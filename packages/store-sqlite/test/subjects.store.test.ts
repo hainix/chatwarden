@@ -34,11 +34,11 @@ const quiet: Logger & { events: string[] } = {
 };
 
 describe('migration 1: subjects', () => {
-  it('creates kit_subjects and kit_subject_ids and is version 1', () => {
+  it('creates kit_subjects and kit_subject_ids and is version 1 or later', () => {
     expect(MIGRATIONS[0]?.version).toBe(1);
     const db = new DatabaseSync(':memory:');
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(1);
+    expect(store.schemaVersion()).toBeGreaterThanOrEqual(1);
     const names = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'kit_%' ORDER BY name")
       .all()

@@ -1,5 +1,14 @@
+import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Store, SubjectId, SubjectIdKind, SubjectIdRecord, SubjectRecord } from '@chatwarden/core';
+import type {
+  AuditEntry,
+  ExceptionPatch,
+  ExceptionRecord,
+  TermPatch,
+  TermRecord,
+  TermStore,
+} from '@chatwarden/matcher';
 
 let savepointSeq = 0;
 
@@ -24,7 +33,7 @@ export function inSavepoint<T>(db: DatabaseSync, fn: () => T): T {
  * methods later tasks add here are `async` only to satisfy the interface.
  * Use `openStore` to get one: it runs the migrations first.
  */
-export class SqliteStore implements Store {
+export class SqliteStore implements Store, TermStore {
   /** The underlying connection, for the domain methods later tasks add in this class. */
   protected readonly db: DatabaseSync;
   private readonly version: number;
@@ -104,4 +113,127 @@ export class SqliteStore implements Store {
       return { subjects, ids };
     });
   }
+
+  // Terms, exceptions and the audit trail. These are SYNCHRONOUS on purpose (the TermStore contract): they
+  // run inside `transaction`, which must never be given an async function.
+
+  listTerms(): TermRecord[] {
+    return this.db
+      .prepare(
+        'SELECT id, term, language, active, note, added_by, added_at, updated_by, updated_at FROM kit_terms ORDER BY rowid',
+      )
+      .all()
+      .map((r) => ({ id: String(r.id), term: String(r.term), language: String(r.language), ...common(r) }));
+  }
+
+  listExceptions(): ExceptionRecord[] {
+    return this.db
+      .prepare(
+        'SELECT id, phrase, language, active, note, added_by, added_at, updated_by, updated_at FROM kit_term_exceptions ORDER BY rowid',
+      )
+      .all()
+      .map((r) => ({ id: String(r.id), phrase: String(r.phrase), language: String(r.language), ...common(r) }));
+  }
+
+  insertTerm(r: TermRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO kit_terms (id, term, language, active, note, added_by, added_at, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(r.id, r.term, r.language, r.active ? 1 : 0, r.note, r.addedBy, r.addedAt, r.updatedBy, r.updatedAt);
+  }
+
+  updateTerm(id: string, patch: TermPatch): void {
+    this.patchRow('kit_terms', 'term', 'term', id, patch.term, patch);
+  }
+
+  setTermActive(id: string, active: boolean, by: string, at: number): void {
+    this.setActive('kit_terms', 'term', id, active, by, at);
+  }
+
+  insertException(r: ExceptionRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO kit_term_exceptions (id, phrase, language, active, note, added_by, added_at, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(r.id, r.phrase, r.language, r.active ? 1 : 0, r.note, r.addedBy, r.addedAt, r.updatedBy, r.updatedAt);
+  }
+
+  updateException(id: string, patch: ExceptionPatch): void {
+    this.patchRow('kit_term_exceptions', 'phrase', 'exception', id, patch.phrase, patch);
+  }
+
+  setExceptionActive(id: string, active: boolean, by: string, at: number): void {
+    this.setActive('kit_term_exceptions', 'exception', id, active, by, at);
+  }
+
+  writeAudit(e: AuditEntry): void {
+    this.db
+      .prepare(
+        `INSERT INTO kit_audit (id, at, actor, action, subject_type, subject_ref, before_json, after_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(randomBytes(16).toString('base64url'), e.at, e.actor, e.action, e.subjectType, e.subjectRef, e.beforeJson, e.afterJson);
+  }
+
+  isSeeded(packId: string): boolean {
+    return this.db.prepare('SELECT 1 AS one FROM kit_meta WHERE key = ?').get(seedKey(packId)) !== undefined;
+  }
+
+  markSeeded(packId: string, at: number): void {
+    this.db.prepare('INSERT OR REPLACE INTO kit_meta (key, value) VALUES (?, ?)').run(seedKey(packId), String(at));
+  }
+
+  /** `table` and `column` are fixed strings from the methods above, never caller input. */
+  private patchRow(
+    table: 'kit_terms' | 'kit_term_exceptions',
+    column: 'term' | 'phrase',
+    subject: string,
+    id: string,
+    word: string | undefined,
+    patch: { language?: string; note?: string | null; updatedBy: string; updatedAt: number },
+  ): void {
+    const sets: string[] = [];
+    const args: (string | number | null)[] = [];
+    if (word !== undefined) {
+      sets.push(`${column} = ?`);
+      args.push(word);
+    }
+    if (patch.language !== undefined) {
+      sets.push('language = ?');
+      args.push(patch.language);
+    }
+    if (patch.note !== undefined) {
+      sets.push('note = ?');
+      args.push(patch.note);
+    }
+    sets.push('updated_by = ?', 'updated_at = ?');
+    args.push(patch.updatedBy, patch.updatedAt, id);
+    const res = this.db.prepare(`UPDATE ${table} SET ${sets.join(', ')} WHERE id = ?`).run(...args);
+    if (Number(res.changes) === 0) throw new Error(`${subject} not found: ${id}`);
+  }
+
+  private setActive(table: 'kit_terms' | 'kit_term_exceptions', subject: string, id: string, active: boolean, by: string, at: number): void {
+    const res = this.db
+      .prepare(`UPDATE ${table} SET active = ?, updated_by = ?, updated_at = ? WHERE id = ?`)
+      .run(active ? 1 : 0, by, at, id);
+    if (Number(res.changes) === 0) throw new Error(`${subject} not found: ${id}`);
+  }
+}
+
+const seedKey = (packId: string) => `terms_seeded:${packId}`;
+
+type Row = Record<string, unknown>;
+/** The columns terms and exceptions share, mapped to the record shape. */
+function common(r: Row) {
+  return {
+    active: r.active === 1,
+    note: r.note === null ? null : String(r.note),
+    addedBy: String(r.added_by),
+    addedAt: Number(r.added_at),
+    updatedBy: r.updated_by === null ? null : String(r.updated_by),
+    updatedAt: r.updated_at === null ? null : Number(r.updated_at),
+  };
 }

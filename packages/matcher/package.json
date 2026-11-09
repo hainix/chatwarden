@@ -17,9 +17,13 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./test-fixtures": {
+      "types": "./dist/test/fixtures/index.d.ts",
+      "default": "./dist/test/fixtures/index.js"
     }
   },
   "files": ["dist/src"],
-  "dependencies": { "obscenity": "^0.4.6" },
+  "dependencies": { "@chatwarden/core": "0.0.0", "obscenity": "^0.4.6" },
   "publishConfig": { "access": "public" }
 }

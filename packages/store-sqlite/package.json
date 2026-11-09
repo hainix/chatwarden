@@ -20,6 +20,6 @@
     }
   },
   "files": ["dist/src"],
-  "dependencies": { "@chatwarden/core": "0.0.0" },
+  "dependencies": { "@chatwarden/core": "0.0.0", "@chatwarden/matcher": "0.0.0" },
   "publishConfig": { "access": "public" }
 }

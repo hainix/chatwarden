@@ -19,11 +19,15 @@ export interface Matcher { match(text: string): { termId: string } | null }
 export class MatcherBuildError extends Error {
   /** `rowId` lets a caller log which row failed without logging the message, which quotes the term. */
   readonly rowId?: string;
+  /** A short fixed description of what is wrong. Unlike the message it never quotes the term, so it is safe to
+   *  log or show next to a row id. */
+  readonly reason?: string;
   // No parameter property: erasableSyntaxOnly forbids it.
-  constructor(message: string, rowId?: string) {
+  constructor(message: string, rowId?: string, reason?: string) {
     super(message);
     this.name = 'MatcherBuildError';
     this.rowId = rowId;
+    this.reason = reason;
   }
 }
 
@@ -39,6 +43,7 @@ function normaliseTerm(row: TermRow): string {
     throw new MatcherBuildError(
       `malformed term in row ${row.id}: must be a single word of plain letters (got ${JSON.stringify(row.term)})`,
       row.id,
+      'must be a single word of plain letters',
     );
   }
   const collapsed = collapseLikePreset(folded);
@@ -46,6 +51,7 @@ function normaliseTerm(row: TermRow): string {
     throw new MatcherBuildError(
       `malformed term in row ${row.id}: ${JSON.stringify(row.term)} collapses to ${JSON.stringify(collapsed)}, below the ${MIN_TERM_LENGTH}-letter minimum`,
       row.id,
+      `must have at least ${MIN_TERM_LENGTH} letters once repeated letters are collapsed`,
     );
   }
   return collapsed;
@@ -55,7 +61,7 @@ function normalisePhrase(row: ExceptionRow): string {
   // Same view as the text it is compared with (see stripInvisible), so an accented or decorated phrase still lines up.
   const phrase = foldPhrase(stripInvisible(row.phrase));
   if (phrase.length === 0) {
-    throw new MatcherBuildError(`malformed exception in row ${row.id}: phrase is empty`, row.id);
+    throw new MatcherBuildError(`malformed exception in row ${row.id}: phrase is empty`, row.id, 'phrase is empty');
   }
   return phrase;
 }
