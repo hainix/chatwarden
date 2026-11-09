@@ -195,7 +195,7 @@ export class ChatService {
     if (!this.gateAllows(roomId, subject)) return refuse('gate');
 
     const now = this.clock.now();
-    const rateKey = `${roomId}:${seatId}`;
+    const rateKey = memKey(roomId, seatId);
 
     const restriction = this.activeRestriction(roomId, seatId, subject, now);
     if (restriction !== null) {
@@ -218,7 +218,7 @@ export class ChatService {
           seatId,
           handle,
           subject,
-          raw: text,
+          raw: trimmed,
           delivered: null,
           blocked: true,
           audience,
@@ -226,7 +226,7 @@ export class ChatService {
       } catch (err) {
         this.warn('chat.evidence_failed', { error: errName(err) });
       }
-      this.strike(roomId, seatId, subject, rateKey, hit.termId, text);
+      this.strike(roomId, seatId, subject, rateKey, hit.termId, trimmed);
       return refuse('blocked');
     }
 
@@ -236,7 +236,7 @@ export class ChatService {
       seatId,
       handle,
       subject,
-      raw: text,
+      raw: trimmed,
       delivered,
       blocked: false,
       audience,

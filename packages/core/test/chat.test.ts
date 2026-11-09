@@ -503,7 +503,7 @@ describe('matcher, strikes and the automatic timeout', () => {
       seatId: 'p1',
       handle: 'Pat',
       subject: s,
-      raw: '  you zorbak  ',
+      raw: 'you zorbak',
       delivered: null,
       blocked: true,
       audience: null,
@@ -539,11 +539,11 @@ describe('matcher, strikes and the automatic timeout', () => {
     expect(rows[0]).toMatchObject({ subject: s, roomId: ROOM, termId: 'syn:zorbak', rawLine: 'zorbak', at: e.clock.t });
   });
 
-  it('the strike keeps the line the person typed (untrimmed), for the later notice', () => {
+  it('the strike keeps the line the person typed, trimmed (so padding cannot inflate storage), for the later notice', () => {
     const e = setup();
     e.sit('p1', who('k1'));
     e.say('p1', ' zorbak! ');
-    expect(e.store.loadStrikes(0)[0]?.rawLine).toBe(' zorbak! ');
+    expect(e.store.loadStrikes(0)[0]?.rawLine).toBe('zorbak!');
   });
 
   it('rate budget spent by a blocked line', () => {
@@ -979,7 +979,7 @@ describe('starring and delivery', () => {
       seatId: 'p1',
       handle: 'Pat',
       subject: s,
-      raw: '  oh snerp ',
+      raw: 'oh snerp',
       delivered: 'oh *****',
       blocked: false,
       audience: ['p1', 'p2'],
@@ -1132,5 +1132,65 @@ describe('never throws', () => {
     for (const bad of [undefined, null, 42, {}] as unknown[]) {
       expect(() => e.chat.accept(ROOM, 'p1', bad as string)).not.toThrow();
     }
+  });
+});
+
+describe('final review: padded lines, rate key separator', () => {
+  const PAD = ' '.repeat(1_000_000);
+
+  it('a 150-char line padded with 1 MB of spaces each side is delivered; the buffered raw is the trimmed text', () => {
+    const e = setup();
+    e.sit('p1', who('k1'));
+    const line = 'a'.repeat(150);
+    const d = delivery(e.say('p1', PAD + line + PAD));
+    expect(d.text).toBe(line);
+    const [row] = e.buffer.snapshot(ROOM);
+    expect(row?.raw.length).toBeLessThanOrEqual(200); // first: a failing string diff of 2 MB is very slow
+    expect(row?.raw).toBe(line);
+  });
+
+  it('a blocked line padded with 1 MB of spaces: buffered raw and the strike rawLine are the trimmed text', () => {
+    const e = setup();
+    e.sit('p1', who('k1'));
+    expect(refusal(e.say('p1', PAD + 'zorbak' + PAD))).toEqual({ reason: 'blocked' });
+    const [row] = e.buffer.snapshot(ROOM);
+    expect(row?.raw.length).toBeLessThanOrEqual(200);
+    expect(row?.raw).toBe('zorbak');
+    const strikes = e.store.loadStrikes(0);
+    expect(strikes).toHaveLength(1);
+    expect(strikes[0]?.rawLine.length).toBeLessThanOrEqual(200);
+    expect(strikes[0]?.rawLine).toBe('zorbak');
+  });
+
+  it('a blocked 150-char line padded with spaces keeps raw and rawLine at most 200 characters', () => {
+    const e = setup();
+    e.sit('p1', who('k1'));
+    const line = 'a'.repeat(140) + ' zorbak';
+    expect(refusal(e.say('p1', PAD + line + PAD))).toEqual({ reason: 'blocked' });
+    expect(e.buffer.snapshot(ROOM)[0]?.raw.length).toBeLessThanOrEqual(200);
+    expect(e.store.loadStrikes(0)[0]?.rawLine.length).toBeLessThanOrEqual(200);
+  });
+
+  it('a trimmed line over 200 is still refused for length even with padding (control)', () => {
+    const e = setup();
+    e.sit('p1', who('k1'));
+    expect(refusal(e.say('p1', PAD + 'a'.repeat(201) + PAD))).toEqual({ reason: 'length' });
+    expect(e.buffer.snapshot(ROOM)).toHaveLength(0);
+  });
+
+  it('a ":" in an id does not share a rate budget: room "a:b"/seat "c" vs room "a"/seat "b:c"', () => {
+    const e = setup();
+    e.sit('c', who('k1'), 'H1', 'a:b');
+    e.sit('b:c', who('k2'), 'H2', 'a');
+    for (let i = 0; i < 3; i++) delivery(e.say('c', `hi ${i}`, undefined, 'a:b'));
+    expect(refusal(e.say('c', 'hi 3', undefined, 'a:b'))).toEqual({ reason: 'rate' });
+    delivery(e.say('b:c', 'other seat, own budget', undefined, 'a'));
+  });
+
+  it('the same room and seat still share one budget (control)', () => {
+    const e = setup();
+    e.sit('c', who('k1'), 'H1', 'a:b');
+    for (let i = 0; i < 3; i++) delivery(e.say('c', `hi ${i}`, undefined, 'a:b'));
+    expect(refusal(e.say('c', 'again', undefined, 'a:b'))).toEqual({ reason: 'rate' });
   });
 });
