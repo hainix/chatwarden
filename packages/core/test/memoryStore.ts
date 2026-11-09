@@ -474,6 +474,15 @@ export class MemoryStore implements Store {
     return true;
   }
 
+  findNoticeForGroup(groupId: string): { id: string; ackedAt: number | null; withdrawnAt: number | null } | null {
+    let best: NoticeRow | null = null;
+    for (const n of this.notices) {
+      if (n.groupId !== groupId || n.withdrawnAt !== null) continue;
+      if (best === null || n.createdAt >= best.createdAt) best = n;
+    }
+    return best === null ? null : { id: best.id, ackedAt: best.ackedAt, withdrawnAt: best.withdrawnAt };
+  }
+
   withdrawNoticeGroup(groupId: string, at: number): number {
     const touched = this.notices.filter((n) => n.groupId === groupId && n.withdrawnAt === null);
     for (const n of touched) n.withdrawnAt = at;

@@ -1,14 +1,16 @@
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { safeWarn } from './log.js';
 import type { MuteService } from './mutes.js';
+import type { NoticeService } from './notices.js';
 import { slidingWindow } from './rateLimit.js';
 import type { SlidingWindow } from './rateLimit.js';
+import { parseRuleRef } from './rules.js';
 import { applySanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import { REPEAT_RESTRICT_MS } from './strikes.js';
 import type { StrikeService } from './strikes.js';
 import type { SubjectIndex } from './subjects.js';
-import type { Clock, Identifiers, Logger, Matcher, Store, SubjectId } from './types.js';
+import type { Clock, Identifiers, Logger, Matcher, ReportExcerptLine, Store, SubjectId } from './types.js';
 
 // The chat acceptance pipeline: one call decides whether a line is delivered, and keeps the evidence and the
 // strikes that go with the decision. The order is Moxgate's `handleChat`:
@@ -32,6 +34,19 @@ const RATE_WINDOW_MS = 5_000;
 
 const AUTO_RESTRICT_REASON = 'auto: repeated slurs';
 
+/** The automatic filter and its timeout are for slurs: Community Rule 1. */
+const BLOCKED_RULE = 1;
+
+/** The blocked line that earned a strike, kept for the notice an automatic timeout makes. */
+interface BlockedLine {
+  lineId: string;
+  ts: number;
+  seatId: string;
+  handle: string;
+  raw: string;
+  audience: string[] | null;
+}
+
 /** Optional profanity starring, injected. Applied to lines that were not blocked. */
 export interface Starrer {
   star(text: string): string;
@@ -39,8 +54,10 @@ export interface Starrer {
 
 /**
  * The verdict on one line. A refusal carries a reason and, for `restricted`, when it ends (`null` =
- * permanent) and whether a human moderator imposed it. Never an identifier, a rule's private note or the
- * matched term. `'empty'` means stay silent.
+ * permanent) and whether a human moderator imposed it. `rule` is the Community Rule number it cites: always 1
+ * for `blocked`, and for `restricted` the sanction's own rule (omitted when it is `'uncovered'`, unknown, or the
+ * restriction is the in-memory fallback). `noticeId` is the player's notice that explains a restriction, when one
+ * exists. Never an identifier, a rule's private note or the matched term. `'empty'` means stay silent.
  */
 export type ChatResult =
   | { deliver: { lineId: string; text: string } }
@@ -49,6 +66,8 @@ export type ChatResult =
         reason: 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked';
         until?: number | null;
         byModerator?: boolean;
+        rule?: number;
+        noticeId?: string;
       };
     };
 
@@ -76,18 +95,27 @@ export interface ChatServiceDeps {
   onAutoRestrict?: (subject: SubjectId | null, second: boolean) => void;
   /** Defaults to `console.warn`. */
   logger?: Logger;
+  /**
+   * Makes the player's notice for an automatic timeout, and finds the notice a refusal points at. Optional:
+   * without it no notice is made and no refusal carries a `noticeId`. A failure of either is logged and never
+   * changes the verdict.
+   */
+  notices?: NoticeService;
 }
 
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
 
 const refuse = (
   reason: 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked',
-  extra?: { until: number | null; byModerator: boolean },
+  extra?: { until?: number | null; byModerator?: boolean; rule?: number; noticeId?: string },
 ): ChatResult => ({ refuse: extra === undefined ? { reason } : { reason, ...extra } });
 
 interface Restriction {
   until: number | null;
   byModerator: boolean;
+  /** The stored sanction's group and rule text; null for the in-memory fallback, which has neither. */
+  groupId: string | null;
+  rule: string | null;
 }
 
 /** Map key for a seat. NUL cannot appear in a room or seat id the way ':' can, so keys never collide. */
@@ -117,6 +145,7 @@ export class ChatService {
   private readonly gate: ChatServiceDeps['gate'];
   private readonly onAutoRestrict: ChatServiceDeps['onAutoRestrict'];
   private readonly logger: Logger | undefined;
+  private readonly notices: NoticeService | undefined;
   private readonly rate: SlidingWindow;
 
   /**
@@ -141,6 +170,7 @@ export class ChatService {
     this.gate = deps.gate;
     this.onAutoRestrict = deps.onAutoRestrict;
     this.logger = deps.logger;
+    this.notices = deps.notices;
     this.rate = slidingWindow({ limit: RATE_LIMIT, windowMs: RATE_WINDOW_MS, clock: deps.clock });
   }
 
@@ -193,7 +223,11 @@ export class ChatService {
 
     const restriction = this.activeRestriction(roomId, seatId, subject, now);
     if (restriction !== null) {
-      return refuse('restricted', { until: restriction.until, byModerator: restriction.byModerator });
+      return refuse('restricted', {
+        until: restriction.until,
+        byModerator: restriction.byModerator,
+        ...this.pointers(restriction),
+      });
     }
 
     if (trimmed.length > MAX_LEN) return refuse('length');
@@ -206,8 +240,9 @@ export class ChatService {
     const hit = this.matchTerm(trimmed);
     if (hit !== null) {
       // Kept as evidence: a report must show what was typed, not only what got through.
+      let lineId = '';
       try {
-        this.buffer.append(roomId, {
+        lineId = this.buffer.append(roomId, {
           ts: now,
           seatId,
           handle,
@@ -220,8 +255,16 @@ export class ChatService {
       } catch (err) {
         this.warn('chat.evidence_failed', { error: errName(err) });
       }
-      this.strike(roomId, seatId, subject, rateKey, hit.termId, trimmed);
-      return refuse('blocked');
+      this.strike(roomId, seatId, subject, rateKey, hit.termId, {
+        lineId,
+        ts: now,
+        seatId,
+        handle,
+        raw: trimmed,
+        audience,
+      });
+      // Explain at the point of block: the automatic filter is Community Rule 1.
+      return refuse('blocked', { rule: BLOCKED_RULE });
     }
 
     const delivered = this.starrer === undefined ? trimmed : this.starrer.star(trimmed);
@@ -276,7 +319,9 @@ export class ChatService {
       const mem = this.memRestrictions.get(key);
       if (mem !== undefined) {
         if (mem.until <= now) this.memRestrictions.delete(key);
-        else if (this.samePerson(mem.subject, subject)) best = { until: mem.until, byModerator: false };
+        else if (this.samePerson(mem.subject, subject)) {
+          best = { until: mem.until, byModerator: false, groupId: null, rule: null };
+        }
       }
       // Only the latest IP of a seated person is known; an IP row speed-bumps them, never links two people.
       const ids: Identifiers = {
@@ -288,7 +333,12 @@ export class ChatService {
         const stored = this.sanctions.active(kind, ids, subject, now);
         if (stored === null) continue;
         if (best === null || lastsAtLeast(stored.until, best.until)) {
-          best = { until: stored.until, byModerator: kind === 'ban' || !stored.automated };
+          best = {
+            until: stored.until,
+            byModerator: kind === 'ban' || !stored.automated,
+            groupId: stored.groupId,
+            rule: stored.rule,
+          };
         }
       }
       return best;
@@ -308,21 +358,27 @@ export class ChatService {
     subject: SubjectId | null,
     rateKey: string,
     termId: string,
-    rawLine: string,
+    line: BlockedLine,
   ): void {
     try {
-      const { autoRestrict } = this.strikes.record(subject, rateKey, roomId, termId, rawLine);
+      const { autoRestrict } = this.strikes.record(subject, rateKey, roomId, termId, line.raw);
       if (autoRestrict === null) return;
       // The kill switch: the strike is kept and the line was blocked, but nothing is enforced, so no row is
       // written (it would go live when the switch flips back), nothing is held in memory and nobody is told.
       if (!this.sanctions.isEnabled()) return;
-      this.applyTimeout(roomId, seatId, subject, autoRestrict.durationMs);
+      this.applyTimeout(roomId, seatId, subject, autoRestrict.durationMs, line);
     } catch (err) {
       this.warn('chat.strike_failed', { error: errName(err) });
     }
   }
 
-  private applyTimeout(roomId: string, seatId: string, subject: SubjectId | null, durationMs: number): void {
+  private applyTimeout(
+    roomId: string,
+    seatId: string,
+    subject: SubjectId | null,
+    durationMs: number,
+    line: BlockedLine,
+  ): void {
     // Read after the strike was written, so the restriction starts at or after every strike it consumed. The
     // strike service reads the same clock, so with one instant per call (as in tests) the two are identical;
     // after a restart a strike is counted only if it is newer than this start.
@@ -344,7 +400,7 @@ export class ChatService {
             source: 'auto_filter',
             automated: true,
             // The automatic timeout is for slurs: Community Rule 1.
-            rule: 1,
+            rule: BLOCKED_RULE,
           },
           now,
           this.sanctions,
@@ -356,6 +412,7 @@ export class ChatService {
         const none: Identifiers = { clientKey: null, accountId: null, ipHash: null };
         const found = this.sanctions.active('chat', none, subject, now);
         stored = found !== null && found.automated && found.until === now + durationMs;
+        if (found !== null && stored) this.makeNotice(subject, found, line);
       } catch (err) {
         this.warn('chat.auto_restrict_failed', { error: errName(err) });
       }
@@ -372,6 +429,67 @@ export class ChatService {
     } catch (err) {
       this.warn('chat.on_auto_restrict_failed', { error: errName(err) });
     }
+  }
+
+  /**
+   * The player's notice for the automatic timeout that was just stored: kind `chat`, Community Rule 1, with the
+   * blocked line that tipped it (the notice masks the matched terms before anything is stored). Its own
+   * transaction, announced to the player once it has committed. A failure is logged and absorbed: the
+   * restriction stands without a notice.
+   */
+  private makeNotice(
+    subject: SubjectId,
+    found: { until: number | null; groupId: string; refCode: string },
+    line: BlockedLine,
+  ): void {
+    const notices = this.notices;
+    if (notices === undefined) return;
+    try {
+      const excerpt: ReportExcerptLine = {
+        lineId: line.lineId,
+        ts: line.ts,
+        seatId: line.seatId,
+        handle: line.handle,
+        raw: line.raw,
+        delivered: null,
+        blocked: true,
+        audience: line.audience,
+        p: 0,
+      };
+      notices.createForSanction(
+        { groupId: found.groupId, refCode: found.refCode, kind: 'chat', until: found.until, rule: BLOCKED_RULE, subject },
+        [excerpt],
+        { notify: true },
+      );
+    } catch (err) {
+      this.warn('chat.notice_failed', { error: errName(err) });
+    }
+  }
+
+  /**
+   * What a `restricted` refusal adds: the rule number (only a real number; not `'uncovered'`, not a row from before
+   * rules, not an unreadable value) and the id of the notice for the restriction's group. Each is left out on its own
+   * failure; this never throws.
+   */
+  private pointers(r: Restriction): { rule?: number; noticeId?: string } {
+    const out: { rule?: number; noticeId?: string } = {};
+    if (r.rule !== null) {
+      try {
+        const rule = parseRuleRef(r.rule);
+        if (typeof rule === 'number') out.rule = rule;
+      } catch (err) {
+        this.warn('chat.rule_unreadable', { error: errName(err) });
+      }
+    }
+    if (r.groupId !== null && this.notices !== undefined) {
+      try {
+        const id = this.notices.noticeIdForGroup(r.groupId);
+        if (id !== null) out.noticeId = id;
+      } catch (err) {
+        this.warn('chat.notice_lookup_failed', { error: errName(err) });
+      }
+    }
+    return out;
   }
 
   private holdInMemory(key: string, subject: SubjectId | null, now: number, durationMs: number): void {

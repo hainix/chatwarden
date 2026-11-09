@@ -538,6 +538,12 @@ export interface Store {
 
   /** Withdraw every not-yet-withdrawn notice of the group at `at`. Returns how many this call withdrew. */
   withdrawNoticeGroup(groupId: string, at: number): number;
+
+  /**
+   * The newest notice of a sanction group that is not withdrawn (newest by `createdAt`, then write order), or null
+   * when the group has none. Seen or not. Carries no subject: it is only a pointer for a refusal.
+   */
+  findNoticeForGroup(groupId: string): { id: string; ackedAt: number | null; withdrawnAt: number | null } | null;
 }
 
 // ---------------------------------------------------------------------------

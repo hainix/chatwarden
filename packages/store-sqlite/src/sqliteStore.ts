@@ -603,6 +603,22 @@ export class SqliteStore implements Store, TermStore {
     );
   }
 
+  findNoticeForGroup(groupId: string): { id: string; ackedAt: number | null; withdrawnAt: number | null } | null {
+    return this.transaction(() => {
+      const r = this.db
+        .prepare(
+          'SELECT id, acked_at, withdrawn_at FROM kit_notices WHERE group_id = ? AND withdrawn_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1',
+        )
+        .get(groupId);
+      if (r === undefined) return null;
+      return {
+        id: String(r.id),
+        ackedAt: r.acked_at === null ? null : Number(r.acked_at),
+        withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
+      };
+    });
+  }
+
   withdrawNoticeGroup(groupId: string, at: number): number {
     return this.transaction(() =>
       Number(this.db.prepare('UPDATE kit_notices SET withdrawn_at = ? WHERE group_id = ? AND withdrawn_at IS NULL').run(at, groupId).changes),

@@ -238,7 +238,7 @@ describe('sanctions on a real database file', () => {
     const fresh = new SanctionIndex({ enabled: () => true, subjects });
     await fresh.load(store, NOW + 2);
     expect(fresh.active('chat', none, s1, NOW + 2)).toEqual({
-      until: NOW + H, automated: false, groupId: keep.groupId, refCode: keep.refCode,
+      until: NOW + H, automated: false, groupId: keep.groupId, refCode: keep.refCode, rule: '2',
     });
     expect(fresh.active('chat', { clientKey: null, accountId: null, ipHash: 'ip1' }, null, NOW + 2)).not.toBeNull();
     expect(fresh.active('ban', none, s1, NOW + 2)).toBeNull();

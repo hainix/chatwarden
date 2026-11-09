@@ -170,6 +170,32 @@ describe('SqliteStore notices', () => {
     expect(store.loadNotices(['s_a'])[0]).toMatchObject({ ackedAt: 2, withdrawnAt: 7 });
   });
 
+  it('findNoticeForGroup returns the newest notice of the group that is not withdrawn', () => {
+    const store = openStore({ db: new DatabaseSync(':memory:') });
+    store.insertNotice(notice('old', { groupId: 'g1', createdAt: 5 }));
+    store.insertNotice(notice('new', { groupId: 'g1', createdAt: 9, ackedAt: 10 }));
+    store.insertNotice(notice('other', { groupId: 'g2', createdAt: 99 }));
+    expect(store.findNoticeForGroup('g1')).toEqual({ id: 'new', ackedAt: 10, withdrawnAt: null });
+    expect(store.findNoticeForGroup('g2')).toEqual({ id: 'other', ackedAt: null, withdrawnAt: null });
+  });
+
+  it('findNoticeForGroup ties on created_at go to the later write, skips withdrawn, and is null when none', () => {
+    const store = openStore({ db: new DatabaseSync(':memory:') });
+    expect(store.findNoticeForGroup('g1')).toBeNull();
+    store.insertNotice(notice('a', { groupId: 'g1', createdAt: 5 }));
+    store.insertNotice(notice('b', { groupId: 'g1', createdAt: 5 }));
+    expect(store.findNoticeForGroup('g1')?.id).toBe('b');
+    store.withdrawNoticeGroup('g1', 6);
+    expect(store.findNoticeForGroup('g1')).toBeNull();
+    expect(store.findNoticeForGroup('')).toBeNull();
+  });
+
+  it('findNoticeForGroup never matches a groupless report outcome', () => {
+    const store = openStore({ db: new DatabaseSync(':memory:') });
+    store.insertNotice(notice('o1', { kind: 'report_outcome', groupId: null, rule: null, until: null, refCode: null, excerpt: [] }));
+    expect(store.findNoticeForGroup('g-o1')).toBeNull();
+  });
+
   it('is rolled back with the transaction', () => {
     const db = new DatabaseSync(':memory:');
     const store = openStore({ db });

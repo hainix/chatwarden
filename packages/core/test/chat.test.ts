@@ -3,6 +3,9 @@ import { ChatService } from '../src/chat.js';
 import type { ChatResult, Starrer } from '../src/chat.js';
 import { EvidenceBuffer, RoomRoster } from '../src/evidence.js';
 import { MuteService } from '../src/mutes.js';
+import { NoticeService } from '../src/notices.js';
+import { CommunityRules, STARTER_RULES } from '../src/rules.js';
+import type { RuleRef } from '../src/rules.js';
 import { applySanction, revokeSanction, SanctionIndex } from '../src/sanctions.js';
 import { StrikeService } from '../src/strikes.js';
 import { SubjectIndex } from '../src/subjects.js';
@@ -22,6 +25,9 @@ const stubMatcher: Matcher = {
     seen.push(text);
     return /\bzorbak\b/i.test(text) ? { termId: 'syn:zorbak' } : null;
   },
+  spans(text: string) {
+    return [...text.matchAll(/\bzorbak\b/gi)].map((m) => ({ start: m.index, end: m.index + m[0].length, termId: 'syn:zorbak' }));
+  },
 };
 const starrer: Starrer = { star: (t) => t.replace(/\bsnerp\b/gi, '*****') };
 
@@ -34,6 +40,13 @@ const who = (clientKey: string | null, accountId: string | null = null, ipHash: 
 class FailingStrikes extends MemoryStore {
   override insertStrike(): void {
     throw new Error('disk full');
+  }
+}
+class RewritesRule extends MemoryStore {
+  /** When not undefined, `loadSanctions` reports this as every row's rule (a corrupt or pre-rules value). */
+  storedRule: string | null | undefined = undefined;
+  override loadSanctions(now: number) {
+    return super.loadSanctions(now).map((r) => (this.storedRule === undefined ? r : { ...r, rule: this.storedRule }));
   }
 }
 class FailingSanctions extends MemoryStore {
@@ -50,6 +63,10 @@ interface Opts {
   starrer?: Starrer | undefined;
   gate?: (roomId: string, subject: SubjectId | null) => boolean;
   onAutoRestrict?: (subject: SubjectId | null, second: boolean) => void;
+  /** Hand the chat service a NoticeService: true is a real one on the same store, or pass a replacement. */
+  notices?: boolean | NoticeService;
+  /** The push hook of the real NoticeService. */
+  notify?: (subject: SubjectId, event: { type: 'notice_pending'; count: number }) => unknown;
 }
 
 function setup(opts: Opts = {}) {
@@ -68,7 +85,19 @@ function setup(opts: Opts = {}) {
   const calls: Array<{ subject: SubjectId | null; second: boolean }> = [];
   const onAutoRestrict =
     opts.onAutoRestrict ?? ((subject: SubjectId | null, second: boolean) => void calls.push({ subject, second }));
+  const realNotices = new NoticeService({
+    store,
+    subjects,
+    rules: new CommunityRules(STARTER_RULES),
+    clock,
+    matcher: stubMatcher,
+    logger: quiet,
+    notify: opts.notify,
+  });
+  const notices =
+    opts.notices === undefined || opts.notices === false ? undefined : opts.notices === true ? realNotices : opts.notices;
   const chat = new ChatService({
+    notices,
     roster,
     buffer,
     subjects,
@@ -96,9 +125,9 @@ function setup(opts: Opts = {}) {
     subject: SubjectId,
     kind: SanctionKind,
     durationMs: number | null,
-    extra: { automated?: boolean; includeIp?: boolean } = {},
+    extra: { automated?: boolean; includeIp?: boolean; rule?: RuleRef; gapNote?: string } = {},
   ) => {
-    await applySanction(
+    return await applySanction(
       store,
       subjects,
       {
@@ -110,7 +139,8 @@ function setup(opts: Opts = {}) {
         actor: 'mod1',
         source: extra.automated ? 'auto_filter' : 'moderator',
         automated: extra.automated ?? false,
-        rule: 1,
+        rule: extra.rule ?? 1,
+        ...(extra.gapNote === undefined ? {} : { gapNote: extra.gapNote }),
       },
       clock.t,
       sanctions,
@@ -144,6 +174,7 @@ function setup(opts: Opts = {}) {
     sanction,
     tick,
     threeSlurs,
+    realNotices,
   };
 }
 
@@ -314,7 +345,7 @@ describe('restriction', () => {
     const e = setup();
     const s = e.sit('p1', who('k1')) as SubjectId;
     await e.sanction(s, 'chat', H);
-    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + H, byModerator: true });
+    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + H, byModerator: true, rule: 1 });
     expect(e.buffer.snapshot(ROOM)).toEqual([]);
   });
 
@@ -322,7 +353,7 @@ describe('restriction', () => {
     const e = setup();
     const s = e.sit('p1', who('k1')) as SubjectId;
     await e.sanction(s, 'chat', H, { automated: true });
-    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + H, byModerator: false });
+    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + H, byModerator: false, rule: 1 });
   });
 
   it('a permanent restriction reports until: null', async () => {
@@ -399,7 +430,7 @@ describe('restriction', () => {
     const e = setup();
     const s = e.sit('p1', who('k1')) as SubjectId;
     await e.sanction(s, 'ban', 2 * H);
-    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + 2 * H, byModerator: true });
+    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + 2 * H, byModerator: true, rule: 1 });
   });
 
   it('a permanent ban reports until: null; an expired ban lets chat through', async () => {
@@ -419,7 +450,7 @@ describe('restriction', () => {
     const s = e.sit('p1', who('k1')) as SubjectId;
     await e.sanction(s, 'chat', H, { automated: true });
     await e.sanction(s, 'ban', 3 * H);
-    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + 3 * H, byModerator: true });
+    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + 3 * H, byModerator: true, rule: 1 });
 
     const e2 = setup();
     const s2 = e2.sit('p1', who('k1')) as SubjectId;
@@ -431,7 +462,7 @@ describe('restriction', () => {
     const s3 = e3.sit('p1', who('k1')) as SubjectId;
     await e3.sanction(s3, 'chat', 3 * H, { automated: true });
     await e3.sanction(s3, 'ban', H);
-    expect(refusal(e3.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + 3 * H, byModerator: false });
+    expect(refusal(e3.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: NOW + 3 * H, byModerator: false, rule: 1 });
   });
 
   it('a ban beats a shorter in-memory automatic restriction', async () => {
@@ -444,7 +475,7 @@ describe('restriction', () => {
     // The same seat now holds a person who is banned for longer than the memory entry.
     const banned = e.sit('p1', who('k9')) as SubjectId;
     await e.sanction(banned, 'ban', 2 * H);
-    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: e.clock.t + 2 * H, byModerator: true });
+    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: e.clock.t + 2 * H, byModerator: true, rule: 1 });
   });
 
   it('the kill switch off: a stored ban restricts nothing', async () => {
@@ -499,7 +530,7 @@ describe('matcher, strikes and the automatic timeout', () => {
   it('a hit refuses "blocked" and buffers the raw line with blocked=true, delivered=null', () => {
     const e = setup();
     const s = e.sit('p1', who('k1'), 'Pat');
-    expect(refusal(e.say('p1', '  you zorbak  '))).toEqual({ reason: 'blocked' });
+    expect(refusal(e.say('p1', '  you zorbak  '))).toEqual({ reason: 'blocked', rule: 1 });
     expect(e.buffer.snapshot(ROOM)[0]).toMatchObject({
       seatId: 'p1',
       handle: 'Pat',
@@ -635,6 +666,7 @@ describe('matcher, strikes and the automatic timeout', () => {
       reason: 'restricted',
       until: strikeAt + 30 * MIN,
       byModerator: false,
+      rule: 1,
     });
     // Over after exactly 30 minutes.
     e.clock.t = strikeAt + 30 * MIN;
@@ -729,7 +761,7 @@ describe('matcher, strikes and the automatic timeout', () => {
       { subject: s, second: true },
     ]);
     e.tick(SEC);
-    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: second + 24 * H, byModerator: false });
+    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: second + 24 * H, byModerator: false, rule: 1 });
   });
 
   it('the strikes that earned a timeout are consumed, also after a restart', async () => {
@@ -1181,7 +1213,7 @@ describe('final review: padded lines, rate key separator', () => {
   it('a blocked line padded with 1 MB of spaces: buffered raw and the strike rawLine are the trimmed text', () => {
     const e = setup();
     e.sit('p1', who('k1'));
-    expect(refusal(e.say('p1', PAD + 'zorbak' + PAD))).toEqual({ reason: 'blocked' });
+    expect(refusal(e.say('p1', PAD + 'zorbak' + PAD))).toEqual({ reason: 'blocked', rule: 1 });
     const [row] = e.buffer.snapshot(ROOM);
     expect(row?.raw.length).toBeLessThanOrEqual(200);
     expect(row?.raw).toBe('zorbak');
@@ -1195,7 +1227,7 @@ describe('final review: padded lines, rate key separator', () => {
     const e = setup();
     e.sit('p1', who('k1'));
     const line = 'a'.repeat(140) + ' zorbak';
-    expect(refusal(e.say('p1', PAD + line + PAD))).toEqual({ reason: 'blocked' });
+    expect(refusal(e.say('p1', PAD + line + PAD))).toEqual({ reason: 'blocked', rule: 1 });
     expect(e.buffer.snapshot(ROOM)[0]?.raw.length).toBeLessThanOrEqual(200);
     expect(e.store.loadStrikes(0)[0]?.rawLine.length).toBeLessThanOrEqual(200);
   });
@@ -1221,5 +1253,347 @@ describe('final review: padded lines, rate key separator', () => {
     e.sit('c', who('k1'), 'H1', 'a:b');
     for (let i = 0; i < 3; i++) delivery(e.say('c', `hi ${i}`, undefined, 'a:b'));
     expect(refusal(e.say('c', 'again', undefined, 'a:b'))).toEqual({ reason: 'rate' });
+  });
+});
+
+describe('K2: refusals cite the rule and point at the notice', () => {
+  const noticeFor = (
+    e: ReturnType<typeof setup>,
+    subject: SubjectId,
+    groupId: string,
+    refCode: string,
+    until: number | null,
+    rule: RuleRef | null = 1,
+    kind: 'chat' | 'ban' = 'chat',
+  ) => e.realNotices.createForSanction({ groupId, refCode, kind, until, rule, subject }, [], { notify: false });
+
+  it('a blocked refusal carries rule 1 and no notice id', () => {
+    const e = setup({ notices: true });
+    e.sit('p1', who('k1'));
+    expect(refusal(e.say('p1', 'zorbak'))).toEqual({ reason: 'blocked', rule: 1 });
+  });
+
+  it('a blocked refusal carries rule 1 even without a notices service', () => {
+    const e = setup();
+    e.sit('p1', who('k1'));
+    expect(refusal(e.say('p1', 'zorbak'))).toEqual({ reason: 'blocked', rule: 1 });
+  });
+
+  it('a restricted refusal carries the sanction rule and the group notice id', async () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    const g = await e.sanction(s, 'chat', H, { rule: 3 });
+    const id = noticeFor(e, s, g.groupId, g.refCode, e.clock.t + H, 3);
+    expect(refusal(e.say('p1', 'hi'))).toEqual({
+      reason: 'restricted',
+      until: e.clock.t + H,
+      byModerator: true,
+      rule: 3,
+      noticeId: id,
+    });
+  });
+
+  it('a ban also cites its rule and notice', async () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    const g = await e.sanction(s, 'ban', null, { rule: 2 });
+    const id = noticeFor(e, s, g.groupId, g.refCode, null, 2, 'ban');
+    expect(refusal(e.say('p1', 'hi'))).toMatchObject({ reason: 'restricted', until: null, rule: 2, noticeId: id });
+  });
+
+  it('a restricted refusal with no notice for the group has the rule and no noticeId', async () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    await e.sanction(s, 'chat', H, { rule: 4 });
+    const r = refusal(e.say('p1', 'hi'));
+    expect(r).toMatchObject({ reason: 'restricted', rule: 4 });
+    expect('noticeId' in r).toBe(false);
+  });
+
+  it('without a notices service a restricted refusal still cites the rule, never a notice id', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1'))!;
+    await e.sanction(s, 'chat', H, { rule: 5 });
+    const r = refusal(e.say('p1', 'hi'));
+    expect(r).toMatchObject({ reason: 'restricted', rule: 5 });
+    expect('noticeId' in r).toBe(false);
+  });
+
+  it("an 'uncovered' sanction omits the rule but still points at its notice", async () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    const g = await e.sanction(s, 'chat', H, { rule: 'uncovered', gapNote: 'private note' });
+    const id = noticeFor(e, s, g.groupId, g.refCode, e.clock.t + H, 'uncovered');
+    const r = refusal(e.say('p1', 'hi'));
+    expect('rule' in r).toBe(false);
+    expect(r).toMatchObject({ reason: 'restricted', noticeId: id });
+  });
+
+  it('points at the newest notice that is not withdrawn', async () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    const g = await e.sanction(s, 'chat', H);
+    const first = noticeFor(e, s, g.groupId, g.refCode, e.clock.t + H);
+    e.clock.t += 1;
+    const second = noticeFor(e, s, g.groupId, g.refCode, e.clock.t + H);
+    expect(second).not.toBe(first);
+    expect(refusal(e.say('p1', 'hi'))).toMatchObject({ noticeId: second });
+    e.store.withdrawNoticeGroup(g.groupId, e.clock.t);
+    expect('noticeId' in refusal(e.say('p1', 'hi again'))).toBe(false);
+  });
+
+  it('a seen notice is still pointed at (the player can read it again)', async () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    const g = await e.sanction(s, 'chat', H);
+    const id = noticeFor(e, s, g.groupId, g.refCode, e.clock.t + H);
+    expect(e.realNotices.ack(s, id)).toBe(true);
+    expect(refusal(e.say('p1', 'hi'))).toMatchObject({ noticeId: id });
+  });
+
+  it('a throwing notices lookup still refuses correctly, with the rule and without a notice id, and logs', async () => {
+    const broken = {
+      noticeIdForGroup: () => {
+        throw new TypeError('db gone');
+      },
+    } as unknown as NoticeService;
+    const e = setup({ notices: broken });
+    const s = e.sit('p1', who('k1'))!;
+    await e.sanction(s, 'chat', H, { rule: 3 });
+    const r = refusal(e.say('p1', 'hi'));
+    expect(r).toEqual({ reason: 'restricted', until: e.clock.t + H, byModerator: true, rule: 3 });
+    expect(e.logs.find((l) => l.event === 'chat.notice_lookup_failed')?.detail).toEqual({ error: 'TypeError' });
+  });
+
+  it('a broken notice store behind the real service gives the same fail-open refusal', async () => {
+    class BrokenLookup extends MemoryStore {
+      override findNoticeForGroup(): never {
+        throw new Error('disk gone');
+      }
+    }
+    const e = setup({ store: new BrokenLookup(), notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    await e.sanction(s, 'chat', H, { rule: 3 });
+    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: e.clock.t + H, byModerator: true, rule: 3 });
+  });
+
+  it('a stored sanction with an unreadable rule omits the rule and still refuses', async () => {
+    const e = setup({ store: new RewritesRule(), notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    await e.sanction(s, 'chat', H);
+    (e.store as RewritesRule).storedRule = 'bogus';
+    await e.sanctions.load(e.store, e.clock.t);
+    const r = refusal(e.say('p1', 'hi'));
+    expect(r).toMatchObject({ reason: 'restricted', byModerator: true });
+    expect('rule' in r).toBe(false);
+  });
+
+  it('a pre-rules sanction (null rule) omits the rule', async () => {
+    const e = setup({ store: new RewritesRule(), notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    await e.sanction(s, 'chat', H);
+    (e.store as RewritesRule).storedRule = null;
+    await e.sanctions.load(e.store, e.clock.t);
+    expect('rule' in refusal(e.say('p1', 'hi'))).toBe(false);
+  });
+
+  it('the in-memory fallback restriction has neither a rule nor a notice id', () => {
+    const e = setup({ store: new FailingSanctions(), notices: true });
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    e.tick();
+    const r = refusal(e.say('p1', 'hello'));
+    expect(r).toMatchObject({ reason: 'restricted', byModerator: false });
+    expect('rule' in r).toBe(false);
+    expect('noticeId' in r).toBe(false);
+  });
+
+  it('no refusal carries an identifier', async () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('client-key-zq7', 'acct-zq7', 'iphash-zq7'))!;
+    const g = await e.sanction(s, 'chat', H);
+    noticeFor(e, s, g.groupId, g.refCode, e.clock.t + H);
+    const text = JSON.stringify([refusal(e.say('p1', 'hi')), refusal(e.say('p1', 'zorbak'))]);
+    for (const secret of [s, 'client-key-zq7', 'acct-zq7', 'iphash-zq7', g.groupId]) expect(text).not.toContain(secret);
+  });
+});
+
+describe('K2: the automatic timeout creates a notice', () => {
+  it('creates one chat notice citing rule 1, tied to the stored sanction', () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    const until = e.threeSlurs() + 30 * MIN;
+    const rows = e.store.rawNotices();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'chat', rule: '1', until, subject: s, ackedAt: null, withdrawnAt: null });
+    const stored = e.store.loadSanctions(e.clock.t);
+    expect(rows[0]?.groupId).toBe(stored[0]?.groupId);
+    expect(rows[0]?.refCode).toBe(stored[0]?.refCode);
+    expect(rows[0]?.excerpt).toHaveLength(1);
+    expect(rows[0]?.excerpt[0]?.day).toBe(new Date(e.clock.t).toISOString().slice(0, 10));
+  });
+
+  it('the excerpt is the triggering line, masked: the matched term never appears', () => {
+    const e = setup({ notices: true });
+    e.sit('p1', who('k1'));
+    for (let i = 0; i < 2; i++) {
+      e.say('p1', 'zorbak');
+      e.tick();
+    }
+    e.say('p1', 'you are a zorbak ok');
+    expect(e.store.rawNotices()[0]?.excerpt[0]?.text).toBe('you are a ****** ok');
+    expect(JSON.stringify(e.store.rawNotices())).not.toContain('zorbak');
+  });
+
+  it('with a matcher that gives no spans the whole line is starred', () => {
+    const store = new MemoryStore();
+    const e = setup({ store });
+    const noSpans = new NoticeService({
+      store,
+      subjects: e.subjects,
+      rules: new CommunityRules(STARTER_RULES),
+      clock: e.clock,
+      matcher: { match: stubMatcher.match },
+    });
+    const e2 = setup({ store, notices: noSpans });
+    e2.sit('p1', who('k1'));
+    e2.threeSlurs();
+    const text = store.rawNotices()[0]?.excerpt[0]?.text;
+    expect(text).toBe('******');
+  });
+
+  it('the player is told a notice is pending (notify on)', () => {
+    const pushed: Array<{ subject: SubjectId; count: number }> = [];
+    const e = setup({ notices: true, notify: (subject, ev) => void pushed.push({ subject, count: ev.count }) });
+    const s = e.sit('p1', who('k1'))!;
+    e.threeSlurs();
+    expect(pushed).toEqual([{ subject: s, count: 1 }]);
+  });
+
+  it('a throwing or rejecting notify hook never breaks the timeout', async () => {
+    for (const notify of [
+      () => {
+        throw new Error('boom');
+      },
+      () => Promise.reject(new Error('boom')),
+    ]) {
+      const e = setup({ notices: true, notify });
+      e.sit('p1', who('k1'));
+      e.threeSlurs();
+      await Promise.resolve();
+      expect(e.store.loadSanctions(e.clock.t)).toHaveLength(1);
+      expect(e.calls).toHaveLength(1);
+    }
+  });
+
+  it('a later restricted refusal points at the notice the timeout made', () => {
+    const e = setup({ notices: true });
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    e.tick();
+    const id = e.store.rawNotices()[0]?.id;
+    expect(refusal(e.say('p1', 'hello'))).toMatchObject({ reason: 'restricted', byModerator: false, rule: 1, noticeId: id });
+  });
+
+  it('the repeat 24 h penalty makes a second notice', () => {
+    const e = setup({ notices: true });
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    e.clock.t += 31 * MIN;
+    e.threeSlurs();
+    const rows = e.store.rawNotices();
+    expect(rows).toHaveLength(2);
+    expect(rows[1]?.until).toBe(e.clock.t + 24 * H);
+  });
+
+  it('no notice below the strike threshold, and none for ordinary lines', () => {
+    const e = setup({ notices: true });
+    e.sit('p1', who('k1'));
+    e.say('p1', 'zorbak');
+    e.tick();
+    e.say('p1', 'zorbak');
+    e.tick();
+    e.say('p1', 'fine');
+    expect(e.store.rawNotices()).toEqual([]);
+  });
+
+  it('the memory fallback (no stored sanction) creates no notice', () => {
+    const e = setup({ store: new FailingSanctions(), notices: true });
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    expect(e.store.rawNotices()).toEqual([]);
+  });
+
+  it('a guest with no subject gets no stored sanction and no notice', () => {
+    const e = setup({ notices: true });
+    e.sit('p1', null);
+    e.threeSlurs();
+    expect(e.store.rawNotices()).toEqual([]);
+  });
+
+  it('with sanctions switched off no notice is made', () => {
+    const e = setup({ notices: true });
+    e.sit('p1', who('k1'));
+    e.flags.sanctionsOn = false;
+    e.threeSlurs();
+    expect(e.store.rawNotices()).toEqual([]);
+  });
+
+  it('without a notices service the timeout is exactly as before', () => {
+    const e = setup();
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    expect(e.store.rawNotices()).toEqual([]);
+    expect(e.store.loadSanctions(e.clock.t)).toHaveLength(1);
+    expect(e.calls).toHaveLength(1);
+  });
+
+  it('a notice that cannot be created is logged, the restriction stands and the hook is still told', () => {
+    const broken = {
+      createForSanction: () => {
+        throw new RangeError('disk full');
+      },
+      noticeIdForGroup: () => null,
+    } as unknown as NoticeService;
+    const e = setup({ notices: broken });
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    expect(e.store.loadSanctions(e.clock.t)).toHaveLength(1);
+    expect(refusal(e.say('p1', 'hi'))).toMatchObject({ reason: 'restricted', rule: 1 });
+    expect(e.logs.find((l) => l.event === 'chat.notice_failed')?.detail).toEqual({ error: 'RangeError' });
+    expect(e.calls).toHaveLength(1);
+  });
+
+  it('a failed notice insert leaves no half row, the restriction stands', () => {
+    class FailingNotices extends MemoryStore {
+      override insertNotice(): void {
+        throw new Error('disk full');
+      }
+    }
+    const e = setup({ store: new FailingNotices(), notices: true });
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    expect(e.store.rawNotices()).toEqual([]);
+    expect(e.store.loadSanctions(e.clock.t)).toHaveLength(1);
+    expect(e.logs.some((l) => l.event === 'chat.notice_failed' && l.detail?.error === 'Error')).toBe(true);
+  });
+
+  it('what the player is shown carries no identifier, and no log line does either', () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('client-key-zq7', 'acct-zq7'))!;
+    e.threeSlurs();
+    const row = e.store.rawNotices()[0]!;
+    const shown = JSON.stringify(e.realNotices.pending(s));
+    for (const secret of [s, 'client-key-zq7', 'acct-zq7', row.groupId ?? '']) expect(shown).not.toContain(secret);
+    expect(JSON.stringify(e.logs)).not.toContain(s);
+  });
+
+  it('the notice is pending for the player and is not a must-acknowledge warning', () => {
+    const e = setup({ notices: true });
+    const s = e.sit('p1', who('k1'))!;
+    e.threeSlurs();
+    const pending = e.realNotices.pending(s);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ kind: 'chat', rule: 1, mustAcknowledge: false });
   });
 });

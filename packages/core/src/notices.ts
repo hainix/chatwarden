@@ -267,6 +267,15 @@ export class NoticeService {
     return this.store.transaction(() => this.store.withdrawNoticeGroup(groupId, this.clock.now()));
   }
 
+  /**
+   * The id of the newest notice of a sanction group that is not withdrawn, seen or not, or null when there is none.
+   * Lets a refusal point the player at the notice that explains it. May throw if the store does; the caller fences it.
+   */
+  noticeIdForGroup(groupId: string): string | null {
+    if (!nonEmpty(groupId)) return null;
+    return this.store.findNoticeForGroup(groupId)?.id ?? null;
+  }
+
   /** True while the person has a warning they have not acknowledged. */
   pendingWarning(subject: SubjectId): boolean {
     return this.rowsOf(subject).some((r) => r.kind === 'warning' && r.ackedAt === null && r.withdrawnAt === null);

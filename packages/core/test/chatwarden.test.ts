@@ -104,7 +104,7 @@ describe('createChatwarden: chat', () => {
     cw.rooms.seat(R, 'a', alice, 'Alice');
     const ok = cw.chat.accept(R, 'a', 'hello');
     expect(ok).toMatchObject({ deliver: { text: 'hello' } });
-    expect(cw.chat.accept(R, 'a', 'you zorbak')).toEqual({ refuse: { reason: 'blocked' } });
+    expect(cw.chat.accept(R, 'a', 'you zorbak')).toEqual({ refuse: { reason: 'blocked', rule: 1 } });
   });
 
   it('without a matcher nothing is blocked', async () => {
@@ -278,7 +278,7 @@ describe('createChatwarden: sanctions and doors', () => {
     const { groupId, refCode } = await cw.sanctions.apply(chatSanction(subject));
     expect(refCode).toMatch(/^M-/);
     const refused = cw.chat.accept(R, 'a', 'hello');
-    expect(refused).toEqual({ refuse: { reason: 'restricted', until: NOW + H, byModerator: true } });
+    expect(refused).toEqual({ refuse: { reason: 'restricted', until: NOW + H, byModerator: true, rule: 1 } });
     expect(JSON.stringify(refused)).not.toContain(subject);
     expect(await cw.sanctions.revoke(groupId, 'mod@example.test', 'mistake')).toBe(true);
     expect(await cw.sanctions.revoke(groupId, 'mod@example.test', 'again')).toBe(false);

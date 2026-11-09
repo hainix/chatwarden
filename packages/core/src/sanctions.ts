@@ -72,6 +72,11 @@ export interface ActiveSanction {
   automated: boolean;
   groupId: string;
   refCode: string;
+  /**
+   * The cited rule as stored text (`'1'`.. or `'uncovered'`), null for a row written before rules existed. Read it
+   * with `parseRuleRef`. A rule number only; the private gap note is never here.
+   */
+  rule: string | null;
 }
 
 const newId = (): string => randomBytes(16).toString('base64url');
@@ -262,6 +267,7 @@ interface IndexRow {
   automated: boolean;
   groupId: string;
   refCode: string;
+  rule: string | null;
 }
 
 /** Sweep expired rows out of the index after this many `add` calls. */
@@ -321,7 +327,7 @@ export class SanctionIndex {
    * The strongest active sanction of `kind` for this person: rows that name
    * their canonical subject, plus IP rows for `ids.ipHash`. Permanent beats
    * timed, otherwise the later end wins. Null when none apply or when
-   * `enabled()` is false. The result carries no reason, rule, actor or
+   * `enabled()` is false. The result carries no reason, actor or
    * identifier.
    */
   active(kind: SanctionKind, ids: Identifiers, subject: SubjectId | null, now: number): ActiveSanction | null {
@@ -349,7 +355,7 @@ export class SanctionIndex {
     const found = best as IndexRow | null;
     return found === null
       ? null
-      : { until: found.endsAt, automated: found.automated, groupId: found.groupId, refCode: found.refCode };
+      : { until: found.endsAt, automated: found.automated, groupId: found.groupId, refCode: found.refCode, rule: found.rule };
   }
 
   private insert(row: SanctionRow): void {
@@ -365,6 +371,7 @@ export class SanctionIndex {
       automated: row.automated,
       groupId: row.groupId,
       refCode: row.refCode,
+      rule: row.rule,
     });
   }
 

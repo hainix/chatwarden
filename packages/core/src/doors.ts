@@ -1,5 +1,6 @@
 import { hashWho } from './hasher.js';
 import { safeWarn } from './log.js';
+import type { NoticeService } from './notices.js';
 import type { ActiveSanction, SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
 import type { Clock, Hasher, Identifiers, Logger, RawWho, SanctionKind, SubjectId } from './types.js';
@@ -9,12 +10,14 @@ export type DoorKind = 'join' | 'create' | 'public' | 'matchmaking';
 
 /**
  * What a refused door tells the caller. `until` is the end in epoch ms, or null when permanent. `refCode`
- * is the one handle the person may quote to a moderator. No reason, identifier, hash or subject id.
+ * is the one handle the person may quote to a moderator. `noticeId` is the notice that explains the refusal, when
+ * there is one (the id the client passes to its notice view). No reason, identifier, hash or subject id.
  */
 export interface DoorRefusal {
   kind: 'ban' | 'area';
   until: number | null;
   refCode: string;
+  noticeId?: string;
 }
 
 export interface DoorServiceDeps {
@@ -23,6 +26,11 @@ export interface DoorServiceDeps {
   sanctions: SanctionIndex;
   clock: Clock;
   logger?: Logger;
+  /**
+   * Looks up the notice that explains a refusal. Optional: without it a refusal never carries a `noticeId`. A
+   * failed lookup is logged and the extra field is left out; the door still refuses.
+   */
+  notices?: NoticeService;
 }
 
 /** Joining or creating a private room: only a full ban closes these. Public rooms and matchmaking add area bans. */
@@ -66,6 +74,7 @@ export class DoorService {
   private readonly sanctions: SanctionIndex;
   private readonly clock: Clock;
   private readonly logger: Logger | undefined;
+  private readonly notices: NoticeService | undefined;
 
   constructor(deps: DoorServiceDeps) {
     this.hasher = deps.hasher;
@@ -73,6 +82,7 @@ export class DoorService {
     this.sanctions = deps.sanctions;
     this.clock = deps.clock;
     this.logger = deps.logger;
+    this.notices = deps.notices;
   }
 
   /**
@@ -105,9 +115,24 @@ export class DoorService {
         }
       }
       const hit = best as Found | null;
-      return hit === null ? null : { kind: hit.kind, until: hit.active.until, refCode: hit.active.refCode };
+      if (hit === null) return null;
+      const refusal: DoorRefusal = { kind: hit.kind, until: hit.active.until, refCode: hit.active.refCode };
+      const noticeId = this.noticeId(hit.active.groupId);
+      if (noticeId !== null) refusal.noticeId = noticeId;
+      return refusal;
     } catch (err) {
       this.logFailure(err);
+      return null;
+    }
+  }
+
+  /** The notice that explains a refusal, or null. Never throws: a broken lookup only drops the extra field. */
+  private noticeId(groupId: string): string | null {
+    if (this.notices === undefined) return null;
+    try {
+      return this.notices.noticeIdForGroup(groupId);
+    } catch (err) {
+      safeWarn(this.logger, 'doors.notice_lookup_failed', { error: err instanceof Error ? err.name : typeof err });
       return null;
     }
   }

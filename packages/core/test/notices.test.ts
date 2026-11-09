@@ -1106,3 +1106,21 @@ describe('a journaled store undoes a failed transaction', () => {
     expect(t.svc.pending(a)).toHaveLength(1);
   });
 });
+
+describe('NoticeService.noticeIdForGroup', () => {
+  it('is the newest live notice of the group, null for none, a withdrawn group or an empty id', () => {
+    const t = setup();
+    const a = t.person('ka');
+    const g = t.group(a);
+    expect(t.svc.noticeIdForGroup(g.groupId)).toBeNull();
+    const first = t.svc.createForSanction(g);
+    t.clock.t += 1;
+    const second = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId)).toBe(second);
+    expect(second).not.toBe(first);
+    expect(t.svc.noticeIdForGroup('')).toBeNull();
+    expect(t.svc.noticeIdForGroup('no-such-group')).toBeNull();
+    t.svc.withdrawGroup(g.groupId);
+    expect(t.svc.noticeIdForGroup(g.groupId)).toBeNull();
+  });
+});

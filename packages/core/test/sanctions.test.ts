@@ -351,21 +351,21 @@ describe('SanctionIndex.active', () => {
     expect(index.active('chat', none, 's_x', NOW)).toBeNull();
   });
 
-  it('matches by subject and, for an IP row, by ipHash; returns exactly until, automated, groupId, refCode', async () => {
+  it('matches by subject and, for an IP row, by ipHash; returns exactly until, automated, groupId, refCode, rule', async () => {
     const { store, subjects, index, s1 } = await person();
     const res = await applySanction(store, subjects, input(s1, { includeIp: true, automated: true }), NOW, index);
-    const want = { until: NOW + H, automated: true, groupId: res.groupId, refCode: res.refCode };
+    const want = { until: NOW + H, automated: true, groupId: res.groupId, refCode: res.refCode, rule: '1' };
     expect(index.active('chat', none, s1, NOW)).toEqual(want);
     expect(index.active('chat', who(null, null, 'ip1'), null, NOW)).toEqual(want);
   });
 
-  it('never returns the reason, rule, actor or any identifier', async () => {
+  it('never returns the reason, actor or any identifier (the rule is only its stored number)', async () => {
     const { store, subjects, index, s1 } = await person();
     await applySanction(store, subjects, input(s1, { includeIp: true, rule: 3, reason: 'private note' }), NOW, index);
     const result = index.active('chat', who('k1', 'a1', 'ip1'), s1, NOW);
     expect(result).not.toBeNull();
-    // Exactly these keys: nothing else can carry an identifier, reason, rule or actor.
-    expect(Object.keys(result ?? {}).sort()).toEqual(['automated', 'groupId', 'refCode', 'until']);
+    // Exactly these keys: nothing else can carry an identifier, reason or actor. The rule is its stored text.
+    expect(Object.keys(result ?? {}).sort()).toEqual(['automated', 'groupId', 'refCode', 'rule', 'until']);
     // The groupId is random, so blank it before the substring scan (it could contain 'k1' by chance).
     const out = JSON.stringify({ ...result, groupId: '' });
     for (const secret of ['private note', '3.1', 'mod@x.com', s1, 'ip1', 'k1', 'a1']) expect(out).not.toContain(secret);
@@ -484,7 +484,7 @@ describe('SanctionIndex.active', () => {
     const { store, subjects, index, s1 } = await person();
     await applySanction(store, subjects, input(s1, { durationMs: H }), NOW, index);
     const perm = await applySanction(store, subjects, input(s1, { durationMs: null }), NOW, index);
-    expect(index.active('chat', none, s1, NOW)).toEqual({ until: null, automated: false, groupId: perm.groupId, refCode: perm.refCode });
+    expect(index.active('chat', none, s1, NOW)).toEqual({ until: null, automated: false, groupId: perm.groupId, refCode: perm.refCode, rule: '1' });
   });
 
   it('a permanent sanction beats a longer timed one regardless of insertion order', async () => {
