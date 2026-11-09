@@ -284,3 +284,17 @@ export interface Store {
    */
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }>;
 }
+
+// ---------------------------------------------------------------------------
+// Matcher (structural; the real one lives in @chatwarden/matcher)
+// ---------------------------------------------------------------------------
+
+/**
+ * What core needs from a term matcher: given chat text, the id of the term it hit, or null.
+ * Declared here so core never imports `@chatwarden/matcher`; the matcher package's own
+ * `Matcher` and `LiveTerms` satisfy it structurally. The term id is for strike records only
+ * and never goes to a player.
+ */
+export interface Matcher {
+  match(text: string): { termId: string } | null;
+}

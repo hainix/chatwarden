@@ -5,6 +5,7 @@ export type {
   Hasher,
   Identifiers,
   Logger,
+  Matcher,
   MuteRow,
   RawWho,
   SanctionKind,
@@ -46,3 +47,7 @@ export {
   StrikeService,
 } from './strikes.js';
 export type { StrikeDecision } from './strikes.js';
+export { slidingWindow } from './rateLimit.js';
+export type { SlidingWindow } from './rateLimit.js';
+export { ChatService } from './chat.js';
+export type { ChatResult, ChatServiceDeps, Starrer } from './chat.js';
