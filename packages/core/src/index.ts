@@ -110,9 +110,9 @@ export {
   historyOf,
   LADDER_TABLE,
   recordStep,
-  suggestAction,
+  suggest,
 } from './ladder.js';
-export type { ActionRecord, LadderCell, LadderRow, LadderStep } from './ladder.js';
+export type { ActionRecord, LadderCell, LadderRow, LadderStep, Suggestion, SuggestContext } from './ladder.js';
 export { DECISION_EVIDENCE_MAX, DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
 export type {
   DecisionAction,

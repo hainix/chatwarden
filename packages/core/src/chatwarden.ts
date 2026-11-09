@@ -7,8 +7,9 @@ import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { hashWho, makeHasher } from './hasher.js';
 import { safeWarn } from './log.js';
-import { historyOf, recordStep, suggestAction } from './ladder.js';
-import type { ActionRecord } from './ladder.js';
+import { historyOf, suggest } from './ladder.js';
+import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
+import { PRESETS } from './profile.js';
 import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
@@ -28,7 +29,6 @@ import type {
   Matcher,
   Platform,
   RawWho,
-  SanctionKind,
   ConductLevel,
   Store,
   StoredReport,
@@ -188,14 +188,13 @@ export interface Chatwarden {
    */
   history(subject: SubjectId): ActionRecord[];
   /**
-   * The next step the ladder suggests for this person's record. It selects nothing; show it as one line. Keyed
-   * by a subject id. Carries subject ids: staff channels only, never send to a player.
+   * What the moderation profile suggests for this person: the outcome, a short label, and a plain sentence on why.
+   * It selects nothing; show it as one line. `context.roomId` is the room of the incident being judged: the repeat
+   * rule counts it as one more note, and with `distinctGames` it must differ from the earlier notes' rooms (a
+   * missing room never pairs with an earlier note). Keyed by a subject id. Carries subject ids: staff channels
+   * only, never send to a player (the returned `label` and `why` themselves hold no identifier).
    */
-  suggest(
-    subject: SubjectId,
-    level: ConductLevel | null,
-    rule: RuleRef,
-  ): { kind: SanctionKind; durationMs: number | null; label: string };
+  suggest(subject: SubjectId, level: ConductLevel | null, rule: RuleRef, context?: SuggestContext): Suggestion;
   /** Rule gaps: sanctions a moderator filed under `'uncovered'`, for the periodic rules review. Staff only. */
   gaps: {
     list(): GapRow[];
@@ -386,8 +385,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     decide: (input) => decisions.decide(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
-    suggest: (subject, level, rule) =>
-      suggestAction(recordStep(historyOf(store, subjects, subject, clock.now())), level, rule),
+    suggest: (subject, level, rule, context) => {
+      const now = clock.now();
+      // TODO(K3a Task 5): use the profile resolved from the creation options; until then every facade is `standard`.
+      return suggest(PRESETS.standard, historyOf(store, subjects, subject, now), level, rule, now, context);
+    },
     gaps: {
       list: () =>
         store.listGaps().map(

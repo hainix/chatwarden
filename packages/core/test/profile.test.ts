@@ -953,3 +953,71 @@ describe('ProfileError', () => {
     expect(e.message).toBe('profile.x is wrong');
   });
 });
+
+describe('areaRules and severeRules (K3a Task 4)', () => {
+  it('every preset carries the K2 defaults: areaRules [5, 6], severeRules [1]', () => {
+    for (const p of Object.values(PRESETS)) {
+      expect(p.areaRules).toEqual([5, 6]);
+      expect(p.severeRules).toEqual([1]);
+    }
+  });
+
+  it('overrides replace the array whole and keep the siblings', () => {
+    const p = resolveProfile('relaxed', { areaRules: [7], severeRules: [2, 3] });
+    expect(p.areaRules).toEqual([7]);
+    expect(p.severeRules).toEqual([2, 3]);
+    expect(p.repeat).toEqual(PRESETS.relaxed.repeat);
+    expect(PRESETS.relaxed.areaRules).toEqual([5, 6]);
+  });
+
+  it('an empty list is allowed and switches the swap or the severe column off', () => {
+    const p = resolveProfile('standard', { areaRules: [], severeRules: [] });
+    expect(p.areaRules).toEqual([]);
+    expect(p.severeRules).toEqual([]);
+  });
+
+  it('duplicates are removed, keeping the first of each in order', () => {
+    expect(resolveProfile('relaxed', { areaRules: [6, 5, 6, 5] }).areaRules).toEqual([6, 5]);
+    expect(resolveProfile('relaxed', { severeRules: [1, 1, 1] }).severeRules).toEqual([1]);
+    const custom = copy(PRESETS.relaxed);
+    custom['areaRules'] = [5, 5, 6];
+    expect(defineProfile(custom as unknown as ModerationProfile).areaRules).toEqual([5, 6]);
+  });
+
+  it('both fields are optional on a custom profile', () => {
+    const custom = copy(PRESETS.strict);
+    delete custom['areaRules'];
+    delete custom['severeRules'];
+    const p = defineProfile(custom as unknown as ModerationProfile);
+    expect(p.areaRules).toBeUndefined();
+    expect(p.severeRules).toBeUndefined();
+  });
+
+  it('anything but a whole number from 1 up is an error at the item path', () => {
+    for (const field of ['areaRules', 'severeRules'] as const) {
+      for (const bad of [0, -1, 1.5, '5', null, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 60]) {
+        const e = invalid((p) => (p[field] = [5, bad]));
+        expect(e.path).toBe(`profile.${field}[1]`);
+        expect(e.message.startsWith(e.path)).toBe(true);
+      }
+    }
+  });
+
+  it('a non-list is an error at the field path; an unknown rule key is still rejected', () => {
+    for (const field of ['areaRules', 'severeRules'] as const) {
+      for (const bad of ['5', 5, null, { 0: 5 }]) expect(invalid((p) => (p[field] = bad)).path).toBe(`profile.${field}`);
+    }
+    expect(failure(() => resolveProfile('relaxed', { areaRule: [5] } as never)).path).toBe('profile.areaRule');
+  });
+
+  it('the error never echoes the value', () => {
+    const e = invalid((p) => (p.areaRules = ['sentinel-secret-text']));
+    expect(e.message).not.toContain('sentinel');
+  });
+
+  it('the resolved arrays are frozen', () => {
+    const p = resolveProfile('relaxed', { areaRules: [5] });
+    expect(Object.isFrozen(p.areaRules)).toBe(true);
+    expect(Object.isFrozen(p.severeRules)).toBe(true);
+  });
+});

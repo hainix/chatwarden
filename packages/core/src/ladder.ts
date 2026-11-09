@@ -1,3 +1,4 @@
+import type { ModerationProfile, Outcome } from './profile.js';
 import type { RuleRef } from './rules.js';
 import { CONDUCT_LEVELS } from './types.js';
 import type { ConductLevel, SanctionKind, SanctionRow, Store, SubjectId } from './types.js';
@@ -105,7 +106,7 @@ export interface LadderRow {
   step: LadderStep;
   /** Suggested for `banter`, `rude` and `hostile` conduct. */
   lowMedium: LadderCell;
-  /** Suggested for `severe` conduct, or whenever the rule is CR 1. */
+  /** Suggested for `severe` conduct, or whenever the rule is one of the profile's `severeRules` (default CR 1). */
   high: LadderCell;
 }
 
@@ -121,8 +122,8 @@ const BAN_PERM = cell('ban', null, 'Full ban permanent');
 
 /**
  * The ladder, one row per record step: the feature contract's 12 cells, kept in one constant so the Guide renders
- * the same table the suggestion reads. Rules 5 and 6 swap a chat cell for a ban from public rooms and matchmaking (`area`) at the same length
- * (see `suggestAction`); the table itself holds the unswapped cells.
+ * the same table the suggestion reads. A profile's `areaRules` (default 5 and 6) swap a chat cell for a ban from public rooms and matchmaking
+ * (`area`) at the same length (see {@link suggest}); the table itself holds the unswapped cells.
  */
 export const LADDER_TABLE: readonly LadderRow[] = Object.freeze([
   Object.freeze({ step: 0, lowMedium: WARNING, high: CHAT_7D }),
@@ -133,44 +134,223 @@ export const LADDER_TABLE: readonly LadderRow[] = Object.freeze([
   Object.freeze({ step: 5, lowMedium: BAN_PERM, high: BAN_PERM }),
 ] as const satisfies readonly LadderRow[]);
 
+/** The rules that swap a chat restriction for a ban from public rooms, when a profile does not say. */
+const DEFAULT_AREA_RULES: readonly number[] = Object.freeze([5, 6]);
+/** The rules that always read the severe (high) column, when a profile does not say. */
+const DEFAULT_SEVERE_RULES: readonly number[] = Object.freeze([1]);
+
+/** What {@link suggest} knows about the incident in front of the moderator, beyond the record. */
+export interface SuggestContext {
+  /**
+   * The room (game) the incident came from. The repeat rule counts this incident as one more note, and with
+   * `distinctGames` it needs to know whether that is a different game from the earlier notes. When it is missing
+   * (or null), an earlier note never pairs with this incident, so the rule is judged on the earlier notes alone.
+   */
+  roomId?: string | null;
+}
+
+/** One suggested next action, with the plain reason a moderator can read out. Carries no identifier. */
+export interface Suggestion {
+  outcome: Outcome;
+  /** Moderator-facing, e.g. `'Note'`, `'Warning'`, `'Restrict chat 24 hours'`, `'No action'`. */
+  label: string;
+  /** One plain sentence naming the profile and the reason. */
+  why: string;
+}
+
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? '' : 's'}`;
+}
+
 function lengthLabel(durationMs: number | null): string {
   if (durationMs === null) return 'permanent';
   if (durationMs % DAY_MS === 0) {
     const d = durationMs / DAY_MS;
-    return d === 1 ? '24 hours' : `${d} days`;
+    return d === 1 ? '24 hours' : plural(d, 'day');
   }
-  return `${durationMs / HOUR_MS} hours`;
+  if (durationMs % HOUR_MS === 0) return plural(durationMs / HOUR_MS, 'hour');
+  if (durationMs % 60_000 === 0) return plural(durationMs / 60_000, 'minute');
+  return plural(Math.ceil(durationMs / 1000), 'second');
+}
+
+function labelOf(o: Outcome): string {
+  if (o === 'none') return 'No action';
+  if (o === 'note') return 'Note';
+  if (o === 'warning') return 'Warning';
+  const len = lengthLabel(o.durationMs);
+  if (o.kind === 'chat') return `Restrict chat ${len}`;
+  if (o.kind === 'area') return `Ban from public rooms ${len}`;
+  return `Full ban ${len}`;
+}
+
+function cellOutcome(c: LadderCell): Outcome {
+  if (c.kind === 'warning' || c.kind === 'note') return c.kind;
+  return { kind: c.kind, durationMs: c.durationMs };
+}
+
+const KIND_RANK = { chat: 0, area: 1, ban: 2 } as const;
+
+/** Orders outcomes by how hard they bite: none < note < warning < restrictions by ladder step, then length, then kind. */
+function strength(o: Outcome): readonly [number, number, number] {
+  if (o === 'none') return [-1, 0, 0];
+  if (o === 'note') return [0, 0, 0];
+  if (o === 'warning') return [1, 0, 0];
+  const step = actionStep({ kind: o.kind, durationMs: o.durationMs, startsAt: 0, revoked: false, automated: false, roomId: null });
+  return [step, o.durationMs ?? Number.POSITIVE_INFINITY, KIND_RANK[o.kind]];
+}
+
+/** True when `a` bites at least as hard as `b`. */
+function atLeast(a: Outcome, b: Outcome): boolean {
+  const x = strength(a);
+  const y = strength(b);
+  for (let i = 0; i < 3; i += 1) {
+    const xi = x[i] ?? 0;
+    const yi = y[i] ?? 0;
+    if (xi !== yi) return xi > yi;
+  }
+  return true;
+}
+
+interface Pick {
+  outcome: Outcome;
+  /** A ladder cell's own label, kept while the outcome is unchanged. */
+  label: string | null;
+}
+
+/** The stronger of two picks; on a tie the second wins (callers pass the ladder cell second to keep its label). */
+function stronger(a: Pick, b: Pick): Pick {
+  return atLeast(b.outcome, a.outcome) ? b : a;
+}
+
+function plainPick(outcome: Outcome): Pick {
+  return { outcome, label: null };
+}
+
+function cellPick(cell: LadderCell): Pick {
+  return { outcome: cellOutcome(cell), label: cell.label };
+}
+
+function copyOutcome(o: Outcome): Outcome {
+  return typeof o === 'string' ? o : { kind: o.kind, durationMs: o.durationMs };
+}
+
+const LEVEL_NOUN: Record<ConductLevel, string> = {
+  banter: 'banter',
+  rude: 'aggressive message',
+  hostile: 'hostile conduct',
+  severe: 'severe conduct',
+};
+
+function lowerFirst(s: string): string {
+  return `${s.charAt(0).toLowerCase()}${s.slice(1)}`;
+}
+
+function verbPhrase(o: Outcome, label: string): string {
+  if (o === 'none') return 'is not acted on';
+  if (o === 'note') return 'is noted';
+  if (o === 'warning') return 'gets a warning';
+  return `is met with: ${lowerFirst(label)}`;
 }
 
 /**
- * The next action a record suggests. It never selects anything; the caller shows it as one line.
- *
- * - The column: `'severe'` reads the high column; so does rule 1 (CR 1), whatever the conduct level. A null level
- *   is `hostile`. `'banter'`, `'rude'` and `'hostile'` read the low/medium column.
- * - A level that is not a {@link ConductLevel} (for example a K2 `'high'`) throws `RangeError` rather than quietly
- *   reading the mild column.
- * - Rules 5 and 6 turn a chat suggestion into a ban from public rooms and matchmaking (`area`) at the same length. A warning or a full
- *   ban is left alone.
- *
- * Returns a fresh object each call. Throws `RangeError` for a step outside 0..5 or an unknown conduct level.
+ * Whether the repeat rule is met, counting this incident as one more note. Revoked notes and notes older than
+ * `windowDays` (measured from `startsAt`, inclusive at the boundary) are left out. At least one earlier note is
+ * always needed, so a rule of "1 note" means "any earlier note", never this incident alone. With `distinctGames` it
+ * counts distinct games: an earlier note with no room is an unknown game and never counts, the earlier notes' rooms
+ * are deduplicated, and this incident adds one only when its own room is known and not already among them.
  */
-export function suggestAction(
-  step: LadderStep,
+function repeatMet(profile: ModerationProfile, live: readonly ActionRecord[], now: number, roomId: string | null): boolean {
+  const since = now - profile.repeat.windowDays * DAY_MS;
+  const prior = live.filter((r) => r.kind === 'note' && r.startsAt >= since);
+  if (!profile.repeat.distinctGames) return prior.length >= 1 && prior.length + 1 >= profile.repeat.notes;
+  const games = new Set<string>();
+  for (const r of prior) if (r.roomId !== null && r.roomId !== '') games.add(r.roomId);
+  const earlier = games.size;
+  if (roomId !== null) games.add(roomId);
+  return earlier >= 1 && games.size >= profile.repeat.notes;
+}
+
+/**
+ * What the moderator should do here, and why, under a profile. It selects and applies nothing; show it as one line.
+ *
+ * - `banter` is never acted on, whatever the record or the rule.
+ * - `severe` (and any non-banter incident under one of the profile's `severeRules`, default CR 1) is acted on at once:
+ *   the stronger of `firstOffense.severe` and the ladder's high column for the record's step.
+ * - Otherwise, with a clean record (step 0): the first-offense outcome for the level, unless this incident, counted
+ *   as one more note, meets the profile's `repeat` rule over the non-revoked notes inside `windowDays`. Then the
+ *   outcome is the stronger of `repeat.outcome` and the first-offense outcome (an escalation never goes below the
+ *   first offense). Records only reach back 90 days, so a longer window cannot see further than that.
+ * - With a warning or restriction on the record (step 1 or more): the ladder's low/medium column for the step, again
+ *   never below the first-offense outcome for the level. Notes no longer matter.
+ * - A chat restriction becomes a ban from public rooms and matchmaking (`area`) at the same length under the
+ *   profile's `areaRules` (default CR 5 and 6). A warning or a full ban is left alone.
+ * - A null level reads as `hostile`.
+ *
+ * Returns a fresh object each call. Throws `RangeError` for a level that is not a {@link ConductLevel} (for example a
+ * K2 `'high'`).
+ */
+export function suggest(
+  profile: ModerationProfile,
+  records: readonly ActionRecord[],
   level: ConductLevel | null,
   rule: RuleRef,
-): { kind: SanctionKind; durationMs: number | null; label: string } {
-  const row = Number.isInteger(step) ? LADDER_TABLE[step] : undefined;
-  if (row === undefined) throw new RangeError('suggestAction: step must be an integer from 0 to 5');
+  now: number,
+  context: SuggestContext = {},
+): Suggestion {
   if (level !== null && !CONDUCT_LEVELS.includes(level)) {
-    throw new RangeError('suggestAction: level must be banter, rude, hostile, severe or null');
+    throw new RangeError('suggest: level must be banter, rude, hostile, severe or null');
   }
-  const picked = rule === 1 || level === 'severe' ? row.high : row.lowMedium;
-  if (picked.kind === 'chat' && (rule === 5 || rule === 6)) {
+  const read: ConductLevel = level ?? 'hostile';
+  const name = profile.name;
+  if (read === 'banter') {
     return {
-      kind: 'area',
-      durationMs: picked.durationMs,
-      label: `Ban from public rooms ${lengthLabel(picked.durationMs)}`,
+      outcome: 'none',
+      label: labelOf('none'),
+      why: `${name} profile: banter is not moderated, so no action is suggested.`,
     };
   }
-  return { kind: picked.kind, durationMs: picked.durationMs, label: picked.label };
+
+  const severeRules = profile.severeRules ?? DEFAULT_SEVERE_RULES;
+  const areaRules = profile.areaRules ?? DEFAULT_AREA_RULES;
+  const severe = read === 'severe' || (typeof rule === 'number' && severeRules.includes(rule));
+  const effective: ConductLevel = severe ? 'severe' : read;
+
+  const step = recordStep(records);
+  const row = profile.ladder[step];
+  if (row === undefined) throw new RangeError('suggest: the profile ladder has no row for this record');
+  const first = plainPick(profile.firstOffense[effective]);
+
+  let pick: Pick;
+  let reason: string;
+  if (severe) {
+    pick = stronger(first, cellPick(row.high));
+    reason = `severe conduct is acted on at once, never below the first-offense outcome or the ladder step for the record: ${lowerFirst(pick.label ?? labelOf(pick.outcome))}`;
+  } else if (step >= 1) {
+    pick = stronger(first, cellPick(row.lowMedium));
+    reason = `the record already holds a warning or a restriction, so the ladder's next step applies: ${lowerFirst(pick.label ?? labelOf(pick.outcome))}`;
+  } else {
+    const live = records.filter((r) => !r.revoked);
+    const roomId = context.roomId === undefined || context.roomId === '' ? null : context.roomId;
+    if (repeatMet(profile, live, now, roomId)) {
+      pick = stronger(first, plainPick(profile.repeat.outcome));
+      const games = profile.repeat.distinctGames ? ' from different games' : '';
+      reason = `${plural(profile.repeat.notes, 'note')} in ${plural(profile.repeat.windowDays, 'day')}${games} counts as repeated: ${lowerFirst(labelOf(pick.outcome))}`;
+    } else {
+      pick = first;
+      const verb = verbPhrase(pick.outcome, labelOf(pick.outcome));
+      reason = live.some((r) => r.kind === 'note')
+        ? `the earlier notes do not yet add up to a repeat, so the ${LEVEL_NOUN[effective]} ${verb}`
+        : `first ${LEVEL_NOUN[effective]} with a clean record ${verb}`;
+    }
+  }
+
+  let outcome = copyOutcome(pick.outcome);
+  let label = pick.label ?? labelOf(outcome);
+  let areaNote = '';
+  if (typeof outcome !== 'string' && outcome.kind === 'chat' && typeof rule === 'number' && areaRules.includes(rule)) {
+    outcome = { kind: 'area', durationMs: outcome.durationMs };
+    label = labelOf(outcome);
+    areaNote = ' (this rule bans from public rooms instead of restricting chat)';
+  }
+  return { outcome, label, why: `${name} profile: ${reason}${areaNote}.` };
 }

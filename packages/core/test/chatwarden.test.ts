@@ -1131,23 +1131,28 @@ describe('createChatwarden: doors point at the notice', () => {
 });
 
 describe('createChatwarden: history and suggest', () => {
-  it('a fresh person has no history and the ladder suggests a warning for a rude first offence', async () => {
+  // TODO(K3a Task 5): the facade uses PRESETS.standard until profile options are wired in.
+  it('a fresh person has no history and the standard profile suggests a warning for a rude first offence', async () => {
     const { cw } = await setup();
     cw.rooms.seat(R, 'a', alice, 'Alice');
     const a = cw.rooms.subjectAt(R, 'a') ?? '';
     expect(cw.history(a)).toEqual([]);
-    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ kind: 'warning', durationMs: null });
-    expect(cw.suggest(a, null, 2)).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'severe', 1)).toMatchObject({ kind: 'chat', durationMs: 7 * DAY });
+    const s = cw.suggest(a, 'rude', 2);
+    expect(s).toMatchObject({ outcome: 'warning', label: 'Warning' });
+    expect(s.why).toMatch(/^Standard profile: /);
+    expect(cw.suggest(a, null, 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    expect(cw.suggest(a, 'severe', 1)).toMatchObject({ outcome: { kind: 'chat', durationMs: 7 * DAY }, label: 'Restrict chat 7 days' });
+    expect(cw.suggest(a, 'rude', 5, { roomId: R })).toMatchObject({ outcome: 'warning' });
   });
 
-  it('suggest reads conduct levels: banter is the mild column, severe the high one, an old K2 value throws', async () => {
+  it('suggest reads conduct levels: banter is no action, severe the high column, an old K2 value throws', async () => {
     const { cw } = await setup();
     cw.rooms.seat(R, 'a', alice, 'Alice');
     const a = cw.rooms.subjectAt(R, 'a') ?? '';
-    expect(cw.suggest(a, 'banter', 2)).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'severe', 2)).toMatchObject({ kind: 'chat', durationMs: 7 * DAY });
+    expect(cw.suggest(a, 'banter', 2)).toMatchObject({ outcome: 'none', label: 'No action' });
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    expect(cw.suggest(a, 'severe', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: 7 * DAY } });
+    expect(cw.suggest(a, 'hostile', 5)).toMatchObject({ outcome: { kind: 'area', durationMs: DAY } });
     expect(() => cw.suggest(a, 'high' as never, 2)).toThrow(RangeError);
   });
 
@@ -1169,7 +1174,8 @@ describe('createChatwarden: history and suggest', () => {
     await warnAlice(r);
     expect(cw.history(a)).toHaveLength(1);
     expect(cw.history(a)[0]).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'chat', durationMs: DAY });
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
   });
 
   it('a decided Note is in the history with the room, tells nobody, and does not move the suggestion', async () => {
@@ -1178,7 +1184,9 @@ describe('createChatwarden: history and suggest', () => {
     const res = await warnAlice(r, { kind: 'note' });
     expect(res).toMatchObject({ ok: true });
     expect(cw.history(a)).toEqual([{ kind: 'note', durationMs: 0, startsAt: r.clock.t, revoked: false, automated: false, roomId: R }]);
-    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'warning' });
+    // the note does not move the ladder step, but it counts toward "repeated": standard turns a second rude into chat 24 h
+    expect(cw.suggest(a, 'severe', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: 7 * DAY } });
+    expect(cw.suggest(a, 'rude', 2, { roomId: R })).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
     expect(cw.notices.pending(alice)).toEqual([]);
     expect(cw.notices.pending(bob)).toEqual([]);
     expect(cw.notices.pendingWarning(alice)).toBe(false);
@@ -1212,6 +1220,16 @@ describe('createChatwarden: history and suggest', () => {
     await warnAlice(r);
     clock.t += 91 * DAY;
     expect(cw.history(a)).toEqual([]);
-    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'warning' });
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: 'warning' });
+  });
+
+  it('a note that has aged out of the 30 day window no longer makes a repeat', async () => {
+    const r = await reported();
+    const { cw, clock, a } = r;
+    await warnAlice(r, { kind: 'note' });
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    clock.t += 31 * DAY;
+    expect(cw.history(a)).toHaveLength(1);
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: 'warning' });
   });
 });

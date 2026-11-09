@@ -84,6 +84,16 @@ export interface ModerationProfile {
   aiAutoAct: ConductLevel[];
   /** The starter Community Rules flavour. */
   rules: RulesFlavour;
+  /**
+   * Rule numbers where a chat restriction becomes a ban from public rooms and matchmaking (`area`) at the same
+   * length. Optional; when missing, `[5, 6]`. Whole numbers from 1; duplicates are removed; `[]` turns the swap off.
+   */
+  areaRules?: number[];
+  /**
+   * Rule numbers that always read the severe (high) ladder column, whatever the conduct level. Optional; when
+   * missing, `[1]`. Whole numbers from 1; duplicates are removed; `[]` turns it off.
+   */
+  severeRules?: number[];
   /** What each conduct level means here, with examples. */
   levels: Record<ConductLevel, LevelDescription>;
   /** The team's own guidelines, ordered. */
@@ -124,9 +134,13 @@ const TOP_KEYS = [
   'aiContext',
   'aiAutoAct',
   'rules',
+  'areaRules',
+  'severeRules',
   'levels',
   'guidelines',
 ] as const;
+/** Top-level keys that may be left out (the kit falls back to its defaults). */
+const OPTIONAL_TOP_KEYS: readonly string[] = ['areaRules', 'severeRules'];
 const REPEAT_KEYS = ['windowDays', 'notes', 'distinctGames', 'outcome'] as const;
 const PROFANITY_KEYS = ['mode', 'style', 'add', 'remove', 'only', 'languages'] as const;
 const OUTCOME_KEYS = ['kind', 'durationMs'] as const;
@@ -160,10 +174,10 @@ function isPlain(v: unknown): v is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-function obj(v: unknown, path: string, keys: readonly string[]): Record<string, unknown> {
+function obj(v: unknown, path: string, keys: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
   if (!isPlain(v)) return fail(path, 'must be an object');
   for (const k of Object.keys(v)) if (!keys.includes(k)) fail(`${path}.${k}`, 'is not a known setting');
-  for (const k of keys) if (!Object.hasOwn(v, k)) fail(`${path}.${k}`, 'is required');
+  for (const k of keys) if (!optional.includes(k) && !Object.hasOwn(v, k)) fail(`${path}.${k}`, 'is required');
   return v;
 }
 
@@ -204,6 +218,12 @@ function word(v: unknown, path: string): void {
 
 function wordList(v: unknown, path: string): void {
   stringList(v, path).forEach((item, i) => word(item, `${path}[${i}]`));
+}
+
+function ruleList(v: unknown, path: string): void {
+  stringList(v, path).forEach((item, i) => {
+    if (!positiveInt(item)) fail(`${path}[${i}]`, 'must be a whole rule number from 1');
+  });
 }
 
 function outcome(v: unknown, path: string): void {
@@ -268,12 +288,13 @@ function validateGuidelines(v: unknown, path: string): void {
  * message names the field and the rule, never the value, since a value may be chat text.
  */
 export function validateProfile(value: unknown): asserts value is ModerationProfile {
-  const p = obj(value, 'profile', TOP_KEYS);
+  const p = obj(value, 'profile', TOP_KEYS, OPTIONAL_TOP_KEYS);
   text(p['id'], 'profile.id');
   text(p['name'], 'profile.name');
   text(p['summary'], 'profile.summary');
   text(p['aiContext'], 'profile.aiContext');
   oneOf(p['rules'], 'profile.rules', RULES_FLAVOURS, "must be 'relaxed', 'standard' or 'strict'");
+  for (const key of OPTIONAL_TOP_KEYS) if (Object.hasOwn(p, key)) ruleList(p[key], `profile.${key}`);
 
   const first = obj(p['firstOffense'], 'profile.firstOffense', CONDUCT_LEVELS);
   for (const level of CONDUCT_LEVELS) outcome(first[level], `profile.firstOffense.${level}`);
@@ -360,9 +381,19 @@ function deepFreeze<T>(v: T): T {
   return v;
 }
 
+/** Drop repeated numbers from `areaRules` and `severeRules` (first one wins, order kept) before they are validated. */
+function dedupeRuleLists(copy: unknown): void {
+  if (!isPlain(copy)) return;
+  for (const key of OPTIONAL_TOP_KEYS) {
+    const list = copy[key];
+    if (Array.isArray(list)) setOwn(copy, key, list.filter((item: unknown, i) => list.findIndex((other: unknown) => Object.is(other, item)) === i));
+  }
+}
+
 /** Copy, validate and freeze. Nothing returned shares structure with the input. */
 function finalize(value: unknown): ModerationProfile {
   const copy = clone(value);
+  dedupeRuleLists(copy);
   validateProfile(copy);
   return deepFreeze(copy);
 }
@@ -438,6 +469,8 @@ const RELAXED: ModerationProfile = {
     'Judge the pattern across the reported lines, not one heated moment, and when unsure choose the milder level.',
   aiAutoAct: ['severe'],
   rules: 'relaxed',
+  areaRules: [5, 6],
+  severeRules: [1],
   levels: LEVELS,
   guidelines: [
     {
@@ -503,6 +536,8 @@ const STANDARD: ModerationProfile = {
     'pattern across the reported lines, and when unsure choose the milder level.',
   aiAutoAct: ['severe'],
   rules: 'standard',
+  areaRules: [5, 6],
+  severeRules: [1],
   levels: LEVELS,
   guidelines: [
     {
@@ -575,6 +610,8 @@ const STRICT: ModerationProfile = {
     'and doxxing as severe. Judge the pattern across the reported lines, and when unsure choose the milder level.',
   aiAutoAct: ['hostile', 'severe'],
   rules: 'strict',
+  areaRules: [5, 6],
+  severeRules: [1],
   levels: STRICT_LEVELS,
   guidelines: [
     {
