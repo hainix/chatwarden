@@ -95,6 +95,11 @@ export interface DecisionServiceDeps {
   /** Kept current with the sanctions a decision writes, once the decision has committed. */
   index?: SanctionIndex;
   logger?: Logger;
+  /**
+   * Whether an `upheld` decision tells the reporter ("action taken"). Default true. Off: the reporter hears
+   * nothing, and the people acted on are still told.
+   */
+  reporterFeedback?: boolean;
 }
 
 const VERDICTS: readonly DecisionInput['verdict'][] = ['upheld', 'noted', 'no_action', 'bad_faith'];
@@ -274,6 +279,7 @@ export class DecisionService {
   private readonly clock: Clock;
   private readonly index: SanctionIndex | undefined;
   private readonly logger: Logger | undefined;
+  private readonly reporterFeedback: boolean;
 
   constructor(deps: DecisionServiceDeps) {
     this.store = deps.store;
@@ -283,6 +289,7 @@ export class DecisionService {
     this.clock = deps.clock;
     this.index = deps.index;
     this.logger = deps.logger;
+    this.reporterFeedback = deps.reporterFeedback ?? true;
   }
 
   /**
@@ -410,7 +417,7 @@ export class DecisionService {
       }
       // Reporter feedback only on `upheld` with at least one NON-note action: a note is staff-only and must never
       // tell the reporter anything, however many of them sit beside the other actions.
-      if (norm.verdict === 'upheld' && plan.some(({ action }) => action.kind !== 'note')) {
+      if (this.reporterFeedback && norm.verdict === 'upheld' && plan.some(({ action }) => action.kind !== 'note')) {
         this.notices.createReportOutcome(reporter, { notify: false });
         told.add(reporter);
       }

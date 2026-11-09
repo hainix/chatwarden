@@ -76,7 +76,7 @@ export {
 export type { ReportCounts, ReportInput, ReportRefusal, ReportResult, ReportServiceDeps } from './reports.js';
 export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
-export { purge, RETENTION_DEFAULTS } from './retention.js';
+export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export {
   ExcerptError,
@@ -102,8 +102,11 @@ export {
   rulesPolicyText,
   RulesError,
   STARTER_RULES,
+  starterRules,
 } from './rules.js';
 export type { CommunityRule, RuleRef } from './rules.js';
+export { LIMITS_DEFAULTS, resolveLimits } from './limits.js';
+export type { Limits, LimitsInput } from './limits.js';
 export {
   actionStep,
   HISTORY_LOOKBACK_MS,

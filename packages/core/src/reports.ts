@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
+import type { Limits } from './limits.js';
 import { safeWarn } from './log.js';
 import type { SubjectIndex } from './subjects.js';
 import type {
@@ -21,6 +22,8 @@ export type { StoredReport } from './types.js';
 
 const DAY_MS = 24 * 3_600_000;
 const WEEK_MS = 7 * DAY_MS;
+
+// REPORTS_PER_DAY, SUSPEND_AFTER and SUSPEND_WINDOW_MS are the DEFAULTS of `limits.reports`.
 
 /** Reports one person may file in any 24 hours. */
 export const REPORTS_PER_DAY = 10;
@@ -82,6 +85,11 @@ export interface ReportServiceDeps {
    */
   onReport?: (report: StoredReport, counts: ReportCounts) => void;
   logger?: Logger;
+  /**
+   * The report limits, already validated (see `resolveLimits`): reports per reporter per 24 h, bad-faith
+   * dismissals that suspend a reporter, and how long a dismissal weighs. Default: 10, 3 and 30 days.
+   */
+  limits?: Limits['reports'];
 }
 
 const newId = (): string => randomBytes(16).toString('base64url');
@@ -126,6 +134,7 @@ export class ReportService {
   private readonly enabled: () => boolean;
   private readonly onReport: ReportServiceDeps['onReport'];
   private readonly logger: Logger | undefined;
+  private readonly limits: Limits['reports'];
 
   constructor(deps: ReportServiceDeps) {
     this.roster = deps.roster;
@@ -136,6 +145,11 @@ export class ReportService {
     this.enabled = deps.enabled ?? (() => true);
     this.onReport = deps.onReport;
     this.logger = deps.logger;
+    this.limits = deps.limits ?? {
+      perDay: REPORTS_PER_DAY,
+      suspendAfter: SUSPEND_AFTER,
+      suspendWindowMs: SUSPEND_WINDOW_MS,
+    };
   }
 
   /**
@@ -196,7 +210,7 @@ export class ReportService {
     try {
       const limits = this.checkLimits(reporter, targetPerson, roomId, now);
       if ('refusal' in limits) return limits.refusal;
-      remaining = Math.max(0, REPORTS_PER_DAY - limits.used - 1);
+      remaining = Math.max(0, this.limits.perDay - limits.used - 1);
 
       const snapshot = this.buffer.snapshot(roomId);
       const people: SubjectId[] = [];
@@ -269,13 +283,13 @@ export class ReportService {
     roomId: string,
     now: number,
   ): { refusal: ReportResult } | { used: number } {
-    const marks = this.store.loadBadFaithMarks(now - SUSPEND_WINDOW_MS);
+    const marks = this.store.loadBadFaithMarks(now - this.limits.suspendWindowMs);
     let bad = 0;
     for (const m of marks) if (this.subjects.canonical(m.reporter) === reporter) bad++;
-    if (bad >= SUSPEND_AFTER) return { refusal: refuse('suspended') };
+    if (bad >= this.limits.suspendAfter) return { refusal: refuse('suspended') };
 
     const used = this.reportsByInLastDay(reporter, now);
-    if (used >= REPORTS_PER_DAY) return { refusal: refuse('rate', 0) };
+    if (used >= this.limits.perDay) return { refusal: refuse('rate', 0) };
 
     for (const pair of this.store.loadRoomReportPairs(roomId)) {
       if (this.subjects.canonical(pair.reporter) === reporter && this.subjects.canonical(pair.target) === target) {

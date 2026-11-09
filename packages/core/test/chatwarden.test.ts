@@ -1131,7 +1131,6 @@ describe('createChatwarden: doors point at the notice', () => {
 });
 
 describe('createChatwarden: history and suggest', () => {
-  // TODO(K3a Task 5): the facade uses PRESETS.standard until profile options are wired in.
   it('a fresh person has no history and the standard profile suggests a warning for a rude first offence', async () => {
     const { cw } = await setup();
     cw.rooms.seat(R, 'a', alice, 'Alice');

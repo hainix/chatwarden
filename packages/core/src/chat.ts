@@ -2,12 +2,12 @@ import type { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { safeWarn } from './log.js';
 import type { MuteService } from './mutes.js';
 import type { NoticeService } from './notices.js';
+import type { Limits } from './limits.js';
 import { slidingWindow } from './rateLimit.js';
 import type { SlidingWindow } from './rateLimit.js';
 import { parseRuleRef } from './rules.js';
 import { applySanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
-import { REPEAT_RESTRICT_MS } from './strikes.js';
 import type { StrikeService } from './strikes.js';
 import type { SubjectIndex } from './subjects.js';
 import type { Clock, Identifiers, Logger, Matcher, ReportExcerptLine, Store, SubjectId } from './types.js';
@@ -25,12 +25,12 @@ import type { Clock, Identifiers, Logger, Matcher, ReportExcerptLine, Store, Sub
 // It never throws. Everything on this path reads in-memory state; the only store writes are the strike
 // (inside StrikeService) and the automatic timeout, and a failure of either is logged and absorbed.
 
-/** Longest line, in characters after trimming. */
-const MAX_LEN = 200;
-/** Lines allowed per rate window per `roomId:seatId`. */
-const RATE_LIMIT = 3;
-/** Rate window, milliseconds. */
-const RATE_WINDOW_MS = 5_000;
+/** Longest line, in characters after trimming. The default of `limits.chatMaxLength`. */
+export const MAX_LEN = 200;
+/** Lines allowed per rate window per `roomId:seatId`. The default of `limits.chatRate.count`. */
+export const RATE_LIMIT = 3;
+/** Rate window, milliseconds. The default of `limits.chatRate.windowMs`. */
+export const RATE_WINDOW_MS = 5_000;
 
 const AUTO_RESTRICT_REASON = 'auto: repeated slurs';
 
@@ -107,6 +107,11 @@ export interface ChatServiceDeps {
    * rule; the service just cites it.
    */
   autoRestrictRule?: number;
+  /**
+   * The chat limits, already validated (see `resolveLimits`). Default: 200 characters and 3 lines per 5 000 ms per
+   * `roomId:seatId`. The service trusts the numbers; the facade validates them.
+   */
+  limits?: { maxLength: Limits['chatMaxLength']; rate: Limits['chatRate'] };
 }
 
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
@@ -155,6 +160,7 @@ export class ChatService {
   private readonly logger: Logger | undefined;
   private readonly notices: NoticeService | undefined;
   private readonly autoRestrictRule: number;
+  private readonly maxLength: number;
   private readonly rate: SlidingWindow;
 
   /**
@@ -181,7 +187,12 @@ export class ChatService {
     this.logger = deps.logger;
     this.notices = deps.notices;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
-    this.rate = slidingWindow({ limit: RATE_LIMIT, windowMs: RATE_WINDOW_MS, clock: deps.clock });
+    this.maxLength = deps.limits?.maxLength ?? MAX_LEN;
+    this.rate = slidingWindow({
+      limit: deps.limits?.rate.count ?? RATE_LIMIT,
+      windowMs: deps.limits?.rate.windowMs ?? RATE_WINDOW_MS,
+      clock: deps.clock,
+    });
   }
 
   /**
@@ -240,7 +251,7 @@ export class ChatService {
       });
     }
 
-    if (trimmed.length > MAX_LEN) return refuse('length');
+    if (trimmed.length > this.maxLength) return refuse('length');
     // Spent even when the line is then blocked, so a flood of slurs is throttled like any flood and cannot
     // probe the term list faster than ordinary chat.
     if (!this.rate.check(rateKey)) return refuse('rate');
@@ -377,7 +388,7 @@ export class ChatService {
       // The kill switch: the strike is kept and the line was blocked, but nothing is enforced, so no row is
       // written (it would go live when the switch flips back), nothing is held in memory and nobody is told.
       if (!this.sanctions.isEnabled()) return;
-      this.applyTimeout(roomId, seatId, subject, autoRestrict.durationMs, line);
+      this.applyTimeout(roomId, seatId, subject, autoRestrict.durationMs, autoRestrict.second === true, line);
     } catch (err) {
       this.warn('chat.strike_failed', { error: errName(err) });
     }
@@ -388,6 +399,7 @@ export class ChatService {
     seatId: string,
     subject: SubjectId | null,
     durationMs: number,
+    second: boolean,
     line: BlockedLine,
   ): void {
     // Read after the strike was written, so the restriction starts at or after every strike it consumed. The
@@ -429,7 +441,7 @@ export class ChatService {
     }
     if (!stored) this.holdInMemory(memKey(roomId, seatId), subject, now, durationMs);
     try {
-      const told: unknown = this.onAutoRestrict?.(subject, durationMs >= REPEAT_RESTRICT_MS);
+      const told: unknown = this.onAutoRestrict?.(subject, second);
       // An async hook is type-legal against `=> void`; its rejection must not escape as an unhandled one.
       if (isThenable(told)) {
         told.then(undefined, (err: unknown) => {

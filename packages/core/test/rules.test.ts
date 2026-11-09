@@ -8,6 +8,7 @@ import {
   rulesPolicyText,
   RulesError,
   STARTER_RULES,
+  starterRules,
 } from '../src/rules.js';
 import type { CommunityRule } from '../src/rules.js';
 
@@ -241,6 +242,92 @@ describe('STARTER_RULES', () => {
     expect(defineRules(STARTER_RULES).label(6)).toBe(
       'Community Rule 6: No throwing, stalling or ruining games on purpose',
     );
+  });
+});
+
+describe('starterRules(flavour)', () => {
+  const FLAVOURS = ['relaxed', 'standard', 'strict'] as const;
+  const SINGLE_GAME = /\b(cards?|creatures?|decks?|mana|mulligan)\b/i;
+
+  it('standard is STARTER_RULES, value for value', () => {
+    expect(starterRules('standard')).toEqual(STARTER_RULES);
+  });
+
+  it.each(FLAVOURS)('%s: CR 1 to 8, same numbers, and a valid registry with every rule active', (flavour) => {
+    const list = starterRules(flavour);
+    expect(list.map((x) => x.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(defineRules(list).active()).toHaveLength(8);
+    expect(list.every((x) => x.retired !== true)).toBe(true);
+  });
+
+  it.each(FLAVOURS)('%s: no title or text uses single-game vocabulary', (flavour) => {
+    for (const rule of starterRules(flavour)) {
+      expect(rule.title, `CR ${rule.number} title`).not.toMatch(SINGLE_GAME);
+      expect(rule.text, `CR ${rule.number} text`).not.toMatch(SINGLE_GAME);
+    }
+  });
+
+  it.each(FLAVOURS)('%s: every text is one or two plain sentences on one line', (flavour) => {
+    for (const rule of starterRules(flavour)) {
+      const sentences = rule.text.split(/[.!?]+/).filter((s) => s.trim() !== '');
+      expect(sentences.length, `CR ${rule.number}`).toBeGreaterThanOrEqual(1);
+      expect(sentences.length, `CR ${rule.number}`).toBeLessThanOrEqual(2);
+      expect(rule.text.trim()).toBe(rule.text);
+      expect(rule.text).not.toMatch(/[\r\n]/);
+    }
+  });
+
+  it('relaxed CR 2 is the moderator text, verbatim', () => {
+    expect(starterRules('relaxed')[1]).toEqual({
+      number: 2,
+      title: 'No harassment or threats',
+      text: "Trash talk about the game and each other's play is fine. Harassing, threatening or personally attacking someone, again and again, is not.",
+    });
+  });
+
+  it('every title other than relaxed CR 2 is the standard one in every flavour', () => {
+    const std = starterRules('standard');
+    for (const flavour of FLAVOURS) {
+      starterRules(flavour).forEach((rule, i) => {
+        if (flavour === 'relaxed' && rule.number === 2) return;
+        expect(rule.title, `${flavour} CR ${rule.number}`).toBe(std[i]!.title);
+      });
+    }
+  });
+
+  it('relaxed differs from standard only in CR 2', () => {
+    const std = starterRules('standard');
+    const diff = starterRules('relaxed').filter((rule, i) => rule.title !== std[i]!.title || rule.text !== std[i]!.text);
+    expect(diff.map((x) => x.number)).toEqual([2]);
+  });
+
+  it('strict CR 3 also covers swearing at people; the title is unchanged', () => {
+    const strict = starterRules('strict')[2]!;
+    expect(strict.title).toBe('No sexual messages');
+    expect(strict.text).toMatch(/swear/i);
+    expect(starterRules('standard')[2]!.text).not.toMatch(/swear/i);
+    expect(starterRules('relaxed')[2]!.text).not.toMatch(/swear/i);
+  });
+
+  it('standard CR 2 keeps its person-versus-game wording', () => {
+    const text = starterRules('standard')[1]!.text.toLowerCase();
+    expect(text).toContain('player');
+    expect(text).toContain('game');
+  });
+
+  it('returns a fresh copy every call: editing one list changes no other', () => {
+    const a = starterRules('relaxed');
+    a[1]!.text = 'changed';
+    a.pop();
+    expect(starterRules('relaxed')[1]!.text).not.toBe('changed');
+    expect(starterRules('relaxed')).toHaveLength(8);
+    const std = starterRules('standard');
+    std[0]!.title = 'changed';
+    expect(STARTER_RULES[0]!.title).not.toBe('changed');
+  });
+
+  it.each(['loose', '', 'Relaxed', null, undefined, 3])('refuses the flavour %j', (bad) => {
+    expect(() => starterRules(bad as never)).toThrow(RulesError);
   });
 });
 

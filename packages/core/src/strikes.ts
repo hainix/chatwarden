@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { Limits } from './limits.js';
 import { safeWarn } from './log.js';
 import type { SubjectIndex } from './subjects.js';
 import type { Clock, Logger, Store, SubjectId } from './types.js';
@@ -7,6 +8,8 @@ import type { Clock, Logger, Store, SubjectId } from './types.js';
 // repeat offender. This module only COUNTS and DECIDES the duration; the caller applies the sanction
 // (`applySanction` with source `auto_filter`, `automated: true`), so the policy here stays a function of the
 // strike history. Behaviour follows Moxgate's strikes module.
+
+// The five constants below are the DEFAULTS of `limits.strikes`; a StrikeService takes its own numbers.
 
 /** Strikes inside this window count: 1 hour. */
 export const STRIKE_WINDOW_MS = 3_600_000;
@@ -29,7 +32,8 @@ const present = (id: SubjectId | null): id is SubjectId => typeof id === 'string
 
 /** What `record` tells the chat path. */
 export interface StrikeDecision {
-  autoRestrict: null | { durationMs: number };
+  /** `second` is present (true) only for the longer repeat duration. */
+  autoRestrict: null | { durationMs: number; second?: true };
 }
 
 export class StrikeService {
@@ -37,6 +41,7 @@ export class StrikeService {
   private readonly clock: Clock;
   private readonly subjects: SubjectIndex;
   private readonly logger: Logger | undefined;
+  private readonly limits: Limits['strikes'];
 
   /**
    * Strike times (epoch ms) by the subject id the strike was filed under: the canonical subject at write time.
@@ -55,11 +60,22 @@ export class StrikeService {
   /** The fallback tally for strikes with no subject, or whose write failed: rateKey -> strike times. */
   private byRateKey = new Map<string, number[]>();
 
-  constructor(store: Store, clock: Clock, subjects: SubjectIndex, opts?: { logger?: Logger }) {
+  /**
+   * `opts.limits` is the `limits.strikes` group (see `resolveLimits`, which validates it); without it the
+   * constants above apply.
+   */
+  constructor(store: Store, clock: Clock, subjects: SubjectIndex, opts?: { logger?: Logger; limits?: Limits['strikes'] }) {
     this.store = store;
     this.clock = clock;
     this.subjects = subjects;
     this.logger = opts?.logger;
+    this.limits = opts?.limits ?? {
+      count: STRIKES_TO_RESTRICT,
+      windowMs: STRIKE_WINDOW_MS,
+      firstMs: STRIKE_FIRST_RESTRICT_MS,
+      repeatMs: REPEAT_RESTRICT_MS,
+      repeatLookbackMs: REPEAT_LOOKBACK_MS,
+    };
   }
 
   /**
@@ -72,14 +88,14 @@ export class StrikeService {
     try {
       const now = this.clock.now();
       const tally = new Map<SubjectId, number[]>();
-      for (const row of this.store.loadStrikes(now - STRIKE_WINDOW_MS)) {
+      for (const row of this.store.loadStrikes(now - this.limits.windowMs)) {
         const times = tally.get(row.subject);
         if (times === undefined) tally.set(row.subject, [row.at]);
         else times.push(row.at);
       }
       const last = new Map<SubjectId, number>();
       for (const { subject, startsAt } of this.store.loadAutoChatStarts()) {
-        if (startsAt < now - REPEAT_LOOKBACK_MS) continue;
+        if (startsAt < now - this.limits.repeatLookbackMs) continue;
         last.set(subject, Math.max(last.get(subject) ?? startsAt, startsAt));
       }
       this.tally = tally;
@@ -138,13 +154,15 @@ export class StrikeService {
     const times = this.foldTally(person);
     times.push(now);
     const last = this.foldLastAutoStart(person);
-    const count = times.reduce((n, t) => (t >= now - STRIKE_WINDOW_MS && (last === undefined || t > last) ? n + 1 : n), 0);
-    if (count < STRIKES_TO_RESTRICT) return { autoRestrict: null };
+    const count = times.reduce((n, t) => (t >= now - this.limits.windowMs && (last === undefined || t > last) ? n + 1 : n), 0);
+    if (count < this.limits.count) return { autoRestrict: null };
 
-    const escalate = last !== undefined && last >= now - REPEAT_LOOKBACK_MS;
+    const escalate = last !== undefined && last >= now - this.limits.repeatLookbackMs;
     this.tally.delete(person);
     this.lastAutoStart.set(person, now);
-    return { autoRestrict: { durationMs: escalate ? REPEAT_RESTRICT_MS : STRIKE_FIRST_RESTRICT_MS } };
+    return {
+      autoRestrict: escalate ? { durationMs: this.limits.repeatMs, second: true } : { durationMs: this.limits.firstMs },
+    };
   }
 
   /** The person's strike times under their canonical id, moving in the times filed under merged-away ids. */
@@ -177,12 +195,12 @@ export class StrikeService {
   /** Drop every strike older than the window and every restriction start older than the look-back. */
   private prune(now: number): void {
     for (const [key, times] of this.tally) {
-      const fresh = times.filter((t) => t >= now - STRIKE_WINDOW_MS);
+      const fresh = times.filter((t) => t >= now - this.limits.windowMs);
       if (fresh.length === 0) this.tally.delete(key);
       else if (fresh.length !== times.length) this.tally.set(key, fresh);
     }
     for (const [key, at] of this.lastAutoStart) {
-      if (at < now - REPEAT_LOOKBACK_MS) this.lastAutoStart.delete(key);
+      if (at < now - this.limits.repeatLookbackMs) this.lastAutoStart.delete(key);
     }
   }
 
@@ -190,18 +208,18 @@ export class StrikeService {
   private recordByRateKey(rateKey: string, now: number): StrikeDecision {
     // Prune every key, not just this one, so entries for players who went quiet cannot pile up.
     for (const [key, times] of this.byRateKey) {
-      const fresh = times.filter((t) => t >= now - STRIKE_WINDOW_MS);
+      const fresh = times.filter((t) => t >= now - this.limits.windowMs);
       if (fresh.length === 0) this.byRateKey.delete(key);
       else if (fresh.length !== times.length) this.byRateKey.set(key, fresh);
     }
     const times = this.byRateKey.get(rateKey) ?? [];
     times.push(now);
-    if (times.length < STRIKES_TO_RESTRICT) {
+    if (times.length < this.limits.count) {
       this.byRateKey.set(rateKey, times);
       return { autoRestrict: null };
     }
     this.byRateKey.delete(rateKey);
-    return { autoRestrict: { durationMs: STRIKE_FIRST_RESTRICT_MS } };
+    return { autoRestrict: { durationMs: this.limits.firstMs } };
   }
 
   /** A fallback firing against a known subject still starts a restriction, so it consumes that subject's strikes. */
