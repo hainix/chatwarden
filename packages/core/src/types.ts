@@ -102,6 +102,49 @@ export interface SubjectIdRecord {
 }
 
 // ---------------------------------------------------------------------------
+// Sanctions (storage shapes)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a sanction restricts: `chat` (public chat), `area` (public areas:
+ * public rooms and matchmaking; Moxgate's "open table"), or `ban` (everything).
+ */
+export type SanctionKind = 'chat' | 'area' | 'ban';
+
+/** Who or what imposed a sanction. */
+export type Source = 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai';
+
+/** A sanction row targets a canonical subject, or one hashed IP (a short speed bump). */
+export type SanctionTargetType = 'subject' | 'ip';
+
+/**
+ * One stored sanction row. A sanction is a GROUP of rows sharing `groupId` and
+ * `refCode`: one `subject` row, plus at most one `ip` row. `value` is a subject
+ * id or a hashed IP, so a row never leaves the server. `reason` is private.
+ */
+export interface SanctionRow {
+  id: string;
+  groupId: string;
+  /** `M-` plus 5 characters; the one handle a player may quote to a moderator. */
+  refCode: string;
+  kind: SanctionKind;
+  targetType: SanctionTargetType;
+  /** Subject id (target `subject`) or hashed IP (target `ip`). */
+  value: string;
+  startsAt: number;
+  /** Epoch ms the row stops applying (it applies strictly before this); null = permanent. */
+  endsAt: number | null;
+  reason: string;
+  /** Rule number the sanction cites (filled by the rules layer), or null. */
+  rule: string | null;
+  actor: string;
+  source: Source;
+  automated: boolean;
+  /** True when written while sanctions enforcement was off. Informational. */
+  pending: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -149,4 +192,24 @@ export interface Store {
 
   /** Every subject and identifier row, for rebuilding the in-memory index. */
   loadSubjects(): Promise<{ subjects: SubjectRecord[]; ids: SubjectIdRecord[] }>;
+
+  // Sanctions. SYNCHRONOUS on purpose (like the term store): `applySanction` must
+  // write, see the outcome and update the in-memory index in one tick, so the chat
+  // path sees an automatic timeout at once. They run SQL inside `transaction`.
+
+  /**
+   * Insert every row of one sanction group atomically. Returns false, having
+   * written nothing, when the group's `refCode` is already taken by another
+   * group; any other failure throws and also leaves nothing written.
+   */
+  insertSanctionGroup(rows: readonly SanctionRow[]): boolean;
+
+  /**
+   * Revoke every unrevoked row of the group; rows already revoked keep their
+   * first revoker, time and reason. Returns how many rows this call revoked.
+   */
+  revokeSanctionGroup(groupId: string, actor: string, at: number, reason: string): number;
+
+  /** Every unrevoked row that has not ended by `now`, for rebuilding the sanction index. */
+  loadSanctions(now: number): SanctionRow[];
 }

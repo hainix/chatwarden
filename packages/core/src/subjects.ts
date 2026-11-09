@@ -85,6 +85,12 @@ export class SubjectIndex {
   private members = new Map<SubjectId, Set<SubjectId>>();
   /** First/last seen of each stored identifier row, for the last_seen throttle. */
   private seen = new Map<string, Seen>();
+  /**
+   * Exact last time each IP row was seen by `resolve` in this process. The
+   * stored `lastSeen` is throttled to once an hour; this is not, so `latestIp`
+   * can tell which of two addresses seen minutes apart is the newer.
+   */
+  private ipSeenAt = new Map<string, number>();
 
   private tail: Promise<void> = Promise.resolve();
 
@@ -104,6 +110,7 @@ export class SubjectIndex {
     this.owned = new Map();
     this.members = new Map();
     this.seen = new Map();
+    this.ipSeenAt = new Map();
 
     for (const s of subjects) {
       this.created.set(s.id, s.createdAt);
@@ -174,6 +181,7 @@ export class SubjectIndex {
     if (ip !== null) {
       if (this.owned.get(root)?.ips.has(ip) === true) this.touch(root, 'ip', ip, now);
       else this.attach(root, 'ip', ip, now);
+      this.ipSeenAt.set(rowKey(root, 'ip', ip), now);
     }
     return root;
   }
@@ -212,6 +220,27 @@ export class SubjectIndex {
       for (const v of o.ips) ips.add(v);
     }
     return { accounts: [...accounts].sort(), keys: [...keys].sort(), ips: [...ips].sort() };
+  }
+
+  /**
+   * The hashed IP most recently seen with the subject or any subject merged
+   * into it, or null when none was seen. On a tie the smaller value wins.
+   * An IP is never used to find a subject; this only reads what was recorded.
+   */
+  latestIp(id: SubjectId): string | null {
+    let best: string | null = null;
+    let bestAt = -Infinity;
+    for (const member of this.members.get(this.canonical(id)) ?? []) {
+      for (const ip of this.owned.get(member)?.ips ?? []) {
+        const key = rowKey(member, 'ip', ip);
+        const at = this.ipSeenAt.get(key) ?? this.seen.get(key)?.lastSeen ?? -Infinity;
+        if (at > bestAt || (at === bestAt && best !== null && ip < best)) {
+          best = ip;
+          bestAt = at;
+        }
+      }
+    }
+    return best;
   }
 
   /** Resolves once every store write queued so far has been attempted. Never rejects. */

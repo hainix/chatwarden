@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { Store, SubjectId, SubjectIdKind, SubjectIdRecord, SubjectRecord } from '@chatwarden/core';
+import type { SanctionKind, SanctionRow, Source, Store, SubjectId, SubjectIdKind, SubjectIdRecord, SubjectRecord } from '@chatwarden/core';
 import type {
   AuditEntry,
   ExceptionPatch,
@@ -112,6 +112,70 @@ export class SqliteStore implements Store, TermStore {
         }));
       return { subjects, ids };
     });
+  }
+
+  // Sanctions. SYNCHRONOUS on purpose (see the Store interface): `applySanction` updates the in-memory index
+  // in the same tick as the write. They run inside `transaction`, which must never be given an async function.
+
+  insertSanctionGroup(rows: readonly SanctionRow[]): boolean {
+    return this.transaction(() => {
+      const first = rows[0];
+      if (first === undefined) return true;
+      const taken = this.db
+        .prepare('SELECT 1 AS one FROM kit_sanctions WHERE ref_code = ? AND group_id <> ? LIMIT 1')
+        .get(first.refCode, first.groupId);
+      if (taken !== undefined) return false;
+      const ins = this.db.prepare(
+        `INSERT INTO kit_sanctions
+           (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const r of rows) {
+        ins.run(
+          r.id, r.groupId, r.refCode, r.kind, r.targetType, r.value, r.startsAt, r.endsAt, r.reason, r.rule,
+          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0,
+        );
+      }
+      return true;
+    });
+  }
+
+  revokeSanctionGroup(groupId: string, actor: string, at: number, reason: string): number {
+    return this.transaction(() => {
+      const res = this.db
+        .prepare(
+          'UPDATE kit_sanctions SET revoked_by = ?, revoked_at = ?, revoke_reason = ? WHERE group_id = ? AND revoked_at IS NULL',
+        )
+        .run(actor, at, reason, groupId);
+      return Number(res.changes);
+    });
+  }
+
+  loadSanctions(now: number): SanctionRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending
+           FROM kit_sanctions WHERE revoked_at IS NULL AND (ends_at IS NULL OR ends_at > ?) ORDER BY rowid`,
+        )
+        .all(now)
+        .map((r) => ({
+          id: String(r.id),
+          groupId: String(r.group_id),
+          refCode: String(r.ref_code),
+          kind: String(r.kind) as SanctionKind,
+          targetType: r.target_type === 'ip' ? ('ip' as const) : ('subject' as const),
+          value: String(r.target_value),
+          startsAt: Number(r.starts_at),
+          endsAt: r.ends_at === null ? null : Number(r.ends_at),
+          reason: String(r.reason),
+          rule: r.rule === null ? null : String(r.rule),
+          actor: String(r.actor),
+          source: String(r.source) as Source,
+          automated: r.automated === 1,
+          pending: r.pending === 1,
+        })),
+    );
   }
 
   // Terms, exceptions and the audit trail. These are SYNCHRONOUS on purpose (the TermStore contract): they

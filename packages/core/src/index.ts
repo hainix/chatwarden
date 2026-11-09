@@ -6,6 +6,10 @@ export type {
   Identifiers,
   Logger,
   RawWho,
+  SanctionKind,
+  SanctionRow,
+  SanctionTargetType,
+  Source,
   Store,
   SubjectId,
   SubjectIdKind,
@@ -21,3 +25,12 @@ export {
   RoomRoster,
 } from './evidence.js';
 export type { EvidenceBufferOptions, EvidenceLine } from './evidence.js';
+export {
+  applySanction,
+  refCode,
+  revokeSanction,
+  SANCTION_KINDS,
+  SANCTION_SOURCES,
+  SanctionIndex,
+} from './sanctions.js';
+export type { ActiveSanction, SanctionInput } from './sanctions.js';

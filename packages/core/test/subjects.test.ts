@@ -675,3 +675,70 @@ describe('memoryStore', () => {
     expect((await store.loadSubjects()).subjects).toEqual([]);
   });
 });
+
+describe('SubjectIndex.latestIp', () => {
+  it('is null for a subject with no IP and for an unknown subject', async () => {
+    const { index } = setup();
+    await index.load();
+    const s = mustResolve(index, who('k1'));
+    expect(index.latestIp(s)).toBeNull();
+    expect(index.latestIp('s_unknown')).toBeNull();
+  });
+
+  it('returns the only IP seen', async () => {
+    const { index } = setup();
+    await index.load();
+    const s = mustResolve(index, who('k1', null, 'ip-a'));
+    expect(index.latestIp(s)).toBe('ip-a');
+  });
+
+  it('returns the most recently seen IP, even within the store write throttle window', async () => {
+    const { index, clock } = setup();
+    await index.load();
+    const s = mustResolve(index, who('k1', null, 'ip-a'));
+    clock.advance(1_000);
+    mustResolve(index, who('k1', null, 'ip-b'));
+    expect(index.latestIp(s)).toBe('ip-b');
+    clock.advance(1_000);
+    mustResolve(index, who('k1', null, 'ip-a')); // back on the first address
+    expect(index.latestIp(s)).toBe('ip-a');
+  });
+
+  it('looks across every subject merged into the root', async () => {
+    const { index, clock } = setup();
+    await index.load();
+    const a = mustResolve(index, who('k1', null, 'ip-a'));
+    clock.advance(1_000);
+    const b = mustResolve(index, who('k2', null, 'ip-b'));
+    clock.advance(1_000);
+    mustResolve(index, who('k1', 'acct'));
+    mustResolve(index, who('k2', 'acct')); // merge
+    const root = index.canonical(a);
+    expect(index.canonical(b)).toBe(root);
+    expect(index.latestIp(root)).toBe('ip-b');
+    expect(index.latestIp(a)).toBe('ip-b');
+    expect(index.latestIp(b)).toBe('ip-b');
+  });
+
+  it('survives a reload from the store (uses the stored last seen)', async () => {
+    const { index, clock, store } = setup();
+    await index.load();
+    const s = mustResolve(index, who('k1', null, 'ip-a'));
+    clock.advance(2 * HOUR);
+    mustResolve(index, who('k1', null, 'ip-b'));
+    clock.advance(2 * HOUR);
+    mustResolve(index, who('k1', null, 'ip-a'));
+    await index.flush();
+    const again = new SubjectIndex(store, clock, { logger: silent() });
+    await again.load();
+    expect(again.latestIp(s)).toBe('ip-a');
+  });
+
+  it('is deterministic on a tie (the smaller value)', async () => {
+    const { index } = setup();
+    await index.load();
+    const s = mustResolve(index, who('k1', null, 'ip-b'));
+    mustResolve(index, who('k1', null, 'ip-a'));
+    expect(index.latestIp(s)).toBe('ip-a');
+  });
+});
