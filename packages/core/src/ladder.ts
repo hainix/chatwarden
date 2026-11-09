@@ -112,7 +112,7 @@ const BAN_PERM = cell('ban', null, 'Full ban permanent');
 
 /**
  * The ladder, one row per record step: the feature contract's 12 cells, kept in one constant so the Guide renders
- * the same table the suggestion reads. Rules 5 and 6 swap a chat cell for an open-table ban at the same length
+ * the same table the suggestion reads. Rules 5 and 6 swap a chat cell for a ban from public rooms and matchmaking (`area`) at the same length
  * (see `suggestAction`); the table itself holds the unswapped cells.
  */
 export const LADDER_TABLE: readonly LadderRow[] = Object.freeze([
@@ -138,7 +138,7 @@ function lengthLabel(durationMs: number | null): string {
  *
  * - The column: `'high'` severity reads the high column; so does rule 1 (CR 1), whatever the severity. A null
  *   severity is `medium`. `'low'`, `'medium'` and `'none'` read the low/medium column.
- * - Rules 5 and 6 turn a chat suggestion into an open-table (`area`) ban at the same length. A warning or a full
+ * - Rules 5 and 6 turn a chat suggestion into a ban from public rooms and matchmaking (`area`) at the same length. A warning or a full
  *   ban is left alone.
  *
  * Returns a fresh object each call. Throws `RangeError` for a step outside 0..5.
@@ -155,7 +155,7 @@ export function suggestAction(
     return {
       kind: 'area',
       durationMs: picked.durationMs,
-      label: `Ban from open tables ${lengthLabel(picked.durationMs)}`,
+      label: `Ban from public rooms ${lengthLabel(picked.durationMs)}`,
     };
   }
   return { kind: picked.kind, durationMs: picked.durationMs, label: picked.label };

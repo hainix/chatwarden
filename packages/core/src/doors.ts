@@ -25,7 +25,7 @@ export interface DoorServiceDeps {
   logger?: Logger;
 }
 
-/** Joining or creating a friends table: only a full ban closes these. Public tables and matchmaking add area bans. */
+/** Joining or creating a private room: only a full ban closes these. Public rooms and matchmaking add area bans. */
 const KINDS_FOR: Record<DoorKind, readonly SanctionKind[]> = {
   join: ['ban'],
   create: ['ban'],
@@ -51,7 +51,7 @@ function outlasts(a: Found, b: Found): boolean {
 }
 
 /**
- * The checks at the doors: joining or creating a room, public tables, matchmaking.
+ * The checks at the doors: joining or creating a room, public rooms, matchmaking.
  *
  * A check reads the live {@link SanctionIndex}; it never touches the store. It resolves the caller with
  * {@link SubjectIndex.lookup}, which neither creates a subject nor links or merges identities (linking

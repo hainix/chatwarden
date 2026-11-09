@@ -119,7 +119,7 @@ describe('DoorService: public and matchmaking refuse an area ban or a ban', () =
     expect(t.doors.check(door, who)).toBeNull();
   });
 
-  it('an area ban keeps them off public tables but not off friends tables', async () => {
+  it('an area ban keeps them off public rooms but not off private rooms', async () => {
     const t = setup();
     await t.ban(t.seat(who), 'area');
     expect(t.doors.check('public', who)).not.toBeNull();

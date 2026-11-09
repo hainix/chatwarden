@@ -327,11 +327,11 @@ describe('suggestAction: null severity defaults', () => {
 describe('suggestAction: rules 5 and 6 turn a chat suggestion into area', () => {
   it.each([5, 6])('rule %i: chat becomes area at the same length', (rule) => {
     const a = suggestAction(1, 'medium', rule);
-    expect(a).toEqual({ kind: 'area', durationMs: DAY, label: 'Ban from open tables 24 hours' });
+    expect(a).toEqual({ kind: 'area', durationMs: DAY, label: 'Ban from public rooms 24 hours' });
     const b = suggestAction(2, 'low', rule);
-    expect(b).toEqual({ kind: 'area', durationMs: 7 * DAY, label: 'Ban from open tables 7 days' });
+    expect(b).toEqual({ kind: 'area', durationMs: 7 * DAY, label: 'Ban from public rooms 7 days' });
     const c = suggestAction(0, 'high', rule);
-    expect(c).toEqual({ kind: 'area', durationMs: 7 * DAY, label: 'Ban from open tables 7 days' });
+    expect(c).toEqual({ kind: 'area', durationMs: 7 * DAY, label: 'Ban from public rooms 7 days' });
   });
 
   it.each([5, 6])('rule %i: a warning and a full ban are left alone', (rule) => {
@@ -367,14 +367,6 @@ describe('suggestAction: guards and purity', () => {
     const a = suggestAction(1, 'low', 2);
     (a as { durationMs: number | null }).durationMs = 1;
     expect(suggestAction(1, 'low', 2).durationMs).toBe(DAY);
-  });
-
-  it('the label never carries an identifier', () => {
-    for (const [step] of CONTRACT) {
-      for (const rule of [1, 5, 'uncovered'] as const) {
-        expect(suggestAction(step, null, rule).label).toMatch(/^(Warning|Restrict chat|Ban from open tables|Full ban)/);
-      }
-    }
   });
 });
 

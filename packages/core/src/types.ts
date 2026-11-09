@@ -114,7 +114,7 @@ export interface SubjectIdRecord {
 
 /**
  * What a sanction restricts: `chat` (public chat), `area` (public areas:
- * public rooms and matchmaking; Moxgate's "open table"), `ban` (everything), or
+ * public rooms and matchmaking), `ban` (everything), or
  * `warning` (a recorded warning: it restricts nothing, never refuses at a door
  * and is never in the sanction index; it has no end, so `endsAt === startsAt`).
  */
