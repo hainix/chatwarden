@@ -175,8 +175,8 @@ describe('SqliteStore notices', () => {
     store.insertNotice(notice('old', { groupId: 'g1', createdAt: 5 }));
     store.insertNotice(notice('new', { groupId: 'g1', createdAt: 9, ackedAt: 10 }));
     store.insertNotice(notice('other', { groupId: 'g2', createdAt: 99 }));
-    expect(store.findNoticeForGroup('g1')).toEqual({ id: 'new', ackedAt: 10, withdrawnAt: null });
-    expect(store.findNoticeForGroup('g2')).toEqual({ id: 'other', ackedAt: null, withdrawnAt: null });
+    expect(store.findNoticeForGroup('g1')).toEqual({ id: 'new', subject: 's_a', ackedAt: 10, withdrawnAt: null });
+    expect(store.findNoticeForGroup('g2')).toEqual({ id: 'other', subject: 's_a', ackedAt: null, withdrawnAt: null });
   });
 
   it('findNoticeForGroup ties on created_at go to the later write, skips withdrawn, and is null when none', () => {

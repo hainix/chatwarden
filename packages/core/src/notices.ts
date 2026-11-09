@@ -268,12 +268,16 @@ export class NoticeService {
   }
 
   /**
-   * The id of the newest notice of a sanction group that is not withdrawn, seen or not, or null when there is none.
-   * Lets a refusal point the player at the notice that explains it. May throw if the store does; the caller fences it.
+   * The id of the newest notice of a sanction group that is not withdrawn, seen or not, when that notice is for
+   * `subject` (the same canonical person, so a merged alias counts). Null when there is none, when it belongs to
+   * another person (a bystander refused through a shared-IP row), or when `subject` is null (a guest). Lets a
+   * refusal point the player at their own notice only. May throw if the store does; the caller fences it.
    */
-  noticeIdForGroup(groupId: string): string | null {
-    if (!nonEmpty(groupId)) return null;
-    return this.store.findNoticeForGroup(groupId)?.id ?? null;
+  noticeIdForGroup(groupId: string, subject: SubjectId | null): string | null {
+    if (!nonEmpty(groupId) || !nonEmpty(subject)) return null;
+    const found = this.store.findNoticeForGroup(groupId);
+    if (found === null) return null;
+    return this.subjects.canonical(found.subject) === this.subjects.canonical(subject) ? found.id : null;
   }
 
   /** True while the person has a warning they have not acknowledged. */

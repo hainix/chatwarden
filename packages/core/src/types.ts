@@ -541,9 +541,12 @@ export interface Store {
 
   /**
    * The newest notice of a sanction group that is not withdrawn (newest by `createdAt`, then write order), or null
-   * when the group has none. Seen or not. Carries no subject: it is only a pointer for a refusal.
+   * when the group has none. Seen or not. `subject` is the stored (possibly since merged) subject the notice is for,
+   * so a caller can check it is the asking person's own. Private: never shown to a player.
    */
-  findNoticeForGroup(groupId: string): { id: string; ackedAt: number | null; withdrawnAt: number | null } | null;
+  findNoticeForGroup(
+    groupId: string,
+  ): { id: string; subject: SubjectId; ackedAt: number | null; withdrawnAt: number | null } | null;
 }
 
 // ---------------------------------------------------------------------------

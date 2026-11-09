@@ -1597,3 +1597,93 @@ describe('K2: the automatic timeout creates a notice', () => {
     expect(pending[0]).toMatchObject({ kind: 'chat', rule: 1, mustAcknowledge: false });
   });
 });
+
+describe('K2 R19: a bystander on a shared IP is told nothing about the offender', () => {
+  const IP_A = 'ip-shared-zq7';
+
+  async function shared(e: ReturnType<typeof setup>) {
+    const offender = e.sit('p1', who('key-off-zq7', null, IP_A))!;
+    const bystander = e.sit('p2', who('key-by-zq7', null, IP_A))!;
+    const g = await e.sanction(offender, 'chat', H, { includeIp: true, rule: 3 });
+    const id = e.realNotices.createForSanction(
+      { groupId: g.groupId, refCode: g.refCode, kind: 'chat', until: e.clock.t + H, rule: 3, subject: offender },
+      [],
+      { notify: false },
+    );
+    return { offender, bystander, g, id };
+  }
+
+  it('the bystander is refused (restricted, with an end) but gets no rule and no notice id', async () => {
+    const e = setup({ notices: true });
+    const { offender, bystander } = await shared(e);
+    expect(offender).not.toBe(bystander);
+    const r = refusal(e.say('p2', 'hi'));
+    expect(r).toEqual({ reason: 'restricted', until: e.clock.t + H, byModerator: true });
+    expect('rule' in r).toBe(false);
+    expect('noticeId' in r).toBe(false);
+  });
+
+  it('the offender still gets both', async () => {
+    const e = setup({ notices: true });
+    const { id } = await shared(e);
+    expect(refusal(e.say('p1', 'hi'))).toEqual({
+      reason: 'restricted',
+      until: e.clock.t + H,
+      byModerator: true,
+      rule: 3,
+      noticeId: id,
+    });
+  });
+
+  it('an alias of the offender (linked by account) still gets both', async () => {
+    const e = setup({ notices: true });
+    const { id } = await shared(e);
+    // A second browser of the same person: same account, a different key and no shared address.
+    e.sit('p3', who('key-off2-zq7', 'acct-zq7', 'ip-other-zq7'));
+    e.sit('p4', who('key-off-zq7', 'acct-zq7', IP_A));
+    const alias = e.sit('p3', who('key-off2-zq7', 'acct-zq7', 'ip-other-zq7'));
+    expect(e.subjects.canonical(alias!)).toBe(e.subjects.canonical(e.sit('p4', who('key-off-zq7', 'acct-zq7', IP_A))!));
+    expect(refusal(e.say('p3', 'hi'))).toMatchObject({ reason: 'restricted', rule: 3, noticeId: id });
+  });
+
+  it('a guest with no subject is not reached by the IP row (control)', async () => {
+    const e = setup({ notices: true });
+    await shared(e);
+    e.sit('p5', null);
+    // A guest has no known address, so the sanction cannot reach them: they chat normally (control).
+    delivery(e.say('p5', 'hello'));
+  });
+
+  it('the bystander gets neither extra without a notices service either', async () => {
+    const e = setup();
+    const offender = e.sit('p1', who('key-off-zq7', null, IP_A))!;
+    e.sit('p2', who('key-by-zq7', null, IP_A));
+    await e.sanction(offender, 'chat', H, { includeIp: true, rule: 3 });
+    expect(refusal(e.say('p2', 'hi'))).toEqual({ reason: 'restricted', until: e.clock.t + H, byModerator: true });
+    expect(refusal(e.say('p1', 'hi'))).toMatchObject({ rule: 3 });
+  });
+
+  it('a bystander who has a sanction of their own gets their own rule and notice, not the offender', async () => {
+    const e = setup({ notices: true });
+    const { bystander } = await shared(e);
+    const g2 = await e.sanction(bystander, 'chat', 2 * H, { rule: 4 });
+    const id2 = e.realNotices.createForSanction(
+      { groupId: g2.groupId, refCode: g2.refCode, kind: 'chat', until: e.clock.t + 2 * H, rule: 4, subject: bystander },
+      [],
+      { notify: false },
+    );
+    expect(refusal(e.say('p2', 'hi'))).toMatchObject({ until: e.clock.t + 2 * H, rule: 4, noticeId: id2 });
+  });
+
+  it('a shorter own sanction under a longer shared-IP row still hides the other person', async () => {
+    const e = setup({ notices: true });
+    const { bystander } = await shared(e);
+    const g2 = await e.sanction(bystander, 'chat', H / 2, { rule: 4 });
+    const r = refusal(e.say('p2', 'hi'));
+    // The longer row is the offender's (via the address), so the bystander is told nothing about it.
+    expect(r).toMatchObject({ reason: 'restricted', until: e.clock.t + H });
+    expect('rule' in r).toBe(false);
+    expect('noticeId' in r).toBe(false);
+    void g2;
+  });
+});

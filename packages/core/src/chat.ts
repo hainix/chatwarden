@@ -116,6 +116,8 @@ interface Restriction {
   /** The stored sanction's group and rule text; null for the in-memory fallback, which has neither. */
   groupId: string | null;
   rule: string | null;
+  /** The sanction is the sender's own, not a bystander matched through a shared-IP row of another person. */
+  own: boolean;
 }
 
 /** Map key for a seat. NUL cannot appear in a room or seat id the way ':' can, so keys never collide. */
@@ -226,7 +228,7 @@ export class ChatService {
       return refuse('restricted', {
         until: restriction.until,
         byModerator: restriction.byModerator,
-        ...this.pointers(restriction),
+        ...this.pointers(restriction, subject),
       });
     }
 
@@ -320,7 +322,7 @@ export class ChatService {
       if (mem !== undefined) {
         if (mem.until <= now) this.memRestrictions.delete(key);
         else if (this.samePerson(mem.subject, subject)) {
-          best = { until: mem.until, byModerator: false, groupId: null, rule: null };
+          best = { until: mem.until, byModerator: false, groupId: null, rule: null, own: true };
         }
       }
       // Only the latest IP of a seated person is known; an IP row speed-bumps them, never links two people.
@@ -338,6 +340,7 @@ export class ChatService {
             byModerator: kind === 'ban' || !stored.automated,
             groupId: stored.groupId,
             rule: stored.rule,
+            own: stored.own,
           };
         }
       }
@@ -468,11 +471,14 @@ export class ChatService {
 
   /**
    * What a `restricted` refusal adds: the rule number (only a real number; not `'uncovered'`, not a row from before
-   * rules, not an unreadable value) and the id of the notice for the restriction's group. Each is left out on its own
-   * failure; this never throws.
+   * rules, not an unreadable value) and the id of the sender's own notice for the restriction's group. Nothing at
+   * all when the restriction is not the sender's own (a shared-IP row of another person). Each is left out on its
+   * own failure; this never throws.
    */
-  private pointers(r: Restriction): { rule?: number; noticeId?: string } {
+  private pointers(r: Restriction, subject: SubjectId | null): { rule?: number; noticeId?: string } {
     const out: { rule?: number; noticeId?: string } = {};
+    // A bystander refused through a shared-IP row of another person is told nothing about that person.
+    if (!r.own) return out;
     if (r.rule !== null) {
       try {
         const rule = parseRuleRef(r.rule);
@@ -483,7 +489,7 @@ export class ChatService {
     }
     if (r.groupId !== null && this.notices !== undefined) {
       try {
-        const id = this.notices.noticeIdForGroup(r.groupId);
+        const id = this.notices.noticeIdForGroup(r.groupId, subject);
         if (id !== null) out.noticeId = id;
       } catch (err) {
         this.warn('chat.notice_lookup_failed', { error: errName(err) });

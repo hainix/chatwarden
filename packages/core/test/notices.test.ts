@@ -1108,19 +1108,44 @@ describe('a journaled store undoes a failed transaction', () => {
 });
 
 describe('NoticeService.noticeIdForGroup', () => {
-  it('is the newest live notice of the group, null for none, a withdrawn group or an empty id', () => {
+  it('is the newest live notice of the group for that person, null for none, a withdrawn group or an empty id', () => {
     const t = setup();
     const a = t.person('ka');
     const g = t.group(a);
-    expect(t.svc.noticeIdForGroup(g.groupId)).toBeNull();
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBeNull();
     const first = t.svc.createForSanction(g);
     t.clock.t += 1;
     const second = t.svc.createForSanction(g);
-    expect(t.svc.noticeIdForGroup(g.groupId)).toBe(second);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(second);
     expect(second).not.toBe(first);
-    expect(t.svc.noticeIdForGroup('')).toBeNull();
-    expect(t.svc.noticeIdForGroup('no-such-group')).toBeNull();
+    expect(t.svc.noticeIdForGroup('', a)).toBeNull();
+    expect(t.svc.noticeIdForGroup('no-such-group', a)).toBeNull();
     t.svc.withdrawGroup(g.groupId);
-    expect(t.svc.noticeIdForGroup(g.groupId)).toBeNull();
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBeNull();
+  });
+
+  it('is null for another person asking about the group, and for a guest (null subject)', () => {
+    const t = setup();
+    const a = t.person('ka');
+    const b = t.person('kb');
+    const g = t.group(a);
+    const id = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+    expect(t.svc.noticeIdForGroup(g.groupId, b)).toBeNull();
+    expect(t.svc.noticeIdForGroup(g.groupId, null)).toBeNull();
+    expect(t.svc.noticeIdForGroup(g.groupId, '')).toBeNull();
+  });
+
+  it('follows a merge in either direction: the surviving and the merged-away id are the same person', () => {
+    const t = setup();
+    const a = t.person('ka');
+    const g = t.group(a);
+    const id = t.svc.createForSanction(g);
+    const b = t.person('kb', 'acct-1');
+    const merged = t.person('ka', 'acct-1');
+    expect(t.subjects.canonical(a)).toBe(t.subjects.canonical(b));
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+    expect(t.svc.noticeIdForGroup(g.groupId, b)).toBe(id);
+    expect(t.svc.noticeIdForGroup(g.groupId, merged)).toBe(id);
   });
 });

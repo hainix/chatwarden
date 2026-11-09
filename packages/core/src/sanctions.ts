@@ -77,6 +77,12 @@ export interface ActiveSanction {
    * with `parseRuleRef`. A rule number only; the private gap note is never here.
    */
   rule: string | null;
+  /**
+   * True when the person asked about is the one the sanction is on (a row on their canonical subject, or an IP row of
+   * a group that also has such a row). False when only a shared IP row matched: a bystander. Only a person's own
+   * sanction may point them at its rule or notice.
+   */
+  own: boolean;
 }
 
 const newId = (): string => randomBytes(16).toString('base64url');
@@ -335,6 +341,7 @@ export class SanctionIndex {
     // A warning restricts nothing and is never indexed.
     if (kind === 'warning') return null;
     let best: IndexRow | null = null;
+    const ownGroups = new Set<string>();
     const consider = (list: readonly IndexRow[] | undefined): void => {
       for (const r of list ?? []) {
         if (r.startsAt > now || (r.endsAt !== null && r.endsAt <= now)) continue;
@@ -346,7 +353,9 @@ export class SanctionIndex {
     if (subject !== null && subjectRows !== undefined) {
       const root = this.subjects.canonical(subject);
       for (const [stored, list] of subjectRows) {
-        if (this.subjects.canonical(stored) === root) consider(list);
+        if (this.subjects.canonical(stored) !== root) continue;
+        for (const r of list) ownGroups.add(r.groupId);
+        consider(list);
       }
     }
     const ip = ids.ipHash;
@@ -355,7 +364,14 @@ export class SanctionIndex {
     const found = best as IndexRow | null;
     return found === null
       ? null
-      : { until: found.endsAt, automated: found.automated, groupId: found.groupId, refCode: found.refCode, rule: found.rule };
+      : {
+          until: found.endsAt,
+          automated: found.automated,
+          groupId: found.groupId,
+          refCode: found.refCode,
+          rule: found.rule,
+          own: ownGroups.has(found.groupId),
+        };
   }
 
   private insert(row: SanctionRow): void {

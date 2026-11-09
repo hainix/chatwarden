@@ -578,3 +578,77 @@ describe('DoorService: a refusal points at the notice', () => {
     for (const secret of [s, 'tok-1', 'acct-1', IP, g.groupId]) expect(text).not.toContain(secret);
   });
 });
+
+describe('DoorService R19: a bystander on a shared IP gets no notice id', () => {
+  function shared() {
+    const t = setup();
+    const notices = new NoticeService({
+      store: t.store,
+      subjects: t.subjects,
+      rules: new CommunityRules(STARTER_RULES),
+      clock: t.clock,
+      logger: { warn() {} },
+    });
+    const doors = new DoorService({
+      hasher: t.hasher,
+      subjects: t.subjects,
+      sanctions: t.sanctions,
+      clock: t.clock,
+      logger: t.logger,
+      notices,
+    });
+    return { ...t, doors, notices };
+  }
+  const offenderWho: RawWho = { clientKey: 'tok-off', ip: IP };
+  const bystanderWho: RawWho = { clientKey: 'tok-by', ip: IP };
+
+  async function offend(t: ReturnType<typeof shared>) {
+    const s = t.seat(offenderWho);
+    t.seat(bystanderWho);
+    const g = await t.ban(s, 'ban', { includeIp: true });
+    const id = t.notices.createForSanction(
+      { groupId: g.groupId, refCode: g.refCode, kind: 'ban', until: NOW + H, rule: 1, subject: s },
+      [],
+      { notify: false },
+    );
+    return { s, g, id };
+  }
+
+  it('the bystander is refused but gets no noticeId', async () => {
+    const t = shared();
+    const { g } = await offend(t);
+    expect(t.doors.check('join', bystanderWho)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+  });
+
+  it('a person with no known identity on the shared address is refused with no noticeId', async () => {
+    const t = shared();
+    const { g } = await offend(t);
+    expect(t.doors.check('join', { ip: IP })).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+  });
+
+  it('the offender still gets the noticeId', async () => {
+    const t = shared();
+    const { g, id } = await offend(t);
+    expect(t.doors.check('join', offenderWho)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode, noticeId: id });
+  });
+
+  it('an alias of the offender (a new key linked by account) still gets the noticeId', async () => {
+    const t = shared();
+    const s = t.seat({ clientKey: 'tok-off', accountId: 'acct-off', ip: IP });
+    t.seat(bystanderWho);
+    const g = await t.ban(s, 'ban', { includeIp: true });
+    const id = t.notices.createForSanction(
+      { groupId: g.groupId, refCode: g.refCode, kind: 'ban', until: NOW + H, rule: 1, subject: s },
+      [],
+      { notify: false },
+    );
+    const alias = t.seat({ clientKey: 'tok-off-2', accountId: 'acct-off' });
+    expect(t.subjects.canonical(alias)).toBe(t.subjects.canonical(s));
+    expect(t.doors.check('join', { clientKey: 'tok-off-2', accountId: 'acct-off' })).toEqual({
+      kind: 'ban',
+      until: NOW + H,
+      refCode: g.refCode,
+      noticeId: id,
+    });
+  });
+});

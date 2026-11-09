@@ -603,16 +603,19 @@ export class SqliteStore implements Store, TermStore {
     );
   }
 
-  findNoticeForGroup(groupId: string): { id: string; ackedAt: number | null; withdrawnAt: number | null } | null {
+  findNoticeForGroup(
+    groupId: string,
+  ): { id: string; subject: SubjectId; ackedAt: number | null; withdrawnAt: number | null } | null {
     return this.transaction(() => {
       const r = this.db
         .prepare(
-          'SELECT id, acked_at, withdrawn_at FROM kit_notices WHERE group_id = ? AND withdrawn_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1',
+          'SELECT id, subject_id, acked_at, withdrawn_at FROM kit_notices WHERE group_id = ? AND withdrawn_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1',
         )
         .get(groupId);
       if (r === undefined) return null;
       return {
         id: String(r.id),
+        subject: String(r.subject_id),
         ackedAt: r.acked_at === null ? null : Number(r.acked_at),
         withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
       };

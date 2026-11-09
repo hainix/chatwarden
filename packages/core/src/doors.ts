@@ -44,6 +44,7 @@ const KINDS_FOR: Record<DoorKind, readonly SanctionKind[]> = {
 interface Found {
   kind: 'ban' | 'area';
   active: ActiveSanction;
+  subject: SubjectId | null;
 }
 
 /** Permanent beats timed, otherwise the later end; on a tie the ban (the stronger kind) is reported. */
@@ -110,14 +111,14 @@ export class DoorService {
         for (const k of kinds) {
           const active = this.sanctions.active(k, ids, subject, now);
           if (active === null) continue;
-          const found: Found = { kind: k === 'ban' ? 'ban' : 'area', active };
+          const found: Found = { kind: k === 'ban' ? 'ban' : 'area', active, subject };
           if (best === null || outlasts(found, best)) best = found;
         }
       }
       const hit = best as Found | null;
       if (hit === null) return null;
       const refusal: DoorRefusal = { kind: hit.kind, until: hit.active.until, refCode: hit.active.refCode };
-      const noticeId = this.noticeId(hit.active.groupId);
+      const noticeId = this.noticeId(hit.active.groupId, hit.subject);
       if (noticeId !== null) refusal.noticeId = noticeId;
       return refusal;
     } catch (err) {
@@ -127,10 +128,10 @@ export class DoorService {
   }
 
   /** The notice that explains a refusal, or null. Never throws: a broken lookup only drops the extra field. */
-  private noticeId(groupId: string): string | null {
+  private noticeId(groupId: string, subject: SubjectId | null): string | null {
     if (this.notices === undefined) return null;
     try {
-      return this.notices.noticeIdForGroup(groupId);
+      return this.notices.noticeIdForGroup(groupId, subject);
     } catch (err) {
       safeWarn(this.logger, 'doors.notice_lookup_failed', { error: err instanceof Error ? err.name : typeof err });
       return null;
