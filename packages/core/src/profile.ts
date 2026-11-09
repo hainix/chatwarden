@@ -299,6 +299,9 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   const first = obj(p['firstOffense'], 'profile.firstOffense', CONDUCT_LEVELS);
   for (const level of CONDUCT_LEVELS) outcome(first[level], `profile.firstOffense.${level}`);
   if (first['banter'] !== 'none') fail('profile.firstOffense.banter', "must be 'none': banter never punishes");
+  if (first['severe'] === 'none' || first['severe'] === 'note') {
+    fail('profile.firstOffense.severe', "must act: 'warning' or a chat, area or ban restriction, since severe conduct is acted on at once");
+  }
 
   const repeat = obj(p['repeat'], 'profile.repeat', REPEAT_KEYS);
   if (!positiveInt(repeat['windowDays']) || repeat['windowDays'] > MAX_WINDOW_DAYS) {

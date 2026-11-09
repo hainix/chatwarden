@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createChatwarden } from '../src/chatwarden.js';
 import { agentBrief, codeOfConduct, moderatorGuide, policyJson } from '../src/documents.js';
 import type { DocumentFormat, DocumentPolicy } from '../src/documents.js';
+import { lengthLabel, outcomeLabel } from '../src/ladder.js';
 import { defineProfile, PRESETS, ProfileError, resolveProfile } from '../src/profile.js';
 import type { ModerationProfile, PresetName } from '../src/profile.js';
 import { defineRules, starterRules } from '../src/rules.js';
@@ -359,21 +360,52 @@ describe('code of conduct: player-facing', () => {
     expect(strict).toMatch(/Messages with swear words are not sent/);
   });
 
-  it('describes the repeat rule from the profile, including a different-games clause', () => {
-    const relaxed = codeOfConduct(policyOf('relaxed'), { format: 'text', gameName: GAME });
-    expect(relaxed).toMatch(/If you do it again in a different game within 30 days, you get a warning\./);
-    const standard = codeOfConduct(policyOf('standard'), { format: 'text', gameName: GAME });
-    expect(standard).toMatch(/If you do it again within 30 days, your chat is restricted for 24 hours\./);
+  /** The markdown of the tier headed `title`, up to the next heading. */
+  function tierSection(doc: string, title: string): string {
+    const start = doc.indexOf(`### ${title}\n`);
+    expect(start, title).toBeGreaterThanOrEqual(0);
+    const rest = doc.slice(start + 1);
+    const end = rest.search(/\n#{2,3} /);
+    return end < 0 ? rest : rest.slice(0, end);
+  }
+
+  it('relaxed keeps the repeat sentence, under the tier whose first offense is a note', () => {
+    const doc = codeOfConduct(policyOf('relaxed'), { format: 'markdown', gameName: GAME });
+    const sentence = 'If you do it again in a different game within 30 days, you get a warning.';
+    expect(tierSection(doc, 'Aggressive but isolated')).toContain(sentence);
+    expect(doc.split(sentence)).toHaveLength(2);
+    expect(tierSection(doc, 'Repeated hostility')).not.toContain('If you do it again');
+    expect(tierSection(doc, 'Repeated hostility')).toContain('If you carry on, each action is stricter than the last.');
   });
 
-  it('follows a custom repeat rule and custom outcomes', () => {
-    const profile = resolveProfile('standard', {
-      repeat: { windowDays: 14, notes: 3, distinctGames: true, outcome: { kind: 'ban', durationMs: null } },
-      firstOffense: { hostile: { kind: 'area', durationMs: 3_600_000 * 36 } },
-    });
-    const doc = codeOfConduct({ profile, rules: policyOf('standard').rules }, { format: 'text', gameName: GAME });
-    expect(doc).toContain('If you do it 3 times in different games within 14 days, you are banned for good.');
-    expect(doc).toContain('you are banned from public rooms and matchmaking for 36 hours');
+  it('standard and strict never promise the note-based repeat outcome', () => {
+    for (const name of ['standard', 'strict'] as const) {
+      for (const format of FORMATS) {
+        const doc = visible(format, codeOfConduct(policyOf(name), { format, gameName: GAME }));
+        expect(doc, `${name} ${format}`).not.toMatch(/do it again[^.]*24 hours/);
+        expect(doc, `${name} ${format}`).not.toMatch(/If you do it (again|\d+ times)/);
+        expect(doc, `${name} ${format}`).toContain('If you carry on, each action is stricter than the last.');
+      }
+    }
+  });
+
+  it('a custom profile whose hostile first offense is a note gets the sentence under its hostile tier', () => {
+    const profile = resolveProfile('standard', { firstOffense: { hostile: 'note' } });
+    const doc = codeOfConduct({ profile, rules: policyOf('standard').rules }, { format: 'markdown', gameName: GAME });
+    const hostile = tierSection(doc, 'Sustained or repeated hostility');
+    expect(hostile).toContain('The moderators may keep a private record.');
+    expect(hostile).toContain('If you do it again within 30 days, your chat is restricted for 24 hours.');
+    expect(hostile).not.toContain('each action is stricter');
+    expect(tierSection(doc, 'Personal abuse')).not.toContain('If you do it again');
+  });
+
+  it('does not say the moderators read the messages, and never says a note is kept for severe', () => {
+    for (const name of PRESET_NAMES) {
+      const doc = codeOfConduct(policyOf(name), { format: 'text', gameName: GAME });
+      expect(doc).toContain('Reported messages are reviewed before a decision is made.');
+      expect(doc).not.toContain('The moderators read');
+      expect(doc).not.toMatch(/Severe\n[^]*Nothing happens/);
+    }
   });
 
   it('after a warning, derives the next and last step from the ladder', () => {
@@ -557,6 +589,20 @@ describe('agentBrief', () => {
     expect(brief).toContain('step 5: low Full ban permanent | high Full ban permanent');
   });
 
+  it('defines record steps 0 to 5 in one compact line, the same mapping as the moderator guide', () => {
+    for (const name of PRESET_NAMES) {
+      const policy = policyOf(name);
+      const brief = agentBrief(policy);
+      const line = brief.split('\n').find((l) => l.startsWith('Record steps:'));
+      expect(line, name).toBeDefined();
+      for (const n of [0, 1, 2, 3, 4, 5]) expect(line, `${name} ${n}`).toContain(`${n} `);
+      expect(line).toContain('two warnings');
+      expect(line).toContain('30 days or more');
+      const guide = moderatorGuide(policy, { format: 'text' });
+      expect(guide).toContain(line?.replace('Record steps: ', '') ?? '?');
+    }
+  });
+
   it('retired rules are omitted', () => {
     const rules = defineRules([
       { number: 1, title: 'Be kind', text: 'Be kind.' },
@@ -694,5 +740,26 @@ describe('cw.documents', () => {
     expect(cw.documents.agentBrief().split('\n')[0]).toBe('Moderation policy for Standard (generated by Chatwarden)');
     expect(cw.documents.codeOfConduct({ format: 'text', gameName: GAME })).toContain(cw.summary);
     await cw.close();
+  });
+});
+
+describe('ladder label helpers (shared with the documents)', () => {
+  it('lengthLabel names lengths in the largest whole unit', () => {
+    expect(lengthLabel(null)).toBe('permanent');
+    expect(lengthLabel(86_400_000)).toBe('24 hours');
+    expect(lengthLabel(7 * 86_400_000)).toBe('7 days');
+    expect(lengthLabel(3_600_000)).toBe('1 hour');
+    expect(lengthLabel(36 * 3_600_000)).toBe('36 hours');
+    expect(lengthLabel(30 * 60_000)).toBe('30 minutes');
+    expect(lengthLabel(45_000)).toBe('45 seconds');
+  });
+
+  it('outcomeLabel names every kind of outcome', () => {
+    expect(outcomeLabel('none')).toBe('No action');
+    expect(outcomeLabel('note')).toBe('Note');
+    expect(outcomeLabel('warning')).toBe('Warning');
+    expect(outcomeLabel({ kind: 'chat', durationMs: 86_400_000 })).toBe('Restrict chat 24 hours');
+    expect(outcomeLabel({ kind: 'area', durationMs: 7 * 86_400_000 })).toBe('Ban from public rooms 7 days');
+    expect(outcomeLabel({ kind: 'ban', durationMs: null })).toBe('Full ban permanent');
   });
 });

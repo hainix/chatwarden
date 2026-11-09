@@ -533,6 +533,24 @@ describe('validation: unknown keys at any depth', () => {
     expect(invalid((p) => (p.guidelines[1].extra = 1)).path).toBe('profile.guidelines[1].extra');
   });
 
+  it("firstOffense.severe must act: 'none' and 'note' are refused", () => {
+    for (const value of ['none', 'note']) {
+      expect(invalid((p) => (p.firstOffense.severe = value)).path, value).toBe('profile.firstOffense.severe');
+      expect(failure(() => resolveProfile('relaxed', { firstOffense: { severe: value as never } })).path, value).toBe(
+        'profile.firstOffense.severe',
+      );
+    }
+    for (const ok of ['warning', { kind: 'chat', durationMs: DAY }, { kind: 'area', durationMs: null }, { kind: 'ban', durationMs: DAY }] as const) {
+      expect(resolveProfile('relaxed', { firstOffense: { severe: ok } }).firstOffense.severe).toEqual(ok);
+    }
+  });
+
+  it('firstOffense.severe: the other levels may still be none or note', () => {
+    const r = resolveProfile('relaxed', { firstOffense: { rude: 'none', hostile: 'note' } });
+    expect(r.firstOffense.rude).toBe('none');
+    expect(r.firstOffense.hostile).toBe('note');
+  });
+
   it('unknown conduct level in firstOffense or levels', () => {
     expect(invalid((p) => (p.firstOffense.medium = 'note')).path).toBe('profile.firstOffense.medium');
     expect(invalid((p) => (p.levels.medium = { meaning: 'x', examples: [] })).path).toBe('profile.levels.medium');

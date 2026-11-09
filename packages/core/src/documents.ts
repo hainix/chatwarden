@@ -1,3 +1,4 @@
+import { lengthLabel, outcomeLabel } from './ladder.js';
 import type { LadderCell } from './ladder.js';
 import { validateProfile } from './profile.js';
 import type { GuidelineCover, GuidelineTier, ModerationProfile, Outcome } from './profile.js';
@@ -246,33 +247,8 @@ function safeLink(v: unknown): string | null {
 // ---------------------------------------------------------------------------------------------------------------
 // Wording shared by the documents
 
-const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
-
 function plural(n: number, unit: string): string {
   return `${n} ${unit}${n === 1 ? '' : 's'}`;
-}
-
-/** `24 hours`, `7 days`, `1 hour`, `30 minutes`. The same wording as the ladder's suggestions. */
-function lengthLabel(durationMs: number): string {
-  if (durationMs % DAY_MS === 0) {
-    const d = durationMs / DAY_MS;
-    return d === 1 ? '24 hours' : plural(d, 'day');
-  }
-  if (durationMs % HOUR_MS === 0) return plural(durationMs / HOUR_MS, 'hour');
-  if (durationMs % 60_000 === 0) return plural(durationMs / 60_000, 'minute');
-  return plural(Math.ceil(durationMs / 1000), 'second');
-}
-
-/** A moderator-facing name for an outcome: `Warning`, `Restrict chat 24 hours`, `Full ban permanent`. */
-function outcomeLabel(o: Outcome): string {
-  if (o === 'none') return 'No action';
-  if (o === 'note') return 'Note';
-  if (o === 'warning') return 'Warning';
-  const len = o.durationMs === null ? 'permanent' : lengthLabel(o.durationMs);
-  if (o.kind === 'chat') return `Restrict chat ${len}`;
-  if (o.kind === 'area') return `Ban from public rooms ${len}`;
-  return `Full ban ${len}`;
 }
 
 function cellOutcome(c: LadderCell): Outcome {
@@ -345,6 +321,10 @@ function ruleLabels(rules: CommunityRules, numbers: readonly number[] | undefine
   return out;
 }
 
+/** What each record step means: the one definition the guide and the agent brief share. */
+const RECORD_STEPS =
+  '0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent';
+
 const DEFAULT_AREA_RULES: readonly number[] = [5, 6];
 const DEFAULT_SEVERE_RULES: readonly number[] = [1];
 
@@ -393,6 +373,7 @@ function playerTierBlocks(profile: ModerationProfile, tier: GuidelineTier): Bloc
   if (counts.length > 0) blocks.push({ k: 'p', text: [{ strong: 'What counts:' }, ` ${counts.join(' ')}`] });
 
   const happens: Rich[] = [];
+  let repeatPrinted = false;
   for (const cover of tier.covers) {
     if (isLevel(cover)) {
       const first = profile.firstOffense[cover];
@@ -402,9 +383,15 @@ function playerTierBlocks(profile: ModerationProfile, tier: GuidelineTier): Bloc
       else if (first === 'note') text = 'The moderators may keep a private record.';
       else text = `The first time, ${clause(first)}.`;
       happens.push(`${prefix}${prefix === '' ? text : text.charAt(0).toLowerCase() + text.slice(1)}`);
+      if (first === 'note' && !repeatPrinted) {
+        // The repeat rule counts notes, so it is only true of a level whose first offense IS a note.
+        happens.push(repeatForPlayer(profile));
+        repeatPrinted = true;
+      }
       if (cover === 'severe') happens.push('This is acted on straight away, whatever your record.');
     } else if (cover === 'repeated') {
-      happens.push(repeatForPlayer(profile));
+      // Elsewhere a first offense is already an action, so a repeat follows the ladder, which only gets stricter.
+      if (!levels.some((l) => profile.firstOffense[l] === 'note')) happens.push('If you carry on, each action is stricter than the last.');
     } else {
       happens.push(afterWarningForPlayer(profile));
     }
@@ -456,7 +443,7 @@ export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOpti
     { k: 'h', level: 2, text: 'The rules' },
     { k: 'ul', items: ruleItems(rules) },
     { k: 'h', level: 2, text: 'What happens if you break a rule' },
-    { k: 'p', text: 'What happens depends on what you did and on whether it has happened before. The moderators read the reported messages before they decide.' },
+    { k: 'p', text: 'What happens depends on what you did and on whether it has happened before. Reported messages are reviewed before a decision is made.' },
   ];
   for (const tier of profile.guidelines) blocks.push(...playerTierBlocks(profile, tier));
 
@@ -478,7 +465,7 @@ export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOpti
     { k: 'h', level: 2, text: 'How to report' },
     {
       k: 'p',
-      text: 'Use the report option in the game. Pick the reason that fits best and describe what happened. The moderators read the recent chat from that game before they decide.',
+      text: 'Use the report option in the game. Pick the reason that fits best and describe what happened. Recent chat from that game is reviewed before a decision is made.',
     },
     {
       k: 'p',
@@ -579,7 +566,7 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
     { k: 'h', level: 2, text: 'Escalation ladder' },
     {
       k: 'p',
-      text: "A person's step is the heaviest action on their record in the last 90 days. Step 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, and 5 is a ban of 30 days or more or anything permanent.",
+      text: `A person's step is the heaviest action on their record in the last 90 days. Step ${RECORD_STEPS}.`,
     },
     {
       k: 'table',
@@ -658,6 +645,7 @@ export function agentBrief(policy: DocumentPolicy): string {
     'First offense, with a clean record:',
     ...CONDUCT_LEVELS.map((l) => `- ${l}: ${outcomeLabel(profile.firstOffense[l])}`),
     `Repeated: ${repeatRule(profile)}. Applies only while the record holds no warning or restriction, and is never milder than the first offense.`,
+    `Record steps: ${RECORD_STEPS}.`,
     'Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude; high = hostile once the record has a warning or restriction, and severe:',
     ...profile.ladder.map((row) => `- step ${row.step}: low ${clean(row.lowMedium.label)} | high ${clean(row.high.label)}`),
   ];

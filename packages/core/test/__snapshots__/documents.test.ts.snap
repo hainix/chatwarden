@@ -27,6 +27,7 @@ First offense, with a clean record:
 - hostile: Warning
 - severe: Restrict chat 7 days
 Repeated: 2 notes in 30 days, from different games, counts as repeated: Warning. Applies only while the record holds no warning or restriction, and is never milder than the first offense.
+Record steps: 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent.
 Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude; high = hostile once the record has a warning or restriction, and severe:
 - step 0: low Warning | high Restrict chat 7 days
 - step 1: low Restrict chat 24 hours | high Restrict chat 7 days
@@ -68,7 +69,7 @@ Trash talk is part of the game. Harassment, threats and hate are not.
 
 ## What happens if you break a rule
 
-What happens depends on what you did and on whether it has happened before. The moderators read the reported messages before they decide.
+What happens depends on what you did and on whether it has happened before. Reported messages are reviewed before a decision is made.
 
 ### Minor, isolated
 
@@ -87,6 +88,7 @@ For example: "ez", "loser", "lol you're trash at this".
 **What happens:**
 
 - The moderators may keep a private record.
+- If you do it again in a different game within 30 days, you get a warning.
 
 For example: "go f— yourself".
 
@@ -97,7 +99,7 @@ For example: "go f— yourself".
 **What happens:**
 
 - The first time, you get a warning.
-- If you do it again in a different game within 30 days, you get a warning.
+- If you carry on, each action is stricter than the last.
 
 For example: "three insults in one game", "insulting the same player again next game".
 
@@ -132,7 +134,7 @@ Swear words are replaced with stars in chat. That is never a reason for action.
 
 ## How to report
 
-Use the report option in the game. Pick the reason that fits best and describe what happened. The moderators read the recent chat from that game before they decide.
+Use the report option in the game. Pick the reason that fits best and describe what happened. Recent chat from that game is reviewed before a decision is made.
 
 Only report real problems. If the moderators decide not to act on a report, that is not a problem for you. Reports made on purpose to get someone in trouble can mean you lose the ability to report.
 
@@ -244,7 +246,7 @@ Repeated applies while the person has no warning or restriction on record; once 
 
 ## Escalation ladder
 
-A person's step is the heaviest action on their record in the last 90 days. Step 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, and 5 is a ban of 30 days or more or anything permanent.
+A person's step is the heaviest action on their record in the last 90 days. Step 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent.
 
 | Step | Low / medium (banter, rude) | High (hostile with a record, severe) |
 | --- | --- | --- |
@@ -314,6 +316,7 @@ First offense, with a clean record:
 - hostile: Restrict chat 24 hours
 - severe: Restrict chat 7 days
 Repeated: 2 notes in 30 days counts as repeated: Restrict chat 24 hours. Applies only while the record holds no warning or restriction, and is never milder than the first offense.
+Record steps: 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent.
 Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude; high = hostile once the record has a warning or restriction, and severe:
 - step 0: low Warning | high Restrict chat 7 days
 - step 1: low Restrict chat 24 hours | high Restrict chat 7 days
@@ -355,7 +358,7 @@ Keep it friendly. Personal insults, harassment and hate aren't allowed.
 
 ## What happens if you break a rule
 
-What happens depends on what you did and on whether it has happened before. The moderators read the reported messages before they decide.
+What happens depends on what you did and on whether it has happened before. Reported messages are reviewed before a decision is made.
 
 ### Banter
 
@@ -384,7 +387,7 @@ For example: "go f— yourself".
 **What happens:**
 
 - The first time, your chat is restricted for 24 hours.
-- If you do it again within 30 days, your chat is restricted for 24 hours.
+- If you carry on, each action is stricter than the last.
 
 For example: "three insults in one game", "insulting the same player again next game".
 
@@ -419,7 +422,7 @@ Swear words are replaced with stars in chat. That is never a reason for action.
 
 ## How to report
 
-Use the report option in the game. Pick the reason that fits best and describe what happened. The moderators read the recent chat from that game before they decide.
+Use the report option in the game. Pick the reason that fits best and describe what happened. Recent chat from that game is reviewed before a decision is made.
 
 Only report real problems. If the moderators decide not to act on a report, that is not a problem for you. Reports made on purpose to get someone in trouble can mean you lose the ability to report.
 
@@ -531,7 +534,7 @@ Repeated applies while the person has no warning or restriction on record; once 
 
 ## Escalation ladder
 
-A person's step is the heaviest action on their record in the last 90 days. Step 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, and 5 is a ban of 30 days or more or anything permanent.
+A person's step is the heaviest action on their record in the last 90 days. Step 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent.
 
 | Step | Low / medium (banter, rude) | High (hostile with a record, severe) |
 | --- | --- | --- |
@@ -601,6 +604,7 @@ First offense, with a clean record:
 - hostile: Restrict chat 24 hours
 - severe: Full ban 7 days
 Repeated: 1 note in 30 days counts as repeated: Restrict chat 24 hours. Applies only while the record holds no warning or restriction, and is never milder than the first offense.
+Record steps: 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent.
 Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude; high = hostile once the record has a warning or restriction, and severe:
 - step 0: low Warning | high Restrict chat 7 days
 - step 1: low Restrict chat 24 hours | high Restrict chat 7 days
@@ -642,7 +646,7 @@ Be kind. No swearing, insults or bullying.
 
 ## What happens if you break a rule
 
-What happens depends on what you did and on whether it has happened before. The moderators read the reported messages before they decide.
+What happens depends on what you did and on whether it has happened before. Reported messages are reviewed before a decision is made.
 
 ### Banter
 
@@ -661,7 +665,7 @@ For example: "ez", "gg", "bad play", "lol".
 **What happens:**
 
 - The first time, your chat is restricted for 1 hour.
-- If you do it again within 30 days, your chat is restricted for 24 hours.
+- If you carry on, each action is stricter than the last.
 
 For example: "loser", "you're an idiot", "go f— yourself".
 
@@ -706,7 +710,7 @@ Messages with swear words are not sent, and you will see a message when that hap
 
 ## How to report
 
-Use the report option in the game. Pick the reason that fits best and describe what happened. The moderators read the recent chat from that game before they decide.
+Use the report option in the game. Pick the reason that fits best and describe what happened. Recent chat from that game is reviewed before a decision is made.
 
 Only report real problems. If the moderators decide not to act on a report, that is not a problem for you. Reports made on purpose to get someone in trouble can mean you lose the ability to report.
 
@@ -818,7 +822,7 @@ Repeated applies while the person has no warning or restriction on record; once 
 
 ## Escalation ladder
 
-A person's step is the heaviest action on their record in the last 90 days. Step 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, and 5 is a ban of 30 days or more or anything permanent.
+A person's step is the heaviest action on their record in the last 90 days. Step 0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent.
 
 | Step | Low / medium (banter, rude) | High (hostile with a record, severe) |
 | --- | --- | --- |

@@ -165,7 +165,8 @@ function plural(n: number, unit: string): string {
   return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
-function lengthLabel(durationMs: number | null): string {
+/** A length in the largest whole unit: `permanent`, `24 hours`, `7 days`, `1 hour`, `30 minutes`. */
+export function lengthLabel(durationMs: number | null): string {
   if (durationMs === null) return 'permanent';
   if (durationMs % DAY_MS === 0) {
     const d = durationMs / DAY_MS;
@@ -176,7 +177,8 @@ function lengthLabel(durationMs: number | null): string {
   return plural(Math.ceil(durationMs / 1000), 'second');
 }
 
-function labelOf(o: Outcome): string {
+/** The moderator-facing name of an outcome: `No action`, `Note`, `Warning`, `Restrict chat 24 hours`, `Full ban permanent`. */
+export function outcomeLabel(o: Outcome): string {
   if (o === 'none') return 'No action';
   if (o === 'note') return 'Note';
   if (o === 'warning') return 'Warning';
@@ -309,7 +311,7 @@ export function suggest(
   if (read === 'banter') {
     return {
       outcome: 'none',
-      label: labelOf('none'),
+      label: outcomeLabel('none'),
       why: `${name} profile: banter is not moderated, so no action is suggested.`,
     };
   }
@@ -328,20 +330,20 @@ export function suggest(
   let reason: string;
   if (severe) {
     pick = stronger(first, cellPick(row.high));
-    reason = `severe conduct is acted on at once, never below the first-offense outcome or the ladder step for the record: ${lowerFirst(pick.label ?? labelOf(pick.outcome))}`;
+    reason = `severe conduct is acted on at once, never below the first-offense outcome or the ladder step for the record: ${lowerFirst(pick.label ?? outcomeLabel(pick.outcome))}`;
   } else if (step >= 1) {
     pick = stronger(first, cellPick(read === 'hostile' ? row.high : row.lowMedium));
-    reason = `the record already holds a warning or a restriction, so the ladder's next step applies: ${lowerFirst(pick.label ?? labelOf(pick.outcome))}`;
+    reason = `the record already holds a warning or a restriction, so the ladder's next step applies: ${lowerFirst(pick.label ?? outcomeLabel(pick.outcome))}`;
   } else {
     const live = records.filter((r) => !r.revoked);
     const roomId = context.roomId === undefined || context.roomId === '' ? null : context.roomId;
     if (repeatMet(profile, live, now, roomId)) {
       pick = stronger(first, plainPick(profile.repeat.outcome));
       const games = profile.repeat.distinctGames ? ' from different games' : '';
-      reason = `${plural(profile.repeat.notes, 'note')} in ${plural(profile.repeat.windowDays, 'day')}${games} counts as repeated: ${lowerFirst(labelOf(pick.outcome))}`;
+      reason = `${plural(profile.repeat.notes, 'note')} in ${plural(profile.repeat.windowDays, 'day')}${games} counts as repeated: ${lowerFirst(outcomeLabel(pick.outcome))}`;
     } else {
       pick = first;
-      const verb = verbPhrase(pick.outcome, labelOf(pick.outcome));
+      const verb = verbPhrase(pick.outcome, outcomeLabel(pick.outcome));
       reason = live.some((r) => r.kind === 'note')
         ? `the earlier notes do not yet add up to a repeat, so the ${LEVEL_NOUN[effective]} ${verb}`
         : `first ${LEVEL_NOUN[effective]} with a clean record ${verb}`;
@@ -349,11 +351,11 @@ export function suggest(
   }
 
   let outcome = copyOutcome(pick.outcome);
-  let label = pick.label ?? labelOf(outcome);
+  let label = pick.label ?? outcomeLabel(outcome);
   let areaNote = '';
   if (typeof outcome !== 'string' && outcome.kind === 'chat' && typeof rule === 'number' && areaRules.includes(rule)) {
     outcome = { kind: 'area', durationMs: outcome.durationMs };
-    label = labelOf(outcome);
+    label = outcomeLabel(outcome);
     areaNote = ' (this rule bans from public rooms instead of restricting chat)';
   }
   return { outcome, label, why: `${name} profile: ${reason}${areaNote}.` };
