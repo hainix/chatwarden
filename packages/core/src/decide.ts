@@ -133,7 +133,8 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
     if (typeof a !== 'object' || a === null) return bad();
     if (!nonEmpty(a.subject)) return bad();
     if (!SANCTION_KINDS.includes(a.kind)) return bad();
-    if (a.durationMs !== null && typeof a.durationMs !== 'number') return bad();
+    // NaN and +-Infinity would serialise as null in the key and alias a permanent decision: refuse them before keying.
+    if (a.durationMs !== null && !(typeof a.durationMs === 'number' && Number.isFinite(a.durationMs))) return bad();
     const rule: unknown = a.rule;
     if (rule !== 'uncovered' && !(typeof rule === 'number' && Number.isSafeInteger(rule) && rule >= 1)) return bad();
     if (a.gapNote !== undefined && typeof a.gapNote !== 'string') return bad();
@@ -288,12 +289,13 @@ export class DecisionService {
   private plan(norm: Normal, report: ReportRecord): Planned[] {
     const target = this.subjects.canonical(report.targetSubject);
     const reporter = this.subjects.canonical(report.reporterSubject);
-    // A dismissal cannot punish the person the report was about; it may act on the reporter or on others who wrote.
-    const allowed = new Set<SubjectId>([reporter, ...report.people.map((p) => this.subjects.canonical(p))]);
-    allowed.delete(target);
+    // A decision acts only on people in the report: its target, its reporter, or someone who wrote in the excerpt.
+    const scope = new Set<SubjectId>([target, reporter, ...report.people.map((p) => this.subjects.canonical(p))]);
 
     return norm.actions.map((a) => {
-      if (norm.verdict !== 'fair' && !allowed.has(a.subject)) return bad();
+      if (!scope.has(a.subject)) return bad();
+      // A dismissal cannot punish the person the report was about.
+      if (norm.verdict !== 'fair' && a.subject === target) return bad();
       if (!this.rules.isCitable(a.rule)) return bad();
       validateSanctionInput(this.sanctionInput(norm, a));
       const lines = a.lineIds.length === 0 ? [] : ownLines(report, a.subject, a.lineIds, this.subjects);

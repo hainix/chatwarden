@@ -3,6 +3,7 @@ import { DecisionService, decisionKey, revokeAndWithdraw } from '../src/decide.j
 import type { DecisionAction, DecisionInput } from '../src/decide.js';
 import { EvidenceBuffer, RoomRoster } from '../src/evidence.js';
 import { NoticeService } from '../src/notices.js';
+import { purge } from '../src/retention.js';
 import { ReportService } from '../src/reports.js';
 import { CommunityRules, STARTER_RULES } from '../src/rules.js';
 import { SanctionIndex } from '../src/sanctions.js';
@@ -286,6 +287,48 @@ describe('decide: fair', () => {
   });
 });
 
+describe('decide: fair acts only on people in the report', () => {
+  it('a stranger is invalid and the store is unchanged', async () => {
+    const t = setup();
+    const { reportId } = await t.table();
+    const stranger = t.person(who('stranger-fair'));
+    const before = t.snapshot();
+    expect(await t.decide(reportId, { actions: [t.warn(stranger)] })).toEqual({ ok: false, error: 'invalid' });
+    expect(t.snapshot()).toEqual(before);
+    expect(t.store.loadReport(reportId)?.status).toBe('open');
+  });
+
+  it('a stranger beside a valid action stops the whole decision', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    const stranger = t.person(who('stranger-fair2'));
+    const before = t.snapshot();
+    expect(await t.decide(reportId, { actions: [t.warn(target), t.warn(stranger)] })).toEqual({ ok: false, error: 'invalid' });
+    expect(t.snapshot()).toEqual(before);
+  });
+
+  it.each(['target', 'reporter', 'bystander'] as const)('accepts the %s', async (who_) => {
+    const t = setup();
+    const r = await t.table();
+    okOf(await t.decide(r.reportId, { actions: [t.warn(r[who_])] }));
+    expect(t.notices.pending(r[who_]).some((n) => n.kind === 'warning')).toBe(true);
+  });
+
+  it.each(['target', 'reporter', 'bystander'] as const)('accepts an alias of the %s', async (who_) => {
+    const t = setup();
+    const r = await t.table(`fr-${who_}`, `ft-${who_}`);
+    const person = r[who_];
+    const key = who_ === 'target' ? `ft-${who_}` : who_ === 'reporter' ? `fr-${who_}` : 'bk1';
+    const other = t.person(who(`${key}-alt`, `acct-f-${who_}`));
+    t.person(who(key, `acct-f-${who_}`));
+    const canon = t.subjects.canonical(person);
+    expect(t.subjects.canonical(other)).toBe(canon);
+    const alias = canon === person ? other : person;
+    const res = okOf(await t.decide(r.reportId, { actions: [t.warn(alias)] }));
+    expect(res.groups[0]?.subject).toBe(canon);
+  });
+});
+
 describe('decide: unfair', () => {
   it('dismisses with no bad-faith mark, no actions and no reporter feedback', async () => {
     const t = setup();
@@ -325,6 +368,19 @@ describe('decide: unfair', () => {
     const res = okOf(await t.decide(reportId, { verdict: 'unfair', actions: [t.warn(reporter, { rule: 4 })] }));
     expect(res.groups).toHaveLength(1);
     expect(t.notices.pending(reporter).map((n) => n.kind)).toEqual(['warning']);
+  });
+
+  it('still refuses the target through an alias (bad_faith too)', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table('ura', 'utg');
+    const other = t.person(who('utg-alt', 'acct-u'));
+    t.person(who('utg', 'acct-u'));
+    const canon = t.subjects.canonical(target);
+    const alias = canon === target ? other : target;
+    for (const verdict of ['unfair', 'bad_faith'] as const) {
+      expect(await t.decide(reportId, { verdict, actions: [t.warn(alias)] })).toEqual({ ok: false, error: 'invalid' });
+    }
+    expect(t.store.rawSanctions()).toHaveLength(0);
   });
 
   it('an action against another person who wrote in the excerpt is allowed', async () => {
@@ -561,6 +617,40 @@ describe('decide: validation (nothing is written on any failure)', () => {
     const before = t.snapshot();
     expect(await t.decide(reportId, { actions: [t.warn(target), make(target)] })).toEqual(invalid);
     expect(t.snapshot()).toEqual(before);
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'a %s duration is invalid even when a matching permanent decision exists (no false replay)',
+    async (bad) => {
+      const t = setup();
+      const { reportId, target } = await t.table();
+      const permanent = okOf(await t.decide(reportId, { actions: [{ subject: target, kind: 'ban', durationMs: null, rule: 1 }] }));
+      expect(permanent.replay).toBe(false);
+      const after = t.snapshot();
+      expect(await t.decide(reportId, { actions: [{ subject: target, kind: 'ban', durationMs: bad, rule: 1 }] })).toEqual(invalid);
+      expect(t.snapshot()).toEqual(after);
+    },
+  );
+
+  it('decisionKey refuses a non-finite duration instead of keying it as permanent', () => {
+    const t = setup();
+    const a = t.person(who('ka-nf'));
+    const mk = (durationMs: number | null): DecisionInput => ({
+      reportId: 'r', verdict: 'fair', actions: [{ subject: a, kind: 'ban', durationMs, rule: 1 }], actor: 'x', reason: 'y',
+    });
+    expect(() => decisionKey(t.subjects, mk(Number.POSITIVE_INFINITY))).toThrow();
+    expect(() => decisionKey(t.subjects, mk(Number.NaN))).toThrow();
+    expect(decisionKey(t.subjects, mk(null))).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('after the report ages out and is purged, the decision is not_found', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    const input = { actions: [t.warn(target)] };
+    okOf(await t.decide(reportId, input));
+    t.clock.t = NOW + 100 * DAY;
+    expect((await purge(t.store, t.clock.now())).reports).toBe(1);
+    expect(await t.decide(reportId, input)).toEqual({ ok: false, error: 'not_found' });
   });
 
   it('the same kind twice for one person is refused (it would double the sanction)', async () => {
