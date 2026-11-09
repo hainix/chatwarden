@@ -95,6 +95,33 @@ describe('migration 6: kit_reports', () => {
     db.close();
   });
 
+  const plan = (db: DatabaseSync, sql: string, ...args: Array<string | number>): string =>
+    db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map((r) => String(r.detail)).join(' | ');
+
+  it('has indexes on room_id, created_at and (partial) actioned_at WHERE bad_faith = 1', () => {
+    const { db } = env();
+    const defs = db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'kit_reports' AND sql IS NOT NULL")
+      .all()
+      .map((r) => `${String(r.name)}: ${String(r.sql)}`);
+    expect(defs.some((d) => /ON kit_reports \(room_id\)/.test(d))).toBe(true);
+    expect(defs.some((d) => /ON kit_reports \(created_at\)/.test(d))).toBe(true);
+    expect(defs.some((d) => /ON kit_reports \(actioned_at\)\s+WHERE bad_faith = 1/.test(d))).toBe(true);
+    db.close();
+  });
+
+  it('the purge, the room-pair listing and the bad-faith listing each use an index, not a table scan', () => {
+    const { db } = env();
+    expect(plan(db, 'DELETE FROM kit_reports WHERE created_at < ?', 1)).toMatch(/USING (COVERING )?INDEX kit_reports_by_created/);
+    expect(plan(db, 'SELECT reporter_subject, target_subject FROM kit_reports WHERE room_id = ?', 'r')).toMatch(
+      /USING (COVERING )?INDEX kit_reports_by_room/,
+    );
+    expect(
+      plan(db, 'SELECT reporter_subject, actioned_at FROM kit_reports WHERE bad_faith = 1 AND actioned_at >= ? ORDER BY actioned_at DESC, rowid', 1),
+    ).toMatch(/USING (COVERING )?INDEX kit_reports_bad_faith/);
+    db.close();
+  });
+
   it('rejects an unknown status and a bad_faith other than 0 or 1', () => {
     const { db, store } = env();
     store.insertReport(report());

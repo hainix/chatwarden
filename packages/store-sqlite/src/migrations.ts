@@ -167,6 +167,10 @@ CREATE TABLE kit_reports (
 CREATE INDEX kit_reports_by_target ON kit_reports (target_subject, created_at);
 CREATE INDEX kit_reports_by_reporter ON kit_reports (reporter_subject, created_at);
 CREATE INDEX kit_reports_by_status ON kit_reports (status, created_at);
+CREATE INDEX kit_reports_by_room ON kit_reports (room_id);
+CREATE INDEX kit_reports_by_created ON kit_reports (created_at);
+CREATE INDEX kit_reports_bad_faith ON kit_reports (actioned_at)
+  WHERE bad_faith = 1;
 `,
   },
 ];
