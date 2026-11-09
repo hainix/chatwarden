@@ -20,5 +20,6 @@
     }
   },
   "files": ["dist/src"],
+  "dependencies": { "obscenity": "^0.4.6" },
   "publishConfig": { "access": "public" }
 }
