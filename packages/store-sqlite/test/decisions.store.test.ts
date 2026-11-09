@@ -87,7 +87,7 @@ describe('migration 10: kit_reports.bad_faith_evidence', () => {
   it('is version 10 and adds one nullable TEXT column at the end of kit_reports', () => {
     expect(MIGRATIONS[9]?.version).toBe(10);
     const { db, store } = env();
-    expect(store.schemaVersion()).toBe(10);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     const info = db.prepare('PRAGMA table_info(kit_reports)').all();
     const col = info.find((c) => c.name === 'bad_faith_evidence');
     expect(col).toMatchObject({ type: 'TEXT', notnull: 0, dflt_value: null });
@@ -105,7 +105,7 @@ describe('migration 10: kit_reports.bad_faith_evidence', () => {
     db.prepare("UPDATE kit_reports SET status = 'dismissed', bad_faith = 1, actioned_at = ?, actioned_by = 'mod-a', mod_note = 'K2 bad faith' WHERE id = 'r2'").run(NOW + 1);
     old.insertDecision('k2-key-with-old-verdict', 'r2', NOW + 1, JSON.stringify({ groups: [] }));
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(10);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(store.loadReport('r1')).toMatchObject({ status: 'open', badFaith: false, badFaithEvidence: null });
     expect(store.loadReport('r2')).toMatchObject({ status: 'dismissed', badFaith: true, actionedBy: 'mod-a', badFaithEvidence: null });
     // a K2 stored decision still replays by its exact key
@@ -120,7 +120,7 @@ describe('migration 10: kit_reports.bad_faith_evidence', () => {
     const broken = [...MIGRATIONS.slice(0, 9), { version: 10, sql: `${MIGRATIONS[9]?.sql ?? ''}\nINSERT INTO no_such_table VALUES (1);` }];
     expect(() => openStore({ db, migrations: broken })).toThrow();
     expect(db.prepare('PRAGMA table_info(kit_reports)').all().map((c) => String(c.name))).not.toContain('bad_faith_evidence');
-    expect(openStore({ db }).schemaVersion()).toBe(10);
+    expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     db.close();
   });
 });

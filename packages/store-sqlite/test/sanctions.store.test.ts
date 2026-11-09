@@ -44,6 +44,7 @@ function row(over: Partial<SanctionRow> = {}): SanctionRow {
     rule: null,
     gapNote: null,
     gapStatus: null,
+    roomId: null,
     actor: 'mod',
     source: 'moderator',
     automated: false,
@@ -88,7 +89,7 @@ describe('migration 3: kit_sanctions', () => {
     expect(cols).toEqual([
       'id', 'group_id', 'ref_code', 'kind', 'target_type', 'target_value', 'starts_at', 'ends_at', 'reason',
       'rule', 'actor', 'source', 'automated', 'pending', 'revoked_by', 'revoked_at', 'revoke_reason',
-      'gap_note', 'gap_status', 'gap_ref',
+      'gap_note', 'gap_status', 'gap_ref', 'room_id',
     ]);
     db.close();
   });
@@ -311,7 +312,7 @@ describe('migration 7: kit_sanctions rebuild', () => {
 
   it('adds the three gap columns after the old ones', () => {
     const db = new DatabaseSync(':memory:');
-    openStore({ db });
+    openStore({ db, migrations: MIGRATIONS.slice(0, 7) });
     const cols = db.prepare('PRAGMA table_info(kit_sanctions)').all().map((c) => String(c.name));
     expect(cols.slice(-3)).toEqual(['gap_note', 'gap_status', 'gap_ref']);
     expect(cols).toHaveLength(20);
@@ -459,6 +460,201 @@ describe('a warning in the sqlite store', () => {
       expect(fresh.active(kind, { clientKey: null, accountId: null, ipHash: 'ip1' }, s, NOW - 1)).toBeNull();
     }
     expect(index.active('ban', none, s, NOW)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// K3a Task 2: migration 11 (the Note kind and the room column), notes and room ids in the sqlite store
+// ---------------------------------------------------------------------------
+
+const v10 = MIGRATIONS.slice(0, 10);
+
+/** A version 10 database holding sanction rows the way versions 7..10 wrote them, gap columns and a revoke included. */
+function seedV10(db: DatabaseSync): void {
+  openStore({ db, migrations: v10 });
+  const ins = db.prepare(
+    `INSERT INTO kit_sanctions
+       (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending,
+        revoked_by, revoked_at, revoke_reason, gap_note, gap_status, gap_ref)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  ins.run('a1', 'ga', 'M-AAAAA', 'chat', 'subject', 's_a', NOW, NOW + H, 'slur', '1', 'auto', 'auto_filter', 1, 0, null, null, null, null, null, null);
+  ins.run('a2', 'ga', 'M-AAAAA', 'chat', 'ip', 'iphash', NOW, NOW + H, 'slur', '1', 'auto', 'auto_filter', 1, 1, null, null, null, null, null, null);
+  ins.run('b1', 'gb', 'M-BBBBB', 'ban', 'subject', 's_b', NOW + 5, null, 'bad', '3', 'mod', 'moderator', 0, 0, 'boss', NOW + 9, 'appeal', null, null, null);
+  ins.run('c1', 'gc', 'M-CCCCC', 'warning', 'subject', 's_c', NOW + 7, NOW + 7, 'x', 'uncovered', 'mod', 'moderator', 0, 0, null, null, null, 'gap text', 'ruled', '9');
+  ins.run('d1', 'gd', 'M-DDDDD', 'area', 'subject', 's_d', NOW + 8, NOW + 2 * H, 'y', null, 'mod', 'api', 0, 1, null, null, null, 'open gap', 'open', null);
+}
+
+describe('migration 11: kit_sanctions rebuild (kind CHECK gains note, room_id added)', () => {
+  it('is version 11', () => {
+    expect(MIGRATIONS[10]?.version).toBe(11);
+    expect(MIGRATIONS.at(-1)?.version).toBeGreaterThanOrEqual(11);
+  });
+
+  it('a fresh database has room_id as the last column, nullable TEXT', () => {
+    const db = new DatabaseSync(':memory:');
+    openStore({ db });
+    const info = db.prepare('PRAGMA table_info(kit_sanctions)').all();
+    expect(info).toHaveLength(21);
+    expect(info.at(-1)).toMatchObject({ name: 'room_id', type: 'TEXT', notnull: 0, dflt_value: null });
+    expect(info.slice(-4, -1).map((c) => String(c.name))).toEqual(['gap_note', 'gap_status', 'gap_ref']);
+    db.close();
+  });
+
+  it('keeps every existing row, every column (gap_ref and the revoke included), in the same order, with a null room', () => {
+    const db = new DatabaseSync(':memory:');
+    seedV10(db);
+    const before = dump(db);
+    const store = openStore({ db });
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
+    const after = dump(db);
+    expect(after.map((r) => r.id)).toEqual(['a1', 'a2', 'b1', 'c1', 'd1']);
+    after.forEach((r, i) => {
+      expect(r).toMatchObject(before[i] as Record<string, unknown>);
+      expect(r.room_id).toBeNull();
+    });
+    expect(after.find((r) => r.id === 'c1')).toMatchObject({ gap_note: 'gap text', gap_status: 'ruled', gap_ref: '9', kind: 'warning' });
+    expect(after.find((r) => r.id === 'b1')).toMatchObject({ revoked_by: 'boss', revoked_at: NOW + 9, revoke_reason: 'appeal' });
+    // Read through the store: old rows have no room.
+    expect(store.loadSubjectActions(0).map((r) => [r.id, r.roomId])).toEqual([['a1', null], ['b1', null], ['c1', null], ['d1', null]]);
+    expect(store.listGaps().map((r) => r.id)).toEqual(['d1', 'c1']);
+    db.close();
+  });
+
+  it('recreates every index, the partial unique ref_code one included', () => {
+    const db = new DatabaseSync(':memory:');
+    seedV10(db);
+    openStore({ db });
+    const idx = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'kit_sanctions' AND name NOT LIKE 'sqlite_autoindex%' ORDER BY name")
+      .all();
+    expect(idx.map((r) => String(r.name))).toEqual(['kit_sanctions_by_group', 'kit_sanctions_by_target', 'kit_sanctions_ref_code']);
+    const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_sanctions_ref_code'").get()?.sql);
+    expect(sql).toMatch(/UNIQUE/i);
+    expect(sql).toMatch(/WHERE target_type = 'subject'/);
+    const ins = db.prepare(
+      `INSERT INTO kit_sanctions (id, group_id, ref_code, kind, target_type, target_value, starts_at, reason, actor, source, automated, pending)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 'r', 'a', 'api', 0, 0)`,
+    );
+    expect(() => ins.run('z1', 'gz', 'M-AAAAA', 'chat', 'subject', 's_z')).toThrow(/UNIQUE/i);
+    expect(() => ins.run('z2', 'gz', 'M-BBBBB', 'note', 'subject', 's_z')).toThrow(/UNIQUE/i);
+    ins.run('z3', 'ga', 'M-AAAAA', 'chat', 'ip', 'other-ip');
+    db.close();
+  });
+
+  it('leaves no scratch table behind and no foreign key problems', () => {
+    const db = new DatabaseSync(':memory:');
+    seedV10(db);
+    openStore({ db });
+    const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'kit_sanctions%'").all();
+    expect(names.map((r) => String(r.name))).toEqual(['kit_sanctions']);
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    db.close();
+  });
+
+  it('accepts the note kind (and the old kinds) and still rejects an unknown kind', () => {
+    const { store, db } = env();
+    expect(store.insertSanctionGroup([row({ kind: 'note', endsAt: NOW, roomId: 'room-1' })])).toBe(true);
+    expect(dump(db)[0]).toMatchObject({ kind: 'note', starts_at: NOW, ends_at: NOW, room_id: 'room-1' });
+    expect(() => store.insertSanctionGroup([row({ id: 'r2', groupId: 'g2', refCode: 'M-BBBBB', kind: 'timeout' as never })])).toThrow();
+  });
+
+  it('the CHECK lists exactly SANCTION_KINDS, and note is one of them', () => {
+    const { db } = env();
+    const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_sanctions'").get()?.sql);
+    const list = /kind\s+TEXT NOT NULL CHECK \(kind IN \(([^)]*)\)\)/.exec(sql)?.[1] ?? '';
+    const checked = list.split(',').map((x) => x.trim().replace(/'/g, ''));
+    expect(checked).toContain('note');
+    expect([...checked].sort()).toEqual([...SANCTION_KINDS].sort());
+  });
+
+  it('the old kinds and the other CHECKs survive the rebuild (target_type, source, gap_status, automated)', () => {
+    const { db } = env();
+    const base = (over: string) =>
+      `INSERT INTO kit_sanctions (id, group_id, ref_code, kind, target_type, target_value, starts_at, reason, actor, source, automated, pending, gap_status)
+       VALUES ${over}`;
+    expect(() => db.prepare(base("('a','g','M-AAAAA','chat','group','v',0,'r','a','api',0,0,NULL)")).run()).toThrow(/CHECK/i);
+    expect(() => db.prepare(base("('a','g','M-AAAAA','chat','subject','v',0,'r','a','robot',0,0,NULL)")).run()).toThrow(/CHECK/i);
+    expect(() => db.prepare(base("('a','g','M-AAAAA','chat','subject','v',0,'r','a','api',2,0,NULL)")).run()).toThrow(/CHECK/i);
+    expect(() => db.prepare(base("('a','g','M-AAAAA','chat','subject','v',0,'r','a','api',0,0,'closed')")).run()).toThrow(/CHECK/i);
+    db.prepare(base("('a','g','M-AAAAA','chat','subject','v',0,'r','a','api',0,0,'open')")).run();
+  });
+
+  it('is all-or-nothing: a failure inside the migration restores the old table, rows and version', () => {
+    const db = new DatabaseSync(':memory:');
+    seedV10(db);
+    const broken = [...v10, { version: 11, sql: `${MIGRATIONS[10]?.sql ?? ''}\nINSERT INTO no_such_table VALUES (1);` }];
+    expect(() => openStore({ db, migrations: broken })).toThrow();
+    const cols = db.prepare('PRAGMA table_info(kit_sanctions)').all().map((c) => String(c.name));
+    expect(cols).toHaveLength(20);
+    expect(cols).not.toContain('room_id');
+    expect(dump(db)).toHaveLength(5);
+    expect(String(db.prepare("SELECT value FROM kit_meta WHERE key = 'schema_version'").get()?.value)).toBe('10');
+    const idx = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'kit_sanctions' AND name NOT LIKE 'sqlite_autoindex%'").all();
+    expect(idx).toHaveLength(3);
+    // The old table still refuses a note...
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO kit_sanctions (id, group_id, ref_code, kind, target_type, target_value, starts_at, reason, actor, source, automated, pending)
+           VALUES ('n', 'gn', 'M-NNNNN', 'note', 'subject', 's', 0, 'r', 'a', 'api', 0, 0)`,
+        )
+        .run(),
+    ).toThrow(/CHECK/i);
+    // ...and a proper retry works.
+    expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
+    expect(dump(db)).toHaveLength(5);
+    db.close();
+  });
+
+  it('upgrades a version 10 file on disk', () => {
+    const path = tmpPath();
+    const raw = new DatabaseSync(path);
+    seedV10(raw);
+    raw.close();
+    const store = openStore({ path });
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
+    expect(store.loadSanctions(NOW).map((r) => r.id)).toEqual(['a1', 'a2', 'c1', 'd1']);
+    store.close();
+  });
+});
+
+describe('a note and a room id in the sqlite store', () => {
+  it('applySanction writes one row, ends = starts, with the room; loads nowhere in the index', async () => {
+    const { store, subjects, index, db } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    await applySanction(store, subjects, input(s, { kind: 'note', durationMs: null, roomId: 'room-A' }), NOW, index);
+    expect(dump(db)).toHaveLength(1);
+    expect(dump(db)[0]).toMatchObject({ kind: 'note', starts_at: NOW, ends_at: NOW, rule: '1', target_type: 'subject', room_id: 'room-A' });
+    const fresh = new SanctionIndex({ enabled: () => true, subjects });
+    await fresh.load(store, NOW - 1);
+    for (const kind of SANCTION_KINDS) {
+      expect(fresh.active(kind, { clientKey: null, accountId: null, ipHash: 'ip1' }, s, NOW - 1)).toBeNull();
+    }
+  });
+
+  it('the room is stored on every row of a group and read back by loadSubjectActions and loadSanctions', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    await applySanction(store, subjects, input(s, { kind: 'ban', includeIp: true, roomId: 'room-B' }), NOW, index);
+    await applySanction(store, subjects, input(s), NOW + 1, index);
+    expect(store.loadSanctions(NOW).map((r) => [r.targetType, r.roomId])).toEqual([['subject', 'room-B'], ['ip', 'room-B'], ['subject', null]]);
+    expect(store.loadSubjectActions(0).map((r) => r.roomId)).toEqual(['room-B', null]);
+    expect(store.listGaps()).toEqual([]);
+  });
+
+  it('purgeSanctions removes a note 90 d after its start and keeps a newer one', async () => {
+    const { store, subjects } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: null });
+    if (s === null) throw new Error('subject');
+    const old = await applySanction(store, subjects, input(s, { kind: 'note', durationMs: null }), NOW - 91 * DAY);
+    const edge = await applySanction(store, subjects, input(s, { kind: 'note', durationMs: null }), NOW - 90 * DAY);
+    const fresh = await applySanction(store, subjects, input(s, { kind: 'note', durationMs: null }), NOW - DAY);
+    expect(store.purgeSanctions(NOW - 90 * DAY)).toBe(1);
+    expect(store.loadSubjectActions(0).map((r) => r.groupId).sort()).toEqual([edge.groupId, fresh.groupId].sort());
+    expect(store.loadSubjectActions(0).map((r) => r.groupId)).not.toContain(old.groupId);
   });
 });
 

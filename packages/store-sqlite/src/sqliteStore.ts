@@ -30,7 +30,7 @@ import type {
 
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
 const SANCTION_COLUMNS =
-  'id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, gap_note, gap_status, actor, source, automated, pending';
+  'id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, gap_note, gap_status, room_id, actor, source, automated, pending';
 
 function toSanctionRow(r: Record<string, unknown>): SanctionRow {
   return {
@@ -46,6 +46,7 @@ function toSanctionRow(r: Record<string, unknown>): SanctionRow {
     rule: r.rule === null ? null : String(r.rule),
     gapNote: r.gap_note === null ? null : String(r.gap_note),
     gapStatus: r.gap_status === null ? null : (String(r.gap_status) as 'open' | 'ruled' | 'not_a_rule'),
+    roomId: r.room_id === null ? null : String(r.room_id),
     actor: String(r.actor),
     source: String(r.source) as Source,
     automated: r.automated === 1,
@@ -176,13 +177,13 @@ export class SqliteStore implements Store, TermStore {
       const ins = this.db.prepare(
         `INSERT INTO kit_sanctions
            (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending,
-            gap_note, gap_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            gap_note, gap_status, room_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const r of rows) {
         ins.run(
           r.id, r.groupId, r.refCode, r.kind, r.targetType, r.value, r.startsAt, r.endsAt, r.reason, r.rule,
-          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus,
+          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus, r.roomId,
         );
       }
       return true;

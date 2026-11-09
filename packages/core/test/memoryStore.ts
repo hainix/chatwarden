@@ -198,6 +198,7 @@ export class MemoryStore implements Store {
       rule: r.rule,
       gapNote: r.gapNote,
       gapStatus: r.gapStatus,
+      roomId: r.roomId,
       actor: r.actor,
       source: r.source,
       automated: r.automated,
