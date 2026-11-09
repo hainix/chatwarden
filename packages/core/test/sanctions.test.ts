@@ -346,7 +346,12 @@ describe('SanctionIndex.active', () => {
   it('never returns the reason, rule, actor or any identifier', async () => {
     const { store, subjects, index, s1 } = await person();
     await applySanction(store, subjects, input(s1, { includeIp: true, rule: '3.1', reason: 'private note' }), NOW, index);
-    const out = JSON.stringify(index.active('chat', who('k1', 'a1', 'ip1'), s1, NOW));
+    const result = index.active('chat', who('k1', 'a1', 'ip1'), s1, NOW);
+    expect(result).not.toBeNull();
+    // Exactly these keys: nothing else can carry an identifier, reason, rule or actor.
+    expect(Object.keys(result ?? {}).sort()).toEqual(['automated', 'groupId', 'refCode', 'until']);
+    // The groupId is random, so blank it before the substring scan (it could contain 'k1' by chance).
+    const out = JSON.stringify({ ...result, groupId: '' });
     for (const secret of ['private note', '3.1', 'mod@x.com', s1, 'ip1', 'k1', 'a1']) expect(out).not.toContain(secret);
   });
 
