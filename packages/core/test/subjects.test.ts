@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SubjectIndex } from '../src/subjects.js';
 import * as core from '../src/index.js';
-import type { Identifiers, Logger, SubjectId, SubjectIdRecord, SubjectRecord } from '../src/types.js';
+import type { Identifiers, Logger, SanctionRow, SubjectId, SubjectIdRecord, SubjectRecord } from '../src/types.js';
 import { MemoryStore, memoryStore } from './memoryStore.js';
 
 const HOUR = 3_600_000;
@@ -740,5 +740,71 @@ describe('SubjectIndex.latestIp', () => {
     const s = mustResolve(index, who('k1', null, 'ip-b'));
     mustResolve(index, who('k1', null, 'ip-a'));
     expect(index.latestIp(s)).toBe('ip-a');
+  });
+});
+
+describe('memoryStore transactions (journaled rollback)', () => {
+  const srow = (id: string, groupId: string, refCode: string): SanctionRow => ({
+    id, groupId, refCode, kind: 'chat', targetType: 'subject', value: 's', startsAt: 0, endsAt: null,
+    reason: 'r', rule: null, actor: 'a', source: 'api', automated: false, pending: false,
+  });
+
+  it('an outer failure undoes writes of a successful inner transaction', async () => {
+    const store = memoryStore();
+    expect(() =>
+      store.transaction(() => {
+        store.transaction(() => {
+          void store.saveSubject({ id: 's1', createdAt: 1, mergedInto: null });
+          store.insertSanctionGroup([srow('r1', 'g1', 'M-AAAAA')]);
+        });
+        throw new Error('outer');
+      }),
+    ).toThrow('outer');
+    expect((await store.loadSubjects()).subjects).toEqual([]);
+    expect(store.rawSanctions()).toEqual([]);
+    expect(store.insertSanctionGroup([srow('r2', 'g2', 'M-AAAAA')])).toBe(true); // the code is free again
+  });
+
+  it('an inner failure caught by the outer fn undoes only the inner writes', async () => {
+    const store = memoryStore();
+    store.transaction(() => {
+      void store.saveSubject({ id: 'keep', createdAt: 1, mergedInto: null });
+      try {
+        store.transaction(() => {
+          void store.saveSubject({ id: 'drop', createdAt: 2, mergedInto: null });
+          throw new Error('inner');
+        });
+      } catch {
+        /* swallowed */
+      }
+    });
+    expect((await store.loadSubjects()).subjects.map((s) => s.id)).toEqual(['keep']);
+  });
+
+  it('rolls back an identifier upsert, a merge mark and a revoke to their prior values', async () => {
+    const store = memoryStore();
+    await store.saveSubject({ id: 's1', createdAt: 1, mergedInto: null });
+    await store.saveSubject({ id: 's2', createdAt: 2, mergedInto: null });
+    await store.saveIdentifier({ subjectId: 's1', kind: 'key', value: 'k', firstSeen: 5, lastSeen: 5 });
+    store.insertSanctionGroup([srow('r1', 'g1', 'M-AAAAA')]);
+    expect(() =>
+      store.transaction(() => {
+        void store.saveIdentifier({ subjectId: 's1', kind: 'key', value: 'k', firstSeen: 9, lastSeen: 9 });
+        void store.markMerged('s2', 's1');
+        store.revokeSanctionGroup('g1', 'm', 7, 'why');
+        throw new Error('x');
+      }),
+    ).toThrow('x');
+    const { subjects, ids } = await store.loadSubjects();
+    expect(ids[0]?.lastSeen).toBe(5);
+    expect(subjects.find((s) => s.id === 's2')?.mergedInto).toBeNull();
+    expect(store.rawSanctions()[0]).toMatchObject({ revokedBy: null, revokedAt: null, revokeReason: null });
+  });
+
+  it('a ref-code collision leaves the earlier group and its code intact', () => {
+    const store = memoryStore();
+    expect(store.insertSanctionGroup([srow('r1', 'g1', 'M-AAAAA')])).toBe(true);
+    expect(store.insertSanctionGroup([srow('r2', 'g2', 'M-AAAAA')])).toBe(false);
+    expect(store.rawSanctions()).toHaveLength(1);
   });
 });

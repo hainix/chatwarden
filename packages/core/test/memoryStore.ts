@@ -17,22 +17,38 @@ export class MemoryStore implements Store {
   protected subjects = new Map<SubjectId, SubjectRecord>();
   protected subjectIds = new Map<string, SubjectIdRecord>();
   protected sanctions: StoredSanction[] = [];
+  /** Group id that owns each ref code: the O(1) collision check. */
+  protected refOwners = new Map<string, string>();
+  /** Undo steps of the innermost open transaction, or null outside one. */
+  private journal: Array<() => void> | null = null;
+
+  private undoWith(step: () => void): void {
+    this.journal?.push(step);
+  }
 
   schemaVersion(): number {
     return 0;
   }
 
-  /** Synchronous like the real thing; restores the Maps if `fn` throws. */
+  /**
+   * Synchronous like the real thing. Writes inside are journaled as undo steps
+   * (cost is O(writes), not O(store size)); if `fn` throws the steps run in
+   * reverse and the error is rethrown. Calls nest: an inner failure the outer
+   * `fn` catches undoes only the inner writes, and a successful inner call
+   * hands its steps to the outer one so an outer failure still undoes them.
+   */
   transaction<T>(fn: () => T): T {
-    const subjects = new Map([...this.subjects].map(([k, v]) => [k, { ...v }]));
-    const subjectIds = new Map([...this.subjectIds].map(([k, v]) => [k, { ...v }]));
-    const sanctions = this.sanctions.map((r) => ({ ...r }));
+    const outer = this.journal;
+    const mine: Array<() => void> = [];
+    this.journal = mine;
     try {
-      return fn();
+      const value = fn();
+      this.journal = outer;
+      if (outer !== null) outer.push(...mine);
+      return value;
     } catch (err) {
-      this.subjects = subjects;
-      this.subjectIds = subjectIds;
-      this.sanctions = sanctions;
+      this.journal = outer; // undo steps must not journal themselves
+      for (let i = mine.length - 1; i >= 0; i--) mine[i]?.();
       throw err;
     }
   }
@@ -42,7 +58,10 @@ export class MemoryStore implements Store {
   // Subjects
 
   saveSubject(subject: SubjectRecord): Promise<void> {
-    if (!this.subjects.has(subject.id)) this.subjects.set(subject.id, { ...subject });
+    if (!this.subjects.has(subject.id)) {
+      this.subjects.set(subject.id, { ...subject });
+      this.undoWith(() => this.subjects.delete(subject.id));
+    }
     return Promise.resolve();
   }
 
@@ -54,15 +73,26 @@ export class MemoryStore implements Store {
     const existing = this.subjectIds.get(key);
     if (existing === undefined) {
       this.subjectIds.set(key, { ...record });
+      this.undoWith(() => this.subjectIds.delete(key));
     } else {
-      existing.lastSeen = Math.max(existing.lastSeen, record.lastSeen);
+      const before = existing.lastSeen;
+      existing.lastSeen = Math.max(before, record.lastSeen);
+      this.undoWith(() => {
+        existing.lastSeen = before;
+      });
     }
     return Promise.resolve();
   }
 
   markMerged(id: SubjectId, into: SubjectId): Promise<void> {
     const subject = this.subjects.get(id);
-    if (subject !== undefined) subject.mergedInto = into;
+    if (subject !== undefined) {
+      const before = subject.mergedInto;
+      subject.mergedInto = into;
+      this.undoWith(() => {
+        subject.mergedInto = before;
+      });
+    }
     return Promise.resolve();
   }
 
@@ -78,23 +108,37 @@ export class MemoryStore implements Store {
   insertSanctionGroup(rows: readonly SanctionRow[]): boolean {
     const first = rows[0];
     if (first === undefined) return true;
-    if (this.sanctions.some((r) => r.refCode === first.refCode && r.groupId !== first.groupId)) return false;
+    const owner = this.refOwners.get(first.refCode);
+    if (owner !== undefined && owner !== first.groupId) return false;
+    const addedCode = owner === undefined;
+    this.refOwners.set(first.refCode, first.groupId);
     for (const row of rows) {
       this.sanctions.push({ ...row, revokedBy: null, revokedAt: null, revokeReason: null });
     }
+    this.undoWith(() => {
+      this.sanctions.length -= rows.length;
+      if (addedCode) this.refOwners.delete(first.refCode);
+    });
     return true;
   }
 
   revokeSanctionGroup(groupId: string, actor: string, at: number, reason: string): number {
-    let n = 0;
+    const touched: StoredSanction[] = [];
     for (const r of this.sanctions) {
       if (r.groupId !== groupId || r.revokedAt !== null) continue;
       r.revokedBy = actor;
       r.revokedAt = at;
       r.revokeReason = reason;
-      n++;
+      touched.push(r);
     }
-    return n;
+    this.undoWith(() => {
+      for (const r of touched) {
+        r.revokedBy = null;
+        r.revokedAt = null;
+        r.revokeReason = null;
+      }
+    });
+    return touched.length;
   }
 
   loadSanctions(now: number): SanctionRow[] {
