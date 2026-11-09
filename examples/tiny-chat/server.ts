@@ -97,7 +97,7 @@ function sameToken(given: unknown, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-const VERDICTS = ['fair', 'unfair', 'bad_faith'] as const;
+const VERDICTS = ['upheld', 'noted', 'no_action', 'bad_faith'] as const;
 
 export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat> {
   const secret = resolveSecret(opts.secret);
@@ -200,12 +200,13 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       return;
     }
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const { reportId, verdict, reason, actions } = body;
+    const { reportId, verdict, reason, actions, evidence } = body;
     if (
       typeof reportId !== 'string' ||
       typeof reason !== 'string' ||
       !VERDICTS.includes(verdict as (typeof VERDICTS)[number]) ||
-      !Array.isArray(actions)
+      !Array.isArray(actions) ||
+      (evidence !== undefined && typeof evidence !== 'string')
     ) {
       res.status(400).json({ ok: false, refused: 'bad_request' });
       return;
@@ -227,6 +228,8 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       actions: mapped,
       actor: 'demo-admin',
       reason,
+      // Required by the kit for `bad_faith` and refused for any other verdict; the kit answers `invalid` (422).
+      ...(evidence === undefined ? {} : { evidence }),
     };
     try {
       const result = await chatwarden.decide(input);

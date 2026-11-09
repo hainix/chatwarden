@@ -11,7 +11,8 @@ import {
 } from '../src/ladder.js';
 import { parseRuleRef } from '../src/rules.js';
 import { SubjectIndex } from '../src/subjects.js';
-import type { Identifiers, SanctionKind, SanctionRow, Severity } from '../src/types.js';
+import { CONDUCT_LEVELS } from '../src/types.js';
+import type { ConductLevel, Identifiers, SanctionKind, SanctionRow } from '../src/types.js';
 import { MemoryStore } from './memoryStore.js';
 
 const H = 3_600_000;
@@ -277,19 +278,19 @@ const asCell = (s: LadderCell): Cell => [s.kind, s.durationMs, s.label];
 
 describe('suggestAction: the 12 ladder cells', () => {
   for (const [step, low, high] of CONTRACT) {
-    it(`step ${step}, low severity (rule 2)`, () => {
-      expect(asCell(suggestAction(step, 'low', 2))).toEqual(low);
+    it(`step ${step}, rude (rule 2)`, () => {
+      expect(asCell(suggestAction(step, 'rude', 2))).toEqual(low);
     });
-    it(`step ${step}, medium severity (rule 2)`, () => {
-      expect(asCell(suggestAction(step, 'medium', 2))).toEqual(low);
+    it(`step ${step}, hostile (rule 2)`, () => {
+      expect(asCell(suggestAction(step, 'hostile', 2))).toEqual(low);
     });
-    it(`step ${step}, high severity (rule 2)`, () => {
-      expect(asCell(suggestAction(step, 'high', 2))).toEqual(high);
+    it(`step ${step}, severe (rule 2)`, () => {
+      expect(asCell(suggestAction(step, 'severe', 2))).toEqual(high);
     });
   }
 
-  it("'none' is treated like 'low'", () => {
-    for (const [step, low] of CONTRACT) expect(asCell(suggestAction(step, 'none', 2))).toEqual(low);
+  it("'banter' is treated like 'rude'", () => {
+    for (const [step, low] of CONTRACT) expect(asCell(suggestAction(step, 'banter', 2))).toEqual(low);
   });
 
   it('LADDER_TABLE holds the same 12 cells, for the Guide to render', () => {
@@ -303,8 +304,27 @@ describe('suggestAction: the 12 ladder cells', () => {
   });
 });
 
-describe('suggestAction: null severity defaults', () => {
-  it('null is medium for an ordinary rule', () => {
+describe('conduct levels', () => {
+  it('CONDUCT_LEVELS is the ordered ladder of levels, frozen', () => {
+    expect([...CONDUCT_LEVELS]).toEqual(['banter', 'rude', 'hostile', 'severe']);
+    expect(Object.isFrozen(CONDUCT_LEVELS)).toBe(true);
+  });
+
+  it('banter and rude and hostile read the same column; only severe reads the high one (for an ordinary rule)', () => {
+    for (const [step, low, high] of CONTRACT) {
+      for (const level of ['banter', 'rude', 'hostile'] as const) expect(asCell(suggestAction(step, level, 3))).toEqual(low);
+      expect(asCell(suggestAction(step, 'severe', 3))).toEqual(high);
+    }
+  });
+
+  it.each(['none', 'low', 'medium', 'high', '', 'SEVERE'])('the retired / unknown level %j throws instead of reading a column', (old) => {
+    expect(() => suggestAction(1, old as never, 2)).toThrow(RangeError);
+    expect(() => suggestAction(1, old as never, 1)).toThrow(RangeError);
+  });
+});
+
+describe('suggestAction: null conduct level defaults', () => {
+  it('null is hostile for an ordinary rule', () => {
     for (const [step, low] of CONTRACT) {
       for (const rule of [2, 3, 4, 7, 8, 'uncovered'] as const) {
         expect(asCell(suggestAction(step, null, rule))).toEqual(low);
@@ -312,42 +332,42 @@ describe('suggestAction: null severity defaults', () => {
     }
   });
 
-  it('null is high when the rule is 1', () => {
+  it('null is severe when the rule is 1', () => {
     for (const [step, , high] of CONTRACT) expect(asCell(suggestAction(step, null, 1))).toEqual(high);
   });
 
-  it('CR 1 reads the high column whatever the severity (the contract: "High severity, or CR 1")', () => {
-    const sev: Severity[] = ['high', 'medium', 'low', 'none'];
+  it('CR 1 reads the high column whatever the conduct level', () => {
+    const levels: ConductLevel[] = ['severe', 'hostile', 'rude', 'banter'];
     for (const [step, , high] of CONTRACT) {
-      for (const s of sev) expect(asCell(suggestAction(step, s, 1))).toEqual(high);
+      for (const s of levels) expect(asCell(suggestAction(step, s, 1))).toEqual(high);
     }
   });
 });
 
 describe('suggestAction: rules 5 and 6 turn a chat suggestion into area', () => {
   it.each([5, 6])('rule %i: chat becomes area at the same length', (rule) => {
-    const a = suggestAction(1, 'medium', rule);
+    const a = suggestAction(1, 'hostile', rule);
     expect(a).toEqual({ kind: 'area', durationMs: DAY, label: 'Ban from public rooms 24 hours' });
-    const b = suggestAction(2, 'low', rule);
+    const b = suggestAction(2, 'rude', rule);
     expect(b).toEqual({ kind: 'area', durationMs: 7 * DAY, label: 'Ban from public rooms 7 days' });
-    const c = suggestAction(0, 'high', rule);
+    const c = suggestAction(0, 'severe', rule);
     expect(c).toEqual({ kind: 'area', durationMs: 7 * DAY, label: 'Ban from public rooms 7 days' });
   });
 
   it.each([5, 6])('rule %i: a warning and a full ban are left alone', (rule) => {
-    expect(suggestAction(0, 'low', rule)).toEqual({ kind: 'warning', durationMs: null, label: 'Warning' });
-    expect(suggestAction(3, 'low', rule)).toEqual({ kind: 'ban', durationMs: 7 * DAY, label: 'Full ban 7 days' });
-    expect(suggestAction(5, 'high', rule).kind).toBe('ban');
+    expect(suggestAction(0, 'rude', rule)).toEqual({ kind: 'warning', durationMs: null, label: 'Warning' });
+    expect(suggestAction(3, 'rude', rule)).toEqual({ kind: 'ban', durationMs: 7 * DAY, label: 'Full ban 7 days' });
+    expect(suggestAction(5, 'severe', rule).kind).toBe('ban');
   });
 
   it.each([1, 2, 3, 4, 7, 8, 9, 'uncovered'] as const)('rule %s does not swap', (rule) => {
-    expect(suggestAction(1, 'medium', rule).kind).toBe('chat');
-    expect(suggestAction(1, 'low', rule).kind).toBe('chat');
+    expect(suggestAction(1, 'hostile', rule).kind).toBe('chat');
+    expect(suggestAction(1, 'rude', rule).kind).toBe('chat');
   });
 
   it('every area suggestion keeps the length of the chat cell it replaces', () => {
     for (const [step, low, high] of CONTRACT) {
-      for (const [sev, cell] of [['low', low], ['high', high]] as const) {
+      for (const [sev, cell] of [['rude', low], ['severe', high]] as const) {
         const swapped = suggestAction(step, sev, 5);
         expect(swapped.durationMs).toBe(cell[1]);
         expect(swapped.kind).toBe(cell[0] === 'chat' ? 'area' : cell[0]);
@@ -358,22 +378,22 @@ describe('suggestAction: rules 5 and 6 turn a chat suggestion into area', () => 
 
 describe('suggestAction: guards and purity', () => {
   it('rejects a step outside 0..5', () => {
-    expect(() => suggestAction(6 as never, 'low', 2)).toThrow(RangeError);
-    expect(() => suggestAction(-1 as never, 'low', 2)).toThrow(RangeError);
-    expect(() => suggestAction(1.5 as never, 'low', 2)).toThrow(RangeError);
+    expect(() => suggestAction(6 as never, 'rude', 2)).toThrow(RangeError);
+    expect(() => suggestAction(-1 as never, 'rude', 2)).toThrow(RangeError);
+    expect(() => suggestAction(1.5 as never, 'rude', 2)).toThrow(RangeError);
   });
 
   it('returns a fresh object each call, so a caller cannot edit the table', () => {
-    const a = suggestAction(1, 'low', 2);
+    const a = suggestAction(1, 'rude', 2);
     (a as { durationMs: number | null }).durationMs = 1;
-    expect(suggestAction(1, 'low', 2).durationMs).toBe(DAY);
+    expect(suggestAction(1, 'rude', 2).durationMs).toBe(DAY);
   });
 });
 
 describe('end to end: history to suggestion', () => {
   it('a stored rule text goes through parseRuleRef; two warnings suggest 7 days of chat', () => {
     const step = recordStep([warn(), warn()]);
-    expect(asCell(suggestAction(step, 'medium', parseRuleRef('2')))).toEqual(CHAT_7D);
+    expect(asCell(suggestAction(step, 'hostile', parseRuleRef('2')))).toEqual(CHAT_7D);
     expect(suggestAction(step, null, parseRuleRef('5')).kind).toBe('area');
     expect(suggestAction(step, null, parseRuleRef('uncovered')).kind).toBe('chat');
   });

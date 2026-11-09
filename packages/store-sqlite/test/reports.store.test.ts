@@ -70,7 +70,7 @@ describe('migration 6: kit_reports', () => {
     expect(info.map((c) => String(c.name))).toEqual([
       'id', 'created_at', 'room_id', 'tags_json', 'reporter_subject', 'reporter_seat', 'reporter_handle',
       'target_subject', 'target_seat', 'target_handle', 'category', 'note', 'line_id', 'excerpt_json',
-      'people_json', 'status', 'bad_faith', 'actioned_at', 'actioned_by', 'mod_note',
+      'people_json', 'status', 'bad_faith', 'actioned_at', 'actioned_by', 'mod_note', 'bad_faith_evidence',
     ]);
     const by = (n: string) => info.find((c) => c.name === n);
     expect(by('status')?.dflt_value).toBe("'open'");

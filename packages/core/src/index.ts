@@ -19,7 +19,7 @@ export type {
   SanctionKind,
   SanctionRow,
   SanctionTargetType,
-  Severity,
+  ConductLevel,
   Source,
   Store,
   SubjectId,
@@ -29,6 +29,7 @@ export type {
   StrikeRow,
   SubjectRecord,
 } from './types.js';
+export { CONDUCT_LEVELS } from './types.js';
 export { hashWho, makeHasher } from './hasher.js';
 export { maskSpans, type MaskSpan } from './mask.js';
 export { SubjectIndex } from './subjects.js';
@@ -112,7 +113,7 @@ export {
   suggestAction,
 } from './ladder.js';
 export type { ActionRecord, LadderCell, LadderRow, LadderStep } from './ladder.js';
-export { DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
+export { DECISION_EVIDENCE_MAX, DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
 export type {
   DecisionAction,
   DecisionGroup,

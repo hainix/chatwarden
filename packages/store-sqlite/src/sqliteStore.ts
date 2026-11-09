@@ -395,6 +395,7 @@ export class SqliteStore implements Store, TermStore {
         actionedAt: r.actioned_at === null ? null : Number(r.actioned_at),
         actionedBy: r.actioned_by === null ? null : String(r.actioned_by),
         modNote: r.mod_note === null ? null : String(r.mod_note),
+        badFaithEvidence: r.bad_faith_evidence === null ? null : String(r.bad_faith_evidence),
       };
     });
   }
@@ -406,15 +407,17 @@ export class SqliteStore implements Store, TermStore {
     actor: string,
     at: number,
     note: string,
+    evidence: string | null = null,
   ): boolean {
     return this.transaction(() => {
       if (status !== 'actioned' && status !== 'dismissed') throw new Error('closeReport: invalid status');
       const res = this.db
         .prepare(
-          `UPDATE kit_reports SET status = ?, bad_faith = ?, actioned_at = ?, actioned_by = ?, mod_note = ?
+          `UPDATE kit_reports SET status = ?, bad_faith = ?, actioned_at = ?, actioned_by = ?, mod_note = ?,
+             bad_faith_evidence = ?
            WHERE id = ? AND status = 'open'`,
         )
-        .run(status, badFaith ? 1 : 0, at, actor, note, id);
+        .run(status, badFaith ? 1 : 0, at, actor, note, evidence, id);
       return Number(res.changes) > 0;
     });
   }

@@ -261,4 +261,13 @@ CREATE TABLE kit_decisions (
 CREATE INDEX kit_decisions_by_report ON kit_decisions (report_id);
 `,
   },
+  {
+    version: 10,
+    // The moderator's written evidence for a bad_faith dismissal (1..500 characters, checked by the decision
+    // service). Staff only: nothing player-facing reads it. NULL on every other report, including every report
+    // written before this migration. Adding a nullable column keeps every row.
+    sql: `
+ALTER TABLE kit_reports ADD COLUMN bad_faith_evidence TEXT;
+`,
+  },
 ];

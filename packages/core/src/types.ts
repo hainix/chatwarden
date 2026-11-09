@@ -166,10 +166,20 @@ export interface SanctionRow {
 }
 
 /**
- * How serious a piece of behaviour is, as the AI read (K3) or a moderator rates it. The escalation ladder reads it:
- * `'none'` is treated exactly like `'low'`.
+ * How serious a piece of behaviour is, as the AI read (K3) or a moderator rates it. The shared vocabulary of every
+ * report, in order from mildest to worst:
+ * - `banter`: trash talk, salt, profanity not aimed at a person.
+ * - `rude`: a personal insult or profanity aimed at a player, isolated.
+ * - `hostile`: sustained or repeated aggression.
+ * - `severe`: threats, hate or slurs, sexual harassment, doxxing, serious harassment.
+ *
+ * The escalation ladder reads it; `banter` reads the same column as `rude` and `hostile` (the profiles added later
+ * decide what each level costs). Replaces the K2 `Severity` (none / low / medium / high, mapped one to one).
  */
-export type Severity = 'high' | 'medium' | 'low' | 'none';
+export type ConductLevel = 'banter' | 'rude' | 'hostile' | 'severe';
+
+/** Every {@link ConductLevel}, ordered from mildest to worst. */
+export const CONDUCT_LEVELS: readonly ConductLevel[] = Object.freeze(['banter', 'rude', 'hostile', 'severe'] as const);
 
 // ---------------------------------------------------------------------------
 // Mutes (storage shape)
@@ -272,6 +282,11 @@ export interface ReportRecord extends Omit<StoredReport, 'status'> {
   actionedAt: number | null;
   actionedBy: string | null;
   modNote: string | null;
+  /**
+   * The moderator's written evidence for a `bad_faith` dismissal (trimmed, 1..500 characters); null on every other
+   * report. Staff only: it is never part of a notice or any other player-facing value.
+   */
+  badFaithEvidence: string | null;
 }
 
 /**
@@ -459,8 +474,9 @@ export interface Store {
   loadReport(id: string): ReportRecord | null;
 
   /**
-   * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`.
-   * Returns true when this call closed it; false (nothing changed) for an unknown report or one already closed.
+   * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`,
+   * and the bad-faith `evidence` (null or omitted when there is none). Returns true when this call closed it; false
+   * (nothing changed, the first closer's evidence kept) for an unknown report or one already closed.
    */
   closeReport(
     id: string,
@@ -469,6 +485,7 @@ export interface Store {
     actor: string,
     at: number,
     note: string,
+    evidence?: string | null,
   ): boolean;
 
   /** Record a decision. A `key` that is already recorded throws (nothing is written). */

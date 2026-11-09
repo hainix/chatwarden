@@ -32,7 +32,7 @@ its moderators with its own sessions, takes report ids from its moderator queue 
 curl -X POST http://127.0.0.1:3000/decide \
   -H 'content-type: application/json' \
   -H "x-admin-token: $TINY_CHAT_ADMIN_TOKEN" \
-  -d '{"reportId":"<id from onReport>","verdict":"fair","reason":"private note","actions":[{"seat":"p1","kind":"warning","durationMs":null,"rule":2}]}'
+  -d '{"reportId":"<id from onReport>","verdict":"upheld","reason":"private note","actions":[{"seat":"p1","kind":"warning","durationMs":null,"rule":2}]}'
 ```
 
 `decide` rejects with the store's own error if the store fails (the route answers a bare 500 and writes nothing); a

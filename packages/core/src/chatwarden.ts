@@ -29,7 +29,7 @@ import type {
   Platform,
   RawWho,
   SanctionKind,
-  Severity,
+  ConductLevel,
   Store,
   StoredReport,
   SubjectId,
@@ -193,7 +193,7 @@ export interface Chatwarden {
    */
   suggest(
     subject: SubjectId,
-    severity: Severity | null,
+    level: ConductLevel | null,
     rule: RuleRef,
   ): { kind: SanctionKind; durationMs: number | null; label: string };
   /** Rule gaps: sanctions a moderator filed under `'uncovered'`, for the periodic rules review. Staff only. */
@@ -386,8 +386,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     decide: (input) => decisions.decide(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
-    suggest: (subject, severity, rule) =>
-      suggestAction(recordStep(historyOf(store, subjects, subject, clock.now())), severity, rule),
+    suggest: (subject, level, rule) =>
+      suggestAction(recordStep(historyOf(store, subjects, subject, clock.now())), level, rule),
     gaps: {
       list: () =>
         store.listGaps().map(

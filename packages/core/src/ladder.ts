@@ -1,5 +1,6 @@
 import type { RuleRef } from './rules.js';
-import type { SanctionKind, SanctionRow, Severity, Store, SubjectId } from './types.js';
+import { CONDUCT_LEVELS } from './types.js';
+import type { ConductLevel, SanctionKind, SanctionRow, Store, SubjectId } from './types.js';
 import type { SubjectIndex } from './subjects.js';
 
 /**
@@ -94,9 +95,9 @@ export interface LadderCell {
 /** One row of the ladder table. */
 export interface LadderRow {
   step: LadderStep;
-  /** Suggested for low or medium severity (and `'none'`). */
+  /** Suggested for `banter`, `rude` and `hostile` conduct. */
   lowMedium: LadderCell;
-  /** Suggested for high severity, or whenever the rule is CR 1. */
+  /** Suggested for `severe` conduct, or whenever the rule is CR 1. */
   high: LadderCell;
 }
 
@@ -136,21 +137,26 @@ function lengthLabel(durationMs: number | null): string {
 /**
  * The next action a record suggests. It never selects anything; the caller shows it as one line.
  *
- * - The column: `'high'` severity reads the high column; so does rule 1 (CR 1), whatever the severity. A null
- *   severity is `medium`. `'low'`, `'medium'` and `'none'` read the low/medium column.
+ * - The column: `'severe'` reads the high column; so does rule 1 (CR 1), whatever the conduct level. A null level
+ *   is `hostile`. `'banter'`, `'rude'` and `'hostile'` read the low/medium column.
+ * - A level that is not a {@link ConductLevel} (for example a K2 `'high'`) throws `RangeError` rather than quietly
+ *   reading the mild column.
  * - Rules 5 and 6 turn a chat suggestion into a ban from public rooms and matchmaking (`area`) at the same length. A warning or a full
  *   ban is left alone.
  *
- * Returns a fresh object each call. Throws `RangeError` for a step outside 0..5.
+ * Returns a fresh object each call. Throws `RangeError` for a step outside 0..5 or an unknown conduct level.
  */
 export function suggestAction(
   step: LadderStep,
-  severity: Severity | null,
+  level: ConductLevel | null,
   rule: RuleRef,
 ): { kind: SanctionKind; durationMs: number | null; label: string } {
   const row = Number.isInteger(step) ? LADDER_TABLE[step] : undefined;
   if (row === undefined) throw new RangeError('suggestAction: step must be an integer from 0 to 5');
-  const picked = rule === 1 || severity === 'high' ? row.high : row.lowMedium;
+  if (level !== null && !CONDUCT_LEVELS.includes(level)) {
+    throw new RangeError('suggestAction: level must be banter, rude, hostile, severe or null');
+  }
+  const picked = rule === 1 || level === 'severe' ? row.high : row.lowMedium;
   if (picked.kind === 'chat' && (rule === 5 || rule === 6)) {
     return {
       kind: 'area',

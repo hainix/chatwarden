@@ -15,6 +15,7 @@ const MIN = 60_000;
 const H = 60 * MIN;
 const DAY = 24 * H;
 const NOW = 1_800_000_000_000;
+const EVIDENCE = 'filed the same false report against three players in one evening';
 
 const who = (clientKey: string | null, accountId: string | null = null, ipHash: string | null = null): Identifiers => ({
   clientKey,
@@ -142,8 +143,17 @@ function setup(
     rule: 2,
     ...over,
   });
+  // A bad_faith verdict needs evidence: supply it unless the test names `evidence` itself (even as undefined).
   const decide = (reportId: string, over: Partial<DecisionInput> = {}) =>
-    decisions.decide({ reportId, verdict: 'fair', actions: [], actor: 'mod-a', reason: 'clear violation', ...over });
+    decisions.decide({
+      reportId,
+      verdict: 'upheld',
+      actions: [],
+      actor: 'mod-a',
+      reason: 'clear violation',
+      ...(over.verdict === 'bad_faith' && !('evidence' in over) ? { evidence: EVIDENCE } : {}),
+      ...over,
+    });
 
   /** Everything the store holds that a decision writes. */
   const snapshot = () => ({
@@ -165,7 +175,7 @@ const activeChat = (t: T, subject: SubjectId) => t.index.active('chat', { client
 
 // ---------------------------------------------------------------------------
 
-describe('decide: fair', () => {
+describe('decide: upheld', () => {
   it('a warning: the report is actioned, the target gets a notice to acknowledge, the reporter gets report_outcome', async () => {
     const t = setup();
     const { reportId, target, reporter } = await t.table();
@@ -287,7 +297,7 @@ describe('decide: fair', () => {
   });
 });
 
-describe('decide: fair acts only on people in the report', () => {
+describe('decide: upheld acts only on people in the report', () => {
   it('a stranger is invalid and the store is unchanged', async () => {
     const t = setup();
     const { reportId } = await t.table();
@@ -329,11 +339,11 @@ describe('decide: fair acts only on people in the report', () => {
   });
 });
 
-describe('decide: unfair', () => {
+describe('decide: no_action', () => {
   it('dismisses with no bad-faith mark, no actions and no reporter feedback', async () => {
     const t = setup();
     const { reportId, reporter, target } = await t.table();
-    const res = okOf(await t.decide(reportId, { verdict: 'unfair' }));
+    const res = okOf(await t.decide(reportId, { verdict: 'no_action' }));
     expect(res.groups).toEqual([]);
     expect(t.store.loadReport(reportId)).toMatchObject({ status: 'dismissed', badFaith: false, actionedBy: 'mod-a', actionedAt: NOW });
     expect(t.notices.pending(reporter)).toEqual([]);
@@ -345,7 +355,7 @@ describe('decide: unfair', () => {
     const t = setup();
     const { reportId, target } = await t.table();
     const before = t.snapshot();
-    expect(await t.decide(reportId, { verdict: 'unfair', actions: [t.warn(target)] })).toEqual({ ok: false, error: 'invalid' });
+    expect(await t.decide(reportId, { verdict: 'no_action', actions: [t.warn(target)] })).toEqual({ ok: false, error: 'invalid' });
     expect(t.snapshot()).toEqual(before);
     expect(t.store.loadReport(reportId)?.status).toBe('open');
   });
@@ -357,7 +367,7 @@ describe('decide: unfair', () => {
     t.person(who('t1k', 'acct-x'));
     expect(t.subjects.canonical(other)).toBe(t.subjects.canonical(target));
     for (const subject of [other, target]) {
-      expect(await t.decide(reportId, { verdict: 'unfair', actions: [t.warn(subject)] })).toEqual({ ok: false, error: 'invalid' });
+      expect(await t.decide(reportId, { verdict: 'no_action', actions: [t.warn(subject)] })).toEqual({ ok: false, error: 'invalid' });
     }
     expect(t.store.rawSanctions()).toHaveLength(0);
   });
@@ -365,7 +375,7 @@ describe('decide: unfair', () => {
   it('an action against the reporter is a normal action; no reporter feedback and no outcome notice', async () => {
     const t = setup();
     const { reportId, reporter } = await t.table();
-    const res = okOf(await t.decide(reportId, { verdict: 'unfair', actions: [t.warn(reporter, { rule: 4 })] }));
+    const res = okOf(await t.decide(reportId, { verdict: 'no_action', actions: [t.warn(reporter, { rule: 4 })] }));
     expect(res.groups).toHaveLength(1);
     expect(t.notices.pending(reporter).map((n) => n.kind)).toEqual(['warning']);
   });
@@ -377,7 +387,7 @@ describe('decide: unfair', () => {
     t.person(who('utg', 'acct-u'));
     const canon = t.subjects.canonical(target);
     const alias = canon === target ? other : target;
-    for (const verdict of ['unfair', 'bad_faith'] as const) {
+    for (const verdict of ['no_action', 'bad_faith'] as const) {
       expect(await t.decide(reportId, { verdict, actions: [t.warn(alias)] })).toEqual({ ok: false, error: 'invalid' });
     }
     expect(t.store.rawSanctions()).toHaveLength(0);
@@ -386,7 +396,7 @@ describe('decide: unfair', () => {
   it('an action against another person who wrote in the excerpt is allowed', async () => {
     const t = setup();
     const { reportId, bystander } = await t.table();
-    okOf(await t.decide(reportId, { verdict: 'unfair', actions: [t.warn(bystander)] }));
+    okOf(await t.decide(reportId, { verdict: 'no_action', actions: [t.warn(bystander)] }));
     expect(t.notices.pending(bystander)).toHaveLength(1);
   });
 
@@ -394,7 +404,7 @@ describe('decide: unfair', () => {
     const t = setup();
     const { reportId } = await t.table();
     const stranger = t.person(who('stranger'));
-    expect(await t.decide(reportId, { verdict: 'unfair', actions: [t.warn(stranger)] })).toEqual({ ok: false, error: 'invalid' });
+    expect(await t.decide(reportId, { verdict: 'no_action', actions: [t.warn(stranger)] })).toEqual({ ok: false, error: 'invalid' });
   });
 });
 
@@ -423,9 +433,9 @@ describe('decide: bad_faith', () => {
     });
   });
 
-  it('two bad-faith dismissals do not suspend; a plain unfair one is not counted', async () => {
+  it('two bad-faith dismissals do not suspend; a plain no_action one is not counted', async () => {
     const t = setup();
-    for (const [i, verdict] of (['bad_faith', 'bad_faith', 'unfair'] as const).entries()) {
+    for (const [i, verdict] of (['bad_faith', 'bad_faith', 'no_action'] as const).entries()) {
       const room = `bfx-${i}`;
       t.sit(room, 'p1', who('same-reporter'));
       t.sit(room, 'p2', who(`victim-${i}`));
@@ -451,6 +461,166 @@ describe('decide: bad_faith', () => {
     const { reportId, target } = await t.table();
     expect(await t.decide(reportId, { verdict: 'bad_faith', actions: [t.chat(target)] })).toEqual({ ok: false, error: 'invalid' });
     expect(t.store.loadReport(reportId)?.status).toBe('open');
+  });
+});
+
+describe('decide: verdicts (renamed in K3a)', () => {
+  it.each([
+    ['upheld', 'actioned', false],
+    ['no_action', 'dismissed', false],
+    ['bad_faith', 'dismissed', true],
+  ] as const)('%s closes the report as %s with bad_faith = %s', async (verdict, status, badFaith) => {
+    const t = setup();
+    const { reportId } = await t.table();
+    okOf(await t.decide(reportId, { verdict }));
+    expect(t.store.loadReport(reportId)).toMatchObject({ status, badFaith, actionedAt: NOW, actionedBy: 'mod-a' });
+  });
+
+  it.each(['fair', 'unfair', 'Upheld', 'NOTED', 'no-action', 'badfaith', '', 'dismissed', 'actioned'])(
+    'the old or unknown verdict %j is invalid and writes nothing',
+    async (verdict) => {
+      const t = setup();
+      const { reportId, target } = await t.table();
+      const before = t.snapshot();
+      expect(await t.decisions.decide({ reportId, verdict: verdict as never, actions: [t.warn(target)], actor: 'm', reason: 'r' })).toEqual({
+        ok: false,
+        error: 'invalid',
+      });
+      expect(t.snapshot()).toEqual(before);
+      expect(t.store.loadReport(reportId)?.status).toBe('open');
+    },
+  );
+
+  it('a missing or non-string verdict is invalid', async () => {
+    const t = setup();
+    const { reportId } = await t.table();
+    for (const verdict of [undefined, null, 1, {}]) {
+      expect(await t.decide(reportId, { verdict: verdict as never })).toEqual({ ok: false, error: 'invalid' });
+    }
+  });
+
+  it('upheld keeps the old fair scope: it may act on the target', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'upheld', actions: [t.warn(target)] }));
+    expect(t.notices.pending(target).map((n) => n.kind)).toEqual(['warning']);
+  });
+
+  it.each(['no_action', 'bad_faith'] as const)('%s keeps the old dismissal scope: never the target, nor a stranger; the reporter is fine', async (verdict) => {
+    const t = setup();
+    const { reportId, target, reporter } = await t.table();
+    const stranger = t.person(who(`stranger-${verdict}`));
+    expect(await t.decide(reportId, { verdict, actions: [t.warn(target)] })).toEqual({ ok: false, error: 'invalid' });
+    expect(await t.decide(reportId, { verdict, actions: [t.warn(stranger)] })).toEqual({ ok: false, error: 'invalid' });
+    expect(t.store.loadReport(reportId)?.status).toBe('open');
+    okOf(await t.decide(reportId, { verdict, actions: [t.warn(reporter, { rule: 4 })] }));
+    expect(t.store.loadReport(reportId)?.status).toBe('dismissed');
+  });
+
+  it('noted is ALWAYS invalid until Task 2 adds the note kind (no action, a warning, a chat restriction)', async () => {
+    // TODO(K3a Task 2): `noted` needs >= 1 action, all of kind `note`. No `note` kind exists yet, so every `noted`
+    // decision is invalid today. Task 2 adds the kind and replaces this test with the real accept / reject cases.
+    const t = setup();
+    const { reportId, target, reporter } = await t.table();
+    const before = t.snapshot();
+    for (const actions of [[], [t.warn(target)], [t.chat(target)], [t.warn(reporter)]]) {
+      expect(await t.decide(reportId, { verdict: 'noted', actions })).toEqual({ ok: false, error: 'invalid' });
+    }
+    expect(t.snapshot()).toEqual(before);
+    expect(t.store.loadReport(reportId)?.status).toBe('open');
+  });
+});
+
+describe('decide: bad_faith evidence', () => {
+  const invalid = { ok: false, error: 'invalid' };
+
+  it('is stored on the report, trimmed; loadReport returns it', async () => {
+    const t = setup();
+    const { reportId } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'bad_faith', evidence: '  three false reports tonight  ' }));
+    expect(t.store.loadReport(reportId)).toMatchObject({ badFaith: true, badFaithEvidence: 'three false reports tonight' });
+  });
+
+  it('is null on an open report and on every other verdict', async () => {
+    const t = setup();
+    const a = await t.table();
+    expect(t.store.loadReport(a.reportId)?.badFaithEvidence).toBeNull();
+    okOf(await t.decide(a.reportId, { verdict: 'upheld' }));
+    expect(t.store.loadReport(a.reportId)?.badFaithEvidence).toBeNull();
+    const b = await t.table();
+    okOf(await t.decide(b.reportId, { verdict: 'no_action' }));
+    expect(t.store.loadReport(b.reportId)?.badFaithEvidence).toBeNull();
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['empty', ''],
+    ['blank', '   \t\n '],
+    ['501 characters', 'x'.repeat(501)],
+    ['501 characters after trimming', ` ${'x'.repeat(501)} `],
+    ['a number', 7],
+    ['null', null],
+    ['an object', { text: 'x' }],
+  ])('a bad_faith verdict with evidence that is %s is invalid and writes nothing', async (_name, evidence) => {
+    const t = setup();
+    const { reportId } = await t.table();
+    const before = t.snapshot();
+    expect(await t.decide(reportId, { verdict: 'bad_faith', evidence: evidence as never })).toEqual(invalid);
+    expect(t.snapshot()).toEqual(before);
+    expect(t.store.loadReport(reportId)?.status).toBe('open');
+  });
+
+  it('exactly 500 characters is accepted (also with padding that trims away); 1 character is accepted', async () => {
+    const t = setup();
+    const a = await t.table();
+    okOf(await t.decide(a.reportId, { verdict: 'bad_faith', evidence: ` ${'x'.repeat(500)} ` }));
+    expect(t.store.loadReport(a.reportId)?.badFaithEvidence).toBe('x'.repeat(500));
+    const b = await t.table();
+    okOf(await t.decide(b.reportId, { verdict: 'bad_faith', evidence: 'x' }));
+  });
+
+  it.each(['upheld', 'no_action', 'noted'] as const)('evidence with the %s verdict is invalid, even empty', async (verdict) => {
+    const t = setup();
+    const { reportId } = await t.table();
+    const before = t.snapshot();
+    for (const evidence of ['why not', '', '   ']) {
+      expect(await t.decide(reportId, { verdict, evidence })).toEqual(invalid);
+    }
+    expect(t.snapshot()).toEqual(before);
+  });
+
+  it('evidence is not part of the idempotency key: the same decision with reworded evidence is a replay', async () => {
+    const t = setup();
+    const { reportId } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'bad_faith', evidence: 'first wording' }));
+    const again = okOf(await t.decide(reportId, { verdict: 'bad_faith', evidence: 'second wording' }));
+    expect(again.replay).toBe(true);
+    expect(t.store.loadReport(reportId)?.badFaithEvidence).toBe('first wording');
+  });
+
+  it('is staff only: it is in no notice, no pending value, no record, no decision result and no log line', async () => {
+    const t = setup();
+    const secret = 'EVIDENCE-MARKER-9f3a';
+    const { reportId, reporter, target, bystander } = await t.table();
+    const res = okOf(await t.decide(reportId, { verdict: 'bad_faith', evidence: secret, actions: [t.chat(reporter, { rule: 4 })] }));
+    expect(JSON.stringify(res)).not.toContain(secret);
+    for (const person of [reporter, target, bystander]) {
+      expect(JSON.stringify(t.notices.pending(person))).not.toContain(secret);
+      expect(JSON.stringify(t.notices.record(person))).not.toContain(secret);
+    }
+    expect(JSON.stringify(t.store.rawNotices())).not.toContain(secret);
+    expect(JSON.stringify(t.store.rawSanctions())).not.toContain(secret);
+    expect(JSON.stringify(t.store.rawDecisions())).not.toContain(secret);
+    expect(JSON.stringify(t.logs)).not.toContain(secret);
+    // ...and it IS on the staff-only report.
+    expect(t.store.loadReport(reportId)?.badFaithEvidence).toBe(secret);
+  });
+
+  it('a failing decision rolls the evidence back with the rest', async () => {
+    const t = setup({ store: new FailOnDecision() });
+    const { reportId } = await t.table();
+    await expect(t.decide(reportId, { verdict: 'bad_faith', evidence: 'rolled back' })).rejects.toThrow('disk full');
+    expect(t.store.loadReport(reportId)).toMatchObject({ status: 'open', badFaith: false, badFaithEvidence: null });
   });
 });
 
@@ -600,7 +770,7 @@ describe('decide: validation (nothing is written on any failure)', () => {
     const t = setup();
     const { reportId } = await t.table();
     const before = t.snapshot();
-    await expect(t.decisions.decide({ reportId, verdict: 'fair', actions: [], actor: 'm', reason: 'r', ...over } as DecisionInput)).resolves.toEqual(invalid);
+    await expect(t.decisions.decide({ reportId, verdict: 'upheld', actions: [], actor: 'm', reason: 'r', ...over } as DecisionInput)).resolves.toEqual(invalid);
     expect(t.snapshot()).toEqual(before);
   });
 
@@ -636,7 +806,7 @@ describe('decide: validation (nothing is written on any failure)', () => {
     const t = setup();
     const a = t.person(who('ka-nf'));
     const mk = (durationMs: number | null): DecisionInput => ({
-      reportId: 'r', verdict: 'fair', actions: [{ subject: a, kind: 'ban', durationMs, rule: 1 }], actor: 'x', reason: 'y',
+      reportId: 'r', verdict: 'upheld', actions: [{ subject: a, kind: 'ban', durationMs, rule: 1 }], actor: 'x', reason: 'y',
     });
     expect(() => decisionKey(t.subjects, mk(Number.POSITIVE_INFINITY))).toThrow();
     expect(() => decisionKey(t.subjects, mk(Number.NaN))).toThrow();
@@ -738,7 +908,7 @@ describe('decide: idempotent', () => {
     const first = okOf(await t.decide(reportId, { actions: [t.warn(target)] }));
     const retired = new CommunityRules(STARTER_RULES.map((r) => (r.number === 2 ? { ...r, retired: true } : r)));
     const again = new DecisionService({ store: t.store, subjects: t.subjects, rules: retired, notices: t.notices, clock: t.clock, index: t.index });
-    const second = okOf(await again.decide({ reportId, verdict: 'fair', actions: [t.warn(target)], actor: 'a', reason: 'r' }));
+    const second = okOf(await again.decide({ reportId, verdict: 'upheld', actions: [t.warn(target)], actor: 'a', reason: 'r' }));
     expect(second.replay).toBe(true);
     expect(second.groups).toEqual(first.groups);
   });
@@ -749,7 +919,7 @@ describe('decide: idempotent', () => {
     okOf(await t.decide(reportId, { actions: [t.warn(target)] }));
     const after = t.snapshot();
     expect(await t.decide(reportId, { actions: [t.chat(target)] })).toEqual({ ok: false, error: 'already_decided' });
-    expect(await t.decide(reportId, { verdict: 'unfair' })).toEqual({ ok: false, error: 'already_decided' });
+    expect(await t.decide(reportId, { verdict: 'no_action' })).toEqual({ ok: false, error: 'already_decided' });
     expect(await t.decide(reportId, { verdict: 'bad_faith' })).toEqual({ ok: false, error: 'already_decided' });
     expect(await t.decide(reportId, { actions: [] })).toEqual({ ok: false, error: 'already_decided' });
     expect(t.snapshot()).toEqual(after);
@@ -782,7 +952,7 @@ describe('decide: idempotent', () => {
     const b = t.person(who('kb'));
     const base = (over: Partial<DecisionInput> = {}): DecisionInput => ({
       reportId: 'r1',
-      verdict: 'fair',
+      verdict: 'upheld',
       actions: [t.warn(a), t.chat(b)],
       actor: 'x',
       reason: 'y',
@@ -793,7 +963,12 @@ describe('decide: idempotent', () => {
     expect(decisionKey(t.subjects, base({ actions: [t.chat(b), t.warn(a)] }))).toBe(k);
     expect(decisionKey(t.subjects, base({ actor: 'other', reason: 'other' }))).toBe(k);
     expect(decisionKey(t.subjects, base({ reportId: 'r2' }))).not.toBe(k);
-    expect(decisionKey(t.subjects, base({ verdict: 'unfair' }))).not.toBe(k);
+    expect(decisionKey(t.subjects, base({ verdict: 'no_action' }))).not.toBe(k);
+    expect(decisionKey(t.subjects, base({ verdict: 'bad_faith', evidence: 'e' }))).not.toBe(k);
+    expect(decisionKey(t.subjects, base({ verdict: 'bad_faith', evidence: 'e' }))).not.toBe(decisionKey(t.subjects, base({ verdict: 'no_action' })));
+    // the old names are no longer decisions at all
+    expect(() => decisionKey(t.subjects, base({ verdict: 'fair' as never }))).toThrow();
+    expect(() => decisionKey(t.subjects, base({ verdict: 'unfair' as never }))).toThrow();
     expect(decisionKey(t.subjects, base({ actions: [t.warn(a)] }))).not.toBe(k);
     expect(decisionKey(t.subjects, base({ actions: [t.warn(a), t.chat(b, { durationMs: 2 * DAY })] }))).not.toBe(k);
     expect(decisionKey(t.subjects, base({ actions: [t.warn(a), t.chat(b, { rule: 3 })] }))).not.toBe(k);
@@ -808,8 +983,8 @@ describe('decide: idempotent', () => {
 
   it('keys do not collide across report ids that run into the verdict', () => {
     const t = setup();
-    const k1 = decisionKey(t.subjects, { reportId: 'ab', verdict: 'fair', actions: [], actor: 'x', reason: 'y' });
-    const k2 = decisionKey(t.subjects, { reportId: 'a', verdict: 'fair', actions: [], actor: 'x', reason: 'y' });
+    const k1 = decisionKey(t.subjects, { reportId: 'ab', verdict: 'upheld', actions: [], actor: 'x', reason: 'y' });
+    const k2 = decisionKey(t.subjects, { reportId: 'a', verdict: 'upheld', actions: [], actor: 'x', reason: 'y' });
     expect(k1).not.toBe(k2);
   });
 });
@@ -911,10 +1086,10 @@ describe('decide: pushes and hooks run after the commit', () => {
     for (const p of probe) expect(p).toEqual({ notices: 3, status: 'actioned' }); // two sanction notices + the reporter outcome
   });
 
-  it('no push for unfair or bad_faith without actions', async () => {
+  it('no push for no_action or bad_faith without actions', async () => {
     const t = setup();
     const a = await t.table();
-    okOf(await t.decide(a.reportId, { verdict: 'unfair' }));
+    okOf(await t.decide(a.reportId, { verdict: 'no_action' }));
     const b = await t.table();
     okOf(await t.decide(b.reportId, { verdict: 'bad_faith' }));
     expect(t.pushed).toEqual([]);
@@ -946,13 +1121,13 @@ describe('decide: pushes and hooks run after the commit', () => {
     const t = setup();
     const bare = new DecisionService({ store: t.store, subjects: t.subjects, rules, notices: t.notices, clock: t.clock });
     const { reportId, target } = await t.table();
-    okOf(await bare.decide({ reportId, verdict: 'fair', actions: [t.chat(target)], actor: 'm', reason: 'r' }));
+    okOf(await bare.decide({ reportId, verdict: 'upheld', actions: [t.chat(target)], actor: 'm', reason: 'r' }));
     expect(t.store.rawSanctions()).toHaveLength(1);
   });
 });
 
 describe('decide: reporter feedback', () => {
-  it('only on fair with at least one applied action, and once', async () => {
+  it('only on upheld with at least one applied action, and once', async () => {
     const t = setup();
     const a = await t.table();
     okOf(await t.decide(a.reportId, { actions: [t.warn(a.target), t.chat(a.target)] }));
@@ -962,12 +1137,12 @@ describe('decide: reporter feedback', () => {
     expect(t.store.rawNotices().filter((n) => n.kind === 'report_outcome')).toHaveLength(1);
   });
 
-  it('never for unfair, bad_faith or a fair decision with no actions', async () => {
+  it('never for no_action, bad_faith or an upheld decision with no actions', async () => {
     const t = setup();
     const a = await t.table();
     const b = await t.table();
     const c = await t.table();
-    okOf(await t.decide(a.reportId, { verdict: 'unfair' }));
+    okOf(await t.decide(a.reportId, { verdict: 'no_action' }));
     okOf(await t.decide(b.reportId, { verdict: 'bad_faith' }));
     okOf(await t.decide(c.reportId, { actions: [] }));
     expect(t.store.rawNotices()).toEqual([]);

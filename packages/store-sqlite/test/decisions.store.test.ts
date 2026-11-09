@@ -83,6 +83,48 @@ describe('migration 9: kit_decisions', () => {
   });
 });
 
+describe('migration 10: kit_reports.bad_faith_evidence', () => {
+  it('is version 10 and adds one nullable TEXT column at the end of kit_reports', () => {
+    expect(MIGRATIONS[9]?.version).toBe(10);
+    const { db, store } = env();
+    expect(store.schemaVersion()).toBe(10);
+    const info = db.prepare('PRAGMA table_info(kit_reports)').all();
+    const col = info.find((c) => c.name === 'bad_faith_evidence');
+    expect(col).toMatchObject({ type: 'TEXT', notnull: 0, dflt_value: null });
+    expect(String(info.at(-1)?.name)).toBe('bad_faith_evidence');
+    db.close();
+  });
+
+  it('upgrades a version 9 database keeping every report row; old reports read back with no evidence', () => {
+    const db = new DatabaseSync(':memory:');
+    const old = openStore({ db, migrations: MIGRATIONS.slice(0, 9) });
+    expect(old.schemaVersion()).toBe(9);
+    old.insertReport(report('r1', NOW));
+    old.insertReport(report('r2', NOW, { reporterSubject: 's_other', roomId: 'R2' }));
+    // K2's closeReport, as SQL: the column does not exist yet.
+    db.prepare("UPDATE kit_reports SET status = 'dismissed', bad_faith = 1, actioned_at = ?, actioned_by = 'mod-a', mod_note = 'K2 bad faith' WHERE id = 'r2'").run(NOW + 1);
+    old.insertDecision('k2-key-with-old-verdict', 'r2', NOW + 1, JSON.stringify({ groups: [] }));
+    const store = openStore({ db });
+    expect(store.schemaVersion()).toBe(10);
+    expect(store.loadReport('r1')).toMatchObject({ status: 'open', badFaith: false, badFaithEvidence: null });
+    expect(store.loadReport('r2')).toMatchObject({ status: 'dismissed', badFaith: true, actionedBy: 'mod-a', badFaithEvidence: null });
+    // a K2 stored decision still replays by its exact key
+    expect(store.findDecision('k2-key-with-old-verdict')).toMatchObject({ reportId: 'r2' });
+    expect(count(db, 'kit_reports')).toBe(2);
+    db.close();
+  });
+
+  it('a failing migration 10 leaves version 9 and no new column', () => {
+    const db = new DatabaseSync(':memory:');
+    openStore({ db, migrations: MIGRATIONS.slice(0, 9) });
+    const broken = [...MIGRATIONS.slice(0, 9), { version: 10, sql: `${MIGRATIONS[9]?.sql ?? ''}\nINSERT INTO no_such_table VALUES (1);` }];
+    expect(() => openStore({ db, migrations: broken })).toThrow();
+    expect(db.prepare('PRAGMA table_info(kit_reports)').all().map((c) => String(c.name))).not.toContain('bad_faith_evidence');
+    expect(openStore({ db }).schemaVersion()).toBe(10);
+    db.close();
+  });
+});
+
 describe('loadReport / closeReport', () => {
   it('loadReport round-trips an open report with null decision columns', () => {
     const { store } = env();
@@ -94,6 +136,7 @@ describe('loadReport / closeReport', () => {
       actionedAt: null,
       actionedBy: null,
       modNote: null,
+      badFaithEvidence: null,
     });
   });
 
@@ -113,6 +156,25 @@ describe('loadReport / closeReport', () => {
       actionedBy: 'mod-a',
       modNote: 'spiteful',
     });
+  });
+
+  it('closeReport stores the bad-faith evidence (staff only, returned by loadReport); no evidence reads back null', () => {
+    const { store, db } = env();
+    store.insertReport(report('r1', NOW));
+    store.insertReport(report('r2', NOW, { reporterSubject: 's_other', roomId: 'R2' }));
+    expect(store.closeReport('r1', 'dismissed', true, 'mod-a', NOW + 5, 'spiteful', 'same false report three times')).toBe(true);
+    expect(store.closeReport('r2', 'dismissed', false, 'mod-a', NOW + 5, 'plain')).toBe(true);
+    expect(store.loadReport('r1')).toMatchObject({ badFaith: true, badFaithEvidence: 'same false report three times' });
+    expect(store.loadReport('r2')).toMatchObject({ badFaith: false, badFaithEvidence: null });
+    expect((db.prepare('SELECT bad_faith_evidence AS e FROM kit_reports WHERE id = ?').get('r2') as { e: unknown }).e).toBeNull();
+  });
+
+  it('a second close never overwrites the first evidence', () => {
+    const { store } = env();
+    store.insertReport(report('r1', NOW));
+    expect(store.closeReport('r1', 'dismissed', true, 'mod-a', NOW, 'first', 'first evidence')).toBe(true);
+    expect(store.closeReport('r1', 'dismissed', true, 'mod-b', NOW + 1, 'second', 'second evidence')).toBe(false);
+    expect(store.loadReport('r1')?.badFaithEvidence).toBe('first evidence');
   });
 
   it('a second close changes nothing and returns false (first closer wins)', () => {
@@ -286,11 +348,11 @@ describe('DecisionService against SQLite', () => {
     return { ...e, index, notices, decisions, reporter, target };
   }
 
-  it('a fair decision closes the report, writes the sanction, the notices and the decision row; a repeat is a replay', async () => {
+  it('an upheld decision closes the report, writes the sanction, the notices and the decision row; a repeat is a replay', async () => {
     const e = decideEnv();
     const input = {
       reportId: 'r1',
-      verdict: 'fair' as const,
+      verdict: 'upheld' as const,
       actions: [{ subject: e.target, kind: 'chat' as const, durationMs: DAY, rule: 2, lineIds: ['L1'] }],
       actor: 'mod',
       reason: 'clear',
@@ -308,7 +370,7 @@ describe('DecisionService against SQLite', () => {
     expect(second.ok && first.ok && second.groups).toEqual(first.ok && first.groups);
     expect(count(e.db, 'kit_sanctions')).toBe(1);
     expect(count(e.db, 'kit_notices')).toBe(2);
-    expect(await e.decisions.decide({ ...input, verdict: 'unfair', actions: [] })).toEqual({ ok: false, error: 'already_decided' });
+    expect(await e.decisions.decide({ ...input, verdict: 'no_action', actions: [] })).toEqual({ ok: false, error: 'already_decided' });
   });
 
   it('a failure part-way rolls the whole decision back in SQLite', async () => {
@@ -322,7 +384,7 @@ describe('DecisionService against SQLite', () => {
     await expect(
       e.decisions.decide({
         reportId: 'r1',
-        verdict: 'fair',
+        verdict: 'upheld',
         actions: [{ subject: e.target, kind: 'ban', durationMs: null, rule: 1 }],
         actor: 'mod',
         reason: 'clear',
@@ -339,7 +401,7 @@ describe('DecisionService against SQLite', () => {
     const e = decideEnv();
     const res = await e.decisions.decide({
       reportId: 'r1',
-      verdict: 'fair',
+      verdict: 'upheld',
       actions: [{ subject: e.target, kind: 'warning', durationMs: null, rule: 3 }],
       actor: 'mod',
       reason: 'clear',
@@ -361,7 +423,7 @@ describe('DecisionService against SQLite', () => {
       e.store.insertReport(report(id, NOW - DAY, { reporterSubject: e.reporter, targetSubject: `s_x_${id}`, roomId: `R-${id}`, people: [] }));
     }
     for (const id of ['r1', 'b1', 'b2']) {
-      expect(await e.decisions.decide({ reportId: id, verdict: 'bad_faith', actions: [], actor: 'mod', reason: 'spite' })).toMatchObject({ ok: true });
+      expect(await e.decisions.decide({ reportId: id, verdict: 'bad_faith', evidence: 'repeat false reports', actions: [], actor: 'mod', reason: 'spite' })).toMatchObject({ ok: true });
     }
     expect(e.store.loadBadFaithMarks(NOW - 30 * DAY).filter((m) => m.reporter === e.reporter)).toHaveLength(3);
   });

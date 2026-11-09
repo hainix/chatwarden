@@ -419,7 +419,7 @@ describe('tiny-chat: report -> decision -> notice -> ack -> record', () => {
   let bobLineId = '';
   const decision = () => ({
     reportId: reports[0]?.id,
-    verdict: 'fair',
+    verdict: 'upheld',
     reason: 'private moderator reason',
     actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2, lineIds: ownLineIds }],
   });
@@ -589,7 +589,7 @@ describe('tiny-chat: report -> decision -> notice -> ack -> record', () => {
     const yLine = report?.excerpt.find((l) => l.seatId === 'p2')?.lineId;
     const res = await decideHttp(other, {
       reportId: report?.id,
-      verdict: 'fair',
+      verdict: 'upheld',
       reason: 'r',
       actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2, lineIds: [yLine] }],
     });
@@ -611,7 +611,7 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
   it('POST /decide is off (404) when no admin token is configured, even with a header', async () => {
     delete process.env.TINY_CHAT_ADMIN_TOKEN;
     const server = await boot();
-    const res = await decideHttp(server, { reportId: 'r', verdict: 'fair', reason: 'r', actions: [] }, 'anything');
+    const res = await decideHttp(server, { reportId: 'r', verdict: 'upheld', reason: 'r', actions: [] }, 'anything');
     expect(res.status).toBe(404);
     expect(res.json).toEqual({ ok: false, refused: 'off' });
   });
@@ -619,9 +619,9 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
   it('the admin token can come from TINY_CHAT_ADMIN_TOKEN', async () => {
     process.env.TINY_CHAT_ADMIN_TOKEN = 'from-env-token';
     const server = await boot();
-    const wrong = await decideHttp(server, { reportId: 'r', verdict: 'fair', reason: 'r', actions: [] }, ADMIN);
+    const wrong = await decideHttp(server, { reportId: 'r', verdict: 'upheld', reason: 'r', actions: [] }, ADMIN);
     expect(wrong.status).toBe(401);
-    const right = await decideHttp(server, { reportId: 'r', verdict: 'fair', reason: 'r', actions: [] }, 'from-env-token');
+    const right = await decideHttp(server, { reportId: 'r', verdict: 'upheld', reason: 'r', actions: [] }, 'from-env-token');
     expect(right.status).toBe(404);
     expect(right.json).toEqual({ ok: false, refused: 'not_found' });
   });
@@ -635,9 +635,9 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     await a.next('chat');
     await reportHttp(server, { key: 'key-e2', targetSeat: 'p1', category: 'spam' });
     const reportId = reports[0]?.id;
-    const good = { reportId, verdict: 'fair', reason: 'r', actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }] };
+    const good = { reportId, verdict: 'upheld', reason: 'r', actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }] };
 
-    expect((await decideHttp(server, { verdict: 'fair' })).status).toBe(400);
+    expect((await decideHttp(server, { verdict: 'upheld' })).status).toBe(400);
     expect((await decideHttp(server, { ...good, verdict: 'maybe' })).status).toBe(400);
     expect((await decideHttp(server, { ...good, actions: 'x' })).status).toBe(400);
     const noSeat = await decideHttp(server, { ...good, actions: [{ seat: 'p99', kind: 'warning', durationMs: null, rule: 2 }] });
@@ -663,7 +663,7 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     const bSubject = server.chatwarden.rooms.subjectAt('lobby', 'p2');
     const res = await decideHttp(server, {
       reportId: reports[0]?.id,
-      verdict: 'fair',
+      verdict: 'upheld',
       reason: 'r',
       actions: [{ seat: 'p1', subject: bSubject, kind: 'warning', durationMs: null, rule: 2 }],
     });
@@ -688,7 +688,7 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     await settle();
     const res = await server.chatwarden.decide({
       reportId: reports[0]?.id ?? '',
-      verdict: 'fair',
+      verdict: 'upheld',
       actor: 'mod',
       reason: 'r',
       actions: [{ subject, kind: 'chat', durationMs: 60_000, rule: 4 }],
@@ -717,7 +717,7 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     const subject = server.chatwarden.rooms.subjectAt('lobby', 'p1') ?? '';
     const res = await server.chatwarden.decide({
       reportId: reports[0]?.id ?? '',
-      verdict: 'fair',
+      verdict: 'upheld',
       actor: 'mod',
       reason: 'r',
       actions: [{ subject, kind: 'warning', durationMs: null, rule: 2 }],
@@ -731,13 +731,95 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
   });
 });
 
+describe('tiny-chat: /decide takes the K3a verdicts', () => {
+  const MARK = 'EVIDENCE-MARKER-7c1d';
+  /** A fresh server with one filed report: p2 reported p1. */
+  async function filed(tag: string) {
+    const reports: StoredReport[] = [];
+    const server = await boot({ adminToken: ADMIN, onReport: (r) => void reports.push(r) });
+    const a = await join(server, `key-${tag}1`);
+    await join(server, `key-${tag}2`);
+    a.say('hello');
+    await a.next('chat');
+    await reportHttp(server, { key: `key-${tag}2`, targetSeat: 'p1', category: 'spam' });
+    return { server, a, reportId: reports[0]?.id };
+  }
+
+  it('upheld with a warning is 200 and sends the target a notice', async () => {
+    const { server, a, reportId } = await filed('v1');
+    const res = await decideHttp(server, { reportId, verdict: 'upheld', reason: 'r', actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }] });
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ ok: true, replay: false });
+    expect(noticesOf(await a.next('notices'))).toHaveLength(1);
+  });
+
+  it('no_action is 200 with no ref codes and tells nobody', async () => {
+    const { server, a, reportId } = await filed('v2');
+    const res = await decideHttp(server, { reportId, verdict: 'no_action', reason: 'banter', actions: [] });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, replay: false, refCodes: [] });
+    await settle();
+    expect(a.frames.filter((f) => f.type === 'notices')).toEqual([]);
+  });
+
+  it('bad_faith with evidence is 200, and the evidence appears in no response or frame', async () => {
+    const { server, a, reportId } = await filed('v3');
+    const res = await decideHttp(server, { reportId, verdict: 'bad_faith', evidence: MARK, reason: 'r', actions: [] });
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ ok: true });
+    await settle();
+    expect(JSON.stringify(a.frames)).not.toContain(MARK);
+    expect(bodies.some((b) => b.includes(MARK))).toBe(false);
+    expect(res.text).not.toContain(MARK);
+  });
+
+  it('bad_faith without usable evidence is 422 invalid and decides nothing; the real one still can', async () => {
+    const { server, reportId } = await filed('v4');
+    for (const evidence of [undefined, '', '   ', 'x'.repeat(501)]) {
+      const res = await decideHttp(server, { reportId, verdict: 'bad_faith', evidence, reason: 'r', actions: [] });
+      expect([res.status, res.json]).toEqual([422, { ok: false, refused: 'invalid' }]);
+    }
+    expect((await decideHttp(server, { reportId, verdict: 'bad_faith', evidence: 'ok', reason: 'r', actions: [] })).status).toBe(200);
+  });
+
+  it('evidence on another verdict is 422 invalid', async () => {
+    const { server, reportId } = await filed('v5');
+    for (const verdict of ['upheld', 'no_action']) {
+      const res = await decideHttp(server, { reportId, verdict, evidence: 'why', reason: 'r', actions: [] });
+      expect([res.status, res.json]).toEqual([422, { ok: false, refused: 'invalid' }]);
+    }
+  });
+
+  it('a non-string evidence is 400 bad_request', async () => {
+    const { server, reportId } = await filed('v6');
+    for (const evidence of [7, null, {}, ['x']]) {
+      const res = await decideHttp(server, { reportId, verdict: 'bad_faith', evidence, reason: 'r', actions: [] });
+      expect([res.status, res.json]).toEqual([400, { ok: false, refused: 'bad_request' }]);
+    }
+  });
+
+  it.each(['fair', 'unfair'])('the old verdict %s is 400 bad_request', async (verdict) => {
+    const { server, reportId } = await filed(`v7${verdict}`);
+    const res = await decideHttp(server, { reportId, verdict, reason: 'r', actions: [] });
+    expect([res.status, res.json]).toEqual([400, { ok: false, refused: 'bad_request' }]);
+  });
+
+  it('noted reaches the kit and is invalid until Task 2 adds the note kind (422, nothing decided)', async () => {
+    // TODO(K3a Task 2): once the `note` kind exists, a noted decision with a note action is 200.
+    const { server, reportId } = await filed('v8');
+    const res = await decideHttp(server, { reportId, verdict: 'noted', reason: 'r', actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }] });
+    expect([res.status, res.json]).toEqual([422, { ok: false, refused: 'invalid' }]);
+    expect((await decideHttp(server, { reportId, verdict: 'no_action', reason: 'r', actions: [] })).status).toBe(200);
+  });
+});
+
 describe('tiny-chat: an empty admin token counts as unset', () => {
   const saved = process.env.TINY_CHAT_ADMIN_TOKEN;
   afterEach(() => {
     if (saved === undefined) delete process.env.TINY_CHAT_ADMIN_TOKEN;
     else process.env.TINY_CHAT_ADMIN_TOKEN = saved;
   });
-  const probe = { reportId: 'r', verdict: 'fair', reason: 'r', actions: [] };
+  const probe = { reportId: 'r', verdict: 'upheld', reason: 'r', actions: [] };
 
   it("adminToken: '' switches /decide off (404), not open to an empty header", async () => {
     delete process.env.TINY_CHAT_ADMIN_TOKEN;
@@ -825,7 +907,7 @@ describe('tiny-chat: refused frames cite the rule and point at the notice', () =
     await reportHttp(server, { key: 'key-f3', targetSeat: 'p1', category: 'spam' });
     const res = await decideHttp(server, {
       reportId: reports[0]?.id,
-      verdict: 'fair',
+      verdict: 'upheld',
       reason: 'private reason',
       actions: [{ seat: 'p1', kind: 'chat', durationMs: 60_000, rule: 4 }],
     });
@@ -852,7 +934,7 @@ describe('tiny-chat: refused frames cite the rule and point at the notice', () =
     await reportHttp(server, { key: 'key-f5', targetSeat: 'p1', category: 'spam' });
     const res = await decideHttp(server, {
       reportId: reports[0]?.id,
-      verdict: 'fair',
+      verdict: 'upheld',
       reason: 'r',
       actions: [{ seat: 'p1', kind: 'chat', durationMs: 60_000, rule: 'uncovered', gapNote: 'a private gap note' }],
     });
@@ -875,7 +957,7 @@ describe('tiny-chat: refused frames cite the rule and point at the notice', () =
     await reportHttp(server, { key: 'key-f7', targetSeat: 'p1', category: 'spam' });
     const res = await decideHttp(server, {
       reportId: reports[0]?.id,
-      verdict: 'fair',
+      verdict: 'upheld',
       reason: 'r',
       actions: [{ seat: 'p1', kind: 'ban', durationMs: null, rule: 2 }],
     });
@@ -901,7 +983,7 @@ describe('tiny-chat: refused frames cite the rule and point at the notice', () =
     const subject = server.chatwarden.rooms.subjectAt('lobby', 'p1') ?? '';
     const res = await server.chatwarden.decide({
       reportId: reports[0]?.id ?? '',
-      verdict: 'fair',
+      verdict: 'upheld',
       actor: 'mod',
       reason: 'r',
       actions: [{ subject, kind: 'chat', durationMs: 60_000, rule: 4, includeIp: true }],

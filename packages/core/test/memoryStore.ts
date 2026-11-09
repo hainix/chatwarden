@@ -302,7 +302,14 @@ export class MemoryStore implements Store {
       (r) => r.reporterSubject === row.reporterSubject && r.targetSubject === row.targetSubject && r.roomId === row.roomId,
     );
     if (dup) return false;
-    this.reports.push({ ...structuredClone(row), badFaith: false, actionedAt: null, actionedBy: null, modNote: null });
+    this.reports.push({
+      ...structuredClone(row),
+      badFaith: false,
+      actionedAt: null,
+      actionedBy: null,
+      modNote: null,
+      badFaithEvidence: null,
+    });
     this.undoWith(() => {
       this.reports.length -= 1;
     });
@@ -321,16 +328,25 @@ export class MemoryStore implements Store {
     actor: string,
     at: number,
     note: string,
+    evidence: string | null = null,
   ): boolean {
     const r = this.reports.find((x) => x.id === id);
     if (r === undefined || r.status !== 'open') return false;
     if (status !== 'actioned' && status !== 'dismissed') throw new Error('closeReport: invalid status');
-    const before = { status: r.status, badFaith: r.badFaith, actionedAt: r.actionedAt, actionedBy: r.actionedBy, modNote: r.modNote };
+    const before = {
+      status: r.status,
+      badFaith: r.badFaith,
+      actionedAt: r.actionedAt,
+      actionedBy: r.actionedBy,
+      modNote: r.modNote,
+      badFaithEvidence: r.badFaithEvidence,
+    };
     r.status = status;
     r.badFaith = badFaith;
     r.actionedAt = at;
     r.actionedBy = actor;
     r.modNote = note;
+    r.badFaithEvidence = evidence;
     this.undoWith(() => Object.assign(r, before));
     return true;
   }

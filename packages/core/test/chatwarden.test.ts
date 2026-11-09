@@ -719,7 +719,7 @@ type Reported = Awaited<ReturnType<typeof reported>>;
 const warnAlice = (r: Reported, over: Partial<DecisionAction> = {}) =>
   r.cw.decide({
     reportId: r.reportId,
-    verdict: 'fair',
+    verdict: 'upheld',
     actor: 'mod@example.test',
     reason: 'private reason text',
     actions: [{ subject: r.a, kind: 'warning', durationMs: null, rule: 2, lineIds: r.own, ...over }],
@@ -1131,14 +1131,36 @@ describe('createChatwarden: doors point at the notice', () => {
 });
 
 describe('createChatwarden: history and suggest', () => {
-  it('a fresh person has no history and the ladder suggests a warning for a low rule', async () => {
+  it('a fresh person has no history and the ladder suggests a warning for a rude first offence', async () => {
     const { cw } = await setup();
     cw.rooms.seat(R, 'a', alice, 'Alice');
     const a = cw.rooms.subjectAt(R, 'a') ?? '';
     expect(cw.history(a)).toEqual([]);
-    expect(cw.suggest(a, 'low', 2)).toMatchObject({ kind: 'warning', durationMs: null });
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ kind: 'warning', durationMs: null });
     expect(cw.suggest(a, null, 2)).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'high', 1)).toMatchObject({ kind: 'chat', durationMs: 7 * DAY });
+    expect(cw.suggest(a, 'severe', 1)).toMatchObject({ kind: 'chat', durationMs: 7 * DAY });
+  });
+
+  it('suggest reads conduct levels: banter is the mild column, severe the high one, an old K2 value throws', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    const a = cw.rooms.subjectAt(R, 'a') ?? '';
+    expect(cw.suggest(a, 'banter', 2)).toMatchObject({ kind: 'warning' });
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'warning' });
+    expect(cw.suggest(a, 'severe', 2)).toMatchObject({ kind: 'chat', durationMs: 7 * DAY });
+    expect(() => cw.suggest(a, 'high' as never, 2)).toThrow(RangeError);
+  });
+
+  it('the facade decide takes the new verdicts: bad_faith needs evidence, fair and unfair are invalid', async () => {
+    const r = await reported();
+    const { cw, reportId, a } = r;
+    const base = { reportId, actor: 'mod@example.test', reason: 'private reason text', actions: [] };
+    expect(await cw.decide({ ...base, verdict: 'fair' as never })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, verdict: 'unfair' as never })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, verdict: 'bad_faith' })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, verdict: 'no_action', evidence: 'x' })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, verdict: 'bad_faith', evidence: 'staff-only-evidence-text' })).toMatchObject({ ok: true });
+    expect(JSON.stringify(cw.notices.pending(r.cw.rooms.subjectAt(R, 'a') ?? a))).not.toContain('staff-only-evidence-text');
   });
 
   it('a decided warning shows in the history and moves the suggestion up the ladder', async () => {
@@ -1147,7 +1169,7 @@ describe('createChatwarden: history and suggest', () => {
     await warnAlice(r);
     expect(cw.history(a)).toHaveLength(1);
     expect(cw.history(a)[0]).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'medium', 2)).toMatchObject({ kind: 'chat', durationMs: DAY });
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'chat', durationMs: DAY });
   });
 
   it('a record older than the 90-day lookback no longer counts', async () => {
@@ -1156,6 +1178,6 @@ describe('createChatwarden: history and suggest', () => {
     await warnAlice(r);
     clock.t += 91 * DAY;
     expect(cw.history(a)).toEqual([]);
-    expect(cw.suggest(a, 'medium', 2)).toMatchObject({ kind: 'warning' });
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'warning' });
   });
 });
