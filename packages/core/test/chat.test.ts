@@ -110,6 +110,7 @@ function setup(opts: Opts = {}) {
         actor: 'mod1',
         source: extra.automated ? 'auto_filter' : 'moderator',
         automated: extra.automated ?? false,
+        rule: 1,
       },
       clock.t,
       sanctions,
@@ -658,6 +659,34 @@ describe('matcher, strikes and the automatic timeout', () => {
       endsAt: at + 30 * MIN,
     });
     expect(e.store.loadStrikes(0).map((x) => x.at)).toContain(rows[0]?.startsAt);
+  });
+
+  it('the automatic timeout cites Community Rule 1 and carries no rule-gap note', () => {
+    const e = setup();
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    const raw = e.store.rawSanctions();
+    expect(raw).toHaveLength(1);
+    expect(raw[0]).toMatchObject({ kind: 'chat', source: 'auto_filter', rule: '1', gapNote: null, gapStatus: null });
+  });
+
+  it('a warning never restricts chat', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1', null, 'ip-1'));
+    await e.sanction(s as string, 'warning', null);
+    expect('deliver' in e.say('p1', 'hello')).toBe(true);
+    e.tick();
+    await e.sanction(s as string, 'warning', null);
+    e.tick();
+    expect('deliver' in e.say('p1', 'still fine')).toBe(true);
+  });
+
+  it('a warning does not hide a real timeout or ban', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1'));
+    await e.sanction(s as string, 'warning', null);
+    await e.sanction(s as string, 'chat', H);
+    expect(refusal(e.say('p1', 'hello'))).toMatchObject({ reason: 'restricted' });
   });
 
   it('the automatic timeout writes no IP row (a timeout must not hit a household)', () => {

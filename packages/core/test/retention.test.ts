@@ -28,7 +28,7 @@ function setup() {
     applySanction(
       store,
       subjects,
-      { kind, subject: s, includeIp, durationMs, reason: 'r', actor: 'mod', source: 'moderator', automated: false },
+      { kind, subject: s, includeIp, durationMs, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 1 },
       at,
     );
   return { store, subjects, subject, sanction };

@@ -50,6 +50,7 @@ function setup(opts: { enabled?: () => boolean } = {}) {
         actor: 'mod@x.com',
         source: 'moderator',
         automated: false,
+        rule: 1,
         ...over,
       },
       clock.t,
@@ -330,7 +331,7 @@ describe('DoorService: what a refusal carries', () => {
   it('has exactly kind, until and refCode: no reason, identifier, hash or subject id', async () => {
     const t = setup();
     const s = t.seat({ clientKey: 'tok-secret', accountId: 'acct-secret', ip: IP });
-    await t.ban(s, 'ban', { includeIp: true, rule: '4.2' });
+    await t.ban(s, 'ban', { includeIp: true, rule: 4 });
     const res = t.doors.check('join', { clientKey: 'tok-secret', accountId: 'acct-secret', ip: IP });
     expect(res).not.toBeNull();
     expect(Object.keys(res ?? {}).sort()).toEqual(['kind', 'refCode', 'until']);
@@ -443,5 +444,34 @@ describe('DoorService: a failure lets the caller through and never throws', () =
       console.warn = orig;
     }
     expect(seen[0]?.[0]).toBe('doors.check_failed');
+  });
+});
+
+describe('DoorService: a warning never refuses at a door', () => {
+  const doorKinds = ['join', 'create', 'public', 'matchmaking'] as const;
+
+  it.each(doorKinds)('%s lets a warned person through, with and without an IP', async (door) => {
+    const t = setup();
+    const s = t.seat(who);
+    await t.ban(s, 'warning', { durationMs: null });
+    expect(t.doors.check(door, who)).toBeNull();
+    // Another browser of the same person, and a stranger on the same IP.
+    expect(t.doors.check(door, { clientKey: 'tok-1' })).toBeNull();
+    expect(t.doors.check(door, { ip: IP })).toBeNull();
+  });
+
+  it.each(doorKinds)('%s lets a person with several warnings through', async (door) => {
+    const t = setup();
+    const s = t.seat(who);
+    for (let i = 0; i < 3; i++) await t.ban(s, 'warning', { durationMs: null });
+    expect(t.doors.check(door, who)).toBeNull();
+  });
+
+  it('a warning does not hide a real ban of the same person', async () => {
+    const t = setup();
+    const s = t.seat(who);
+    await t.ban(s, 'warning', { durationMs: null });
+    await t.ban(s, 'ban');
+    expect(t.doors.check('join', who)).toMatchObject({ kind: 'ban' });
   });
 });

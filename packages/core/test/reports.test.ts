@@ -891,6 +891,7 @@ describe('report: counts for onReport', () => {
         actor: 'auto',
         source: over.source ?? 'auto_filter',
         automated: over.automated ?? true,
+        rule: 1,
       },
       at,
     );

@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -171,6 +171,52 @@ CREATE INDEX kit_reports_by_room ON kit_reports (room_id);
 CREATE INDEX kit_reports_by_created ON kit_reports (created_at);
 CREATE INDEX kit_reports_bad_faith ON kit_reports (actioned_at)
   WHERE bad_faith = 1;
+`,
+  },
+  {
+    version: 7,
+    // SQLite cannot ALTER a CHECK, so the Warning kind needs the table rebuilt: create the new shape, copy every
+    // row in rowid order (loadSanctions orders by rowid), drop the old table (which drops its indexes), rename, and
+    // recreate every index, the partial unique ref_code one included. Nothing references kit_sanctions, so no
+    // foreign key is in play. The runner wraps this in one savepoint with the version bump: a failure anywhere
+    // leaves the old table, its rows and version 6 untouched. The kind list below and SANCTION_KINDS in core must
+    // match (a test compares them). gap_note / gap_status / gap_ref belong to the subject row of a group: a moderator
+    // sanction under 'uncovered' carries a note, and a later decision closes the gap as 'ruled' (gap_ref is the new
+    // rule number) or 'not_a_rule'. Rows written before this migration keep a NULL rule and no gap.
+    sql: `
+CREATE TABLE kit_sanctions_v7 (
+  id            TEXT PRIMARY KEY,
+  group_id      TEXT NOT NULL,
+  ref_code      TEXT NOT NULL,
+  kind          TEXT NOT NULL CHECK (kind IN ('chat', 'area', 'ban', 'warning')),
+  target_type   TEXT NOT NULL CHECK (target_type IN ('subject', 'ip')),
+  target_value  TEXT NOT NULL,
+  starts_at     INTEGER NOT NULL,
+  ends_at       INTEGER,
+  reason        TEXT NOT NULL,
+  rule          TEXT,
+  actor         TEXT NOT NULL,
+  source        TEXT NOT NULL CHECK (source IN ('moderator', 'auto_filter', 'coop', 'api', 'ai')),
+  automated     INTEGER NOT NULL CHECK (automated IN (0, 1)),
+  pending       INTEGER NOT NULL CHECK (pending IN (0, 1)),
+  revoked_by    TEXT,
+  revoked_at    INTEGER,
+  revoke_reason TEXT,
+  gap_note      TEXT,
+  gap_status    TEXT CHECK (gap_status IN ('open', 'ruled', 'not_a_rule')),
+  gap_ref       TEXT
+);
+INSERT INTO kit_sanctions_v7
+  (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source,
+   automated, pending, revoked_by, revoked_at, revoke_reason)
+  SELECT id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source,
+         automated, pending, revoked_by, revoked_at, revoke_reason
+  FROM kit_sanctions ORDER BY rowid;
+DROP TABLE kit_sanctions;
+ALTER TABLE kit_sanctions_v7 RENAME TO kit_sanctions;
+CREATE UNIQUE INDEX kit_sanctions_ref_code ON kit_sanctions (ref_code) WHERE target_type = 'subject';
+CREATE INDEX kit_sanctions_by_group ON kit_sanctions (group_id);
+CREATE INDEX kit_sanctions_by_target ON kit_sanctions (target_type, target_value);
 `,
   },
 ];

@@ -37,7 +37,9 @@ export {
   applySanction,
   refCode,
   revokeSanction,
+  GAP_NOTE_MAX,
   SANCTION_KINDS,
+  SanctionError,
   SANCTION_SOURCES,
   SanctionIndex,
 } from './sanctions.js';
@@ -75,6 +77,7 @@ export {
   CATEGORY_TO_RULE,
   CommunityRules,
   defineRules,
+  parseRuleRef,
   rulesPolicyText,
   RulesError,
   STARTER_RULES,

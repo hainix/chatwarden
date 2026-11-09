@@ -56,7 +56,7 @@ async function sanction(
   return applySanction(
     e.store,
     e.subjects,
-    { kind, subject, includeIp, durationMs, reason: 'r', actor: 'mod', source: 'moderator', automated: false },
+    { kind, subject, includeIp, durationMs, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 1 },
     at,
   );
 }

@@ -158,6 +158,7 @@ describe('tiny-chat: one room, two players', () => {
       actor: 'mod@example.test',
       source: 'moderator',
       automated: false,
+      rule: 1,
     });
     a.say('still here');
     const refused = await a.next('refused');
@@ -191,6 +192,7 @@ describe('tiny-chat: edges', () => {
       actor: 'mod@example.test',
       source: 'moderator',
       automated: false,
+      rule: 1,
     });
     await first.close();
     const again = await Client.connect(`ws://127.0.0.1:${server.port}/?key=key-ban`);

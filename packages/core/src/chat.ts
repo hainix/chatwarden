@@ -343,6 +343,8 @@ export class ChatService {
             actor: 'auto',
             source: 'auto_filter',
             automated: true,
+            // The automatic timeout is for slurs: Community Rule 1.
+            rule: 1,
           },
           now,
           this.sanctions,

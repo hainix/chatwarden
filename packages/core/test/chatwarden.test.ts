@@ -267,6 +267,7 @@ describe('createChatwarden: sanctions and doors', () => {
     actor: 'mod@example.test',
     source: 'moderator' as const,
     automated: false,
+    rule: 1,
   });
 
   it('a chat sanction refuses the next line as restricted, with a time and no identifiers; revoke lifts it', async () => {
@@ -336,6 +337,7 @@ describe('createChatwarden: lifecycle', () => {
       actor: 'mod',
       source: 'moderator',
       automated: false,
+      rule: 1,
     });
     await first.cw.flush();
 

@@ -4,6 +4,7 @@ import {
   CATEGORY_TO_RULE,
   CommunityRules,
   defineRules,
+  parseRuleRef,
   rulesPolicyText,
   RulesError,
   STARTER_RULES,
@@ -285,5 +286,40 @@ describe('rulesPolicyText', () => {
       const rule = STARTER_RULES[i]!;
       expect(line).toBe(`CR ${rule.number}. ${rule.title}: ${rule.text}`);
     });
+  });
+});
+
+describe('parseRuleRef', () => {
+  it('reads a stored rule number and the uncovered marker', () => {
+    expect(parseRuleRef('1')).toBe(1);
+    expect(parseRuleRef('12')).toBe(12);
+    expect(parseRuleRef('uncovered')).toBe('uncovered');
+  });
+
+  it('round-trips every starter rule and uncovered through String()', () => {
+    for (const ref of [...STARTER_RULES.map((x) => x.number), 'uncovered' as const]) {
+      expect(parseRuleRef(String(ref))).toBe(ref);
+    }
+  });
+
+  it.each(['', ' ', '0', '-1', '1.5', '01', '1 ', ' 1', 'Uncovered', 'x', '1e2', '9007199254740993', 'NaN', '4.2'])(
+    'refuses %j',
+    (text) => {
+      expect(() => parseRuleRef(text)).toThrow(RulesError);
+    },
+  );
+
+  it('refuses a non-string', () => {
+    expect(() => parseRuleRef(null as never)).toThrow(RulesError);
+    expect(() => parseRuleRef(3 as never)).toThrow(RulesError);
+  });
+
+  it('does not echo the bad text in the error', () => {
+    try {
+      parseRuleRef('secret-xyz');
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).not.toContain('secret-xyz');
+    }
   });
 });

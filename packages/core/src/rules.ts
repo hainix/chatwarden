@@ -26,6 +26,20 @@ export class RulesError extends Error {
   }
 }
 
+/**
+ * Read a stored rule (`'1'`, `'12'` or `'uncovered'`) back into a `RuleRef`. The one conversion point between the
+ * TEXT a sanction row keeps and the typed value the rest of the code uses. Throws `RulesError` for anything else;
+ * the message never echoes the bad text.
+ */
+export function parseRuleRef(text: string): RuleRef {
+  if (text === 'uncovered') return 'uncovered';
+  if (typeof text === 'string' && /^[1-9][0-9]*$/.test(text)) {
+    const n = Number(text);
+    if (Number.isSafeInteger(n)) return n;
+  }
+  throw new RulesError('Not a stored rule reference');
+}
+
 export class CommunityRules {
   private readonly byNumber = new Map<number, CommunityRule>();
   private readonly sorted: CommunityRule[];

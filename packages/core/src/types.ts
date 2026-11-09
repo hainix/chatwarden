@@ -114,9 +114,11 @@ export interface SubjectIdRecord {
 
 /**
  * What a sanction restricts: `chat` (public chat), `area` (public areas:
- * public rooms and matchmaking; Moxgate's "open table"), or `ban` (everything).
+ * public rooms and matchmaking; Moxgate's "open table"), `ban` (everything), or
+ * `warning` (a recorded warning: it restricts nothing, never refuses at a door
+ * and is never in the sanction index; it has no end, so `endsAt === startsAt`).
  */
-export type SanctionKind = 'chat' | 'area' | 'ban';
+export type SanctionKind = 'chat' | 'area' | 'ban' | 'warning';
 
 /** Who or what imposed a sanction. */
 export type Source = 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai';
@@ -142,8 +144,15 @@ export interface SanctionRow {
   /** Epoch ms the row stops applying (it applies strictly before this); null = permanent. */
   endsAt: number | null;
   reason: string;
-  /** Rule number the sanction cites (filled by the rules layer), or null. */
+  /**
+   * The Community Rule the sanction cites, as TEXT: the number (`'1'`..) or `'uncovered'`. Null only on a row
+   * written before rules existed. `parseRuleRef` in rules.ts is the one conversion point.
+   */
   rule: string | null;
+  /** Private moderator note on a rule gap (a moderator sanction under `'uncovered'`); subject row only. */
+  gapNote: string | null;
+  /** Where that gap stands: `open` until someone makes it a rule (`ruled`) or decides it is not one. */
+  gapStatus: 'open' | 'ruled' | 'not_a_rule' | null;
   actor: string;
   source: Source;
   automated: boolean;
@@ -315,6 +324,16 @@ export interface Store {
 
   /** Every unrevoked row that has not ended by `now`, for rebuilding the sanction index. */
   loadSanctions(now: number): SanctionRow[];
+
+  /** Every subject row that carries a rule-gap note (any status, revoked or not), newest `startsAt` first. */
+  listGaps(): SanctionRow[];
+
+  /**
+   * Close an open rule gap: set its status (`ruled` with the new rule number as `ref`, or `not_a_rule` with a null
+   * `ref`). Returns true when this call closed it; false for an unknown group, a group with no note, or a gap that
+   * is already closed.
+   */
+  closeGap(groupId: string, status: 'ruled' | 'not_a_rule', ref: string | null, actor: string, at: number): boolean;
 
   // Mutes. SYNCHRONOUS on purpose (like sanctions): `MuteService.set` writes inside
   // `transaction`, then updates its in-memory index in the same tick.

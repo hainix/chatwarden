@@ -19,6 +19,11 @@ export interface StoredReportRow extends Omit<StoredReport, 'status'> {
 
 /** A stored sanction row plus its revocation, as the SQL table keeps it. */
 export interface StoredSanction extends SanctionRow {
+  /** The new rule a closed gap became (`ruled`), as text; null otherwise. */
+  gapRef: string | null;
+  /** Who closed the gap, and when; null while it is open. */
+  gapClosedBy: string | null;
+  gapClosedAt: number | null;
   revokedBy: string | null;
   revokedAt: number | null;
   revokeReason: string | null;
@@ -136,7 +141,7 @@ export class MemoryStore implements Store {
     const addedCode = owner === undefined;
     this.refOwners.set(first.refCode, first.groupId);
     for (const row of rows) {
-      this.sanctions.push({ ...row, revokedBy: null, revokedAt: null, revokeReason: null });
+      this.sanctions.push({ ...row, gapRef: null, gapClosedBy: null, gapClosedAt: null, revokedBy: null, revokedAt: null, revokeReason: null });
     }
     this.undoWith(() => {
       this.sanctions.length -= rows.length;
@@ -167,22 +172,54 @@ export class MemoryStore implements Store {
   loadSanctions(now: number): SanctionRow[] {
     return this.sanctions
       .filter((r) => r.revokedAt === null && (r.endsAt === null || r.endsAt > now))
-      .map((r) => ({
-        id: r.id,
-        groupId: r.groupId,
-        refCode: r.refCode,
-        kind: r.kind,
-        targetType: r.targetType,
-        value: r.value,
-        startsAt: r.startsAt,
-        endsAt: r.endsAt,
-        reason: r.reason,
-        rule: r.rule,
-        actor: r.actor,
-        source: r.source,
-        automated: r.automated,
-        pending: r.pending,
-      }));
+      .map((r) => this.sanctionRow(r));
+  }
+
+  private sanctionRow(r: StoredSanction): SanctionRow {
+    return {
+      id: r.id,
+      groupId: r.groupId,
+      refCode: r.refCode,
+      kind: r.kind,
+      targetType: r.targetType,
+      value: r.value,
+      startsAt: r.startsAt,
+      endsAt: r.endsAt,
+      reason: r.reason,
+      rule: r.rule,
+      gapNote: r.gapNote,
+      gapStatus: r.gapStatus,
+      actor: r.actor,
+      source: r.source,
+      automated: r.automated,
+      pending: r.pending,
+    };
+  }
+
+  listGaps(): SanctionRow[] {
+    // Newest first; insertion order breaks a tie, like SQLite's rowid.
+    return this.sanctions
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.targetType === 'subject' && r.gapNote !== null)
+      .sort((a, b) => b.r.startsAt - a.r.startsAt || b.i - a.i)
+      .map(({ r }) => this.sanctionRow(r));
+  }
+
+  closeGap(groupId: string, status: 'ruled' | 'not_a_rule', ref: string | null, actor: string, at: number): boolean {
+    if (status !== 'ruled' && status !== 'not_a_rule') throw new Error('closeGap: invalid status');
+    const row = this.sanctions.find((r) => r.groupId === groupId && r.targetType === 'subject');
+    if (row === undefined || row.gapNote === null || row.gapStatus !== 'open') return false;
+    row.gapStatus = status;
+    row.gapRef = ref;
+    row.gapClosedBy = actor;
+    row.gapClosedAt = at;
+    this.undoWith(() => {
+      row.gapStatus = 'open';
+      row.gapRef = null;
+      row.gapClosedBy = null;
+      row.gapClosedAt = null;
+    });
+    return true;
   }
 
   // Mutes (synchronous, see the Store interface)
