@@ -5,6 +5,7 @@ import {
   MatcherBuildError,
   type ExceptionRow,
   type Matcher,
+  type Span,
   type TermRow,
 } from './matcher.js';
 import { collapseLikePreset, foldPhrase, foldTerm } from './normalise.js';
@@ -61,7 +62,7 @@ const plainException = (r: ExceptionRecord): ExceptionRow => ({
 const isThenable = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && typeof (v as { then?: unknown }).then === 'function';
 
-const NEVER: Matcher = { match: () => null };
+const NEVER: Matcher = { match: () => null, spans: () => [] };
 
 /** Terms and exceptions share a shape apart from the word column, so one set of edit internals serves both. */
 interface Kind {
@@ -114,6 +115,11 @@ export class LiveTerms implements Matcher {
 
   match(text: string): { termId: string } | null {
     return this.current.match(text);
+  }
+
+  /** Every match as a range on the original text (end exclusive), for masking. Same rules as {@link match}. */
+  spans(text: string): Span[] {
+    return this.current.spans?.(text) ?? [];
   }
 
   /** Copies the pack into the store the first time this pack id is seen, then builds the matcher from the

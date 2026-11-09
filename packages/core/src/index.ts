@@ -26,6 +26,7 @@ export type {
   SubjectRecord,
 } from './types.js';
 export { hashWho, makeHasher } from './hasher.js';
+export { maskSpans, type MaskSpan } from './mask.js';
 export { SubjectIndex } from './subjects.js';
 export {
   EVIDENCE_MAX_AGE_MS,

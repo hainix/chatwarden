@@ -443,6 +443,12 @@ export interface Store {
  */
 export interface Matcher {
   match(text: string): { termId: string } | null;
+  /**
+   * Every match as a range on the ORIGINAL text (`end` exclusive), for masking a blocked line in a player
+   * notice. Optional: a matcher without it simply cannot mask, and the caller must then withhold the line.
+   * Empty exactly when `match` is null.
+   */
+  spans?(text: string): Array<{ start: number; end: number; termId: string }>;
 }
 
 // ---------------------------------------------------------------------------

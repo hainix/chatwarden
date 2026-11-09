@@ -7,13 +7,20 @@ import {
   stripInvisible,
   type Folded,
 } from './normalise.js';
+import { mergeSpans, stripWithMap, toOriginal, type Span } from './spans.js';
 
 /** A row of the term list: one whole word the matcher refuses. */
 export interface TermRow { id: string; term: string; language: string; active: boolean }
 /** A row of the exception list: a phrase whose match is suppressed. */
 export interface ExceptionRow { id: string; phrase: string; language: string; active: boolean }
-/** What a caller needs from a matcher: the id of the term row that matched, or null. */
-export interface Matcher { match(text: string): { termId: string } | null }
+export type { Span } from './spans.js';
+/** What a caller needs from a matcher: the id of the term row that matched, or null. `spans`, when present,
+ *  gives every match as a range on the ORIGINAL text (`end` exclusive, overlapping ranges merged, hidden
+ *  characters inside a hit included), so a caller can mask it. It is empty exactly when `match` is null. */
+export interface Matcher {
+  match(text: string): { termId: string } | null;
+  spans?(text: string): Span[];
+}
 
 /** Thrown for a malformed active term or exception row; the message names the row id. */
 export class MatcherBuildError extends Error {
@@ -121,7 +128,7 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
     phrases.push(normalisePhrase(row));
   }
 
-  if (terms.every((t) => !t.active)) return { match: () => null };
+  if (terms.every((t) => !t.active)) return { match: () => null, spans: () => [] };
 
   // No whitelistedTerms: exceptions are applied by isExcepted (word-bounded), not by obscenity.
   const matcher = new RegExpMatcher({
@@ -129,22 +136,40 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
     ...englishRecommendedTransformers,
   });
 
+  /** Every non-excepted hit of the text, as the matcher reads it (`stripInvisible` already applied), in
+   *  the order the passes find them. Lazy, so `match` can stop at the first. */
+  function* hits(text: string): Generator<{ startIndex: number; endIndex: number; termId: string }> {
+    const passes = LEET_PUNCTUATION.test(text) ? [text, text.replace(LEET_PUNCTUATION_ALL, ' ')] : [text];
+    // Exceptions are matched against the ORIGINAL text in both passes (pass 2 only swaps single
+    // characters for spaces, so its indices still line up), so a phrase may itself contain ! | ( / $ @.
+    const folded = phrases.length > 0 ? foldForExceptions(text) : null;
+    for (const pass of passes) {
+      for (const hit of matcher.getAllMatches(pass, true)) {
+        if (folded && isExcepted(hit, folded, phrases)) continue;
+        yield {
+          startIndex: hit.startIndex,
+          endIndex: hit.endIndex,
+          termId: dataset.getPayloadWithPhraseMetadata(hit).phraseMetadata!.rowId,
+        };
+      }
+    }
+  }
+
   return {
     match(raw: string) {
       // Everything below, hit ranges and exception edges included, works on this one view, so a hidden
       // character can neither split a term nor make an exception phrase look cleanly bounded.
-      const text = stripInvisible(raw);
-      const passes = LEET_PUNCTUATION.test(text) ? [text, text.replace(LEET_PUNCTUATION_ALL, ' ')] : [text];
-      // Exceptions are matched against the ORIGINAL text in both passes (pass 2 only swaps single
-      // characters for spaces, so its indices still line up), so a phrase may itself contain ! | ( / $ @.
-      const folded = phrases.length > 0 ? foldForExceptions(text) : null;
-      for (const pass of passes) {
-        for (const hit of matcher.getAllMatches(pass, true)) {
-          if (folded && isExcepted(hit, folded, phrases)) continue;
-          return { termId: dataset.getPayloadWithPhraseMetadata(hit).phraseMetadata!.rowId };
-        }
-      }
+      for (const hit of hits(stripInvisible(raw))) return { termId: hit.termId };
       return null;
+    },
+    spans(raw: string) {
+      // stripInvisible changes indices, so the view keeps where each of its characters came from.
+      const view = stripWithMap(raw);
+      const found: Span[] = [];
+      for (const hit of hits(view.text)) {
+        found.push({ ...toOriginal(view, hit.startIndex, hit.endIndex), termId: hit.termId });
+      }
+      return mergeSpans(found);
     },
   };
 }
