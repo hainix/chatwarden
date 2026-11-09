@@ -53,7 +53,7 @@ export interface GuidelineTier {
   examples: string[];
   /** The conduct levels (and optionally `repeated` and `after_warning`) this tier is about. */
   covers: GuidelineCover[];
-  /** Free text. A tier covering `banter` cannot state an action. */
+  /** Free text. */
   outcome: string;
 }
 
@@ -69,8 +69,11 @@ export interface ModerationProfile {
   summary: string;
   /** The first time, with a clean record. `banter` is always `'none'`. */
   firstOffense: Record<ConductLevel, Outcome>;
-  /** When notes add up to "repeated": `notes` notes in `windowDays` days (from distinct games if asked). */
-  repeat: { windowDays: number; notes: number; distinctGames: boolean };
+  /**
+   * When notes add up to "repeated": `notes` notes in `windowDays` days (from distinct games if asked), and what
+   * then happens. `outcome` must escalate: `'none'` and `'note'` are rejected.
+   */
+  repeat: { windowDays: number; notes: number; distinctGames: boolean; outcome: Outcome };
   /** Escalation after the first offense. Six rows, steps 0 to 5. */
   ladder: readonly LadderRow[];
   /** Ordinary swearing in chat. */
@@ -124,7 +127,7 @@ const TOP_KEYS = [
   'levels',
   'guidelines',
 ] as const;
-const REPEAT_KEYS = ['windowDays', 'notes', 'distinctGames'] as const;
+const REPEAT_KEYS = ['windowDays', 'notes', 'distinctGames', 'outcome'] as const;
 const PROFANITY_KEYS = ['mode', 'style', 'add', 'remove', 'only', 'languages'] as const;
 const OUTCOME_KEYS = ['kind', 'durationMs'] as const;
 const LEVEL_KEYS = ['meaning', 'examples'] as const;
@@ -142,8 +145,10 @@ const LADDER_ROWS = 6;
 const WORD_MAX = 40;
 const MAX_DEPTH = 24;
 
-/** Words that state an action. A banter tier may not use them: banter never punishes. */
-const ACTION_WORDS = /\b(warn\w*|note[sd]?|time-?outs?|restrict\w*|bans?|banned|banning|mut(?:e|es|ed)|suspen\w+|sanction\w*|kick\w*|strikes?|punish\w*)\b/i;
+/** The longest any duration may be: 100 years, so later date arithmetic cannot overflow. */
+export const MAX_DURATION_MS = 3_153_600_000_000;
+/** The longest `repeat.windowDays`: ten years. */
+export const MAX_WINDOW_DAYS = 3650;
 
 function fail(path: string, reason: string): never {
   throw new ProfileError(path, reason);
@@ -177,7 +182,9 @@ function positiveInt(v: unknown): v is number {
 }
 
 function duration(v: unknown, path: string): void {
-  if (v !== null && !positiveInt(v)) fail(path, 'must be a whole number of milliseconds above 0, or null for permanent');
+  if (v !== null && (!positiveInt(v) || v > MAX_DURATION_MS)) {
+    fail(path, 'must be a whole number of milliseconds above 0 and at most 100 years, or null for permanent');
+  }
 }
 
 function stringList(v: unknown, path: string): unknown[] {
@@ -249,10 +256,7 @@ function validateGuidelines(v: unknown, path: string): void {
         covered.add(c);
       }
     });
-    const outcomeText = text(t['outcome'], `${tp}.outcome`);
-    if (covers.includes('banter') && ACTION_WORDS.test(outcomeText)) {
-      fail(`${tp}.outcome`, 'cannot state an action for banter: banter never punishes');
-    }
+    text(t['outcome'], `${tp}.outcome`);
   });
   for (const level of CONDUCT_LEVELS) {
     if (!covered.has(level)) fail(path, `must cover every conduct level exactly once; ${level} is not covered`);
@@ -276,9 +280,15 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (first['banter'] !== 'none') fail('profile.firstOffense.banter', "must be 'none': banter never punishes");
 
   const repeat = obj(p['repeat'], 'profile.repeat', REPEAT_KEYS);
-  if (!positiveInt(repeat['windowDays'])) fail('profile.repeat.windowDays', 'must be a whole number of days ≥ 1');
+  if (!positiveInt(repeat['windowDays']) || repeat['windowDays'] > MAX_WINDOW_DAYS) {
+    fail('profile.repeat.windowDays', `must be a whole number of days from 1 to ${MAX_WINDOW_DAYS}`);
+  }
   if (!positiveInt(repeat['notes'])) fail('profile.repeat.notes', 'must be a whole number ≥ 1');
   if (typeof repeat['distinctGames'] !== 'boolean') fail('profile.repeat.distinctGames', 'must be true or false');
+  outcome(repeat['outcome'], 'profile.repeat.outcome');
+  if (repeat['outcome'] === 'none' || repeat['outcome'] === 'note') {
+    fail('profile.repeat.outcome', "must escalate: 'warning' or a chat, area or ban restriction");
+  }
 
   validateLadder(p['ladder'], 'profile.ladder');
 
@@ -380,6 +390,24 @@ const LEVELS: Record<ConductLevel, LevelDescription> = {
   },
 };
 
+/**
+ * Strict reads the table differently: here a mild insult is not banter, it is rude. Banter is only salt and jokes
+ * about play, with no insults and no swearing; any insult or swearing aimed at a player is rude. Hostile and severe
+ * mean the same as everywhere else.
+ */
+const STRICT_LEVELS: Record<ConductLevel, LevelDescription> = {
+  banter: {
+    meaning: 'Friendly salt and jokes about play, with no insults and no swearing',
+    examples: ['ez', 'gg', 'bad play', 'lol'],
+  },
+  rude: {
+    meaning: 'Any insult or swearing aimed at a player, even once',
+    examples: ['loser', "you're an idiot", 'go f— yourself'],
+  },
+  hostile: LEVELS.hostile,
+  severe: LEVELS.severe,
+};
+
 const DEFAULT_PROFANITY: ProfanityConfig = {
   mode: 'star',
   style: 'full',
@@ -399,7 +427,7 @@ const RELAXED: ModerationProfile = {
     hostile: 'warning',
     severe: { kind: 'chat', durationMs: 7 * DAY },
   },
-  repeat: { windowDays: 30, notes: 2, distinctGames: true },
+  repeat: { windowDays: 30, notes: 2, distinctGames: true, outcome: 'warning' },
   ladder: LADDER_TABLE,
   profanity: { ...DEFAULT_PROFANITY, mode: 'star' },
   aiContext:
@@ -464,7 +492,7 @@ const STANDARD: ModerationProfile = {
     hostile: { kind: 'chat', durationMs: DAY },
     severe: { kind: 'chat', durationMs: 7 * DAY },
   },
-  repeat: { windowDays: 30, notes: 2, distinctGames: false },
+  repeat: { windowDays: 30, notes: 2, distinctGames: false, outcome: { kind: 'chat', durationMs: DAY } },
   ladder: LADDER_TABLE,
   profanity: { ...DEFAULT_PROFANITY, mode: 'star' },
   aiContext:
@@ -535,34 +563,35 @@ const STRICT: ModerationProfile = {
     hostile: { kind: 'chat', durationMs: DAY },
     severe: { kind: 'ban', durationMs: 7 * DAY },
   },
-  repeat: { windowDays: 30, notes: 1, distinctGames: false },
+  repeat: { windowDays: 30, notes: 1, distinctGames: false, outcome: 'warning' },
   ladder: LADDER_TABLE,
   profanity: { ...DEFAULT_PROFANITY, mode: 'refuse' },
   aiContext:
-    'This is a game for younger players and families, and the aim is a kind space. Read salt and jokes about ' +
-    'play as banter, and take no action; swearing is stopped before it is sent and is never a violation. Read ' +
-    'insults and abuse aimed at a player as rude. Read several insults, bullying, picking a fight or following ' +
+    'This is a game for younger players and families, and the aim is a kind space. Read only friendly salt and ' +
+    'jokes about play ("ez", "gg", "bad play") as banter, and take no action; swearing is stopped before it is ' +
+    'sent and is never a violation. Read any insult or swearing aimed at a player, even a mild one such as ' +
+    '"loser", as rude. Read several insults, bullying, picking a fight or following ' +
     'someone across games as hostile. Read threats, hate, slurs, attacks on who someone is, sexual harassment ' +
     'and doxxing as severe. Judge the pattern across the reported lines, and when unsure choose the milder level.',
   aiAutoAct: ['hostile', 'severe'],
   rules: 'strict',
-  levels: LEVELS,
+  levels: STRICT_LEVELS,
   guidelines: [
     {
       title: 'Banter',
       description:
-        'Salt and jokes about play. Swearing is stopped before it is sent, and that is not a violation.',
-      examples: ['ez', 'loser'],
+        'Friendly salt and jokes about play, with no insults. Swearing is stopped before it is sent, and that is not a violation.',
+      examples: ['ez', 'gg', 'bad play', 'lol'],
       covers: ['banter'],
       outcome: 'No action. Nothing is recorded.',
     },
     {
       title: 'Rudeness',
       description:
-        'Insults or abuse aimed at a player, even once. Any earlier note on the record makes it repeated.',
-      examples: ['go f— yourself'],
+        'Any insult or swearing aimed at a player, even once. Any earlier note on the record makes it repeated.',
+      examples: ['loser', "you're an idiot", 'go f— yourself'],
       covers: ['rude', 'repeated'],
-      outcome: 'Chat restricted for 1 hour.',
+      outcome: 'First time: chat restricted for 1 hour. Repeated (any earlier note on the record): a warning.',
     },
     {
       title: 'Bullying',

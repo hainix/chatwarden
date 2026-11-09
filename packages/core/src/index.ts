@@ -124,6 +124,8 @@ export type {
 } from './decide.js';
 export {
   defineProfile,
+  MAX_DURATION_MS,
+  MAX_WINDOW_DAYS,
   PRESETS,
   ProfileError,
   resolveProfile,

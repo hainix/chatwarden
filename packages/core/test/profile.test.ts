@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   defineProfile,
+  MAX_DURATION_MS,
+  MAX_WINDOW_DAYS,
   PRESETS,
   ProfileError,
   resolveProfile,
@@ -84,9 +86,14 @@ describe('the presets equal the standards doc tables, cell by cell', () => {
   });
 
   it('repeat rules', () => {
-    expect(PRESETS.relaxed.repeat).toEqual({ windowDays: 30, notes: 2, distinctGames: true });
-    expect(PRESETS.standard.repeat).toEqual({ windowDays: 30, notes: 2, distinctGames: false });
-    expect(PRESETS.strict.repeat).toEqual({ windowDays: 30, notes: 1, distinctGames: false });
+    expect(PRESETS.relaxed.repeat).toEqual({ windowDays: 30, notes: 2, distinctGames: true, outcome: 'warning' });
+    expect(PRESETS.standard.repeat).toEqual({
+      windowDays: 30,
+      notes: 2,
+      distinctGames: false,
+      outcome: { kind: 'chat', durationMs: DAY },
+    });
+    expect(PRESETS.strict.repeat).toEqual({ windowDays: 30, notes: 1, distinctGames: false, outcome: 'warning' });
   });
 
   it('profanity modes and defaults', () => {
@@ -118,8 +125,8 @@ describe('the presets equal the standards doc tables, cell by cell', () => {
     expect(PRESETS.strict.rules).toBe('strict');
   });
 
-  it('the conduct table: meanings and corrected examples', () => {
-    for (const p of Object.values(PRESETS)) {
+  it('the conduct table: meanings and corrected examples (relaxed and standard)', () => {
+    for (const p of [PRESETS.relaxed, PRESETS.standard]) {
       expect(Object.keys(p.levels).sort()).toEqual([...CONDUCT_LEVELS].sort());
       expect(p.levels.banter.meaning).toBe(
         'Trash talk, salt, jokes about play, profanity not aimed at a person, a single mild insult',
@@ -145,11 +152,47 @@ describe('the presets equal the standards doc tables, cell by cell', () => {
     }
   });
 
-  it("'loser' and \"you're an idiot\" are banter; 'go f— yourself' is rude", () => {
-    expect(PRESETS.relaxed.levels.banter.examples).toContain('loser');
-    expect(PRESETS.relaxed.levels.banter.examples).toContain("you're an idiot");
-    expect(PRESETS.relaxed.levels.rude.examples).toContain('go f— yourself');
-    expect(PRESETS.relaxed.levels.rude.examples.join(' ')).not.toMatch(/fuck/i);
+  it("relaxed and standard: 'loser' and \"you're an idiot\" are banter; rude is the doc's own wording", () => {
+    for (const p of [PRESETS.relaxed, PRESETS.standard]) {
+      expect(p.levels.banter.examples).toContain('loser');
+      expect(p.levels.banter.examples).toContain("you're an idiot");
+      expect(p.levels.rude.examples).toEqual(['go f\u2014 yourself']);
+    }
+  });
+
+  it('strict reads mild insults as rude: its own banter and rude levels (R10)', () => {
+    const l = PRESETS.strict.levels;
+    expect(l.banter.examples).toEqual(['ez', 'gg', 'bad play', 'lol']);
+    expect(l.banter.meaning).toBe('Friendly salt and jokes about play, with no insults and no swearing');
+    expect(l.rude.meaning).toBe('Any insult or swearing aimed at a player, even once');
+    expect(l.rude.examples).toEqual(['loser', "you're an idiot", 'go f\u2014 yourself']);
+    for (const insult of l.rude.examples) expect(l.banter.examples).not.toContain(insult);
+    expect(l.hostile).toEqual(PRESETS.relaxed.levels.hostile);
+    expect(l.severe).toEqual(PRESETS.relaxed.levels.severe);
+    // The strict guidelines and AI context agree with that reading.
+    expect(PRESETS.strict.guidelines[0]!.examples).toEqual(['ez', 'gg', 'bad play', 'lol']);
+    const rude = PRESETS.strict.guidelines[1]!;
+    expect(rude.examples).toEqual(['loser', "you're an idiot", 'go f\u2014 yourself']);
+    expect(rude.outcome).toBe(
+      'First time: chat restricted for 1 hour. Repeated (any earlier note on the record): a warning.',
+    );
+    expect(PRESETS.strict.aiContext).toContain('"loser"');
+    expect(PRESETS.strict.aiContext).toContain('as rude');
+    expect(PRESETS.strict.aiContext).not.toContain('single mild insult as banter');
+  });
+
+  it('every preset keeps the doc wording for hostile and severe', () => {
+    for (const p of Object.values(PRESETS)) {
+      expect(p.levels.hostile.examples).toEqual([
+        'three insults in one game',
+        'insulting the same player again next game',
+      ]);
+      expect(p.levels.severe.examples).toEqual([
+        'any slur',
+        "I'll find you",
+        'anything about race or religion as an attack',
+      ]);
+    }
   });
 
   it('aiContext is a non-empty plain-language standard', () => {
@@ -210,9 +253,26 @@ describe('preset guidelines tiers', () => {
     }
   });
 
-  it('guideline examples carry no real profanity or slur', () => {
-    const all = JSON.stringify(Object.values(PRESETS).map((p) => p.guidelines));
-    expect(all).not.toMatch(/fuck|shit|bitch|cunt/i);
+  it('guideline examples are drawn from the doc wording only', () => {
+    const allowed = new Set<string>([
+      'ez',
+      'loser',
+      "you're an idiot",
+      "lol you're trash at this",
+      'damn it',
+      'gg',
+      'bad play',
+      'lol',
+      'go f\u2014 yourself',
+      'three insults in one game',
+      'insulting the same player again next game',
+      'any slur',
+      "I'll find you",
+      'anything about race or religion as an attack',
+    ]);
+    for (const p of Object.values(PRESETS)) {
+      for (const g of p.guidelines) for (const ex of g.examples) expect(allowed.has(ex)).toBe(true);
+    }
   });
 });
 
@@ -254,7 +314,7 @@ describe('resolveProfile: overrides', () => {
   it('a deep override keeps siblings at every depth', () => {
     const r = resolveProfile('relaxed', { profanity: { mode: 'allow' }, repeat: { notes: 3 } });
     expect(r.profanity).toEqual({ ...PRESETS.relaxed.profanity, mode: 'allow' });
-    expect(r.repeat).toEqual({ windowDays: 30, notes: 3, distinctGames: true });
+    expect(r.repeat).toEqual({ windowDays: 30, notes: 3, distinctGames: true, outcome: 'warning' });
     const lv = resolveProfile('relaxed', { levels: { rude: { examples: ['one'] } } });
     expect(lv.levels.rude.meaning).toBe(PRESETS.relaxed.levels.rude.meaning);
     expect(lv.levels.rude.examples).toEqual(['one']);
@@ -345,7 +405,7 @@ describe('resolveProfile: overrides', () => {
   it('validates the MERGED result', () => {
     const e = failure(() => resolveProfile('relaxed', { repeat: { windowDays: 0 } }));
     expect(e.path).toBe('profile.repeat.windowDays');
-    expect(e.message).toBe('profile.repeat.windowDays must be a whole number of days ≥ 1');
+    expect(e.message).toBe('profile.repeat.windowDays must be a whole number of days from 1 to 3650');
   });
 
   it('a prototype-pollution key is carried as an unknown key and rejected', () => {
@@ -394,7 +454,7 @@ describe('defineProfile', () => {
     name: 'My Game',
     summary: 'Be good.',
     firstOffense: { banter: 'none', rude: 'warning', hostile: { kind: 'chat', durationMs: HOUR }, severe: 'warning' },
-    repeat: { windowDays: 14, notes: 3, distinctGames: false },
+    repeat: { windowDays: 14, notes: 3, distinctGames: false, outcome: 'warning' },
     ladder: LADDER_TABLE,
     profanity: { mode: 'allow', style: 'grawlix', add: ['glarn'], remove: [], only: null, languages: ['en'] },
     aiContext: 'Be gentle with banter. Act only on clear threats.',
@@ -614,12 +674,75 @@ describe('validation: the repeat rule', () => {
 
   it('boundaries: 1 passes', () => {
     const r = resolveProfile('relaxed', { repeat: { windowDays: 1, notes: 1 } });
-    expect(r.repeat).toEqual({ windowDays: 1, notes: 1, distinctGames: true });
+    expect(r.repeat).toEqual({ windowDays: 1, notes: 1, distinctGames: true, outcome: 'warning' });
   });
 
   it('distinctGames must be a boolean', () => {
     expect(invalid((p) => (p.repeat.distinctGames = 'yes')).path).toBe('profile.repeat.distinctGames');
     expect(invalid((p) => (p.repeat.distinctGames = 1)).path).toBe('profile.repeat.distinctGames');
+  });
+
+  it("repeat.outcome: 'warning' and restrictions are valid, 'none' and 'note' are not (a repeat must escalate)", () => {
+    const good = [
+      'warning',
+      { kind: 'chat', durationMs: DAY },
+      { kind: 'area', durationMs: HOUR },
+      { kind: 'ban', durationMs: null },
+    ] as const;
+    for (const outcome of good) {
+      expect(resolveProfile('strict', { repeat: { outcome } }).repeat.outcome).toEqual(outcome);
+    }
+    for (const bad of ['none', 'note']) {
+      const e = invalid((p) => (p.repeat.outcome = bad));
+      expect(e.path).toBe('profile.repeat.outcome');
+      expect(e.message).toContain('escalate');
+    }
+  });
+
+  it('repeat.outcome failures land at the right path', () => {
+    const at = (v: unknown) => invalid((p) => (p.repeat.outcome = v)).path;
+    expect(invalid((p) => delete p.repeat.outcome).path).toBe('profile.repeat.outcome');
+    expect(at('ban')).toBe('profile.repeat.outcome');
+    expect(at(5)).toBe('profile.repeat.outcome');
+    expect(at(null)).toBe('profile.repeat.outcome');
+    expect(at({ kind: 'mute', durationMs: DAY })).toBe('profile.repeat.outcome.kind');
+    expect(at({ kind: 'warning', durationMs: null })).toBe('profile.repeat.outcome.kind');
+    expect(at({ kind: 'chat' })).toBe('profile.repeat.outcome.durationMs');
+    expect(at({ kind: 'chat', durationMs: 0 })).toBe('profile.repeat.outcome.durationMs');
+    expect(at({ kind: 'chat', durationMs: 1.5 })).toBe('profile.repeat.outcome.durationMs');
+    expect(at({ kind: 'chat', durationMs: MAX_DURATION_MS + 1 })).toBe('profile.repeat.outcome.durationMs');
+  });
+
+  it('an override of repeat.outcome keeps its siblings', () => {
+    const r = resolveProfile('relaxed', { repeat: { outcome: 'warning' } });
+    expect(r.repeat).toEqual(PRESETS.relaxed.repeat);
+    expect(r.repeat.notes).toBe(2);
+    const std = resolveProfile('standard', { repeat: { outcome: { durationMs: HOUR } } });
+    expect(std.repeat).toEqual({ ...PRESETS.standard.repeat, outcome: { kind: 'chat', durationMs: HOUR } });
+  });
+
+  it('windowDays is capped at 3650 days; the boundary passes', () => {
+    expect(MAX_WINDOW_DAYS).toBe(3650);
+    expect(resolveProfile('relaxed', { repeat: { windowDays: 3650 } }).repeat.windowDays).toBe(3650);
+    expect(invalid((p) => (p.repeat.windowDays = 3651)).path).toBe('profile.repeat.windowDays');
+    expect(invalid((p) => (p.repeat.windowDays = Number.MAX_SAFE_INTEGER)).path).toBe('profile.repeat.windowDays');
+  });
+
+  it('every durationMs is capped at 100 years; the boundary passes (outcomes and ladder cells)', () => {
+    expect(MAX_DURATION_MS).toBe(100 * 365 * DAY);
+    const ok = resolveProfile('relaxed', { firstOffense: { severe: { kind: 'ban', durationMs: MAX_DURATION_MS } } });
+    expect(ok.firstOffense.severe).toEqual({ kind: 'ban', durationMs: MAX_DURATION_MS });
+    const over = invalid((p) => (p.firstOffense.severe = { kind: 'ban', durationMs: MAX_DURATION_MS + 1 }));
+    expect(over.path).toBe('profile.firstOffense.severe.durationMs');
+    expect(invalid((p) => (p.ladder[2].high.durationMs = MAX_DURATION_MS + 1)).path).toBe(
+      'profile.ladder[2].high.durationMs',
+    );
+    expect(invalid((p) => (p.ladder[2].high.durationMs = Number.MAX_SAFE_INTEGER)).path).toBe(
+      'profile.ladder[2].high.durationMs',
+    );
+    const atCap = copy(PRESETS.relaxed) as { ladder: Array<{ high: { durationMs: number } }> };
+    atCap.ladder[2]!.high.durationMs = MAX_DURATION_MS;
+    expect(() => defineProfile(atCap as unknown as ModerationProfile)).not.toThrow();
   });
 
   it('the message names the unit', () => {
@@ -779,38 +902,15 @@ describe('validation: guidelines tiers', () => {
     expect(invalid((p) => (p.guidelines = {})).path).toBe('profile.guidelines');
   });
 
-  it('a tier covering banter cannot state an action', () => {
-    for (const outcome of [
-      'Warning',
-      'We will warn them',
-      'Add a note to their record',
-      'Chat restriction for an hour',
-      'Timeout',
-      'A ban',
-      'Mute them',
-      'Suspend the player',
-    ]) {
-      const e = invalid((p) => (p.guidelines[0].outcome = outcome));
-      expect(e.path).toBe('profile.guidelines[0].outcome');
-      expect(e.message).not.toContain(outcome);
+  it('outcome is free text: any non-empty string is accepted, on any tier', () => {
+    for (const outcome of ['None', 'No action.', 'Whatever the team wants to say', 'A ban for a week']) {
+      for (const i of [0, 3]) {
+        const r = resolveProfile('relaxed', {
+          guidelines: PRESETS.relaxed.guidelines.map((g, j) => (j === i ? { ...g, outcome } : g)),
+        });
+        expect(r.guidelines[i]!.outcome).toBe(outcome);
+      }
     }
-  });
-
-  it('a banter tier may say no action, none, dismissed, nothing', () => {
-    for (const outcome of ['None', 'No action.', 'Dismissed, nothing recorded', 'Let it slide']) {
-      const r = resolveProfile('relaxed', {
-        guidelines: PRESETS.relaxed.guidelines.map((g, i) => (i === 0 ? { ...g, outcome } : g)),
-      });
-      expect(r.guidelines[0]!.outcome).toBe(outcome);
-    }
-  });
-
-  it('a tier not covering banter may state any action', () => {
-    expect(PRESETS.relaxed.guidelines[1]!.outcome.length).toBeGreaterThan(0);
-    const r = resolveProfile('relaxed', {
-      guidelines: PRESETS.relaxed.guidelines.map((g, i) => (i === 3 ? { ...g, outcome: 'A ban for a week' } : g)),
-    });
-    expect(r.guidelines[3]!.outcome).toBe('A ban for a week');
   });
 });
 
@@ -830,7 +930,6 @@ describe('errors never echo values that could be chat text', () => {
       (p) => (p.profanity.only = [secret.repeat(5)]),
       (p) => (p.rules = secret),
       (p) => (p.guidelines[0].covers = [secret]),
-      (p) => (p.guidelines[0].outcome = secret + ' warning'),
       (p) => (p.ladder[0].lowMedium.kind = secret),
       (p) => (p.ladder[0].step = secret),
       (p) => (p.levels.rude.examples = [secret, 5]),
@@ -852,14 +951,5 @@ describe('ProfileError', () => {
     expect(e.name).toBe('ProfileError');
     expect(e.path).toBe('profile.x');
     expect(e.message).toBe('profile.x is wrong');
-  });
-});
-
-describe('the examples in the presets never carry a real slur', () => {
-  it('only the doc wording is used for rude', () => {
-    for (const p of Object.values(PRESETS)) {
-      const text = JSON.stringify(p);
-      expect(text).not.toMatch(/fuck|shit|cunt|bitch/i);
-    }
   });
 });
