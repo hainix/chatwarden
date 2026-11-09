@@ -8,13 +8,18 @@ export type {
   Platform,
   Matcher,
   MuteRow,
+  NoticeKind,
+  NoticeRow,
   RawWho,
   ReportActivity,
+  DecisionRow,
   ReportCategory,
   ReportExcerptLine,
+  ReportRecord,
   SanctionKind,
   SanctionRow,
   SanctionTargetType,
+  Severity,
   Source,
   Store,
   SubjectId,
@@ -25,6 +30,7 @@ export type {
   SubjectRecord,
 } from './types.js';
 export { hashWho, makeHasher } from './hasher.js';
+export { maskSpans, type MaskSpan } from './mask.js';
 export { SubjectIndex } from './subjects.js';
 export {
   EVIDENCE_MAX_AGE_MS,
@@ -37,11 +43,13 @@ export {
   applySanction,
   refCode,
   revokeSanction,
+  GAP_NOTE_MAX,
   SANCTION_KINDS,
+  SanctionError,
   SANCTION_SOURCES,
   SanctionIndex,
 } from './sanctions.js';
-export type { ActiveSanction, SanctionInput } from './sanctions.js';
+export type { ActiveSanction, SanctionInput, WrittenSanction } from './sanctions.js';
 export { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from './mutes.js';
 export {
   REPEAT_LOOKBACK_MS,
@@ -69,5 +77,47 @@ export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { purge, RETENTION_DEFAULTS } from './retention.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
+export {
+  ExcerptError,
+  NOTICE_EXCERPT_MAX,
+  NOTICE_RECORD_WINDOW_MS,
+  NoticeService,
+  ownLines,
+} from './notices.js';
+export type {
+  ExcerptErrorCode,
+  NoticeCreateOptions,
+  NoticeServiceDeps,
+  PlayerNotice,
+  SanctionNoticeInput,
+} from './notices.js';
 export { createChatwarden } from './chatwarden.js';
-export type { Chatwarden, ChatwardenOptions } from './chatwarden.js';
+export type { Chatwarden, ChatwardenOptions, GapRow } from './chatwarden.js';
+export {
+  CATEGORY_TO_RULE,
+  CommunityRules,
+  defineRules,
+  parseRuleRef,
+  rulesPolicyText,
+  RulesError,
+  STARTER_RULES,
+} from './rules.js';
+export type { CommunityRule, RuleRef } from './rules.js';
+export {
+  actionStep,
+  HISTORY_LOOKBACK_MS,
+  historyOf,
+  LADDER_TABLE,
+  recordStep,
+  suggestAction,
+} from './ladder.js';
+export type { ActionRecord, LadderCell, LadderRow, LadderStep } from './ladder.js';
+export { DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
+export type {
+  DecisionAction,
+  DecisionGroup,
+  DecisionInput,
+  DecisionResult,
+  DecisionServiceDeps,
+  RevokeDeps,
+} from './decide.js';

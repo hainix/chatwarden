@@ -1,5 +1,6 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import type { Identifiers, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
+import type { RuleRef } from './rules.js';
 import type { SubjectIndex } from './subjects.js';
 
 // A sanction is written as one GROUP of rows tied by `groupId` and `refCode`: one row for the canonical
@@ -11,7 +12,21 @@ import type { SubjectIndex } from './subjects.js';
 export type { SanctionKind, Source } from './types.js';
 
 /** Every kind a sanction can have. The `kit_sanctions` CHECK constraint lists the same values. */
-export const SANCTION_KINDS: readonly SanctionKind[] = ['chat', 'area', 'ban'];
+export const SANCTION_KINDS: readonly SanctionKind[] = ['chat', 'area', 'ban', 'warning'];
+
+/** The longest rule-gap note, after trimming. */
+export const GAP_NOTE_MAX = 500;
+
+/**
+ * A sanction input that fails validation. The message names the problem only: never a subject, a key, a rule-gap
+ * note or any other value from the input.
+ */
+export class SanctionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SanctionError';
+  }
+}
 
 /** Every source a sanction can come from. */
 export const SANCTION_SOURCES: readonly Source[] = ['moderator', 'auto_filter', 'coop', 'api', 'ai'];
@@ -29,17 +44,25 @@ export interface SanctionInput {
   kind: SanctionKind;
   /** The person to sanction; stored as its canonical (surviving) subject. */
   subject: SubjectId;
-  /** Also write one IP row: the subject's most recently seen IP, capped at 24 h. */
+  /** Also write one IP row: the subject's most recently seen IP, capped at 24 h. Must be false for a warning. */
   includeIp: boolean;
-  /** Milliseconds from now; null is permanent. Must be finite and above 0. */
+  /** Milliseconds from now; null is permanent. Must be finite and above 0. Must be null for a warning. */
   durationMs: number | null;
   /** Private moderator note. Never returned to a player. */
   reason: string;
   actor: string;
   source: Source;
   automated: boolean;
-  /** Rule number the sanction cites (the rules layer fills it). */
-  rule?: string;
+  /**
+   * The Community Rule the sanction cites: a rule number, or `'uncovered'` when none fits. Stored as TEXT. Absent
+   * means `'uncovered'`.
+   */
+  rule?: RuleRef;
+  /**
+   * Private note saying what the rules did not cover. Required (non-empty, at most 500 characters after trimming)
+   * when the rule is `'uncovered'` and the source is `moderator`; otherwise it must be absent. Never shown to a player.
+   */
+  gapNote?: string;
 }
 
 /** What `active` tells the chat path. No reason, rule, actor or identifier. */
@@ -49,6 +72,17 @@ export interface ActiveSanction {
   automated: boolean;
   groupId: string;
   refCode: string;
+  /**
+   * The cited rule as stored text (`'1'`.. or `'uncovered'`), null for a row written before rules existed. Read it
+   * with `parseRuleRef`. A rule number only; the private gap note is never here.
+   */
+  rule: string | null;
+  /**
+   * True when the person asked about is the one the sanction is on (a row on their canonical subject, or an IP row of
+   * a group that also has such a row). False when only a shared IP row matched: a bystander. Only a person's own
+   * sanction may point them at its rule or notice.
+   */
+  own: boolean;
 }
 
 const newId = (): string => randomBytes(16).toString('base64url');
@@ -60,15 +94,57 @@ export function refCode(): string {
   return out;
 }
 
-function validate(input: SanctionInput): void {
+/** What `validate` settles: the rule as stored text, and the trimmed gap note (null when there is none). */
+interface Checked {
+  rule: string;
+  gapNote: string | null;
+}
+
+/**
+ * Check a sanction input without writing anything. Throws {@link SanctionError} exactly where `applySanction` would
+ * (the same checks, run first). Lets a caller that writes several sanctions in one transaction refuse the whole
+ * batch before the first write.
+ */
+export function validateSanctionInput(input: SanctionInput): void {
+  validate(input);
+}
+
+function validate(input: SanctionInput): Checked {
   const d = input.durationMs;
-  if (d !== null && (!Number.isFinite(d) || d <= 0)) {
+  if (input.kind === 'warning') {
+    // A warning has no end and no IP: it is a record, not a restriction.
+    if (d !== null) throw new SanctionError('applySanction: a warning has no duration');
+    if (input.includeIp) throw new SanctionError('applySanction: a warning has no IP row');
+  } else if (d !== null && (!Number.isFinite(d) || d <= 0)) {
     // NaN would otherwise store NULL (a silent permanent ban); zero or less is an already-expired row.
-    throw new Error(`applySanction: invalid duration ${d}`);
+    throw new SanctionError(`applySanction: invalid duration ${d}`);
   }
-  if (!SANCTION_KINDS.includes(input.kind)) throw new Error('applySanction: invalid kind');
-  if (!SANCTION_SOURCES.includes(input.source)) throw new Error('applySanction: invalid source');
-  if (typeof input.subject !== 'string' || input.subject === '') throw new Error('applySanction: missing subject');
+  if (!SANCTION_KINDS.includes(input.kind)) throw new SanctionError('applySanction: invalid kind');
+  if (!SANCTION_SOURCES.includes(input.source)) throw new SanctionError('applySanction: invalid source');
+  if (typeof input.subject !== 'string' || input.subject === '') throw new SanctionError('applySanction: missing subject');
+
+  const ref: unknown = input.rule === undefined ? 'uncovered' : input.rule;
+  const numbered = typeof ref === 'number' && Number.isSafeInteger(ref) && ref >= 1;
+  if (ref !== 'uncovered' && !numbered) throw new SanctionError('applySanction: invalid rule');
+
+  const note: unknown = input.gapNote;
+  if (ref === 'uncovered' && input.source === 'moderator') {
+    const trimmed = typeof note === 'string' ? note.trim() : '';
+    if (trimmed === '') throw new SanctionError('applySanction: a rule-gap note is required when no rule is cited');
+    if (trimmed.length > GAP_NOTE_MAX) throw new SanctionError('applySanction: the rule-gap note is too long');
+    return { rule: 'uncovered', gapNote: trimmed };
+  }
+  if (note !== undefined) throw new SanctionError('applySanction: a rule-gap note is only for an uncovered moderator sanction');
+  return { rule: String(ref), gapNote: null };
+}
+
+/** What {@link writeSanction} wrote: the group's handle and the rows, for the caller to hand to the index. */
+export interface WrittenSanction {
+  groupId: string;
+  refCode: string;
+  rows: SanctionRow[];
+  /** Epoch ms the subject row ends; null = permanent. A warning ends where it starts. */
+  endsAt: number | null;
 }
 
 function applyNow(
@@ -76,16 +152,15 @@ function applyNow(
   subjects: SubjectIndex,
   input: SanctionInput,
   now: number,
-  index: SanctionIndex | undefined,
-): { groupId: string; refCode: string } {
-  validate(input);
+  pending: boolean,
+): WrittenSanction {
+  const { rule, gapNote } = validate(input);
   const subject = subjects.canonical(input.subject);
-  const endsAt = input.durationMs === null ? null : now + input.durationMs;
+  // A warning has no end: it ends where it starts, so it is never "still running".
+  const endsAt = input.kind === 'warning' ? now : input.durationMs === null ? null : now + input.durationMs;
   const ipEndsAt = endsAt === null ? now + IP_MAX_MS : Math.min(endsAt, now + IP_MAX_MS);
   const ip = input.includeIp ? subjects.latestIp(subject) : null;
   const groupId = newId();
-  // Informational: `active()` already returns null while disabled and the row applies once it is re-enabled.
-  const pending = index !== undefined && !index.isEnabled();
 
   const build = (code: string): SanctionRow[] => {
     const base = {
@@ -94,24 +169,33 @@ function applyNow(
       kind: input.kind,
       startsAt: now,
       reason: input.reason,
-      rule: input.rule ?? null,
+      rule,
       actor: input.actor,
       source: input.source,
       automated: input.automated,
       pending,
     };
-    const rows: SanctionRow[] = [{ ...base, id: newId(), targetType: 'subject', value: subject, endsAt }];
-    if (ip !== null) rows.push({ ...base, id: newId(), targetType: 'ip', value: ip, endsAt: ipEndsAt });
+    // The gap note lives on the subject row only: one gap per sanction group.
+    const subjectRow: SanctionRow = {
+      ...base,
+      id: newId(),
+      targetType: 'subject',
+      value: subject,
+      endsAt,
+      gapNote,
+      gapStatus: gapNote === null ? null : 'open',
+    };
+    const rows: SanctionRow[] = [subjectRow];
+    if (ip !== null) {
+      rows.push({ ...base, id: newId(), targetType: 'ip', value: ip, endsAt: ipEndsAt, gapNote: null, gapStatus: null });
+    }
     return rows;
   };
 
   for (let attempt = 0; attempt < REF_ATTEMPTS; attempt++) {
     const rows = build(refCode());
     const written = store.transaction(() => store.insertSanctionGroup(rows));
-    if (written) {
-      index?.add(rows, now);
-      return { groupId, refCode: rows[0]?.refCode ?? '' };
-    }
+    if (written) return { groupId, refCode: rows[0]?.refCode ?? '', rows, endsAt };
   }
   throw new Error('applySanction: could not allocate a unique ref code');
 }
@@ -134,10 +218,29 @@ export function applySanction(
   index?: SanctionIndex,
 ): Promise<{ groupId: string; refCode: string }> {
   try {
-    return Promise.resolve(applyNow(store, subjects, input, now, index));
+    // Informational: `active()` already returns null while disabled and the row applies once it is re-enabled.
+    const written = applyNow(store, subjects, input, now, index !== undefined && !index.isEnabled());
+    index?.add(written.rows, now);
+    return Promise.resolve({ groupId: written.groupId, refCode: written.refCode });
   } catch (err) {
     return Promise.reject(err);
   }
+}
+
+/**
+ * Write one sanction group to the store and return its rows, WITHOUT touching any index. For a caller that writes
+ * several things in one `store.transaction` and must only show the rows to the index once that transaction has
+ * committed (`index.add(written.rows, now)`). Same validation and rows as {@link applySanction}; `pending` is the
+ * value to record (true when enforcement is off). Synchronous; throws {@link SanctionError} on a bad input.
+ */
+export function writeSanction(
+  store: Store,
+  subjects: SubjectIndex,
+  input: SanctionInput,
+  now: number,
+  pending: boolean,
+): WrittenSanction {
+  return applyNow(store, subjects, input, now, pending);
 }
 
 /**
@@ -170,6 +273,7 @@ interface IndexRow {
   automated: boolean;
   groupId: string;
   refCode: string;
+  rule: string | null;
 }
 
 /** Sweep expired rows out of the index after this many `add` calls. */
@@ -229,12 +333,15 @@ export class SanctionIndex {
    * The strongest active sanction of `kind` for this person: rows that name
    * their canonical subject, plus IP rows for `ids.ipHash`. Permanent beats
    * timed, otherwise the later end wins. Null when none apply or when
-   * `enabled()` is false. The result carries no reason, rule, actor or
+   * `enabled()` is false. The result carries no reason, actor or
    * identifier.
    */
   active(kind: SanctionKind, ids: Identifiers, subject: SubjectId | null, now: number): ActiveSanction | null {
     if (!this.enabled()) return null;
+    // A warning restricts nothing and is never indexed.
+    if (kind === 'warning') return null;
     let best: IndexRow | null = null;
+    const ownGroups = new Set<string>();
     const consider = (list: readonly IndexRow[] | undefined): void => {
       for (const r of list ?? []) {
         if (r.startsAt > now || (r.endsAt !== null && r.endsAt <= now)) continue;
@@ -246,7 +353,9 @@ export class SanctionIndex {
     if (subject !== null && subjectRows !== undefined) {
       const root = this.subjects.canonical(subject);
       for (const [stored, list] of subjectRows) {
-        if (this.subjects.canonical(stored) === root) consider(list);
+        if (this.subjects.canonical(stored) !== root) continue;
+        for (const r of list) ownGroups.add(r.groupId);
+        consider(list);
       }
     }
     const ip = ids.ipHash;
@@ -255,10 +364,18 @@ export class SanctionIndex {
     const found = best as IndexRow | null;
     return found === null
       ? null
-      : { until: found.endsAt, automated: found.automated, groupId: found.groupId, refCode: found.refCode };
+      : {
+          until: found.endsAt,
+          automated: found.automated,
+          groupId: found.groupId,
+          refCode: found.refCode,
+          rule: found.rule,
+          own: ownGroups.has(found.groupId),
+        };
   }
 
   private insert(row: SanctionRow): void {
+    if (row.kind === 'warning') return;
     const table = row.targetType === 'subject' ? this.bySubject : this.byIp;
     let byValue = table.get(row.kind);
     if (byValue === undefined) table.set(row.kind, (byValue = new Map()));
@@ -270,6 +387,7 @@ export class SanctionIndex {
       automated: row.automated,
       groupId: row.groupId,
       refCode: row.refCode,
+      rule: row.rule,
     });
   }
 

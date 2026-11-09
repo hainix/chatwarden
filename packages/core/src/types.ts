@@ -114,9 +114,11 @@ export interface SubjectIdRecord {
 
 /**
  * What a sanction restricts: `chat` (public chat), `area` (public areas:
- * public rooms and matchmaking; Moxgate's "open table"), or `ban` (everything).
+ * public rooms and matchmaking), `ban` (everything), or
+ * `warning` (a recorded warning: it restricts nothing, never refuses at a door
+ * and is never in the sanction index; it has no end, so `endsAt === startsAt`).
  */
-export type SanctionKind = 'chat' | 'area' | 'ban';
+export type SanctionKind = 'chat' | 'area' | 'ban' | 'warning';
 
 /** Who or what imposed a sanction. */
 export type Source = 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai';
@@ -142,14 +144,32 @@ export interface SanctionRow {
   /** Epoch ms the row stops applying (it applies strictly before this); null = permanent. */
   endsAt: number | null;
   reason: string;
-  /** Rule number the sanction cites (filled by the rules layer), or null. */
+  /**
+   * The Community Rule the sanction cites, as TEXT: the number (`'1'`..) or `'uncovered'`. Null only on a row
+   * written before rules existed. `parseRuleRef` in rules.ts is the one conversion point.
+   */
   rule: string | null;
+  /** Private moderator note on a rule gap (a moderator sanction under `'uncovered'`); subject row only. */
+  gapNote: string | null;
+  /** Where that gap stands: `open` until someone makes it a rule (`ruled`) or decides it is not one. */
+  gapStatus: 'open' | 'ruled' | 'not_a_rule' | null;
   actor: string;
   source: Source;
   automated: boolean;
   /** True when written while sanctions enforcement was off. Informational. */
   pending: boolean;
+  /**
+   * Epoch ms the group was revoked. Set only by `loadSubjectActions` (revoked rows come back there, flagged); every
+   * other load leaves the property off.
+   */
+  revokedAt?: number | null;
 }
+
+/**
+ * How serious a piece of behaviour is, as the AI read (K3) or a moderator rates it. The escalation ladder reads it:
+ * `'none'` is treated exactly like `'low'`.
+ */
+export type Severity = 'high' | 'medium' | 'low' | 'none';
 
 // ---------------------------------------------------------------------------
 // Mutes (storage shape)
@@ -217,6 +237,7 @@ export interface ReportExcerptLine {
  * One stored report. `reporterSubject` and `targetSubject` are the CANONICAL subject ids at submit time (a later
  * merge is resolved at query time). `people` lists the distinct canonical subjects who wrote a line in the
  * excerpt, in first-seen order. Private: only moderation tools read it, and it never reaches a player.
+ * Carries subject ids: staff channels only, never send to a player.
  */
 export interface StoredReport {
   id: string;
@@ -239,12 +260,69 @@ export interface StoredReport {
   status: 'open';
 }
 
+/**
+ * A stored report as the moderator tools see it: the intake fields plus where a decision left it. `status` is
+ * `open` until `closeReport` moves it to `actioned` or `dismissed`; the `actioned*` and `modNote` fields are null
+ * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
+ * Private: moderator tools only.
+ */
+export interface ReportRecord extends Omit<StoredReport, 'status'> {
+  status: 'open' | 'actioned' | 'dismissed';
+  badFaith: boolean;
+  actionedAt: number | null;
+  actionedBy: string | null;
+  modNote: string | null;
+}
+
+/**
+ * One recorded moderator decision, kept so the same decision sent twice is a replay and not a second action.
+ * `key` is a hash of the report and the decision; `resultJson` is what the first call answered.
+ */
+export interface DecisionRow {
+  key: string;
+  reportId: string;
+  /** Epoch ms. */
+  at: number;
+  resultJson: string;
+}
+
 /** The light projection of a report the intake rules count: who reported whom, where and when. */
 export interface ReportActivity {
   reporter: SubjectId;
   target: SubjectId;
   roomId: string;
   createdAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// Notices (storage shape)
+// ---------------------------------------------------------------------------
+
+/** What a player notice is about: a sanction of that kind, or the outcome of a report the player filed. */
+export type NoticeKind = 'warning' | 'chat' | 'area' | 'ban' | 'report_outcome';
+
+/**
+ * One stored player notice. `subject` is the CANONICAL subject at write time (a later merge is resolved at query
+ * time). `excerpt` is already the player-safe text (own lines only, blocked terms masked, day only): the raw line is
+ * never stored here. `rule` is the cited rule as TEXT (`'1'`.. or `'uncovered'`), like a sanction row. Private: the
+ * only shape that reaches a player is `PlayerNotice`.
+ */
+export interface NoticeRow {
+  /** Random, never derived. */
+  id: string;
+  subject: SubjectId;
+  /** The sanction group this notice is about; null for a report outcome. */
+  groupId: string | null;
+  kind: NoticeKind;
+  rule: string | null;
+  /** Epoch ms the sanction ends; null = permanent (or a warning, or a report outcome). */
+  until: number | null;
+  refCode: string | null;
+  excerpt: Array<{ text: string; day: string }>;
+  /** Epoch ms. */
+  createdAt: number;
+  ackedAt: number | null;
+  withdrawnAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +394,22 @@ export interface Store {
   /** Every unrevoked row that has not ended by `now`, for rebuilding the sanction index. */
   loadSanctions(now: number): SanctionRow[];
 
+  /**
+   * Every SUBJECT row (never an IP row) with `startsAt >= since`, revoked and ended ones included, oldest write first.
+   * Each row carries `revokedAt` (null when unrevoked). The history behind the escalation ladder.
+   */
+  loadSubjectActions(since: number): SanctionRow[];
+
+  /** Every subject row that carries a rule-gap note (any status, revoked or not), newest `startsAt` first. */
+  listGaps(): SanctionRow[];
+
+  /**
+   * Close an open rule gap: set its status (`ruled` with the new rule number as `ref`, or `not_a_rule` with a null
+   * `ref`). Returns true when this call closed it; false for an unknown group, a group with no note, or a gap that
+   * is already closed.
+   */
+  closeGap(groupId: string, status: 'ruled' | 'not_a_rule', ref: string | null, actor: string, at: number): boolean;
+
   // Mutes. SYNCHRONOUS on purpose (like sanctions): `MuteService.set` writes inside
   // `transaction`, then updates its in-memory index in the same tick.
 
@@ -361,6 +455,28 @@ export interface Store {
    */
   insertReport(row: StoredReport): boolean;
 
+  /** One report with its decision columns, or null when there is none by that id. */
+  loadReport(id: string): ReportRecord | null;
+
+  /**
+   * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`.
+   * Returns true when this call closed it; false (nothing changed) for an unknown report or one already closed.
+   */
+  closeReport(
+    id: string,
+    status: 'actioned' | 'dismissed',
+    badFaith: boolean,
+    actor: string,
+    at: number,
+    note: string,
+  ): boolean;
+
+  /** Record a decision. A `key` that is already recorded throws (nothing is written). */
+  insertDecision(key: string, reportId: string, at: number, resultJson: string): void;
+
+  /** The recorded decision for `key`, or null. */
+  findDecision(key: string): DecisionRow | null;
+
   /** Who reported whom (light rows, no excerpt) for every report created at or after `since`, oldest first. */
   loadReportActivity(since: number): ReportActivity[];
 
@@ -376,15 +492,20 @@ export interface Store {
    */
   loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }>;
 
-  // Retention. SYNCHRONOUS on purpose: `purge` runs all four inside one `transaction`. Each deletes rows
+  // Retention. SYNCHRONOUS on purpose: `purge` runs all five inside one `transaction`. Each deletes rows
   // strictly older than the cutoff (epoch ms) and returns how many it deleted.
 
-  /** Delete reports with `createdAt < before`. */
-  purgeReports(before: number): number;
+  /**
+   * Delete reports with `createdAt < before`, except a bad-faith dismissal still inside its window
+   * (`bad_faith = 1` and `actionedAt >= keepBadFaithSince`): the reporter's suspension reads it. Also deletes the
+   * recorded decisions of reports that no longer exist. Returns how many reports it deleted.
+   */
+  purgeReports(before: number, keepBadFaithSince: number): number;
 
   /**
    * Delete sanction rows that ended (`endsAt` set and `< before`) or were revoked (`revokedAt < before`).
-   * A permanent, unrevoked row is never deleted.
+   * A permanent, unrevoked row is never deleted, and neither is a row whose rule gap is still `open`: the gap
+   * is the moderators' to-do and needs its note.
    */
   purgeSanctions(before: number): number;
 
@@ -393,6 +514,40 @@ export interface Store {
 
   /** Delete mutes with `createdAt < before`. */
   purgeMutes(before: number): number;
+
+  /**
+   * Delete a notice when it was withdrawn and has `createdAt < before`; or was seen, is a `warning` or
+   * `report_outcome`, and has `createdAt < before`; or its end is past (`until` set and `< before`). A notice for a
+   * permanent or still-running sanction is never deleted while it applies, and an unseen warning is kept until it
+   * is seen or withdrawn.
+   */
+  purgeNotices(before: number): number;
+
+  // Notices. SYNCHRONOUS on purpose (like sanctions): `NoticeService` runs these inside `transaction`.
+
+  /** Insert one notice. A duplicate id throws. */
+  insertNotice(row: NoticeRow): void;
+
+  /**
+   * Every notice (seen, unseen and withdrawn) stored under any of these subject ids, oldest first (`createdAt`, then
+   * write order). The caller passes a person's stored ids (a canonical subject and the ones merged into it).
+   */
+  loadNotices(subjects: readonly SubjectId[]): NoticeRow[];
+
+  /** Mark a notice seen at `at`. Returns true only when this call did it: not when already seen, withdrawn or unknown. */
+  ackNotice(id: string, at: number): boolean;
+
+  /** Withdraw every not-yet-withdrawn notice of the group at `at`. Returns how many this call withdrew. */
+  withdrawNoticeGroup(groupId: string, at: number): number;
+
+  /**
+   * The newest notice of a sanction group that is not withdrawn (newest by `createdAt`, then write order), or null
+   * when the group has none. Seen or not. `subject` is the stored (possibly since merged) subject the notice is for,
+   * so a caller can check it is the asking person's own. Private: never shown to a player.
+   */
+  findNoticeForGroup(
+    groupId: string,
+  ): { id: string; subject: SubjectId; ackedAt: number | null; withdrawnAt: number | null } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -407,6 +562,12 @@ export interface Store {
  */
 export interface Matcher {
   match(text: string): { termId: string } | null;
+  /**
+   * Every match as a range on the ORIGINAL text (`end` exclusive), for masking a blocked line in a player
+   * notice. Optional: a matcher without it simply cannot mask, and the caller must then withhold the line.
+   * Empty exactly when `match` is null.
+   */
+  spans?(text: string): Array<{ start: number; end: number; termId: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -416,8 +577,15 @@ export interface Matcher {
 /**
  * What the adopter game or chat server supplies. `identify` reads whatever a connection looks like in the
  * adopter stack (a request, a socket, a session) and returns who is behind it, RAW (see {@link RawWho}).
- * K2 adds an optional `notify` here for delivering notices.
+ * `notify` is optional: it is how the kit tells your client that a player has notices waiting.
  */
 export interface Platform {
   identify(ctx: unknown): RawWho;
+  /**
+   * Told after a notice is written, with the person's SUBJECT ID and how many notices are pending. The subject id is
+   * an identifier: use it only to find that player's live connection on your server, then send the client the
+   * notices (`notices.pending`), never the id. Map back from the subject on the server only. Fenced: a throw or a
+   * rejection is logged (`notices.notify_failed`) and never reaches the caller. Called with the platform as `this`.
+   */
+  notify?(who: SubjectId, event: { type: 'notice_pending'; count: number }): void | PromiseLike<unknown>;
 }

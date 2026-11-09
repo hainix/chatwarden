@@ -64,6 +64,7 @@ function setup(opts: { store?: MemoryStore } = {}) {
         actor: 'auto',
         source: over.source ?? 'auto_filter',
         automated: over.automated ?? true,
+        rule: 1,
       },
       t,
     );

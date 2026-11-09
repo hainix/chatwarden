@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { DoorService } from '../src/doors.js';
 import { makeHasher } from '../src/hasher.js';
 import { applySanction, revokeSanction, SanctionIndex, type SanctionInput } from '../src/sanctions.js';
+import { NoticeService } from '../src/notices.js';
+import { CommunityRules, STARTER_RULES } from '../src/rules.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Hasher, Logger, RawWho, SanctionKind, SubjectId } from '../src/types.js';
 import { MemoryStore } from './memoryStore.js';
@@ -50,6 +52,7 @@ function setup(opts: { enabled?: () => boolean } = {}) {
         actor: 'mod@x.com',
         source: 'moderator',
         automated: false,
+        rule: 1,
         ...over,
       },
       clock.t,
@@ -118,7 +121,7 @@ describe('DoorService: public and matchmaking refuse an area ban or a ban', () =
     expect(t.doors.check(door, who)).toBeNull();
   });
 
-  it('an area ban keeps them off public tables but not off friends tables', async () => {
+  it('an area ban keeps them off public rooms but not off private rooms', async () => {
     const t = setup();
     await t.ban(t.seat(who), 'area');
     expect(t.doors.check('public', who)).not.toBeNull();
@@ -330,7 +333,7 @@ describe('DoorService: what a refusal carries', () => {
   it('has exactly kind, until and refCode: no reason, identifier, hash or subject id', async () => {
     const t = setup();
     const s = t.seat({ clientKey: 'tok-secret', accountId: 'acct-secret', ip: IP });
-    await t.ban(s, 'ban', { includeIp: true, rule: '4.2' });
+    await t.ban(s, 'ban', { includeIp: true, rule: 4 });
     const res = t.doors.check('join', { clientKey: 'tok-secret', accountId: 'acct-secret', ip: IP });
     expect(res).not.toBeNull();
     expect(Object.keys(res ?? {}).sort()).toEqual(['kind', 'refCode', 'until']);
@@ -443,5 +446,209 @@ describe('DoorService: a failure lets the caller through and never throws', () =
       console.warn = orig;
     }
     expect(seen[0]?.[0]).toBe('doors.check_failed');
+  });
+});
+
+describe('DoorService: a warning never refuses at a door', () => {
+  const doorKinds = ['join', 'create', 'public', 'matchmaking'] as const;
+
+  it.each(doorKinds)('%s lets a warned person through, with and without an IP', async (door) => {
+    const t = setup();
+    const s = t.seat(who);
+    await t.ban(s, 'warning', { durationMs: null });
+    expect(t.doors.check(door, who)).toBeNull();
+    // Another browser of the same person, and a stranger on the same IP.
+    expect(t.doors.check(door, { clientKey: 'tok-1' })).toBeNull();
+    expect(t.doors.check(door, { ip: IP })).toBeNull();
+  });
+
+  it.each(doorKinds)('%s lets a person with several warnings through', async (door) => {
+    const t = setup();
+    const s = t.seat(who);
+    for (let i = 0; i < 3; i++) await t.ban(s, 'warning', { durationMs: null });
+    expect(t.doors.check(door, who)).toBeNull();
+  });
+
+  it('a warning does not hide a real ban of the same person', async () => {
+    const t = setup();
+    const s = t.seat(who);
+    await t.ban(s, 'warning', { durationMs: null });
+    await t.ban(s, 'ban');
+    expect(t.doors.check('join', who)).toMatchObject({ kind: 'ban' });
+  });
+});
+
+describe('DoorService: a refusal points at the notice', () => {
+  function withNotices(over: { notices?: NoticeService } = {}) {
+    const t = setup();
+    const notices = new NoticeService({
+      store: t.store,
+      subjects: t.subjects,
+      rules: new CommunityRules(STARTER_RULES),
+      clock: t.clock,
+      logger: { warn() {} },
+    });
+    const doors = new DoorService({
+      hasher: t.hasher,
+      subjects: t.subjects,
+      sanctions: t.sanctions,
+      clock: t.clock,
+      logger: t.logger,
+      notices: over.notices ?? notices,
+    });
+    const notice = (subject: SubjectId, g: { groupId: string; refCode: string }, kind: 'ban' | 'area', until: number | null) =>
+      notices.createForSanction({ groupId: g.groupId, refCode: g.refCode, kind, until, rule: 1, subject }, [], { notify: false });
+    return { ...t, doors, notices, notice };
+  }
+  const who: RawWho = { clientKey: 'tok-1' };
+
+  it('a ban refusal carries the notice id of its group', async () => {
+    const t = withNotices();
+    const s = t.seat(who);
+    const g = await t.ban(s, 'ban');
+    const id = t.notice(s, g, 'ban', NOW + H);
+    expect(t.doors.check('join', who)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode, noticeId: id });
+  });
+
+  it('an area refusal carries the notice id of its group', async () => {
+    const t = withNotices();
+    const s = t.seat(who);
+    const g = await t.ban(s, 'area');
+    const id = t.notice(s, g, 'area', NOW + H);
+    expect(t.doors.check('public', who)).toEqual({ kind: 'area', until: NOW + H, refCode: g.refCode, noticeId: id });
+  });
+
+  it('with the longer of two sanctions reported, the notice is the one for that group', async () => {
+    const t = withNotices();
+    const s = t.seat(who);
+    const shortG = await t.ban(s, 'ban', { durationMs: H });
+    const longG = await t.ban(s, 'ban', { durationMs: 3 * H });
+    t.notice(s, shortG, 'ban', NOW + H);
+    const longId = t.notice(s, longG, 'ban', NOW + 3 * H);
+    expect(t.doors.check('join', who)).toMatchObject({ refCode: longG.refCode, noticeId: longId });
+  });
+
+  it('a refusal with no notice for the group omits noticeId', async () => {
+    const t = withNotices();
+    await t.ban(t.seat(who), 'ban');
+    const r = t.doors.check('join', who);
+    expect(r).not.toBeNull();
+    expect('noticeId' in (r as object)).toBe(false);
+  });
+
+  it('a withdrawn notice is not pointed at', async () => {
+    const t = withNotices();
+    const s = t.seat(who);
+    const g = await t.ban(s, 'ban');
+    t.notice(s, g, 'ban', NOW + H);
+    t.notices.withdrawGroup(g.groupId);
+    expect('noticeId' in (t.doors.check('join', who) as object)).toBe(false);
+  });
+
+  it('without a notices service the refusal is exactly as before', async () => {
+    const t = setup();
+    const g = await t.ban(t.seat(who), 'ban');
+    expect(t.doors.check('join', who)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+  });
+
+  it('a broken notices lookup still refuses, without a notice id, and logs the class only', async () => {
+    const broken = {
+      noticeIdForGroup: () => {
+        throw new TypeError('db gone');
+      },
+    } as unknown as NoticeService;
+    const t = withNotices({ notices: broken });
+    const g = await t.ban(t.seat(who), 'ban');
+    expect(t.doors.check('join', who)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+    expect(t.logged).toContainEqual(['doors.notice_lookup_failed', { error: 'TypeError' }]);
+  });
+
+  it('a person with no sanction still gets through (control)', () => {
+    const t = withNotices();
+    t.seat(who);
+    expect(t.doors.check('join', who)).toBeNull();
+  });
+
+  it('no refusal carries an identifier', async () => {
+    const t = withNotices();
+    const s = t.seat({ clientKey: 'tok-1', accountId: 'acct-1' });
+    const g = await t.ban(s, 'ban');
+    t.notice(s, g, 'ban', NOW + H);
+    const text = JSON.stringify(t.doors.check('join', { clientKey: 'tok-1', accountId: 'acct-1', ip: IP }));
+    for (const secret of [s, 'tok-1', 'acct-1', IP, g.groupId]) expect(text).not.toContain(secret);
+  });
+});
+
+describe('DoorService R19: a bystander on a shared IP gets no notice id', () => {
+  function shared() {
+    const t = setup();
+    const notices = new NoticeService({
+      store: t.store,
+      subjects: t.subjects,
+      rules: new CommunityRules(STARTER_RULES),
+      clock: t.clock,
+      logger: { warn() {} },
+    });
+    const doors = new DoorService({
+      hasher: t.hasher,
+      subjects: t.subjects,
+      sanctions: t.sanctions,
+      clock: t.clock,
+      logger: t.logger,
+      notices,
+    });
+    return { ...t, doors, notices };
+  }
+  const offenderWho: RawWho = { clientKey: 'tok-off', ip: IP };
+  const bystanderWho: RawWho = { clientKey: 'tok-by', ip: IP };
+
+  async function offend(t: ReturnType<typeof shared>) {
+    const s = t.seat(offenderWho);
+    t.seat(bystanderWho);
+    const g = await t.ban(s, 'ban', { includeIp: true });
+    const id = t.notices.createForSanction(
+      { groupId: g.groupId, refCode: g.refCode, kind: 'ban', until: NOW + H, rule: 1, subject: s },
+      [],
+      { notify: false },
+    );
+    return { s, g, id };
+  }
+
+  it('the bystander is refused but gets no noticeId', async () => {
+    const t = shared();
+    const { g } = await offend(t);
+    expect(t.doors.check('join', bystanderWho)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+  });
+
+  it('a person with no known identity on the shared address is refused with no noticeId', async () => {
+    const t = shared();
+    const { g } = await offend(t);
+    expect(t.doors.check('join', { ip: IP })).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode });
+  });
+
+  it('the offender still gets the noticeId', async () => {
+    const t = shared();
+    const { g, id } = await offend(t);
+    expect(t.doors.check('join', offenderWho)).toEqual({ kind: 'ban', until: NOW + H, refCode: g.refCode, noticeId: id });
+  });
+
+  it('an alias of the offender (a new key linked by account) still gets the noticeId', async () => {
+    const t = shared();
+    const s = t.seat({ clientKey: 'tok-off', accountId: 'acct-off', ip: IP });
+    t.seat(bystanderWho);
+    const g = await t.ban(s, 'ban', { includeIp: true });
+    const id = t.notices.createForSanction(
+      { groupId: g.groupId, refCode: g.refCode, kind: 'ban', until: NOW + H, rule: 1, subject: s },
+      [],
+      { notify: false },
+    );
+    const alias = t.seat({ clientKey: 'tok-off-2', accountId: 'acct-off' });
+    expect(t.subjects.canonical(alias)).toBe(t.subjects.canonical(s));
+    expect(t.doors.check('join', { clientKey: 'tok-off-2', accountId: 'acct-off' })).toEqual({
+      kind: 'ban',
+      until: NOW + H,
+      refCode: g.refCode,
+      noticeId: id,
+    });
   });
 });

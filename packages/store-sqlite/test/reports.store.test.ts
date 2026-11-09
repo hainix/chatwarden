@@ -296,6 +296,7 @@ describe('loadAutoChatGroups', () => {
         actor: 'a',
         source: over.source ?? 'auto_filter',
         automated: (over.source ?? 'auto_filter') === 'auto_filter',
+        rule: 1,
       },
       at,
     );

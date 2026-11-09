@@ -1,6 +1,9 @@
 import type {
+  DecisionRow,
   MuteRow,
+  NoticeRow,
   ReportActivity,
+  ReportRecord,
   SanctionRow,
   Store,
   StoredReport,
@@ -10,15 +13,16 @@ import type {
   SubjectRecord,
 } from '../src/types.js';
 
-/** A report plus the moderation columns K2 will fill (modelled here so the intake rules can be tested). */
-export interface StoredReportRow extends Omit<StoredReport, 'status'> {
-  status: 'open' | 'actioned' | 'dismissed';
-  badFaith: boolean;
-  actionedAt: number | null;
-}
+/** A report plus the moderation columns a decision fills. */
+export type StoredReportRow = ReportRecord;
 
 /** A stored sanction row plus its revocation, as the SQL table keeps it. */
 export interface StoredSanction extends SanctionRow {
+  /** The new rule a closed gap became (`ruled`), as text; null otherwise. */
+  gapRef: string | null;
+  /** Who closed the gap, and when; null while it is open. */
+  gapClosedBy: string | null;
+  gapClosedAt: number | null;
   revokedBy: string | null;
   revokedAt: number | null;
   revokeReason: string | null;
@@ -40,6 +44,10 @@ export class MemoryStore implements Store {
   protected strikes: StrikeRow[] = [];
   /** Reports in insertion order; `insertReport` enforces UNIQUE (reporter, target, room). */
   protected reports: StoredReportRow[] = [];
+  /** Recorded decisions by key. */
+  protected decisions = new Map<string, DecisionRow>();
+  /** Notices in insertion order (stands in for SQLite's rowid). */
+  protected notices: NoticeRow[] = [];
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -136,7 +144,7 @@ export class MemoryStore implements Store {
     const addedCode = owner === undefined;
     this.refOwners.set(first.refCode, first.groupId);
     for (const row of rows) {
-      this.sanctions.push({ ...row, revokedBy: null, revokedAt: null, revokeReason: null });
+      this.sanctions.push({ ...row, gapRef: null, gapClosedBy: null, gapClosedAt: null, revokedBy: null, revokedAt: null, revokeReason: null });
     }
     this.undoWith(() => {
       this.sanctions.length -= rows.length;
@@ -167,22 +175,60 @@ export class MemoryStore implements Store {
   loadSanctions(now: number): SanctionRow[] {
     return this.sanctions
       .filter((r) => r.revokedAt === null && (r.endsAt === null || r.endsAt > now))
-      .map((r) => ({
-        id: r.id,
-        groupId: r.groupId,
-        refCode: r.refCode,
-        kind: r.kind,
-        targetType: r.targetType,
-        value: r.value,
-        startsAt: r.startsAt,
-        endsAt: r.endsAt,
-        reason: r.reason,
-        rule: r.rule,
-        actor: r.actor,
-        source: r.source,
-        automated: r.automated,
-        pending: r.pending,
-      }));
+      .map((r) => this.sanctionRow(r));
+  }
+
+  loadSubjectActions(since: number): SanctionRow[] {
+    return this.sanctions
+      .filter((r) => r.targetType === 'subject' && r.startsAt >= since)
+      .map((r) => ({ ...this.sanctionRow(r), revokedAt: r.revokedAt }));
+  }
+
+  private sanctionRow(r: StoredSanction): SanctionRow {
+    return {
+      id: r.id,
+      groupId: r.groupId,
+      refCode: r.refCode,
+      kind: r.kind,
+      targetType: r.targetType,
+      value: r.value,
+      startsAt: r.startsAt,
+      endsAt: r.endsAt,
+      reason: r.reason,
+      rule: r.rule,
+      gapNote: r.gapNote,
+      gapStatus: r.gapStatus,
+      actor: r.actor,
+      source: r.source,
+      automated: r.automated,
+      pending: r.pending,
+    };
+  }
+
+  listGaps(): SanctionRow[] {
+    // Newest first; insertion order breaks a tie, like SQLite's rowid.
+    return this.sanctions
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.targetType === 'subject' && r.gapNote !== null)
+      .sort((a, b) => b.r.startsAt - a.r.startsAt || b.i - a.i)
+      .map(({ r }) => this.sanctionRow(r));
+  }
+
+  closeGap(groupId: string, status: 'ruled' | 'not_a_rule', ref: string | null, actor: string, at: number): boolean {
+    if (status !== 'ruled' && status !== 'not_a_rule') throw new Error('closeGap: invalid status');
+    const row = this.sanctions.find((r) => r.groupId === groupId && r.targetType === 'subject');
+    if (row === undefined || row.gapNote === null || row.gapStatus !== 'open') return false;
+    row.gapStatus = status;
+    row.gapRef = ref;
+    row.gapClosedBy = actor;
+    row.gapClosedAt = at;
+    this.undoWith(() => {
+      row.gapStatus = 'open';
+      row.gapRef = null;
+      row.gapClosedBy = null;
+      row.gapClosedAt = null;
+    });
+    return true;
   }
 
   // Mutes (synchronous, see the Store interface)
@@ -256,11 +302,48 @@ export class MemoryStore implements Store {
       (r) => r.reporterSubject === row.reporterSubject && r.targetSubject === row.targetSubject && r.roomId === row.roomId,
     );
     if (dup) return false;
-    this.reports.push({ ...structuredClone(row), badFaith: false, actionedAt: null });
+    this.reports.push({ ...structuredClone(row), badFaith: false, actionedAt: null, actionedBy: null, modNote: null });
     this.undoWith(() => {
       this.reports.length -= 1;
     });
     return true;
+  }
+
+  loadReport(id: string): ReportRecord | null {
+    const r = this.reports.find((x) => x.id === id);
+    return r === undefined ? null : structuredClone(r);
+  }
+
+  closeReport(
+    id: string,
+    status: 'actioned' | 'dismissed',
+    badFaith: boolean,
+    actor: string,
+    at: number,
+    note: string,
+  ): boolean {
+    const r = this.reports.find((x) => x.id === id);
+    if (r === undefined || r.status !== 'open') return false;
+    if (status !== 'actioned' && status !== 'dismissed') throw new Error('closeReport: invalid status');
+    const before = { status: r.status, badFaith: r.badFaith, actionedAt: r.actionedAt, actionedBy: r.actionedBy, modNote: r.modNote };
+    r.status = status;
+    r.badFaith = badFaith;
+    r.actionedAt = at;
+    r.actionedBy = actor;
+    r.modNote = note;
+    this.undoWith(() => Object.assign(r, before));
+    return true;
+  }
+
+  insertDecision(key: string, reportId: string, at: number, resultJson: string): void {
+    if (this.decisions.has(key)) throw new Error('UNIQUE constraint failed: kit_decisions.key');
+    this.decisions.set(key, { key, reportId, at, resultJson });
+    this.undoWith(() => this.decisions.delete(key));
+  }
+
+  findDecision(key: string): DecisionRow | null {
+    const d = this.decisions.get(key);
+    return d === undefined ? null : { ...d };
   }
 
   loadReportActivity(since: number): ReportActivity[] {
@@ -299,13 +382,22 @@ export class MemoryStore implements Store {
   // Retention (synchronous, see the Store interface). Each removes rows in place and journals an undo that
   // restores the previous contents.
 
-  purgeReports(before: number): number {
+  purgeReports(before: number, keepBadFaithSince: number): number {
     const snapshot = [...this.reports];
-    const kept = snapshot.filter((r) => r.createdAt >= before);
+    const kept = snapshot.filter(
+      (r) => r.createdAt >= before || (r.badFaith && r.actionedAt !== null && r.actionedAt >= keepBadFaithSince),
+    );
     const n = snapshot.length - kept.length;
     if (n > 0) {
       this.reports.splice(0, this.reports.length, ...kept);
-      this.undoWith(() => this.reports.splice(0, this.reports.length, ...snapshot));
+      // A decision outlives only its report.
+      const alive = new Set(kept.map((r) => r.id));
+      const dropped = [...this.decisions.values()].filter((d) => !alive.has(d.reportId));
+      for (const d of dropped) this.decisions.delete(d.key);
+      this.undoWith(() => {
+        this.reports.splice(0, this.reports.length, ...snapshot);
+        for (const d of dropped) this.decisions.set(d.key, d);
+      });
     }
     return n;
   }
@@ -314,7 +406,8 @@ export class MemoryStore implements Store {
     const snapshot = [...this.sanctions];
     const owners = new Map(this.refOwners);
     const kept = snapshot.filter(
-      (r) => !((r.endsAt !== null && r.endsAt < before) || (r.revokedAt !== null && r.revokedAt < before)),
+      (r) =>
+        r.gapStatus === 'open' || !((r.endsAt !== null && r.endsAt < before) || (r.revokedAt !== null && r.revokedAt < before)),
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
@@ -352,21 +445,93 @@ export class MemoryStore implements Store {
     return n;
   }
 
+  // Notices (synchronous, see the Store interface)
+
+  insertNotice(row: NoticeRow): void {
+    if (this.notices.some((n) => n.id === row.id)) throw new Error('UNIQUE constraint failed: kit_notices.id');
+    this.notices.push(structuredClone(row));
+    this.undoWith(() => {
+      this.notices.length -= 1;
+    });
+  }
+
+  loadNotices(subjects: readonly SubjectId[]): NoticeRow[] {
+    const want = new Set(subjects);
+    return this.notices
+      .map((n, i) => ({ n, i }))
+      .filter(({ n }) => want.has(n.subject))
+      .sort((a, b) => a.n.createdAt - b.n.createdAt || a.i - b.i)
+      .map(({ n }) => structuredClone(n));
+  }
+
+  ackNotice(id: string, at: number): boolean {
+    const n = this.notices.find((x) => x.id === id);
+    if (n === undefined || n.ackedAt !== null || n.withdrawnAt !== null) return false;
+    n.ackedAt = at;
+    this.undoWith(() => {
+      n.ackedAt = null;
+    });
+    return true;
+  }
+
+  findNoticeForGroup(
+    groupId: string,
+  ): { id: string; subject: SubjectId; ackedAt: number | null; withdrawnAt: number | null } | null {
+    let best: NoticeRow | null = null;
+    for (const n of this.notices) {
+      if (n.groupId !== groupId || n.withdrawnAt !== null) continue;
+      if (best === null || n.createdAt >= best.createdAt) best = n;
+    }
+    return best === null ? null : { id: best.id, subject: best.subject, ackedAt: best.ackedAt, withdrawnAt: best.withdrawnAt };
+  }
+
+  withdrawNoticeGroup(groupId: string, at: number): number {
+    const touched = this.notices.filter((n) => n.groupId === groupId && n.withdrawnAt === null);
+    for (const n of touched) n.withdrawnAt = at;
+    if (touched.length > 0) {
+      this.undoWith(() => {
+        for (const n of touched) n.withdrawnAt = null;
+      });
+    }
+    return touched.length;
+  }
+
+  purgeNotices(before: number): number {
+    const snapshot = [...this.notices];
+    const kept = snapshot.filter(
+      (n) =>
+        !(
+          (n.withdrawnAt !== null && n.createdAt < before) ||
+          (n.ackedAt !== null && (n.kind === 'warning' || n.kind === 'report_outcome') && n.createdAt < before) ||
+          (n.until !== null && n.until < before)
+        ),
+    );
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.notices.splice(0, this.notices.length, ...kept);
+      this.undoWith(() => this.notices.splice(0, this.notices.length, ...snapshot));
+    }
+    return n;
+  }
+
+  /** Test helper: every stored notice. */
+  rawNotices(): NoticeRow[] {
+    return this.notices.map((n) => structuredClone(n));
+  }
+
   /** Test helper (K2 adds dismissing): mark a report bad-faith, dismissed at `actionedAt` (null = never closed). */
   markReportBadFaith(id: string, actionedAt: number | null): void {
     const r = this.reports.find((x) => x.id === id);
     if (!r) throw new Error('unknown report');
     r.badFaith = true;
     r.actionedAt = actionedAt;
+    r.actionedBy = 'test';
     r.status = 'dismissed';
   }
 
-  /** Test helper: close a report without the bad-faith mark. */
-  closeReport(id: string, status: 'actioned' | 'dismissed', actionedAt: number): void {
-    const r = this.reports.find((x) => x.id === id);
-    if (!r) throw new Error('unknown report');
-    r.status = status;
-    r.actionedAt = actionedAt;
+  /** Test helper: every recorded decision. */
+  rawDecisions(): DecisionRow[] {
+    return [...this.decisions.values()].map((d) => ({ ...d }));
   }
 
   /** Test helper: every stored report. */

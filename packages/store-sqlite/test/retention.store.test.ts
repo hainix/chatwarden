@@ -56,7 +56,7 @@ async function sanction(
   return applySanction(
     e.store,
     e.subjects,
-    { kind, subject, includeIp, durationMs, reason: 'r', actor: 'mod', source: 'moderator', automated: false },
+    { kind, subject, includeIp, durationMs, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 1 },
     at,
   );
 }
@@ -70,7 +70,7 @@ describe('purge against SQLite', () => {
     store.insertStrike(strike('edge', NOW - 30 * DAY));
     store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 180 * DAY - 1 });
     store.upsertMute({ viewer: 'v', target: 'edge', createdAt: NOW - 180 * DAY });
-    expect(await purge(store, NOW)).toEqual({ reports: 1, sanctions: 0, strikes: 1, mutes: 1 });
+    expect(await purge(store, NOW)).toEqual({ reports: 1, sanctions: 0, strikes: 1, mutes: 1, notices: 0 });
     expect(db.prepare('SELECT id FROM kit_reports').all().map((r) => r.id)).toEqual(['edge']);
     expect(db.prepare('SELECT id FROM kit_strikes').all().map((r) => r.id)).toEqual(['edge']);
     expect(db.prepare('SELECT target_id FROM kit_mutes').all().map((r) => r.target_id)).toEqual(['edge']);

@@ -1,4 +1,5 @@
 import type { RoomRoster } from './evidence.js';
+import { safeWarn } from './log.js';
 import type { SubjectIndex } from './subjects.js';
 import type { Clock, Logger, Store, SubjectId } from './types.js';
 
@@ -14,13 +15,6 @@ export const MUTE_TTL_MS = 180 * 24 * 3_600_000;
 /** One person keeps at most this many mutes; the oldest by `createdAt` is dropped for the next. */
 export const MAX_MUTES_PER_VIEWER = 500;
 
-const defaultLogger: Logger = {
-  warn(event, detail) {
-    if (detail === undefined) console.warn(event);
-    else console.warn(event, detail);
-  },
-};
-
 type Op = { put: true; viewer: SubjectId; target: SubjectId; createdAt: number } | { put: false; viewer: SubjectId; target: SubjectId };
 
 const present = (id: SubjectId | null): id is SubjectId => typeof id === 'string' && id !== '';
@@ -29,7 +23,7 @@ export class MuteService {
   private readonly store: Store;
   private readonly clock: Clock;
   private readonly subjects: SubjectIndex;
-  private readonly logger: Logger;
+  private readonly logger: Logger | undefined;
 
   /**
    * Stored viewer id -> stored target id -> createdAt. Either id may have been merged away since the row
@@ -41,7 +35,7 @@ export class MuteService {
     this.store = store;
     this.clock = clock;
     this.subjects = subjects;
-    this.logger = opts?.logger ?? defaultLogger;
+    this.logger = opts?.logger;
   }
 
   /** Replace the in-memory index with the store's live mutes (those within the TTL). Call once at start up. */
@@ -77,14 +71,10 @@ export class MuteService {
       if (on) this.mute(cv, ct);
       else this.unmute(cv, ct);
     } catch (err) {
-      try {
-        this.logger.warn('mutes.write_failed', {
-          op: on ? 'mute' : 'unmute',
-          error: err instanceof Error ? err.name : typeof err,
-        });
-      } catch {
-        // A broken logger must not break chat.
-      }
+      safeWarn(this.logger, 'mutes.write_failed', {
+        op: on ? 'mute' : 'unmute',
+        error: err instanceof Error ? err.name : typeof err,
+      });
     }
   }
 

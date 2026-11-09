@@ -157,6 +157,7 @@ describe('loadAutoChatStarts', () => {
         actor: 'auto',
         source: over.source ?? 'auto_filter',
         automated: true,
+        rule: 1,
       },
       at,
     );

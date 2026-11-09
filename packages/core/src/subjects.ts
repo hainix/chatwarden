@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { safeWarn } from './log.js';
 import type {
   Clock,
   Identifiers,
@@ -22,13 +23,6 @@ interface Seen {
   firstSeen: number;
   lastSeen: number;
 }
-
-const defaultLogger: Logger = {
-  warn(event, detail) {
-    if (detail === undefined) console.warn(event);
-    else console.warn(event, detail);
-  },
-};
 
 function present(value: string | null | undefined): string | null {
   return value === null || value === undefined || value === '' ? null : value;
@@ -70,7 +64,7 @@ function emptyOwned(): Owned {
 export class SubjectIndex {
   private readonly store: Store;
   private readonly clock: Clock;
-  private readonly logger: Logger;
+  private readonly logger: Logger | undefined;
 
   /** Subject id -> created_at, for every known subject (merged ones too). */
   private created = new Map<SubjectId, number>();
@@ -97,7 +91,7 @@ export class SubjectIndex {
   constructor(store: Store, clock: Clock, opts?: { logger?: Logger }) {
     this.store = store;
     this.clock = clock;
-    this.logger = opts?.logger ?? defaultLogger;
+    this.logger = opts?.logger;
   }
 
   /** Rebuild the in-memory index from the store. Call once before `resolve`. */
@@ -226,6 +220,15 @@ export class SubjectIndex {
   }
 
   /**
+   * The surviving subject for `id` and every subject merged into it (itself included), sorted. An id the index has
+   * never seen is its own and only member. Use it to read rows stored under any of a person's ids.
+   */
+  aliasesOf(id: SubjectId): SubjectId[] {
+    const root = this.canonical(id);
+    return [...(this.members.get(root) ?? [root])].sort();
+  }
+
+  /**
    * Every identifier of the subject and of every subject merged into it
    * (sorted copies). An unknown id has none.
    */
@@ -342,10 +345,6 @@ export class SubjectIndex {
   }
 
   private logFailure(err: unknown): void {
-    try {
-      this.logger.warn('subjects.write_failed', { error: err instanceof Error ? err.name : typeof err });
-    } catch {
-      /* a broken logger must not break the chat path */
-    }
+    safeWarn(this.logger, 'subjects.write_failed', { error: err instanceof Error ? err.name : typeof err });
   }
 }

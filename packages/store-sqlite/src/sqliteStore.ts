@@ -1,8 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type {
+  DecisionRow,
   MuteRow,
+  NoticeKind,
+  NoticeRow,
   ReportActivity,
+  ReportCategory,
+  ReportRecord,
   SanctionKind,
   SanctionRow,
   Source,
@@ -22,6 +27,33 @@ import type {
   TermRecord,
   TermStore,
 } from '@chatwarden/matcher';
+
+/** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
+const SANCTION_COLUMNS =
+  'id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, gap_note, gap_status, actor, source, automated, pending';
+
+function toSanctionRow(r: Record<string, unknown>): SanctionRow {
+  return {
+    id: String(r.id),
+    groupId: String(r.group_id),
+    refCode: String(r.ref_code),
+    kind: String(r.kind) as SanctionKind,
+    targetType: r.target_type === 'ip' ? 'ip' : 'subject',
+    value: String(r.target_value),
+    startsAt: Number(r.starts_at),
+    endsAt: r.ends_at === null ? null : Number(r.ends_at),
+    reason: String(r.reason),
+    rule: r.rule === null ? null : String(r.rule),
+    gapNote: r.gap_note === null ? null : String(r.gap_note),
+    gapStatus: r.gap_status === null ? null : (String(r.gap_status) as 'open' | 'ruled' | 'not_a_rule'),
+    actor: String(r.actor),
+    source: String(r.source) as Source,
+    automated: r.automated === 1,
+    pending: r.pending === 1,
+    // Only a query that selects revoked_at gets the property; the other loads keep the plain row shape.
+    ...(r.revoked_at === undefined ? {} : { revokedAt: r.revoked_at === null ? null : Number(r.revoked_at) }),
+  };
+}
 
 let savepointSeq = 0;
 
@@ -143,13 +175,14 @@ export class SqliteStore implements Store, TermStore {
       if (taken !== undefined) return false;
       const ins = this.db.prepare(
         `INSERT INTO kit_sanctions
-           (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending,
+            gap_note, gap_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const r of rows) {
         ins.run(
           r.id, r.groupId, r.refCode, r.kind, r.targetType, r.value, r.startsAt, r.endsAt, r.reason, r.rule,
-          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0,
+          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus,
         );
       }
       return true;
@@ -171,27 +204,59 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() =>
       this.db
         .prepare(
-          `SELECT id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending
+          `SELECT ${SANCTION_COLUMNS}
            FROM kit_sanctions WHERE revoked_at IS NULL AND (ends_at IS NULL OR ends_at > ?) ORDER BY rowid`,
         )
         .all(now)
-        .map((r) => ({
-          id: String(r.id),
-          groupId: String(r.group_id),
-          refCode: String(r.ref_code),
-          kind: String(r.kind) as SanctionKind,
-          targetType: r.target_type === 'ip' ? ('ip' as const) : ('subject' as const),
-          value: String(r.target_value),
-          startsAt: Number(r.starts_at),
-          endsAt: r.ends_at === null ? null : Number(r.ends_at),
-          reason: String(r.reason),
-          rule: r.rule === null ? null : String(r.rule),
-          actor: String(r.actor),
-          source: String(r.source) as Source,
-          automated: r.automated === 1,
-          pending: r.pending === 1,
-        })),
+        .map(toSanctionRow),
     );
+  }
+
+  loadSubjectActions(since: number): SanctionRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT ${SANCTION_COLUMNS}, revoked_at
+           FROM kit_sanctions WHERE target_type = 'subject' AND starts_at >= ? ORDER BY rowid`,
+        )
+        .all(since)
+        .map(toSanctionRow),
+    );
+  }
+
+  listGaps(): SanctionRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT ${SANCTION_COLUMNS}
+           FROM kit_sanctions WHERE target_type = 'subject' AND gap_note IS NOT NULL ORDER BY starts_at DESC, rowid DESC`,
+        )
+        .all()
+        .map(toSanctionRow),
+    );
+  }
+
+  closeGap(groupId: string, status: 'ruled' | 'not_a_rule', ref: string | null, actor: string, at: number): boolean {
+    return this.transaction(() => {
+      const res = this.db
+        .prepare(
+          `UPDATE kit_sanctions SET gap_status = ?, gap_ref = ?
+           WHERE group_id = ? AND target_type = 'subject' AND gap_note IS NOT NULL AND gap_status = 'open'`,
+        )
+        .run(status, ref, groupId);
+      if (Number(res.changes) === 0) return false;
+      // Who closed it and when go to the audit trail, in the same transaction. The sanction group id names no person.
+      this.db
+        .prepare(
+          `INSERT INTO kit_audit (id, at, actor, action, subject_type, subject_ref, before_json, after_json)
+           VALUES (?, ?, ?, 'gap.close', 'sanction', ?, ?, ?)`,
+        )
+        .run(
+          randomBytes(16).toString('base64url'), at, actor, groupId,
+          JSON.stringify({ gapStatus: 'open' }), JSON.stringify({ gapStatus: status, gapRef: ref }),
+        );
+      return true;
+    });
   }
 
   // Mutes. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never
@@ -305,6 +370,72 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  loadReport(id: string): ReportRecord | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT * FROM kit_reports WHERE id = ?').get(id);
+      if (r === undefined) return null;
+      return {
+        id: String(r.id),
+        createdAt: Number(r.created_at),
+        roomId: String(r.room_id),
+        tags: JSON.parse(String(r.tags_json)) as Record<string, string>,
+        reporterSubject: String(r.reporter_subject),
+        reporterSeat: String(r.reporter_seat),
+        reporterHandle: String(r.reporter_handle),
+        targetSubject: String(r.target_subject),
+        targetSeat: String(r.target_seat),
+        targetHandle: String(r.target_handle),
+        category: String(r.category) as ReportCategory,
+        note: r.note === null ? null : String(r.note),
+        lineId: r.line_id === null ? null : String(r.line_id),
+        excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
+        people: JSON.parse(String(r.people_json)) as SubjectId[],
+        status: String(r.status) as ReportRecord['status'],
+        badFaith: Number(r.bad_faith) === 1,
+        actionedAt: r.actioned_at === null ? null : Number(r.actioned_at),
+        actionedBy: r.actioned_by === null ? null : String(r.actioned_by),
+        modNote: r.mod_note === null ? null : String(r.mod_note),
+      };
+    });
+  }
+
+  closeReport(
+    id: string,
+    status: 'actioned' | 'dismissed',
+    badFaith: boolean,
+    actor: string,
+    at: number,
+    note: string,
+  ): boolean {
+    return this.transaction(() => {
+      if (status !== 'actioned' && status !== 'dismissed') throw new Error('closeReport: invalid status');
+      const res = this.db
+        .prepare(
+          `UPDATE kit_reports SET status = ?, bad_faith = ?, actioned_at = ?, actioned_by = ?, mod_note = ?
+           WHERE id = ? AND status = 'open'`,
+        )
+        .run(status, badFaith ? 1 : 0, at, actor, note, id);
+      return Number(res.changes) > 0;
+    });
+  }
+
+  insertDecision(key: string, reportId: string, at: number, resultJson: string): void {
+    this.transaction(() => {
+      this.db
+        .prepare('INSERT INTO kit_decisions (key, report_id, at, result_json) VALUES (?, ?, ?, ?)')
+        .run(key, reportId, at, resultJson);
+    });
+  }
+
+  findDecision(key: string): DecisionRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT key, report_id, at, result_json FROM kit_decisions WHERE key = ?').get(key);
+      return r === undefined
+        ? null
+        : { key: String(r.key), reportId: String(r.report_id), at: Number(r.at), resultJson: String(r.result_json) };
+    });
+  }
+
   loadReportActivity(since: number): ReportActivity[] {
     return this.transaction(() =>
       this.db
@@ -358,8 +489,20 @@ export class SqliteStore implements Store, TermStore {
   // Retention. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must
   // never be given an async function.
 
-  purgeReports(before: number): number {
-    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_reports WHERE created_at < ?').run(before).changes));
+  purgeReports(before: number, keepBadFaithSince: number): number {
+    return this.transaction(() => {
+      const n = Number(
+        this.db
+          .prepare(
+            `DELETE FROM kit_reports
+             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?)`,
+          )
+          .run(before, keepBadFaithSince).changes,
+      );
+      // A recorded decision outlives only its report.
+      if (n > 0) this.db.prepare('DELETE FROM kit_decisions WHERE report_id NOT IN (SELECT id FROM kit_reports)').run();
+      return n;
+    });
   }
 
   purgeSanctions(before: number): number {
@@ -368,7 +511,8 @@ export class SqliteStore implements Store, TermStore {
         this.db
           .prepare(
             `DELETE FROM kit_sanctions
-             WHERE (ends_at IS NOT NULL AND ends_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?)`,
+             WHERE ((ends_at IS NOT NULL AND ends_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?))
+               AND (gap_status IS NULL OR gap_status <> 'open')`
           )
           .run(before, before).changes,
       ),
@@ -381,6 +525,107 @@ export class SqliteStore implements Store, TermStore {
 
   purgeMutes(before: number): number {
     return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_mutes WHERE created_at < ?').run(before).changes));
+  }
+
+  purgeNotices(before: number): number {
+    return this.transaction(() =>
+      Number(
+        this.db
+          .prepare(
+            `DELETE FROM kit_notices
+             WHERE (withdrawn_at IS NOT NULL AND created_at < ?)
+                OR (acked_at IS NOT NULL AND kind IN ('warning', 'report_outcome') AND created_at < ?)
+                OR (until IS NOT NULL AND until < ?)`,
+          )
+          .run(before, before, before).changes,
+      ),
+    );
+  }
+
+  // Notices. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never be
+  // given an async function.
+
+  insertNotice(row: NoticeRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO kit_notices (id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          row.id,
+          row.subject,
+          row.groupId,
+          row.kind,
+          row.rule,
+          row.until,
+          row.refCode,
+          JSON.stringify(row.excerpt),
+          row.createdAt,
+          row.ackedAt,
+          row.withdrawnAt,
+        );
+    });
+  }
+
+  loadNotices(subjects: readonly SubjectId[]): NoticeRow[] {
+    if (subjects.length === 0) return [];
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at
+           FROM kit_notices WHERE subject_id IN (${subjects.map(() => '?').join(', ')}) ORDER BY created_at, rowid`,
+        )
+        .all(...subjects)
+        .map((r) => ({
+          id: String(r.id),
+          subject: String(r.subject_id),
+          groupId: r.group_id === null ? null : String(r.group_id),
+          kind: String(r.kind) as NoticeKind,
+          rule: r.rule === null ? null : String(r.rule),
+          until: r.until === null ? null : Number(r.until),
+          refCode: r.ref_code === null ? null : String(r.ref_code),
+          excerpt: JSON.parse(String(r.excerpt_json)) as Array<{ text: string; day: string }>,
+          createdAt: Number(r.created_at),
+          ackedAt: r.acked_at === null ? null : Number(r.acked_at),
+          withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
+        })),
+    );
+  }
+
+  ackNotice(id: string, at: number): boolean {
+    return this.transaction(
+      () =>
+        Number(
+          this.db.prepare('UPDATE kit_notices SET acked_at = ? WHERE id = ? AND acked_at IS NULL AND withdrawn_at IS NULL').run(at, id)
+            .changes,
+        ) > 0,
+    );
+  }
+
+  findNoticeForGroup(
+    groupId: string,
+  ): { id: string; subject: SubjectId; ackedAt: number | null; withdrawnAt: number | null } | null {
+    return this.transaction(() => {
+      const r = this.db
+        .prepare(
+          'SELECT id, subject_id, acked_at, withdrawn_at FROM kit_notices WHERE group_id = ? AND withdrawn_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1',
+        )
+        .get(groupId);
+      if (r === undefined) return null;
+      return {
+        id: String(r.id),
+        subject: String(r.subject_id),
+        ackedAt: r.acked_at === null ? null : Number(r.acked_at),
+        withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
+      };
+    });
+  }
+
+  withdrawNoticeGroup(groupId: string, at: number): number {
+    return this.transaction(() =>
+      Number(this.db.prepare('UPDATE kit_notices SET withdrawn_at = ? WHERE group_id = ? AND withdrawn_at IS NULL').run(at, groupId).changes),
+    );
   }
 
   // Terms, exceptions and the audit trail. These are SYNCHRONOUS on purpose (the TermStore contract): they
