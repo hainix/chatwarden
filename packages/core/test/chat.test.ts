@@ -835,6 +835,108 @@ describe('matcher, strikes and the automatic timeout', () => {
   });
 });
 
+describe('review fixes: async hook, non-boolean gate, in-memory restriction belongs to the person', () => {
+  it('an async onAutoRestrict that rejects is logged and raises no unhandled rejection', async () => {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => void unhandled.push(reason);
+    process.on('unhandledRejection', listener);
+    try {
+      const e = setup({
+        onAutoRestrict: (async () => {
+          throw new SyntaxError('feed down');
+        }) as unknown as () => void,
+      });
+      e.sit('p1', who('k1'));
+      e.threeSlurs();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(e.logs.some((l) => l.event === 'chat.on_auto_restrict_failed' && l.detail?.error === 'SyntaxError')).toBe(
+        true,
+      );
+      expect(JSON.stringify(e.logs)).not.toContain('feed down');
+      expect(unhandled).toEqual([]);
+      e.tick(SEC);
+      expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+  });
+
+  it('an async onAutoRestrict that resolves is fine and logs nothing', async () => {
+    const e = setup({ onAutoRestrict: (async () => undefined) as unknown as () => void });
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(e.logs).toEqual([]);
+  });
+
+  it('a gate that returns a non-boolean (a Promise, a truthy value) does not pass', () => {
+    const asyncGate = (() => Promise.resolve(true)) as unknown as () => boolean;
+    const e = setup({ gate: asyncGate });
+    e.sit('p1', who('k1'));
+    expect(refusal(e.say('p1', 'hi')).reason).toBe('gate');
+    const e2 = setup({ gate: (() => 1) as unknown as () => boolean });
+    e2.sit('p1', who('k1'));
+    expect(refusal(e2.say('p1', 'hi')).reason).toBe('gate');
+  });
+
+  it('seat changes hands after a memory fallback: the new occupant can chat', () => {
+    const e = setup();
+    e.sit('p1', null, 'Guest');
+    e.threeSlurs();
+    e.tick(SEC);
+    expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+    e.sit('p1', who('k2'), 'Newcomer');
+    delivery(e.say('p1', 'hello'));
+  });
+
+  it('a stored-fallback timeout (write failed) also stays with the person, not the seat', () => {
+    const e = setup({ store: new FailingSanctions() });
+    e.sit('p1', who('k1'));
+    e.threeSlurs();
+    e.tick(SEC);
+    expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+    e.sit('p1', who('k2'));
+    delivery(e.say('p1', 'hello'));
+  });
+
+  it('the same person staying in the seat is still restricted (also re-seated, and linked by merge)', () => {
+    const e = setup({ store: new FailingSanctions() });
+    e.sit('p1', who('ka'));
+    e.threeSlurs();
+    e.tick(SEC);
+    e.sit('p1', who('ka'), 'renamed');
+    expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+    // Merged into another subject since: still the same person.
+    e.subjects.resolve(who('kb', 'acct'));
+    e.subjects.resolve(who('ka', 'acct'));
+    e.sit('p1', who('kb', 'acct'));
+    expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+  });
+
+  it('a guest who leaves and a different guest sits: both have no subject, so the entry still applies (accepted)', () => {
+    const e = setup();
+    e.sit('p1', null, 'Guest A');
+    e.threeSlurs();
+    e.tick(SEC);
+    e.sit('p1', null, 'Guest B');
+    expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+  });
+
+  it("a roomId containing ':' does not collide with another room's seat", () => {
+    const e = setup();
+    // 'a:b' + seat 'c' versus 'a' + seat 'b:c' would both be 'a:b:c' with a colon separator.
+    e.sit('c', null, 'G1', 'a:b');
+    e.sit('b:c', null, 'G2', 'a');
+    for (let i = 0; i < 3; i++) {
+      e.say('c', 'zorbak', undefined, 'a:b');
+      if (i < 2) e.tick();
+    }
+    e.tick(SEC);
+    expect(refusal(e.say('c', 'hi', undefined, 'a:b')).reason).toBe('restricted');
+    delivery(e.say('b:c', 'hi', undefined, 'a'));
+  });
+});
+
 describe('starring and delivery', () => {
   it('stars profanity with the injected starrer and delivers the starred text, with no strike', () => {
     const e = setup({ starrer });

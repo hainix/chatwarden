@@ -96,6 +96,12 @@ interface Restriction {
   byModerator: boolean;
 }
 
+/** Map key for a seat. NUL cannot appear in a room or seat id the way ':' can, so keys never collide. */
+const memKey = (roomId: string, seatId: string): string => `${roomId}\u0000${seatId}`;
+
+const isThenable = (v: unknown): v is PromiseLike<unknown> =>
+  typeof v === 'object' && v !== null && typeof (v as { then?: unknown }).then === 'function';
+
 /** `a` lasts at least as long as `b` (permanent beats timed). */
 const lastsAtLeast = (a: number | null, b: number | null): boolean => {
   if (a === null) return true;
@@ -121,9 +127,11 @@ export class ChatService {
 
   /**
    * Automatic restrictions that could not be stored (no subject to put a row on, or the write failed), by
-   * `roomId:seatId`, to the epoch ms they end. Lost on restart, like the in-memory strikes behind them.
+   * room and seat (see `memKey`), with the epoch ms they end and the person they were earned by. The entry
+   * belongs to that PERSON: it applies only while the seat's occupant is still them (two guests, both with no
+   * subject, count as the same). Lost on restart, like the in-memory strikes behind them.
    */
-  private memRestrictions = new Map<string, number>();
+  private memRestrictions = new Map<string, { until: number; subject: SubjectId | null }>();
 
   constructor(deps: ChatServiceDeps) {
     this.roster = deps.roster;
@@ -240,7 +248,8 @@ export class ChatService {
   private gateAllows(roomId: string, subject: SubjectId | null): boolean {
     if (this.gate === undefined) return true;
     try {
-      return this.gate(roomId, subject);
+      // Strictly `true`: a non-boolean (a Promise from an async gate, say) must not pass.
+      return this.gate(roomId, subject) === true;
     } catch (err) {
       this.warn('chat.gate_failed', { error: errName(err) });
       return false;
@@ -268,12 +277,12 @@ export class ChatService {
     try {
       // The kill switch silences the in-memory restrictions too: they are sanctions, just never stored.
       if (!this.sanctions.isEnabled()) return null;
-      const key = `${roomId}:${seatId}`;
+      const key = memKey(roomId, seatId);
       let best: Restriction | null = null;
-      const memUntil = this.memRestrictions.get(key);
-      if (memUntil !== undefined) {
-        if (memUntil <= now) this.memRestrictions.delete(key);
-        else best = { until: memUntil, byModerator: false };
+      const mem = this.memRestrictions.get(key);
+      if (mem !== undefined) {
+        if (mem.until <= now) this.memRestrictions.delete(key);
+        else if (this.samePerson(mem.subject, subject)) best = { until: mem.until, byModerator: false };
       }
       // Only the latest IP of a seated person is known; an IP row speed-bumps them, never links two people.
       const ids: Identifiers = {
@@ -355,17 +364,29 @@ export class ChatService {
         this.warn('chat.auto_restrict_failed', { error: errName(err) });
       }
     }
-    if (!stored) this.holdInMemory(`${roomId}:${seatId}`, now, durationMs);
+    if (!stored) this.holdInMemory(memKey(roomId, seatId), subject, now, durationMs);
     try {
-      this.onAutoRestrict?.(subject, durationMs >= REPEAT_RESTRICT_MS);
+      const told: unknown = this.onAutoRestrict?.(subject, durationMs >= REPEAT_RESTRICT_MS);
+      // An async hook is type-legal against `=> void`; its rejection must not escape as an unhandled one.
+      if (isThenable(told)) {
+        told.then(undefined, (err: unknown) => {
+          this.warn('chat.on_auto_restrict_failed', { error: errName(err) });
+        });
+      }
     } catch (err) {
       this.warn('chat.on_auto_restrict_failed', { error: errName(err) });
     }
   }
 
-  private holdInMemory(key: string, now: number, durationMs: number): void {
-    for (const [k, until] of this.memRestrictions) if (until <= now) this.memRestrictions.delete(k);
-    this.memRestrictions.set(key, now + durationMs);
+  private holdInMemory(key: string, subject: SubjectId | null, now: number, durationMs: number): void {
+    for (const [k, e] of this.memRestrictions) if (e.until <= now) this.memRestrictions.delete(k);
+    this.memRestrictions.set(key, { until: now + durationMs, subject });
+  }
+
+  /** Same person (merges folded in); two unknown speakers count as the same. */
+  private samePerson(a: SubjectId | null, b: SubjectId | null): boolean {
+    if (a === null || b === null) return a === b;
+    return this.subjects.canonical(a) === this.subjects.canonical(b);
   }
 
   private warn(event: string, detail: Record<string, string | number | boolean>): void {
