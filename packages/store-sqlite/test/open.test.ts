@@ -46,6 +46,16 @@ function tables(db: DatabaseSync): string[] {
   const rows = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all();
   return rows.map((r) => String(r.name));
 }
+/** `DatabaseSync#isTransaction` needs Node 22.16; a nested BEGIN fails exactly when one is open. */
+function inTransaction(db: DatabaseSync): boolean {
+  try {
+    db.exec('BEGIN');
+  } catch {
+    return true;
+  }
+  db.exec('ROLLBACK');
+  return false;
+}
 function kitVersion(db: DatabaseSync): string | undefined {
   const row = db.prepare("SELECT value FROM kit_meta WHERE key='schema_version'").get();
   return row === undefined ? undefined : String(row.value);
@@ -106,7 +116,7 @@ describe('openStore: migrations', () => {
     expect(() => openStore({ db, migrations: [M1, bad] })).toThrow();
     expect(kitVersion(db)).toBe('1');
     expect(tables(db)).not.toContain('kit_half');
-    expect(db.isTransaction).toBe(false);
+    expect(inTransaction(db)).toBe(false);
   });
 
   it('a failing migration keeps earlier successful ones applied', () => {
@@ -212,7 +222,7 @@ describe('Store.transaction', () => {
       }),
     ).toThrow('boom');
     expect(count()).toBe(0);
-    expect(db.isTransaction).toBe(false);
+    expect(inTransaction(db)).toBe(false);
   });
 
   it('nested: an inner failure caught by the outer keeps the outer write only', () => {
@@ -247,7 +257,7 @@ describe('Store.transaction', () => {
     const { db, store, count, add } = setup();
     db.exec('BEGIN');
     store.transaction(() => add('x'));
-    expect(db.isTransaction).toBe(true);
+    expect(inTransaction(db)).toBe(true);
     db.exec('ROLLBACK');
     expect(count()).toBe(0);
   });
