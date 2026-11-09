@@ -1,20 +1,39 @@
 import { ChatService } from './chat.js';
+import { DecisionService, revokeAndWithdraw } from './decide.js';
+import type { DecisionInput, DecisionResult } from './decide.js';
 import type { ChatResult, Starrer } from './chat.js';
 import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { hashWho, makeHasher } from './hasher.js';
 import { safeWarn } from './log.js';
+import { historyOf, recordStep, suggestAction } from './ladder.js';
+import type { ActionRecord } from './ladder.js';
 import { MuteService } from './mutes.js';
+import { NoticeService } from './notices.js';
+import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
 import type { ReportCounts, ReportInput, ReportResult } from './reports.js';
 import { purge } from './retention.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
-import { applySanction, revokeSanction, SanctionIndex } from './sanctions.js';
+import { defineRules, STARTER_RULES } from './rules.js';
+import type { CommunityRules, RuleRef } from './rules.js';
+import { applySanction, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
 import { SubjectIndex } from './subjects.js';
-import type { Clock, Logger, Matcher, Platform, RawWho, Store, StoredReport, SubjectId } from './types.js';
+import type {
+  Clock,
+  Logger,
+  Matcher,
+  Platform,
+  RawWho,
+  SanctionKind,
+  Severity,
+  Store,
+  StoredReport,
+  SubjectId,
+} from './types.js';
 
 /** The wall clock, used only when the adopter injects none. Tests and replays pass their own. */
 const systemClock: Clock = { now: () => Date.now() };
@@ -24,6 +43,23 @@ const DEFAULT_PURGE_EVERY_MS = 21_600_000;
 
 /** The longest delay `setInterval` honours: Node clamps anything above 2^31-1 ms to 1 ms. */
 const MAX_PURGE_EVERY_MS = 2_147_483_647;
+
+/**
+ * One rule gap, for the moderators' rules review. It names the sanction group and its reference code but never
+ * a person: no subject id, key or hash.
+ */
+export interface GapRow {
+  groupId: string;
+  refCode: string;
+  /** Epoch ms the sanction was made. */
+  at: number;
+  /** The moderator who cited `'uncovered'`. */
+  actor: string;
+  /** The moderator's private note on what the rules did not cover. Staff only: never show it to a player. */
+  note: string;
+  rule: 'uncovered';
+  status: 'open' | 'ruled' | 'not_a_rule';
+}
 
 /** Everything {@link createChatwarden} needs. Only the store, the secret and the platform are required. */
 export interface ChatwardenOptions {
@@ -60,6 +96,17 @@ export interface ChatwardenOptions {
   retention?: false | ({ everyMs?: number } & Partial<RetentionPolicy>);
   /** Passed to every component. Defaults to `console.warn`. */
   logger?: Logger;
+  /**
+   * The numbered Community Rules, from `defineRules`. Default: `defineRules(STARTER_RULES)`. A decision may cite
+   * only an active rule here, and notices show the rule's title.
+   */
+  rules?: CommunityRules;
+  /**
+   * The Community Rule the automatic slur filter cites: on a `blocked` refusal, on the automatic timeout it earns
+   * and on the notice for it. Default 1. Must be a rule in `rules` that is not retired, else creation throws a
+   * `RangeError`; set it when your registry numbers slurs differently.
+   */
+  autoRestrictRule?: number;
 }
 
 /** The moderation kit as an adopter uses it. Nothing here returns an identifier meant for a player. */
@@ -95,10 +142,55 @@ export interface Chatwarden {
   reports: { submit(input: ReportInput): Promise<ReportResult> };
   doors: { check(kind: DoorKind, who: RawWho): DoorRefusal | null };
   sanctions: {
-    /** Write one sanction group and make it live at once. Resolves with the group id and the player-quotable ref code. */
+    /**
+     * Write one sanction group and make it live at once. Resolves with the group id and the player-quotable ref
+     * code. This writes no player notice: `decide` is the path that does.
+     */
     apply(input: SanctionInput): Promise<{ groupId: string; refCode: string }>;
-    /** Revoke a whole group. Resolves true when this call revoked something. */
+    /**
+     * Revoke a whole group and withdraw its player notice in the same transaction: an unseen notice is never shown,
+     * a seen one leaves "My record". Resolves true when this call revoked something.
+     */
     revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
+  };
+  /** The registry in use (the one given, or the starter rules). Retired rules stay listed. */
+  rules: CommunityRules;
+  /**
+   * Player-facing notices and "My record". Each takes the same `RawWho` as the doors, hashes it and FINDS the person
+   * (never creates one): an unknown person gets empty lists and `false`. An IP alone finds nobody. A failure in the
+   * store is logged (`chatwarden.notices_failed`) and reads as empty or `false`. The values are `PlayerNotice`s:
+   * no subject, key, hash, moderator or reason.
+   */
+  notices: {
+    /** Notices not yet seen, oldest first. A pending warning must be shown and acked before the next game starts. */
+    pending(who: RawWho): PlayerNotice[];
+    /** Mark one of this person's notices seen. False for another person's, an unknown id or a withdrawn notice. */
+    ack(who: RawWho, id: string): boolean;
+    /** "My record": the person's sanction notices that still apply, seen or not. */
+    record(who: RawWho): PlayerNotice[];
+    /** True while the person has a warning they have not acknowledged. */
+    pendingWarning(who: RawWho): boolean;
+  };
+  /**
+   * Decide a report: close it, write each sanction and its notice, and tell the people involved, in one
+   * transaction. Idempotent (the same decision again is a replay). A malformed or disallowed decision resolves
+   * `{ ok: false, error: 'invalid' }`; a STORE failure REJECTS with the store's own error and writes nothing, so a
+   * route handler should catch it. Moderator-side: the result carries subject ids, so never forward it to a player.
+   */
+  decide(input: DecisionInput): Promise<DecisionResult>;
+  /** The person's counted actions in the last 90 days. Server-side: for the moderator's view only. */
+  history(subject: SubjectId): ActionRecord[];
+  /** The next step the ladder suggests for this person's record. It selects nothing; show it as one line. */
+  suggest(
+    subject: SubjectId,
+    severity: Severity | null,
+    rule: RuleRef,
+  ): { kind: SanctionKind; durationMs: number | null; label: string };
+  /** Rule gaps: sanctions a moderator filed under `'uncovered'`, for the periodic rules review. Staff only. */
+  gaps: {
+    list(): GapRow[];
+    /** Close an open gap as `ruled` (with the new rule number as `ref`) or `not_a_rule` (`ref` null). True when this call closed it. */
+    close(groupId: string, status: 'ruled' | 'not_a_rule', ref: string | null, actor: string): boolean;
   };
   /**
    * Delete rows past retention now. The built-in timer already does this (unless `retention: false`); the
@@ -134,6 +226,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (opts.retention !== false && purgeEveryMs > MAX_PURGE_EVERY_MS) {
     throw new RangeError(`retention.everyMs must be at most ${MAX_PURGE_EVERY_MS}`);
   }
+  const rules = opts.rules ?? defineRules(STARTER_RULES);
+  const autoRestrictRule = opts.autoRestrictRule ?? 1;
+  const autoRule = rules.get(autoRestrictRule);
+  if (autoRule === undefined || autoRule.retired === true) {
+    throw new RangeError('autoRestrictRule must be the number of an active rule in the registry');
+  }
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
 
   const subjects = new SubjectIndex(store, clock, { logger });
@@ -147,6 +245,19 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await sanctions.load(store, clock.now());
   await mutes.load();
   await strikes.load();
+
+  // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
+  // decisions all write to and read from it, and `platform.notify` hears of every new notice through it.
+  const platformNotify = platform.notify;
+  const notices = new NoticeService({
+    store,
+    subjects,
+    rules,
+    clock,
+    matcher: opts.matcher,
+    logger,
+    notify: typeof platformNotify === 'function' ? (who, event) => platformNotify.call(platform, who, event) : undefined,
+  });
 
   const chat = new ChatService({
     roster,
@@ -162,6 +273,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     gate: opts.gate,
     onAutoRestrict: opts.onAutoRestrict,
     logger,
+    notices,
+    autoRestrictRule,
   });
   const reports = new ReportService({
     roster,
@@ -173,7 +286,24 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     onReport: opts.onReport,
     logger,
   });
-  const doors = new DoorService({ hasher, subjects, sanctions, clock, logger });
+  const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
+  const decisions = new DecisionService({ store, subjects, rules, notices, clock, index: sanctions, logger });
+
+  // The person behind a player's connection details, FOUND and never created. An IP alone finds nobody.
+  const personOf = (who: RawWho): SubjectId | null => {
+    const ids = hashWho(hasher, who);
+    return subjects.lookup({ clientKey: ids.clientKey, accountId: ids.accountId, ipHash: null });
+  };
+  /** A player-facing read: a store failure is logged (class only) and reads as `fallback`. */
+  const forPlayer = <T>(who: RawWho, fallback: T, read: (subject: SubjectId) => T): T => {
+    try {
+      const subject = personOf(who);
+      return subject === null ? fallback : read(subject);
+    } catch (err) {
+      safeWarn(logger, 'chatwarden.notices_failed', { error: err instanceof Error ? err.name : typeof err });
+      return fallback;
+    }
+  };
 
   const seat: Chatwarden['rooms']['seat'] = (roomId, seatId, who, handle, tags) => {
     const subject = subjects.resolve(hashWho(hasher, who));
@@ -231,7 +361,34 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
       apply: (input) => applySanction(store, subjects, input, clock.now(), sanctions),
-      revoke: (groupId, actor, reason) => revokeSanction(store, groupId, actor, clock.now(), reason, sanctions),
+      revoke: async (groupId, actor, reason) =>
+        (await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock, index: sanctions })).revoked,
+    },
+    rules,
+    notices: {
+      pending: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.pending(s)),
+      ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
+      record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
+      pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
+    },
+    decide: (input) => decisions.decide(input),
+    history: (subject) => historyOf(store, subjects, subject, clock.now()),
+    suggest: (subject, severity, rule) =>
+      suggestAction(recordStep(historyOf(store, subjects, subject, clock.now())), severity, rule),
+    gaps: {
+      list: () =>
+        store.listGaps().map(
+          (r): GapRow => ({
+            groupId: r.groupId,
+            refCode: r.refCode,
+            at: r.startsAt,
+            actor: r.actor,
+            note: r.gapNote ?? '',
+            rule: 'uncovered',
+            status: r.gapStatus ?? 'open',
+          }),
+        ),
+      close: (groupId, status, ref, actor) => store.transaction(() => store.closeGap(groupId, status, ref, actor, clock.now())),
     },
     purge: (policy) => purge(store, clock.now(), { ...retentionPolicy, ...policy }),
     flush: () => subjects.flush(),

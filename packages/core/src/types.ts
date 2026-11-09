@@ -576,8 +576,15 @@ export interface Matcher {
 /**
  * What the adopter game or chat server supplies. `identify` reads whatever a connection looks like in the
  * adopter stack (a request, a socket, a session) and returns who is behind it, RAW (see {@link RawWho}).
- * K2 adds an optional `notify` here for delivering notices.
+ * `notify` is optional: it is how the kit tells your client that a player has notices waiting.
  */
 export interface Platform {
   identify(ctx: unknown): RawWho;
+  /**
+   * Told after a notice is written, with the person's SUBJECT ID and how many notices are pending. The subject id is
+   * an identifier: use it only to find that player's live connection on your server, then send the client the
+   * notices (`notices.pending`), never the id. Map back from the subject on the server only. Fenced: a throw or a
+   * rejection is logged (`notices.notify_failed`) and never reaches the caller. Called with the platform as `this`.
+   */
+  notify?(who: SubjectId, event: { type: 'notice_pending'; count: number }): void | PromiseLike<unknown>;
 }

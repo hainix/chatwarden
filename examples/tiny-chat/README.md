@@ -8,8 +8,31 @@ npm start -w @chatwarden/example-tiny-chat
 ```
 
 Connect a WebSocket client to `ws://127.0.0.1:3000/?key=anything` and send `{"type":"chat","text":"hello"}`.
-Anything the server sends back is `{type:'welcome'|'chat'|'refused', ...}`; see the header of `server.ts`.
-`POST /report` files a report (`{ key, targetSeat, category }`).
+Anything the server sends back is `{type:'welcome'|'chat'|'refused'|'notices'|'acked', ...}`; see the header of
+`server.ts`. `POST /report` files a report (`{ key, targetSeat, category }`).
+
+## Warnings and notices
+
+A moderator decision (a warning, a restriction, a ban) writes a notice for the player. The server pushes
+`{type:'notices', items}` when the player connects with notices waiting and whenever a decision adds one; the client
+shows them and replies `{type:'ack', id}` (a warning must be acknowledged before the player's next game).
+`platform.notify` is how the kit tells the server a player has a notice: it hands over a subject id, which the server
+maps to a seat in its own connection map. The subject id never goes on the wire.
+
+`GET /record?key=...` returns the player's "My record".
+
+**Demo only: `/record` and `/decide` are not secure.** `/record` trusts a key passed in the URL, so anyone who knows
+a player's key can read that player's record. `/decide` stands in for a moderator console: it is guarded by a shared
+token in the `x-admin-token` header (set `TINY_CHAT_ADMIN_TOKEN`, or pass `adminToken` to `startServer`; without one
+the route is off), names seats instead of people, and uses a fixed actor. A real app authenticates its players and
+its moderators with its own sessions, takes report ids from its moderator queue (`onReport`), and records who decided.
+
+```sh
+curl -X POST http://127.0.0.1:3000/decide -H 'content-type: application/json' -H 'x-admin-token: $TINY_CHAT_ADMIN_TOKEN'   -d '{"reportId":"<id from onReport>","verdict":"fair","reason":"private note","actions":[{"seat":"p1","kind":"warning","durationMs":null,"rule":2}]}'
+```
+
+`decide` rejects with the store's own error if the store fails (the route answers a bare 500 and writes nothing); a
+decision the kit refuses answers 422.
 
 The store is in-memory (`openStore({ path: ':memory:' })`), so everything resets on restart.
 

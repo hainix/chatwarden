@@ -788,7 +788,7 @@ describe('matcher, strikes and the automatic timeout', () => {
     expect(e.calls).toEqual([{ subject: null, second: false }]);
     const end = at + 30 * MIN;
     e.tick(SEC);
-    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: end, byModerator: false });
+    expect(refusal(e.say('p1', 'hi'))).toEqual({ reason: 'restricted', until: end, byModerator: false, rule: 1 });
     e.clock.t = end - 1;
     expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
     e.clock.t = end;
@@ -1397,14 +1397,13 @@ describe('K2: refusals cite the rule and point at the notice', () => {
     expect('rule' in refusal(e.say('p1', 'hi'))).toBe(false);
   });
 
-  it('the in-memory fallback restriction has neither a rule nor a notice id', () => {
+  it('the in-memory fallback restriction cites the automatic-filter rule (1 by default) but has no notice id', () => {
     const e = setup({ store: new FailingSanctions(), notices: true });
     e.sit('p1', who('k1'));
     e.threeSlurs();
     e.tick();
     const r = refusal(e.say('p1', 'hello'));
-    expect(r).toMatchObject({ reason: 'restricted', byModerator: false });
-    expect('rule' in r).toBe(false);
+    expect(r).toMatchObject({ reason: 'restricted', byModerator: false, rule: 1 });
     expect('noticeId' in r).toBe(false);
   });
 

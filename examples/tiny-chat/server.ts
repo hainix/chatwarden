@@ -2,20 +2,34 @@
 //
 // Wire protocol (JSON text frames)
 //   in:  { type: 'chat', text }                     { type: 'mute', seatId, on }
+//        { type: 'ack', id }                        the player has seen that notice
 //   out: { type: 'welcome', seatId }
 //        { type: 'chat', seatId, text, lineId }     a delivered line (the sender gets their own back)
 //        { type: 'refused', reason, until? }        reason: blocked | rate | length | restricted | gate | banned
+//        { type: 'notices', items }                 the player's pending notices (PlayerNotice[]): on connect when
+//                                                   any are waiting, and whenever a decision adds one
+//        { type: 'acked', id, ok }                  the answer to an 'ack'
 // HTTP: POST /report { key, targetSeat, category, note?, lineId? } -> 200 { ok, remaining } | 4xx { ok: false, refused }
+//       GET  /record?key=...   DEMO ONLY: the key's "My record" -> { ok, items }. A real app authenticates the player.
+//       POST /decide           DEMO ONLY, guarded by the `x-admin-token` header. A real app authenticates its moderators.
+//                              { reportId, verdict, reason, actions: [{ seat, kind, durationMs, rule, lineIds?, gapNote? }] }
 //
 // "key" stands in for whatever credential your game already has (a session token, a device id). It is sent as a
 // query parameter on the socket and in the report body to keep this demo short; no frame or response ever
 // carries it, a subject id or a hash back to a player.
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { createChatwarden, type Chatwarden, type ChatwardenOptions, type RawWho } from '@chatwarden/core';
+import {
+  createChatwarden,
+  type Chatwarden,
+  type ChatwardenOptions,
+  type DecisionAction,
+  type DecisionInput,
+  type RawWho,
+} from '@chatwarden/core';
 import { LiveTerms, type TermPack } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/test-fixtures';
 import { openStore } from '@chatwarden/store-sqlite';
@@ -36,6 +50,12 @@ export interface TinyChatOptions {
    * is fine for a demo and wrong for production, where startup throws instead.
    */
   secret?: string;
+  /**
+   * DEMO ONLY: the token `POST /decide` wants in the `x-admin-token` header. Default: the `TINY_CHAT_ADMIN_TOKEN`
+   * environment variable. With neither, the route is switched off (404). A real app authenticates its moderators
+   * with its own session, never a shared token.
+   */
+  adminToken?: string;
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -60,11 +80,28 @@ export interface TinyChat {
 interface Seat {
   ws: WebSocket;
   seatId: string;
-  key: string;
+  /** Who is behind the connection, as `identify` read it once. Server-side only. */
+  who: RawWho;
 }
+
+/** Equal tokens, without leaking where they differ. */
+function sameToken(given: unknown, expected: string): boolean {
+  if (typeof given !== 'string') return false;
+  const a = createHash('sha256').update(given).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
+const VERDICTS = ['fair', 'unfair', 'bad_faith'] as const;
 
 export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat> {
   const secret = resolveSecret(opts.secret);
+  const adminToken = opts.adminToken ?? (process.env.TINY_CHAT_ADMIN_TOKEN || undefined);
+  // Declared before the kit: `platform.notify` below looks a seat up here when a notice lands.
+  const seats = new Map<string, Seat>();
+  const send = (ws: WebSocket, frame: object): void => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(frame));
+  };
   const clock = { now: () => Date.now() };
   const store = openStore({ path: ':memory:' });
   const terms = new LiveTerms({ store, pack: opts.pack ?? syntheticTermPack(), clock });
@@ -79,20 +116,31 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     // X-Forwarded-For (or your platform's equivalent) yourself, trusting only your own proxy's header.
     ip: req.socket.remoteAddress ?? null,
   });
-  const chatwarden = await createChatwarden({
+  /** Push a seat its pending notices (the notices themselves, never the subject). */
+  const pushNotices = (seat: Seat): void => {
+    const items = chatwarden.notices.pending(seat.who);
+    if (items.length > 0) send(seat.ws, { type: 'notices', items });
+  };
+  // `notify` and `pushNotices` read `chatwarden` only when a notice lands, long after it is assigned.
+  const chatwarden: Chatwarden = await createChatwarden({
     store,
     secret,
-    platform: { identify: (ctx) => identify(ctx as IncomingMessage) },
+    platform: {
+      identify: (ctx) => identify(ctx as IncomingMessage),
+      // The kit tells us a SUBJECT has notices. The subject id is an identifier, so it stays on the server: find the
+      // seat that person holds in our own map, then send that connection its notices.
+      notify: (subject) => {
+        for (const seat of seats.values()) {
+          if (chatwarden.rooms.subjectAt(ROOM, seat.seatId) === subject) pushNotices(seat);
+        }
+      },
+    },
     matcher: terms,
     clock,
     onReport: opts.onReport,
   });
 
-  const seats = new Map<string, Seat>();
   let nextSeat = 1;
-  const send = (ws: WebSocket, frame: object): void => {
-    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(frame));
-  };
 
   const app = express();
   app.use(express.json());
@@ -103,7 +151,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       res.status(400).json({ ok: false, refused: 'bad_request' });
       return;
     }
-    const reporter = [...seats.values()].find((s) => s.key === key);
+    const reporter = [...seats.values()].find((s) => s.who.clientKey === key);
     if (reporter === undefined) {
       res.status(422).json({ ok: false, refused: 'off' });
       return;
@@ -119,6 +167,72 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     // Deliberately not returning the report id: nothing the reporter does not need.
     if (result.ok) res.json({ ok: true, remaining: result.remaining });
     else res.status(result.refused === 'rate' ? 429 : 422).json({ ok: false, refused: result.refused });
+  });
+
+  // DEMO ONLY. "My record" for whoever holds `key`. Anyone who knows (or guesses) a key can read that player's
+  // record, which is exactly why a real app authenticates the player first and never takes the key from a URL.
+  app.get('/record', (req, res) => {
+    const key = req.query.key;
+    if (typeof key !== 'string' || key === '') {
+      res.status(400).json({ ok: false, refused: 'bad_request' });
+      return;
+    }
+    res.json({ ok: true, items: chatwarden.notices.record({ clientKey: key, ip: req.socket.remoteAddress ?? null }) });
+  });
+
+  // DEMO ONLY. A moderator decides a report. A shared token in a header stands in for moderator login; a real app
+  // authenticates its moderators with its own session and writes an audit trail. Switched off without a token.
+  // Actions name SEATS (the demo has no moderator console); the server turns a seat into a subject, which never
+  // leaves it. The answer carries reference codes only.
+  app.post('/decide', async (req, res) => {
+    if (adminToken === undefined) {
+      res.status(404).json({ ok: false, refused: 'off' });
+      return;
+    }
+    if (!sameToken(req.get('x-admin-token'), adminToken)) {
+      res.status(401).json({ ok: false, refused: 'unauthorized' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const { reportId, verdict, reason, actions } = body;
+    if (
+      typeof reportId !== 'string' ||
+      typeof reason !== 'string' ||
+      !VERDICTS.includes(verdict as (typeof VERDICTS)[number]) ||
+      !Array.isArray(actions)
+    ) {
+      res.status(400).json({ ok: false, refused: 'bad_request' });
+      return;
+    }
+    const mapped: DecisionAction[] = [];
+    for (const raw of actions as unknown[]) {
+      const a = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+      const { seat, ...rest } = a;
+      const subject = typeof seat === 'string' ? chatwarden.rooms.subjectAt(ROOM, seat) : null;
+      if (subject === null) {
+        res.status(422).json({ ok: false, refused: 'no_such_seat' });
+        return;
+      }
+      mapped.push({ ...rest, subject } as unknown as DecisionAction);
+    }
+    const input: DecisionInput = {
+      reportId,
+      verdict: verdict as DecisionInput['verdict'],
+      actions: mapped,
+      actor: 'demo-admin',
+      reason,
+    };
+    try {
+      const result = await chatwarden.decide(input);
+      if (!result.ok) {
+        res.status(result.error === 'not_found' ? 404 : 422).json({ ok: false, refused: result.error });
+        return;
+      }
+      res.json({ ok: true, replay: result.replay, refCodes: result.groups.map((g) => g.refCode) });
+    } catch {
+      // `decide` rejects with the store's own error and writes nothing. Say so, and say nothing more.
+      res.status(500).json({ ok: false, refused: 'error' });
+    }
   });
 
   // Body-parser failures (malformed JSON, an oversized body) and anything else thrown in a route: always a small
@@ -145,10 +259,12 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       return;
     }
     const seatId = `p${nextSeat++}`;
-    const seat: Seat = { ws, seatId, key: who.clientKey ?? '' };
+    const seat: Seat = { ws, seatId, who };
     seats.set(seatId, seat);
     chatwarden.rooms.seat(ROOM, seatId, who, `Player ${seatId.slice(1)}`);
     send(ws, { type: 'welcome', seatId });
+    // Anything that landed while they were away (a warning to acknowledge, a report outcome).
+    pushNotices(seat);
 
     ws.on('message', (data) => {
       let msg: unknown;
@@ -161,6 +277,10 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       const m = msg as Record<string, unknown>;
       if (m.type === 'mute' && typeof m.seatId === 'string' && typeof m.on === 'boolean') {
         chatwarden.mutes.set(ROOM, seatId, m.seatId, m.on);
+        return;
+      }
+      if (m.type === 'ack' && typeof m.id === 'string') {
+        send(ws, { type: 'acked', id: m.id, ok: chatwarden.notices.ack(who, m.id) });
         return;
       }
       if (m.type !== 'chat' || typeof m.text !== 'string') return;

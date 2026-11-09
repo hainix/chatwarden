@@ -92,7 +92,7 @@ export type {
   SanctionNoticeInput,
 } from './notices.js';
 export { createChatwarden } from './chatwarden.js';
-export type { Chatwarden, ChatwardenOptions } from './chatwarden.js';
+export type { Chatwarden, ChatwardenOptions, GapRow } from './chatwarden.js';
 export {
   CATEGORY_TO_RULE,
   CommunityRules,

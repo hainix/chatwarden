@@ -34,8 +34,8 @@ const RATE_WINDOW_MS = 5_000;
 
 const AUTO_RESTRICT_REASON = 'auto: repeated slurs';
 
-/** The automatic filter and its timeout are for slurs: Community Rule 1. */
-const BLOCKED_RULE = 1;
+/** The Community Rule the automatic filter and its timeout cite unless the adopter says otherwise: CR 1 (slurs). */
+const DEFAULT_AUTO_RESTRICT_RULE = 1;
 
 /** The blocked line that earned a strike, kept for the notice an automatic timeout makes. */
 interface BlockedLine {
@@ -54,9 +54,9 @@ export interface Starrer {
 
 /**
  * The verdict on one line. A refusal carries a reason and, for `restricted`, when it ends (`null` =
- * permanent) and whether a human moderator imposed it. `rule` is the Community Rule number it cites: always 1
- * for `blocked`, and for `restricted` the sanction's own rule (omitted when it is `'uncovered'`, unknown, or the
- * restriction is the in-memory fallback). `noticeId` is the player's notice that explains a restriction, when one
+ * permanent) and whether a human moderator imposed it. `rule` is the Community Rule number it cites: the
+ * automatic-filter rule (`autoRestrictRule`, CR 1 by default) for `blocked`, and for `restricted` the sanction's
+ * own rule (omitted when it is `'uncovered'` or unknown; the in-memory fallback cites the automatic-filter rule). `noticeId` is the player's notice that explains a restriction, when one
  * exists. Never an identifier, a rule's private note or the matched term. `'empty'` means stay silent.
  */
 export type ChatResult =
@@ -101,6 +101,12 @@ export interface ChatServiceDeps {
    * changes the verdict.
    */
   notices?: NoticeService;
+  /**
+   * The Community Rule the automatic filter cites: on a `blocked` refusal, on the automatic timeout it earns (the
+   * stored sanction, the in-memory fallback and the player's notice). Default 1. The caller checks it is an active
+   * rule; the service just cites it.
+   */
+  autoRestrictRule?: number;
 }
 
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
@@ -113,7 +119,7 @@ const refuse = (
 interface Restriction {
   until: number | null;
   byModerator: boolean;
-  /** The stored sanction's group and rule text; null for the in-memory fallback, which has neither. */
+  /** The stored sanction's group (null for the in-memory fallback, which has none) and its rule text. */
   groupId: string | null;
   rule: string | null;
   /** The sanction is the sender's own, not a bystander matched through a shared-IP row of another person. */
@@ -148,6 +154,7 @@ export class ChatService {
   private readonly onAutoRestrict: ChatServiceDeps['onAutoRestrict'];
   private readonly logger: Logger | undefined;
   private readonly notices: NoticeService | undefined;
+  private readonly autoRestrictRule: number;
   private readonly rate: SlidingWindow;
 
   /**
@@ -173,6 +180,7 @@ export class ChatService {
     this.onAutoRestrict = deps.onAutoRestrict;
     this.logger = deps.logger;
     this.notices = deps.notices;
+    this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
     this.rate = slidingWindow({ limit: RATE_LIMIT, windowMs: RATE_WINDOW_MS, clock: deps.clock });
   }
 
@@ -265,8 +273,8 @@ export class ChatService {
         raw: trimmed,
         audience,
       });
-      // Explain at the point of block: the automatic filter is Community Rule 1.
-      return refuse('blocked', { rule: BLOCKED_RULE });
+      // Explain at the point of block: cite the automatic filter's rule.
+      return refuse('blocked', { rule: this.autoRestrictRule });
     }
 
     const delivered = this.starrer === undefined ? trimmed : this.starrer.star(trimmed);
@@ -322,7 +330,7 @@ export class ChatService {
       if (mem !== undefined) {
         if (mem.until <= now) this.memRestrictions.delete(key);
         else if (this.samePerson(mem.subject, subject)) {
-          best = { until: mem.until, byModerator: false, groupId: null, rule: null, own: true };
+          best = { until: mem.until, byModerator: false, groupId: null, rule: String(this.autoRestrictRule), own: true };
         }
       }
       // Only the latest IP of a seated person is known; an IP row speed-bumps them, never links two people.
@@ -402,8 +410,7 @@ export class ChatService {
             actor: 'auto',
             source: 'auto_filter',
             automated: true,
-            // The automatic timeout is for slurs: Community Rule 1.
-            rule: BLOCKED_RULE,
+            rule: this.autoRestrictRule,
           },
           now,
           this.sanctions,
@@ -435,7 +442,7 @@ export class ChatService {
   }
 
   /**
-   * The player's notice for the automatic timeout that was just stored: kind `chat`, Community Rule 1, with the
+   * The player's notice for the automatic timeout that was just stored: kind `chat`, citing the automatic-filter rule, with the
    * blocked line that tipped it (the notice masks the matched terms before anything is stored). Its own
    * transaction, announced to the player once it has committed. A failure is logged and absorbed: the
    * restriction stands without a notice.
@@ -460,7 +467,7 @@ export class ChatService {
         p: 0,
       };
       notices.createForSanction(
-        { groupId: found.groupId, refCode: found.refCode, kind: 'chat', until: found.until, rule: BLOCKED_RULE, subject },
+        { groupId: found.groupId, refCode: found.refCode, kind: 'chat', until: found.until, rule: this.autoRestrictRule, subject },
         [excerpt],
         { notify: true },
       );
