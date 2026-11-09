@@ -71,3 +71,12 @@ export { purge, RETENTION_DEFAULTS } from './retention.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export { createChatwarden } from './chatwarden.js';
 export type { Chatwarden, ChatwardenOptions } from './chatwarden.js';
+export {
+  CATEGORY_TO_RULE,
+  CommunityRules,
+  defineRules,
+  rulesPolicyText,
+  RulesError,
+  STARTER_RULES,
+} from './rules.js';
+export type { CommunityRule, RuleRef } from './rules.js';
