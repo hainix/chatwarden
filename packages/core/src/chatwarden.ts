@@ -233,6 +233,11 @@ export interface Chatwarden {
    * replayed decision announces nothing). A listener may be async; it is fenced: a throw or a rejection is logged
    * (`chatwarden.listener_failed`, error class only) and never reaches the operation. Staff only: a `sanction.applied`
    * event carries the target's subject id. They hold no chat text, reason, evidence or gap note.
+   * Carries subject ids: staff channels only, never send to a player.
+   *
+   * Listeners run synchronously, in the call that raised the event. `auto.restricted` is raised inside
+   * `chat.accept`, on the chat hot path: keep a listener cheap, or hand the work off (queue it, or return a promise
+   * after a quick synchronous start) so it never delays a chat line.
    */
   on: Subscribe;
   names: {
@@ -573,11 +578,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         return done;
       },
       revoke: async (groupId, actor, reason) => {
-        const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock, index: sanctions });
+        // One instant for the stored revokedAt and the event, so a consumer correlating the two sees the same time.
+        const at = clock.now();
+        const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock: { now: () => at }, index: sanctions });
         if (revoked) {
           try {
             const code = store.sanctionRefCode(groupId);
-            if (code !== null) bus.emit({ type: 'sanction.revoked', groupId, refCode: code, at: clock.now() });
+            if (code !== null) bus.emit({ type: 'sanction.revoked', groupId, refCode: code, at });
           } catch (err) {
             eventFailed(err);
           }

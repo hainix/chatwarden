@@ -26,6 +26,7 @@ export type KitEvent =
    * A sanction group was written (by `decide` or `sanctions.apply`, a note included). `until` is when it ends, or
    * null for a permanent one and for a warning or note (read `kind`). The automatic slur timeout is
    * `auto.restricted`, not this.
+   * Carries subject ids: staff channels only, never send to a player.
    */
   | {
       type: 'sanction.applied';
@@ -42,7 +43,10 @@ export type KitEvent =
   | { type: 'sanction.revoked'; groupId: string; refCode: string; at: number }
   /** A moderator filed a sanction under `'uncovered'` and a rule-gap row now exists for the group. */
   | { type: 'gap.created'; groupId: string; refCode: string; at: number }
-  /** A blocked line earned an automatic timeout that was stored; `second` is true for the 24 h repeat. */
+  /**
+   * A blocked line earned an automatic timeout that was stored; `second` is true for the 24 h repeat. It is raised
+   * inside `chat.accept`, on the chat hot path, so its listeners must be cheap or defer their work.
+   */
   | { type: 'auto.restricted'; groupId: string; refCode: string; second: boolean };
 
 /** Every event type, for checking a subscription. */

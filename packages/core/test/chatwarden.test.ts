@@ -1673,3 +1673,22 @@ describe('createChatwarden: names.check', () => {
     }
   });
 });
+
+describe('createChatwarden: names.check, odd inputs', () => {
+  const m: Matcher = {
+    match: (t) => (/(^|[^\p{L}\p{N}_])zorbak([^\p{L}\p{N}_]|$)/iu.test(t) ? { termId: 'syn:zorbak' } : null),
+  };
+
+  it('a whitespace-only name is ok (the caller decides whether a blank name is allowed)', async () => {
+    const { cw } = await setup({ matcher: m });
+    for (const name of [' ', '   ', '\t\n', '  ']) expect(cw.names.check(name)).toEqual({ ok: true });
+  });
+
+  it('a very long name is checked in full, not capped: clean passes, a term at the end is still caught', async () => {
+    const { cw } = await setup({ matcher: m });
+    const clean = 'a'.repeat(10_000);
+    expect(cw.names.check(clean)).toEqual({ ok: true });
+    expect(cw.names.check(`${'a '.repeat(5_000)}zorbak`)).toEqual({ ok: false, reason: 'name_not_allowed', rule: 1 });
+    expect(cw.names.check(`zorbak ${'a '.repeat(5_000)}`)).toEqual({ ok: false, reason: 'name_not_allowed', rule: 1 });
+  });
+});

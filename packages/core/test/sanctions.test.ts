@@ -1132,3 +1132,33 @@ describe('SanctionIndex.active: own', () => {
     expect(index.active('chat', none, s1, NOW)?.own).toBe(true);
   });
 });
+
+describe('MemoryStore.sanctionRefCode', () => {
+  it('returns the ref code of a known group and null for an unknown one', async () => {
+    const { MemoryStore } = await import('./memoryStore.js');
+    const store = new MemoryStore();
+    const row = {
+      id: 'r1',
+      groupId: 'g1',
+      refCode: 'M-ABCDE',
+      kind: 'chat' as const,
+      targetType: 'subject' as const,
+      value: 's_x',
+      startsAt: 1,
+      endsAt: 2,
+      reason: 'r',
+      rule: '1',
+      gapNote: null,
+      gapStatus: null,
+      roomId: null,
+      actor: 'mod',
+      source: 'moderator' as const,
+      automated: false,
+      pending: false,
+    };
+    store.transaction(() => store.insertSanctionGroup([row]));
+    expect(store.sanctionRefCode('g1')).toBe('M-ABCDE');
+    expect(store.sanctionRefCode('nope')).toBeNull();
+    expect(store.sanctionRefCode('')).toBeNull();
+  });
+});

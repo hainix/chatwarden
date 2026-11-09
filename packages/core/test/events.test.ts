@@ -792,3 +792,43 @@ describe('events: carry no player text', () => {
     expect(wire).not.toContain('Bob');
   });
 });
+
+describe('events: fix round 1', () => {
+  it('sanction.revoked.at equals the stored revokedAt even when the clock ticks on every read', async () => {
+    const store = new MemoryStore();
+    let t = NOW;
+    const clock = { now: () => (t += 7) };
+    const cw = await createChatwarden({
+      store,
+      secret: 'events-secret',
+      platform: { identify: (c) => c as RawWho },
+      clock,
+      logger: { warn() {} },
+      matcher: blocker,
+    });
+    const events: KitEvent[] = [];
+    cw.on('*', (e) => void events.push(e));
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    const subject = cw.rooms.subjectAt(R, 'a') ?? '';
+    const { groupId } = await cw.sanctions.apply({
+      kind: 'chat',
+      subject,
+      includeIp: false,
+      durationMs: H,
+      reason: 'r',
+      actor: 'mod',
+      source: 'moderator',
+      automated: false,
+      rule: 1,
+    });
+    events.length = 0;
+    expect(await cw.sanctions.revoke(groupId, 'mod', 'oops')).toBe(true);
+    const stored = store.rawSanctions().filter((r) => r.groupId === groupId);
+    expect(stored.length).toBeGreaterThan(0);
+    const revokedAt = stored[0]?.revokedAt;
+    expect(typeof revokedAt).toBe('number');
+    expect(stored.every((r) => r.revokedAt === revokedAt)).toBe(true);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'sanction.revoked', at: revokedAt });
+  });
+});
