@@ -10,7 +10,7 @@ import {
   type ModerationProfile,
   type ProfileOverrides,
 } from '../src/profile.js';
-import { LADDER_TABLE } from '../src/ladder.js';
+import { HISTORY_LOOKBACK_MS, LADDER_TABLE } from '../src/ladder.js';
 import { CONDUCT_LEVELS } from '../src/types.js';
 import type { ConductLevel } from '../src/types.js';
 
@@ -93,7 +93,12 @@ describe('the presets equal the standards doc tables, cell by cell', () => {
       distinctGames: false,
       outcome: { kind: 'chat', durationMs: DAY },
     });
-    expect(PRESETS.strict.repeat).toEqual({ windowDays: 30, notes: 1, distinctGames: false, outcome: 'warning' });
+    expect(PRESETS.strict.repeat).toEqual({
+      windowDays: 30,
+      notes: 1,
+      distinctGames: false,
+      outcome: { kind: 'chat', durationMs: DAY },
+    });
   });
 
   it('profanity modes and defaults', () => {
@@ -174,7 +179,7 @@ describe('the presets equal the standards doc tables, cell by cell', () => {
     const rude = PRESETS.strict.guidelines[1]!;
     expect(rude.examples).toEqual(['loser', "you're an idiot", 'go f\u2014 yourself']);
     expect(rude.outcome).toBe(
-      'First time: chat restricted for 1 hour. Repeated (any earlier note on the record): a warning.',
+      'First time: chat restricted for 1 hour. Repeated (any earlier note on the record): chat restricted for 24 hours.',
     );
     expect(PRESETS.strict.aiContext).toContain('"loser"');
     expect(PRESETS.strict.aiContext).toContain('as rude');
@@ -405,7 +410,9 @@ describe('resolveProfile: overrides', () => {
   it('validates the MERGED result', () => {
     const e = failure(() => resolveProfile('relaxed', { repeat: { windowDays: 0 } }));
     expect(e.path).toBe('profile.repeat.windowDays');
-    expect(e.message).toBe('profile.repeat.windowDays must be a whole number of days from 1 to 3650');
+    expect(e.message).toBe(
+      'profile.repeat.windowDays must be a whole number of days from 1 to 90: the record only reaches back 90 days',
+    );
   });
 
   it('a prototype-pollution key is carried as an unknown key and rejected', () => {
@@ -721,11 +728,22 @@ describe('validation: the repeat rule', () => {
     expect(std.repeat).toEqual({ ...PRESETS.standard.repeat, outcome: { kind: 'chat', durationMs: HOUR } });
   });
 
-  it('windowDays is capped at 3650 days; the boundary passes', () => {
-    expect(MAX_WINDOW_DAYS).toBe(3650);
-    expect(resolveProfile('relaxed', { repeat: { windowDays: 3650 } }).repeat.windowDays).toBe(3650);
-    expect(invalid((p) => (p.repeat.windowDays = 3651)).path).toBe('profile.repeat.windowDays');
+  it('windowDays is capped at the 90 day history lookback; 90 passes, 91 fails', () => {
+    expect(MAX_WINDOW_DAYS).toBe(90);
+    expect(MAX_WINDOW_DAYS * DAY).toBe(HISTORY_LOOKBACK_MS);
+    expect(resolveProfile('relaxed', { repeat: { windowDays: 90 } }).repeat.windowDays).toBe(90);
+    const e = invalid((p) => (p.repeat.windowDays = 91));
+    expect(e.path).toBe('profile.repeat.windowDays');
+    expect(e.message).toContain('90 days');
+    expect(invalid((p) => (p.repeat.windowDays = 3650)).path).toBe('profile.repeat.windowDays');
     expect(invalid((p) => (p.repeat.windowDays = Number.MAX_SAFE_INTEGER)).path).toBe('profile.repeat.windowDays');
+  });
+
+  it('a window of 91 days is refused through resolveProfile and defineProfile alike', () => {
+    expect(failure(() => resolveProfile('strict', { repeat: { windowDays: 91 } })).path).toBe('profile.repeat.windowDays');
+    const custom = copy(PRESETS.standard);
+    (custom['repeat'] as { windowDays: number }).windowDays = 91;
+    expect(failure(() => defineProfile(custom as unknown as ModerationProfile)).path).toBe('profile.repeat.windowDays');
   });
 
   it('every durationMs is capped at 100 years; the boundary passes (outcomes and ladder cells)', () => {

@@ -490,27 +490,53 @@ describe('suggest: relaxed, the moderator\'s scenarios', () => {
 describe('suggest: the ladder cells, step by step', () => {
   for (const [step, low, high] of CONTRACT) {
     if (step === 0) continue;
-    it(`step ${step}: rude and hostile read the low column, severe the high column`, () => {
+    it(`step ${step}: rude reads the low column; hostile and severe read the high column`, () => {
       const records = AT_STEP[step as 1 | 2 | 3 | 4 | 5];
       expect(sug(RELAXED, records, 'rude', 2, 'g')).toMatchObject({ label: low[2] });
-      expect(sug(RELAXED, records, 'hostile', 2, 'g')).toMatchObject({ label: low[2] });
+      expect(sug(RELAXED, records, 'hostile', 2, 'g')).toMatchObject({ label: high[2] });
       expect(sug(RELAXED, records, 'severe', 2, 'g')).toMatchObject({ label: high[2] });
       expect(sug(RELAXED, records, 'rude', 2, 'g').outcome).toEqual(outcomeOf(low));
+      expect(sug(RELAXED, records, 'hostile', 2, 'g').outcome).toEqual(outcomeOf(high));
       expect(sug(RELAXED, records, 'severe', 2, 'g').outcome).toEqual(outcomeOf(high));
     });
   }
+
+  it('the per-level contract holds under every preset: rude = low, hostile = high, severe = high (never below the first offense)', () => {
+    for (const p of [RELAXED, STANDARD, STRICT]) {
+      for (const [step, low, high] of CONTRACT) {
+        if (step === 0) continue;
+        const records = AT_STEP[step as 1 | 2 | 3 | 4 | 5];
+        for (const [level, cell] of [['rude', low], ['hostile', high], ['severe', high]] as const) {
+          const got = sug(p, records, level, 2, 'g').outcome;
+          const want = outcomeOf(cell);
+          const floor = p.firstOffense[level];
+          // the answer is the contract cell, or the profile's own (stronger) first offense when that is harder
+          expect([JSON.stringify(want), JSON.stringify(floor)]).toContain(JSON.stringify(got));
+        }
+      }
+    }
+  });
+
+  it('a revoked warning does not move the ladder', () => {
+    expect(sug(RELAXED, [warn({ revoked: true })], 'rude', 2, 'g').outcome).toBe('note');
+    expect(sug(RELAXED, [warn({ revoked: true })], 'hostile').outcome).toBe('warning');
+    expect(sug(RELAXED, [warn({ revoked: true }), warn()], 'hostile').outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
+    expect(sug(RELAXED, [rec('ban', 7 * DAY, { revoked: true })], 'severe').outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
+  });
 
   it('step 0 severe is the high column of row 0', () => {
     expect(sug(RELAXED, [], 'severe').label).toBe('Restrict chat 7 days');
   });
 
   it('two warnings make step 2', () => {
-    expect(sug(RELAXED, [warn(), warn()], 'hostile', parseRuleRef('2')).outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
+    expect(sug(RELAXED, [warn(), warn()], 'hostile', parseRuleRef('2')).outcome).toEqual({ kind: 'ban', durationMs: 7 * DAY });
+    expect(sug(RELAXED, [warn(), warn()], 'rude', parseRuleRef('2'), 'g').outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
   });
 
   it('a stored rule text goes through parseRuleRef', () => {
-    expect(sug(RELAXED, [warn(), warn()], 'hostile', parseRuleRef('5')).outcome).toEqual({ kind: 'area', durationMs: 7 * DAY });
-    expect(sug(RELAXED, [warn(), warn()], 'hostile', parseRuleRef('uncovered')).outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
+    expect(sug(RELAXED, [warn(), warn()], 'rude', parseRuleRef('5'), 'g').outcome).toEqual({ kind: 'area', durationMs: 7 * DAY });
+    expect(sug(RELAXED, [warn(), warn()], 'rude', parseRuleRef('uncovered'), 'g').outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
+    expect(sug(RELAXED, [warn(), warn()], 'hostile', parseRuleRef('5')).outcome).toEqual({ kind: 'ban', durationMs: 7 * DAY });
   });
 });
 
@@ -541,15 +567,33 @@ describe('suggest: standard and strict, key cells', () => {
     expect(sug(STRICT, [], 'severe')).toMatchObject({ outcome: { kind: 'ban', durationMs: 7 * DAY }, label: 'Full ban 7 days' });
   });
 
-  it('strict: "any note" is repeated, but a clean record is not (this incident alone is not a repeat)', () => {
-    expect(sug(STRICT, [], 'rude').outcome).toEqual({ kind: 'chat', durationMs: H });
-    const withNote = sug(STRICT, [note({ roomId: 'g1' })], 'hostile');
-    expect(withNote.outcome).toEqual({ kind: 'chat', durationMs: DAY });
+  it('strict notes: 1 pins "any EARLIER note": a lone incident on a clean record is not repeated', () => {
+    const lone = sug(STRICT, [], 'rude');
+    expect(lone.outcome).toEqual({ kind: 'chat', durationMs: H });
+    expect(lone.why).not.toContain('repeated');
+    expect(lone.why).toContain('clean record');
+    expect(sug(STRICT, [], 'rude', 2, 'g1').outcome).toEqual({ kind: 'chat', durationMs: H });
+    // an earlier note that has aged out, or been revoked, is not an earlier note either
+    expect(sug(STRICT, [note({ startsAt: NOW - 30 * DAY - 1 })], 'rude').outcome).toEqual({ kind: 'chat', durationMs: H });
+    expect(sug(STRICT, [note({ revoked: true })], 'rude').outcome).toEqual({ kind: 'chat', durationMs: H });
   });
 
-  it('an escalation never goes below the first offense: strict rude with an earlier note is not milder than chat 1 h', () => {
-    // strict's repeat outcome is a warning, which is milder than its rude first offense (chat 1 h)
-    expect(sug(STRICT, [note()], 'rude').outcome).toEqual({ kind: 'chat', durationMs: H });
+  it('strict rude with an earlier note is repeated: chat 24 hours, and the reason says so', () => {
+    const s = sug(STRICT, [note({ roomId: 'g1' })], 'rude', 2, 'g1');
+    expect(s).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY }, label: 'Restrict chat 24 hours' });
+    expect(s.why).toContain('repeated');
+    expect(s.why).toMatch(/^Strict profile: /);
+    expect(sug(STRICT, [note()], 'hostile').outcome).toEqual({ kind: 'chat', durationMs: DAY });
+  });
+
+  it('an escalation never goes below the first offense, even if a custom repeat outcome is milder', () => {
+    const p = resolveProfile('relaxed', {
+      firstOffense: { rude: { kind: 'chat', durationMs: 2 * H } },
+      repeat: { windowDays: 30, notes: 2, distinctGames: false, outcome: 'warning' },
+    });
+    const s = sug(p, [note({ roomId: 'a' })], 'rude', 2, 'b');
+    expect(s.outcome).toEqual({ kind: 'chat', durationMs: 2 * H });
+    expect(s.label).toBe('Restrict chat 2 hours');
   });
 
   it('strict severe on a record climbs the ladder: step 3 is a 30 day ban', () => {
@@ -610,12 +654,13 @@ describe('suggest: custom profiles', () => {
 describe('suggest: areaRules and severeRules', () => {
   it('rules 5 and 6 turn a chat suggestion into a ban from public rooms of the same length', () => {
     for (const rule of [5, 6]) {
-      const s = sug(RELAXED, AT_STEP[1], 'hostile', rule);
+      const s = sug(RELAXED, AT_STEP[1], 'rude', rule, 'g');
       expect(s).toMatchObject({ outcome: { kind: 'area', durationMs: DAY }, label: 'Ban from public rooms 24 hours' });
       expect(s.why).toContain('public rooms');
+      expect(sug(RELAXED, AT_STEP[1], 'hostile', rule)).toMatchObject({ outcome: { kind: 'area', durationMs: 7 * DAY } });
       expect(sug(RELAXED, [], 'severe', rule)).toMatchObject({ outcome: { kind: 'area', durationMs: 7 * DAY }, label: 'Ban from public rooms 7 days' });
     }
-    expect(sug(RELAXED, AT_STEP[1], 'hostile', 4).outcome).toEqual({ kind: 'chat', durationMs: DAY });
+    expect(sug(RELAXED, AT_STEP[1], 'rude', 4, 'g').outcome).toEqual({ kind: 'chat', durationMs: DAY });
   });
 
   it('a warning, a note and a full ban are left alone', () => {
@@ -631,9 +676,9 @@ describe('suggest: areaRules and severeRules', () => {
 
   it('areaRules override: only the listed rules swap', () => {
     const p = resolveProfile('relaxed', { areaRules: [7] });
-    expect(sug(p, AT_STEP[1], 'hostile', 5).outcome).toEqual({ kind: 'chat', durationMs: DAY });
-    expect(sug(p, AT_STEP[1], 'hostile', 7).outcome).toEqual({ kind: 'area', durationMs: DAY });
-    expect(sug(resolveProfile('relaxed', { areaRules: [] }), AT_STEP[1], 'hostile', 5).outcome).toEqual({ kind: 'chat', durationMs: DAY });
+    expect(sug(p, AT_STEP[1], 'rude', 5, 'g').outcome).toEqual({ kind: 'chat', durationMs: DAY });
+    expect(sug(p, AT_STEP[1], 'rude', 7, 'g').outcome).toEqual({ kind: 'area', durationMs: DAY });
+    expect(sug(resolveProfile('relaxed', { areaRules: [] }), AT_STEP[1], 'rude', 5, 'g').outcome).toEqual({ kind: 'chat', durationMs: DAY });
   });
 
   it('a profile without areaRules or severeRules falls back to [5, 6] and [1]', () => {
@@ -641,7 +686,7 @@ describe('suggest: areaRules and severeRules', () => {
     delete bare.areaRules;
     delete bare.severeRules;
     const p = bare as ModerationProfile;
-    expect(sug(p, AT_STEP[1], 'hostile', 5).outcome).toEqual({ kind: 'area', durationMs: DAY });
+    expect(sug(p, AT_STEP[1], 'rude', 5, 'g').outcome).toEqual({ kind: 'area', durationMs: DAY });
     expect(sug(p, [], 'rude', 1).outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
   });
 
@@ -661,12 +706,16 @@ describe('suggest: areaRules and severeRules', () => {
   });
 
   it('the uncovered rule is neither severe nor area', () => {
-    expect(sug(RELAXED, AT_STEP[1], 'hostile', 'uncovered').outcome).toEqual({ kind: 'chat', durationMs: DAY });
+    expect(sug(RELAXED, AT_STEP[1], 'rude', 'uncovered', 'g').outcome).toEqual({ kind: 'chat', durationMs: DAY });
+    expect(sug(RELAXED, AT_STEP[1], 'hostile', 'uncovered').outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
   });
 
   it('a null level reads as hostile', () => {
     expect(sug(RELAXED, [], null).outcome).toBe('warning');
-    expect(sug(RELAXED, AT_STEP[1], null).outcome).toEqual({ kind: 'chat', durationMs: DAY });
+    expect(sug(RELAXED, AT_STEP[1], null).outcome).toEqual({ kind: 'chat', durationMs: 7 * DAY });
+    for (const step of [1, 2, 3, 4, 5] as const) {
+      expect(sug(RELAXED, AT_STEP[step], null)).toEqual(sug(RELAXED, AT_STEP[step], 'hostile'));
+    }
   });
 });
 

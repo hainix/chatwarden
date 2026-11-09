@@ -1,4 +1,4 @@
-import { LADDER_TABLE } from './ladder.js';
+import { HISTORY_LOOKBACK_MS, LADDER_TABLE } from './ladder.js';
 import type { LadderRow } from './ladder.js';
 import { CONDUCT_LEVELS } from './types.js';
 import type { ConductLevel } from './types.js';
@@ -161,8 +161,8 @@ const MAX_DEPTH = 24;
 
 /** The longest any duration may be: 100 years, so later date arithmetic cannot overflow. */
 export const MAX_DURATION_MS = 3_153_600_000_000;
-/** The longest `repeat.windowDays`: ten years. */
-export const MAX_WINDOW_DAYS = 3650;
+/** The longest `repeat.windowDays`: the history lookback (90 days), since the record reaches back no further. */
+export const MAX_WINDOW_DAYS = HISTORY_LOOKBACK_MS / DAY;
 
 function fail(path: string, reason: string): never {
   throw new ProfileError(path, reason);
@@ -302,7 +302,10 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
 
   const repeat = obj(p['repeat'], 'profile.repeat', REPEAT_KEYS);
   if (!positiveInt(repeat['windowDays']) || repeat['windowDays'] > MAX_WINDOW_DAYS) {
-    fail('profile.repeat.windowDays', `must be a whole number of days from 1 to ${MAX_WINDOW_DAYS}`);
+    fail(
+      'profile.repeat.windowDays',
+      `must be a whole number of days from 1 to ${MAX_WINDOW_DAYS}: the record only reaches back ${MAX_WINDOW_DAYS} days`,
+    );
   }
   if (!positiveInt(repeat['notes'])) fail('profile.repeat.notes', 'must be a whole number ≥ 1');
   if (typeof repeat['distinctGames'] !== 'boolean') fail('profile.repeat.distinctGames', 'must be true or false');
@@ -584,7 +587,8 @@ const STANDARD: ModerationProfile = {
 /**
  * Strict is for younger players and families. Two points the standards table cannot say in an {@link Outcome}:
  * - Its ladder is the same K2 table as the other presets; what makes strict strict is `firstOffense`, `repeat`
- *   (any single note is repeated) and refusing profanity. The ladder carries no per-preset floor.
+ *   (any earlier note is repeated, and then chat is restricted for 24 hours) and refusing profanity. The ladder carries
+ *   no per-preset floor.
  * - The table's rude first offense is "warning + chat 1 h". An Outcome is one action, so it is the 1 hour chat
  *   restriction, the stronger of the two. The window for "any note" is the same 30 days as the other presets.
  */
@@ -598,7 +602,7 @@ const STRICT: ModerationProfile = {
     hostile: { kind: 'chat', durationMs: DAY },
     severe: { kind: 'ban', durationMs: 7 * DAY },
   },
-  repeat: { windowDays: 30, notes: 1, distinctGames: false, outcome: 'warning' },
+  repeat: { windowDays: 30, notes: 1, distinctGames: false, outcome: { kind: 'chat', durationMs: DAY } },
   ladder: LADDER_TABLE,
   profanity: { ...DEFAULT_PROFANITY, mode: 'refuse' },
   aiContext:
@@ -628,7 +632,8 @@ const STRICT: ModerationProfile = {
         'Any insult or swearing aimed at a player, even once. Any earlier note on the record makes it repeated.',
       examples: ['loser', "you're an idiot", 'go f— yourself'],
       covers: ['rude', 'repeated'],
-      outcome: 'First time: chat restricted for 1 hour. Repeated (any earlier note on the record): a warning.',
+      outcome:
+        'First time: chat restricted for 1 hour. Repeated (any earlier note on the record): chat restricted for 24 hours.',
     },
     {
       title: 'Bullying',

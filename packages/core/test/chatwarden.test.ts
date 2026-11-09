@@ -1174,7 +1174,7 @@ describe('createChatwarden: history and suggest', () => {
     await warnAlice(r);
     expect(cw.history(a)).toHaveLength(1);
     expect(cw.history(a)[0]).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: 7 * DAY } });
     expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
   });
 

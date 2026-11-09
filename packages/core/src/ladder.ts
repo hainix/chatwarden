@@ -104,9 +104,12 @@ export interface LadderCell {
 /** One row of the ladder table. */
 export interface LadderRow {
   step: LadderStep;
-  /** Suggested for `banter`, `rude` and `hostile` conduct. */
+  /** Suggested for `banter` and `rude` conduct. */
   lowMedium: LadderCell;
-  /** Suggested for `severe` conduct, or whenever the rule is one of the profile's `severeRules` (default CR 1). */
+  /**
+   * Suggested for `hostile` conduct once the record holds a warning or a restriction (step 1 or more), for `severe`
+   * conduct, and whenever the rule is one of the profile's `severeRules` (default CR 1).
+   */
   high: LadderCell;
 }
 
@@ -279,9 +282,10 @@ function repeatMet(profile: ModerationProfile, live: readonly ActionRecord[], no
  * - Otherwise, with a clean record (step 0): the first-offense outcome for the level, unless this incident, counted
  *   as one more note, meets the profile's `repeat` rule over the non-revoked notes inside `windowDays`. Then the
  *   outcome is the stronger of `repeat.outcome` and the first-offense outcome (an escalation never goes below the
- *   first offense). Records only reach back 90 days, so a longer window cannot see further than that.
- * - With a warning or restriction on the record (step 1 or more): the ladder's low/medium column for the step, again
- *   never below the first-offense outcome for the level. Notes no longer matter.
+ *   first offense).
+ * - With a warning or restriction on the record (step 1 or more): `rude` reads the ladder's low/medium column for the
+ *   step and `hostile` reads the high column, each never below the first-offense outcome for the level. Notes no
+ *   longer matter.
  * - A chat restriction becomes a ban from public rooms and matchmaking (`area`) at the same length under the
  *   profile's `areaRules` (default CR 5 and 6). A warning or a full ban is left alone.
  * - A null level reads as `hostile`.
@@ -326,7 +330,7 @@ export function suggest(
     pick = stronger(first, cellPick(row.high));
     reason = `severe conduct is acted on at once, never below the first-offense outcome or the ladder step for the record: ${lowerFirst(pick.label ?? labelOf(pick.outcome))}`;
   } else if (step >= 1) {
-    pick = stronger(first, cellPick(row.lowMedium));
+    pick = stronger(first, cellPick(read === 'hostile' ? row.high : row.lowMedium));
     reason = `the record already holds a warning or a restriction, so the ladder's next step applies: ${lowerFirst(pick.label ?? labelOf(pick.outcome))}`;
   } else {
     const live = records.filter((r) => !r.revoked);
