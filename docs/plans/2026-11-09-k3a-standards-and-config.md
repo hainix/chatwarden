@@ -274,7 +274,7 @@ Plus these:
     - text: "Trash talk about the game and each other's play is fine. Harassing, threatening or personally
       attacking someone, again and again, is not."
 
-    Strict CR 3 also covers swearing at people. The guard test (no single-game vocabulary) applies to every flavour.
+    Strict CR 2 also covers swearing aimed at a player (ruling R17). The guard test (no single-game vocabulary) applies to every flavour.
   - `STARTER_RULES` = `starterRules('standard')`, for compatibility.
   - `ChatwardenOptions` gains:
     - `profile?: keyof PRESETS | ModerationProfile` (default `'standard'`) and `overrides?: ProfileOverrides`
