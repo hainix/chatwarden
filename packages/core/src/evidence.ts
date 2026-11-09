@@ -144,6 +144,11 @@ export class RoomRoster {
     this.rooms.get(roomId)?.seats.delete(seatId);
   }
 
+  /** Seat ids currently held in the room, sorted; [] for an unknown room. A copy. */
+  seats(roomId: string): string[] {
+    return [...(this.rooms.get(roomId)?.seats.keys() ?? [])].sort();
+  }
+
   occupant(roomId: string, seatId: string): { subject: SubjectId | null; handle: string } | null {
     const found = this.rooms.get(roomId)?.seats.get(seatId);
     return found ? { ...found } : null;

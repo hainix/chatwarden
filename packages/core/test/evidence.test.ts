@@ -548,3 +548,27 @@ describe('seat handover and room close', () => {
     expect(buffer.append('R', line())).toBe('1');
   });
 });
+
+describe('RoomRoster.seats', () => {
+  it('lists the seat ids of a room, sorted, and [] for an unknown room', () => {
+    const roster = new RoomRoster();
+    expect(roster.seats('NOPE')).toEqual([]);
+    roster.seat('R', 'p2', 's_two', 'bob');
+    roster.seat('R', 'p1', 's_one', 'alice');
+    roster.seat('R', 'p10', null, 'guest');
+    roster.seat('OTHER', 'z9', 's_z', 'zed');
+    expect(roster.seats('R')).toEqual(['p1', 'p10', 'p2']);
+  });
+
+  it('follows unseat and close, and returns a copy', () => {
+    const roster = new RoomRoster();
+    roster.seat('R', 'p1', 's_one', 'alice');
+    roster.seat('R', 'p2', 's_two', 'bob');
+    roster.unseat('R', 'p1');
+    expect(roster.seats('R')).toEqual(['p2']);
+    roster.seats('R').push('hacked');
+    expect(roster.seats('R')).toEqual(['p2']);
+    roster.close('R');
+    expect(roster.seats('R')).toEqual([]);
+  });
+});

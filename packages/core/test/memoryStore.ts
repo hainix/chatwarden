@@ -1,4 +1,4 @@
-import type { SanctionRow, Store, SubjectIdRecord, SubjectId, SubjectRecord } from '../src/types.js';
+import type { MuteRow, SanctionRow, Store, SubjectIdRecord, SubjectId, SubjectRecord } from '../src/types.js';
 
 /** A stored sanction row plus its revocation, as the SQL table keeps it. */
 export interface StoredSanction extends SanctionRow {
@@ -17,6 +17,9 @@ export class MemoryStore implements Store {
   protected subjects = new Map<SubjectId, SubjectRecord>();
   protected subjectIds = new Map<string, SubjectIdRecord>();
   protected sanctions: StoredSanction[] = [];
+  /** Mutes by `viewer, target`; `seq` stands in for SQLite's rowid (insertion order, kept on refresh). */
+  protected mutes = new Map<string, { row: MuteRow; seq: number }>();
+  private muteSeq = 0;
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -162,11 +165,60 @@ export class MemoryStore implements Store {
       }));
   }
 
+  // Mutes (synchronous, see the Store interface)
+
+  upsertMute(row: MuteRow): void {
+    const key = muteKey(row.viewer, row.target);
+    const existing = this.mutes.get(key);
+    if (existing === undefined) {
+      this.mutes.set(key, { row: { ...row }, seq: ++this.muteSeq });
+      this.undoWith(() => this.mutes.delete(key));
+    } else {
+      const before = existing.row.createdAt;
+      existing.row.createdAt = row.createdAt;
+      this.undoWith(() => {
+        existing.row.createdAt = before;
+      });
+    }
+  }
+
+  deleteMute(viewer: SubjectId, target: SubjectId): boolean {
+    const key = muteKey(viewer, target);
+    const existing = this.mutes.get(key);
+    if (existing === undefined) return false;
+    this.mutes.delete(key);
+    this.undoWith(() => this.mutes.set(key, existing));
+    return true;
+  }
+
+  loadMutes(since: number): MuteRow[] {
+    return [...this.mutes.values()].filter((m) => m.row.createdAt >= since).map((m) => ({ ...m.row }));
+  }
+
+  pruneMutes(viewer: SubjectId, keep: number): SubjectId[] {
+    const mine = [...this.mutes.entries()]
+      .filter(([, m]) => m.row.viewer === viewer)
+      .sort(([, a], [, b]) => a.row.createdAt - b.row.createdAt || a.seq - b.seq);
+    const drop = mine.slice(0, Math.max(0, mine.length - keep));
+    for (const [key, m] of drop) {
+      this.mutes.delete(key);
+      this.undoWith(() => this.mutes.set(key, m));
+    }
+    return drop.map(([, m]) => m.row.target);
+  }
+
+  /** Test helper: every stored mute. */
+  rawMutes(): MuteRow[] {
+    return [...this.mutes.values()].map((m) => ({ ...m.row }));
+  }
+
   /** Test helper: every stored row, revoked ones included. */
   rawSanctions(): StoredSanction[] {
     return this.sanctions.map((r) => ({ ...r }));
   }
 }
+
+const muteKey = (viewer: SubjectId, target: SubjectId): string => `${viewer}\u0000${target}`;
 
 export function memoryStore(): MemoryStore {
   return new MemoryStore();

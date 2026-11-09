@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { SanctionKind, SanctionRow, Source, Store, SubjectId, SubjectIdKind, SubjectIdRecord, SubjectRecord } from '@chatwarden/core';
+import type { MuteRow, SanctionKind, SanctionRow, Source, Store, SubjectId, SubjectIdKind, SubjectIdRecord, SubjectRecord } from '@chatwarden/core';
 import type {
   AuditEntry,
   ExceptionPatch,
@@ -176,6 +176,52 @@ export class SqliteStore implements Store, TermStore {
           pending: r.pending === 1,
         })),
     );
+  }
+
+  // Mutes. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never
+  // be given an async function.
+
+  upsertMute(row: MuteRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO kit_mutes (viewer_id, target_id, created_at) VALUES (?, ?, ?)
+           ON CONFLICT (viewer_id, target_id) DO UPDATE SET created_at = excluded.created_at`,
+        )
+        .run(row.viewer, row.target, row.createdAt);
+    });
+  }
+
+  deleteMute(viewer: SubjectId, target: SubjectId): boolean {
+    return this.transaction(
+      () => Number(this.db.prepare('DELETE FROM kit_mutes WHERE viewer_id = ? AND target_id = ?').run(viewer, target).changes) > 0,
+    );
+  }
+
+  loadMutes(since: number): MuteRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare('SELECT viewer_id, target_id, created_at FROM kit_mutes WHERE created_at >= ? ORDER BY rowid')
+        .all(since)
+        .map((r) => ({ viewer: String(r.viewer_id), target: String(r.target_id), createdAt: Number(r.created_at) })),
+    );
+  }
+
+  pruneMutes(viewer: SubjectId, keep: number): SubjectId[] {
+    return this.transaction(() => {
+      const total = Number(
+        (this.db.prepare('SELECT COUNT(*) AS n FROM kit_mutes WHERE viewer_id = ?').get(viewer) as { n: number }).n,
+      );
+      const extra = total - Math.max(0, keep);
+      if (extra <= 0) return [];
+      const doomed = this.db
+        .prepare('SELECT target_id FROM kit_mutes WHERE viewer_id = ? ORDER BY created_at, rowid LIMIT ?')
+        .all(viewer, extra)
+        .map((r) => String(r.target_id));
+      const del = this.db.prepare('DELETE FROM kit_mutes WHERE viewer_id = ? AND target_id = ?');
+      for (const target of doomed) del.run(viewer, target);
+      return doomed;
+    });
   }
 
   // Terms, exceptions and the audit trail. These are SYNCHRONOUS on purpose (the TermStore contract): they

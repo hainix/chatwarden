@@ -145,6 +145,22 @@ export interface SanctionRow {
 }
 
 // ---------------------------------------------------------------------------
+// Mutes (storage shape)
+// ---------------------------------------------------------------------------
+
+/**
+ * One lasting mute: `viewer` does not want to see `target`. Both are subject ids
+ * exactly as the caller gave them (possibly merged away since); matching goes
+ * through the canonical subject at query time. `createdAt` is epoch ms and is
+ * refreshed when the viewer mutes the same person again.
+ */
+export interface MuteRow {
+  viewer: SubjectId;
+  target: SubjectId;
+  createdAt: number;
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -212,4 +228,23 @@ export interface Store {
 
   /** Every unrevoked row that has not ended by `now`, for rebuilding the sanction index. */
   loadSanctions(now: number): SanctionRow[];
+
+  // Mutes. SYNCHRONOUS on purpose (like sanctions): `MuteService.set` writes inside
+  // `transaction`, then updates its in-memory index in the same tick.
+
+  /** Insert the (viewer, target) mute, or set its `createdAt` when it already exists. */
+  upsertMute(row: MuteRow): void;
+
+  /** Delete the (viewer, target) mute exactly as stored. Returns whether a row was removed. */
+  deleteMute(viewer: SubjectId, target: SubjectId): boolean;
+
+  /** Every mute created at or after `since` (epoch ms): the live ones, for rebuilding the index. */
+  loadMutes(since: number): MuteRow[];
+
+  /**
+   * Keep only the `keep` newest mutes of this stored viewer id (by `createdAt`; on a
+   * tie the one written last survives) and delete the rest. Returns the target ids of
+   * the deleted rows, oldest first.
+   */
+  pruneMutes(viewer: SubjectId, keep: number): SubjectId[];
 }

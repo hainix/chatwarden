@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -96,6 +96,22 @@ CREATE TABLE kit_sanctions (
 CREATE UNIQUE INDEX kit_sanctions_ref_code ON kit_sanctions (ref_code) WHERE target_type = 'subject';
 CREATE INDEX kit_sanctions_by_group ON kit_sanctions (group_id);
 CREATE INDEX kit_sanctions_by_target ON kit_sanctions (target_type, target_value);
+`,
+  },
+  {
+    version: 4,
+    // A mute is (viewer, target) subject ids exactly as the caller gave them; the service compares through
+    // the canonical subject, so there is no foreign key (a merge must not orphan a mute, and subject rows are
+    // written in the background). The primary key makes a repeat mute an upsert. It keeps the implicit rowid,
+    // which breaks created_at ties when the cap drops the oldest.
+    sql: `
+CREATE TABLE kit_mutes (
+  viewer_id  TEXT NOT NULL,
+  target_id  TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (viewer_id, target_id)
+);
+CREATE INDEX kit_mutes_by_created ON kit_mutes (created_at);
 `,
   },
 ];

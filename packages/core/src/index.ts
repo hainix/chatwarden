@@ -5,6 +5,7 @@ export type {
   Hasher,
   Identifiers,
   Logger,
+  MuteRow,
   RawWho,
   SanctionKind,
   SanctionRow,
@@ -34,3 +35,4 @@ export {
   SanctionIndex,
 } from './sanctions.js';
 export type { ActiveSanction, SanctionInput } from './sanctions.js';
+export { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from './mutes.js';
