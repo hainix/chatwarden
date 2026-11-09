@@ -12,6 +12,7 @@
   "dependencies": {
     "@chatwarden/core": "0.0.0",
     "@chatwarden/matcher": "0.0.0",
+    "@chatwarden/profanity": "0.0.0",
     "@chatwarden/store-sqlite": "0.0.0",
     "express": "^5.1.0",
     "ws": "^8.18.3"

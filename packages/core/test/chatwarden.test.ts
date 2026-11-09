@@ -1456,3 +1456,112 @@ describe('createChatwarden: staff report queue', () => {
     expect(JSON.stringify(r.store.rawReports())).toBe(before);
   });
 });
+
+describe('createChatwarden: the same scripted conversation under each preset', () => {
+  const HOUR = H;
+  type Step = { label: string; outcome: unknown };
+
+  /**
+   * One conversation, three incidents, each in its own room (game): banter ("loser"), rude, then rude again in a second
+   * game 4 hours later. After each suggestion the suggested outcome is applied through `decide`, so the record grows.
+   * Returns what `suggest` said at each incident. The expectations below are written out from the ladder table
+   * (`ladder.ts`) and the preset, not read back from `suggest`.
+   */
+  async function conversation(over: Partial<ChatwardenOptions>, rooms: [string, string, string]): Promise<Step[]> {
+    const { cw, clock } = await setup(over);
+    const offender: RawWho = { clientKey: 'key-offender', ip: '198.51.100.20' };
+    const steps: Step[] = [];
+    const lines = ['loser', 'you are trash, uninstall', 'still trash, uninstall again'];
+    const reporters = ['rep-1', 'rep-2', 'rep-3'];
+    const levels = ['banter', 'rude', 'rude'] as const;
+    for (let i = 0; i < 3; i++) {
+      const room = rooms[i] as string;
+      const reporter = reporters[i] as string;
+      cw.rooms.seat(room, 'off', offender, 'Offender');
+      cw.rooms.seat(room, reporter, { clientKey: `key-${reporter}`, ip: `198.51.100.3${i}` }, 'Reporter');
+      expect(cw.chat.accept(room, 'off', lines[i] as string)).toHaveProperty('deliver');
+      const sent = await cw.reports.submit({ roomId: room, reporterSeat: reporter, targetSeat: 'off', category: 'harassment' });
+      if (!sent.ok) throw new Error('expected the report to be stored');
+      const subject = cw.rooms.subjectAt(room, 'off');
+      if (subject === null) throw new Error('expected a subject');
+
+      const s = cw.suggest(subject, levels[i] as 'banter' | 'rude', 2, { roomId: room });
+      steps.push({ label: s.label, outcome: s.outcome });
+
+      const base = { reportId: sent.reportId, actor: 'mod@example.test', reason: 'private reason text' };
+      const o = s.outcome;
+      const action = (kind: DecisionAction['kind'], durationMs: number | null): DecisionAction => ({ subject, kind, durationMs, rule: 2 });
+      const decided =
+        o === 'none'
+          ? await cw.decide({ ...base, verdict: 'no_action', actions: [] })
+          : o === 'note'
+            ? await cw.decide({ ...base, verdict: 'noted', actions: [action('note', null)] })
+            : o === 'warning'
+              ? await cw.decide({ ...base, verdict: 'upheld', actions: [action('warning', null)] })
+              : await cw.decide({ ...base, verdict: 'upheld', actions: [action(o.kind, o.durationMs)] });
+      expect(decided).toMatchObject({ ok: true });
+      clock.t += 4 * HOUR; // past a 1 hour restriction, far inside every 30 day window
+    }
+    return steps;
+  }
+
+  it('relaxed: none, note, then warning (two rude incidents from different games)', async () => {
+    expect(await conversation({ profile: 'relaxed' }, ['g0', 'gameA', 'gameB'])).toEqual([
+      { label: 'No action', outcome: 'none' },
+      { label: 'Note', outcome: 'note' },
+      { label: 'Warning', outcome: 'warning' },
+    ]);
+  });
+
+  it('relaxed control: the second rude incident in the SAME game is not a repeat (note, note)', async () => {
+    expect(await conversation({ profile: 'relaxed' }, ['g0', 'gameA', 'gameA'])).toEqual([
+      { label: 'No action', outcome: 'none' },
+      { label: 'Note', outcome: 'note' },
+      { label: 'Note', outcome: 'note' },
+    ]);
+  });
+
+  it('standard (also the default): none, warning, then the ladder at step 1, chat for 24 hours', async () => {
+    const expected = [
+      { label: 'No action', outcome: 'none' },
+      { label: 'Warning', outcome: 'warning' },
+      { label: 'Restrict chat 24 hours', outcome: { kind: 'chat', durationMs: 24 * HOUR } },
+    ];
+    expect(await conversation({ profile: 'standard' }, ['g0', 'gameA', 'gameB'])).toEqual(expected);
+    expect(await conversation({}, ['g0', 'gameA', 'gameB'])).toEqual(expected);
+  });
+
+  it('strict: none, chat for 1 hour, then the ladder at step 2, chat for 7 days', async () => {
+    expect(await conversation({ profile: 'strict' }, ['g0', 'gameA', 'gameB'])).toEqual([
+      { label: 'No action', outcome: 'none' },
+      { label: 'Restrict chat 1 hour', outcome: { kind: 'chat', durationMs: HOUR } },
+      { label: 'Restrict chat 7 days', outcome: { kind: 'chat', durationMs: 7 * 24 * HOUR } },
+    ]);
+  });
+
+  it('an override of one nested field keeps the preset\'s other fields: relaxed + rude warning', async () => {
+    const steps = await conversation({ profile: 'relaxed', overrides: { firstOffense: { rude: 'warning' } } }, ['g0', 'gameA', 'gameB']);
+    // Rude is now a warning at once; the second rude reads ladder step 1 (relaxed ladder unchanged): chat 24 hours.
+    expect(steps.map((x) => x.label)).toEqual(['No action', 'Warning', 'Restrict chat 24 hours']);
+  });
+
+  it('banter is never punished under any preset, even for a person with a full record', async () => {
+    for (const profile of ['relaxed', 'standard', 'strict'] as const) {
+      const steps = await conversation({ profile }, ['g0', 'gameA', 'gameB']);
+      expect(steps[0]).toEqual({ label: 'No action', outcome: 'none' });
+      const { cw } = await reported({ profile });
+      const subject = cw.rooms.subjectAt(R, 'a') ?? '';
+      expect(cw.suggest(subject, 'banter', 2)).toMatchObject({ outcome: 'none' });
+    }
+  });
+
+  it('exposes the profile, limits, summary, rules and documents the facade resolved', async () => {
+    const { cw } = await setup({ profile: 'relaxed' });
+    expect(cw.profile.id).toBe('relaxed');
+    expect(cw.summary).toBe('Trash talk is part of the game. Harassment, threats and hate are not.');
+    expect(cw.summary).toBe(cw.profile.summary);
+    expect(cw.limits.chatMaxLength).toBe(200);
+    expect(cw.documents.codeOfConduct({ format: 'html', gameName: 'Test Game' })).toContain(cw.summary);
+    expect(cw.rules.active().length).toBeGreaterThan(0);
+  });
+});

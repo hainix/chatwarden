@@ -9,8 +9,25 @@ npm start -w @chatwarden/example-tiny-chat
 
 Connect a WebSocket client to `ws://127.0.0.1:3000/?key=anything` and send `{"type":"chat","text":"hello"}`.
 Anything the server sends back is `{type:'welcome'|'chat'|'refused'|'notices'|'acked', ...}`; see the header of
-`server.ts`. A `refused` frame may carry `rule` (show it as "Community Rule N") and `noticeId` (the player's own notice that
+`server.ts`. The `welcome` frame carries `summary`, the profile's one-line standard ("Trash talk is part of the game. Harassment,
+threats and hate are not."), to show above the chat. A `refused` frame may carry `rule` (show it as "Community Rule N") and `noticeId` (the player's own notice that
 explains the refusal). `POST /report` files a report (`{ key, targetSeat, category }`).
+
+## The profile, swearing and the code of conduct
+
+tiny-chat runs the one-line preset `profile: 'relaxed'` with the optional `@chatwarden/profanity` package
+(`profanityPackage`). Under `relaxed` ordinary swearing is starred, never refused, and never a strike, note or notice.
+`startServer({ overrides })` changes single fields:
+
+```ts
+startServer({ overrides: { profanity: { mode: 'allow' } } });                 // no starring
+startServer({ overrides: { profanity: { remove: ['damn', 'hell'] } } });      // take words off the list
+```
+
+`GET /code-of-conduct` serves `cw.documents.codeOfConduct({ format: 'html', gameName: 'tiny-chat' })`: plain generated
+HTML, sent with `content-security-policy: default-src 'none'; style-src 'unsafe-inline'`.
+
+**Profanity starring is not slur protection.** Slurs are the term pack's job (`matcher`); always pass one.
 
 ## Warnings and notices
 
@@ -34,6 +51,9 @@ curl -X POST http://127.0.0.1:3000/decide \
   -H "x-admin-token: $TINY_CHAT_ADMIN_TOKEN" \
   -d '{"reportId":"<id from onReport>","verdict":"upheld","reason":"private note","actions":[{"seat":"p1","kind":"warning","durationMs":null,"rule":2}]}'
 ```
+
+`verdict` is `upheld`, `noted` (every action a `note`: recorded for staff, nothing sent to the player), `no_action` or
+`bad_faith` (needs an `evidence` string).
 
 `decide` rejects with the store's own error if the store fails (the route answers a bare 500 and writes nothing); a
 decision the kit refuses answers 422.

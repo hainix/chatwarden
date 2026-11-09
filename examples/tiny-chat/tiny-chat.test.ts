@@ -1012,6 +1012,146 @@ describe('tiny-chat: refused frames cite the rule and point at the notice', () =
   });
 });
 
+const SUMMARY = 'Trash talk is part of the game. Harassment, threats and hate are not.';
+
+describe('tiny-chat: runs the relaxed profile and shows its summary', () => {
+  it('the welcome frame carries the summary and nothing identifying', async () => {
+    const server = await boot();
+    expect(server.chatwarden.profile.id).toBe('relaxed');
+    expect(server.chatwarden.profile.profanity.mode).toBe('star');
+    const client = await Client.connect(`ws://127.0.0.1:${server.port}/?key=key-wel`);
+    clients.push(client);
+    const welcome = await client.next('welcome');
+    expect(welcome).toEqual({ type: 'welcome', seatId: 'p1', summary: SUMMARY });
+    expect(client.raw.join('')).not.toMatch(IDENTIFIER_RE);
+    expect(client.raw.join('')).not.toContain('key-wel');
+  });
+
+  it('every seat gets the same summary, and it is the profile summary', async () => {
+    const server = await boot();
+    for (const key of ['key-w1', 'key-w2']) {
+      const c = await Client.connect(`ws://127.0.0.1:${server.port}/?key=${key}`);
+      clients.push(c);
+      expect(await c.next('welcome')).toMatchObject({ summary: server.chatwarden.summary });
+    }
+  });
+});
+
+describe('tiny-chat: GET /code-of-conduct', () => {
+  it('serves the HTML code of conduct, with a locked-down content security policy', async () => {
+    const server = await boot();
+    const res = await fetch(`http://127.0.0.1:${server.port}/code-of-conduct`);
+    const text = await res.text();
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/^text\/html/);
+    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'; style-src 'unsafe-inline'");
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(text).toContain(server.chatwarden.documents.codeOfConduct({ format: 'html', gameName: 'tiny-chat' }));
+    expect(text).toContain(SUMMARY);
+    expect(text).toContain('tiny-chat');
+  });
+
+  it('is plain generated HTML: no script, no handler, no external reference, no identifier', async () => {
+    const server = await boot();
+    const text = await (await fetch(`http://127.0.0.1:${server.port}/code-of-conduct`)).text();
+    expect(text).not.toMatch(/<script|\son[a-z]+=|javascript:|src=|<iframe|<link/i);
+    expect(text).not.toMatch(IDENTIFIER_RE);
+  });
+
+  it('is read-only and needs no token: POST is not a route, and the admin route stays guarded (control)', async () => {
+    const server = await boot({ adminToken: ADMIN });
+    const posted = await fetch(`http://127.0.0.1:${server.port}/code-of-conduct`, { method: 'POST' });
+    expect(posted.status).toBe(404);
+    expect((await decideHttp(server, {}, null)).status).toBe(401);
+  });
+});
+
+describe('tiny-chat: profanity starring and the overrides example', () => {
+  // `floomp` and `wibble` are made-up words. Adding them to the profile stands in for real profanity, so the example holds none.
+  async function two(over: Parameters<typeof startServer>[0]) {
+    const server = await boot(over);
+    const a = await join(server, 'key-pf1');
+    const b = await join(server, 'key-pf2');
+    return { server, a, b };
+  }
+
+  it('is active by default: an added word is starred for everyone, and the sender sees the same line', async () => {
+    const { a, b } = await two({ overrides: { profanity: { add: ['floomp'] } } });
+    a.say('oh floomp it');
+    expect(await b.next('chat')).toMatchObject({ text: 'oh ****** it' });
+    expect(await a.next('chat')).toMatchObject({ text: 'oh ****** it' });
+  });
+
+  it('starring is never a violation: no refusal, no notice, no record, no strike', async () => {
+    const { server, a, b } = await two({ overrides: { profanity: { add: ['floomp'] } } });
+    for (let i = 0; i < 3; i++) a.say('floomp floomp');
+    await b.next('chat');
+    await settle();
+    expect(a.frames.filter((f) => f.type === 'refused' || f.type === 'notices')).toEqual([]);
+    expect(server.chatwarden.notices.record({ clientKey: 'key-pf1' })).toEqual([]);
+    const subject = server.chatwarden.rooms.subjectAt('lobby', 'p1') ?? '';
+    expect(server.chatwarden.history(subject)).toEqual([]);
+    expect(server.chatwarden.doors.check('join', { clientKey: 'key-pf1' })).toBeNull();
+  });
+
+  it('a line without the word is untouched (control)', async () => {
+    const { a, b } = await two({ overrides: { profanity: { add: ['floomp'] } } });
+    a.say('gg well played');
+    expect(await b.next('chat')).toMatchObject({ text: 'gg well played' });
+  });
+
+  it("overrides: { profanity: { mode: 'allow' } } lets the same line through as written", async () => {
+    const { a, b } = await two({ overrides: { profanity: { add: ['floomp'], mode: 'allow' } } });
+    a.say('oh floomp it');
+    expect(await b.next('chat')).toMatchObject({ text: 'oh floomp it' });
+  });
+
+  it('overrides: { profanity: { remove: [...] } } takes a word off the list', async () => {
+    const { a, b } = await two({ overrides: { profanity: { add: ['floomp', 'wibble'], remove: ['floomp'] } } });
+    a.say('floomp and wibble');
+    expect(await b.next('chat')).toMatchObject({ text: 'floomp and ******' });
+  });
+
+  it("overrides: { profanity: { mode: 'refuse' } } refuses the line and still records nothing", async () => {
+    const { server, a } = await two({ overrides: { profanity: { add: ['floomp'], mode: 'refuse' } } });
+    a.say('oh floomp it');
+    expect(await a.next('refused')).toEqual({ type: 'refused', reason: 'profanity' });
+    expect(server.chatwarden.notices.record({ clientKey: 'key-pf1' })).toEqual([]);
+  });
+
+  it('a bad overrides value fails startup, naming the field and not the value', async () => {
+    const bad = { profanity: { add: ['sn3rp-secret'] } };
+    await expect(startServer({ port: 0, secret: 's', overrides: bad })).rejects.toThrow(/profanity\.add/);
+    await expect(startServer({ port: 0, secret: 's', overrides: bad })).rejects.not.toThrow(/sn3rp-secret/);
+  });
+});
+
+describe('tiny-chat: a noted decision', () => {
+  it('creates no notice and no record entry for the player, and none for the reporter either', async () => {
+    const reports: StoredReport[] = [];
+    const server = await boot({ adminToken: ADMIN, onReport: (r) => void reports.push(r) });
+    const a = await join(server, 'key-nt1');
+    const b = await join(server, 'key-nt2');
+    a.say('you are trash');
+    await a.next('chat');
+    await reportHttp(server, { key: 'key-nt2', targetSeat: 'p1', category: 'harassment' });
+    const res = await decideHttp(server, {
+      reportId: reports[0]?.id,
+      verdict: 'noted',
+      reason: 'first rude line',
+      actions: [{ seat: 'p1', kind: 'note', durationMs: null, rule: 2 }],
+    });
+    expect(res.json).toMatchObject({ ok: true, replay: false });
+    await settle();
+    for (const c of [a, b]) expect(c.frames.filter((f) => f.type === 'notices')).toEqual([]);
+    for (const key of ['key-nt1', 'key-nt2']) {
+      expect((await http(server, `/record?key=${key}`)).json).toEqual({ ok: true, items: [] });
+    }
+    const subject = server.chatwarden.rooms.subjectAt('lobby', 'p1') ?? '';
+    expect(server.chatwarden.history(subject)).toMatchObject([{ kind: 'note', roomId: 'lobby' }]);
+  });
+});
+
 describe('tiny-chat: the README curl example', () => {
   const readme = readFileSync(fileURLToPath(new URL('./README.md', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
   const curl = readme.slice(readme.indexOf('curl -X POST'), readme.indexOf('```', readme.indexOf('curl -X POST')));
@@ -1027,5 +1167,31 @@ describe('tiny-chat: the README curl example', () => {
     for (const line of lines.slice(0, -1)) expect(line.endsWith(' \\')).toBe(true);
     expect(lines.at(-1)?.trimStart().startsWith("-d '")).toBe(true);
     expect(lines.some((l) => l.trimStart().startsWith('-d ') && l.includes('-H'))).toBe(false);
+  });
+});
+
+describe('the READMEs show the preset and the overrides', () => {
+  const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
+  const root = read('../../README.md');
+
+  it('the root README has "Pick a preset": the one-liner, both overrides, the standards link and the slur note', () => {
+    expect(root).toContain('## Pick a preset');
+    expect(root).toContain("createChatwarden({ profile: 'relaxed',");
+    expect(root).toContain("overrides: { profanity: { mode: 'allow' } }");
+    expect(root).toContain("overrides: { profanity: { remove: ['damn', 'hell'] } }");
+    expect(root).toContain('docs/design/2026-11-09-moderation-standards.md');
+    expect(root).toContain('profanity starring is not slur protection');
+  });
+
+  it('the standards link points at a real file', () => {
+    expect(() => read('../../docs/design/2026-11-09-moderation-standards.md')).not.toThrow();
+  });
+
+  it('the tiny-chat README says it runs relaxed with the profanity package and serves /code-of-conduct', () => {
+    const tiny = read('./README.md');
+    expect(tiny).toContain("profile: 'relaxed'");
+    expect(tiny).toContain('profanityPackage');
+    expect(tiny).toContain('GET /code-of-conduct');
+    expect(tiny).toContain("default-src 'none'; style-src 'unsafe-inline'");
   });
 });

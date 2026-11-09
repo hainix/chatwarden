@@ -3,10 +3,11 @@
 // Wire protocol (JSON text frames)
 //   in:  { type: 'chat', text }                     { type: 'mute', seatId, on }
 //        { type: 'ack', id }                        the player has seen that notice
-//   out: { type: 'welcome', seatId }
+//   out: { type: 'welcome', seatId, summary }  `summary` is the profile's one-line standard, to show above the chat
 //        { type: 'chat', seatId, text, lineId }     a delivered line (the sender gets their own back)
 //        { type: 'refused', reason, until?, rule?, noticeId? }
-//                                                   reason: blocked | rate | length | restricted | gate | banned.
+//                                                   reason: blocked | rate | length | restricted | gate | banned | profanity
+//                                                   (profanity only when the profile refuses swearing; the default stars it).
 //                                                   `rule` is the Community Rule number to show as "Community Rule N";
 //                                                   `noticeId` is the player's own notice that explains it (look it up in
 //                                                   the `notices` frames or "My record"). Both are left out when unknown,
@@ -15,6 +16,7 @@
 //                                                   any are waiting, and whenever a decision adds one
 //        { type: 'acked', id, ok }                  the answer to an 'ack'
 // HTTP: POST /report { key, targetSeat, category, note?, lineId? } -> 200 { ok, remaining } | 4xx { ok: false, refused }
+//       GET  /code-of-conduct   the players' code of conduct (generated from the profile and rules) as HTML
 //       GET  /record?key=...   DEMO ONLY: the key's "My record" -> { ok, items }. A real app authenticates the player.
 //       POST /decide           DEMO ONLY, guarded by the `x-admin-token` header. A real app authenticates its moderators.
 //                              { reportId, verdict, reason, actions: [{ seat, kind, durationMs, rule, lineIds?, gapNote? }] }
@@ -33,13 +35,18 @@ import {
   type ChatwardenOptions,
   type DecisionAction,
   type DecisionInput,
+  type ProfileOverrides,
   type RawWho,
 } from '@chatwarden/core';
 import { LiveTerms, type TermPack } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/test-fixtures';
+import { createProfanityFilter } from '@chatwarden/profanity';
 import { openStore } from '@chatwarden/store-sqlite';
 
 const ROOM = 'lobby';
+const GAME_NAME = 'tiny-chat';
+/** The code of conduct page may load nothing and run nothing; its one inline style block is the only thing allowed. */
+const CONDUCT_CSP = "default-src 'none'; style-src 'unsafe-inline'";
 const CATEGORIES = ['harassment', 'hate', 'cheating', 'spam', 'disruption', 'other'] as const;
 type Category = (typeof CATEGORIES)[number];
 
@@ -61,6 +68,12 @@ export interface TinyChatOptions {
    * with its own session, never a shared token.
    */
   adminToken?: string;
+  /**
+   * Changes to the `relaxed` profile, deep-merged onto it. For example `{ profanity: { mode: 'allow' } }` stops starring,
+   * `{ profanity: { remove: ['damn', 'hell'] } }` takes words off the list and `{ profanity: { add: ['word'] } }` adds
+   * one. An invalid value throws at startup.
+   */
+  overrides?: ProfileOverrides;
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -142,6 +155,12 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       },
     },
     matcher: terms,
+    // The one-line preset. Try 'standard' or 'strict'; `overrides` changes single fields (see the README).
+    profile: 'relaxed',
+    overrides: opts.overrides,
+    // The optional profanity package builds the star filter from the profile. Always pass a slur matcher too (above):
+    // starring ordinary swearing is not slur protection.
+    profanityPackage: { createProfanityFilter },
     clock,
     onReport: opts.onReport,
   });
@@ -150,6 +169,27 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
 
   const app = express();
   app.use(express.json());
+
+  // The players' code of conduct, generated from the profile and the rules in force. Plain HTML with no script and no
+  // external reference; the CSP says so to the browser as well. Public by design: it is the rules, not a record.
+  app.get('/code-of-conduct', (_req, res) => {
+    const body = chatwarden.documents.codeOfConduct({ format: 'html', gameName: GAME_NAME });
+    res
+      .status(200)
+      .set({
+        'content-type': 'text/html; charset=utf-8',
+        'content-security-policy': CONDUCT_CSP,
+        'x-content-type-options': 'nosniff',
+      })
+      .send(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+          '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+          '<title>Code of conduct</title>' +
+          '<style>body{font:16px/1.5 system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem}' +
+          'table{border-collapse:collapse}th,td{border:1px solid #888;padding:.25rem .5rem;text-align:left}</style>' +
+          `</head><body>${body}</body></html>`,
+      );
+  });
   app.post('/report', async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const { key, targetSeat, category, note, lineId } = body;
@@ -271,7 +311,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     const seat: Seat = { ws, seatId, who };
     seats.set(seatId, seat);
     chatwarden.rooms.seat(ROOM, seatId, who, `Player ${seatId.slice(1)}`);
-    send(ws, { type: 'welcome', seatId });
+    send(ws, { type: 'welcome', seatId, summary: chatwarden.summary });
     // Anything that landed while they were away (a warning to acknowledge, a report outcome).
     pushNotices(seat);
 

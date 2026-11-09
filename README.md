@@ -14,6 +14,29 @@ Status: pre-release, as-is, no support promise; PRs welcome.
 | [`@chatwarden/profanity`](packages/profanity) | Optional ordinary-swearing filter (allow, star or refuse; style, add, remove, custom list). Slurs stay the matcher's job. |
 | [`examples/tiny-chat`](examples/tiny-chat) | A one-room Express + `ws` chat server wired through `createChatwarden` (private, not published). |
 
+## Pick a preset
+
+One line chooses your game's written standard (what counts as rude or hostile, what happens first, what counts as repeated):
+
+```ts
+const cw = await createChatwarden({ profile: 'relaxed', store, secret, platform, matcher, profanityPackage });
+// 'relaxed' (trash talk is fine), 'standard' (the default) or 'strict' (younger players and families)
+```
+
+The preset sets the suggestions a moderator sees, the starter Community Rules, the profanity mode and a one-line
+`cw.summary` to show players. Change single fields with `overrides`; the rest of the preset stays, and a list you give
+replaces the preset's list instead of adding to it:
+
+```ts
+createChatwarden({ profile: 'relaxed', overrides: { profanity: { mode: 'allow' } }, /* ... */ });
+createChatwarden({ profile: 'relaxed', overrides: { profanity: { remove: ['damn', 'hell'] } }, /* ... */ });
+```
+
+`cw.documents.codeOfConduct({ format: 'html', gameName })` writes the players' code of conduct from the same profile.
+See the [moderation standards](docs/design/2026-11-09-moderation-standards.md) for the exact tables behind each preset.
+
+Always pass a term pack (a slur `matcher`): profanity starring is not slur protection.
+
 ## Development
 
 Requires Node 22.13 or newer (`nvm use` reads `.nvmrc`).
