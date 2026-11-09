@@ -12,8 +12,8 @@ export interface RetentionPolicy {
   /** A strike (and the raw line kept with it) is deleted once it is older than this. */
   strikesMs: number;
   /**
-   * A seen or withdrawn player notice is deleted once it is older than this; so is any notice whose end is this
-   * far past. An unseen permanent notice is kept.
+   * A withdrawn notice, and a seen warning or report outcome, is deleted once it is older than this; so is any
+   * notice whose end is this far past. A notice for a permanent or running sanction is kept while it applies.
    */
   noticesMs: number;
 }
@@ -47,8 +47,9 @@ function checkWindow(name: string, ms: number): void {
  *   A permanent, unrevoked sanction is never deleted.
  * - strikes: `at < now - strikesMs`
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)
- * - notices: seen or withdrawn and `createdAt < now - noticesMs`, or `until < now - noticesMs` (seen or not). An
- *   unseen, unwithdrawn permanent notice is kept.
+ * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
+ *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
+ *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn.
  *
  * Every cutoff is strict: a row exactly on the line is kept. Subjects, terms and the audit trail are never
  * touched. The in-memory indexes need no update: they already ignore everything this removes.

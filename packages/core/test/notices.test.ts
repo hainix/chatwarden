@@ -741,7 +741,7 @@ describe('record (My record)', () => {
     expect(t.svc.record(a)).toEqual([]);
   });
 
-  it('keeps a permanent sanction forever', () => {
+  it('keeps a permanent sanction on the record until it is withdrawn', () => {
     const t = setup();
     const a = t.person('ka');
     t.svc.createForSanction(t.group(a, { kind: 'ban', until: null }), []);
@@ -749,12 +749,38 @@ describe('record (My record)', () => {
     expect(t.svc.record(a)).toHaveLength(1);
   });
 
-  it('shows a warning (no end) like a permanent entry', () => {
+  it('keeps a permanent sanction on the record after it is acked, until it is withdrawn', () => {
     const t = setup();
     const a = t.person('ka');
-    t.svc.createForSanction(t.group(a, { kind: 'warning', until: null }), [line()]);
-    t.clock.t = NOW + 300 * DAY;
+    const g = t.group(a, { kind: 'ban', until: null });
+    const id = t.svc.createForSanction(g, []);
+    t.svc.ack(a, id);
+    t.clock.t = NOW + 400 * DAY;
+    expect(t.svc.record(a)).toHaveLength(1);
+    expect(t.svc.record(a)[0]?.refCode).toBe(g.refCode);
+    t.svc.withdrawGroup(g.groupId);
+    expect(t.svc.record(a)).toEqual([]);
+  });
+
+  it('keeps a warning on the record for 90 days only, from when it was made', () => {
+    const t = setup();
+    const a = t.person('ka');
+    const id = t.svc.createForSanction(t.group(a, { kind: 'warning', until: null }), [line()]);
+    t.svc.ack(a, id);
+    t.clock.t = NOW + 90 * DAY;
     expect(t.svc.record(a)[0]).toMatchObject({ kind: 'warning', until: null, mustAcknowledge: true });
+    t.clock.t = NOW + 90 * DAY + 1;
+    expect(t.svc.record(a)).toEqual([]);
+  });
+
+  it('an unacked warning older than 90 days is off the record but still pending', () => {
+    const t = setup();
+    const a = t.person('ka');
+    t.svc.createForSanction(t.group(a, { kind: 'warning', until: null }), []);
+    t.clock.t = NOW + 91 * DAY;
+    expect(t.svc.record(a)).toEqual([]);
+    expect(t.svc.pending(a)).toHaveLength(1);
+    expect(t.svc.pendingWarning(a)).toBe(true);
   });
 
   it('is oldest first, and follows a merge', () => {
@@ -981,6 +1007,74 @@ describe('notify', () => {
     const a = t.person('ka');
     t.svc.createReportOutcome(a);
     expect(JSON.stringify(t.logs)).not.toMatch(/secret|zorbak|s_[A-Za-z0-9_-]{22}/);
+  });
+});
+
+describe('the notify seam (notify: false, announce)', () => {
+  it('a create with notify:false inside a transaction that throws never notifies and leaves no notice', () => {
+    const t = setup();
+    const a = t.person('ka');
+    expect(() =>
+      t.store.transaction(() => {
+        t.svc.createForSanction(t.group(a), [], { notify: false });
+        t.svc.createReportOutcome(a, { notify: false });
+        throw new Error('outer failed');
+      }),
+    ).toThrow('outer failed');
+    expect(t.pushed).toEqual([]);
+    expect(t.svc.pending(a)).toEqual([]);
+    expect(t.store.rawNotices()).toEqual([]);
+  });
+
+  it('announce after a successful outer transaction notifies once with the right count', () => {
+    const t = setup();
+    const a = t.person('ka');
+    t.store.transaction(() => {
+      t.svc.createForSanction(t.group(a), [], { notify: false });
+      t.svc.createForSanction(t.group(a), [], { notify: false });
+    });
+    expect(t.pushed).toEqual([]);
+    t.svc.announce(a);
+    expect(t.pushed).toEqual([{ subject: a, count: 2 }]);
+  });
+
+  it('the default and notify:true still notify; only an explicit false suppresses', () => {
+    const t = setup();
+    const a = t.person('ka');
+    t.svc.createForSanction(t.group(a), [], { notify: true });
+    t.svc.createForSanction(t.group(a), [], {});
+    t.svc.createReportOutcome(a, { notify: true });
+    t.svc.createReportOutcome(a, { notify: false });
+    expect(t.pushed.map((p) => p.count)).toEqual([1, 2, 3]);
+  });
+
+  it('announce recomputes the count and canonicalises the subject', () => {
+    const t = setup();
+    const a = t.person('ka');
+    const b = t.person('kb', 'acct-b');
+    t.svc.createForSanction(t.group(a), [], { notify: false });
+    const merged = t.person('ka', 'acct-b');
+    const alias = merged === a ? b : a;
+    t.svc.announce(alias);
+    expect(t.pushed).toEqual([{ subject: merged, count: 1 }]);
+    t.svc.ack(merged, t.svc.pending(merged)[0]?.id ?? '');
+    t.svc.announce(merged);
+    expect(t.pushed.at(-1)).toEqual({ subject: merged, count: 0 });
+  });
+
+  it('announce is fenced: a throwing, rejecting or missing notify never reaches the caller', async () => {
+    const t = setup({ notify: () => Promise.reject(new TypeError('x')) });
+    const a = t.person('ka');
+    expect(() => t.svc.announce(a)).not.toThrow();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.logs.map((l) => l.event)).toEqual(['notices.notify_failed']);
+    const t2 = setup({
+      notify: () => {
+        throw new Error('x');
+      },
+    });
+    expect(() => t2.svc.announce(t2.person('kb'))).not.toThrow();
+    expect(() => t2.svc.announce('' as never)).not.toThrow();
   });
 });
 

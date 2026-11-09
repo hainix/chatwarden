@@ -451,10 +451,11 @@ export class SqliteStore implements Store, TermStore {
         this.db
           .prepare(
             `DELETE FROM kit_notices
-             WHERE ((acked_at IS NOT NULL OR withdrawn_at IS NOT NULL) AND created_at < ?)
+             WHERE (withdrawn_at IS NOT NULL AND created_at < ?)
+                OR (acked_at IS NOT NULL AND kind IN ('warning', 'report_outcome') AND created_at < ?)
                 OR (until IS NOT NULL AND until < ?)`,
           )
-          .run(before, before).changes,
+          .run(before, before, before).changes,
       ),
     );
   }

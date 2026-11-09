@@ -462,8 +462,10 @@ export interface Store {
   purgeMutes(before: number): number;
 
   /**
-   * Delete notices that were seen or withdrawn (`ackedAt` or `withdrawnAt` set) and have `createdAt < before`, and
-   * any notice whose end is past (`until` set and `< before`). An unseen, unwithdrawn permanent notice is kept.
+   * Delete a notice when it was withdrawn and has `createdAt < before`; or was seen, is a `warning` or
+   * `report_outcome`, and has `createdAt < before`; or its end is past (`until` set and `< before`). A notice for a
+   * permanent or still-running sanction is never deleted while it applies, and an unseen warning is kept until it
+   * is seen or withdrawn.
    */
   purgeNotices(before: number): number;
 

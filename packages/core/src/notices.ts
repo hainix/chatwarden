@@ -99,6 +99,12 @@ export function ownLines(
   return out;
 }
 
+/** Options for creating a notice. */
+export interface NoticeCreateOptions {
+  /** Default true. False skips the push; call `announce` after the surrounding transaction commits. */
+  notify?: boolean;
+}
+
 /** What a notice is told about a sanction. `excerptLines` come through {@link ownLines}. */
 export interface SanctionNoticeInput {
   groupId: string;
@@ -165,8 +171,15 @@ export class NoticeService {
    * Write the notice for a sanction group and tell the player's client. Returns the notice id.
    * `excerptLines` must already be the target's own lines (see {@link ownLines}); at most five. A blocked line is
    * masked here, and no raw blocked text is ever stored. Throws on a malformed input (nothing is written).
+   *
+   * Pass `{ notify: false }` when this runs inside a larger `store.transaction` that may still roll back, then call
+   * {@link announce} once that transaction has committed.
    */
-  createForSanction(group: SanctionNoticeInput, excerptLines: readonly ReportExcerptLine[] = []): string {
+  createForSanction(
+    group: SanctionNoticeInput,
+    excerptLines: readonly ReportExcerptLine[] = [],
+    opts: NoticeCreateOptions = {},
+  ): string {
     if (!SANCTION_NOTICE_KINDS.includes(group.kind)) throw new Error('createForSanction: invalid kind');
     if (!nonEmpty(group.groupId) || typeof group.refCode !== 'string') throw new Error('createForSanction: invalid group');
     if (!nonEmpty(group.subject)) throw new Error('createForSanction: invalid subject');
@@ -185,16 +198,18 @@ export class NoticeService {
         excerpt,
       },
       subject,
+      opts.notify !== false,
     );
   }
 
   /** Tell a reporter that their report led to action. No rule, code, end or excerpt: nothing about the other player. */
-  createReportOutcome(reporter: SubjectId): string {
+  createReportOutcome(reporter: SubjectId, opts: NoticeCreateOptions = {}): string {
     if (!nonEmpty(reporter)) throw new Error('createReportOutcome: invalid subject');
     const subject = this.subjects.canonical(reporter);
     return this.insert(
       { subject, groupId: null, kind: 'report_outcome', rule: null, until: null, refCode: null, excerpt: [] },
       subject,
+      opts.notify !== false,
     );
   }
 
@@ -219,8 +234,19 @@ export class NoticeService {
   }
 
   /**
-   * "My record": the person's sanction notices (seen or not) that are not withdrawn and are still running, have no
-   * end, or were made within 90 days. Report outcomes are not included. Decided from the notice row alone.
+   * Tell the player's client how many notices are pending now (the same fenced push a create does). Use it after
+   * the transaction a `{ notify: false }` create ran in has committed. Never throws.
+   */
+  announce(subject: SubjectId): void {
+    if (!nonEmpty(subject)) return;
+    this.push(this.subjects.canonical(subject));
+  }
+
+  /**
+   * "My record": the person's sanction notices (seen or not) that are not withdrawn and still apply. A warning
+   * applies for 90 days from when it was made (the ladder lookback). Any other kind applies while it is permanent
+   * (until it is withdrawn), still running, or made within 90 days. Report outcomes are never included. Decided from
+   * the notice row alone; `purgeNotices` agrees with this, so a row that applies is never purged.
    */
   record(subject: SubjectId): PlayerNotice[] {
     const now = this.clock.now();
@@ -229,7 +255,8 @@ export class NoticeService {
         (r) =>
           r.withdrawnAt === null &&
           r.kind !== 'report_outcome' &&
-          (r.until === null || r.until > now || r.createdAt >= now - NOTICE_RECORD_WINDOW_MS),
+          (r.createdAt >= now - NOTICE_RECORD_WINDOW_MS ||
+            (r.kind !== 'warning' && (r.until === null || r.until > now))),
       )
       .map((r) => this.toPlayer(r));
   }
@@ -245,11 +272,15 @@ export class NoticeService {
     return this.rowsOf(subject).some((r) => r.kind === 'warning' && r.ackedAt === null && r.withdrawnAt === null);
   }
 
-  private insert(fields: Omit<NoticeRow, 'id' | 'createdAt' | 'ackedAt' | 'withdrawnAt'>, subject: SubjectId): string {
+  private insert(
+    fields: Omit<NoticeRow, 'id' | 'createdAt' | 'ackedAt' | 'withdrawnAt'>,
+    subject: SubjectId,
+    notify: boolean,
+  ): string {
     const id = newId();
     const row: NoticeRow = { id, ...fields, createdAt: this.clock.now(), ackedAt: null, withdrawnAt: null };
     this.store.transaction(() => this.store.insertNotice(row));
-    this.push(subject);
+    if (notify) this.push(subject);
     return id;
   }
 

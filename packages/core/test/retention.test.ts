@@ -334,11 +334,11 @@ const notice = (id: string, over: Partial<NoticeRow> = {}): NoticeRow => ({
 describe('purge: notices', () => {
   const left = (store: MemoryStore): string[] => store.rawNotices().map((n) => n.id).sort();
 
-  it('deletes an acked notice created before the cutoff, keeps the edge and newer', async () => {
+  it('deletes an acked warning created before the cutoff, keeps the edge and newer', async () => {
     const { store } = setup();
-    store.insertNotice(notice('old', { createdAt: NOW - 90 * DAY - 1, ackedAt: NOW - 100 * DAY }));
-    store.insertNotice(notice('edge', { createdAt: NOW - 90 * DAY, ackedAt: NOW - 80 * DAY }));
-    store.insertNotice(notice('new', { createdAt: NOW - DAY, ackedAt: NOW }));
+    store.insertNotice(notice('old', { kind: 'warning', until: null, createdAt: NOW - 90 * DAY - 1, ackedAt: NOW - 100 * DAY }));
+    store.insertNotice(notice('edge', { kind: 'warning', until: null, createdAt: NOW - 90 * DAY, ackedAt: NOW - 80 * DAY }));
+    store.insertNotice(notice('new', { kind: 'warning', until: null, createdAt: NOW - DAY, ackedAt: NOW }));
     const res = await purge(store, NOW);
     expect(res.notices).toBe(1);
     expect(left(store)).toEqual(['edge', 'new']);
@@ -350,6 +350,46 @@ describe('purge: notices', () => {
     store.insertNotice(notice('new', { createdAt: NOW - 5 * DAY, withdrawnAt: NOW - 4 * DAY }));
     expect((await purge(store, NOW)).notices).toBe(1);
     expect(left(store)).toEqual(['new']);
+  });
+
+  it('an acked permanent ban older than 90 d survives while it applies; an acked warning of that age does not', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('ban', { kind: 'ban', until: null, createdAt: NOW - 400 * DAY, ackedAt: NOW - 399 * DAY }));
+    store.insertNotice(notice('warn', { kind: 'warning', until: null, createdAt: NOW - 400 * DAY, ackedAt: NOW - 399 * DAY }));
+    store.insertNotice(notice('outcome', { kind: 'report_outcome', groupId: null, rule: null, until: null, refCode: null, createdAt: NOW - 400 * DAY, ackedAt: NOW - 399 * DAY }));
+    expect((await purge(store, NOW)).notices).toBe(2);
+    expect(left(store)).toEqual(['ban']);
+  });
+
+  it('an acked running sanction (chat, area, ban) older than 90 d is kept; withdrawing it makes it purgeable', async () => {
+    const { store } = setup();
+    for (const kind of ['chat', 'area', 'ban'] as const) {
+      store.insertNotice(notice(kind, { kind, until: NOW + 30 * DAY, createdAt: NOW - 100 * DAY, ackedAt: NOW - 99 * DAY }));
+    }
+    expect((await purge(store, NOW)).notices).toBe(0);
+    store.withdrawNoticeGroup('g-chat', NOW);
+    expect((await purge(store, NOW)).notices).toBe(1);
+    expect(left(store)).toEqual(['area', 'ban']);
+  });
+
+  it('an unacked warning older than 90 d is kept until it is acked or withdrawn', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('w1', { kind: 'warning', until: null, createdAt: NOW - 200 * DAY }));
+    store.insertNotice(notice('w2', { kind: 'warning', until: null, createdAt: NOW - 200 * DAY }));
+    expect((await purge(store, NOW)).notices).toBe(0);
+    store.ackNotice('w1', NOW);
+    store.withdrawNoticeGroup('g-w2', NOW);
+    expect((await purge(store, NOW)).notices).toBe(2);
+    expect(left(store)).toEqual([]);
+  });
+
+  it('an acked report outcome older than 90 d is purged; an unacked one is kept', async () => {
+    const { store } = setup();
+    const o = { kind: 'report_outcome', groupId: null, rule: null, until: null, refCode: null, createdAt: NOW - 100 * DAY } as const;
+    store.insertNotice(notice('seen', { ...o, ackedAt: NOW - 99 * DAY }));
+    store.insertNotice(notice('unseen', { ...o }));
+    expect((await purge(store, NOW)).notices).toBe(1);
+    expect(left(store)).toEqual(['unseen']);
   });
 
   it('keeps an UNACKED, unwithdrawn permanent notice however old', async () => {
@@ -378,14 +418,14 @@ describe('purge: notices', () => {
 
   it('noticesMs overrides the window', async () => {
     const { store } = setup();
-    store.insertNotice(notice('a', { createdAt: NOW - 10 * DAY, ackedAt: NOW - 9 * DAY }));
+    store.insertNotice(notice('a', { kind: 'warning', until: null, createdAt: NOW - 10 * DAY, ackedAt: NOW - 9 * DAY }));
     expect((await purge(store, NOW)).notices).toBe(0);
     expect((await purge(store, NOW, { noticesMs: 5 * DAY })).notices).toBe(1);
   });
 
   it('rejects an invalid noticesMs and deletes nothing', async () => {
     const { store } = setup();
-    store.insertNotice(notice('a', { createdAt: NOW - 1000 * DAY, ackedAt: NOW - 999 * DAY }));
+    store.insertNotice(notice('a', { kind: 'warning', until: null, createdAt: NOW - 1000 * DAY, ackedAt: NOW - 999 * DAY }));
     for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
       await expect(purge(store, NOW, { noticesMs: bad })).rejects.toThrow(/purge/);
     }
@@ -394,7 +434,7 @@ describe('purge: notices', () => {
 
   it('is part of the one transaction: a later failure restores the notices', async () => {
     const { store } = setup();
-    store.insertNotice(notice('old', { createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
+    store.insertNotice(notice('old', { kind: 'warning', until: null, createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
     store.purgeMutes = () => {
       throw new Error('disk full');
     };
@@ -404,7 +444,7 @@ describe('purge: notices', () => {
 
   it('purgeNotices itself journals an undo', () => {
     const { store } = setup();
-    store.insertNotice(notice('old', { createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
+    store.insertNotice(notice('old', { kind: 'warning', until: null, createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
     expect(() =>
       store.transaction(() => {
         expect(store.purgeNotices(NOW - 90 * DAY)).toBe(1);

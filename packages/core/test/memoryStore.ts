@@ -442,7 +442,11 @@ export class MemoryStore implements Store {
     const snapshot = [...this.notices];
     const kept = snapshot.filter(
       (n) =>
-        !(((n.ackedAt !== null || n.withdrawnAt !== null) && n.createdAt < before) || (n.until !== null && n.until < before)),
+        !(
+          (n.withdrawnAt !== null && n.createdAt < before) ||
+          (n.ackedAt !== null && (n.kind === 'warning' || n.kind === 'report_outcome') && n.createdAt < before) ||
+          (n.until !== null && n.until < before)
+        ),
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {

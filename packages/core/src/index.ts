@@ -84,6 +84,7 @@ export {
 } from './notices.js';
 export type {
   ExcerptErrorCode,
+  NoticeCreateOptions,
   NoticeServiceDeps,
   PlayerNotice,
   SanctionNoticeInput,
