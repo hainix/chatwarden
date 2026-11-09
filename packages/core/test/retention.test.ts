@@ -65,12 +65,92 @@ const strike = (id: string, at: number): StrikeRow => ({
 const ids = (rows: Array<{ id: string }>): string[] => rows.map((r) => r.id).sort();
 
 describe('defaults', () => {
-  it('are 90 d of reports, 90 d after a sanction ends, 30 d of strikes, 90 d of notices', () => {
-    expect(RETENTION_DEFAULTS).toEqual({ reportsMs: 90 * DAY, sanctionAfterEndMs: 90 * DAY, strikesMs: 30 * DAY, noticesMs: 90 * DAY });
+  it('are 90 d of reports, 90 d after a sanction ends, 30 d of strikes, 90 d of notices, 30 d of bad-faith marks', () => {
+    expect(RETENTION_DEFAULTS).toEqual({
+      reportsMs: 90 * DAY,
+      sanctionAfterEndMs: 90 * DAY,
+      strikesMs: 30 * DAY,
+      noticesMs: 90 * DAY,
+      badFaithMs: 30 * DAY,
+    });
   });
 });
 
 describe('purge: reports', () => {
+  /** A report closed as bad faith at `actionedAt`. */
+  const markBad = (store: MemoryStore, id: string, createdAt: number, actionedAt: number) => {
+    store.insertReport(report(id, createdAt));
+    expect(store.closeReport(id, 'dismissed', true, 'mod', actionedAt, 'n')).toBe(true);
+  };
+
+  it('keeps a live bad-faith mark (actioned within 30 d) even past the 90 d cutoff', async () => {
+    const { store } = setup();
+    markBad(store, 'live', NOW - 100 * DAY, NOW - 10 * DAY);
+    const res = await purge(store, NOW);
+    expect(res.reports).toBe(0);
+    expect(ids(store.rawReports())).toEqual(['live']);
+  });
+
+  it('a bad-faith mark exactly 30 d old is kept; one millisecond older goes', async () => {
+    const { store } = setup();
+    markBad(store, 'edge', NOW - 100 * DAY, NOW - 30 * DAY);
+    markBad(store, 'past', NOW - 100 * DAY, NOW - 30 * DAY - 1);
+    const res = await purge(store, NOW);
+    expect(res.reports).toBe(1);
+    expect(ids(store.rawReports())).toEqual(['edge']);
+  });
+
+  it('only bad_faith = 1 is spared: a plain dismissal and an actioned report of the same age go', async () => {
+    const { store } = setup();
+    store.insertReport(report('plain', NOW - 100 * DAY));
+    store.closeReport('plain', 'dismissed', false, 'mod', NOW - 5 * DAY, 'n');
+    store.insertReport(report('acted', NOW - 100 * DAY));
+    store.closeReport('acted', 'actioned', false, 'mod', NOW - 5 * DAY, 'n');
+    markBad(store, 'bad', NOW - 100 * DAY, NOW - 5 * DAY);
+    expect((await purge(store, NOW)).reports).toBe(2);
+    expect(ids(store.rawReports())).toEqual(['bad']);
+  });
+
+  it('an open report is never spared, and a mark with no actioned_at is not live', async () => {
+    const { store } = setup();
+    store.insertReport(report('open', NOW - 100 * DAY));
+    store.insertReport(report('never', NOW - 100 * DAY));
+    store.markReportBadFaith('never', null);
+    expect((await purge(store, NOW)).reports).toBe(2);
+  });
+
+  it('badFaithMs moves the window; 0 keeps only a mark actioned at or after now', async () => {
+    const { store } = setup();
+    markBad(store, 'a', NOW - 100 * DAY, NOW - 40 * DAY);
+    expect((await purge(store, NOW, { badFaithMs: 45 * DAY })).reports).toBe(0);
+    expect((await purge(store, NOW, { badFaithMs: 39 * DAY })).reports).toBe(1);
+  });
+
+  it('a fresh-enough report is kept whatever its bad-faith state', async () => {
+    const { store } = setup();
+    markBad(store, 'new', NOW - 10 * DAY, NOW - 100 * DAY);
+    expect((await purge(store, NOW)).reports).toBe(0);
+  });
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])('rejects an invalid badFaithMs (%s)', async (bad) => {
+    const { store } = setup();
+    store.insertReport(report('old', NOW - 1000 * DAY));
+    await expect(purge(store, NOW, { badFaithMs: bad })).rejects.toThrow('purge: invalid badFaithMs');
+    expect(store.rawReports()).toHaveLength(1);
+  });
+
+  it('deletes the recorded decision of a purged report and keeps the one of a spared report', async () => {
+    const { store } = setup();
+    store.insertReport(report('gone', NOW - 100 * DAY));
+    store.insertReport(report('kept', NOW - 100 * DAY));
+    store.closeReport('kept', 'dismissed', true, 'mod', NOW - DAY, 'n');
+    store.insertDecision('k-gone', 'gone', NOW - 100 * DAY, '{}');
+    store.insertDecision('k-kept', 'kept', NOW - DAY, '{}');
+    await purge(store, NOW);
+    expect(store.findDecision('k-gone')).toBeNull();
+    expect(store.findDecision('k-kept')).not.toBeNull();
+  });
+
   it('old report purged, recent kept', async () => {
     const { store } = setup();
     store.insertReport(report('old', NOW - 90 * DAY - 1));
@@ -92,7 +172,7 @@ describe('purge: reports', () => {
     const { store } = setup();
     store.insertReport(report('a', NOW - 100 * DAY));
     store.insertReport(report('b', NOW - 100 * DAY));
-    store.closeReport('b', 'actioned', NOW - 99 * DAY);
+    store.closeReport('b', 'actioned', false, 'mod', NOW - 99 * DAY, 'n');
     expect((await purge(store, NOW)).reports).toBe(2);
     expect(store.rawReports()).toEqual([]);
   });
@@ -182,6 +262,44 @@ describe('purge: sanctions', () => {
     expect(t.store.insertSanctionGroup([reuse as never])).toBe(true);
     const clash = { ...reuse, id: 'new2', groupId: 'g-new2', refCode: live.refCode };
     expect(t.store.insertSanctionGroup([clash as never])).toBe(false);
+  });
+});
+
+describe('purge: sanctions with an open rule gap', () => {
+  it('spares an old ended sanction whose gap is open, and purges it once the gap is closed', async () => {
+    const { store, subjects, subject } = setup();
+    const s = subject('k1');
+    const gap = await applySanction(
+      store,
+      subjects,
+      { kind: 'chat', subject: s, includeIp: false, durationMs: DAY, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 'uncovered', gapNote: 'no rule fits' },
+      NOW - 200 * DAY,
+    );
+    expect((await purge(store, NOW)).sanctions).toBe(0);
+    expect(store.rawSanctions()).toHaveLength(1);
+    store.closeGap(gap.groupId, 'not_a_rule', null, 'mod', NOW);
+    expect((await purge(store, NOW)).sanctions).toBe(1);
+  });
+
+  it('spares an open-gap sanction that was revoked long ago too; ruled and not_a_rule gaps are not spared', async () => {
+    const e = setup();
+    const s = e.subject('k1');
+    const mk = (note: string | undefined) =>
+      applySanction(
+        e.store,
+        e.subjects,
+        { kind: 'warning', subject: s, includeIp: false, durationMs: null, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: note === undefined ? 1 : 'uncovered', ...(note === undefined ? {} : { gapNote: note }) },
+        NOW - 200 * DAY,
+      );
+    const open = await mk('gap');
+    const ruled = await mk('gap2');
+    await mk(undefined);
+    await revokeSanction(e.store, open.groupId, 'mod', NOW - 150 * DAY, 'x');
+    await revokeSanction(e.store, ruled.groupId, 'mod', NOW - 150 * DAY, 'x');
+    e.store.closeGap(ruled.groupId, 'ruled', '9', 'mod', NOW - 140 * DAY);
+    // The closed (ruled) gap and the plain warning (it ends where it starts, long ago) go; the open gap stays.
+    expect((await purge(e.store, NOW)).sanctions).toBe(2);
+    expect(e.store.rawSanctions().map((r) => r.gapStatus)).toEqual(['open']);
   });
 });
 

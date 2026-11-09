@@ -72,7 +72,7 @@ const copyLine = (l: ReportExcerptLine): ReportExcerptLine => ({ ...l, audience:
  * requested id is not the subject's own line (an id absent from the excerpt counts). Nothing partial is returned.
  */
 export function ownLines(
-  report: StoredReport,
+  report: Pick<StoredReport, 'people' | 'excerpt'>,
   subject: SubjectId,
   lineIds: readonly string[],
   subjects: SubjectIndex,

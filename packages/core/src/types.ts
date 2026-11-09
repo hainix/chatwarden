@@ -259,6 +259,32 @@ export interface StoredReport {
   status: 'open';
 }
 
+/**
+ * A stored report as the moderator tools see it: the intake fields plus where a decision left it. `status` is
+ * `open` until `closeReport` moves it to `actioned` or `dismissed`; the `actioned*` and `modNote` fields are null
+ * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
+ * Private: moderator tools only.
+ */
+export interface ReportRecord extends Omit<StoredReport, 'status'> {
+  status: 'open' | 'actioned' | 'dismissed';
+  badFaith: boolean;
+  actionedAt: number | null;
+  actionedBy: string | null;
+  modNote: string | null;
+}
+
+/**
+ * One recorded moderator decision, kept so the same decision sent twice is a replay and not a second action.
+ * `key` is a hash of the report and the decision; `resultJson` is what the first call answered.
+ */
+export interface DecisionRow {
+  key: string;
+  reportId: string;
+  /** Epoch ms. */
+  at: number;
+  resultJson: string;
+}
+
 /** The light projection of a report the intake rules count: who reported whom, where and when. */
 export interface ReportActivity {
   reporter: SubjectId;
@@ -428,6 +454,28 @@ export interface Store {
    */
   insertReport(row: StoredReport): boolean;
 
+  /** One report with its decision columns, or null when there is none by that id. */
+  loadReport(id: string): ReportRecord | null;
+
+  /**
+   * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`.
+   * Returns true when this call closed it; false (nothing changed) for an unknown report or one already closed.
+   */
+  closeReport(
+    id: string,
+    status: 'actioned' | 'dismissed',
+    badFaith: boolean,
+    actor: string,
+    at: number,
+    note: string,
+  ): boolean;
+
+  /** Record a decision. A `key` that is already recorded throws (nothing is written). */
+  insertDecision(key: string, reportId: string, at: number, resultJson: string): void;
+
+  /** The recorded decision for `key`, or null. */
+  findDecision(key: string): DecisionRow | null;
+
   /** Who reported whom (light rows, no excerpt) for every report created at or after `since`, oldest first. */
   loadReportActivity(since: number): ReportActivity[];
 
@@ -446,12 +494,17 @@ export interface Store {
   // Retention. SYNCHRONOUS on purpose: `purge` runs all five inside one `transaction`. Each deletes rows
   // strictly older than the cutoff (epoch ms) and returns how many it deleted.
 
-  /** Delete reports with `createdAt < before`. */
-  purgeReports(before: number): number;
+  /**
+   * Delete reports with `createdAt < before`, except a bad-faith dismissal still inside its window
+   * (`bad_faith = 1` and `actionedAt >= keepBadFaithSince`): the reporter's suspension reads it. Also deletes the
+   * recorded decisions of reports that no longer exist. Returns how many reports it deleted.
+   */
+  purgeReports(before: number, keepBadFaithSince: number): number;
 
   /**
    * Delete sanction rows that ended (`endsAt` set and `< before`) or were revoked (`revokedAt < before`).
-   * A permanent, unrevoked row is never deleted.
+   * A permanent, unrevoked row is never deleted, and neither is a row whose rule gap is still `open`: the gap
+   * is the moderators' to-do and needs its note.
    */
   purgeSanctions(before: number): number;
 

@@ -245,4 +245,20 @@ CREATE INDEX kit_notices_by_group ON kit_notices (group_id);
 CREATE INDEX kit_notices_by_created ON kit_notices (created_at);
 `,
   },
+  {
+    version: 9,
+    // One row per recorded moderator decision. key is a SHA-256 over the report id, the verdict and the sorted
+    // actions (canonical subjects), so the same decision sent again is found here and replayed instead of applied
+    // twice. result_json is what the first call answered (group ids, ref codes, notice ids). report_id has no
+    // foreign key: the retention purge deletes the decisions of the reports it deletes.
+    sql: `
+CREATE TABLE kit_decisions (
+  key         TEXT PRIMARY KEY,
+  report_id   TEXT NOT NULL,
+  at          INTEGER NOT NULL,
+  result_json TEXT NOT NULL
+);
+CREATE INDEX kit_decisions_by_report ON kit_decisions (report_id);
+`,
+  },
 ];

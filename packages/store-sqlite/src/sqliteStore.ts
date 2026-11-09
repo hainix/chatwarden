@@ -1,10 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type {
+  DecisionRow,
   MuteRow,
   NoticeKind,
   NoticeRow,
   ReportActivity,
+  ReportCategory,
+  ReportRecord,
   SanctionKind,
   SanctionRow,
   Source,
@@ -367,6 +370,72 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  loadReport(id: string): ReportRecord | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT * FROM kit_reports WHERE id = ?').get(id);
+      if (r === undefined) return null;
+      return {
+        id: String(r.id),
+        createdAt: Number(r.created_at),
+        roomId: String(r.room_id),
+        tags: JSON.parse(String(r.tags_json)) as Record<string, string>,
+        reporterSubject: String(r.reporter_subject),
+        reporterSeat: String(r.reporter_seat),
+        reporterHandle: String(r.reporter_handle),
+        targetSubject: String(r.target_subject),
+        targetSeat: String(r.target_seat),
+        targetHandle: String(r.target_handle),
+        category: String(r.category) as ReportCategory,
+        note: r.note === null ? null : String(r.note),
+        lineId: r.line_id === null ? null : String(r.line_id),
+        excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
+        people: JSON.parse(String(r.people_json)) as SubjectId[],
+        status: String(r.status) as ReportRecord['status'],
+        badFaith: Number(r.bad_faith) === 1,
+        actionedAt: r.actioned_at === null ? null : Number(r.actioned_at),
+        actionedBy: r.actioned_by === null ? null : String(r.actioned_by),
+        modNote: r.mod_note === null ? null : String(r.mod_note),
+      };
+    });
+  }
+
+  closeReport(
+    id: string,
+    status: 'actioned' | 'dismissed',
+    badFaith: boolean,
+    actor: string,
+    at: number,
+    note: string,
+  ): boolean {
+    return this.transaction(() => {
+      if (status !== 'actioned' && status !== 'dismissed') throw new Error('closeReport: invalid status');
+      const res = this.db
+        .prepare(
+          `UPDATE kit_reports SET status = ?, bad_faith = ?, actioned_at = ?, actioned_by = ?, mod_note = ?
+           WHERE id = ? AND status = 'open'`,
+        )
+        .run(status, badFaith ? 1 : 0, at, actor, note, id);
+      return Number(res.changes) > 0;
+    });
+  }
+
+  insertDecision(key: string, reportId: string, at: number, resultJson: string): void {
+    this.transaction(() => {
+      this.db
+        .prepare('INSERT INTO kit_decisions (key, report_id, at, result_json) VALUES (?, ?, ?, ?)')
+        .run(key, reportId, at, resultJson);
+    });
+  }
+
+  findDecision(key: string): DecisionRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT key, report_id, at, result_json FROM kit_decisions WHERE key = ?').get(key);
+      return r === undefined
+        ? null
+        : { key: String(r.key), reportId: String(r.report_id), at: Number(r.at), resultJson: String(r.result_json) };
+    });
+  }
+
   loadReportActivity(since: number): ReportActivity[] {
     return this.transaction(() =>
       this.db
@@ -420,8 +489,20 @@ export class SqliteStore implements Store, TermStore {
   // Retention. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must
   // never be given an async function.
 
-  purgeReports(before: number): number {
-    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_reports WHERE created_at < ?').run(before).changes));
+  purgeReports(before: number, keepBadFaithSince: number): number {
+    return this.transaction(() => {
+      const n = Number(
+        this.db
+          .prepare(
+            `DELETE FROM kit_reports
+             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?)`,
+          )
+          .run(before, keepBadFaithSince).changes,
+      );
+      // A recorded decision outlives only its report.
+      if (n > 0) this.db.prepare('DELETE FROM kit_decisions WHERE report_id NOT IN (SELECT id FROM kit_reports)').run();
+      return n;
+    });
   }
 
   purgeSanctions(before: number): number {
@@ -430,7 +511,8 @@ export class SqliteStore implements Store, TermStore {
         this.db
           .prepare(
             `DELETE FROM kit_sanctions
-             WHERE (ends_at IS NOT NULL AND ends_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?)`,
+             WHERE ((ends_at IS NOT NULL AND ends_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?))
+               AND (gap_status IS NULL OR gap_status <> 'open')`
           )
           .run(before, before).changes,
       ),

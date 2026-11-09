@@ -89,6 +89,15 @@ interface Checked {
   gapNote: string | null;
 }
 
+/**
+ * Check a sanction input without writing anything. Throws {@link SanctionError} exactly where `applySanction` would
+ * (the same checks, run first). Lets a caller that writes several sanctions in one transaction refuse the whole
+ * batch before the first write.
+ */
+export function validateSanctionInput(input: SanctionInput): void {
+  validate(input);
+}
+
 function validate(input: SanctionInput): Checked {
   const d = input.durationMs;
   if (input.kind === 'warning') {
@@ -118,13 +127,22 @@ function validate(input: SanctionInput): Checked {
   return { rule: String(ref), gapNote: null };
 }
 
+/** What {@link writeSanction} wrote: the group's handle and the rows, for the caller to hand to the index. */
+export interface WrittenSanction {
+  groupId: string;
+  refCode: string;
+  rows: SanctionRow[];
+  /** Epoch ms the subject row ends; null = permanent. A warning ends where it starts. */
+  endsAt: number | null;
+}
+
 function applyNow(
   store: Store,
   subjects: SubjectIndex,
   input: SanctionInput,
   now: number,
-  index: SanctionIndex | undefined,
-): { groupId: string; refCode: string } {
+  pending: boolean,
+): WrittenSanction {
   const { rule, gapNote } = validate(input);
   const subject = subjects.canonical(input.subject);
   // A warning has no end: it ends where it starts, so it is never "still running".
@@ -132,8 +150,6 @@ function applyNow(
   const ipEndsAt = endsAt === null ? now + IP_MAX_MS : Math.min(endsAt, now + IP_MAX_MS);
   const ip = input.includeIp ? subjects.latestIp(subject) : null;
   const groupId = newId();
-  // Informational: `active()` already returns null while disabled and the row applies once it is re-enabled.
-  const pending = index !== undefined && !index.isEnabled();
 
   const build = (code: string): SanctionRow[] => {
     const base = {
@@ -168,10 +184,7 @@ function applyNow(
   for (let attempt = 0; attempt < REF_ATTEMPTS; attempt++) {
     const rows = build(refCode());
     const written = store.transaction(() => store.insertSanctionGroup(rows));
-    if (written) {
-      index?.add(rows, now);
-      return { groupId, refCode: rows[0]?.refCode ?? '' };
-    }
+    if (written) return { groupId, refCode: rows[0]?.refCode ?? '', rows, endsAt };
   }
   throw new Error('applySanction: could not allocate a unique ref code');
 }
@@ -194,10 +207,29 @@ export function applySanction(
   index?: SanctionIndex,
 ): Promise<{ groupId: string; refCode: string }> {
   try {
-    return Promise.resolve(applyNow(store, subjects, input, now, index));
+    // Informational: `active()` already returns null while disabled and the row applies once it is re-enabled.
+    const written = applyNow(store, subjects, input, now, index !== undefined && !index.isEnabled());
+    index?.add(written.rows, now);
+    return Promise.resolve({ groupId: written.groupId, refCode: written.refCode });
   } catch (err) {
     return Promise.reject(err);
   }
+}
+
+/**
+ * Write one sanction group to the store and return its rows, WITHOUT touching any index. For a caller that writes
+ * several things in one `store.transaction` and must only show the rows to the index once that transaction has
+ * committed (`index.add(written.rows, now)`). Same validation and rows as {@link applySanction}; `pending` is the
+ * value to record (true when enforcement is off). Synchronous; throws {@link SanctionError} on a bad input.
+ */
+export function writeSanction(
+  store: Store,
+  subjects: SubjectIndex,
+  input: SanctionInput,
+  now: number,
+  pending: boolean,
+): WrittenSanction {
+  return applyNow(store, subjects, input, now, pending);
 }
 
 /**

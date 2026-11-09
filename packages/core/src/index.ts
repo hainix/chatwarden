@@ -12,8 +12,10 @@ export type {
   NoticeRow,
   RawWho,
   ReportActivity,
+  DecisionRow,
   ReportCategory,
   ReportExcerptLine,
+  ReportRecord,
   SanctionKind,
   SanctionRow,
   SanctionTargetType,
@@ -47,7 +49,7 @@ export {
   SANCTION_SOURCES,
   SanctionIndex,
 } from './sanctions.js';
-export type { ActiveSanction, SanctionInput } from './sanctions.js';
+export type { ActiveSanction, SanctionInput, WrittenSanction } from './sanctions.js';
 export { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from './mutes.js';
 export {
   REPEAT_LOOKBACK_MS,
@@ -110,3 +112,12 @@ export {
   suggestAction,
 } from './ladder.js';
 export type { ActionRecord, LadderCell, LadderRow, LadderStep } from './ladder.js';
+export { DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
+export type {
+  DecisionAction,
+  DecisionGroup,
+  DecisionInput,
+  DecisionResult,
+  DecisionServiceDeps,
+  RevokeDeps,
+} from './decide.js';

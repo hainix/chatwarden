@@ -491,9 +491,9 @@ describe('createChatwarden: retention on by default', () => {
     vi.useFakeTimers();
     class Flaky extends MemoryStore {
       fail = true;
-      override purgeReports(before: number): number {
+      override purgeReports(before: number, keepBadFaithSince: number): number {
         if (this.fail) throw new RangeError('secret-detail disk full');
-        return super.purgeReports(before);
+        return super.purgeReports(before, keepBadFaithSince);
       }
     }
     const store = new Flaky();

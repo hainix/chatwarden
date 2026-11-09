@@ -1,7 +1,9 @@
 import type {
+  DecisionRow,
   MuteRow,
   NoticeRow,
   ReportActivity,
+  ReportRecord,
   SanctionRow,
   Store,
   StoredReport,
@@ -11,12 +13,8 @@ import type {
   SubjectRecord,
 } from '../src/types.js';
 
-/** A report plus the moderation columns K2 will fill (modelled here so the intake rules can be tested). */
-export interface StoredReportRow extends Omit<StoredReport, 'status'> {
-  status: 'open' | 'actioned' | 'dismissed';
-  badFaith: boolean;
-  actionedAt: number | null;
-}
+/** A report plus the moderation columns a decision fills. */
+export type StoredReportRow = ReportRecord;
 
 /** A stored sanction row plus its revocation, as the SQL table keeps it. */
 export interface StoredSanction extends SanctionRow {
@@ -46,6 +44,8 @@ export class MemoryStore implements Store {
   protected strikes: StrikeRow[] = [];
   /** Reports in insertion order; `insertReport` enforces UNIQUE (reporter, target, room). */
   protected reports: StoredReportRow[] = [];
+  /** Recorded decisions by key. */
+  protected decisions = new Map<string, DecisionRow>();
   /** Notices in insertion order (stands in for SQLite's rowid). */
   protected notices: NoticeRow[] = [];
   /** Group id that owns each ref code: the O(1) collision check. */
@@ -302,11 +302,48 @@ export class MemoryStore implements Store {
       (r) => r.reporterSubject === row.reporterSubject && r.targetSubject === row.targetSubject && r.roomId === row.roomId,
     );
     if (dup) return false;
-    this.reports.push({ ...structuredClone(row), badFaith: false, actionedAt: null });
+    this.reports.push({ ...structuredClone(row), badFaith: false, actionedAt: null, actionedBy: null, modNote: null });
     this.undoWith(() => {
       this.reports.length -= 1;
     });
     return true;
+  }
+
+  loadReport(id: string): ReportRecord | null {
+    const r = this.reports.find((x) => x.id === id);
+    return r === undefined ? null : structuredClone(r);
+  }
+
+  closeReport(
+    id: string,
+    status: 'actioned' | 'dismissed',
+    badFaith: boolean,
+    actor: string,
+    at: number,
+    note: string,
+  ): boolean {
+    const r = this.reports.find((x) => x.id === id);
+    if (r === undefined || r.status !== 'open') return false;
+    if (status !== 'actioned' && status !== 'dismissed') throw new Error('closeReport: invalid status');
+    const before = { status: r.status, badFaith: r.badFaith, actionedAt: r.actionedAt, actionedBy: r.actionedBy, modNote: r.modNote };
+    r.status = status;
+    r.badFaith = badFaith;
+    r.actionedAt = at;
+    r.actionedBy = actor;
+    r.modNote = note;
+    this.undoWith(() => Object.assign(r, before));
+    return true;
+  }
+
+  insertDecision(key: string, reportId: string, at: number, resultJson: string): void {
+    if (this.decisions.has(key)) throw new Error('UNIQUE constraint failed: kit_decisions.key');
+    this.decisions.set(key, { key, reportId, at, resultJson });
+    this.undoWith(() => this.decisions.delete(key));
+  }
+
+  findDecision(key: string): DecisionRow | null {
+    const d = this.decisions.get(key);
+    return d === undefined ? null : { ...d };
   }
 
   loadReportActivity(since: number): ReportActivity[] {
@@ -345,13 +382,22 @@ export class MemoryStore implements Store {
   // Retention (synchronous, see the Store interface). Each removes rows in place and journals an undo that
   // restores the previous contents.
 
-  purgeReports(before: number): number {
+  purgeReports(before: number, keepBadFaithSince: number): number {
     const snapshot = [...this.reports];
-    const kept = snapshot.filter((r) => r.createdAt >= before);
+    const kept = snapshot.filter(
+      (r) => r.createdAt >= before || (r.badFaith && r.actionedAt !== null && r.actionedAt >= keepBadFaithSince),
+    );
     const n = snapshot.length - kept.length;
     if (n > 0) {
       this.reports.splice(0, this.reports.length, ...kept);
-      this.undoWith(() => this.reports.splice(0, this.reports.length, ...snapshot));
+      // A decision outlives only its report.
+      const alive = new Set(kept.map((r) => r.id));
+      const dropped = [...this.decisions.values()].filter((d) => !alive.has(d.reportId));
+      for (const d of dropped) this.decisions.delete(d.key);
+      this.undoWith(() => {
+        this.reports.splice(0, this.reports.length, ...snapshot);
+        for (const d of dropped) this.decisions.set(d.key, d);
+      });
     }
     return n;
   }
@@ -360,7 +406,8 @@ export class MemoryStore implements Store {
     const snapshot = [...this.sanctions];
     const owners = new Map(this.refOwners);
     const kept = snapshot.filter(
-      (r) => !((r.endsAt !== null && r.endsAt < before) || (r.revokedAt !== null && r.revokedAt < before)),
+      (r) =>
+        r.gapStatus === 'open' || !((r.endsAt !== null && r.endsAt < before) || (r.revokedAt !== null && r.revokedAt < before)),
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
@@ -467,15 +514,13 @@ export class MemoryStore implements Store {
     if (!r) throw new Error('unknown report');
     r.badFaith = true;
     r.actionedAt = actionedAt;
+    r.actionedBy = 'test';
     r.status = 'dismissed';
   }
 
-  /** Test helper: close a report without the bad-faith mark. */
-  closeReport(id: string, status: 'actioned' | 'dismissed', actionedAt: number): void {
-    const r = this.reports.find((x) => x.id === id);
-    if (!r) throw new Error('unknown report');
-    r.status = status;
-    r.actionedAt = actionedAt;
+  /** Test helper: every recorded decision. */
+  rawDecisions(): DecisionRow[] {
+    return [...this.decisions.values()].map((d) => ({ ...d }));
   }
 
   /** Test helper: every stored report. */

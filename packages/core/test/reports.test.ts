@@ -1026,7 +1026,7 @@ describe('report: suspension after three bad-faith dismissals in 30 days', () =>
     const { a } = t.table();
     for (let i = 0; i < 5; i++) {
       const row = t.seed({ reporterSubject: a });
-      t.store.closeReport(row.id, 'dismissed', NOW - DAY);
+      t.store.closeReport(row.id, 'dismissed', false, 'mod', NOW - DAY, 'n');
     }
     expect(await t.submit()).toMatchObject({ ok: true });
   });
