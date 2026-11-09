@@ -66,13 +66,20 @@ export class CommunityRules {
   }
 }
 
-function isNonEmptyString(v: unknown): v is string {
-  return typeof v === 'string' && v.trim() !== '';
+/**
+ * Trim a title or text and check it is one non-empty line. A line break is refused, not flattened: the text goes
+ * into the AI read's prompt one rule per line, so a line break would let a rule smuggle in extra prompt lines.
+ */
+function cleanLine(v: unknown, n: number, what: string): string {
+  if (typeof v !== 'string' || v.trim() === '') throw new RulesError(`Rule ${n} needs ${what}`);
+  const trimmed = v.trim();
+  if (/[\r\n]/.test(trimmed)) throw new RulesError(`Rule ${n} ${what} must be a single line`);
+  return trimmed;
 }
 
 /**
  * Validate a rules list and build the registry. Throws `RulesError` on a duplicate number, a number that is not a
- * positive integer, or an empty title or text.
+ * positive integer, an empty title or text, or a line break in a title or text. Surrounding whitespace is trimmed.
  *
  * With `previous`, a number that was in the previous list and is missing from `next` is refused: a rule can be
  * retired, never removed or renumbered.
@@ -82,6 +89,7 @@ export function defineRules(
   options: { previous?: readonly CommunityRule[] | CommunityRules } = {},
 ): CommunityRules {
   const seen = new Set<number>();
+  const clean: CommunityRule[] = [];
   for (const rule of rules) {
     const n: unknown = rule.number;
     if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 1) {
@@ -89,8 +97,7 @@ export function defineRules(
     }
     if (seen.has(n)) throw new RulesError(`Rule number ${n} is used twice`);
     seen.add(n);
-    if (!isNonEmptyString(rule.title)) throw new RulesError(`Rule ${n} needs a title`);
-    if (!isNonEmptyString(rule.text)) throw new RulesError(`Rule ${n} needs text`);
+    clean.push({ ...rule, title: cleanLine(rule.title, n, 'a title'), text: cleanLine(rule.text, n, 'text') });
   }
   const { previous } = options;
   if (previous !== undefined) {
@@ -101,7 +108,7 @@ export function defineRules(
       }
     }
   }
-  return new CommunityRules(rules);
+  return new CommunityRules(clean);
 }
 
 export const STARTER_RULES: CommunityRule[] = [
@@ -113,7 +120,7 @@ export const STARTER_RULES: CommunityRule[] = [
   {
     number: 2,
     title: 'No insulting, threatening or targeting another player',
-    text: 'Do not insult, threaten or pick on another player in chat. Talk about cards and plays, like killing a creature or a bad keep, is normal and fine.',
+    text: 'Do not insult, threaten or target another player as a person in chat. Talk about the game itself, like destroying or killing an opposing unit or character in play, is fine.',
   },
   {
     number: 3,
@@ -123,7 +130,7 @@ export const STARTER_RULES: CommunityRule[] = [
   {
     number: 4,
     title: 'No spam, flooding or advertising',
-    text: 'Do not repeat the same message, flood the chat or advertise. Keep chat to the game and the people in it.',
+    text: 'Do not repeat the same message, flood the chat or advertise. Stick to talking about the game and the people in it.',
   },
   {
     number: 5,
