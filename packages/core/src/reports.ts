@@ -78,6 +78,7 @@ export interface ReportServiceDeps {
   /**
    * Called once for each stored report, after the result is decided. Fenced: a synchronous throw or an async
    * rejection is logged and never reaches the reporter. It receives a copy of the report.
+   * Carries subject ids: staff channels only, never send to a player.
    */
   onReport?: (report: StoredReport, counts: ReportCounts) => void;
   logger?: Logger;

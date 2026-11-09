@@ -82,6 +82,7 @@ export interface ChatwardenOptions {
    *
    * The report carries SUBJECT IDS (reporter and target) and the evidence lines, so it is for staff channels
    * only (a moderator queue, a private log). Never forward it, or any part of it, to a player.
+   * Carries subject ids: staff channels only, never send to a player.
    */
   onReport?: (report: StoredReport, counts: ReportCounts) => void;
   /** Told once when a blocked line earned an automatic timeout; `second` is true for the 24 h repeat. */
@@ -124,7 +125,9 @@ export interface Chatwarden {
     close(roomId: string): void;
     /**
      * The subject id of the seat's current occupant, or null. A server-side helper for admin tooling and
-     * sanctions. NEVER send the result to a player: a subject id is an identifier.
+     * sanctions. It is the CANONICAL subject (a merge is folded in), the same id `platform.notify` is told and the
+     * same one `history` and `decide` use. NEVER send the result to a player: a subject id is an identifier.
+     * Carries subject ids: staff channels only, never send to a player.
      */
     subjectAt(roomId: string, seatId: string): SubjectId | null;
   };
@@ -176,11 +179,18 @@ export interface Chatwarden {
    * transaction. Idempotent (the same decision again is a replay). A malformed or disallowed decision resolves
    * `{ ok: false, error: 'invalid' }`; a STORE failure REJECTS with the store's own error and writes nothing, so a
    * route handler should catch it. Moderator-side: the result carries subject ids, so never forward it to a player.
+   * Carries subject ids: staff channels only, never send to a player.
    */
   decide(input: DecisionInput): Promise<DecisionResult>;
-  /** The person's counted actions in the last 90 days. Server-side: for the moderator's view only. */
+  /**
+   * The person's counted actions in the last 90 days. Server-side: for the moderator's view only. Keyed
+   * by a subject id. Carries subject ids: staff channels only, never send to a player.
+   */
   history(subject: SubjectId): ActionRecord[];
-  /** The next step the ladder suggests for this person's record. It selects nothing; show it as one line. */
+  /**
+   * The next step the ladder suggests for this person's record. It selects nothing; show it as one line. Keyed
+   * by a subject id. Carries subject ids: staff channels only, never send to a player.
+   */
   suggest(
     subject: SubjectId,
     severity: Severity | null,
@@ -342,7 +352,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         roster.close(roomId);
         buffer.drop(roomId);
       },
-      subjectAt: (roomId, seatId) => roster.occupant(roomId, seatId)?.subject ?? null,
+      subjectAt: (roomId, seatId) => {
+        const subject = roster.occupant(roomId, seatId)?.subject ?? null;
+        return subject === null ? null : subjects.canonical(subject);
+      },
     },
     chat: {
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),

@@ -1046,6 +1046,43 @@ describe('createChatwarden: platform.notify', () => {
     expect(told).toEqual([cw.rooms.subjectAt(R, 'a')]);
   });
 
+  it('after a merge, notify names the same subject subjectAt gives for the seat (canonical)', async () => {
+    const told: string[] = [];
+    const platform: Platform = { identify: (ctx) => ctx as RawWho, notify: (who) => void told.push(who) };
+    const { cw, clock } = await setup({ platform, matcher: spanBlocker });
+    // The older person (with an account) survives a merge, so seat them first.
+    cw.rooms.seat(R, 'acct', { clientKey: 'key-old', accountId: 'acct-merge', ip: '198.51.100.7' }, 'Old');
+    clock.t += 10;
+    cw.rooms.seat(R, 'a', { clientKey: 'key-new', ip: '198.51.100.8' }, 'New');
+    const before = cw.rooms.subjectAt(R, 'a');
+    // The new browser links the account: the two subjects merge, and seat 'a' still holds the merged-away one.
+    cw.rooms.seat(R, 'link', { clientKey: 'key-new', accountId: 'acct-merge', ip: '198.51.100.8' }, 'Linked');
+    const after = cw.rooms.subjectAt(R, 'a');
+    expect(after).toBe(cw.rooms.subjectAt(R, 'acct'));
+    expect(after).not.toBe(before);
+    for (let i = 0; i < 3; i++) cw.chat.accept(R, 'a', 'zorbak');
+    expect(told).toEqual([after]);
+  });
+
+  it('an unmerged seat is unchanged and an empty seat is still null (control)', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    const a = cw.rooms.subjectAt(R, 'a');
+    expect(a).toMatch(SUBJECT_RE);
+    expect(cw.rooms.subjectAt(R, 'a')).toBe(a);
+    expect(cw.rooms.subjectAt(R, 'nobody')).toBeNull();
+  });
+
+  it('two seats of one merged person report the same subject', async () => {
+    const { cw, clock } = await setup();
+    cw.rooms.seat(R, 'old', { clientKey: 'k-old', accountId: 'acct-2' }, 'Old');
+    clock.t += 10;
+    cw.rooms.seat(R, 'new', { clientKey: 'k-new' }, 'New');
+    cw.rooms.seat(R, 'link', { clientKey: 'k-new', accountId: 'acct-2' }, 'Link');
+    expect(cw.rooms.subjectAt(R, 'new')).toBe(cw.rooms.subjectAt(R, 'old'));
+    expect(cw.rooms.subjectAt(R, 'link')).toBe(cw.rooms.subjectAt(R, 'old'));
+  });
+
   it('is called with the platform as this', async () => {
     let self: unknown;
     const platform: Platform = {

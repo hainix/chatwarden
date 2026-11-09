@@ -1338,8 +1338,89 @@ describe('K2: refusals cite the rule and point at the notice', () => {
     const second = noticeFor(e, s, g.groupId, g.refCode, e.clock.t + H);
     expect(second).not.toBe(first);
     expect(refusal(e.say('p1', 'hi'))).toMatchObject({ noticeId: second });
-    e.store.withdrawNoticeGroup(g.groupId, e.clock.t);
+    e.realNotices.withdrawGroup(g.groupId);
     expect('noticeId' in refusal(e.say('p1', 'hi again'))).toBe(false);
+  });
+
+  describe('the notice lookup is cached (no store read per attempt)', () => {
+    class Counting extends MemoryStore {
+      lookups = 0;
+      override findNoticeForGroup(groupId: string) {
+        this.lookups += 1;
+        return super.findNoticeForGroup(groupId);
+      }
+    }
+
+    it('50 restricted attempts make at most one findNoticeForGroup call and all carry the notice id', async () => {
+      const store = new Counting();
+      const e = setup({ store, notices: true });
+      const s = e.sit('p1', who('k1'))!;
+      const g = await e.sanction(s, 'chat', 60 * H, { rule: 3 });
+      const id = noticeFor(e, s, g.groupId, g.refCode, e.clock.t + 60 * H, 3);
+      store.lookups = 0;
+      for (let i = 0; i < 50; i++) {
+        expect(refusal(e.say('p1', 'hi'))).toMatchObject({ reason: 'restricted', rule: 3, noticeId: id });
+      }
+      expect(store.lookups).toBeLessThanOrEqual(1);
+    });
+
+    it('a restriction with no notice reads the store once over 50 attempts, and has no noticeId', async () => {
+      const store = new Counting();
+      const e = setup({ store, notices: true });
+      const s = e.sit('p1', who('k1'))!;
+      await e.sanction(s, 'chat', 60 * H, { rule: 3 });
+      store.lookups = 0;
+      for (let i = 0; i < 50; i++) expect('noticeId' in refusal(e.say('p1', 'hi'))).toBe(false);
+      expect(store.lookups).toBe(1);
+    });
+
+    it('withdrawing the group drops the notice id from the next attempt', async () => {
+      const store = new Counting();
+      const e = setup({ store, notices: true });
+      const s = e.sit('p1', who('k1'))!;
+      const g = await e.sanction(s, 'chat', 60 * H);
+      const id = noticeFor(e, s, g.groupId, g.refCode, e.clock.t + 60 * H);
+      expect(refusal(e.say('p1', 'hi'))).toMatchObject({ noticeId: id });
+      e.realNotices.withdrawGroup(g.groupId);
+      expect('noticeId' in refusal(e.say('p1', 'hi again'))).toBe(false);
+    });
+
+    it('the automatic timeout is pointed at its own notice, then repeat attempts read no store', () => {
+      const store = new Counting();
+      const e = setup({ store, notices: true });
+      const s = e.sit('p1', who('k1'))!;
+      e.threeSlurs();
+      e.tick();
+      store.lookups = 0;
+      const first = refusal(e.say('p1', 'hello'));
+      expect(first).toMatchObject({ reason: 'restricted', byModerator: false });
+      const id = (first as { noticeId?: string }).noticeId;
+      expect(typeof id).toBe('string');
+      for (let i = 0; i < 20; i++) {
+        e.tick();
+        expect(refusal(e.say('p1', 'hello'))).toMatchObject({ noticeId: id });
+      }
+      expect(store.lookups).toBeLessThanOrEqual(1);
+      expect(s).toBeTruthy();
+    });
+
+    it('a bystander on the shared-IP row never gets the owner notice id, cached or not (R19)', async () => {
+      const store = new Counting();
+      const e = setup({ store, notices: true });
+      const owner = e.sit('p1', who('k1', null, 'iphash-shared'))!;
+      const g = await e.sanction(owner, 'chat', 60 * H, { includeIp: true, rule: 3 });
+      noticeFor(e, owner, g.groupId, g.refCode, e.clock.t + 60 * H, 3);
+      e.sit('p2', who('k2', null, 'iphash-shared'));
+      for (let i = 0; i < 5; i++) {
+        const mine = refusal(e.say('p1', 'hi'));
+        expect(mine).toMatchObject({ reason: 'restricted', noticeId: expect.any(String) });
+        const theirs = refusal(e.say('p2', 'hi'));
+        expect(theirs).toMatchObject({ reason: 'restricted' });
+        expect('noticeId' in theirs).toBe(false);
+        expect('rule' in theirs).toBe(false);
+        e.tick();
+      }
+    });
   });
 
   it('a seen notice is still pointed at (the player can read it again)', async () => {

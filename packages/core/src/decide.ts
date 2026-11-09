@@ -49,7 +49,10 @@ export interface DecisionInput {
   source?: Source;
 }
 
-/** What one applied action produced. Moderator-facing: `subject` is an identifier and never goes to a player. */
+/**
+ * What one applied action produced. Moderator-facing: `subject` is an identifier.
+ * Carries subject ids: staff channels only, never send to a player.
+ */
 export interface DecisionGroup {
   subject: SubjectId;
   groupId: string;
@@ -57,6 +60,10 @@ export interface DecisionGroup {
   noticeId: string;
 }
 
+/**
+ * The answer to `decide`. Each group in `groups` carries a subject id. Carries subject ids: staff channels only, never send to a player. Show the player their
+ * notice (`notices.pending`), never this.
+ */
 export type DecisionResult =
   | { ok: true; groups: DecisionGroup[]; replay: boolean }
   | { ok: false; error: 'not_found' | 'already_decided' | 'invalid' };
@@ -249,6 +256,8 @@ export class DecisionService {
    *
    * After the commit the sanctions join the index and each notified person (every target, and the reporter on a
    * `fair` decision with at least one action) is told once. Both are fenced: they never fail the decision.
+   *
+   * The result's groups carry subject ids. Carries subject ids: staff channels only, never send to a player.
    */
   decide(input: DecisionInput): Promise<DecisionResult> {
     try {

@@ -23,7 +23,7 @@ const noSpansMatcher: Matcher = { match: fakeMatcher.match };
 
 const rules = new CommunityRules(STARTER_RULES);
 
-function setup(opts: { matcher?: Matcher; notify?: (s: SubjectId, e: { type: 'notice_pending'; count: number }) => unknown; store?: MemoryStore } = {}) {
+function setup(opts: { lookupCacheMax?: number; matcher?: Matcher; notify?: (s: SubjectId, e: { type: 'notice_pending'; count: number }) => unknown; store?: MemoryStore } = {}) {
   const store = opts.store ?? new MemoryStore();
   const clock = { t: NOW, now: () => clock.t };
   const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
@@ -40,6 +40,7 @@ function setup(opts: { matcher?: Matcher; notify?: (s: SubjectId, e: { type: 'no
     matcher: 'matcher' in opts ? opts.matcher : fakeMatcher,
     logger,
     notify: notify as never,
+    ...(opts.lookupCacheMax === undefined ? {} : { lookupCacheMax: opts.lookupCacheMax }),
   });
   const person = (key: string, account: string | null = null): SubjectId => {
     const s = subjects.resolve({ clientKey: key, accountId: account, ipHash: null });
@@ -1147,5 +1148,158 @@ describe('NoticeService.noticeIdForGroup', () => {
     expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
     expect(t.svc.noticeIdForGroup(g.groupId, b)).toBe(id);
     expect(t.svc.noticeIdForGroup(g.groupId, merged)).toBe(id);
+  });
+});
+
+class CountingStore extends MemoryStore {
+  lookups = 0;
+  override findNoticeForGroup(groupId: string) {
+    this.lookups += 1;
+    return super.findNoticeForGroup(groupId);
+  }
+}
+
+describe('NoticeService.noticeIdForGroup: the group cache', () => {
+  it('reads the store once for 50 lookups of the same group', () => {
+    const store = new CountingStore();
+    const t = setup({ store });
+    const a = t.person('ka');
+    const g = t.group(a);
+    const id = t.svc.createForSanction(g);
+    store.lookups = 0;
+    for (let i = 0; i < 50; i++) expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+    expect(store.lookups).toBeLessThanOrEqual(1);
+  });
+
+  it('a group with no notice is read once, then answered from the cache (a miss is cached)', () => {
+    const store = new CountingStore();
+    const t = setup({ store });
+    const a = t.person('ka');
+    for (let i = 0; i < 50; i++) expect(t.svc.noticeIdForGroup('grp-none', a)).toBeNull();
+    expect(store.lookups).toBe(1);
+  });
+
+  it('createForSanction after a cached miss makes the notice visible without another store read', () => {
+    const store = new CountingStore();
+    const t = setup({ store });
+    const a = t.person('ka');
+    const g = t.group(a);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBeNull();
+    const reads = store.lookups;
+    const id = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+    expect(store.lookups).toBe(reads);
+  });
+
+  it('a newer notice for the group replaces the cached one', () => {
+    const store = new CountingStore();
+    const t = setup({ store });
+    const a = t.person('ka');
+    const g = t.group(a);
+    const first = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(first);
+    t.clock.t += 1;
+    const second = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(second);
+  });
+
+  it('withdrawGroup invalidates: the lookup is null afterwards and reads the store again', () => {
+    const store = new CountingStore();
+    const t = setup({ store });
+    const a = t.person('ka');
+    const g = t.group(a);
+    const id = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+    t.svc.withdrawGroup(g.groupId);
+    const before = store.lookups;
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBeNull();
+    expect(store.lookups).toBe(before + 1);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBeNull();
+    expect(store.lookups).toBe(before + 1);
+  });
+
+  it('a withdraw that rolls back still invalidates (the next lookup reads the truth)', () => {
+    const store = new CountingStore();
+    const t = setup({ store });
+    const a = t.person('ka');
+    const g = t.group(a);
+    const id = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+    expect(() =>
+      store.transaction(() => {
+        t.svc.withdrawGroup(g.groupId);
+        throw new Error('later step failed');
+      }),
+    ).toThrow('later step failed');
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+  });
+
+  it('own versus bystander stays correct whoever asks first (R19)', () => {
+    const t = setup();
+    const a = t.person('ka');
+    const b = t.person('kb');
+    const g = t.group(a);
+    const id = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId, b)).toBeNull();
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+    expect(t.svc.noticeIdForGroup(g.groupId, b)).toBeNull();
+    expect(t.svc.noticeIdForGroup(g.groupId, null)).toBeNull();
+    // A cold cache (a fresh service on the same store), bystander first.
+    const cold = new NoticeService({ store: t.store, subjects: t.subjects, rules, clock: t.clock });
+    expect(cold.noticeIdForGroup(g.groupId, b)).toBeNull();
+    expect(cold.noticeIdForGroup(g.groupId, a)).toBe(id);
+    expect(cold.noticeIdForGroup(g.groupId, b)).toBeNull();
+  });
+
+  it('a merge after the entry was cached still matches the person (the subject is compared canonically each time)', () => {
+    const store = new CountingStore();
+    const t = setup({ store });
+    const a = t.person('ka');
+    const g = t.group(a);
+    const id = t.svc.createForSanction(g);
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBe(id);
+    const b = t.person('kb');
+    expect(t.svc.noticeIdForGroup(g.groupId, b)).toBeNull();
+    t.person('ka', 'acct-1');
+    t.person('kb', 'acct-1');
+    expect(t.subjects.canonical(a)).toBe(t.subjects.canonical(b));
+    expect(t.svc.noticeIdForGroup(g.groupId, b)).toBe(id);
+  });
+
+  it('the cache is bounded: the oldest entry is evicted past the cap and is simply re-read', () => {
+    const store = new CountingStore();
+    const t = setup({ store, lookupCacheMax: 3 });
+    const a = t.person('ka');
+    const groups = [1, 2, 3, 4].map(() => t.group(a));
+    const ids = groups.map((g) => t.svc.createForSanction(g));
+    store.lookups = 0;
+    expect(t.svc.noticeIdForGroup(groups[3]!.groupId, a)).toBe(ids[3]);
+    expect(t.svc.noticeIdForGroup(groups[2]!.groupId, a)).toBe(ids[2]);
+    expect(store.lookups).toBe(0);
+    // groups[0] was evicted by the fourth insert; the answer is still right, from the store.
+    expect(t.svc.noticeIdForGroup(groups[0]!.groupId, a)).toBe(ids[0]);
+    expect(store.lookups).toBe(1);
+  });
+
+  it('a lookup that throws caches nothing', () => {
+    class Flaky extends CountingStore {
+      fail = true;
+      override findNoticeForGroup(groupId: string) {
+        if (this.fail) throw new Error('disk gone');
+        return super.findNoticeForGroup(groupId);
+      }
+    }
+    const store = new Flaky();
+    const t = setup({ store });
+    const a = t.person('ka');
+    const g = t.group(a);
+    const id = t.svc.createForSanction(g);
+    t.svc.withdrawGroup(g.groupId);
+    const id2 = t.svc.createForSanction(g);
+    expect(id2).not.toBe(id);
+    t.svc.withdrawGroup(g.groupId);
+    expect(() => t.svc.noticeIdForGroup(g.groupId, a)).toThrow('disk gone');
+    store.fail = false;
+    expect(t.svc.noticeIdForGroup(g.groupId, a)).toBeNull();
   });
 });

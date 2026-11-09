@@ -16,6 +16,9 @@ export const NOTICE_EXCERPT_MAX = 5;
 /** "My record" keeps an ended sanction this long after its notice was made. */
 export const NOTICE_RECORD_WINDOW_MS = 90 * DAY_MS;
 
+/** How many sanction groups the notice-id lookup remembers. The oldest entry is dropped past this. */
+export const NOTICE_LOOKUP_CACHE_MAX = 10_000;
+
 const SANCTION_NOTICE_KINDS: readonly NoticeKind[] = ['warning', 'chat', 'area', 'ban'];
 
 /**
@@ -125,6 +128,8 @@ export interface NoticeServiceDeps {
   /** Masks blocked lines. Without it (or without `spans`) a blocked line is shown fully starred. */
   matcher?: Matcher;
   logger?: Logger;
+  /** How many sanction groups {@link NoticeService.noticeIdForGroup} remembers. Default {@link NOTICE_LOOKUP_CACHE_MAX}. */
+  lookupCacheMax?: number;
   /**
    * Told after a notice is written, with the person's pending count. Fenced: a throw or a rejection is logged and
    * never reaches the caller. Never carries a notice body.
@@ -156,6 +161,12 @@ export class NoticeService {
   private readonly matcher: Matcher | undefined;
   private readonly logger: Logger | undefined;
   private readonly hook: NoticeServiceDeps['notify'];
+  /**
+   * group id -> its newest live notice (id and the stored subject it is for), or null when the group has none.
+   * Insertion order is recency order (a hit re-inserts), so the first key is the oldest. Server-side only.
+   */
+  private readonly byGroup = new Map<string, { id: string; subject: SubjectId } | null>();
+  private readonly byGroupMax: number;
 
   constructor(deps: NoticeServiceDeps) {
     this.store = deps.store;
@@ -165,6 +176,8 @@ export class NoticeService {
     this.matcher = deps.matcher;
     this.logger = deps.logger;
     this.hook = deps.notify;
+    const max = deps.lookupCacheMax;
+    this.byGroupMax = typeof max === 'number' && Number.isInteger(max) && max >= 1 ? max : NOTICE_LOOKUP_CACHE_MAX;
   }
 
   /**
@@ -264,20 +277,45 @@ export class NoticeService {
   /** Withdraw the notices of a sanction group (it was revoked). Returns how many were withdrawn. */
   withdrawGroup(groupId: string): number {
     if (!nonEmpty(groupId)) return 0;
-    return this.store.transaction(() => this.store.withdrawNoticeGroup(groupId, this.clock.now()));
+    try {
+      return this.store.transaction(() => this.store.withdrawNoticeGroup(groupId, this.clock.now()));
+    } finally {
+      // Forget even when the transaction failed or an outer one rolls back: the next lookup reads the truth.
+      this.byGroup.delete(groupId);
+    }
   }
 
   /**
    * The id of the newest notice of a sanction group that is not withdrawn, seen or not, when that notice is for
    * `subject` (the same canonical person, so a merged alias counts). Null when there is none, when it belongs to
    * another person (a bystander refused through a shared-IP row), or when `subject` is null (a guest). Lets a
-   * refusal point the player at their own notice only. May throw if the store does; the caller fences it.
+   * refusal point the player at their own notice only. The answer for a group is remembered (a miss too), so a repeat
+   * attempt reads no store; a create replaces it and a withdraw forgets it. May throw if the store does (nothing is
+   * remembered then); the caller fences it.
    */
   noticeIdForGroup(groupId: string, subject: SubjectId | null): string | null {
     if (!nonEmpty(groupId) || !nonEmpty(subject)) return null;
-    const found = this.store.findNoticeForGroup(groupId);
+    let found: { id: string; subject: SubjectId } | null;
+    if (this.byGroup.has(groupId)) {
+      found = this.byGroup.get(groupId) ?? null;
+      this.remember(groupId, found); // a hit counts as recent
+    } else {
+      const row = this.store.findNoticeForGroup(groupId);
+      found = row === null ? null : { id: row.id, subject: row.subject };
+      this.remember(groupId, found);
+    }
     if (found === null) return null;
     return this.subjects.canonical(found.subject) === this.subjects.canonical(subject) ? found.id : null;
+  }
+
+  private remember(groupId: string, entry: { id: string; subject: SubjectId } | null): void {
+    this.byGroup.delete(groupId);
+    this.byGroup.set(groupId, entry);
+    while (this.byGroup.size > this.byGroupMax) {
+      const oldest = this.byGroup.keys().next();
+      if (oldest.done === true) break;
+      this.byGroup.delete(oldest.value);
+    }
   }
 
   /** True while the person has a warning they have not acknowledged. */
@@ -293,6 +331,9 @@ export class NoticeService {
     const id = newId();
     const row: NoticeRow = { id, ...fields, createdAt: this.clock.now(), ackedAt: null, withdrawnAt: null };
     this.store.transaction(() => this.store.insertNotice(row));
+    // The newest notice of a group is the one a refusal points at. (A transaction this write sits in may still roll
+    // back; the entry is then for a random group id nothing will ask about, and it ages out.)
+    if (fields.groupId !== null) this.remember(fields.groupId, { id, subject: fields.subject });
     if (notify) this.push(subject);
     return id;
   }

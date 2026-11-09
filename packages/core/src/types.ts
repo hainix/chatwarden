@@ -237,6 +237,7 @@ export interface ReportExcerptLine {
  * One stored report. `reporterSubject` and `targetSubject` are the CANONICAL subject ids at submit time (a later
  * merge is resolved at query time). `people` lists the distinct canonical subjects who wrote a line in the
  * excerpt, in first-seen order. Private: only moderation tools read it, and it never reaches a player.
+ * Carries subject ids: staff channels only, never send to a player.
  */
 export interface StoredReport {
   id: string;
