@@ -54,6 +54,7 @@ export async function purge(
     sanctionAfterEndMs: policy.sanctionAfterEndMs ?? RETENTION_DEFAULTS.sanctionAfterEndMs,
     strikesMs: policy.strikesMs ?? RETENTION_DEFAULTS.strikesMs,
   };
+  if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
   checkWindow('sanctionAfterEndMs', p.sanctionAfterEndMs);
   checkWindow('strikesMs', p.strikesMs);

@@ -124,6 +124,20 @@ describe('purge against SQLite', () => {
     expect(count(e.db, 'kit_reports')).toBe(0);
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'rejects a non-finite now (%s) and deletes nothing',
+    async (bad) => {
+      const { db, store } = env();
+      store.insertReport(report('old', NOW - 1000 * DAY));
+      store.insertStrike(strike('old', NOW - 1000 * DAY));
+      store.upsertMute({ viewer: 'v', target: 'old', createdAt: NOW - 1000 * DAY });
+      await expect(purge(store, bad)).rejects.toThrow('purge: invalid now');
+      expect(count(db, 'kit_reports')).toBe(1);
+      expect(count(db, 'kit_strikes')).toBe(1);
+      expect(count(db, 'kit_mutes')).toBe(1);
+    },
+  );
+
   it('is atomic: a failing table rolls the others back', async () => {
     const { db, store } = env();
     store.insertReport(report('old', NOW - 100 * DAY));

@@ -263,6 +263,24 @@ describe('purge: result, policy and scope', () => {
     expect(t.store.rawReports()).toHaveLength(1);
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'rejects a non-finite now (%s) before any write and deletes nothing',
+    async (bad) => {
+      const t = setup();
+      t.store.insertReport(report('r1', NOW - 1000 * DAY));
+      t.store.insertStrike(strike('s1', NOW - 1000 * DAY));
+      await expect(purge(t.store, bad)).rejects.toThrow('purge: invalid now');
+      expect(t.store.rawReports()).toHaveLength(1);
+      expect(t.store.loadStrikes(0)).toHaveLength(1);
+    },
+  );
+
+  it('a finite now (zero, negative) is accepted (control)', async () => {
+    const t = setup();
+    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0 });
+    await expect(purge(t.store, -5)).resolves.toBeDefined();
+  });
+
   it('never touches subjects (or their identifiers)', async () => {
     const t = setup();
     t.subject('k1');
