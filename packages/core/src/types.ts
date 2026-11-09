@@ -58,3 +58,35 @@ export interface Hasher {
   /** Hash a raw IP address. */
   ip(raw: string): string;
 }
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
+/**
+ * Persistence for the kit. An adapter package (for example
+ * `@chatwarden/store-sqlite`) implements it.
+ *
+ * Later tasks add the domain methods (subjects, sanctions, evidence, reports,
+ * mutes ...) in this interface. They are async (`Promise`) so a non-SQLite
+ * adapter can be remote; the chat hot path never awaits them, it reads
+ * in-memory indexes instead. Add each new group of methods under the marker
+ * below and keep the lifecycle methods above it.
+ */
+export interface Store {
+  /** Latest applied kit schema version (0 when no migration has run). */
+  schemaVersion(): number;
+
+  /**
+   * Run `fn` atomically: every write inside commits together, or none does
+   * if `fn` throws (the error is rethrown). Calls nest: an inner failure
+   * that the outer `fn` catches rolls back only the inner part. `fn` must be
+   * synchronous; a returned promise is not awaited.
+   */
+  transaction<T>(fn: () => T): T;
+
+  /** Release resources the store owns. A database handed in by the host stays open. */
+  close(): void;
+
+  // --- Domain methods (async) are added below by later tasks. ---
+}
