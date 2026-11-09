@@ -301,12 +301,24 @@ describe('starterRules(flavour)', () => {
     expect(diff.map((x) => x.number)).toEqual([2]);
   });
 
-  it('strict CR 3 also covers swearing at people; the title is unchanged', () => {
-    const strict = starterRules('strict')[2]!;
-    expect(strict.title).toBe('No sexual messages');
-    expect(strict.text).toMatch(/swear/i);
-    expect(starterRules('standard')[2]!.text).not.toMatch(/swear/i);
-    expect(starterRules('relaxed')[2]!.text).not.toMatch(/swear/i);
+  it('strict CR 2 covers swearing at a player; CR 3 is the standard text', () => {
+    const strict = starterRules('strict');
+    const std = starterRules('standard');
+    expect(strict[1]!.title).toBe(std[1]!.title);
+    expect(strict[1]!.text).toMatch(/swear/i);
+    expect(strict[1]!.text).not.toBe(std[1]!.text);
+    expect(strict[2]).toEqual(std[2]);
+  });
+
+  it('standard and relaxed CR 2 do not mention swearing', () => {
+    expect(starterRules('standard')[1]!.text).not.toMatch(/swear/i);
+    expect(starterRules('relaxed')[1]!.text).not.toMatch(/swear/i);
+  });
+
+  it('strict differs from standard only in CR 2', () => {
+    const std = starterRules('standard');
+    const diff = starterRules('strict').filter((rule, i) => rule.title !== std[i]!.title || rule.text !== std[i]!.text);
+    expect(diff.map((x) => x.number)).toEqual([2]);
   });
 
   it('standard CR 2 keeps its person-versus-game wording', () => {

@@ -99,7 +99,8 @@ export interface ChatwardenOptions {
    *
    * Floors, checked at creation (and on every `purge(policy)`), each a `ProfileError` naming the field: `sanctionAfterEndMs`
    * and `noticesMs` at least 90 days (the ladder and "My record" reach back that far), `badFaithMs` at least
-   * `limits.reports.suspendWindowMs`. When you leave `badFaithMs` out it follows a longer suspension window.
+   * `limits.reports.suspendWindowMs`. Not enforced, but `strikesMs` should be at least `limits.strikes.windowMs`, or strikes are
+   * deleted before the window that counts them closes. When you leave `badFaithMs` out it follows a longer suspension window.
    */
   retention?: false | ({ everyMs?: number } & Partial<RetentionPolicy>);
   /**

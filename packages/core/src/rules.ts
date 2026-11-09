@@ -176,9 +176,9 @@ const RELAXED_CR2: Pick<CommunityRule, 'title' | 'text'> = {
   text: "Trash talk about the game and each other's play is fine. Harassing, threatening or personally attacking someone, again and again, is not.",
 };
 
-/** CR 3 where swearing is not allowed: it also covers swearing at people. */
-const STRICT_CR3_TEXT =
-  'Do not send sexual messages or comments, and do not pressure anyone for them. Do not swear at other people.';
+/** CR 2 where swearing is not allowed: it also covers swearing aimed at a player. */
+const STRICT_CR2_TEXT =
+  'Do not insult, swear at, threaten or target another player in chat. Talking about the game itself is fine; aiming it at a person is not.';
 
 /**
  * The starter Community Rules for a profile flavour: a fresh copy each call, so editing one list changes no other.
@@ -186,7 +186,7 @@ const STRICT_CR3_TEXT =
  * only the wording a profile needs differs:
  * - `relaxed`: CR 2 is "No harassment or threats", with trash talk about the game explicitly fine.
  * - `standard`: the original starter set (what {@link STARTER_RULES} holds).
- * - `strict`: CR 3 also covers swearing at people.
+ * - `strict`: CR 2 also covers swearing aimed at a player (CR 3 stays the standard text).
  *
  * Throws {@link RulesError} for any other flavour. No flavour uses the vocabulary of a single game.
  */
@@ -196,7 +196,7 @@ export function starterRules(flavour: RulesFlavour): CommunityRule[] {
   }
   return STANDARD_RULES.map((rule) => {
     if (flavour === 'relaxed' && rule.number === 2) return { number: 2, ...RELAXED_CR2 };
-    if (flavour === 'strict' && rule.number === 3) return { ...rule, text: STRICT_CR3_TEXT };
+    if (flavour === 'strict' && rule.number === 2) return { ...rule, text: STRICT_CR2_TEXT };
     return { ...rule };
   });
 }

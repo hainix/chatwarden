@@ -94,9 +94,11 @@ describe('createChatwarden: profile, summary and starter rules', () => {
     expect(cw.rules.get(8)).toEqual(STARTER_RULES[7]);
   });
 
-  it('standard keeps the K2 CR 2; strict covers swearing in CR 3', async () => {
+  it('standard keeps the K2 CR 2; strict CR 2 covers swearing and CR 3 is unchanged', async () => {
     expect((await setup({ profile: 'standard' })).cw.rules.get(2)).toEqual(STARTER_RULES[1]);
-    expect((await setup({ profile: 'strict' })).cw.rules.get(3)?.text).toMatch(/swear/i);
+    const strict = (await setup({ profile: 'strict' })).cw.rules;
+    expect(strict.get(2)?.text).toMatch(/swear/i);
+    expect(strict.get(3)).toEqual(STARTER_RULES[2]);
   });
 
   it('suggest uses the resolved profile (no more hard-wired standard)', async () => {
@@ -129,7 +131,8 @@ describe('createChatwarden: profile, summary and starter rules', () => {
   it('overrides can change the summary and the rules flavour', async () => {
     const { cw } = await setup({ profile: 'standard', overrides: { summary: 'House rules apply.', rules: 'strict' } });
     expect(cw.summary).toBe('House rules apply.');
-    expect(cw.rules.get(3)?.text).toMatch(/swear/i);
+    expect(cw.rules.get(2)?.text).toMatch(/swear/i);
+    expect(cw.rules.get(3)).toEqual(STARTER_RULES[2]);
   });
 
   it('accepts a complete custom profile, and overrides apply to it', async () => {
