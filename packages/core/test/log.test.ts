@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { safeWarn } from '../src/log.js';
 import type { Logger } from '../src/types.js';
+import * as pkg from '../src/index.js';
 
 describe('safeWarn', () => {
+  it('is exported from the package entry', () => {
+    expect(pkg.safeWarn).toBe(safeWarn);
+  });
+
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

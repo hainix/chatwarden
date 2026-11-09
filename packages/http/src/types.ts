@@ -7,9 +7,16 @@ export interface KitRequest {
   path: string;
   query: Record<string, string>;
   headers: Record<string, string>;
-  /** The parsed body, when the adapter already parsed one. A route that needs a body validates it itself. */
+  /**
+   * A body the adapter already parsed. Routes must NOT trust it: a pre-parsed body skipped the 64 KiB cap and the
+   * prototype-pollution check. Adapters should leave it `undefined`; routes read `parseJson(req.rawBody)`.
+   */
   body: unknown;
-  /** The body exactly as received; {@link parseJson} reads this. */
+  /**
+   * The body exactly as received. Adapters MUST supply it (and must not pre-parse with a framework JSON parser), and
+   * routes call `parseJson(req.rawBody)`, which enforces the byte cap and rejects forbidden keys. A route that needs
+   * a body validates the parsed value itself.
+   */
   rawBody?: string;
 }
 

@@ -93,6 +93,17 @@ describe('resolvePermissions', () => {
     expect(() => resolvePermissions({ toString: 'owner' } as never)).toThrow(RangeError);
   });
 
+  it('names an unknown key in the error (adopter config), never a value', () => {
+    expect(() => resolvePermissions({ 'reports.reed': 'owner' } as never)).toThrow(/"reports\.reed"/);
+    try {
+      resolvePermissions({ nope: 'super-secret-value' } as never);
+      expect.unreachable();
+    } catch (e) {
+      expect((e as Error).message).toContain('nope');
+      expect((e as Error).message).not.toContain('super-secret-value');
+    }
+  });
+
   it('names the key in the error but never the value', () => {
     try {
       resolvePermissions({ settings: 'super-secret-value' as Role });

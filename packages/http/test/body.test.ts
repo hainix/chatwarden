@@ -53,6 +53,48 @@ describe('parseJson', () => {
     expect(parseJson(`"${'😀'.repeat(16383)}"`)).toBeDefined();
   });
 
+  it('hits the limit exactly with a multi-byte character, and refuses one byte more', () => {
+    // 'é' is 2 bytes. 2 quotes + 65532 'a' + 2 bytes = 65536.
+    const exact = `"${'a'.repeat(65532)}é"`;
+    expect(Buffer.byteLength(exact)).toBe(65536);
+    expect(parseJson(exact)).toBe(`${'a'.repeat(65532)}é`);
+    const plusOne = `"${'a'.repeat(65533)}é"`;
+    expect(Buffer.byteLength(plusOne)).toBe(65537);
+    expect(fail(plusOne).status).toBe(413);
+    // The extra bytes fall in the middle of a 3-byte character.
+    const mid = `"${'a'.repeat(65533)}€"`;
+    expect(Buffer.byteLength(mid)).toBe(65538);
+    expect(fail(mid).status).toBe(413);
+    const midExact = `"${'a'.repeat(65532)}€"`;
+    expect(Buffer.byteLength(midExact)).toBe(65537);
+    expect(fail(midExact).status).toBe(413);
+    const euroExact = `"${'a'.repeat(65531)}€"`;
+    expect(Buffer.byteLength(euroExact)).toBe(65536);
+    expect(parseJson(euroExact)).toBeDefined();
+    // 4-byte emoji: exact, then one byte over.
+    const emojiExact = `"${'a'.repeat(65530)}😀"`;
+    expect(Buffer.byteLength(emojiExact)).toBe(65536);
+    expect(parseJson(emojiExact)).toBeDefined();
+    expect(fail(`"${'a'.repeat(65531)}😀"`).status).toBe(413);
+  });
+
+  it('measures the cut at a custom cap mid-character too', () => {
+    // '"é"' is 4 bytes.
+    expect(parseJson('"é"', 4)).toBe('é');
+    expect(fail('"é"', 3).status).toBe(413);
+    expect(fail('"€"', 4).status).toBe(413);
+  });
+
+  it('validates max: a positive integer, else RangeError', () => {
+    for (const bad of [0, -1, 1.5, NaN, Infinity, -Infinity, '10' as unknown as number, null as unknown as number]) {
+      expect(() => parseJson('{}', bad)).toThrow(RangeError);
+    }
+    // Validated even when the body is empty.
+    expect(() => parseJson('', 0)).toThrow(RangeError);
+    expect(parseJson('{}', 2)).toEqual({});
+    expect(parseJson('{}', undefined)).toEqual({});
+  });
+
   it('honours a custom cap', () => {
     expect(parseJson('{"a":1}', 7)).toEqual({ a: 1 });
     expect(fail('{"a":12}', 7).status).toBe(413);

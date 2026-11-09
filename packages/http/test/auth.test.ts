@@ -117,6 +117,36 @@ describe('guard', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it('validates the permissions map once, at construction', () => {
+    const handler = vi.fn(ok);
+    const authenticate = (): Authz => ({ actor: 'o', role: 'owner' });
+    expect(() => guard({ authenticate, permissions: { settings: 'admin' as Role } }, 'settings', handler)).toThrow(RangeError);
+    expect(() => guard({ authenticate, permissions: { nope: 'owner' } as never }, 'settings', handler)).toThrow(RangeError);
+  });
+
+  it('accepts partial overrides and applies them over the defaults', async () => {
+    const handler = vi.fn(ok);
+    const as = (role: Role) => ({
+      authenticate: () => ({ actor: 'a', role }),
+      permissions: { 'terms.write': 'senior' as Role },
+    });
+    expect((await withErrors(guard(as('moderator'), 'terms.write', handler))(req(), {})).status).toBe(403);
+    expect((await withErrors(guard(as('senior'), 'terms.write', handler))(req(), {})).status).toBe(200);
+    // A key not overridden keeps its default.
+    expect((await withErrors(guard(as('moderator'), 'reports.read', handler))(req(), {})).status).toBe(200);
+    expect((await withErrors(guard(as('senior'), 'settings', handler))(req(), {})).status).toBe(403);
+  });
+
+  it('is not affected by later mutation of the options object it was given', async () => {
+    const handler = vi.fn(ok);
+    const overrides: { settings?: Role } = { settings: 'senior' };
+    const g = withErrors(
+      guard({ authenticate: () => ({ actor: 's', role: 'senior' }), permissions: overrides }, 'settings', handler),
+    );
+    overrides.settings = 'owner';
+    expect((await g(req(), {})).status).toBe(200);
+  });
+
   it('a throwing authenticate becomes a 500 with no detail, handler not called', async () => {
     const handler = vi.fn(ok);
     const warn = vi.fn();

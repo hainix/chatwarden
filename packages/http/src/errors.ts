@@ -4,6 +4,7 @@ import {
   ProfileError,
   ReportQueryError,
   RulesError,
+  safeWarn,
   SanctionError,
 } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
@@ -33,11 +34,14 @@ export type ErrorCode = keyof typeof TABLE;
 export class HttpError extends Error {
   readonly status: number;
   readonly code: ErrorCode;
-  constructor(code: ErrorCode) {
+  /** Response headers to send with the error. A `method_not_allowed` always carries `allow` (empty when none given). */
+  readonly headers: Readonly<Record<string, string>> | undefined;
+  constructor(code: ErrorCode, headers?: Record<string, string>) {
     super(TABLE[code].message);
     this.name = 'HttpError';
     this.code = code;
     this.status = TABLE[code].status;
+    this.headers = headers === undefined ? undefined : { ...headers };
   }
 }
 
@@ -61,7 +65,9 @@ export class NotFoundError extends HttpError {
 export function errorResponse(code: ErrorCode, headers?: Record<string, string>): KitResponse {
   const { status, message } = TABLE[code];
   const res: KitResponse = { status, body: { error: code, message } };
-  if (headers !== undefined) res.headers = headers;
+  // A 405 must carry `allow` (RFC 9110); an empty one means "no method is allowed here".
+  if (code === 'method_not_allowed') res.headers = { allow: '', ...headers };
+  else if (headers !== undefined) res.headers = { ...headers };
   return res;
 }
 
@@ -76,39 +82,32 @@ const codeFor = (err: unknown): ErrorCode | null => {
   return null;
 };
 
-/** Log one warning without ever letting the logger hurt the response: a throwing or rejecting logger is swallowed. */
-function warn(logger: Pick<Logger, 'warn'> | undefined, event: string, detail: Record<string, string>): void {
-  try {
-    let out: unknown;
-    if (logger !== undefined) out = logger.warn(event, detail);
-    else console.warn(event, detail);
-    if (typeof (out as { then?: unknown } | null | undefined)?.then === 'function') {
-      (out as PromiseLike<unknown>).then(undefined, () => undefined);
-    }
-  } catch {
-    // A broken logger must not turn a clean error response into a crash.
-  }
-}
-
 /**
  * Wrap a handler so that nothing it throws (or rejects with) escapes:
  * - a validation-type error (`ReportQueryError`, `AuditQueryError`, `RangeError`, `ProfileError`, `SanctionError`,
  *   `RulesError`, `ExcerptError`, `ValidationError`) -> 400
- * - `NotFoundError` -> 404; `HttpError` -> its own status (401, 403, 413, ...)
+ * - `NotFoundError` -> 404; `HttpError` -> its own status and headers (401, 403, 413, ...); a `RangeError` is
+ *   also logged, class only
  * - anything else -> 500 `{ error: 'internal' }`, logged with the error class only.
  * The body is always `{ error: <code>, message: <fixed text> }`; no input and no error message is echoed.
  */
 export function withErrors<A extends unknown[]>(
   handler: (...args: A) => KitResponse | Promise<KitResponse>,
-  logger?: Pick<Logger, 'warn'>,
+  logger?: Logger,
 ): (...args: A) => Promise<KitResponse> {
   return async (...args: A): Promise<KitResponse> => {
     try {
       return await handler(...args);
     } catch (err) {
       const code = codeFor(err);
-      if (code !== null) return errorResponse(code);
-      warn(logger, 'chatwarden.http_error', { error: err instanceof Error ? err.name : typeof err });
+      if (err instanceof HttpError) return errorResponse(err.code, err.headers === undefined ? undefined : { ...err.headers });
+      if (code !== null) {
+        // A RangeError is a 400 by contract, but an engine RangeError (stack overflow, invalid array length) looks the
+        // same; log the class (never the message) so the two can be told apart.
+        if (err instanceof RangeError) safeWarn(logger, 'chatwarden.http_range_error', { error: err.name });
+        return errorResponse(code);
+      }
+      safeWarn(logger, 'chatwarden.http_error', { error: err instanceof Error ? err.name : typeof err });
       return { status: 500, body: { error: 'internal' } };
     }
   };

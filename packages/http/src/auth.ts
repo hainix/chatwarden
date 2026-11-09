@@ -1,6 +1,7 @@
 import { ROLES } from '@chatwarden/core';
+import type { Role } from '@chatwarden/core';
 import { HttpError } from './errors.js';
-import { PERMISSIONS, roleAtLeast } from './permissions.js';
+import { PERMISSIONS, resolvePermissions, roleAtLeast } from './permissions.js';
 import type { PermissionKey, Permissions } from './permissions.js';
 import type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';
 
@@ -32,7 +33,8 @@ export function requireRole(
 
 export interface GuardOptions {
   authenticate: Authenticate;
-  permissions?: Permissions;
+  /** Overrides of the default minimum roles. Validated once, when the guard is built (`RangeError` for a bad one). */
+  permissions?: Partial<Record<PermissionKey, Role | undefined>>;
 }
 
 /**
@@ -45,8 +47,11 @@ export function guard(
   permission: PermissionKey,
   handler: (req: KitRequest, params: RouteParams, authz: Authz) => KitResponse | Promise<KitResponse>,
 ): (req: KitRequest, params: RouteParams) => Promise<KitResponse> {
+  const { authenticate } = options;
+  // Resolved (validated, defaults filled in, frozen copy) once here, not per request.
+  const permissions = resolvePermissions(options.permissions);
   return async (req, params) => {
-    const authz = requireRole(await options.authenticate(req), permission, options.permissions);
+    const authz = requireRole(await authenticate(req), permission, permissions);
     return handler(req, params, authz);
   };
 }

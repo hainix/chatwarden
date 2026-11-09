@@ -25,6 +25,7 @@ function hasForbiddenKey(root: unknown): boolean {
 
 /**
  * Read a JSON request body.
+ * - `max` must be a positive integer, else `RangeError` (a programming error, not a request error).
  * - `undefined` or `''` -> `undefined` (a route that needs a body validates it itself).
  * - more than `max` bytes (UTF-8, not characters) -> 413 `payload_too_large`, before any parsing.
  * - not JSON -> 400 `invalid_json`.
@@ -32,6 +33,7 @@ function hasForbiddenKey(root: unknown): boolean {
  * Errors are {@link HttpError}s with fixed messages: the body is never echoed.
  */
 export function parseJson(rawBody: string | undefined, max: number = BODY_MAX_BYTES): unknown {
+  if (!Number.isSafeInteger(max) || max < 1) throw new RangeError('parseJson: max must be a positive integer');
   if (rawBody === undefined || rawBody === '') return undefined;
   // A UTF-16 string has at most 3 UTF-8 bytes per unit, so a short one can skip the exact count.
   if (rawBody.length * 3 > max && Buffer.byteLength(rawBody, 'utf8') > max) throw new HttpError('payload_too_large');

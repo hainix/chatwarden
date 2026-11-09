@@ -53,7 +53,8 @@ describe('withErrors: mapping', () => {
     expect(body.message.length).toBeGreaterThan(0);
     expect(Object.keys(body).sort()).toEqual(['error', 'message']);
     expect(JSON.stringify(res)).not.toContain(SECRET);
-    expect(warn).not.toHaveBeenCalled();
+    // Only a RangeError is logged (its class), see the RangeError block below.
+    if (code !== 'invalid_value') expect(warn).not.toHaveBeenCalled();
   });
 
   it('gives the same message for the same code whatever the input', async () => {
@@ -77,6 +78,59 @@ describe('withErrors: mapping', () => {
   it('maps a subclass of a mapped class the same way', async () => {
     class Sub extends SanctionError {}
     expect((await run(new Sub('x'))).res.status).toBe(400);
+  });
+});
+
+describe('withErrors: RangeError logging', () => {
+  it('still answers 400 and logs the class name only', async () => {
+    const { res, warn } = await run(new RangeError(SECRET));
+    expect(res.status).toBe(400);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('chatwarden.http_range_error', { error: 'RangeError' });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(SECRET);
+  });
+
+  it('does not log the other 400s or an HttpError', async () => {
+    for (const e of [new SanctionError('x'), new ValidationError(), new NotFoundError(), new AuditQueryError('actor')]) {
+      expect((await run(e)).warn).not.toHaveBeenCalled();
+    }
+  });
+
+  it('survives a throwing logger on the RangeError path', async () => {
+    const h = withErrors(
+      (r: KitRequest) => {
+        void r;
+        throw new RangeError('x');
+      },
+      {
+        warn: () => {
+          throw new Error('log down');
+        },
+      },
+    );
+    expect((await h(req)).status).toBe(400);
+  });
+});
+
+describe('withErrors: method_not_allowed thrown by a handler', () => {
+  it('passes the headers of the HttpError through', async () => {
+    const { res } = await run(new HttpError('method_not_allowed', { allow: 'GET, POST' }));
+    expect(res.status).toBe(405);
+    expect(res.headers).toEqual({ allow: 'GET, POST' });
+    expect(res.body).toEqual({ error: 'method_not_allowed', message: 'Method not allowed.' });
+  });
+
+  it('is still a valid 405 (an allow header) with no headers given', async () => {
+    const { res } = await run(new HttpError('method_not_allowed'));
+    expect(res.status).toBe(405);
+    expect(res.headers).toEqual({ allow: '' });
+  });
+
+  it('does not add headers to other codes, and does not share the headers object', async () => {
+    expect((await run(new HttpError('forbidden'))).res.headers).toBeUndefined();
+    const headers = { allow: 'GET' };
+    const { res } = await run(new HttpError('method_not_allowed', headers));
+    expect(res.headers).not.toBe(headers);
   });
 });
 

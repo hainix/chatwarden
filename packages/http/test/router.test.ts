@@ -66,6 +66,15 @@ describe('createRouter: matching', () => {
     expect((await router(req('GET', '/reports/other'))).body).toBe('param');
   });
 
+  it('breaks an equal-literal tie left to right, whatever the insertion order', async () => {
+    const one = createRouter({ 'GET /a/:x/c': () => ok('x-first'), 'GET /a/b/:y': () => ok('b-first') });
+    const two = createRouter({ 'GET /a/b/:y': () => ok('b-first'), 'GET /a/:x/c': () => ok('x-first') });
+    expect((await one(req('GET', '/a/b/c'))).body).toBe('b-first');
+    expect((await two(req('GET', '/a/b/c'))).body).toBe('b-first');
+    expect((await one(req('GET', '/a/z/c'))).body).toBe('x-first');
+    expect((await two(req('GET', '/a/z/c'))).body).toBe('x-first');
+  });
+
   it('strips the query string before matching', async () => {
     const router = createRouter({ 'GET /reports/:id': (_r, p) => ok(p['id']) });
     expect((await router(req('GET', '/reports/abc?limit=5&x=/y'))).body).toBe('abc');
@@ -197,6 +206,28 @@ describe('createRouter: route table validation', () => {
 
   it('rejects two routes that are the same shape for one method', () => {
     expect(() => createRouter({ 'GET /a/:x': h, 'GET /a/:y': h })).toThrow(RangeError);
+  });
+
+  it('rejects a duplicate param name in one route', () => {
+    expect(() => createRouter({ 'GET /a/:id/b/:id': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /:x/:x': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /a/:x/b/:y': h })).not.toThrow();
+  });
+
+  it('rejects "." and ".." literal segments', () => {
+    expect(() => createRouter({ 'GET /a/./b': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /a/../b': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /..': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /.': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /a/.b/..c/d.e': h })).not.toThrow();
+  });
+
+  it('rejects any two routes of one method with an identical shape, whatever the param names', () => {
+    expect(() => createRouter({ 'GET /a/:x/c': h, 'GET /a/:y/c': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /:a/:b': h, 'GET /:c/:d': h })).toThrow(RangeError);
+    // Different shapes are fine, in either order.
+    expect(() => createRouter({ 'GET /a/:x/c': h, 'GET /a/b/:y': h })).not.toThrow();
+    expect(() => createRouter({ 'GET /a/:x': h, 'GET /a/b': h })).not.toThrow();
   });
 
   it('allows the same path under different methods', () => {

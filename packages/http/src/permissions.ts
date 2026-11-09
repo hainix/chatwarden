@@ -59,7 +59,7 @@ export function resolvePermissions(overrides?: Partial<Record<PermissionKey, Rol
   }
   const out: Record<PermissionKey, Role> = { ...PERMISSIONS };
   for (const key of Object.keys(overrides ?? {})) {
-    if (!isPermissionKey(key)) throw new RangeError('permissions: unknown permission');
+    if (!isPermissionKey(key)) throw new RangeError(`permissions: unknown permission "${key}"`);
     const value = (overrides as Record<string, unknown>)[key];
     if (value === undefined) continue;
     if (!isRole(value)) throw new RangeError(`permissions.${key} must be one of ${ROLES.join(', ')}`);
