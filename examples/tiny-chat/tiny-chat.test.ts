@@ -1,8 +1,21 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import type { StoredReport } from '@chatwarden/core';
 import { startServer } from './server.js';
 import type { TinyChat } from './server.js';
+
+// Count randomUUID() calls (the server's fallback client key) while still returning real values.
+const uuid = vi.hoisted(() => ({ calls: 0 }));
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return {
+    ...actual,
+    randomUUID: (...args: Parameters<typeof actual.randomUUID>) => {
+      uuid.calls++;
+      return actual.randomUUID(...args);
+    },
+  };
+});
 
 type Frame = Record<string, unknown>;
 
@@ -72,7 +85,7 @@ afterAll(async () => {
 });
 
 async function boot(opts: Parameters<typeof startServer>[0] = {}): Promise<TinyChat> {
-  const server = await startServer({ port: 0, ...opts });
+  const server = await startServer({ port: 0, secret: 'test-secret-not-for-production', ...opts });
   servers.push(server);
   return server;
 }
@@ -235,5 +248,128 @@ describe('tiny-chat: edges', () => {
     expect(unknown.status).toBe(422);
     const bad = await post(server, { targetSeat: 'p1' });
     expect(bad.status).toBe(400);
+  });
+
+  const postRaw = (server: TinyChat, body: string): Promise<Response> =>
+    fetch(`http://127.0.0.1:${server.port}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+
+  it('a malformed JSON body to /report is a JSON 400 bad_request, never an HTML stack page', async () => {
+    const server = await boot();
+    const res = await postRaw(server, '{"key": "k", "targetSeat": ');
+    expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toMatch(/application\/json/);
+    const text = await res.text();
+    expect(text).not.toMatch(/<html|<pre|SyntaxError|at .*\(/i);
+    expect(JSON.parse(text)).toEqual({ ok: false, refused: 'bad_request' });
+  });
+
+  it('an oversized body to /report is a JSON 4xx bad_request too', async () => {
+    const server = await boot();
+    const res = await postRaw(server, JSON.stringify({ key: 'k', note: 'x'.repeat(200_000) }));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ ok: false, refused: 'bad_request' });
+  });
+
+  it('the server still works after a bad body (control)', async () => {
+    const server = await boot();
+    await join(server, 'key-ctl');
+    await postRaw(server, '{nope');
+    const res = await post(server, { key: 'key-ctl', targetSeat: 'p1', category: 'spam' });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ ok: false, refused: 'self' });
+  });
+
+  it('identifies a connection once: a keyless player draws one fallback key, not two', async () => {
+    const server = await boot();
+    const before = uuid.calls;
+    const keyless = await Client.connect(`ws://127.0.0.1:${server.port}/`);
+    clients.push(keyless);
+    await keyless.next('welcome');
+    expect(uuid.calls - before).toBe(1);
+    // The seated person is the one the door saw: they can chat as themself.
+    keyless.say('hi');
+    expect(await keyless.next('chat')).toMatchObject({ text: 'hi' });
+  });
+});
+
+describe('tiny-chat: the leak-scan regex is not vacuous (positive controls)', () => {
+  it('matches a real subject id from subjectAt()', async () => {
+    const server = await boot();
+    await join(server, 'key-ctl-re');
+    const subject = server.chatwarden.rooms.subjectAt('lobby', 'p1');
+    expect(subject).not.toBeNull();
+    expect(IDENTIFIER_RE.test(`{"x":"${subject}"}`)).toBe(true);
+  });
+
+  it('matches a 32-hex hash, and not ordinary chat text', () => {
+    expect(IDENTIFIER_RE.test('0123456789abcdef0123456789abcdef')).toBe(true);
+    expect(IDENTIFIER_RE.test('{"type":"chat","seatId":"p1","text":"hello there","lineId":"7"}')).toBe(false);
+  });
+});
+
+describe('tiny-chat: the secret', () => {
+  const saved = { secret: process.env.CHATWARDEN_SECRET, nodeEnv: process.env.NODE_ENV };
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (saved.secret === undefined) delete process.env.CHATWARDEN_SECRET;
+    else process.env.CHATWARDEN_SECRET = saved.secret;
+    process.env.NODE_ENV = saved.nodeEnv;
+  });
+
+  it('an explicit secret starts quietly', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    delete process.env.CHATWARDEN_SECRET;
+    await boot();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('CHATWARDEN_SECRET from the environment starts quietly', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    process.env.CHATWARDEN_SECRET = 'from-the-environment';
+    const server = await startServer({ port: 0 });
+    servers.push(server);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('with no secret outside production it generates one and warns once, in one line, without printing it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    delete process.env.CHATWARDEN_SECRET;
+    process.env.NODE_ENV = 'development';
+    const server = await startServer({ port: 0 });
+    servers.push(server);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toMatch(/CHATWARDEN_SECRET/);
+    expect(line).toMatch(/restart/);
+    expect(line).toMatch(/production/);
+    expect(line).not.toContain('\n');
+    expect(line).not.toMatch(/[0-9a-f]{32}/);
+  });
+
+  it('in production with no secret it throws at startup', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    delete process.env.CHATWARDEN_SECRET;
+    process.env.NODE_ENV = 'production';
+    await expect(startServer({ port: 0 })).rejects.toThrow(/CHATWARDEN_SECRET/);
+  });
+
+  it('in production an explicit or environment secret is fine', async () => {
+    process.env.NODE_ENV = 'production';
+    const server = await startServer({ port: 0, secret: 'configured' });
+    servers.push(server);
+    process.env.CHATWARDEN_SECRET = 'configured-too';
+    const again = await startServer({ port: 0 });
+    servers.push(again);
+  });
+
+  it('an empty CHATWARDEN_SECRET counts as unset', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    process.env.CHATWARDEN_SECRET = '';
+    process.env.NODE_ENV = 'production';
+    await expect(startServer({ port: 0 })).rejects.toThrow(/CHATWARDEN_SECRET/);
   });
 });
