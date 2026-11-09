@@ -9,7 +9,8 @@ npm start -w @chatwarden/example-tiny-chat
 
 Connect a WebSocket client to `ws://127.0.0.1:3000/?key=anything` and send `{"type":"chat","text":"hello"}`.
 Anything the server sends back is `{type:'welcome'|'chat'|'refused'|'notices'|'acked', ...}`; see the header of
-`server.ts`. `POST /report` files a report (`{ key, targetSeat, category }`).
+`server.ts`. A `refused` frame may carry `rule` (show it as "Community Rule N") and `noticeId` (the player's own notice that
+explains the refusal). `POST /report` files a report (`{ key, targetSeat, category }`).
 
 ## Warnings and notices
 
@@ -28,11 +29,24 @@ the route is off), names seats instead of people, and uses a fixed actor. A real
 its moderators with its own sessions, takes report ids from its moderator queue (`onReport`), and records who decided.
 
 ```sh
-curl -X POST http://127.0.0.1:3000/decide -H 'content-type: application/json' -H 'x-admin-token: $TINY_CHAT_ADMIN_TOKEN'   -d '{"reportId":"<id from onReport>","verdict":"fair","reason":"private note","actions":[{"seat":"p1","kind":"warning","durationMs":null,"rule":2}]}'
+curl -X POST http://127.0.0.1:3000/decide \
+  -H 'content-type: application/json' \
+  -H "x-admin-token: $TINY_CHAT_ADMIN_TOKEN" \
+  -d '{"reportId":"<id from onReport>","verdict":"fair","reason":"private note","actions":[{"seat":"p1","kind":"warning","durationMs":null,"rule":2}]}'
 ```
 
 `decide` rejects with the store's own error if the store fails (the route answers a bare 500 and writes nothing); a
 decision the kit refuses answers 422.
+
+## Staff-only vs player-facing
+
+Some kit values carry subject ids (they name a person). They are for staff channels only, never for a player:
+`onReport`'s `StoredReport`, the result of `decide` (its `groups`), `history`, `suggest`, `gaps.list` and
+`rooms.subjectAt`. Keep them on the server or in a moderator queue.
+
+What a player may see: a `PlayerNotice` (from `notices.pending` and `notices.record`), a `refused` frame (a reason, an end
+time, a rule number and a notice id) and a reference code to quote to a moderator. The demo server follows this: it
+turns a subject into a seat on the server, and no frame or response carries a subject id, a key or a hash.
 
 The store is in-memory (`openStore({ path: ':memory:' })`), so everything resets on restart.
 

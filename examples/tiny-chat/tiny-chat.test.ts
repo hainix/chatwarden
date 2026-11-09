@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import type { StoredReport } from '@chatwarden/core';
@@ -128,7 +130,7 @@ describe('tiny-chat: one room, two players', () => {
 
   it('A sends a blocked term: A is refused as blocked and B receives nothing', async () => {
     a.say('zorbak');
-    expect(await a.next('refused')).toEqual({ type: 'refused', reason: 'blocked' });
+    expect(await a.next('refused')).toEqual({ type: 'refused', reason: 'blocked', rule: 1 });
     // Anything B receives next on its one socket is the later line, so the blocked one never came.
     a.say('after');
     expect(await b.next('chat')).toMatchObject({ text: 'after' });
@@ -726,5 +728,208 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     expect(await server.chatwarden.sanctions.revoke(res.groups[0]?.groupId ?? '', 'mod', 'mistake')).toBe(true);
     expect((await http(server, '/record?key=key-r1')).json).toEqual({ ok: true, items: [] });
     expect(server.chatwarden.notices.pendingWarning({ clientKey: 'key-r1' })).toBe(false);
+  });
+});
+
+describe('tiny-chat: an empty admin token counts as unset', () => {
+  const saved = process.env.TINY_CHAT_ADMIN_TOKEN;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.TINY_CHAT_ADMIN_TOKEN;
+    else process.env.TINY_CHAT_ADMIN_TOKEN = saved;
+  });
+  const probe = { reportId: 'r', verdict: 'fair', reason: 'r', actions: [] };
+
+  it("adminToken: '' switches /decide off (404), not open to an empty header", async () => {
+    delete process.env.TINY_CHAT_ADMIN_TOKEN;
+    const server = await boot({ adminToken: '' });
+    for (const token of ['', 'anything', null]) {
+      const res = await decideHttp(server, probe, token);
+      expect([res.status, res.json]).toEqual([404, { ok: false, refused: 'off' }]);
+    }
+  });
+
+  it('an empty TINY_CHAT_ADMIN_TOKEN environment variable is unset too', async () => {
+    process.env.TINY_CHAT_ADMIN_TOKEN = '';
+    const server = await boot();
+    const res = await decideHttp(server, probe, '');
+    expect([res.status, res.json]).toEqual([404, { ok: false, refused: 'off' }]);
+    const both = await boot({ adminToken: '' });
+    expect((await decideHttp(both, probe, '')).status).toBe(404);
+  });
+
+  it("adminToken: '' falls back to a real TINY_CHAT_ADMIN_TOKEN", async () => {
+    process.env.TINY_CHAT_ADMIN_TOKEN = 'env-real-token';
+    const server = await boot({ adminToken: '' });
+    expect((await decideHttp(server, probe, '')).status).toBe(401);
+    const right = await decideHttp(server, probe, 'env-real-token');
+    expect([right.status, right.json]).toEqual([404, { ok: false, refused: 'not_found' }]);
+  });
+
+  it('a real token with an empty or missing x-admin-token header is 401 (control)', async () => {
+    delete process.env.TINY_CHAT_ADMIN_TOKEN;
+    const server = await boot({ adminToken: ADMIN });
+    for (const token of ['', null, 'wrong']) {
+      const res = await decideHttp(server, probe, token);
+      expect([res.status, res.json]).toEqual([401, { ok: false, refused: 'unauthorized' }]);
+    }
+    expect((await decideHttp(server, probe, ADMIN)).status).toBe(404);
+  });
+});
+
+describe('tiny-chat: a merge does not stop the live notices frame', () => {
+  it('the connected client still receives the notice after its browser links an account', async () => {
+    const server = await boot();
+    // The older person (with an account) survives a merge. Seat them first and let the clock move on.
+    server.chatwarden.rooms.seat('lobby', 'ghost-old', { clientKey: 'key-m-old', accountId: 'acct-m' }, 'Old');
+    await settle();
+    const c = await join(server, 'key-m-new');
+    const before = server.chatwarden.rooms.subjectAt('lobby', 'p1');
+    // The browser links the account (a login elsewhere): the two subjects merge; seat p1 held the merged-away one.
+    server.chatwarden.rooms.seat('lobby', 'ghost-link', { clientKey: 'key-m-new', accountId: 'acct-m' }, 'Link');
+    expect(server.chatwarden.rooms.subjectAt('lobby', 'p1')).toBe(server.chatwarden.rooms.subjectAt('lobby', 'ghost-old'));
+    expect(server.chatwarden.rooms.subjectAt('lobby', 'p1')).not.toBe(before);
+    for (let i = 0; i < 3; i++) c.say('zorbak');
+    const frame = await c.next('notices');
+    expect(noticesOf(frame)).toHaveLength(1);
+    expect(noticesOf(frame)[0]).toMatchObject({ kind: 'chat', rule: 1 });
+    expect(JSON.stringify(c.raw)).not.toMatch(IDENTIFIER_RE);
+  });
+});
+
+describe('tiny-chat: refused frames cite the rule and point at the notice', () => {
+  it('blocked cites Community Rule 1; the automatic timeout cites it and points at its notice', async () => {
+    const server = await boot();
+    const c = await join(server, 'key-f1');
+    c.say('zorbak');
+    expect(await c.next('refused')).toEqual({ type: 'refused', reason: 'blocked', rule: 1 });
+    c.say('zorbak');
+    c.say('zorbak');
+    const notice = noticesOf(await c.next('notices'))[0];
+    expect(notice).toMatchObject({ kind: 'chat', rule: 1 });
+    await c.next('refused');
+    await c.next('refused');
+    c.say('hello');
+    const refused = await c.next('refused');
+    expect(refused).toMatchObject({ type: 'refused', reason: 'restricted', rule: 1 });
+    expect(refused.noticeId).toBe(notice?.id);
+    expect(typeof refused.until).toBe('number');
+  });
+
+  it('a decided chat restriction cites its rule and the id of the notice the player was sent', async () => {
+    const reports: StoredReport[] = [];
+    const server = await boot({ onReport: (r) => void reports.push(r), adminToken: ADMIN });
+    const a = await join(server, 'key-f2');
+    await join(server, 'key-f3');
+    a.say('hello');
+    await a.next('chat');
+    await reportHttp(server, { key: 'key-f3', targetSeat: 'p1', category: 'spam' });
+    const res = await decideHttp(server, {
+      reportId: reports[0]?.id,
+      verdict: 'fair',
+      reason: 'private reason',
+      actions: [{ seat: 'p1', kind: 'chat', durationMs: 60_000, rule: 4 }],
+    });
+    expect(res.status).toBe(200);
+    const notice = noticesOf(await a.next('notices'))[0];
+    a.say('again');
+    const refused = await a.next('refused');
+    expect(refused).toMatchObject({ type: 'refused', reason: 'restricted', rule: 4, noticeId: notice?.id });
+    expect(Object.keys(refused).sort()).toEqual(['noticeId', 'reason', 'rule', 'type', 'until']);
+    // The id is the notice's random handle, not an identifier: the scan stays clean.
+    expect(JSON.stringify(a.raw)).not.toMatch(IDENTIFIER_RE);
+    expect(JSON.stringify(a.raw)).not.toContain('private reason');
+  });
+
+  it('an uncovered restriction has no rule field but still points at its notice; other reasons carry neither field', async () => {
+    const reports: StoredReport[] = [];
+    const server = await boot({ onReport: (r) => void reports.push(r), adminToken: ADMIN });
+    const a = await join(server, 'key-f4');
+    await join(server, 'key-f5');
+    a.say('x'.repeat(201));
+    expect(await a.next('refused')).toEqual({ type: 'refused', reason: 'length' });
+    a.say('hello');
+    await a.next('chat');
+    await reportHttp(server, { key: 'key-f5', targetSeat: 'p1', category: 'spam' });
+    const res = await decideHttp(server, {
+      reportId: reports[0]?.id,
+      verdict: 'fair',
+      reason: 'r',
+      actions: [{ seat: 'p1', kind: 'chat', durationMs: 60_000, rule: 'uncovered', gapNote: 'a private gap note' }],
+    });
+    expect(res.status).toBe(200);
+    const notice = noticesOf(await a.next('notices'))[0];
+    a.say('again');
+    const refused = await a.next('refused');
+    expect('rule' in refused).toBe(false);
+    expect(refused.noticeId).toBe(notice?.id);
+    expect(JSON.stringify(a.raw)).not.toContain('private gap note');
+  });
+
+  it('a banned player refused at the door is pointed at their notice too', async () => {
+    const reports: StoredReport[] = [];
+    const server = await boot({ onReport: (r) => void reports.push(r), adminToken: ADMIN });
+    const a = await join(server, 'key-f6');
+    await join(server, 'key-f7');
+    a.say('hello');
+    await a.next('chat');
+    await reportHttp(server, { key: 'key-f7', targetSeat: 'p1', category: 'spam' });
+    const res = await decideHttp(server, {
+      reportId: reports[0]?.id,
+      verdict: 'fair',
+      reason: 'r',
+      actions: [{ seat: 'p1', kind: 'ban', durationMs: null, rule: 2 }],
+    });
+    expect(res.status).toBe(200);
+    const notice = noticesOf(await a.next('notices'))[0];
+    await a.close();
+    const again = await Client.connect(`ws://127.0.0.1:${server.port}/?key=key-f6`);
+    clients.push(again);
+    const refused = await again.next('refused');
+    expect(refused).toEqual({ type: 'refused', reason: 'banned', until: null, noticeId: notice?.id });
+    expect(again.raw.join('')).not.toMatch(IDENTIFIER_RE);
+  });
+
+  it('a bystander on the offender address is told nothing about the offender', async () => {
+    const reports: StoredReport[] = [];
+    const server = await boot({ onReport: (r) => void reports.push(r), adminToken: ADMIN });
+    const a = await join(server, 'key-f8');
+    const b = await join(server, 'key-f9');
+    a.say('hello');
+    await a.next('chat');
+    await reportHttp(server, { key: 'key-f9', targetSeat: 'p1', category: 'spam' });
+    // Every local test client shares 127.0.0.1, so an IP-wide restriction on A reaches B as a bystander.
+    const subject = server.chatwarden.rooms.subjectAt('lobby', 'p1') ?? '';
+    const res = await server.chatwarden.decide({
+      reportId: reports[0]?.id ?? '',
+      verdict: 'fair',
+      actor: 'mod',
+      reason: 'r',
+      actions: [{ subject, kind: 'chat', durationMs: 60_000, rule: 4, includeIp: true }],
+    });
+    expect(res.ok).toBe(true);
+    await a.next('notices');
+    b.say('hi');
+    const refused = await b.next('refused');
+    expect(refused).toMatchObject({ type: 'refused', reason: 'restricted' });
+    expect('rule' in refused).toBe(false);
+    expect('noticeId' in refused).toBe(false);
+  });
+});
+
+describe('tiny-chat: the README curl example', () => {
+  const readme = readFileSync(fileURLToPath(new URL('./README.md', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
+  const curl = readme.slice(readme.indexOf('curl -X POST'), readme.indexOf('```', readme.indexOf('curl -X POST')));
+
+  it('expands the admin token (double quotes) and does not leave it literal in single quotes', () => {
+    expect(curl).toContain('-H "x-admin-token: $TINY_CHAT_ADMIN_TOKEN"');
+    expect(curl).not.toContain("'x-admin-token: $TINY_CHAT_ADMIN_TOKEN'");
+  });
+
+  it('breaks each option onto its own line with a backslash continuation, including before -d', () => {
+    const lines = curl.trimEnd().split('\n');
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    for (const line of lines.slice(0, -1)) expect(line.endsWith(' \\')).toBe(true);
+    expect(lines.at(-1)?.trimStart().startsWith("-d '")).toBe(true);
+    expect(lines.some((l) => l.trimStart().startsWith('-d ') && l.includes('-H'))).toBe(false);
   });
 });

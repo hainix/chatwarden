@@ -5,7 +5,12 @@
 //        { type: 'ack', id }                        the player has seen that notice
 //   out: { type: 'welcome', seatId }
 //        { type: 'chat', seatId, text, lineId }     a delivered line (the sender gets their own back)
-//        { type: 'refused', reason, until? }        reason: blocked | rate | length | restricted | gate | banned
+//        { type: 'refused', reason, until?, rule?, noticeId? }
+//                                                   reason: blocked | rate | length | restricted | gate | banned.
+//                                                   `rule` is the Community Rule number to show as "Community Rule N";
+//                                                   `noticeId` is the player's own notice that explains it (look it up in
+//                                                   the `notices` frames or "My record"). Both are left out when unknown,
+//                                                   and for a bystander refused through someone else's shared address.
 //        { type: 'notices', items }                 the player's pending notices (PlayerNotice[]): on connect when
 //                                                   any are waiting, and whenever a decision adds one
 //        { type: 'acked', id, ok }                  the answer to an 'ack'
@@ -96,7 +101,8 @@ const VERDICTS = ['fair', 'unfair', 'bad_faith'] as const;
 
 export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat> {
   const secret = resolveSecret(opts.secret);
-  const adminToken = opts.adminToken ?? (process.env.TINY_CHAT_ADMIN_TOKEN || undefined);
+  // An empty token (option or environment variable) is no token: the route stays off rather than open to an empty header.
+  const adminToken = opts.adminToken || process.env.TINY_CHAT_ADMIN_TOKEN || undefined;
   // Declared before the kit: `platform.notify` below looks a seat up here when a notice lands.
   const seats = new Map<string, Seat>();
   const send = (ws: WebSocket, frame: object): void => {
@@ -254,7 +260,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     const who = identify(req); // once: the door check and the seat must see the same person
     const door = chatwarden.doors.check('join', who);
     if (door !== null) {
-      send(ws, { type: 'refused', reason: 'banned', until: door.until });
+      send(ws, { type: 'refused', reason: 'banned', until: door.until, ...(door.noticeId === undefined ? {} : { noticeId: door.noticeId }) });
       ws.close();
       return;
     }
@@ -287,8 +293,17 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
 
       const result = chatwarden.chat.accept(ROOM, seatId, m.text);
       if ('refuse' in result) {
-        const { reason, until } = result.refuse;
-        if (reason !== 'empty') send(ws, { type: 'refused', reason, ...(until === undefined ? {} : { until }) });
+        const { reason, until, rule, noticeId } = result.refuse;
+        if (reason !== 'empty') {
+          send(ws, {
+            type: 'refused',
+            reason,
+            ...(until === undefined ? {} : { until }),
+            // Both are the player's own: a rule number and the random handle of their notice, never an identifier.
+            ...(rule === undefined ? {} : { rule }),
+            ...(noticeId === undefined ? {} : { noticeId }),
+          });
+        }
         return;
       }
       const { lineId, text } = result.deliver;
