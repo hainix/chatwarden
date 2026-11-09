@@ -122,3 +122,22 @@ export type {
   DecisionServiceDeps,
   RevokeDeps,
 } from './decide.js';
+export {
+  defineProfile,
+  PRESETS,
+  ProfileError,
+  resolveProfile,
+  validateProfile,
+} from './profile.js';
+export type {
+  DeepPartial,
+  GuidelineCover,
+  GuidelineTier,
+  LevelDescription,
+  ModerationProfile,
+  Outcome,
+  PresetName,
+  ProfanityConfig,
+  ProfileOverrides,
+  RulesFlavour,
+} from './profile.js';
