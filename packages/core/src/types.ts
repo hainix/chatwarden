@@ -35,6 +35,13 @@ export interface RawWho {
   /** RAW client key (a credential: never store or log it). */
   clientKey?: string;
   accountId?: string;
+  /**
+   * The REAL client address of the connection. Behind a reverse proxy, load balancer or CDN, the socket's
+   * address is the proxy's, not the player's: parse `X-Forwarded-For` (or your platform's equivalent) yourself,
+   * trusting only the hop you control. If you pass a proxy's address, every player appears under one IP, so
+   * one IP sanction would silence them all. Hashed before it is stored; `'unknown'`, empty and null mean not
+   * known.
+   */
   ip?: string | null;
 }
 

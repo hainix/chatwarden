@@ -18,6 +18,16 @@ import type { Clock, Logger, Matcher, Platform, RawWho, Store, StoredReport, Sub
 /** The wall clock, used only when the adopter injects none. Tests and replays pass their own. */
 const systemClock: Clock = { now: () => Date.now() };
 
+/** How often the built-in retention purge runs unless `retention.everyMs` says otherwise: 6 hours. */
+const DEFAULT_PURGE_EVERY_MS = 21_600_000;
+
+const defaultLogger: Logger = {
+  warn(event, detail) {
+    if (detail === undefined) console.warn(event);
+    else console.warn(event, detail);
+  },
+};
+
 /** Everything {@link createChatwarden} needs. Only the store, the secret and the platform are required. */
 export interface ChatwardenOptions {
   /** Where moderation state lives (for example `openStore(...)` from `@chatwarden/store-sqlite`). */
@@ -34,10 +44,23 @@ export interface ChatwardenOptions {
   enabled?: () => boolean;
   /** Who may chat: false refuses the line with `'gate'`. Called with the room and the sender's subject. */
   gate?: (roomId: string, subject: SubjectId | null) => boolean;
-  /** Told once for each stored report. Fenced: a throw never reaches the reporter. */
+  /**
+   * Told once for each stored report. Fenced: a throw never reaches the reporter.
+   *
+   * The report carries SUBJECT IDS (reporter and target) and the evidence lines, so it is for staff channels
+   * only (a moderator queue, a private log). Never forward it, or any part of it, to a player.
+   */
   onReport?: (report: StoredReport, counts: ReportCounts) => void;
   /** Told once when a blocked line earned an automatic timeout; `second` is true for the 24 h repeat. */
   onAutoRestrict?: (subject: SubjectId | null, second: boolean) => void;
+  /**
+   * Retention purge. On by default: the kit deletes rows past their retention (see `RETENTION_DEFAULTS`) every
+   * `everyMs` (default 6 hours) on a timer that does not keep the process alive. Give a policy to change how
+   * long rows are kept, `{ everyMs }` to change how often it runs, or `false` to turn it off and run
+   * `purge()` yourself. A failing purge is logged (`chatwarden.purge_failed`) and never thrown; `close()`
+   * stops the timer.
+   */
+  retention?: false | ({ everyMs?: number } & Partial<RetentionPolicy>);
   /** Passed to every component. Defaults to `console.warn`. */
   logger?: Logger;
 }
@@ -80,7 +103,10 @@ export interface Chatwarden {
     /** Revoke a whole group. Resolves true when this call revoked something. */
     revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
   };
-  /** Delete rows past retention. Run it from a timer or a maintenance job. */
+  /**
+   * Delete rows past retention now. The built-in timer already does this (unless `retention: false`); the
+   * policy given at creation is the default here, and `policy` overrides it field by field.
+   */
   purge(policy?: Partial<RetentionPolicy>): Promise<PurgeResult>;
   /** Wait for background store writes (identity linking) to land. */
   flush(): Promise<void>;
@@ -101,7 +127,15 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const clock = opts.clock ?? systemClock;
   const enabled = opts.enabled ?? ((): boolean => true);
   const logger = opts.logger;
+  const log = logger ?? defaultLogger;
   const hasher = makeHasher(opts.secret);
+
+  const { everyMs, ...retentionPolicy } = opts.retention === false ? {} : (opts.retention ?? {});
+  const purgeEveryMs = everyMs ?? DEFAULT_PURGE_EVERY_MS;
+  if (opts.retention !== false && (!Number.isFinite(purgeEveryMs) || purgeEveryMs <= 0)) {
+    throw new Error('createChatwarden: retention.everyMs must be a positive finite number');
+  }
+  if (opts.matcher === undefined) log.warn('chatwarden.no_matcher');
 
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });
@@ -147,6 +181,18 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     roster.seat(roomId, seatId, subject, handle, tags);
   };
 
+  // The retention timer. `setInterval` is not a clock read, so Date.now() stays out of it; `unref` so it never
+  // keeps a process alive.
+  let timer: ReturnType<typeof setInterval> | undefined;
+  if (opts.retention !== false) {
+    timer = setInterval(() => {
+      purge(store, clock.now(), retentionPolicy).catch((err: unknown) => {
+        log.warn('chatwarden.purge_failed', { error: err instanceof Error ? err.name : typeof err });
+      });
+    }, purgeEveryMs);
+    (timer as { unref?: () => void }).unref?.();
+  }
+
   return {
     rooms: {
       seat,
@@ -181,9 +227,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       apply: (input) => applySanction(store, subjects, input, clock.now(), sanctions),
       revoke: (groupId, actor, reason) => revokeSanction(store, groupId, actor, clock.now(), reason, sanctions),
     },
-    purge: (policy) => purge(store, clock.now(), policy),
+    purge: (policy) => purge(store, clock.now(), { ...retentionPolicy, ...policy }),
     flush: () => subjects.flush(),
     close: async () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
       await subjects.flush();
       store.close();
     },

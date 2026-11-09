@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createChatwarden } from '../src/chatwarden.js';
 import type { ChatwardenOptions } from '../src/chatwarden.js';
 import type { Logger, Matcher, Platform, RawWho } from '../src/types.js';
@@ -140,7 +140,7 @@ describe('createChatwarden: chat', () => {
     });
     cw.rooms.seat(R, 'a', alice, 'Alice');
     cw.chat.accept(R, 'a', 'hello');
-    expect(logged).toEqual([['chat.gate_failed', { error: 'TypeError' }]]);
+    expect(logged.filter(([e]) => e !== 'chatwarden.no_matcher')).toEqual([['chat.gate_failed', { error: 'TypeError' }]]);
   });
 
   it('three blocked lines earn an automatic timeout and onAutoRestrict hears of it', async () => {
@@ -377,5 +377,160 @@ describe('createChatwarden: lifecycle', () => {
     cw.rooms.seat(R, 'a', alice, 'Alice');
     await cw.close();
     expect(order).toEqual(['saveSubject', 'close']);
+  });
+});
+
+describe('createChatwarden: retention on by default', () => {
+  const DAY = 24 * H;
+  const SIX_H = 6 * H;
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const oldReport = (id: string) => ({
+    id,
+    createdAt: NOW - 100 * DAY,
+    roomId: `room-${id}`,
+    tags: {},
+    reporterSubject: `s_rep_${id}`,
+    reporterSeat: 'p1',
+    reporterHandle: 'A',
+    targetSubject: `s_tgt_${id}`,
+    targetSeat: 'p2',
+    targetHandle: 'B',
+    category: 'harassment' as const,
+    note: null,
+    lineId: null,
+    excerpt: [],
+    people: [],
+    status: 'open' as const,
+  });
+
+  it('purges every 6 h by default, not before', async () => {
+    vi.useFakeTimers();
+    const { cw, store, clock } = await setup();
+    store.insertReport(oldReport('r1'));
+    await vi.advanceTimersByTimeAsync(SIX_H - 1);
+    expect(store.rawReports()).toHaveLength(1);
+    clock.t += SIX_H;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(store.rawReports()).toHaveLength(0);
+    // And again on the next tick.
+    store.insertReport(oldReport('r2'));
+    await vi.advanceTimersByTimeAsync(SIX_H);
+    expect(store.rawReports()).toHaveLength(0);
+    await cw.close();
+  });
+
+  it('everyMs and the policy fields are honoured', async () => {
+    vi.useFakeTimers();
+    const { cw, store, clock } = await setup({ retention: { everyMs: 1000, reportsMs: 10 * DAY } });
+    store.insertReport({ ...oldReport('r1'), createdAt: NOW - 20 * DAY });
+    store.insertReport({ ...oldReport('r2'), createdAt: NOW - 5 * DAY });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(store.rawReports()).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(store.rawReports().map((r) => r.id)).toEqual(['r2']);
+    expect(clock.t).toBe(NOW);
+    await cw.close();
+  });
+
+  it('a policy object without everyMs keeps the 6 h default', async () => {
+    vi.useFakeTimers();
+    const { cw, store } = await setup({ retention: { reportsMs: DAY } });
+    store.insertReport({ ...oldReport('r1'), createdAt: NOW - 2 * DAY });
+    await vi.advanceTimersByTimeAsync(SIX_H - 1);
+    expect(store.rawReports()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(store.rawReports()).toHaveLength(0);
+    await cw.close();
+  });
+
+  it('retention: false starts no timer and never purges', async () => {
+    vi.useFakeTimers();
+    const { cw, store } = await setup({ retention: false });
+    expect(vi.getTimerCount()).toBe(0);
+    store.insertReport(oldReport('r1'));
+    await vi.advanceTimersByTimeAsync(1000 * H);
+    expect(store.rawReports()).toHaveLength(1);
+    await cw.close();
+  });
+
+  it('the default starts exactly one timer, and it does not keep the process alive (unref)', async () => {
+    vi.useFakeTimers();
+    const spy = vi.spyOn(globalThis, 'setInterval');
+    const { cw } = await setup();
+    expect(vi.getTimerCount()).toBe(1);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const timer = spy.mock.results[0]?.value as { hasRef(): boolean };
+    expect(timer.hasRef()).toBe(false);
+    await cw.close();
+    spy.mockRestore();
+  });
+
+  it('close stops the timer: no purge afterwards', async () => {
+    vi.useFakeTimers();
+    const { cw, store } = await setup();
+    await cw.close();
+    expect(vi.getTimerCount()).toBe(0);
+    store.insertReport(oldReport('r1'));
+    await vi.advanceTimersByTimeAsync(100 * H);
+    expect(store.rawReports()).toHaveLength(1);
+  });
+
+  it('close twice is harmless', async () => {
+    vi.useFakeTimers();
+    const { cw } = await setup();
+    await cw.close();
+    await expect(cw.close()).resolves.toBeUndefined();
+  });
+
+  it('a failing purge is logged (event and error class only), never thrown, and the timer keeps going', async () => {
+    vi.useFakeTimers();
+    class Flaky extends MemoryStore {
+      fail = true;
+      override purgeReports(before: number): number {
+        if (this.fail) throw new RangeError('secret-detail disk full');
+        return super.purgeReports(before);
+      }
+    }
+    const store = new Flaky();
+    const { cw, logged } = await setup({ retention: { everyMs: 1000 } }, store);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(logged.filter(([e]) => e === 'chatwarden.purge_failed')).toEqual([
+      ['chatwarden.purge_failed', { error: 'RangeError' }],
+    ]);
+    expect(JSON.stringify(logged)).not.toContain('secret-detail');
+    store.fail = false;
+    store.insertReport(oldReport('r1'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(store.rawReports()).toHaveLength(0);
+    await cw.close();
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('rejects retention.everyMs = %s at creation', async (bad) => {
+    await expect(setup({ retention: { everyMs: bad } })).rejects.toThrow(/retention\.everyMs/);
+  });
+
+  it('a manual purge() uses the configured policy unless the caller overrides it', async () => {
+    const { cw, store } = await setup({ retention: false });
+    store.insertReport({ ...oldReport('r1'), createdAt: NOW - 2 * DAY });
+    expect((await cw.purge()).reports).toBe(0);
+    expect((await cw.purge({ reportsMs: DAY })).reports).toBe(1);
+  });
+});
+
+describe('createChatwarden: no matcher warning', () => {
+  it('logs chatwarden.no_matcher once at creation when no matcher is given', async () => {
+    const { cw, logged } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    cw.chat.accept(R, 'a', 'hello');
+    cw.chat.accept(R, 'a', 'hello again');
+    expect(logged.filter(([e]) => e === 'chatwarden.no_matcher')).toEqual([['chatwarden.no_matcher', undefined]]);
+  });
+
+  it('logs nothing about it when a matcher is given', async () => {
+    const { logged } = await setup({ matcher: blocker });
+    expect(logged.filter(([e]) => e === 'chatwarden.no_matcher')).toEqual([]);
   });
 });
