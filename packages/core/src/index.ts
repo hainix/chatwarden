@@ -14,3 +14,10 @@ export type {
 } from './types.js';
 export { hashWho, makeHasher } from './hasher.js';
 export { SubjectIndex } from './subjects.js';
+export {
+  EVIDENCE_MAX_AGE_MS,
+  EVIDENCE_MAX_LINES,
+  EvidenceBuffer,
+  RoomRoster,
+} from './evidence.js';
+export type { EvidenceBufferOptions, EvidenceLine } from './evidence.js';
