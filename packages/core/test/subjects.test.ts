@@ -808,3 +808,66 @@ describe('memoryStore transactions (journaled rollback)', () => {
     expect(store.rawSanctions()).toHaveLength(1);
   });
 });
+
+describe('SubjectIndex.lookup (read-only)', () => {
+  it('finds the subject of a known key, a known account, or both', () => {
+    const { index } = setup();
+    const s = mustResolve(index, who('k1', 'a1', 'ip1'));
+    expect(index.lookup(who('k1'))).toBe(s);
+    expect(index.lookup(who(null, 'a1'))).toBe(s);
+    expect(index.lookup(who('k1', 'a1', 'other-ip'))).toBe(s);
+  });
+
+  it('returns null for an unknown key or account and for an IP alone', () => {
+    const { index } = setup();
+    mustResolve(index, who('k1', 'a1', 'ip1'));
+    expect(index.lookup(who('nope'))).toBeNull();
+    expect(index.lookup(who(null, 'nope'))).toBeNull();
+    expect(index.lookup(who(null, null, 'ip1'))).toBeNull();
+    expect(index.lookup(who(null))).toBeNull();
+    expect(index.lookup(who('', ''))).toBeNull();
+  });
+
+  it('never creates a subject, records an identifier, or writes to the store', async () => {
+    const { index, store } = setup();
+    mustResolve(index, who('k1'));
+    await index.flush();
+    const before = await store.loadSubjects();
+    expect(index.lookup(who('stranger', 'stranger-acct', 'ip9'))).toBeNull();
+    expect(index.lookup(who('k1', 'new-acct', 'ip9'))).not.toBeNull();
+    await index.flush();
+    expect(await store.loadSubjects()).toEqual(before);
+    // the unknown account was not attached to k1's subject
+    expect(index.lookup(who(null, 'new-acct'))).toBeNull();
+    expect(index.lookup(who('stranger'))).toBeNull();
+  });
+
+  it('never links or merges: a key and an account of two subjects stay two subjects', () => {
+    const { index } = setup(1_000);
+    const a = mustResolve(index, who('k1'));
+    const b = mustResolve(index, who(null, 'a1'));
+    expect(a).not.toBe(b);
+    index.lookup(who('k1', 'a1'));
+    expect(index.canonical(a)).toBe(a);
+    expect(index.canonical(b)).toBe(b);
+  });
+
+  it('with a key and an account on two subjects, answers the one a merge would keep (the older)', () => {
+    const { index, clock } = setup(1_000);
+    const older = mustResolve(index, who('k1'));
+    clock.advance(10);
+    const newer = mustResolve(index, who(null, 'a1'));
+    expect(index.lookup(who('k1', 'a1'))).toBe(older);
+    expect(index.lookup(who(null, 'a1'))).toBe(newer);
+  });
+
+  it('answers the canonical (surviving) subject after a merge', () => {
+    const { index, clock } = setup(1_000);
+    const a = mustResolve(index, who('k1'));
+    clock.advance(10);
+    mustResolve(index, who(null, 'a1'));
+    expect(mustResolve(index, who('k1', 'a1'))).toBe(a);
+    expect(index.lookup(who(null, 'a1'))).toBe(a);
+    expect(index.lookup(who('k1'))).toBe(a);
+  });
+});

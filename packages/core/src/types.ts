@@ -368,6 +368,24 @@ export interface Store {
    * subject row's stored target (revoked and expired groups included). Never IP rows.
    */
   loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }>;
+
+  // Retention. SYNCHRONOUS on purpose: `purge` runs all four inside one `transaction`. Each deletes rows
+  // strictly older than the cutoff (epoch ms) and returns how many it deleted.
+
+  /** Delete reports with `createdAt < before`. */
+  purgeReports(before: number): number;
+
+  /**
+   * Delete sanction rows that ended (`endsAt` set and `< before`) or were revoked (`revokedAt < before`).
+   * A permanent, unrevoked row is never deleted.
+   */
+  purgeSanctions(before: number): number;
+
+  /** Delete strikes with `at < before`. */
+  purgeStrikes(before: number): number;
+
+  /** Delete mutes with `createdAt < before`. */
+  purgeMutes(before: number): number;
 }
 
 // ---------------------------------------------------------------------------

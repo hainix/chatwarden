@@ -296,6 +296,62 @@ export class MemoryStore implements Store {
     return out;
   }
 
+  // Retention (synchronous, see the Store interface). Each removes rows in place and journals an undo that
+  // restores the previous contents.
+
+  purgeReports(before: number): number {
+    const snapshot = [...this.reports];
+    const kept = snapshot.filter((r) => r.createdAt >= before);
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.reports.splice(0, this.reports.length, ...kept);
+      this.undoWith(() => this.reports.splice(0, this.reports.length, ...snapshot));
+    }
+    return n;
+  }
+
+  purgeSanctions(before: number): number {
+    const snapshot = [...this.sanctions];
+    const owners = new Map(this.refOwners);
+    const kept = snapshot.filter(
+      (r) => !((r.endsAt !== null && r.endsAt < before) || (r.revokedAt !== null && r.revokedAt < before)),
+    );
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.sanctions.splice(0, this.sanctions.length, ...kept);
+      // A ref code is held by the rows that remain; free the codes nothing holds any more.
+      const held = new Set(kept.map((r) => r.refCode));
+      for (const code of [...this.refOwners.keys()]) if (!held.has(code)) this.refOwners.delete(code);
+      this.undoWith(() => {
+        this.sanctions.splice(0, this.sanctions.length, ...snapshot);
+        this.refOwners = owners;
+      });
+    }
+    return n;
+  }
+
+  purgeStrikes(before: number): number {
+    const snapshot = [...this.strikes];
+    const kept = snapshot.filter((r) => r.at >= before);
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.strikes.splice(0, this.strikes.length, ...kept);
+      this.undoWith(() => this.strikes.splice(0, this.strikes.length, ...snapshot));
+    }
+    return n;
+  }
+
+  purgeMutes(before: number): number {
+    let n = 0;
+    for (const [key, m] of [...this.mutes]) {
+      if (m.row.createdAt >= before) continue;
+      this.mutes.delete(key);
+      this.undoWith(() => this.mutes.set(key, m));
+      n++;
+    }
+    return n;
+  }
+
   /** Test helper (K2 adds dismissing): mark a report bad-faith, dismissed at `actionedAt` (null = never closed). */
   markReportBadFaith(id: string, actionedAt: number | null): void {
     const r = this.reports.find((x) => x.id === id);

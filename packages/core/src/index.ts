@@ -64,3 +64,7 @@ export {
   SUSPEND_WINDOW_MS,
 } from './reports.js';
 export type { ReportCounts, ReportInput, ReportRefusal, ReportResult, ReportServiceDeps } from './reports.js';
+export { DoorService } from './doors.js';
+export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
+export { purge, RETENTION_DEFAULTS } from './retention.js';
+export type { PurgeResult, RetentionPolicy } from './retention.js';

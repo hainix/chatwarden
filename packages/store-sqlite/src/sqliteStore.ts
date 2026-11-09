@@ -352,6 +352,34 @@ export class SqliteStore implements Store, TermStore {
     );
   }
 
+  // Retention. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must
+  // never be given an async function.
+
+  purgeReports(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_reports WHERE created_at < ?').run(before).changes));
+  }
+
+  purgeSanctions(before: number): number {
+    return this.transaction(() =>
+      Number(
+        this.db
+          .prepare(
+            `DELETE FROM kit_sanctions
+             WHERE (ends_at IS NOT NULL AND ends_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?)`,
+          )
+          .run(before, before).changes,
+      ),
+    );
+  }
+
+  purgeStrikes(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_strikes WHERE at < ?').run(before).changes));
+  }
+
+  purgeMutes(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_mutes WHERE created_at < ?').run(before).changes));
+  }
+
   // Terms, exceptions and the audit trail. These are SYNCHRONOUS on purpose (the TermStore contract): they
   // run inside `transaction`, which must never be given an async function.
 

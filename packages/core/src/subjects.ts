@@ -187,6 +187,27 @@ export class SubjectIndex {
   }
 
   /**
+   * The existing subject for these identifiers, or null. Read-only: it never creates a subject, records
+   * an identifier, links or merges, and queues no store write, so a door check cannot mint people or
+   * join two identities. An IP alone finds nothing. When the key and the account belong to two
+   * different subjects (not yet linked), the one a merge would keep (the older) is returned.
+   */
+  lookup(ids: Identifiers): SubjectId | null {
+    const key = present(ids.clientKey);
+    const account = present(ids.accountId);
+    const keyOwner = key === null ? undefined : this.keyOwner.get(key);
+    const accountOwner = account === null ? undefined : this.accountOwner.get(account);
+    const keyRoot = keyOwner === undefined ? undefined : this.canonical(keyOwner);
+    const accountRoot = accountOwner === undefined ? undefined : this.canonical(accountOwner);
+    if (keyRoot === undefined) return accountRoot ?? null;
+    if (accountRoot === undefined || accountRoot === keyRoot) return keyRoot;
+    const ck = this.created.get(keyRoot) ?? 0;
+    const ca = this.created.get(accountRoot) ?? 0;
+    const keyWins = ck !== ca ? ck < ca : keyRoot < accountRoot;
+    return keyWins ? keyRoot : accountRoot;
+  }
+
+  /**
    * The surviving subject `id` was merged into, following the chain to the
    * root. An id the index has never seen is returned unchanged.
    */
