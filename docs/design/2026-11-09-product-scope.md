@@ -132,6 +132,34 @@ Legend:
 | Shared slur list on our own corpus service, signed zipped releases, Zenodo mirror, "Share with the community list" button | 📐 K7 | uses |
 | 🆕 **Calibration and eval sets** published the same way (synthetic plus contributed and anonymized), feeding moderator calibration and the AI eval | K7 | uses |
 
+## 10. Chat itself (optional, drop-in) 🆕
+
+> Owner, 2026-11-09: "Should we provide any of the other chat features that we support, like some of the UI, the
+> translation layer… people could definitely just take the moderation part, but someone just wants to throw in
+> chat and hook up their buttons or just take our default buttons. Nice to give as much out of the box that works
+> as possible."
+
+Three layers. Each is optional, and each works without the one above it. Moderation is built in, never bolted on:
+every message goes through `chat.accept`, and every line has Report and Mute.
+
+| Package | What | From Moxgate |
+|---|---|---|
+| `@chatwarden/chat-server` | Channels: room, team, whisper/DM, system/announcements, spectators. Short configurable history. Typing and presence (hidden for muted and restricted people). Read markers and unread counts. Delete own message (N s window); moderator remove (removed for everyone, kept as evidence). Pinned messages, slow mode, quick chat and pings, reactions, mentions. A documented JSON protocol over `ws`, Socket.IO or service mode. | team chat, typing, system lines |
+| `@chatwarden/client` | Headless, framework-free client: connection plus reconnect, an observable store, optimistic send, refusal handling (reason, rule, notice link), notices, mutes, personal settings. Plus React hooks (`useChat`, `useNotices`, `useChatSettings`). Bring your own buttons. | chatSlice, useChatActions |
+| `@chatwarden/chat-react` | Default UI, themable via CSS variables, also available unstyled:<br>• `ChatPanel`: virtualized list, scroll anchoring, unread pill, compact mode, typing line, `/t` team prefix, quick-chat bar, emoji/reaction picker<br>• `ChatDock`, `LineMenu` (mute, report, copy, translate, show original)<br>• `ReportDialog` (shows the profile summary), `NoticeDialog`, `MyRecord`, `RulesPage` (renders `codeOfConduct`), `ChatSettings` (hide profanity for me, chat off, team only) | ChatPanel, ChatDock, ChatLineMenu, ReportDialog, chatCompact |
+| `@chatwarden/translate` | Per-viewer automatic translation of other players' lines, with "show original". Pluggable engines:<br>• Chrome on-device Translator (used only when the model is already downloaded)<br>• Cloudflare Workers AI<br>• LibreTranslate (self-host)<br>• DeepL / Google adapters<br>• language detection, an edge/LRU cache keyed by text hash, per-IP limits on the server route<br>Moderation always runs on the ORIGINAL text, never the translation. | chatTranslation (engines.ts), cards-api `/translate` |
+
+Game-friendly extras:
+- **Quick chat:** preset phrases and pings, shown in each viewer's own language, so no translation is needed. A
+  strict profile can be set to quick-chat-only, the safest mode for young players.
+- **An emote wheel and "gg" buttons.**
+- **Chat off per player, and spectator chat kept separate from players.**
+
+UI strings ship in en plus Moxgate's 6 locales, with community translations after that.
+
+Moxgate is the first customer. At K6 it swaps its own ChatPanel, ReportDialog and translation for these packages,
+keeping its own styling through theme variables.
+
 ## Roadmap (sequence)
 
 Each phase is its own plan, written when it starts, against the code as built. Moxgate adopts after K4b so it
@@ -143,7 +171,8 @@ runs the full product early (K6); later phases ship as Chatwarden releases that 
 | K3b | HTTP admin + player APIs, roles, audit, webhooks, Discord feed, notifications, names API, observability |
 | K3c | AI read levels 1–2 (3–4 behind flags), providers, eval set, explain-why |
 | K4 | React hub (queue, decisions, history, guidelines, gaps, terms, calibration, wellbeing, team workflow, search) + player components + i18n |
-| K4b | init CLI, service mode, recipes, testing kit, docs CLI, Claude Code plugin, agent eval |
+| K4c | chat layer: chat-server, headless client + hooks, chat-react default UI, translate package, quick chat |
+| K4b | init CLI (can scaffold the full chat too), service mode, recipes, testing kit, docs CLI, Claude Code plugin, agent eval |
 | K8 | landing page with live in-browser demo, docs site, browser build of core |
 | K6 | **Moxgate adopts** (on Moxgate's LOCAL main; the owner pushes) |
 | K9 | AutoMod rules engine, spam / links / personal-info guard, hold-for-review, per-context policy |
