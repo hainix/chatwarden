@@ -60,6 +60,48 @@ export interface Hasher {
 }
 
 // ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+
+/**
+ * Where components report failures that must not interrupt the caller (for
+ * example a background store write). Defaults to `console.warn`. A log line
+ * NEVER carries an identifier, hash, subject id, chat text or term: only event
+ * names, counts and error class names.
+ */
+export interface Logger {
+  warn(event: string, detail?: Record<string, string | number | boolean>): void;
+}
+
+// ---------------------------------------------------------------------------
+// Subjects (storage shapes)
+// ---------------------------------------------------------------------------
+
+/** Kind of identifier a subject was seen with. */
+export type SubjectIdKind = 'account' | 'key' | 'ip';
+
+/** A stored subject. `mergedInto` is set once another subject absorbed it. */
+export interface SubjectRecord {
+  id: SubjectId;
+  /** Epoch ms; the older subject survives a merge. */
+  createdAt: number;
+  mergedInto: SubjectId | null;
+}
+
+/**
+ * One identifier seen on one subject. `value` is the account id as given, the
+ * HASHED client key, or the hashed IP. A key or account belongs to one
+ * subject; an IP may be recorded on several (it never links them).
+ */
+export interface SubjectIdRecord {
+  subjectId: SubjectId;
+  kind: SubjectIdKind;
+  value: string;
+  firstSeen: number;
+  lastSeen: number;
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -89,4 +131,22 @@ export interface Store {
   close(): void;
 
   // --- Domain methods (async) are added below by later tasks. ---
+
+  // Subjects
+
+  /** Insert a subject; a subject that already exists is left unchanged. */
+  saveSubject(subject: SubjectRecord): Promise<void>;
+
+  /**
+   * Upsert one identifier row (keyed by subject, kind and value): `firstSeen`
+   * is kept from the first write, `lastSeen` only moves forward. The subject
+   * must already exist.
+   */
+  saveIdentifier(record: SubjectIdRecord): Promise<void>;
+
+  /** Mark `id` as absorbed into `into`. */
+  markMerged(id: SubjectId, into: SubjectId): Promise<void>;
+
+  /** Every subject and identifier row, for rebuilding the in-memory index. */
+  loadSubjects(): Promise<{ subjects: SubjectRecord[]; ids: SubjectIdRecord[] }>;
 }
