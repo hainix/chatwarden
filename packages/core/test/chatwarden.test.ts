@@ -1172,6 +1172,40 @@ describe('createChatwarden: history and suggest', () => {
     expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'chat', durationMs: DAY });
   });
 
+  it('a decided Note is in the history with the room, tells nobody, and does not move the suggestion', async () => {
+    const r = await reported();
+    const { cw, a, b } = r;
+    const res = await warnAlice(r, { kind: 'note' });
+    expect(res).toMatchObject({ ok: true });
+    expect(cw.history(a)).toEqual([{ kind: 'note', durationMs: 0, startsAt: r.clock.t, revoked: false, automated: false, roomId: R }]);
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ kind: 'warning' });
+    expect(cw.notices.pending(alice)).toEqual([]);
+    expect(cw.notices.pending(bob)).toEqual([]);
+    expect(cw.notices.pendingWarning(alice)).toBe(false);
+    expect(cw.doors.check('join', alice)).toBeNull();
+    expect(cw.chat.accept(R, 'a', 'still free to talk')).toHaveProperty('deliver');
+    expect(b).not.toBe(a);
+  });
+
+  it('the facade decide takes the noted verdict: all notes only', async () => {
+    const r = await reported();
+    const { cw, reportId, a } = r;
+    const base = { reportId, actor: 'mod@example.test', reason: 'private reason text', verdict: 'noted' as const };
+    expect(await cw.decide({ ...base, actions: [] })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, actions: [{ subject: a, kind: 'warning', durationMs: null, rule: 2 }] })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, actions: [{ subject: a, kind: 'note', durationMs: null, rule: 2 }] })).toMatchObject({ ok: true });
+  });
+
+  it('sanctions.apply takes an optional roomId, and it reads back in the history', async () => {
+    const { cw, clock } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    const a = cw.rooms.subjectAt(R, 'a') ?? '';
+    await cw.sanctions.apply({ kind: 'note', subject: a, includeIp: false, durationMs: null, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 2, roomId: 'game-9' });
+    await cw.sanctions.apply({ kind: 'note', subject: a, includeIp: false, durationMs: null, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 2 });
+    expect(cw.history(a).map((h) => h.roomId)).toEqual(['game-9', null]);
+    expect(cw.history(a)[0]?.startsAt).toBe(clock.t);
+  });
+
   it('a record older than the 90-day lookback no longer counts', async () => {
     const r = await reported();
     const { cw, clock, a } = r;

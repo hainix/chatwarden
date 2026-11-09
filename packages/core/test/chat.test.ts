@@ -713,6 +713,24 @@ describe('matcher, strikes and the automatic timeout', () => {
     expect('deliver' in e.say('p1', 'still fine')).toBe(true);
   });
 
+  it('a note never restricts chat, however many there are', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1', null, 'ip-1'));
+    for (let i = 0; i < 4; i++) {
+      await e.sanction(s as string, 'note', null);
+      e.tick();
+      expect('deliver' in e.say('p1', `still fine ${i}`)).toBe(true);
+    }
+  });
+
+  it('a note does not hide a real timeout', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1'));
+    await e.sanction(s as string, 'note', null);
+    await e.sanction(s as string, 'chat', H);
+    expect(refusal(e.say('p1', 'hello'))).toMatchObject({ reason: 'restricted' });
+  });
+
   it('a warning does not hide a real timeout or ban', async () => {
     const e = setup();
     const s = e.sit('p1', who('k1'));

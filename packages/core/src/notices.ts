@@ -19,6 +19,7 @@ export const NOTICE_RECORD_WINDOW_MS = 90 * DAY_MS;
 /** How many sanction groups the notice-id lookup remembers. The oldest entry is dropped past this. */
 export const NOTICE_LOOKUP_CACHE_MAX = 10_000;
 
+// A `note` is deliberately absent: it is on the record for staff and never makes a notice (see `DecisionService`).
 const SANCTION_NOTICE_KINDS: readonly NoticeKind[] = ['warning', 'chat', 'area', 'ban'];
 
 /**

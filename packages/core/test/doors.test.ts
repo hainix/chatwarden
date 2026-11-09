@@ -478,6 +478,35 @@ describe('DoorService: a warning never refuses at a door', () => {
   });
 });
 
+describe('DoorService: a note never refuses at a door', () => {
+  const doorKinds = ['join', 'create', 'public', 'matchmaking'] as const;
+
+  it.each(doorKinds)('%s lets a person with a note through, with and without an IP', async (door) => {
+    const t = setup();
+    const s = t.seat(who);
+    await t.ban(s, 'note', { durationMs: null });
+    expect(t.doors.check(door, who)).toBeNull();
+    expect(t.doors.check(door, { clientKey: 'tok-1' })).toBeNull();
+    expect(t.doors.check(door, { ip: IP })).toBeNull();
+  });
+
+  it.each(doorKinds)('%s lets a person with several notes and warnings through', async (door) => {
+    const t = setup();
+    const s = t.seat(who);
+    for (let i = 0; i < 3; i++) await t.ban(s, 'note', { durationMs: null });
+    await t.ban(s, 'warning', { durationMs: null });
+    expect(t.doors.check(door, who)).toBeNull();
+  });
+
+  it('a note does not hide a real ban of the same person', async () => {
+    const t = setup();
+    const s = t.seat(who);
+    await t.ban(s, 'note', { durationMs: null });
+    await t.ban(s, 'ban');
+    expect(t.doors.check('join', who)).toMatchObject({ kind: 'ban' });
+  });
+});
+
 describe('DoorService: a refusal points at the notice', () => {
   function withNotices(over: { notices?: NoticeService } = {}) {
     const t = setup();

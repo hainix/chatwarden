@@ -804,9 +804,23 @@ describe('tiny-chat: /decide takes the K3a verdicts', () => {
     expect([res.status, res.json]).toEqual([400, { ok: false, refused: 'bad_request' }]);
   });
 
-  it('noted reaches the kit and is invalid until Task 2 adds the note kind (422, nothing decided)', async () => {
-    // TODO(K3a Task 2): once the `note` kind exists, a noted decision with a note action is 200.
-    const { server, reportId } = await filed('v8');
+  it('noted with a note action is 200, tells nobody, and closes the report', async () => {
+    const { server, a, reportId } = await filed('v8');
+    const res = await decideHttp(server, { reportId, verdict: 'noted', reason: 'r', actions: [{ seat: 'p1', kind: 'note', durationMs: null, rule: 2 }] });
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({ ok: true, replay: false });
+    await settle();
+    expect(a.frames.filter((f) => f.type === 'notices')).toEqual([]);
+    expect(server.chatwarden.notices.pending({ clientKey: 'key-v81' })).toEqual([]);
+    expect(server.chatwarden.notices.pendingWarning({ clientKey: 'key-v81' })).toBe(false);
+    // The report is closed: a different decision is refused (422), the same one replays (200).
+    expect((await decideHttp(server, { reportId, verdict: 'no_action', reason: 'r', actions: [] })).status).toBe(422);
+    const again = await decideHttp(server, { reportId, verdict: 'noted', reason: 'r', actions: [{ seat: 'p1', kind: 'note', durationMs: null, rule: 2 }] });
+    expect(again.json).toMatchObject({ ok: true, replay: true });
+  });
+
+  it('noted with a warning action stays invalid (422, nothing decided)', async () => {
+    const { server, reportId } = await filed('v9');
     const res = await decideHttp(server, { reportId, verdict: 'noted', reason: 'r', actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }] });
     expect([res.status, res.json]).toEqual([422, { ok: false, refused: 'invalid' }]);
     expect((await decideHttp(server, { reportId, verdict: 'no_action', reason: 'r', actions: [] })).status).toBe(200);

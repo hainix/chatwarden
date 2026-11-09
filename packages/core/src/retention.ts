@@ -51,6 +51,7 @@ function checkWindow(name: string, ms: number): void {
  * - reports: `createdAt < now - reportsMs`, except a bad-faith dismissal actioned at or after `now - badFaithMs`
  *   (it still counts toward its reporter's suspension). The recorded decisions of deleted reports go with them.
  * - sanctions: ended (`endsAt < now - sanctionAfterEndMs`) or revoked (`revokedAt < now - sanctionAfterEndMs`).
+ *   A warning or a note ends where it starts, so it goes `sanctionAfterEndMs` (90 days by default) after its start.
  *   A permanent, unrevoked sanction is never deleted, nor is one whose rule gap is still open.
  * - strikes: `at < now - strikesMs`
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)

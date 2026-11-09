@@ -746,7 +746,7 @@ describe('SubjectIndex.latestIp', () => {
 describe('memoryStore transactions (journaled rollback)', () => {
   const srow = (id: string, groupId: string, refCode: string): SanctionRow => ({
     id, groupId, refCode, kind: 'chat', targetType: 'subject', value: 's', startsAt: 0, endsAt: null,
-    reason: 'r', rule: null, gapNote: null, gapStatus: null, actor: 'a', source: 'api', automated: false, pending: false,
+    reason: 'r', rule: null, gapNote: null, gapStatus: null, roomId: null, actor: 'a', source: 'api', automated: false, pending: false,
   });
 
   it('an outer failure undoes writes of a successful inner transaction', async () => {

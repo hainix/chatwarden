@@ -116,9 +116,11 @@ export interface SubjectIdRecord {
  * What a sanction restricts: `chat` (public chat), `area` (public areas:
  * public rooms and matchmaking), `ban` (everything), or
  * `warning` (a recorded warning: it restricts nothing, never refuses at a door
- * and is never in the sanction index; it has no end, so `endsAt === startsAt`).
+ * and is never in the sanction index; it has no end, so `endsAt === startsAt`), or
+ * `note` (the Note outcome: on the record and never punishing. Stored exactly like a warning, but it also
+ * tells the player nothing: no notice, no reporter feedback, and it does not move the escalation step).
  */
-export type SanctionKind = 'chat' | 'area' | 'ban' | 'warning';
+export type SanctionKind = 'chat' | 'area' | 'ban' | 'warning' | 'note';
 
 /** Who or what imposed a sanction. */
 export type Source = 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai';
@@ -153,6 +155,12 @@ export interface SanctionRow {
   gapNote: string | null;
   /** Where that gap stands: `open` until someone makes it a rule (`ruled`) or decides it is not one. */
   gapStatus: 'open' | 'ruled' | 'not_a_rule' | null;
+  /**
+   * The room (game) the sanction came from, when known: a moderator decision stores the decided report's room. Null
+   * for an automatic timeout, a direct `sanctions.apply` that gave none, and every row written before migration 11.
+   * Private. Lets the escalation ladder count notes from distinct games.
+   */
+  roomId: string | null;
   actor: string;
   source: Source;
   automated: boolean;

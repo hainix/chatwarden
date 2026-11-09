@@ -22,6 +22,12 @@ export interface ActionRecord {
   startsAt: number;
   revoked: boolean;
   automated: boolean;
+  /**
+   * The room (game) the action came from, or null when none was recorded (an automatic timeout, a direct sanction
+   * with no room, a row written before rooms were stored). Private to staff; Task 4's "repeated, from distinct games"
+   * reads it.
+   */
+  roomId: string | null;
 }
 
 /** A step on the ladder. 0 is "nothing on record". */
@@ -48,15 +54,17 @@ function toRecord(row: SanctionRow): ActionRecord {
     startsAt: row.startsAt,
     revoked: row.revokedAt !== undefined && row.revokedAt !== null,
     automated: row.automated,
+    roomId: row.roomId,
   };
 }
 
 /**
- * The step one action reaches. A warning is 1. A chat or area restriction is 2 under 7 days (auto timeouts
- * included) and 3 from 7 days. A ban is 3 under 7 days, 4 from 7 days up to 30, 5 from 30 days. Anything
+ * The step one action reaches. A note is 0: it is on the record but moves
+ * nothing. A warning is 1. A chat or area restriction is 2 under 7 days (auto timeouts included) and 3 from 7 days. A ban is 3 under 7 days, 4 from 7 days up to 30, 5 from 30 days. Anything
  * permanent is 5. A revoked record keeps its own step here; `recordStep` is what leaves it out.
  */
 export function actionStep(a: ActionRecord): LadderStep {
+  if (a.kind === 'note') return 0;
   if (a.kind === 'warning') return 1;
   if (a.durationMs === null) return 5;
   if (a.kind === 'ban') {
@@ -69,7 +77,7 @@ export function actionStep(a: ActionRecord): LadderStep {
 
 /**
  * A record's step: the highest `actionStep` over its non-revoked actions, and at least 2 once it holds two or
- * more non-revoked warnings. 0 for nothing.
+ * more non-revoked warnings (notes are not warnings and add nothing). 0 for nothing.
  */
 export function recordStep(records: readonly ActionRecord[]): LadderStep {
   let step: LadderStep = 0;

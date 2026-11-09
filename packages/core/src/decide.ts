@@ -24,15 +24,15 @@ export interface DecisionAction {
   /** The person to sanction; stored as their canonical subject. */
   subject: SubjectId;
   kind: SanctionKind;
-  /** Milliseconds from now; null is permanent. Must be null for a warning. */
+  /** Milliseconds from now; null is permanent. Must be null for a warning or a note. */
   durationMs: number | null;
   /** The Community Rule cited. Must be citable (active), or `'uncovered'` with a `gapNote`. */
   rule: RuleRef;
   /** Private note on what the rules did not cover. Required under `'uncovered'` for a moderator; otherwise absent. */
   gapNote?: string;
-  /** Also sanction the subject's latest IP (at most 24 h). Not for a warning. */
+  /** Also sanction the subject's latest IP (at most 24 h). Not for a warning or a note. */
   includeIp?: boolean;
-  /** Up to five of THIS person's own lines in the report, shown to them in the notice. */
+  /** Up to five of THIS person's own lines in the report, shown to them in the notice (a note has no notice). */
   lineIds?: string[];
 }
 
@@ -74,7 +74,8 @@ export interface DecisionGroup {
   subject: SubjectId;
   groupId: string;
   refCode: string;
-  noticeId: string;
+  /** The player's notice for this action; null for a `note`, which tells the player nothing. */
+  noticeId: string | null;
 }
 
 /**
@@ -193,9 +194,7 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
     };
   });
   // A `noted` decision needs at least one action, and every action must be a `note`.
-  // TODO(K3a Task 2): the `note` kind does not exist yet (it is not in SANCTION_KINDS, so a `note` action is refused
-  // above), which makes `noted` ALWAYS invalid for now. Task 2 adds the kind and completes this path.
-  if (input.verdict === 'noted' && (actions.length === 0 || actions.some((a) => (a.kind as string) !== 'note'))) return bad();
+  if (input.verdict === 'noted' && (actions.length === 0 || actions.some((a) => a.kind !== 'note'))) return bad();
   actions.sort((x, y) => byText(x.subject, y.subject) || byText(x.kind, y.kind));
   // The same kind twice for one person would sanction them twice for one report.
   for (let i = 1; i < actions.length; i++) {
@@ -297,8 +296,9 @@ export class DecisionService {
    *   `{ ok: true, replay: true }` with the first call's groups and writes nothing, even though the report is closed.
    * - `already_decided`: the report is closed and this is a different decision.
    *
-   * After the commit the sanctions join the index and each notified person (every target, and the reporter on a
-   * `upheld` decision with at least one action) is told once. Both are fenced: they never fail the decision.
+   * After the commit the sanctions join the index and each notified person (every target of a non-note action, and
+   * the reporter on an `upheld` decision with at least one non-note action) is told once. A `note` makes no notice and
+   * tells nobody. Both are fenced: they never fail the decision.
    *
    * The result's groups carry subject ids. Carries subject ids: staff channels only, never send to a player.
    */
@@ -349,14 +349,14 @@ export class DecisionService {
       // A dismissal cannot punish the person the report was about.
       if (isDismissal(norm.verdict) && a.subject === target) return bad();
       if (!this.rules.isCitable(a.rule)) return bad();
-      validateSanctionInput(this.sanctionInput(norm, a));
+      validateSanctionInput(this.sanctionInput(norm, a, report.roomId));
       const lines = a.lineIds.length === 0 ? [] : ownLines(report, a.subject, a.lineIds, this.subjects);
       if (!lines.every(lineIsSound)) return bad();
       return { action: a, lines };
     });
   }
 
-  private sanctionInput(norm: Normal, a: NormalAction) {
+  private sanctionInput(norm: Normal, a: NormalAction, roomId: string) {
     return {
       kind: a.kind,
       subject: a.subject,
@@ -367,6 +367,7 @@ export class DecisionService {
       source: norm.source,
       automated: false,
       rule: a.rule,
+      roomId,
       ...(a.gapNote === undefined ? {} : { gapNote: a.gapNote }),
     };
   }
@@ -383,28 +384,33 @@ export class DecisionService {
       }
       const groups: DecisionGroup[] = [];
       const rows: SanctionRow[] = [];
+      const told = new Set<SubjectId>();
       for (const { action: a, lines } of plan) {
         // No index here: the rows reach it only after the transaction has committed.
-        const written = writeSanction(this.store, this.subjects, this.sanctionInput(norm, a), now, pending);
-        const noticeId = this.notices.createForSanction(
-          {
-            groupId: written.groupId,
-            refCode: written.refCode,
-            kind: a.kind,
-            until: a.kind === 'warning' ? null : written.endsAt,
-            rule: a.rule,
-            subject: a.subject,
-          },
-          lines,
-          { notify: false },
-        );
+        const written = writeSanction(this.store, this.subjects, this.sanctionInput(norm, a, report.roomId), now, pending);
+        // A note is on the record and tells the player nothing: no notice, so nobody to announce to either.
+        const noticeId =
+          a.kind === 'note'
+            ? null
+            : this.notices.createForSanction(
+                {
+                  groupId: written.groupId,
+                  refCode: written.refCode,
+                  kind: a.kind,
+                  until: a.kind === 'warning' ? null : written.endsAt,
+                  rule: a.rule,
+                  subject: a.subject,
+                },
+                lines,
+                { notify: false },
+              );
+        if (noticeId !== null) told.add(a.subject);
         groups.push({ subject: a.subject, groupId: written.groupId, refCode: written.refCode, noticeId });
         rows.push(...written.rows);
       }
-      const told = new Set<SubjectId>(groups.map((g) => g.subject));
-      // Reporter feedback only on `upheld` with at least one action. TODO(K3a Task 2): "non-note action" once the
-      // `note` kind exists (a note is staff-only and must never tell the reporter anything).
-      if (norm.verdict === 'upheld' && groups.length > 0) {
+      // Reporter feedback only on `upheld` with at least one NON-note action: a note is staff-only and must never
+      // tell the reporter anything, however many of them sit beside the other actions.
+      if (norm.verdict === 'upheld' && plan.some(({ action }) => action.kind !== 'note')) {
         this.notices.createReportOutcome(reporter, { notify: false });
         told.add(reporter);
       }

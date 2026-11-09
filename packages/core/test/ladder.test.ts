@@ -20,11 +20,20 @@ const DAY = 24 * H;
 const NOW = 1_800_000_000_000;
 
 function rec(kind: SanctionKind, durationMs: number | null, over: Partial<ActionRecord> = {}): ActionRecord {
-  return { kind, durationMs, startsAt: NOW - DAY, revoked: false, automated: false, ...over };
+  return { kind, durationMs, startsAt: NOW - DAY, revoked: false, automated: false, roomId: null, ...over };
 }
 const warn = (over: Partial<ActionRecord> = {}) => rec('warning', 0, over);
+const note = (over: Partial<ActionRecord> = {}) => rec('note', 0, over);
 
 describe('actionStep: kind and length to a step', () => {
+  it('a note is step 0, whatever its duration: it is on the record but moves nothing', () => {
+    expect(actionStep(note())).toBe(0);
+    expect(actionStep(rec('note', null))).toBe(0);
+    expect(actionStep(rec('note', 30 * DAY))).toBe(0);
+    expect(actionStep(note({ revoked: true }))).toBe(0);
+    expect(actionStep(note({ roomId: 'R1', automated: true }))).toBe(0);
+  });
+
   it('a warning is step 1, whatever its duration', () => {
     expect(actionStep(warn())).toBe(1);
     expect(actionStep(rec('warning', null))).toBe(1);
@@ -108,6 +117,19 @@ describe('recordStep: the highest step of the live records', () => {
     expect(recordStep([warn(), warn(), rec('ban', 8 * DAY)])).toBe(4);
   });
 
+  it('notes never move the step: alone they are 0, beside other actions they change nothing', () => {
+    expect(recordStep([note()])).toBe(0);
+    expect(recordStep([note(), note(), note(), note()])).toBe(0);
+    expect(recordStep([note(), warn()])).toBe(1);
+    expect(recordStep([note(), rec('chat', DAY)])).toBe(2);
+    expect(recordStep([note(), rec('ban', null), note()])).toBe(5);
+  });
+
+  it('a note is not a warning: one warning plus notes stays step 1, never the "two warnings" step 2', () => {
+    expect(recordStep([warn(), note(), note()])).toBe(1);
+    expect(recordStep([note(), note(), warn(), warn()])).toBe(2);
+  });
+
   it('ignores revoked records of every kind', () => {
     expect(recordStep([rec('ban', null, { revoked: true })])).toBe(0);
     expect(recordStep([rec('ban', null, { revoked: true }), rec('chat', DAY)])).toBe(2);
@@ -132,6 +154,7 @@ function row(over: Partial<SanctionRow> = {}): SanctionRow {
     rule: '1',
     gapNote: null,
     gapStatus: null,
+    roomId: null,
     actor: 'mod',
     source: 'moderator',
     automated: false,
@@ -175,10 +198,40 @@ describe('historyOf: the canonical person over the last 90 days', () => {
     expect(h).toHaveLength(3);
     const byKind = new Map(h.map((r) => [r.kind, r]));
     expect(byKind.get('chat')).toEqual({
-      kind: 'chat', durationMs: 2 * H, startsAt: NOW - DAY, revoked: false, automated: true,
+      kind: 'chat', durationMs: 2 * H, startsAt: NOW - DAY, revoked: false, automated: true, roomId: null,
     });
     expect(byKind.get('ban')).toMatchObject({ durationMs: null, automated: false });
     expect(byKind.get('warning')).toMatchObject({ durationMs: 0, revoked: false });
+  });
+
+  it('a note is in the history with its room; a row stored without a room reads null', async () => {
+    const { store, subjects } = setup();
+    await subjects.load();
+    const s = must(subjects.resolve(who('k1')));
+    put(store, { value: s, kind: 'note', startsAt: NOW - DAY, endsAt: NOW - DAY, roomId: 'room-A' });
+    put(store, { value: s, kind: 'note', startsAt: NOW - 2 * DAY, endsAt: NOW - 2 * DAY, roomId: 'room-B' });
+    put(store, { value: s, kind: 'chat', startsAt: NOW - 3 * DAY, endsAt: NOW - 3 * DAY + H });
+    const h = historyOf(store, subjects, s, NOW);
+    expect(h).toHaveLength(3);
+    const notes = h.filter((r) => r.kind === 'note');
+    expect(notes.map((r) => r.roomId)).toEqual(['room-A', 'room-B']);
+    expect(notes[0]).toEqual({ kind: 'note', durationMs: 0, startsAt: NOW - DAY, revoked: false, automated: false, roomId: 'room-A' });
+    expect(h.find((r) => r.kind === 'chat')?.roomId).toBeNull();
+    // Notes do not move the step.
+    expect(recordStep(h)).toBe(2);
+    expect(recordStep(notes)).toBe(0);
+  });
+
+  it('a revoked note is flagged revoked and keeps its room', async () => {
+    const { store, subjects } = setup();
+    await subjects.load();
+    const s = must(subjects.resolve(who('k1')));
+    put(store, { value: s, kind: 'note', startsAt: NOW - DAY, endsAt: NOW - DAY, roomId: 'room-A' });
+    const group = store.rawSanctions()[0]?.groupId as string;
+    store.revokeSanctionGroup(group, 'mod', NOW, 'mistake');
+    expect(historyOf(store, subjects, s, NOW)).toEqual([
+      { kind: 'note', durationMs: 0, startsAt: NOW - DAY, revoked: true, automated: false, roomId: 'room-A' },
+    ]);
   });
 
   it('the 90-day lookback is measured from startsAt and is inclusive', async () => {

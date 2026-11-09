@@ -3,6 +3,7 @@ import { DecisionService, decisionKey, revokeAndWithdraw } from '../src/decide.j
 import type { DecisionAction, DecisionInput } from '../src/decide.js';
 import { EvidenceBuffer, RoomRoster } from '../src/evidence.js';
 import { NoticeService } from '../src/notices.js';
+import { historyOf, recordStep } from '../src/ladder.js';
 import { purge } from '../src/retention.js';
 import { ReportService } from '../src/reports.js';
 import { CommunityRules, STARTER_RULES } from '../src/rules.js';
@@ -136,6 +137,13 @@ function setup(
     rule: 2,
     ...over,
   });
+  const note = (subject: SubjectId, over: Partial<DecisionAction> = {}): DecisionAction => ({
+    subject,
+    kind: 'note',
+    durationMs: null,
+    rule: 2,
+    ...over,
+  });
   const chat = (subject: SubjectId, over: Partial<DecisionAction> = {}): DecisionAction => ({
     subject,
     kind: 'chat',
@@ -163,7 +171,7 @@ function setup(
     decisions: store.rawDecisions(),
   });
 
-  return { store, clock, logs, subjects, index, notices, decisions, roster, buffer, reports, pushed, person, sit, say, table, file, warn, chat, decide, snapshot };
+  return { store, clock, logs, subjects, index, notices, decisions, roster, buffer, reports, pushed, person, sit, say, table, file, warn, note, chat, decide, snapshot };
 }
 
 type T = ReturnType<typeof setup>;
@@ -516,18 +524,233 @@ describe('decide: verdicts (renamed in K3a)', () => {
     okOf(await t.decide(reportId, { verdict, actions: [t.warn(reporter, { rule: 4 })] }));
     expect(t.store.loadReport(reportId)?.status).toBe('dismissed');
   });
+});
 
-  it('noted is ALWAYS invalid until Task 2 adds the note kind (no action, a warning, a chat restriction)', async () => {
-    // TODO(K3a Task 2): `noted` needs >= 1 action, all of kind `note`. No `note` kind exists yet, so every `noted`
-    // decision is invalid today. Task 2 adds the kind and replaces this test with the real accept / reject cases.
+describe('decide: noted (the Note outcome: on the record, never punishing)', () => {
+  const invalid = { ok: false, error: 'invalid' };
+
+  it('a note on the target: the report is actioned, one note row, and NO notice for anyone', async () => {
     const t = setup();
-    const { reportId, target, reporter } = await t.table();
-    const before = t.snapshot();
-    for (const actions of [[], [t.warn(target)], [t.chat(target)], [t.warn(reporter)]]) {
-      expect(await t.decide(reportId, { verdict: 'noted', actions })).toEqual({ ok: false, error: 'invalid' });
+    const { reportId, target, reporter, room } = await t.table();
+    const res = okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target)] }));
+    expect(res.replay).toBe(false);
+    expect(res.groups).toHaveLength(1);
+    expect(res.groups[0]).toMatchObject({ subject: target, noticeId: null });
+    expect(res.groups[0]?.refCode).toMatch(/^M-[A-Z2-9]{5}$/);
+    expect(t.store.loadReport(reportId)).toMatchObject({ status: 'actioned', badFaith: false, actionedBy: 'mod-a', modNote: 'clear violation' });
+    const rows = t.store.rawSanctions();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: 'note', targetType: 'subject', value: target, startsAt: NOW, endsAt: NOW, rule: '2', roomId: room,
+      actor: 'mod-a', source: 'moderator', reason: 'clear violation', groupId: res.groups[0]?.groupId,
+    });
+    // No notice for the target, none for the reporter, nothing pushed.
+    expect(t.store.rawNotices()).toEqual([]);
+    expect(t.notices.pending(target)).toEqual([]);
+    expect(t.notices.pending(reporter)).toEqual([]);
+    expect(t.notices.record(target)).toEqual([]);
+    expect(t.pushed).toEqual([]);
+  });
+
+  it('a note restricts nothing: the index never sees it', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target)] }));
+    const ids = { clientKey: null, accountId: null, ipHash: null };
+    for (const k of ['chat', 'area', 'ban', 'warning', 'note'] as const) {
+      expect(t.index.active(k, ids, target, NOW + 1)).toBeNull();
     }
+  });
+
+  it('notes on two people: one group each, no notice for anyone', async () => {
+    const t = setup();
+    const { reportId, target, bystander, room } = await t.table();
+    const res = okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target), t.note(bystander, { rule: 4 })] }));
+    expect(res.groups.map((g) => g.subject).sort()).toEqual([target, bystander].sort());
+    expect(res.groups.every((g) => g.noticeId === null)).toBe(true);
+    expect(t.store.rawSanctions().map((r) => [r.kind, r.roomId])).toEqual([['note', room], ['note', room]]);
+    expect(t.store.rawNotices()).toEqual([]);
+  });
+
+  it('a note on the reporter is allowed (the same scope as upheld) and still tells nobody', async () => {
+    const t = setup();
+    const { reportId, reporter } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(reporter)] }));
+    expect(t.store.rawNotices()).toEqual([]);
+  });
+
+  it('the note joins the target\'s history with the report\'s room, and does not move the step', async () => {
+    const t = setup();
+    const { reportId, target, room } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target)] }));
+    const h = historyOf(t.store, t.subjects, target, NOW);
+    expect(h).toEqual([{ kind: 'note', durationMs: 0, startsAt: NOW, revoked: false, automated: false, roomId: room }]);
+    expect(recordStep(h)).toBe(0);
+  });
+
+  it('a gap note works when no rule is cited, like a warning', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target, { rule: 'uncovered', gapNote: 'odd case' })] }));
+    expect(t.store.rawSanctions()[0]).toMatchObject({ kind: 'note', rule: 'uncovered', gapNote: 'odd case', gapStatus: 'open' });
+  });
+
+  it('is invalid with no action and writes nothing', async () => {
+    const t = setup();
+    const { reportId } = await t.table();
+    const before = t.snapshot();
+    expect(await t.decide(reportId, { verdict: 'noted', actions: [] })).toEqual(invalid);
     expect(t.snapshot()).toEqual(before);
     expect(t.store.loadReport(reportId)?.status).toBe('open');
+  });
+
+  it.each([
+    ['a warning', (t: T, p: SubjectId) => [t.warn(p)]],
+    ['a chat restriction', (t: T, p: SubjectId) => [t.chat(p)]],
+    ['an area ban', (_t: T, p: SubjectId) => [{ subject: p, kind: 'area' as const, durationMs: DAY, rule: 5 }]],
+    ['a ban', (_t: T, p: SubjectId) => [{ subject: p, kind: 'ban' as const, durationMs: null, rule: 1 }]],
+    ['a note AND a warning', (t: T, p: SubjectId) => [t.note(p), t.warn(p)]],
+    ['a note on one person and a chat restriction on another', (t: T, p: SubjectId, q: SubjectId) => [t.note(p), t.chat(q)]],
+  ])('is invalid with %s and writes nothing', async (_name, mk) => {
+    const t = setup();
+    const { reportId, target, bystander } = await t.table();
+    const before = t.snapshot();
+    expect(await t.decide(reportId, { verdict: 'noted', actions: mk(t, target, bystander) })).toEqual(invalid);
+    expect(t.snapshot()).toEqual(before);
+    expect(t.store.loadReport(reportId)?.status).toBe('open');
+  });
+
+  it('is invalid for a stranger, with the store unchanged', async () => {
+    const t = setup();
+    const { reportId } = await t.table();
+    const stranger = t.person(who('stranger-note'));
+    const before = t.snapshot();
+    expect(await t.decide(reportId, { verdict: 'noted', actions: [t.note(stranger)] })).toEqual(invalid);
+    expect(t.snapshot()).toEqual(before);
+  });
+
+  it.each([
+    ['a duration', { durationMs: DAY }],
+    ['includeIp', { includeIp: true }],
+    ['a retired rule', { rule: 9 }],
+    ['an unknown rule', { rule: 99 }],
+    ['an uncovered rule without a gap note', { rule: 'uncovered' as const }],
+  ])('a note with %s is invalid', async (_name, over) => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    const before = t.snapshot();
+    expect(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target, over as Partial<DecisionAction>)] })).toEqual(invalid);
+    expect(t.snapshot()).toEqual(before);
+  });
+
+  it('the same note twice for one person is invalid', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    expect(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target), t.note(target, { rule: 4 })] })).toEqual(invalid);
+  });
+
+  it('sending it again replays: one note, same groups with a null noticeId', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    const first = okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target)] }));
+    const again = okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target)] }));
+    expect(again.replay).toBe(true);
+    expect(again.groups).toEqual(first.groups);
+    expect(again.groups[0]?.noticeId).toBeNull();
+    expect(t.store.rawSanctions()).toHaveLength(1);
+  });
+
+  it('a different decision on the closed report is already_decided', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target)] }));
+    expect(await t.decide(reportId, { verdict: 'upheld', actions: [t.warn(target)] })).toEqual({ ok: false, error: 'already_decided' });
+  });
+
+  it('is atomic: a store failure on the second note leaves nothing behind', async () => {
+    const t = setup({ store: new FailOnSecondSanction() });
+    const { reportId, target, bystander } = await t.table();
+    const before = t.snapshot();
+    await expect(t.decide(reportId, { verdict: 'noted', actions: [t.note(target), t.note(bystander)] })).rejects.toThrow('disk full');
+    expect(t.snapshot()).toEqual(before);
+  });
+
+  it('the decision key is distinct from the same action under upheld', async () => {
+    const t = setup();
+    const a = decisionKey(t.subjects, { reportId: 'r', verdict: 'noted', actions: [t.note('s1')], actor: 'x', reason: 'y' });
+    const b = decisionKey(t.subjects, { reportId: 'r', verdict: 'upheld', actions: [t.note('s1')], actor: 'x', reason: 'y' });
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('decide: notes inside other verdicts', () => {
+  it('upheld with ONLY notes: report actioned, no notice for anyone, and NO reporter feedback', async () => {
+    const t = setup();
+    const { reportId, target, reporter } = await t.table();
+    const res = okOf(await t.decide(reportId, { actions: [t.note(target)] }));
+    expect(res.groups[0]?.noticeId).toBeNull();
+    expect(t.store.loadReport(reportId)?.status).toBe('actioned');
+    expect(t.store.rawNotices()).toEqual([]);
+    expect(t.notices.pending(reporter)).toEqual([]);
+    expect(t.pushed).toEqual([]);
+  });
+
+  it('upheld with a note AND a warning: the warning notifies, the note does not, and the reporter is told once', async () => {
+    const t = setup();
+    const { reportId, target, reporter } = await t.table();
+    const res = okOf(await t.decide(reportId, { actions: [t.note(target), t.warn(target)] }));
+    expect(res.groups).toHaveLength(2);
+    const byKind = new Map(t.store.rawSanctions().map((r) => [r.kind, r.groupId]));
+    const noteGroup = res.groups.find((g) => g.groupId === byKind.get('note'));
+    const warnGroup = res.groups.find((g) => g.groupId === byKind.get('warning'));
+    expect(noteGroup?.noticeId).toBeNull();
+    expect(typeof warnGroup?.noticeId).toBe('string');
+    expect(t.notices.pending(target).map((n) => n.kind)).toEqual(['warning']);
+    expect(t.notices.pending(reporter).map((n) => n.kind)).toEqual(['report_outcome']);
+    expect(t.store.rawNotices()).toHaveLength(2);
+  });
+
+  it('upheld with a note on one person and a chat restriction on another: feedback is sent (a non-note action exists)', async () => {
+    const t = setup();
+    const { reportId, target, bystander, reporter } = await t.table();
+    okOf(await t.decide(reportId, { actions: [t.note(bystander), t.chat(target)] }));
+    expect(t.notices.pending(reporter).map((n) => n.kind)).toEqual(['report_outcome']);
+    expect(t.notices.pending(bystander)).toEqual([]);
+    expect(t.notices.pending(target).map((n) => n.kind)).toEqual(['chat']);
+  });
+
+  it('upheld with a note and no other action twice-checked: a note on the reporter alone is no feedback either', async () => {
+    const t = setup();
+    const { reportId, reporter } = await t.table();
+    okOf(await t.decide(reportId, { actions: [t.note(reporter)] }));
+    expect(t.notices.pending(reporter)).toEqual([]);
+  });
+
+  it.each(['no_action', 'bad_faith'] as const)('%s may write a note on the reporter: no notice, never on the target', async (verdict) => {
+    const t = setup();
+    const { reportId, target, reporter } = await t.table();
+    expect(await t.decide(reportId, { verdict, actions: [t.note(target)] })).toEqual({ ok: false, error: 'invalid' });
+    okOf(await t.decide(reportId, { verdict, actions: [t.note(reporter)] }));
+    expect(t.store.rawSanctions().map((r) => r.kind)).toEqual(['note']);
+    expect(t.store.rawNotices()).toEqual([]);
+  });
+
+  it('every action a decision writes carries the report\'s room, whatever its kind', async () => {
+    const t = setup();
+    const { reportId, target, room } = await t.table();
+    okOf(await t.decide(reportId, { actions: [t.warn(target), t.chat(target, { includeIp: false })] }));
+    expect(t.store.rawSanctions().map((r) => r.roomId)).toEqual([room, room]);
+  });
+
+  it('includeIp rows of a decision carry the room too', async () => {
+    const t = setup();
+    const room = 'ipr2';
+    t.sit(room, 'p1', who('ip-rep2'));
+    const target = t.sit(room, 'p2', who('ip-tgt2', null, 'iphash2'));
+    t.say(room, 'p2', 'hello');
+    const reportId = await t.file(room);
+    okOf(await t.decide(reportId, { actions: [t.chat(target, { includeIp: true })] }));
+    expect(t.store.rawSanctions().map((r) => r.roomId)).toEqual([room, room]);
   });
 });
 
