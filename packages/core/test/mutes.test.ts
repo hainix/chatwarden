@@ -678,6 +678,29 @@ describe('load', () => {
 });
 
 describe('write failures never reach the caller', () => {
+  it('a throwing logger never makes set() throw (mute and unmute)', () => {
+    const store = new MemoryStore();
+    const clock = { t: NOW, now: () => clock.t };
+    const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
+    const angry: Logger = {
+      warn() {
+        throw new Error('logger down');
+      },
+    };
+    const mutes = new MuteService(store, clock, subjects, { logger: angry });
+    const v = subjects.resolve(who('vk')) as SubjectId;
+    const t = subjects.resolve(who('tk')) as SubjectId;
+    store.upsertMute = () => {
+      throw new TypeError('db is down');
+    };
+    store.deleteMute = () => {
+      throw new TypeError('db is down');
+    };
+    expect(() => mutes.set(v, t, true)).not.toThrow();
+    expect(() => mutes.set(v, t, false)).not.toThrow();
+    expect(mutes.isMuted(v, t)).toBe(false);
+  });
+
   it('a failed mute is logged, memory and store are unchanged, and nothing throws', () => {
     const store = new MemoryStore();
     const { mutes, logs, person } = setup({ store });

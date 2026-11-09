@@ -77,10 +77,14 @@ export class MuteService {
       if (on) this.mute(cv, ct);
       else this.unmute(cv, ct);
     } catch (err) {
-      this.logger.warn('mutes.write_failed', {
-        op: on ? 'mute' : 'unmute',
-        error: err instanceof Error ? err.name : typeof err,
-      });
+      try {
+        this.logger.warn('mutes.write_failed', {
+          op: on ? 'mute' : 'unmute',
+          error: err instanceof Error ? err.name : typeof err,
+        });
+      } catch {
+        // A broken logger must not break chat.
+      }
     }
   }
 
