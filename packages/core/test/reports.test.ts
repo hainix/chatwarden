@@ -78,7 +78,7 @@ function setup(opts: { store?: MemoryStore; enabled?: () => boolean; onReport?: 
     return s;
   };
   /** One chat line from whoever holds `seat` now. */
-  const say = (seat: string, raw = `line from ${seat}`, over: { room?: string; blocked?: boolean; ts?: number } = {}): string => {
+  const say = (seat: string, raw = `line from ${seat}`, over: { room?: string; blocked?: boolean; ts?: number; audience?: string[] } = {}): string => {
     const room = over.room ?? ROOM;
     const occ = roster.occupant(room, seat);
     return buffer.append(room, {
@@ -89,7 +89,7 @@ function setup(opts: { store?: MemoryStore; enabled?: () => boolean; onReport?: 
       raw,
       delivered: over.blocked ? null : raw,
       blocked: over.blocked ?? false,
-      audience: null,
+      audience: over.audience ?? null,
     });
   };
   const input = (over: Partial<Submit> = {}): Submit => ({
@@ -302,6 +302,57 @@ describe('report: who is the target', () => {
     const { b } = { b: t.roster.occupant(ROOM, 'p2')?.subject };
     await t.submit({ lineId: id });
     expect(stored(t.store)).toMatchObject({ targetSubject: b, lineId: null });
+  });
+});
+
+describe('report: a reporter cannot cite a line they never saw', () => {
+  it("a whisper that did not include the reporter's seat is ignored: the target is the targetSeat occupant", async () => {
+    const t = setup();
+    const { b } = t.table(); // p1 reporter, p2 target
+    const c = t.sit('p3', who('k3'), 'Whisperer');
+    t.sit('p4', who('k4'), 'Listener');
+    const id = t.say('p3', 'secret whisper', { audience: ['p3', 'p4'] });
+    expect(await t.submit({ lineId: id, targetSeat: 'p2' })).toMatchObject({ ok: true });
+    const row = stored(t.store);
+    expect(row.targetSubject).toBe(b);
+    expect(row.targetSubject).not.toBe(c);
+    expect(row.lineId).toBeNull();
+  });
+
+  it('with no usable targetSeat the ignored line is simply not_player (it does not reveal the line exists)', async () => {
+    const t = setup();
+    t.table();
+    t.sit('p3', who('k3'));
+    t.sit('p4', who('k4'));
+    const id = t.say('p3', 'secret whisper', { audience: ['p3', 'p4'] });
+    expect(await t.submit({ lineId: id, targetSeat: 'p9' })).toEqual({ ok: false, refused: 'not_player' });
+  });
+
+  it('an empty audience includes nobody: ignored', async () => {
+    const t = setup();
+    const { b } = t.table();
+    t.sit('p3', who('k3'));
+    const id = t.say('p3', 'to nobody', { audience: [] });
+    await t.submit({ lineId: id });
+    expect(stored(t.store)).toMatchObject({ targetSubject: b, lineId: null });
+  });
+
+  it("a whisper that included the reporter's seat is a valid citation (control)", async () => {
+    const t = setup();
+    t.table();
+    const c = t.sit('p3', who('k3'), 'Whisperer');
+    const id = t.say('p3', 'psst', { audience: ['p1', 'p3'] });
+    await t.submit({ lineId: id, targetSeat: 'p2' });
+    expect(stored(t.store)).toMatchObject({ targetSubject: c, lineId: id, targetSeat: 'p3' });
+  });
+
+  it('a line to the whole room (audience null) is a valid citation (control)', async () => {
+    const t = setup();
+    t.table();
+    const c = t.sit('p3', who('k3'));
+    const id = t.say('p3', 'hello all');
+    await t.submit({ lineId: id, targetSeat: 'p2' });
+    expect(stored(t.store)).toMatchObject({ targetSubject: c, lineId: id });
   });
 });
 

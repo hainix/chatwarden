@@ -156,7 +156,8 @@ export class ReportService {
    *
    * The reporter, the target and the duplicate check all match by CANONICAL subject, so merged aliases are
    * one person. The target is the author of `lineId` when that line is still in the evidence buffer (the seat may
-   * have changed hands since), otherwise the seat's current occupant. The excerpt is the room's evidence
+   * have changed hands since) and the reporter could have seen it (a line sent to a limited audience that left
+   * the reporter's seat out is ignored), otherwise the seat's current occupant. The excerpt is the room's evidence
    * snapshot: each line stores `p`, its writer's index in the report's `people` list, and no identity.
    */
   async submit(input: ReportInput): Promise<ReportResult> {
@@ -178,7 +179,10 @@ export class ReportService {
     if (reporterOcc === null || !present(reporterOcc.subject)) return refuse('off');
     const reporter = this.subjects.canonical(reporterOcc.subject);
 
-    const line = typeof input.lineId === 'string' ? this.buffer.get(roomId, input.lineId) : undefined;
+    let line = typeof input.lineId === 'string' ? this.buffer.get(roomId, input.lineId) : undefined;
+    // A reporter cannot cite a line they never saw: one sent to a limited audience that left their seat out is
+    // ignored, and the target falls back to the targetSeat occupant.
+    if (line !== undefined && line.audience !== null && !line.audience.includes(input.reporterSeat)) line = undefined;
     let target: { subject: SubjectId | null; seat: string; handle: string };
     if (line !== undefined) {
       target = { subject: line.subject, seat: line.seatId, handle: line.handle };
