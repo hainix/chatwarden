@@ -19,7 +19,11 @@ interface Rows {
 
 /** What the function given to {@link LiveTerms.change} may do. Every method is synchronous and writes one
  *  audit row (a no-op toggle or an empty patch writes nothing). `hits` is the dry-run result
- *  ({@link LiveTerms.check}) the moderator went ahead despite; it is kept in the audit row. */
+ *  ({@link LiveTerms.check}) the moderator went ahead despite; it is kept in the audit row.
+ *
+ *  WARNING: `hits` are chat lines, and they are PERSISTED into the audit log (kept as long as the log is, with
+ *  nothing purging them). Pass counts or a few capped, trimmed lines rather than everything `check` returned,
+ *  and remember that players typed them. */
 export interface TermEditor {
   /** Returns the new row id. */
   addTerm(input: { term: string; language: string; note?: string | null }, hits?: string[]): string;
@@ -151,6 +155,9 @@ export class LiveTerms implements Matcher {
    * block. A throw from `fn` itself rolls back and rejects with that error. `fn` must be synchronous.
    */
   async change<T>(actor: string, fn: (edit: TermEditor) => T): Promise<ChangeResult<T>> {
+    // With a pack configured, the store is not the truth until `load()` has seeded it and built from it: an
+    // edit before then would act on an unseeded store. Refuse, writing nothing and never calling `fn`.
+    if (this.pack !== null && !this.storeLoaded) return { ok: false, error: 'not loaded' };
     // Everything up to the swap is synchronous, so two changes never interleave.
     const state: { fnError?: { err: unknown }; built?: { matcher: Matcher; rows: Rows } } = {};
     try {

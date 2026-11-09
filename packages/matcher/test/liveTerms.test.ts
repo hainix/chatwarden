@@ -526,6 +526,48 @@ describe('change: terms', () => {
   });
 });
 
+describe('change before load', () => {
+  it('with a pack configured, change() before load() is refused as "not loaded": fn never runs, nothing is written', async () => {
+    const r = rig();
+    const fn = vi.fn((e: TermEditor) => e.addTerm({ term: 'Blorft', language: 'en' }));
+    const res = await r.live.change('alice', fn);
+    expect(res).toEqual({ ok: false, error: 'not loaded' });
+    expect(fn).not.toHaveBeenCalled();
+    expect(r.store.state.terms).toEqual([]);
+    expect(r.store.state.exceptions).toEqual([]);
+    expect(r.store.state.audit).toEqual([]);
+    expect(r.store.state.seeded).toEqual([]);
+    expect(r.warn).not.toHaveBeenCalled();
+  });
+
+  it('the pack still blocks in the meantime, and the same change works after load() (control)', async () => {
+    const r = rig();
+    expect(blocked(r.live, 'you zorbak')).toBe(true);
+    await r.live.change('alice', (e) => e.addTerm({ term: 'Blorft', language: 'en' }));
+    await r.live.load();
+    const res = await r.live.change('alice', (e) => e.addTerm({ term: 'Blorft', language: 'en' }));
+    expect(res.ok).toBe(true);
+    expect(blocked(r.live, 'what a blorft')).toBe(true);
+    expect(r.store.state.audit).toHaveLength(1);
+  });
+
+  it('a rejecting fn is also not run before load (it cannot throw its error out)', async () => {
+    const r = rig();
+    await expect(
+      r.live.change('alice', () => {
+        throw new Error('should not run');
+      }),
+    ).resolves.toEqual({ ok: false, error: 'not loaded' });
+  });
+
+  it('with no pack configured the store is the truth, so change() works without load()', async () => {
+    const r = rig({ pack: null });
+    await r.live.load();
+    const res = await r.live.change('alice', (e) => e.addTerm({ term: 'Blorft', language: 'en' }));
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe('change: exceptions', () => {
   it('an exception shields a term match after the change; disabling it blocks again; editing moves it', async () => {
     const r = await loaded();
