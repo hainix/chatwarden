@@ -129,6 +129,10 @@ export interface ChatwardenOptions {
   /**
    * Changes to the profile, deep-merged onto it (`{ profanity: { mode: 'allow' } }`; arrays replace). An unknown key
    * or an invalid result throws a `ProfileError` at creation.
+   *
+   * Overriding an outcome (`firstOffense`), the `repeat` rule or the `ladder` means overriding the `guidelines` text
+   * too: the moderator guide and the AI brief repeat each guideline's `outcome` as written. Only the player code of
+   * conduct derives its outcomes from those fields automatically.
    */
   overrides?: ProfileOverrides;
   /**
@@ -262,7 +266,8 @@ export interface Chatwarden {
    * What the moderation profile suggests for this person: the outcome, a short label, and a plain sentence on why.
    * It selects nothing; show it as one line. `context.roomId` is the room of the incident being judged: the repeat
    * rule counts it as one more note, and with `distinctGames` it must differ from the earlier notes' rooms (a
-   * missing room never pairs with an earlier note). Keyed by a subject id. Carries subject ids: staff channels
+   * missing room never pairs with an earlier note). When the profile's `repeat.distinctGames` is true (`relaxed`),
+   * the caller MUST pass the incident's `roomId` (the report's room), or note escalation never fires. Keyed by a subject id. Carries subject ids: staff channels
    * only, never send to a player (the returned `label` and `why` themselves hold no identifier).
    */
   suggest(subject: SubjectId, level: ConductLevel | null, rule: RuleRef, context?: SuggestContext): Suggestion;
@@ -339,7 +344,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   }
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
   const profanity = buildProfanityFilter(opts, profile.profanity);
-  if (profanity === undefined && profile.profanity.mode === 'refuse') safeWarn(logger, 'chatwarden.no_profanity_filter');
+  if (profanity === undefined && profile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
 
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });

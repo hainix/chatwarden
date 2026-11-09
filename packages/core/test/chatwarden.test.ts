@@ -224,11 +224,30 @@ describe('createChatwarden: chat', () => {
     });
   });
 
-  it('strict without any filter warns once at creation that swearing will not be refused; standard does not', async () => {
-    const strict = await setup({ profile: 'strict' });
-    expect(strict.logged.filter(([e]) => e === 'chatwarden.no_profanity_filter')).toHaveLength(1);
-    const standard = await setup();
-    expect(standard.logged.some(([e]) => e === 'chatwarden.no_profanity_filter')).toBe(false);
+  it.each(['strict', 'standard', 'relaxed'] as const)('%s (profanity not allowed) without any filter warns once at creation that swearing will not be handled', async (profile) => {
+    const s = await setup({ profile });
+    expect(s.logged.filter(([e]) => e === 'chatwarden.no_profanity_filter')).toHaveLength(1);
+  });
+
+  it('the default profile (star) without any filter warns once too', async () => {
+    const s = await setup();
+    expect(s.logged.filter(([e]) => e === 'chatwarden.no_profanity_filter')).toHaveLength(1);
+  });
+
+  it('mode allow never warns, with or without a filter', async () => {
+    const s = await setup({ overrides: { profanity: { mode: 'allow' } } });
+    expect(s.logged.some(([e]) => e === 'chatwarden.no_profanity_filter')).toBe(false);
+  });
+
+  it('star or refuse with a ready filter or a package does not warn', async () => {
+    const pkg = { createProfanityFilter: (): ProfanityFilter => ({ apply: (t) => ({ hit: false, text: t }) }) };
+    const own: ProfanityFilter = { apply: (t) => ({ hit: false, text: t }) };
+    for (const extra of [{ profanity: own }, { profanityPackage: pkg }]) {
+      for (const profile of ['relaxed', 'standard', 'strict'] as const) {
+        const s = await setup({ profile, ...extra });
+        expect(s.logged.some(([e]) => e === 'chatwarden.no_profanity_filter')).toBe(false);
+      }
+    }
   });
 
   it('the gate hook is passed through with the sender subject', async () => {
@@ -252,7 +271,9 @@ describe('createChatwarden: chat', () => {
     });
     cw.rooms.seat(R, 'a', alice, 'Alice');
     cw.chat.accept(R, 'a', 'hello');
-    expect(logged.filter(([e]) => e !== 'chatwarden.no_matcher')).toEqual([['chat.gate_failed', { error: 'TypeError' }]]);
+    expect(logged.filter(([e]) => e !== 'chatwarden.no_matcher' && e !== 'chatwarden.no_profanity_filter')).toEqual([
+      ['chat.gate_failed', { error: 'TypeError' }],
+    ]);
   });
 
   it('three blocked lines earn an automatic timeout and onAutoRestrict hears of it', async () => {

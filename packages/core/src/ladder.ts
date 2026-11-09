@@ -148,6 +148,9 @@ export interface SuggestContext {
    * The room (game) the incident came from. The repeat rule counts this incident as one more note, and with
    * `distinctGames` it needs to know whether that is a different game from the earlier notes. When it is missing
    * (or null), an earlier note never pairs with this incident, so the rule is judged on the earlier notes alone.
+   *
+   * When the profile's `repeat.distinctGames` is true, the caller MUST pass the incident's `roomId`, or note
+   * escalation never fires: without it this incident cannot count as a different game.
    */
   roomId?: string | null;
 }

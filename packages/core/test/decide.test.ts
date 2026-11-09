@@ -347,6 +347,58 @@ describe('decide: upheld acts only on people in the report', () => {
   });
 });
 
+describe('decide: a report filed with an empty room id', () => {
+  /** A table whose room id is the empty string: the report keeps it, the sanction rows must not. */
+  async function emptyRoomTable() {
+    const t = setup();
+    const reporter = t.sit('', 'p1', who('rk-empty'));
+    const target = t.sit('', 'p2', who('tk-empty'));
+    t.say('', 'p2', 'target says one');
+    const res = await t.reports.submit({ roomId: '', reporterSeat: 'p1', targetSeat: 'p2', category: 'other' });
+    if (!res.ok) throw new Error(`report refused: ${res.refused}`);
+    return { t, reportId: res.reportId, reporter, target };
+  }
+
+  it('can be upheld with a warning', async () => {
+    const { t, reportId, target } = await emptyRoomTable();
+    const res = await t.decide(reportId, { verdict: 'upheld', actions: [t.warn(target)] });
+    expect(res.ok).toBe(true);
+    expect(t.store.rawSanctions().map((r) => [r.kind, r.roomId ?? null])).toEqual([['warning', null]]);
+  });
+
+  it('can be upheld with a chat restriction', async () => {
+    const { t, reportId, target } = await emptyRoomTable();
+    expect((await t.decide(reportId, { verdict: 'upheld', actions: [t.chat(target)] })).ok).toBe(true);
+    expect(t.store.rawSanctions().map((r) => r.roomId ?? null)).toEqual([null]);
+  });
+
+  it('can be noted, and the note reaches the history with a null room', async () => {
+    const { t, reportId, target } = await emptyRoomTable();
+    expect((await t.decide(reportId, { verdict: 'noted', actions: [t.note(target)] })).ok).toBe(true);
+    expect(t.store.rawSanctions().map((r) => [r.kind, r.roomId ?? null])).toEqual([['note', null]]);
+    expect(historyOf(t.store, t.subjects, target, NOW).map((h) => h.roomId)).toEqual([null]);
+  });
+
+  it('can be closed as no_action with a warning on the reporter', async () => {
+    const { t, reportId, reporter } = await emptyRoomTable();
+    expect((await t.decide(reportId, { verdict: 'no_action', actions: [t.warn(reporter, { rule: 4 })] })).ok).toBe(true);
+    expect(t.store.rawSanctions().map((r) => r.roomId ?? null)).toEqual([null]);
+  });
+
+  it('can be closed as no_action with no actions at all', async () => {
+    const { t, reportId } = await emptyRoomTable();
+    expect((await t.decide(reportId, { verdict: 'no_action' })).ok).toBe(true);
+    expect(t.store.loadReport(reportId)).toMatchObject({ status: 'dismissed' });
+  });
+
+  it('control: a report with a real room still records that room', async () => {
+    const t = setup();
+    const { reportId, target, room } = await t.table();
+    okOf(await t.decide(reportId, { verdict: 'noted', actions: [t.note(target)] }));
+    expect(t.store.rawSanctions().map((r) => r.roomId)).toEqual([room]);
+  });
+});
+
 describe('decide: no_action', () => {
   it('dismisses with no bad-faith mark, no actions and no reporter feedback', async () => {
     const t = setup();

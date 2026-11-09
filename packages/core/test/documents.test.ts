@@ -408,9 +408,19 @@ describe('code of conduct: player-facing', () => {
     }
   });
 
-  it('after a warning, derives the next and last step from the ladder', () => {
-    const doc = codeOfConduct(policyOf('standard'), { format: 'text', gameName: GAME });
-    expect(doc).toMatch(/If you carry on after a warning, the next step is usually a chat timeout of 24 hours\. It gets stricter each time, up to a permanent ban\./);
+  it.each(['standard', 'relaxed'] as const)('%s: after a warning, derives the next and last step from the ladder', (name) => {
+    const doc = codeOfConduct(policyOf(name), { format: 'text', gameName: GAME });
+    expect(doc).toMatch(/If you carry on after a warning, the next step is at least a chat timeout of 24 hours\. It gets stricter each time, up to a permanent ban\./);
+    // Hostile after a warning reads the high column, so "usually" would understate it.
+    expect(doc).not.toContain('the next step is usually');
+  });
+
+  it('after a warning, "at least" follows the ladder own step-1 outcome', () => {
+    const base = PRESETS.standard.ladder;
+    const ladder = base.map((row, i) => (i === 1 ? { ...row, lowMedium: { kind: 'chat' as const, durationMs: 3 * 86_400_000, label: 'Restrict chat 3 days' } } : row));
+    const profile = resolveProfile('standard', { ladder });
+    const doc = codeOfConduct({ profile, rules: policyOf('standard').rules }, { format: 'text', gameName: GAME });
+    expect(doc).toContain('the next step is at least a chat timeout of 3 days.');
   });
 
   it('says which rules ban from public rooms instead of restricting chat, and skips the line when none do', () => {
@@ -428,6 +438,14 @@ describe('code of conduct: player-facing', () => {
     const doc = codeOfConduct({ profile, rules: policyOf('relaxed').rules }, { format: 'text', gameName: GAME });
     expect(doc).toContain('Swearing is allowed in chat');
     expect(doc).toContain('never a reason for action');
+  });
+
+  it.each(['allow', 'star', 'refuse'] as const)('%s mode scopes "never a reason for action" to swearing on its own', (mode) => {
+    const profile = resolveProfile('standard', { profanity: { mode } });
+    const doc = codeOfConduct({ profile, rules: policyOf('standard').rules }, { format: 'text', gameName: GAME });
+    expect(doc).toContain('Swearing on its own is never a reason for action. Aiming abuse at a player is covered by the rules above.');
+    // The unscoped claim is gone: no sentence says swearing is never a reason, full stop.
+    expect(doc).not.toMatch(/(?<!on its own )is never a reason for action\.(?! Aiming)/);
   });
 
   it('shows tier examples', () => {
@@ -513,7 +531,16 @@ describe('moderator guide', () => {
   it('describes profanity handling', () => {
     expect(moderatorGuide(policyOf('relaxed'), { format: 'text' })).toMatch(/star/);
     expect(moderatorGuide(policyOf('strict'), { format: 'text' })).toMatch(/refus/);
-    expect(moderatorGuide(policyOf('strict'), { format: 'text' })).toMatch(/never a rule violation/i);
+    expect(moderatorGuide(policyOf('strict'), { format: 'text' })).toContain(
+      'The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.',
+    );
+    expect(moderatorGuide(policyOf('strict'), { format: 'text' })).not.toMatch(/swearing is never a rule violation/i);
+  });
+
+  it.each(PRESET_NAMES)('%s agent brief scopes the profanity line', (name) => {
+    const brief = agentBrief(policyOf(name));
+    expect(brief).toContain('The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.');
+    expect(brief).not.toMatch(/It is never a rule violation/);
   });
 
   it('uses table elements in HTML and pipe tables in markdown', () => {

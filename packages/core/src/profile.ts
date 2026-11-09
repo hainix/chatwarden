@@ -96,7 +96,12 @@ export interface ModerationProfile {
   severeRules?: number[];
   /** What each conduct level means here, with examples. */
   levels: Record<ConductLevel, LevelDescription>;
-  /** The team's own guidelines, ordered. */
+  /**
+   * The team's own guidelines, ordered. Each tier's `outcome` is free text the moderator guide and the AI brief repeat
+   * as written; the kit never derives it. If you override an outcome (`firstOffense`), the `repeat` rule or the
+   * `ladder`, override `guidelines` to match, or the guide and brief will describe the preset's outcomes instead of
+   * yours. Only the player code of conduct derives its outcomes from those fields automatically.
+   */
   guidelines: GuidelineTier[];
 }
 
@@ -610,8 +615,8 @@ const STRICT: ModerationProfile = {
   profanity: { ...DEFAULT_PROFANITY, mode: 'refuse' },
   aiContext:
     'This is a game for younger players and families, and the aim is a kind space. Read only friendly salt and ' +
-    'jokes about play ("ez", "gg", "bad play") as banter, and take no action; swearing is stopped before it is ' +
-    'sent and is never a violation. Read any insult or swearing aimed at a player, even a mild one such as ' +
+    'jokes about play ("ez", "gg", "bad play") as banter, and take no action; swearing that is not aimed at anyone is ' +
+    'stopped before it is sent and is not a violation. Read any insult or swearing aimed at a player, even a mild one such as ' +
     '"loser", as rude. Read several insults, bullying, picking a fight or following ' +
     'someone across games as hostile. Read threats, hate, slurs, attacks on who someone is, sexual harassment ' +
     'and doxxing as severe. Judge the pattern across the reported lines, and when unsure choose the milder level.',
@@ -624,7 +629,7 @@ const STRICT: ModerationProfile = {
     {
       title: 'Banter',
       description:
-        'Friendly salt and jokes about play, with no insults. Swearing is stopped before it is sent, and that is not a violation.',
+        'Friendly salt and jokes about play, with no insults. Swearing that is not aimed at anyone is stopped before it is sent, and that is not a violation.',
       examples: ['ez', 'gg', 'bad play', 'lol'],
       covers: ['banter'],
       outcome: 'No action. Nothing is recorded.',

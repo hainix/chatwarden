@@ -134,6 +134,8 @@ export {
   HISTORY_LOOKBACK_MS,
   historyOf,
   LADDER_TABLE,
+  lengthLabel,
+  outcomeLabel,
   recordStep,
   suggest,
 } from './ladder.js';

@@ -418,7 +418,9 @@ export class SqliteStore implements Store, TermStore {
         where.push('created_at < ?');
         args.push(q.before);
       } else {
-        where.push('(created_at < ? OR (created_at = ? AND id < ?))');
+        // `created_at <= ?` is redundant with the pair below it, but it is a plain range on the indexed column, so
+        // SQLite seeks to the cursor instead of scanning the table.
+        where.push('(created_at <= ? AND (created_at < ? OR id < ?))');
         args.push(q.before, q.before, q.beforeId);
       }
     }

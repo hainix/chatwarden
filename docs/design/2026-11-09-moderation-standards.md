@@ -189,8 +189,8 @@ profanity: {
 ```
 
 - `refuse` returns a new chat refusal reason, `'profanity'`, which cites the profile's summary rather than a
-  rule. Under `strict`, swearing is "not allowed here", which is not a rule violation that earns strikes.
-  Profanity refusals never create strikes, notes or sanctions.
+  rule. Under `strict`, swearing is "not allowed here"; the profanity filter never earns strikes, and swearing at a player
+  is CR 2 and is judged as rude. Profanity refusals never create strikes, notes or sanctions.
 - The built-in English list stays in the optional `@chatwarden/profanity` package (obscenity's dataset), so the
   core install has no word data.
 - `remove` and `only` are applied to the dataset by word. Test-first, with synthetic stand-ins where a

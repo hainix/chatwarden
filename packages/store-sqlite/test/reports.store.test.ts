@@ -415,6 +415,44 @@ describe('listReports', () => {
     db.close();
   });
 
+  it('a cursor page seeks the created_at index instead of scanning the table', () => {
+    const { db, store } = env();
+    seeded(store);
+    const seen: string[] = [];
+    const prepare = db.prepare.bind(db);
+    db.prepare = ((sql: string) => {
+      seen.push(sql);
+      return prepare(sql);
+    }) as typeof db.prepare;
+    store.listReports({ before: NOW + 10, beforeId: 'r3', limit: 10 });
+    db.prepare = prepare as typeof db.prepare;
+    const sql = seen.find((q) => q.includes('FROM kit_reports') && q.includes('created_at')) ?? '';
+    expect(sql).not.toBe('');
+    // The plan does not depend on the bound values: one number per placeholder.
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...Array.from({ length: (sql.match(/\?/g) ?? []).length }, () => NOW + 10));
+    const detail = plan.map((r) => String((r as { detail: string }).detail)).join(' | ');
+    expect(detail).toMatch(/SEARCH kit_reports USING INDEX kit_reports_by_created \(created_at/);
+    db.close();
+  });
+
+  it('the cursor with the redundant range term gives the same pages when several rows tie on created_at', () => {
+    const { db, store } = env();
+    for (let i = 1; i <= 9; i++) store.insertReport(report({ id: `t${i}`, createdAt: NOW + (i <= 5 ? 5 : 6), reporterSubject: `s_t${i}` }));
+    // Walk the whole list two at a time by the cursor; every row appears once, in the newest-first order.
+    const all: string[] = [];
+    let cursor: { before: number; beforeId: string } | undefined;
+    for (;;) {
+      const page = store.listReports({ limit: 2, ...(cursor ?? {}) });
+      if (page.length === 0) break;
+      all.push(...ids(page));
+      const last = page[page.length - 1];
+      if (last === undefined) break;
+      cursor = { before: last.createdAt, beforeId: last.id };
+    }
+    expect(all).toEqual(['t9', 't8', 't7', 't6', 't5', 't4', 't3', 't2', 't1']);
+    db.close();
+  });
+
   it('before (exclusive) pages by time; with beforeId it splits an exact tie', () => {
     const { db, store } = env();
     seeded(store);

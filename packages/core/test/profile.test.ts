@@ -184,6 +184,11 @@ describe('the presets equal the standards doc tables, cell by cell', () => {
     expect(PRESETS.strict.aiContext).toContain('"loser"');
     expect(PRESETS.strict.aiContext).toContain('as rude');
     expect(PRESETS.strict.aiContext).not.toContain('single mild insult as banter');
+    // Swearing is only "not a violation" when it is not aimed at anyone.
+    expect(PRESETS.strict.aiContext).toContain('swearing that is not aimed at anyone is stopped before it is sent and is not a violation');
+    expect(PRESETS.strict.aiContext).not.toContain('is never a violation');
+    const banter = PRESETS.strict.guidelines.find((g) => g.title === 'Banter');
+    expect(banter?.description).toContain('Swearing that is not aimed at anyone is stopped before it is sent, and that is not a violation.');
   });
 
   it('every preset keeps the doc wording for hostile and severe', () => {

@@ -361,7 +361,7 @@ function afterWarningForPlayer(profile: ModerationProfile): string {
   const last = profile.ladder[profile.ladder.length - 1];
   const nextText = next === undefined ? 'a stricter action' : noun(cellOutcome(next.lowMedium));
   const lastText = last === undefined ? 'a permanent ban' : noun(cellOutcome(last.lowMedium));
-  return `If you carry on after a warning, the next step is usually ${nextText}. It gets stricter each time, up to ${lastText}.`;
+  return `If you carry on after a warning, the next step is at least ${nextText}. It gets stricter each time, up to ${lastText}.`;
 }
 
 function playerTierBlocks(profile: ModerationProfile, tier: GuidelineTier): Block[] {
@@ -409,11 +409,11 @@ function playerTierBlocks(profile: ModerationProfile, tier: GuidelineTier): Bloc
 function swearingForPlayer(profile: ModerationProfile): string {
   switch (profile.profanity.mode) {
     case 'allow':
-      return 'Swearing is allowed in chat. It is never a reason for action.';
+      return 'Swearing is allowed in chat. Swearing on its own is never a reason for action. Aiming abuse at a player is covered by the rules above.';
     case 'star':
-      return 'Swear words are replaced with stars in chat. That is never a reason for action.';
+      return 'Swear words are replaced with stars in chat. Swearing on its own is never a reason for action. Aiming abuse at a player is covered by the rules above.';
     case 'refuse':
-      return 'Messages with swear words are not sent, and you will see a message when that happens. It is never a reason for action.';
+      return 'Messages with swear words are not sent, and you will see a message when that happens. Swearing on its own is never a reason for action. Aiming abuse at a player is covered by the rules above.';
   }
 }
 
@@ -502,7 +502,7 @@ function profanityForModerators(profile: ModerationProfile): string[] {
   if (p.remove.length > 0) out.push(`Built-in words allowed here: ${listOf(p.remove)}.`);
   if (p.only !== null) out.push(`Only these words count as swearing: ${listOf(p.only)}.`);
   out.push(`Word lists: ${listOf(p.languages)}.`);
-  out.push('Swearing is never a rule violation: it never creates a strike, a note, a sanction or a notice.');
+  out.push('The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.');
   return out;
 }
 
@@ -658,7 +658,7 @@ export function agentBrief(policy: DocumentPolicy): string {
   lines.push(
     'Guidelines:',
     ...profile.guidelines.map((t) => `- ${clean(t.title)} (covers: ${t.covers.map(coverName).join(', ')}): ${clean(t.outcome)}`),
-    `Profanity: ${profile.profanity.mode}. It is never a rule violation.`,
+    `Profanity: ${profile.profanity.mode}. The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.`,
     '',
     'AI AUTO-ACT',
     profile.aiAutoAct.length === 0

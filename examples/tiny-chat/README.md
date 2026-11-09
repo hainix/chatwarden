@@ -62,7 +62,9 @@ decision the kit refuses answers 422.
 
 Some kit values carry subject ids (they name a person). They are for staff channels only, never for a player:
 `onReport`'s `StoredReport`, the result of `decide` (its `groups`), `history`, `suggest`, `gaps.list` and
-`rooms.subjectAt`. Keep them on the server or in a moderator queue.
+`rooms.subjectAt`. Keep them on the server or in a moderator queue. The demo never calls `suggest`; a moderator console that does must pass
+the report's `roomId` as `{ roomId }` whenever the profile's `repeat.distinctGames` is true (`relaxed`), or note escalation
+never fires.
 
 What a player may see: a `PlayerNotice` (from `notices.pending` and `notices.record`), a `refused` frame (a reason, an end
 time, a rule number and a notice id) and a reference code to quote to a moderator. The demo server follows this: it

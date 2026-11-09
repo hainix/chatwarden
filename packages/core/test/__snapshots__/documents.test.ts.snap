@@ -43,7 +43,7 @@ Guidelines:
 - Repeated hostility (covers: hostile, repeated behaviour): A warning: be respectful.
 - After a warning (covers: after a warning): Timeouts, then bans, stepping up with each action.
 - Severe (covers: severe): Immediate action: chat restricted for 7 days, then bans.
-Profanity: star. It is never a rule violation.
+Profanity: star. The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.
 
 AI AUTO-ACT
 The AI may act on its own for: severe. Auto-act is never banter or rude; a moderator decides those.
@@ -109,7 +109,7 @@ For example: "three insults in one game", "insulting the same player again next 
 
 **What happens:**
 
-- If you carry on after a warning, the next step is usually a chat timeout of 24 hours. It gets stricter each time, up to a permanent ban.
+- If you carry on after a warning, the next step is at least a chat timeout of 24 hours. It gets stricter each time, up to a permanent ban.
 
 ### Severe
 
@@ -130,7 +130,7 @@ Breaking CR 1 (No slurs or hate aimed at who someone is) is always treated as se
 
 ## Swearing
 
-Swear words are replaced with stars in chat. That is never a reason for action.
+Swear words are replaced with stars in chat. Swearing on its own is never a reason for action. Aiming abuse at a player is covered by the rules above.
 
 ## How to report
 
@@ -269,7 +269,7 @@ The AI may act on its own for: severe. It never acts on its own for banter or ru
 
 - Swearing is replaced with stars in chat (style: full).
 - Word lists: en.
-- Swearing is never a rule violation: it never creates a strike, a note, a sanction or a notice.
+- The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.
 
 ## Writing a reason
 
@@ -332,7 +332,7 @@ Guidelines:
 - Sustained or repeated hostility (covers: hostile, repeated behaviour): Chat restricted for 24 hours.
 - After a warning (covers: after a warning): Longer restrictions, then bans, stepping up with each action.
 - Severe (covers: severe): Chat restricted for 7 days at once, then bans.
-Profanity: star. It is never a rule violation.
+Profanity: star. The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.
 
 AI AUTO-ACT
 The AI may act on its own for: severe. Auto-act is never banter or rude; a moderator decides those.
@@ -397,7 +397,7 @@ For example: "three insults in one game", "insulting the same player again next 
 
 **What happens:**
 
-- If you carry on after a warning, the next step is usually a chat timeout of 24 hours. It gets stricter each time, up to a permanent ban.
+- If you carry on after a warning, the next step is at least a chat timeout of 24 hours. It gets stricter each time, up to a permanent ban.
 
 ### Severe
 
@@ -418,7 +418,7 @@ Breaking CR 1 (No slurs or hate aimed at who someone is) is always treated as se
 
 ## Swearing
 
-Swear words are replaced with stars in chat. That is never a reason for action.
+Swear words are replaced with stars in chat. Swearing on its own is never a reason for action. Aiming abuse at a player is covered by the rules above.
 
 ## How to report
 
@@ -557,7 +557,7 @@ The AI may act on its own for: severe. It never acts on its own for banter or ru
 
 - Swearing is replaced with stars in chat (style: full).
 - Word lists: en.
-- Swearing is never a rule violation: it never creates a strike, a note, a sanction or a notice.
+- The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.
 
 ## Writing a reason
 
@@ -620,11 +620,11 @@ Guidelines:
 - Bullying (covers: hostile): Chat restricted for 24 hours.
 - After a warning (covers: after a warning): Longer restrictions, then bans, stepping up with each action.
 - Severe (covers: severe): A 7 day ban at once.
-Profanity: refuse. It is never a rule violation.
+Profanity: refuse. The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.
 
 AI AUTO-ACT
 The AI may act on its own for: hostile, severe. Auto-act is never banter or rude; a moderator decides those.
-Standard for the AI read: This is a game for younger players and families, and the aim is a kind space. Read only friendly salt and jokes about play ("ez", "gg", "bad play") as banter, and take no action; swearing is stopped before it is sent and is never a violation. Read any insult or swearing aimed at a player, even a mild one such as "loser", as rude. Read several insults, bullying, picking a fight or following someone across games as hostile. Read threats, hate, slurs, attacks on who someone is, sexual harassment and doxxing as severe. Judge the pattern across the reported lines, and when unsure choose the milder level.
+Standard for the AI read: This is a game for younger players and families, and the aim is a kind space. Read only friendly salt and jokes about play ("ez", "gg", "bad play") as banter, and take no action; swearing that is not aimed at anyone is stopped before it is sent and is not a violation. Read any insult or swearing aimed at a player, even a mild one such as "loser", as rude. Read several insults, bullying, picking a fight or following someone across games as hostile. Read threats, hate, slurs, attacks on who someone is, sexual harassment and doxxing as severe. Judge the pattern across the reported lines, and when unsure choose the milder level.
 "
 `;
 
@@ -685,7 +685,7 @@ For example: "three insults in one game", "insulting the same player again next 
 
 **What happens:**
 
-- If you carry on after a warning, the next step is usually a chat timeout of 24 hours. It gets stricter each time, up to a permanent ban.
+- If you carry on after a warning, the next step is at least a chat timeout of 24 hours. It gets stricter each time, up to a permanent ban.
 
 ### Severe
 
@@ -706,7 +706,7 @@ Breaking CR 1 (No slurs or hate aimed at who someone is) is always treated as se
 
 ## Swearing
 
-Messages with swear words are not sent, and you will see a message when that happens. It is never a reason for action.
+Messages with swear words are not sent, and you will see a message when that happens. Swearing on its own is never a reason for action. Aiming abuse at a player is covered by the rules above.
 
 ## How to report
 
@@ -755,7 +755,7 @@ This guide is generated from the moderation profile and the Community Rules in f
 
 ### Banter
 
-Friendly salt and jokes about play, with no insults. Swearing is stopped before it is sent, and that is not a violation.
+Friendly salt and jokes about play, with no insults. Swearing that is not aimed at anyone is stopped before it is sent, and that is not a violation.
 
 Examples: ez; gg; bad play; lol
 
@@ -845,7 +845,7 @@ The AI may act on its own for: hostile, severe. It never acts on its own for ban
 
 - A message with swearing is refused before it is sent.
 - Word lists: en.
-- Swearing is never a rule violation: it never creates a strike, a note, a sanction or a notice.
+- The profanity filter never creates a strike, note, sanction or notice. Swearing aimed at a player is still judged as rude.
 
 ## Writing a reason
 

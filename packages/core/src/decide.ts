@@ -374,7 +374,7 @@ export class DecisionService {
       source: norm.source,
       automated: false,
       rule: a.rule,
-      roomId,
+      roomId: roomId === '' ? null : roomId,
       ...(a.gapNote === undefined ? {} : { gapNote: a.gapNote }),
     };
   }
