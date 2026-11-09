@@ -1153,14 +1153,14 @@ describe('createChatwarden: history and suggest', () => {
 
   it('the facade decide takes the new verdicts: bad_faith needs evidence, fair and unfair are invalid', async () => {
     const r = await reported();
-    const { cw, reportId, a } = r;
+    const { cw, reportId } = r;
     const base = { reportId, actor: 'mod@example.test', reason: 'private reason text', actions: [] };
     expect(await cw.decide({ ...base, verdict: 'fair' as never })).toEqual({ ok: false, error: 'invalid' });
     expect(await cw.decide({ ...base, verdict: 'unfair' as never })).toEqual({ ok: false, error: 'invalid' });
     expect(await cw.decide({ ...base, verdict: 'bad_faith' })).toEqual({ ok: false, error: 'invalid' });
     expect(await cw.decide({ ...base, verdict: 'no_action', evidence: 'x' })).toEqual({ ok: false, error: 'invalid' });
     expect(await cw.decide({ ...base, verdict: 'bad_faith', evidence: 'staff-only-evidence-text' })).toMatchObject({ ok: true });
-    expect(JSON.stringify(cw.notices.pending(r.cw.rooms.subjectAt(R, 'a') ?? a))).not.toContain('staff-only-evidence-text');
+    for (const who of [alice, bob]) expect(JSON.stringify(cw.notices.pending(who))).not.toContain('staff-only-evidence-text');
   });
 
   it('a decided warning shows in the history and moves the suggestion up the ladder', async () => {
