@@ -228,6 +228,13 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  sanctionRefCode(groupId: string): string | null {
+    const row = this.transaction(() =>
+      this.db.prepare('SELECT ref_code FROM kit_sanctions WHERE group_id = ? LIMIT 1').get(groupId),
+    ) as { ref_code: string } | undefined;
+    return row === undefined ? null : row.ref_code;
+  }
+
   loadSanctions(now: number): SanctionRow[] {
     return this.transaction(() =>
       this.db

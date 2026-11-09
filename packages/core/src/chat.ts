@@ -111,6 +111,12 @@ export interface ChatServiceDeps {
    * penalty. Not called while sanctions are switched off. A throw is logged and swallowed.
    */
   onAutoRestrict?: (subject: SubjectId | null, second: boolean) => void;
+  /**
+   * Told once, after the stored automatic timeout has landed (and after `onAutoRestrict`), with the sanction group
+   * and its ref code. Not called when the timeout is held only in memory (a speaker with no subject, or a failed
+   * write): there is no stored group to name. The facade turns it into the `auto.restricted` event. Fenced.
+   */
+  onAutoRestricted?: (info: { groupId: string; refCode: string; second: boolean }) => void;
   /** Defaults to `console.warn`. */
   logger?: Logger;
   /**
@@ -176,6 +182,7 @@ export class ChatService {
   private readonly profanityMode: ProfanityConfig['mode'];
   private readonly gate: ChatServiceDeps['gate'];
   private readonly onAutoRestrict: ChatServiceDeps['onAutoRestrict'];
+  private readonly onAutoRestricted: ChatServiceDeps['onAutoRestricted'];
   private readonly logger: Logger | undefined;
   private readonly notices: NoticeService | undefined;
   private readonly autoRestrictRule: number;
@@ -204,6 +211,7 @@ export class ChatService {
     this.profanityMode = deps.profanityMode ?? 'star';
     this.gate = deps.gate;
     this.onAutoRestrict = deps.onAutoRestrict;
+    this.onAutoRestricted = deps.onAutoRestricted;
     this.logger = deps.logger;
     this.notices = deps.notices;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
@@ -447,6 +455,7 @@ export class ChatService {
     // after a restart a strike is counted only if it is newer than this start.
     const now = this.clock.now();
     let stored = false;
+    let landed: { groupId: string; refCode: string } | null = null;
     if (subject !== null) {
       try {
         // The store write and the index update both happen synchronously, before this returns its promise.
@@ -474,7 +483,10 @@ export class ChatService {
         const none: Identifiers = { clientKey: null, accountId: null, ipHash: null };
         const found = this.sanctions.active('chat', none, subject, now);
         stored = found !== null && found.automated && found.until === now + durationMs;
-        if (found !== null && stored) this.makeNotice(subject, found, line);
+        if (found !== null && stored) {
+          landed = { groupId: found.groupId, refCode: found.refCode };
+          this.makeNotice(subject, found, line);
+        }
       } catch (err) {
         this.warn('chat.auto_restrict_failed', { error: errName(err) });
       }
@@ -490,6 +502,18 @@ export class ChatService {
       }
     } catch (err) {
       this.warn('chat.on_auto_restrict_failed', { error: errName(err) });
+    }
+    if (landed !== null) {
+      try {
+        const told: unknown = this.onAutoRestricted?.({ ...landed, second });
+        if (isThenable(told)) {
+          told.then(undefined, (err: unknown) => {
+            this.warn('chat.on_auto_restrict_failed', { error: errName(err) });
+          });
+        }
+      } catch (err) {
+        this.warn('chat.on_auto_restrict_failed', { error: errName(err) });
+      }
     }
   }
 

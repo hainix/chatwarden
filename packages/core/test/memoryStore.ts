@@ -173,6 +173,10 @@ export class MemoryStore implements Store {
     return touched.length;
   }
 
+  sanctionRefCode(groupId: string): string | null {
+    return this.sanctions.find((r) => r.groupId === groupId)?.refCode ?? null;
+  }
+
   loadSanctions(now: number): SanctionRow[] {
     return this.sanctions
       .filter((r) => r.revokedAt === null && (r.endsAt === null || r.endsAt > now))

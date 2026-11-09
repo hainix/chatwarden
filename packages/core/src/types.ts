@@ -423,6 +423,12 @@ export interface Store {
    */
   revokeSanctionGroup(groupId: string, actor: string, at: number, reason: string): number;
 
+  /**
+   * The player-quotable ref code of a sanction group, or null for an unknown group. Revoked and ended groups are
+   * still found: the code never changes. For the `sanction.revoked` event.
+   */
+  sanctionRefCode(groupId: string): string | null;
+
   /** Every unrevoked row that has not ended by `now`, for rebuilding the sanction index. */
   loadSanctions(now: number): SanctionRow[];
 
@@ -620,6 +626,12 @@ export interface Matcher {
    * Empty exactly when `match` is null.
    */
   spans?(text: string): Array<{ start: number; end: number; termId: string }>;
+  /**
+   * The same check for a NAME (a handle, a table or deck name) rather than a chat line: the matcher also reads the
+   * name split into words (underscores, camel-case humps, digit runs), so `Zorbak_99` is caught. Optional: without
+   * it `names.check` falls back to `match`.
+   */
+  matchName?(name: string): { termId: string } | null;
 }
 
 // ---------------------------------------------------------------------------

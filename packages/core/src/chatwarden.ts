@@ -7,6 +7,8 @@ import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { EventBus } from './events.js';
+import type { Subscribe } from './events.js';
 import { hashWho, makeHasher } from './hasher.js';
 import { safeWarn } from './log.js';
 import { historyOf, suggest } from './ladder.js';
@@ -105,7 +107,10 @@ export interface ChatwardenOptions {
    * Carries subject ids: staff channels only, never send to a player.
    */
   onReport?: (report: StoredReport, counts: ReportCounts) => void;
-  /** Told once when a blocked line earned an automatic timeout; `second` is true for the 24 h repeat. */
+  /**
+   * Told once when a blocked line earned an automatic timeout; `second` is true for the 24 h repeat. The same moment
+   * is also the `auto.restricted` event (`cw.on`), which names the stored group; this option keeps its shape.
+   */
   onAutoRestrict?: (subject: SubjectId | null, second: boolean) => void;
   /**
    * Retention purge. On by default: the kit deletes rows past their retention (see `RETENTION_DEFAULTS`) every
@@ -219,6 +224,25 @@ export interface Chatwarden {
      * a seen one leaves "My record". Resolves true when this call revoked something.
      */
     revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
+  };
+  /**
+   * Subscribe to what happens in the kit: `'report.created'`, `'report.closed'`, `'sanction.applied'`,
+   * `'sanction.revoked'`, `'gap.created'`, `'auto.restricted'`, or `'*'` for all. Returns the unsubscribe function.
+   *
+   * Events are announced after the operation has committed, once each, and never for a refused or failed one (a
+   * replayed decision announces nothing). A listener may be async; it is fenced: a throw or a rejection is logged
+   * (`chatwarden.listener_failed`, error class only) and never reaches the operation. Staff only: a `sanction.applied`
+   * event carries the target's subject id. They hold no chat text, reason, evidence or gap note.
+   */
+  on: Subscribe;
+  names: {
+    /**
+     * May a player use this as a name (a handle, a table or deck name)? Reads it with the matcher's name rules
+     * (`Zorbak_99` is caught, not only `zorbak`). `rule` is the Community Rule the slur filter cites
+     * (`autoRestrictRule`). No matcher, and a matcher that fails (logged, class only), both let the name through.
+     * Throws a TypeError for a value that is not a string.
+     */
+    check(text: string): { ok: true } | { ok: false; reason: 'name_not_allowed'; rule: number };
   };
   /** The registry in use (the one given, or the starter rules for the profile). Retired rules stay listed. */
   rules: CommunityRules;
@@ -346,6 +370,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const profanity = buildProfanityFilter(opts, profile.profanity);
   if (profanity === undefined && profile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
 
+  const bus = new EventBus(logger);
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });
   const roster = new RoomRoster();
@@ -385,6 +410,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     profanityMode: profile.profanity.mode,
     gate: opts.gate,
     onAutoRestrict: opts.onAutoRestrict,
+    onAutoRestricted: ({ groupId, refCode, second }) => {
+      bus.emit({ type: 'auto.restricted', groupId, refCode, second });
+    },
     logger,
     notices,
     autoRestrictRule,
@@ -426,6 +454,26 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     } catch (err) {
       safeWarn(logger, 'chatwarden.notices_failed', { error: err instanceof Error ? err.name : typeof err });
       return fallback;
+    }
+  };
+
+  const eventFailed = (err: unknown): void => {
+    safeWarn(logger, 'chatwarden.event_failed', { error: err instanceof Error ? err.name : typeof err });
+  };
+  /** `report.created` for a stored report: read back from the store, so the event states what was stored. */
+  const announceReport = (reportId: string): void => {
+    try {
+      const stored = store.loadReport(reportId);
+      if (stored === null) return;
+      bus.emit({
+        type: 'report.created',
+        reportId: stored.id,
+        createdAt: stored.createdAt,
+        category: stored.category,
+        roomTags: { ...stored.tags },
+      });
+    } catch (err) {
+      eventFailed(err);
     }
   };
 
@@ -485,7 +533,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       mutedSeats: (roomId, viewerSeat) => mutes.mutedSeats(roomId, viewerSeat, roster),
     },
     reports: {
-      submit: (input) => reports.submit(input),
+      submit: async (input) => {
+        const res = await reports.submit(input);
+        if (res.ok) announceReport(res.reportId);
+        return res;
+      },
       list: (q) => listStaffReports(store, subjects, q),
       get: (id) => {
         const record = typeof id === 'string' ? store.loadReport(id) : null;
@@ -494,9 +546,59 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
-      apply: (input) => applySanction(store, subjects, input, clock.now(), sanctions),
-      revoke: async (groupId, actor, reason) =>
-        (await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock, index: sanctions })).revoked,
+      apply: async (input) => {
+        const now = clock.now();
+        const done = await applySanction(store, subjects, input, now, sanctions);
+        try {
+          const rule: RuleRef = input.rule === undefined ? 'uncovered' : input.rule;
+          const noEnd = input.kind === 'warning' || input.kind === 'note' || input.durationMs === null;
+          bus.emit({
+            type: 'sanction.applied',
+            groupId: done.groupId,
+            refCode: done.refCode,
+            kind: input.kind,
+            until: noEnd ? null : now + (input.durationMs ?? 0),
+            rule,
+            source: input.source,
+            automated: input.automated,
+            target: subjects.canonical(input.subject),
+          });
+          // A gap row exists only for a moderator's uncovered rule (the sanction check requires its note).
+          if (rule === 'uncovered' && input.source === 'moderator') {
+            bus.emit({ type: 'gap.created', groupId: done.groupId, refCode: done.refCode, at: now });
+          }
+        } catch (err) {
+          eventFailed(err);
+        }
+        return done;
+      },
+      revoke: async (groupId, actor, reason) => {
+        const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock, index: sanctions });
+        if (revoked) {
+          try {
+            const code = store.sanctionRefCode(groupId);
+            if (code !== null) bus.emit({ type: 'sanction.revoked', groupId, refCode: code, at: clock.now() });
+          } catch (err) {
+            eventFailed(err);
+          }
+        }
+        return revoked;
+      },
+    },
+    on: bus.on,
+    names: {
+      check: (text) => {
+        if (typeof text !== 'string') throw new TypeError('names.check: the name must be a string');
+        const m = opts.matcher;
+        if (m === undefined) return { ok: true };
+        try {
+          const hit = typeof m.matchName === 'function' ? m.matchName(text) : m.match(text);
+          return hit === null ? { ok: true } : { ok: false, reason: 'name_not_allowed', rule: autoRestrictRule };
+        } catch (err) {
+          safeWarn(logger, 'chatwarden.names_matcher_failed', { error: err instanceof Error ? err.name : typeof err });
+          return { ok: true };
+        }
+      },
     },
     rules,
     profile,
@@ -509,7 +611,33 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
     },
-    decide: (input) => decisions.decide(input),
+    decide: async (input) => {
+      const { result, committed } = await decisions.decideDetailed(input);
+      if (committed !== null) {
+        try {
+          bus.emit({ type: 'report.closed', reportId: committed.reportId, verdict: committed.verdict, at: committed.at });
+          for (const g of committed.applied) {
+            bus.emit({
+              type: 'sanction.applied',
+              groupId: g.groupId,
+              refCode: g.refCode,
+              kind: g.kind,
+              until: g.until,
+              rule: g.rule,
+              source: g.source,
+              automated: false,
+              target: g.target,
+            });
+          }
+          for (const g of committed.applied) {
+            if (g.gap) bus.emit({ type: 'gap.created', groupId: g.groupId, refCode: g.refCode, at: committed.at });
+          }
+        } catch (err) {
+          eventFailed(err);
+        }
+      }
+      return result;
+    },
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
     suggest: (subject, level, rule, context) => {
       const now = clock.now();

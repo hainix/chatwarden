@@ -118,3 +118,29 @@ describe('matchName (synthetic pack)', () => {
     expect(seen[0]).toBe('big_red');
   });
 });
+
+describe('Matcher.matchName (built matchers)', () => {
+  it('buildMatcher carries matchName with the same semantics as the matchName helper', () => {
+    const m = pack();
+    expect(typeof m.matchName).toBe('function');
+    for (const name of ['Zorbak_99', 'TheZorbak', 'zorbak99', 'xXZorbakXx', 'x_zorbak', 'BigVlemmo', 'Alice', 'quill_42', '', 'xZorbakx']) {
+      expect(m.matchName?.(name) ?? null, name).toEqual(matchName(m, name));
+    }
+  });
+
+  it('catches the handle form that plain match misses', () => {
+    const m = pack();
+    expect(m.match('Zorbak_99')).toBeNull();
+    expect(m.matchName?.('Zorbak_99')).toEqual({ termId: 'syn:zorbak' });
+  });
+
+  it('a matcher with no active terms has a matchName that never matches', () => {
+    const m = buildMatcher([term('a', 'zorbak', false)], []);
+    expect(m.matchName?.('Zorbak_99')).toBeNull();
+  });
+
+  it('honours exceptions like match does', () => {
+    const m = pack();
+    expect(m.matchName?.('Tarvo_Lake')).toBeNull();
+  });
+});

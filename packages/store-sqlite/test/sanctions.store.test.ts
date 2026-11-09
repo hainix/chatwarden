@@ -797,3 +797,28 @@ describe('SqliteStore loadSubjectActions', () => {
     expect(store.loadSanctions(NOW)[0]).not.toHaveProperty('revokedAt');
   });
 });
+
+describe('SqliteStore.sanctionRefCode', () => {
+  it('finds the ref code of a group, revoked or ended, and null for an unknown group', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const live = await applySanction(store, subjects, input(s), NOW, index);
+    const ended = await applySanction(store, subjects, input(s, { durationMs: 1 }), NOW - DAY, index);
+    const revoked = await applySanction(store, subjects, input(s, { kind: 'ban', durationMs: null }), NOW, index);
+    store.revokeSanctionGroup(revoked.groupId, 'mod', NOW, 'oops');
+    expect(store.sanctionRefCode(live.groupId)).toBe(live.refCode);
+    expect(store.sanctionRefCode(ended.groupId)).toBe(ended.refCode);
+    expect(store.sanctionRefCode(revoked.groupId)).toBe(revoked.refCode);
+    expect(store.sanctionRefCode('no-such-group')).toBeNull();
+    expect(store.sanctionRefCode('')).toBeNull();
+  });
+
+  it('gives the same code for a group that has an IP row too', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const g = await applySanction(store, subjects, input(s, { includeIp: true }), NOW, index);
+    expect(store.sanctionRefCode(g.groupId)).toBe(g.refCode);
+  });
+});
