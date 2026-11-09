@@ -137,6 +137,14 @@ describe('cw.audit.record: refusals and fencing', () => {
       { actor: undefined },
       { actor: 42 },
       { actor: 'x'.repeat(129) },
+      { actor: 'Jane Doe' },
+      { actor: ' alice' },
+      { actor: 'alice ' },
+      { actor: 'a	b' },
+      { actor: 'zoë' },
+      { actor: 'a/b' },
+      { actor: '<b>' },
+      { target: { type: 'report', ref: 'x'.repeat(65) } },
       { actor: 'line\nbreak' },
       { target: { type: 'chat', ref: 'x' } },
       { target: { type: 'report', ref: '' } },
@@ -177,6 +185,30 @@ describe('cw.audit.record: refusals and fencing', () => {
   it('is synchronous: it returns a boolean, not a promise', async () => {
     const { cw } = await setup();
     expect(typeof rec(cw)).toBe('boolean');
+  });
+});
+
+describe('cw.audit.record: actor and ref charsets', () => {
+  it('accepts a staff ref or an email-style login', async () => {
+    const { cw } = await setup();
+    for (const actor of ['alice', 's_Ab-1_2', 'jane.doe@example.com', 'jane+ops@example.co.uk', 'mod:42', 'x'.repeat(128)]) {
+      expect(rec(cw, { actor }), actor).toBe(true);
+    }
+    expect(cw.audit.list({ limit: 10, actor: 'jane.doe@example.com' }).items).toHaveLength(1);
+  });
+
+  it('a ref of 64 characters is accepted and 65 is refused', async () => {
+    const { cw } = await setup();
+    expect(rec(cw, { target: { type: 'report', ref: 'r'.repeat(64) } })).toBe(true);
+    expect(rec(cw, { target: { type: 'report', ref: 'r'.repeat(65) } })).toBe(false);
+  });
+
+  it('list can still filter on a legacy actor with spaces (the restriction is for record only)', async () => {
+    class Legacy extends MemoryStore {}
+    const store = new Legacy();
+    store.insertAudit({ id: 'legacy', at: NOW, actor: 'Old Mod Name', role: null, action: 'term.add', target: null });
+    const { cw } = await setup({}, store);
+    expect(cw.audit.list({ limit: 5, actor: 'Old Mod Name' }).items).toHaveLength(1);
   });
 });
 
@@ -367,7 +399,7 @@ describe('cw.audit.list: keyset paging', () => {
     },
   );
 
-  it('a report cursor is not accepted as an audit cursor, and a non-string before is refused', async () => {
+  it('a non-string before is refused and a null before is the first page', async () => {
     const { cw } = await setup();
     expect(() => cw.audit.list({ limit: 5, before: 12 as never })).toThrow(AuditQueryError);
     expect(() => cw.audit.list({ limit: 5, before: null as never })).not.toThrow();
@@ -381,6 +413,31 @@ describe('legacy term rows through the store contract', () => {
     for (const item of cw.audit.list({ limit: 5 }).items) {
       expect(Object.keys(item).every((k) => ['id', 'at', 'actor', 'role', 'action', 'target'].includes(k))).toBe(true);
     }
+  });
+});
+
+describe('retention: non-finite values are refused for every field', () => {
+  const fields = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs'] as const;
+  for (const field of fields) {
+    for (const bad of [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NaN]) {
+      it(`${field} = ${bad} is a ProfileError naming the field, at creation and on purge(policy)`, async () => {
+        await expect(setup({ retention: { [field]: bad } })).rejects.toThrow(new RegExp(`^retention[.]${field} `));
+        await expect(setup({ retention: { [field]: bad } })).rejects.toBeInstanceOf(ProfileError);
+        const { cw } = await setup();
+        await expect(cw.purge({ [field]: bad })).rejects.toBeInstanceOf(ProfileError);
+      });
+    }
+  }
+
+  it('one bad override does not poison the next purge', async () => {
+    const { cw } = await setup();
+    await expect(cw.purge({ auditMs: Number.POSITIVE_INFINITY })).rejects.toBeInstanceOf(ProfileError);
+    await expect(cw.purge()).resolves.toMatchObject({ audit: 0 });
+  });
+
+  it('finite values are unaffected (control)', async () => {
+    const { cw } = await setup({ retention: { reportsMs: 1, strikesMs: 1 } });
+    await cw.close();
   });
 });
 

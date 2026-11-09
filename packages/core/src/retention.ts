@@ -38,6 +38,8 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs'] as const;
+
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
  * absent one takes a default, and the defaults satisfy every floor):
@@ -46,10 +48,20 @@ const RECORD_FLOOR_MS = 90 * DAY_MS;
  * - `badFaithMs` at least `suspendWindowMs`: a bad-faith dismissal weighs against its reporter for that long
  * - `auditMs` at least 90 days: the staff trail is how a community answers "who did that"
  *
+ * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
+ *
  * Throws {@link ProfileError} naming the field and why. Anything that is not a number at least the floor fails,
  * NaN included.
  */
 export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWindowMs: number): void {
+  // Every field present must be a finite number, whatever its floor: Infinity or NaN would make every later purge
+  // throw (and so delete nothing from any table).
+  for (const field of FIELDS) {
+    const v: unknown = policy[field];
+    if (v !== undefined && !(typeof v === 'number' && Number.isFinite(v))) {
+      throw new ProfileError(`retention.${field}`, 'must be a finite number of milliseconds');
+    }
+  }
   const below = (v: unknown, floor: number): boolean => v !== undefined && !(typeof v === 'number' && v >= floor);
   if (below(policy.sanctionAfterEndMs, RECORD_FLOOR_MS)) {
     throw new ProfileError(
@@ -103,7 +115,8 @@ function checkWindow(name: string, ms: number): void {
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn.
  *
- * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are never touched. The in-memory indexes need no update: they already ignore everything this removes.
+ * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are never touched. The in-memory
+ * indexes need no update: they already ignore everything this removes.
  */
 export async function purge(
   store: Store,

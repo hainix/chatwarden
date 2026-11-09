@@ -35,13 +35,20 @@ export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
 export interface AuditTarget {
   type: AuditTargetType;
-  /** An id: 1..128 characters of `A-Z a-z 0-9 _ . : -`. Never text. */
+  /**
+   * An id: 1..64 characters of `A-Z a-z 0-9 _ . : -`. It holds ids only (a report id, a sanction group id, a
+   * subject id, a term id), never text: pass the id of a term, not the term.
+   */
   ref: string;
 }
 
 /** What {@link AuditService.record} takes. Nothing else is read, so nothing else can be stored. */
 export interface AuditRecordInput {
-  /** The staff member (their staff ref or login name): 1..128 characters, no control characters. */
+  /**
+   * The staff member: a staff ref or login, 1..128 characters of `A-Z a-z 0-9 _ . : @ + -`, no whitespace. Never a
+   * display name or any message. (Rows written before the trail existed may carry other actors; `list` returns
+   * them as they are.)
+   */
   actor: string;
   role: Role;
   action: AuditAction;
@@ -110,9 +117,8 @@ export class AuditQueryError extends Error {
   }
 }
 
-const REF_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
-// eslint-disable-next-line no-control-regex
-const ACTOR_RE = /^[^\u0000-\u001f\u007f]{1,128}$/;
+const REF_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+const ACTOR_RE = /^[A-Za-z0-9_.:@+-]{1,128}$/;
 
 const newId = (): string => randomBytes(16).toString('base64url');
 
