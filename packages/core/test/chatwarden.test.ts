@@ -492,7 +492,7 @@ describe('createChatwarden: lifecycle', () => {
 
   it('purge runs against the store with the injected clock and the given policy', async () => {
     const { cw } = await setup();
-    expect(await cw.purge()).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0 });
+    expect(await cw.purge()).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0 });
     await expect(cw.purge({ reportsMs: -1 })).rejects.toThrow(/invalid reportsMs/);
   });
 

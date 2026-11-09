@@ -23,8 +23,8 @@ interface Rows {
  *  audit row (a no-op toggle or an empty patch writes nothing). `hits` is the dry-run result
  *  ({@link LiveTerms.check}) the moderator went ahead despite; it is kept in the audit row.
  *
- *  WARNING: `hits` are chat lines, and they are PERSISTED into the audit log (kept as long as the log is, with
- *  nothing purging them). Pass counts or a few capped, trimmed lines rather than everything `check` returned,
+ *  WARNING: `hits` are chat lines, and they are PERSISTED into the audit log (kept until the audit
+ *  retention purges them: `retention.auditMs`, 365 days by default). Pass counts or a few capped, trimmed lines rather than everything `check` returned,
  *  and remember that players typed them. */
 export interface TermEditor {
   /** Returns the new row id. */

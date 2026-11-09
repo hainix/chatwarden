@@ -86,6 +86,26 @@ export {
   staffReport,
 } from './staffReports.js';
 export type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
+export {
+  AUDIT_ACTIONS,
+  AUDIT_PAGE_MAX,
+  AUDIT_TARGET_TYPES,
+  AuditQueryError,
+  AuditService,
+  ROLES,
+} from './audit.js';
+export type {
+  AuditAction,
+  AuditItem,
+  AuditListQuery,
+  AuditPage,
+  AuditQuery,
+  AuditRecordInput,
+  AuditRow,
+  AuditTarget,
+  AuditTargetType,
+  Role,
+} from './audit.js';
 export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';

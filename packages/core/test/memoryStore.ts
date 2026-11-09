@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+import type { AuditListQuery, AuditRow } from '../src/audit.js';
 import type {
   DecisionRow,
   MuteRow,
@@ -49,6 +51,8 @@ export class MemoryStore implements Store {
   protected decisions = new Map<string, DecisionRow>();
   /** Notices in insertion order (stands in for SQLite's rowid). */
   protected notices: NoticeRow[] = [];
+  /** Staff audit entries in insertion order. */
+  protected auditRows: AuditRow[] = [];
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -228,13 +232,59 @@ export class MemoryStore implements Store {
     row.gapRef = ref;
     row.gapClosedBy = actor;
     row.gapClosedAt = at;
+    // Like SqliteStore: who closed it and when go to the audit trail (no role, the group id as the target).
+    const entry: AuditRow = {
+      id: randomBytes(16).toString('base64url'),
+      at,
+      actor,
+      role: null,
+      action: 'gap.close',
+      target: { type: 'sanction', ref: groupId },
+    };
+    this.auditRows.push(entry);
     this.undoWith(() => {
       row.gapStatus = 'open';
       row.gapRef = null;
       row.gapClosedBy = null;
       row.gapClosedAt = null;
+      this.auditRows.splice(this.auditRows.indexOf(entry), 1);
     });
     return true;
+  }
+
+  // Staff audit trail (synchronous, see the Store interface).
+
+  insertAudit(row: AuditRow): void {
+    if (this.auditRows.some((r) => r.id === row.id)) throw new Error('insertAudit: duplicate id');
+    const copy = structuredClone(row);
+    this.auditRows.push(copy);
+    this.undoWith(() => this.auditRows.splice(this.auditRows.indexOf(copy), 1));
+  }
+
+  listAudit(q: AuditListQuery): AuditRow[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    return this.auditRows
+      .filter((r) => {
+        if (q.actor !== undefined && r.actor !== q.actor) return false;
+        if (q.action !== undefined && r.action !== q.action) return false;
+        if (q.before === undefined) return true;
+        if (r.at !== q.before) return r.at < q.before;
+        return q.beforeId !== undefined && r.id < q.beforeId;
+      })
+      .sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .slice(0, limit)
+      .map((r) => structuredClone(r));
+  }
+
+  purgeAudit(before: number): number {
+    const snapshot = [...this.auditRows];
+    const kept = snapshot.filter((r) => r.at >= before);
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.auditRows.splice(0, this.auditRows.length, ...kept);
+      this.undoWith(() => this.auditRows.splice(0, this.auditRows.length, ...snapshot));
+    }
+    return n;
   }
 
   // Mutes (synchronous, see the Store interface)

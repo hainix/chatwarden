@@ -1,6 +1,8 @@
 // Core types for @chatwarden/core. Organized by section; later tasks append
 // their own sections below.
 
+import type { AuditListQuery, AuditRow } from './audit.js';
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
@@ -540,7 +542,29 @@ export interface Store {
    */
   loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }>;
 
-  // Retention. SYNCHRONOUS on purpose: `purge` runs all five inside one `transaction`. Each deletes rows
+  // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
+  // editor write; none of these methods ever returns the json columns those carry (they may hold term text).
+
+  /** Insert one audit entry. A duplicate id throws (nothing is written). Both json columns are written NULL. */
+  insertAudit(row: AuditRow): void;
+
+  /**
+   * Audit entries newest first (`at` descending, then `id` descending, so a tie is stable). `actor` and `action`
+   * filter by equality. `before` keeps only entries older than that instant (exclusive), and with `beforeId` also the
+   * ones AT that instant whose id sorts below it (keyset paging: pass the last row's `at` and `id`). `beforeId`
+   * without `before` is ignored. `limit` is clamped to 1..200 (a fraction is floored).
+   *
+   * Rows written before roles existed read with `role: null`. A legacy term-editor row is mapped into the
+   * {@link AuditRow} action union (`add` -> `term.add` or `exception.add`, `edit` -> `*.update`, `enable` / `disable` ->
+   * `*.toggle`); any other action it does not recognise reads as `term.update`, and a target type outside the union
+   * reads as no target. The `action` filter matches the mapped name.
+   */
+  listAudit(q: AuditListQuery): AuditRow[];
+
+  /** Delete audit entries with `at < before`. Returns how many. */
+  purgeAudit(before: number): number;
+
+  // Retention. SYNCHRONOUS on purpose: `purge` runs all six inside one `transaction`. Each deletes rows
   // strictly older than the cutoff (epoch ms) and returns how many it deleted.
 
   /**

@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -315,6 +315,16 @@ ALTER TABLE kit_sanctions_v11 RENAME TO kit_sanctions;
 CREATE UNIQUE INDEX kit_sanctions_ref_code ON kit_sanctions (ref_code) WHERE target_type = 'subject';
 CREATE INDEX kit_sanctions_by_group ON kit_sanctions (group_id);
 CREATE INDEX kit_sanctions_by_target ON kit_sanctions (target_type, target_value);
+`,
+  },
+  {
+    version: 12,
+    // The staff audit trail (K3b): `kit_audit` gains the actor's role (NULL on every row written before roles existed)
+    // and an index on (at, id) for newest-first paging. Existing rows, and their json columns, are untouched. A new
+    // entry writes NULL to both json columns and '' to subject_type / subject_ref when it has no target.
+    sql: `
+ALTER TABLE kit_audit ADD COLUMN role TEXT CHECK (role IN ('moderator', 'senior', 'owner'));
+CREATE INDEX kit_audit_by_at ON kit_audit (at, id);
 `,
   },
 ];

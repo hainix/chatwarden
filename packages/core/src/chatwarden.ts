@@ -1,3 +1,5 @@
+import { AuditService } from './audit.js';
+import type { AuditPage, AuditQuery, AuditRecordInput } from './audit.js';
 import { ChatService } from './chat.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
@@ -120,7 +122,7 @@ export interface ChatwardenOptions {
    * stops the timer.
    *
    * Floors, checked at creation (and on every `purge(policy)`), each a `ProfileError` naming the field: `sanctionAfterEndMs`
-   * and `noticesMs` at least 90 days (the ladder and "My record" reach back that far), `badFaithMs` at least
+   * and `noticesMs` at least 90 days (the ladder and "My record" reach back that far), `auditMs` at least 90 days (default 365), `badFaithMs` at least
    * `limits.reports.suspendWindowMs`. Not enforced, but `strikesMs` should be at least `limits.strikes.windowMs`, or strikes are
    * deleted before the window that counts them closes. When you leave `badFaithMs` out it follows a longer suspension window.
    */
@@ -305,6 +307,24 @@ export interface Chatwarden {
     list(): GapRow[];
     /** Close an open gap as `ruled` (with the new rule number as `ref`) or `not_a_rule` (`ref` null). True when this call closed it. */
     close(groupId: string, status: 'ruled' | 'not_a_rule', ref: string | null, actor: string): boolean;
+  };
+  /**
+   * The staff audit trail: who (actor and role) did what to which id, and when. Staff only. Stores ids and the action
+   * name, never chat text, a reason or a note. Rows from the term editor and from `gaps.close` read here too (role
+   * null). Kept `retention.auditMs` (default 365 days, at least 90).
+   */
+  audit: {
+    /**
+     * Write one entry, stamped with the clock. Synchronous and fenced: it never throws; it returns false, and logs
+     * (`chatwarden.audit_refused` / `chatwarden.audit_failed`, the error class only), when the input is outside the
+     * closed lists or the store fails.
+     */
+    record(input: AuditRecordInput): boolean;
+    /**
+     * One page, newest first. `limit` is an integer 1..200 (`RangeError` otherwise); a bad `before`, `actor` or
+     * `action` throws `AuditQueryError`. Never carries the json the term editor kept.
+     */
+    list(q: AuditQuery): AuditPage;
   };
   /**
    * Delete rows past retention now. The built-in timer already does this (unless `retention: false`); the
@@ -506,6 +526,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     (timer as { unref?: () => void }).unref?.();
   }
 
+  const audit = new AuditService({ store, clock, logger });
+
   return {
     rooms: {
       seat,
@@ -664,6 +686,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           }),
         ),
       close: (groupId, status, ref, actor) => store.transaction(() => store.closeGap(groupId, status, ref, actor, clock.now())),
+    },
+    audit: {
+      record: (input) => audit.record(input),
+      list: (q) => audit.list(q),
     },
     purge: async (policy) => {
       const merged: Partial<RetentionPolicy> = { ...retentionPolicy };

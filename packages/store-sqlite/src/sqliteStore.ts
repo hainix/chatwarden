@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, ROLES } from '@chatwarden/core';
 import type {
+  AuditListQuery,
+  AuditRow,
+  AuditTargetType,
   DecisionRow,
   MuteRow,
   NoticeKind,
@@ -28,6 +32,41 @@ import type {
   TermRecord,
   TermStore,
 } from '@chatwarden/matcher';
+
+/** A term-editor action name (`LiveTerms`) mapped to the audit union; the prefix is the row's subject type. */
+const LEGACY_ACTIONS: ReadonlyArray<readonly [string, string]> = [
+  ['add', 'add'],
+  ['edit', 'update'],
+  ['enable', 'toggle'],
+  ['disable', 'toggle'],
+];
+
+const sqlList = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(', ');
+
+/**
+ * SQL for the audit action a `kit_audit` row reads as: an action already in the union is itself; a term-editor row
+ * (`add` / `edit` / `enable` / `disable` on a `term` or `exception`) maps by name; anything else reads as `term.update`.
+ * Built from fixed strings only, never caller input.
+ */
+const AUDIT_ACTION_SQL = `CASE WHEN action IN (${sqlList(AUDIT_ACTIONS)}) THEN action ${(['term', 'exception'] as const)
+  .flatMap((type) =>
+    LEGACY_ACTIONS.map(([from, to]) => `WHEN subject_type = '${type}' AND action = '${from}' THEN '${type}.${to}' `),
+  )
+  .join('')}ELSE 'term.update' END`;
+
+function auditFromRow(r: Record<string, unknown>): AuditRow {
+  const type = String(r.subject_type);
+  const ref = String(r.subject_ref);
+  const role = r.role === null || r.role === undefined ? null : String(r.role);
+  return {
+    id: String(r.id),
+    at: Number(r.at),
+    actor: String(r.actor),
+    role: ROLES.find((x) => x === role) ?? null,
+    action: String(r.action) as AuditRow['action'],
+    target: ref !== '' && (AUDIT_TARGET_TYPES as readonly string[]).includes(type) ? { type: type as AuditTargetType, ref } : null,
+  };
+}
 
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
 function reportFromRow(r: Record<string, unknown>): ReportRecord {
@@ -292,6 +331,51 @@ export class SqliteStore implements Store, TermStore {
         );
       return true;
     });
+  }
+
+  // Staff audit trail. SYNCHRONOUS on purpose. The json columns (before_json / after_json) are never selected: the
+  // rows the term editor wrote may hold term text there.
+
+  insertAudit(row: AuditRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO kit_audit (id, at, actor, role, action, subject_type, subject_ref, before_json, after_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+      )
+      .run(row.id, row.at, row.actor, row.role, row.action, row.target?.type ?? '', row.target?.ref ?? '');
+  }
+
+  listAudit(q: AuditListQuery): AuditRow[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    const where: string[] = [];
+    const args: Array<string | number> = [];
+    if (q.actor !== undefined) {
+      where.push('actor = ?');
+      args.push(q.actor);
+    }
+    if (q.action !== undefined) {
+      where.push(`(${AUDIT_ACTION_SQL}) = ?`);
+      args.push(q.action);
+    }
+    if (q.before !== undefined) {
+      if (q.beforeId === undefined) {
+        where.push('at < ?');
+        args.push(q.before);
+      } else {
+        // `at <= ?` is redundant with the pair below it, but it is a plain range on the indexed column, so SQLite
+        // seeks to the cursor instead of scanning the table.
+        where.push('(at <= ? AND (at < ? OR id < ?))');
+        args.push(q.before, q.before, q.beforeId);
+      }
+    }
+    const sql =
+      `SELECT id, at, actor, role, (${AUDIT_ACTION_SQL}) AS action, subject_type, subject_ref FROM kit_audit` +
+      `${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(auditFromRow));
+  }
+
+  purgeAudit(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_audit WHERE at < ?').run(before).changes));
   }
 
   // Mutes. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never

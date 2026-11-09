@@ -60,13 +60,13 @@ export interface ReportPage {
   next: string | null;
 }
 
-const b64urlEncode = (text: string): string => {
+export const b64urlEncode = (text: string): string => {
   let bin = '';
   for (const byte of new TextEncoder().encode(text)) bin += String.fromCharCode(byte);
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
-const b64urlDecode = (cursor: string): string | null => {
+export const b64urlDecode = (cursor: string): string | null => {
   if (!/^[A-Za-z0-9_-]+$/.test(cursor) || cursor.length % 4 === 1) return null;
   try {
     const bin = atob(cursor.replace(/-/g, '+').replace(/_/g, '/'));
