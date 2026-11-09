@@ -568,3 +568,36 @@ describe('SqliteStore listGaps and closeGap', () => {
     expect(cited).toMatchObject({ gapNote: null, gapStatus: null });
   });
 });
+
+describe('SqliteStore loadSubjectActions', () => {
+  it('returns subject rows at or after since (revoked and ended ones too), with revokedAt, in write order', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const old = await applySanction(store, subjects, input(s), NOW - 5 * DAY, index);
+    const ended = await applySanction(store, subjects, input(s, { kind: 'ban', includeIp: true }), NOW - 3 * DAY, index);
+    const warn = await applySanction(store, subjects, input(s, { kind: 'warning', durationMs: null }), NOW - 2 * DAY, index);
+    await applySanction(store, subjects, input(s, { kind: 'ban', durationMs: null }), NOW - DAY, index);
+    store.revokeSanctionGroup(ended.groupId, 'mod', NOW, 'oops');
+
+    const got = store.loadSubjectActions(NOW - 3 * DAY);
+    expect(got).toHaveLength(3);
+    expect(got.every((r) => r.targetType === 'subject')).toBe(true);
+    expect(got.map((r) => r.kind)).toEqual(['ban', 'warning', 'ban']);
+    expect(got[0]?.revokedAt).toBe(NOW);
+    expect(got[1]?.revokedAt ?? null).toBeNull();
+    expect(got[1]).toMatchObject({ groupId: warn.groupId, startsAt: NOW - 2 * DAY, endsAt: NOW - 2 * DAY });
+    // The boundary is inclusive, and a later since drops older rows.
+    expect(store.loadSubjectActions(NOW - 5 * DAY)).toHaveLength(4);
+    expect(store.loadSubjectActions(NOW - 5 * DAY + 1).map((r) => r.groupId)).not.toContain(old.groupId);
+    expect(store.loadSubjectActions(NOW + 1)).toEqual([]);
+  });
+
+  it('loadSanctions rows carry no revokedAt (unchanged shape)', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    await applySanction(store, subjects, input(s), NOW, index);
+    expect(store.loadSanctions(NOW)[0]).not.toHaveProperty('revokedAt');
+  });
+});

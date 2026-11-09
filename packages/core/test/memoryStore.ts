@@ -175,6 +175,12 @@ export class MemoryStore implements Store {
       .map((r) => this.sanctionRow(r));
   }
 
+  loadSubjectActions(since: number): SanctionRow[] {
+    return this.sanctions
+      .filter((r) => r.targetType === 'subject' && r.startsAt >= since)
+      .map((r) => ({ ...this.sanctionRow(r), revokedAt: r.revokedAt }));
+  }
+
   private sanctionRow(r: StoredSanction): SanctionRow {
     return {
       id: r.id,

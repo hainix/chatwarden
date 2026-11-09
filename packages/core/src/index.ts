@@ -15,6 +15,7 @@ export type {
   SanctionKind,
   SanctionRow,
   SanctionTargetType,
+  Severity,
   Source,
   Store,
   SubjectId,
@@ -83,3 +84,12 @@ export {
   STARTER_RULES,
 } from './rules.js';
 export type { CommunityRule, RuleRef } from './rules.js';
+export {
+  actionStep,
+  HISTORY_LOOKBACK_MS,
+  historyOf,
+  LADDER_TABLE,
+  recordStep,
+  suggestAction,
+} from './ladder.js';
+export type { ActionRecord, LadderCell, LadderRow, LadderStep } from './ladder.js';

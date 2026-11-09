@@ -158,7 +158,18 @@ export interface SanctionRow {
   automated: boolean;
   /** True when written while sanctions enforcement was off. Informational. */
   pending: boolean;
+  /**
+   * Epoch ms the group was revoked. Set only by `loadSubjectActions` (revoked rows come back there, flagged); every
+   * other load leaves the property off.
+   */
+  revokedAt?: number | null;
 }
+
+/**
+ * How serious a piece of behaviour is, as the AI read (K3) or a moderator rates it. The escalation ladder reads it:
+ * `'none'` is treated exactly like `'low'`.
+ */
+export type Severity = 'high' | 'medium' | 'low' | 'none';
 
 // ---------------------------------------------------------------------------
 // Mutes (storage shape)
@@ -324,6 +335,12 @@ export interface Store {
 
   /** Every unrevoked row that has not ended by `now`, for rebuilding the sanction index. */
   loadSanctions(now: number): SanctionRow[];
+
+  /**
+   * Every SUBJECT row (never an IP row) with `startsAt >= since`, revoked and ended ones included, oldest write first.
+   * Each row carries `revokedAt` (null when unrevoked). The history behind the escalation ladder.
+   */
+  loadSubjectActions(since: number): SanctionRow[];
 
   /** Every subject row that carries a rule-gap note (any status, revoked or not), newest `startsAt` first. */
   listGaps(): SanctionRow[];

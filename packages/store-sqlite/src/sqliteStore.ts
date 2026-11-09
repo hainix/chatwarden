@@ -45,6 +45,8 @@ function toSanctionRow(r: Record<string, unknown>): SanctionRow {
     source: String(r.source) as Source,
     automated: r.automated === 1,
     pending: r.pending === 1,
+    // Only a query that selects revoked_at gets the property; the other loads keep the plain row shape.
+    ...(r.revoked_at === undefined ? {} : { revokedAt: r.revoked_at === null ? null : Number(r.revoked_at) }),
   };
 }
 
@@ -201,6 +203,18 @@ export class SqliteStore implements Store, TermStore {
            FROM kit_sanctions WHERE revoked_at IS NULL AND (ends_at IS NULL OR ends_at > ?) ORDER BY rowid`,
         )
         .all(now)
+        .map(toSanctionRow),
+    );
+  }
+
+  loadSubjectActions(since: number): SanctionRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT ${SANCTION_COLUMNS}, revoked_at
+           FROM kit_sanctions WHERE target_type = 'subject' AND starts_at >= ? ORDER BY rowid`,
+        )
+        .all(since)
         .map(toSanctionRow),
     );
   }

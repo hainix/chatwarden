@@ -966,3 +966,34 @@ describe('MemoryStore listGaps and closeGap', () => {
     expect(store.listGaps()).toHaveLength(2);
   });
 });
+
+describe('MemoryStore loadSubjectActions', () => {
+  const row = (id: string, over: Partial<SanctionRow>): SanctionRow => ({
+    id, groupId: `g_${id}`, refCode: `M-${id.toUpperCase().padEnd(5, 'A')}`, kind: 'chat', targetType: 'subject', value: 's_x',
+    startsAt: NOW, endsAt: NOW + H, reason: 'private', rule: '1', gapNote: null, gapStatus: null, actor: 'mod',
+    source: 'moderator', automated: false, pending: false, ...over,
+  });
+
+  it('returns subject rows at or after since, revoked and ended ones included, flagged', () => {
+    const store = new MemoryStore();
+    store.insertSanctionGroup([row('a', { startsAt: NOW - 10 })]);
+    store.insertSanctionGroup([row('b', { startsAt: NOW - 11 })]);
+    store.insertSanctionGroup([row('c', { startsAt: NOW + 5, endsAt: null }), row('cip', { groupId: 'g_c', targetType: 'ip', value: 'h' })]);
+    store.revokeSanctionGroup('g_a', 'mod', NOW, 'oops');
+    const got = store.loadSubjectActions(NOW - 10);
+    expect(got.map((r) => r.id)).toEqual(['a', 'c']);
+    expect(got.find((r) => r.id === 'a')?.revokedAt).toBe(NOW);
+    expect(got.find((r) => r.id === 'c')?.revokedAt ?? null).toBeNull();
+  });
+
+  it('a transaction that rolls back leaves no trace in the history', () => {
+    const store = new MemoryStore();
+    expect(() =>
+      store.transaction(() => {
+        store.insertSanctionGroup([row('z', {})]);
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(store.loadSubjectActions(0)).toEqual([]);
+  });
+});
