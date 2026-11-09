@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type {
   MuteRow,
+  NoticeKind,
+  NoticeRow,
   ReportActivity,
   SanctionKind,
   SanctionRow,
@@ -441,6 +443,87 @@ export class SqliteStore implements Store, TermStore {
 
   purgeMutes(before: number): number {
     return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_mutes WHERE created_at < ?').run(before).changes));
+  }
+
+  purgeNotices(before: number): number {
+    return this.transaction(() =>
+      Number(
+        this.db
+          .prepare(
+            `DELETE FROM kit_notices
+             WHERE ((acked_at IS NOT NULL OR withdrawn_at IS NOT NULL) AND created_at < ?)
+                OR (until IS NOT NULL AND until < ?)`,
+          )
+          .run(before, before).changes,
+      ),
+    );
+  }
+
+  // Notices. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never be
+  // given an async function.
+
+  insertNotice(row: NoticeRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO kit_notices (id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          row.id,
+          row.subject,
+          row.groupId,
+          row.kind,
+          row.rule,
+          row.until,
+          row.refCode,
+          JSON.stringify(row.excerpt),
+          row.createdAt,
+          row.ackedAt,
+          row.withdrawnAt,
+        );
+    });
+  }
+
+  loadNotices(subjects: readonly SubjectId[]): NoticeRow[] {
+    if (subjects.length === 0) return [];
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at
+           FROM kit_notices WHERE subject_id IN (${subjects.map(() => '?').join(', ')}) ORDER BY created_at, rowid`,
+        )
+        .all(...subjects)
+        .map((r) => ({
+          id: String(r.id),
+          subject: String(r.subject_id),
+          groupId: r.group_id === null ? null : String(r.group_id),
+          kind: String(r.kind) as NoticeKind,
+          rule: r.rule === null ? null : String(r.rule),
+          until: r.until === null ? null : Number(r.until),
+          refCode: r.ref_code === null ? null : String(r.ref_code),
+          excerpt: JSON.parse(String(r.excerpt_json)) as Array<{ text: string; day: string }>,
+          createdAt: Number(r.created_at),
+          ackedAt: r.acked_at === null ? null : Number(r.acked_at),
+          withdrawnAt: r.withdrawn_at === null ? null : Number(r.withdrawn_at),
+        })),
+    );
+  }
+
+  ackNotice(id: string, at: number): boolean {
+    return this.transaction(
+      () =>
+        Number(
+          this.db.prepare('UPDATE kit_notices SET acked_at = ? WHERE id = ? AND acked_at IS NULL AND withdrawn_at IS NULL').run(at, id)
+            .changes,
+        ) > 0,
+    );
+  }
+
+  withdrawNoticeGroup(groupId: string, at: number): number {
+    return this.transaction(() =>
+      Number(this.db.prepare('UPDATE kit_notices SET withdrawn_at = ? WHERE group_id = ? AND withdrawn_at IS NULL').run(at, groupId).changes),
+    );
   }
 
   // Terms, exceptions and the audit trail. These are SYNCHRONOUS on purpose (the TermStore contract): they

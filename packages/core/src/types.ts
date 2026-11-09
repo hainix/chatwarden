@@ -268,6 +268,37 @@ export interface ReportActivity {
 }
 
 // ---------------------------------------------------------------------------
+// Notices (storage shape)
+// ---------------------------------------------------------------------------
+
+/** What a player notice is about: a sanction of that kind, or the outcome of a report the player filed. */
+export type NoticeKind = 'warning' | 'chat' | 'area' | 'ban' | 'report_outcome';
+
+/**
+ * One stored player notice. `subject` is the CANONICAL subject at write time (a later merge is resolved at query
+ * time). `excerpt` is already the player-safe text (own lines only, blocked terms masked, day only): the raw line is
+ * never stored here. `rule` is the cited rule as TEXT (`'1'`.. or `'uncovered'`), like a sanction row. Private: the
+ * only shape that reaches a player is `PlayerNotice`.
+ */
+export interface NoticeRow {
+  /** Random, never derived. */
+  id: string;
+  subject: SubjectId;
+  /** The sanction group this notice is about; null for a report outcome. */
+  groupId: string | null;
+  kind: NoticeKind;
+  rule: string | null;
+  /** Epoch ms the sanction ends; null = permanent (or a warning, or a report outcome). */
+  until: number | null;
+  refCode: string | null;
+  excerpt: Array<{ text: string; day: string }>;
+  /** Epoch ms. */
+  createdAt: number;
+  ackedAt: number | null;
+  withdrawnAt: number | null;
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -412,7 +443,7 @@ export interface Store {
    */
   loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }>;
 
-  // Retention. SYNCHRONOUS on purpose: `purge` runs all four inside one `transaction`. Each deletes rows
+  // Retention. SYNCHRONOUS on purpose: `purge` runs all five inside one `transaction`. Each deletes rows
   // strictly older than the cutoff (epoch ms) and returns how many it deleted.
 
   /** Delete reports with `createdAt < before`. */
@@ -429,6 +460,29 @@ export interface Store {
 
   /** Delete mutes with `createdAt < before`. */
   purgeMutes(before: number): number;
+
+  /**
+   * Delete notices that were seen or withdrawn (`ackedAt` or `withdrawnAt` set) and have `createdAt < before`, and
+   * any notice whose end is past (`until` set and `< before`). An unseen, unwithdrawn permanent notice is kept.
+   */
+  purgeNotices(before: number): number;
+
+  // Notices. SYNCHRONOUS on purpose (like sanctions): `NoticeService` runs these inside `transaction`.
+
+  /** Insert one notice. A duplicate id throws. */
+  insertNotice(row: NoticeRow): void;
+
+  /**
+   * Every notice (seen, unseen and withdrawn) stored under any of these subject ids, oldest first (`createdAt`, then
+   * write order). The caller passes a person's stored ids (a canonical subject and the ones merged into it).
+   */
+  loadNotices(subjects: readonly SubjectId[]): NoticeRow[];
+
+  /** Mark a notice seen at `at`. Returns true only when this call did it: not when already seen, withdrawn or unknown. */
+  ackNotice(id: string, at: number): boolean;
+
+  /** Withdraw every not-yet-withdrawn notice of the group at `at`. Returns how many this call withdrew. */
+  withdrawNoticeGroup(groupId: string, at: number): number;
 }
 
 // ---------------------------------------------------------------------------

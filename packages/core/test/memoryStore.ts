@@ -1,5 +1,6 @@
 import type {
   MuteRow,
+  NoticeRow,
   ReportActivity,
   SanctionRow,
   Store,
@@ -45,6 +46,8 @@ export class MemoryStore implements Store {
   protected strikes: StrikeRow[] = [];
   /** Reports in insertion order; `insertReport` enforces UNIQUE (reporter, target, room). */
   protected reports: StoredReportRow[] = [];
+  /** Notices in insertion order (stands in for SQLite's rowid). */
+  protected notices: NoticeRow[] = [];
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -393,6 +396,65 @@ export class MemoryStore implements Store {
       n++;
     }
     return n;
+  }
+
+  // Notices (synchronous, see the Store interface)
+
+  insertNotice(row: NoticeRow): void {
+    if (this.notices.some((n) => n.id === row.id)) throw new Error('UNIQUE constraint failed: kit_notices.id');
+    this.notices.push(structuredClone(row));
+    this.undoWith(() => {
+      this.notices.length -= 1;
+    });
+  }
+
+  loadNotices(subjects: readonly SubjectId[]): NoticeRow[] {
+    const want = new Set(subjects);
+    return this.notices
+      .map((n, i) => ({ n, i }))
+      .filter(({ n }) => want.has(n.subject))
+      .sort((a, b) => a.n.createdAt - b.n.createdAt || a.i - b.i)
+      .map(({ n }) => structuredClone(n));
+  }
+
+  ackNotice(id: string, at: number): boolean {
+    const n = this.notices.find((x) => x.id === id);
+    if (n === undefined || n.ackedAt !== null || n.withdrawnAt !== null) return false;
+    n.ackedAt = at;
+    this.undoWith(() => {
+      n.ackedAt = null;
+    });
+    return true;
+  }
+
+  withdrawNoticeGroup(groupId: string, at: number): number {
+    const touched = this.notices.filter((n) => n.groupId === groupId && n.withdrawnAt === null);
+    for (const n of touched) n.withdrawnAt = at;
+    if (touched.length > 0) {
+      this.undoWith(() => {
+        for (const n of touched) n.withdrawnAt = null;
+      });
+    }
+    return touched.length;
+  }
+
+  purgeNotices(before: number): number {
+    const snapshot = [...this.notices];
+    const kept = snapshot.filter(
+      (n) =>
+        !(((n.ackedAt !== null || n.withdrawnAt !== null) && n.createdAt < before) || (n.until !== null && n.until < before)),
+    );
+    const n = snapshot.length - kept.length;
+    if (n > 0) {
+      this.notices.splice(0, this.notices.length, ...kept);
+      this.undoWith(() => this.notices.splice(0, this.notices.length, ...snapshot));
+    }
+    return n;
+  }
+
+  /** Test helper: every stored notice. */
+  rawNotices(): NoticeRow[] {
+    return this.notices.map((n) => structuredClone(n));
   }
 
   /** Test helper (K2 adds dismissing): mark a report bad-faith, dismissed at `actionedAt` (null = never closed). */

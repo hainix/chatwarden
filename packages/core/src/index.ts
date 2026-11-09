@@ -8,6 +8,8 @@ export type {
   Platform,
   Matcher,
   MuteRow,
+  NoticeKind,
+  NoticeRow,
   RawWho,
   ReportActivity,
   ReportCategory,
@@ -73,6 +75,19 @@ export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { purge, RETENTION_DEFAULTS } from './retention.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
+export {
+  ExcerptError,
+  NOTICE_EXCERPT_MAX,
+  NOTICE_RECORD_WINDOW_MS,
+  NoticeService,
+  ownLines,
+} from './notices.js';
+export type {
+  ExcerptErrorCode,
+  NoticeServiceDeps,
+  PlayerNotice,
+  SanctionNoticeInput,
+} from './notices.js';
 export { createChatwarden } from './chatwarden.js';
 export type { Chatwarden, ChatwardenOptions } from './chatwarden.js';
 export {

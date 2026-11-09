@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { purge, RETENTION_DEFAULTS } from '../src/retention.js';
 import { applySanction, revokeSanction } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
-import type { SanctionKind, StoredReport, StrikeRow, SubjectId } from '../src/types.js';
+import type { NoticeRow, SanctionKind, StoredReport, StrikeRow, SubjectId } from '../src/types.js';
 import { MemoryStore } from './memoryStore.js';
 
 const H = 3_600_000;
@@ -65,8 +65,8 @@ const strike = (id: string, at: number): StrikeRow => ({
 const ids = (rows: Array<{ id: string }>): string[] => rows.map((r) => r.id).sort();
 
 describe('defaults', () => {
-  it('are 90 d of reports, 90 d after a sanction ends, 30 d of strikes', () => {
-    expect(RETENTION_DEFAULTS).toEqual({ reportsMs: 90 * DAY, sanctionAfterEndMs: 90 * DAY, strikesMs: 30 * DAY });
+  it('are 90 d of reports, 90 d after a sanction ends, 30 d of strikes, 90 d of notices', () => {
+    expect(RETENTION_DEFAULTS).toEqual({ reportsMs: 90 * DAY, sanctionAfterEndMs: 90 * DAY, strikesMs: 30 * DAY, noticesMs: 90 * DAY });
   });
 });
 
@@ -225,15 +225,15 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
     t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
-    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1 });
+    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0 });
   });
 
   it('on an empty store, or run twice, deletes nothing', async () => {
     const { store } = setup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0 });
     store.insertReport(report('r1', NOW - 100 * DAY));
     await purge(store, NOW);
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0 });
   });
 
   it('a custom policy overrides the defaults, field by field', async () => {
@@ -242,9 +242,9 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 10 * DAY));
     await t.sanction(t.subject('k1'), NOW - 20 * DAY, DAY); // ended 19 d ago
     const res = await purge(t.store, NOW, { reportsMs: 5 * DAY });
-    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0 });
+    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0 });
     const res2 = await purge(t.store, NOW, { strikesMs: 5 * DAY, sanctionAfterEndMs: 5 * DAY });
-    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0 });
+    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0 });
   });
 
   it('a zero window purges everything already past', async () => {
@@ -277,7 +277,7 @@ describe('purge: result, policy and scope', () => {
 
   it('a finite now (zero, negative) is accepted (control)', async () => {
     const t = setup();
-    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0 });
+    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0 });
     await expect(purge(t.store, -5)).resolves.toBeDefined();
   });
 
@@ -313,5 +313,105 @@ describe('purge: result, policy and scope', () => {
     store.insertReport(report('r1', 1_000));
     expect((await purge(store, 1_000 + 90 * DAY)).reports).toBe(0);
     expect((await purge(store, 1_000 + 90 * DAY + 1)).reports).toBe(1);
+  });
+});
+
+const notice = (id: string, over: Partial<NoticeRow> = {}): NoticeRow => ({
+  id,
+  subject: 's_x',
+  groupId: `g-${id}`,
+  kind: 'chat',
+  rule: '2',
+  until: NOW + DAY,
+  refCode: 'M-AAAAA',
+  excerpt: [],
+  createdAt: NOW - DAY,
+  ackedAt: null,
+  withdrawnAt: null,
+  ...over,
+});
+
+describe('purge: notices', () => {
+  const left = (store: MemoryStore): string[] => store.rawNotices().map((n) => n.id).sort();
+
+  it('deletes an acked notice created before the cutoff, keeps the edge and newer', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('old', { createdAt: NOW - 90 * DAY - 1, ackedAt: NOW - 100 * DAY }));
+    store.insertNotice(notice('edge', { createdAt: NOW - 90 * DAY, ackedAt: NOW - 80 * DAY }));
+    store.insertNotice(notice('new', { createdAt: NOW - DAY, ackedAt: NOW }));
+    const res = await purge(store, NOW);
+    expect(res.notices).toBe(1);
+    expect(left(store)).toEqual(['edge', 'new']);
+  });
+
+  it('deletes a withdrawn notice the same way', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('old', { createdAt: NOW - 91 * DAY, withdrawnAt: NOW - 91 * DAY, until: null }));
+    store.insertNotice(notice('new', { createdAt: NOW - 5 * DAY, withdrawnAt: NOW - 4 * DAY }));
+    expect((await purge(store, NOW)).notices).toBe(1);
+    expect(left(store)).toEqual(['new']);
+  });
+
+  it('keeps an UNACKED, unwithdrawn permanent notice however old', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('perm', { createdAt: NOW - 1000 * DAY, until: null }));
+    store.insertNotice(notice('warn', { kind: 'warning', createdAt: NOW - 1000 * DAY, until: null }));
+    expect((await purge(store, NOW + 5000 * DAY)).notices).toBe(0);
+    expect(left(store)).toEqual(['perm', 'warn']);
+  });
+
+  it('deletes any notice whose end is more than 90 days past, acked or not', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('unacked-old-end', { createdAt: NOW - 200 * DAY, until: NOW - 90 * DAY - 1 }));
+    store.insertNotice(notice('acked-old-end', { createdAt: NOW - 20 * DAY, until: NOW - 90 * DAY - 1, ackedAt: NOW - 10 * DAY }));
+    store.insertNotice(notice('end-edge', { createdAt: NOW - 200 * DAY, until: NOW - 90 * DAY }));
+    store.insertNotice(notice('running', { createdAt: NOW - 200 * DAY, until: NOW + DAY }));
+    expect((await purge(store, NOW)).notices).toBe(2);
+    expect(left(store)).toEqual(['end-edge', 'running']);
+  });
+
+  it('keeps an unacked temporary notice created long ago while it is still running', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('x', { createdAt: NOW - 120 * DAY, until: NOW + 10 * DAY }));
+    expect((await purge(store, NOW)).notices).toBe(0);
+  });
+
+  it('noticesMs overrides the window', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('a', { createdAt: NOW - 10 * DAY, ackedAt: NOW - 9 * DAY }));
+    expect((await purge(store, NOW)).notices).toBe(0);
+    expect((await purge(store, NOW, { noticesMs: 5 * DAY })).notices).toBe(1);
+  });
+
+  it('rejects an invalid noticesMs and deletes nothing', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('a', { createdAt: NOW - 1000 * DAY, ackedAt: NOW - 999 * DAY }));
+    for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(purge(store, NOW, { noticesMs: bad })).rejects.toThrow(/purge/);
+    }
+    expect(left(store)).toEqual(['a']);
+  });
+
+  it('is part of the one transaction: a later failure restores the notices', async () => {
+    const { store } = setup();
+    store.insertNotice(notice('old', { createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
+    store.purgeMutes = () => {
+      throw new Error('disk full');
+    };
+    await expect(purge(store, NOW)).rejects.toThrow('disk full');
+    expect(left(store)).toEqual(['old']);
+  });
+
+  it('purgeNotices itself journals an undo', () => {
+    const { store } = setup();
+    store.insertNotice(notice('old', { createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
+    expect(() =>
+      store.transaction(() => {
+        expect(store.purgeNotices(NOW - 90 * DAY)).toBe(1);
+        expect(left(store)).toEqual([]);
+        throw new Error('x');
+      }),
+    ).toThrow('x');
+    expect(left(store)).toEqual(['old']);
   });
 });

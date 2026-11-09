@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -217,6 +217,32 @@ ALTER TABLE kit_sanctions_v7 RENAME TO kit_sanctions;
 CREATE UNIQUE INDEX kit_sanctions_ref_code ON kit_sanctions (ref_code) WHERE target_type = 'subject';
 CREATE INDEX kit_sanctions_by_group ON kit_sanctions (group_id);
 CREATE INDEX kit_sanctions_by_target ON kit_sanctions (target_type, target_value);
+`,
+  },
+  {
+    version: 8,
+    // A player notice: what one person is shown about a sanction taken against them (group_id), or about a report
+    // they filed (report_outcome, no group). subject_id is the canonical subject at write time and is resolved
+    // through merges by the service, so there is no foreign key. excerpt_json holds the player-safe lines only
+    // ({text, day}, own lines, blocked terms already masked): never the raw line. Ids are random. acked_at is
+    // when the player saw it; withdrawn_at when its sanction was revoked.
+    sql: `
+CREATE TABLE kit_notices (
+  id           TEXT PRIMARY KEY,
+  subject_id   TEXT NOT NULL,
+  group_id     TEXT,
+  kind         TEXT NOT NULL CHECK (kind IN ('warning', 'chat', 'area', 'ban', 'report_outcome')),
+  rule         TEXT,
+  until        INTEGER,
+  ref_code     TEXT,
+  excerpt_json TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  acked_at     INTEGER,
+  withdrawn_at INTEGER
+);
+CREATE INDEX kit_notices_by_subject ON kit_notices (subject_id, acked_at, withdrawn_at);
+CREATE INDEX kit_notices_by_group ON kit_notices (group_id);
+CREATE INDEX kit_notices_by_created ON kit_notices (created_at);
 `,
   },
 ];

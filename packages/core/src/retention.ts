@@ -11,12 +11,18 @@ export interface RetentionPolicy {
   sanctionAfterEndMs: number;
   /** A strike (and the raw line kept with it) is deleted once it is older than this. */
   strikesMs: number;
+  /**
+   * A seen or withdrawn player notice is deleted once it is older than this; so is any notice whose end is this
+   * far past. An unseen permanent notice is kept.
+   */
+  noticesMs: number;
 }
 
 export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   reportsMs: 90 * DAY_MS,
   sanctionAfterEndMs: 90 * DAY_MS,
   strikesMs: 30 * DAY_MS,
+  noticesMs: 90 * DAY_MS,
 };
 
 /** Rows deleted, per table. */
@@ -25,6 +31,7 @@ export interface PurgeResult {
   sanctions: number;
   strikes: number;
   mutes: number;
+  notices: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -40,6 +47,8 @@ function checkWindow(name: string, ms: number): void {
  *   A permanent, unrevoked sanction is never deleted.
  * - strikes: `at < now - strikesMs`
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)
+ * - notices: seen or withdrawn and `createdAt < now - noticesMs`, or `until < now - noticesMs` (seen or not). An
+ *   unseen, unwithdrawn permanent notice is kept.
  *
  * Every cutoff is strict: a row exactly on the line is kept. Subjects, terms and the audit trail are never
  * touched. The in-memory indexes need no update: they already ignore everything this removes.
@@ -53,15 +62,18 @@ export async function purge(
     reportsMs: policy.reportsMs ?? RETENTION_DEFAULTS.reportsMs,
     sanctionAfterEndMs: policy.sanctionAfterEndMs ?? RETENTION_DEFAULTS.sanctionAfterEndMs,
     strikesMs: policy.strikesMs ?? RETENTION_DEFAULTS.strikesMs,
+    noticesMs: policy.noticesMs ?? RETENTION_DEFAULTS.noticesMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
   checkWindow('sanctionAfterEndMs', p.sanctionAfterEndMs);
   checkWindow('strikesMs', p.strikesMs);
+  checkWindow('noticesMs', p.noticesMs);
   return store.transaction(() => ({
     reports: store.purgeReports(now - p.reportsMs),
     sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
     strikes: store.purgeStrikes(now - p.strikesMs),
     mutes: store.purgeMutes(now - MUTE_TTL_MS),
+    notices: store.purgeNotices(now - p.noticesMs),
   }));
 }

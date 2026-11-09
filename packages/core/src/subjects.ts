@@ -220,6 +220,15 @@ export class SubjectIndex {
   }
 
   /**
+   * The surviving subject for `id` and every subject merged into it (itself included), sorted. An id the index has
+   * never seen is its own and only member. Use it to read rows stored under any of a person's ids.
+   */
+  aliasesOf(id: SubjectId): SubjectId[] {
+    const root = this.canonical(id);
+    return [...(this.members.get(root) ?? [root])].sort();
+  }
+
+  /**
    * Every identifier of the subject and of every subject merged into it
    * (sorted copies). An unknown id has none.
    */
