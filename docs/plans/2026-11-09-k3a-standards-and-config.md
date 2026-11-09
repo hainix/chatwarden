@@ -167,6 +167,21 @@ Plus these:
     - `ladder: readonly LadderRow[]`
     - `profanity: ProfanityConfig`
     - `rules: 'relaxed' | 'standard' | 'strict'`, the starter-rules flavour (Task 5)
+    - `guidelines: Array<{ title: string; description: string; examples: string[]; covers: Array<ConductLevel | 'repeated' | 'after_warning'>; outcome: string }>`
+      - These are the team's own words (standards doc, section "Moderator guidelines and generated documents").
+      - Each preset ships default tiers derived from its table. Relaxed = five tiers matching Moxgate's
+        moderators:
+        - minor isolated → none
+        - aggressive isolated → note
+        - repeated → warning
+        - after a warning → timeouts and bans
+        - severe → immediate
+      - Validation:
+        - every conduct level is covered by exactly one tier
+        - a tier covering `banter` can't state an action
+        - `outcome` is free text
+  - The preset `levels` examples follow the doc's corrected table. "loser" and "you're an idiot" are banter;
+    "go f— yourself" is rude.
   - `interface ProfanityConfig { mode: 'allow' | 'star' | 'refuse'; style: 'full' | 'keepFirst' | 'grawlix'; add: string[]; remove: string[]; only: string[] | null; languages: string[] }`
   - `PRESETS: Record<'relaxed' | 'standard' | 'strict', ModerationProfile>`, verbatim from the standards doc tables.
     The `levels` meanings and examples come from its conduct table. The examples are plain and contain no slur.
@@ -353,7 +368,40 @@ Plus these:
 - [ ] **Step 4: Run.** Expected: PASS.
 - [ ] **Step 5: Commit** `feat(core): staff report queue on the facade`.
 
-### Task 8: Wire it together in the facade and tiny-chat
+### Task 8: Policy documents
+
+**Files:**
+- Create: `packages/core/src/documents.ts`
+- Modify: `packages/core/src/{chatwarden.ts,index.ts}`
+- Test: `packages/core/test/documents.test.ts`
+
+**Interfaces:**
+- Consumes: the resolved `ModerationProfile` (Task 3) and `CommunityRules`.
+- Produces pure functions over `{ profile, rules }`:
+  - `codeOfConduct({ format: 'markdown' | 'html' | 'text', gameName: string, contactUrl?: string })`
+  - `moderatorGuide({ format })`
+  - `agentBrief(): string` (plain text)
+  - `policyJson(): object`
+- Contents follow the standards doc's documents table.
+- HTML escapes every interpolated value (the game name and the team-written text) and has no scripts or inline
+  handlers.
+- `agentBrief()` is deterministic (stable ordering), so it can be a cached AI prompt prefix in K3c.
+- The facade exposes `cw.documents.*`, bound to the resolved policy.
+
+- [ ] **Step 1: Write failing tests:**
+  - each document contains the summary, every active rule (`CR n. Title`) and every guideline tier title
+  - retired rules are omitted
+  - HTML escapes `<script>` and quotes in a team-written description and the game name
+  - one markdown snapshot per preset
+  - `agentBrief` is identical across two calls and states all four levels with their meanings
+  - `policyJson` round-trips through `JSON.parse` + `defineProfile`
+  - no document contains a placeholder such as `TODO` or `{{`
+- [ ] **Step 2: Run** `npx vitest run packages/core/test/documents.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run.** Expected: PASS.
+- [ ] **Step 5: Commit** `feat(core): generated code of conduct, moderator guide, agent brief and policy JSON`.
+
+### Task 9: Wire it together in the facade and tiny-chat
 
 **Files:**
 - Modify: `packages/core/src/chatwarden.ts`, `examples/tiny-chat/{server.ts,tiny-chat.test.ts,README.md}`, root README
@@ -364,6 +412,7 @@ Plus these:
   - The full facade integration test under each preset: the same scripted conversation (banter, then rude, then
     rude in a second game) yields the profile's suggestions.
   - tiny-chat runs `profile: 'relaxed'` with `profanityPackage`.
+  - `GET /code-of-conduct` serves `cw.documents.codeOfConduct({ format: 'html', gameName: 'tiny-chat' })`.
   - Its welcome frame carries `summary` so the client can show "Trash talk is part of the game. Harassment,
     threats and hate are not." above the chat.
   - `/decide` accepts `noted` with a note action.
