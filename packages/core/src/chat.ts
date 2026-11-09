@@ -1,4 +1,5 @@
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { safeWarn } from './log.js';
 import type { MuteService } from './mutes.js';
 import { slidingWindow } from './rateLimit.js';
 import type { SlidingWindow } from './rateLimit.js';
@@ -77,13 +78,6 @@ export interface ChatServiceDeps {
   logger?: Logger;
 }
 
-const defaultLogger: Logger = {
-  warn(event, detail) {
-    if (detail === undefined) console.warn(event);
-    else console.warn(event, detail);
-  },
-};
-
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
 
 const refuse = (
@@ -122,7 +116,7 @@ export class ChatService {
   private readonly starrer: Starrer | undefined;
   private readonly gate: ChatServiceDeps['gate'];
   private readonly onAutoRestrict: ChatServiceDeps['onAutoRestrict'];
-  private readonly logger: Logger;
+  private readonly logger: Logger | undefined;
   private readonly rate: SlidingWindow;
 
   /**
@@ -146,7 +140,7 @@ export class ChatService {
     this.starrer = deps.starrer;
     this.gate = deps.gate;
     this.onAutoRestrict = deps.onAutoRestrict;
-    this.logger = deps.logger ?? defaultLogger;
+    this.logger = deps.logger;
     this.rate = slidingWindow({ limit: RATE_LIMIT, windowMs: RATE_WINDOW_MS, clock: deps.clock });
   }
 
@@ -390,10 +384,6 @@ export class ChatService {
   }
 
   private warn(event: string, detail: Record<string, string | number | boolean>): void {
-    try {
-      this.logger.warn(event, detail);
-    } catch {
-      // A broken logger must not break chat.
-    }
+    safeWarn(this.logger, event, detail);
   }
 }

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { safeWarn } from './log.js';
 import type { SubjectIndex } from './subjects.js';
 import type { Clock, Logger, Store, SubjectId } from './types.js';
 
@@ -24,13 +25,6 @@ export const REPEAT_LOOKBACK_MS = 7 * 24 * 3_600_000;
 
 const newId = (): string => randomBytes(16).toString('base64url');
 
-const defaultLogger: Logger = {
-  warn(event, detail) {
-    if (detail === undefined) console.warn(event);
-    else console.warn(event, detail);
-  },
-};
-
 const present = (id: SubjectId | null): id is SubjectId => typeof id === 'string' && id !== '';
 
 /** What `record` tells the chat path. */
@@ -42,7 +36,7 @@ export class StrikeService {
   private readonly store: Store;
   private readonly clock: Clock;
   private readonly subjects: SubjectIndex;
-  private readonly logger: Logger;
+  private readonly logger: Logger | undefined;
 
   /**
    * Strike times (epoch ms) by the subject id the strike was filed under: the canonical subject at write time.
@@ -65,7 +59,7 @@ export class StrikeService {
     this.store = store;
     this.clock = clock;
     this.subjects = subjects;
-    this.logger = opts?.logger ?? defaultLogger;
+    this.logger = opts?.logger;
   }
 
   /**
@@ -219,10 +213,6 @@ export class StrikeService {
   }
 
   private warn(event: string, detail: Record<string, string | number | boolean>): void {
-    try {
-      this.logger.warn(event, detail);
-    } catch {
-      // A broken logger must not break chat.
-    }
+    safeWarn(this.logger, event, detail);
   }
 }

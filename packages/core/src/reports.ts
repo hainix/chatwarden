@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { safeWarn } from './log.js';
 import type { SubjectIndex } from './subjects.js';
 import type {
   Clock,
@@ -82,13 +83,6 @@ export interface ReportServiceDeps {
   logger?: Logger;
 }
 
-const defaultLogger: Logger = {
-  warn(event, detail) {
-    if (detail === undefined) console.warn(event);
-    else console.warn(event, detail);
-  },
-};
-
 const newId = (): string => randomBytes(16).toString('base64url');
 
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
@@ -130,7 +124,7 @@ export class ReportService {
   private readonly clock: Clock;
   private readonly enabled: () => boolean;
   private readonly onReport: ReportServiceDeps['onReport'];
-  private readonly logger: Logger;
+  private readonly logger: Logger | undefined;
 
   constructor(deps: ReportServiceDeps) {
     this.roster = deps.roster;
@@ -140,7 +134,7 @@ export class ReportService {
     this.clock = deps.clock;
     this.enabled = deps.enabled ?? (() => true);
     this.onReport = deps.onReport;
-    this.logger = deps.logger ?? defaultLogger;
+    this.logger = deps.logger;
   }
 
   /**
@@ -336,10 +330,6 @@ export class ReportService {
   }
 
   private warn(event: string, detail: Record<string, string | number | boolean>): void {
-    try {
-      this.logger.warn(event, detail);
-    } catch {
-      // A broken logger must not break reporting.
-    }
+    safeWarn(this.logger, event, detail);
   }
 }

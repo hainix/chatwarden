@@ -1,4 +1,5 @@
 import { hashWho } from './hasher.js';
+import { safeWarn } from './log.js';
 import type { ActiveSanction, SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
 import type { Clock, Hasher, Identifiers, Logger, RawWho, SanctionKind, SubjectId } from './types.js';
@@ -23,13 +24,6 @@ export interface DoorServiceDeps {
   clock: Clock;
   logger?: Logger;
 }
-
-const defaultLogger: Logger = {
-  warn(event, detail) {
-    if (detail === undefined) console.warn(event);
-    else console.warn(event, detail);
-  },
-};
 
 /** Joining or creating a friends table: only a full ban closes these. Public tables and matchmaking add area bans. */
 const KINDS_FOR: Record<DoorKind, readonly SanctionKind[]> = {
@@ -71,14 +65,14 @@ export class DoorService {
   private readonly subjects: SubjectIndex;
   private readonly sanctions: SanctionIndex;
   private readonly clock: Clock;
-  private readonly logger: Logger;
+  private readonly logger: Logger | undefined;
 
   constructor(deps: DoorServiceDeps) {
     this.hasher = deps.hasher;
     this.subjects = deps.subjects;
     this.sanctions = deps.sanctions;
     this.clock = deps.clock;
-    this.logger = deps.logger ?? defaultLogger;
+    this.logger = deps.logger;
   }
 
   /**
@@ -119,10 +113,6 @@ export class DoorService {
   }
 
   private logFailure(err: unknown): void {
-    try {
-      this.logger.warn('doors.check_failed', { error: err instanceof Error ? err.name : typeof err });
-    } catch {
-      /* a broken logger must not break the door */
-    }
+    safeWarn(this.logger, 'doors.check_failed', { error: err instanceof Error ? err.name : typeof err });
   }
 }

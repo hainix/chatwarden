@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createChatwarden } from '../src/chatwarden.js';
 import type { ChatwardenOptions } from '../src/chatwarden.js';
 import type { Logger, Matcher, Platform, RawWho } from '../src/types.js';
@@ -517,6 +517,137 @@ describe('createChatwarden: retention on by default', () => {
     store.insertReport({ ...oldReport('r1'), createdAt: NOW - 2 * DAY });
     expect((await cw.purge()).reports).toBe(0);
     expect((await cw.purge({ reportsMs: DAY })).reports).toBe(1);
+  });
+});
+
+describe('createChatwarden: retention timer hardening', () => {
+  const throwingLogger: Logger = {
+    warn() {
+      throw new Error('logger broke');
+    },
+  };
+  const asyncBadLogger = { warn: () => Promise.reject(new Error('async')) } as unknown as Logger;
+  const rejections: unknown[] = [];
+  const onRejection = (r: unknown): void => void rejections.push(r);
+  const settle = (): Promise<void> => new Promise<void>((r) => process.nextTick(r));
+  beforeEach(() => {
+    rejections.length = 0;
+    process.on('unhandledRejection', onRejection);
+  });
+  afterEach(() => {
+    process.off('unhandledRejection', onRejection);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  class FailingStore extends MemoryStore {
+    override purgeReports(): number {
+      throw new RangeError('disk full');
+    }
+  }
+
+  it('a throwing logger inside the purge failure path never produces an unhandledRejection', async () => {
+    vi.useFakeTimers();
+    const { cw } = await setup(
+      { retention: { everyMs: 10 }, logger: throwingLogger, matcher: blocker },
+      new FailingStore(),
+    );
+    await vi.advanceTimersByTimeAsync(30);
+    await settle();
+    expect(rejections).toEqual([]);
+    await cw.close();
+  });
+
+  it('an async logger that rejects inside the purge failure path never produces an unhandledRejection', async () => {
+    vi.useFakeTimers();
+    const { cw } = await setup(
+      { retention: { everyMs: 10 }, logger: asyncBadLogger, matcher: blocker },
+      new FailingStore(),
+    );
+    await vi.advanceTimersByTimeAsync(30);
+    await settle();
+    expect(rejections).toEqual([]);
+    await cw.close();
+  });
+
+  it('a throwing clock inside the timer is caught, logged, and the timer keeps going', async () => {
+    vi.useFakeTimers();
+    let broken = false;
+    const clock = {
+      now: () => {
+        if (broken) throw new TypeError('clock broke');
+        return NOW;
+      },
+    };
+    const { cw, logged } = await setup({ retention: { everyMs: 10 }, clock, matcher: blocker });
+    broken = true;
+    await vi.advanceTimersByTimeAsync(30);
+    await settle();
+    expect(rejections).toEqual([]);
+    expect(logged.filter(([e]) => e === 'chatwarden.purge_failed')).toEqual([
+      ['chatwarden.purge_failed', { error: 'TypeError' }],
+      ['chatwarden.purge_failed', { error: 'TypeError' }],
+      ['chatwarden.purge_failed', { error: 'TypeError' }],
+    ]);
+    await cw.close();
+  });
+
+  it('a throwing clock AND a throwing logger inside the timer is silent', async () => {
+    vi.useFakeTimers();
+    let broken = false;
+    const clock = {
+      now: () => {
+        if (broken) throw new TypeError('clock broke');
+        return NOW;
+      },
+    };
+    const { cw } = await setup({ retention: { everyMs: 10 }, clock, logger: throwingLogger, matcher: blocker });
+    broken = true;
+    await vi.advanceTimersByTimeAsync(30);
+    await settle();
+    expect(rejections).toEqual([]);
+    await cw.close();
+  });
+
+  it('everyMs 2_147_483_648 throws RangeError', async () => {
+    const err = await setup({ retention: { everyMs: 2_147_483_648 } }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RangeError);
+    expect((err as Error).message).toBe('retention.everyMs must be at most 2147483647');
+  });
+
+  it.each([2_147_483_649, 1e12])('everyMs %s also throws RangeError', async (big) => {
+    await expect(setup({ retention: { everyMs: big } })).rejects.toBeInstanceOf(RangeError);
+  });
+
+  it('everyMs 2_147_483_647 is accepted and schedules at exactly that interval', async () => {
+    vi.useFakeTimers();
+    const spy = vi.spyOn(globalThis, 'setInterval');
+    const { cw } = await setup({ retention: { everyMs: 2_147_483_647 }, matcher: blocker });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[1]).toBe(2_147_483_647);
+    await cw.close();
+  });
+
+  it('the no_matcher warning with a throwing logger does not reject createChatwarden', async () => {
+    const { cw } = await setup({ logger: throwingLogger, retention: false });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    expect(cw.chat.accept(R, 'a', 'hello')).toBeDefined();
+    await cw.close();
+  });
+
+  it('the no_matcher warning with an async-rejecting logger does not reject or leak', async () => {
+    const { cw } = await setup({ logger: asyncBadLogger, retention: false });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    expect(rejections).toEqual([]);
+    await cw.close();
+  });
+
+  it('the no_matcher warning with the default logger and a throwing console.warn does not reject', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {
+      throw new Error('console broke');
+    });
+    const { cw } = await setup({ logger: undefined, retention: false });
+    await cw.close();
   });
 });
 

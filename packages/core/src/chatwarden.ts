@@ -4,6 +4,7 @@ import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { hashWho, makeHasher } from './hasher.js';
+import { safeWarn } from './log.js';
 import { MuteService } from './mutes.js';
 import { ReportService } from './reports.js';
 import type { ReportCounts, ReportInput, ReportResult } from './reports.js';
@@ -21,12 +22,8 @@ const systemClock: Clock = { now: () => Date.now() };
 /** How often the built-in retention purge runs unless `retention.everyMs` says otherwise: 6 hours. */
 const DEFAULT_PURGE_EVERY_MS = 21_600_000;
 
-const defaultLogger: Logger = {
-  warn(event, detail) {
-    if (detail === undefined) console.warn(event);
-    else console.warn(event, detail);
-  },
-};
+/** The longest delay `setInterval` honours: Node clamps anything above 2^31-1 ms to 1 ms. */
+const MAX_PURGE_EVERY_MS = 2_147_483_647;
 
 /** Everything {@link createChatwarden} needs. Only the store, the secret and the platform are required. */
 export interface ChatwardenOptions {
@@ -56,7 +53,7 @@ export interface ChatwardenOptions {
   /**
    * Retention purge. On by default: the kit deletes rows past their retention (see `RETENTION_DEFAULTS`) every
    * `everyMs` (default 6 hours) on a timer that does not keep the process alive. Give a policy to change how
-   * long rows are kept, `{ everyMs }` to change how often it runs, or `false` to turn it off and run
+   * long rows are kept, `{ everyMs }` (at most 2147483647) to change how often it runs, or `false` to turn it off and run
    * `purge()` yourself. A failing purge is logged (`chatwarden.purge_failed`) and never thrown; `close()`
    * stops the timer.
    */
@@ -127,7 +124,6 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const clock = opts.clock ?? systemClock;
   const enabled = opts.enabled ?? ((): boolean => true);
   const logger = opts.logger;
-  const log = logger ?? defaultLogger;
   const hasher = makeHasher(opts.secret);
 
   const { everyMs, ...retentionPolicy } = opts.retention === false ? {} : (opts.retention ?? {});
@@ -135,7 +131,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (opts.retention !== false && (!Number.isFinite(purgeEveryMs) || purgeEveryMs <= 0)) {
     throw new Error('createChatwarden: retention.everyMs must be a positive finite number');
   }
-  if (opts.matcher === undefined) log.warn('chatwarden.no_matcher');
+  if (opts.retention !== false && purgeEveryMs > MAX_PURGE_EVERY_MS) {
+    throw new RangeError(`retention.everyMs must be at most ${MAX_PURGE_EVERY_MS}`);
+  }
+  if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
 
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });
@@ -185,10 +184,17 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   // keeps a process alive.
   let timer: ReturnType<typeof setInterval> | undefined;
   if (opts.retention !== false) {
+    // The whole callback is fenced, `clock.now()` included, and so is the logging: nothing here may ever become
+    // an unhandled rejection or an uncaught exception from a timer, which would crash the process.
+    const failed = (err: unknown): void => {
+      safeWarn(logger, 'chatwarden.purge_failed', { error: err instanceof Error ? err.name : typeof err });
+    };
     timer = setInterval(() => {
-      purge(store, clock.now(), retentionPolicy).catch((err: unknown) => {
-        log.warn('chatwarden.purge_failed', { error: err instanceof Error ? err.name : typeof err });
-      });
+      try {
+        purge(store, clock.now(), retentionPolicy).then(undefined, failed);
+      } catch (err) {
+        failed(err);
+      }
     }, purgeEveryMs);
     (timer as { unref?: () => void }).unref?.();
   }
