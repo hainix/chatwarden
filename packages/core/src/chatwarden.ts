@@ -2,6 +2,8 @@ import { ChatService } from './chat.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
 import type { ChatResult } from './chat.js';
+import { bindDocuments } from './documents.js';
+import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
@@ -222,6 +224,11 @@ export interface Chatwarden {
   limits: Limits;
   /** The profile's one-line summary, for the report dialog and the rules page. Same as `profile.summary`. */
   summary: string;
+  /**
+   * Generated policy documents, bound to the profile and rules in force: a player code of conduct, a moderator guide,
+   * an agent brief and the policy as JSON. Pure text; nothing here reads the store.
+   */
+  documents: Documents;
   /**
    * Player-facing notices and "My record". Each takes the same `RawWho` as the doors, hashes it and FINDS the person
    * (never creates one): an unknown person gets empty lists and `false`. An IP alone finds nobody. A failure in the
@@ -490,6 +497,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     profile,
     limits,
     summary: profile.summary,
+    documents: bindDocuments({ profile, rules }),
     notices: {
       pending: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.pending(s)),
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),

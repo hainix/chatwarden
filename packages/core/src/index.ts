@@ -118,6 +118,15 @@ export {
   starterRules,
 } from './rules.js';
 export type { CommunityRule, RuleRef } from './rules.js';
+export { agentBrief, bindDocuments, codeOfConduct, moderatorGuide, policyJson } from './documents.js';
+export type {
+  CodeOfConductOptions,
+  DocumentFormat,
+  DocumentPolicy,
+  Documents,
+  ModeratorGuideOptions,
+  PolicyJson,
+} from './documents.js';
 export { LIMITS_DEFAULTS, resolveLimits } from './limits.js';
 export type { Limits, LimitsInput } from './limits.js';
 export {
