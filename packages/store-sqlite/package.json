@@ -1,0 +1,28 @@
+{
+  "name": "@chatwarden/store-sqlite",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Chatwarden store-sqlite package.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hainix/chatwarden.git",
+    "directory": "packages/store-sqlite"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": ["dist/src"],
+  "dependencies": { "@chatwarden/core": "0.0.0" },
+  "peerDependencies": { "@chatwarden/matcher": "0.0.0" },
+  "peerDependenciesMeta": { "@chatwarden/matcher": { "optional": true } },
+  "devDependencies": { "@chatwarden/matcher": "0.0.0" },
+  "publishConfig": { "access": "public" }
+}

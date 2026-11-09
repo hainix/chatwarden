@@ -1,0 +1,29 @@
+{
+  "name": "@chatwarden/matcher",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Chatwarden matcher package.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hainix/chatwarden.git",
+    "directory": "packages/matcher"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./test-fixtures": {
+      "types": "./dist/test/fixtures/index.d.ts",
+      "default": "./dist/test/fixtures/index.js"
+    }
+  },
+  "files": ["dist/src"],
+  "dependencies": { "@chatwarden/core": "0.0.0", "obscenity": "^0.4.6" },
+  "publishConfig": { "access": "public" }
+}

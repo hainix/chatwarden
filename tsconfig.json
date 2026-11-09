@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/store-sqlite" },
+    { "path": "packages/matcher" },
+    { "path": "examples/tiny-chat" }
+  ]
+}

@@ -1,0 +1,645 @@
+import { describe, expect, it } from 'vitest';
+import { applySanction, refCode, revokeSanction, SanctionIndex, type SanctionInput } from '../src/sanctions.js';
+import { SubjectIndex } from '../src/subjects.js';
+import type { Identifiers, SanctionKind, SanctionRow, SubjectId } from '../src/types.js';
+import { MemoryStore } from './memoryStore.js';
+
+const H = 3_600_000;
+const DAY = 24 * H;
+const NOW = 1_800_000_000_000;
+const REF_RE = /^M-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}$/;
+
+function who(clientKey: string | null, accountId: string | null = null, ipHash: string | null = null): Identifiers {
+  return { clientKey, accountId, ipHash };
+}
+const none = who(null);
+
+function setup(opts: { enabled?: () => boolean; store?: MemoryStore } = {}) {
+  const store = opts.store ?? new MemoryStore();
+  const clock = { t: NOW, now: () => clock.t };
+  const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
+  const index = new SanctionIndex({ enabled: opts.enabled ?? (() => true), subjects });
+  return { store, clock, subjects, index };
+}
+
+function subjectOf(subjects: SubjectIndex, ids: Identifiers): SubjectId {
+  const s = subjects.resolve(ids);
+  if (s === null) throw new Error('expected a subject');
+  return s;
+}
+
+function input(subject: SubjectId, over: Partial<SanctionInput> = {}): SanctionInput {
+  return {
+    kind: 'chat',
+    subject,
+    includeIp: false,
+    durationMs: H,
+    reason: 'slurs',
+    actor: 'mod@x.com',
+    source: 'moderator',
+    automated: false,
+    ...over,
+  };
+}
+
+/** Standard fixture: one person, one key, one account, one IP. */
+async function person() {
+  const env = setup();
+  const s1 = subjectOf(env.subjects, who('k1', 'a1', 'ip1'));
+  return { ...env, s1 };
+}
+
+const rows = (store: MemoryStore) => store.rawSanctions();
+
+describe('refCode', () => {
+  it('is M- plus 5 characters of the unambiguous alphabet', () => {
+    for (let i = 0; i < 2_000; i++) expect(refCode()).toMatch(REF_RE);
+  });
+
+  it('never uses the look-alike characters I, L, O, 0 or 1', () => {
+    for (let i = 0; i < 2_000; i++) expect(refCode().slice(2)).not.toMatch(/[ILO01]/);
+  });
+
+  it('draws vary', () => {
+    expect(new Set(Array.from({ length: 50 }, () => refCode())).size).toBeGreaterThan(40);
+  });
+});
+
+describe('applySanction: rows', () => {
+  it('writes ONE subject row without includeIp and returns a group id and a ref code', async () => {
+    const { store, subjects, s1 } = await person();
+    const res = await applySanction(store, subjects, input(s1), NOW);
+    expect(res.groupId).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(res.refCode).toMatch(REF_RE);
+    const r = rows(store);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ targetType: 'subject', value: s1, groupId: res.groupId, refCode: res.refCode });
+  });
+
+  it('writes the metadata on every row', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(
+      store,
+      subjects,
+      input(s1, { kind: 'area', includeIp: true, durationMs: 2 * H, reason: 'harassment', actor: 'auto', source: 'auto_filter', automated: true, rule: '4.2' }),
+      NOW,
+    );
+    const r = rows(store);
+    expect(r).toHaveLength(2);
+    for (const row of r) {
+      expect(row).toMatchObject({
+        kind: 'area',
+        startsAt: NOW,
+        endsAt: NOW + 2 * H,
+        reason: 'harassment',
+        actor: 'auto',
+        source: 'auto_filter',
+        automated: true,
+        rule: '4.2',
+        pending: false,
+        revokedBy: null,
+        revokedAt: null,
+      });
+    }
+  });
+
+  it('stores a null rule when none is given and automated false for a moderator', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1), NOW);
+    expect(rows(store)[0]).toMatchObject({ rule: null, automated: false, source: 'moderator' });
+  });
+
+  it('gives each row a distinct id and each call a distinct group id and ref code', async () => {
+    const { store, subjects, s1 } = await person();
+    const a = await applySanction(store, subjects, input(s1, { includeIp: true }), NOW);
+    const b = await applySanction(store, subjects, input(s1, { includeIp: true }), NOW);
+    expect(a.groupId).not.toBe(b.groupId);
+    expect(a.refCode).not.toBe(b.refCode);
+    const ids = rows(store).map((r) => r.id);
+    expect(new Set(ids).size).toBe(4);
+  });
+
+  it('every row of a group carries the same ref code', async () => {
+    const { store, subjects, s1 } = await person();
+    const res = await applySanction(store, subjects, input(s1, { includeIp: true }), NOW);
+    expect(rows(store).map((r) => r.refCode)).toEqual([res.refCode, res.refCode]);
+  });
+
+  it('stores the CANONICAL subject when handed a subject that was merged away', async () => {
+    const { store, subjects, clock, s1 } = await person();
+    clock.t = NOW + 1_000; // s2 is younger, so s1 survives the merge
+    const s2 = subjectOf(subjects, who('k2'));
+    subjectOf(subjects, who('k2', 'a1')); // links k2 and a1: s1 and s2 merge
+    expect(subjects.canonical(s2)).toBe(s1);
+    await applySanction(store, subjects, input(s2), clock.t);
+    expect(rows(store)[0]?.value).toBe(s1);
+  });
+
+  it('rejects a NaN, zero, negative or infinite duration and writes nothing', async () => {
+    const { store, subjects, index, s1 } = await person();
+    for (const durationMs of [Number.NaN, 0, -1, -H, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      await expect(applySanction(store, subjects, input(s1, { durationMs }), NOW, index), String(durationMs)).rejects.toThrow(/duration/i);
+    }
+    expect(rows(store)).toEqual([]);
+    expect(index.active('chat', none, s1, NOW)).toBeNull();
+  });
+
+  it('accepts null (permanent) and a 1 ms duration', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { durationMs: null }), NOW);
+    await applySanction(store, subjects, input(s1, { durationMs: 1 }), NOW);
+    expect(rows(store)).toHaveLength(2);
+  });
+
+  it('rejects an unknown kind or source and writes nothing', async () => {
+    const { store, subjects, s1 } = await person();
+    await expect(applySanction(store, subjects, input(s1, { kind: 'nope' as SanctionKind }), NOW)).rejects.toThrow(/kind/i);
+    await expect(applySanction(store, subjects, input(s1, { source: 'nope' as never }), NOW)).rejects.toThrow(/source/i);
+    expect(rows(store)).toEqual([]);
+  });
+
+  it('a failed apply does not poison the next one', async () => {
+    const { store, subjects, s1 } = await person();
+    await expect(applySanction(store, subjects, input(s1, { durationMs: 0 }), NOW)).rejects.toThrow();
+    await applySanction(store, subjects, input(s1), NOW);
+    expect(rows(store)).toHaveLength(1);
+  });
+});
+
+describe('applySanction: the IP row', () => {
+  it('includeIp writes ONE IP row: the most recently seen IP, not every IP', async () => {
+    const { store, subjects, clock } = setup();
+    const s = subjectOf(subjects, who('k1', null, 'ip-old'));
+    clock.t = NOW + 10 * 60_000;
+    subjectOf(subjects, who('k1', null, 'ip-new'));
+    await applySanction(store, subjects, input(s, { includeIp: true }), clock.t);
+    const ipRows = rows(store).filter((r) => r.targetType === 'ip');
+    expect(ipRows.map((r) => r.value)).toEqual(['ip-new']);
+  });
+
+  it('writes no IP row when no IP was ever seen (the subject row is still written)', async () => {
+    const { store, subjects } = setup();
+    const s = subjectOf(subjects, who('k1'));
+    await applySanction(store, subjects, input(s, { includeIp: true }), NOW);
+    expect(rows(store).map((r) => r.targetType)).toEqual(['subject']);
+  });
+
+  it('caps the IP row at 24 h for a 30-day ban, leaving the subject row at 30 days', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { kind: 'ban', includeIp: true, durationMs: 30 * DAY }), NOW);
+    const r = rows(store);
+    expect(r.find((x) => x.targetType === 'ip')?.endsAt).toBe(NOW + DAY);
+    expect(r.find((x) => x.targetType === 'subject')?.endsAt).toBe(NOW + 30 * DAY);
+  });
+
+  it('does not stretch the IP row when the sanction is shorter than 24 h', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { includeIp: true, durationMs: 2 * H }), NOW);
+    expect(rows(store).find((x) => x.targetType === 'ip')?.endsAt).toBe(NOW + 2 * H);
+  });
+
+  it('treats exactly 24 h as unchanged', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { includeIp: true, durationMs: DAY }), NOW);
+    expect(rows(store).find((x) => x.targetType === 'ip')?.endsAt).toBe(NOW + DAY);
+  });
+
+  it('IP row capped at 24 h even for permanent, while the subject row stays permanent', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { kind: 'ban', includeIp: true, durationMs: null }), NOW);
+    const r = rows(store);
+    expect(r.find((x) => x.targetType === 'ip')?.endsAt).toBe(NOW + DAY);
+    expect(r.find((x) => x.targetType === 'subject')?.endsAt).toBeNull();
+  });
+
+  it('the IP is found across merged subjects (latest IP of the merged person)', async () => {
+    const { store, subjects, clock } = setup();
+    const a = subjectOf(subjects, who('k1', null, 'ip-a'));
+    clock.t = NOW + 5 * 60_000;
+    subjectOf(subjects, who('k2', null, 'ip-b'));
+    clock.t = NOW + 10 * 60_000;
+    const merged = subjectOf(subjects, who('k2', 'acct')); // key k2 alone so far
+    subjectOf(subjects, who('k1', 'acct')); // links the two subjects
+    const root = subjects.canonical(a);
+    expect(subjects.canonical(merged)).toBe(root);
+    await applySanction(store, subjects, input(root, { includeIp: true }), clock.t);
+    expect(rows(store).filter((r) => r.targetType === 'ip').map((r) => r.value)).toEqual(['ip-b']);
+  });
+});
+
+describe('applySanction: synchronous effect and failures', () => {
+  it('the write and the index update have happened by the time the promise exists', async () => {
+    const { store, subjects, index, s1 } = await person();
+    const p = applySanction(store, subjects, input(s1, { durationMs: 30 * 60_000, automated: true }), NOW, index);
+    // No await yet: the chat path must already see the timeout.
+    expect(rows(store)).toHaveLength(1);
+    expect(index.active('chat', none, s1, NOW)).toMatchObject({ until: NOW + 30 * 60_000, automated: true });
+    await p;
+  });
+
+  it('revoke is also synchronous', async () => {
+    const { store, subjects, index, s1 } = await person();
+    const { groupId } = await applySanction(store, subjects, input(s1), NOW, index);
+    const p = revokeSanction(store, groupId, 'boss', NOW + 1, 'mistake', index);
+    expect(index.active('chat', none, s1, NOW + 1)).toBeNull();
+    expect(rows(store)[0]?.revokedAt).toBe(NOW + 1);
+    await p;
+  });
+
+  it('a write failure rejects and leaves the store and the index untouched', async () => {
+    const store = new MemoryStore();
+    store.insertSanctionGroup = () => {
+      throw new Error('disk full');
+    };
+    const { subjects, index } = setup({ store });
+    const subject = subjectOf(subjects, who('k1', 'a1', 'ip1'));
+    await expect(applySanction(store, subjects, input(subject, { includeIp: true }), NOW, index)).rejects.toThrow('disk full');
+    expect(rows(store)).toEqual([]);
+    expect(index.active('chat', who(null, null, 'ip1'), subject, NOW)).toBeNull();
+  });
+
+  it('a revoke failure rejects and leaves the index untouched', async () => {
+    const { store, subjects, index, s1 } = await person();
+    const { groupId } = await applySanction(store, subjects, input(s1), NOW, index);
+    store.revokeSanctionGroup = () => {
+      throw new Error('locked');
+    };
+    await expect(revokeSanction(store, groupId, 'boss', NOW + 1, 'r', index)).rejects.toThrow('locked');
+    expect(index.active('chat', none, s1, NOW + 1)).not.toBeNull();
+  });
+
+  it('with no index given the store is written and nothing else is needed', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1), NOW);
+    const fresh = new SanctionIndex({ enabled: () => true, subjects });
+    await fresh.load(store, NOW);
+    expect(fresh.active('chat', none, s1, NOW)).not.toBeNull();
+  });
+});
+
+describe('applySanction: ref codes', () => {
+  it('retries on a collision with a new code, up to 5 attempts', async () => {
+    const { store, subjects, s1 } = await person();
+    const real = store.insertSanctionGroup.bind(store);
+    const seen: string[] = [];
+    let calls = 0;
+    store.insertSanctionGroup = (r) => {
+      calls++;
+      seen.push(r[0]?.refCode ?? '');
+      return calls <= 4 ? false : real(r);
+    };
+    const res = await applySanction(store, subjects, input(s1), NOW);
+    expect(calls).toBe(5);
+    expect(res.refCode).toBe(seen[4]);
+    expect(new Set(seen).size).toBeGreaterThan(1);
+    expect(rows(store)).toHaveLength(1);
+  });
+
+  it('throws after 5 collisions and writes nothing', async () => {
+    const { store, subjects, index, s1 } = await person();
+    let calls = 0;
+    store.insertSanctionGroup = () => {
+      calls++;
+      return false;
+    };
+    await expect(applySanction(store, subjects, input(s1), NOW, index)).rejects.toThrow(/ref/i);
+    expect(calls).toBe(5);
+    expect(rows(store)).toEqual([]);
+    expect(index.active('chat', none, s1, NOW)).toBeNull();
+  });
+
+  it('the group keeps ONE ref code on every row even after a retry', async () => {
+    const { store, subjects, s1 } = await person();
+    const real = store.insertSanctionGroup.bind(store);
+    let calls = 0;
+    store.insertSanctionGroup = (r) => (++calls === 1 ? false : real(r));
+    const res = await applySanction(store, subjects, input(s1, { includeIp: true }), NOW);
+    expect(rows(store).map((r) => r.refCode)).toEqual([res.refCode, res.refCode]);
+  });
+
+  it('refCode format and uniqueness over 10 000 draws', async () => {
+    const { store, subjects, s1 } = await person();
+    const codes = new Set<string>();
+    for (let i = 0; i < 10_000; i++) {
+      const res = await applySanction(store, subjects, input(s1, { durationMs: 1 }), NOW);
+      expect(res.refCode).toMatch(REF_RE);
+      codes.add(res.refCode);
+    }
+    expect(codes.size).toBe(10_000);
+  });
+});
+
+describe('SanctionIndex.active', () => {
+  it('returns null when nothing is loaded', () => {
+    const { index } = setup();
+    expect(index.active('chat', none, 's_x', NOW)).toBeNull();
+  });
+
+  it('matches by subject and, for an IP row, by ipHash; returns exactly until, automated, groupId, refCode', async () => {
+    const { store, subjects, index, s1 } = await person();
+    const res = await applySanction(store, subjects, input(s1, { includeIp: true, automated: true }), NOW, index);
+    const want = { until: NOW + H, automated: true, groupId: res.groupId, refCode: res.refCode };
+    expect(index.active('chat', none, s1, NOW)).toEqual(want);
+    expect(index.active('chat', who(null, null, 'ip1'), null, NOW)).toEqual(want);
+  });
+
+  it('never returns the reason, rule, actor or any identifier', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { includeIp: true, rule: '3.1', reason: 'private note' }), NOW, index);
+    const result = index.active('chat', who('k1', 'a1', 'ip1'), s1, NOW);
+    expect(result).not.toBeNull();
+    // Exactly these keys: nothing else can carry an identifier, reason, rule or actor.
+    expect(Object.keys(result ?? {}).sort()).toEqual(['automated', 'groupId', 'refCode', 'until']);
+    // The groupId is random, so blank it before the substring scan (it could contain 'k1' by chance).
+    const out = JSON.stringify({ ...result, groupId: '' });
+    for (const secret of ['private note', '3.1', 'mod@x.com', s1, 'ip1', 'k1', 'a1']) expect(out).not.toContain(secret);
+  });
+
+  it('matches by subject across browsers: a new key signed into the sanctioned account', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1), NOW, index);
+    const newBrowser = subjectOf(subjects, who('k-new', 'a1'));
+    expect(newBrowser).toBe(s1);
+    expect(index.active('chat', who('k-new', 'a1'), newBrowser, NOW)).not.toBeNull();
+  });
+
+  it('sanction follows a merged subject (sanction the survivor, merge another in)', async () => {
+    const { store, subjects, index } = setup();
+    const s1 = subjectOf(subjects, who('k1'));
+    const s2 = subjectOf(subjects, who('k2'));
+    expect(s2).not.toBe(s1);
+    await applySanction(store, subjects, input(s1), NOW, index);
+    expect(index.active('chat', who('k2'), s2, NOW)).toBeNull(); // not yet linked
+    const merged = subjectOf(subjects, who('k2', 'acct'));
+    subjectOf(subjects, who('k1', 'acct'));
+    const root = subjects.canonical(s2);
+    expect(root).toBe(subjects.canonical(s1));
+    expect(index.active('chat', who('k2', 'acct'), subjects.canonical(merged), NOW)).not.toBeNull();
+    expect(index.active('chat', who('k1', 'acct'), subjects.canonical(s1), NOW)).not.toBeNull();
+  });
+
+  it('sanction follows a merge in the other direction (sanction the one that gets merged away)', async () => {
+    const { store, subjects, index, clock } = setup();
+    const older = subjectOf(subjects, who('k-old'));
+    clock.t = NOW + 1_000;
+    const younger = subjectOf(subjects, who('k-young'));
+    await applySanction(store, subjects, input(younger), clock.t, index);
+    expect(index.active('chat', who('k-old'), older, clock.t)).toBeNull();
+    subjectOf(subjects, who('k-young', 'acct'));
+    const survivor = subjectOf(subjects, who('k-old', 'acct'));
+    expect(survivor).toBe(older);
+    expect(subjects.canonical(younger)).toBe(older);
+    expect(index.active('chat', who('k-old', 'acct'), survivor, clock.t)).not.toBeNull();
+  });
+
+  it('a boot-time load also follows merges recorded in the store', async () => {
+    const { store, subjects, index, clock } = setup();
+    const older = subjectOf(subjects, who('k-old'));
+    clock.t = NOW + 1_000;
+    const younger = subjectOf(subjects, who('k-young'));
+    await applySanction(store, subjects, input(younger), clock.t, index);
+    subjectOf(subjects, who('k-young', 'acct'));
+    subjectOf(subjects, who('k-old', 'acct'));
+    await subjects.flush();
+    const subjects2 = new SubjectIndex(store, clock, { logger: { warn() {} } });
+    await subjects2.load();
+    const index2 = new SanctionIndex({ enabled: () => true, subjects: subjects2 });
+    await index2.load(store, clock.t);
+    expect(index2.active('chat', who('k-old'), subjects2.canonical(older), clock.t)).not.toBeNull();
+  });
+
+  it('household IP: a sanction without includeIp never refuses a different subject on the same IP', async () => {
+    const { store, subjects, index } = setup();
+    const a = subjectOf(subjects, who('ka', null, 'home'));
+    const b = subjectOf(subjects, who('kb', null, 'home'));
+    expect(b).not.toBe(a);
+    await applySanction(store, subjects, input(a, { kind: 'ban', durationMs: null }), NOW, index);
+    expect(index.active('ban', who('kb', null, 'home'), b, NOW)).toBeNull();
+    expect(index.active('ban', who(null, null, 'home'), null, NOW)).toBeNull();
+    expect(index.active('ban', who('ka', null, 'home'), a, NOW)).not.toBeNull();
+  });
+
+  it('with includeIp the IP row is a 24 h speed bump on the shared address, then frees it', async () => {
+    const { store, subjects, index } = setup();
+    const a = subjectOf(subjects, who('ka', null, 'home'));
+    const b = subjectOf(subjects, who('kb', null, 'home'));
+    await applySanction(store, subjects, input(a, { kind: 'ban', includeIp: true, durationMs: null }), NOW, index);
+    expect(index.active('ban', who('kb', null, 'home'), b, NOW + DAY - 1)).not.toBeNull();
+    expect(index.active('ban', who('kb', null, 'home'), b, NOW + DAY)).toBeNull();
+    expect(index.active('ban', who('ka', null, 'home'), a, NOW + DAY)).toMatchObject({ until: null });
+  });
+
+  it('does not match an unrelated identity', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { includeIp: true }), NOW, index);
+    const other = subjectOf(subjects, who('kx', 'ax', 'ipx'));
+    expect(index.active('chat', who('kx', 'ax', 'ipx'), other, NOW)).toBeNull();
+  });
+
+  it('does not match a null subject with no IP', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1), NOW, index);
+    expect(index.active('chat', none, null, NOW)).toBeNull();
+  });
+
+  it('only matches the asked kind', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { kind: 'chat' }), NOW, index);
+    expect(index.active('area', none, s1, NOW)).toBeNull();
+    expect(index.active('ban', none, s1, NOW)).toBeNull();
+    expect(index.active('chat', none, s1, NOW)).not.toBeNull();
+  });
+
+  it('keeps the value spaces apart: an IP row never matches as a subject, and vice versa', async () => {
+    const { store, index, s1 } = await person();
+    // An IP row whose value equals a subject id, and a subject row whose value equals an IP hash.
+    store.insertSanctionGroup([
+      sanctionRow({ id: 'r1', groupId: 'g1', refCode: 'M-AAAAA', targetType: 'ip', value: s1 }),
+      sanctionRow({ id: 'r2', groupId: 'g2', refCode: 'M-BBBBB', targetType: 'subject', value: 'ipX', kind: 'ban' }),
+    ]);
+    await index.load(store, NOW);
+    expect(index.active('chat', none, s1, NOW)).toBeNull();
+    expect(index.active('ban', who(null, null, 'ipX'), null, NOW)).toBeNull();
+    expect(index.active('chat', who(null, null, s1), null, NOW)).not.toBeNull();
+    expect(index.active('ban', none, 'ipX', NOW)).not.toBeNull();
+  });
+
+  it('a permanent sanction beats a 1-hour one and reports until null', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { durationMs: H }), NOW, index);
+    const perm = await applySanction(store, subjects, input(s1, { durationMs: null }), NOW, index);
+    expect(index.active('chat', none, s1, NOW)).toEqual({ until: null, automated: false, groupId: perm.groupId, refCode: perm.refCode });
+  });
+
+  it('a permanent sanction beats a longer timed one regardless of insertion order', async () => {
+    const { store, subjects, index, s1 } = await person();
+    const perm = await applySanction(store, subjects, input(s1, { durationMs: null }), NOW, index);
+    await applySanction(store, subjects, input(s1, { durationMs: 30 * DAY }), NOW, index);
+    expect(index.active('chat', none, s1, NOW)?.groupId).toBe(perm.groupId);
+  });
+
+  it('among timed sanctions the latest end wins, whichever row it matched through', async () => {
+    const { store, subjects, index, clock } = setup();
+    const a = subjectOf(subjects, who('ka', null, 'ipa'));
+    const b = subjectOf(subjects, who('kb', null, 'ipa'));
+    await applySanction(store, subjects, input(a, { durationMs: H }), NOW, index);
+    const long = await applySanction(store, subjects, input(b, { durationMs: 5 * H }), clock.t, index);
+    await applySanction(store, subjects, input(a, { includeIp: true, durationMs: 2 * H }), NOW, index);
+    const r = index.active('chat', who('ka', null, 'ipa'), a, NOW);
+    expect(r?.until).toBe(NOW + 2 * H);
+    expect(index.active('chat', who('kb', null, 'ipa'), b, NOW)?.groupId).toBe(long.groupId);
+  });
+
+  it('is inactive once revoked; a revoked permanent does not shadow a live timed one', async () => {
+    const { store, subjects, index, s1 } = await person();
+    const perm = await applySanction(store, subjects, input(s1, { durationMs: null }), NOW, index);
+    const timed = await applySanction(store, subjects, input(s1, { durationMs: H }), NOW, index);
+    await revokeSanction(store, perm.groupId, 'boss', NOW + 1, 'wrong person', index);
+    expect(index.active('chat', none, s1, NOW + 2)?.groupId).toBe(timed.groupId);
+    await revokeSanction(store, timed.groupId, 'boss', NOW + 3, 'wrong person', index);
+    expect(index.active('chat', none, s1, NOW + 4)).toBeNull();
+  });
+
+  it('ends exactly now is inactive; one ms earlier is still active', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { includeIp: true, durationMs: H }), NOW, index);
+    expect(index.active('chat', who(null, null, 'ip1'), s1, NOW + H - 1)).not.toBeNull();
+    expect(index.active('chat', who(null, null, 'ip1'), s1, NOW + H)).toBeNull();
+    expect(index.active('chat', none, s1, NOW + 2 * H)).toBeNull();
+  });
+
+  it('does not load rows that expired before load', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { durationMs: H }), NOW);
+    await index.load(store, NOW + 2 * H);
+    expect(index.active('chat', none, s1, NOW)).toBeNull();
+  });
+
+  it('is inactive before starts_at and active from it', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { durationMs: H }), NOW + 10 * H, index);
+    expect(index.active('chat', none, s1, NOW)).toBeNull();
+    expect(index.active('chat', none, s1, NOW + 10 * H)).not.toBeNull();
+  });
+
+  it('a permanent sanction stays active indefinitely', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { kind: 'ban', durationMs: null }), NOW, index);
+    expect(index.active('ban', none, s1, NOW + 3650 * DAY)).toMatchObject({ until: null });
+  });
+
+  it('does not see writes made without the index until load is called, and load replaces the set wholesale', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await index.load(store, NOW);
+    const { groupId } = await applySanction(store, subjects, input(s1), NOW);
+    expect(index.active('chat', none, s1, NOW)).toBeNull();
+    await index.load(store, NOW);
+    expect(index.active('chat', none, s1, NOW)).not.toBeNull();
+    await revokeSanction(store, groupId, 'boss', NOW + 1, 'r');
+    await index.load(store, NOW + 1);
+    expect(index.active('chat', none, s1, NOW + 1)).toBeNull();
+  });
+
+  it('many short expired sanctions do not disturb a live one', async () => {
+    const { store, subjects, index, s1 } = await person();
+    for (let i = 0; i < 300; i++) await applySanction(store, subjects, input(s1, { durationMs: 1 }), NOW + i, index);
+    const live = await applySanction(store, subjects, input(s1, { durationMs: H }), NOW + 1_000, index);
+    expect(index.active('chat', none, s1, NOW + 1_000)?.groupId).toBe(live.groupId);
+  });
+});
+
+describe('SanctionIndex enabled option', () => {
+  it('returns null when disabled, even with a matching sanction', async () => {
+    const env = setup({ enabled: () => false });
+    const s = subjectOf(env.subjects, who('k1', 'a1', 'ip1'));
+    await applySanction(env.store, env.subjects, input(s, { kind: 'ban', durationMs: null, includeIp: true }), NOW, env.index);
+    expect(env.index.active('ban', who(null, null, 'ip1'), s, NOW)).toBeNull();
+  });
+
+  it('returns null without throwing when disabled and nothing is loaded', () => {
+    const env = setup({ enabled: () => false });
+    expect(env.index.active('chat', none, 's_x', NOW)).toBeNull();
+  });
+
+  it('reads the flag on every call, so flipping it takes effect live', async () => {
+    let on = true;
+    const env = setup({ enabled: () => on });
+    const s = subjectOf(env.subjects, who('k1'));
+    await applySanction(env.store, env.subjects, input(s), NOW, env.index);
+    expect(env.index.active('chat', none, s, NOW)).not.toBeNull();
+    on = false;
+    expect(env.index.active('chat', none, s, NOW)).toBeNull();
+    on = true;
+    expect(env.index.active('chat', none, s, NOW)).not.toBeNull();
+  });
+
+  it('pending recorded while disabled, becomes active when enabled', async () => {
+    let on = false;
+    const env = setup({ enabled: () => on });
+    const s = subjectOf(env.subjects, who('k1', null, 'ip1'));
+    await applySanction(env.store, env.subjects, input(s, { includeIp: true }), NOW, env.index);
+    expect(rows(env.store).map((r) => r.pending)).toEqual([true, true]);
+    expect(env.index.active('chat', none, s, NOW)).toBeNull();
+    on = true;
+    expect(env.index.active('chat', none, s, NOW)).not.toBeNull();
+    // Informational: a boot-time load keeps the row and enforces it.
+    await env.index.load(env.store, NOW);
+    expect(env.index.active('chat', none, s, NOW)).not.toBeNull();
+  });
+
+  it('pending is false when the switch is on at write time', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1), NOW, index);
+    expect(rows(store)[0]?.pending).toBe(false);
+  });
+});
+
+function sanctionRow(over: Partial<SanctionRow>): SanctionRow {
+  return {
+    id: 'r',
+    groupId: 'g',
+    refCode: 'M-ZZZZZ',
+    kind: 'chat',
+    targetType: 'subject',
+    value: 'v',
+    startsAt: NOW,
+    endsAt: NOW + H,
+    reason: 'x',
+    rule: null,
+    actor: 'a',
+    source: 'moderator',
+    automated: false,
+    pending: false,
+    ...over,
+  };
+}
+
+describe('revokeSanction', () => {
+  it('revokes every row of the group, and only that group', async () => {
+    const { store, subjects, index, s1 } = await person();
+    const g1 = await applySanction(store, subjects, input(s1, { includeIp: true }), NOW, index);
+    const other = subjectOf(subjects, who('k9'));
+    const g2 = await applySanction(store, subjects, input(other), NOW, index);
+    expect(await revokeSanction(store, g1.groupId, 'boss', NOW + 5, 'appeal', index)).toBe(true);
+    for (const r of rows(store).filter((x) => x.groupId === g1.groupId)) expect(r).toMatchObject({ revokedBy: 'boss', revokedAt: NOW + 5, revokeReason: 'appeal' });
+    for (const r of rows(store).filter((x) => x.groupId === g2.groupId)) expect(r).toMatchObject({ revokedBy: null, revokedAt: null });
+    expect(index.active('chat', who(null, null, 'ip1'), null, NOW + 6)).toBeNull();
+    expect(index.active('chat', none, other, NOW + 6)).not.toBeNull();
+  });
+
+  it('the first revoke wins: a second keeps the first revoker, time and reason', async () => {
+    const { store, subjects, s1 } = await person();
+    const g = await applySanction(store, subjects, input(s1, { includeIp: true }), NOW);
+    expect(await revokeSanction(store, g.groupId, 'first', NOW + 1, 'first reason')).toBe(true);
+    expect(await revokeSanction(store, g.groupId, 'second', NOW + 2, 'second reason')).toBe(false);
+    for (const r of rows(store)) expect(r).toMatchObject({ revokedBy: 'first', revokedAt: NOW + 1, revokeReason: 'first reason' });
+  });
+
+  it('is a no-op for an unknown group', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, input(s1), NOW, index);
+    expect(await revokeSanction(store, 'nope', 'm', NOW, 'r', index)).toBe(false);
+    expect(rows(store).every((r) => r.revokedAt === null)).toBe(true);
+    expect(index.active('chat', none, s1, NOW)).not.toBeNull();
+  });
+});
