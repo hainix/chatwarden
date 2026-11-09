@@ -1,0 +1,205 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createRouter } from '@chatwarden/http';
+import type { KitRequest, KitResponse } from '@chatwarden/http';
+
+const req = (method: string, path: string, extra: Partial<KitRequest> = {}): KitRequest => ({
+  method,
+  path,
+  query: {},
+  headers: {},
+  body: undefined,
+  ...extra,
+});
+
+const ok = (body: unknown = { ok: true }): KitResponse => ({ status: 200, body });
+
+describe('createRouter: matching', () => {
+  it('dispatches by method and path, and passes the params', async () => {
+    const getOne = vi.fn((_r: KitRequest, p: Record<string, string>) => ok({ id: p['id'] }));
+    const list = vi.fn(() => ok({ list: true }));
+    const router = createRouter({ 'GET /reports/:id': getOne, 'GET /reports': list });
+    expect(await router(req('GET', '/reports/abc-123_X'))).toEqual({ status: 200, body: { id: 'abc-123_X' } });
+    expect(await router(req('GET', '/reports'))).toEqual({ status: 200, body: { list: true } });
+    expect(getOne).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the request through unchanged', async () => {
+    const seen: KitRequest[] = [];
+    const router = createRouter({
+      'POST /x': (r) => {
+        seen.push(r);
+        return ok();
+      },
+    });
+    const r = req('POST', '/x', { query: { a: '1' }, headers: { h: 'v' }, body: { k: 1 }, rawBody: '{"k":1}' });
+    await router(r);
+    expect(seen[0]).toBe(r);
+  });
+
+  it('supports several params and a root route', async () => {
+    const router = createRouter({
+      'GET /a/:x/b/:y': (_r, p) => ok(p),
+      'GET /': () => ok('root'),
+    });
+    expect((await router(req('GET', '/a/one/b/two'))).body).toEqual({ x: 'one', y: 'two' });
+    expect((await router(req('GET', '/'))).body).toBe('root');
+  });
+
+  it('supports async handlers', async () => {
+    const router = createRouter({ 'GET /a': async () => ok('later') });
+    expect((await router(req('GET', '/a'))).body).toBe('later');
+  });
+
+  it('is case sensitive on the path and normalises the method case', async () => {
+    const router = createRouter({ 'GET /Reports': () => ok() });
+    expect((await router(req('GET', '/reports'))).status).toBe(404);
+    expect((await router(req('get', '/Reports'))).status).toBe(200);
+  });
+
+  it('prefers a literal segment over a param', async () => {
+    const router = createRouter({
+      'GET /reports/:id': () => ok('param'),
+      'GET /reports/export': () => ok('literal'),
+    });
+    expect((await router(req('GET', '/reports/export'))).body).toBe('literal');
+    expect((await router(req('GET', '/reports/other'))).body).toBe('param');
+  });
+
+  it('strips the query string before matching', async () => {
+    const router = createRouter({ 'GET /reports/:id': (_r, p) => ok(p['id']) });
+    expect((await router(req('GET', '/reports/abc?limit=5&x=/y'))).body).toBe('abc');
+    expect((await router(req('GET', '/reports?limit=5'))).status).toBe(404);
+  });
+
+  it('treats a trailing slash as no match', async () => {
+    const router = createRouter({ 'GET /reports': () => ok(), 'GET /reports/:id': () => ok() });
+    expect((await router(req('GET', '/reports/'))).status).toBe(404);
+    expect((await router(req('GET', '/reports/abc/'))).status).toBe(404);
+    expect((await router(req('GET', '/reports/?x=1'))).status).toBe(404);
+  });
+
+  it('does not match empty segments or a path without a leading slash', async () => {
+    const router = createRouter({ 'GET /a/:id': () => ok() });
+    expect((await router(req('GET', '/a//'))).status).toBe(404);
+    expect((await router(req('GET', '//a/x'))).status).toBe(404);
+    expect((await router(req('GET', 'a/x'))).status).toBe(404);
+    expect((await router(req('GET', ''))).status).toBe(404);
+  });
+});
+
+describe('createRouter: params', () => {
+  const router = createRouter({ 'GET /r/:id': (_r, p) => ok(p['id']) });
+  const status = async (path: string): Promise<number> => (await router(req('GET', path))).status;
+
+  it('accepts 1 to 64 characters of [A-Za-z0-9_-]', async () => {
+    expect(await status('/r/a')).toBe(200);
+    expect(await status(`/r/${'a'.repeat(64)}`)).toBe(200);
+    expect(await status('/r/A-z_9')).toBe(200);
+  });
+
+  it('answers 404 for a bad param', async () => {
+    expect(await status(`/r/${'a'.repeat(65)}`)).toBe(404);
+    expect(await status('/r/a.b')).toBe(404);
+    expect(await status('/r/a b')).toBe(404);
+    expect(await status('/r/a:b')).toBe(404);
+    expect(await status('/r/a;b')).toBe(404);
+    expect(await status('/r/é')).toBe(404);
+  });
+
+  it('decodes the param before the check', async () => {
+    expect((await router(req('GET', '/r/a%2Db'))).body).toBe('a-b');
+    expect((await router(req('GET', '/r/%61bc'))).body).toBe('abc');
+    expect(await status('/r/a%2Fb')).toBe(404);
+    expect(await status('/r/a%20b')).toBe(404);
+    expect(await status('/r/a%2e%2e')).toBe(404);
+    expect(await status('/r/%2e%2e')).toBe(404);
+    expect(await status(`/r/${'%61'.repeat(65)}`)).toBe(404);
+  });
+
+  it('answers 404 for a malformed encoding', async () => {
+    expect(await status('/r/%')).toBe(404);
+    expect(await status('/r/%zz')).toBe(404);
+    expect(await status('/r/%E0%A4%A')).toBe(404);
+    expect(await status('/r/%ff')).toBe(404);
+  });
+
+  it('never calls the handler for a bad param', async () => {
+    const h = vi.fn(() => ok());
+    const r = createRouter({ 'GET /r/:id': h });
+    await r(req('GET', '/r/a%2Fb'));
+    await r(req('GET', '/r/%'));
+    await r(req('POST', '/r/%'));
+    expect(h).not.toHaveBeenCalled();
+  });
+
+  it('answers 404, not 405, for a bad param on another method', async () => {
+    expect(await status('/r/a.b')).toBe(404);
+    const res = await router(req('DELETE', '/r/a.b'));
+    expect(res.status).toBe(404);
+    expect(res.headers?.['allow']).toBeUndefined();
+  });
+});
+
+describe('createRouter: 404 and 405', () => {
+  const router = createRouter({
+    'GET /things': () => ok(),
+    'POST /things': () => ok(),
+    'GET /things/:id': () => ok(),
+    'DELETE /things/:id': () => ok(),
+  });
+
+  it('answers 404 with a fixed body for no match', async () => {
+    const res = await router(req('GET', '/nothing/here'));
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: 'not_found', message: 'Not found.' });
+  });
+
+  it('answers 405 with an allow header for the wrong method', async () => {
+    const res = await router(req('PUT', '/things'));
+    expect(res.status).toBe(405);
+    expect(res.headers).toEqual({ allow: 'GET, POST' });
+    expect(res.body).toEqual({ error: 'method_not_allowed', message: 'Method not allowed.' });
+    const res2 = await router(req('POST', '/things/abc'));
+    expect(res2.status).toBe(405);
+    expect(res2.headers).toEqual({ allow: 'DELETE, GET' });
+  });
+
+  it('does not echo the path or method', async () => {
+    const res = await router(req('PATCH', '/things/secret-id'));
+    expect(JSON.stringify(res)).not.toContain('secret-id');
+    expect(JSON.stringify(res)).not.toContain('PATCH');
+    const res2 = await router(req('GET', '/leak-me'));
+    expect(JSON.stringify(res2)).not.toContain('leak-me');
+  });
+
+  it('does not run any handler on 404 or 405', async () => {
+    const h = vi.fn(() => ok());
+    const r = createRouter({ 'GET /a': h });
+    await r(req('POST', '/a'));
+    await r(req('GET', '/b'));
+    expect(h).not.toHaveBeenCalled();
+  });
+});
+
+describe('createRouter: route table validation', () => {
+  const h = (): KitResponse => ok();
+
+  it('rejects a malformed route key', () => {
+    expect(() => createRouter({ 'GET reports': h })).toThrow(RangeError);
+    expect(() => createRouter({ '/reports': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'get /reports': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /reports/': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /a//b': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /a/:': h })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /a/:b-c': h })).toThrow(RangeError);
+  });
+
+  it('rejects two routes that are the same shape for one method', () => {
+    expect(() => createRouter({ 'GET /a/:x': h, 'GET /a/:y': h })).toThrow(RangeError);
+  });
+
+  it('allows the same path under different methods', () => {
+    expect(() => createRouter({ 'GET /a/:x': h, 'POST /a/:y': h })).not.toThrow();
+  });
+});

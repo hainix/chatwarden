@@ -26,6 +26,10 @@ export default defineConfig({
         find: '@chatwarden/profanity',
         replacement: fileURLToPath(new URL('./packages/profanity/src/index.ts', import.meta.url)),
       },
+      {
+        find: '@chatwarden/http',
+        replacement: fileURLToPath(new URL('./packages/http/src/index.ts', import.meta.url)),
+      },
     ],
   },
   test: {

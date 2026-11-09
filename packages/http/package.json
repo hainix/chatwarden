@@ -1,0 +1,25 @@
+{
+  "name": "@chatwarden/http",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Chatwarden HTTP package: framework-free router, error mapping, auth hook and role permissions for the admin and player APIs.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hainix/chatwarden.git",
+    "directory": "packages/http"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": ["dist/src"],
+  "dependencies": { "@chatwarden/core": "0.0.0" },
+  "publishConfig": { "access": "public" }
+}
