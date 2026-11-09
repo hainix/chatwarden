@@ -1,5 +1,5 @@
 ---
-status: proposed (owner + community moderator input 2026-11-09; recommendations are the defaults until answered)
+status: approved 2026-11-09 (owner: "follow your recommendation on all of these" + presets-and-configurability principle)
 updated: 2026-11-09
 ---
 
@@ -114,6 +114,63 @@ type Outcome = 'none' | 'note' | 'warning' | { kind: 'chat' | 'area' | 'ban'; du
 
 After the first offense, every profile escalates through its ladder. The record step counts warnings and
 restrictions as K2 does, and "repeated" turns accumulated notes into a step.
+
+## Presets on top, everything configurable underneath (owner 2026-11-09)
+
+> "Good presets are good, just to make things super easy for people to pick what version they want, and pick
+> good defaults, but then also make things configurable under the hood as possible. Some people might not want
+> swear words starred in chat, or certain ones to be starred… add flexibility to the open source client."
+
+The rule for every setting in the kit:
+1. **One line to start.** `createChatwarden({ profile: 'relaxed' })` gives a complete, sensible setup.
+2. **Override any field.** `createChatwarden({ profile: 'relaxed', overrides: { profanity: { mode: 'allow' } } })`.
+   - `resolveProfile(preset, overrides)` deep-merges the overrides onto the preset and validates the result.
+     Unknown keys, an outcome the ladder can't express, or an AI auto-act on banter/rude all throw at creation with
+     a plain message.
+   - The resolved profile is readable (`cw.profile`), so the Guide and the docs show what is actually in force.
+3. **Or write your own.** `defineProfile({...})` builds a complete custom profile with the same validation.
+4. **Defaults are documented next to every field.** The docs site's configuration page is generated from the
+   profile types and the preset values, so a default can't be undocumented.
+
+### Profanity, as the worked example
+
+Profanity is ordinary swearing. Slurs are separate and always refused by the term list.
+
+```ts
+profanity: {
+  mode: 'allow' | 'star' | 'refuse',      // relaxed/standard: 'star', strict: 'refuse'
+  style: 'full' | 'keepFirst' | 'grawlix', // '****', 'f***', '#$%!'. Default 'full'
+  add: string[],      // extra words treated as profanity (whole-word, same evasion handling as the term matcher)
+  remove: string[],   // words from the built-in list that are allowed here (e.g. 'damn', 'hell')
+  only: string[] | null,  // if set, ONLY these words count (a fully custom list); `add`/`remove` still apply
+  languages: string[],    // built-in lists to use; 'en' today, more as contributed
+}
+```
+
+- `refuse` returns a new chat refusal reason, `'profanity'`, which cites the profile's summary rather than a
+  rule. Under `strict`, swearing is "not allowed here", which is not a rule violation that earns strikes.
+  Profanity refusals never create strikes, notes or sanctions.
+- The built-in English list stays in the optional `@chatwarden/profanity` package (obscenity's dataset), so the
+  core install has no word data.
+- `remove` and `only` are applied to the dataset by word. Test-first, with synthetic stand-ins where a
+  test needs a word, because the repo still carries no real slur. Ordinary profanity in tests is allowed and
+  scoped to the profanity package.
+
+### Other configurable surfaces (same pattern)
+
+Each has a preset default and a typed override:
+- conduct-level meanings and examples, which feed the Guide and the AI context
+- first-offense outcomes
+- the repeat rule
+- the ladder table
+- AI auto-act levels
+- the profile `summary`
+- Community Rules: the starter set per profile, or your own via `defineRules`
+- `autoRestrictRule`
+- slur strike thresholds (3 per hour, 30 min / 24 h, currently constants) and the chat length / rate limits
+- retention windows, with floors enforced: a window shorter than the ladder lookback or the suspension window
+  throws, and the message says why
+- reporter feedback (on/off), the report rate limit, and the bad-faith suspension threshold
 
 ## Where it shows up
 
