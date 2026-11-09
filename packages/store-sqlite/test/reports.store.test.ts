@@ -12,8 +12,10 @@ import {
   type Identifiers,
   type SanctionKind,
   type Source,
+  type Store,
   type StoredReport,
 } from '@chatwarden/core';
+import { MemoryStore } from '../../core/test/memoryStore.js';
 import { MIGRATIONS, openStore } from '../src/index.js';
 
 const H = 3_600_000;
@@ -370,6 +372,103 @@ describe('end to end through ReportService', () => {
       ok: false,
       refused: 'suspended',
     });
+    db.close();
+  });
+});
+
+describe('listReports', () => {
+  const seeded = (store: Pick<Store, 'insertReport' | 'closeReport'>) => {
+    // r1..r6 with three at the same instant, so the id tie-break shows.
+    const times = [NOW, NOW + 10, NOW + 10, NOW + 10, NOW + 20, NOW + 30];
+    times.forEach((createdAt, i) => {
+      store.insertReport(report({ id: `r${i + 1}`, createdAt, reporterSubject: `s_rep${i}` }));
+    });
+    store.closeReport('r2', 'actioned', false, 'mod', NOW + 100, 'n');
+    store.closeReport('r3', 'dismissed', true, 'mod', NOW + 100, 'n', 'ev');
+    store.closeReport('r5', 'actioned', false, 'mod', NOW + 100, 'n');
+  };
+  const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
+
+  it('newest first, ties on created_at broken by id descending', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(ids(store.listReports({ limit: 10 }))).toEqual(['r6', 'r5', 'r4', 'r3', 'r2', 'r1']);
+    db.close();
+  });
+
+  it('returns whole records with the decision columns', () => {
+    const { db, store } = env();
+    seeded(store);
+    const [row] = store.listReports({ status: 'dismissed', limit: 5 });
+    expect(row).toEqual(store.loadReport('r3'));
+    expect(row).toMatchObject({ status: 'dismissed', badFaith: true, actionedBy: 'mod', badFaithEvidence: 'ev' });
+    expect(row?.excerpt).toEqual(report().excerpt);
+    db.close();
+  });
+
+  it('filters by status', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(ids(store.listReports({ status: 'open', limit: 10 }))).toEqual(['r6', 'r4', 'r1']);
+    expect(ids(store.listReports({ status: 'actioned', limit: 10 }))).toEqual(['r5', 'r2']);
+    expect(ids(store.listReports({ status: 'dismissed', limit: 10 }))).toEqual(['r3']);
+    db.close();
+  });
+
+  it('before (exclusive) pages by time; with beforeId it splits an exact tie', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(ids(store.listReports({ before: NOW + 10, limit: 10 }))).toEqual(['r1']);
+    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r3', limit: 10 }))).toEqual(['r2', 'r1']);
+    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r4', limit: 2 }))).toEqual(['r3', 'r2']);
+    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r1', limit: 10 }))).toEqual(['r1']);
+    expect(ids(store.listReports({ before: NOW, limit: 10 }))).toEqual([]);
+    // A cursor with a filter.
+    expect(ids(store.listReports({ status: 'open', before: NOW + 10, beforeId: 'r4', limit: 10 }))).toEqual(['r1']);
+    // beforeId alone (no before) is ignored.
+    expect(ids(store.listReports({ beforeId: 'r3', limit: 10 }))).toHaveLength(6);
+    db.close();
+  });
+
+  it('limit is clamped to 1..200 at the store as well', () => {
+    const { db, store } = env();
+    for (let i = 0; i < 210; i++) store.insertReport(report({ id: `q${i}`, createdAt: NOW + i, reporterSubject: `s${i}` }));
+    expect(store.listReports({ limit: 500 })).toHaveLength(200);
+    expect(store.listReports({ limit: 200 })).toHaveLength(200);
+    expect(store.listReports({ limit: 0 })).toHaveLength(1);
+    expect(store.listReports({ limit: -4 })).toHaveLength(1);
+    expect(store.listReports({ limit: 3.8 })).toHaveLength(3);
+    expect(store.listReports({ limit: 5 })).toHaveLength(5);
+    db.close();
+  });
+
+  it('an empty table lists nothing', () => {
+    const { db, store } = env();
+    expect(store.listReports({ limit: 10 })).toEqual([]);
+    db.close();
+  });
+
+  it('agrees with the in-memory store on every query', () => {
+    const { db, store } = env();
+    const mem = new MemoryStore();
+    seeded(store);
+    seeded(mem);
+    const queries = [
+      { limit: 10 },
+      { limit: 2 },
+      { status: 'open' as const, limit: 10 },
+      { status: 'actioned' as const, limit: 1 },
+      { status: 'dismissed' as const, limit: 10 },
+      { before: NOW + 10, limit: 10 },
+      { before: NOW + 10, beforeId: 'r3', limit: 10 },
+      { before: NOW + 10, beforeId: 'r4', limit: 2 },
+      { before: NOW + 30, limit: 3 },
+      { before: NOW + 31, beforeId: 'zz', limit: 3 },
+      { status: 'open' as const, before: NOW + 10, beforeId: 'r4', limit: 10 },
+      { limit: 0 },
+      { limit: 999 },
+    ];
+    for (const q of queries) expect(store.listReports(q), JSON.stringify(q)).toEqual(mem.listReports(q));
     db.close();
   });
 });

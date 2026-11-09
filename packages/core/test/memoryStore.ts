@@ -3,6 +3,7 @@ import type {
   MuteRow,
   NoticeRow,
   ReportActivity,
+  ReportListQuery,
   ReportRecord,
   SanctionRow,
   Store,
@@ -320,6 +321,20 @@ export class MemoryStore implements Store {
   loadReport(id: string): ReportRecord | null {
     const r = this.reports.find((x) => x.id === id);
     return r === undefined ? null : structuredClone(r);
+  }
+
+  listReports(q: ReportListQuery): ReportRecord[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    return this.reports
+      .filter((r) => {
+        if (q.status !== undefined && r.status !== q.status) return false;
+        if (q.before === undefined) return true;
+        if (r.createdAt !== q.before) return r.createdAt < q.before;
+        return q.beforeId !== undefined && r.id < q.beforeId;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .slice(0, limit)
+      .map((r) => structuredClone(r));
   }
 
   closeReport(

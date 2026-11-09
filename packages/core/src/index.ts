@@ -16,6 +16,7 @@ export type {
   DecisionRow,
   ReportCategory,
   ReportExcerptLine,
+  ReportListQuery,
   ReportRecord,
   SanctionKind,
   SanctionRow,
@@ -75,6 +76,16 @@ export {
   SUSPEND_WINDOW_MS,
 } from './reports.js';
 export type { ReportCounts, ReportInput, ReportRefusal, ReportResult, ReportServiceDeps } from './reports.js';
+export {
+  decodeReportCursor,
+  encodeReportCursor,
+  listStaffReports,
+  REPORT_PAGE_DEFAULT,
+  REPORT_PAGE_MAX,
+  ReportQueryError,
+  staffReport,
+} from './staffReports.js';
+export type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
@@ -84,6 +95,7 @@ export {
   NOTICE_EXCERPT_MAX,
   NOTICE_RECORD_WINDOW_MS,
   NoticeService,
+  ownLineIdsByPerson,
   ownLines,
 } from './notices.js';
 export type {

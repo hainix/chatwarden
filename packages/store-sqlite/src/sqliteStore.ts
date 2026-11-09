@@ -7,6 +7,7 @@ import type {
   NoticeRow,
   ReportActivity,
   ReportCategory,
+  ReportListQuery,
   ReportRecord,
   SanctionKind,
   SanctionRow,
@@ -29,6 +30,32 @@ import type {
 } from '@chatwarden/matcher';
 
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
+function reportFromRow(r: Record<string, unknown>): ReportRecord {
+  return {
+    id: String(r.id),
+    createdAt: Number(r.created_at),
+    roomId: String(r.room_id),
+    tags: JSON.parse(String(r.tags_json)) as Record<string, string>,
+    reporterSubject: String(r.reporter_subject),
+    reporterSeat: String(r.reporter_seat),
+    reporterHandle: String(r.reporter_handle),
+    targetSubject: String(r.target_subject),
+    targetSeat: String(r.target_seat),
+    targetHandle: String(r.target_handle),
+    category: String(r.category) as ReportCategory,
+    note: r.note === null ? null : String(r.note),
+    lineId: r.line_id === null ? null : String(r.line_id),
+    excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
+    people: JSON.parse(String(r.people_json)) as SubjectId[],
+    status: String(r.status) as ReportRecord['status'],
+    badFaith: Number(r.bad_faith) === 1,
+    actionedAt: r.actioned_at === null ? null : Number(r.actioned_at),
+    actionedBy: r.actioned_by === null ? null : String(r.actioned_by),
+    modNote: r.mod_note === null ? null : String(r.mod_note),
+    badFaithEvidence: r.bad_faith_evidence === null ? null : String(r.bad_faith_evidence),
+  };
+}
+
 const SANCTION_COLUMNS =
   'id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, gap_note, gap_status, room_id, actor, source, automated, pending';
 
@@ -374,31 +401,29 @@ export class SqliteStore implements Store, TermStore {
   loadReport(id: string): ReportRecord | null {
     return this.transaction(() => {
       const r = this.db.prepare('SELECT * FROM kit_reports WHERE id = ?').get(id);
-      if (r === undefined) return null;
-      return {
-        id: String(r.id),
-        createdAt: Number(r.created_at),
-        roomId: String(r.room_id),
-        tags: JSON.parse(String(r.tags_json)) as Record<string, string>,
-        reporterSubject: String(r.reporter_subject),
-        reporterSeat: String(r.reporter_seat),
-        reporterHandle: String(r.reporter_handle),
-        targetSubject: String(r.target_subject),
-        targetSeat: String(r.target_seat),
-        targetHandle: String(r.target_handle),
-        category: String(r.category) as ReportCategory,
-        note: r.note === null ? null : String(r.note),
-        lineId: r.line_id === null ? null : String(r.line_id),
-        excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
-        people: JSON.parse(String(r.people_json)) as SubjectId[],
-        status: String(r.status) as ReportRecord['status'],
-        badFaith: Number(r.bad_faith) === 1,
-        actionedAt: r.actioned_at === null ? null : Number(r.actioned_at),
-        actionedBy: r.actioned_by === null ? null : String(r.actioned_by),
-        modNote: r.mod_note === null ? null : String(r.mod_note),
-        badFaithEvidence: r.bad_faith_evidence === null ? null : String(r.bad_faith_evidence),
-      };
+      return r === undefined ? null : reportFromRow(r);
     });
+  }
+
+  listReports(q: ReportListQuery): ReportRecord[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    const where: string[] = [];
+    const args: Array<string | number> = [];
+    if (q.status !== undefined) {
+      where.push('status = ?');
+      args.push(q.status);
+    }
+    if (q.before !== undefined) {
+      if (q.beforeId === undefined) {
+        where.push('created_at < ?');
+        args.push(q.before);
+      } else {
+        where.push('(created_at < ? OR (created_at = ? AND id < ?))');
+        args.push(q.before, q.before, q.beforeId);
+      }
+    }
+    const sql = `SELECT * FROM kit_reports${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
   }
 
   closeReport(

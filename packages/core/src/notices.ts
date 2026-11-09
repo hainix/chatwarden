@@ -68,6 +68,36 @@ export class ExcerptError extends Error {
 const copyLine = (l: ReportExcerptLine): ReportExcerptLine => ({ ...l, audience: l.audience === null ? null : [...l.audience] });
 
 /**
+ * The canonical person who wrote `line` in `report`, or null: `people[p]` canonicalised, null for a line with no
+ * writer (`p` null), a `p` that is not an index into `people`, or a malformed one. The one rule behind
+ * {@link ownLines} and {@link ownLineIdsByPerson}.
+ */
+function writerOf(report: Pick<StoredReport, 'people'>, line: ReportExcerptLine, subjects: SubjectIndex): SubjectId | null {
+  const p = line.p;
+  if (typeof p !== 'number' || !Number.isInteger(p) || p < 0 || p >= report.people.length) return null;
+  const who = report.people[p];
+  return who === undefined ? null : subjects.canonical(who);
+}
+
+/**
+ * Every person in the report's `people` (canonical, no duplicates) mapped to the ids of the excerpt lines they wrote
+ * themselves, in the report's order: the same rule as {@link ownLines}, with no cap. A person with no own line maps
+ * to an empty array. Carries subject ids: staff channels only, never send to a player.
+ */
+export function ownLineIdsByPerson(
+  report: Pick<StoredReport, 'people' | 'excerpt'>,
+  subjects: SubjectIndex,
+): Record<SubjectId, string[]> {
+  const out: Record<SubjectId, string[]> = {};
+  for (const who of report.people) out[subjects.canonical(who)] ??= [];
+  for (const l of report.excerpt) {
+    const writer = writerOf(report, l, subjects);
+    if (writer !== null) (out[writer] ??= []).push(l.lineId);
+  }
+  return out;
+}
+
+/**
  * The lines of `report` that `subject` wrote themselves, for `lineIds`, in the report's order. A line is the
  * subject's when `people[p]` canonicalises to the subject (so a merged alias's line is theirs); a line with no
  * writer (`p` null), an index outside `people`, or someone else's is never theirs.
@@ -85,12 +115,7 @@ export function ownLines(
   const wanted = new Set<string>(lineIds);
   if (wanted.size > NOTICE_EXCERPT_MAX) throw new ExcerptError('too_many');
   const person = subjects.canonical(subject);
-  const isOwn = (l: ReportExcerptLine): boolean => {
-    const p = l.p;
-    if (typeof p !== 'number' || !Number.isInteger(p) || p < 0 || p >= report.people.length) return false;
-    const who = report.people[p];
-    return who !== undefined && subjects.canonical(who) === person;
-  };
+  const isOwn = (l: ReportExcerptLine): boolean => writerOf(report, l, subjects) === person;
   const out: ReportExcerptLine[] = [];
   const found = new Set<string>();
   for (const l of report.excerpt) {

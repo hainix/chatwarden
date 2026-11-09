@@ -25,6 +25,8 @@ import type { CommunityRules, RuleRef } from './rules.js';
 import { applySanction, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
+import { listStaffReports, staffReport } from './staffReports.js';
+import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 import { SubjectIndex } from './subjects.js';
 import type {
   Clock,
@@ -182,7 +184,23 @@ export interface Chatwarden {
     /** The seats whose current occupant the viewer has muted. Seat ids only. */
     mutedSeats(roomId: string, viewerSeat: string): string[];
   };
-  reports: { submit(input: ReportInput): Promise<ReportResult> };
+  reports: {
+    submit(input: ReportInput): Promise<ReportResult>;
+    /**
+     * The staff report queue, newest first (ties broken by id), one page at a time. Filter with `status`; pass the
+     * previous page's `next` as `before` for the next page; `limit` defaults to 50 and is clamped to 1..200. Each item
+     * is a {@link StaffReport}: the whole record plus the canonical staff refs and the own line ids of every person.
+     * Throws `ReportQueryError` for an unknown status or a cursor that is not one of ours, and the store's own error
+     * if it fails, so a route handler should catch both.
+     * Carries subject ids: staff channels only, never send to a player.
+     */
+    list(q?: ReportQuery): ReportPage;
+    /**
+     * One report as a {@link StaffReport}, or null for an unknown id. Throws the store's own error if it fails.
+     * Carries subject ids: staff channels only, never send to a player.
+     */
+    get(id: string): StaffReport | null;
+  };
   doors: { check(kind: DoorKind, who: RawWho): DoorRefusal | null };
   sanctions: {
     /**
@@ -454,7 +472,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       },
       mutedSeats: (roomId, viewerSeat) => mutes.mutedSeats(roomId, viewerSeat, roster),
     },
-    reports: { submit: (input) => reports.submit(input) },
+    reports: {
+      submit: (input) => reports.submit(input),
+      list: (q) => listStaffReports(store, subjects, q),
+      get: (id) => {
+        const record = typeof id === 'string' ? store.loadReport(id) : null;
+        return record === null ? null : staffReport(record, subjects);
+      },
+    },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
       apply: (input) => applySanction(store, subjects, input, clock.now(), sanctions),

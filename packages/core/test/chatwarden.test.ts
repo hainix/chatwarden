@@ -1342,3 +1342,117 @@ describe('createChatwarden: history and suggest', () => {
     expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: 'warning' });
   });
 });
+
+describe('createChatwarden: staff report queue', () => {
+  it('get returns the record plus staff refs and the own line ids of every person', async () => {
+    const r = await reported();
+    const { cw, reportId, a, b, own, bobLine } = r;
+    const got = cw.reports.get(reportId);
+    if (got === null) throw new Error('expected the report');
+    expect(got).toMatchObject({
+      id: reportId,
+      status: 'open',
+      badFaith: false,
+      actionedAt: null,
+      actionedBy: null,
+      modNote: null,
+      badFaithEvidence: null,
+      targetPerson: a,
+      reporterPerson: b,
+      category: 'harassment',
+    });
+    expect(got.people).toEqual([a, b]);
+    expect(got.ownLineIds[a]).toEqual(own);
+    expect(got.ownLineIds[b]).toEqual([bobLine]);
+    expect(Object.keys(got.ownLineIds).sort()).toEqual([a, b].sort());
+    // The same excerpt rule as a notice: what the picker offers is accepted by decide.
+    expect((await warnAlice(r, { lineIds: got.ownLineIds[a] ?? [] })).ok).toBe(true);
+  });
+
+  it('get of an unknown id is null (also after the report was purged, and for odd input)', async () => {
+    const { cw } = await reported();
+    expect(cw.reports.get('nope')).toBeNull();
+    expect(cw.reports.get('')).toBeNull();
+    expect(cw.reports.get(undefined as never)).toBeNull();
+  });
+
+  it('list is newest first with the same shape as get, and the status filter follows decide', async () => {
+    const r = await reported();
+    const { cw, reportId, clock } = r;
+    clock.t += 1000;
+    cw.rooms.seat(R, 'c', { clientKey: 'key-carol', ip: '198.51.100.3' }, 'Carol');
+    const second = await cw.reports.submit({ roomId: R, reporterSeat: 'c', targetSeat: 'a', category: 'spam' });
+    if (!second.ok) throw new Error('expected a second report');
+    const all = cw.reports.list();
+    expect(all.items.map((x) => x.id)).toEqual([second.reportId, reportId]);
+    expect(all.next).toBeNull();
+    expect(all.items[1]).toEqual(cw.reports.get(reportId));
+    expect(cw.reports.list({ status: 'open' }).items).toHaveLength(2);
+    expect(cw.reports.list({ status: 'actioned' }).items).toEqual([]);
+    expect((await warnAlice(r)).ok).toBe(true);
+    expect(cw.reports.list({ status: 'open' }).items.map((x) => x.id)).toEqual([second.reportId]);
+    const actioned = cw.reports.list({ status: 'actioned' }).items;
+    expect(actioned.map((x) => x.id)).toEqual([reportId]);
+    expect(actioned[0]).toMatchObject({ status: 'actioned', actionedBy: 'mod@example.test', actionedAt: clock.t });
+    expect(cw.reports.list({ status: 'dismissed' }).items).toEqual([]);
+  });
+
+  it('list pages with the opaque cursor and clamps the limit', async () => {
+    const r = await reported();
+    const { cw, store, clock } = r;
+    for (let i = 0; i < 4; i++) {
+      clock.t += 1;
+      const seat = `x${i}`;
+      cw.rooms.seat(R, seat, { clientKey: `key-x${i}`, ip: '198.51.100.9' }, `X${i}`);
+      const res = await cw.reports.submit({ roomId: R, reporterSeat: seat, targetSeat: 'b', category: 'spam' });
+      if (!res.ok) throw new Error('expected a report');
+    }
+    expect(store.rawReports()).toHaveLength(5);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 10; guard++) {
+      const page: ReturnType<typeof cw.reports.list> = cw.reports.list({ limit: 2, ...(cursor === null ? {} : { before: cursor }) });
+      seen.push(...page.items.map((x) => x.id));
+      cursor = page.next;
+      if (cursor === null) break;
+    }
+    expect(seen).toEqual(store.rawReports().map((x) => x.id).reverse());
+    expect(cw.reports.list({ limit: 0 }).items).toHaveLength(1);
+    expect(cw.reports.list({ limit: -3 }).items).toHaveLength(1);
+    expect(cw.reports.list({ limit: 10_000 }).items).toHaveLength(5);
+    expect(typeof cw.reports.list({ limit: 2 }).next).toBe('string');
+  });
+
+  it('a malformed cursor or status is a loud ReportQueryError, not an empty page', async () => {
+    const { cw } = await reported();
+    expect(() => cw.reports.list({ before: '???' })).toThrow(expect.objectContaining({ name: 'ReportQueryError' }));
+    expect(() => cw.reports.list({ status: 'closed' as never })).toThrow(expect.objectContaining({ name: 'ReportQueryError' }));
+  });
+
+  it('after a merge a report filed earlier shows the CANONICAL person', async () => {
+    const r = await reported();
+    const { cw, reportId, own, a } = r;
+    cw.rooms.seat(R, 'acct', { clientKey: 'key-other', accountId: 'acct-merge', ip: '198.51.100.7' }, 'Other');
+    cw.rooms.seat(R, 'link', { clientKey: 'key-alice', accountId: 'acct-merge', ip: '198.51.100.1' }, 'Linked');
+    const merged = cw.rooms.subjectAt(R, 'acct');
+    expect(merged).toBe(cw.rooms.subjectAt(R, 'a'));
+    if (merged === null) throw new Error('expected a subject');
+    const got = cw.reports.get(reportId);
+    if (got === null) throw new Error('expected the report');
+    expect(got.targetPerson).toBe(merged);
+    expect(got.people[0]).toBe(merged);
+    expect(got.ownLineIds[merged]).toEqual(own);
+    // Only canonical refs are offered: the person once, and Bob.
+    expect(Object.keys(got.ownLineIds).sort()).toEqual([merged, r.b].sort());
+    expect(got.targetSubject).toBe(a);
+    expect(cw.reports.list().items[0]?.targetPerson).toBe(merged);
+  });
+
+  it('is read-only: reading writes nothing and leaves the stored record untouched', async () => {
+    const r = await reported();
+    const before = JSON.stringify(r.store.rawReports());
+    r.cw.reports.get(r.reportId);
+    r.cw.reports.list();
+    expect(JSON.stringify(r.store.rawReports())).toBe(before);
+  });
+});

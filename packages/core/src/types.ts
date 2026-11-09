@@ -297,6 +297,15 @@ export interface ReportRecord extends Omit<StoredReport, 'status'> {
   badFaithEvidence: string | null;
 }
 
+/** What {@link Store.listReports} takes. */
+export interface ReportListQuery {
+  status?: 'open' | 'actioned' | 'dismissed';
+  /** Epoch ms; only reports created before this (exclusive), or at it with an id below `beforeId`. */
+  before?: number;
+  beforeId?: string;
+  limit: number;
+}
+
 /**
  * One recorded moderator decision, kept so the same decision sent twice is a replay and not a second action.
  * `key` is a hash of the report and the decision; `resultJson` is what the first call answered.
@@ -480,6 +489,14 @@ export interface Store {
 
   /** One report with its decision columns, or null when there is none by that id. */
   loadReport(id: string): ReportRecord | null;
+
+  /**
+   * Reports newest first (`created_at` descending, then `id` descending, so a tie is stable), whole records. `status`
+   * filters; `before` keeps only reports older than that instant (exclusive), and with `beforeId` also the ones filed
+   * AT that instant whose id sorts below it (keyset paging: pass the last row's `createdAt` and `id`). `beforeId`
+   * without `before` is ignored. `limit` is clamped to 1..200 (a fraction is floored).
+   */
+  listReports(q: ReportListQuery): ReportRecord[];
 
   /**
    * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`,
