@@ -111,7 +111,7 @@ type Outcome = 'none' | 'note' | 'warning' | { kind: 'chat' | 'area' | 'ban'; du
 | rude, first | **note** | warning | warning + chat 1 h |
 | hostile, first | warning | chat 24 h | chat 24 h |
 | severe, first | chat 7 d → ban per ladder | chat 7 d → ban | ban 7 d |
-| repeated | 2 notes in 30 d, from different games → warning | 2 notes in 30 d → chat 24 h | any note → warning |
+| repeated | 2 notes in 30 d, from different games → warning | 2 notes in 30 d → chat 24 h | any earlier note → chat 24 h (never milder than the first offense) |
 | profanity | star | star | refuse |
 | AI may auto-act on | severe | severe | hostile, severe |
 
