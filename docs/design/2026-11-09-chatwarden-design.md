@@ -548,9 +548,43 @@ The **11-09 spec is the feature contract**. Its parts A/B/C are built here (K2, 
   - Each level gets its own fixtures and its own row in the eval table.
 - **K8. Landing page and docs site.** Built in the kit repo (`site/`), deployed to Cloudflare Pages (the
   owner's existing Cloudflare account), on its own domain (owner question 9).
-  - **Landing page.** One page, leading with the AI moderation pitch:
-    - a live **playground**: type chat lines and see the matcher, a recorded AI read and the notice the
-      player would get, with no API key needed
+  - **Interactive demo, the centrepiece.** The owner (2026-11-09) asked for "an interactive demo on the
+    landing page so that people know what the interface looks like, can look at the moderation tools… well
+    polished… focuses on what it does, what it can provide, and super easy integration". It is a split view
+    with no sign-up and no API key.
+    - **Left, "The game":** a chat room with three seats. The visitor plays one seat while two scripted
+      players chat.
+      - Synthetic demo slurs are refused, with the rule cited.
+      - Trash talk goes through.
+      - Report works on any line.
+    - **Right, "Your moderator":** the real `@chatwarden/hub-react` hub.
+      - The report lands in the queue with its recorded AI read (labelled as recorded), the evidence and the
+        ladder suggestion.
+      - The visitor decides, for example "Warn", choosing the line to show. The left pane instantly shows the
+        player's notice with that excerpt and the Acknowledge button.
+      - "My record" and the Rule gaps list are one click away.
+    - **The real kit, running in the browser**, not a mock:
+      - core
+      - `@chatwarden/store-memory`, the journaled MemoryStore promoted to a shipped package (also useful
+        for adopters' own tests)
+      - the matcher with the synthetic demo pack
+      - an injectable WebCrypto `Hasher`, with core's `node:crypto` use isolated behind `Hasher` and id
+        generation so core bundles for the browser
+
+      What visitors click is exactly what adopters ship.
+    - **Guided tour**, four steps: say something bad, report it, decide, see the player's view. A "Reset
+      demo" button, and a "Show me the code" toggle that reveals the few lines of integration behind each
+      step.
+    - **Polished and focused:**
+      - its own visual identity
+      - fast to load (code-split)
+      - works on a phone (the panes stack)
+      - meets accessibility basics
+      - no filler: every section shows what it does, what it provides, and how little code it takes
+  - **Landing page sections** around the demo:
+    - a one-line pitch
+    - the demo
+    - "add it in 3 steps" (`npx chatwarden init`, the chat hook, mount the hub), with copyable code
     - the four AI levels
     - "works with Coop / Discord / any game server"
     - a 3-step quickstart
