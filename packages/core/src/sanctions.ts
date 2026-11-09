@@ -12,7 +12,10 @@ import type { SubjectIndex } from './subjects.js';
 export type { SanctionKind, Source } from './types.js';
 
 /** Every kind a sanction can have. The `kit_sanctions` CHECK constraint lists the same values. */
-export const SANCTION_KINDS: readonly SanctionKind[] = ['chat', 'area', 'ban', 'warning'];
+export const SANCTION_KINDS: readonly SanctionKind[] = ['chat', 'area', 'ban', 'warning', 'note'];
+
+/** A warning and a note are records, not restrictions: no end, no IP row, never in the index, never refuse. */
+const isRecordKind = (kind: SanctionKind): boolean => kind === 'warning' || kind === 'note';
 
 /** The longest rule-gap note, after trimming. */
 export const GAP_NOTE_MAX = 500;
@@ -44,9 +47,9 @@ export interface SanctionInput {
   kind: SanctionKind;
   /** The person to sanction; stored as its canonical (surviving) subject. */
   subject: SubjectId;
-  /** Also write one IP row: the subject's most recently seen IP, capped at 24 h. Must be false for a warning. */
+  /** Also write one IP row: the subject's most recently seen IP, capped at 24 h. Must be false for a warning or a note. */
   includeIp: boolean;
-  /** Milliseconds from now; null is permanent. Must be finite and above 0. Must be null for a warning. */
+  /** Milliseconds from now; null is permanent. Must be finite and above 0. Must be null for a warning or a note. */
   durationMs: number | null;
   /** Private moderator note. Never returned to a player. */
   reason: string;
@@ -63,6 +66,11 @@ export interface SanctionInput {
    * when the rule is `'uncovered'` and the source is `moderator`; otherwise it must be absent. Never shown to a player.
    */
   gapNote?: string;
+  /**
+   * The room (game) this came from, kept on every row of the group. Absent or null stores null. A non-empty string
+   * otherwise. Private; the ladder reads it to count notes from distinct games.
+   */
+  roomId?: string | null;
 }
 
 /** What `active` tells the chat path. No reason, rule, actor or identifier. */
@@ -111,10 +119,10 @@ export function validateSanctionInput(input: SanctionInput): void {
 
 function validate(input: SanctionInput): Checked {
   const d = input.durationMs;
-  if (input.kind === 'warning') {
-    // A warning has no end and no IP: it is a record, not a restriction.
-    if (d !== null) throw new SanctionError('applySanction: a warning has no duration');
-    if (input.includeIp) throw new SanctionError('applySanction: a warning has no IP row');
+  if (isRecordKind(input.kind)) {
+    // A warning or a note has no end and no IP: it is a record, not a restriction.
+    if (d !== null) throw new SanctionError('applySanction: a warning or note has no duration');
+    if (input.includeIp) throw new SanctionError('applySanction: a warning or note has no IP row');
   } else if (d !== null && (!Number.isFinite(d) || d <= 0)) {
     // NaN would otherwise store NULL (a silent permanent ban); zero or less is an already-expired row.
     throw new SanctionError(`applySanction: invalid duration ${d}`);
@@ -122,6 +130,10 @@ function validate(input: SanctionInput): Checked {
   if (!SANCTION_KINDS.includes(input.kind)) throw new SanctionError('applySanction: invalid kind');
   if (!SANCTION_SOURCES.includes(input.source)) throw new SanctionError('applySanction: invalid source');
   if (typeof input.subject !== 'string' || input.subject === '') throw new SanctionError('applySanction: missing subject');
+  const room: unknown = input.roomId;
+  if (room !== undefined && room !== null && (typeof room !== 'string' || room === '')) {
+    throw new SanctionError('applySanction: invalid room');
+  }
 
   const ref: unknown = input.rule === undefined ? 'uncovered' : input.rule;
   const numbered = typeof ref === 'number' && Number.isSafeInteger(ref) && ref >= 1;
@@ -143,7 +155,7 @@ export interface WrittenSanction {
   groupId: string;
   refCode: string;
   rows: SanctionRow[];
-  /** Epoch ms the subject row ends; null = permanent. A warning ends where it starts. */
+  /** Epoch ms the subject row ends; null = permanent. A warning or note ends where it starts. */
   endsAt: number | null;
 }
 
@@ -156,8 +168,8 @@ function applyNow(
 ): WrittenSanction {
   const { rule, gapNote } = validate(input);
   const subject = subjects.canonical(input.subject);
-  // A warning has no end: it ends where it starts, so it is never "still running".
-  const endsAt = input.kind === 'warning' ? now : input.durationMs === null ? null : now + input.durationMs;
+  // A warning or note has no end: it ends where it starts, so it is never "still running".
+  const endsAt = isRecordKind(input.kind) ? now : input.durationMs === null ? null : now + input.durationMs;
   const ipEndsAt = endsAt === null ? now + IP_MAX_MS : Math.min(endsAt, now + IP_MAX_MS);
   const ip = input.includeIp ? subjects.latestIp(subject) : null;
   const groupId = newId();
@@ -170,6 +182,7 @@ function applyNow(
       startsAt: now,
       reason: input.reason,
       rule,
+      roomId: input.roomId ?? null,
       actor: input.actor,
       source: input.source,
       automated: input.automated,
@@ -338,8 +351,8 @@ export class SanctionIndex {
    */
   active(kind: SanctionKind, ids: Identifiers, subject: SubjectId | null, now: number): ActiveSanction | null {
     if (!this.enabled()) return null;
-    // A warning restricts nothing and is never indexed.
-    if (kind === 'warning') return null;
+    // A warning or a note restricts nothing and is never indexed.
+    if (isRecordKind(kind)) return null;
     let best: IndexRow | null = null;
     const ownGroups = new Set<string>();
     const consider = (list: readonly IndexRow[] | undefined): void => {
@@ -375,7 +388,7 @@ export class SanctionIndex {
   }
 
   private insert(row: SanctionRow): void {
-    if (row.kind === 'warning') return;
+    if (isRecordKind(row.kind)) return;
     const table = row.targetType === 'subject' ? this.bySubject : this.byIp;
     let byValue = table.get(row.kind);
     if (byValue === undefined) table.set(row.kind, (byValue = new Map()));

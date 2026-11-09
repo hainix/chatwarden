@@ -16,31 +16,48 @@ import type { Clock, Logger, ReportExcerptLine, ReportRecord, SanctionKind, Sanc
 /** The longest moderator reason, after trimming. */
 export const DECISION_REASON_MAX = 500;
 
+/** The longest bad-faith evidence note, after trimming. */
+export const DECISION_EVIDENCE_MAX = 500;
+
 /** One sanction a decision applies. */
 export interface DecisionAction {
   /** The person to sanction; stored as their canonical subject. */
   subject: SubjectId;
   kind: SanctionKind;
-  /** Milliseconds from now; null is permanent. Must be null for a warning. */
+  /** Milliseconds from now; null is permanent. Must be null for a warning or a note. */
   durationMs: number | null;
   /** The Community Rule cited. Must be citable (active), or `'uncovered'` with a `gapNote`. */
   rule: RuleRef;
   /** Private note on what the rules did not cover. Required under `'uncovered'` for a moderator; otherwise absent. */
   gapNote?: string;
-  /** Also sanction the subject's latest IP (at most 24 h). Not for a warning. */
+  /** Also sanction the subject's latest IP (at most 24 h). Not for a warning or a note. */
   includeIp?: boolean;
-  /** Up to five of THIS person's own lines in the report, shown to them in the notice. */
+  /** Up to five of THIS person's own lines in the report, shown to them in the notice (a note has no notice). */
   lineIds?: string[];
 }
 
 export interface DecisionInput {
   reportId: string;
   /**
-   * `fair`: the report was right (status `actioned`). `unfair`: it was wrong (`dismissed`). `bad_faith`: it was
-   * wrong and made in bad faith (`dismissed` with the bad-faith mark, which counts toward the reporter's suspension).
-   * `unfair` and `bad_faith` may act on the reporter or another person in the report, never on the reported target.
+   * What the moderator decided:
+   * - `upheld`: rules were broken and an action was taken (status `actioned`). The reporter is told "action taken".
+   * - `noted`: the behaviour is recorded as a Note and nothing is done to the player (status `actioned`). Needs at
+   *   least one action and every action must be of kind `note`.
+   * - `no_action`: the behaviour was within the rules (status `dismissed`). Neutral for the reporter: an honest
+   *   report that does not hold up is never held against them.
+   * - `bad_faith`: there is evidence of deliberate abuse of the report tool (`dismissed` with the bad-faith mark,
+   *   which counts toward the reporter's suspension). Requires `evidence`.
+   *
+   * `no_action` and `bad_faith` may act on the reporter or another person in the report, never on the reported
+   * target. The K2 names `fair` and `unfair` are gone: they answer `invalid`.
    */
-  verdict: 'fair' | 'unfair' | 'bad_faith';
+  verdict: 'upheld' | 'noted' | 'no_action' | 'bad_faith';
+  /**
+   * The written evidence for a `bad_faith` verdict: required for it (1..500 characters after trimming) and
+   * forbidden for every other verdict. Stored on the report as `badFaithEvidence`. Private: staff only, never shown
+   * to a player, and not part of the decision's idempotency key.
+   */
+  evidence?: string;
   actions: DecisionAction[];
   actor: string;
   /** Private; required, at most 500 characters after trimming. Never shown to a player. */
@@ -57,7 +74,8 @@ export interface DecisionGroup {
   subject: SubjectId;
   groupId: string;
   refCode: string;
-  noticeId: string;
+  /** The player's notice for this action; null for a `note`, which tells the player nothing. */
+  noticeId: string | null;
 }
 
 /**
@@ -77,9 +95,17 @@ export interface DecisionServiceDeps {
   /** Kept current with the sanctions a decision writes, once the decision has committed. */
   index?: SanctionIndex;
   logger?: Logger;
+  /**
+   * Whether an `upheld` decision tells the reporter ("action taken"). Default true. Off: the reporter hears
+   * nothing, and the people acted on are still told.
+   */
+  reporterFeedback?: boolean;
 }
 
-const VERDICTS: readonly DecisionInput['verdict'][] = ['fair', 'unfair', 'bad_faith'];
+const VERDICTS: readonly DecisionInput['verdict'][] = ['upheld', 'noted', 'no_action', 'bad_faith'];
+
+/** `no_action` and `bad_faith` dismiss the report; `upheld` and `noted` action it. */
+const isDismissal = (verdict: DecisionInput['verdict']): boolean => verdict === 'no_action' || verdict === 'bad_faith';
 
 const INVALID: DecisionResult = Object.freeze({ ok: false, error: 'invalid' }) as DecisionResult;
 
@@ -113,6 +139,8 @@ interface Normal {
   verdict: DecisionInput['verdict'];
   actor: string;
   reason: string;
+  /** The trimmed bad-faith evidence; null for every other verdict. */
+  evidence: string | null;
   source: Source;
   /** Sorted by canonical subject, then kind. */
   actions: NormalAction[];
@@ -133,6 +161,15 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
   if (typeof input.reason !== 'string') return bad();
   const reason = input.reason.trim();
   if (reason === '' || reason.length > DECISION_REASON_MAX) return bad();
+  // Evidence is required for bad_faith and forbidden otherwise (even an empty string): the verdict says what it is for.
+  let evidence: string | null = null;
+  if (input.verdict === 'bad_faith') {
+    if (typeof input.evidence !== 'string') return bad();
+    evidence = input.evidence.trim();
+    if (evidence === '' || evidence.length > DECISION_EVIDENCE_MAX) return bad();
+  } else if (input.evidence !== undefined) {
+    return bad();
+  }
   const source: unknown = input.source === undefined ? 'moderator' : input.source;
   if (!SANCTION_SOURCES.includes(source as Source)) return bad();
 
@@ -161,6 +198,8 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
       lineIds,
     };
   });
+  // A `noted` decision needs at least one action, and every action must be a `note`.
+  if (input.verdict === 'noted' && (actions.length === 0 || actions.some((a) => a.kind !== 'note'))) return bad();
   actions.sort((x, y) => byText(x.subject, y.subject) || byText(x.kind, y.kind));
   // The same kind twice for one person would sanction them twice for one report.
   for (let i = 1; i < actions.length; i++) {
@@ -168,7 +207,15 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
     const c = actions[i];
     if (p !== undefined && c !== undefined && p.subject === c.subject && p.kind === c.kind) return bad();
   }
-  return { reportId: input.reportId, verdict: input.verdict, actor: input.actor.trim(), reason, source: source as Source, actions };
+  return {
+    reportId: input.reportId,
+    verdict: input.verdict,
+    actor: input.actor.trim(),
+    reason,
+    evidence,
+    source: source as Source,
+    actions,
+  };
 }
 
 /** JSON with sorted keys, no whitespace, and no `undefined`: the same value always gives the same text. */
@@ -232,6 +279,7 @@ export class DecisionService {
   private readonly clock: Clock;
   private readonly index: SanctionIndex | undefined;
   private readonly logger: Logger | undefined;
+  private readonly reporterFeedback: boolean;
 
   constructor(deps: DecisionServiceDeps) {
     this.store = deps.store;
@@ -241,6 +289,7 @@ export class DecisionService {
     this.clock = deps.clock;
     this.index = deps.index;
     this.logger = deps.logger;
+    this.reporterFeedback = deps.reporterFeedback ?? true;
   }
 
   /**
@@ -254,8 +303,9 @@ export class DecisionService {
    *   `{ ok: true, replay: true }` with the first call's groups and writes nothing, even though the report is closed.
    * - `already_decided`: the report is closed and this is a different decision.
    *
-   * After the commit the sanctions join the index and each notified person (every target, and the reporter on a
-   * `fair` decision with at least one action) is told once. Both are fenced: they never fail the decision.
+   * After the commit the sanctions join the index and each notified person (every target of a non-note action, and
+   * the reporter on an `upheld` decision with at least one non-note action) is told once. A `note` makes no notice and
+   * tells nobody. Both are fenced: they never fail the decision.
    *
    * The result's groups carry subject ids. Carries subject ids: staff channels only, never send to a player.
    */
@@ -304,16 +354,16 @@ export class DecisionService {
     return norm.actions.map((a) => {
       if (!scope.has(a.subject)) return bad();
       // A dismissal cannot punish the person the report was about.
-      if (norm.verdict !== 'fair' && a.subject === target) return bad();
+      if (isDismissal(norm.verdict) && a.subject === target) return bad();
       if (!this.rules.isCitable(a.rule)) return bad();
-      validateSanctionInput(this.sanctionInput(norm, a));
+      validateSanctionInput(this.sanctionInput(norm, a, report.roomId));
       const lines = a.lineIds.length === 0 ? [] : ownLines(report, a.subject, a.lineIds, this.subjects);
       if (!lines.every(lineIsSound)) return bad();
       return { action: a, lines };
     });
   }
 
-  private sanctionInput(norm: Normal, a: NormalAction) {
+  private sanctionInput(norm: Normal, a: NormalAction, roomId: string) {
     return {
       kind: a.kind,
       subject: a.subject,
@@ -324,6 +374,7 @@ export class DecisionService {
       source: norm.source,
       automated: false,
       rule: a.rule,
+      roomId: roomId === '' ? null : roomId,
       ...(a.gapNote === undefined ? {} : { gapNote: a.gapNote }),
     };
   }
@@ -332,34 +383,41 @@ export class DecisionService {
     const now = this.clock.now();
     const pending = this.index !== undefined && !this.index.isEnabled();
     const reporter = this.subjects.canonical(report.reporterSubject);
-    const status = norm.verdict === 'fair' ? 'actioned' : 'dismissed';
+    const status = isDismissal(norm.verdict) ? 'dismissed' : 'actioned';
 
     const done = this.store.transaction(() => {
-      if (!this.store.closeReport(report.id, status, norm.verdict === 'bad_faith', norm.actor, now, norm.reason)) {
+      if (!this.store.closeReport(report.id, status, norm.verdict === 'bad_faith', norm.actor, now, norm.reason, norm.evidence)) {
         return null;
       }
       const groups: DecisionGroup[] = [];
       const rows: SanctionRow[] = [];
+      const told = new Set<SubjectId>();
       for (const { action: a, lines } of plan) {
         // No index here: the rows reach it only after the transaction has committed.
-        const written = writeSanction(this.store, this.subjects, this.sanctionInput(norm, a), now, pending);
-        const noticeId = this.notices.createForSanction(
-          {
-            groupId: written.groupId,
-            refCode: written.refCode,
-            kind: a.kind,
-            until: a.kind === 'warning' ? null : written.endsAt,
-            rule: a.rule,
-            subject: a.subject,
-          },
-          lines,
-          { notify: false },
-        );
+        const written = writeSanction(this.store, this.subjects, this.sanctionInput(norm, a, report.roomId), now, pending);
+        // A note is on the record and tells the player nothing: no notice, so nobody to announce to either.
+        const noticeId =
+          a.kind === 'note'
+            ? null
+            : this.notices.createForSanction(
+                {
+                  groupId: written.groupId,
+                  refCode: written.refCode,
+                  kind: a.kind,
+                  until: a.kind === 'warning' ? null : written.endsAt,
+                  rule: a.rule,
+                  subject: a.subject,
+                },
+                lines,
+                { notify: false },
+              );
+        if (noticeId !== null) told.add(a.subject);
         groups.push({ subject: a.subject, groupId: written.groupId, refCode: written.refCode, noticeId });
         rows.push(...written.rows);
       }
-      const told = new Set<SubjectId>(groups.map((g) => g.subject));
-      if (norm.verdict === 'fair' && groups.length > 0) {
+      // Reporter feedback only on `upheld` with at least one NON-note action: a note is staff-only and must never
+      // tell the reporter anything, however many of them sit beside the other actions.
+      if (this.reporterFeedback && norm.verdict === 'upheld' && plan.some(({ action }) => action.kind !== 'note')) {
         this.notices.createReportOutcome(reporter, { notify: false });
         told.add(reporter);
       }

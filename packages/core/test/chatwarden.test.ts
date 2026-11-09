@@ -3,7 +3,8 @@ import { createChatwarden } from '../src/chatwarden.js';
 import type { ChatwardenOptions } from '../src/chatwarden.js';
 import type { DecisionAction } from '../src/decide.js';
 import { defineRules, STARTER_RULES } from '../src/rules.js';
-import type { Logger, Matcher, Platform, RawWho } from '../src/types.js';
+import type { ProfanityConfig } from '../src/profile.js';
+import type { Logger, Matcher, Platform, ProfanityFilter, RawWho } from '../src/types.js';
 import { MemoryStore } from './memoryStore.js';
 
 const NOW = 1_800_000_000_000;
@@ -15,6 +16,18 @@ type Logged = Array<[string, Record<string, string | number | boolean> | undefin
 
 /** A matcher that blocks the one synthetic word. */
 const blocker: Matcher = { match: (t) => (t.toLowerCase().includes('zorbak') ? { termId: 'syn:zorbak' } : null) };
+
+/** A synthetic filter: treats the word 'heck' as swearing and stars it. Records what it was asked about. */
+function stubFilter(): ProfanityFilter & { seen: string[] } {
+  const seen: string[] = [];
+  return {
+    seen,
+    apply(text) {
+      seen.push(text);
+      return { hit: /\bheck\b/.test(text), text: text.replace(/\bheck\b/g, '****') };
+    },
+  };
+}
 
 async function setup(over: Partial<ChatwardenOptions> = {}, store = new MemoryStore()) {
   const clock = { t: NOW, now: () => clock.t };
@@ -115,10 +128,126 @@ describe('createChatwarden: chat', () => {
     expect(cw.chat.accept(R, 'a', 'zorbak')).toMatchObject({ deliver: { text: 'zorbak' } });
   });
 
-  it('applies the starrer to delivered text', async () => {
-    const { cw } = await setup({ starrer: { star: (t) => t.replace('heck', '****') } });
+  it('applies the profanity filter to delivered text (the standard profile stars)', async () => {
+    const { cw } = await setup({ profanity: stubFilter() });
     cw.rooms.seat(R, 'a', alice, 'Alice');
     expect(cw.chat.accept(R, 'a', 'oh heck')).toMatchObject({ deliver: { text: 'oh ****' } });
+  });
+
+  it('profile strict refuses a profane line with the profanity reason, and creates no strike or sanction', async () => {
+    const { cw, store } = await setup({ profanity: stubFilter(), profile: 'strict' });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    expect(cw.chat.accept(R, 'a', 'oh heck')).toEqual({ refuse: { reason: 'profanity' } });
+    expect(store.loadStrikes(0)).toEqual([]);
+    expect(store.loadSanctions(NOW)).toEqual([]);
+  });
+
+  it('the profanity mode comes from the profile: an override to allow never calls the filter', async () => {
+    const filter = stubFilter();
+    const { cw } = await setup({ profanity: filter, overrides: { profanity: { mode: 'allow' } } });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    expect(cw.chat.accept(R, 'a', 'oh heck')).toMatchObject({ deliver: { text: 'oh heck' } });
+    expect(filter.seen).toEqual([]);
+  });
+
+  it('an override to refuse turns a relaxed profile strict about swearing', async () => {
+    const { cw } = await setup({
+      profanity: stubFilter(),
+      profile: 'relaxed',
+      overrides: { profanity: { mode: 'refuse' } },
+    });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    expect(cw.chat.accept(R, 'a', 'oh heck')).toEqual({ refuse: { reason: 'profanity' } });
+  });
+
+  describe('profanityPackage', () => {
+    const fakePackage = () => {
+      const configs: ProfanityConfig[] = [];
+      return {
+        configs,
+        pkg: {
+          createProfanityFilter(config: ProfanityConfig) {
+            configs.push(config);
+            return stubFilter();
+          },
+        },
+      };
+    };
+
+    it('builds the filter from the resolved profile and uses it', async () => {
+      const { configs, pkg } = fakePackage();
+      const { cw } = await setup({ profanityPackage: pkg, overrides: { profanity: { style: 'grawlix', add: ['snerp'] } } });
+      expect(configs).toEqual([cw.profile.profanity]);
+      expect(configs[0]).toMatchObject({ mode: 'star', style: 'grawlix', add: ['snerp'] });
+      cw.rooms.seat(R, 'a', alice, 'Alice');
+      expect(cw.chat.accept(R, 'a', 'oh heck')).toMatchObject({ deliver: { text: 'oh ****' } });
+    });
+
+    it('is built once for strict too, and refuses', async () => {
+      const { configs, pkg } = fakePackage();
+      const { cw } = await setup({ profanityPackage: pkg, profile: 'strict' });
+      expect(configs).toHaveLength(1);
+      expect(configs[0]?.mode).toBe('refuse');
+      cw.rooms.seat(R, 'a', alice, 'Alice');
+      expect(cw.chat.accept(R, 'a', 'oh heck')).toEqual({ refuse: { reason: 'profanity' } });
+    });
+
+    it('with mode allow nothing is built', async () => {
+      const { configs, pkg } = fakePackage();
+      const { cw } = await setup({ profanityPackage: pkg, overrides: { profanity: { mode: 'allow' } } });
+      expect(configs).toEqual([]);
+      cw.rooms.seat(R, 'a', alice, 'Alice');
+      expect(cw.chat.accept(R, 'a', 'oh heck')).toMatchObject({ deliver: { text: 'oh heck' } });
+    });
+
+    it('a ready filter wins over the package, which is then not asked to build', async () => {
+      const { configs, pkg } = fakePackage();
+      const own: ProfanityFilter = { apply: (t) => ({ hit: true, text: `own:${t}` }) };
+      const { cw } = await setup({ profanity: own, profanityPackage: pkg });
+      expect(configs).toEqual([]);
+      cw.rooms.seat(R, 'a', alice, 'Alice');
+      expect(cw.chat.accept(R, 'a', 'x')).toMatchObject({ deliver: { text: 'own:x' } });
+    });
+
+    it('a package that throws on the config fails creation (a bad language is a startup error)', async () => {
+      const pkg = {
+        createProfanityFilter(): ProfanityFilter {
+          throw new RangeError('unknown language');
+        },
+      };
+      await expect(setup({ profanityPackage: pkg })).rejects.toThrow(RangeError);
+    });
+
+    it('a package that returns something that is not a filter fails creation', async () => {
+      const pkg = { createProfanityFilter: () => ({}) as ProfanityFilter };
+      await expect(setup({ profanityPackage: pkg })).rejects.toThrow(TypeError);
+    });
+  });
+
+  it.each(['strict', 'standard', 'relaxed'] as const)('%s (profanity not allowed) without any filter warns once at creation that swearing will not be handled', async (profile) => {
+    const s = await setup({ profile });
+    expect(s.logged.filter(([e]) => e === 'chatwarden.no_profanity_filter')).toHaveLength(1);
+  });
+
+  it('the default profile (star) without any filter warns once too', async () => {
+    const s = await setup();
+    expect(s.logged.filter(([e]) => e === 'chatwarden.no_profanity_filter')).toHaveLength(1);
+  });
+
+  it('mode allow never warns, with or without a filter', async () => {
+    const s = await setup({ overrides: { profanity: { mode: 'allow' } } });
+    expect(s.logged.some(([e]) => e === 'chatwarden.no_profanity_filter')).toBe(false);
+  });
+
+  it('star or refuse with a ready filter or a package does not warn', async () => {
+    const pkg = { createProfanityFilter: (): ProfanityFilter => ({ apply: (t) => ({ hit: false, text: t }) }) };
+    const own: ProfanityFilter = { apply: (t) => ({ hit: false, text: t }) };
+    for (const extra of [{ profanity: own }, { profanityPackage: pkg }]) {
+      for (const profile of ['relaxed', 'standard', 'strict'] as const) {
+        const s = await setup({ profile, ...extra });
+        expect(s.logged.some(([e]) => e === 'chatwarden.no_profanity_filter')).toBe(false);
+      }
+    }
   });
 
   it('the gate hook is passed through with the sender subject', async () => {
@@ -142,7 +271,9 @@ describe('createChatwarden: chat', () => {
     });
     cw.rooms.seat(R, 'a', alice, 'Alice');
     cw.chat.accept(R, 'a', 'hello');
-    expect(logged.filter(([e]) => e !== 'chatwarden.no_matcher')).toEqual([['chat.gate_failed', { error: 'TypeError' }]]);
+    expect(logged.filter(([e]) => e !== 'chatwarden.no_matcher' && e !== 'chatwarden.no_profanity_filter')).toEqual([
+      ['chat.gate_failed', { error: 'TypeError' }],
+    ]);
   });
 
   it('three blocked lines earn an automatic timeout and onAutoRestrict hears of it', async () => {
@@ -719,7 +850,7 @@ type Reported = Awaited<ReturnType<typeof reported>>;
 const warnAlice = (r: Reported, over: Partial<DecisionAction> = {}) =>
   r.cw.decide({
     reportId: r.reportId,
-    verdict: 'fair',
+    verdict: 'upheld',
     actor: 'mod@example.test',
     reason: 'private reason text',
     actions: [{ subject: r.a, kind: 'warning', durationMs: null, rule: 2, lineIds: r.own, ...over }],
@@ -1131,14 +1262,40 @@ describe('createChatwarden: doors point at the notice', () => {
 });
 
 describe('createChatwarden: history and suggest', () => {
-  it('a fresh person has no history and the ladder suggests a warning for a low rule', async () => {
+  it('a fresh person has no history and the standard profile suggests a warning for a rude first offence', async () => {
     const { cw } = await setup();
     cw.rooms.seat(R, 'a', alice, 'Alice');
     const a = cw.rooms.subjectAt(R, 'a') ?? '';
     expect(cw.history(a)).toEqual([]);
-    expect(cw.suggest(a, 'low', 2)).toMatchObject({ kind: 'warning', durationMs: null });
-    expect(cw.suggest(a, null, 2)).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'high', 1)).toMatchObject({ kind: 'chat', durationMs: 7 * DAY });
+    const s = cw.suggest(a, 'rude', 2);
+    expect(s).toMatchObject({ outcome: 'warning', label: 'Warning' });
+    expect(s.why).toMatch(/^Standard profile: /);
+    expect(cw.suggest(a, null, 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    expect(cw.suggest(a, 'severe', 1)).toMatchObject({ outcome: { kind: 'chat', durationMs: 7 * DAY }, label: 'Restrict chat 7 days' });
+    expect(cw.suggest(a, 'rude', 5, { roomId: R })).toMatchObject({ outcome: 'warning' });
+  });
+
+  it('suggest reads conduct levels: banter is no action, severe the high column, an old K2 value throws', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    const a = cw.rooms.subjectAt(R, 'a') ?? '';
+    expect(cw.suggest(a, 'banter', 2)).toMatchObject({ outcome: 'none', label: 'No action' });
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    expect(cw.suggest(a, 'severe', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: 7 * DAY } });
+    expect(cw.suggest(a, 'hostile', 5)).toMatchObject({ outcome: { kind: 'area', durationMs: DAY } });
+    expect(() => cw.suggest(a, 'high' as never, 2)).toThrow(RangeError);
+  });
+
+  it('the facade decide takes the new verdicts: bad_faith needs evidence, fair and unfair are invalid', async () => {
+    const r = await reported();
+    const { cw, reportId } = r;
+    const base = { reportId, actor: 'mod@example.test', reason: 'private reason text', actions: [] };
+    expect(await cw.decide({ ...base, verdict: 'fair' as never })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, verdict: 'unfair' as never })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, verdict: 'bad_faith' })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, verdict: 'no_action', evidence: 'x' })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, verdict: 'bad_faith', evidence: 'staff-only-evidence-text' })).toMatchObject({ ok: true });
+    for (const who of [alice, bob]) expect(JSON.stringify(cw.notices.pending(who))).not.toContain('staff-only-evidence-text');
   });
 
   it('a decided warning shows in the history and moves the suggestion up the ladder', async () => {
@@ -1147,7 +1304,44 @@ describe('createChatwarden: history and suggest', () => {
     await warnAlice(r);
     expect(cw.history(a)).toHaveLength(1);
     expect(cw.history(a)[0]).toMatchObject({ kind: 'warning' });
-    expect(cw.suggest(a, 'medium', 2)).toMatchObject({ kind: 'chat', durationMs: DAY });
+    expect(cw.suggest(a, 'hostile', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: 7 * DAY } });
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+  });
+
+  it('a decided Note is in the history with the room, tells nobody, and does not move the suggestion', async () => {
+    const r = await reported();
+    const { cw, a, b } = r;
+    const res = await warnAlice(r, { kind: 'note' });
+    expect(res).toMatchObject({ ok: true });
+    expect(cw.history(a)).toEqual([{ kind: 'note', durationMs: 0, startsAt: r.clock.t, revoked: false, automated: false, roomId: R }]);
+    // the note does not move the ladder step, but it counts toward "repeated": standard turns a second rude into chat 24 h
+    expect(cw.suggest(a, 'severe', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: 7 * DAY } });
+    expect(cw.suggest(a, 'rude', 2, { roomId: R })).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    expect(cw.notices.pending(alice)).toEqual([]);
+    expect(cw.notices.pending(bob)).toEqual([]);
+    expect(cw.notices.pendingWarning(alice)).toBe(false);
+    expect(cw.doors.check('join', alice)).toBeNull();
+    expect(cw.chat.accept(R, 'a', 'still free to talk')).toHaveProperty('deliver');
+    expect(b).not.toBe(a);
+  });
+
+  it('the facade decide takes the noted verdict: all notes only', async () => {
+    const r = await reported();
+    const { cw, reportId, a } = r;
+    const base = { reportId, actor: 'mod@example.test', reason: 'private reason text', verdict: 'noted' as const };
+    expect(await cw.decide({ ...base, actions: [] })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, actions: [{ subject: a, kind: 'warning', durationMs: null, rule: 2 }] })).toEqual({ ok: false, error: 'invalid' });
+    expect(await cw.decide({ ...base, actions: [{ subject: a, kind: 'note', durationMs: null, rule: 2 }] })).toMatchObject({ ok: true });
+  });
+
+  it('sanctions.apply takes an optional roomId, and it reads back in the history', async () => {
+    const { cw, clock } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    const a = cw.rooms.subjectAt(R, 'a') ?? '';
+    await cw.sanctions.apply({ kind: 'note', subject: a, includeIp: false, durationMs: null, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 2, roomId: 'game-9' });
+    await cw.sanctions.apply({ kind: 'note', subject: a, includeIp: false, durationMs: null, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 2 });
+    expect(cw.history(a).map((h) => h.roomId)).toEqual(['game-9', null]);
+    expect(cw.history(a)[0]?.startsAt).toBe(clock.t);
   });
 
   it('a record older than the 90-day lookback no longer counts', async () => {
@@ -1156,6 +1350,239 @@ describe('createChatwarden: history and suggest', () => {
     await warnAlice(r);
     clock.t += 91 * DAY;
     expect(cw.history(a)).toEqual([]);
-    expect(cw.suggest(a, 'medium', 2)).toMatchObject({ kind: 'warning' });
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: 'warning' });
+  });
+
+  it('a note that has aged out of the 30 day window no longer makes a repeat', async () => {
+    const r = await reported();
+    const { cw, clock, a } = r;
+    await warnAlice(r, { kind: 'note' });
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: { kind: 'chat', durationMs: DAY } });
+    clock.t += 31 * DAY;
+    expect(cw.history(a)).toHaveLength(1);
+    expect(cw.suggest(a, 'rude', 2)).toMatchObject({ outcome: 'warning' });
+  });
+});
+
+describe('createChatwarden: staff report queue', () => {
+  it('get returns the record plus staff refs and the own line ids of every person', async () => {
+    const r = await reported();
+    const { cw, reportId, a, b, own, bobLine } = r;
+    const got = cw.reports.get(reportId);
+    if (got === null) throw new Error('expected the report');
+    expect(got).toMatchObject({
+      id: reportId,
+      status: 'open',
+      badFaith: false,
+      actionedAt: null,
+      actionedBy: null,
+      modNote: null,
+      badFaithEvidence: null,
+      targetPerson: a,
+      reporterPerson: b,
+      category: 'harassment',
+    });
+    expect(got.people).toEqual([a, b]);
+    expect(got.ownLineIds[a]).toEqual(own);
+    expect(got.ownLineIds[b]).toEqual([bobLine]);
+    expect(Object.keys(got.ownLineIds).sort()).toEqual([a, b].sort());
+    // The same excerpt rule as a notice: what the picker offers is accepted by decide.
+    expect((await warnAlice(r, { lineIds: got.ownLineIds[a] ?? [] })).ok).toBe(true);
+  });
+
+  it('get of an unknown id is null (also after the report was purged, and for odd input)', async () => {
+    const { cw } = await reported();
+    expect(cw.reports.get('nope')).toBeNull();
+    expect(cw.reports.get('')).toBeNull();
+    expect(cw.reports.get(undefined as never)).toBeNull();
+  });
+
+  it('list is newest first with the same shape as get, and the status filter follows decide', async () => {
+    const r = await reported();
+    const { cw, reportId, clock } = r;
+    clock.t += 1000;
+    cw.rooms.seat(R, 'c', { clientKey: 'key-carol', ip: '198.51.100.3' }, 'Carol');
+    const second = await cw.reports.submit({ roomId: R, reporterSeat: 'c', targetSeat: 'a', category: 'spam' });
+    if (!second.ok) throw new Error('expected a second report');
+    const all = cw.reports.list();
+    expect(all.items.map((x) => x.id)).toEqual([second.reportId, reportId]);
+    expect(all.next).toBeNull();
+    expect(all.items[1]).toEqual(cw.reports.get(reportId));
+    expect(cw.reports.list({ status: 'open' }).items).toHaveLength(2);
+    expect(cw.reports.list({ status: 'actioned' }).items).toEqual([]);
+    expect((await warnAlice(r)).ok).toBe(true);
+    expect(cw.reports.list({ status: 'open' }).items.map((x) => x.id)).toEqual([second.reportId]);
+    const actioned = cw.reports.list({ status: 'actioned' }).items;
+    expect(actioned.map((x) => x.id)).toEqual([reportId]);
+    expect(actioned[0]).toMatchObject({ status: 'actioned', actionedBy: 'mod@example.test', actionedAt: clock.t });
+    expect(cw.reports.list({ status: 'dismissed' }).items).toEqual([]);
+  });
+
+  it('list pages with the opaque cursor and clamps the limit', async () => {
+    const r = await reported();
+    const { cw, store, clock } = r;
+    for (let i = 0; i < 4; i++) {
+      clock.t += 1;
+      const seat = `x${i}`;
+      cw.rooms.seat(R, seat, { clientKey: `key-x${i}`, ip: '198.51.100.9' }, `X${i}`);
+      const res = await cw.reports.submit({ roomId: R, reporterSeat: seat, targetSeat: 'b', category: 'spam' });
+      if (!res.ok) throw new Error('expected a report');
+    }
+    expect(store.rawReports()).toHaveLength(5);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 10; guard++) {
+      const page: ReturnType<typeof cw.reports.list> = cw.reports.list({ limit: 2, ...(cursor === null ? {} : { before: cursor }) });
+      seen.push(...page.items.map((x) => x.id));
+      cursor = page.next;
+      if (cursor === null) break;
+    }
+    expect(seen).toEqual(store.rawReports().map((x) => x.id).reverse());
+    expect(cw.reports.list({ limit: 0 }).items).toHaveLength(1);
+    expect(cw.reports.list({ limit: -3 }).items).toHaveLength(1);
+    expect(cw.reports.list({ limit: 10_000 }).items).toHaveLength(5);
+    expect(typeof cw.reports.list({ limit: 2 }).next).toBe('string');
+  });
+
+  it('a malformed cursor or status is a loud ReportQueryError, not an empty page', async () => {
+    const { cw } = await reported();
+    expect(() => cw.reports.list({ before: '???' })).toThrow(expect.objectContaining({ name: 'ReportQueryError' }));
+    expect(() => cw.reports.list({ status: 'closed' as never })).toThrow(expect.objectContaining({ name: 'ReportQueryError' }));
+  });
+
+  it('after a merge a report filed earlier shows the CANONICAL person', async () => {
+    const r = await reported();
+    const { cw, reportId, own, a } = r;
+    cw.rooms.seat(R, 'acct', { clientKey: 'key-other', accountId: 'acct-merge', ip: '198.51.100.7' }, 'Other');
+    cw.rooms.seat(R, 'link', { clientKey: 'key-alice', accountId: 'acct-merge', ip: '198.51.100.1' }, 'Linked');
+    const merged = cw.rooms.subjectAt(R, 'acct');
+    expect(merged).toBe(cw.rooms.subjectAt(R, 'a'));
+    if (merged === null) throw new Error('expected a subject');
+    const got = cw.reports.get(reportId);
+    if (got === null) throw new Error('expected the report');
+    expect(got.targetPerson).toBe(merged);
+    expect(got.people[0]).toBe(merged);
+    expect(got.ownLineIds[merged]).toEqual(own);
+    // Only canonical refs are offered: the person once, and Bob.
+    expect(Object.keys(got.ownLineIds).sort()).toEqual([merged, r.b].sort());
+    expect(got.targetSubject).toBe(a);
+    expect(cw.reports.list().items[0]?.targetPerson).toBe(merged);
+  });
+
+  it('is read-only: reading writes nothing and leaves the stored record untouched', async () => {
+    const r = await reported();
+    const before = JSON.stringify(r.store.rawReports());
+    r.cw.reports.get(r.reportId);
+    r.cw.reports.list();
+    expect(JSON.stringify(r.store.rawReports())).toBe(before);
+  });
+});
+
+describe('createChatwarden: the same scripted conversation under each preset', () => {
+  const HOUR = H;
+  type Step = { label: string; outcome: unknown };
+
+  /**
+   * One conversation, three incidents, each in its own room (game): banter ("loser"), rude, then rude again in a second
+   * game 4 hours later. After each suggestion the suggested outcome is applied through `decide`, so the record grows.
+   * Returns what `suggest` said at each incident. The expectations below are written out from the ladder table
+   * (`ladder.ts`) and the preset, not read back from `suggest`.
+   */
+  async function conversation(over: Partial<ChatwardenOptions>, rooms: [string, string, string]): Promise<Step[]> {
+    const { cw, clock } = await setup(over);
+    const offender: RawWho = { clientKey: 'key-offender', ip: '198.51.100.20' };
+    const steps: Step[] = [];
+    const lines = ['loser', 'you are trash, uninstall', 'still trash, uninstall again'];
+    const reporters = ['rep-1', 'rep-2', 'rep-3'];
+    const levels = ['banter', 'rude', 'rude'] as const;
+    for (let i = 0; i < 3; i++) {
+      const room = rooms[i] as string;
+      const reporter = reporters[i] as string;
+      cw.rooms.seat(room, 'off', offender, 'Offender');
+      cw.rooms.seat(room, reporter, { clientKey: `key-${reporter}`, ip: `198.51.100.3${i}` }, 'Reporter');
+      expect(cw.chat.accept(room, 'off', lines[i] as string)).toHaveProperty('deliver');
+      const sent = await cw.reports.submit({ roomId: room, reporterSeat: reporter, targetSeat: 'off', category: 'harassment' });
+      if (!sent.ok) throw new Error('expected the report to be stored');
+      const subject = cw.rooms.subjectAt(room, 'off');
+      if (subject === null) throw new Error('expected a subject');
+
+      const s = cw.suggest(subject, levels[i] as 'banter' | 'rude', 2, { roomId: room });
+      steps.push({ label: s.label, outcome: s.outcome });
+
+      const base = { reportId: sent.reportId, actor: 'mod@example.test', reason: 'private reason text' };
+      const o = s.outcome;
+      const action = (kind: DecisionAction['kind'], durationMs: number | null): DecisionAction => ({ subject, kind, durationMs, rule: 2 });
+      const decided =
+        o === 'none'
+          ? await cw.decide({ ...base, verdict: 'no_action', actions: [] })
+          : o === 'note'
+            ? await cw.decide({ ...base, verdict: 'noted', actions: [action('note', null)] })
+            : o === 'warning'
+              ? await cw.decide({ ...base, verdict: 'upheld', actions: [action('warning', null)] })
+              : await cw.decide({ ...base, verdict: 'upheld', actions: [action(o.kind, o.durationMs)] });
+      expect(decided).toMatchObject({ ok: true });
+      clock.t += 4 * HOUR; // past a 1 hour restriction, far inside every 30 day window
+    }
+    return steps;
+  }
+
+  it('relaxed: none, note, then warning (two rude incidents from different games)', async () => {
+    expect(await conversation({ profile: 'relaxed' }, ['g0', 'gameA', 'gameB'])).toEqual([
+      { label: 'No action', outcome: 'none' },
+      { label: 'Note', outcome: 'note' },
+      { label: 'Warning', outcome: 'warning' },
+    ]);
+  });
+
+  it('relaxed control: the second rude incident in the SAME game is not a repeat (note, note)', async () => {
+    expect(await conversation({ profile: 'relaxed' }, ['g0', 'gameA', 'gameA'])).toEqual([
+      { label: 'No action', outcome: 'none' },
+      { label: 'Note', outcome: 'note' },
+      { label: 'Note', outcome: 'note' },
+    ]);
+  });
+
+  it('standard (also the default): none, warning, then the ladder at step 1, chat for 24 hours', async () => {
+    const expected = [
+      { label: 'No action', outcome: 'none' },
+      { label: 'Warning', outcome: 'warning' },
+      { label: 'Restrict chat 24 hours', outcome: { kind: 'chat', durationMs: 24 * HOUR } },
+    ];
+    expect(await conversation({ profile: 'standard' }, ['g0', 'gameA', 'gameB'])).toEqual(expected);
+    expect(await conversation({}, ['g0', 'gameA', 'gameB'])).toEqual(expected);
+  });
+
+  it('strict: none, chat for 1 hour, then the ladder at step 2, chat for 7 days', async () => {
+    expect(await conversation({ profile: 'strict' }, ['g0', 'gameA', 'gameB'])).toEqual([
+      { label: 'No action', outcome: 'none' },
+      { label: 'Restrict chat 1 hour', outcome: { kind: 'chat', durationMs: HOUR } },
+      { label: 'Restrict chat 7 days', outcome: { kind: 'chat', durationMs: 7 * 24 * HOUR } },
+    ]);
+  });
+
+  it('an override of one nested field keeps the preset\'s other fields: relaxed + rude warning', async () => {
+    const steps = await conversation({ profile: 'relaxed', overrides: { firstOffense: { rude: 'warning' } } }, ['g0', 'gameA', 'gameB']);
+    // Rude is now a warning at once; the second rude reads ladder step 1 (relaxed ladder unchanged): chat 24 hours.
+    expect(steps.map((x) => x.label)).toEqual(['No action', 'Warning', 'Restrict chat 24 hours']);
+  });
+
+  it('banter is never punished under any preset, even for a person with a full record', async () => {
+    for (const profile of ['relaxed', 'standard', 'strict'] as const) {
+      const steps = await conversation({ profile }, ['g0', 'gameA', 'gameB']);
+      expect(steps[0]).toEqual({ label: 'No action', outcome: 'none' });
+      const { cw } = await reported({ profile });
+      const subject = cw.rooms.subjectAt(R, 'a') ?? '';
+      expect(cw.suggest(subject, 'banter', 2)).toMatchObject({ outcome: 'none' });
+    }
+  });
+
+  it('exposes the profile, limits, summary, rules and documents the facade resolved', async () => {
+    const { cw } = await setup({ profile: 'relaxed' });
+    expect(cw.profile.id).toBe('relaxed');
+    expect(cw.summary).toBe('Trash talk is part of the game. Harassment, threats and hate are not.');
+    expect(cw.summary).toBe(cw.profile.summary);
+    expect(cw.limits.chatMaxLength).toBe(200);
+    expect(cw.documents.codeOfConduct({ format: 'html', gameName: 'Test Game' })).toContain(cw.summary);
+    expect(cw.rules.active().length).toBeGreaterThan(0);
   });
 });

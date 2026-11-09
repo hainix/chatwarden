@@ -1,35 +1,43 @@
 import { ChatService } from './chat.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
-import type { ChatResult, Starrer } from './chat.js';
+import type { ChatResult } from './chat.js';
+import { bindDocuments } from './documents.js';
+import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { hashWho, makeHasher } from './hasher.js';
 import { safeWarn } from './log.js';
-import { historyOf, recordStep, suggestAction } from './ladder.js';
-import type { ActionRecord } from './ladder.js';
+import { historyOf, suggest } from './ladder.js';
+import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
+import { resolveLimits } from './limits.js';
+import type { Limits, LimitsInput } from './limits.js';
+import { resolveProfile } from './profile.js';
+import type { ModerationProfile, PresetName, ProfanityConfig, ProfileOverrides } from './profile.js';
 import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
 import type { ReportCounts, ReportInput, ReportResult } from './reports.js';
-import { purge } from './retention.js';
+import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
-import { defineRules, STARTER_RULES } from './rules.js';
+import { defineRules, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
 import { applySanction, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
+import { listStaffReports, staffReport } from './staffReports.js';
+import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 import { SubjectIndex } from './subjects.js';
 import type {
   Clock,
   Logger,
   Matcher,
   Platform,
+  ProfanityFilter,
   RawWho,
-  SanctionKind,
-  Severity,
+  ConductLevel,
   Store,
   StoredReport,
   SubjectId,
@@ -70,7 +78,19 @@ export interface ChatwardenOptions {
   platform: Platform;
   /** Without one, nothing is ever blocked. An adopter holding `LiveTerms` passes it here. */
   matcher?: Matcher;
-  starrer?: Starrer;
+  /**
+   * A ready profanity filter. What it does with a profane line is the profile's call (`profile.profanity.mode`):
+   * `allow` never calls it, `star` delivers its masked text, `refuse` refuses the line with `'profanity'`. Ordinary
+   * swearing only: slurs go through `matcher`. Wins over `profanityPackage`.
+   */
+  profanity?: ProfanityFilter;
+  /**
+   * The optional `@chatwarden/profanity` package, `{ createProfanityFilter }`. The kit builds the filter from the
+   * resolved `profile.profanity` (style, add, remove, only, languages), so core carries no word list. A config the
+   * package rejects (an unknown language, say) fails creation. Not called when the mode is `allow` or when a
+   * ready `profanity` filter is given.
+   */
+  profanityPackage?: { createProfanityFilter(config: ProfanityConfig): ProfanityFilter };
   /** Defaults to the system clock. */
   clock?: Clock;
   /** The kill switch, read per call. Drives both sanction enforcement and report intake. Defaults to always on. */
@@ -93,13 +113,41 @@ export interface ChatwardenOptions {
    * long rows are kept, `{ everyMs }` (at most 2147483647) to change how often it runs, or `false` to turn it off and run
    * `purge()` yourself. A failing purge is logged (`chatwarden.purge_failed`) and never thrown; `close()`
    * stops the timer.
+   *
+   * Floors, checked at creation (and on every `purge(policy)`), each a `ProfileError` naming the field: `sanctionAfterEndMs`
+   * and `noticesMs` at least 90 days (the ladder and "My record" reach back that far), `badFaithMs` at least
+   * `limits.reports.suspendWindowMs`. Not enforced, but `strikesMs` should be at least `limits.strikes.windowMs`, or strikes are
+   * deleted before the window that counts them closes. When you leave `badFaithMs` out it follows a longer suspension window.
    */
   retention?: false | ({ everyMs?: number } & Partial<RetentionPolicy>);
+  /**
+   * The moderation profile: a preset by name (`'relaxed'`, `'standard'` or `'strict'`) or a complete profile from
+   * `defineProfile` / `resolveProfile`. Default `'standard'`. It drives `suggest`, the starter rules and the
+   * summary; read the result back as `cw.profile`.
+   */
+  profile?: PresetName | ModerationProfile;
+  /**
+   * Changes to the profile, deep-merged onto it (`{ profanity: { mode: 'allow' } }`; arrays replace). An unknown key
+   * or an invalid result throws a `ProfileError` at creation.
+   *
+   * Overriding an outcome (`firstOffense`), the `repeat` rule or the `ladder` means overriding the `guidelines` text
+   * too: the moderator guide and the AI brief repeat each guideline's `outcome` as written. Only the player code of
+   * conduct derives its outcomes from those fields automatically.
+   */
+  overrides?: ProfileOverrides;
+  /**
+   * The numbers the kit enforces: chat length and rate, the slur filter's strikes and timeouts, report limits and
+   * reporter feedback. Any field, groups included (`{ strikes: { count: 2 } }` keeps the other strike settings);
+   * the defaults are Moxgate's. Every number must be a whole number above 0 (durations at most 100 years), else a
+   * `ProfileError` is thrown at creation. Read the result back as `cw.limits`.
+   */
+  limits?: LimitsInput;
   /** Passed to every component. Defaults to `console.warn`. */
   logger?: Logger;
   /**
-   * The numbered Community Rules, from `defineRules`. Default: `defineRules(STARTER_RULES)`. A decision may cite
-   * only an active rule here, and notices show the rule's title.
+   * The numbered Community Rules, from `defineRules`. Default: `defineRules(starterRules(profile.rules))`, the
+   * starter set for the profile's flavour. A decision may cite only an active rule here, and notices show the rule's
+   * title.
    */
   rules?: CommunityRules;
   /**
@@ -142,7 +190,23 @@ export interface Chatwarden {
     /** The seats whose current occupant the viewer has muted. Seat ids only. */
     mutedSeats(roomId: string, viewerSeat: string): string[];
   };
-  reports: { submit(input: ReportInput): Promise<ReportResult> };
+  reports: {
+    submit(input: ReportInput): Promise<ReportResult>;
+    /**
+     * The staff report queue, newest first (ties broken by id), one page at a time. Filter with `status`; pass the
+     * previous page's `next` as `before` for the next page; `limit` defaults to 50 and is clamped to 1..200. Each item
+     * is a {@link StaffReport}: the whole record plus the canonical staff refs and the own line ids of every person.
+     * Throws `ReportQueryError` for an unknown status or a cursor that is not one of ours, and the store's own error
+     * if it fails, so a route handler should catch both.
+     * Carries subject ids: staff channels only, never send to a player.
+     */
+    list(q?: ReportQuery): ReportPage;
+    /**
+     * One report as a {@link StaffReport}, or null for an unknown id. Throws the store's own error if it fails.
+     * Carries subject ids: staff channels only, never send to a player.
+     */
+    get(id: string): StaffReport | null;
+  };
   doors: { check(kind: DoorKind, who: RawWho): DoorRefusal | null };
   sanctions: {
     /**
@@ -156,8 +220,19 @@ export interface Chatwarden {
      */
     revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
   };
-  /** The registry in use (the one given, or the starter rules). Retired rules stay listed. */
+  /** The registry in use (the one given, or the starter rules for the profile). Retired rules stay listed. */
   rules: CommunityRules;
+  /** The profile in force: the preset, the overrides and the validation applied. Deep-frozen. */
+  profile: ModerationProfile;
+  /** The limits in force, defaults filled in. Deep-frozen. */
+  limits: Limits;
+  /** The profile's one-line summary, for the report dialog and the rules page. Same as `profile.summary`. */
+  summary: string;
+  /**
+   * Generated policy documents, bound to the profile and rules in force: a player code of conduct, a moderator guide,
+   * an agent brief and the policy as JSON. Pure text; nothing here reads the store.
+   */
+  documents: Documents;
   /**
    * Player-facing notices and "My record". Each takes the same `RawWho` as the doors, hashes it and FINDS the person
    * (never creates one): an unknown person gets empty lists and `false`. An IP alone finds nobody. A failure in the
@@ -188,14 +263,14 @@ export interface Chatwarden {
    */
   history(subject: SubjectId): ActionRecord[];
   /**
-   * The next step the ladder suggests for this person's record. It selects nothing; show it as one line. Keyed
-   * by a subject id. Carries subject ids: staff channels only, never send to a player.
+   * What the moderation profile suggests for this person: the outcome, a short label, and a plain sentence on why.
+   * It selects nothing; show it as one line. `context.roomId` is the room of the incident being judged: the repeat
+   * rule counts it as one more note, and with `distinctGames` it must differ from the earlier notes' rooms (a
+   * missing room never pairs with an earlier note). When the profile's `repeat.distinctGames` is true (`relaxed`),
+   * the caller MUST pass the incident's `roomId` (the report's room), or note escalation never fires. Keyed by a subject id. Carries subject ids: staff channels
+   * only, never send to a player (the returned `label` and `why` themselves hold no identifier).
    */
-  suggest(
-    subject: SubjectId,
-    severity: Severity | null,
-    rule: RuleRef,
-  ): { kind: SanctionKind; durationMs: number | null; label: string };
+  suggest(subject: SubjectId, level: ConductLevel | null, rule: RuleRef, context?: SuggestContext): Suggestion;
   /** Rule gaps: sanctions a moderator filed under `'uncovered'`, for the periodic rules review. Staff only. */
   gaps: {
     list(): GapRow[];
@@ -214,6 +289,21 @@ export interface Chatwarden {
 }
 
 /**
+ * The profanity filter for the profile, or undefined. Mode `allow` builds nothing; a ready filter wins over the
+ * package; a package that throws fails creation and one that returns a non-filter is a TypeError.
+ */
+function buildProfanityFilter(opts: ChatwardenOptions, config: ProfanityConfig): ProfanityFilter | undefined {
+  if (config.mode === 'allow') return undefined;
+  if (opts.profanity !== undefined) return opts.profanity;
+  if (opts.profanityPackage === undefined) return undefined;
+  const built = opts.profanityPackage.createProfanityFilter(config);
+  if (typeof built !== 'object' || built === null || typeof built.apply !== 'function') {
+    throw new TypeError('profanityPackage.createProfanityFilter must return a filter with an apply(text) method');
+  }
+  return built;
+}
+
+/**
  * Wire every component and return the kit. This is the recommended entry point: the component classes stay
  * exported for adapters and advanced use, but an adopter needs only this.
  *
@@ -228,7 +318,17 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const logger = opts.logger;
   const hasher = makeHasher(opts.secret);
 
-  const { everyMs, ...retentionPolicy } = opts.retention === false ? {} : (opts.retention ?? {});
+  // Everything an adopter configures is checked before the store is touched or a timer started.
+  const profile = resolveProfile(opts.profile ?? 'standard', opts.overrides);
+  const limits = resolveLimits(opts.limits);
+
+  const { everyMs, ...givenRetention } = opts.retention === false ? {} : (opts.retention ?? {});
+  /** The policy in force: what was given, with `badFaithMs` following a longer suspension window than its default. */
+  const retentionPolicy: Partial<RetentionPolicy> = {
+    ...givenRetention,
+    badFaithMs: givenRetention.badFaithMs ?? Math.max(RETENTION_DEFAULTS.badFaithMs, limits.reports.suspendWindowMs),
+  };
+  checkRetentionFloors(retentionPolicy, limits.reports.suspendWindowMs);
   const purgeEveryMs = everyMs ?? DEFAULT_PURGE_EVERY_MS;
   if (opts.retention !== false && (!Number.isFinite(purgeEveryMs) || purgeEveryMs <= 0)) {
     throw new Error('createChatwarden: retention.everyMs must be a positive finite number');
@@ -236,20 +336,22 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (opts.retention !== false && purgeEveryMs > MAX_PURGE_EVERY_MS) {
     throw new RangeError(`retention.everyMs must be at most ${MAX_PURGE_EVERY_MS}`);
   }
-  const rules = opts.rules ?? defineRules(STARTER_RULES);
+  const rules = opts.rules ?? defineRules(starterRules(profile.rules));
   const autoRestrictRule = opts.autoRestrictRule ?? 1;
   const autoRule = rules.get(autoRestrictRule);
   if (autoRule === undefined || autoRule.retired === true) {
     throw new RangeError('autoRestrictRule must be the number of an active rule in the registry');
   }
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
+  const profanity = buildProfanityFilter(opts, profile.profanity);
+  if (profanity === undefined && profile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
 
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });
   const roster = new RoomRoster();
   const buffer = new EvidenceBuffer({ clock });
   const mutes = new MuteService(store, clock, subjects, { logger });
-  const strikes = new StrikeService(store, clock, subjects, { logger });
+  const strikes = new StrikeService(store, clock, subjects, { logger, limits: limits.strikes });
 
   await subjects.load();
   await sanctions.load(store, clock.now());
@@ -279,12 +381,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     mutes,
     clock,
     matcher: opts.matcher,
-    starrer: opts.starrer,
+    profanity,
+    profanityMode: profile.profanity.mode,
     gate: opts.gate,
     onAutoRestrict: opts.onAutoRestrict,
     logger,
     notices,
     autoRestrictRule,
+    limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
   });
   const reports = new ReportService({
     roster,
@@ -295,9 +399,19 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     enabled,
     onReport: opts.onReport,
     logger,
+    limits: limits.reports,
   });
   const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
-  const decisions = new DecisionService({ store, subjects, rules, notices, clock, index: sanctions, logger });
+  const decisions = new DecisionService({
+    store,
+    subjects,
+    rules,
+    notices,
+    clock,
+    index: sanctions,
+    logger,
+    reporterFeedback: limits.reporterFeedback,
+  });
 
   // The person behind a player's connection details, FOUND and never created. An IP alone finds nobody.
   const personOf = (who: RawWho): SubjectId | null => {
@@ -370,7 +484,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       },
       mutedSeats: (roomId, viewerSeat) => mutes.mutedSeats(roomId, viewerSeat, roster),
     },
-    reports: { submit: (input) => reports.submit(input) },
+    reports: {
+      submit: (input) => reports.submit(input),
+      list: (q) => listStaffReports(store, subjects, q),
+      get: (id) => {
+        const record = typeof id === 'string' ? store.loadReport(id) : null;
+        return record === null ? null : staffReport(record, subjects);
+      },
+    },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
       apply: (input) => applySanction(store, subjects, input, clock.now(), sanctions),
@@ -378,6 +499,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         (await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock, index: sanctions })).revoked,
     },
     rules,
+    profile,
+    limits,
+    summary: profile.summary,
+    documents: bindDocuments({ profile, rules }),
     notices: {
       pending: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.pending(s)),
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
@@ -386,8 +511,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     decide: (input) => decisions.decide(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
-    suggest: (subject, severity, rule) =>
-      suggestAction(recordStep(historyOf(store, subjects, subject, clock.now())), severity, rule),
+    suggest: (subject, level, rule, context) => {
+      const now = clock.now();
+      return suggest(profile, historyOf(store, subjects, subject, now), level, rule, now, context);
+    },
     gaps: {
       list: () =>
         store.listGaps().map(
@@ -403,7 +530,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         ),
       close: (groupId, status, ref, actor) => store.transaction(() => store.closeGap(groupId, status, ref, actor, clock.now())),
     },
-    purge: (policy) => purge(store, clock.now(), { ...retentionPolicy, ...policy }),
+    purge: async (policy) => {
+      const merged: Partial<RetentionPolicy> = { ...retentionPolicy };
+      for (const [k, v] of Object.entries(policy ?? {})) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
+      checkRetentionFloors(merged, limits.reports.suspendWindowMs);
+      return await purge(store, clock.now(), merged);
+    },
     flush: () => subjects.flush(),
     close: async () => {
       if (timer !== undefined) clearInterval(timer);

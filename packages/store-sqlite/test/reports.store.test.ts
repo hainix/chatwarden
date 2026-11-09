@@ -12,8 +12,10 @@ import {
   type Identifiers,
   type SanctionKind,
   type Source,
+  type Store,
   type StoredReport,
 } from '@chatwarden/core';
+import { MemoryStore } from '../../core/test/memoryStore.js';
 import { MIGRATIONS, openStore } from '../src/index.js';
 
 const H = 3_600_000;
@@ -70,7 +72,7 @@ describe('migration 6: kit_reports', () => {
     expect(info.map((c) => String(c.name))).toEqual([
       'id', 'created_at', 'room_id', 'tags_json', 'reporter_subject', 'reporter_seat', 'reporter_handle',
       'target_subject', 'target_seat', 'target_handle', 'category', 'note', 'line_id', 'excerpt_json',
-      'people_json', 'status', 'bad_faith', 'actioned_at', 'actioned_by', 'mod_note',
+      'people_json', 'status', 'bad_faith', 'actioned_at', 'actioned_by', 'mod_note', 'bad_faith_evidence',
     ]);
     const by = (n: string) => info.find((c) => c.name === n);
     expect(by('status')?.dflt_value).toBe("'open'");
@@ -370,6 +372,141 @@ describe('end to end through ReportService', () => {
       ok: false,
       refused: 'suspended',
     });
+    db.close();
+  });
+});
+
+describe('listReports', () => {
+  const seeded = (store: Pick<Store, 'insertReport' | 'closeReport'>) => {
+    // r1..r6 with three at the same instant, so the id tie-break shows.
+    const times = [NOW, NOW + 10, NOW + 10, NOW + 10, NOW + 20, NOW + 30];
+    times.forEach((createdAt, i) => {
+      store.insertReport(report({ id: `r${i + 1}`, createdAt, reporterSubject: `s_rep${i}` }));
+    });
+    store.closeReport('r2', 'actioned', false, 'mod', NOW + 100, 'n');
+    store.closeReport('r3', 'dismissed', true, 'mod', NOW + 100, 'n', 'ev');
+    store.closeReport('r5', 'actioned', false, 'mod', NOW + 100, 'n');
+  };
+  const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
+
+  it('newest first, ties on created_at broken by id descending', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(ids(store.listReports({ limit: 10 }))).toEqual(['r6', 'r5', 'r4', 'r3', 'r2', 'r1']);
+    db.close();
+  });
+
+  it('returns whole records with the decision columns', () => {
+    const { db, store } = env();
+    seeded(store);
+    const [row] = store.listReports({ status: 'dismissed', limit: 5 });
+    expect(row).toEqual(store.loadReport('r3'));
+    expect(row).toMatchObject({ status: 'dismissed', badFaith: true, actionedBy: 'mod', badFaithEvidence: 'ev' });
+    expect(row?.excerpt).toEqual(report().excerpt);
+    db.close();
+  });
+
+  it('filters by status', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(ids(store.listReports({ status: 'open', limit: 10 }))).toEqual(['r6', 'r4', 'r1']);
+    expect(ids(store.listReports({ status: 'actioned', limit: 10 }))).toEqual(['r5', 'r2']);
+    expect(ids(store.listReports({ status: 'dismissed', limit: 10 }))).toEqual(['r3']);
+    db.close();
+  });
+
+  it('a cursor page seeks the created_at index instead of scanning the table', () => {
+    const { db, store } = env();
+    seeded(store);
+    const seen: string[] = [];
+    const prepare = db.prepare.bind(db);
+    db.prepare = ((sql: string) => {
+      seen.push(sql);
+      return prepare(sql);
+    }) as typeof db.prepare;
+    store.listReports({ before: NOW + 10, beforeId: 'r3', limit: 10 });
+    db.prepare = prepare as typeof db.prepare;
+    const sql = seen.find((q) => q.includes('FROM kit_reports') && q.includes('created_at')) ?? '';
+    expect(sql).not.toBe('');
+    // The plan does not depend on the bound values: one number per placeholder.
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...Array.from({ length: (sql.match(/\?/g) ?? []).length }, () => NOW + 10));
+    const detail = plan.map((r) => String((r as { detail: string }).detail)).join(' | ');
+    expect(detail).toMatch(/SEARCH kit_reports USING INDEX kit_reports_by_created \(created_at/);
+    db.close();
+  });
+
+  it('the cursor with the redundant range term gives the same pages when several rows tie on created_at', () => {
+    const { db, store } = env();
+    for (let i = 1; i <= 9; i++) store.insertReport(report({ id: `t${i}`, createdAt: NOW + (i <= 5 ? 5 : 6), reporterSubject: `s_t${i}` }));
+    // Walk the whole list two at a time by the cursor; every row appears once, in the newest-first order.
+    const all: string[] = [];
+    let cursor: { before: number; beforeId: string } | undefined;
+    for (;;) {
+      const page = store.listReports({ limit: 2, ...(cursor ?? {}) });
+      if (page.length === 0) break;
+      all.push(...ids(page));
+      const last = page[page.length - 1];
+      if (last === undefined) break;
+      cursor = { before: last.createdAt, beforeId: last.id };
+    }
+    expect(all).toEqual(['t9', 't8', 't7', 't6', 't5', 't4', 't3', 't2', 't1']);
+    db.close();
+  });
+
+  it('before (exclusive) pages by time; with beforeId it splits an exact tie', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(ids(store.listReports({ before: NOW + 10, limit: 10 }))).toEqual(['r1']);
+    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r3', limit: 10 }))).toEqual(['r2', 'r1']);
+    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r4', limit: 2 }))).toEqual(['r3', 'r2']);
+    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r1', limit: 10 }))).toEqual(['r1']);
+    expect(ids(store.listReports({ before: NOW, limit: 10 }))).toEqual([]);
+    // A cursor with a filter.
+    expect(ids(store.listReports({ status: 'open', before: NOW + 10, beforeId: 'r4', limit: 10 }))).toEqual(['r1']);
+    // beforeId alone (no before) is ignored.
+    expect(ids(store.listReports({ beforeId: 'r3', limit: 10 }))).toHaveLength(6);
+    db.close();
+  });
+
+  it('limit is clamped to 1..200 at the store as well', () => {
+    const { db, store } = env();
+    for (let i = 0; i < 210; i++) store.insertReport(report({ id: `q${i}`, createdAt: NOW + i, reporterSubject: `s${i}` }));
+    expect(store.listReports({ limit: 500 })).toHaveLength(200);
+    expect(store.listReports({ limit: 200 })).toHaveLength(200);
+    expect(store.listReports({ limit: 0 })).toHaveLength(1);
+    expect(store.listReports({ limit: -4 })).toHaveLength(1);
+    expect(store.listReports({ limit: 3.8 })).toHaveLength(3);
+    expect(store.listReports({ limit: 5 })).toHaveLength(5);
+    db.close();
+  });
+
+  it('an empty table lists nothing', () => {
+    const { db, store } = env();
+    expect(store.listReports({ limit: 10 })).toEqual([]);
+    db.close();
+  });
+
+  it('agrees with the in-memory store on every query', () => {
+    const { db, store } = env();
+    const mem = new MemoryStore();
+    seeded(store);
+    seeded(mem);
+    const queries = [
+      { limit: 10 },
+      { limit: 2 },
+      { status: 'open' as const, limit: 10 },
+      { status: 'actioned' as const, limit: 1 },
+      { status: 'dismissed' as const, limit: 10 },
+      { before: NOW + 10, limit: 10 },
+      { before: NOW + 10, beforeId: 'r3', limit: 10 },
+      { before: NOW + 10, beforeId: 'r4', limit: 2 },
+      { before: NOW + 30, limit: 3 },
+      { before: NOW + 31, beforeId: 'zz', limit: 3 },
+      { status: 'open' as const, before: NOW + 10, beforeId: 'r4', limit: 10 },
+      { limit: 0 },
+      { limit: 999 },
+    ];
+    for (const q of queries) expect(store.listReports(q), JSON.stringify(q)).toEqual(mem.listReports(q));
     db.close();
   });
 });

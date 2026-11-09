@@ -4,6 +4,7 @@
     { "path": "packages/core" },
     { "path": "packages/store-sqlite" },
     { "path": "packages/matcher" },
+    { "path": "packages/profanity" },
     { "path": "examples/tiny-chat" }
   ]
 }

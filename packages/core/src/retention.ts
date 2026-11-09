@@ -1,4 +1,5 @@
 import { MUTE_TTL_MS } from './mutes.js';
+import { ProfileError } from './profile.js';
 import type { Store } from './types.js';
 
 const DAY_MS = 86_400_000;
@@ -31,6 +32,39 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   badFaithMs: 30 * DAY_MS,
 };
 
+/** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
+const RECORD_FLOOR_MS = 90 * DAY_MS;
+
+/**
+ * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
+ * absent one takes a default, and the defaults satisfy every floor):
+ * - `sanctionAfterEndMs` at least 90 days: the ladder reads that far back
+ * - `noticesMs` at least 90 days: "My record" shows that far back
+ * - `badFaithMs` at least `suspendWindowMs`: a bad-faith dismissal weighs against its reporter for that long
+ *
+ * Throws {@link ProfileError} naming the field and why. Anything that is not a number at least the floor fails,
+ * NaN included.
+ */
+export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWindowMs: number): void {
+  const below = (v: unknown, floor: number): boolean => v !== undefined && !(typeof v === 'number' && v >= floor);
+  if (below(policy.sanctionAfterEndMs, RECORD_FLOOR_MS)) {
+    throw new ProfileError(
+      'retention.sanctionAfterEndMs',
+      "must be at least 90 days: the ladder looks back that far at a person's earlier actions",
+    );
+  }
+  if (below(policy.noticesMs, RECORD_FLOOR_MS)) {
+    throw new ProfileError('retention.noticesMs', "must be at least 90 days: players' records reach back that far");
+  }
+  if (below(policy.badFaithMs, suspendWindowMs)) {
+    throw new ProfileError(
+      'retention.badFaithMs',
+      `must be at least limits.reports.suspendWindowMs (${Math.round((suspendWindowMs / DAY_MS) * 100) / 100} days): ` +
+        "a report dismissed as bad faith counts toward its reporter's suspension for that long",
+    );
+  }
+}
+
 /** Rows deleted, per table. */
 export interface PurgeResult {
   reports: number;
@@ -51,6 +85,7 @@ function checkWindow(name: string, ms: number): void {
  * - reports: `createdAt < now - reportsMs`, except a bad-faith dismissal actioned at or after `now - badFaithMs`
  *   (it still counts toward its reporter's suspension). The recorded decisions of deleted reports go with them.
  * - sanctions: ended (`endsAt < now - sanctionAfterEndMs`) or revoked (`revokedAt < now - sanctionAfterEndMs`).
+ *   A warning or a note ends where it starts, so it goes `sanctionAfterEndMs` (90 days by default) after its start.
  *   A permanent, unrevoked sanction is never deleted, nor is one whose rule gap is still open.
  * - strikes: `at < now - strikesMs`
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)

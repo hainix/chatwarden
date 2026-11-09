@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -259,6 +259,62 @@ CREATE TABLE kit_decisions (
   result_json TEXT NOT NULL
 );
 CREATE INDEX kit_decisions_by_report ON kit_decisions (report_id);
+`,
+  },
+  {
+    version: 10,
+    // The moderator's written evidence for a bad_faith dismissal (1..500 characters, checked by the decision
+    // service). Staff only: nothing player-facing reads it. NULL on every other report, including every report
+    // written before this migration. Adding a nullable column keeps every row.
+    sql: `
+ALTER TABLE kit_reports ADD COLUMN bad_faith_evidence TEXT;
+`,
+  },
+  {
+    version: 11,
+    // Two changes to kit_sanctions in ONE rebuild, because SQLite cannot ALTER a CHECK: the kind list gains 'note' (the
+    // Note outcome, stored like a warning) and a nullable room_id TEXT is added (the room the decided report came from;
+    // NULL on every row written before this migration, on automatic timeouts and on a direct sanction that names none).
+    // It follows migration 7's pattern exactly: create the new shape, copy EVERY column of every row in rowid order
+    // (gap_ref and the revoke columns included), drop the old table (which drops its indexes), rename, and recreate
+    // every index, the partial unique ref_code one included. Nothing references kit_sanctions. The runner wraps this in
+    // one savepoint with the version bump: a failure anywhere leaves the old table, its rows and version 10 untouched.
+    // The kind list below and SANCTION_KINDS in core must match (a test compares them).
+    sql: `
+CREATE TABLE kit_sanctions_v11 (
+  id            TEXT PRIMARY KEY,
+  group_id      TEXT NOT NULL,
+  ref_code      TEXT NOT NULL,
+  kind          TEXT NOT NULL CHECK (kind IN ('chat', 'area', 'ban', 'warning', 'note')),
+  target_type   TEXT NOT NULL CHECK (target_type IN ('subject', 'ip')),
+  target_value  TEXT NOT NULL,
+  starts_at     INTEGER NOT NULL,
+  ends_at       INTEGER,
+  reason        TEXT NOT NULL,
+  rule          TEXT,
+  actor         TEXT NOT NULL,
+  source        TEXT NOT NULL CHECK (source IN ('moderator', 'auto_filter', 'coop', 'api', 'ai')),
+  automated     INTEGER NOT NULL CHECK (automated IN (0, 1)),
+  pending       INTEGER NOT NULL CHECK (pending IN (0, 1)),
+  revoked_by    TEXT,
+  revoked_at    INTEGER,
+  revoke_reason TEXT,
+  gap_note      TEXT,
+  gap_status    TEXT CHECK (gap_status IN ('open', 'ruled', 'not_a_rule')),
+  gap_ref       TEXT,
+  room_id       TEXT
+);
+INSERT INTO kit_sanctions_v11
+  (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source,
+   automated, pending, revoked_by, revoked_at, revoke_reason, gap_note, gap_status, gap_ref)
+  SELECT id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source,
+         automated, pending, revoked_by, revoked_at, revoke_reason, gap_note, gap_status, gap_ref
+  FROM kit_sanctions ORDER BY rowid;
+DROP TABLE kit_sanctions;
+ALTER TABLE kit_sanctions_v11 RENAME TO kit_sanctions;
+CREATE UNIQUE INDEX kit_sanctions_ref_code ON kit_sanctions (ref_code) WHERE target_type = 'subject';
+CREATE INDEX kit_sanctions_by_group ON kit_sanctions (group_id);
+CREATE INDEX kit_sanctions_by_target ON kit_sanctions (target_type, target_value);
 `,
   },
 ];

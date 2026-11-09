@@ -116,9 +116,11 @@ export interface SubjectIdRecord {
  * What a sanction restricts: `chat` (public chat), `area` (public areas:
  * public rooms and matchmaking), `ban` (everything), or
  * `warning` (a recorded warning: it restricts nothing, never refuses at a door
- * and is never in the sanction index; it has no end, so `endsAt === startsAt`).
+ * and is never in the sanction index; it has no end, so `endsAt === startsAt`), or
+ * `note` (the Note outcome: on the record and never punishing. Stored exactly like a warning, but it also
+ * tells the player nothing: no notice, no reporter feedback, and it does not move the escalation step).
  */
-export type SanctionKind = 'chat' | 'area' | 'ban' | 'warning';
+export type SanctionKind = 'chat' | 'area' | 'ban' | 'warning' | 'note';
 
 /** Who or what imposed a sanction. */
 export type Source = 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai';
@@ -153,6 +155,12 @@ export interface SanctionRow {
   gapNote: string | null;
   /** Where that gap stands: `open` until someone makes it a rule (`ruled`) or decides it is not one. */
   gapStatus: 'open' | 'ruled' | 'not_a_rule' | null;
+  /**
+   * The room (game) the sanction came from, when known: a moderator decision stores the decided report's room. Null
+   * for an automatic timeout, a direct `sanctions.apply` that gave none, and every row written before migration 11.
+   * Private. Lets the escalation ladder count notes from distinct games.
+   */
+  roomId: string | null;
   actor: string;
   source: Source;
   automated: boolean;
@@ -166,10 +174,20 @@ export interface SanctionRow {
 }
 
 /**
- * How serious a piece of behaviour is, as the AI read (K3) or a moderator rates it. The escalation ladder reads it:
- * `'none'` is treated exactly like `'low'`.
+ * How serious a piece of behaviour is, as the AI read (K3) or a moderator rates it. The shared vocabulary of every
+ * report, in order from mildest to worst:
+ * - `banter`: trash talk, salt, profanity not aimed at a person.
+ * - `rude`: a personal insult or profanity aimed at a player, isolated.
+ * - `hostile`: sustained or repeated aggression.
+ * - `severe`: threats, hate or slurs, sexual harassment, doxxing, serious harassment.
+ *
+ * The escalation ladder reads it; `banter` reads the same column as `rude` and `hostile` (the profiles added later
+ * decide what each level costs). Replaces the K2 `Severity` (none / low / medium / high, mapped one to one).
  */
-export type Severity = 'high' | 'medium' | 'low' | 'none';
+export type ConductLevel = 'banter' | 'rude' | 'hostile' | 'severe';
+
+/** Every {@link ConductLevel}, ordered from mildest to worst. */
+export const CONDUCT_LEVELS: readonly ConductLevel[] = Object.freeze(['banter', 'rude', 'hostile', 'severe'] as const);
 
 // ---------------------------------------------------------------------------
 // Mutes (storage shape)
@@ -272,6 +290,20 @@ export interface ReportRecord extends Omit<StoredReport, 'status'> {
   actionedAt: number | null;
   actionedBy: string | null;
   modNote: string | null;
+  /**
+   * The moderator's written evidence for a `bad_faith` dismissal (trimmed, 1..500 characters); null on every other
+   * report. Staff only: it is never part of a notice or any other player-facing value.
+   */
+  badFaithEvidence: string | null;
+}
+
+/** What {@link Store.listReports} takes. */
+export interface ReportListQuery {
+  status?: 'open' | 'actioned' | 'dismissed';
+  /** Epoch ms; only reports created before this (exclusive), or at it with an id below `beforeId`. */
+  before?: number;
+  beforeId?: string;
+  limit: number;
 }
 
 /**
@@ -459,8 +491,17 @@ export interface Store {
   loadReport(id: string): ReportRecord | null;
 
   /**
-   * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`.
-   * Returns true when this call closed it; false (nothing changed) for an unknown report or one already closed.
+   * Reports newest first (`created_at` descending, then `id` descending, so a tie is stable), whole records. `status`
+   * filters; `before` keeps only reports older than that instant (exclusive), and with `beforeId` also the ones filed
+   * AT that instant whose id sorts below it (keyset paging: pass the last row's `createdAt` and `id`). `beforeId`
+   * without `before` is ignored. `limit` is clamped to 1..200 (a fraction is floored).
+   */
+  listReports(q: ReportListQuery): ReportRecord[];
+
+  /**
+   * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`,
+   * and the bad-faith `evidence` (null or omitted when there is none). Returns true when this call closed it; false
+   * (nothing changed, the first closer's evidence kept) for an unknown report or one already closed.
    */
   closeReport(
     id: string,
@@ -469,6 +510,7 @@ export interface Store {
     actor: string,
     at: number,
     note: string,
+    evidence?: string | null,
   ): boolean;
 
   /** Record a decision. A `key` that is already recorded throws (nothing is written). */
@@ -553,6 +595,16 @@ export interface Store {
 // ---------------------------------------------------------------------------
 // Matcher (structural; the real one lives in @chatwarden/matcher)
 // ---------------------------------------------------------------------------
+
+/**
+ * What core needs from a profanity filter: given chat text, whether it holds ordinary swearing, and the text with
+ * that swearing masked. Declared here so core carries no word data and never imports `@chatwarden/profanity`,
+ * whose `createProfanityFilter` returns one. `text` equals the input when there is no hit. It is never a slur
+ * check (the {@link Matcher} does that) and a hit is never a rule violation.
+ */
+export interface ProfanityFilter {
+  apply(text: string): { hit: boolean; text: string };
+}
 
 /**
  * What core needs from a term matcher: given chat text, the id of the term it hit, or null.

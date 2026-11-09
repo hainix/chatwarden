@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { LIMITS_DEFAULTS } from '../src/limits.js';
+import type { Limits } from '../src/limits.js';
 import { applySanction } from '../src/sanctions.js';
 import {
   REPEAT_LOOKBACK_MS,
@@ -25,7 +27,7 @@ const who = (clientKey: string | null, accountId: string | null = null, ipHash: 
 
 type Logs = Array<{ event: string; detail?: Record<string, string | number | boolean> }>;
 
-function setup(opts: { store?: MemoryStore } = {}) {
+function setup(opts: { store?: MemoryStore; limits?: Limits['strikes'] } = {}) {
   const store = opts.store ?? new MemoryStore();
   const clock = { t: NOW, now: () => clock.t };
   const logs: Logs = [];
@@ -35,7 +37,7 @@ function setup(opts: { store?: MemoryStore } = {}) {
     },
   };
   const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
-  const strikes = new StrikeService(store, clock, subjects, { logger });
+  const strikes = new StrikeService(store, clock, subjects, { logger, ...(opts.limits ? { limits: opts.limits } : {}) });
   const person = (ids: Identifiers): SubjectId => {
     const s = subjects.resolve(ids);
     if (s === null) throw new Error('expected a subject');
@@ -86,6 +88,83 @@ describe('values', () => {
     expect(STRIKE_FIRST_RESTRICT_MS).toBe(30 * MIN);
     expect(REPEAT_RESTRICT_MS).toBe(24 * H);
     expect(REPEAT_LOOKBACK_MS).toBe(7 * DAY);
+  });
+});
+
+describe('configurable limits', () => {
+  const custom = (over: Partial<Limits['strikes']>): Limits['strikes'] => ({ ...LIMITS_DEFAULTS.strikes, ...over });
+
+  it('passing the default limits explicitly behaves exactly like passing none', () => {
+    const env = setup({ limits: LIMITS_DEFAULTS.strikes });
+    const s = env.person(who('k1'));
+    expect(thirdStrike(env, s)).toEqual({ durationMs: 30 * MIN });
+    expect(thirdStrike(env, s, NOW + 2 * H)).toEqual({ durationMs: 24 * H, second: true });
+  });
+
+  it('count: two strikes fire with count 2; two do not with count 4', () => {
+    const two = setup({ limits: custom({ count: 2 }) });
+    const a = two.person(who('k1'));
+    expect(two.strike(a, NOW).autoRestrict).toBeNull();
+    expect(two.strike(a, NOW + 1).autoRestrict).toEqual({ durationMs: 30 * MIN });
+
+    const four = setup({ limits: custom({ count: 4 }) });
+    const b = four.person(who('k2'));
+    expect(thirdStrike(four, b)).toBeNull();
+    expect(four.strike(b, NOW + 3).autoRestrict).toEqual({ durationMs: 30 * MIN });
+  });
+
+  it('windowMs: strikes further apart than the window never add up; inside it they do', () => {
+    const env = setup({ limits: custom({ count: 2, windowMs: 10 * MIN }) });
+    const s = env.person(who('k1'));
+    expect(env.strike(s, NOW).autoRestrict).toBeNull();
+    expect(env.strike(s, NOW + 11 * MIN).autoRestrict).toBeNull();
+    expect(env.strike(s, NOW + 12 * MIN).autoRestrict).toEqual({ durationMs: 30 * MIN });
+  });
+
+  it('firstMs and repeatMs set the two durations; only the repeat carries second', () => {
+    const env = setup({ limits: custom({ count: 1, firstMs: 5 * MIN, repeatMs: 50 * MIN }) });
+    const s = env.person(who('k1'));
+    const first = env.strike(s, NOW).autoRestrict;
+    expect(first).toEqual({ durationMs: 5 * MIN });
+    expect(first).not.toHaveProperty('second');
+    expect(env.strike(s, NOW + H).autoRestrict).toEqual({ durationMs: 50 * MIN, second: true });
+  });
+
+  it('a repeat is flagged second even when repeatMs is shorter than firstMs', () => {
+    const env = setup({ limits: custom({ count: 1, firstMs: 50 * MIN, repeatMs: 5 * MIN }) });
+    const s = env.person(who('k1'));
+    expect(env.strike(s, NOW).autoRestrict).toEqual({ durationMs: 50 * MIN });
+    expect(env.strike(s, NOW + H).autoRestrict).toEqual({ durationMs: 5 * MIN, second: true });
+  });
+
+  it('repeatLookbackMs: an earlier restriction older than the look-back does not escalate', () => {
+    const env = setup({ limits: custom({ count: 1, repeatLookbackMs: 2 * H }) });
+    const s = env.person(who('k1'));
+    expect(env.strike(s, NOW).autoRestrict).toEqual({ durationMs: 30 * MIN });
+    expect(env.strike(s, NOW + 2 * H).autoRestrict).toEqual({ durationMs: 24 * H, second: true });
+    expect(env.strike(s, NOW + 2 * H + 2 * H + 1).autoRestrict).toEqual({ durationMs: 30 * MIN });
+  });
+
+  it('load() uses the configured look-back for stored automatic restrictions', async () => {
+    const store = new MemoryStore();
+    const a = setup({ store, limits: custom({ count: 1, repeatLookbackMs: DAY }) });
+    const s = a.person(who('k1'));
+    await a.applyAuto(s, NOW - 3 * H);
+    await a.strikes.load();
+    expect(a.strike(s, NOW).autoRestrict).toEqual({ durationMs: 24 * H, second: true });
+
+    const storeB = new MemoryStore();
+    const b = setup({ store: storeB, limits: custom({ count: 1, repeatLookbackMs: 2 * H }) });
+    const t = b.person(who('k1'));
+    await b.applyAuto(t, NOW - 3 * H);
+    await b.strikes.load();
+    expect(b.strike(t, NOW).autoRestrict).toEqual({ durationMs: 30 * MIN });
+  });
+
+  it('the no-subject fallback uses count, window and firstMs too', () => {
+    const env = setup({ limits: custom({ count: 2, firstMs: 7 * MIN }) });
+    expect(env.strike(null, NOW, 'rk').autoRestrict).toBeNull();
+    expect(env.strike(null, NOW + 1, 'rk').autoRestrict).toEqual({ durationMs: 7 * MIN });
   });
 });
 
@@ -194,7 +273,7 @@ describe('record (subject path)', () => {
     expect(env.strike(s, NOW + 2 * MIN).autoRestrict).toEqual({ durationMs: 30 * MIN });
     expect(env.strike(s, NOW + 33 * MIN).autoRestrict).toBeNull();
     expect(env.strike(s, NOW + 34 * MIN).autoRestrict).toBeNull();
-    expect(env.strike(s, NOW + 35 * MIN).autoRestrict).toEqual({ durationMs: 24 * H });
+    expect(env.strike(s, NOW + 35 * MIN).autoRestrict).toEqual({ durationMs: 24 * H, second: true });
   });
 
   it('a strike in the same millisecond as the firing is consumed too', () => {
@@ -233,7 +312,7 @@ describe('escalation', () => {
     const s = env.person(who('k1'));
     await env.applyAuto(s, NOW - 3 * DAY);
     await env.strikes.load();
-    expect(thirdStrike(env, s)).toEqual({ durationMs: 24 * H });
+    expect(thirdStrike(env, s)).toEqual({ durationMs: 24 * H, second: true });
   });
 
   it('escalates even when that earlier restriction was revoked (rows count whatever happened to them)', async () => {
@@ -243,7 +322,7 @@ describe('escalation', () => {
     const row = env.store.rawSanctions()[0];
     expect(env.store.revokeSanctionGroup(row?.groupId ?? '', 'mod', NOW - DAY + 1, 'sorry')).toBe(1);
     await env.strikes.load();
-    expect(thirdStrike(env, s)).toEqual({ durationMs: 24 * H });
+    expect(thirdStrike(env, s)).toEqual({ durationMs: 24 * H, second: true });
   });
 
   it('escalates when that earlier restriction has long expired (6 days, 30 min long)', async () => {
@@ -251,7 +330,7 @@ describe('escalation', () => {
     const s = env.person(who('k1'));
     await env.applyAuto(s, NOW - 6 * DAY);
     await env.strikes.load();
-    expect(thirdStrike(env, s)).toEqual({ durationMs: 24 * H });
+    expect(thirdStrike(env, s)).toEqual({ durationMs: 24 * H, second: true });
   });
 
   it('does not escalate for an automatic restriction older than 7 days', async () => {
@@ -267,7 +346,7 @@ describe('escalation', () => {
     const a = exact.person(who('k1'));
     await exact.applyAuto(a, NOW + 2 - 7 * DAY);
     await exact.strikes.load();
-    expect(thirdStrike(exact, a)).toEqual({ durationMs: 24 * H });
+    expect(thirdStrike(exact, a)).toEqual({ durationMs: 24 * H, second: true });
 
     const older = setup();
     const b = older.person(who('k1'));
@@ -320,8 +399,8 @@ describe('escalation', () => {
     const env = setup();
     const s = env.person(who('k1'));
     expect(thirdStrike(env, s, NOW)).toEqual({ durationMs: 30 * MIN });
-    expect(thirdStrike(env, s, NOW + 2 * H)).toEqual({ durationMs: 24 * H });
-    expect(thirdStrike(env, s, NOW + 5 * DAY)).toEqual({ durationMs: 24 * H }); // 2nd firing was < 7 d before
+    expect(thirdStrike(env, s, NOW + 2 * H)).toEqual({ durationMs: 24 * H, second: true });
+    expect(thirdStrike(env, s, NOW + 5 * DAY)).toEqual({ durationMs: 24 * H, second: true }); // 2nd firing was < 7 d before
     expect(thirdStrike(env, s, NOW + 13 * DAY)).toEqual({ durationMs: 30 * MIN }); // 8 d since the last one
   });
 });
@@ -434,7 +513,7 @@ describe('merged aliases', () => {
     expect(thirdStrike(env, b, NOW + 10)).toEqual({ durationMs: 30 * MIN });
     env.person(who('ka', 'acct'));
     env.person(who('kb', 'acct'));
-    expect(thirdStrike(env, a, NOW + 2 * H)).toEqual({ durationMs: 24 * H });
+    expect(thirdStrike(env, a, NOW + 2 * H)).toEqual({ durationMs: 24 * H, second: true });
   });
 
   it('a load rebuilds the tally for an absorbed id', async () => {
@@ -642,7 +721,7 @@ describe('store failure (Review Focus 5)', () => {
     expect(env.strike(s, NOW + 2, 'rk2').autoRestrict).toBeNull(); // same ms as the firing: consumed
     expect(env.strike(s, NOW + 3, 'rk2').autoRestrict).toBeNull();
     expect(env.strike(s, NOW + 4, 'rk2').autoRestrict).toBeNull();
-    expect(env.strike(s, NOW + 5, 'rk2').autoRestrict).toEqual({ durationMs: 24 * H });
+    expect(env.strike(s, NOW + 5, 'rk2').autoRestrict).toEqual({ durationMs: 24 * H, second: true });
   });
 
   it('a throwing logger does not make record throw', () => {

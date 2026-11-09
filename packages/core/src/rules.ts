@@ -1,3 +1,4 @@
+import type { RulesFlavour } from './profile.js';
 import type { ReportCategory } from './types.js';
 
 /**
@@ -125,7 +126,8 @@ export function defineRules(
   return new CommunityRules(clean);
 }
 
-export const STARTER_RULES: CommunityRule[] = [
+/** The starter rules for the standard profile. {@link starterRules} copies and adjusts them per profile flavour. */
+const STANDARD_RULES: readonly CommunityRule[] = [
   {
     number: 1,
     title: 'No slurs or hate aimed at who someone is',
@@ -167,6 +169,40 @@ export const STARTER_RULES: CommunityRule[] = [
     text: 'Do not report someone to get them in trouble when they have not broken a rule. Use reports for real problems.',
   },
 ];
+
+/** CR 2 where trash talk is part of the game: the moderator's wording. */
+const RELAXED_CR2: Pick<CommunityRule, 'title' | 'text'> = {
+  title: 'No harassment or threats',
+  text: "Trash talk about the game and each other's play is fine. Harassing, threatening or personally attacking someone, again and again, is not.",
+};
+
+/** CR 2 where swearing is not allowed: it also covers swearing aimed at a player. */
+const STRICT_CR2_TEXT =
+  'Do not insult, swear at, threaten or target another player in chat. Talking about the game itself is fine; aiming it at a person is not.';
+
+/**
+ * The starter Community Rules for a profile flavour: a fresh copy each call, so editing one list changes no other.
+ * The numbers and titles are the same in every flavour, so a rule number means the same thing under any profile;
+ * only the wording a profile needs differs:
+ * - `relaxed`: CR 2 is "No harassment or threats", with trash talk about the game explicitly fine.
+ * - `standard`: the original starter set (what {@link STARTER_RULES} holds).
+ * - `strict`: CR 2 also covers swearing aimed at a player (CR 3 stays the standard text).
+ *
+ * Throws {@link RulesError} for any other flavour. No flavour uses the vocabulary of a single game.
+ */
+export function starterRules(flavour: RulesFlavour): CommunityRule[] {
+  if (flavour !== 'relaxed' && flavour !== 'standard' && flavour !== 'strict') {
+    throw new RulesError("A starter rules flavour must be 'relaxed', 'standard' or 'strict'");
+  }
+  return STANDARD_RULES.map((rule) => {
+    if (flavour === 'relaxed' && rule.number === 2) return { number: 2, ...RELAXED_CR2 };
+    if (flavour === 'strict' && rule.number === 2) return { ...rule, text: STRICT_CR2_TEXT };
+    return { ...rule };
+  });
+}
+
+/** The standard profile's starter rules, kept for compatibility: `starterRules('standard')`. */
+export const STARTER_RULES: CommunityRule[] = starterRules('standard');
 
 /** The rule a report category points to by default. A moderator can still pick another. */
 export const CATEGORY_TO_RULE: Record<ReportCategory, RuleRef> = {

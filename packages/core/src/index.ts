@@ -7,6 +7,7 @@ export type {
   Logger,
   Platform,
   Matcher,
+  ProfanityFilter,
   MuteRow,
   NoticeKind,
   NoticeRow,
@@ -15,11 +16,12 @@ export type {
   DecisionRow,
   ReportCategory,
   ReportExcerptLine,
+  ReportListQuery,
   ReportRecord,
   SanctionKind,
   SanctionRow,
   SanctionTargetType,
-  Severity,
+  ConductLevel,
   Source,
   Store,
   SubjectId,
@@ -29,6 +31,7 @@ export type {
   StrikeRow,
   SubjectRecord,
 } from './types.js';
+export { CONDUCT_LEVELS } from './types.js';
 export { hashWho, makeHasher } from './hasher.js';
 export { maskSpans, type MaskSpan } from './mask.js';
 export { SubjectIndex } from './subjects.js';
@@ -63,7 +66,7 @@ export type { StrikeDecision } from './strikes.js';
 export { slidingWindow } from './rateLimit.js';
 export type { SlidingWindow } from './rateLimit.js';
 export { ChatService } from './chat.js';
-export type { ChatResult, ChatServiceDeps, Starrer } from './chat.js';
+export type { ChatResult, ChatServiceDeps, RefuseReason } from './chat.js';
 export {
   REPORT_CATEGORIES,
   REPORT_NOTE_MAX,
@@ -73,15 +76,26 @@ export {
   SUSPEND_WINDOW_MS,
 } from './reports.js';
 export type { ReportCounts, ReportInput, ReportRefusal, ReportResult, ReportServiceDeps } from './reports.js';
+export {
+  decodeReportCursor,
+  encodeReportCursor,
+  listStaffReports,
+  REPORT_PAGE_DEFAULT,
+  REPORT_PAGE_MAX,
+  ReportQueryError,
+  staffReport,
+} from './staffReports.js';
+export type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
-export { purge, RETENTION_DEFAULTS } from './retention.js';
+export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export {
   ExcerptError,
   NOTICE_EXCERPT_MAX,
   NOTICE_RECORD_WINDOW_MS,
   NoticeService,
+  ownLineIdsByPerson,
   ownLines,
 } from './notices.js';
 export type {
@@ -101,18 +115,32 @@ export {
   rulesPolicyText,
   RulesError,
   STARTER_RULES,
+  starterRules,
 } from './rules.js';
 export type { CommunityRule, RuleRef } from './rules.js';
+export { agentBrief, bindDocuments, codeOfConduct, moderatorGuide, policyJson } from './documents.js';
+export type {
+  CodeOfConductOptions,
+  DocumentFormat,
+  DocumentPolicy,
+  Documents,
+  ModeratorGuideOptions,
+  PolicyJson,
+} from './documents.js';
+export { LIMITS_DEFAULTS, resolveLimits } from './limits.js';
+export type { Limits, LimitsInput } from './limits.js';
 export {
   actionStep,
   HISTORY_LOOKBACK_MS,
   historyOf,
   LADDER_TABLE,
+  lengthLabel,
+  outcomeLabel,
   recordStep,
-  suggestAction,
+  suggest,
 } from './ladder.js';
-export type { ActionRecord, LadderCell, LadderRow, LadderStep } from './ladder.js';
-export { DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
+export type { ActionRecord, LadderCell, LadderRow, LadderStep, Suggestion, SuggestContext } from './ladder.js';
+export { DECISION_EVIDENCE_MAX, DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
 export type {
   DecisionAction,
   DecisionGroup,
@@ -121,3 +149,24 @@ export type {
   DecisionServiceDeps,
   RevokeDeps,
 } from './decide.js';
+export {
+  defineProfile,
+  MAX_DURATION_MS,
+  MAX_WINDOW_DAYS,
+  PRESETS,
+  ProfileError,
+  resolveProfile,
+  validateProfile,
+} from './profile.js';
+export type {
+  DeepPartial,
+  GuidelineCover,
+  GuidelineTier,
+  LevelDescription,
+  ModerationProfile,
+  Outcome,
+  PresetName,
+  ProfanityConfig,
+  ProfileOverrides,
+  RulesFlavour,
+} from './profile.js';

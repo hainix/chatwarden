@@ -625,6 +625,7 @@ function sanctionRow(over: Partial<SanctionRow>): SanctionRow {
     rule: null,
     gapNote: null,
     gapStatus: null,
+    roomId: null,
     actor: 'a',
     source: 'moderator',
     automated: false,
@@ -670,8 +671,8 @@ describe('revokeSanction', () => {
 const GAP = 'private gap note about an odd case';
 
 describe('SANCTION_KINDS', () => {
-  it('lists the warning kind', () => {
-    expect([...SANCTION_KINDS]).toEqual(['chat', 'area', 'ban', 'warning']);
+  it('lists the warning and note kinds', () => {
+    expect([...SANCTION_KINDS]).toEqual(['chat', 'area', 'ban', 'warning', 'note']);
   });
 });
 
@@ -734,7 +735,7 @@ describe('a warning is never active', () => {
   it('active() returns null for every kind, through add() and through load()', async () => {
     const { store, subjects, index, s1 } = await person();
     await applySanction(store, subjects, input(s1, { kind: 'warning', durationMs: null, rule: 1 }), NOW, index);
-    const kinds: SanctionKind[] = ['chat', 'area', 'ban', 'warning'];
+    const kinds: SanctionKind[] = ['chat', 'area', 'ban', 'warning', 'note'];
     for (const k of kinds) expect(index.active(k, who('k1', 'a1', 'ip1'), s1, NOW)).toBeNull();
     for (const k of kinds) expect(index.active(k, none, s1, NOW - 1)).toBeNull();
     // The store hands the row back for a load made before its (equal) start and end; the index must skip it.
@@ -761,6 +762,124 @@ describe('a warning is never active', () => {
     await applySanction(store, subjects, input(s1, { kind: 'ban', durationMs: null, rule: 1 }), NOW, index);
     await revokeSanction(store, w.groupId, 'boss', NOW + 1, 'x', index);
     expect(index.active('ban', none, s1, NOW + 2)).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// K3a Task 2: the Note kind (stored like a warning: on the record, never punishing)
+// ---------------------------------------------------------------------------
+
+const noteInput = (subject: SubjectId, over: Partial<SanctionInput> = {}): SanctionInput =>
+  input(subject, { kind: 'note', durationMs: null, rule: 2, ...over });
+
+describe('applySanction: the note kind', () => {
+  it('writes one subject row with no end: ends = starts, no IP row, the cited rule', async () => {
+    const { store, subjects, s1 } = await person();
+    const res = await applySanction(store, subjects, noteInput(s1), NOW);
+    expect(res.refCode).toMatch(REF_RE);
+    const r = rows(store);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({
+      kind: 'note',
+      targetType: 'subject',
+      value: s1,
+      startsAt: NOW,
+      endsAt: NOW,
+      rule: '2',
+      groupId: res.groupId,
+      roomId: null,
+    });
+  });
+
+  it('refuses a duration (a note has no end)', async () => {
+    const { store, subjects, s1 } = await person();
+    for (const d of [H, 1, 0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(applySanction(store, subjects, noteInput(s1, { durationMs: d }), NOW)).rejects.toBeInstanceOf(SanctionError);
+    }
+    expect(rows(store)).toEqual([]);
+  });
+
+  it('refuses includeIp (a note never reaches an IP)', async () => {
+    const { store, subjects, s1 } = await person();
+    await expect(applySanction(store, subjects, noteInput(s1, { includeIp: true }), NOW)).rejects.toBeInstanceOf(SanctionError);
+    expect(rows(store)).toEqual([]);
+  });
+
+  it('needs the gap note when no rule is cited, like a warning', async () => {
+    const { store, subjects, s1 } = await person();
+    await expect(applySanction(store, subjects, noteInput(s1, { rule: 'uncovered' }), NOW)).rejects.toBeInstanceOf(SanctionError);
+    await applySanction(store, subjects, noteInput(s1, { rule: 'uncovered', gapNote: GAP }), NOW);
+    expect(rows(store)[0]).toMatchObject({ kind: 'note', gapNote: GAP, gapStatus: 'open' });
+  });
+
+  it('gets a unique ref code and can be revoked', async () => {
+    const { store, subjects, s1 } = await person();
+    const a = await applySanction(store, subjects, noteInput(s1), NOW);
+    const b = await applySanction(store, subjects, noteInput(s1), NOW);
+    expect(a.refCode).not.toBe(b.refCode);
+    expect(await revokeSanction(store, a.groupId, 'boss', NOW + 1, 'mistake')).toBe(true);
+    expect(rows(store).filter((x) => x.revokedAt !== null)).toHaveLength(1);
+  });
+});
+
+describe('a note is never active', () => {
+  it('active() returns null for every kind, through add() and through load()', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, noteInput(s1), NOW, index);
+    for (const k of SANCTION_KINDS) expect(index.active(k, who('k1', 'a1', 'ip1'), s1, NOW)).toBeNull();
+    for (const k of SANCTION_KINDS) expect(index.active(k, none, s1, NOW - 1)).toBeNull();
+    expect(store.loadSanctions(NOW - 1).map((r) => r.kind)).toEqual(['note']);
+    const fresh = new SanctionIndex({ enabled: () => true, subjects });
+    await fresh.load(store, NOW - 1);
+    for (const k of SANCTION_KINDS) expect(fresh.active(k, none, s1, NOW - 1)).toBeNull();
+    for (const k of SANCTION_KINDS) expect(fresh.active(k, none, s1, NOW)).toBeNull();
+  });
+
+  it('does not disturb a real restriction of the same person, before or after it', async () => {
+    const { store, subjects, index, s1 } = await person();
+    await applySanction(store, subjects, noteInput(s1), NOW, index);
+    await applySanction(store, subjects, input(s1, { durationMs: 2 * H, rule: 1 }), NOW, index);
+    await applySanction(store, subjects, noteInput(s1), NOW + 5, index);
+    expect(index.active('chat', none, s1, NOW + 6)).toMatchObject({ until: NOW + 2 * H });
+    expect(index.active('note', none, s1, NOW + 6)).toBeNull();
+  });
+
+  it('revoking a note leaves the index alone', async () => {
+    const { store, subjects, index, s1 } = await person();
+    const n = await applySanction(store, subjects, noteInput(s1), NOW, index);
+    await applySanction(store, subjects, input(s1, { kind: 'ban', durationMs: null, rule: 1 }), NOW, index);
+    await revokeSanction(store, n.groupId, 'boss', NOW + 1, 'x', index);
+    expect(index.active('ban', none, s1, NOW + 2)).not.toBeNull();
+  });
+});
+
+describe('applySanction: roomId', () => {
+  it('stores the room on every row of the group when given, for any kind', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, noteInput(s1, { roomId: 'room-7' }), NOW);
+    await applySanction(store, subjects, input(s1, { includeIp: true, roomId: 'room-8' }), NOW);
+    expect(rows(store).map((x) => [x.kind, x.targetType, x.roomId])).toEqual([
+      ['note', 'subject', 'room-7'],
+      ['chat', 'subject', 'room-8'],
+      ['chat', 'ip', 'room-8'],
+    ]);
+  });
+
+  it('absent or null roomId stores null', async () => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1), NOW);
+    await applySanction(store, subjects, input(s1, { roomId: null }), NOW);
+    expect(rows(store).map((x) => x.roomId)).toEqual([null, null]);
+  });
+
+  it.each([
+    ['empty', ''],
+    ['a number', 7],
+    ['an object', {}],
+  ])('refuses a roomId that is %s', async (_name, bad) => {
+    const { store, subjects, s1 } = await person();
+    await expect(applySanction(store, subjects, input(s1, { roomId: bad as never }), NOW)).rejects.toBeInstanceOf(SanctionError);
+    expect(rows(store)).toEqual([]);
   });
 });
 
@@ -971,7 +1090,7 @@ describe('MemoryStore listGaps and closeGap', () => {
 describe('MemoryStore loadSubjectActions', () => {
   const row = (id: string, over: Partial<SanctionRow>): SanctionRow => ({
     id, groupId: `g_${id}`, refCode: `M-${id.toUpperCase().padEnd(5, 'A')}`, kind: 'chat', targetType: 'subject', value: 's_x',
-    startsAt: NOW, endsAt: NOW + H, reason: 'private', rule: '1', gapNote: null, gapStatus: null, actor: 'mod',
+    startsAt: NOW, endsAt: NOW + H, reason: 'private', rule: '1', gapNote: null, gapStatus: null, roomId: null, actor: 'mod',
     source: 'moderator', automated: false, pending: false, ...over,
   });
 

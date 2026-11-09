@@ -3,6 +3,7 @@ import type {
   MuteRow,
   NoticeRow,
   ReportActivity,
+  ReportListQuery,
   ReportRecord,
   SanctionRow,
   Store,
@@ -198,6 +199,7 @@ export class MemoryStore implements Store {
       rule: r.rule,
       gapNote: r.gapNote,
       gapStatus: r.gapStatus,
+      roomId: r.roomId,
       actor: r.actor,
       source: r.source,
       automated: r.automated,
@@ -302,7 +304,14 @@ export class MemoryStore implements Store {
       (r) => r.reporterSubject === row.reporterSubject && r.targetSubject === row.targetSubject && r.roomId === row.roomId,
     );
     if (dup) return false;
-    this.reports.push({ ...structuredClone(row), badFaith: false, actionedAt: null, actionedBy: null, modNote: null });
+    this.reports.push({
+      ...structuredClone(row),
+      badFaith: false,
+      actionedAt: null,
+      actionedBy: null,
+      modNote: null,
+      badFaithEvidence: null,
+    });
     this.undoWith(() => {
       this.reports.length -= 1;
     });
@@ -314,6 +323,20 @@ export class MemoryStore implements Store {
     return r === undefined ? null : structuredClone(r);
   }
 
+  listReports(q: ReportListQuery): ReportRecord[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    return this.reports
+      .filter((r) => {
+        if (q.status !== undefined && r.status !== q.status) return false;
+        if (q.before === undefined) return true;
+        if (r.createdAt !== q.before) return r.createdAt < q.before;
+        return q.beforeId !== undefined && r.id < q.beforeId;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .slice(0, limit)
+      .map((r) => structuredClone(r));
+  }
+
   closeReport(
     id: string,
     status: 'actioned' | 'dismissed',
@@ -321,16 +344,25 @@ export class MemoryStore implements Store {
     actor: string,
     at: number,
     note: string,
+    evidence: string | null = null,
   ): boolean {
     const r = this.reports.find((x) => x.id === id);
     if (r === undefined || r.status !== 'open') return false;
     if (status !== 'actioned' && status !== 'dismissed') throw new Error('closeReport: invalid status');
-    const before = { status: r.status, badFaith: r.badFaith, actionedAt: r.actionedAt, actionedBy: r.actionedBy, modNote: r.modNote };
+    const before = {
+      status: r.status,
+      badFaith: r.badFaith,
+      actionedAt: r.actionedAt,
+      actionedBy: r.actionedBy,
+      modNote: r.modNote,
+      badFaithEvidence: r.badFaithEvidence,
+    };
     r.status = status;
     r.badFaith = badFaith;
     r.actionedAt = at;
     r.actionedBy = actor;
     r.modNote = note;
+    r.badFaithEvidence = evidence;
     this.undoWith(() => Object.assign(r, before));
     return true;
   }

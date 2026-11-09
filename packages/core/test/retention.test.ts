@@ -265,6 +265,48 @@ describe('purge: sanctions', () => {
   });
 });
 
+describe('purge: notes follow the warning rule (90 d after the start)', () => {
+  it('a note started more than 90 d ago goes; at exactly 90 d, and newer, stays', async () => {
+    const t = setup();
+    await t.sanction(t.subject('k1'), NOW - 90 * DAY - 1, null, 'note');
+    await t.sanction(t.subject('k2'), NOW - 90 * DAY, null, 'note');
+    await t.sanction(t.subject('k3'), NOW - DAY, null, 'note');
+    expect((await purge(t.store, NOW)).sanctions).toBe(1);
+    expect(t.store.rawSanctions().map((r) => r.startsAt)).toEqual([NOW - 90 * DAY, NOW - DAY]);
+  });
+
+  it('a note is purged exactly like a warning of the same age', async () => {
+    const t = setup();
+    for (const kind of ['note', 'warning'] as const) {
+      await t.sanction(t.subject(`${kind}-old`), NOW - 120 * DAY, null, kind);
+      await t.sanction(t.subject(`${kind}-new`), NOW - 10 * DAY, null, kind);
+    }
+    expect((await purge(t.store, NOW)).sanctions).toBe(2);
+    expect(t.store.rawSanctions().map((r) => [r.kind, r.startsAt])).toEqual([
+      ['note', NOW - 10 * DAY],
+      ['warning', NOW - 10 * DAY],
+    ]);
+  });
+
+  it('a revoked note goes 90 d after the revoke', async () => {
+    const t = setup();
+    const { groupId } = await t.sanction(t.subject('k1'), NOW - 10 * DAY, null, 'note');
+    await revokeSanction(t.store, groupId, 'mod', NOW - 91 * DAY, 'oops');
+    expect((await purge(t.store, NOW)).sanctions).toBe(1);
+  });
+
+  it('a note whose rule gap is still open is kept', async () => {
+    const t = setup();
+    await applySanction(
+      t.store,
+      t.subjects,
+      { kind: 'note', subject: t.subject('k1'), includeIp: false, durationMs: null, reason: 'r', actor: 'mod', source: 'moderator', automated: false, rule: 'uncovered', gapNote: 'gap' },
+      NOW - 200 * DAY,
+    );
+    expect((await purge(t.store, NOW)).sanctions).toBe(0);
+  });
+});
+
 describe('purge: sanctions with an open rule gap', () => {
   it('spares an old ended sanction whose gap is open, and purges it once the gap is closed', async () => {
     const { store, subjects, subject } = setup();
