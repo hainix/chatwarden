@@ -51,6 +51,7 @@ export class SqliteStore implements Store, TermStore {
   protected readonly db: DatabaseSync;
   private readonly version: number;
   private readonly ownsDb: boolean;
+  private closed = false;
 
   constructor(db: DatabaseSync, version: number, ownsDb: boolean) {
     this.db = db;
@@ -59,7 +60,7 @@ export class SqliteStore implements Store, TermStore {
   }
 
   schemaVersion(): number {
-    if (!this.db.isOpen) throw new Error('store is closed');
+    if (this.closed) throw new Error('store is closed');
     return this.version;
   }
 
@@ -68,7 +69,9 @@ export class SqliteStore implements Store, TermStore {
   }
 
   close(): void {
-    if (this.ownsDb && this.db.isOpen) this.db.close();
+    if (this.closed) return;
+    this.closed = true;
+    if (this.ownsDb) this.db.close();
   }
 
   // --- Domain methods (async) are added below by later tasks. ---

@@ -62,7 +62,13 @@ export function openStore(opts: OpenOptions): SqliteStore {
     }
     return new SqliteStore(db, version, ownsDb);
   } catch (err) {
-    if (ownsDb && db.isOpen) db.close();
+    if (ownsDb) {
+      try {
+        db.close();
+      } catch {
+        /* already closed */
+      }
+    }
     throw err;
   }
 }

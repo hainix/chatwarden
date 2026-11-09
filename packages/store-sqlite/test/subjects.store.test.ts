@@ -202,7 +202,7 @@ describe('SubjectIndex on SQLite', () => {
     await index.flush();
     expect((await store.loadSubjects()).subjects).toHaveLength(1);
     store.close();
-    expect(db.isOpen).toBe(true);
+    expect(() => db.prepare('SELECT 1 AS one').get()).not.toThrow();
     db.close();
   });
 });

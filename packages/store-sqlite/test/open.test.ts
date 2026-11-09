@@ -258,3 +258,40 @@ describe('Store.transaction', () => {
     expect(count()).toBe(5);
   });
 });
+
+describe('SqliteStore.close (no reliance on DatabaseSync#isOpen, which needs Node 22.15)', () => {
+  it('schemaVersion works while open and throws "store is closed" after close', () => {
+    const store = openStore({ path: tmpPath() });
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
+    store.close();
+    expect(() => store.schemaVersion()).toThrow('store is closed');
+  });
+
+  it('close is idempotent on a store that owns its connection', () => {
+    const store = openStore({ path: tmpPath() });
+    store.close();
+    expect(() => store.close()).not.toThrow();
+    expect(() => store.close()).not.toThrow();
+  });
+
+  it('close on a host-owned connection leaves the connection open and usable', () => {
+    const db = memDb();
+    const store = openStore({ db });
+    store.close();
+    expect(() => store.close()).not.toThrow();
+    expect(() => db.prepare('SELECT 1 AS one').get()).not.toThrow();
+    expect(() => store.schemaVersion()).toThrow('store is closed');
+  });
+
+  it('openStore closes a connection it owns when a migration fails, and rethrows', () => {
+    const bad: Migration = { version: 1, sql: 'THIS IS NOT SQL' };
+    expect(() => openStore({ path: tmpPath(), migrations: [bad] })).toThrow();
+  });
+
+  it('openStore leaves a host-owned connection open when a migration fails', () => {
+    const db = memDb();
+    const bad: Migration = { version: 1, sql: 'THIS IS NOT SQL' };
+    expect(() => openStore({ db, migrations: [bad] })).toThrow();
+    expect(() => db.prepare('SELECT 1 AS one').get()).not.toThrow();
+  });
+});
