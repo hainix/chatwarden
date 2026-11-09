@@ -240,7 +240,7 @@ describe('StrikeService on SQLite', () => {
     // One strike since the restriction began (line four); two more fire it, escalated to 24 h.
     expect(strikes2.record(person, 'rk', 'ROOM1', 'term-1', 'five').autoRestrict).toBeNull();
     clock.t = NOW + 34 * MIN;
-    expect(strikes2.record(person, 'rk', 'ROOM1', 'term-1', 'six').autoRestrict).toEqual({ durationMs: 24 * H });
+    expect(strikes2.record(person, 'rk', 'ROOM1', 'term-1', 'six').autoRestrict).toEqual({ durationMs: 24 * H, second: true });
     expect(store2.loadStrikes(0)).toHaveLength(6);
     store2.close();
   });
