@@ -1,7 +1,7 @@
 import { ChatService } from './chat.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
-import type { ChatResult, Starrer } from './chat.js';
+import type { ChatResult } from './chat.js';
 import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
@@ -12,7 +12,7 @@ import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
 import { resolveLimits } from './limits.js';
 import type { Limits, LimitsInput } from './limits.js';
 import { resolveProfile } from './profile.js';
-import type { ModerationProfile, PresetName, ProfileOverrides } from './profile.js';
+import type { ModerationProfile, PresetName, ProfanityConfig, ProfileOverrides } from './profile.js';
 import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
@@ -31,6 +31,7 @@ import type {
   Logger,
   Matcher,
   Platform,
+  ProfanityFilter,
   RawWho,
   ConductLevel,
   Store,
@@ -73,7 +74,19 @@ export interface ChatwardenOptions {
   platform: Platform;
   /** Without one, nothing is ever blocked. An adopter holding `LiveTerms` passes it here. */
   matcher?: Matcher;
-  starrer?: Starrer;
+  /**
+   * A ready profanity filter. What it does with a profane line is the profile's call (`profile.profanity.mode`):
+   * `allow` never calls it, `star` delivers its masked text, `refuse` refuses the line with `'profanity'`. Ordinary
+   * swearing only: slurs go through `matcher`. Wins over `profanityPackage`.
+   */
+  profanity?: ProfanityFilter;
+  /**
+   * The optional `@chatwarden/profanity` package, `{ createProfanityFilter }`. The kit builds the filter from the
+   * resolved `profile.profanity` (style, add, remove, only, languages), so core carries no word list. A config the
+   * package rejects (an unknown language, say) fails creation. Not called when the mode is `allow` or when a
+   * ready `profanity` filter is given.
+   */
+  profanityPackage?: { createProfanityFilter(config: ProfanityConfig): ProfanityFilter };
   /** Defaults to the system clock. */
   clock?: Clock;
   /** The kill switch, read per call. Drives both sanction enforcement and report intake. Defaults to always on. */
@@ -246,6 +259,21 @@ export interface Chatwarden {
 }
 
 /**
+ * The profanity filter for the profile, or undefined. Mode `allow` builds nothing; a ready filter wins over the
+ * package; a package that throws fails creation and one that returns a non-filter is a TypeError.
+ */
+function buildProfanityFilter(opts: ChatwardenOptions, config: ProfanityConfig): ProfanityFilter | undefined {
+  if (config.mode === 'allow') return undefined;
+  if (opts.profanity !== undefined) return opts.profanity;
+  if (opts.profanityPackage === undefined) return undefined;
+  const built = opts.profanityPackage.createProfanityFilter(config);
+  if (typeof built !== 'object' || built === null || typeof built.apply !== 'function') {
+    throw new TypeError('profanityPackage.createProfanityFilter must return a filter with an apply(text) method');
+  }
+  return built;
+}
+
+/**
  * Wire every component and return the kit. This is the recommended entry point: the component classes stay
  * exported for adapters and advanced use, but an adopter needs only this.
  *
@@ -285,6 +313,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     throw new RangeError('autoRestrictRule must be the number of an active rule in the registry');
   }
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
+  const profanity = buildProfanityFilter(opts, profile.profanity);
+  if (profanity === undefined && profile.profanity.mode === 'refuse') safeWarn(logger, 'chatwarden.no_profanity_filter');
 
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });
@@ -321,7 +351,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     mutes,
     clock,
     matcher: opts.matcher,
-    starrer: opts.starrer,
+    profanity,
+    profanityMode: profile.profanity.mode,
     gate: opts.gate,
     onAutoRestrict: opts.onAutoRestrict,
     logger,

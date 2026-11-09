@@ -580,6 +580,16 @@ export interface Store {
 // ---------------------------------------------------------------------------
 
 /**
+ * What core needs from a profanity filter: given chat text, whether it holds ordinary swearing, and the text with
+ * that swearing masked. Declared here so core carries no word data and never imports `@chatwarden/profanity`,
+ * whose `createProfanityFilter` returns one. `text` equals the input when there is no hit. It is never a slur
+ * check (the {@link Matcher} does that) and a hit is never a rule violation.
+ */
+export interface ProfanityFilter {
+  apply(text: string): { hit: boolean; text: string };
+}
+
+/**
  * What core needs from a term matcher: given chat text, the id of the term it hit, or null.
  * Declared here so core never imports `@chatwarden/matcher`; the matcher package's own
  * `Matcher` and `LiveTerms` satisfy it structurally. The term id is for strike records only

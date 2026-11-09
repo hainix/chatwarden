@@ -3,7 +3,8 @@ import { createChatwarden } from '../src/chatwarden.js';
 import type { ChatwardenOptions } from '../src/chatwarden.js';
 import type { DecisionAction } from '../src/decide.js';
 import { defineRules, STARTER_RULES } from '../src/rules.js';
-import type { Logger, Matcher, Platform, RawWho } from '../src/types.js';
+import type { ProfanityConfig } from '../src/profile.js';
+import type { Logger, Matcher, Platform, ProfanityFilter, RawWho } from '../src/types.js';
 import { MemoryStore } from './memoryStore.js';
 
 const NOW = 1_800_000_000_000;
@@ -15,6 +16,18 @@ type Logged = Array<[string, Record<string, string | number | boolean> | undefin
 
 /** A matcher that blocks the one synthetic word. */
 const blocker: Matcher = { match: (t) => (t.toLowerCase().includes('zorbak') ? { termId: 'syn:zorbak' } : null) };
+
+/** A synthetic filter: treats the word 'heck' as swearing and stars it. Records what it was asked about. */
+function stubFilter(): ProfanityFilter & { seen: string[] } {
+  const seen: string[] = [];
+  return {
+    seen,
+    apply(text) {
+      seen.push(text);
+      return { hit: /\bheck\b/.test(text), text: text.replace(/\bheck\b/g, '****') };
+    },
+  };
+}
 
 async function setup(over: Partial<ChatwardenOptions> = {}, store = new MemoryStore()) {
   const clock = { t: NOW, now: () => clock.t };
@@ -115,10 +128,107 @@ describe('createChatwarden: chat', () => {
     expect(cw.chat.accept(R, 'a', 'zorbak')).toMatchObject({ deliver: { text: 'zorbak' } });
   });
 
-  it('applies the starrer to delivered text', async () => {
-    const { cw } = await setup({ starrer: { star: (t) => t.replace('heck', '****') } });
+  it('applies the profanity filter to delivered text (the standard profile stars)', async () => {
+    const { cw } = await setup({ profanity: stubFilter() });
     cw.rooms.seat(R, 'a', alice, 'Alice');
     expect(cw.chat.accept(R, 'a', 'oh heck')).toMatchObject({ deliver: { text: 'oh ****' } });
+  });
+
+  it('profile strict refuses a profane line with the profanity reason, and creates no strike or sanction', async () => {
+    const { cw, store } = await setup({ profanity: stubFilter(), profile: 'strict' });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    expect(cw.chat.accept(R, 'a', 'oh heck')).toEqual({ refuse: { reason: 'profanity' } });
+    expect(store.loadStrikes(0)).toEqual([]);
+    expect(store.loadSanctions(NOW)).toEqual([]);
+  });
+
+  it('the profanity mode comes from the profile: an override to allow never calls the filter', async () => {
+    const filter = stubFilter();
+    const { cw } = await setup({ profanity: filter, overrides: { profanity: { mode: 'allow' } } });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    expect(cw.chat.accept(R, 'a', 'oh heck')).toMatchObject({ deliver: { text: 'oh heck' } });
+    expect(filter.seen).toEqual([]);
+  });
+
+  it('an override to refuse turns a relaxed profile strict about swearing', async () => {
+    const { cw } = await setup({
+      profanity: stubFilter(),
+      profile: 'relaxed',
+      overrides: { profanity: { mode: 'refuse' } },
+    });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    expect(cw.chat.accept(R, 'a', 'oh heck')).toEqual({ refuse: { reason: 'profanity' } });
+  });
+
+  describe('profanityPackage', () => {
+    const fakePackage = () => {
+      const configs: ProfanityConfig[] = [];
+      return {
+        configs,
+        pkg: {
+          createProfanityFilter(config: ProfanityConfig) {
+            configs.push(config);
+            return stubFilter();
+          },
+        },
+      };
+    };
+
+    it('builds the filter from the resolved profile and uses it', async () => {
+      const { configs, pkg } = fakePackage();
+      const { cw } = await setup({ profanityPackage: pkg, overrides: { profanity: { style: 'grawlix', add: ['snerp'] } } });
+      expect(configs).toEqual([cw.profile.profanity]);
+      expect(configs[0]).toMatchObject({ mode: 'star', style: 'grawlix', add: ['snerp'] });
+      cw.rooms.seat(R, 'a', alice, 'Alice');
+      expect(cw.chat.accept(R, 'a', 'oh heck')).toMatchObject({ deliver: { text: 'oh ****' } });
+    });
+
+    it('is built once for strict too, and refuses', async () => {
+      const { configs, pkg } = fakePackage();
+      const { cw } = await setup({ profanityPackage: pkg, profile: 'strict' });
+      expect(configs).toHaveLength(1);
+      expect(configs[0]?.mode).toBe('refuse');
+      cw.rooms.seat(R, 'a', alice, 'Alice');
+      expect(cw.chat.accept(R, 'a', 'oh heck')).toEqual({ refuse: { reason: 'profanity' } });
+    });
+
+    it('with mode allow nothing is built', async () => {
+      const { configs, pkg } = fakePackage();
+      const { cw } = await setup({ profanityPackage: pkg, overrides: { profanity: { mode: 'allow' } } });
+      expect(configs).toEqual([]);
+      cw.rooms.seat(R, 'a', alice, 'Alice');
+      expect(cw.chat.accept(R, 'a', 'oh heck')).toMatchObject({ deliver: { text: 'oh heck' } });
+    });
+
+    it('a ready filter wins over the package, which is then not asked to build', async () => {
+      const { configs, pkg } = fakePackage();
+      const own: ProfanityFilter = { apply: (t) => ({ hit: true, text: `own:${t}` }) };
+      const { cw } = await setup({ profanity: own, profanityPackage: pkg });
+      expect(configs).toEqual([]);
+      cw.rooms.seat(R, 'a', alice, 'Alice');
+      expect(cw.chat.accept(R, 'a', 'x')).toMatchObject({ deliver: { text: 'own:x' } });
+    });
+
+    it('a package that throws on the config fails creation (a bad language is a startup error)', async () => {
+      const pkg = {
+        createProfanityFilter(): ProfanityFilter {
+          throw new RangeError('unknown language');
+        },
+      };
+      await expect(setup({ profanityPackage: pkg })).rejects.toThrow(RangeError);
+    });
+
+    it('a package that returns something that is not a filter fails creation', async () => {
+      const pkg = { createProfanityFilter: () => ({}) as ProfanityFilter };
+      await expect(setup({ profanityPackage: pkg })).rejects.toThrow(TypeError);
+    });
+  });
+
+  it('strict without any filter warns once at creation that swearing will not be refused; standard does not', async () => {
+    const strict = await setup({ profile: 'strict' });
+    expect(strict.logged.filter(([e]) => e === 'chatwarden.no_profanity_filter')).toHaveLength(1);
+    const standard = await setup();
+    expect(standard.logged.some(([e]) => e === 'chatwarden.no_profanity_filter')).toBe(false);
   });
 
   it('the gate hook is passed through with the sender subject', async () => {

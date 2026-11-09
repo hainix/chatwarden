@@ -7,6 +7,7 @@ export type {
   Logger,
   Platform,
   Matcher,
+  ProfanityFilter,
   MuteRow,
   NoticeKind,
   NoticeRow,
@@ -64,7 +65,7 @@ export type { StrikeDecision } from './strikes.js';
 export { slidingWindow } from './rateLimit.js';
 export type { SlidingWindow } from './rateLimit.js';
 export { ChatService } from './chat.js';
-export type { ChatResult, ChatServiceDeps, Starrer } from './chat.js';
+export type { ChatResult, ChatServiceDeps, RefuseReason } from './chat.js';
 export {
   REPORT_CATEGORIES,
   REPORT_NOTE_MAX,

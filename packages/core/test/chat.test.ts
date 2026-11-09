@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ChatService } from '../src/chat.js';
-import type { ChatResult, Starrer } from '../src/chat.js';
+import type { ChatResult } from '../src/chat.js';
 import { EvidenceBuffer, RoomRoster } from '../src/evidence.js';
 import { MuteService } from '../src/mutes.js';
 import { NoticeService } from '../src/notices.js';
@@ -9,7 +9,7 @@ import type { RuleRef } from '../src/rules.js';
 import { applySanction, revokeSanction, SanctionIndex } from '../src/sanctions.js';
 import { StrikeService } from '../src/strikes.js';
 import { SubjectIndex } from '../src/subjects.js';
-import type { Identifiers, Logger, Matcher, SanctionKind, SubjectId } from '../src/types.js';
+import type { Identifiers, Logger, Matcher, ProfanityFilter, SanctionKind, SubjectId } from '../src/types.js';
 import { MemoryStore } from './memoryStore.js';
 
 const SEC = 1000;
@@ -29,7 +29,10 @@ const stubMatcher: Matcher = {
     return [...text.matchAll(/\bzorbak\b/gi)].map((m) => ({ start: m.index, end: m.index + m[0].length, termId: 'syn:zorbak' }));
   },
 };
-const starrer: Starrer = { star: (t) => t.replace(/\bsnerp\b/gi, '*****') };
+// Synthetic profanity only: the stub filter treats the word 'snerp' as swearing and stars it.
+const filter: ProfanityFilter = {
+  apply: (t) => ({ hit: /\bsnerp\b/i.test(t), text: t.replace(/\bsnerp\b/gi, '*****') }),
+};
 
 const who = (clientKey: string | null, accountId: string | null = null, ipHash: string | null = null): Identifiers => ({
   clientKey,
@@ -60,7 +63,8 @@ type Logs = Array<{ event: string; detail?: Record<string, string | number | boo
 interface Opts {
   store?: MemoryStore;
   matcher?: Matcher | undefined;
-  starrer?: Starrer | undefined;
+  profanity?: ProfanityFilter | undefined;
+  profanityMode?: 'allow' | 'star' | 'refuse';
   gate?: (roomId: string, subject: SubjectId | null) => boolean;
   onAutoRestrict?: (subject: SubjectId | null, second: boolean) => void;
   /** Hand the chat service a NoticeService: true is a real one on the same store, or pass a replacement. */
@@ -107,7 +111,8 @@ function setup(opts: Opts = {}) {
     mutes,
     clock,
     matcher: 'matcher' in opts ? opts.matcher : stubMatcher,
-    starrer: opts.starrer,
+    profanity: opts.profanity,
+    profanityMode: opts.profanityMode,
     gate: opts.gate,
     onAutoRestrict,
     logger,
@@ -1016,40 +1021,189 @@ describe('review fixes: async hook, non-boolean gate, in-memory restriction belo
   });
 });
 
+describe('profanity modes', () => {
+  const calls = () => {
+    const seenText: string[] = [];
+    const spy: ProfanityFilter = {
+      apply: (t) => {
+        seenText.push(t);
+        return filter.apply(t);
+      },
+    };
+    return { spy, seenText };
+  };
+
+  it('allow: the filter is never called and the line is delivered as typed', () => {
+    const { spy, seenText } = calls();
+    const e = setup({ profanity: spy, profanityMode: 'allow' });
+    e.sit('p1', who('k1'));
+    expect(delivery(e.say('p1', 'oh snerp it')).text).toBe('oh snerp it');
+    expect(seenText).toEqual([]);
+  });
+
+  it('star: a clean line is delivered unchanged', () => {
+    const e = setup({ profanity: filter, profanityMode: 'star' });
+    e.sit('p1', who('k1'));
+    expect(delivery(e.say('p1', 'hello there')).text).toBe('hello there');
+  });
+
+  it('refuse: a profane line is refused with exactly { reason: profanity } (no rule, no notice, no time)', () => {
+    const e = setup({ profanity: filter, profanityMode: 'refuse', notices: true });
+    e.sit('p1', who('k1'));
+    expect(e.say('p1', 'oh snerp it')).toEqual({ refuse: { reason: 'profanity' } });
+  });
+
+  it('refuse: a clean line is delivered as typed', () => {
+    const e = setup({ profanity: filter, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    expect(delivery(e.say('p1', ' hello there ')).text).toBe('hello there');
+  });
+
+  it('refuse: the filter sees the trimmed text', () => {
+    const { spy, seenText } = calls();
+    const e = setup({ profanity: spy, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    e.say('p1', '  hi snerp  ');
+    expect(seenText).toEqual(['hi snerp']);
+  });
+
+  it('refuse: is not buffered as evidence, blocked or otherwise', () => {
+    const e = setup({ profanity: filter, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    e.say('p1', 'oh snerp it');
+    expect(e.buffer.snapshot(ROOM)).toEqual([]);
+  });
+
+  it('refuse: spends the rate budget like any other refusal after the rate check', () => {
+    const e = setup({ profanity: filter, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    for (let i = 0; i < 3; i++) expect(refusal(e.say('p1', 'snerp')).reason).toBe('profanity');
+    expect(refusal(e.say('p1', 'a clean line')).reason).toBe('rate');
+    e.tick();
+    delivery(e.say('p1', 'a clean line'));
+  });
+
+  it('refuse: a rate-limited profane line is refused as rate, and the filter is not asked', () => {
+    const { spy, seenText } = calls();
+    const e = setup({ profanity: spy, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    for (let i = 0; i < 3; i++) e.say('p1', 'fine');
+    seenText.length = 0;
+    expect(refusal(e.say('p1', 'snerp')).reason).toBe('rate');
+    expect(seenText).toEqual([]);
+  });
+
+  it('refuse: a too-long profane line is refused as length first', () => {
+    const e = setup({ profanity: filter, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    expect(refusal(e.say('p1', `snerp ${'x'.repeat(250)}`)).reason).toBe('length');
+  });
+
+  it('refuse: a restricted speaker is told restricted, not profanity', async () => {
+    const e = setup({ profanity: filter, profanityMode: 'refuse' });
+    const s = e.sit('p1', who('k1'));
+    await e.sanction(s!, 'chat', 3_600_000);
+    expect(refusal(e.say('p1', 'snerp')).reason).toBe('restricted');
+  });
+
+  it('refuse: a line with a slur AND profanity is blocked (strike), not a profanity refusal', () => {
+    const e = setup({ profanity: filter, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    expect(refusal(e.say('p1', 'snerp zorbak'))).toEqual({ reason: 'blocked', rule: 1 });
+    expect(e.store.loadStrikes(0)).toHaveLength(1);
+  });
+
+  it('refuse: the slur matcher runs before the profanity filter, which is not asked about a blocked line', () => {
+    const { spy, seenText } = calls();
+    const e = setup({ profanity: spy, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    e.say('p1', 'snerp zorbak');
+    expect(seenText).toEqual([]);
+  });
+
+  it.each(['star', 'refuse'] as const)(
+    '%s: profanity never earns a strike, a sanction, a notice or an automatic timeout, however often',
+    (profanityMode) => {
+      const e = setup({ profanity: filter, profanityMode, notices: true });
+      const s = e.sit('p1', who('k1'));
+      for (let i = 0; i < 12; i++) {
+        e.say('p1', 'snerp');
+        e.tick();
+      }
+      expect(e.store.loadStrikes(0)).toEqual([]);
+      expect(e.store.loadSanctions(e.clock.t)).toEqual([]);
+      expect(e.store.loadNotices([s!])).toEqual([]);
+      expect(e.calls).toEqual([]);
+      delivery(e.say('p1', 'a clean line'));
+    },
+  );
+
+  it('refuse: each speaker gets their own verdict', () => {
+    const e = setup({ profanity: filter, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    e.sit('p2', who('k2'));
+    expect(refusal(e.say('p1', 'snerp')).reason).toBe('profanity');
+    delivery(e.say('p2', 'hello'));
+  });
+});
+
 describe('starring and delivery', () => {
-  it('stars profanity with the injected starrer and delivers the starred text, with no strike', () => {
-    const e = setup({ starrer });
+  it('stars profanity with the injected filter and delivers the starred text, with no strike', () => {
+    const e = setup({ profanity: filter, profanityMode: 'star' });
     e.sit('p1', who('k1'));
     expect(delivery(e.say('p1', 'oh snerp it')).text).toBe('oh ***** it');
     expect(e.store.loadStrikes(0)).toEqual([]);
   });
 
-  it('without a starrer text is delivered as typed (trimmed)', () => {
-    const e = setup();
+  it('a filter with no mode given stars (star is the default mode)', () => {
+    const e = setup({ profanity: filter });
     e.sit('p1', who('k1'));
-    expect(delivery(e.say('p1', ' oh snerp ')).text).toBe('oh snerp');
+    expect(delivery(e.say('p1', 'oh snerp it')).text).toBe('oh ***** it');
+  });
+
+  it('without a filter text is delivered as typed (trimmed), in every mode', () => {
+    for (const profanityMode of ['allow', 'star', 'refuse'] as const) {
+      const e = setup({ profanityMode });
+      e.sit('p1', who('k1'));
+      expect(delivery(e.say('p1', ' oh snerp ')).text).toBe('oh snerp');
+    }
   });
 
   it('a blocked term wins over starring: the line is refused, not starred', () => {
-    const e = setup({ starrer });
+    const e = setup({ profanity: filter, profanityMode: 'star' });
     e.sit('p1', who('k1'));
     expect(refusal(e.say('p1', 'snerp zorbak')).reason).toBe('blocked');
   });
 
-  it('a throwing starrer does not throw out of accept', () => {
+  it('a filter that throws fails open: the line is delivered as typed and the failure is logged by class only', () => {
     const e = setup({
-      starrer: {
-        star() {
-          throw new Error('x');
+      profanity: {
+        apply() {
+          throw new RangeError('secret detail');
         },
       },
+      profanityMode: 'refuse',
     });
     e.sit('p1', who('k1'));
-    expect(() => e.say('p1', 'hi')).not.toThrow();
+    expect(delivery(e.say('p1', 'hi snerp')).text).toBe('hi snerp');
+    expect(e.logs).toContainEqual({ event: 'chat.profanity_failed', detail: { error: 'RangeError' } });
+    expect(JSON.stringify(e.logs)).not.toContain('secret detail');
+  });
+
+  it.each([
+    ['null', null],
+    ['a text that is not a string', { hit: true, text: 42 }],
+    ['a hit that is not a boolean', { hit: 'yes', text: 'x' }],
+    ['undefined', undefined],
+  ])('a filter that returns %s fails open', (_name, bad) => {
+    const e = setup({ profanity: { apply: () => bad as never }, profanityMode: 'refuse' });
+    e.sit('p1', who('k1'));
+    expect(delivery(e.say('p1', 'hi snerp')).text).toBe('hi snerp');
+    expect(e.logs.some((l) => l.event === 'chat.profanity_failed')).toBe(true);
   });
 
   it('buffers the delivered line: subject, handle, raw, starred text, audience', () => {
-    const e = setup({ starrer });
+    const e = setup({ profanity: filter });
     const s = e.sit('p1', who('k1'), 'Pat');
     const d = delivery(e.say('p1', '  oh snerp ', { audience: ['p1', 'p2'] }));
     expect(e.buffer.get(ROOM, d.lineId)).toMatchObject({

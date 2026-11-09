@@ -10,7 +10,17 @@ import { applySanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import type { StrikeService } from './strikes.js';
 import type { SubjectIndex } from './subjects.js';
-import type { Clock, Identifiers, Logger, Matcher, ReportExcerptLine, Store, SubjectId } from './types.js';
+import type { ProfanityConfig } from './profile.js';
+import type {
+  Clock,
+  Identifiers,
+  Logger,
+  Matcher,
+  ProfanityFilter,
+  ReportExcerptLine,
+  Store,
+  SubjectId,
+} from './types.js';
 
 // The chat acceptance pipeline: one call decides whether a line is delivered, and keeps the evidence and the
 // strikes that go with the decision. The order is Moxgate's `handleChat`:
@@ -20,7 +30,8 @@ import type { Clock, Identifiers, Logger, Matcher, ReportExcerptLine, Store, Sub
 //   4. length > 200                      -> 'length'
 //   5. rate, 3 per 5 s per room:seat     -> 'rate' (spent even when the line is then blocked)
 //   6. matcher hit                       -> buffered as blocked, one strike, maybe an automatic timeout, 'blocked'
-//   7. starring
+//   7. profanity, by the profile's mode  -> allow: untouched; star: masked; refuse: 'profanity' (never a strike,
+//                                           never buffered, never a notice: swearing is not a rule violation)
 //   8. buffer the delivered line         -> its lineId
 // It never throws. Everything on this path reads in-memory state; the only store writes are the strike
 // (inside StrikeService) and the automatic timeout, and a failure of either is logged and absorbed.
@@ -47,11 +58,6 @@ interface BlockedLine {
   audience: string[] | null;
 }
 
-/** Optional profanity starring, injected. Applied to lines that were not blocked. */
-export interface Starrer {
-  star(text: string): string;
-}
-
 /**
  * The verdict on one line. A refusal carries a reason and, for `restricted`, when it ends (`null` =
  * permanent) and whether a human moderator imposed it. `rule` is the Community Rule number it cites: the
@@ -59,11 +65,13 @@ export interface Starrer {
  * own rule (omitted when it is `'uncovered'` or unknown; the in-memory fallback cites the automatic-filter rule). `noticeId` is the player's notice that explains a restriction, when one
  * exists. Never an identifier, a rule's private note or the matched term. `'empty'` means stay silent.
  */
+export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity';
+
 export type ChatResult =
   | { deliver: { lineId: string; text: string } }
   | {
       refuse: {
-        reason: 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked';
+        reason: RefuseReason;
         until?: number | null;
         byModerator?: boolean;
         rule?: number;
@@ -82,7 +90,17 @@ export interface ChatServiceDeps {
   clock: Clock;
   /** Without one, nothing is ever blocked. */
   matcher?: Matcher;
-  starrer?: Starrer;
+  /**
+   * The profanity filter. Used for lines the matcher did not block, as the `profanityMode` says; without one,
+   * swearing is never touched. A throw (or a result that is not `{ hit: boolean, text: string }`) lets the line
+   * through unchanged and is logged by class only: a broken word list must not silence chat.
+   */
+  profanity?: ProfanityFilter;
+  /**
+   * What to do with a profane line: `allow` (the filter is not called), `star` (deliver the masked text) or
+   * `refuse` (refuse the line with `'profanity'`). Default `star`. The facade passes `profile.profanity.mode`.
+   */
+  profanityMode?: ProfanityConfig['mode'];
   /**
    * Who may chat: false refuses the line with `'gate'`. Called with the room and the sender's subject (null
    * when the speaker is not a known person). A throw refuses too (fail closed).
@@ -117,7 +135,7 @@ export interface ChatServiceDeps {
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
 
 const refuse = (
-  reason: 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked',
+  reason: RefuseReason,
   extra?: { until?: number | null; byModerator?: boolean; rule?: number; noticeId?: string },
 ): ChatResult => ({ refuse: extra === undefined ? { reason } : { reason, ...extra } });
 
@@ -154,7 +172,8 @@ export class ChatService {
   private readonly mutes: MuteService;
   private readonly clock: Clock;
   private readonly matcher: Matcher | undefined;
-  private readonly starrer: Starrer | undefined;
+  private readonly profanity: ProfanityFilter | undefined;
+  private readonly profanityMode: ProfanityConfig['mode'];
   private readonly gate: ChatServiceDeps['gate'];
   private readonly onAutoRestrict: ChatServiceDeps['onAutoRestrict'];
   private readonly logger: Logger | undefined;
@@ -181,7 +200,8 @@ export class ChatService {
     this.mutes = deps.mutes;
     this.clock = deps.clock;
     this.matcher = deps.matcher;
-    this.starrer = deps.starrer;
+    this.profanity = deps.profanity;
+    this.profanityMode = deps.profanityMode ?? 'star';
     this.gate = deps.gate;
     this.onAutoRestrict = deps.onAutoRestrict;
     this.logger = deps.logger;
@@ -288,7 +308,11 @@ export class ChatService {
       return refuse('blocked', { rule: this.autoRestrictRule });
     }
 
-    const delivered = this.starrer === undefined ? trimmed : this.starrer.star(trimmed);
+    // Profanity is softening or a house rule, never a violation: a refusal here is not buffered as a blocked line,
+    // earns no strike, note or notice, and (the rate check having passed) has spent the line's rate budget.
+    const swearing = this.applyProfanity(trimmed);
+    if (swearing !== null && swearing.hit && this.profanityMode === 'refuse') return refuse('profanity');
+    const delivered = swearing === null || this.profanityMode !== 'star' ? trimmed : swearing.text;
     const lineId = this.buffer.append(roomId, {
       ts: now,
       seatId,
@@ -311,6 +335,22 @@ export class ChatService {
     } catch (err) {
       this.warn('chat.gate_failed', { error: errName(err) });
       return false;
+    }
+  }
+
+  /** The filter's verdict, or null when there is nothing to apply (mode allow, no filter) or it failed (logged). */
+  private applyProfanity(trimmed: string): { hit: boolean; text: string } | null {
+    if (this.profanity === undefined || this.profanityMode === 'allow') return null;
+    try {
+      const result: unknown = this.profanity.apply(trimmed);
+      const r = result as { hit?: unknown; text?: unknown } | null | undefined;
+      if (typeof r !== 'object' || r === null || typeof r.hit !== 'boolean' || typeof r.text !== 'string') {
+        throw new TypeError('profanity filter returned a malformed result');
+      }
+      return { hit: r.hit, text: r.text };
+    } catch (err) {
+      this.warn('chat.profanity_failed', { error: errName(err) });
+      return null;
     }
   }
 

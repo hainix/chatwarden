@@ -11,6 +11,7 @@ Status: pre-release, as-is, no support promise; PRs welcome.
 | [`@chatwarden/core`](packages/core) | Moderation engine. No runtime dependencies; imports nothing from `node:` except `node:crypto`. |
 | [`@chatwarden/store-sqlite`](packages/store-sqlite) | SQLite-backed store for sanctions, strikes and reports. |
 | [`@chatwarden/matcher`](packages/matcher) | Text matcher that resists Unicode evasion without blocking innocent words. |
+| [`@chatwarden/profanity`](packages/profanity) | Optional ordinary-swearing filter (allow, star or refuse; style, add, remove, custom list). Slurs stay the matcher's job. |
 | [`examples/tiny-chat`](examples/tiny-chat) | A one-room Express + `ws` chat server wired through `createChatwarden` (private, not published). |
 
 ## Development
