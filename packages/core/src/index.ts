@@ -15,6 +15,7 @@ export type {
   SubjectId,
   SubjectIdKind,
   SubjectIdRecord,
+  StrikeRow,
   SubjectRecord,
 } from './types.js';
 export { hashWho, makeHasher } from './hasher.js';
@@ -36,3 +37,12 @@ export {
 } from './sanctions.js';
 export type { ActiveSanction, SanctionInput } from './sanctions.js';
 export { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from './mutes.js';
+export {
+  REPEAT_LOOKBACK_MS,
+  REPEAT_RESTRICT_MS,
+  STRIKE_FIRST_RESTRICT_MS,
+  STRIKE_WINDOW_MS,
+  STRIKES_TO_RESTRICT,
+  StrikeService,
+} from './strikes.js';
+export type { StrikeDecision } from './strikes.js';

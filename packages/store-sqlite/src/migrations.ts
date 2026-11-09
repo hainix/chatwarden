@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -112,6 +112,24 @@ CREATE TABLE kit_mutes (
   PRIMARY KEY (viewer_id, target_id)
 );
 CREATE INDEX kit_mutes_by_created ON kit_mutes (created_at);
+`,
+  },
+  {
+    version: 5,
+    // One row per blocked slur attempt, filed under the canonical subject at write time (a later merge is
+    // resolved by the service, so there is no foreign key). There is no IP, key or account column on purpose:
+    // a strike is never keyed or counted by IP. raw_line is the line the subject typed themselves, kept for
+    // K2's automatic-timeout notice; Task 13's retention purge deletes rows after 30 days.
+    sql: `
+CREATE TABLE kit_strikes (
+  id         TEXT PRIMARY KEY,
+  at         INTEGER NOT NULL,
+  subject_id TEXT NOT NULL,
+  room_id    TEXT NOT NULL,
+  term_id    TEXT NOT NULL,
+  raw_line   TEXT NOT NULL
+);
+CREATE INDEX kit_strikes_by_subject ON kit_strikes (subject_id, at);
 `,
   },
 ];

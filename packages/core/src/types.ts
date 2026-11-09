@@ -161,6 +161,27 @@ export interface MuteRow {
 }
 
 // ---------------------------------------------------------------------------
+// Strikes (storage shape)
+// ---------------------------------------------------------------------------
+
+/**
+ * One slur strike: the filter blocked a line `subject` typed. `subject` is the
+ * canonical subject at write time (a later merge is resolved at query time).
+ * `rawLine` is the line the subject typed themselves, kept for K2's
+ * automatic-timeout notice; it is private and purged after 30 days. Never keyed
+ * by IP.
+ */
+export interface StrikeRow {
+  id: string;
+  /** Epoch ms. */
+  at: number;
+  subject: SubjectId;
+  roomId: string;
+  termId: string;
+  rawLine: string;
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -247,4 +268,19 @@ export interface Store {
    * the deleted rows, oldest first.
    */
   pruneMutes(viewer: SubjectId, keep: number): SubjectId[];
+
+  // Strikes. SYNCHRONOUS on purpose (like sanctions): `StrikeService.record` writes inside `transaction`,
+  // then updates its in-memory tally in the same tick.
+
+  /** Append one strike row. */
+  insertStrike(row: StrikeRow): void;
+
+  /** Every strike at or after `since` (epoch ms), oldest first, for rebuilding the tally. */
+  loadStrikes(since: number): StrikeRow[];
+
+  /**
+   * For each subject id a `chat` sanction from source `auto_filter` was written against: the latest
+   * `startsAt` of those rows, revoked or expired ones included. Subject rows only (never IP rows).
+   */
+  loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }>;
 }

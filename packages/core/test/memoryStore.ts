@@ -1,4 +1,4 @@
-import type { MuteRow, SanctionRow, Store, SubjectIdRecord, SubjectId, SubjectRecord } from '../src/types.js';
+import type { MuteRow, SanctionRow, Store, StrikeRow, SubjectIdRecord, SubjectId, SubjectRecord } from '../src/types.js';
 
 /** A stored sanction row plus its revocation, as the SQL table keeps it. */
 export interface StoredSanction extends SanctionRow {
@@ -20,6 +20,7 @@ export class MemoryStore implements Store {
   /** Mutes by `viewer, target`; `seq` stands in for SQLite's rowid (insertion order, kept on refresh). */
   protected mutes = new Map<string, { row: MuteRow; seq: number }>();
   private muteSeq = 0;
+  protected strikes: StrikeRow[] = [];
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -205,6 +206,33 @@ export class MemoryStore implements Store {
       this.undoWith(() => this.mutes.set(key, m));
     }
     return drop.map(([, m]) => m.row.target);
+  }
+
+  // Strikes (synchronous, see the Store interface)
+
+  insertStrike(row: StrikeRow): void {
+    this.strikes.push({ ...row });
+    this.undoWith(() => {
+      this.strikes.length -= 1;
+    });
+  }
+
+  loadStrikes(since: number): StrikeRow[] {
+    return this.strikes.filter((r) => r.at >= since).map((r) => ({ ...r }));
+  }
+
+  loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }> {
+    const latest = new Map<SubjectId, number>();
+    for (const r of this.sanctions) {
+      if (r.kind !== 'chat' || r.source !== 'auto_filter' || r.targetType !== 'subject') continue;
+      latest.set(r.value, Math.max(latest.get(r.value) ?? r.startsAt, r.startsAt));
+    }
+    return [...latest].map(([subject, startsAt]) => ({ subject, startsAt }));
+  }
+
+  /** Test helper: every stored strike. */
+  rawStrikes(): StrikeRow[] {
+    return this.strikes.map((r) => ({ ...r }));
   }
 
   /** Test helper: every stored mute. */

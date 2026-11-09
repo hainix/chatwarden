@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { MuteRow, SanctionKind, SanctionRow, Source, Store, SubjectId, SubjectIdKind, SubjectIdRecord, SubjectRecord } from '@chatwarden/core';
+import type { MuteRow, SanctionKind, SanctionRow, Source, Store, StrikeRow, SubjectId, SubjectIdKind, SubjectIdRecord, SubjectRecord } from '@chatwarden/core';
 import type {
   AuditEntry,
   ExceptionPatch,
@@ -222,6 +222,48 @@ export class SqliteStore implements Store, TermStore {
       for (const target of doomed) del.run(viewer, target);
       return doomed;
     });
+  }
+
+  // Strikes. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never
+  // be given an async function.
+
+  insertStrike(row: StrikeRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare('INSERT INTO kit_strikes (id, at, subject_id, room_id, term_id, raw_line) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(row.id, row.at, row.subject, row.roomId, row.termId, row.rawLine);
+    });
+  }
+
+  loadStrikes(since: number): StrikeRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          'SELECT id, at, subject_id, room_id, term_id, raw_line FROM kit_strikes WHERE at >= ? ORDER BY at, rowid',
+        )
+        .all(since)
+        .map((r) => ({
+          id: String(r.id),
+          at: Number(r.at),
+          subject: String(r.subject_id),
+          roomId: String(r.room_id),
+          termId: String(r.term_id),
+          rawLine: String(r.raw_line),
+        })),
+    );
+  }
+
+  loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }> {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT target_value, MAX(starts_at) AS latest FROM kit_sanctions
+           WHERE kind = 'chat' AND source = 'auto_filter' AND target_type = 'subject'
+           GROUP BY target_value ORDER BY MIN(rowid)`,
+        )
+        .all()
+        .map((r) => ({ subject: String(r.target_value), startsAt: Number(r.latest) })),
+    );
   }
 
   // Terms, exceptions and the audit trail. These are SYNCHRONOUS on purpose (the TermStore contract): they
