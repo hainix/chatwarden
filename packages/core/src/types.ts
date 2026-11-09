@@ -401,3 +401,16 @@ export interface Store {
 export interface Matcher {
   match(text: string): { termId: string } | null;
 }
+
+// ---------------------------------------------------------------------------
+// Platform
+// ---------------------------------------------------------------------------
+
+/**
+ * What the adopter game or chat server supplies. `identify` reads whatever a connection looks like in the
+ * adopter stack (a request, a socket, a session) and returns who is behind it, RAW (see {@link RawWho}).
+ * K2 adds an optional `notify` here for delivering notices.
+ */
+export interface Platform {
+  identify(ctx: unknown): RawWho;
+}

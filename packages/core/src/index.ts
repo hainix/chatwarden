@@ -5,6 +5,7 @@ export type {
   Hasher,
   Identifiers,
   Logger,
+  Platform,
   Matcher,
   MuteRow,
   RawWho,
@@ -68,3 +69,5 @@ export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { purge, RETENTION_DEFAULTS } from './retention.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
+export { createChatwarden } from './chatwarden.js';
+export type { Chatwarden, ChatwardenOptions } from './chatwarden.js';

@@ -6,7 +6,7 @@
   "description": "Open-source chat moderation for games and anyone with a chat.",
   "license": "Apache-2.0",
   "engines": { "node": ">=22.13" },
-  "workspaces": ["packages/*"],
+  "workspaces": ["packages/*", "examples/*"],
   "scripts": {
     "typecheck": "tsc -b",
     "lint": "eslint .",

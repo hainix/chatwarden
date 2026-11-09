@@ -11,6 +11,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
       },
       {
+        find: '@chatwarden/store-sqlite',
+        replacement: fileURLToPath(new URL('./packages/store-sqlite/src/index.ts', import.meta.url)),
+      },
+      {
         find: '@chatwarden/matcher/test-fixtures',
         replacement: fileURLToPath(new URL('./packages/matcher/test/fixtures/index.ts', import.meta.url)),
       },
@@ -21,7 +25,7 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
     setupFiles: ['./packages/store-sqlite/test/setup.ts'],
   },
