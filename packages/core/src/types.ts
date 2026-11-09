@@ -182,6 +182,65 @@ export interface StrikeRow {
 }
 
 // ---------------------------------------------------------------------------
+// Reports (storage shapes)
+// ---------------------------------------------------------------------------
+
+/** What a player may report another for. */
+export type ReportCategory = 'harassment' | 'hate' | 'cheating' | 'spam' | 'disruption' | 'other';
+
+/**
+ * One chat line inside a report's excerpt. It carries no identity of its own: `p` is the writer's index in the
+ * report's `people` list, or null when the writer had no subject.
+ */
+export interface ReportExcerptLine {
+  lineId: string;
+  /** When the line was sent, epoch ms. */
+  ts: number;
+  seatId: string;
+  handle: string;
+  raw: string;
+  delivered: string | null;
+  blocked: boolean;
+  /** Seat ids that could see the line; null means the whole room. */
+  audience: string[] | null;
+  p: number | null;
+}
+
+/**
+ * One stored report. `reporterSubject` and `targetSubject` are the CANONICAL subject ids at submit time (a later
+ * merge is resolved at query time). `people` lists the distinct canonical subjects who wrote a line in the
+ * excerpt, in first-seen order. Private: only moderation tools read it, and it never reaches a player.
+ */
+export interface StoredReport {
+  id: string;
+  /** Epoch ms. */
+  createdAt: number;
+  roomId: string;
+  /** The room's tags when the report was filed. */
+  tags: Record<string, string>;
+  reporterSubject: SubjectId;
+  reporterSeat: string;
+  reporterHandle: string;
+  targetSubject: SubjectId;
+  targetSeat: string;
+  targetHandle: string;
+  category: ReportCategory;
+  note: string | null;
+  lineId: string | null;
+  excerpt: ReportExcerptLine[];
+  people: SubjectId[];
+  status: 'open';
+}
+
+/** The light projection of a report the intake rules count: who reported whom, where and when. */
+export interface ReportActivity {
+  reporter: SubjectId;
+  target: SubjectId;
+  roomId: string;
+  createdAt: number;
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -283,6 +342,32 @@ export interface Store {
    * `startsAt` of those rows, revoked or expired ones included. Subject rows only (never IP rows).
    */
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }>;
+
+  // Reports. SYNCHRONOUS on purpose (like sanctions): `ReportService.submit` runs these inside `transaction`.
+  // Subject ids come back exactly as stored (canonical at write time, possibly merged since); the service folds
+  // aliases. The table also carries `status`, `bad_faith` and `actioned_at` for K2's moderator tools.
+
+  /**
+   * Insert one report. Returns false, having written nothing, when a report by the same reporter subject
+   * against the same target subject in the same room already exists (the UNIQUE backstop); any other
+   * failure throws.
+   */
+  insertReport(row: StoredReport): boolean;
+
+  /** Who reported whom (light rows, no excerpt) for every report created at or after `since`, oldest first. */
+  loadReportActivity(since: number): ReportActivity[];
+
+  /** Who reported whom in one room, all time. */
+  loadRoomReportPairs(roomId: string): Array<{ reporter: SubjectId; target: SubjectId }>;
+
+  /** The reporter and `actioned_at` of every report marked bad-faith and actioned at or after `since`. */
+  loadBadFaithMarks(since: number): Array<{ reporter: SubjectId; actionedAt: number }>;
+
+  /**
+   * One row per `chat` sanction GROUP from source `auto_filter` that starts at or after `since`, naming the
+   * subject row's stored target (revoked and expired groups included). Never IP rows.
+   */
+  loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }>;
 }
 
 // ---------------------------------------------------------------------------

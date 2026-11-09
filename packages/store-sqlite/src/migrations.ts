@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -130,6 +130,43 @@ CREATE TABLE kit_strikes (
   raw_line   TEXT NOT NULL
 );
 CREATE INDEX kit_strikes_by_subject ON kit_strikes (subject_id, at);
+`,
+  },
+  {
+    version: 6,
+    // One row per report. reporter_subject and target_subject are the CANONICAL subject ids at submit time (a
+    // later merge is resolved in code, so there is no foreign key); the UNIQUE constraint is the backstop for
+    // "one report per reporter, target and room", while the service checks across merged aliases. excerpt_json
+    // holds the evidence lines with no identity in them; people_json lists the canonical subjects who wrote
+    // them (the lines point into it by index). status, bad_faith and the actioned_* / mod_note columns are
+    // written by K2's moderator tools; intake only reads bad_faith + actioned_at to suspend a reporter.
+    sql: `
+CREATE TABLE kit_reports (
+  id               TEXT PRIMARY KEY,
+  created_at       INTEGER NOT NULL,
+  room_id          TEXT NOT NULL,
+  tags_json        TEXT NOT NULL,
+  reporter_subject TEXT NOT NULL,
+  reporter_seat    TEXT NOT NULL,
+  reporter_handle  TEXT NOT NULL,
+  target_subject   TEXT NOT NULL,
+  target_seat      TEXT NOT NULL,
+  target_handle    TEXT NOT NULL,
+  category         TEXT NOT NULL,
+  note             TEXT,
+  line_id          TEXT,
+  excerpt_json     TEXT NOT NULL,
+  people_json      TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'actioned', 'dismissed')),
+  bad_faith        INTEGER NOT NULL DEFAULT 0 CHECK (bad_faith IN (0, 1)),
+  actioned_at      INTEGER,
+  actioned_by      TEXT,
+  mod_note         TEXT,
+  UNIQUE (reporter_subject, target_subject, room_id)
+);
+CREATE INDEX kit_reports_by_target ON kit_reports (target_subject, created_at);
+CREATE INDEX kit_reports_by_reporter ON kit_reports (reporter_subject, created_at);
+CREATE INDEX kit_reports_by_status ON kit_reports (status, created_at);
 `,
   },
 ];

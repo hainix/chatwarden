@@ -8,6 +8,9 @@ export type {
   Matcher,
   MuteRow,
   RawWho,
+  ReportActivity,
+  ReportCategory,
+  ReportExcerptLine,
   SanctionKind,
   SanctionRow,
   SanctionTargetType,
@@ -16,6 +19,7 @@ export type {
   SubjectId,
   SubjectIdKind,
   SubjectIdRecord,
+  StoredReport,
   StrikeRow,
   SubjectRecord,
 } from './types.js';
@@ -51,3 +55,12 @@ export { slidingWindow } from './rateLimit.js';
 export type { SlidingWindow } from './rateLimit.js';
 export { ChatService } from './chat.js';
 export type { ChatResult, ChatServiceDeps, Starrer } from './chat.js';
+export {
+  REPORT_CATEGORIES,
+  REPORT_NOTE_MAX,
+  REPORTS_PER_DAY,
+  ReportService,
+  SUSPEND_AFTER,
+  SUSPEND_WINDOW_MS,
+} from './reports.js';
+export type { ReportCounts, ReportInput, ReportRefusal, ReportResult, ReportServiceDeps } from './reports.js';

@@ -1,6 +1,19 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { MuteRow, SanctionKind, SanctionRow, Source, Store, StrikeRow, SubjectId, SubjectIdKind, SubjectIdRecord, SubjectRecord } from '@chatwarden/core';
+import type {
+  MuteRow,
+  ReportActivity,
+  SanctionKind,
+  SanctionRow,
+  Source,
+  Store,
+  StoredReport,
+  StrikeRow,
+  SubjectId,
+  SubjectIdKind,
+  SubjectIdRecord,
+  SubjectRecord,
+} from '@chatwarden/core';
 import type {
   AuditEntry,
   ExceptionPatch,
@@ -263,6 +276,79 @@ export class SqliteStore implements Store, TermStore {
         )
         .all()
         .map((r) => ({ subject: String(r.target_value), startsAt: Number(r.latest) })),
+    );
+  }
+
+  // Reports. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never
+  // be given an async function.
+
+  insertReport(r: StoredReport): boolean {
+    return this.transaction(() => {
+      // Only the (reporter, target, room) conflict is swallowed; a clashing primary key still throws.
+      const res = this.db
+        .prepare(
+          `INSERT INTO kit_reports
+             (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
+              target_seat, target_handle, category, note, line_id, excerpt_json, people_json, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING`,
+        )
+        .run(
+          r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle,
+          r.targetSubject, r.targetSeat, r.targetHandle, r.category, r.note, r.lineId, JSON.stringify(r.excerpt),
+          JSON.stringify(r.people), r.status,
+        );
+      return Number(res.changes) > 0;
+    });
+  }
+
+  loadReportActivity(since: number): ReportActivity[] {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT reporter_subject, target_subject, room_id, created_at FROM kit_reports
+           WHERE created_at >= ? ORDER BY created_at, rowid`,
+        )
+        .all(since)
+        .map((r) => ({
+          reporter: String(r.reporter_subject),
+          target: String(r.target_subject),
+          roomId: String(r.room_id),
+          createdAt: Number(r.created_at),
+        })),
+    );
+  }
+
+  loadRoomReportPairs(roomId: string): Array<{ reporter: SubjectId; target: SubjectId }> {
+    return this.transaction(() =>
+      this.db
+        .prepare('SELECT reporter_subject, target_subject FROM kit_reports WHERE room_id = ? ORDER BY rowid')
+        .all(roomId)
+        .map((r) => ({ reporter: String(r.reporter_subject), target: String(r.target_subject) })),
+    );
+  }
+
+  loadBadFaithMarks(since: number): Array<{ reporter: SubjectId; actionedAt: number }> {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT reporter_subject, actioned_at FROM kit_reports
+           WHERE bad_faith = 1 AND actioned_at >= ? ORDER BY actioned_at DESC, rowid`,
+        )
+        .all(since)
+        .map((r) => ({ reporter: String(r.reporter_subject), actionedAt: Number(r.actioned_at) })),
+    );
+  }
+
+  loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }> {
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT DISTINCT target_value, group_id FROM kit_sanctions
+           WHERE kind = 'chat' AND source = 'auto_filter' AND target_type = 'subject' AND starts_at >= ?`,
+        )
+        .all(since)
+        .map((r) => ({ subject: String(r.target_value), groupId: String(r.group_id) })),
     );
   }
 

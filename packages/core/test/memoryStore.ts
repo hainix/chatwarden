@@ -1,4 +1,21 @@
-import type { MuteRow, SanctionRow, Store, StrikeRow, SubjectIdRecord, SubjectId, SubjectRecord } from '../src/types.js';
+import type {
+  MuteRow,
+  ReportActivity,
+  SanctionRow,
+  Store,
+  StoredReport,
+  StrikeRow,
+  SubjectIdRecord,
+  SubjectId,
+  SubjectRecord,
+} from '../src/types.js';
+
+/** A report plus the moderation columns K2 will fill (modelled here so the intake rules can be tested). */
+export interface StoredReportRow extends Omit<StoredReport, 'status'> {
+  status: 'open' | 'actioned' | 'dismissed';
+  badFaith: boolean;
+  actionedAt: number | null;
+}
 
 /** A stored sanction row plus its revocation, as the SQL table keeps it. */
 export interface StoredSanction extends SanctionRow {
@@ -21,6 +38,8 @@ export class MemoryStore implements Store {
   protected mutes = new Map<string, { row: MuteRow; seq: number }>();
   private muteSeq = 0;
   protected strikes: StrikeRow[] = [];
+  /** Reports in insertion order; `insertReport` enforces UNIQUE (reporter, target, room). */
+  protected reports: StoredReportRow[] = [];
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -228,6 +247,75 @@ export class MemoryStore implements Store {
       latest.set(r.value, Math.max(latest.get(r.value) ?? r.startsAt, r.startsAt));
     }
     return [...latest].map(([subject, startsAt]) => ({ subject, startsAt }));
+  }
+
+  // Reports (synchronous, see the Store interface)
+
+  insertReport(row: StoredReport): boolean {
+    const dup = this.reports.some(
+      (r) => r.reporterSubject === row.reporterSubject && r.targetSubject === row.targetSubject && r.roomId === row.roomId,
+    );
+    if (dup) return false;
+    this.reports.push({ ...structuredClone(row), badFaith: false, actionedAt: null });
+    this.undoWith(() => {
+      this.reports.length -= 1;
+    });
+    return true;
+  }
+
+  loadReportActivity(since: number): ReportActivity[] {
+    return this.reports
+      .filter((r) => r.createdAt >= since)
+      .map((r) => ({ reporter: r.reporterSubject, target: r.targetSubject, roomId: r.roomId, createdAt: r.createdAt }));
+  }
+
+  loadRoomReportPairs(roomId: string): Array<{ reporter: SubjectId; target: SubjectId }> {
+    return this.reports.filter((r) => r.roomId === roomId).map((r) => ({ reporter: r.reporterSubject, target: r.targetSubject }));
+  }
+
+  loadBadFaithMarks(since: number): Array<{ reporter: SubjectId; actionedAt: number }> {
+    const out: Array<{ reporter: SubjectId; actionedAt: number }> = [];
+    for (const r of this.reports) {
+      if (r.badFaith && r.actionedAt !== null && r.actionedAt >= since) {
+        out.push({ reporter: r.reporterSubject, actionedAt: r.actionedAt });
+      }
+    }
+    return out;
+  }
+
+  loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }> {
+    const seen = new Set<string>();
+    const out: Array<{ subject: SubjectId; groupId: string }> = [];
+    for (const r of this.sanctions) {
+      if (r.kind !== 'chat' || r.source !== 'auto_filter' || r.targetType !== 'subject' || r.startsAt < since) continue;
+      const key = `${r.value}\u0000${r.groupId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ subject: r.value, groupId: r.groupId });
+    }
+    return out;
+  }
+
+  /** Test helper (K2 adds dismissing): mark a report bad-faith, dismissed at `actionedAt` (null = never closed). */
+  markReportBadFaith(id: string, actionedAt: number | null): void {
+    const r = this.reports.find((x) => x.id === id);
+    if (!r) throw new Error('unknown report');
+    r.badFaith = true;
+    r.actionedAt = actionedAt;
+    r.status = 'dismissed';
+  }
+
+  /** Test helper: close a report without the bad-faith mark. */
+  closeReport(id: string, status: 'actioned' | 'dismissed', actionedAt: number): void {
+    const r = this.reports.find((x) => x.id === id);
+    if (!r) throw new Error('unknown report');
+    r.status = status;
+    r.actionedAt = actionedAt;
+  }
+
+  /** Test helper: every stored report. */
+  rawReports(): StoredReportRow[] {
+    return this.reports.map((r) => structuredClone(r));
   }
 
   /** Test helper: every stored strike. */
