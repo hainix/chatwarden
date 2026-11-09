@@ -55,8 +55,11 @@ These replace the unlabelled `Severity`. Every report is read as one of:
 
 | Level | Meaning | Examples |
 |---|---|---|
-| `banter` | Trash talk, salt, jokes about play, profanity not aimed at a person | "ez", "bad keep", "loser", "lol you're trash at this", "damn it" |
-| `rude` | A personal insult or profanity aimed at a player, isolated | "go f— yourself", "you're an idiot" |
+| `banter` | Trash talk, salt, jokes about play, profanity not aimed at a person, a single mild insult | "ez", "loser", "you're an idiot", "lol you're trash at this", "damn it" |
+| `rude` | Aggressive, profane abuse aimed at a player, isolated | "go f— yourself" |
+
+The level boundaries follow Moxgate's moderators' tier 1 and tier 2 exactly. "A single rude comment" is tier 1
+(no action, no record). The aggressive one is tier 2 (no action, but recorded).
 | `hostile` | Sustained or repeated aggression: several insults, picking a fight, following someone across games | three insults in one game; insulting the same player again next game |
 | `severe` | Threats, hate or slurs, attacks on who someone is, sexual harassment, doxxing, serious harassment | any slur, "I'll find you", anything about race or religion as an attack |
 
@@ -114,6 +117,44 @@ type Outcome = 'none' | 'note' | 'warning' | { kind: 'chat' | 'area' | 'ban'; du
 
 After the first offense, every profile escalates through its ladder. The record step counts warnings and
 restrictions as K2 does, and "repeated" turns accumulated notes into a step.
+
+## Moderator guidelines and generated documents (owner 2026-11-09)
+
+> "We as moderators agreed to these guidelines on our side… Every moderator is going to have different
+> guidelines for their game. The moderator tooling should list out the rules that apply based on the code, and
+> then their own code of conduct. And then generate some, like, hey, these are the terms that you can copy to
+> your website, or let the agent know."
+
+**One source of truth, many outputs.** The resolved profile, the Community Rules and the team's own guidelines
+generate every document. Change the config and every document changes with it, so the text and the
+enforcement can't drift apart.
+
+1. **The team's own guidelines are part of the profile.**
+   - `profile.guidelines` is an ordered list of tiers, each with a title, a description in the team's words,
+     examples, the conduct level(s) it covers, and its outcome.
+   - Every preset ships default tiers written from its own table. Relaxed's defaults are the five tiers above,
+     in plain generic wording.
+   - A team replaces them with its own words. Moxgate passes its moderators' text verbatim.
+   - Validation checks that every conduct level is covered by exactly one tier, and that each tier's stated
+     outcome matches `firstOffense` / the repeat rule / the ladder. A guideline can't promise something the kit
+     won't do.
+2. **Generated documents** are pure functions over the resolved policy, each returning `markdown | html | text`:
+
+   | Document | Audience | Contents |
+   |---|---|---|
+   | `codeOfConduct({ gameName, contactUrl })` | players: copy to your website, link from the report dialog | the summary line, the Community Rules (numbered), what happens in plain words (the tiers, written for players), how to report, what a notice means, "think it's a mistake?" |
+   | `moderatorGuide()` | the moderation team | the tiers with examples and outcomes, the repeat rule, the ladder, how to write a reason, "a dismissed report is not bad faith", when a rule gap note is needed |
+   | `agentBrief()` | coding agents and the AI read | a compact, unambiguous policy statement: levels with meanings, the rules, the outcomes. Pasted into `AGENTS.md`, given to a support bot, or used as the AI read's policy text, so humans, agents and the model all apply one standard |
+   | `policyJson()` | tools | the resolved policy as JSON, so other systems (Coop policies, a Discord bot) import it |
+
+3. **Where they appear:**
+   - **The hub** gets a "Rules & guidelines" tab showing the rules in force, the tiers and the ladder, rendered
+     live from config, each with **Copy for your website** / **Copy for an agent** buttons. (K4.)
+   - **The CLI:** `npx chatwarden docs --out ./docs` writes `CODE_OF_CONDUCT.md`, `MODERATION.md`,
+     `chatwarden-policy.json` and an `AGENTS.md` snippet, so a coding agent wiring the kit in can drop the
+     policy into the project. (K4b.)
+   - **player-react's** `/rules` page renders `codeOfConduct`. (K4.)
+   - **The AI read** (K3c) uses `agentBrief()` as its policy prompt.
 
 ## Presets on top, everything configurable underneath (owner 2026-11-09)
 
