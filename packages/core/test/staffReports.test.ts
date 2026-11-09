@@ -282,3 +282,68 @@ describe('staffReport', () => {
     expect(r.excerpt).toHaveLength(1);
   });
 });
+
+describe('listStaffReports with a person filter', () => {
+  function seed() {
+    const e = env();
+    const a = e.person('ka');
+    const b = e.person('kb');
+    const add = (id: string, createdAt: number, target: SubjectId, over: Partial<ReportRecord> = {}) =>
+      e.store.insertReport({
+        ...record({ id, createdAt, targetSubject: target, reporterSubject: `s_rep_${id}`, people: [target], ...over }),
+        status: 'open',
+      });
+    add('a1', NOW + 1, a);
+    add('b1', NOW + 2, b);
+    add('a2', NOW + 3, a);
+    add('b2', NOW + 4, b);
+    return { ...e, a, b, add };
+  }
+
+  it('lists only reports against the person, newest first', () => {
+    const { store, subjects, a, b } = seed();
+    expect(listStaffReports(store, subjects, { person: a }).items.map((r) => r.id)).toEqual(['a2', 'a1']);
+    expect(listStaffReports(store, subjects, { person: b }).items.map((r) => r.id)).toEqual(['b2', 'b1']);
+  });
+
+  it('honours limit (clamped like the queue) and returns no cursor', () => {
+    const { store, subjects, a } = seed();
+    const page = listStaffReports(store, subjects, { person: a, limit: 1 });
+    expect(page.items.map((r) => r.id)).toEqual(['a2']);
+    expect(page.next).toBeNull();
+    expect(listStaffReports(store, subjects, { person: a, limit: 0 }).items).toHaveLength(1);
+    expect(listStaffReports(store, subjects, { person: a, limit: Number.NaN }).items).toHaveLength(2);
+  });
+
+  it('includes reports filed against a merged alias, and finds them by either id', () => {
+    const { store, subjects, a, add } = seed();
+    const alias = subjects.resolve({ clientKey: 'alias-key', accountId: null, ipHash: null }) as SubjectId;
+    add('al1', NOW + 9, alias);
+    subjects.resolve({ clientKey: 'alias-key', accountId: 'acct-merge', ipHash: null });
+    subjects.resolve({ clientKey: 'ka', accountId: 'acct-merge', ipHash: null });
+    const root = subjects.canonical(a);
+    expect(subjects.canonical(alias)).toBe(root);
+    const viaRoot = listStaffReports(store, subjects, { person: root }).items.map((r) => r.id);
+    const viaAlias = listStaffReports(store, subjects, { person: alias }).items.map((r) => r.id);
+    expect(viaRoot).toEqual(['al1', 'a2', 'a1']);
+    expect(viaAlias).toEqual(viaRoot);
+  });
+
+  it('an unknown person lists nothing', () => {
+    const { store, subjects } = seed();
+    expect(listStaffReports(store, subjects, { person: 's_nobody' })).toEqual({ items: [], next: null });
+  });
+
+  it('refuses a person with a status or a cursor, and a person that is not a string (ReportQueryError)', () => {
+    const { store, subjects, a } = seed();
+    expect(() => listStaffReports(store, subjects, { person: a, status: 'open' })).toThrow(ReportQueryError);
+    expect(() => listStaffReports(store, subjects, { person: a, before: encodeReportCursor(NOW, 'x') })).toThrow(ReportQueryError);
+    expect(() => listStaffReports(store, subjects, { person: 5 as never })).toThrow(ReportQueryError);
+    expect(() => listStaffReports(store, subjects, { person: '' })).toThrow(ReportQueryError);
+  });
+
+  it('controls: no person still lists everyone', () => {
+    const { store, subjects } = seed();
+    expect(listStaffReports(store, subjects, {}).items).toHaveLength(4);
+  });
+});

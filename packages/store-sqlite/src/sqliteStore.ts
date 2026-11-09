@@ -496,6 +496,14 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+    if (subjects.length === 0) return [];
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const marks = subjects.map(() => '?').join(', ');
+    const sql = `SELECT * FROM kit_reports WHERE target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+  }
+
   listReports(q: ReportListQuery): ReportRecord[] {
     const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
     const where: string[] = [];

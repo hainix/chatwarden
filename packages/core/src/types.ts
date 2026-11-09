@@ -507,6 +507,13 @@ export interface Store {
   listReports(q: ReportListQuery): ReportRecord[];
 
   /**
+   * Reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id and every
+   * alias merged into it), newest first (`created_at` descending, then `id` descending), whole records. `limit` is
+   * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
+   */
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+
+  /**
    * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`,
    * and the bad-faith `evidence` (null or omitted when there is none). Returns true when this call closed it; false
    * (nothing changed, the first closer's evidence kept) for an unknown report or one already closed.

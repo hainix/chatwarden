@@ -28,6 +28,8 @@ describe('withErrors: mapping', () => {
   const cases: Array<[string, () => unknown, number, string]> = [
     ['ReportQueryError(status)', () => new ReportQueryError('status'), 400, 'invalid_query'],
     ['ReportQueryError(before)', () => new ReportQueryError('before'), 400, 'invalid_query'],
+    ['ReportQueryError(person)', () => new ReportQueryError('person'), 400, 'invalid_query'],
+    ['HttpError(already_decided)', () => new HttpError('already_decided'), 409, 'already_decided'],
     ['AuditQueryError(before)', () => new AuditQueryError('before'), 400, 'invalid_query'],
     ['AuditQueryError(action)', () => new AuditQueryError('action'), 400, 'invalid_query'],
     ['AuditQueryError(actor)', () => new AuditQueryError('actor'), 400, 'invalid_query'],

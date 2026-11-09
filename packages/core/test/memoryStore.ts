@@ -377,6 +377,16 @@ export class MemoryStore implements Store {
     return r === undefined ? null : structuredClone(r);
   }
 
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const wanted = new Set(subjects);
+    return this.reports
+      .filter((r) => wanted.has(r.targetSubject))
+      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .slice(0, n)
+      .map((r) => structuredClone(r));
+  }
+
   listReports(q: ReportListQuery): ReportRecord[] {
     const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
     return this.reports

@@ -510,3 +510,95 @@ describe('listReports', () => {
     db.close();
   });
 });
+
+describe('listReportsByPerson', () => {
+  const seeded = (store: Pick<Store, 'insertReport' | 'closeReport'>) => {
+    // Reports against s_a (two aliases: s_a and s_a2), s_b, and one filed BY s_a against s_b.
+    const rows: Array<[string, number, string, string]> = [
+      ['p1', NOW, 's_a', 's_x1'],
+      ['p2', NOW + 10, 's_a2', 's_x2'],
+      ['p3', NOW + 10, 's_a', 's_x3'],
+      ['p4', NOW + 20, 's_b', 's_x4'],
+      ['p5', NOW + 30, 's_b', 's_a'],
+      ['p6', NOW + 40, 's_a', 's_x5'],
+    ];
+    for (const [id, createdAt, targetSubject, reporterSubject] of rows) {
+      store.insertReport(report({ id, createdAt, targetSubject, reporterSubject, people: [targetSubject] }));
+    }
+    store.closeReport('p3', 'actioned', false, 'mod', NOW + 100, 'n');
+  };
+  const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
+
+  it('lists reports AGAINST the person only, newest first, ties by id descending', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(ids(store.listReportsByPerson(['s_a'], 10))).toEqual(['p6', 'p3', 'p1']);
+    expect(ids(store.listReportsByPerson(['s_b'], 10))).toEqual(['p5', 'p4']);
+    db.close();
+  });
+
+  it('reads every alias given, and returns whole records with the decision columns', () => {
+    const { db, store } = env();
+    seeded(store);
+    const rows = store.listReportsByPerson(['s_a', 's_a2'], 10);
+    expect(ids(rows)).toEqual(['p6', 'p3', 'p2', 'p1']);
+    expect(rows.find((r) => r.id === 'p3')).toMatchObject({ status: 'actioned', actionedBy: 'mod', modNote: 'n' });
+    expect(rows[0]?.excerpt.length).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it('limit is clamped to 1..200 and a fraction is floored', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(ids(store.listReportsByPerson(['s_a'], 2))).toEqual(['p6', 'p3']);
+    expect(store.listReportsByPerson(['s_a'], 0)).toHaveLength(1);
+    expect(store.listReportsByPerson(['s_a'], -4)).toHaveLength(1);
+    expect(store.listReportsByPerson(['s_a'], 2.9)).toHaveLength(2);
+    expect(store.listReportsByPerson(['s_a'], 9999)).toHaveLength(3);
+    db.close();
+  });
+
+  it('controls: an unknown person, an empty list, or a similar id matches nothing', () => {
+    const { db, store } = env();
+    seeded(store);
+    expect(store.listReportsByPerson(['s_zzz'], 10)).toEqual([]);
+    expect(store.listReportsByPerson([], 10)).toEqual([]);
+    expect(store.listReportsByPerson(['s_'], 10)).toEqual([]);
+    expect(store.listReportsByPerson(["s_a' OR 1=1 --"], 10)).toEqual([]);
+    db.close();
+  });
+
+  it('seeks the target_subject index instead of scanning the table', () => {
+    const { db, store } = env();
+    seeded(store);
+    const detail = db
+      .prepare('EXPLAIN QUERY PLAN SELECT * FROM kit_reports WHERE target_subject IN (?, ?) ORDER BY created_at DESC, id DESC LIMIT ?')
+      .all('s_a', 's_a2', 5)
+      .map((r) => String(r.detail))
+      .join(' | ');
+    expect(detail).toMatch(/INDEX kit_reports_by_target/);
+    db.close();
+  });
+
+  it('agrees with the in-memory store on every query', () => {
+    const { db, store } = env();
+    const mem = new MemoryStore();
+    seeded(store);
+    seeded(mem);
+    const queries: Array<[string[], number]> = [
+      [['s_a'], 10],
+      [['s_a', 's_a2'], 10],
+      [['s_a2', 's_a'], 2],
+      [['s_b'], 1],
+      [['s_a', 's_b'], 4],
+      [['nobody'], 5],
+      [[], 5],
+      [['s_a'], 0],
+      [['s_a'], 999],
+    ];
+    for (const [who, limit] of queries) {
+      expect(store.listReportsByPerson(who, limit), JSON.stringify([who, limit])).toEqual(mem.listReportsByPerson(who, limit));
+    }
+    db.close();
+  });
+});
