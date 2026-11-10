@@ -306,9 +306,9 @@ describe('LiveTerms on SQLite, end to end', () => {
     if (!ex.ok) throw new Error('setup');
     const rows = db.prepare('SELECT * FROM kit_audit ORDER BY rowid').all();
     expect(rows.map((r) => [r.at, r.actor, r.action, r.subject_type, r.subject_ref])).toEqual([
-      [T0, 'alice', 'add', 'term', add.value],
-      [T0 + 1, 'bob', 'disable', 'term', add.value],
-      [T0 + 2, 'bob', 'add', 'exception', ex.value],
+      [T0, 'alice', 'term.add', 'term', add.value],
+      [T0 + 1, 'bob', 'term.toggle', 'term', add.value],
+      [T0 + 2, 'bob', 'exception.add', 'exception', ex.value],
     ]);
     expect(rows[0]!.before_json).toBeNull();
     expect(JSON.parse(String(rows[0]!.after_json))).toMatchObject({ id: add.value, term: 'blorft', active: true, note: 'n', hits: ['a line'] });
@@ -363,7 +363,7 @@ describe('LiveTerms on SQLite, end to end', () => {
     const live = new LiveTerms({ store, pack: syntheticTermPack(), clock: clock(), logger: quiet() });
     await live.load();
     const bad = await live.change('a', (e) => e.addException({ phrase: 'quissel', language: 'en' }));
-    expect(bad).toEqual({ ok: false, error: expect.stringContaining('syn:quissel') });
+    expect(bad).toEqual({ ok: false, error: expect.stringContaining('syn:quissel'), code: 'unblocks_known' });
     expect(live.match('you quissel')).not.toBeNull();
     expect((await live.change('a', (e) => e.addException({ phrase: 'blorft stew', language: 'en' }))).ok).toBe(true);
     store.close();

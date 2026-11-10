@@ -10,8 +10,10 @@ export type {
   AuditEntry,
   ExceptionPatch,
   ExceptionRecord,
+  LegacyTermAuditAction,
+  TermAuditAction,
   TermPatch,
   TermRecord,
   TermStore,
 } from './termStore.js';
-export { LiveTerms, type ChangeResult, type CheckResult, type TermEditor } from './liveTerms.js';
+export { LiveTerms, type ChangeRefusalCode, type ChangeResult, type CheckResult, type TermEditor } from './liveTerms.js';

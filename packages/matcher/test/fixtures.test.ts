@@ -26,6 +26,17 @@ describe('@chatwarden/matcher/fixtures (shipped synthetic fixtures)', () => {
     a.terms[0]!.positive.push('mutated');
     expect(fixtures.syntheticTermPack().terms[0]!.positive).not.toContain('mutated');
   });
+  it('syntheticTermPack carries a small flat positiveCorpus of invented lines that the pack blocks', () => {
+    const pack = loadTermPack(fixtures.syntheticTermPack());
+    expect(pack.positiveCorpus?.length).toBeGreaterThanOrEqual(3);
+    const matcher = buildMatcher(pack.terms, pack.exceptions);
+    for (const line of pack.positiveCorpus ?? []) {
+      expect(matcher.match(line), line).not.toBeNull();
+    }
+    const copy = fixtures.syntheticTermPack();
+    copy.positiveCorpus?.push('mutated');
+    expect(fixtures.syntheticTermPack().positiveCorpus).not.toContain('mutated');
+  });
   it('MemoryTermStore plugs into LiveTerms', async () => {
     const store = new fixtures.MemoryTermStore();
     const live = new LiveTerms({ store, pack: fixtures.syntheticTermPack(), clock: { now: () => 1 } });

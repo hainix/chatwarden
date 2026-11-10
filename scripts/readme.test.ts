@@ -179,6 +179,24 @@ describe('the new package READMEs', () => {
     expect(notes).toMatch(/term id/);
   });
 
+  it('matcher: documents positiveCorpus, the refusal codes, the Sync APIs, the audit names and how to read term history', () => {
+    const doc = flat(readme('matcher'));
+    expect(doc).toContain('positiveCorpus');
+    for (const code of ['duplicate', 'unblocks_known', 'invalid', 'not_found', 'not_loaded', 'build_failed']) {
+      expect(doc, code).toContain(`\`${code}\``);
+    }
+    expect(doc).toContain('loadSync()');
+    expect(doc).toContain('changeSync(');
+    for (const name of ['term.add', 'term.update', 'term.toggle', 'exception.add', 'exception.update', 'exception.toggle']) {
+      expect(doc, name).toContain(`\`${name}\``);
+    }
+    expect(doc).toContain("cw.audit.list({ action: 'term.add'");
+    expect(doc).toMatch(/after_json\.active/);
+    // The Sync boot and the refusal code are shown as real code, which the compile check further down covers.
+    const code = [...readme('matcher').matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string).filter((c) => c.startsWith('import '));
+    expect(code.some((c) => c.includes('loadSync()') && c.includes('changeSync(') && c.includes('.code'))).toBe(true);
+  });
+
   it('matcher: its examples use only the invented fixture terms', () => {
     const synthetic = new Set(
       [...read('packages/matcher/src/fixtures/syntheticPack.ts').matchAll(/term: '([a-z]+)'/g)].map((m) => m[1] as string),

@@ -105,14 +105,68 @@ The main parts of the API:
 | `matcher.spans?.(text)` | Every hit as `{ start, end, termId }` on the original text (`end` exclusive, overlaps merged, hidden characters inside a hit included), for masking a blocked line. |
 | `matcher.matchName?.(name)` | `match` for a handle or a table or deck name, which also reads the name split into words. |
 | `loadTermPack(json)` | Validates an untrusted `TermPack` (strict keys, unique ids, rows that build) and returns a copy. Its errors never quote a term. |
-| `new LiveTerms({ store, pack, clock, logger? })` | The live matcher. `load()` seeds the store from `pack` once, then builds from the store. `check(term, language, recentLines)` is the dry run. `change(actor, fn)` edits atomically and refuses an edit that would leave no active term, duplicate a word, or unblock a line the pack requires blocked. |
+| `new LiveTerms({ store, pack, clock, logger? })` | The live matcher. `load()` seeds the store from `pack` once, then builds from the store. `check(term, language, recentLines)` is the dry run. `change(actor, fn)` edits atomically and refuses an edit that would leave no active term, duplicate a word, or unblock a line the pack requires blocked. A refusal is `{ ok: false, error, code }`. |
+| `LiveTerms.loadSync()`, `LiveTerms.changeSync(actor, fn)` | `load()` and `change()` without a promise, for a host that cannot await (a relay boot). `load()` and `change()` are thin async wrappers over them and return the same results. |
 | `LiveTerms.usingPack` | True while the matcher runs on the pack because the store could not be read. |
 | `TermStore` | The storage `LiveTerms` needs. `@chatwarden/store-sqlite` implements it. |
 | `stripInvisible`, `foldTerm`, `collapseLikePreset` | The normalisation steps, if you build tools around the matcher. |
 
 `LiveTerms` fails open: if the store cannot be read, it keeps the previous matcher, or the pack, and logs the event; it never
 throws into chat. A term pack has `id`, `version`, `terms` (each with `positive` and `negative` example lines), `exceptions`,
-`negativeCorpus` (lines known to be fine) and `knownLosses` (lines the list accepts blocking).
+`negativeCorpus` (lines known to be fine) and `knownLosses` (lines the list accepts blocking). It may also have
+`positiveCorpus`, a flat list of lines the list must keep blocking (see below).
+
+### Editing terms at runtime
+
+`change()` and `changeSync()` check two lists of lines the pack says must stay blocked: each term's own `positive` lines, and the
+pack's flat `positiveCorpus`. Every line that the active terms block on their own must still be blocked once the exceptions
+apply, or the edit is refused and nothing is written. Disabling or renaming a term is not a trip (the terms alone no longer block
+that line), and a line that no term blocks is ignored. The refusal names the line's index (`exception would unblock positive
+corpus line 3`), never the line. `positiveCorpus` is optional, and `loadTermPack` accepts it.
+
+A refusal carries a `code` next to the `error` text, so a caller can branch without reading the message:
+
+| `code` | Meaning |
+| --- | --- |
+| `duplicate` | The word reads as the same as another term or exception row. |
+| `unblocks_known` | An exception would unblock a `positive` or `positiveCorpus` line. |
+| `invalid` | A term or exception is malformed, or no active term would remain. |
+| `not_found` | The edit named a term or exception id that does not exist. |
+| `not_loaded` | A pack is configured and `load()` or `loadSync()` has not run yet. |
+| `build_failed` | The store failed while the change was checked and committed; nothing was changed. |
+
+```ts
+import { createChatwarden, type Platform } from '@chatwarden/core';
+import { LiveTerms, loadTermPack } from '@chatwarden/matcher';
+import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
+import { openStore } from '@chatwarden/store-sqlite';
+
+const store = openStore({ path: './chatwarden.db' });
+const platform: Platform = { identify: (ctx) => ({ clientKey: String(ctx) }) };
+const pack = loadTermPack({ ...syntheticTermPack(), positiveCorpus: ['you zorbak', 'ZORBAK!!'] });
+const terms = new LiveTerms({ store, pack, clock: { now: () => Date.now() } });
+
+// A synchronous host (a relay boot) uses the Sync versions: no promise to await.
+terms.loadSync();
+const result = terms.changeSync('moderator@example.com', (edit) => edit.addException({ phrase: 'zorbak', language: 'en' }));
+if (!result.ok && result.code === 'unblocks_known') {
+  console.log('refused:', result.error); // "exception would unblock positive corpus line 0" (an index, never the line)
+}
+
+// Read term edit history through the core audit trail.
+const cw = await createChatwarden({ store, secret: process.env.CHATWARDEN_SECRET!, platform, matcher: terms });
+const page = cw.audit.list({ action: 'term.add', limit: 50 });
+for (const item of page.items) console.log(item.at, item.actor, item.target?.ref);
+await cw.close();
+```
+
+Every `LiveTerms` edit writes one audit row under a closed `AuditAction` name: `term.add`, `term.update`, `term.toggle`,
+`exception.add`, `exception.update` and `exception.toggle`. The row's target is the term or exception id. A no-op edit writes
+nothing. Read term edit history with `cw.audit.list({ action: 'term.add', limit: 50 })`, or with any of the other names, when
+`LiveTerms` and `createChatwarden` share the store. The list gives who, when, which action and which row id, and never the
+word. The before and after JSON of a row stay in the store's `kit_audit` table (`before_json` and `after_json`); for a toggle,
+`after_json.active` says which way it went. Rows an earlier release wrote with the raw names (`add`, `edit`, `enable`, `disable`)
+still read through `audit.list` under the closed names.
 
 ## Security notes
 

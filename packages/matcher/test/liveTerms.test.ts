@@ -385,7 +385,7 @@ describe('change: terms', () => {
     const r = await loaded({ pack });
     const before = structuredClone(r.store.state);
     const res = await r.live.change('a', (e) => e.setTermActive('syn:zorbak', false));
-    expect(res).toEqual({ ok: false, error: expect.stringMatching(/no active term/) });
+    expect(res).toEqual({ ok: false, error: expect.stringMatching(/no active term/), code: 'invalid' });
     expect(r.store.state).toEqual(before);
     expect(blocked(r.live, 'you zorbak')).toBe(true);
   });
@@ -425,7 +425,7 @@ describe('change: terms', () => {
       (e: TermEditor) => e.setExceptionActive('nope', false),
     ]) {
       const res = await r.live.change('a', fn);
-      expect(res).toEqual({ ok: false, error: expect.stringMatching(/not found: nope/) });
+      expect(res).toEqual({ ok: false, error: expect.stringMatching(/not found: nope/), code: 'not_found' });
     }
     expect(r.store.state).toEqual(before);
   });
@@ -531,7 +531,7 @@ describe('change before load', () => {
     const r = rig();
     const fn = vi.fn((e: TermEditor) => e.addTerm({ term: 'Blorft', language: 'en' }));
     const res = await r.live.change('alice', fn);
-    expect(res).toEqual({ ok: false, error: 'not loaded' });
+    expect(res).toEqual({ ok: false, error: 'not loaded', code: 'not_loaded' });
     expect(fn).not.toHaveBeenCalled();
     expect(r.store.state.terms).toEqual([]);
     expect(r.store.state.exceptions).toEqual([]);
@@ -557,7 +557,7 @@ describe('change before load', () => {
       r.live.change('alice', () => {
         throw new Error('should not run');
       }),
-    ).resolves.toEqual({ ok: false, error: 'not loaded' });
+    ).resolves.toEqual({ ok: false, error: 'not loaded', code: 'not_loaded' });
   });
 
   it('with no pack configured the store is the truth, so change() works without load()', async () => {
@@ -765,7 +765,7 @@ describe('audit trail', () => {
     const id = added.value;
     expect(r.store.state.audit).toHaveLength(1);
     expect(r.store.state.audit[0]).toMatchObject({
-      at: T0, actor: 'alice', action: 'add', subjectType: 'term', subjectRef: id, beforeJson: null,
+      at: T0, actor: 'alice', action: 'term.add', subjectType: 'term', subjectRef: id, beforeJson: null,
     });
     expect(JSON.parse(r.store.state.audit[0]!.afterJson)).toMatchObject({ id, term: 'blorft', language: 'en', active: true, note: 'n' });
 
@@ -777,10 +777,10 @@ describe('audit trail', () => {
     await r.live.change('carol', (e) => e.setTermActive(id, true));
     const rows = r.store.state.audit;
     expect(rows.map((a) => [a.at, a.actor, a.action])).toEqual([
-      [T0, 'alice', 'add'],
-      [T0 + 1, 'bob', 'edit'],
-      [T0 + 2, 'bob', 'disable'],
-      [T0 + 3, 'carol', 'enable'],
+      [T0, 'alice', 'term.add'],
+      [T0 + 1, 'bob', 'term.update'],
+      [T0 + 2, 'bob', 'term.toggle'],
+      [T0 + 3, 'carol', 'term.toggle'],
     ]);
     expect(JSON.parse(rows[1]!.beforeJson!).note).toBe('n');
     expect(JSON.parse(rows[1]!.afterJson).note).toBe('m');
@@ -799,7 +799,7 @@ describe('audit trail', () => {
     await r.live.change('alice', (e) => e.setExceptionActive(add.value, false));
     await r.live.change('alice', (e) => e.setExceptionActive(add.value, true));
     const rows = r.store.state.audit;
-    expect(rows.map((a) => a.action)).toEqual(['add', 'edit', 'disable', 'enable']);
+    expect(rows.map((a) => a.action)).toEqual(['exception.add', 'exception.update', 'exception.toggle', 'exception.toggle']);
     expect(rows.every((a) => a.subjectType === 'exception' && a.subjectRef === add.value)).toBe(true);
     expect(rows[0]!.beforeJson).toBeNull();
     expect(JSON.parse(rows[0]!.afterJson)).toMatchObject({ id: add.value, phrase: 'blorft stew', active: true });
@@ -815,9 +815,9 @@ describe('audit trail', () => {
       e.addException({ phrase: 'blorft stew', language: 'en' });
     });
     expect(r.store.state.audit.map((a) => [a.subjectType, a.action])).toEqual([
-      ['term', 'add'],
-      ['term', 'disable'],
-      ['exception', 'add'],
+      ['term', 'term.add'],
+      ['term', 'term.toggle'],
+      ['exception', 'exception.add'],
     ]);
   });
 
@@ -992,5 +992,375 @@ describe('row ids come from Web Crypto, not a node: import', () => {
     for (const file of walk(fileURLToPath(new URL('../src', import.meta.url)))) {
       expect(readFileSync(file, 'utf8'), file).not.toMatch(/(?:from|import\s*\()\s*['"]node:/);
     }
+  });
+});
+
+// --- K8a task 5: flat positive corpus, typed refusals, sync API, term.* audit names ---
+
+/** A pack whose only canary is the flat `positiveCorpus` (every per-term `positive` list is empty). */
+function flatPack(positiveCorpus: string[], over: Partial<TermPack> = {}): TermPack {
+  const base = syntheticTermPack();
+  return { ...base, terms: base.terms.map((t) => ({ ...t, positive: [] })), positiveCorpus, ...over };
+}
+const FLAT = ['you zorbak', 'f3nr1sk!', 'tarvo lake tarvo', 'hello there'];
+
+describe('flat positiveCorpus canary', () => {
+  it('refuses an exception that unblocks a flat line: code, index only, nothing written', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    const before = structuredClone(r.store.state);
+    const res = await r.live.change('a', (e) => e.addException({ phrase: 'you zorbak', language: 'en' }));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.code).toBe('unblocks_known');
+    expect(res.error).toMatch(/positive corpus line 0\b/);
+    for (const secret of ['zorbak', 'f3nr1sk', 'tarvo']) expect(res.error.toLowerCase()).not.toContain(secret);
+    expect(r.store.state).toEqual(before);
+    expect(r.store.state.audit).toEqual([]);
+    expect(blocked(r.live, 'you zorbak')).toBe(true);
+  });
+
+  it('names the index of the line that tripped, not the first line', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    const res = await r.live.change('a', (e) => e.addException({ phrase: 'f3nr1sk', language: 'en' }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/positive corpus line 1\b/);
+  });
+
+  it('exception update that starts shielding a flat line is refused and rolled back', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    const add = await r.live.change('a', (e) => e.addException({ phrase: 'blorft stew', language: 'en' }));
+    if (!add.ok) throw new Error('setup');
+    const audit = structuredClone(r.store.state.audit);
+    const res = await r.live.change('a', (e) => e.updateException(add.value, { phrase: 'zorbak' }));
+    expect(res).toMatchObject({ ok: false, code: 'unblocks_known' });
+    expect(r.store.state.exceptions.at(-1)!.phrase).toBe('blorft stew');
+    expect(r.store.state.audit).toEqual(audit);
+    expect(blocked(r.live, 'you zorbak')).toBe(true);
+  });
+
+  it('exception toggle on (a shielding exception sitting disabled) is refused; staying off is fine', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    r.store.state.exceptions.push({
+      id: 'bad', phrase: 'zorbak', language: 'en', active: false, note: null, addedBy: 'x', addedAt: 1, updatedBy: null, updatedAt: null,
+    });
+    await r.live.load();
+    const before = structuredClone(r.store.state);
+    const res = await r.live.change('a', (e) => e.setExceptionActive('bad', true));
+    expect(res).toMatchObject({ ok: false, code: 'unblocks_known' });
+    expect(r.store.state).toEqual(before);
+    expect((await r.live.change('a', (e) => e.setExceptionActive('bad', false))).ok).toBe(true);
+    expect(blocked(r.live, 'you zorbak')).toBe(true);
+  });
+
+  it('a term disable that stops the terms alone blocking a flat line is allowed (not a canary trip)', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    const res = await r.live.change('a', (e) => e.setTermActive('syn:zorbak', false));
+    expect(res.ok).toBe(true);
+    expect(blocked(r.live, 'you zorbak')).toBe(false);
+    expect(r.store.state.audit.map((a) => a.action)).toEqual(['term.toggle']);
+  });
+
+  it('a term update that moves the word off a flat line is allowed too', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    expect((await r.live.change('a', (e) => e.updateTerm('syn:zorbak', { term: 'zorbek' }))).ok).toBe(true);
+    expect(blocked(r.live, 'you zorbak')).toBe(false);
+  });
+
+  it('a disabled term plus an exception for it in one change is allowed', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    const res = await r.live.change('a', (e) => {
+      e.setTermActive('syn:zorbak', false);
+      e.addException({ phrase: 'glarn zorbak stew', language: 'en' });
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('a no-op edit passes and writes nothing', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    const before = structuredClone(r.store.state);
+    const res = await r.live.change('a', (e) => {
+      e.setTermActive('syn:zorbak', true);
+      e.updateTerm('syn:zorbak', {});
+      e.setExceptionActive('syn-ex:tarvo-lake', true);
+      e.updateException('syn-ex:tarvo-lake', {});
+    });
+    expect(res.ok).toBe(true);
+    expect(r.store.state).toEqual(before);
+  });
+
+  it('controls: an unrelated exception passes; a flat line the terms never block is ignored', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    // 'hello there' is in the corpus but no term blocks it, so an exception can not "unblock" it.
+    const res = await r.live.change('a', (e) => {
+      e.addException({ phrase: 'hello there', language: 'en' });
+      e.addException({ phrase: 'glarn quissel', language: 'en' });
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it('a flat line shielded in the middle of a longer change refuses the whole change', async () => {
+    const r = await loaded({ pack: flatPack(FLAT) });
+    const before = structuredClone(r.store.state);
+    const res = await r.live.change('a', (e) => {
+      e.addTerm({ term: 'blorft', language: 'en' });
+      e.addException({ phrase: 'zorbak', language: 'en' });
+    });
+    expect(res).toMatchObject({ ok: false, code: 'unblocks_known' });
+    expect(r.store.state).toEqual(before);
+  });
+
+  it('the per-term canary is unchanged: it still names the term row', async () => {
+    const r = await loaded();
+    const res = await r.live.change('a', (e) => e.addException({ phrase: 'zorbak', language: 'en' }));
+    expect(res).toMatchObject({ ok: false, code: 'unblocks_known' });
+    if (!res.ok) expect(res.error).toMatch(/positive line \d+ of term syn:zorbak/);
+  });
+
+  it('a flat line trips even though the per-term lists are empty, and both lists are checked when both exist', async () => {
+    const r = await loaded({ pack: flatPack(['you quissel!']) });
+    const res = await r.live.change('a', (e) => e.addException({ phrase: 'you quissel', language: 'en' }));
+    expect(res).toMatchObject({ ok: false, code: 'unblocks_known', error: expect.stringMatching(/positive corpus line 0/) });
+    const both = await loaded({ pack: syntheticTermPack({ positiveCorpus: ['you quissel!'] }) });
+    expect(await both.live.change('a', (e) => e.addException({ phrase: 'quissel', language: 'en' }))).toMatchObject({
+      ok: false,
+      code: 'unblocks_known',
+    });
+  });
+
+  it('no positiveCorpus key means no flat canary; an empty one too', async () => {
+    const noKey = { ...flatPack([]) } as Partial<TermPack>;
+    delete noKey.positiveCorpus;
+    for (const pack of [noKey as TermPack, flatPack([])]) {
+      const r = await loaded({ pack });
+      expect((await r.live.change('a', (e) => e.addException({ phrase: 'zorbak', language: 'en' }))).ok).toBe(true);
+    }
+  });
+
+  it('with no pack there is no flat canary', async () => {
+    const r = await loaded({ pack: null });
+    await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }));
+    expect((await r.live.change('a', (e) => e.addException({ phrase: 'blorft', language: 'en' }))).ok).toBe(true);
+  });
+
+  it('the synthetic pack ships a small flat corpus of invented lines that its own terms block', async () => {
+    const pack = syntheticTermPack();
+    expect(pack.positiveCorpus!.length).toBeGreaterThanOrEqual(3);
+    const r = await loaded({ pack });
+    for (const line of pack.positiveCorpus!) expect(blocked(r.live, line), line).toBe(true);
+  });
+});
+
+describe('typed refusals', () => {
+  it('duplicate', async () => {
+    const r = await loaded();
+    const add = await r.live.change('a', (e) => e.addTerm({ term: 'ZORBAK', language: 'en' }));
+    expect(add).toMatchObject({ ok: false, code: 'duplicate', error: expect.stringMatching(/duplicate term/) });
+    const ex = await r.live.change('a', (e) => e.addException({ phrase: 'Tarvo  Lake', language: 'en' }));
+    expect(ex).toMatchObject({ ok: false, code: 'duplicate' });
+    const edit = await r.live.change('a', (e) => e.updateTerm('syn:vlemmo', { term: 'quissel' }));
+    expect(edit).toMatchObject({ ok: false, code: 'duplicate' });
+  });
+
+  it('unblocks_known', async () => {
+    const r = await loaded();
+    const res = await r.live.change('a', (e) => e.addException({ phrase: 'zorbak', language: 'en' }));
+    expect(res).toMatchObject({ ok: false, code: 'unblocks_known', error: expect.stringMatching(/would unblock/) });
+  });
+
+  it('invalid: malformed term, blank exception, no active term would remain', async () => {
+    const r = await loaded();
+    for (const bad of ['two words', 'zz', 'blorft!']) {
+      expect(await r.live.change('a', (e) => e.addTerm({ term: bad, language: 'en' })), bad).toMatchObject({ ok: false, code: 'invalid' });
+    }
+    expect(await r.live.change('a', (e) => e.addException({ phrase: '  ', language: 'en' }))).toMatchObject({ ok: false, code: 'invalid' });
+    const one = await loaded({ pack: syntheticTermPack({ terms: [syntheticTermPack().terms[0]!], exceptions: [] }) });
+    expect(await one.live.change('a', (e) => e.setTermActive('syn:zorbak', false))).toMatchObject({
+      ok: false,
+      code: 'invalid',
+      error: expect.stringMatching(/no active term/),
+    });
+  });
+
+  it('not_found: an unknown term or exception id', async () => {
+    const r = await loaded();
+    expect(await r.live.change('a', (e) => e.updateTerm('nope', { note: 'x' }))).toMatchObject({ ok: false, code: 'not_found' });
+    expect(await r.live.change('a', (e) => e.setTermActive('nope', false))).toMatchObject({ ok: false, code: 'not_found' });
+    expect(await r.live.change('a', (e) => e.updateException('nope', { note: 'x' }))).toMatchObject({ ok: false, code: 'not_found' });
+    expect(await r.live.change('a', (e) => e.setExceptionActive('nope', false))).toMatchObject({ ok: false, code: 'not_found' });
+  });
+
+  it('not_loaded', async () => {
+    const r = rig();
+    expect(await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }))).toEqual({
+      ok: false,
+      error: 'not loaded',
+      code: 'not_loaded',
+    });
+    expect(r.live.changeSync('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }))).toEqual({
+      ok: false,
+      error: 'not loaded',
+      code: 'not_loaded',
+    });
+  });
+
+  it('build_failed: the store failing while the matcher is rebuilt refuses, logs the class only, and writes nothing', async () => {
+    const r = await loaded();
+    const before = structuredClone(r.store.state);
+    r.store.fail = (m) => {
+      // After the edit, while the matcher is rebuilt from the store: a failure of the store, not a rule.
+      if (m === 'listExceptions') throw new TypeError('disk on fire: zorbak');
+    };
+    const res = await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }));
+    expect(res).toEqual({ ok: false, error: 'the term store failed; no change was made', code: 'build_failed' });
+    r.store.fail = () => {};
+    expect(r.store.state).toEqual(before);
+    expect(r.warn).toHaveBeenCalledWith('terms.change_failed', { error: 'TypeError' });
+    expectLogsFree(r.warn);
+  });
+
+  it('a success has no code, and a refusal keeps the error string', async () => {
+    const r = await loaded();
+    const res = await r.live.change('a', (e) => e.addTerm({ term: 'zorbak', language: 'en' }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(['duplicate', 'unblocks_known', 'invalid', 'not_found', 'not_loaded', 'build_failed']).toContain(res.code);
+      expect(typeof res.error).toBe('string');
+    }
+    const good = await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }));
+    expect(good.ok).toBe(true);
+    expect('code' in good).toBe(false);
+  });
+
+  it('a throw from fn still rejects with that error (not a refusal)', async () => {
+    const r = await loaded();
+    await expect(r.live.change('a', () => { throw new RangeError('mine'); })).rejects.toThrow('mine');
+    expect(() => r.live.changeSync('a', () => { throw new RangeError('mine'); })).toThrow('mine');
+  });
+});
+
+describe('synchronous API', () => {
+  const thenable = (v: unknown) => typeof v === 'object' && v !== null && typeof (v as { then?: unknown }).then === 'function';
+
+  it('loadSync seeds and builds without a promise', () => {
+    const r = rig();
+    const out: unknown = r.live.loadSync();
+    expect(out).toBeUndefined();
+    expect(thenable(out)).toBe(false);
+    expect(r.store.state.seeded).toEqual(['synthetic']);
+    expect(r.live.usingPack).toBe(false);
+    expect(blocked(r.live, 'you zorbak')).toBe(true);
+  });
+
+  it('changeSync returns a plain result, applies the edit and writes the audit', () => {
+    const r = rig();
+    r.live.loadSync();
+    const res = r.live.changeSync('alice', (e) => e.addTerm({ term: 'blorft', language: 'en' }));
+    expect(thenable(res)).toBe(false);
+    expect(res.ok).toBe(true);
+    expect(blocked(r.live, 'what a blorft')).toBe(true);
+    expect(r.store.state.audit.map((a) => a.action)).toEqual(['term.add']);
+  });
+
+  it('changeSync refusals are plain objects with a code', () => {
+    const r = rig();
+    r.live.loadSync();
+    const res = r.live.changeSync('a', (e) => e.addTerm({ term: 'zorbak', language: 'en' }));
+    expect(thenable(res)).toBe(false);
+    expect(res).toMatchObject({ ok: false, code: 'duplicate' });
+  });
+
+  it('changeSync refuses an async fn (a TypeError, nothing written)', () => {
+    const r = rig();
+    r.live.loadSync();
+    const before = structuredClone(r.store.state);
+    expect(() => r.live.changeSync('a', (async () => 1) as never)).toThrow(TypeError);
+    expect(r.store.state).toEqual(before);
+  });
+
+  it('loadSync fails open like load: logs, falls back to the pack, never throws', () => {
+    const r = rig();
+    r.store.fail = (m) => {
+      if (m === 'listTerms') throw new Error('boom');
+    };
+    expect(() => r.live.loadSync()).not.toThrow();
+    expect(r.warn).toHaveBeenCalledWith('terms.load_failed', { error: 'Error' });
+    expect(r.live.usingPack).toBe(true);
+    expect(blocked(r.live, 'you zorbak')).toBe(true);
+  });
+
+  it('the async wrappers resolve to the same results as the Sync versions', async () => {
+    const a = rig();
+    const b = rig();
+    a.live.loadSync();
+    await b.live.load();
+    expect(b.store.state).toEqual(a.store.state);
+    const steps: Array<(e: TermEditor) => unknown> = [
+      (e) => e.setTermActive('syn:snerp', false),
+      (e) => e.addException({ phrase: 'zorbak', language: 'en' }),
+      (e) => e.updateTerm('nope', {}),
+      (e) => e.addTerm({ term: 'zorbak', language: 'en' }),
+      (e) => e.setTermActive('syn:snerp', true),
+    ];
+    for (const step of steps) {
+      const sync = a.live.changeSync('a', step);
+      const wrapped = await b.live.change('a', step);
+      const norm = (x: typeof sync) => (x.ok ? { ok: true } : x);
+      expect(norm(wrapped)).toEqual(norm(sync));
+    }
+    expect(b.store.state.audit).toEqual(a.store.state.audit);
+    expect(b.store.state.terms.map((t) => [t.id, t.active])).toEqual(a.store.state.terms.map((t) => [t.id, t.active]));
+  });
+
+  it('load() and change() still return promises', async () => {
+    const r = rig();
+    const l = r.live.load();
+    expect(thenable(l)).toBe(true);
+    await l;
+    const c = r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }));
+    expect(thenable(c)).toBe(true);
+    expect((await c).ok).toBe(true);
+  });
+});
+
+describe('audit action names', () => {
+  it('terms and exceptions write the closed term.* / exception.* names', async () => {
+    const r = await loaded();
+    const t = await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }));
+    const x = await r.live.change('a', (e) => e.addException({ phrase: 'blorft stew', language: 'en' }));
+    if (!t.ok || !x.ok) throw new Error('setup');
+    await r.live.change('a', (e) => e.updateTerm(t.value, { note: 'n' }));
+    await r.live.change('a', (e) => e.updateException(x.value, { note: 'n' }));
+    await r.live.change('a', (e) => e.setTermActive(t.value, false));
+    await r.live.change('a', (e) => e.setExceptionActive(x.value, false));
+    expect(r.store.state.audit.map((a) => a.action)).toEqual([
+      'term.add', 'exception.add', 'term.update', 'exception.update', 'term.toggle', 'exception.toggle',
+    ]);
+  });
+
+  it('every action is in core AUDIT_ACTIONS', async () => {
+    const { AUDIT_ACTIONS } = await import('@chatwarden/core');
+    const r = await loaded();
+    await r.live.change('a', (e) => {
+      const t = e.addTerm({ term: 'blorft', language: 'en' });
+      const x = e.addException({ phrase: 'blorft stew', language: 'en' });
+      e.updateTerm(t, { note: 'n' });
+      e.updateException(x, { note: 'n' });
+      e.setTermActive(t, false);
+      e.setExceptionActive(x, false);
+    });
+    expect(r.store.state.audit).toHaveLength(6);
+    for (const row of r.store.state.audit) expect(AUDIT_ACTIONS as readonly string[]).toContain(row.action);
+  });
+
+  it('a toggle records the direction in after_json.active (and before_json.active)', async () => {
+    const r = await loaded();
+    await r.live.change('a', (e) => e.setTermActive('syn:snerp', false));
+    await r.live.change('a', (e) => e.setTermActive('syn:snerp', true));
+    await r.live.change('a', (e) => e.setExceptionActive('syn-ex:tarvo-lake', false));
+    await r.live.change('a', (e) => e.setExceptionActive('syn-ex:tarvo-lake', true));
+    const rows = r.store.state.audit;
+    expect(rows.map((a) => a.action)).toEqual(['term.toggle', 'term.toggle', 'exception.toggle', 'exception.toggle']);
+    expect(rows.map((a) => JSON.parse(a.afterJson).active)).toEqual([false, true, false, true]);
+    expect(rows.map((a) => JSON.parse(a.beforeJson!).active)).toEqual([true, false, true, false]);
   });
 });

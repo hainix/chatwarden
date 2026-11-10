@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS, purge, type AuditRow } from '@chatwarden/core';
+import { AUDIT_ACTIONS, createChatwarden, purge, type AuditRow } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { MIGRATIONS, openStore } from '../src/index.js';
 
@@ -184,6 +184,51 @@ describe('rows written by the real term editor', () => {
     expect(dumped).not.toMatch(/quissel|drakkuun|typed|note/);
     // The text is in the table (legacy), which is why the store never selects those columns.
     expect(String(db.prepare('SELECT group_concat(after_json) AS j FROM kit_audit').get()?.j)).toContain('quissel');
+  });
+});
+
+describe('term edit history through cw.audit.list (new term.* rows and legacy raw rows together)', () => {
+  it('lists LiveTerms rows by term.* / exception.* action, with direction in after_json, and maps old raw names', async () => {
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    // Rows an earlier release wrote, with the raw names.
+    const old = db.prepare(
+      `INSERT INTO kit_audit (id, at, actor, action, subject_type, subject_ref, before_json, after_json)
+       VALUES (?, ?, 'old-mod', ?, ?, ?, NULL, '{"active":false}')`,
+    );
+    old.run('o1', 1, 'disable', 'term', 'old-t');
+    old.run('o2', 2, 'edit', 'exception', 'old-x');
+    old.run('o3', 3, 'add', 'term', 'old-t2');
+    let t = NOW;
+    const clock = { now: () => t++ };
+    const live = new LiveTerms({ store, pack: null, clock, logger: { warn() {} } });
+    await live.load();
+    const made = await live.change('new-mod', (e) => ({
+      t: e.addTerm({ term: 'quissel', language: 'en' }),
+      x: e.addException({ phrase: 'drakkuun', language: 'en' }),
+      keep: e.addTerm({ term: 'fenrisk', language: 'en' }),
+    }));
+    if (!made.ok) throw new Error('setup');
+    await live.change('new-mod', (e) => e.setTermActive(made.value.t, false));
+    await live.change('new-mod', (e) => e.updateException(made.value.x, { note: 'n' }));
+
+    const cw = await createChatwarden({ store, secret: 'k'.repeat(32), platform: { identify: (c) => c as never }, clock, retention: false });
+    const refs = (action: Parameters<typeof cw.audit.list>[0]['action']) =>
+      cw.audit.list({ limit: 50, action }).items.map((i) => `${i.actor}:${i.target?.ref}`).sort();
+    expect(refs('term.toggle')).toEqual([`new-mod:${made.value.t}`, 'old-mod:old-t'].sort());
+    expect(refs('exception.update')).toEqual([`new-mod:${made.value.x}`, 'old-mod:old-x'].sort());
+    expect(refs('term.add')).toEqual([`new-mod:${made.value.keep}`, `new-mod:${made.value.t}`, 'old-mod:old-t2'].sort());
+    expect(refs('exception.add')).toEqual([`new-mod:${made.value.x}`]);
+    expect(cw.audit.list({ limit: 50, action: 'term.update' }).items).toEqual([]);
+
+    // New rows are stored under the closed names, so a raw read sees them as they are.
+    const raw = db.prepare("SELECT action, after_json FROM kit_audit WHERE actor = 'new-mod' ORDER BY rowid").all();
+    expect(raw.map((r) => r.action)).toEqual(['term.add', 'exception.add', 'term.add', 'term.toggle', 'exception.update']);
+    expect(JSON.parse(String(raw[3]!.after_json)).active).toBe(false);
+    for (const r of raw) expect(AUDIT_ACTIONS as readonly string[]).toContain(r.action);
+    // The list never carries text.
+    expect(JSON.stringify(cw.audit.list({ limit: 50 }))).not.toMatch(/quissel|drakkuun|fenrisk|json/);
+    await cw.close();
   });
 });
 

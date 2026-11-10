@@ -36,11 +36,32 @@ export interface TermEditor {
   setExceptionActive(id: string, active: boolean): void;
 }
 
-export type ChangeResult<T> = { ok: true; value: T } | { ok: false; error: string };
+/**
+ * Why {@link LiveTerms.change} refused, for a caller that branches on it instead of reading the message:
+ * - `duplicate`: the word reads as the same as another row (terms and exceptions, any language, active or not).
+ * - `unblocks_known`: an exception would unblock a line the pack requires blocked (a term's `positive` line or a
+ *   `positiveCorpus` line that the terms alone block).
+ * - `invalid`: a term or exception is malformed (blank, more than one word, too short), or no active term would remain.
+ * - `not_found`: the edit named a term or exception id the store does not have.
+ * - `not_loaded`: a pack is configured and `load()` / `loadSync()` has not built from the store yet.
+ * - `build_failed`: the store failed while the edit was being checked and committed (the matcher rebuild reads it);
+ *   nothing was changed and the error class was logged as `terms.change_failed`. A throw from the edit function itself is
+ *   not a refusal: it rejects (or, in `changeSync`, throws).
+ */
+export type ChangeRefusalCode = 'duplicate' | 'unblocks_known' | 'invalid' | 'not_found' | 'not_loaded' | 'build_failed';
+
+/** `error` is a message safe to show a moderator (it never quotes a term or a line); `code` is the same refusal as data. */
+export type ChangeResult<T> = { ok: true; value: T } | { ok: false; error: string; code: ChangeRefusalCode };
 export type CheckResult = { ok: true; hits: string[] } | { ok: false; error: string };
 
 /** A change the rules refuse. The message is safe to hand back to a moderator (it never quotes a term). */
-class Refusal extends Error {}
+class Refusal extends Error {
+  readonly code: ChangeRefusalCode;
+  constructor(code: ChangeRefusalCode, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 /** 16 random bytes as 22 unpadded base64url characters. Web Crypto (`globalThis.crypto`, present in Node and every browser),
@@ -141,8 +162,16 @@ export class LiveTerms implements Matcher {
   }
 
   /** Copies the pack into the store the first time this pack id is seen, then builds the matcher from the
-   *  store. On failure it logs and keeps the previous store matcher, or falls back to the pack. */
+   *  store. On failure it logs and keeps the previous store matcher, or falls back to the pack.
+   *
+   *  A thin async wrapper over {@link loadSync}. A synchronous host (a relay boot, a constructor) calls `loadSync`. */
   async load(): Promise<void> {
+    this.loadSync();
+  }
+
+  /** {@link load} without a promise: the same seed and build, done by the time it returns. It never throws (it fails
+   *  open, as `load` does). Use it where the host cannot await, such as a synchronous relay boot. */
+  loadSync(): void {
     try {
       this.seed();
       this.install(this.readRows());
@@ -176,12 +205,23 @@ export class LiveTerms implements Matcher {
    * Runs `fn` (which edits through the {@link TermEditor}) atomically with the matcher reload. The change
    * is refused, with nothing written, when no active term would remain, a term or exception is malformed,
    * a word duplicates another, or an exception would unblock a pack `positive` line that the terms alone
-   * block. A throw from `fn` itself rolls back and rejects with that error. `fn` must be synchronous.
+   * block (a term's `positive` line, or a line of the pack's flat `positiveCorpus`). A throw from `fn` itself
+   * rolls back and rejects with that error. `fn` must be synchronous. A refusal carries a `code`
+   * ({@link ChangeRefusalCode}) next to the message.
+   *
+   * A thin async wrapper over {@link changeSync}. A synchronous host (a relay boot, a handler that cannot await)
+   * calls `changeSync` and gets the same result without a promise.
    */
   async change<T>(actor: string, fn: (edit: TermEditor) => T): Promise<ChangeResult<T>> {
+    return this.changeSync(actor, fn);
+  }
+
+  /** {@link change} without a promise: the same atomic edit and refusals, with the result returned directly.
+   *  A throw from `fn` is thrown (where `change` rejects). */
+  changeSync<T>(actor: string, fn: (edit: TermEditor) => T): ChangeResult<T> {
     // With a pack configured, the store is not the truth until `load()` has seeded it and built from it: an
     // edit before then would act on an unseeded store. Refuse, writing nothing and never calling `fn`.
-    if (this.pack !== null && !this.storeLoaded) return { ok: false, error: 'not loaded' };
+    if (this.pack !== null && !this.storeLoaded) return { ok: false, error: 'not loaded', code: 'not_loaded' };
     // Everything up to the swap is synchronous, so two changes never interleave.
     const state: { fnError?: { err: unknown }; built?: { matcher: Matcher; rows: Rows } } = {};
     try {
@@ -206,9 +246,9 @@ export class LiveTerms implements Matcher {
     } catch (err) {
       this.resync();
       if (state.fnError) throw state.fnError.err;
-      if (err instanceof Refusal) return { ok: false, error: err.message };
+      if (err instanceof Refusal) return { ok: false, error: err.message, code: err.code };
       this.logger.warn('terms.change_failed', { error: errName(err) });
-      return { ok: false, error: 'the term store failed; no change was made' };
+      return { ok: false, error: 'the term store failed; no change was made', code: 'build_failed' };
     }
   }
 
@@ -306,25 +346,28 @@ export class LiveTerms implements Matcher {
   private validate(): { matcher: Matcher; rows: Rows } {
     const rows = this.readRows();
     if (!rows.terms.some((t) => t.active)) {
-      throw new Refusal('no active term would remain: at least one term must stay enabled');
+      throw new Refusal('invalid', 'no active term would remain: at least one term must stay enabled');
     }
     let matcher: Matcher;
     try {
       matcher = buildMatcher(rows.terms, rows.exceptions);
     } catch (err) {
-      if (err instanceof MatcherBuildError) throw new Refusal(describeBuildError(err, true));
+      if (err instanceof MatcherBuildError) throw new Refusal('invalid', describeBuildError(err, true));
       throw err;
     }
     // Canary: every positive line the active terms block on their own must still be blocked once the
     // exceptions apply. The error names the term row and the line's index, not the line (it is a slur).
+    // Two lists, one rule: each term's own `positive` lines, then the pack's flat `positiveCorpus`.
     if (this.pack) {
       const termsOnly = buildMatcher(rows.terms, []);
+      const unblocked = (line: string): boolean => termsOnly.match(line) !== null && matcher.match(line) === null;
       for (const t of this.pack.terms) {
         for (const [i, line] of t.positive.entries()) {
-          if (termsOnly.match(line) !== null && matcher.match(line) === null) {
-            throw new Refusal(`exception would unblock positive line ${i} of term ${t.id}`);
-          }
+          if (unblocked(line)) throw new Refusal('unblocks_known', `exception would unblock positive line ${i} of term ${t.id}`);
         }
+      }
+      for (const [i, line] of (this.pack.positiveCorpus ?? []).entries()) {
+        if (unblocked(line)) throw new Refusal('unblocks_known', `exception would unblock positive corpus line ${i}`);
       }
     }
     return { matcher, rows };
@@ -387,21 +430,21 @@ export class LiveTerms implements Matcher {
     if (key === '') return;
     for (const r of kind.words()) {
       if (r.id !== selfId && kind.key(r.word) === key) {
-        throw new Refusal(`duplicate ${kind.subject}: matches existing row ${r.id}`);
+        throw new Refusal('duplicate', `duplicate ${kind.subject}: matches existing row ${r.id}`);
       }
     }
   }
 
   private snapshot(kind: Kind, id: string): Record<string, unknown> {
     const row = kind.get(id);
-    if (!row) throw new Refusal(`${kind.subject} not found: ${id}`);
+    if (!row) throw new Refusal('not_found', `${kind.subject} not found: ${id}`);
     return { ...row };
   }
 
   private audit(
     kind: Kind,
     actor: string,
-    action: 'add' | 'edit' | 'enable' | 'disable',
+    op: 'add' | 'update' | 'toggle',
     id: string,
     before: Record<string, unknown> | null,
     after: Record<string, unknown>,
@@ -410,7 +453,7 @@ export class LiveTerms implements Matcher {
     this.store.writeAudit({
       at: this.clock.now(),
       actor,
-      action,
+      action: `${kind.subject}.${op}`,
       subjectType: kind.subject,
       subjectRef: id,
       beforeJson: before === null ? null : JSON.stringify(before),
@@ -442,7 +485,7 @@ export class LiveTerms implements Matcher {
       actor,
       this.clock.now(),
     );
-    this.audit(kind, actor, 'edit', id, before, this.snapshot(kind, id), hits);
+    this.audit(kind, actor, 'update', id, before, this.snapshot(kind, id), hits);
   }
 
   /** A toggle to the state the row is already in writes nothing, so the audit trail only records real changes. */
@@ -450,7 +493,7 @@ export class LiveTerms implements Matcher {
     const before = this.snapshot(kind, id);
     if (before.active === active) return;
     kind.setActive(id, active, actor, this.clock.now());
-    this.audit(kind, actor, active ? 'enable' : 'disable', id, before, this.snapshot(kind, id));
+    this.audit(kind, actor, 'toggle', id, before, this.snapshot(kind, id));
   }
 }
 
