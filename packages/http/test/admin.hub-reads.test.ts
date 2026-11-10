@@ -76,6 +76,19 @@ describe('GET /people/:ref/history: sanctions and asReporter', () => {
     expect(await handleOf(blank.target)).toBeNull();
   });
 
+  it('handle is the newest non-blank one: an older report named them, the newest recorded none; null when none ever did', async () => {
+    const w = await world();
+    await file(w, { targetHandle: 'Snerp', key: 'raw-client-key-history-fallback' });
+    w.clock.t += 5000;
+    const newest = await file(w, { targetHandle: '', key: 'raw-client-key-history-fallback' });
+    const handleOf = async (ref: string): Promise<unknown> => ((await w.call('GET', `/people/${ref}/history`)).body as { handle: unknown }).handle;
+    expect(await handleOf(newest.target)).toBe('Snerp');
+    const never = await file(w, { targetHandle: '', key: 'raw-client-key-history-never-1' });
+    w.clock.t += 5000;
+    await file(w, { targetHandle: '', key: 'raw-client-key-history-never-1' });
+    expect(await handleOf(never.target)).toBeNull();
+  });
+
   it('handle adds no audit row beyond history.view', async () => {
     const w = await world();
     const r = await file(w);
@@ -271,6 +284,19 @@ describe('GET /sanctions', () => {
       w.clock.t += 1000;
       const y = await sanction(w, named.target, { kind: 'warning', durationMs: null });
       expect([await handleOf(w, x.groupId), await handleOf(w, y.groupId)]).toEqual(['Vlemmo', 'Vlemmo']);
+    });
+
+    it('is the newest NON-BLANK handle: an older report named them, the newest recorded none, so the older name is used', async () => {
+      const w = await world();
+      await file(w, { targetHandle: 'Glarn', key: 'raw-client-key-fallback-sanction' });
+      w.clock.t += 5000;
+      const newest = await file(w, { targetHandle: '', key: 'raw-client-key-fallback-sanction' });
+      const s = await sanction(w, newest.target);
+      expect(await handleOf(w, s.groupId)).toBe('Glarn');
+      // A newer non-blank one wins over the older one.
+      w.clock.t += 5000;
+      await file(w, { targetHandle: 'Tarvo', key: 'raw-client-key-fallback-sanction' });
+      expect(await handleOf(w, s.groupId)).toBe('Tarvo');
     });
 
     it('counts only reports filed against the person (a reporter has none), and an automatic sanction carries it too', async () => {

@@ -83,7 +83,7 @@ const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string
  *   caller's claim; while they have other open reports it is kept (one case per person).
  * - `GET /people/:ref/history?limit`: a person's actions, recent reports against them, their sanctions as
  *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
- *   filed stand, `asReporter`, and `handle`, their handle on the newest report filed against them or null (`history.view`)
+ *   filed stand, `asReporter`, and `handle`, their handle on the newest report filed against them that recorded one, or null (`history.view`)
  */
 export function reportRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
@@ -190,7 +190,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         category: r.category,
       }));
       // The name to show for the person: their handle on the newest report filed against them (null when none, or none recorded).
-      const handle = filed[0]?.targetHandle === undefined || filed[0].targetHandle === '' ? null : filed[0].targetHandle;
+      const handle = filed.find((r) => r.targetHandle !== '')?.targetHandle ?? null;
       const sanctions = cw.sanctions.forPerson(ref);
       const asReporter = cw.reports.reporterRecord(ref);
       c.audit('history.view', { type: 'person', ref });

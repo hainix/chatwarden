@@ -4,6 +4,7 @@ import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { applySanction, needForSanction, parseSanction } from './apply.js';
 import { gateCase } from './claims.js';
+import { latestHandle } from './handles.js';
 import type { AdminContext } from './context.js';
 import { bodyObject, bodyTakeOver, bodyText, queryLimit } from './validate.js';
 
@@ -40,8 +41,7 @@ export function sanctionRoutes(ctx: AdminContext): RouteTable {
       const handles = new Map<string, string | null>();
       for (const { person } of page.items) {
         if (handles.has(person)) continue;
-        const latest = cw.reports.list({ person, limit: 1 }).items[0];
-        handles.set(person, latest === undefined || latest.targetHandle === '' ? null : latest.targetHandle);
+        handles.set(person, latestHandle(cw, person));
       }
       const items = page.items.map((i) => ({ ...i, handle: handles.get(i.person) ?? null }));
       return { status: 200, body: { items, next: page.next } };
