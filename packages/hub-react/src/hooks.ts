@@ -127,7 +127,8 @@ export interface PagedList<T> {
   /** A later page is loading. */
   loadingMore: boolean;
   error: HubError | null;
-  loadMore: () => Promise<void>;
+  /** Resolves with how many items it added (0 when there was nothing to load, a page was already loading, or it failed). */
+  loadMore: () => Promise<number>;
   /** Start over from the first page (the list stays on screen until it answers). */
   reload: () => void;
 }
@@ -179,17 +180,20 @@ export function usePagedList<T>(key: string, load: (cursor: string | undefined) 
   const own = state.key === key;
   const current = own ? state : freshList<T>(key);
 
-  const loadMore = useCallback(async (): Promise<void> => {
-    if (more.current || !state.loaded || state.next === null || state.key !== key) return;
+  const loadMore = useCallback(async (): Promise<number> => {
+    if (more.current || !state.loaded || state.next === null || state.key !== key) return 0;
     more.current = true;
     const mine = latest.current;
     const cursor = state.next;
     setState((s) => ({ ...s, loadingMore: true, error: null }));
     try {
       const page = await loadRef.current(cursor);
-      if (mine === latest.current) setState((s) => ({ ...s, items: [...s.items, ...page.items], next: page.next, loadingMore: false, error: null }));
+      if (mine !== latest.current) return 0;
+      setState((s) => ({ ...s, items: [...s.items, ...page.items], next: page.next, loadingMore: false, error: null }));
+      return page.items.length;
     } catch (e) {
       if (mine === latest.current) setState((s) => ({ ...s, loadingMore: false, error: toHubError(e) }));
+      return 0;
     } finally {
       if (mine === latest.current) more.current = false;
     }

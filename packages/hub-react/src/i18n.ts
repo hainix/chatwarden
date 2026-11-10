@@ -40,6 +40,8 @@ export const en = {
   'hub.route.notFound.back': 'Back to the overview',
   'hub.route.soon.title': '{name} is not available yet',
   'hub.route.soon.body': 'This screen is still being built.',
+  'hub.route.soon.name.report': 'Report',
+  'hub.route.soon.name.person': 'Person',
 
   'hub.state.loading': 'Loading',
   'hub.state.retry': 'Try again',
@@ -63,6 +65,7 @@ export const en = {
   'hub.overview.stat.reports': 'Open reports',
   'hub.overview.stat.longest': 'Longest wait',
   'hub.overview.stat.longestNote': 'Oldest open report is against {who}',
+  'hub.overview.stat.none': 'None',
   'hub.overview.stat.nobody': 'Nobody is waiting',
   'hub.overview.stat.partial.one': 'Counted from the newest {count} report. Older ones are not included.',
   'hub.overview.stat.partial.other': 'Counted from the newest {count} reports. Older ones are not included.',
@@ -144,7 +147,7 @@ export const en = {
   // Not `.other`: that is the plural form's name.
   'hub.category.misc': 'Other',
 
-  'hub.person.label': 'Person {tag}',
+  'hub.person.prefix': 'Person',
 } as const;
 
 /** A catalog: keys to English (or translated) text. Any object of strings will do. */

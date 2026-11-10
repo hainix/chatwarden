@@ -278,6 +278,36 @@ describe('usePagedList', () => {
     expect(asked).toEqual([undefined, '1', '2']);
   });
 
+  it('loadMore says how many items it added: the page size, then 0 at the end, a failure or a double call', async () => {
+    let n = 0;
+    const load = (cursor: string | undefined) => {
+      n += 1;
+      if (n === 3) return Promise.reject(boom('network', 0));
+      return Promise.resolve(cursor === undefined ? { items: ['a', 'b'], next: '1' } : { items: ['c'], next: cursor === '1' ? '2' : null });
+    };
+    const { result } = renderHook(() => usePagedList('k', load));
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    let added = -1;
+    await act(async () => {
+      added = await result.current.loadMore();
+    });
+    expect(added).toBe(1);
+    await act(async () => {
+      added = await result.current.loadMore();
+    });
+    expect(added).toBe(0);
+    expect(result.current.error).not.toBeNull();
+    await act(async () => {
+      added = await result.current.loadMore();
+    });
+    expect(added).toBe(1);
+    expect(result.current.next).toBeNull();
+    await act(async () => {
+      added = await result.current.loadMore();
+    });
+    expect(added).toBe(0);
+  });
+
   it('sends one request for a double loadMore', async () => {
     const gate = deferred<{ items: string[]; next: string | null }>();
     let n = 0;
