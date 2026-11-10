@@ -171,7 +171,7 @@ Every `LiveTerms` edit writes one audit row under a closed `AuditAction` name: `
 `exception.add`, `exception.update` and `exception.toggle`. The row's target is the term or exception id. A no-op edit writes
 nothing. Read term edit history with `cw.audit.list({ action: 'term.add', limit: 50 })`, or with any of the other names, when
 `LiveTerms` and `createChatwarden` share the store. The list gives who, when, which action and which row id, and never the
-word. The before and after JSON of a row stay in the store's `kit_audit` table (`before_json` and `after_json`); for a toggle,
+word. The before and after JSON of a row stay in the store's `kit_audit` table (`before_json` and `after_json`; a custom TermStore receives them as `entry.beforeJson` and `entry.afterJson`); for a toggle,
 `after_json.active` says which way it went. Rows an earlier release wrote with the raw names (`add`, `edit`, `enable`, `disable`)
 still read through `audit.list` under the closed names.
 

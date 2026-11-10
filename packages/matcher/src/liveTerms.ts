@@ -64,7 +64,8 @@ class Refusal extends Error {
 }
 
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-/** 16 random bytes as 22 unpadded base64url characters. Web Crypto (`globalThis.crypto`, present in Node and every browser),
+/** Local on purpose: core's randomId is internal, and this package must still link against core 0.1.0 (peer ^0.1.0).
+ *  16 random bytes as 22 unpadded base64url characters. Web Crypto (`globalThis.crypto`, present in Node and every browser),
  *  never a `node:` import, so the matcher bundles for a browser. */
 function newId(): string {
   const raw = new Uint8Array(16);

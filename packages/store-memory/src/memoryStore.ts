@@ -18,7 +18,8 @@ import type {
   DiscordThreadRow,
 } from '@chatwarden/core';
 
-/** 16 random bytes as unpadded base64url (22 characters), from Web Crypto: no `node:` module, so it runs in a browser. */
+/** Local on purpose: core's randomId is internal, and this package must still link against core 0.1.0 (peer ^0.1.0).
+ *  16 random bytes as unpadded base64url (22 characters), from Web Crypto: no `node:` module, so it runs in a browser. */
 function newId(): string {
   const web = (globalThis as { crypto?: { getRandomValues(a: Uint8Array): unknown } }).crypto;
   if (!web || typeof web.getRandomValues !== 'function') throw new Error('chatwarden: no secure random source (globalThis.crypto)');

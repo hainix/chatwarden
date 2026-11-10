@@ -22,7 +22,8 @@ const dirs = readdirSync(join(root, 'packages'), { withFileTypes: true })
   .map((d) => d.name);
 const published = dirs.map((d) => ({ dir: d, pkg: readJson<Manifest>('packages', d, 'package.json') }));
 const names = published.map((p) => p.pkg.name);
-const VERSION = '0.1.1';
+// The fixed group moves together; read the version from core instead of hardcoding it, so a release does not break this test.
+const VERSION = readJson<Manifest>('packages', 'core', 'package.json').version as string;
 // The peer range stays at the first release it was written for: a 0.1.0 consumer is not forced to move for a patch.
 const PEER_RANGE = '^0.1.0';
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
@@ -165,7 +166,7 @@ describe('tiny-chat example', () => {
     expect(tiny.private).toBe(true);
     expect(tiny.name).toBe('@chatwarden/example-tiny-chat');
   });
-  it('depends on every published package as a regular dependency at 0.1.1', () => {
+  it('depends on every published package as a regular dependency at the group version', () => {
     for (const n of names) expect(tiny.dependencies?.[n]).toBe(VERSION);
   });
 });
