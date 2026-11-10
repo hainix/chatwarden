@@ -124,27 +124,33 @@ describe('noActionForm: the "No action needed" body', () => {
   });
 });
 
-describe('reporterWarrants: when a reporter\'s record is worth a warning', () => {
-  const rec = (reports: number, actioned: number) => ({ reports, open: 0, actioned, dismissed: reports - actioned, badFaith: 0, suspendedUntil: null });
-  it.each([
-    [0, 0, false],
-    [1, 0, false],
-    [2, 0, false],
-    [3, 3, false],
-    [3, 2, false],
-    [3, 1, false],
-    [3, 0, true],
-    [4, 0, true],
-    [4, 1, true],
-    [4, 2, false],
-    [6, 2, false],
-    [6, 1, true],
-    [30, 10, false],
-    [30, 9, true],
-    [100, 33, true],
-    [100, 34, false],
-  ])('%i reports, %i upheld: %s', (reports, upheld, expected) => {
-    expect(reporterWarrants(rec(reports, upheld))).toBe(expected);
+describe("reporterWarrants: when a reporter's record is worth a warning", () => {
+  // Only decided reports count: open ones are neither upheld nor not upheld.
+  const rec = (open: number, actioned: number, dismissed: number) => ({ reports: open + actioned + dismissed, open, actioned, dismissed, badFaith: 0, suspendedUntil: null });
+  const table: Array<[number, number, number, boolean]> = [
+    // open, upheld, not upheld, warning
+    [0, 0, 0, false],
+    [3, 0, 0, false],
+    [9, 0, 0, false],
+    [0, 0, 2, false],
+    [0, 0, 3, true],
+    [0, 1, 2, false],
+    [0, 2, 1, false],
+    [0, 3, 0, false],
+    [0, 1, 3, true],
+    [0, 2, 2, false],
+    [5, 0, 2, false],
+    [5, 0, 3, true],
+    [2, 1, 3, true],
+    [2, 2, 2, false],
+    [0, 10, 20, false],
+    [0, 9, 21, true],
+    [0, 33, 67, true],
+    [0, 34, 66, false],
+    [40, 33, 67, true],
+  ];
+  it.each(table)('%i open, %i upheld, %i not upheld: warning %s', (open, upheld, notUpheld, expected) => {
+    expect(reporterWarrants(rec(open, upheld, notUpheld))).toBe(expected);
   });
 });
 

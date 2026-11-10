@@ -100,7 +100,7 @@ export function SimpleNav({ route }: { route: Route }) {
               ref={button}
               type="button"
               aria-expanded={open}
-              aria-controls={`${id}-more`}
+              {...(open ? { 'aria-controls': `${id}-more` } : {})}
               {...(here === 'more' ? { 'data-current': 'true' } : {})}
               onClick={() => setOpen((v) => !v)}
             >

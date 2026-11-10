@@ -52,7 +52,9 @@ export function useMode(): ModeValue {
 const noopSubscribe = (): (() => void) => () => undefined;
 
 /** The hub's mode: the prop, else this visit's choice, else the remembered one, else Simple. */
-export function useModeState(prop: HubMode | undefined): ModeValue {
+export function useModeState(given: HubMode | undefined): ModeValue {
+  // A caller outside TypeScript can hand over anything: only a real mode fixes the view, anything else is as if there were no prop.
+  const prop = isMode(given) ? given : undefined;
   // The server and the first client render agree on the default; the remembered choice follows at once on the client.
   const remembered = useSyncExternalStore(noopSubscribe, readMode, () => DEFAULT_MODE);
   const [chosen, setChosen] = useState<HubMode | null>(null);

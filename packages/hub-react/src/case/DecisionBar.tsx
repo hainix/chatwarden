@@ -164,6 +164,7 @@ export function DecisionBar() {
         stateRef.current.setVerdict(hit.verdict);
       }
     };
+    // 7d: this listener is on the whole document. Once pieces can mount several times on a page, keys must be scoped to the hub root.
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [shortcuts]);

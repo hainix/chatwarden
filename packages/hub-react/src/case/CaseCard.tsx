@@ -7,19 +7,19 @@ import { isWaiting, useDecisions } from '../decisions.js';
 import { outcomeChoice, toInput } from '../decision.js';
 import type { DecisionForm } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
-import type { ExcerptLine, ReportPerson } from '../excerpt.js';
-import { relativeTime, timeOfDay } from '../format.js';
+import type { ReportPerson } from '../excerpt.js';
+import { personTag, relativeTime } from '../format.js';
 import { useHubData } from '../hooks.js';
 import { categoryLabel, decideErrorText, outcomeLabel } from '../labels.js';
 import { isTypingTarget } from '../shortcuts.js';
-import { needsSenior, noActionForm, oneClickOf, ownLinesOf, recordLine, reporterWarrants, stepLabel } from '../simple.js';
+import { needsSenior, noActionForm, oneClickOf, ownLinesOf, recordLine, reporterDecided, reporterWarrants, stepLabel } from '../simple.js';
 import type { OneClick } from '../simple.js';
 import { UNDO_MS } from '../toasts.js';
 import type { ReporterRecord, StaffReport } from '../types.js';
-import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton, Tag } from '../ui.js';
+import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
-import { Masked } from './Transcript.js';
+import { Line } from './Transcript.js';
 
 // The Simple case view: one card per case. Who, why, what they said, their record, the ladder's suggestion and three ways to
 // answer it. Everything underneath is the Detailed workbench's: the same case read, the same claim, the same decision hold (the five
@@ -28,6 +28,8 @@ import { Masked } from './Transcript.js';
 
 /** The uid of the one action a one-click decision holds. */
 const UID = 'a1';
+/** The card names the writer by the handle on the line. */
+const noName = (): string => '';
 const SECONDS = UNDO_MS / 1000;
 
 /** "Reported for spam by Saffron, yesterday." One report; several read "3 reports: hate, harassment." */
@@ -52,46 +54,6 @@ function reportedLine(
   });
 }
 
-/** One line of the chat. The reported one is marked; blocked words stay hidden until shown. */
-function Line({ line, whole, theirs }: { line: ExcerptLine; whole: boolean; theirs: boolean }) {
-  const { t, locale } = useHub();
-  const { reveal } = useCase();
-  const shown = reveal.shows(line.id);
-  const hidden = line.blocked && !shown;
-  const time = timeOfDay(line.ts, locale);
-  return (
-    <li
-      className="cw-line cw-sline"
-      {...(line.reported ? { 'data-reported': 'true' } : {})}
-      {...(line.blocked ? { 'data-blocked': 'true' } : {})}
-      {...(whole ? { 'data-who': 'true' } : {})}
-      {...(whole && theirs ? { 'data-theirs': 'true' } : {})}
-    >
-      <time className="cw-line-time" dateTime={new Date(line.ts).toISOString()}>
-        {time}
-      </time>
-      {whole && <span className="cw-line-who">{line.handle}</span>}
-      <span className="cw-line-text">{hidden ? <Masked /> : line.raw}</span>
-      {(line.reported || (line.blocked && !reveal.all)) && (
-        <span className="cw-line-meta">
-          {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}
-          {line.blocked && !reveal.all && (
-            <button
-              type="button"
-              className="cw-linkbtn"
-              aria-pressed={shown}
-              aria-label={t(shown ? 'hub.mask.hideLine' : 'hub.mask.showLine', { name: line.handle, time })}
-              onClick={() => reveal.toggle(line.id)}
-            >
-              {t(shown ? 'hub.mask.hide' : 'hub.mask.show')}
-            </button>
-          )}
-        </span>
-      )}
-    </li>
-  );
-}
-
 /** What the reported person said, and, on request, the whole chat around it. */
 function Said({ report, target, people }: { report: StaffReport; target: ReportPerson; people: ReportPerson[] }) {
   const { t } = useHub();
@@ -110,7 +72,7 @@ function Said({ report, target, people }: { report: StaffReport; target: ReportP
         <div className="cw-transcript cw-scard-lines">
           <ol className="cw-lines" aria-label={t('hub.report.excerpt.label')}>
             {shown.map((l) => (
-              <Line key={l.id} line={l} whole={whole} theirs={l.person === target.ref} />
+              <Line key={l.id} line={l} picks={null} name={noName} simple={{ whole, theirs: l.person === target.ref }} />
             ))}
           </ol>
         </div>
@@ -161,7 +123,7 @@ function ReporterWarning({ report, people }: { report: StaffReport; people: Repo
   const who = people.find((p) => p.ref === ref);
   return (
     <Notice tone="warn">
-      {t('hub.simple.reporterWarning', { name: who === undefined ? t('hub.person.unnamed', { tag: ref.slice(0, 8) }) : personName(who, people, t), upheld: record.actioned, count: record.reports })}
+      {t('hub.simple.reporterWarning', { name: who === undefined ? t('hub.person.unnamed', { tag: personTag(ref) }) : personName(who, people, t), upheld: record.actioned, count: reporterDecided(record) })}
     </Notice>
   );
 }
@@ -200,7 +162,22 @@ export function CaseCard() {
   const waiting = isWaiting(entry);
   const readOnly = holder.kind === 'other';
   const editable = open && canDecide && draft.status === 'ready' && !waiting && status !== 'done' && status !== 'conflict';
-  const usable = editable && !readOnly && !elseOpen;
+  // The suggestion and the rule come from the read of the case. A newer report about the person means the ladder may have moved
+  // (and the case with it), so the case is read again, and until that read is in, one click offers nothing it could send stale.
+  // A decision of your own that is on its way changes the count too: that is not news, so it reads nothing.
+  const count = group?.reports ?? null;
+  const readAt = useRef<number | null>(count);
+  const behind = readAt.current !== null && count !== null && readAt.current !== count;
+  const fresh = !behind && !detail.loading;
+  const settled = useRef(left);
+  settled.current = left;
+  useEffect(() => {
+    if (count === null) return;
+    const before = readAt.current;
+    readAt.current = count;
+    if (before !== null && before !== count && !settled.current) detail.reload();
+  }, [count]);
+  const usable = editable && !readOnly && !elseOpen && fresh;
 
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
@@ -253,6 +230,7 @@ export function CaseCard() {
         s.sendNoAction();
       }
     };
+    // 7d: this listener is on the whole document. Once pieces can mount several times on a page, keys must be scoped to the hub root.
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [shortcuts]);
@@ -375,12 +353,12 @@ export function CaseCard() {
         {draft.status === 'ready' && (
           <div className="cw-scard-actions">
             {one !== null && (
-              <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" {...(shortcuts ? { 'aria-keyshortcuts': '1' } : {})} onClick={() => sendPrimary(false)}>
+              <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '1' } : {})} onClick={() => sendPrimary(false)}>
                 <span>{stepLabel(t, locale, one.choice)}</span>
                 {kbd('1')}
               </button>
             )}
-            <button ref={noActionRef} type="button" className="cw-btn" {...(shortcuts ? { 'aria-keyshortcuts': '2' } : {})} onClick={sendNoAction}>
+            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '2' } : {})} onClick={sendNoAction}>
               <span>{t('hub.simple.noAction')}</span>
               {kbd('2')}
             </button>

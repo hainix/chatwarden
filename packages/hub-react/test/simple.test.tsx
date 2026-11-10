@@ -234,12 +234,13 @@ describe('the record in one line', () => {
 });
 
 describe('the reporter warning', () => {
-  /** Files the reporter's earlier reports, each decided, so the record has this many upheld and not upheld. */
-  async function history(w: HubWorld, reporter: string, past: Array<'upheld' | 'dismissed'>): Promise<void> {
+  /** Files the reporter's earlier reports: some decided (upheld or not), some still open. */
+  async function history(w: HubWorld, reporter: string, past: Array<'upheld' | 'dismissed'>, open = 0): Promise<void> {
     for (const [i, outcome] of past.entries()) {
       const g = await w.file({ reporter, target: `Other${i}`, room: `past-${reporter}-${i}` });
       await w.client.decide(g.id, { verdict: outcome === 'upheld' ? 'upheld' : 'no_action', reason: 'Decided.', actions: [] });
     }
+    for (let i = 0; i < open; i += 1) await w.file({ reporter, target: `Pending${i}`, room: `open-${reporter}-${i}` });
   }
   const warning = (): HTMLElement | null => screen.queryByText(/past reports were mostly not upheld/);
   /** Waits until the reporter's record has been asked for and answered, so "no warning" is a result, not a race. */
@@ -251,16 +252,20 @@ describe('the reporter warning', () => {
     });
   };
 
+  // Only decided reports count (the one on the card is open, and so are any others still waiting).
   it.each([
-    ['2 reports, none upheld', ['dismissed'], false],
-    ['3 reports, 1 upheld', ['upheld', 'dismissed'], false],
-    ['3 reports, 2 upheld', ['upheld', 'upheld'], false],
-    ['3 reports, none upheld', ['dismissed', 'dismissed'], true],
-    ['4 reports, 1 upheld', ['upheld', 'dismissed', 'dismissed'], true],
-    ['4 reports, 2 upheld', ['upheld', 'upheld', 'dismissed'], false],
-  ] as const)('%s: warning shown: %s', async (_name, past, shown) => {
+    ['2 decided, none upheld', ['dismissed', 'dismissed'], 0, false],
+    ['3 open, none decided', [], 3, false],
+    ['3 decided, none upheld', ['dismissed', 'dismissed', 'dismissed'], 0, true],
+    ['3 decided, 1 upheld (exactly a third)', ['upheld', 'dismissed', 'dismissed'], 0, false],
+    ['3 decided, 2 upheld', ['upheld', 'upheld', 'dismissed'], 0, false],
+    ['4 decided, 1 upheld', ['upheld', 'dismissed', 'dismissed', 'dismissed'], 0, true],
+    ['4 decided, 2 upheld', ['upheld', 'upheld', 'dismissed', 'dismissed'], 0, false],
+    ['2 decided, none upheld, and 3 open', ['dismissed', 'dismissed'], 3, false],
+    ['3 decided, none upheld, and 2 open', ['dismissed', 'dismissed', 'dismissed'], 2, true],
+  ] as const)('%s: warning shown: %s', async (_name, past, waiting, shown) => {
     const w = await hubWorld();
-    await history(w, 'Saffron', [...past]);
+    await history(w, 'Saffron', [...past], waiting);
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     await open(w, f.id);
     await settle(w, f.reporter);
@@ -268,9 +273,9 @@ describe('the reporter warning', () => {
     else expect(warning()).toBeNull();
   });
 
-  it('is plain and does not accuse: it says what the numbers are', async () => {
+  it('is plain and does not accuse: it says what the numbers are, of the decided reports', async () => {
     const w = await hubWorld();
-    await history(w, 'Saffron', ['upheld', 'dismissed', 'dismissed']);
+    await history(w, 'Saffron', ['upheld', 'dismissed', 'dismissed', 'dismissed'], 2);
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     await open(w, f.id);
     expect(await screen.findByText("Saffron's past reports were mostly not upheld (1 of 4).")).toBeInTheDocument();

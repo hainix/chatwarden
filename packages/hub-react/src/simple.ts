@@ -52,9 +52,13 @@ export function noActionForm(reason: string): DecisionForm {
   return { ...emptyForm(), verdict: 'not_a_problem', reason };
 }
 
-/** True when the reporter's record is worth a warning: three or more reports, and fewer than a third of them upheld. */
+/** How many of the reporter's reports have been decided. A report still open is neither upheld nor not upheld, so it is not counted. */
+export const reporterDecided = (record: ReporterRecord): number => record.actioned + record.dismissed;
+
+/** True when the reporter's record is worth a warning: three or more decided reports, and fewer than a third of them upheld. */
 export function reporterWarrants(record: ReporterRecord): boolean {
-  return record.reports >= 3 && record.actioned * 3 < record.reports;
+  const decided = reporterDecided(record);
+  return decided >= 3 && record.actioned * 3 < decided;
 }
 
 /** The lines one person wrote, in order. */

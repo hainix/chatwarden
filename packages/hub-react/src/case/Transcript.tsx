@@ -30,7 +30,18 @@ export function Masked() {
   return <span className="cw-mask">{t('hub.mask.label')}</span>;
 }
 
-function Line({ line, picks, name }: { line: ExcerptLine; picks: LinePicks | null; name: (ref: string | null) => string }) {
+/** How Simple mode draws a line: its own columns, and who said it only when the whole chat is shown. */
+export interface SimpleLine {
+  whole: boolean;
+  /** The line is the reported person's. */
+  theirs: boolean;
+}
+
+/**
+ * One line of the chat, for the Transcript and for the Simple card: the one place that decides when blocked words stay hidden.
+ * `simple` draws the card's lighter line (no margin box, no tags but "Reported line"); without it this is the transcript's.
+ */
+export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: LinePicks | null; name: (ref: string | null) => string; simple?: SimpleLine }) {
   const { t, locale } = useHub();
   const { reveal } = useCase();
   const showDelivered = line.delivered !== null && line.delivered !== line.raw;
@@ -40,6 +51,41 @@ function Line({ line, picks, name }: { line: ExcerptLine; picks: LinePicks | nul
   const theirs = picks !== null && line.person !== null && line.person === picks.person;
   const on = theirs && picks.chosen.includes(line.id);
   const full = picks !== null && picks.chosen.length >= picks.max;
+  const reveals = line.blocked && !reveal.all;
+  const toggle = (
+    <button
+      type="button"
+      className="cw-linkbtn"
+      aria-pressed={shown}
+      aria-label={t(shown ? 'hub.mask.hideLine' : 'hub.mask.showLine', { name: name(line.person) || line.handle, time })}
+      onClick={() => reveal.toggle(line.id)}
+    >
+      {t(shown ? 'hub.mask.hide' : 'hub.mask.show')}
+    </button>
+  );
+  if (simple !== undefined) {
+    return (
+      <li
+        className="cw-line cw-sline"
+        {...(line.reported ? { 'data-reported': 'true' } : {})}
+        {...(line.blocked ? { 'data-blocked': 'true' } : {})}
+        {...(simple.whole ? { 'data-who': 'true' } : {})}
+        {...(simple.whole && simple.theirs ? { 'data-theirs': 'true' } : {})}
+      >
+        <time className="cw-line-time" dateTime={new Date(line.ts).toISOString()}>
+          {time}
+        </time>
+        {simple.whole && <span className="cw-line-who">{line.handle}</span>}
+        <span className="cw-line-text">{hidden ? <Masked /> : line.raw}</span>
+        {(line.reported || reveals) && (
+          <span className="cw-line-meta">
+            {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}
+            {reveals && toggle}
+          </span>
+        )}
+      </li>
+    );
+  }
   return (
     <li
       className="cw-line"
@@ -67,17 +113,7 @@ function Line({ line, picks, name }: { line: ExcerptLine; picks: LinePicks | nul
         <span className="cw-line-meta">
           {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}
           {line.blocked && <Tag>{t('hub.report.line.blocked')}</Tag>}
-          {line.blocked && !reveal.all && (
-            <button
-              type="button"
-              className="cw-linkbtn"
-              aria-pressed={shown}
-              aria-label={t(shown ? 'hub.mask.hideLine' : 'hub.mask.showLine', { name: name(line.person) || line.handle, time })}
-              onClick={() => reveal.toggle(line.id)}
-            >
-              {t(shown ? 'hub.mask.hide' : 'hub.mask.show')}
-            </button>
-          )}
+          {reveals && toggle}
           {line.audience !== null && <Tag>{t('hub.report.line.audience', { count: line.audience.length })}</Tag>}
           {showDelivered && <span className="cw-hint">{t('hub.report.line.delivered', { text: line.delivered ?? '' })}</span>}
         </span>
