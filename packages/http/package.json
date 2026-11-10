@@ -17,10 +17,21 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./express": {
+      "types": "./dist/src/express.d.ts",
+      "default": "./dist/src/express.js"
     }
   },
   "files": ["dist/src"],
   "dependencies": { "@chatwarden/core": "0.0.0" },
-  "devDependencies": { "@chatwarden/matcher": "0.0.0", "@chatwarden/store-sqlite": "0.0.0" },
+  "peerDependencies": { "express": "^5.0.0" },
+  "peerDependenciesMeta": { "express": { "optional": true } },
+  "devDependencies": {
+    "@chatwarden/matcher": "0.0.0",
+    "@chatwarden/store-sqlite": "0.0.0",
+    "@types/express": "^5.0.3",
+    "express": "^5.1.0"
+  },
   "publishConfig": { "access": "public" }
 }

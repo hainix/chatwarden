@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import type { StoredReport } from '@chatwarden/core';
+import { CODE_OF_CONDUCT_CSP } from '@chatwarden/http';
 import { startServer } from './server.js';
 import type { TinyChat } from './server.js';
 
@@ -397,12 +398,49 @@ async function http(server: TinyChat, path: string, init?: RequestInit): Promise
   bodies.push(text);
   return { status: res.status, text, json: JSON.parse(text) as Record<string, unknown> };
 }
-const decideHttp = (server: TinyChat, body: unknown, token: string | null = ADMIN): Promise<Reply> =>
-  http(server, '/decide', {
+const tokenHeader = (token: string | null): Record<string, string> => (token === null ? {} : { 'x-admin-token': token });
+
+/**
+ * A staff GET that is NOT kept for the leak scan: staff responses carry subject ids by design (the report detail names the
+ * people), and the scan covers what players and the decision answer see.
+ */
+async function staffGet(server: TinyChat, path: string, token: string | null = ADMIN): Promise<Reply> {
+  const res = await fetch(`http://127.0.0.1:${server.port}/admin${path}`, { headers: tokenHeader(token) });
+  const text = await res.text();
+  return { status: res.status, text, json: JSON.parse(text) as Record<string, unknown> };
+}
+
+/** The subject ids a report names, from `GET /admin/reports/:id` (the only place the demo shows them). */
+async function subjectsOf(server: TinyChat, reportId: string): Promise<{ target: string; reporter: string } | null> {
+  const res = await staffGet(server, `/reports/${reportId}`);
+  if (res.status !== 200) return null;
+  const report = res.json.report as { targetSubject: string; reporterSubject: string };
+  return { target: report.targetSubject, reporter: report.reporterSubject };
+}
+
+/**
+ * Decide through the kit: `POST /admin/reports/:id/decide`. The tests name people by seat, as they always did (p1 is the
+ * reported player, anyone else the reporter); this helper turns each `seat` into the subject id the staff API wants,
+ * read from `GET /admin/reports/:id`. An action that already names a `subject` is sent as given.
+ */
+async function decideHttp(server: TinyChat, body: unknown, token: string | null = ADMIN): Promise<Reply> {
+  const input = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  const { reportId, ...rest } = input;
+  const id = typeof reportId === 'string' ? reportId : 'missing';
+  const who = await subjectsOf(server, id);
+  if (who !== null && Array.isArray(rest.actions)) {
+    rest.actions = (rest.actions as unknown[]).map((a) => {
+      if (typeof a !== 'object' || a === null || !('seat' in a)) return a;
+      const { seat, ...action } = a as Record<string, unknown>;
+      return { ...action, subject: seat === 'p1' ? who.target : who.reporter };
+    });
+  }
+  return http(server, `/admin/reports/${id}/decide`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(token === null ? {} : { 'x-admin-token': token }) },
-    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json', ...tokenHeader(token) },
+    body: JSON.stringify(rest),
   });
+}
 const reportHttp = (server: TinyChat, body: unknown): Promise<Reply> =>
   http(server, '/report', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 const noticesOf = (f: Frame): Array<Record<string, unknown>> => f.items as Array<Record<string, unknown>>;
@@ -448,11 +486,11 @@ describe('tiny-chat: report -> decision -> notice -> ack -> record', () => {
     expect(bobLineId).not.toBe('');
   });
 
-  it('POST /decide needs the admin token: none, wrong and a different-length one are all 401, and nothing is decided', async () => {
+  it('POST /admin/reports/:id/decide needs the admin token: none, wrong and a different-length one are all 401, and nothing is decided', async () => {
     for (const token of [null, 'wrong', `${ADMIN}x`, '']) {
       const res = await decideHttp(server, decision(), token);
       expect(res.status).toBe(401);
-      expect(res.json).toEqual({ ok: false, refused: 'unauthorized' });
+      expect(res.json).toEqual({ error: 'unauthorized', message: 'Authentication is required.' });
     }
     await settle();
     expect(a.frames.filter((f) => f.type === 'notices')).toEqual([]);
@@ -463,7 +501,8 @@ describe('tiny-chat: report -> decision -> notice -> ack -> record', () => {
     const res = await decideHttp(server, decision());
     expect(res.status).toBe(200);
     expect(res.json).toMatchObject({ ok: true, replay: false });
-    expect(res.json.refCodes).toHaveLength(1);
+    expect(res.json.groups).toHaveLength(1);
+    expect((res.json.groups as Array<{ refCode: string }>)[0]?.refCode).toMatch(/^M-/);
 
     const mine = await a.next('notices');
     const [n] = noticesOf(mine);
@@ -530,20 +569,20 @@ describe('tiny-chat: report -> decision -> notice -> ack -> record', () => {
     await a.next('chat');
     expect(a.frames.filter((f) => f.type === 'notices')).toEqual([]);
 
-    const rec = await http(server, '/record?key=key-na');
+    const rec = await http(server, '/api/record', { headers: { 'x-chatwarden-key': 'key-na' } });
     expect(rec.status).toBe(200);
-    const items = rec.json.items as Array<Record<string, unknown>>;
+    const items = rec.json.record as Array<Record<string, unknown>>;
     expect(items.map((n) => n.id)).toEqual([warningId]);
     expect(items[0]).toMatchObject({ kind: 'warning', rule: 2 });
   });
 
-  it('the reporter record never lists a report outcome; an unknown key and a missing key are handled', async () => {
-    expect((await http(server, '/record?key=key-nb')).json).toEqual({ ok: true, items: [] });
-    expect((await http(server, '/record?key=nobody')).json).toEqual({ ok: true, items: [] });
-    const none = await http(server, '/record');
-    expect(none.status).toBe(400);
-    expect(none.json).toEqual({ ok: false, refused: 'bad_request' });
-    expect((await http(server, '/record?key=')).status).toBe(400);
+  it('the reporter record never lists a report outcome; an unknown key, a missing key and an empty key are an empty record', async () => {
+    expect((await http(server, '/api/record?key=key-nb')).json).toEqual({ record: [] });
+    expect((await http(server, '/api/record?key=nobody')).json).toEqual({ record: [] });
+    const none = await http(server, '/api/record');
+    expect([none.status, none.json]).toEqual([200, { record: [] }]);
+    expect((await http(server, '/api/record?key=')).json).toEqual({ record: [] });
+    expect((await http(server, '/api/record', { headers: { 'x-chatwarden-key': '' } })).json).toEqual({ record: [] });
   });
 
   it('the notices, the record and every response leak no identifier, key, reason or moderator', () => {
@@ -551,8 +590,8 @@ describe('tiny-chat: report -> decision -> notice -> ack -> record', () => {
     // The scan is not vacuous: it covers notice frames, acks and a record body.
     expect(frames.some((t) => t.includes('"type":"notices"'))).toBe(true);
     expect(frames.some((t) => t.includes('"type":"acked"'))).toBe(true);
-    expect(bodies.some((t) => t.includes('"items"'))).toBe(true);
-    expect(bodies.some((t) => t.includes('refCodes'))).toBe(true);
+    expect(bodies.some((t) => t.includes('"record"'))).toBe(true);
+    expect(bodies.some((t) => t.includes('"refCode"'))).toBe(true);
     for (const text of [...frames, ...bodies]) {
       expect(text).not.toMatch(IDENTIFIER_RE);
       for (const secret of ['key-na', 'key-nb', ADMIN, 'private moderator reason', 'demo-admin']) {
@@ -593,8 +632,8 @@ describe('tiny-chat: report -> decision -> notice -> ack -> record', () => {
       reason: 'r',
       actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2, lineIds: [yLine] }],
     });
-    expect(res.status).toBe(422);
-    expect(res.json).toEqual({ ok: false, refused: 'invalid' });
+    expect(res.status).toBe(400);
+    expect(res.json).toEqual({ error: 'invalid_request', message: 'The request is not valid.' });
     await settle();
     expect(x.frames.filter((f) => f.type === 'notices')).toEqual([]);
     expect(other.chatwarden.notices.pending({ clientKey: 'key-x' })).toEqual([]);
@@ -608,12 +647,15 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     else process.env.TINY_CHAT_ADMIN_TOKEN = saved;
   });
 
-  it('POST /decide is off (404) when no admin token is configured, even with a header', async () => {
+  it('the admin API is off (404) when no admin token is configured, even with a header', async () => {
     delete process.env.TINY_CHAT_ADMIN_TOKEN;
     const server = await boot();
     const res = await decideHttp(server, { reportId: 'r', verdict: 'upheld', reason: 'r', actions: [] }, 'anything');
     expect(res.status).toBe(404);
     expect(res.json).toEqual({ ok: false, refused: 'off' });
+    // Every admin path is off, not just decide.
+    expect((await staffGet(server, '/reports', 'anything')).json).toEqual({ ok: false, refused: 'off' });
+    expect((await staffGet(server, '/audit', null)).status).toBe(404);
   });
 
   it('the admin token can come from TINY_CHAT_ADMIN_TOKEN', async () => {
@@ -623,14 +665,15 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     expect(wrong.status).toBe(401);
     const right = await decideHttp(server, { reportId: 'r', verdict: 'upheld', reason: 'r', actions: [] }, 'from-env-token');
     expect(right.status).toBe(404);
-    expect(right.json).toEqual({ ok: false, refused: 'not_found' });
+    expect(right.json).toEqual({ error: 'not_found', message: 'Not found.' });
   });
 
-  it('answers 400 for a malformed body, 422 for an unknown seat, 422 for an invalid decision and 404 for an unknown report', async () => {
+  it('answers 400 for a malformed body, an unknown or unnamed subject and an invalid decision, and 404 for an unknown report', async () => {
     const reports: StoredReport[] = [];
     const server = await boot({ adminToken: ADMIN, onReport: (r) => void reports.push(r) });
     const a = await join(server, 'key-e1');
     await join(server, 'key-e2');
+    await join(server, 'key-e3');
     a.say('hello');
     await a.next('chat');
     await reportHttp(server, { key: 'key-e2', targetSeat: 'p1', category: 'spam' });
@@ -640,19 +683,24 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     expect((await decideHttp(server, { verdict: 'upheld' })).status).toBe(400);
     expect((await decideHttp(server, { ...good, verdict: 'maybe' })).status).toBe(400);
     expect((await decideHttp(server, { ...good, actions: 'x' })).status).toBe(400);
-    const noSeat = await decideHttp(server, { ...good, actions: [{ seat: 'p99', kind: 'warning', durationMs: null, rule: 2 }] });
-    expect([noSeat.status, noSeat.json]).toEqual([422, { ok: false, refused: 'no_such_seat' }]);
-    const noSeatField = await decideHttp(server, { ...good, actions: [{ kind: 'warning', durationMs: null, rule: 2 }] });
-    expect(noSeatField.status).toBe(422);
+    const invalid = { error: 'invalid_request', message: 'The request is not valid.' };
+    // Staff name subject ids; one the report does not name (an unknown id, or a third player) is refused.
+    const unknownSubject = await decideHttp(server, { ...good, actions: [{ subject: 's_no-such-subject', kind: 'warning', durationMs: null, rule: 2 }] });
+    expect([unknownSubject.status, unknownSubject.json]).toEqual([400, invalid]);
+    const thirdParty = server.chatwarden.rooms.subjectAt('lobby', 'p3') ?? '';
+    const bystander = await decideHttp(server, { ...good, actions: [{ subject: thirdParty, kind: 'warning', durationMs: null, rule: 2 }] });
+    expect([bystander.status, bystander.json]).toEqual([400, invalid]);
+    const noSubject = await decideHttp(server, { ...good, actions: [{ kind: 'warning', durationMs: null, rule: 2 }] });
+    expect([noSubject.status, noSubject.json]).toEqual([400, invalid]);
     const badRule = await decideHttp(server, { ...good, actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 99 }] });
-    expect([badRule.status, badRule.json]).toEqual([422, { ok: false, refused: 'invalid' }]);
-    const unknown = await decideHttp(server, { ...good, reportId: 'nope' });
-    expect([unknown.status, unknown.json]).toEqual([404, { ok: false, refused: 'not_found' }]);
+    expect([badRule.status, badRule.json]).toEqual([400, invalid]);
+    const unknown = await decideHttp(server, { ...good, reportId: 'nope', actions: [] });
+    expect([unknown.status, unknown.json]).toEqual([404, { error: 'not_found', message: 'Not found.' }]);
     // Nothing above decided anything; the real one still can.
     expect((await decideHttp(server, good)).status).toBe(200);
   });
 
-  it('a subject smuggled into an action is ignored: the seat decides who is sanctioned', async () => {
+  it('the subject ids come from GET /admin/reports/:id; the target gets the warning and the reporter only an outcome', async () => {
     const reports: StoredReport[] = [];
     const server = await boot({ adminToken: ADMIN, onReport: (r) => void reports.push(r) });
     const a = await join(server, 'key-s1');
@@ -660,18 +708,66 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     a.say('hello');
     await a.next('chat');
     await reportHttp(server, { key: 'key-s2', targetSeat: 'p1', category: 'spam' });
-    const bSubject = server.chatwarden.rooms.subjectAt('lobby', 'p2');
+    const reportId = reports[0]?.id ?? '';
+    const detail = await staffGet(server, `/reports/${reportId}`);
+    expect(detail.status).toBe(200);
+    const { targetSubject, reporterSubject } = detail.json.report as { targetSubject: string; reporterSubject: string };
+    // The staff API shows ids (that is its job); the demo's seats resolve to the same people.
+    expect(targetSubject).toMatch(IDENTIFIER_RE);
+    expect(targetSubject).toBe(server.chatwarden.rooms.subjectAt('lobby', 'p1'));
+    expect(reporterSubject).toBe(server.chatwarden.rooms.subjectAt('lobby', 'p2'));
     const res = await decideHttp(server, {
-      reportId: reports[0]?.id,
+      reportId,
       verdict: 'upheld',
       reason: 'r',
-      actions: [{ seat: 'p1', subject: bSubject, kind: 'warning', durationMs: null, rule: 2 }],
+      actions: [{ subject: targetSubject, kind: 'warning', durationMs: null, rule: 2 }],
     });
     expect(res.status).toBe(200);
-    const mine = await a.next('notices');
-    expect(noticesOf(mine)[0]).toMatchObject({ kind: 'warning' });
-    // B is only the reporter: an outcome, not a warning.
+    expect(noticesOf(await a.next('notices'))[0]).toMatchObject({ kind: 'warning' });
     expect(noticesOf(await b.next('notices')).map((n) => n.kind)).toEqual(['report_outcome']);
+    // The decision's own answer shows ref codes and kinds, never an id.
+    expect(res.text).not.toMatch(IDENTIFIER_RE);
+  });
+
+  it('staff routes need the token: the report detail, the queue and the audit trail are all 401 without it (and show no id)', async () => {
+    const reports: StoredReport[] = [];
+    const server = await boot({ adminToken: ADMIN, onReport: (r) => void reports.push(r) });
+    await join(server, 'key-au1');
+    await join(server, 'key-au2');
+    await reportHttp(server, { key: 'key-au2', targetSeat: 'p1', category: 'spam' });
+    const id = reports[0]?.id ?? '';
+    for (const path of [`/reports/${id}`, '/reports', '/audit']) {
+      for (const token of [null, 'wrong', '']) {
+        const res = await staffGet(server, path, token);
+        expect([res.status, res.json.error]).toEqual([401, 'unauthorized']);
+        expect(res.text).not.toMatch(IDENTIFIER_RE);
+      }
+      expect((await staffGet(server, path)).status).toBe(200);
+    }
+    // Reading a report is audited, under the fixed demo actor.
+    const audit = await staffGet(server, '/audit');
+    expect(JSON.stringify(audit.json)).toContain('demo-admin');
+  });
+
+  it('an admin body over 64 KiB is 413 in the kit shape, and the server carries on', async () => {
+    const server = await boot({ adminToken: ADMIN });
+    const big = await http(server, '/admin/reports/x/decide', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-admin-token': ADMIN },
+      body: JSON.stringify({ reason: 'x'.repeat(70_000) }),
+    });
+    expect([big.status, big.json.error]).toEqual([413, 'payload_too_large']);
+    expect((await staffGet(server, '/reports')).status).toBe(200);
+  });
+
+  it('no express body parser sits in front of the kit: a malformed admin body is the kit 400, not an Express error', async () => {
+    const server = await boot({ adminToken: ADMIN });
+    const res = await http(server, '/admin/reports/x/decide', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-admin-token': ADMIN },
+      body: '{"verdict": ',
+    });
+    expect([res.status, res.json.error]).toEqual([400, 'invalid_json']);
   });
 
   it('a decision for a player who is offline waits and is pushed on their next connect', async () => {
@@ -724,14 +820,14 @@ describe('tiny-chat: the demo admin route and notices, edges', () => {
     });
     if (!res.ok) throw new Error('expected ok');
     await a.next('notices');
-    expect(((await http(server, '/record?key=key-r1')).json.items as unknown[]).length).toBe(1);
+    expect(((await http(server, '/api/record?key=key-r1')).json.record as unknown[]).length).toBe(1);
     expect(await server.chatwarden.sanctions.revoke(res.groups[0]?.groupId ?? '', 'mod', 'mistake')).toBe(true);
-    expect((await http(server, '/record?key=key-r1')).json).toEqual({ ok: true, items: [] });
+    expect((await http(server, '/api/record?key=key-r1')).json).toEqual({ record: [] });
     expect(server.chatwarden.notices.pendingWarning({ clientKey: 'key-r1' })).toBe(false);
   });
 });
 
-describe('tiny-chat: /decide takes the K3a verdicts', () => {
+describe('tiny-chat: the decide route takes the K3a verdicts', () => {
   const MARK = 'EVIDENCE-MARKER-7c1d';
   /** A fresh server with one filed report: p2 reported p1. */
   async function filed(tag: string) {
@@ -757,7 +853,7 @@ describe('tiny-chat: /decide takes the K3a verdicts', () => {
     const { server, a, reportId } = await filed('v2');
     const res = await decideHttp(server, { reportId, verdict: 'no_action', reason: 'banter', actions: [] });
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ ok: true, replay: false, refCodes: [] });
+    expect(res.json).toEqual({ ok: true, replay: false, groups: [] });
     await settle();
     expect(a.frames.filter((f) => f.type === 'notices')).toEqual([]);
   });
@@ -773,35 +869,35 @@ describe('tiny-chat: /decide takes the K3a verdicts', () => {
     expect(res.text).not.toContain(MARK);
   });
 
-  it('bad_faith without usable evidence is 422 invalid and decides nothing; the real one still can', async () => {
+  it('bad_faith without usable evidence is 400 invalid and decides nothing; the real one still can', async () => {
     const { server, reportId } = await filed('v4');
     for (const evidence of [undefined, '', '   ', 'x'.repeat(501)]) {
       const res = await decideHttp(server, { reportId, verdict: 'bad_faith', evidence, reason: 'r', actions: [] });
-      expect([res.status, res.json]).toEqual([422, { ok: false, refused: 'invalid' }]);
+      expect([res.status, res.json.error]).toEqual([400, 'invalid_request']);
     }
     expect((await decideHttp(server, { reportId, verdict: 'bad_faith', evidence: 'ok', reason: 'r', actions: [] })).status).toBe(200);
   });
 
-  it('evidence on another verdict is 422 invalid', async () => {
+  it('evidence on another verdict is 400 invalid', async () => {
     const { server, reportId } = await filed('v5');
     for (const verdict of ['upheld', 'no_action']) {
       const res = await decideHttp(server, { reportId, verdict, evidence: 'why', reason: 'r', actions: [] });
-      expect([res.status, res.json]).toEqual([422, { ok: false, refused: 'invalid' }]);
+      expect([res.status, res.json.error]).toEqual([400, 'invalid_request']);
     }
   });
 
-  it('a non-string evidence is 400 bad_request', async () => {
+  it('a non-string evidence is 400 invalid_request', async () => {
     const { server, reportId } = await filed('v6');
     for (const evidence of [7, null, {}, ['x']]) {
       const res = await decideHttp(server, { reportId, verdict: 'bad_faith', evidence, reason: 'r', actions: [] });
-      expect([res.status, res.json]).toEqual([400, { ok: false, refused: 'bad_request' }]);
+      expect([res.status, res.json.error]).toEqual([400, 'invalid_request']);
     }
   });
 
-  it.each(['fair', 'unfair'])('the old verdict %s is 400 bad_request', async (verdict) => {
+  it.each(['fair', 'unfair'])('the old verdict %s is 400 invalid_request', async (verdict) => {
     const { server, reportId } = await filed(`v7${verdict}`);
     const res = await decideHttp(server, { reportId, verdict, reason: 'r', actions: [] });
-    expect([res.status, res.json]).toEqual([400, { ok: false, refused: 'bad_request' }]);
+    expect([res.status, res.json.error]).toEqual([400, 'invalid_request']);
   });
 
   it('noted with a note action is 200, tells nobody, and closes the report', async () => {
@@ -813,16 +909,17 @@ describe('tiny-chat: /decide takes the K3a verdicts', () => {
     expect(a.frames.filter((f) => f.type === 'notices')).toEqual([]);
     expect(server.chatwarden.notices.pending({ clientKey: 'key-v81' })).toEqual([]);
     expect(server.chatwarden.notices.pendingWarning({ clientKey: 'key-v81' })).toBe(false);
-    // The report is closed: a different decision is refused (422), the same one replays (200).
-    expect((await decideHttp(server, { reportId, verdict: 'no_action', reason: 'r', actions: [] })).status).toBe(422);
+    // The report is closed: a different decision is a 409, the same one replays (200).
+    const other = await decideHttp(server, { reportId, verdict: 'no_action', reason: 'r', actions: [] });
+    expect([other.status, other.json.error]).toEqual([409, 'already_decided']);
     const again = await decideHttp(server, { reportId, verdict: 'noted', reason: 'r', actions: [{ seat: 'p1', kind: 'note', durationMs: null, rule: 2 }] });
     expect(again.json).toMatchObject({ ok: true, replay: true });
   });
 
-  it('noted with a warning action stays invalid (422, nothing decided)', async () => {
+  it('noted with a warning action stays invalid (400, nothing decided)', async () => {
     const { server, reportId } = await filed('v9');
     const res = await decideHttp(server, { reportId, verdict: 'noted', reason: 'r', actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }] });
-    expect([res.status, res.json]).toEqual([422, { ok: false, refused: 'invalid' }]);
+    expect([res.status, res.json.error]).toEqual([400, 'invalid_request']);
     expect((await decideHttp(server, { reportId, verdict: 'no_action', reason: 'r', actions: [] })).status).toBe(200);
   });
 });
@@ -835,7 +932,7 @@ describe('tiny-chat: an empty admin token counts as unset', () => {
   });
   const probe = { reportId: 'r', verdict: 'upheld', reason: 'r', actions: [] };
 
-  it("adminToken: '' switches /decide off (404), not open to an empty header", async () => {
+  it("adminToken: '' switches the admin API off (404), not open to an empty header", async () => {
     delete process.env.TINY_CHAT_ADMIN_TOKEN;
     const server = await boot({ adminToken: '' });
     for (const token of ['', 'anything', null]) {
@@ -858,7 +955,7 @@ describe('tiny-chat: an empty admin token counts as unset', () => {
     const server = await boot({ adminToken: '' });
     expect((await decideHttp(server, probe, '')).status).toBe(401);
     const right = await decideHttp(server, probe, 'env-real-token');
-    expect([right.status, right.json]).toEqual([404, { ok: false, refused: 'not_found' }]);
+    expect([right.status, right.json]).toEqual([404, { error: 'not_found', message: 'Not found.' }]);
   });
 
   it('a real token with an empty or missing x-admin-token header is 401 (control)', async () => {
@@ -866,7 +963,7 @@ describe('tiny-chat: an empty admin token counts as unset', () => {
     const server = await boot({ adminToken: ADMIN });
     for (const token of ['', null, 'wrong']) {
       const res = await decideHttp(server, probe, token);
-      expect([res.status, res.json]).toEqual([401, { ok: false, refused: 'unauthorized' }]);
+      expect([res.status, res.json.error]).toEqual([401, 'unauthorized']);
     }
     expect((await decideHttp(server, probe, ADMIN)).status).toBe(404);
   });
@@ -1037,14 +1134,16 @@ describe('tiny-chat: runs the relaxed profile and shows its summary', () => {
   });
 });
 
-describe('tiny-chat: GET /code-of-conduct', () => {
+describe('tiny-chat: GET /api/code-of-conduct', () => {
   it('serves the HTML code of conduct, with a locked-down content security policy', async () => {
     const server = await boot();
-    const res = await fetch(`http://127.0.0.1:${server.port}/code-of-conduct`);
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/code-of-conduct?format=html`);
     const text = await res.text();
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/^text\/html/);
-    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'; style-src 'unsafe-inline'");
+    // The kit's own value, not a copy in the example.
+    expect(res.headers.get('content-security-policy')).toBe(CODE_OF_CONDUCT_CSP);
+    expect(CODE_OF_CONDUCT_CSP).toBe("default-src 'none'; style-src 'unsafe-inline'");
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(text).toContain(server.chatwarden.documents.codeOfConduct({ format: 'html', gameName: 'tiny-chat' }));
     expect(text).toContain(SUMMARY);
@@ -1053,16 +1152,31 @@ describe('tiny-chat: GET /code-of-conduct', () => {
 
   it('is plain generated HTML: no script, no handler, no external reference, no identifier', async () => {
     const server = await boot();
-    const text = await (await fetch(`http://127.0.0.1:${server.port}/code-of-conduct`)).text();
+    const text = await (await fetch(`http://127.0.0.1:${server.port}/api/code-of-conduct?format=html`)).text();
     expect(text).not.toMatch(/<script|\son[a-z]+=|javascript:|src=|<iframe|<link/i);
     expect(text).not.toMatch(IDENTIFIER_RE);
   });
 
-  it('is read-only and needs no token: POST is not a route, and the admin route stays guarded (control)', async () => {
+  it('is read-only and needs no token: POST is 405, and the admin route stays guarded (control)', async () => {
     const server = await boot({ adminToken: ADMIN });
-    const posted = await fetch(`http://127.0.0.1:${server.port}/code-of-conduct`, { method: 'POST' });
-    expect(posted.status).toBe(404);
+    const posted = await fetch(`http://127.0.0.1:${server.port}/api/code-of-conduct`, { method: 'POST' });
+    expect(posted.status).toBe(405);
+    expect(posted.headers.get('allow')).toBe('GET');
     expect((await decideHttp(server, {}, null)).status).toBe(401);
+  });
+
+  it('defaults to markdown, names the game, and an unknown format is 400', async () => {
+    const server = await boot();
+    const md = await fetch(`http://127.0.0.1:${server.port}/api/code-of-conduct`);
+    expect(md.headers.get('content-type')).toMatch(/^text\/markdown/);
+    expect(await md.text()).toContain('tiny-chat');
+    expect((await fetch(`http://127.0.0.1:${server.port}/api/code-of-conduct?format=pdf`)).status).toBe(400);
+  });
+
+  it('the old root path is gone (control: the kit serves it under /api only)', async () => {
+    const server = await boot();
+    const old = await fetch(`http://127.0.0.1:${server.port}/code-of-conduct`);
+    expect(old.status).toBe(404);
   });
 });
 
@@ -1145,10 +1259,141 @@ describe('tiny-chat: a noted decision', () => {
     await settle();
     for (const c of [a, b]) expect(c.frames.filter((f) => f.type === 'notices')).toEqual([]);
     for (const key of ['key-nt1', 'key-nt2']) {
-      expect((await http(server, `/record?key=${key}`)).json).toEqual({ ok: true, items: [] });
+      expect((await http(server, `/api/record?key=${key}`)).json).toEqual({ record: [] });
     }
     const subject = server.chatwarden.rooms.subjectAt('lobby', 'p1') ?? '';
     expect(server.chatwarden.history(subject)).toMatchObject([{ kind: 'note', roomId: 'lobby' }]);
+  });
+});
+
+describe('tiny-chat: the player API (/api) and the health probes', () => {
+  const api = (server: TinyChat, path: string, init?: RequestInit): Promise<Reply> => http(server, `/api${path}`, init);
+
+  /** A server where p1 holds a pending warning (decided through the staff API), and the key it belongs to. */
+  async function warned(tag: string) {
+    const reports: StoredReport[] = [];
+    const server = await boot({ adminToken: ADMIN, onReport: (r) => void reports.push(r) });
+    const a = await join(server, `key-${tag}a`);
+    await join(server, `key-${tag}b`);
+    a.say('hello');
+    await a.next('chat');
+    await reportHttp(server, { key: `key-${tag}b`, targetSeat: 'p1', category: 'spam' });
+    const res = await decideHttp(server, {
+      reportId: reports[0]?.id,
+      verdict: 'upheld',
+      reason: 'private reason',
+      actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }],
+    });
+    expect(res.status).toBe(200);
+    await a.next('notices');
+    return { server, a, key: `key-${tag}a`, otherKey: `key-${tag}b` };
+  }
+
+  it('GET /api/notices lists the pending notice for the key in the x-chatwarden-key header', async () => {
+    const { server, key } = await warned('p1');
+    const res = await api(server, '/notices', { headers: { 'x-chatwarden-key': key } });
+    expect(res.status).toBe(200);
+    const notices = res.json.notices as Array<Record<string, unknown>>;
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ kind: 'warning', rule: 2, mustAcknowledge: true });
+    expect(res.text).not.toMatch(IDENTIFIER_RE);
+    expect(res.text).not.toContain('private reason');
+  });
+
+  it('the demo falls back to ?key=, and the header wins when both are sent', async () => {
+    const { server, key, otherKey } = await warned('p2');
+    const viaQuery = await api(server, `/notices?key=${key}`);
+    expect((viaQuery.json.notices as unknown[]).length).toBe(1);
+    const kinds = (r: Reply): unknown[] => (r.json.notices as Array<{ kind: string }>).map((n) => n.kind);
+    expect(kinds(viaQuery)).toEqual(['warning']);
+    // The other player is the reporter: they hold only the report outcome, never the warning.
+    const headerWins = await api(server, `/notices?key=${key}`, { headers: { 'x-chatwarden-key': otherKey } });
+    expect(kinds(headerWins)).toEqual(['report_outcome']);
+    const queryOnly = await api(server, `/notices?key=${otherKey}`);
+    expect(kinds(queryOnly)).toEqual(['report_outcome']);
+  });
+
+  it('no key is nobody: empty lists, 200', async () => {
+    const { server } = await warned('p3');
+    expect((await api(server, '/notices')).json).toEqual({ notices: [] });
+    expect((await api(server, '/notices?key=')).json).toEqual({ notices: [] });
+    expect((await api(server, '/notices', { headers: { 'x-chatwarden-key': 'unknown-key' } })).json).toEqual({ notices: [] });
+  });
+
+  it('a client-sent address header cannot choose the IP the kit sees', async () => {
+    const { server, key } = await warned('p4');
+    // The demo sets its own x-tiny-chat-ip from the socket; a forged one is overwritten, so the key still decides.
+    const res = await api(server, '/notices', { headers: { 'x-chatwarden-key': key, 'x-tiny-chat-ip': '203.0.113.9' } });
+    expect((res.json.notices as unknown[]).length).toBe(1);
+  });
+
+  it('POST /api/notices/:id/ack acks the caller own notice; another key, an unknown id and no key are ok:false', async () => {
+    const { server, key, otherKey } = await warned('p5');
+    const id = String(((await api(server, '/notices', { headers: { 'x-chatwarden-key': key } })).json.notices as Array<{ id: string }>)[0]?.id);
+    const ack = (k: string | null, nid: string): Promise<Reply> =>
+      api(server, `/notices/${nid}/ack`, { method: 'POST', headers: k === null ? {} : { 'x-chatwarden-key': k } });
+    expect((await ack(otherKey, id)).json).toEqual({ ok: false });
+    expect((await ack(null, id)).json).toEqual({ ok: false });
+    expect((await ack(key, 'no-such-notice')).json).toEqual({ ok: false });
+    expect((await ack(key, id)).json).toEqual({ ok: true });
+    expect((await api(server, '/notices', { headers: { 'x-chatwarden-key': key } })).json).toEqual({ notices: [] });
+    expect(server.chatwarden.notices.pendingWarning({ clientKey: key })).toBe(false);
+    // The acked warning is in My record.
+    const rec = await api(server, '/record', { headers: { 'x-chatwarden-key': key } });
+    expect((rec.json.record as Array<{ id: string }>).map((n) => n.id)).toEqual([id]);
+  });
+
+  it('GET /api/rules lists the active rules and the summary, with no identifier', async () => {
+    const server = await boot();
+    const res = await api(server, '/rules');
+    expect(res.status).toBe(200);
+    expect(res.json.summary).toBe(SUMMARY);
+    const rules = res.json.rules as Array<{ number: number; title: string; text: string }>;
+    expect(rules.length).toBeGreaterThanOrEqual(8);
+    expect(rules[0]).toEqual({ number: 1, title: expect.any(String), text: expect.any(String) });
+    expect(res.text).not.toMatch(IDENTIFIER_RE);
+  });
+
+  it('POST /api/names/check answers for a name, and a missing name is 400', async () => {
+    const server = await boot();
+    const json = { 'content-type': 'application/json' };
+    const ok = await api(server, '/names/check', { method: 'POST', headers: json, body: JSON.stringify({ name: 'Friendly Fox' }) });
+    expect(ok.status).toBe(200);
+    const bad = await api(server, '/names/check', { method: 'POST', headers: json, body: '{}' });
+    expect([bad.status, bad.json.error]).toEqual([400, 'invalid_request']);
+  });
+
+  it('an unknown /api path is the kit 404 JSON, and a wrong method a 405', async () => {
+    const server = await boot();
+    const missing = await api(server, '/nope');
+    expect([missing.status, missing.json]).toEqual([404, { error: 'not_found', message: 'Not found.' }]);
+    const wrong = await api(server, '/notices', { method: 'DELETE' });
+    expect([wrong.status, wrong.json.error]).toEqual([405, 'method_not_allowed']);
+  });
+
+  it('the old /record and /decide routes are gone (control)', async () => {
+    const server = await boot();
+    expect((await http(server, '/record?key=whoever')).status).toBe(404);
+    expect((await http(server, '/decide', { method: 'POST', headers: { 'x-admin-token': ADMIN } })).status).toBe(404);
+  });
+
+  it('GET /healthz and /readyz are public and say only "ok"', async () => {
+    const server = await boot();
+    for (const path of ['/healthz', '/readyz']) {
+      const res = await http(server, path);
+      expect([res.status, res.json]).toEqual([200, { ok: true }]);
+    }
+    const post = await http(server, '/healthz', { method: 'POST' });
+    expect(post.status).toBe(405);
+  });
+
+  it('health at the root does not swallow the demo own routes (POST /report and the socket still work)', async () => {
+    const server = await boot();
+    await join(server, 'key-hr1');
+    const self = await reportHttp(server, { key: 'key-hr1', targetSeat: 'p1', category: 'spam' });
+    expect([self.status, self.json]).toEqual([422, { ok: false, refused: 'self' }]);
+    const unknown = await http(server, '/nothing-here');
+    expect([unknown.status, unknown.json.error]).toEqual([404, 'not_found']);
   });
 });
 
@@ -1191,7 +1436,7 @@ describe('the READMEs show the preset and the overrides', () => {
     const tiny = read('./README.md');
     expect(tiny).toContain("profile: 'relaxed'");
     expect(tiny).toContain('profanityPackage');
-    expect(tiny).toContain('GET /code-of-conduct');
+    expect(tiny).toContain('GET /api/code-of-conduct');
     expect(tiny).toContain("default-src 'none'; style-src 'unsafe-inline'");
   });
 });
