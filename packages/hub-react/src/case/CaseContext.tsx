@@ -10,7 +10,8 @@ import type { ReportPerson } from '../excerpt.js';
 import { useHubData } from '../hooks.js';
 import type { HubData } from '../hooks.js';
 import { useOptionalQueue } from '../liveQueue.js';
-import type { QueueGroup } from '../queue.js';
+import { nextOpenReport } from '../queue.js';
+import type { NextReport, QueueGroup } from '../queue.js';
 import type { PersonHistory, ReportDetail } from '../types.js';
 import { useDecisionForm } from './useDecisionForm.js';
 import type { DecisionDraft } from './useDecisionForm.js';
@@ -27,6 +28,8 @@ export interface CaseValue {
   group: QueueGroup | null;
   /** The reported person's record, or null when the role cannot read histories. */
   history: HubData<PersonHistory | null> | null;
+  /** The same person's next open report (the oldest other one) and how many are left, or null when this is their last. */
+  next: NextReport | null;
   /** Who holds the case now. */
   holder: Holder;
   /** What is going on with this report's decision (held, sending, done, failed...), if anything. */
@@ -100,6 +103,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     group,
     history: wantsHistory ? history : null,
     holder,
+    next: report === undefined ? null : nextOpenReport(queue?.groups ?? [], report.targetPerson, reportId, decisions.decidedIds()),
     entry,
     left,
     draft,

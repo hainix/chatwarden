@@ -137,12 +137,8 @@ export function DecisionBar() {
       return;
     }
     decisions.submit({ reportId: report.id, person: report.targetPerson, name: nameOfTarget, input: toInput(form), snapshot: form });
-    if (andNext) {
-      void actions.takeNext().then((result) => {
-        // Nobody is waiting: leave the finished case for the team view, which says so.
-        if (result === 'none') go({ name: 'overview' });
-      });
-    }
+    // On to the same person's next report, or the next case: one rule, in `continueFrom`.
+    if (andNext) void actions.continueFrom({ reportId: report.id, person: report.targetPerson });
   };
   const decideRef = useRef(decide);
   decideRef.current = decide;
@@ -202,10 +198,28 @@ export function DecisionBar() {
   const problemsOf = (uid: string): { rule?: Problem } | undefined => shown.actions[uid];
 
   // While the decision is waiting (held or sending) there is a way on: the next case, without waiting for the answer.
-  const takeNextButton = (
-    <button type="button" className="cw-btn" onClick={() => void actions.takeNext().then((r) => r === 'none' && go({ name: 'overview' }))}>
-      {t('hub.queue.takeNext')}
-    </button>
+  // One case per person: when they have other open reports the way on is their next one (the claim stays), and Take next case
+  // is the other choice.
+  const nextReport = c.next;
+  const wayOn = (finished: boolean): ReactNode => (
+    <>
+      {nextReport !== null && (
+        <button
+          type="button"
+          className="cw-btn cw-btn--primary"
+          onClick={() => void actions.continueFrom({ reportId: report.id, person: report.targetPerson })}
+        >
+          {t('hub.decide.nextReport', { name: nameOfTarget, count: nextReport.left })}
+        </button>
+      )}
+      <button
+        type="button"
+        className={finished && nextReport === null ? 'cw-btn cw-btn--primary' : 'cw-btn'}
+        onClick={() => void actions.takeNext().then((r) => r === 'none' && go({ name: 'overview' }))}
+      >
+        {t('hub.queue.takeNext')}
+      </button>
+    </>
   );
   let body: ReactNode;
   if (!open) {
@@ -241,7 +255,7 @@ export function DecisionBar() {
             <button type="button" className="cw-btn" onClick={() => decisions.undo(report.id)}>
               {t('hub.toast.undo')}
             </button>
-            {takeNextButton}
+            {wayOn(false)}
           </div>
         )}
         {status === 'sending' && (
@@ -249,14 +263,12 @@ export function DecisionBar() {
             <p>
               <strong>{t('hub.decide.submitting')}</strong>
             </p>
-            {takeNextButton}
+            {wayOn(false)}
           </div>
         )}
         {status === 'done' && entry?.state.status === 'done' && (
           <DecisionResult state={entry.state} innerRef={resultRef}>
-            <button type="button" className="cw-btn cw-btn--primary" onClick={() => void actions.takeNext().then((r) => r === 'none' && go({ name: 'overview' }))}>
-              {t('hub.queue.takeNext')}
-            </button>
+            {wayOn(true)}
           </DecisionResult>
         )}
         {status === 'conflict' && (

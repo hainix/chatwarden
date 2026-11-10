@@ -452,6 +452,8 @@ export const en = {
   'hub.decide.submitNext': 'Decide and take next',
   'hub.decide.undoHint': 'Held for {seconds} s so you can undo it.',
   'hub.decide.held': 'Sending the decision on {who} in {seconds} s.',
+  'hub.decide.nextReport.one': 'Next report on {name} ({count} left)',
+  'hub.decide.nextReport.other': 'Next report on {name} ({count} left)',
   'hub.decide.queued': 'Decision queued.',
   'hub.decide.queued.note': 'It is sent in {seconds} s unless you undo it.',
   'hub.decide.sent': 'Decision on {who} sent.',

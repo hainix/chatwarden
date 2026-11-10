@@ -3,8 +3,9 @@ import { toHubError } from './client.js';
 import { useHub } from './context.js';
 import { groupName, errorText } from './labels.js';
 import { CLAIM_TTL_MS, actorName, holderOf } from './claims.js';
-import { useOptionalDecisions } from './decisions.js';
+import { hasLeft, useOptionalDecisions } from './decisions.js';
 import { useOptionalQueue, useQueue } from './liveQueue.js';
+import { nextOpenReport } from './queue.js';
 import { useToasts } from './toasts.js';
 
 // Working a case: claiming it when it is opened, keeping the claim and the "viewing" hint alive while it stays open, and the
@@ -42,7 +43,10 @@ export function CaseSession({ reportId }: { reportId: string }) {
   if (group !== null) seen.current = { reportId, person: group.person };
   else if (seen.current !== null && seen.current.reportId !== reportId) seen.current = null;
   const openPerson = seen.current?.person ?? null;
-  const person = group?.person ?? null;
+  // The report I just decided is no longer in the open queue, but its person is still the case I am working (their other reports may
+  // be open: one case per person), so the claim and the heartbeat go on. A case that closed for any other reason is not mine.
+  const decidedHere = hasLeft(decisions?.entry(reportId));
+  const person = group?.person ?? (decidedHere ? openPerson : null);
   const canClaim = can('reports.decide');
 
   const queueRef = useRef(queue);
@@ -126,7 +130,7 @@ export function CaseSession({ reportId }: { reportId: string }) {
   useEffect(() => {
     if (person === null) return;
     return () => {
-      if (decisionsRef.current?.isPending(person)) return;
+      if (decisionsRef.current?.willRelease(person)) return;
       const q = queueRef.current;
       const group = q.groups.find((g) => g.person === person);
       if (group === undefined || holderOf(group.claim, me.actor, nowRef.current()).kind !== 'you') return;
@@ -143,6 +147,12 @@ export type TakeResult = 'taken' | 'none' | 'busy' | 'failed';
 export interface CaseActions {
   /** Claim and open the oldest unclaimed case that matches the category filter. Says how it went. */
   takeNext: () => Promise<TakeResult>;
+  /**
+   * What to do once `decided` is on its way: go on to the same person's next open report (they are one case: the claim is kept and
+   * `/cases/next` is not asked), and only when there is none take the next case, or open the team view when nobody is waiting.
+   * The one place that rule lives. Answers `same` for the first, else how Take next went.
+   */
+  continueFrom: (decided: { reportId: string; person: string }) => Promise<'same' | TakeResult>;
   /** Claim a free case (after you let it go). */
   claim: (person: string) => Promise<void>;
   /** A senior or owner moving another moderator's live claim to themselves. The server audits it. */
@@ -155,6 +165,9 @@ export interface CaseActions {
 export function useCaseActions(): CaseActions {
   const { client, t, go } = useHub();
   const queue = useOptionalQueue();
+  const decisionsHere = useOptionalDecisions();
+  const decisionsRef = useRef(decisionsHere);
+  decisionsRef.current = decisionsHere;
   const toasts = useToasts();
   const queueRef = useRef(queue);
   queueRef.current = queue;
@@ -194,6 +207,22 @@ export function useCaseActions(): CaseActions {
       q.endTake(TAKE_COOLDOWN_MS);
     }
   }, [client, fail, go, t, toasts]);
+
+  const continueFrom = useCallback(
+    async (decided: { reportId: string; person: string }): Promise<'same' | TakeResult> => {
+      const q = queueRef.current;
+      const next = q === null ? null : nextOpenReport(q.groups, decided.person, decided.reportId, decisionsRef.current?.decidedIds());
+      if (next !== null) {
+        go({ name: 'report', id: next.id });
+        return 'same';
+      }
+      const result = await takeNext();
+      // Nobody is waiting: the team view says so.
+      if (result === 'none') go({ name: 'overview' });
+      return result;
+    },
+    [go, takeNext],
+  );
 
   const claimCase = useCallback(
     async (person: string): Promise<void> => {
@@ -268,5 +297,5 @@ export function useCaseActions(): CaseActions {
     [client, fail, t, toasts],
   );
 
-  return { takeNext, release, claim: claimCase, takeOver };
+  return { takeNext, continueFrom, release, claim: claimCase, takeOver };
 }

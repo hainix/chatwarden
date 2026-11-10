@@ -123,6 +123,31 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
   return groups.sort((a, b) => order[sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
 }
 
+const NONE: ReadonlySet<string> = new Set();
+
+/** The next report to open about a person once `exceptId` is decided: the oldest other open one, and how many are left. */
+export interface NextReport {
+  id: string;
+  category: ReportCategory;
+  createdAt: number;
+  /** How many other open reports the person has (this one counted out), the one to open included. */
+  left: number;
+}
+
+/**
+ * One case per person: the report to go on to after deciding `exceptId`, from the live queue (which holds open reports only). The
+ * oldest other open report of the same person, or null when it was their last. Entries are newest first, so the oldest is the last.
+ * This is the one place the rule lives: the notice, "Decide and take next" and Ctrl+Enter all ask it.
+ */
+export function nextOpenReport(groups: readonly QueueGroup[], person: string, exceptId: string, decided: ReadonlySet<string> = NONE): NextReport | null {
+  const group = groups.find((g) => g.person === person);
+  if (group === undefined) return null;
+  // `decided`: reports whose decision is on its way (held or sent) are still in the queue until it is read again, but are done with.
+  const others = group.entries.filter((e) => e.id !== exceptId && !decided.has(e.id));
+  const oldest = others[others.length - 1];
+  return oldest === undefined ? null : { ...oldest, left: others.length };
+}
+
 export interface QueueFilter {
   claim: 'all' | 'unclaimed' | 'mine';
   category: ReportCategory | 'all';
