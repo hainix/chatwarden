@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { CaseCard } from '../case/CaseCard.js';
 import type { Route } from '../router.js';
 import { Actions } from './Actions.js';
 import { Audit } from './Audit.js';
@@ -9,17 +10,21 @@ import { Overview } from './Overview.js';
 import { Person } from './Person.js';
 import { Report } from './Report.js';
 import { Reports } from './Reports.js';
+import { SimpleHome } from './SimpleHome.js';
 import { Terms } from './Terms.js';
 
-/** The screen for a route that the role may open. */
-export function screenFor(route: Route): ReactNode {
+/**
+ * The screen for a route that the role may open. In Simple mode the landing is the calm Cases screen and a case is the one card;
+ * every other screen is the same in both modes.
+ */
+export function screenFor(route: Route, simple = false): ReactNode {
   switch (route.name) {
     case 'overview':
-      return <Overview />;
+      return simple ? <SimpleHome /> : <Overview />;
     case 'reports':
       return <Reports status={route.status} />;
     case 'report':
-      return <Report />;
+      return simple ? <CaseCard /> : <Report />;
     case 'person':
       return <Person person={route.ref} />;
     case 'actions':

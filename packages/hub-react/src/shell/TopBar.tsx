@@ -4,9 +4,13 @@ import { absoluteTime } from '../format.js';
 import { Icon, Mark } from '../icons.js';
 import type { HubText } from '../i18n.js';
 import { useOptionalQueue } from '../liveQueue.js';
+import { useMode } from '../mode.js';
+import type { HubMode } from '../mode.js';
+import type { Route } from '../router.js';
+import { SimpleNav } from './SimpleNav.js';
 import type { Role } from '../types.js';
 import { keyLabel, modKey } from '../shortcuts.js';
-import { Avatar, Kbd, Tag } from '../ui.js';
+import { Avatar, Kbd, Segmented, Tag } from '../ui.js';
 
 const ROLE_LABEL: Record<Role, HubText> = {
   moderator: 'hub.session.role.moderator',
@@ -21,8 +25,10 @@ const FACES = 4;
  * The slim top bar: the product, the game, whether the queue is live, the command bar, and who is on. Everything here recedes;
  * the one thing that glows is the small green dot, which says the connection is up.
  */
-export function TopBar({ gameName, shortcuts, onCommand }: { gameName?: string; shortcuts: boolean; onCommand: () => void }) {
+export function TopBar({ route, gameName, shortcuts, onCommand }: { route: Route; gameName?: string; shortcuts: boolean; onCommand: () => void }) {
   const { t, me, now, locale } = useHub();
+  const { mode, setMode, fixed } = useMode();
+  const simple = mode === 'simple';
   const queue = useOptionalQueue();
   const team = queue === null ? [] : teamOf(queue.groups, me.actor, now());
   const shown = team.slice(0, FACES);
@@ -50,6 +56,7 @@ export function TopBar({ gameName, shortcuts, onCommand }: { gameName?: string; 
                 : t('hub.shell.offline')}
         </span>
       )}
+      {simple && <SimpleNav route={route} />}
       <div className="cw-top-gap" />
       <button type="button" className="cw-cmd" onClick={onCommand} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+K Meta+K' } : {})}>
         <Icon name="search" />
@@ -61,7 +68,7 @@ export function TopBar({ gameName, shortcuts, onCommand }: { gameName?: string; 
           </span>
         )}
       </button>
-      {queue !== null && (
+      {queue !== null && !simple && (
         <ul className="cw-faces" aria-label={t('hub.shell.onNow.label')}>
           {shown.map((m) => (
             <li key={m.actor} title={actorName(m.actor)}>
@@ -71,6 +78,17 @@ export function TopBar({ gameName, shortcuts, onCommand }: { gameName?: string; 
           ))}
           {team.length > shown.length && <li className="cw-faces-more">{t('hub.shell.onNow.more', { count: team.length - shown.length })}</li>}
         </ul>
+      )}
+      {!fixed && (
+        <Segmented<HubMode>
+          label={t('hub.mode.label')}
+          value={mode}
+          options={[
+            { value: 'simple', label: t('hub.mode.simple') },
+            { value: 'detailed', label: t('hub.mode.detailed') },
+          ]}
+          onChange={setMode}
+        />
       )}
       <div className="cw-who" role="group" aria-label={t('hub.session.label')}>
         <span className="cw-actor">{me.actor}</span>

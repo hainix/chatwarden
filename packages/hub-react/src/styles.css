@@ -2648,6 +2648,205 @@
   background: none;
 }
 
+/* ---- Simple mode ------------------------------------------------------------------------------------------------------ */
+/* One card per case. No rail: the menu is in the top bar, the queue is the list beside the card. Neutral throughout: the only
+   colour is the primary button (your next action), the reported line, the warning and the referee card, each as everywhere else. */
+.cw-hub .cw-body[data-mode='simple'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cw-hub .cw-body[data-mode='simple'][data-queue='true'] {
+  grid-template-columns: var(--cw-queue-width) minmax(0, 1fr);
+}
+
+.cw-hub .cw-snav {
+  min-width: 0;
+}
+.cw-hub .cw-snav > ul {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1);
+}
+.cw-hub .cw-snav a,
+.cw-hub .cw-snav button {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(var(--cw-control-height) - 4px);
+  padding: 0 var(--cw-space-3);
+  border: 0;
+  border-radius: var(--cw-radius-s);
+  background: transparent;
+  color: var(--cw-ink-muted);
+  font-weight: var(--cw-weight-strong);
+  text-decoration: none;
+  cursor: pointer;
+}
+.cw-hub .cw-snav a:hover,
+.cw-hub .cw-snav button:hover {
+  color: var(--cw-ink);
+}
+.cw-hub .cw-snav a[aria-current='page'],
+.cw-hub .cw-snav button[data-current='true'] {
+  background: var(--cw-surface-sunken);
+  color: var(--cw-ink);
+}
+.cw-hub .cw-snav-more {
+  position: relative;
+}
+.cw-hub .cw-snav-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  display: grid;
+  min-width: 11rem;
+  padding: var(--cw-space-1);
+  border: var(--cw-border-width) solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-m);
+  background: var(--cw-surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--cw-shadow-ink) 22%, transparent);
+}
+.cw-hub .cw-snav-menu a {
+  display: flex;
+  width: 100%;
+}
+
+.cw-hub .cw-scard {
+  display: grid;
+  gap: var(--cw-space-4);
+  align-content: start;
+  min-width: 0;
+  max-width: 48rem;
+  padding: var(--cw-space-4) var(--cw-space-5) var(--cw-space-5);
+}
+.cw-hub .cw-scard-head {
+  display: grid;
+  gap: 0;
+}
+.cw-hub .cw-scard-head .cw-screen-title {
+  font-size: var(--cw-text-xl);
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-scard-sub {
+  color: var(--cw-ink-muted);
+}
+.cw-hub .cw-scard-said,
+.cw-hub .cw-scard-record {
+  display: grid;
+  gap: var(--cw-space-2);
+  min-width: 0;
+}
+.cw-hub .cw-scard-said h3,
+.cw-hub .cw-scard-record h3 {
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+}
+.cw-hub .cw-scard-lines {
+  min-width: 0;
+}
+.cw-hub .cw-scard-lines .cw-lines {
+  margin: 0;
+  padding: 0;
+}
+.cw-hub .cw-scard-lines .cw-line-text {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-sline {
+  grid-template-columns: 6rem minmax(0, 1fr);
+}
+.cw-hub .cw-sline[data-who='true'] {
+  grid-template-columns: 6rem minmax(4rem, 9rem) minmax(0, 1fr);
+}
+.cw-hub .cw-sline .cw-line-time {
+  white-space: nowrap;
+}
+.cw-hub .cw-sline .cw-line-meta {
+  grid-column: 2 / -1;
+}
+.cw-hub .cw-scard-toggle {
+  justify-self: start;
+}
+.cw-hub .cw-scard-decision {
+  display: grid;
+  gap: var(--cw-space-3);
+  min-width: 0;
+}
+.cw-hub .cw-scard-decision .cw-suggest-text .cw-hint {
+  display: block;
+  overflow: visible;
+}
+.cw-hub .cw-scard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2) var(--cw-space-3);
+}
+.cw-hub .cw-scard-actions .cw-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-3);
+  min-height: calc(var(--cw-control-height) + 0.25rem);
+}
+.cw-hub .cw-scard-fine {
+  font-size: var(--cw-text-s);
+}
+.cw-hub .cw-scard-none {
+  font-weight: var(--cw-weight-medium);
+}
+.cw-hub .cw-scard-back {
+  display: flex;
+}
+/* Something else opens the decision bar in the flow of the card, closed or not: it is not a sheet at the bottom edge. */
+.cw-hub .cw-scard .cw-dock[data-open] {
+  position: static;
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-m);
+  box-shadow: none;
+}
+.cw-hub .cw-scard .cw-dock[data-open] .cw-dock-bar {
+  display: none;
+}
+.cw-hub .cw-scard .cw-dock[data-open] .cw-dock-body {
+  display: grid;
+  max-height: none;
+  padding: var(--cw-space-3) var(--cw-space-4) var(--cw-space-4);
+  overflow: visible;
+  border-top: 0;
+}
+.cw-hub .cw-simple-home {
+  display: grid;
+  gap: var(--cw-space-1);
+}
+@media (max-width: 51.1875rem) {
+  .cw-hub .cw-snav {
+    flex: 1 1 100%;
+  }
+  .cw-hub .cw-scard {
+    padding: var(--cw-space-3) 0 var(--cw-space-4);
+  }
+  .cw-hub .cw-scard-actions .cw-btn {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+}
+/* In a narrow card (a phone, or the queue and a pane beside it) a line is its time, who said it if the whole chat is open, and under
+   them the words at the full width, so the words are not squeezed into what is left of a row. */
+@container cwmain (max-width: 34rem) {
+  .cw-hub .cw-sline,
+  .cw-hub .cw-sline[data-who='true'] {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .cw-hub .cw-sline[data-who='true'] .cw-line-who {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .cw-hub .cw-sline .cw-line-text,
+  .cw-hub .cw-sline .cw-line-meta {
+    grid-column: 1 / -1;
+  }
+}
+
 /* ---- Motion, forced colours -------------------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: no-preference) {
   .cw-hub .cw-btn,

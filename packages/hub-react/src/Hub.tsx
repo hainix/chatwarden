@@ -12,6 +12,8 @@ import { createT, en } from './i18n.js';
 import type { HubT } from './i18n.js';
 import { errorText } from './labels.js';
 import { QueueProvider, useOptionalQueue } from './liveQueue.js';
+import { ModeProvider, useMode, useModeState } from './mode.js';
+import type { HubMode } from './mode.js';
 import { permissionFor } from './nav.js';
 import { buildPath, hashRouter, memoryRouter, parseRoute } from './router.js';
 import type { HubRouter, Route } from './router.js';
@@ -50,6 +52,12 @@ export interface HubProps {
   gameName?: string;
   /** Set `false` to turn every keyboard shortcut off (J, K, N, ?, Ctrl or Cmd+K, Escape), for a page that has its own. Default `true`. */
   shortcuts?: boolean;
+  /**
+   * `simple` is one card per case with the suggestion one click away (for a team of one or two); `detailed` is the full workbench.
+   * Set it to fix the mode and hide the Simple/Detailed switch. Left out, each moderator's last choice is kept in their browser,
+   * and a browser that cannot keep it (or has none) gets `simple`.
+   */
+  mode?: HubMode;
 }
 
 const noopSubscribe = (): (() => void) => () => undefined;
@@ -72,7 +80,8 @@ function clientId(client: object): number {
  * use: the queue of open cases, the screen or case in the middle, and (beside an open case) who is handling it. Pass a
  * `client`; everything else has a default.
  */
-export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme, onNavigate, now, className, gameName, shortcuts = true }: HubProps) {
+export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme, onNavigate, now, className, gameName, shortcuts = true, mode: modeProp }: HubProps) {
+  const mode = useModeState(modeProp);
   const t = useMemo(() => tProp ?? createT(en, locale), [tProp, locale]);
   const fallbackRouter = useMemo(() => (typeof window === 'undefined' ? memoryRouter('/') : hashRouter()), []);
   const router = routerProp ?? fallbackRouter;
@@ -127,7 +136,9 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
     );
     content = (
       <HubContext.Provider value={value}>
-        <ToastProvider>{value.can('reports.read') ? <QueueProvider>{shell}</QueueProvider> : shell}</ToastProvider>
+        <ModeProvider value={mode}>
+          <ToastProvider>{value.can('reports.read') ? <QueueProvider>{shell}</QueueProvider> : shell}</ToastProvider>
+        </ModeProvider>
       </HubContext.Provider>
     );
   }
@@ -158,6 +169,7 @@ type Dialogs = null | 'command' | 'shortcuts';
 /** The workbench: top bar, rail, queue, the screen, the case panel, and the windows and shortcuts that work across them. */
 function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string | undefined; shortcuts: boolean }) {
   const { t, can } = useHub();
+  const simple = useMode().mode === 'simple';
   const queue = useOptionalQueue();
   const mainRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -191,7 +203,7 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
         {route.name === 'notFound' ? (
           <NotFound />
         ) : allowed ? (
-          screenFor(route)
+          screenFor(route, simple)
         ) : (
           <div className="cw-screen">
             <div className="cw-empty">
@@ -203,7 +215,7 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
           </div>
         )}
       </main>
-      {inCase && <CasePanel />}
+      {inCase && !simple && <CasePanel />}
     </>
   );
 
@@ -212,10 +224,16 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
       <button type="button" className="cw-skip" onClick={() => mainRef.current?.focus()}>
         {t('hub.skip')}
       </button>
-      <TopBar gameName={gameName} shortcuts={shortcuts} onCommand={() => setDialog('command')} />
+      <TopBar route={route} gameName={gameName} shortcuts={shortcuts} onCommand={() => setDialog('command')} />
       <ConnectionBanner />
-      <div className="cw-body" ref={bodyRef} data-queue={hasQueue ? 'true' : 'false'} data-case={hasQueue && reportId !== null ? 'true' : 'false'}>
-        <Rail route={route} />
+      <div
+        className="cw-body"
+        ref={bodyRef}
+        data-mode={simple ? 'simple' : 'detailed'}
+        data-queue={hasQueue ? 'true' : 'false'}
+        data-case={hasQueue && reportId !== null && !simple ? 'true' : 'false'}
+      >
+        {!simple && <Rail route={route} />}
         {hasQueue && <QueuePane route={route} shortcuts={shortcuts} />}
         <div className="cw-work">
           {inCase && reportId !== null ? (

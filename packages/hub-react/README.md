@@ -84,6 +84,24 @@ export const client = createHubClient(routerTransport(handle));
 | `className` | `string` | Extra class names for the root element, handy for theming. |
 | `gameName` | `string` | Your game's name, shown beside the product name in the top bar. Default: none. |
 | `shortcuts` | `boolean` | Set `false` to turn every keyboard shortcut off (J, K, N, ?, Ctrl or Cmd+K, Escape), for a page that has its own. Default `true`. |
+| `mode` | `'simple' \| 'detailed'` | Fixes the view and hides the Simple/Detailed switch. Left out, each moderator's last choice is kept in their browser (`localStorage`, key `chatwarden.hub.mode`), and a browser that cannot keep it gets `simple`. |
+
+### Simple mode
+
+Simple is the default view: one card per case, for a team of one or two. The card holds the person's name, what they were reported
+for and by whom, what they said (only their own lines, the reported one marked, with "Show the whole chat" for the rest; blocked words
+stay hidden until shown), their record in one line, and the ladder's suggestion as a referee card with three buttons: the suggested step
+("Restrict chat, 24 hours"), "No action needed", and "Something else…", which opens the full decision bar in place. One click sends
+Fair, the suggested rule, the rule's title as the reason and the person's own lines (up to five) as what the player is shown; "No action
+needed" sends Not a problem with the reason "No rule was broken". Both go through the same five-second Undo as Detailed, the same claims
+and the same send, and the keys are `1`, `2` and Ctrl or Cmd+Enter (the suggested step, then the next case). When no rule covers the report, or the role
+cannot apply the step, the card says so and offers "Something else…" instead.
+
+What Simple hides stays one click away in Detailed: claims are still taken and released quietly, and only a case someone else holds shows
+it ("maya is on it", read-only, with Take over for a role holding `claims.override`). A reporter's record shows only as a warning when they
+have three or more reports and fewer than a third were upheld. The menu is Cases, Words, Blocked and More (Recent actions, Audit, Rule gaps and
+Guide, each by permission); the command bar and every route still work. The switch in the top bar keeps the open case, and a decision waiting
+for its Undo survives it.
 
 ### Screens
 

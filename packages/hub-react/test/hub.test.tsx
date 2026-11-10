@@ -190,10 +190,10 @@ describe('Hub: router, callbacks, theme, text', () => {
     const w = await hubWorld();
     let path = '/';
     const mk = (): HubRouter => ({ path, navigate: vi.fn() });
-    const { rerender } = render(<Hub client={w.client} router={mk()} now={w.now} />);
+    const { rerender } = render(<Hub client={w.client} router={mk()} now={w.now} mode="detailed" />);
     await screen.findByRole('heading', { name: 'Overview' });
     path = '/reports';
-    rerender(<Hub client={w.client} router={mk()} now={w.now} />);
+    rerender(<Hub client={w.client} router={mk()} now={w.now} mode="detailed" />);
     expect(await screen.findByRole('heading', { level: 2, name: 'Reports' })).toBeInTheDocument();
   });
 
@@ -212,7 +212,7 @@ describe('Hub: router, callbacks, theme, text', () => {
   it('defaults to the URL hash', async () => {
     window.location.hash = '#/reports';
     const w = await hubWorld();
-    render(<Hub client={w.client} now={w.now} />);
+    render(<Hub client={w.client} now={w.now} mode="detailed" />);
     expect(await screen.findByRole('heading', { level: 2, name: 'Reports' })).toBeInTheDocument();
     window.location.hash = '';
   });
@@ -223,11 +223,11 @@ describe('Hub: router, callbacks, theme, text', () => {
     await screen.findByRole('heading', { name: 'Overview' });
     const root = container.querySelector('.cw-hub');
     expect(root).toHaveAttribute('data-cw-theme', 'dark');
-    rerender(<Hub client={w.client} router={memoryRouter('/')} now={w.now} theme="light" />);
+    rerender(<Hub client={w.client} router={memoryRouter('/')} now={w.now} mode="detailed" theme="light" />);
     expect(container.querySelector('.cw-hub')).toHaveAttribute('data-cw-theme', 'light');
-    rerender(<Hub client={w.client} router={memoryRouter('/')} now={w.now} theme="auto" />);
+    rerender(<Hub client={w.client} router={memoryRouter('/')} now={w.now} mode="detailed" theme="auto" />);
     expect(container.querySelector('.cw-hub')).not.toHaveAttribute('data-cw-theme');
-    rerender(<Hub client={w.client} router={memoryRouter('/')} now={w.now} />);
+    rerender(<Hub client={w.client} router={memoryRouter('/')} now={w.now} mode="detailed" />);
     expect(container.querySelector('.cw-hub')).not.toHaveAttribute('data-cw-theme');
   });
 

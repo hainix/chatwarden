@@ -15,6 +15,6 @@ export function renderHub(w: HubWorld, options: RenderOptions = {}) {
   const { path, ...props } = options;
   const router = props.router ?? memoryRouter(path ?? '/');
   const user = userEvent.setup();
-  const utils = render(<Hub client={w.client} router={router} now={w.now} {...props} />);
+  const utils = render(<Hub client={w.client} router={router} now={w.now} mode="detailed" {...props} />);
   return { ...utils, user, router };
 }

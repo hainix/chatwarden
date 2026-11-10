@@ -2,6 +2,7 @@ export const VERSION = '0.1.1';
 
 export { Hub } from './Hub.js';
 export type { HubProps } from './Hub.js';
+export type { HubMode } from './mode.js';
 
 export { createHubClient, fetchAll, HubError, toHubError } from './client.js';
 export type { HubClient } from './client.js';

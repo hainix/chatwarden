@@ -7,6 +7,7 @@ import { absoluteTime, formatDuration, listOf, waitTone } from '../format.js';
 import { Icon } from '../icons.js';
 import { CATEGORY_LIST, categoryLabel, errorText, groupName } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
+import { useMode } from '../mode.js';
 import type { ShownRow } from '../live.js';
 import type { Route } from '../router.js';
 import { Avatar, Kbd, Link, PersonChip, Skeleton } from '../ui.js';
@@ -23,6 +24,7 @@ const SKELETON_ROWS = 5;
  */
 export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boolean }) {
   const { t, locale, can } = useHub();
+  const simple = useMode().mode === 'simple';
   const queue = useQueue();
   const actions = useCaseActions();
   const titleId = useId();
@@ -87,7 +89,7 @@ export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boole
     body = (
       <ul className="cw-case-list" aria-label={t('hub.queue.list')}>
         {queue.visible.map((row) => (
-          <CaseRow key={row.group.person} row={row} selected={openReport !== null && row.group.reportIds.includes(openReport)} onRelease={() => void actions.release(row.group.person)} />
+          <CaseRow key={row.group.person} row={row} simple={simple} selected={openReport !== null && row.group.reportIds.includes(openReport)} onRelease={() => void actions.release(row.group.person)} />
         ))}
       </ul>
     );
@@ -117,24 +119,28 @@ export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boole
             {shortcuts && <Kbd>N</Kbd>}
           </button>
         )}
-        <div className="cw-seg" role="group" aria-label={t('hub.queue.filter.claim')}>
-          {(['all', 'unclaimed', 'mine'] as const).map((v) => (
-            <button key={v} type="button" aria-pressed={queue.filter.claim === v} onClick={() => queue.setFilter({ claim: v })}>
-              {t(`hub.queue.claim.${v}`)}
-            </button>
-          ))}
-        </div>
-        <label className="cw-select">
-          <span className="cw-sr">{t('hub.queue.filter.category')}</span>
-          <select value={queue.filter.category} onChange={(e) => queue.setFilter({ category: e.target.value as typeof queue.filter.category })}>
-            <option value="all">{t('hub.queue.category.all')}</option>
-            {CATEGORY_LIST.map((c) => (
-              <option key={c} value={c}>
-                {categoryLabel(t, c)}
-              </option>
+        {!simple && (
+          <div className="cw-seg" role="group" aria-label={t('hub.queue.filter.claim')}>
+            {(['all', 'unclaimed', 'mine'] as const).map((v) => (
+              <button key={v} type="button" aria-pressed={queue.filter.claim === v} onClick={() => queue.setFilter({ claim: v })}>
+                {t(`hub.queue.claim.${v}`)}
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+        )}
+        {!simple && (
+          <label className="cw-select">
+            <span className="cw-sr">{t('hub.queue.filter.category')}</span>
+            <select value={queue.filter.category} onChange={(e) => queue.setFilter({ category: e.target.value as typeof queue.filter.category })}>
+              <option value="all">{t('hub.queue.category.all')}</option>
+              {CATEGORY_LIST.map((c) => (
+                <option key={c} value={c}>
+                  {categoryLabel(t, c)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <div className="cw-newbar" role="status">
         {queue.incoming > 0 && (
@@ -170,8 +176,11 @@ export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boole
   );
 }
 
-/** One case. The link opens it (and so claims it); the row's own button releases your claim. */
-function CaseRow({ row, selected, onRelease }: { row: ShownRow; selected: boolean; onRelease: () => void }) {
+/**
+ * One case. The link opens it (and so claims it); the row's own button releases your claim. In Simple mode a claim is not shown
+ * unless someone else holds the case ("maya is on it"), and nothing offers a release: leaving a case lets it go.
+ */
+function CaseRow({ row, simple, selected, onRelease }: { row: ShownRow; simple: boolean; selected: boolean; onRelease: () => void }) {
   const { t, locale, now, me } = useHub();
   const g = row.group;
   const name = groupName(t, g);
@@ -190,7 +199,7 @@ function CaseRow({ row, selected, onRelease }: { row: ShownRow; selected: boolea
         <span className="cw-case-main">
           <span className="cw-case-who">
             <span className="cw-case-name">{name}</span>
-            <PersonChip person={g.person} />
+            {!simple && <PersonChip person={g.person} />}
           </span>
           <span className="cw-case-cats">
             {g.categories.map((c) => (
@@ -209,21 +218,29 @@ function CaseRow({ row, selected, onRelease }: { row: ShownRow; selected: boolea
             {waiting === null ? '' : t('hub.reports.row.waiting', { duration: formatDuration(waiting, locale) })}
             {overdue && <span className="cw-sr"> {t('hub.queue.row.overdue')}</span>}
           </span>
-          <span className="cw-case-claim">
-            {holder.kind === 'none' ? (
-              <span className="cw-case-free">
-                {t('hub.queue.row.unclaimed')}
-                <span className="cw-sr"> {t('hub.queue.row.notHandled')}</span>
+          {simple ? (
+            holder.kind === 'other' && (
+              <span className="cw-case-claim">
+                <span>{t('hub.simple.claim.rowTheirs', { name: actorName(holder.by) })}</span>
               </span>
-            ) : (
-              <>
-                <Avatar actor={holder.by} you={holder.kind === 'you'} size="s" />
-                <span aria-hidden="true">{holder.kind === 'you' ? t('hub.queue.row.you') : actorName(holder.by)}</span>
-                <span className="cw-sr">{holder.kind === 'you' ? t('hub.queue.row.handledByYou') : t('hub.queue.row.handledBy', { name: actorName(holder.by) })}</span>
-              </>
-            )}
-          </span>
-          {viewers.length > 0 && (
+            )
+          ) : (
+            <span className="cw-case-claim">
+              {holder.kind === 'none' ? (
+                <span className="cw-case-free">
+                  {t('hub.queue.row.unclaimed')}
+                  <span className="cw-sr"> {t('hub.queue.row.notHandled')}</span>
+                </span>
+              ) : (
+                <>
+                  <Avatar actor={holder.by} you={holder.kind === 'you'} size="s" />
+                  <span aria-hidden="true">{holder.kind === 'you' ? t('hub.queue.row.you') : actorName(holder.by)}</span>
+                  <span className="cw-sr">{holder.kind === 'you' ? t('hub.queue.row.handledByYou') : t('hub.queue.row.handledBy', { name: actorName(holder.by) })}</span>
+                </>
+              )}
+            </span>
+          )}
+          {!simple && viewers.length > 0 && (
             <span className="cw-case-viewing">
               <Icon name="eye" />
               <span aria-hidden="true">{viewerText}</span>
@@ -232,7 +249,7 @@ function CaseRow({ row, selected, onRelease }: { row: ShownRow; selected: boolea
           )}
         </span>
       </Link>
-      {holder.kind === 'you' && (
+      {!simple && holder.kind === 'you' && (
         <button type="button" className="cw-case-release" aria-label={t('hub.queue.row.releaseLabel', { who: name })} onClick={onRelease}>
           {t('hub.queue.row.release')}
         </button>

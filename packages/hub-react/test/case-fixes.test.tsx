@@ -198,7 +198,7 @@ describe('Important 2: Fair brings the suggestion back under React StrictMode to
     const user = userEvent.setup();
     render(
       <StrictMode>
-        <Hub client={w.client} router={memoryRouter(`/reports/${f.id}`)} now={w.now} />
+        <Hub client={w.client} router={memoryRouter(`/reports/${f.id}`)} now={w.now} mode="detailed" />
       </StrictMode>,
     );
     await screen.findByRole('heading', { level: 2, name: /report against/ });
