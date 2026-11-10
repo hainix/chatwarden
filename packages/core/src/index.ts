@@ -185,12 +185,13 @@ export {
   starterRules,
 } from './rules.js';
 export type { CommunityRule, RuleRef } from './rules.js';
-export { agentBrief, bindDocuments, codeOfConduct, moderatorGuide, policyJson } from './documents.js';
+export { GUIDE_SECTIONS, agentBrief, bindDocuments, codeOfConduct, moderatorGuide, policyJson } from './documents.js';
 export type {
   CodeOfConductOptions,
   DocumentFormat,
   DocumentPolicy,
   Documents,
+  GuideSection,
   ModeratorGuideOptions,
   PolicyJson,
 } from './documents.js';

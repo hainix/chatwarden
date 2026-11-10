@@ -790,3 +790,87 @@ describe('ladder label helpers (shared with the documents)', () => {
     expect(outcomeLabel({ kind: 'ban', durationMs: null })).toBe('Full ban permanent');
   });
 });
+
+describe('moderatorGuide omitSections (the hub draws those two sections from data)', () => {
+  const headings = (md: string): string[] => [...md.matchAll(/^##? (.+)$/gm)].map((m) => m[1] as string);
+
+  it('the default output is unchanged: no option, an empty list and undefined give the same document', () => {
+    for (const name of PRESET_NAMES) {
+      for (const format of FORMATS) {
+        const plain = moderatorGuide(policyOf(name), { format });
+        expect(moderatorGuide(policyOf(name), { format, omitSections: [] }), `${name}/${format}`).toBe(plain);
+        expect(moderatorGuide(policyOf(name), { format, omitSections: undefined })).toBe(plain);
+      }
+    }
+  });
+
+  it('exports the section names', async () => {
+    const core = await import('../src/index.js');
+    expect([...core.GUIDE_SECTIONS]).toEqual(['rules', 'ladder']);
+  });
+
+  it('omitting rules drops the Community Rules heading and every rule line, and nothing else', () => {
+    const policy = policyOf('standard');
+    const full = moderatorGuide(policy, { format: 'markdown' });
+    const cut = moderatorGuide(policy, { format: 'markdown', omitSections: ['rules'] });
+    expect(full).toContain('## Community Rules');
+    expect(cut).not.toContain('## Community Rules');
+    for (const r of policy.rules.active()) expect(cut, `rule ${r.number}`).not.toContain(`- **CR ${r.number}`);
+    expect(headings(cut)).toEqual(headings(full).filter((h) => h !== 'Community Rules'));
+    expect(cut).toContain('## Conduct levels');
+    expect(cut).toContain('## Escalation ladder');
+  });
+
+  it('omitting the ladder drops its heading, intro, table and the area and severe notes, and nothing else', () => {
+    const policy = policyOf('standard');
+    const full = moderatorGuide(policy, { format: 'markdown' });
+    const cut = moderatorGuide(policy, { format: 'markdown', omitSections: ['ladder'] });
+    expect(full).toContain('Rules that always read the High column');
+    for (const gone of ['## Escalation ladder', 'Low / medium', 'A person\'s step is the heaviest', 'Rules that turn a chat restriction', 'Rules that always read the High column']) {
+      expect(cut, gone).not.toContain(gone);
+    }
+    expect(headings(cut)).toEqual(headings(full).filter((h) => h !== 'Escalation ladder'));
+    expect(cut).toContain('## Community Rules');
+    expect(cut).toContain('## The AI read');
+    expect(cut).toContain('## Repeated behaviour');
+  });
+
+  it('omitting both keeps the document order of everything else, in every format and preset', () => {
+    for (const name of PRESET_NAMES) {
+      const md = moderatorGuide(policyOf(name), { format: 'markdown' });
+      const cut = moderatorGuide(policyOf(name), { format: 'markdown', omitSections: ['ladder', 'rules'] });
+      expect(headings(cut)).toEqual(headings(md).filter((h) => h !== 'Community Rules' && h !== 'Escalation ladder'));
+      for (const format of ['html', 'text'] as const) {
+        const out = moderatorGuide(policyOf(name), { format, omitSections: ['rules', 'ladder'] });
+        expect(out).not.toMatch(/<h2>Community Rules<\/h2>|<h2>Escalation ladder<\/h2>|^Community Rules\n-+|^Escalation ladder\n-+|Low \/ medium/m);
+        expect(out).toMatch(/Conduct levels/);
+        expect(out).toMatch(/Repeated behaviour/);
+      }
+    }
+  });
+
+  it('a profile with its own area and severe rules loses those notes with the ladder', () => {
+    const profile = defineProfile({ ...PRESETS.standard, areaRules: [2], severeRules: [3] });
+    const policy: DocumentPolicy = { profile, rules: defineRules(starterRules(profile.rules)) };
+    expect(moderatorGuide(policy, { format: 'markdown' })).toMatch(/Rules that turn a chat restriction/);
+    expect(moderatorGuide(policy, { format: 'markdown', omitSections: ['ladder'] })).not.toMatch(/Rules that turn a chat restriction|always read the High column/);
+  });
+
+  it('refuses a section it does not know, or a list that is not one, with a RangeError', () => {
+    const policy = policyOf('standard');
+    expect(() => moderatorGuide(policy, { format: 'markdown', omitSections: ['levels' as never] })).toThrow(RangeError);
+    expect(() => moderatorGuide(policy, { format: 'markdown', omitSections: 'rules' as never })).toThrow(RangeError);
+    expect(() => moderatorGuide(policy, { format: 'markdown', omitSections: [1 as never] })).toThrow(RangeError);
+  });
+
+  it('the bound documents take it too (cw.documents)', async () => {
+    const cw = await createChatwarden({
+      store: new MemoryStore(),
+      secret: 'doc-test-secret-0000-not-real-at-all',
+      platform: { identify: (c) => c as RawWho } as Platform,
+      profile: 'standard',
+      retention: false,
+    });
+    expect(cw.documents.moderatorGuide({ format: 'markdown', omitSections: ['rules'] })).not.toContain('## Community Rules');
+  });
+});

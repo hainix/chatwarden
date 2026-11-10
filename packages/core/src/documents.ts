@@ -34,9 +34,19 @@ export interface CodeOfConductOptions {
   contactUrl?: string;
 }
 
+/**
+ * The sections of the moderator guide a caller may leave out: `rules` (the Community Rules list) and `ladder` (the escalation
+ * ladder: its heading, the step note, the table and the notes on area and severe rules). The moderator hub draws both from data
+ * and asks for the rest of the guide.
+ */
+export const GUIDE_SECTIONS = ['rules', 'ladder'] as const;
+export type GuideSection = (typeof GUIDE_SECTIONS)[number];
+
 /** Options for {@link moderatorGuide}. */
 export interface ModeratorGuideOptions {
   format: DocumentFormat;
+  /** Sections to leave out. Default none: the whole guide. The rest keeps its order. */
+  omitSections?: readonly GuideSection[];
 }
 
 /** The policy as data, for tools that import it. */
@@ -206,6 +216,14 @@ function render(blocks: readonly Block[], format: DocumentFormat): string {
 
 // ---------------------------------------------------------------------------------------------------------------
 // Checks
+
+function checkSections(sections: unknown): ReadonlySet<GuideSection> {
+  if (sections === undefined) return new Set();
+  if (!Array.isArray(sections) || !sections.every((x) => typeof x === 'string' && (GUIDE_SECTIONS as readonly string[]).includes(x))) {
+    throw new RangeError(`omitSections must be a list of: ${GUIDE_SECTIONS.join(', ')}`);
+  }
+  return new Set(sections as GuideSection[]);
+}
 
 function checkFormat(format: unknown): DocumentFormat {
   if (typeof format !== 'string' || !FORMATS.includes(format)) {
@@ -520,6 +538,7 @@ function aiForModerators(profile: ModerationProfile): string {
 export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOptions): string {
   checkPolicy(policy);
   const format = checkFormat(options.format);
+  const omit = checkSections(options.omitSections);
   const { profile, rules } = policy;
 
   const blocks: Block[] = [
@@ -529,8 +548,7 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
       k: 'p',
       text: 'This guide is generated from the moderation profile and the Community Rules in force, so it matches what the kit enforces. It is for the moderation team: do not publish it.',
     },
-    { k: 'h', level: 2, text: 'Community Rules' },
-    { k: 'ul', items: ruleItems(rules) },
+    ...(omit.has('rules') ? [] : ([{ k: 'h', level: 2, text: 'Community Rules' }, { k: 'ul', items: ruleItems(rules) }] as Block[])),
     { k: 'h', level: 2, text: 'Conduct levels' },
     {
       k: 'table',
@@ -562,27 +580,31 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
       k: 'p',
       text: 'Repeated applies while the person has no warning or restriction on record; once they do, the ladder below applies. At least one earlier note is always needed. Revoked notes, and notes older than the window, do not count. An escalation is never milder than the first-offense outcome.',
     },
-    { k: 'h', level: 2, text: 'Escalation ladder' },
-    {
-      k: 'p',
-      text: `A person's step is the heaviest action on their record in the last 90 days. Step ${RECORD_STEPS}.`,
-    },
-    {
-      k: 'table',
-      head: ['Step', 'Low / medium (banter, rude)', 'High (hostile with a record, severe)'],
-      rows: profile.ladder.map((row) => [String(row.step), clean(row.lowMedium.label), clean(row.high.label)]),
-    },
   );
-  const area = areaRuleList(policy);
-  if (area.length > 0) {
-    blocks.push({
-      k: 'p',
-      text: `Rules that turn a chat restriction into a ban from public rooms and matchmaking at the same length: ${area.map((r) => `CR ${r.number}. ${r.title}`).join('; ')}.`,
-    });
-  }
-  const severe = severeRuleList(policy);
-  if (severe.length > 0) {
-    blocks.push({ k: 'p', text: `Rules that always read the High column: ${severe.map((r) => `CR ${r.number}. ${r.title}`).join('; ')}.` });
+  if (!omit.has('ladder')) {
+    blocks.push(
+      { k: 'h', level: 2, text: 'Escalation ladder' },
+      {
+        k: 'p',
+        text: `A person's step is the heaviest action on their record in the last 90 days. Step ${RECORD_STEPS}.`,
+      },
+      {
+        k: 'table',
+        head: ['Step', 'Low / medium (banter, rude)', 'High (hostile with a record, severe)'],
+        rows: profile.ladder.map((row) => [String(row.step), clean(row.lowMedium.label), clean(row.high.label)]),
+      },
+    );
+    const area = areaRuleList(policy);
+    if (area.length > 0) {
+      blocks.push({
+        k: 'p',
+        text: `Rules that turn a chat restriction into a ban from public rooms and matchmaking at the same length: ${area.map((r) => `CR ${r.number}. ${r.title}`).join('; ')}.`,
+      });
+    }
+    const severe = severeRuleList(policy);
+    if (severe.length > 0) {
+      blocks.push({ k: 'p', text: `Rules that always read the High column: ${severe.map((r) => `CR ${r.number}. ${r.title}`).join('; ')}.` });
+    }
   }
 
   blocks.push(

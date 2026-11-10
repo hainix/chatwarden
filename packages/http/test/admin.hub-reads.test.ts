@@ -412,9 +412,66 @@ describe('GET /blocked', () => {
     const body = (await w.call('GET', '/blocked', { query: { days: '1' } })).body as { items: Array<Record<string, unknown>> };
     expect(body.items.map((i) => i.id)).toEqual(['k2', 'k1']);
     expect(body.items[0]).toEqual({
-      id: 'k2', at: NOW - HOUR, roomId: 'ROOM2', termId: 'syn:vlemmo', term: 'vlemmo', language: 'en', person: 's_b', text: 'newest line',
+      id: 'k2', at: NOW - HOUR, roomId: 'ROOM2', termId: 'syn:vlemmo', term: 'vlemmo', language: 'en', person: 's_b', handle: null, text: 'newest line',
     });
-    expect(Object.keys(body.items[0]!)).toEqual(['id', 'at', 'roomId', 'termId', 'term', 'language', 'person', 'text']);
+    expect(Object.keys(body.items[0]!)).toEqual(['id', 'at', 'roomId', 'termId', 'term', 'language', 'person', 'handle', 'text']);
+  });
+
+  describe('handle: the name on the latest report against the person', () => {
+    const handles = async (w: W, role?: 'moderator' | 'senior'): Promise<unknown[]> =>
+      ((await w.call('GET', '/blocked', role === undefined ? {} : { role })).body as { items: Array<{ handle: unknown }> }).items.map((i) => i.handle);
+
+    it('is the handle on the newest report filed against the person, null for someone never reported', async () => {
+      const w = await world();
+      const a = await file(w, { targetHandle: 'Zorbak' });
+      strike(w, 'k1', NOW - 2 * HOUR, { subject: a.target });
+      strike(w, 'k2', NOW - HOUR, { subject: 's_never_reported_0000000000' });
+      expect(await handles(w)).toEqual([null, 'Zorbak']);
+    });
+
+    it('is the LATEST handle when the person was reported under two names', async () => {
+      const w = await world();
+      await file(w, { targetHandle: 'OldName', key: 'raw-client-key-blocked-same-0001' });
+      w.clock.t += 5000;
+      const later = await file(w, { targetHandle: 'NewName', key: 'raw-client-key-blocked-same-0001' });
+      strike(w, 'k1', NOW - HOUR, { subject: later.target });
+      expect(await handles(w)).toEqual(['NewName']);
+    });
+
+    it('is the newest NON-BLANK handle: the newest report recorded none, so the older name is used; null when none ever did', async () => {
+      const w = await world();
+      await file(w, { targetHandle: 'Snerp', key: 'raw-client-key-blocked-fallback-1' });
+      w.clock.t += 5000;
+      const newest = await file(w, { targetHandle: '', key: 'raw-client-key-blocked-fallback-1' });
+      const never = await file(w, { targetHandle: '', key: 'raw-client-key-blocked-never-0001' });
+      strike(w, 'k1', NOW - 2 * HOUR, { subject: newest.target });
+      strike(w, 'k2', NOW - HOUR, { subject: never.target });
+      expect(await handles(w)).toEqual([null, 'Snerp']);
+    });
+
+    it('one person with several lines gets the same handle on each', async () => {
+      const w = await world();
+      const a = await file(w, { targetHandle: 'Vlemmo' });
+      for (const id of ['k1', 'k2', 'k3']) strike(w, id, NOW - HOUR, { subject: a.target });
+      expect(await handles(w)).toEqual(['Vlemmo', 'Vlemmo', 'Vlemmo']);
+    });
+
+    it('needs history.read as well, as the term needs terms.read: a caller without it gets null', async () => {
+      const w = await world({ permissions: { 'history.read': 'senior' } });
+      const a = await file(w, { targetHandle: 'Fenrisk' });
+      strike(w, 'k1', NOW - HOUR, { subject: a.target });
+      expect(await handles(w, 'moderator')).toEqual([null]);
+      expect(await handles(w, 'senior')).toEqual(['Fenrisk']);
+    });
+
+    it('adds no audit row beyond blocked.view', async () => {
+      const w = await world();
+      const a = await file(w, { targetHandle: 'Fenrisk' });
+      strike(w, 'k1', NOW - HOUR, { subject: a.target });
+      w.routeAudit();
+      await w.call('GET', '/blocked');
+      expect(w.routeAudit().map((r) => r.action)).toEqual(['blocked.view']);
+    });
   });
 
   it('term and language are null when the term is no longer listed, and when no terms are mounted', async () => {
