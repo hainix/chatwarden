@@ -21,7 +21,12 @@ import type {
   SanctionInput,
   SanctionRow,
   AuditItem,
+  Changes,
+  ClaimResult,
   ConductLevel,
+  NextCase,
+  Reason,
+  ReportCategory,
   Suggestion,
   SuggestInput,
   TermInput,
@@ -34,19 +39,24 @@ import type {
  * Why a call to the staff API failed. `status` is the HTTP status, or 0 when no answer arrived. `code` is the kit's error code
  * (`forbidden`, `not_found`, `already_decided`, ...), `network` for a dropped connection, `bad_response` for an answer that is
  * not the shape the hub expects, `unexpected` for anything else, and `http_<status>` when the body is not a kit error.
- * `retryAfter` is the seconds from a `retry-after` header (a 429).
+ * `retryAfter` is the seconds from a `retry-after` header (a 429). A `claimed` error (409: another moderator is handling the
+ * case) also says who (`heldBy`) and until when (`heldUntil`, epoch ms).
  */
 export class HubError extends Error {
   readonly status: number;
   readonly code: string;
   readonly retryAfter: number | undefined;
+  readonly heldBy: string | undefined;
+  readonly heldUntil: number | undefined;
 
-  constructor(init: { status: number; code: string; message: string; retryAfter?: number }) {
+  constructor(init: { status: number; code: string; message: string; retryAfter?: number; heldBy?: string; heldUntil?: number }) {
     super(init.message);
     this.name = 'HubError';
     this.status = init.status;
     this.code = init.code;
     this.retryAfter = init.retryAfter;
+    this.heldBy = init.heldBy;
+    this.heldUntil = init.heldUntil;
   }
 }
 
@@ -68,7 +78,11 @@ function errorOf(res: TransportResponse): HubError {
   const retryAfter = retryAfterOf(res.headers);
   const rest = retryAfter === undefined ? {} : { retryAfter };
   if (isObject(b) && typeof b.error === 'string' && typeof b.message === 'string') {
-    return new HubError({ status: res.status, code: b.error, message: b.message, ...rest });
+    const held =
+      b.error === 'claimed'
+        ? { ...(typeof b.by === 'string' ? { heldBy: b.by } : {}), ...(typeof b.until === 'number' ? { heldUntil: b.until } : {}) }
+        : {};
+    return new HubError({ status: res.status, code: b.error, message: b.message, ...rest, ...held });
   }
   // A proxy's HTML page, or an empty body: say the status, never echo the body.
   return new HubError({ status: res.status, code: `http_${res.status}`, message: `The server answered with status ${res.status}.`, ...rest });
@@ -142,6 +156,26 @@ export interface HubClient {
   /** `POST /exceptions/:id/active`. */
   setExceptionActive(id: string, active: boolean): Promise<{ ok: true }>;
 
+  // The team: claims, take next, viewing, the change token, saved reasons
+  /** `GET /changes`: the token for the queue and claims, and whether it differs from `since`. One cheap read. */
+  changes(since?: string): Promise<Changes>;
+  /** `POST /cases/:ref/claim`: claim an open case, or beat your own claim (a heartbeat). A 409 `claimed` says who holds it. */
+  claimCase(person: string, options?: { takeOver?: boolean }): Promise<ClaimResult>;
+  /** `POST /cases/:ref/release`: release your own claim. `released` is false when there was nothing of yours to release. */
+  releaseCase(person: string): Promise<{ released: boolean }>;
+  /** `POST /cases/next`: claim and return the oldest open case nobody holds, or `{ case: null }`. */
+  takeNext(options?: { category?: ReportCategory }): Promise<{ case: NextCase | null }>;
+  /** `POST /cases/:ref/viewing`: say you have the case open (a hint for 30 seconds); answers who else has. */
+  viewing(person: string): Promise<{ viewers: string[] }>;
+  /** `GET /reasons`: the saved reasons, switched-off ones included. */
+  listReasons(): Promise<{ reasons: Reason[] }>;
+  /** `POST /reasons` (senior). */
+  addReason(input: { label: string; text: string }): Promise<{ reason: Reason }>;
+  /** `PATCH /reasons/:id` (senior). */
+  updateReason(id: string, patch: { label?: string; text?: string }): Promise<{ reason: Reason }>;
+  /** `POST /reasons/:id/active` (senior). */
+  setReasonActive(id: string, active: boolean): Promise<{ reason: Reason }>;
+
   // Blocked lines, policy, audit
   /** `GET /blocked`: the lines the term filter refused (default the last 7 days). */
   listBlocked(options?: { days?: BlockedDays }): Promise<{ items: BlockedLine[] }>;
@@ -190,6 +224,16 @@ export function createHubClient(transport: Transport): HubClient {
     addException: (input) => post<{ id: string }>('/exceptions', input),
     updateException: (id, p) => patch<{ ok: true }>(`/exceptions/${enc(id)}`, p),
     setExceptionActive: (id, active) => post<{ ok: true }>(`/exceptions/${enc(id)}/active`, { active }),
+
+    changes: (since) => get<Changes>('/changes', q({ since })),
+    claimCase: (person, options = {}) => post<ClaimResult>(`/cases/${enc(person)}/claim`, options.takeOver === true ? { takeOver: true } : undefined),
+    releaseCase: (person) => post<{ released: boolean }>(`/cases/${enc(person)}/release`, undefined),
+    takeNext: (options = {}) => post<{ case: NextCase | null }>('/cases/next', options.category === undefined ? undefined : { category: options.category }),
+    viewing: (person) => post<{ viewers: string[] }>(`/cases/${enc(person)}/viewing`, undefined),
+    listReasons: () => get<{ reasons: Reason[] }>('/reasons'),
+    addReason: (input) => post<{ reason: Reason }>('/reasons', input),
+    updateReason: (id, p) => patch<{ reason: Reason }>(`/reasons/${enc(id)}`, p),
+    setReasonActive: (id, active) => post<{ reason: Reason }>(`/reasons/${enc(id)}/active`, { active }),
 
     listBlocked: (options = {}) => get<{ items: BlockedLine[] }>('/blocked', q({ days: options.days })),
     policy: (options = {}) => get<PolicyDocs>('/policy', q({ format: options.format })),

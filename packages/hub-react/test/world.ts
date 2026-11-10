@@ -77,8 +77,14 @@ export async function hubWorld(opts: WorldOptions = {}) {
   const session: { who: { actor: string; role: Role } | null } = {
     who: opts.role === null ? null : { actor: opts.actor ?? 'ann@example.test', role: opts.role ?? 'moderator' },
   };
+  // A second moderator: a client made by `clientFor` sends who it is in a header, so two people can act at once on one server.
   const routes: RouteTable = adminRoutes(cw, {
-    authorize: () => session.who,
+    authorize: (req) => {
+      const actor = req.headers['x-test-actor'];
+      const role = req.headers['x-test-role'];
+      if (typeof actor === 'string' && typeof role === 'string') return { actor, role: role as Role };
+      return session.who;
+    },
     ...(opts.permissions === undefined ? {} : { permissions: opts.permissions }),
     ...(opts.terms === false ? {} : { terms: live }),
     gameName: opts.gameName ?? 'Test Game',
@@ -99,6 +105,9 @@ export async function hubWorld(opts: WorldOptions = {}) {
   const client: HubClient = createHubClient(transport);
   /** A client straight to the real routes: not recorded, never intercepted (for a test's own fake answers). */
   const direct: HubClient = createHubClient(real);
+  /** A client for another signed-in person (a teammate), straight to the real routes. */
+  const clientFor = (actor: string, role: Role = 'moderator'): HubClient =>
+    createHubClient(routerTransport(handle, { headers: { 'x-test-actor': actor, 'x-test-role': role } }));
 
   let n = 0;
   /** Files one report in a new room and returns its id, the reported person's staff ref and the reporter's. */
@@ -197,7 +206,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
   const raw = (req: Partial<KitRequest> & { method: string; path: string }): Promise<KitResponse> =>
     handle({ query: {}, headers: {}, body: undefined, ...req });
 
-  return { cw, clock, session, routes, handle, transport, client, direct, sent, intercept, file, fileRich, sanction, raw, live, now: () => clock.t };
+  return { cw, clock, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, raw, live, now: () => clock.t };
 }
 
 export type HubWorld = Awaited<ReturnType<typeof hubWorld>>;

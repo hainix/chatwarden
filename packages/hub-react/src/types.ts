@@ -36,6 +36,13 @@ export interface ListReportsQuery {
   limit?: number;
 }
 
+/** Who holds a case, since when, and until when (a claim lapses at `until` unless its holder keeps working: a heartbeat). */
+export interface Claim {
+  by: string;
+  since: number;
+  until: number;
+}
+
 /** `GET /reports/:id`: the report with each named person's counted history and the ladder's suggestion for the reported person. */
 export interface ReportDetail {
   report: StaffReport;
@@ -43,6 +50,35 @@ export interface ReportDetail {
   suggest: Suggestion;
   /** The Community Rule the category maps to, or `"uncovered"`. */
   rule: number | 'uncovered';
+  /** Who holds the reported person's case, or null. A claim never blocks a read. */
+  claim: Claim | null;
+}
+
+/** `POST /cases/:ref/claim`. `tookOverFrom` is the previous holder when a senior moved a live claim, else null. */
+export interface ClaimResult {
+  claim: Claim;
+  tookOverFrom: string | null;
+}
+
+/** The case `POST /cases/next` handed out: the person, the report to open (their newest open one) and the claim now held. */
+export interface NextCase {
+  person: string;
+  reportId: string;
+  claim: Claim;
+}
+
+/** `GET /changes`: the opaque token for the queue and claims, and whether it differs from `since`. */
+export interface Changes {
+  token: string;
+  changed: boolean;
+}
+
+/** A saved reason a moderator can put into a decision. */
+export interface Reason {
+  id: string;
+  label: string;
+  text: string;
+  active: boolean;
 }
 
 export interface SuggestInput {
@@ -57,6 +93,8 @@ export interface DecideInput {
   reason: string;
   actions: DecisionAction[];
   evidence?: string;
+  /** A senior or owner moving another moderator's live claim to themselves (audited by the server). */
+  takeOver?: boolean;
 }
 
 /** `POST /reports/:id/decide`. `replay` is true when the same decision had already been made and nothing was applied again. */
@@ -94,6 +132,7 @@ export interface SanctionInput {
   reason?: string;
   gapNote?: string;
   includeIp?: boolean;
+  takeOver?: boolean;
 }
 
 export interface CloseGapInput {

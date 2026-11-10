@@ -15,6 +15,13 @@ describe('HubError', () => {
     expect([e.status, e.code, e.message, e.retryAfter]).toEqual([429, 'rate_limited', 'Slow down.', 7]);
     expect(new HubError({ status: 404, code: 'not_found', message: 'x' }).retryAfter).toBeUndefined();
   });
+
+  it('carries who holds the case and until when, for a claimed error only', () => {
+    const e = new HubError({ status: 409, code: 'claimed', message: 'm', heldBy: 'maya@example.test', heldUntil: 1234 });
+    expect([e.heldBy, e.heldUntil]).toEqual(['maya@example.test', 1234]);
+    const plain = new HubError({ status: 409, code: 'already_decided', message: 'm' });
+    expect([plain.heldBy, plain.heldUntil]).toEqual([undefined, undefined]);
+  });
 });
 
 describe('errors from the transport', () => {
@@ -36,6 +43,15 @@ describe('errors from the transport', () => {
       const err = (await get(fake({ status: 429, headers: { 'retry-after': value }, body: { error: 'rate_limited', message: 'm' } })).catch((e: unknown) => e)) as HubError;
       expect(err.retryAfter, value).toBeUndefined();
     }
+  });
+
+  it('reads by and until from a claimed error, and ignores them when they are not the right type', async () => {
+    const ok = (await get(fake({ status: 409, body: { error: 'claimed', message: 'm', by: 'maya@example.test', until: 99 } })).catch((e: unknown) => e)) as HubError;
+    expect([ok.code, ok.heldBy, ok.heldUntil]).toEqual(['claimed', 'maya@example.test', 99]);
+    const bad = (await get(fake({ status: 409, body: { error: 'claimed', message: 'm', by: 5, until: 'soon' } })).catch((e: unknown) => e)) as HubError;
+    expect([bad.code, bad.heldBy, bad.heldUntil]).toEqual(['claimed', undefined, undefined]);
+    const other = (await get(fake({ status: 409, body: { error: 'already_decided', message: 'm', by: 'x', until: 1 } })).catch((e: unknown) => e)) as HubError;
+    expect([other.heldBy, other.heldUntil]).toEqual([undefined, undefined]);
   });
 
   it('names an error with a body that is not the kit shape by its status', async () => {
@@ -97,6 +113,7 @@ describe('every staff route has a client method', () => {
     const c = w.client;
     const newTerm = await c.addTerm({ term: 'quibblex', language: 'en', note: 'n' });
     const newExc = await c.addException({ phrase: 'quibblexes', language: 'en' });
+    const reasonId = (await w.direct.addReason({ label: 'Repeat', text: 'Again after a warning.' })).reason.id;
 
     type Expect = { method: string; path: string; query?: Record<string, string | number>; body?: unknown };
     const calls: Array<[string, () => Promise<unknown>, Expect]> = [
@@ -125,6 +142,18 @@ describe('every staff route has a client method', () => {
       ['listBlocked', () => c.listBlocked({ days: 30 }), { method: 'GET', path: '/blocked', query: { days: 30 } }],
       ['policy', () => c.policy({ format: 'text' }), { method: 'GET', path: '/policy', query: { format: 'text' } }],
       ['listAudit', () => c.listAudit({ limit: 5, action: 'report.view' }), { method: 'GET', path: '/audit', query: { limit: 5, action: 'report.view' } }],
+      ['changes without a token', () => c.changes(), { method: 'GET', path: '/changes' }],
+      ['changes since a token', () => c.changes('0'), { method: 'GET', path: '/changes', query: { since: '0' } }],
+      ['claimCase', () => c.claimCase(person), { method: 'POST', path: `/cases/${person}/claim` }],
+      ['claimCase takeOver', () => c.claimCase(person, { takeOver: true }), { method: 'POST', path: `/cases/${person}/claim`, body: { takeOver: true } }],
+      ['viewing', () => c.viewing(person), { method: 'POST', path: `/cases/${person}/viewing` }],
+      ['releaseCase', () => c.releaseCase(person), { method: 'POST', path: `/cases/${person}/release` }],
+      ['takeNext', () => c.takeNext(), { method: 'POST', path: '/cases/next' }],
+      ['takeNext in a category', () => c.takeNext({ category: 'harassment' }), { method: 'POST', path: '/cases/next', body: { category: 'harassment' } }],
+      ['listReasons', () => c.listReasons(), { method: 'GET', path: '/reasons' }],
+      ['addReason', () => c.addReason({ label: 'Slur', text: 'A slur aimed at a person.' }), { method: 'POST', path: '/reasons', body: { label: 'Slur', text: 'A slur aimed at a person.' } }],
+      ['updateReason', () => c.updateReason(reasonId, { label: 'Slur attempt' }), { method: 'PATCH', path: `/reasons/${reasonId}`, body: { label: 'Slur attempt' } }],
+      ['setReasonActive', () => c.setReasonActive(reasonId, false), { method: 'POST', path: `/reasons/${reasonId}/active`, body: { active: false } }],
       [
         'decide',
         () => c.decide(id, { verdict: 'upheld', reason: 'clear', actions: [{ subject: person, kind: 'warning', durationMs: null, rule: 1 }] }),
@@ -179,6 +208,84 @@ describe('every staff route has a client method', () => {
     expect(me.can['reports.read']).toBe(true);
     expect(me.can['audit.read']).toBe(false);
     expect(me.can['gaps.close']).toBe(false);
+  });
+});
+
+describe('the team methods', () => {
+  it('claim, heartbeat and release against the real routes', async () => {
+    const w = await hubWorld({ role: 'moderator', actor: 'ann@example.test' });
+    const { person } = await w.file({ target: 'Mallory' });
+    const first = await w.client.claimCase(person);
+    expect(first.claim.by).toBe('ann@example.test');
+    expect(first.tookOverFrom).toBeNull();
+    w.clock.t += 60_000;
+    const beat = await w.client.claimCase(person);
+    expect(beat.claim.since).toBe(first.claim.since);
+    expect(beat.claim.until).toBeGreaterThan(first.claim.until);
+    expect(await w.client.releaseCase(person)).toEqual({ released: true });
+    expect(await w.client.releaseCase(person)).toEqual({ released: false });
+  });
+
+  it('another moderator gets claimed with who and until; a 404 for a person with no open case', async () => {
+    const w = await hubWorld({ role: 'moderator', actor: 'ann@example.test' });
+    const { person } = await w.file({ target: 'Mallory' });
+    await w.client.claimCase(person);
+    const maya = w.clientFor('maya@example.test', 'moderator');
+    const err = (await maya.claimCase(person).catch((e: unknown) => e)) as HubError;
+    expect([err.status, err.code, err.heldBy]).toEqual([409, 'claimed', 'ann@example.test']);
+    expect(err.heldUntil).toBeGreaterThan(w.now());
+    expect(await maya.claimCase('nobody-here').catch((e: unknown) => e)).toMatchObject({ status: 404 });
+  });
+
+  it('takeNext hands out the oldest unclaimed case, then null when none is left', async () => {
+    const w = await hubWorld({ role: 'moderator', actor: 'ann@example.test' });
+    const a = await w.file({ target: 'First' });
+    await w.file({ target: 'Second' });
+    const got = await w.client.takeNext();
+    expect(got.case?.person).toBe(a.person);
+    expect(got.case?.reportId).toBe(a.id);
+    expect((await w.client.takeNext()).case?.person).not.toBe(a.person);
+    expect(await w.client.takeNext()).toEqual({ case: null });
+  });
+
+  it('changes: the token is stable until something happens, then reports changed', async () => {
+    const w = await hubWorld({ role: 'moderator' });
+    const first = await w.client.changes();
+    expect(first.changed).toBe(true);
+    expect(await w.client.changes(first.token)).toEqual({ token: first.token, changed: false });
+    await w.file({ target: 'Mallory' });
+    const after = await w.client.changes(first.token);
+    expect(after.changed).toBe(true);
+    expect(after.token).not.toBe(first.token);
+  });
+
+  it('viewing lists the other staff with the case open', async () => {
+    const w = await hubWorld({ role: 'moderator', actor: 'ann@example.test' });
+    const { person } = await w.file({ target: 'Mallory' });
+    const maya = w.clientFor('maya@example.test', 'moderator');
+    expect((await maya.viewing(person)).viewers).toEqual([]);
+    expect((await w.client.viewing(person)).viewers).toEqual(['maya@example.test']);
+  });
+
+  it('reasons: a senior adds, edits and switches one off; a moderator reads them', async () => {
+    const w = await hubWorld({ role: 'senior' });
+    const { reason } = await w.client.addReason({ label: 'Threat', text: 'A threat against a person.' });
+    expect(reason).toMatchObject({ label: 'Threat', active: true });
+    await w.client.updateReason(reason.id, { text: 'A threat.' });
+    await w.client.setReasonActive(reason.id, false);
+    const list = await w.client.listReasons();
+    expect(list.reasons).toEqual([{ id: reason.id, label: 'Threat', text: 'A threat.', active: false }]);
+    w.session.who = { actor: 'ann@example.test', role: 'moderator' };
+    expect((await w.client.listReasons()).reasons).toHaveLength(1);
+    expect(await w.client.addReason({ label: 'x', text: 'y' }).catch((e: unknown) => e)).toMatchObject({ status: 403 });
+  });
+
+  it('encodes a ref so it cannot add a path segment', async () => {
+    const w = await hubWorld({ role: 'moderator' });
+    await w.client.claimCase('a/b?x=1').catch(() => undefined);
+    await w.client.viewing('../audit').catch(() => undefined);
+    await w.client.releaseCase('a b').catch(() => undefined);
+    expect(w.sent.map((r) => r.path)).toEqual(['/cases/a%2Fb%3Fx%3D1/claim', '/cases/..%2Faudit/viewing', '/cases/a%20b/release']);
   });
 });
 
