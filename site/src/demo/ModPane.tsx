@@ -181,7 +181,6 @@ export function ModPane({
           <button
             type="button"
             aria-pressed={tab === 'reports'}
-            aria-label={`Reports, ${reports.length} open`}
             data-tour="queue-tab"
             onClick={() => setTab('reports')}
           >
@@ -189,6 +188,8 @@ export function ModPane({
             <span className="badge" data-n={reports.length} key={reports.length} aria-hidden="true">
               {reports.length}
             </span>
+            {/* The name comes from the content ("Reports, 2 open"), so it also contains the visible words (axe: label-content-name-mismatch). */}
+            <span className="sr-only">, {reports.length} open</span>
           </button>
           <button type="button" aria-pressed={tab === 'record'} onClick={() => setTab('record')}>
             My record

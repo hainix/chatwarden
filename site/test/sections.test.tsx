@@ -40,7 +40,7 @@ describe('Hero', () => {
   });
   it('shows the same three-package install command as step 1, with a copy button', () => {
     render(<Hero />);
-    expect(screen.getByText('npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher')).toBeTruthy();
+    expect(document.querySelector('.cmd code')?.textContent).toBe('npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher');
     expect(screen.getByRole('button', { name: /copy install command/i })).toBeTruthy();
   });
   it('shows an animated chat snippet in which a synthetic term is refused with a stamp', () => {

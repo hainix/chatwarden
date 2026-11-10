@@ -1,0 +1,28 @@
+# Chatwarden
+
+> Chatwarden is a free, open-source chat moderation kit for games, written in TypeScript for Node 22.13 or newer. It refuses slurs that dodge filters, keeps evidence when players report, and gives players a fair ladder of warnings, timeouts and bans. It is pre-release (0.1.x), Apache-2.0, provided as-is with no support promise. It is not a child-safety tool.
+
+The packages are small and independent. Start with the repository README, then install `@chatwarden/core`, `@chatwarden/store-sqlite` and `@chatwarden/matcher`. Every code sample on https://chatwarden.dev/ is copied from these READMEs.
+
+## Docs (README per package)
+
+- [Repository README](https://github.com/hainix/chatwarden/blob/main/README.md): what the kit is, the package list and which packages to install for which job.
+- [@chatwarden/core](https://github.com/hainix/chatwarden/blob/main/packages/core/README.md): the moderation engine (chat verdicts, reports, decisions, notices); no runtime dependencies. Start here.
+- [@chatwarden/matcher](https://github.com/hainix/chatwarden/blob/main/packages/matcher/README.md): the slur matcher that resists Unicode and leetspeak evasion without blocking innocent words; includes invented test words.
+- [@chatwarden/store-sqlite](https://github.com/hainix/chatwarden/blob/main/packages/store-sqlite/README.md): the SQLite store for reports, sanctions, notices and the audit trail, on the SQLite built into Node.
+- [@chatwarden/http](https://github.com/hainix/chatwarden/blob/main/packages/http/README.md): HTTP routes for staff and players, signed webhooks and an Express adapter.
+- [@chatwarden/profanity](https://github.com/hainix/chatwarden/blob/main/packages/profanity/README.md): an optional filter for ordinary swearing that a game can allow, star or refuse.
+- [@chatwarden/discord](https://github.com/hainix/chatwarden/blob/main/packages/discord/README.md): posts the staff review queue into a Discord forum through a channel webhook.
+
+## npm packages
+
+- [@chatwarden/core on npm](https://www.npmjs.com/package/@chatwarden/core): the engine; install this first.
+- [@chatwarden/matcher on npm](https://www.npmjs.com/package/@chatwarden/matcher): the slur matcher.
+- [@chatwarden/store-sqlite on npm](https://www.npmjs.com/package/@chatwarden/store-sqlite): the SQLite store.
+- [@chatwarden/http on npm](https://www.npmjs.com/package/@chatwarden/http): the HTTP routes and Express adapter.
+- [@chatwarden/profanity on npm](https://www.npmjs.com/package/@chatwarden/profanity): the optional profanity filter.
+- [@chatwarden/discord on npm](https://www.npmjs.com/package/@chatwarden/discord): the Discord review-queue feed.
+
+## Optional
+
+- [Source repository](https://github.com/hainix/chatwarden): the code, issues and pull requests.

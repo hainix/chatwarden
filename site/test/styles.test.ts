@@ -54,3 +54,29 @@ describe('reduced motion', () => {
     expect(m?.[1]).toMatch(/transition:\s*none\s*!important/);
   });
 });
+
+describe('gold on dark surfaces', () => {
+  const demoCss = readFileSync(join(__dirname, '..', 'src', 'demo', 'demo.css'), 'utf8');
+  it('--gold-bright is the same gold in both themes (the light --gold is a dark text gold)', () => {
+    expect(css).toMatch(/--gold-bright:\s*#ffc83d/);
+    for (const sel of [":root[data-theme='light']", ':root:not([data-theme])']) {
+      expect(bodies(sel).join(';'), sel).not.toMatch(/--gold-bright/);
+    }
+  });
+  it('fills under dark ink (step numbers, avatars) use the bright gold, so they stay yellow in the light theme', () => {
+    expect(bodies('.step-num').join(';')).toMatch(/background:\s*var\(--gold-bright\)/);
+    expect(bodies('.avatar-b').join(';')).toMatch(/background:\s*var\(--gold-bright\)/);
+  });
+  it('the demo (all dark screens) never uses the theme-dependent --gold', () => {
+    expect(demoCss).not.toMatch(/var\(--gold\)/);
+  });
+});
+
+describe('the open-source badges and the demo count chip', () => {
+  const demoCss = readFileSync(join(__dirname, '..', 'src', 'demo', 'demo.css'), 'utf8');
+  it('the demo owns a bare .badge (a magenta count chip), so the site sheet must not define one', () => {
+    expect(demoCss).toMatch(/^\.badge\s*\{/m);
+    expect(bodies('.badge')).toEqual([]);
+    expect(bodies('.open-badge').join(';')).toMatch(/border-radius:\s*999px/);
+  });
+});

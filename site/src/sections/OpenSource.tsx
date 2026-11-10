@@ -14,11 +14,11 @@ export function OpenSource() {
             <p className="open-big">Apache-2.0</p>
             <p>Use it, change it, ship it. No strings.</p>
           </div>
-          <ul className="badges">
-            <li className="badge">
+          <ul className="open-badges">
+            <li className="open-badge">
               <ShieldCheckIcon /> Published with npm provenance
             </li>
-            <li className="badge">
+            <li className="open-badge">
               <PadIcon /> Used by Moxgate
             </li>
           </ul>

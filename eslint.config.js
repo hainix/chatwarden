@@ -28,10 +28,15 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'site/scripts/**/*.mjs'],
     languageOptions: {
       globals: { console: 'readonly', process: 'readonly', Buffer: 'readonly', URL: 'readonly' },
     },
+  },
+  {
+    // Plain browser scripts that ship as-is from the site's public/ folder.
+    files: ['site/public/**/*.js'],
+    languageOptions: { globals: { localStorage: 'readonly', document: 'readonly' } },
   },
   {
     files: ['packages/core/**/*.ts'],

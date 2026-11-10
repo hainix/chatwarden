@@ -2,14 +2,14 @@
 
 @font-face {
   font-family: 'Bungee';
-  src: url('/fonts/bungee-latin-400-normal.woff2') format('woff2');
+  src: url('./assets/fonts/bungee-latin-400-normal.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: 'Atkinson Hyperlegible Next';
-  src: url('/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2') format('woff2');
+  src: url('./assets/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2') format('woff2');
   font-weight: 200 800;
   font-style: normal;
   font-display: swap;
@@ -32,6 +32,7 @@
   --warden: #35e3c5;
   --warden-text: #35e3c5;
   --gold: #ffc83d;
+  --gold-bright: #ffc83d; /* gold on the dark screens and under dark ink: the same in both themes (--gold is darker in light) */
   --logo-edge: #0a0d1a;
   --grid: rgba(120, 140, 255, 0.07);
   --glow-a: rgba(255, 61, 143, 0.16);
@@ -238,6 +239,15 @@ h3 {
   color: var(--muted);
   max-width: 34em;
 }
+p,
+li {
+  text-wrap: pretty; /* no one-word last lines */
+}
+/* The headline is two sentences: each is balanced on its own, so the break always falls after "chat." */
+.h1-line {
+  display: block;
+  text-wrap: balance;
+}
 
 /* ---------- header ---------- */
 .site-header {
@@ -297,8 +307,15 @@ h3 {
   }
 }
 @media (max-width: 420px) {
+  /* Icon only on a small phone, but the link keeps its name ("GitHub"): hidden visually, not with display: none. */
   .nav-gh span {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 }
 .icon-btn {
@@ -418,24 +435,66 @@ h3 {
 .section-lead {
   color: var(--muted);
   font-size: 1.125rem;
+  text-wrap: balance;
 }
 
 /* ---------- hero ---------- */
+@property --mx {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 68%;
+}
+@property --my {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 40%;
+}
 .hero {
+  position: relative;
   padding-block: clamp(40px, 7vw, 88px) clamp(48px, 7vw, 96px);
+  transition: --mx 0.5s ease-out, --my 0.5s ease-out;
+}
+/* The arena answers the mouse: a soft glow, and the grid lines light up teal under it. Hover-capable pointers only. */
+.hero::before,
+.hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s;
+}
+.hero::before {
+  background: radial-gradient(460px 340px at var(--mx) var(--my), color-mix(in srgb, var(--warden) 15%, transparent), transparent 70%);
+}
+.hero::after {
+  background:
+    linear-gradient(color-mix(in srgb, var(--warden) 38%, transparent) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, color-mix(in srgb, var(--warden) 38%, transparent) 1px, transparent 1px) 0 0 / 48px 48px;
+  -webkit-mask-image: radial-gradient(240px 240px at var(--mx) var(--my), #000, transparent);
+  mask-image: radial-gradient(240px 240px at var(--mx) var(--my), #000, transparent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .hero:hover::before,
+  .hero:hover::after {
+    opacity: 1;
+  }
 }
 .hero-grid {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 40px;
   align-items: center;
 }
 @media (min-width: 960px) {
   .hero-grid {
-    grid-template-columns: 1.05fr 1fr;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
     gap: 56px;
   }
 }
 .hero-copy {
+  min-width: 0;
   display: grid;
   gap: 24px;
   justify-items: start;
@@ -461,7 +520,14 @@ h3 {
 }
 .cmd code {
   font-size: 0.9375rem;
-  overflow-wrap: anywhere;
+}
+.nw {
+  white-space: nowrap; /* a phone wraps between words, never inside @chatwarden/store-sqlite */
+}
+@media (max-width: 420px) {
+  .cmd code {
+    font-size: 0.875rem;
+  }
 }
 .cmd code::before {
   content: '$ ';
@@ -564,7 +630,7 @@ h3 {
   background: var(--warden);
 }
 .avatar-b {
-  background: var(--gold);
+  background: var(--gold-bright);
 }
 .bubble {
   position: relative;
@@ -803,6 +869,21 @@ h3 {
   width: 34px;
   height: 34px;
 }
+@keyframes level-up {
+  0% {
+    transform: none;
+  }
+  45% {
+    transform: translateY(-6px) scale(1.14) rotate(-4deg);
+  }
+  100% {
+    transform: translateY(-3px) scale(1.06);
+  }
+}
+.card:hover .card-icon {
+  animation: level-up 0.32s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warden) 20%, transparent), 0 0 22px color-mix(in srgb, var(--warden) 45%, transparent);
+}
 .card-icon {
   display: grid;
   place-items: center;
@@ -843,10 +924,15 @@ h3 {
   gap: 18px;
   min-width: 0;
 }
-@media (min-width: 960px) {
+/* Under 1280px the words sit above the code, so a block gets the whole column. From 1280px they sit beside it and the code
+   column is pulled out to the right (the left edge stays on the page grid), so the README lines are not cut off. */
+@media (min-width: 1280px) {
+  .steps {
+    margin-right: -72px;
+  }
   .step {
-    grid-template-columns: 300px minmax(0, 1fr);
-    gap: 36px;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 28px;
     align-items: start;
   }
 }
@@ -854,6 +940,21 @@ h3 {
   display: grid;
   gap: 8px;
   justify-items: start;
+}
+@media (min-width: 600px) and (max-width: 1279px) {
+  .step-text {
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 18px;
+    align-items: center;
+  }
+  .step-text .step-num {
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
+  .step-text p {
+    grid-column: 2;
+    max-width: 44em;
+  }
 }
 .step-text p {
   color: var(--muted);
@@ -866,7 +967,7 @@ h3 {
   font-family: var(--font-display);
   font-size: 1.35rem;
   color: #0a0d1a;
-  background: var(--gold);
+  background: var(--gold-bright);
   border: 2px solid var(--logo-edge);
   border-radius: 8px;
   box-shadow: 3px 3px 0 var(--edge-shadow);
@@ -910,6 +1011,16 @@ h3 {
   font-size: 0.8125rem;
   line-height: 1.65;
   tab-size: 2;
+}
+@media (min-width: 960px) {
+  .code pre {
+    max-height: none; /* a page-sized block reads better than a box with its own scrollbar */
+  }
+}
+@media (min-width: 1280px) {
+  .code pre {
+    font-size: 0.78rem;
+  }
 }
 .code pre:focus-visible {
   outline: 3px solid #ffc83d;
@@ -966,6 +1077,7 @@ h3 {
 }
 .level[data-status='coming'] {
   border-style: dashed;
+  border-color: color-mix(in srgb, var(--edge) 55%, var(--bg)); /* not here yet: quieter than a live card */
 }
 .level-num {
   grid-row: span 2;
@@ -1064,12 +1176,12 @@ h3 {
 .open-license p:last-child {
   color: var(--muted);
 }
-.badges {
+.open-badges {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
 }
-.badge {
+.open-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1079,7 +1191,7 @@ h3 {
   border: 2px solid var(--edge);
   border-radius: 999px;
 }
-.badge svg {
+.open-badge svg {
   color: var(--warden-text);
 }
 .open-links {
@@ -1089,8 +1201,18 @@ h3 {
 }
 
 /* ---------- FAQ ---------- */
-.faq-wrap {
-  max-width: 820px;
+@media (min-width: 960px) {
+  .faq-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    gap: 48px;
+    align-items: start;
+  }
+  .faq-wrap .section-head {
+    position: sticky;
+    top: 96px;
+    margin-bottom: 0;
+  }
 }
 .faq {
   display: grid;
@@ -1101,6 +1223,9 @@ h3 {
   border: 2px solid var(--edge);
   border-radius: var(--radius);
   transition: border-color 0.15s, box-shadow 0.15s;
+}
+.faq-item:hover {
+  border-color: color-mix(in srgb, var(--warden) 60%, var(--edge));
 }
 .faq-item[open] {
   border-color: var(--warden);
@@ -1178,6 +1303,109 @@ h3 {
   font-size: var(--fs-small);
 }
 
+/* ---------- AI level meter ---------- */
+.level-meter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 24px;
+  padding: 10px 16px;
+  color: var(--screen-text);
+  background: var(--screen);
+  border: 2px solid var(--screen-edge);
+  border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--edge-shadow);
+  font-size: var(--fs-small);
+}
+.pips {
+  display: flex;
+  gap: 6px;
+}
+.pip {
+  width: 30px;
+  height: 12px;
+  border: 2px dashed var(--screen-muted);
+  border-radius: 3px;
+}
+.pip.is-live {
+  background: var(--warden);
+  border: 2px solid var(--warden);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--warden) 60%, transparent);
+}
+/* One scan when the meter scrolls into view. Without 'idle' or 'seen' (no JS, reduced motion) the pips are simply final. */
+.level-meter[data-phase='idle'] .pip,
+.level-meter[data-phase='seen'] .pip {
+  animation: pip-scan 0.55s ease-out both;
+}
+.level-meter[data-phase='idle'] .pip {
+  animation-play-state: paused;
+}
+.pip:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.pip:nth-child(3) {
+  animation-delay: 0.24s;
+}
+.pip:nth-child(4) {
+  animation-delay: 0.36s;
+}
+.pip:nth-child(5) {
+  animation-delay: 0.48s;
+}
+@keyframes pip-scan {
+  from {
+    opacity: 0.15;
+    transform: scaleX(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scaleX(1.18);
+    border-color: var(--gold-bright);
+  }
+}
+
+/* ---------- easter egg: the warden goes gold (konami code) ---------- */
+:root[data-gold='true'] {
+  --warden: #ffc83d;
+  --warden-text: #ffc83d;
+  --glow-b: rgba(255, 200, 61, 0.16);
+}
+:root[data-gold='true'][data-theme='light'] {
+  --warden: #e8a800;
+  --warden-text: #8a5a00;
+  --glow-b: rgba(232, 168, 0, 0.16);
+}
+@media (prefers-color-scheme: light) {
+  :root[data-gold='true']:not([data-theme]) {
+    --warden: #e8a800;
+    --warden-text: #8a5a00;
+    --glow-b: rgba(232, 168, 0, 0.16);
+  }
+}
+.gold-toast {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 90;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  font-weight: 800;
+  color: #0a0d1a;
+  background: #ffc83d;
+  border: 2px solid #0a0d1a;
+  border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--edge-shadow);
+  transition: opacity 0.2s, translate 0.2s;
+}
+.gold-toast[data-show='false'] {
+  opacity: 0;
+  translate: 0 12px;
+  pointer-events: none;
+}
+
 /* ---------- motion preferences ---------- */
 @media (prefers-reduced-motion: reduce) {
   html {
@@ -1201,5 +1429,8 @@ h3 {
   }
   .msg-refused {
     margin-bottom: 14px;
+  }
+  .msg-notice {
+    margin-top: 14px; /* clear of the stamp that hangs off the bubble's bottom edge */
   }
 }

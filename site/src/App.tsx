@@ -1,3 +1,4 @@
+import { GoldWarden } from './components/GoldWarden';
 import { AiLevels } from './sections/AiLevels';
 import { DemoSlot } from './sections/DemoSlot';
 import { Faq } from './sections/Faq';
@@ -27,6 +28,7 @@ export function App() {
         <Faq />
       </main>
       <Footer />
+      <GoldWarden />
     </>
   );
 }

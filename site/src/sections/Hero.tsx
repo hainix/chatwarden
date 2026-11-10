@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type PointerEvent } from 'react';
 import { CopyButton } from '../components/CopyButton';
 import { ReplayIcon } from '../components/Icons';
 import { HERO_CHAT, INSTALL_KIT } from '../content';
@@ -50,12 +50,46 @@ function ChatSnippet() {
   );
 }
 
-export function Hero() {
+/** The install command, one nowrap chunk per word, so a phone wraps between words and never inside a package name. */
+function InstallText({ text }: { text: string }) {
+  const words = text.split(' ');
   return (
-    <section id="hero" aria-labelledby="hero-title" className="hero">
+    <>
+      {words.map((w, i) => (
+        <span key={i}>
+          <span className="nw">{w}</span>
+          {i < words.length - 1 ? ' ' : ''}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** A glow that follows the mouse over the hero. Mouse and pen only, never under reduced motion; the CSS eases it. */
+function useGlow() {
+  const ref = useRef<HTMLElement | null>(null);
+  const onPointerMove = (e: PointerEvent<HTMLElement>) => {
+    if (e.pointerType === 'touch') return;
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return;
+    el.style.setProperty('--mx', `${Math.round(((e.clientX - r.left) / r.width) * 100)}%`);
+    el.style.setProperty('--my', `${Math.round(((e.clientY - r.top) / r.height) * 100)}%`);
+  };
+  return { ref, onPointerMove };
+}
+
+export function Hero() {
+  const glow = useGlow();
+  return (
+    <section id="hero" aria-labelledby="hero-title" className="hero" ref={glow.ref} onPointerMove={glow.onPointerMove}>
       <div className="wrap hero-grid">
         <div className="hero-copy">
-          <h1 id="hero-title">Your game has chat. Give it a warden.</h1>
+          <h1 id="hero-title">
+            <span className="h1-line">Your game has chat.</span> <span className="h1-line">Give it a warden.</span>
+          </h1>
           <p className="lead">
             Chatwarden is a free, open-source moderation kit for games. It refuses slurs that dodge filters, keeps the
             evidence when players report, and lets trash talk be trash talk.
@@ -65,7 +99,9 @@ export function Hero() {
               Try the demo
             </a>
             <div className="cmd">
-              <code>{INSTALL_KIT}</code>
+              <code>
+                <InstallText text={INSTALL_KIT} />
+              </code>
               <CopyButton text={INSTALL_KIT} label="Copy install command" />
             </div>
           </div>

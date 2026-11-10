@@ -63,10 +63,42 @@ so they work on both backgrounds.
 ## Performance and accessibility rules this design keeps
 
 - No third-party script, font, analytics or tracker; every asset is same-origin. `test/dist.test.ts` scans the build.
-- Fonts use `font-display: swap`; the display face is preloaded. Initial JS is about 78 KB gzip.
+- Fonts are bundled from `src/assets/fonts/` so Vite hashes them (`/assets/bungee-<hash>.woff2`) and the `_headers` file can
+  cache them as immutable. Both use `font-display: swap`; the display face is preloaded from `index.html`. Initial JS is about
+  80 KB gzip, initial CSS about 6 KB, and the lazy demo chunk adds about 15 KB JS and 5 KB CSS.
+- The page runs under a strict CSP (`public/_headers`): `default-src 'self'`, no inline script (the theme bootstrap is
+  `public/theme-init.js`), no inline style. React sets custom properties through the CSSOM, which the policy allows.
 - Semantic landmarks, a skip link, one h1, labelled sections, visible 3px focus rings, 44px touch targets, native
   `<details>` for the FAQ, focusable scrollable code blocks, copy results announced in a polite live region.
 - Works at 360px: single column, no horizontal scroll, the stamp moves to the bubble's bottom edge so the line stays readable.
+
+## Polish and delight (Task 4)
+
+- Every delight is cheap, optional and reduced-motion safe (the base style is always the finished look):
+  - the hero grid lights up teal under a mouse (`--mx` / `--my` on `.hero`, set only for mouse and pen, never under
+    reduced motion, eased by a registered `@property`);
+  - feature cards: the icon tile pops on hover ("level up");
+  - the AI-levels HUD meter runs one pip scan when it scrolls into view (`useSeen`); it states only what is true,
+    "AI levels shipped: 0 of 4";
+  - the konami code (up up down down left right left right B A) turns the warden gold and says so in a polite live region;
+    typing it again turns it back (`GoldWarden`, `data-gold` on `<html>`). It ignores form fields.
+- Nothing fakes data: no counters, no activity feeds.
+- Steps layout: under 1280px the words sit above each code block so the block gets the whole column; from 1280px they sit beside
+  it and the code column is pulled out 72px to the right (the left edge stays on the page grid), and the code is 12.5px, so
+  the README lines (kept verbatim) are not clipped. `test/browser.test.ts` measures this at 1024 to 1920.
+- Never reuse a bare class name across the two stylesheets: the demo's lazy CSS styles `.badge` as a count chip, which once
+  restyled the open-source pills (they are `.open-badge` now).
+- Gold on a dark screen or under dark ink is `--gold-bright` in both themes; `--gold` is the darker text gold in light.
+
+## Meta, SEO and deploy
+
+- `index.html` carries title, description, canonical, Open Graph and Twitter tags. The OG image (`public/og.png`, 1200x630) is
+  rendered from `scripts/og.svg` by `scripts/assets.mjs` with `@resvg/resvg-js`, using the two self-hosted fonts (unpacked from
+  woff2 with `wawoff2`, since resvg reads TTF only). The same script makes `favicon-32.png` and `apple-touch-icon.png` from
+  `public/favicon.svg`. `npm run build` runs it first; the outputs are committed.
+- `robots.txt`, `sitemap.xml`, `llms.txt` (README and npm links, one line each; `test/meta.test.ts` checks every GitHub path
+  exists in this repo). No `security.txt`: there is no real contact to put in it.
+- See `README.md` for the deploy steps.
 
 ## Honesty rules the copy keeps
 

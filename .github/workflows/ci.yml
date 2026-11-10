@@ -27,6 +27,23 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+  # The landing page (site/) is not part of the packages: it has its own tests (copy, built-page scans, CSP, axe) and build.
+  # Kept apart so a site change never blocks the package matrix and a package change never waits on a browser download.
+  site:
+    name: Site (test and build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The CSP and accessibility tests drive a real browser.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test --workspace site
+      - run: npm run build --workspace site
+
   smoke:
     name: Smoke (consumer install) Node ${{ matrix.node }}
     runs-on: ubuntu-latest

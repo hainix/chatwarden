@@ -4,7 +4,6 @@
 // The deny list is not written out here (the repo carries no real slur, anywhere). It is the English dataset of
 // `obscenity`, the library @chatwarden/matcher is built on, run with its recommended transformers over every text file
 // in dist. The only terms the site may mention are the invented ones from @chatwarden/matcher/fixtures.
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import {
@@ -17,7 +16,6 @@ import { SYNTHETIC_TERMS } from '../../packages/matcher/src/fixtures/syntheticPa
 
 const siteDir = join(__dirname, '..');
 const dist = join(siteDir, 'dist');
-const VITE_BIN = join(siteDir, '..', 'node_modules', 'vite', 'bin', 'vite.js');
 
 // The invented words (the matcher test's allow-list, plus the exception phrase's `glarn`).
 const INVENTED = ['zorbak', 'vlemmo', 'quissel', 'drakkuun', 'fenrisk', 'tarvo', 'snerp', 'glarn'];
@@ -26,6 +24,7 @@ const INVENTED = ['zorbak', 'vlemmo', 'quissel', 'drakkuun', 'fenrisk', 'tarvo',
 const ALLOWED_HOSTS = new Set(['github.com', 'www.npmjs.com', 'npmjs.com', 'chatwarden.dev']);
 const INERT_URLS = [
   /^https?:\/\/www\.w3\.org\/((XML\/)?\d{4}\/)[a-z0-9/]+$/i, // XML, SVG, MathML and XLink namespaces (never fetched)
+  /^https?:\/\/www\.sitemaps\.org\/schemas\/sitemap\/[\d.]+$/i, // the sitemap XML namespace (never fetched)
   /^https:\/\/react\.dev\/errors\b/i, // the text of React's production error messages (never fetched)
 ];
 
@@ -45,12 +44,8 @@ const isFontLicence = (p: string) => /fonts[\\/]OFL-.*\.txt$/.test(p);
 let files: string[] = [];
 let texts: Map<string, string>;
 
+// dist/ is built once by test/globalBuild.ts before any test file runs.
 beforeAll(() => {
-  execFileSync(process.execPath, [VITE_BIN, 'build', '--logLevel', 'error'], {
-    cwd: siteDir,
-    stdio: 'inherit',
-    env: { ...process.env, NODE_ENV: 'production' },
-  });
   files = walk(dist);
   texts = new Map(files.filter((f) => TEXT_EXT.has(extname(f))).map((f) => [f, readFileSync(f, 'utf8')]));
 });
@@ -82,7 +77,9 @@ describe('built dist', () => {
 
   it('loads no script, stylesheet, font, image or frame from another origin', () => {
     const html = texts.get(join(dist, 'index.html')) ?? '';
-    const refs = [...html.matchAll(/\s(?:src|href)="([^"]+)"/g)].map((m) => m[1] as string);
+    // The canonical link is an identifier for crawlers, not a load; every other src/href must be same-origin.
+    const withoutCanonical = html.replace(/<link\s+rel="canonical"[^>]*>/, '');
+    const refs = [...withoutCanonical.matchAll(/\s(?:src|href)="([^"]+)"/g)].map((m) => m[1] as string);
     expect(refs.length).toBeGreaterThan(0);
     for (const r of refs) expect(r.startsWith('/') && !r.startsWith('//'), r).toBe(true);
     const css = [...texts].filter(([f]) => f.endsWith('.css')).map(([, t]) => t).join('\n');
