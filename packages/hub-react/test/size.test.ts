@@ -43,10 +43,11 @@ describe('bundle size', () => {
     expect(inputs.filter((i) => /@chatwarden|packages[\\/](core|http|store-memory|matcher)[\\/]/.test(i))).toEqual([]);
   });
 
-  it('imports React only through the names the peers provide', async () => {
+  it('imports only what the peers provide: React, and the kit core for the ladder table', async () => {
     const { text } = await bundle();
-    const imports = [...text.matchAll(/from\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(new Set(imports)).toEqual(new Set(['react', 'react/jsx-runtime']));
+    // `import ... from "x"` only: a catalog phrase that happens to end in "from" is not an import.
+    const imports = [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1]);
+    expect(new Set(imports)).toEqual(new Set(['react', 'react/jsx-runtime', '@chatwarden/core']));
   });
 
   it('contains no Node builtin and no eval', async () => {
@@ -60,6 +61,6 @@ describe('bundle size', () => {
     const css = await readFile(fileURLToPath(new URL('../src/styles.css', import.meta.url)));
     const gzip = gzipSync(css, { level: 9 }).byteLength;
     console.log(`hub-react styles.css: ${css.byteLength} bytes, ${gzip} bytes gzipped`);
-    expect(gzip).toBeLessThan(6 * 1024);
+    expect(gzip).toBeLessThan(7 * 1024);
   });
 });

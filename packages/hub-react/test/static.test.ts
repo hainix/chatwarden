@@ -209,8 +209,8 @@ describe('the stylesheet is a complete token contract', () => {
     expect(tokenBlock).toMatch(/:where\(\.cw-hub\)\s*\{/);
   });
 
-  it('is under 24 KB raw (the size test holds it to 6 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(24 * 1024);
+  it('is under 32 KB raw (the size test holds it to 7 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(32 * 1024);
   });
 });
 

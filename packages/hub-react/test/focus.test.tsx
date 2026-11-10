@@ -37,7 +37,7 @@ describe('focus and announcements when the screen changes', () => {
     await w.file({ target: 'Mallory' });
     const { user } = renderHub(w, { path: '/reports' });
     await user.click(await screen.findByRole('link', { name: 'Review the newest report against Mallory' }));
-    expect(await screen.findByRole('heading', { level: 2, name: 'Report is not available yet' })).toHaveFocus();
+    expect(await screen.findByRole('heading', { level: 2, name: /^(Report|Harassment report against Mallory)$/ })).toHaveFocus();
   });
 
   it('keeps focus on the status button when only the query changes', async () => {
@@ -63,11 +63,11 @@ describe('focus and announcements when the screen changes', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Reports' })).toBe(heading);
     expect(heading).not.toHaveFocus();
     act(() => router.navigate('/reports/abc'));
-    expect(await screen.findByRole('heading', { level: 2, name: 'Report is not available yet' })).toHaveFocus();
-    const first = screen.getByRole('heading', { level: 2, name: 'Report is not available yet' });
+    expect(await screen.findByRole('heading', { level: 2, name: 'Report' })).toHaveFocus();
+    const first = screen.getByRole('heading', { level: 2, name: 'Report' });
     act(() => router.navigate('/reports/def'));
-    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Report is not available yet' })).not.toBe(first));
-    expect(screen.getByRole('heading', { level: 2, name: 'Report is not available yet' })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Report' })).not.toBe(first));
+    expect(screen.getByRole('heading', { level: 2, name: 'Report' })).toHaveFocus();
   });
 });
 

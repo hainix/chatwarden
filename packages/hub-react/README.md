@@ -1,8 +1,8 @@
 # @chatwarden/hub-react
 
 The moderator hub for Chatwarden, the open-source chat moderation kit for games: a React UI over the kit's staff HTTP API. A
-moderator sees the report queue grouped by person, what was done lately, and (as the later screens land) decides reports,
-sanctions people, edits blocked terms and reads the audit trail. It talks to the API through a small injected transport, so the
+moderator sees the report queue grouped by person, what was done lately, reads a report and decides it, and (as the later
+screens land) sanctions people, edits blocked terms and reads the audit trail. It talks to the API through a small injected transport, so the
 same hub runs against a real server (`fetch`) or against the real staff routes running in the page (a demo).
 
 Status: pre-release, as-is, no support promise.
@@ -15,7 +15,8 @@ npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-
 
 `react` and `react-dom` (18.3 or 19) are peer dependencies, so your app has one copy of React. The hub uses only APIs that exist in
 18.3 (`useSyncExternalStore`, `useId`), but it is tested only on React 19 so far. `@chatwarden/core` and
-`@chatwarden/http` are peers too: the hub imports only their types, but its own type declarations name them. Node 22.13 or newer
+`@chatwarden/http` are peers too: the hub imports types from both and one value from core (`LADDER_TABLE`, so the decision menu
+and the suggestion cannot drift apart), and its own type declarations name them. Node 22.13 or newer
 for the tooling; the hub itself runs in a browser and imports no `node:` module.
 
 ## Quick start
@@ -87,10 +88,25 @@ export const client = createHubClient(routerTransport(handle));
 | --- | --- | --- |
 | `#/` | Overview: people waiting, open reports, longest wait, the people who need review, recent actions | any signed-in role (panels follow `reports.read` and `history.read`) |
 | `#/reports`, `#/reports?status=actioned` | Reports: the queue grouped by reported person, filtered by status | `reports.read` |
-| `#/reports/:id`, `#/people/:ref`, `#/terms`, `#/blocked`, `#/gaps`, `#/audit`, `#/guide` | Routes and tabs exist; the screens arrive in later releases and show a short "not available yet" page until then | the permission of the tab |
+| `#/reports/:id` | Report: who is in it, their last 90 days, the saved chat (the reported line marked, blocked lines struck through, a filter to one person) and the decision panel | `reports.read`; deciding needs `reports.decide`, actions need `sanctions.apply` |
+| `#/people/:ref`, `#/terms`, `#/blocked`, `#/gaps`, `#/audit`, `#/guide` | Routes and tabs exist; the screens arrive in later releases and show a short "not available yet" page until then | the permission of the tab |
 
 The tabs a role cannot use are not shown: Audit appears for a senior and above, and every tab follows the permission table the
 server reports in `GET /me` (so a `permissions` override on the server is respected).
+
+### The report page and the decision
+
+The decision panel sends one call, `POST /reports/:id/decide`. It offers the ladder's suggestion (and asks the server again when the
+conduct level changes), the verdict (Fair, Not a problem, Bad faith), any number of actions up to 20, each with a person, what
+happens (the ladder table's presets, a note, or a kind and length), the Community Rule it is under (or "No rule covers this" with a
+note) and up to five of that person's own lines to show them, and a reason. It refuses what the server would refuse before sending:
+no action on the reported person unless the report is fair, bad-faith evidence of 1 to 500 characters, a gap note for an uncovered
+rule, at most five lines that are the person's own, one action of a kind per person, no permanent length without
+`sanctions.apply.ban_permanent`. The role's `can` map decides what is offered, never the role name.
+
+There is no idempotency key to send: the server recognises a repeated decision by its content and answers `replay: true`, which the
+panel shows as a success. A `409 already_decided` reloads the report and says someone else decided it. A network failure keeps
+everything typed and offers "Try again", which sends the same body. The panel's results are announced in a polite live region.
 
 ### `HubClient`
 
@@ -241,6 +257,8 @@ background. Keep the ink and soft pair at a readable contrast when you change th
 - **The full person ref is in the link.** The page shows only the 8 character tag, but a link to a person (`#/people/:ref`) has to
   carry the whole ref, because the server route needs it. It is staff-only, like the queue, but the address bar, the history and the
   paths `onNavigate` receives all hold it, so do not forward those to analytics.
+- **The report page shows chat as typed.** The excerpt is for staff: it holds the raw lines (blocked ones included, struck through)
+  and the reporter's note. What a player sees is only the lines the moderator chose for them, as the server masks them.
 - **Opening a report is an audited read.** The Overview and the queue are built from the queue list alone and never open a single
   report, so no `report.view` row names a report just because someone looked at the Overview.
 - **Authorization stays on the server.** The hub hides what the role cannot use, but the server still refuses it (403). Mount the

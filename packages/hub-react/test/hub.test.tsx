@@ -161,7 +161,6 @@ describe('Hub: screens the role cannot use, unknown paths, and screens still to 
     ['/blocked', 'Blocked'],
     ['/gaps', 'Rule gaps'],
     ['/guide', 'Guide'],
-    ['/reports/abc', 'Report'],
     ['/people/abc', 'Person'],
   ])('%s opens a titled placeholder until its screen is built', async (path, name) => {
     const w = await hubWorld({ role: 'owner' });
