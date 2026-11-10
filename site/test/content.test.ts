@@ -1,0 +1,59 @@
+// The site's code snippets and install commands must be real: every import line and install command has to appear in a
+// README of this repo. Copy that drifts from the READMEs fails here.
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { FAQ, FEATURES, HERO_CHAT, INSTALL_ONE, INSTALL_KIT, LEVELS, STEPS, WORKS_WITH } from '../src/content';
+
+const repo = join(__dirname, '..', '..');
+const readmes = [
+  join(repo, 'README.md'),
+  ...readdirSync(join(repo, 'packages')).map((p) => join(repo, 'packages', p, 'README.md')),
+].map((p) => readFileSync(p, 'utf8'));
+const allReadme = readmes.join('\n');
+
+describe('content is grounded in the READMEs', () => {
+  it('the install commands appear in the README as written', () => {
+    expect(allReadme).toContain('npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher');
+    expect(INSTALL_KIT).toBe('npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher');
+    expect(INSTALL_ONE).toBe('npm i @chatwarden/core');
+    expect(allReadme).toContain('npm install @chatwarden/core');
+  });
+  it('every import line in the step snippets is a real line from a README', () => {
+    const lines = STEPS.flatMap((s) => s.code.split('\n')).filter((l) => /^import /.test(l));
+    expect(lines.length).toBeGreaterThan(3);
+    for (const line of lines) {
+      const normal = (s: string) => s.replace(/\s+/g, ' ').trim();
+      expect(normal(allReadme), line).toContain(normal(line));
+    }
+  });
+  it('the API calls in the snippets exist in a README', () => {
+    const code = STEPS.map((s) => s.code).join('\n');
+    for (const call of ['createChatwarden(', 'openStore(', 'cw.chat.accept(', 'cw.rooms.seat', 'new LiveTerms(', 'syntheticTermPack()']) {
+      if (code.includes(call)) expect(allReadme, call).toContain(call);
+    }
+  });
+  it('snippets use only synthetic terms (when they use any)', () => {
+    const all = JSON.stringify([STEPS, HERO_CHAT, FEATURES, FAQ, LEVELS, WORKS_WITH]);
+    const words = all.match(/z[o0]rbak|vlemmo|quissel|drakkuun|fenrisk|tarvo|snerp|glarn/gi) ?? [];
+    expect(words.length).toBeGreaterThan(0);
+  });
+  it('has the hero refusal on a synthetic term, with a delivered trash-talk line', () => {
+    const refused = HERO_CHAT.filter((m) => m.verdict === 'refused');
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.text).toMatch(/zorbak/i);
+    expect(HERO_CHAT.filter((m) => m.verdict === 'delivered').length).toBeGreaterThanOrEqual(2);
+  });
+  it('has six features, three steps, five levels', () => {
+    expect(FEATURES).toHaveLength(6);
+    expect(STEPS).toHaveLength(3);
+    expect(LEVELS.map((l) => l.level)).toEqual([0, 1, 2, 3, 4]);
+  });
+  it('only level 0 is marked available; the AI read is not built yet', () => {
+    expect(LEVELS.filter((l) => l.status === 'available').map((l) => l.level)).toEqual([0]);
+  });
+  it('the FAQ states the no-SLA line plainly', () => {
+    expect(JSON.stringify(FAQ)).toMatch(/free forever/i);
+    expect(JSON.stringify(FAQ)).toMatch(/no SLA/);
+  });
+});
