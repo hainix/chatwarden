@@ -128,6 +128,8 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
   // belong to React. It is disposed with the hub, which sends a decision that is still held.
   const controller = useHubController(client, () => nowRef.current());
   controller.configure({ t });
+  // Who is signed in, once `GET /me` has answered: the controller needs it for claims and for the "mine" filter. Nothing listens for it.
+  if (me.data !== undefined) controller.identify(me.data);
   const session = controller.session;
   const value = useMemo<HubContextValue | null>(() => {
     if (me.data === undefined) return null;

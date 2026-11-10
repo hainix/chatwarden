@@ -1,4 +1,8 @@
 import type { PageSource, Timers } from '../../src/headless/env.js';
+import { createHubController } from '../../src/headless/controller.js';
+import type { HubControllerOptions } from '../../src/headless/controller.js';
+import { hubWorld } from '../world.js';
+import type { WorldOptions } from '../world.js';
 
 // What the controller's tests stand on: timers that only move when the test moves them, and a page the test can hide, close, or
 // take offline. No DOM and no global fake timers: the controller is handed both, as an adopter's runtime would.
@@ -118,3 +122,24 @@ export function fakePage(): FakePage {
     listeners: () => on.visibility.size + on.hide.size + on.online.size + on.offline.size,
   };
 }
+
+// ---- a controller over the real staff routes -------------------------------------------------------------------------------
+
+
+export interface RigOptions {
+  world?: WorldOptions;
+  controller?: Partial<HubControllerOptions>;
+}
+
+/** The real routes over the in-memory store, a controller on them, and the timers and page the test moves. */
+export async function rig(options: RigOptions = {}) {
+  const w = await hubWorld(options.world);
+  const timers = manualTimers();
+  const page = fakePage();
+  const controller = createHubController({ client: w.client, now: w.now, schedule: timers, page, ...options.controller });
+  /** The requests of one kind sent so far (`GET /changes`, `POST /cases/x/claim`, ...). */
+  const count = (method: string, path: string | RegExp): number =>
+    w.sent.filter((r) => r.method === method && (typeof path === 'string' ? r.path === path : path.test(r.path))).length;
+  return { w, timers, page, controller, count };
+}
+export type Rig = Awaited<ReturnType<typeof rig>>;
