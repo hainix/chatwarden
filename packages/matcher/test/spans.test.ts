@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { maskSpans } from '@chatwarden/core';
 import { LiveTerms, buildMatcher, type Matcher } from '../src/index.js';
-import { MemoryTermStore, SYNTHETIC_TERMS, packExceptionRows, packTermRows, syntheticTermPack, term } from './fixtures/index.js';
+import { MemoryTermStore, SYNTHETIC_TERMS, syntheticTermPack } from '../src/fixtures/index.js';
+import { packExceptionRows, packTermRows, term } from './fixtures/rows.js';
 
 const m = () => buildMatcher(packTermRows(), packExceptionRows());
 const spansOf = (mm: Matcher, text: string) => mm.spans!(text);

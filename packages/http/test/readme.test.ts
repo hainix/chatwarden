@@ -1,9 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { BACKOFF_BASE_MS, DELIVERY_HEADER, MAX_RETRIES, PERMISSIONS, PERMISSION_KEYS, SIGNATURE_HEADER, TIMESTAMP_HEADER } from '../src/index.js';
+import { BACKOFF_BASE_MS, DELIVERY_HEADER, MAX_RETRIES, PERMISSIONS, PERMISSION_KEYS, RETRY_AFTER_CAP_MS, RETRY_AFTER_FLOOR_MS, SIGNATURE_HEADER, TIMESTAMP_HEADER } from '../src/index.js';
 
 // The READMEs are part of the product: an adopter (or a coding agent) copies from them. These checks keep them true to the
 // code: every permission, every error code and every header the code defines must be written down, and every ```ts block
@@ -14,7 +13,6 @@ const read = (rel: string): string => readFileSync(join(here, rel), 'utf8').repl
 const http = read('../README.md');
 const discord = read('../../discord/README.md');
 const root = read('../../../README.md');
-const tiny = read('../../../examples/tiny-chat/README.md');
 
 /** The text of a `## Heading` section, up to the next `## ` heading. */
 function section(doc: string, heading: string): string {
@@ -164,7 +162,7 @@ describe('packages/http/README.md', () => {
   it('says how a CommonJS app consumes it, and that CORS middleware mounts before toExpress', () => {
     const install = section(http, 'Install');
     expect(install).toContain('### CommonJS');
-    expect(install).toMatch(/Node 22\.12 or newer/);
+    expect(install).toMatch(/Node 22\.13 or newer/);
     expect(install).toMatch(/no top-level `await`/);
     expect(install).toContain('moduleResolution: node');
     expect(install).toContain('typesVersions');
@@ -254,101 +252,35 @@ describe('the root README', () => {
   });
 });
 
-describe('every ```ts block in the READMEs compiles against the package sources', () => {
-  const docs: Array<[string, string]> = [
-    ['http', http],
-    ['discord', discord],
-    ['root', root],
-    ['tiny-chat', tiny],
-  ];
-  const snippets = docs.flatMap(([name, text]) =>
-    [...text.matchAll(/```ts\n([\s\S]*?)```/g)].map((m, i) => ({ file: `${name}-${i}.ts`, code: m[1] as string })),
-  );
-
-  // Names the snippets use but leave to the reader (their own login, their own term pack, ...).
-  const STUBS = `
-declare const yourTermPack: import('@chatwarden/matcher').TermPack;
-declare function lookupStaffFromSession(cookie: string | undefined): Promise<{ email: string; role: 'moderator' | 'senior' | 'owner' } | null>;
-declare function yourModeratorLogin(req: import('@chatwarden/http').KitRequest): { actor: string; role: 'moderator' | 'senior' | 'owner' } | null;
-declare const secret: string;
-declare const platform: import('@chatwarden/core').Platform;
-declare const matcher: import('@chatwarden/core').Matcher;
-declare const cw: import('@chatwarden/core').Chatwarden;
-declare const authorize: import('@chatwarden/http').Authenticate;
-`;
-  /** A block that is a fragment (a bare option object, an override line) is not compiled on its own. */
-  const standalone = (code: string): boolean => code.startsWith('import ');
-
-  function compile(extra: Array<{ file: string; code: string }> = []): Map<string, string[]> {
-    const dir = join(here, '__snippets__').replaceAll('\\', '/');
-    const cfg = ts.readConfigFile(join(here, '../../../tsconfig.base.json'), ts.sys.readFile);
-    const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, join(here, '../../..'));
-    // The workspace packages resolve to their TypeScript source (the same map vitest.config.ts uses), so this check needs no
-    // prior `tsc -b` and never reads a stale `dist`. Exact keys, so the subpath `/express` is not taken by the bare name.
-    const src = (rel: string): string[] => [`packages/${rel}`];
-    const options: ts.CompilerOptions = {
-      ...parsed.options,
-      pathsBasePath: join(here, '../../..'),
-      paths: {
-        '@chatwarden/core': src('core/src/index.ts'),
-        '@chatwarden/store-sqlite': src('store-sqlite/src/index.ts'),
-        '@chatwarden/matcher': src('matcher/src/index.ts'),
-        '@chatwarden/matcher/test-fixtures': src('matcher/test/fixtures/index.ts'),
-        '@chatwarden/profanity': src('profanity/src/index.ts'),
-        '@chatwarden/discord': src('discord/src/index.ts'),
-        '@chatwarden/http': src('http/src/index.ts'),
-        '@chatwarden/http/express': src('http/src/express.ts'),
-      },
-      noEmit: true,
-      composite: false,
-      incremental: false,
-      declaration: false,
-      declarationMap: false,
-      sourceMap: false,
-    };
-    const virtual = new Map<string, string>();
-    const stubs = `${dir}/stubs.d.ts`;
-    virtual.set(stubs, STUBS);
-    const names: string[] = [stubs];
-    for (const s of [...snippets.filter((x) => standalone(x.code)), ...extra]) {
-      const path = `${dir}/${s.file}`;
-      virtual.set(path, `${s.code}\nexport {};\n`);
-      names.push(path);
-    }
-    const host = ts.createCompilerHost(options);
-    const realFile = host.fileExists.bind(host);
-    const realRead = host.readFile.bind(host);
-    const realSource = host.getSourceFile.bind(host);
-    const norm = (f: string): string => f.replaceAll('\\', '/');
-    host.fileExists = (f) => virtual.has(norm(f)) || realFile(f);
-    host.readFile = (f) => virtual.get(norm(f)) ?? realRead(f);
-    host.getSourceFile = (f, lang, onError, shouldCreate) => {
-      const text = virtual.get(norm(f));
-      return text === undefined ? realSource(f, lang, onError, shouldCreate) : ts.createSourceFile(f, text, lang, true);
-    };
-    const program = ts.createProgram({ rootNames: names, options, host });
-    const byFile = new Map<string, string[]>();
-    for (const d of ts.getPreEmitDiagnostics(program)) {
-      const file = d.file === undefined ? undefined : norm(d.file.fileName);
-      if (file === undefined || !file.includes('/__snippets__/')) continue;
-      const name = file.split('/').at(-1) as string;
-      byFile.set(name, [...(byFile.get(name) ?? []), ts.flattenDiagnosticMessageText(d.messageText, '\n')]);
-    }
-    return byFile;
-  }
-
-  it('finds the snippets it is meant to check', () => {
-    expect(snippets.length).toBeGreaterThanOrEqual(6);
-    expect(snippets.filter((s) => standalone(s.code)).length).toBeGreaterThanOrEqual(5);
-    for (const [, text] of docs.slice(0, 3)) expect(text).toContain('```ts');
+describe('packages/http/README.md: gap notes, matchRoute and the retry-after floor', () => {
+  it('warns that GET /gaps returns the moderators gap notes in bulk, so no chat goes into a note', () => {
+    const routes = http.slice(http.indexOf('### The routes'), http.indexOf('### Mounting'));
+    const gaps = rows(routes).find((r) => r[0] === '`GET /gaps`')?.[1] ?? '';
+    expect(gaps).toMatch(/moderator-written gap notes/);
+    expect(gaps).toMatch(/in bulk/);
+    expect(gaps).toMatch(/never paste chat/i);
+    const notes = section(http, 'Security notes');
+    expect(notes).toMatch(/gap note/i);
+    expect(notes).toMatch(/never paste chat/i);
+    expect(notes).toMatch(/GET \/gaps/);
   });
 
-  it('all compile in one program, and a deliberate error is caught (control)', { timeout: 60_000 }, () => {
-    const diagnostics = compile([{ file: 'control.ts', code: "const n: number = 'not a number';" }]);
-    const control = diagnostics.get('control.ts');
-    expect(control?.length, 'the control must fail to compile').toBe(1);
-    expect(control?.[0]).toContain("Type 'string' is not assignable to type 'number'");
-    diagnostics.delete('control.ts');
-    expect(Object.fromEntries(diagnostics)).toEqual({});
+  it('documents matchRoute for adapter authors: run, matches, falling through, and createRouter', () => {
+    const adapters = section(http, 'Writing another adapter');
+    for (const needle of ['matchRoute', 'CompiledRoutes', 'run(req)', 'matches(path', 'next()', 'RangeError', 'createRouter']) {
+      expect(adapters, needle).toContain(needle);
+    }
+    expect(adapters).toMatch(/before you read the\s+body/);
+    expect(adapters).toMatch(/handler that answers 404 is a match/);
+    expect(adapters).toMatch(/OPTIONS/);
+    expect(adapters).toMatch(/HEAD/);
+  });
+
+  it('documents RETRY_AFTER_FLOOR_MS with its value, beside the cap', () => {
+    const hooks = section(http, 'Webhooks');
+    expect(hooks).toContain('`RETRY_AFTER_FLOOR_MS`');
+    expect(hooks).toContain('`RETRY_AFTER_CAP_MS`');
+    expect(hooks).toContain(`${RETRY_AFTER_FLOOR_MS / 1000} second`);
+    expect(hooks).toContain(`${RETRY_AFTER_CAP_MS / 1000} seconds`);
   });
 });

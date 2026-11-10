@@ -5,7 +5,7 @@ import type {
   TermPatch,
   TermRecord,
   TermStore,
-} from '../../src/index.js';
+} from '../termStore.js';
 
 interface State {
   terms: TermRecord[];

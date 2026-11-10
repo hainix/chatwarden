@@ -1,11 +1,25 @@
 {
   "name": "@chatwarden/discord",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "Chatwarden Discord package: feeds the staff review queue into a Discord forum through a channel webhook, one thread per reported person.",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "keywords": [
+    "chatwarden",
+    "moderation",
+    "chat",
+    "discord",
+    "webhook",
+    "review-queue"
+  ],
+  "homepage": "https://github.com/hainix/chatwarden/tree/main/packages/discord#readme",
+  "bugs": {
+    "url": "https://github.com/hainix/chatwarden/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hainix/chatwarden.git",
@@ -19,7 +33,23 @@
       "default": "./dist/src/index.js"
     }
   },
-  "files": ["dist/src"],
-  "dependencies": { "@chatwarden/core": "0.0.0" },
-  "publishConfig": { "access": "public" }
+  "sideEffects": false,
+  "files": [
+    "dist/src",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "tsc -b"
+  },
+  "peerDependencies": {
+    "@chatwarden/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@chatwarden/core": "0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

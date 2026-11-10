@@ -7,7 +7,7 @@ import {
   foldTerm,
   stripInvisible,
 } from '../src/index.js';
-import { SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS, UNLISTED_WORDS } from './fixtures/syntheticPack.js';
+import { SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS, UNLISTED_WORDS } from '../src/fixtures/syntheticPack.js';
 import { exception, packExceptionRows, packTermRows, term } from './fixtures/rows.js';
 
 const pack = () => buildMatcher(packTermRows(), packExceptionRows());

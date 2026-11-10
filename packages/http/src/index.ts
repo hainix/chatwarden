@@ -1,8 +1,9 @@
+export const VERSION = '0.1.0';
 export { ROLES } from '@chatwarden/core';
 export type { Role } from '@chatwarden/core';
 export type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';
-export { createRouter } from './router.js';
-export type { RouteHandler, RouteTable } from './router.js';
+export { compileRoutes as matchRoute, createRouter } from './router.js';
+export type { CompiledRoutes, RouteHandler, RouteTable } from './router.js';
 export { errorResponse, HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
 export type { ErrorCode } from './errors.js';
 export { BODY_MAX_BYTES, parseJson } from './body.js';
@@ -47,6 +48,7 @@ export {
   REPLAY_CACHE_SIZE,
   ReplayCache,
   RETRY_AFTER_CAP_MS,
+  RETRY_AFTER_FLOOR_MS,
   SIGNATURE_HEADER,
   SIGNATURE_WINDOW_MS,
   TIMESTAMP_HEADER,

@@ -24,9 +24,15 @@ const coreRestrictedImports = [
 ];
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '.superpowers/**', '**/*.tsbuildinfo'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', '.superpowers/**', '**/*.tsbuildinfo', '.smoke/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', Buffer: 'readonly', URL: 'readonly' },
+    },
+  },
   {
     files: ['packages/core/**/*.ts'],
     rules: { 'no-restricted-imports': coreRestrictedImports },

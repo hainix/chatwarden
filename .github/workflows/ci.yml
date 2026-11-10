@@ -23,5 +23,34 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run check:pack
       - run: npm run lint
       - run: npm test
+
+  smoke:
+    name: Smoke (consumer install) Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.13', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      # Packs every package (prepack runs), installs the tarballs into fresh ESM and CommonJS projects, typechecks and runs them.
+      - run: node scripts/smoke.mjs
+      # Convenience copy of the tarballs (one leg is enough: they are identical). The smoke run above is the gate; the
+      # upload is best-effort so an account-wide artifact quota can never turn CI red. Adopters vendoring before the
+      # first npm publish can also run `node scripts/smoke.mjs` locally and take `.smoke/tarballs/`.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && matrix.node == '24' }}
+        continue-on-error: true
+        with:
+          name: chatwarden-tarballs
+          path: .smoke/tarballs/*.tgz
+          if-no-files-found: error
+          retention-days: 7

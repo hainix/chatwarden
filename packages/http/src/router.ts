@@ -87,7 +87,20 @@ export interface CompiledRoutes {
   matches(path: string, method?: string): boolean;
 }
 
-/** Compile a route table once. Validates it exactly as {@link createRouter} does (`RangeError`). */
+/**
+ * Compile a route table once. Validates it exactly as {@link createRouter} does (`RangeError`).
+ *
+ * Exported from the package as `matchRoute`, for authors of an adapter for another framework (Fastify, Koa, a Worker).
+ * The contract:
+ * - `run(req)` answers every request: a handler's response, 404 for a path no route has, 405 (with `allow`) for a known
+ *   path under another method. Handler errors propagate; wrap the handlers in `withErrors` as `createRouter` expects.
+ * - `matches(path, method?)` is the question to ask first. True means the path is this table's (answer it with `run`);
+ *   false means it is not, so hand the request back to your framework (`toExpress` calls `next()`) BEFORE you read the
+ *   body. A handler that answers 404 is a match; `matches` is false only when no route fits the path under any method.
+ *   Pass the request method so a CORS preflight (`OPTIONS`) to a known path stays the app's, unless a route answers it.
+ * - The path is the URL path only. The query string is ignored by `matches` and stripped by `run`.
+ * - HEAD runs the GET handler; send its status and headers, but not its body.
+ */
 export function compileRoutes(routes: RouteTable): CompiledRoutes {
   const table: Route[] = [];
   const seen = new Set<string>();

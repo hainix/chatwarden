@@ -1,8 +1,8 @@
-// Synthetic term pack for the matcher tests. Every word here is invented: none is a real word in en, es or pt,
-// and the pack carries no real slur, hate term or profanity. Each term exists to exercise one mechanism of the
-// matcher, so a regression names the mechanism it broke.
+// Synthetic term pack, shipped as `@chatwarden/matcher/fixtures`. Every word here is invented: none is a real word in en,
+// es or pt, and the pack carries no real slur, hate term or profanity. Each term exists to exercise one mechanism
+// of the matcher, so a regression names the mechanism it broke.
 //
-// A plain data module (no imports, no logic): Task 7 builds the TermPack type on top of it.
+// A plain data module (no imports, no logic).
 
 export interface SyntheticTerm {
   /** Row id the tests give the term (the matcher reports it back as `termId`). */

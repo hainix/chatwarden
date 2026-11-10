@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildMatcher, matchName, nameViews } from '../src/index.js';
-import { SYNTHETIC_TERMS } from './fixtures/syntheticPack.js';
+import { SYNTHETIC_TERMS } from '../src/fixtures/syntheticPack.js';
 import { packExceptionRows, packTermRows, term } from './fixtures/rows.js';
 
 const pack = () => buildMatcher(packTermRows(), packExceptionRows());

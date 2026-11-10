@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createChatwarden } from '@chatwarden/core';
 import type { Chatwarden, Logger, RawWho } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
-import { syntheticTermPack } from '@chatwarden/matcher/test-fixtures';
+import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { openStore } from '@chatwarden/store-sqlite';
 import { adminRoutes, createRouter } from '@chatwarden/http';
 import type { Authz, KitRequest, KitResponse, Role } from '@chatwarden/http';

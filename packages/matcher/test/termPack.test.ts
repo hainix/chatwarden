@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildMatcher, loadTermPack } from '../src/index.js';
-import { SYNTHETIC_TERMS, syntheticTermPack } from './fixtures/index.js';
+import { SYNTHETIC_TERMS, syntheticTermPack } from '../src/fixtures/index.js';
 
 /** A pack as it would arrive from disk or the network. */
 const json = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
