@@ -62,14 +62,14 @@ describe('Hero', () => {
   });
 });
 
-describe('DemoSlot', () => {
+describe('DemoSlot placeholder', () => {
   it('is a #demo section with a heading and the loading placeholder', () => {
     const { container } = render(<DemoSlot />);
     const section = container.querySelector('section#demo');
     expect(section).toBeTruthy();
     expect(section?.getAttribute('aria-labelledby')).toBeTruthy();
     expect(within(section as HTMLElement).getByRole('heading', { level: 2 })).toBeTruthy();
-    expect(screen.getByText(/loading in the next build/i)).toBeTruthy();
+    expect(screen.getByText(/loading the demo/i)).toBeTruthy();
     expect(section?.querySelector('[data-demo-slot]')).toBeTruthy();
   });
   it('names the two panes the demo will fill', () => {

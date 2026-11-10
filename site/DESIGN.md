@@ -74,3 +74,20 @@ No customer logos (only the true "Used by Moxgate"), no invented numbers, instal
 (`test/content.test.ts`), AI levels 1 to 4 are marked coming soon, the hub UI is marked coming while the HTTP admin API
 and Discord feed are described as shipping, and "free forever, no SLA" is stated plainly. Demo words are the invented
 terms from `@chatwarden/matcher/fixtures` only.
+
+## The interactive demo (`src/demo/`, its own chunk)
+
+Two dark "screens" side by side: the game (a lobby with You, Ada and Bo, a composer, a report button on every other
+player's line, and a "player's screen" frame that slides in with the notice) and the moderator console (a report queue badge,
+evidence with the reported line marked, the ladder suggestion, a "line to show the player" picker and the four decisions in
+a sticky bar). The REFUSED! stamp is the hero's, reused. The tour tooltip is a gold quest bubble with progress pips, so it
+never reads as part of a screen; it points at the control with a static gold ring (a soft ripple only when motion is allowed).
+
+- It talks to the kit through `DemoEngine` (`engine.ts`), shaped like `@chatwarden/core` (`chat.accept`, `reports.submit`,
+  `decide`, `notices.*`, `suggest`). `fakeEngine.ts` is a temporary in-browser stand-in; Task 3 replaces it with the real kit.
+- "Show me the code" shows lines copied verbatim from the READMEs (`test/demoCode.test.ts` checks every line).
+- Phones (under 900px): one pane at a time, a sticky Game / Moderator switcher below the site header, the tour moves to the
+  moderator pane by itself for step 3, and the decide bar sticks to the bottom of the screen.
+- Scripted players say a line every 4 to 6 seconds; they wait while the tab is hidden, while you type, while the report
+  dialog is open and while paused. Nothing is stored: a reload is a fresh lobby.
+- Lazy: `DemoSlot` loads the chunk when the section is within 600px of the viewport (or on pointer or focus).

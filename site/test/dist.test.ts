@@ -6,7 +6,7 @@
 // in dist. The only terms the site may mention are the invented ones from @chatwarden/matcher/fixtures.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { extname, join, relative } from 'node:path';
+import { extname, join, relative, sep } from 'node:path';
 import {
   RegExpMatcher,
   englishDataset,
@@ -135,8 +135,24 @@ describe('built dist', () => {
   it('ships the favicon and keeps the initial JS small (under 120 KB gzip)', async () => {
     const { gzipSync } = await import('node:zlib');
     expect(existsSync(join(dist, 'favicon.svg'))).toBe(true);
-    const js = files.filter((f) => f.endsWith('.js'));
-    const gz = js.reduce((n, f) => n + gzipSync(readFileSync(f)).length, 0);
+    const html = texts.get(join(dist, 'index.html')) ?? '';
+    // What the page loads up front: every script (and preload) index.html names. The lazy demo chunk is not among them.
+    const initial = [...html.matchAll(/<(?:script|link)[^>]+(?:src|href)="(\/assets\/[^"]+\.js)"/g)].map((m) => join(dist, (m[1] as string).slice(1)));
+    expect(initial.length).toBeGreaterThan(0);
+    const gz = initial.reduce((n, f) => n + gzipSync(readFileSync(f)).length, 0);
     expect(gz).toBeLessThan(120 * 1024);
+  });
+
+  it('code-splits the demo: its own chunk, not named by index.html, and the page weight stays small', async () => {
+    const { gzipSync } = await import('node:zlib');
+    const html = texts.get(join(dist, 'index.html')) ?? '';
+    const demo = files.filter((f) => /Demo-[\w-]+\.js$/.test(f));
+    expect(demo).toHaveLength(1);
+    expect(html).not.toContain(relative(dist, demo[0] as string).split(sep).join('/'));
+    const js = files.filter((f) => f.endsWith('.js'));
+    const total = js.reduce((n, f) => n + gzipSync(readFileSync(f)).length, 0);
+    expect(total).toBeLessThan(120 * 1024); // even with the demo, all the JS together is small
+    const initialCss = texts.get(files.find((f) => /index-[\w-]+\.css$/.test(f)) ?? '') ?? '';
+    expect(initialCss).not.toContain('.tour'); // the demo's styles ship with the demo chunk
   });
 });
