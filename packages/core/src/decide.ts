@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from './crypto.js';
 import { safeWarn } from './log.js';
 import { ownLines } from './notices.js';
 import type { NoticeService } from './notices.js';
@@ -269,9 +269,7 @@ function keyOf(n: Normal): string {
     includeIp: a.includeIp,
     lineIds: a.lineIds,
   }));
-  return createHash('sha256')
-    .update(`${n.reportId}\u0000${n.verdict}\u0000${canonicalJSON(actions)}`)
-    .digest('hex');
+  return sha256Hex(`${n.reportId}\u0000${n.verdict}\u0000${canonicalJSON(actions)}`);
 }
 
 /**

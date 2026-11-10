@@ -2,7 +2,7 @@
 // byte-compatible with Moxgate's identity hasher. The internal kind strings
 // 'playerKey' and 'ipHash' are Moxgate's and must not change, or existing
 // hashes stop matching.
-import { createHmac } from 'node:crypto';
+import { hmacSha256Hex } from './crypto.js';
 import type { Hasher, Identifiers, RawWho } from './types.js';
 
 // 128 bits of the HMAC: plenty to avoid collisions, short enough to index.
@@ -14,7 +14,7 @@ export function makeHasher(secret: string): Hasher {
   // The kind prefix keeps the two spaces apart: a client key that happened to
   // equal an IP string must not produce the same value in both columns.
   const mac = (kind: string, input: string): string =>
-    createHmac('sha256', secret).update(`${kind}:${input}`).digest('hex').slice(0, HASH_HEX_LEN);
+    hmacSha256Hex(secret, `${kind}:${input}`).slice(0, HASH_HEX_LEN);
   return {
     clientKey: (raw) => mac('playerKey', raw),
     ip: (raw) => mac('ipHash', raw),

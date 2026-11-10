@@ -1,19 +1,20 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
-// @chatwarden/core must stay portable and dependency-free: the only node:
-// built-in it may import is node:crypto.
+// @chatwarden/core must stay portable (it runs in a browser) and dependency-free: it may import nothing from a
+// node: module, not even node:crypto (see src/crypto.ts for the process.getBuiltinModule route). Applies to src only;
+// tests may use node:crypto as the reference implementation.
 const coreRestrictedImports = [
   'error',
   {
-    paths: ['fs', 'path', 'net', 'http', 'sqlite'].map((name) => ({
+    paths: ['fs', 'path', 'net', 'http', 'sqlite', 'crypto', 'os', 'util', 'buffer'].map((name) => ({
       name,
       message: `@chatwarden/core must not import "${name}".`,
     })),
     patterns: [
       {
-        group: ['node:*', '!node:crypto'],
-        message: '@chatwarden/core may import nothing from node: except node:crypto.',
+        group: ['node:*'],
+        message: '@chatwarden/core src may not import node: modules; it must run in a browser (use src/crypto.ts).',
       },
       {
         group: ['fs/*', 'path/*'],
@@ -34,7 +35,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/core/**/*.ts'],
+    files: ['packages/core/src/**/*.ts'],
     rules: { 'no-restricted-imports': coreRestrictedImports },
   },
 );

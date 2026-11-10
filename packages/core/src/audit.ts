@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomId } from './crypto.js';
 import { safeWarn } from './log.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { Clock, Logger, Store } from './types.js';
@@ -123,7 +123,7 @@ const ACTOR_RE = /^[A-Za-z0-9_.:@+-]{1,128}$/;
 /** True when `actor` is a string the audit trail accepts: 1..128 characters of `A-Z a-z 0-9 _ . : @ + -`. */
 export const isValidAuditActor = (actor: unknown): actor is string => typeof actor === 'string' && ACTOR_RE.test(actor);
 
-const newId = (): string => randomBytes(16).toString('base64url');
+const newId = (): string => randomId(16);
 
 const isAction = (v: unknown): v is AuditAction => typeof v === 'string' && (AUDIT_ACTIONS as readonly string[]).includes(v);
 const isRole = (v: unknown): v is Role => typeof v === 'string' && (ROLES as readonly string[]).includes(v);

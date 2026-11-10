@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomId } from './crypto.js';
 import { safeWarn } from './log.js';
 import { maskSpans } from './mask.js';
 import { parseRuleRef } from './rules.js';
@@ -163,7 +163,7 @@ export interface NoticeServiceDeps {
   notify?: (subject: SubjectId, event: { type: 'notice_pending'; count: number }) => unknown;
 }
 
-const newId = (): string => randomBytes(16).toString('base64url');
+const newId = (): string => randomId(16);
 
 const errName = (err: unknown): string => {
   try {
