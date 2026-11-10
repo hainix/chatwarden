@@ -24,7 +24,8 @@ running the real staff routes in the browser, and the "Hub UI is coming" tag com
 UI kit, no CSS-in-JS), vitest + jsdom + @testing-library/react + user-event, and axe-core for accessibility checks in tests.
 No router library: a tiny hash router with an adapter prop. No data library: small `useHubData` / `useHubAction` hooks.
 
-**Spec:** docs/design/2026-11-09-chatwarden-design.md (packages table, "Two review backends", AI provenance rules, K4,
+**Spec:** docs/design/2026-11-10-hub-workbench-and-teams.md (the workbench, team claims, the look; it governs Tasks 4b onward and
+the restyle of earlier screens), docs/design/2026-11-09-chatwarden-design.md (packages table, "Two review backends", AI provenance rules, K4,
 K8 demo), docs/design/2026-11-09-feature-contract-from-moxgate.md (the hub's screens and player notices), and the owner's
 direction on 2026-11-10: "it says 'hub ui is coming' from the website, do any remaining work to have this be fully
 feature complete".
@@ -199,7 +200,77 @@ shared store contract suite + http:
   - keyboard-only completion
   - axe
 
+### Task 4b: Team routes in the kit (claims, take next, change token, viewing, saved reasons)
+Per the addendum's "What the kit adds". Core facade + both stores + contract suite + http routes + browser-safe subpath, like Task 2:
+- `POST /cases/:ref/claim` (claim or heartbeat; `{ takeOver?: boolean }`; TTL 10 minutes; 409 `claimed` with `{ by, until }` when
+  someone else holds it and `takeOver` is absent or not allowed), `POST /cases/:ref/release`, and `POST /cases/next { category?, filters }`
+  (claims and returns the oldest unclaimed open case, or `{ case: null }`). New permission `claims.override` (senior). The audit
+  trail records claim takeovers (`case.takeover`), not ordinary claims.
+- `GET /reports` items and `GET /reports/:id` gain `claim: { by, since, until } | null` for the target person.
+- `decide` (and direct sanctions on that person) refuse with 409 `claimed` when another moderator holds the case; deciding releases
+  the caller's claim. A claim never blocks reads.
+- `GET /changes?since=<token>` returns `{ token, changed: boolean }`, cheap, with no audit. The token moves on any report, decision,
+  sanction, claim or gap change.
+- Viewing: `POST /cases/:ref/viewing` (heartbeat, 30 s TTL, in memory only, never stored); `GET /reports` items gain
+  `viewing: string[]` (actors, excluding the caller).
+- Saved reasons: `GET /reasons` (moderator), `POST /reasons`, `PATCH /reasons/:id`, `POST /reasons/:id/active` (senior). Each is
+  `{ id, label (≤40), text (≤500), active }`.
+- Tests: concurrency (two moderators racing for the same case and for take next: exactly one wins), expiry by clock, heartbeat
+  extends, release, takeover permission and audit, decide blocked and allowed, the change token on each event type and stable
+  otherwise, viewing expiry, the saved-reasons role gates, sqlite and memory parity.
+
+### Task 4c: Design system v2 and the workbench shell
+Restyle the whole package to the addendum's look, and rebuild the shell as the workbench:
+- New tokens (neutral base, one accent, semantic red and yellow, referee-card styles), contrast AA in both themes, the optional
+  `font.css` with a subset of Instrument Sans (self-hosted woff2, OFL licence shipped), and the system font by default.
+- The shell: a slim top bar (product, game name, live state, command bar, who is on), a receding section rail, and the three panes at
+  ≥ 1200px, two at ≥ 820px, and stacked below that.
+- The queue pane:
+  - rows show the claim (you in blue, others neutral), viewing, categories and wait (red only when overdue)
+  - filters (category, all/unclaimed/mine)
+  - "Take next case" (N)
+  - J/K
+  - background refresh via `GET /changes`, with an "N new" pill
+- The overview becomes the team view: who is on and their current load, the oldest wait, totals, and Recent actions.
+- Everything async: skeletons, the connection-lost and reconnected banner, toasts with Undo, the command bar (Ctrl+K: people,
+  reports, terms, screens), and the shortcut sheet (?). Every shortcut can be turned off with a prop, and none fires inside an input.
+- Tests:
+  - the refresh loop (polls while visible, backs off while hidden, the pill never reorders the list under focus)
+  - claims shown per state
+  - each shortcut, and that none fires while typing
+  - the command bar (keyboard, results, escape)
+  - the banners
+  - the token and contrast static checks
+  - axe, light and dark
+  - size
+
+### Task 4d: The case in the workbench
+Move Task 4's report page and decision panel into the workbench's case pane, in the v2 look:
+- The claim banner ("You're handling this", "Maya is handling this" with Take over for seniors, released on idle) and "Ana is viewing".
+- The evidence first:
+  - the transcript, with the reported line marked
+  - the person's lines tinted
+  - "Only <name>"
+  - blocked words masked until shown (per line, or for the case)
+  - line checkboxes in the margin to choose what the player sees
+- The docked decision bar:
+  - verdict keys 1/2/3
+  - the suggestion pre-filled, with a referee card and a "Change" option that opens Task 4's full action editor
+  - the rule, and saved reasons
+  - "Decide and take next" (Ctrl+Enter)
+  - the 5-second undo window: send at once on page hide; Undo cancels with nothing sent
+- The context pane: the record with referee cards, blocked attempts, and the reporters' track records.
+- Tests:
+  - the claim flows (claim on open, the 409 `claimed` banner, takeover by role, release on decide)
+  - undo (nothing is sent within the window, and it is sent after; page hide sends)
+  - decide and take next
+  - masking toggles
+  - keyboard-only completion
+  - axe
+  - the existing Task 4 decision tests kept green
+
 ### Task 5: Person page, direct sanctions, notes and revoke
+Built in the v2 look, as a case-pane view of the workbench (the person's record opens in the middle pane). Recent actions also show the person's handle (`/sanctions` items gain `handle: string|null`, the handle on their latest report).
 - **`PersonView`** (`#/people/:ref`):
   - the timeline (reports about them, sanctions with kind, rule, time left, ref code, actor, source with the AI label slot,
     revoked state)
@@ -222,6 +293,7 @@ shared store contract suite + http:
   - axe
 
 ### Task 6: Terms, Blocked, Rule gaps, Audit, Guide
+Built in the v2 look. Blocked words are masked by default on Blocked and Terms, the same way they are in the case.
 - **Terms** (`#/terms`):
   - Terms and exceptions by language, using `Intl.DisplayNames` labels. Columns: word, note, last changed by/at, blocks in
     the last 30 days, active.
