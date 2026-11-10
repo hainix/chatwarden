@@ -14,12 +14,16 @@ const TOKEN_RE = /^[A-Za-z0-9_.-]{1,64}$/;
  * - `POST /cases/:ref/claim { takeOver? }` (`reports.decide`): claim an open case, or beat your own claim (a heartbeat).
  *   200 `{ claim: { by, since, until }, tookOverFrom: string | null }`. 404 when the person has no open case. 409 `claimed`
  *   `{ by, until }` when another moderator holds it and `takeOver` is absent, or the caller lacks `claims.override`. A real
- *   takeover (a live claim of someone else moved) is audited as `case.takeover` on the person; an ordinary claim is not.
+ *   takeover (a live claim of someone else moved) is audited as `case.takeover` on the person; an ordinary claim is not. The
+ *   row is written before the move, so it means the takeover was attempted: if the last report closed in between, the answer
+ *   is 404 and nothing moved.
  * - `POST /cases/:ref/release` (`reports.decide`): `{ released: boolean }`. Only your own live claim is released.
  * - `POST /cases/next { category? }` (`reports.decide`): claim and return the oldest open case nobody holds (a case you
- *   already hold is skipped), `{ case: { person, reportId, claim } }`, or `{ case: null }`.
+ *   already hold is skipped), `{ case: { person, reportId, claim } }`, or `{ case: null }`. `category` is the only filter:
+ *   the order is already oldest first, and there is no wait filter.
  * - `POST /cases/:ref/viewing` (`reports.read`): a heartbeat that you have the case open (30 s, in memory, never stored).
- *   `{ viewers: string[] }`, the others.
+ *   `{ viewers: string[] }`, the others. 404 `not_found` when the person has no open case (nothing is tracked); one actor
+ *   keeps at most 20 cases open, a newer beat dropping their oldest.
  * - `GET /changes?since=<token>` (`reports.read`): `{ token, changed }`. One read, no audit row.
  * - `GET /reasons` (`reasons.read`): `{ reasons: [{ id, label, text, active }] }`, in the order they were added.
  * - `POST /reasons { label, text }`, `PATCH /reasons/:id { label?, text? }`, `POST /reasons/:id/active { active }`
@@ -85,7 +89,8 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
 
     'POST /cases/:ref/viewing': ctx.secure('reports.read', (c) => {
       const ref = c.params.ref as string;
-      cw.cases.view(ref, c.authz.actor);
+      // Only a real case is tracked: 404 for a person with no open report, so made-up refs fill nothing.
+      if (!cw.cases.view(ref, c.authz.actor)) throw new NotFoundError();
       return { status: 200, body: { viewers: cw.cases.viewers(ref, c.authz.actor) } };
     }),
 

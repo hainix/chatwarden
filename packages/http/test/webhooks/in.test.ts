@@ -1106,3 +1106,47 @@ describe('logging and a shared replay cache', () => {
     expect(replay.size).toBe(1);
   });
 });
+
+describe('action: decide and a moderator claim', () => {
+  it('releases the claim on the reported person after a decision (the service actor is not held up by it)', async () => {
+    const s = await setup();
+    const { reportId, target } = await s.filed();
+    expect(s.cw.cases.claim(target, 'ann').ok).toBe(true);
+    expect((await s.post(decideBody(reportId, target))).status).toBe(200);
+    expect(s.cw.cases.holder(target)).toBeNull();
+  });
+
+  it('does not touch a claim on someone else', async () => {
+    const s = await setup();
+    const a = await s.filed();
+    const b = await s.filed();
+    s.cw.cases.claim(b.target, 'bea');
+    await s.post(decideBody(a.reportId, a.target));
+    expect(s.cw.cases.holder(b.target)?.by).toBe('bea');
+  });
+
+  it('a replay releases nothing: a claim taken since stays', async () => {
+    const s = await setup();
+    const { reportId, target } = await s.filed();
+    expect((await s.post(decideBody(reportId, target))).status).toBe(200);
+    // A second report on the same person is claimed; the first decision is sent again.
+    s.cw.rooms.seat('room-in-extra', 'a', { clientKey: 'key-target-aaaaaaaa-1', ip: '198.51.100.7' }, 'Tgt');
+    s.cw.rooms.seat('room-in-extra', 'b', { clientKey: 'key-reporter-extra-1', ip: '198.51.100.9' }, 'Rep');
+    s.cw.chat.accept('room-in-extra', 'a', 'another line');
+    const again = await s.cw.reports.submit({ roomId: 'room-in-extra', reporterSeat: 'b', targetSeat: 'a', category: 'harassment' });
+    expect(again.ok).toBe(true);
+    expect(s.cw.cases.claim(target, 'bea').ok).toBe(true);
+    const replay = await s.post(decideBody(reportId, target));
+    expect((replay.body as { replay: boolean }).replay).toBe(true);
+    expect(s.cw.cases.holder(target)?.by).toBe('bea');
+  });
+
+  it('a decision that is refused (already decided differently) releases nothing', async () => {
+    const s = await setup();
+    const { reportId, target } = await s.filed();
+    await s.post(decideBody(reportId, target));
+    s.cw.cases.claim(target, 'ann'); // no open case left: refused
+    expect(s.cw.cases.holder(target)).toBeNull();
+    expect(errorOf(await s.post(decideBody(reportId, target, { verdict: 'no_action', actions: [] })))).toBe('already_decided');
+  });
+});

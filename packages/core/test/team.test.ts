@@ -6,7 +6,10 @@ import {
   REASON_TEXT_MAX,
   REASONS_MAX,
   ReasonError,
+  CLAIM_BUSY_TRIES,
+  VIEWING_PER_ACTOR_MAX,
   VIEWING_TTL_MS,
+  ViewingPresence,
   createChatwarden,
 } from '../src/index.js';
 import type { Chatwarden, RawWho, ReportCategory } from '../src/index.js';
@@ -154,7 +157,7 @@ describe('cases.claim', () => {
     expect(cw.cases.holder(b.person)?.by).toBe('bea');
   });
 
-  it('two moderators racing on one case: exactly one wins, both orders', async () => {
+  it('two moderators claiming back to back: exactly one wins, both orders', async () => {
     for (const order of [['ann', 'bea'], ['bea', 'ann']] as const) {
       const { cw, file } = await setup();
       const r = await file();
@@ -314,7 +317,7 @@ describe('cases.next', () => {
     expect(cw.cases.holder(a.person)).toBeNull();
   });
 
-  it('two moderators racing for the only case: exactly one gets it, the other gets null', async () => {
+  it('two moderators asking back to back for the only case: exactly one gets it, the other gets null', async () => {
     const { cw, file } = await setup();
     const a = await file();
     const tries = await Promise.all(['ann', 'bea'].map(async (who) => Promise.resolve().then(() => cw.cases.next(who))));
@@ -323,7 +326,7 @@ describe('cases.next', () => {
     expect(cw.cases.holder(a.person)).not.toBeNull();
   });
 
-  it('three moderators racing over three cases each get a different one', async () => {
+  it('three moderators asking back to back over three cases each get a different one', async () => {
     const { cw, file } = await setup();
     const cases = [await file(), await file(), await file()];
     const tries = await Promise.all(['ann', 'bea', 'cy'].map(async (who) => Promise.resolve().then(() => cw.cases.next(who))));
@@ -415,13 +418,14 @@ describe('viewing presence', () => {
     expect(cw.cases.viewers(r.person)).toEqual(['ann']);
   });
 
-  it('stays bounded: a flood of distinct people does not grow without limit, and live viewers still read', async () => {
-    const { cw, clock } = await setup();
-    for (let i = 0; i < 12_000; i++) cw.cases.view(`s_flood_${i}`, 'ann');
+  it('stays bounded: a flood of distinct people does not grow without limit, and live viewers still read', () => {
+    const clock = { t: NOW, now: () => clock.t };
+    const presence = new ViewingPresence(clock);
+    for (let i = 0; i < 12_000; i++) presence.touch(`s_flood_${i}`, `actor${i % 500}`);
     clock.t += VIEWING_TTL_MS;
-    cw.cases.view('s_real', 'bea');
-    expect(cw.cases.viewers('s_real')).toEqual(['bea']);
-    expect(cw.cases.viewers('s_flood_5')).toEqual([]);
+    presence.touch('s_real', 'bea');
+    expect(presence.viewers('s_real')).toEqual(['bea']);
+    expect(presence.viewers('s_flood_5')).toEqual([]);
   });
 });
 
@@ -636,5 +640,249 @@ describe('reasons', () => {
     cw.reasons.add({ label: 'A', text: 'a' });
     cw.reasons.list()[0]!.label = 'changed';
     expect(cw.reasons.list()[0]?.label).toBe('A');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Fix round 1: a lost cross-process race is retried, take next reads claims once per page, viewing needs an open case,
+// reasons count characters and refuse control characters.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** What node:sqlite throws when another process commits between our read and our write (SQLITE_BUSY_SNAPSHOT). */
+const busy = (): Error => Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 517, errstr: 'database is locked' });
+
+/** A store whose first `failures` claim attempts fail like a lost cross-process race, after `rival` (if any) has committed. */
+class BusyStore extends MemoryStore {
+  failures = 0;
+  calls = 0;
+  rival: (() => void) | null = null;
+  /** Another process's claim: written outside this transaction's journal, so the failure's rollback cannot undo it. */
+  rivalWrite(person: string, by: string, since: number, until: number): void {
+    this.claims.set(person, { person, by, since, until });
+  }
+  override claimCase(...args: Parameters<MemoryStore['claimCase']>): ReturnType<MemoryStore['claimCase']> {
+    this.calls += 1;
+    if (this.failures > 0) {
+      this.failures -= 1;
+      const rival = this.rival;
+      this.rival = null;
+      rival?.();
+      throw busy();
+    }
+    return super.claimCase(...args);
+  }
+}
+
+async function busySetup() {
+  const store = new BusyStore();
+  const clock = { t: NOW, now: () => clock.t };
+  const cw = await createChatwarden({
+    store, secret: 'team-secret', platform: { identify: (c) => c as RawWho }, clock, retention: false, logger: { warn() {} },
+  });
+  let n = 0;
+  /** An open report against a person, written straight into the store. */
+  const open = (person: string) => {
+    n += 1;
+    store.insertReport({
+      id: `busy-r${n}`, createdAt: NOW + n, roomId: `busy-room-${n}`, tags: {}, reporterSubject: `s_reporter${n}`, reporterSeat: 'p1',
+      reporterHandle: 'R', targetSubject: person, targetSeat: 'p2', targetHandle: 'T', category: 'harassment', note: null, lineId: null,
+      excerpt: [], people: [], status: 'open',
+    });
+  };
+  /** Make `by` the holder through the store, as another process would. */
+  const rivalClaim = (person: string, by: string) => () => store.rivalWrite(person, by, clock.t, clock.t + 600_000);
+  return { cw, store, clock, open, rivalClaim };
+}
+
+describe('a lost cross-process race is retried, not thrown', () => {
+  it('claim: one busy failure is retried and then wins when nobody else took the case', async () => {
+    const { cw, store, open } = await busySetup();
+    open('s_a');
+    store.failures = 1;
+    expect(cw.cases.claim('s_a', 'ann')).toMatchObject({ ok: true, claim: { by: 'ann' } });
+    expect(store.calls).toBe(2);
+  });
+
+  it('claim: the retry re-reads, so a rival who won meanwhile gives the normal claimed answer', async () => {
+    const { cw, store, open, rivalClaim } = await busySetup();
+    open('s_a');
+    store.failures = 1;
+    store.rival = rivalClaim('s_a', 'rival');
+    expect(cw.cases.claim('s_a', 'ann')).toMatchObject({ ok: false, error: 'claimed', claim: { by: 'rival' } });
+  });
+
+  it('is bounded: after CLAIM_BUSY_TRIES attempts the busy error is thrown', async () => {
+    const { cw, store, open } = await busySetup();
+    open('s_a');
+    expect(CLAIM_BUSY_TRIES).toBe(3);
+    store.failures = 99;
+    expect(() => cw.cases.claim('s_a', 'ann')).toThrow('database is locked');
+    expect(store.calls).toBe(CLAIM_BUSY_TRIES);
+  });
+
+  it('succeeds on the last allowed attempt', async () => {
+    const { cw, store, open } = await busySetup();
+    open('s_a');
+    store.failures = CLAIM_BUSY_TRIES - 1;
+    expect(cw.cases.claim('s_a', 'ann').ok).toBe(true);
+    expect(store.calls).toBe(CLAIM_BUSY_TRIES);
+  });
+
+  it('an error that is not a busy error is not retried', async () => {
+    const { cw, store, open } = await busySetup();
+    open('s_a');
+    store.claimCase = () => {
+      store.calls += 1;
+      throw new Error('disk full');
+    };
+    expect(() => cw.cases.claim('s_a', 'ann')).toThrow('disk full');
+    expect(store.calls).toBe(1);
+  });
+
+  it('recognises SQLITE_BUSY by code (5) and by message', async () => {
+    for (const make of [
+      () => Object.assign(new Error('x'), { errcode: 5 }),
+      () => Object.assign(new Error('x'), { errcode: 261 }),
+      () => new Error('SQLITE_BUSY: database is locked'),
+      () => new Error('database is locked'),
+    ]) {
+      const { cw, store, open } = await busySetup();
+      open('s_a');
+      const real = store.claimCase.bind(store);
+      let first = true;
+      store.claimCase = (...args) => {
+        if (first) {
+          first = false;
+          throw make();
+        }
+        return real(...args);
+      };
+      expect(cw.cases.claim('s_a', 'ann').ok).toBe(true);
+    }
+  });
+
+  it('take next: a candidate lost to a busy failure is retried, sees the rival, and the next candidate is taken', async () => {
+    const { cw, store, open, rivalClaim } = await busySetup();
+    open('s_a');
+    open('s_b');
+    store.failures = 1;
+    store.rival = rivalClaim('s_a', 'rival');
+    expect(cw.cases.next('ann')?.person).toBe('s_b');
+    expect(cw.cases.holder('s_a')?.by).toBe('rival');
+    expect(cw.cases.holder('s_b')?.by).toBe('ann');
+  });
+});
+
+describe('take next reads claims once per page and skips held people without a write', () => {
+  it('only the free candidate costs a claim attempt', async () => {
+    const { cw, store, open } = await busySetup();
+    for (let i = 0; i < 6; i++) open(`s_held${i}`);
+    open('s_free');
+    for (let i = 0; i < 6; i++) cw.cases.claim(`s_held${i}`, 'bea');
+    store.calls = 0;
+    expect(cw.cases.next('ann')?.person).toBe('s_free');
+    expect(store.calls).toBe(1);
+  });
+
+  it('a case the caller holds is skipped without a write too, and a lapsed claim is attempted', async () => {
+    const { cw, store, open, clock } = await busySetup();
+    open('s_old');
+    open('s_mine');
+    open('s_free');
+    cw.cases.claim('s_old', 'bea');
+    clock.t += 300_000;
+    cw.cases.claim('s_mine', 'ann');
+    clock.t += 300_000; // s_old lapsed, s_mine is still live
+    store.calls = 0;
+    expect(cw.cases.next('ann')?.person).toBe('s_old');
+    expect(store.calls).toBe(1);
+  });
+
+  it('when everything is held: null, and no write at all', async () => {
+    const { cw, store, open } = await busySetup();
+    open('s_a');
+    open('s_b');
+    cw.cases.claim('s_a', 'bea');
+    cw.cases.claim('s_b', 'bea');
+    store.calls = 0;
+    expect(cw.cases.next('ann')).toBeNull();
+    expect(store.calls).toBe(0);
+  });
+});
+
+describe('viewing needs an open case and is capped per actor', () => {
+  it('view answers false and tracks nothing for a person with no open case', async () => {
+    const { cw, file, decide } = await setup();
+    expect(cw.cases.view('s_nobody', 'ann')).toBe(false);
+    expect(cw.cases.viewers('s_nobody')).toEqual([]);
+    const r = await file();
+    expect(cw.cases.view(r.person, 'ann')).toBe(true);
+    expect(cw.cases.viewers(r.person)).toEqual(['ann']);
+    await decide(cw, r.id, r.person);
+    expect(cw.cases.view(r.person, 'bea')).toBe(false);
+    expect(cw.cases.viewers(r.person, 'zed')).toEqual(['ann']); // ann's earlier beat still counts until it lapses
+  });
+
+  it('a flood of made-up refs from one actor tracks none of them', async () => {
+    const { cw } = await setup();
+    for (let i = 0; i < 500; i++) expect(cw.cases.view(`s_made_up_${i}`, 'ann')).toBe(false);
+    expect(cw.cases.viewers('s_made_up_3')).toEqual([]);
+  });
+
+  it('one actor keeps at most 20 cases open: the oldest beat is dropped, other actors are unaffected', async () => {
+    const { cw, file } = await setup();
+    expect(VIEWING_PER_ACTOR_MAX).toBe(20);
+    const people: string[] = [];
+    for (let i = 0; i < 22; i++) people.push((await file()).person);
+    cw.cases.view(people[0]!, 'bea');
+    for (const p of people) cw.cases.view(p, 'ann');
+    expect(cw.cases.viewers(people[0]!)).toEqual(['bea']); // ann's beat on the first was dropped, bea's stays
+    expect(cw.cases.viewers(people[1]!)).toEqual([]);
+    expect(cw.cases.viewers(people[2]!)).toEqual(['ann']);
+    expect(cw.cases.viewers(people[21]!)).toEqual(['ann']);
+  });
+
+  it('beating the same case again does not use up the cap', async () => {
+    const { cw, file } = await setup();
+    const people: string[] = [];
+    for (let i = 0; i < 20; i++) people.push((await file()).person);
+    for (let round = 0; round < 5; round++) for (const p of people) cw.cases.view(p, 'ann');
+    for (const p of people) expect(cw.cases.viewers(p)).toEqual(['ann']);
+  });
+});
+
+describe('reasons count characters and refuse control characters', () => {
+  it('counts code points, not UTF-16 units', async () => {
+    const { cw } = await setup();
+    const emoji = '\u{1F600}';
+    const made = cw.reasons.add({ label: emoji.repeat(REASON_LABEL_MAX), text: emoji.repeat(REASON_TEXT_MAX) });
+    expect(() => cw.reasons.add({ label: emoji.repeat(REASON_LABEL_MAX + 1), text: 't' })).toThrow(ReasonError);
+    expect(() => cw.reasons.add({ label: 'l', text: emoji.repeat(REASON_TEXT_MAX + 1) })).toThrow(ReasonError);
+    expect(() => cw.reasons.update(made.id, { label: emoji.repeat(REASON_LABEL_MAX + 1) })).toThrow(ReasonError);
+    expect(() => cw.reasons.update(made.id, { text: emoji.repeat(REASON_TEXT_MAX + 1) })).toThrow(ReasonError);
+  });
+
+  it('refuses control characters in a label, newline and tab included', async () => {
+    const { cw } = await setup();
+    for (const bad of ['a\nb', 'a\tb', 'a\rb', 'a\u0000b', 'a\u001fb', 'a\u007fb']) {
+      expect(() => cw.reasons.add({ label: bad, text: 't' }), JSON.stringify(bad)).toThrow(ReasonError);
+    }
+    const ok = cw.reasons.add({ label: 'fine', text: 't' });
+    expect(() => cw.reasons.update(ok.id, { label: 'a\nb' })).toThrow(ReasonError);
+  });
+
+  it('allows a newline in the text but no other control character', async () => {
+    const { cw } = await setup();
+    expect(cw.reasons.add({ label: 'l', text: 'line one\nline two' }).text).toBe('line one\nline two');
+    for (const bad of ['a\tb', 'a\rb', 'a\u0000b', 'a\u0007b', 'a\u007fb']) {
+      expect(() => cw.reasons.add({ label: 'l', text: bad }), JSON.stringify(bad)).toThrow(ReasonError);
+    }
+    const r = cw.reasons.add({ label: 'l2', text: 't' });
+    expect(() => cw.reasons.update(r.id, { text: 'x\u0000y' })).toThrow(ReasonError);
+  });
+
+  it('trims first, so a trailing newline is not a control character problem', async () => {
+    const { cw } = await setup();
+    expect(cw.reasons.add({ label: ' ok \n', text: ' fine \n' })).toMatchObject({ label: 'ok', text: 'fine' });
   });
 });

@@ -363,13 +363,14 @@ describe('SubjectIndex: subject ids', () => {
     const two = setup();
     await one.index.load();
     await two.index.load();
-    const ids: Identifiers = who('k1', 'a1', 'ip-1');
+    // Dots are not in the id alphabet, so an identifier made with them can never appear inside a random id by chance.
+    const ids: Identifiers = who('key.one', 'acct.one', 'ip.one');
     const a = mustResolve(one.index, ids);
     const b = mustResolve(two.index, ids);
     expect(a).toMatch(ID_RE);
     expect(b).toMatch(ID_RE);
     expect(a).not.toBe(b);
-    for (const text of ['k1', 'a1', 'ip-1']) expect(a).not.toContain(text);
+    for (const text of ['key.one', 'acct.one', 'ip.one']) expect(a).not.toContain(text);
   });
 
   it('every new subject gets a fresh id', async () => {

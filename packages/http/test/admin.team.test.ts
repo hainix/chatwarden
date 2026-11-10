@@ -200,7 +200,7 @@ describe('POST /cases/:ref/claim', () => {
     expect(w.cw.cases.holder(r.target)).toBeNull();
   });
 
-  it('two moderators racing for one case through the routes: exactly one 200 and one 409', async () => {
+  it('two moderators claiming back to back through the routes: exactly one 200 and one 409', async () => {
     for (const order of [['ann', 'bea'], ['bea', 'ann']]) {
       const w = await world();
       const r = await w.file();
@@ -504,6 +504,55 @@ describe('POST /cases/:ref/viewing', () => {
     const r = await w.file();
     expect((await w.call('POST', `/cases/${r.target}/viewing`, { role: 'moderator' })).status).toBe(200);
     expect((await w.call('POST', `/cases/${r.target}/claim`, { role: 'moderator' })).status).toBe(403);
+  });
+});
+
+describe('POST /cases/:ref/viewing: only real cases, and a cap per actor', () => {
+  it('404 not_found for a person with no open case (unknown, never reported, decided), and nothing is tracked', async () => {
+    const w = await world();
+    expect((await w.call('POST', '/cases/s_made_up/viewing', { actor: 'ann' })).status).toBe(404);
+    expect((await w.call('POST', `/cases/${w.person()}/viewing`, { actor: 'ann' })).status).toBe(404);
+    const r = await w.file();
+    await w.call('POST', `/reports/${r.id}/decide`, { body: warn(r.target) });
+    const res = await w.call('POST', `/cases/${r.target}/viewing`, { actor: 'ann' });
+    expect(res.status).toBe(404);
+    expect(errorOf(res)).toBe('not_found');
+    expect(res.headers?.['cache-control']).toBe('no-store');
+    expect(w.cw.cases.viewers('s_made_up')).toEqual([]);
+  });
+
+  it('a flood of made-up refs cannot fill the presence table, so real presence still shows', async () => {
+    const w = await world();
+    for (let i = 0; i < 200; i++) await w.call('POST', `/cases/s_flood_${i}/viewing`, { actor: 'mallory' });
+    const r = await w.file();
+    expect(body(await w.call('POST', `/cases/${r.target}/viewing`, { actor: 'ann' })).viewers).toEqual([]);
+    expect(body(await w.call('POST', `/cases/${r.target}/viewing`, { actor: 'bea' })).viewers).toEqual(['ann']);
+  });
+
+  it('one actor keeps at most 20 cases open; the oldest beat is dropped and other actors are untouched', async () => {
+    const w = await world();
+    const cases: string[] = [];
+    for (let i = 0; i < 21; i++) cases.push((await w.file()).target);
+    await w.call('POST', `/cases/${cases[0]}/viewing`, { actor: 'bea' });
+    for (const c of cases) expect((await w.call('POST', `/cases/${c}/viewing`, { actor: 'ann' })).status).toBe(200);
+    const queue = body(await w.call('GET', '/reports', { actor: 'zed' })).items as Array<{ targetPerson: string; viewing: string[] }>;
+    const viewing = (person: string) => queue.find((i) => i.targetPerson === person)?.viewing;
+    expect(viewing(cases[0]!)).toEqual(['bea']);
+    expect(viewing(cases[1]!)).toEqual(['ann']);
+    expect(viewing(cases[20]!)).toEqual(['ann']);
+  });
+});
+
+describe('saved reasons: characters and control characters', () => {
+  it('counts characters (an emoji is one), and refuses a control character in a label or text', async () => {
+    const w = await world();
+    const emoji = '\u{1F600}';
+    const post = (label: string, text: string) => w.call('POST', '/reasons', { role: 'senior', body: { label, text } });
+    expect((await post(emoji.repeat(40), emoji.repeat(500))).status).toBe(200);
+    expect((await post(emoji.repeat(41), 't')).status).toBe(400);
+    expect((await post('two\nlines', 't')).status).toBe(400);
+    expect((await post('l', 'tab\there')).status).toBe(400);
+    expect((await post('l', 'two\nlines')).status).toBe(200);
   });
 });
 

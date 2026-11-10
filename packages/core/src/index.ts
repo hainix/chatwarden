@@ -43,6 +43,8 @@ export type {
 export { CLAIM_TTL_MS, CONDUCT_LEVELS } from './types.js';
 export {
   CaseDesk,
+  CLAIM_BUSY_TRIES,
+  VIEWING_PER_ACTOR_MAX,
   REASON_LABEL_MAX,
   REASON_TEXT_MAX,
   REASONS_MAX,

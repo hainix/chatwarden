@@ -363,7 +363,8 @@ CREATE TABLE kit_discord_threads (
     version: 15,
     // The team workbench (K4): a soft claim per person (`person` is the canonical subject id the staff refs show, so a
     // merge is resolved in code and there is no foreign key) and the saved decision reasons. A claim is live while
-    // `until` is in the future; an expired row is replaced by the next claim, never swept. `claimed_by` is a staff actor.
+    // `until` is in the future; an expired row is replaced by the next claim, never swept or purged by retention: like
+    // kit_discord_threads, a future subject erasure must clear it. `claimed_by` is a staff actor.
     // Nothing here holds chat text, and it is staff-only. The change token needs no table: it is a counter in kit_meta
     // that the write methods move.
     sql: `

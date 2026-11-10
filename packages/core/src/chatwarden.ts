@@ -294,7 +294,9 @@ export interface Chatwarden {
      * is kept). Needs an open report against the person (`no_case` otherwise). Somebody else's live claim answers
      * `claimed` with it, unless `takeOver` is true, which moves it to `actor` (`tookOverFrom` names the previous holder).
      * `takeOver` is not permission-checked here: the caller decides who may use it. The write is one atomic conditional
-     * statement, so two moderators racing for one case never both win, even from two processes on one database.
+     * statement, so two moderators racing for one case never both win, even from two processes on one database. A
+     * process that loses the database lock race in between (SQLite BUSY) is retried up to `CLAIM_BUSY_TRIES` times with
+     * a fresh read, so it answers `claimed` with the winner, not an error.
      */
     claim(person: SubjectId, actor: string, opts?: { takeOver?: boolean }): ClaimOutcome;
     /** End `actor`'s own claim. True only when it ended a live one; never touches another moderator's. */
@@ -302,11 +304,16 @@ export interface Chatwarden {
     /**
      * Claim and return the oldest OPEN case nobody holds, optionally only cases with an open report of `category`
      * (`RangeError` for an unknown one), or null. A case is a person, ranked by their oldest open report and opened on
-     * their newest. A case `actor` already holds is skipped.
+     * their newest. A case anyone holds is skipped without a write (held cases are read once per page of reports). `category`
+     * is the only filter: the order is already oldest first. A candidate lost to a rival in between is retried like `claim`.
      */
     next(actor: string, filter?: { category?: ReportCategory }): NextCase | null;
-    /** `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only. */
-    view(person: SubjectId, actor: string): void;
+    /**
+     * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
+     * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
+     * (`VIEWING_PER_ACTOR_MAX`), a newer beat dropping their oldest. True when the beat was recorded.
+     */
+    view(person: SubjectId, actor: string): boolean;
     /** Who has the person's case open now (sorted), leaving `except` out. In this process's memory: other processes are not seen. */
     viewers(person: SubjectId, except?: string): string[];
     /** `viewers` for several people at once; people nobody is viewing are absent. */
@@ -315,7 +322,7 @@ export interface Chatwarden {
   /** A cheap "did anything change?" for the moderator queue. */
   changes: {
     /**
-     * An opaque token, persisted in the store, that is different after any report filed or decided, sanction applied or
+     * An opaque token, persisted in the store (the in-memory store starts again at "0" when the process restarts), that is different after any report filed or decided, sanction applied or
      * revoked, rule gap closed, claim taken, taken over or released, or saved reason changed, and the same otherwise
      * (a claim heartbeat, a refused claim, viewing and every read leave it alone). A claim that merely expires does not
      * move it. Compare it for equality only; one read of one row, no audit, no other reads.

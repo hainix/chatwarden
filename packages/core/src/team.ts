@@ -12,12 +12,18 @@ import type { Clock, ReasonRow, ReportCategory, Store, SubjectId } from './types
 /** How long a viewing beat counts: 30 seconds. */
 export const VIEWING_TTL_MS = 30_000;
 
-/** The longest saved-reason label, after trimming. */
+/** The longest saved-reason label, in characters (code points), after trimming. */
 export const REASON_LABEL_MAX = 40;
-/** The longest saved-reason text, after trimming. */
+/** The longest saved-reason text, in characters (code points), after trimming. */
 export const REASON_TEXT_MAX = 500;
 /** The most saved reasons the kit keeps. */
 export const REASONS_MAX = 200;
+
+/** The most cases one actor keeps open at once for viewing; a newer beat drops their oldest. */
+export const VIEWING_PER_ACTOR_MAX = 20;
+
+/** How many times a claim is attempted when another process wins the database lock race in between (SQLITE_BUSY). */
+export const CLAIM_BUSY_TRIES = 3;
 
 /** The most distinct people viewing presence tracks at once; past it new people are not tracked (it is a hint). */
 const VIEWING_PEOPLE_MAX = 10_000;
@@ -63,6 +69,32 @@ export class ReasonError extends Error {
 
 const claimOf = (c: { by: string; since: number; until: number }): CaseClaim => ({ by: c.by, since: c.since, until: c.until });
 
+/**
+ * Is this the store telling us another process got in between our read and our write (SQLite's "database is locked":
+ * BUSY, LOCKED or BUSY_SNAPSHOT)? Read from the error's `errcode` (low byte 5 or 6) or, failing that, its message.
+ */
+function isBusy(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const code = (err as { errcode?: unknown }).errcode;
+  if (typeof code === 'number') return (code & 0xff) === 5 || (code & 0xff) === 6;
+  return /SQLITE_BUSY|SQLITE_LOCKED|database is locked/i.test(String((err as { message?: unknown }).message));
+}
+
+/**
+ * Run a store transaction that reads then writes, again when it lost a lock race: the retry starts a fresh read, so the
+ * loser of a race for a case sees the winner's claim and answers the normal "claimed", not an error. Bounded by
+ * {@link CLAIM_BUSY_TRIES}; any other error, and the last busy one, is thrown.
+ */
+function retryBusy<T>(run: () => T): T {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return run();
+    } catch (err) {
+      if (attempt >= CLAIM_BUSY_TRIES || !isBusy(err)) throw err;
+    }
+  }
+}
+
 const needActor = (actor: unknown): string => {
   if (!isValidAuditActor(actor)) throw new RangeError('cases: the actor is not a valid staff ref');
   return actor;
@@ -78,6 +110,8 @@ export class ViewingPresence {
   private readonly clock: Clock;
   /** person -> actor -> the instant the beat stops counting. */
   private readonly seen = new Map<SubjectId, Map<string, number>>();
+  /** actor -> the people they have open, oldest beat first (refreshing a beat moves it last). */
+  private readonly byActor = new Map<string, Set<SubjectId>>();
   /** When the last sweep of expired beats ran; a sweep runs at most once per beat lifetime. */
   private lastSweep = Number.NEGATIVE_INFINITY;
 
@@ -96,6 +130,26 @@ export class ViewingPresence {
       this.seen.set(person, who);
     }
     who.set(actor, now + VIEWING_TTL_MS);
+    // One actor holds at most VIEWING_PER_ACTOR_MAX cases open: the oldest beat makes room for the newest.
+    let mine = this.byActor.get(actor);
+    if (mine === undefined) {
+      mine = new Set();
+      this.byActor.set(actor, mine);
+    }
+    mine.delete(person);
+    mine.add(person);
+    if (mine.size > VIEWING_PER_ACTOR_MAX) {
+      const oldest = mine.values().next().value as SubjectId;
+      mine.delete(oldest);
+      this.forget(oldest, actor);
+    }
+  }
+
+  private forget(person: SubjectId, actor: string): void {
+    const who = this.seen.get(person);
+    if (who === undefined) return;
+    who.delete(actor);
+    if (who.size === 0) this.seen.delete(person);
   }
 
   /** The actors whose beat still counts for `person`, sorted, leaving `except` out. */
@@ -111,7 +165,13 @@ export class ViewingPresence {
   private sweep(now: number): void {
     this.lastSweep = now;
     for (const [person, who] of this.seen) {
-      for (const [actor, until] of who) if (until <= now) who.delete(actor);
+      for (const [actor, until] of who) {
+        if (until > now) continue;
+        who.delete(actor);
+        const mine = this.byActor.get(actor);
+        mine?.delete(person);
+        if (mine?.size === 0) this.byActor.delete(actor);
+      }
       if (who.size === 0) this.seen.delete(person);
     }
   }
@@ -161,16 +221,18 @@ export class CaseDesk {
   claim(person: SubjectId, actor: string, opts: { takeOver?: boolean } = {}): ClaimOutcome {
     needActor(actor);
     const canonical = this.subjects.canonical(needPerson(person));
-    return this.store.transaction((): ClaimOutcome => {
-      if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1).length === 0) {
-        return { ok: false, error: 'no_case' };
-      }
-      const now = this.clock.now();
-      const res = this.store.claimCase(canonical, actor, now, now + CLAIM_TTL_MS, opts.takeOver === true ? 'takeover' : 'claim');
-      return res.won
-        ? { ok: true, claim: claimOf(res.claim), tookOverFrom: res.from }
-        : { ok: false, error: 'claimed', claim: claimOf(res.claim) };
-    });
+    return retryBusy(() =>
+      this.store.transaction((): ClaimOutcome => {
+        if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1).length === 0) {
+          return { ok: false, error: 'no_case' };
+        }
+        const now = this.clock.now();
+        const res = this.store.claimCase(canonical, actor, now, now + CLAIM_TTL_MS, opts.takeOver === true ? 'takeover' : 'claim');
+        return res.won
+          ? { ok: true, claim: claimOf(res.claim), tookOverFrom: res.from }
+          : { ok: false, error: 'claimed', claim: claimOf(res.claim) };
+      }),
+    );
   }
 
   /** Release `actor`'s claim on the person. True only when it ended a live claim of theirs. */
@@ -198,22 +260,32 @@ export class CaseDesk {
         ...(after === undefined ? {} : { after: after.createdAt, afterId: after.id }),
         limit: NEXT_PAGE,
       });
+      // New people on this page, oldest report first. Who already holds one is read once for the whole page, so a held case
+      // costs no write; only the rest get the atomic 'free' claim (which stays the arbiter if a rival slips in).
+      const candidates: SubjectId[] = [];
       for (const report of page) {
         const person = this.subjects.canonical(report.targetSubject);
         if (seen.has(person)) continue;
         seen.add(person);
-        const won = this.store.transaction(() => {
-          const now = this.clock.now();
-          const res = this.store.claimCase(person, actor, now, now + CLAIM_TTL_MS, 'free');
-          if (!res.won) return null;
-          const newest = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 1)[0];
-          if (newest === undefined) {
-            // The case closed under us: do not leave a claim on nothing.
-            this.store.releaseClaim(person, actor, now);
-            return null;
-          }
-          return { person, reportId: newest.id, claim: claimOf(res.claim) };
-        });
+        candidates.push(person);
+      }
+      const held = new Set(this.store.loadClaims(candidates, this.clock.now()).map((c) => c.person));
+      for (const person of candidates) {
+        if (held.has(person)) continue;
+        const won = retryBusy(() =>
+          this.store.transaction(() => {
+            const now = this.clock.now();
+            const res = this.store.claimCase(person, actor, now, now + CLAIM_TTL_MS, 'free');
+            if (!res.won) return null;
+            const newest = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 1)[0];
+            if (newest === undefined) {
+              // The case closed under us: do not leave a claim on nothing.
+              this.store.releaseClaim(person, actor, now);
+              return null;
+            }
+            return { person, reportId: newest.id, claim: claimOf(res.claim) };
+          }),
+        );
         if (won !== null) return won;
       }
       const last = page[page.length - 1];
@@ -222,10 +294,17 @@ export class CaseDesk {
     }
   }
 
-  /** `actor` has the person's case open now (a beat; it counts for 30 seconds). Never stored, never blocks anyone. */
-  view(person: SubjectId, actor: string): void {
+  /**
+   * `actor` has the person's case open now (a beat; it counts for 30 seconds). Never stored, never blocks anyone. Only a
+   * person with an open report is tracked (false otherwise, nothing recorded), and one actor keeps at most
+   * {@link VIEWING_PER_ACTOR_MAX} cases open: a newer beat drops their oldest. True when the beat was recorded.
+   */
+  view(person: SubjectId, actor: string): boolean {
     needActor(actor);
-    this.presence.touch(this.subjects.canonical(needPerson(person)), actor);
+    const canonical = this.subjects.canonical(needPerson(person));
+    if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1).length === 0) return false;
+    this.presence.touch(canonical, actor);
+    return true;
   }
 
   /** Who has the person's case open now, sorted, leaving `except` out. */
@@ -293,16 +372,26 @@ export class ReasonBook {
   }
 }
 
+/** Any control character: a label is one line. */
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]/;
+/** Any control character but the newline: a text may run over several lines. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_EXCEPT_NEWLINE = /[\u0000-\u0009\u000b-\u001f\u007f]/;
+
+/** Length in characters (code points), so an emoji counts once. */
+const length = (s: string): number => [...s].length;
+
 function cleanLabel(v: unknown): string {
   if (typeof v !== 'string') throw new ReasonError('label');
   const label = v.trim();
-  if (label === '' || label.length > REASON_LABEL_MAX) throw new ReasonError('label');
+  if (label === '' || length(label) > REASON_LABEL_MAX || CONTROL.test(label)) throw new ReasonError('label');
   return label;
 }
 
 function cleanText(v: unknown): string {
   if (typeof v !== 'string') throw new ReasonError('text');
   const text = v.trim();
-  if (text === '' || text.length > REASON_TEXT_MAX) throw new ReasonError('text');
+  if (text === '' || length(text) > REASON_TEXT_MAX || CONTROL_EXCEPT_NEWLINE.test(text)) throw new ReasonError('text');
   return text;
 }

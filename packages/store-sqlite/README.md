@@ -91,14 +91,17 @@ How it behaves:
   never a value; the kit logs only an event name and the error class.
 - **Claims and saved reasons.** Migration 15 adds `kit_claims` (a soft claim per person: the staff actor holding the case and when it
   lapses) and `kit_reasons` (the moderators' saved decision reasons). A claim is taken with one conditional statement, so two
-  server processes on the same file never both win a case. The queue's change token is a counter row in `kit_meta` that every
+  server processes on the same file never both win a case. If a second process commits between the kit's read and its write,
+  SQLite refuses the write (`database is locked`); the kit retries that claim up to 3 times with a fresh read, so the loser
+  gets the normal "claimed" answer. The store sets a 5 second `busy_timeout` on a connection that has none (yours is kept if
+  you set one), so short writes from two processes queue instead of failing. The queue's change token is a counter row in `kit_meta` that every
   report, decision, sanction, gap, claim-owner and reason change moves in the same transaction. Nothing here holds chat; the
   claim table holds subject ids and staff actors, so it is staff-only like the rest. Expired claim rows are replaced by the
-  next claim and are not purged.
+  next claim and are not purged (see below).
 - **What retention does not purge.** `cw.purge()` and the built-in timer delete old reports, sanctions, strikes, mutes, notices,
-  audit rows and webhook keys. The subject tables (`kit_subjects`, `kit_subject_ids`) and the Discord thread map
-  (`kit_discord_threads`) are not purged, because the ladder and a returning player's record depend on knowing who is who. They
-  hold hashes and ids, not chat. If your privacy policy needs a person erased, that is a separate step you run on the database.
+  audit rows and webhook keys. The subject tables (`kit_subjects`, `kit_subject_ids`), the Discord thread map
+  (`kit_discord_threads`) and the claim table (`kit_claims`, one row per person ever claimed) are not purged, because the ladder and a returning player's record depend on knowing who is who. They
+  hold hashes and ids, not chat. If your privacy policy needs a person erased, that is a separate step you run on the database, and it must clear `kit_claims` too.
 - **Encryption at rest is yours.** SQLite does not encrypt the file. Put it on an encrypted disk if the hashes and the moderators'
   excerpts need that.
 
