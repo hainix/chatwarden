@@ -56,8 +56,8 @@ export interface LiveQueueState {
 }
 
 export interface LiveQueueStore extends Store<LiveQueueState> {
-  /** Begin loading and polling. Safe to call twice. */
-  start: () => void;
+  /** Begin loading and polling. Safe to call twice. Resolves once the first read has been tried (it never rejects: a failure is in the snapshot). */
+  start: () => Promise<void>;
   /** Stop the polling, the minute and every listener (the state stays). */
   stop: () => void;
   /** Stop for good: a later `start` does nothing. */
@@ -199,6 +199,8 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   };
 
   interface Run {
+    /** Settles when the first poll has been answered. */
+    first: Promise<void>;
     kick: () => void;
     stop: () => void;
   }
@@ -254,7 +256,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
       commit((prev) => ({ ...prev, connection: 'offline' }));
     };
     const offs = [page.onVisibilityChange(onVisibility), page.onOnline(onOnline), page.onOffline(onOffline)];
-    if (page.online()) void tick();
+    const first = page.online() ? tick() : Promise.resolve();
 
     // A minute tick, while the tab is visible: waits, the 24 hour flip and lapsed claims are worked out from the clock, and a
     // quiet queue changes nothing else.
@@ -267,6 +269,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     );
 
     return {
+      first,
       kick: () => void tick(),
       stop: () => {
         cancelled = true;
@@ -301,6 +304,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     getSnapshot: store.getSnapshot,
     start() {
       if (run === null && !disposed) run = begin();
+      return run?.first ?? Promise.resolve();
     },
     stop() {
       run?.stop();

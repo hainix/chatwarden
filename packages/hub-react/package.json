@@ -2,7 +2,7 @@
   "name": "@chatwarden/hub-react",
   "version": "0.1.1",
   "private": false,
-  "description": "Moderator hub for Chatwarden: a themeable React UI over the staff HTTP API, with the report queue, decisions, sanctions, blocked terms and audit trail.",
+  "description": "Moderator hub for Chatwarden: a themeable React UI over the staff HTTP API, with the report queue, decisions, sanctions, blocked terms and audit trail, plus a headless controller for other frameworks.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -32,8 +32,19 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
+    "./headless": {
+      "types": "./dist/src/headless/index.d.ts",
+      "default": "./dist/src/headless/index.js"
+    },
     "./styles.css": "./src/styles.css",
     "./font.css": "./font.css"
+  },
+  "typesVersions": {
+    "*": {
+      "headless": [
+        "dist/src/headless/index.d.ts"
+      ]
+    }
   },
   "sideEffects": [
     "./src/styles.css",

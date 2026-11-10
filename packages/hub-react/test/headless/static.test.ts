@@ -70,7 +70,7 @@ const files = walk(headless).filter((f) => /\.tsx?$/.test(f));
 
 describe('src/headless imports no React', () => {
   it('has files to check (control)', () => {
-    expect(files.length).toBeGreaterThan(4);
+    expect(files.length).toBeGreaterThan(8);
     expect(files.map((f) => f.slice(headless.length + 1).replaceAll('\\', '/'))).toContain('controller.ts');
   });
 
@@ -86,7 +86,7 @@ describe('src/headless imports no React', () => {
 
   it('and nothing it reaches does either: the whole closure of imports is free of React and .tsx', () => {
     const closure = reach(join(headless, 'index.ts'));
-    expect(closure.length).toBeGreaterThan(6);
+    expect(closure.length).toBeGreaterThan(10);
     expect(closure.filter((f) => f.endsWith('.tsx'))).toEqual([]);
     expect(closure.filter((f) => specifiers(f).some(isReact))).toEqual([]);
   });

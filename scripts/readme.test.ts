@@ -385,6 +385,7 @@ declare const authorize: import('@chatwarden/http').Authenticate;
         '@chatwarden/http': src('http/src/index.ts'),
         '@chatwarden/http/admin': src('http/src/admin-entry.ts'),
         '@chatwarden/hub-react': src('hub-react/src/index.ts'),
+        '@chatwarden/hub-react/headless': src('hub-react/src/headless/index.ts'),
         '@chatwarden/player-react': src('player-react/src/index.ts'),
         '@chatwarden/http/express': src('http/src/express.ts'),
       },

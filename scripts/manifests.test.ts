@@ -182,6 +182,13 @@ describe('hub-react', () => {
     expect(hub().exports?.['./font.css']).toBe('./font.css');
     expect(hub().sideEffects).toEqual(['./src/styles.css', './font.css']);
   });
+  it('exports the headless controller as ./headless, from dist, with types, and nothing else from it', () => {
+    expect(hub().exports?.['./headless']).toEqual({ types: './dist/src/headless/index.d.ts', default: './dist/src/headless/index.js' });
+    // A subpath that is ESM and types only: no `require` condition, no CSS, no side effects.
+    expect(Object.keys(hub().exports?.['./headless'] as object)).toEqual(['types', 'default']);
+    // ...and older module resolution (node10) finds the types through typesVersions.
+    expect((hub() as { typesVersions?: unknown }).typesVersions).toEqual({ '*': { headless: ['dist/src/headless/index.d.ts'] } });
+  });
   it('dev-depends on the kit the tests run on and on the test tools, not as peers', () => {
     for (const d of ['@chatwarden/matcher', '@chatwarden/store-memory', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {
       expect(hub().devDependencies?.[d], d).toBeDefined();

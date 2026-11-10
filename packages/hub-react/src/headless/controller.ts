@@ -64,13 +64,16 @@ export interface HubController {
   readonly me: Store<Me | null>;
   /** Say who is signed in, when the host has already asked `GET /me` itself. Starts nothing. */
   identify(me: Me): void;
-  /** Asks `GET /me` (unless `identify` was called) and, for a role that can read reports, starts the live queue. */
+  /**
+   * Asks `GET /me` (unless `identify` was called) and, for a role that can read reports, starts the live queue and waits for its first
+   * read, so `queue.getSnapshot()` has the cases (or the error) when this resolves.
+   */
   start(): Promise<ActionResult<Me>>;
   /**
    * Open a case: the moderator becomes its handler if nobody is, the claim and the "viewing" hint are renewed while the tab is
-   * visible, and its row stays in the queue. Opening another case leaves this one.
+   * visible, and its row stays in the queue. Opening another case leaves this one. Resolves once the first claim has answered.
    */
-  open(reportId: string): void;
+  open(reportId: string): Promise<void>;
   /** Leave the open case (or the given one, if it is the open one). Its claim is let go unless a decision on it is waiting, or the claim is not yours. */
   leave(reportId?: string): void;
   /** Claim and open the oldest unclaimed case that matches the queue's category filter. Never throws; says how it went. */
@@ -143,7 +146,7 @@ export function createHubController(options: HubControllerOptions): HubControlle
         }
         identify(who);
       }
-      if (!disposed && who.can['reports.read'] === true) queue.start();
+      if (!disposed && who.can['reports.read'] === true) await queue.start();
       return { ok: true, value: who };
     },
     open: cases.open,

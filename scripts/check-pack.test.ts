@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
 import { BROWSER_SAFE, bareImports, checkFileList, checkManifest, exportTargets, nodeImports, undeclaredImports, nodeImportProblems } from './check-pack.mjs';
@@ -352,5 +354,17 @@ describe('nodeImportProblems (browser-safe packages)', () => {
         files: [file('dist/src/a.d.ts', "import fs from 'node:fs';\n"), file('src/a.ts', "import fs from 'node:fs';\n")],
       }),
     ).toEqual([]);
+  });
+});
+
+describe('the hub-react manifest in the repo', () => {
+  const hub = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/hub-react/package.json', import.meta.url)), 'utf8')) as Pkg;
+  it('lists the headless entry among the files a tarball must hold (types and ESM, from dist)', () => {
+    const targets = exportTargets(hub) as string[];
+    expect(targets).toContain('dist/src/headless/index.js');
+    expect(targets).toContain('dist/src/headless/index.d.ts');
+  });
+  it('is browser-safe, which covers the headless entry too: no Node builtin in dist', () => {
+    expect([...BROWSER_SAFE]).toContain('@chatwarden/hub-react');
   });
 });

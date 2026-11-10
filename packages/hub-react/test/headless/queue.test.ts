@@ -40,6 +40,20 @@ describe('the live queue: the first load', () => {
     expect(s.updatedAt).toBe(r.w.now());
   });
 
+  it('start() resolves once the first read is in: the cases (or the error) are in the snapshot', async () => {
+    const r = await started();
+    const a = await r.w.file({ target: 'Alpha' });
+    await r.controller.start();
+    expect(queue(r).status).toBe('ready');
+    expect(queue(r).groups.map((g) => g.person)).toEqual([a.person]);
+    const failing = await started();
+    failing.w.intercept.fn = (req) => (req.path === '/me' ? undefined : { status: 500, body: { error: 'boom', message: 'x' } });
+    await failing.controller.start();
+    expect(failing.controller.queue.getSnapshot().status).toBe('error');
+    // And it never rejects, even asked twice.
+    await expect(failing.controller.queue.start()).resolves.toBeUndefined();
+  });
+
   it('start() says who is signed in, from GET /me', async () => {
     const r = await started({ world: { role: 'senior', actor: 'sam@example.test' } });
     const answer = await r.controller.start();

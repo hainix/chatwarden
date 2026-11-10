@@ -199,8 +199,11 @@ describe('paging', () => {
     expect(reads(w)[1]?.query).toEqual({ limit: 50, cursor: expect.any(String) });
     await user.click(screen.getByRole('button', { name: 'Load more' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull());
-    const total = w.cw.audit.list({ limit: 200 }).items.length;
-    expect(bodyRows()).toHaveLength(total);
+    // Count only the rows this test made. The hub's own first reads (the queue) can write one audit row of their own, before or after
+    // the trail is read, so the whole trail is 120 or 121 rows depending on which read comes first under load.
+    const made = (rows: HTMLElement[]): number => rows.filter((r) => r.textContent?.includes('Viewed a person’s record')).length;
+    expect(made(bodyRows())).toBe(120);
+    expect(w.cw.audit.list({ limit: 200 }).items.filter((i) => i.action === 'history.view')).toHaveLength(120);
     expect(screen.getByText('That is the whole trail.')).toBeInTheDocument();
     expect(reads(w)).toHaveLength(3);
   });

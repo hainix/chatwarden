@@ -50,6 +50,17 @@ describe('opening a case', () => {
     expect(r.controller.opened.getSnapshot()).toEqual({ reportId: a.id, person: a.person });
   });
 
+  it('open() resolves once the first claim has answered, so the claim is on screen when it does', async () => {
+    const { r, a } = await ready();
+    await r.controller.open(a.id);
+    expect(group(r, a.person)?.claim?.by).toBe(ME);
+    expect(views(r, a.person)).toBe(1);
+    // Before the queue shows the case there is nothing to wait for.
+    const early = await rig();
+    const x = await early.w.file({ target: 'Early' });
+    await expect(early.controller.open(x.id)).resolves.toBeUndefined();
+  });
+
   it('opening the same report again does nothing more', async () => {
     const { r, a } = await ready();
     r.controller.open(a.id);

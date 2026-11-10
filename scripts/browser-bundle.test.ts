@@ -42,6 +42,7 @@ beforeAll(async () => {
   for (const pkg of ['core', 'matcher', 'store-memory', 'http']) {
     if (!existsSync(`${ROOT}packages/${pkg}/dist/src/index.js`)) throw new Error(`packages/${pkg} is not built: run \`npm run build\` first`);
   }
+  if (!existsSync(`${ROOT}packages/hub-react/dist/src/headless/index.js`)) throw new Error('packages/hub-react is not built: run `npm run build` first');
   const a = await build({ ...common, format: 'esm' });
   esm = a.outputFiles[0]!.text;
   const b = await build({ ...common, format: 'iife', globalName: 'CW', minify: true });
@@ -57,6 +58,18 @@ describe('browser bundle: static scan', () => {
     }
     expect(inputs.some((p) => p.replaceAll('\\', '/').startsWith('packages/matcher/dist/src/fixtures/'))).toBe(true);
     expect(inputs).toContain('scripts/browser-entry.ts'); // the entry itself
+  });
+
+  it('bundles @chatwarden/hub-react/headless from its own entry, and no React, no .tsx, no stylesheet', () => {
+    const inputs = Object.keys(metafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    expect(inputs).toContain('packages/hub-react/dist/src/headless/index.js');
+    expect(inputs).toContain('packages/hub-react/dist/src/headless/controller.js');
+    // The React hub is not in it: nothing from the entry's own file, none of its components, and no React package at all.
+    for (const reactSide of ['index', 'Hub', 'context', 'controllerContext', 'hooks', 'toasts', 'decisions', 'cases', 'liveQueue']) {
+      expect(inputs, reactSide).not.toContain(`packages/hub-react/dist/src/${reactSide}.js`);
+    }
+    expect(inputs.filter((p) => /node_modules\/(react|react-dom|scheduler)\//.test(p))).toEqual([]);
+    expect(inputs.filter((p) => /\.(tsx|css)$/.test(p))).toEqual([]);
   });
 
   it('bundles @chatwarden/http/admin from its own entry, and none of the Node-side http modules', () => {
@@ -237,6 +250,43 @@ const ADMIN_SCENARIO = `(async () => {
   return JSON.stringify(out);
 })()`;
 
+// The headless hub controller, run in the context through `CW.hubHeadless`: no document, no window, no navigator. The staff client
+// talks to the real routes in the page; the controller loads the queue, takes a case, and holds and undoes a decision.
+const HUB_SCENARIO = `(async () => {
+  const { createChatwarden } = CW.core;
+  const { MemoryStore } = CW.storeMemory;
+  const { adminRoutes, createRouter } = CW.httpAdmin;
+  const { createHubClient, createHubController, routerTransport } = CW.hubHeadless;
+  const R = 'room';
+  const clock = { now: () => Date.now() };
+  const cw = await createChatwarden({ store: new MemoryStore(), secret: 'hub-secret', platform: { identify: (ctx) => ctx }, clock });
+  cw.rooms.seat(R, 'a', { clientKey: 'key-alice', ip: '198.51.100.1' }, 'Alice');
+  cw.rooms.seat(R, 'b', { clientKey: 'key-bob', ip: '198.51.100.2' }, 'Bob');
+  cw.chat.accept(R, 'a', 'hello there');
+  const res = await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a', category: 'harassment' });
+  const handle = createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-mod', role: 'moderator' }) }));
+  const controller = createHubController({ client: createHubClient(routerTransport(handle)) });
+  const out = { document: typeof document, window: typeof window, navigator: typeof navigator };
+  const started = await controller.start();
+  out.started = started.ok && started.value.actor;
+  const queue = controller.queue.getSnapshot();
+  out.status = queue.status;
+  out.cases = queue.groups.length;
+  out.connection = queue.connection;
+  await controller.open(res.reportId);
+  out.claimedBy = controller.queue.getSnapshot().groups[0].claim && controller.queue.getSnapshot().groups[0].claim.by;
+  const outcome = controller.decide({ reportId: res.reportId, person: queue.groups[0].person, input: { verdict: 'no_action', reason: 'r', actions: [] } });
+  out.held = controller.decisions.entry(res.reportId).state.status;
+  out.toast = controller.toasts.getSnapshot().map((t) => t.text);
+  controller.undo(res.reportId);
+  out.outcome = await outcome;
+  controller.dispose();
+  controller.dispose();
+  out.disposed = controller.disposed;
+  out.open = (await cw.reports.get(res.reportId)).status;
+  return JSON.stringify(out);
+})()`;
+
 describe('browser bundle: runs in a context with no Node globals', () => {
   it('the context really is bare', () => {
     const ctx = browserContext();
@@ -249,7 +299,7 @@ describe('browser bundle: runs in a context with no Node globals', () => {
   it('loads the bundle with only browser globals', () => {
     const ctx = browserContext();
     run(ctx, iife);
-    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,matcher,storeMemory');
+    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,hubHeadless,matcher,storeMemory');
     expect(run(ctx, `typeof CW.core.createChatwarden + typeof CW.matcher.LiveTerms + typeof CW.storeMemory.MemoryStore`)).toBe('functionfunctionfunction');
   });
 
@@ -324,6 +374,16 @@ describe('browser bundle: runs in a context with no Node globals', () => {
     expect([out.overAscii, out.overEuro, out.overAstral]).toEqual([413, 413, 413]);
     expect(out.audit.status).toBe(200);
     expect(out.audit.body.items.length).toBeGreaterThan(0);
+  });
+
+  it('runs the headless hub controller (@chatwarden/hub-react/headless) in the context: load, claim, hold, Undo, dispose, no DOM', async () => {
+    const ctx = browserContext();
+    run(ctx, iife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, HUB_SCENARIO)) as Record<string, unknown>;
+    expect([out.document, out.window, out.navigator]).toEqual(['undefined', 'undefined', 'undefined']);
+    expect(out).toMatchObject({ started: 'demo-mod', status: 'ready', cases: 1, connection: 'live', claimedBy: 'demo-mod', held: 'held', outcome: { status: 'undone' }, disposed: true, open: 'open' });
+    expect(out.toast).toHaveLength(1);
+    expect((out.toast as string[])[0]).toMatch(/^Sending the decision on .+ in 5 s\.$/);
   });
 
   it('computes the same identity hashes in the pure-JS path as the native path', async () => {

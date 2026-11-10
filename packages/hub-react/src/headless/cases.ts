@@ -49,8 +49,9 @@ export interface CaseStore {
    * Opens a case: makes the moderator its handler if nobody is, renews the claim every 60 seconds and the viewing hint every 20
    * while the tab is visible, and keeps its row in the queue. A case someone else holds is opened to read, with a notice. Opening
    * another report of the same person is the same case (nothing is released); opening another person's leaves this one.
+   * Resolves once the first claim and viewing calls have answered (at once when the queue does not show the case yet).
    */
-  open: (reportId: string) => void;
+  open: (reportId: string) => Promise<void>;
   /**
    * Leaves the open case (a given report only counts when it is the open one) and lets it go, unless a decision on it is waiting:
    * sending that releases it. Only a claim that is yours is released.
@@ -92,6 +93,8 @@ interface Active {
   person: string;
   key: string;
   stop: () => void;
+  /** Settles when the first claim and viewing calls have answered. */
+  first: Promise<void>;
 }
 
 export function createCaseStore(options: CaseStoreOptions): CaseStore {
@@ -117,7 +120,7 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
   // ---- the open case: its heartbeat, and letting it go ----------------------------------------------------------------
 
   /** Renews the claim and the viewing hint while `person` stays open. */
-  const beat = (person: string): (() => void) => {
+  const beat = (person: string): { stop: () => void; first: Promise<void> } => {
     const q = options.queue();
     let cancelled = false;
     // Who we last knew held it, so a change is said once and a steady state is not repeated at every heartbeat.
@@ -157,8 +160,7 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
       }
     };
 
-    void claim();
-    void view();
+    const first = Promise.all([claim(), view()]).then(() => undefined);
     const claimTimer = timers.setInterval(() => page.visible() && void claim(), CLAIM_BEAT_MS);
     const viewTimer = timers.setInterval(() => page.visible() && void view(), VIEWING_BEAT_MS);
     const offVisible = page.onVisibilityChange(() => {
@@ -167,7 +169,7 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
         void view();
       }
     });
-    return () => {
+    const stop = (): void => {
       cancelled = true;
       // A release held the case off for this visit only: opening it again claims it.
       q?.holdOff(person, false);
@@ -175,6 +177,7 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
       timers.clearInterval(viewTimer);
       offVisible();
     };
+    return { stop, first };
   };
 
   /**
@@ -236,7 +239,7 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
         const key = person === null ? null : `${person}|${canClaim()}|${actor()}`;
         if (key !== (active?.key ?? null)) {
           stopActive();
-          if (person !== null && key !== null) active = { person, key, stop: beat(person) };
+          if (person !== null && key !== null) active = { person, key, ...beat(person) };
         }
       } while (dirty);
     } finally {
@@ -260,20 +263,21 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
     opened.set(null);
   };
 
-  const open = (reportId: string): void => {
-    if (disposed || current?.reportId === reportId) return;
+  const open = (reportId: string): Promise<void> => {
+    if (disposed || current?.reportId === reportId) return Promise.resolve();
     if (current !== null) {
       // Another report while one is open: the same person's other report is the same case (the claim and the beat go on); a
       // different person's lets the first go, as `derive` finds out.
       current = { reportId, seen: null };
       derive();
-      return;
+      return active?.first ?? Promise.resolve();
     }
     current = { reportId, seen: null };
     const q = options.queue();
     offs = [decisions.subscribe(derive)];
     if (q !== null) offs.push(q.subscribe(derive));
     derive();
+    return active?.first ?? Promise.resolve();
   };
 
   // ---- what a moderator does about a claim -----------------------------------------------------------------------------

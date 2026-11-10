@@ -411,6 +411,71 @@ It is the latin subset of the variable font (weights 400 to 700, about 30 KB), s
 party. Instrument Sans is licensed under the SIL Open Font License 1.1; the licence text ships as `fonts/OFL.txt`. A strict
 Content-Security-Policy needs `font-src 'self'` for it.
 
+## Headless (any framework)
+
+`@chatwarden/hub-react/headless` is the hub's behaviour with no React and no DOM: the live queue, claims, the Undo hold on a
+decision and the toasts. The React hub is built on it, so a Vue, Svelte or Solid dashboard, or a plain script, gets the same
+behaviour. Every store has `subscribe(listener)` and `getSnapshot()`, and a snapshot is the same object until something changes
+(so it works with `useSyncExternalStore`, a Vue `shallowRef`, a Svelte store, or a bare callback).
+
+```ts
+import { createHubClient, createHubController, fetchTransport, personTag } from '@chatwarden/hub-react/headless';
+
+const controller = createHubController({ client: createHubClient(fetchTransport({ baseUrl: '/admin' })) });
+
+// Asks GET /me, then loads the queue and keeps it fresh (it asks GET /changes every 5 seconds, 30 while the tab is hidden).
+const started = await controller.start();
+if (!started.ok) throw new Error(`Not signed in: ${started.error.code}`);
+
+// List the cases. New ones wait behind `incoming` until you call `controller.queue.showIncoming()`.
+const stopList = controller.queue.subscribe(() => {
+  const { visible, incoming } = controller.queue.getSnapshot();
+  console.log(visible.map((row) => `${personTag(row.group.person)}: ${row.group.open} open`), `${incoming} new`);
+});
+const first = controller.queue.getSnapshot().visible[0];
+
+if (first !== undefined) {
+  const reportId = first.group.reportIds[0] as string;
+
+  // Open one. You become its handler if nobody is, the claim is renewed while the tab is visible, and it is let go on leave().
+  await controller.open(reportId); // resolves once the first claim has answered
+
+  // Toasts are plain records: draw them yourself. A held decision has one, with the Undo.
+  controller.toasts.subscribe(() => console.log(controller.toasts.getSnapshot().map((toast) => toast.text)));
+
+  // Decide it. The decision is held for 5 seconds (the toast offers Undo), then sent; the promise says how it ended.
+  const outcome = controller.decide({
+    reportId,
+    person: first.group.person,
+    input: { verdict: 'no_action', reason: 'Banter between friends.', actions: [] },
+  });
+  controller.undo(reportId); // changed my mind: nothing is sent, the case comes back
+  console.log(await outcome); // { status: 'undone' }
+}
+
+// Done: stops every timer and listener, lets the open case go, and sends a decision that is still held.
+stopList();
+controller.dispose();
+```
+
+Nothing in it throws for an outcome it expects: `start`, `decide`, `retry`, `claim`, `takeOver`, `release` and `takeNext` answer a
+typed result (a 409, a 404 or a dropped connection is `{ ok: false, error }` or `{ status: 'failed' | 'conflict' }`).
+
+| Part | What it is |
+| --- | --- |
+| `controller.queue` | The live queue: `status`, `rows`, `visible`, `incoming`, `connection` (`live`, `lost`, `offline`, `signedOut`), filters, and `showIncoming()`, `reload()`, `retryNow()`. |
+| `controller.decisions` | One entry per report in flight (`held`, `sending`, `done`, `failed`, `conflict`, `undone`), with the form to give back on a failure. |
+| `controller.opened` | The case that is open, and the person it is about. |
+| `controller.toasts` | The toast records and their timers. How they look is yours. |
+| `decide(command, { hold })`, `undo(id)`, `retry(id)` | `hold` is `true` (5 s, the default), a number of milliseconds, or `false` (send at once). `retry` sends a failed decision again with the same body. |
+| `open(id)`, `leave()`, `takeNext()`, `claim(person)`, `takeOver(person)`, `release(person)` | Claims. Leaving a case releases it, unless a decision on it is waiting or the claim is someone else's. |
+| `dispose()` | Safe to call twice. A closing page sends a held decision at once (`pagehide`, a hidden tab, `dispose`), and only once. |
+
+To run it without a DOM (a test, a worker, Node), hand it the timers and the page: `createHubController({ client, schedule, page })`.
+`schedule` is `{ setTimeout, clearTimeout, setInterval, clearInterval, now }` and `page` is `{ visible, online, onVisibilityChange,
+onPageHide, onOnline, onOffline }`; both default to the browser's, and outside a browser the page is always visible and online.
+Keys, focus and the toasts' markup are the UI's, so they are not in it.
+
 ## Security notes
 
 - **No identifiers reach the page beyond the staff API's own.** The hub shows a person as the first 8 characters of their opaque
