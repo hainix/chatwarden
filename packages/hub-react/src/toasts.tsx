@@ -4,7 +4,7 @@ import { useHub } from './context.js';
 
 // Toasts: short news that does not need an answer ("You took the case"), and the one that does, for a few seconds: Undo.
 // A "held" action is the Undo window the design asks for: the action waits, visible, for UNDO_MS; Undo cancels it; and it is
-// sent at once if the toast is dismissed early, or if the hub is closing. Nothing is sent twice.
+// sent at once if the toast is dismissed early, or if the hub is closing (the page hides, or the tab is hidden). Nothing is sent twice.
 
 /** How long an Undo toast, and the action it holds, waits. The stylesheet's progress bar runs for the same 5 seconds. */
 export const UNDO_MS = 5_000;
@@ -147,10 +147,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const flush = (): void => {
       for (const id of [...pending.current.keys()]) finish(id);
     };
+    // `pagehide` is the tab closing; a hidden tab is the other way the page can go away without it (a phone switching apps).
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') flush();
+    };
     window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
     const held = pending.current;
     return () => {
       window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
       for (const [, entry] of held) void Promise.resolve().then(entry.run).catch(() => undefined);
       held.clear();
     };

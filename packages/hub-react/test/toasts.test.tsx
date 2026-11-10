@@ -219,6 +219,49 @@ describe('a held action with Undo', () => {
     expect(run2).toHaveBeenCalledTimes(1);
   });
 
+  const setVisibility = (state: 'hidden' | 'visible'): void => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+
+  it('is sent at once when the tab is hidden (a phone switching apps), and only once', async () => {
+    const view = mount();
+    const run = vi.fn();
+    act(() => void view.api().hold({ text: 'Held.', run }));
+    await act(async () => setVisibility('hidden'));
+    expect(run).toHaveBeenCalledTimes(1);
+    await act(async () => setVisibility('hidden'));
+    await act(async () => void window.dispatchEvent(new Event('pagehide')));
+    view.unmount();
+    await tick(10_000);
+    expect(run).toHaveBeenCalledTimes(1);
+    setVisibility('visible');
+  });
+
+  it('a tab becoming visible again sends nothing and a hidden tab does not touch an undone action', async () => {
+    const view = mount();
+    const kept = vi.fn();
+    const undone = vi.fn();
+    act(() => void view.api().hold({ text: 'Kept.', run: kept }));
+    act(() => void view.api().hold({ text: 'Undone.', run: undone }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Undo' })[1] as HTMLElement);
+    await act(async () => setVisibility('visible'));
+    expect(kept).not.toHaveBeenCalled();
+    await act(async () => setVisibility('hidden'));
+    expect(kept).toHaveBeenCalledTimes(1);
+    expect(undone).not.toHaveBeenCalled();
+    setVisibility('visible');
+  });
+
+  it('a listener left behind by an unmounted hub does not run anything', async () => {
+    const view = mount();
+    view.unmount();
+    const run = vi.fn();
+    await act(async () => setVisibility('hidden'));
+    expect(run).not.toHaveBeenCalled();
+    setVisibility('visible');
+  });
+
   it('an undone action is not sent when the hub closes', async () => {
     const view = mount();
     const run = vi.fn();
