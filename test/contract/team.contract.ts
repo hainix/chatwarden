@@ -157,7 +157,7 @@ export function teamContract(name: string, make: () => Store): void {
         expect(s.loadClaims(['s_p1', 's_p2'], NOW).map((c) => [c.person, c.by])).toEqual([['s_p1', 'ann'], ['s_p2', 'bea']]);
       });
 
-      it('two moderators racing on one case: exactly one wins, whatever the interleaving', async () => {
+      it('two moderators claiming back to back: exactly one wins, in either order', async () => {
         for (const order of [['ann', 'bea'], ['bea', 'ann']]) {
           const s = make();
           const tries = await Promise.all(order.map(async (who) => Promise.resolve().then(() => claim(s, 's_race', who, NOW))));
@@ -168,7 +168,7 @@ export function teamContract(name: string, make: () => Store): void {
         }
       });
 
-      it('five claimants and a taker racing: one claim winner, take over is the only way to move it', async () => {
+      it('five claimants back to back: one claim winner, take over is the only way to move it', async () => {
         const s = make();
         const tries = await Promise.all(
           ['a', 'b', 'c', 'd', 'e'].map(async (who) => Promise.resolve().then(() => claim(s, 's_race', who, NOW))),
