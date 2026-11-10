@@ -1,0 +1,453 @@
+/*
+ * @chatwarden/player-react
+ *
+ * One small stylesheet. Every colour, size, radius and space is a --cw-* custom property set in the token block below, with a
+ * light and a dark value (light-dark()); every rule is scoped under .cw-player. Nothing is injected at run time, so a strict
+ * Content-Security-Policy needs nothing more than permission to load this file.
+ *
+ * It is neutral on purpose: it sits inside a game, so it takes the game's font (inherit) and uses a quiet grey and white base.
+ * To make it look like your game, set three things on .cw-player (or the className you pass): --cw-surface (the base),
+ * --cw-accent (your next action) and --cw-radius. Every other token has a default that works on them.
+ *
+ * Colour only where it means something:
+ *   accent  the one next action, a link, a choice you made, and the focus ring
+ *   red     a failure, and the red side of a referee card
+ *   yellow  the yellow side of a referee card
+ * The referee card is the one signature detail, the same as in the moderator hub: yellow for a warning, half yellow and half red
+ * for a restriction, red for a ban, a dashed outline for a note. A sanction looks the same to staff and to the player.
+ */
+
+/* ---- Tokens ------------------------------------------------------------------------------------------------------ */
+:where(.cw-player) {
+  color-scheme: light dark;
+
+  /* Neutral base: the panel, the sunken well, the lines, and the text */
+  --cw-surface: light-dark(#ffffff, #151c28);
+  --cw-surface-sunken: light-dark(#eef0f4, #111722);
+  --cw-border: light-dark(#e0e3ea, #242d3c);
+  --cw-border-strong: light-dark(#7a8397, #6b7893);
+  --cw-ink: light-dark(#151b27, #e8ebf1);
+  --cw-ink-muted: light-dark(#4f5a6e, #9ba4b6);
+
+  /* The one accent: your next action, a link, a choice, the focus ring */
+  --cw-accent: light-dark(#2950d3, #7d9bff);
+  --cw-accent-ink: light-dark(#ffffff, #0e131c);
+  --cw-accent-soft: light-dark(#e7ecfb, #1d2847);
+
+  /* Red: a failure. Yellow: the yellow of a referee card. Both are also the card. */
+  --cw-red: light-dark(#c42f3b, #ff6b74);
+  --cw-red-soft: light-dark(#fbe4e6, #3a1a1f);
+  --cw-yellow: light-dark(#e5ad00, #f2c84b);
+
+  /* The ink every shadow and backdrop is made from */
+  --cw-shadow-ink: light-dark(#151b27, #000000);
+
+  /* Type: the game's own font */
+  --cw-font: inherit;
+  --cw-text-s: 0.8125rem;
+  --cw-text-m: 0.9375rem;
+  --cw-text-l: 1.125rem;
+  --cw-leading: 1.5;
+
+  /* Shape and space */
+  --cw-radius: 10px;
+  --cw-radius-s: 6px;
+  --cw-border-width: 1px;
+  --cw-space-1: 0.25rem;
+  --cw-space-2: 0.5rem;
+  --cw-space-3: 0.75rem;
+  --cw-space-4: 1rem;
+  --cw-space-5: 1.5rem;
+  --cw-control-height: 2.5rem;
+
+  /* A dialog is at most this wide (and never wider than the screen), and sits above the game */
+  --cw-dialog-width: 30rem;
+  --cw-layer: 1000;
+}
+
+/* The theme prop, or the same attribute on any ancestor, picks one scheme. Without either, the player's setting decides. */
+[data-cw-theme='light'] .cw-player,
+.cw-player[data-cw-theme='light'] {
+  color-scheme: light;
+}
+[data-cw-theme='dark'] .cw-player,
+.cw-player[data-cw-theme='dark'] {
+  color-scheme: dark;
+}
+/* ---- End of tokens ----------------------------------------------------------------------------------------------- */
+
+/* ---- Fallback ---------------------------------------------------------------------------------------------------- */
+/* A browser without light-dark() (before 2024) would drop every colour token above. This gives it the light values; it follows
+   neither prefers-color-scheme nor the theme prop. */
+@supports not (color: light-dark(#000, #fff)) {
+  :where(.cw-player) {
+    --cw-surface: #ffffff;
+    --cw-surface-sunken: #eef0f4;
+    --cw-border: #e0e3ea;
+    --cw-border-strong: #7a8397;
+    --cw-ink: #151b27;
+    --cw-ink-muted: #4f5a6e;
+    --cw-accent: #2950d3;
+    --cw-accent-ink: #ffffff;
+    --cw-accent-soft: #e7ecfb;
+    --cw-red: #c42f3b;
+    --cw-red-soft: #fbe4e6;
+    --cw-yellow: #e5ad00;
+    --cw-shadow-ink: #151b27;
+  }
+}
+/* ---- End of fallback --------------------------------------------------------------------------------------------- */
+
+/* ---- Base -------------------------------------------------------------------------------------------------------- */
+.cw-player {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  background: var(--cw-surface);
+  color: var(--cw-ink);
+  font-family: var(--cw-font);
+  font-size: var(--cw-text-m);
+  line-height: var(--cw-leading);
+  overflow-wrap: anywhere;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+.cw-player *,
+.cw-player *::before,
+.cw-player *::after {
+  box-sizing: inherit;
+}
+.cw-player h2,
+.cw-player h3,
+.cw-player p,
+.cw-player ul,
+.cw-player ol,
+.cw-player dl,
+.cw-player dd,
+.cw-player fieldset {
+  margin: 0;
+  padding: 0;
+}
+.cw-player ul {
+  list-style: none;
+}
+.cw-player :is(a, button, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--cw-accent);
+  outline-offset: 2px;
+  border-radius: var(--cw-radius-s);
+}
+/* The heading that takes focus is a place to start reading, not a control: no ring of its own. */
+.cw-player .cw-title:focus {
+  outline: none;
+}
+
+/* ---- The referee card: the same as the moderator hub's -------------------------------------------------------------- */
+.cw-player .cw-card {
+  display: inline-block;
+  flex: none;
+  width: 0.875rem;
+  height: 1.1875rem;
+  border-radius: 2.5px;
+  transform: rotate(-8deg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--cw-shadow-ink) 25%, transparent);
+}
+.cw-player .cw-card--warning {
+  background: var(--cw-yellow);
+}
+.cw-player .cw-card--restriction {
+  background: linear-gradient(135deg, var(--cw-yellow) 50%, var(--cw-red) 50%);
+}
+.cw-player .cw-card--ban {
+  background: var(--cw-red);
+}
+.cw-player .cw-card--note {
+  border: 1.5px dashed var(--cw-ink-muted);
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ---- Text -------------------------------------------------------------------------------------------------------- */
+.cw-player .cw-title {
+  font-size: var(--cw-text-l);
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.cw-player .cw-kind {
+  font-size: var(--cw-text-m);
+  font-weight: 600;
+}
+.cw-player .cw-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-3);
+  margin-bottom: var(--cw-space-3);
+}
+.cw-player .cw-body,
+.cw-player .cw-summary {
+  margin-bottom: var(--cw-space-3);
+}
+.cw-player .cw-position,
+.cw-player .cw-hint,
+.cw-player .cw-lines-label,
+.cw-player .cw-ref {
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+}
+.cw-player .cw-position {
+  margin-bottom: var(--cw-space-2);
+}
+.cw-player .cw-hint {
+  margin-bottom: var(--cw-space-3);
+}
+.cw-player .cw-state {
+  color: var(--cw-ink-muted);
+}
+.cw-player .cw-section > * + * {
+  margin-top: var(--cw-space-3);
+}
+
+.cw-player .cw-facts {
+  margin-bottom: var(--cw-space-3);
+}
+.cw-player .cw-fact + .cw-fact {
+  margin-top: var(--cw-space-2);
+}
+.cw-player .cw-facts dt {
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+}
+.cw-player .cw-facts dd {
+  overflow-wrap: anywhere;
+}
+
+.cw-player .cw-lines {
+  display: grid;
+  gap: var(--cw-space-2);
+  margin-bottom: var(--cw-space-3);
+}
+.cw-player .cw-lines li {
+  padding: var(--cw-space-2) var(--cw-space-3);
+  border-left: 3px solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-surface-sunken);
+}
+.cw-player .cw-line-day {
+  display: block;
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+}
+.cw-player .cw-line-text {
+  overflow-wrap: anywhere;
+}
+
+.cw-player .cw-rules {
+  padding-left: var(--cw-space-5);
+}
+.cw-player .cw-rules li + li {
+  margin-top: var(--cw-space-3);
+}
+.cw-player .cw-rule-text {
+  overflow-wrap: anywhere;
+}
+
+.cw-player .cw-items {
+  display: grid;
+  gap: var(--cw-space-3);
+}
+.cw-player .cw-item {
+  padding: var(--cw-space-4);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius);
+  background: var(--cw-surface);
+}
+
+.cw-player .cw-restricted {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2) var(--cw-space-3);
+  padding: var(--cw-space-2) var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-surface-sunken);
+}
+
+/* ---- Links and buttons ------------------------------------------------------------------------------------------- */
+.cw-player .cw-link {
+  color: var(--cw-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.cw-player .cw-appeal {
+  margin-bottom: var(--cw-space-3);
+}
+.cw-player .cw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2);
+  margin-top: var(--cw-space-4);
+}
+.cw-player .cw-btn {
+  min-height: var(--cw-control-height);
+  padding: var(--cw-space-1) var(--cw-space-4);
+  border: var(--cw-border-width) solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-surface);
+  color: var(--cw-ink);
+  font: inherit;
+  font-weight: 600;
+  white-space: normal;
+  cursor: pointer;
+}
+.cw-player .cw-btn:hover {
+  background: var(--cw-surface-sunken);
+}
+.cw-player .cw-btn--primary {
+  border-color: var(--cw-accent);
+  background: var(--cw-accent);
+  color: var(--cw-accent-ink);
+}
+.cw-player .cw-btn--primary:hover {
+  background: var(--cw-accent);
+  filter: brightness(1.08);
+}
+/* A busy button is dimmed and ignores clicks but keeps focus (it is not :disabled, which would drop it). */
+.cw-player .cw-btn[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---- Errors ------------------------------------------------------------------------------------------------------ */
+.cw-player .cw-error,
+.cw-player .cw-field-error {
+  margin-bottom: var(--cw-space-3);
+  padding: var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-red);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-red-soft);
+  color: var(--cw-red);
+  overflow-wrap: anywhere;
+}
+.cw-player .cw-error .cw-btn {
+  margin-top: var(--cw-space-2);
+}
+
+/* ---- The dialog -------------------------------------------------------------------------------------------------- */
+.cw-player .cw-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--cw-layer);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
+  padding: var(--cw-space-3);
+  background: color-mix(in srgb, var(--cw-shadow-ink) 55%, transparent);
+}
+.cw-player .cw-dialog {
+  width: min(var(--cw-dialog-width), 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--cw-space-5);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius);
+  background: var(--cw-surface);
+  color: var(--cw-ink);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--cw-shadow-ink) 35%, transparent);
+  animation: cw-in 0.15s ease-out;
+}
+.cw-player .cw-dialog:focus {
+  outline: none;
+}
+@keyframes cw-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- The report form --------------------------------------------------------------------------------------------- */
+.cw-player .cw-fieldset {
+  min-width: 0;
+  margin: 0 0 var(--cw-space-3);
+  border: 0;
+}
+.cw-player .cw-fieldset[aria-invalid='true'] {
+  border-left: 3px solid var(--cw-red);
+  padding-left: var(--cw-space-3);
+}
+.cw-player .cw-legend {
+  margin-bottom: var(--cw-space-2);
+  padding: 0;
+  font-weight: 600;
+}
+.cw-player .cw-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-3);
+  min-height: var(--cw-control-height);
+  padding: 0 var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-s);
+  cursor: pointer;
+}
+.cw-player .cw-choice + .cw-choice {
+  margin-top: var(--cw-space-1);
+}
+.cw-player .cw-choice:has(input:checked) {
+  border-color: var(--cw-accent);
+  background: var(--cw-accent-soft);
+}
+.cw-player input[type='radio'] {
+  flex: none;
+  accent-color: var(--cw-accent);
+}
+.cw-player .cw-label {
+  display: block;
+  margin-bottom: var(--cw-space-1);
+  font-weight: 600;
+}
+.cw-player textarea {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  padding: var(--cw-space-2) var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-surface);
+  color: var(--cw-ink);
+  font: inherit;
+  resize: vertical;
+}
+.cw-player textarea + .cw-hint {
+  margin-top: var(--cw-space-1);
+}
+.cw-player .cw-result {
+  padding: var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-surface-sunken);
+}
+
+/* ---- Motion and forced colours ----------------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .cw-player .cw-dialog {
+    animation: none;
+  }
+}
+@media (forced-colors: active) {
+  .cw-player .cw-card {
+    border: 1px solid CanvasText;
+  }
+  .cw-player .cw-btn,
+  .cw-player .cw-dialog,
+  .cw-player .cw-item {
+    border: 1px solid CanvasText;
+  }
+}
