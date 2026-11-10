@@ -21,6 +21,8 @@ function report(over: Partial<ReportSummary> = {}): ReportSummary {
     actionedAt: null,
     actionedBy: null,
     targetHandle: 'Mallory',
+    claim: null,
+    viewing: [],
     ...over,
   };
 }
