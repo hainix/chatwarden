@@ -331,13 +331,15 @@ CREATE INDEX kit_audit_by_at ON kit_audit (at, id);
     version: 13,
     // Incoming-webhook idempotency keys (K3b): `key` is the sender's idempotencyKey, `state` is `pending` while the
     // action is being applied and `done` once it has answered, and `result_json` holds the response body only (ids and
-    // ref codes, never chat text). A `pending` row has no result and a `done` row always has one. Purged after 24 h.
+    // ref codes, never chat text). A `pending` row has no result and a `done` row always has one. `fingerprint` is the SHA-256 of
+    // the canonical validated request, so a key reused for a different request is refused. Purged after 24 h.
     sql: `
 CREATE TABLE kit_webhook_keys (
   key         TEXT PRIMARY KEY,
   created_at  INTEGER NOT NULL,
   state       TEXT NOT NULL CHECK (state IN ('pending', 'done')),
   result_json TEXT,
+  fingerprint TEXT NOT NULL,
   CHECK ((state = 'pending' AND result_json IS NULL) OR (state = 'done' AND result_json IS NOT NULL))
 );
 CREATE INDEX kit_webhook_keys_by_created ON kit_webhook_keys (created_at);

@@ -53,6 +53,7 @@ export {
   SanctionError,
   SANCTION_SOURCES,
   SanctionIndex,
+  validateSanctionInput,
 } from './sanctions.js';
 export type { ActiveSanction, SanctionInput, WrittenSanction } from './sanctions.js';
 export { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from './mutes.js';

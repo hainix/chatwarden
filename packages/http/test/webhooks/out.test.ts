@@ -588,10 +588,42 @@ describe('retries', () => {
       expect(f.calls).toHaveLength(2);
     });
 
-    it('retry-after: 0 retries at once', async () => {
+    it('retry-after: 0 is floored at 1 s (a receiver cannot make us retry at once)', async () => {
       const { k, f } = await run((n) => (n === 0 ? { status: 429, headers: { 'retry-after': '0' } } : 200));
       k.emit(closed(1));
       await tick(0);
+      expect(f.calls).toHaveLength(1);
+      await tick(999);
+      expect(f.calls).toHaveLength(1);
+      await tick(1);
+      expect(f.calls).toHaveLength(2);
+    });
+
+    it('a retry-after date in the past is floored at 1 s too', async () => {
+      const past = new Date(NOW - 60_000).toUTCString();
+      const { k, f } = await run((n) => (n === 0 ? { status: 429, headers: { 'retry-after': past } } : 200));
+      k.emit(closed(1));
+      await tick(0);
+      await tick(999);
+      expect(f.calls).toHaveLength(1);
+      await tick(1);
+      expect(f.calls).toHaveLength(2);
+    });
+
+    it.each([
+      ['1', 1000],
+      ['2', 2000],
+      ['59', 59_000],
+      ['60', 60_000],
+      ['61', 60_000],
+      ['99999999999', 60_000],
+    ])('retry-after %s s waits %i ms (1 s floor, 60 s cap)', async (value, ms) => {
+      const { k, f } = await run((n) => (n === 0 ? { status: 429, headers: { 'retry-after': value } } : 200));
+      k.emit(closed(1));
+      await tick(0);
+      await tick(ms - 1);
+      expect(f.calls).toHaveLength(1);
+      await tick(1);
       expect(f.calls).toHaveLength(2);
     });
 
@@ -680,10 +712,8 @@ describe('the queue', () => {
     for (let i = 1; i <= QUEUE_MAX; i++) k.emit(closed(i)); // exactly fills the queue
     expect(logged).toEqual([]);
     k.emit(closed(QUEUE_MAX + 1)); // overflow: closed(1) is dropped
-    expect(logged).toEqual([['chatwarden.webhook_dropped', { count: 1 }]]);
     k.emit(closed(QUEUE_MAX + 2)); // overflow again: closed(2) is dropped
-    expect(logged).toHaveLength(2);
-    expect(logged[1]).toEqual(['chatwarden.webhook_dropped', { count: 1 }]);
+    expect(logged.map(([e]) => e)).toEqual(['chatwarden.webhook_dropped']);
 
     release?.();
     await tick(0);
@@ -697,19 +727,205 @@ describe('the queue', () => {
     expect(ids.at(-1)).toBe(`r${QUEUE_MAX + 2}`);
   });
 
-  it('the drop log carries a count and nothing else', async () => {
+  describe('drop logging is coalesced', () => {
+    async function overflowing() {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+      const k = fakeKit();
+      const logged: Logged = [];
+      const f = fakeFetch(() => 'hang');
+      const out = webhooksOut(k.kit, { endpoints: [endpointA()], fetch: f.fetch, clock, logger: { warn: (e, d) => void logged.push([e, d]) } });
+      k.emit(closed(0));
+      await tick(0);
+      for (let i = 1; i <= QUEUE_MAX; i++) k.emit(closed(i));
+      return { k, logged, out };
+    }
+    const drops = (logged: Logged) => logged.filter(([e]) => e === 'chatwarden.webhook_dropped');
+
+    it('logs the first drop at once, then at most once per 60 s with the accumulated count', async () => {
+      const { k, logged } = await overflowing();
+      k.emit(closed(2000));
+      expect(drops(logged)).toEqual([['chatwarden.webhook_dropped', { count: 1 }]]);
+      for (let i = 0; i < 99; i++) k.emit(closed(3000 + i));
+      expect(drops(logged)).toHaveLength(1); // 99 more drops, still one line
+      await tick(59_999);
+      expect(drops(logged)).toHaveLength(1);
+      await tick(1);
+      expect(drops(logged)).toEqual([
+        ['chatwarden.webhook_dropped', { count: 1 }],
+        ['chatwarden.webhook_dropped', { count: 99 }],
+      ]);
+      // Quiet afterwards: nothing more is logged without more drops.
+      await tick(10 * 60_000);
+      expect(drops(logged)).toHaveLength(2);
+    });
+
+    it('after the window a new drop logs at once again', async () => {
+      const { k, logged } = await overflowing();
+      k.emit(closed(2000));
+      await tick(61_000);
+      k.emit(closed(2001));
+      expect(drops(logged).map(([, d]) => d)).toEqual([{ count: 1 }, { count: 1 }]);
+    });
+
+    it('dispose flushes what has not been logged yet, once', async () => {
+      const { k, logged, out } = await overflowing();
+      k.emit(closed(2000));
+      k.emit(closed(2001));
+      k.emit(closed(2002));
+      expect(drops(logged).map(([, d]) => d)).toEqual([{ count: 1 }]);
+      out.dispose();
+      expect(drops(logged).map(([, d]) => d)).toEqual([{ count: 1 }, { count: 2 }]);
+      out.dispose();
+      await tick(10 * 60_000);
+      expect(drops(logged)).toHaveLength(2);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('dispose logs nothing when nothing is unlogged', async () => {
+      const { k, logged, out } = await overflowing();
+      k.emit(closed(2000));
+      out.dispose();
+      expect(drops(logged)).toHaveLength(1);
+    });
+
+    it('carries a count and nothing else, and each endpoint counts for itself', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+      const k = fakeKit();
+      const logged: Logged = [];
+      const f = fakeFetch(() => 'hang');
+      webhooksOut(k.kit, {
+        endpoints: [endpointA(), { url: URL_B, secret: SECRET_B, events: '*' }],
+        fetch: f.fetch,
+        clock,
+        logger: { warn: (e, d) => void logged.push([e, d]) },
+      });
+      for (let i = 0; i < QUEUE_MAX + 3; i++) k.emit(closed(i));
+      await tick(0);
+      // Each endpoint overflows by 2: one immediate line each, the rest waits for the window.
+      expect(drops(logged)).toHaveLength(2);
+      await tick(60_000);
+      const lines = drops(logged);
+      expect(lines).toHaveLength(4);
+      for (const [, detail] of lines) expect(Object.keys(detail ?? {})).toEqual(['count']);
+      expect(lines.map(([, d]) => d?.count)).toEqual([1, 1, 1, 1]);
+      expect(JSON.stringify(logged)).not.toContain('URL-TOKEN-XYZ');
+    });
+  });
+});
+
+describe('signing timestamps', () => {
+  /** A receiver that answers at once and verifies with our own `verify`, one shared replay cache. */
+  function instantReceiver(secret: string, now: number) {
+    const seen = new ReplayCache();
+    const stats = { calls: 0, ok: 0, rejected: 0, maxDrift: 0 };
+    const fn = (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const h = (init as Call['init']).headers;
+      stats.calls++;
+      stats.maxDrift = Math.max(stats.maxDrift, Number(h[TIMESTAMP_HEADER]) - now / 1000);
+      const ok = verify(secret, h, (init as Call['init']).body, now, seen);
+      if (ok) stats.ok++;
+      else stats.rejected++;
+      return Promise.resolve(new Response(null, { status: ok ? 200 : 401 }));
+    };
+    return { fetch: fn as unknown as typeof fetch, stats };
+  }
+
+  it('a burst of 600 events inside one second all verify, with no drift from the real clock', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     const k = fakeKit();
+    const rx = instantReceiver(SECRET, NOW);
     const logged: Logged = [];
-    const f = fakeFetch(() => 'hang');
-    webhooksOut(k.kit, { endpoints: [endpointA()], fetch: f.fetch, clock, logger: { warn: (e, d) => void logged.push([e, d]) } });
-    for (let i = 0; i < QUEUE_MAX + 3; i++) k.emit(closed(i));
+    webhooksOut(k.kit, { endpoints: [endpointA()], fetch: rx.fetch, clock: { now: () => NOW }, logger: { warn: (e, d) => void logged.push([e, d]) } });
+    for (let i = 0; i < 600; i++) k.emit(closed(i));
+    for (let i = 0; i < 700 && rx.stats.calls < 600; i++) await tick(0);
+    expect(rx.stats.calls).toBe(600);
+    expect(rx.stats.ok).toBe(600);
+    expect(rx.stats.rejected).toBe(0);
+    expect(rx.stats.maxDrift).toBe(0);
+    expect(logged).toEqual([]);
+  });
+
+  it('only the retries of ONE delivery are bumped: the drift stays within the number of retries', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const k = fakeKit();
+    const f = fakeFetch(() => 500);
+    webhooksOut(k.kit, { endpoints: [endpointA()], fetch: f.fetch, clock: { now: () => NOW }, random: () => 0 });
+    k.emit(closed(1));
+    await tick(120_000);
+    expect(f.calls).toHaveLength(MAX_RETRIES + 1);
+    const times = f.calls.map((c) => Number(stamps(c)));
+    expect(times).toEqual([0, 1, 2, 3, 4, 5].map((i) => NOW / 1000 + i));
+    expect(Math.max(...times) - NOW / 1000).toBeLessThanOrEqual(MAX_RETRIES);
+  });
+
+  it('a second delivery starts from the real clock again, not from where the first one left off', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const k = fakeKit();
+    const f = fakeFetch((n) => (n < 3 ? 500 : 200));
+    webhooksOut(k.kit, { endpoints: [endpointA()], fetch: f.fetch, clock: { now: () => NOW }, random: () => 0 });
+    k.emit(closed(1)); // three 500s, then a 200: timestamps NOW/1000 .. +3
+    k.emit(closed(2));
+    await tick(60_000);
+    const second = f.calls.filter((c) => (bodyOf(c).data as { reportId: string }).reportId === 'r2');
+    expect(second.map((c) => Number(stamps(c)))).toEqual([NOW / 1000]);
+  });
+});
+
+describe('the endpoint config is copied at construction', () => {
+  it("later changes to the adopter's object change nothing: url, events and secret stay as validated", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const k = fakeKit();
+    const f = fakeFetch();
+    const events: Array<KitEvent['type']> = ['report.closed'];
+    const config: WebhookEndpoint = { url: URL_A, secret: SECRET, events };
+    webhooksOut(k.kit, { endpoints: [config], fetch: f.fetch, clock });
+    (config as { url: string }).url = 'http://evil.example.test/steal';
+    (config as { secret: string }).secret = 'z'.repeat(40);
+    events.push('report.created');
+    k.emit(created());
+    k.emit(closed(1));
     await tick(0);
-    const drops = logged.filter(([e]) => e === 'chatwarden.webhook_dropped');
-    expect(drops).toHaveLength(2);
-    for (const [, detail] of drops) expect(Object.keys(detail ?? {})).toEqual(['count']);
-    expect(JSON.stringify(logged)).not.toContain('URL-TOKEN-XYZ');
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0]?.url).toBe(URL_A);
+    expect(bodyOf(f.calls[0] as Call).type).toBe('report.closed');
+    expect(verify(SECRET, (f.calls[0] as Call).init.headers, (f.calls[0] as Call).init.body, NOW, new ReplayCache())).toBe(true);
+  });
+
+  it('fetch gets the parsed href, not the string the adopter wrote', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const k = fakeKit();
+    const f = fakeFetch();
+    webhooksOut(k.kit, { endpoints: [endpointA({ url: 'HTTPS://Hooks.Example.TEST' })], fetch: f.fetch, clock });
+    k.emit(closed(1));
+    await tick(0);
+    expect(f.calls[0]?.url).toBe('https://hooks.example.test/');
+  });
+
+  it('a getter that changes its answer is read once', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const k = fakeKit();
+    const f = fakeFetch();
+    let reads = 0;
+    const config = {
+      get url(): string {
+        return reads++ === 0 ? URL_A : 'http://evil.example.test/';
+      },
+      secret: SECRET,
+      events: '*' as const,
+    };
+    webhooksOut(k.kit, { endpoints: [config], fetch: f.fetch, clock });
+    k.emit(closed(1));
+    k.emit(closed(2));
+    await tick(0);
+    expect(f.calls.map((c) => c.url)).toEqual([URL_A, URL_A]);
   });
 });
 

@@ -381,18 +381,19 @@ export class SqliteStore implements Store, TermStore {
 
   // Webhook keys. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
 
-  reserveWebhookKey(key: string, now: number, notBefore: number): WebhookKeyReservation {
+  reserveWebhookKey(key: string, now: number, notBefore: number, fingerprint: string): WebhookKeyReservation {
     return this.transaction(() => {
       this.db.prepare('DELETE FROM kit_webhook_keys WHERE key = ? AND created_at < ?').run(key, notBefore);
       const inserted = this.db
-        .prepare("INSERT OR IGNORE INTO kit_webhook_keys (key, created_at, state, result_json) VALUES (?, ?, 'pending', NULL)")
-        .run(key, now);
+        .prepare("INSERT OR IGNORE INTO kit_webhook_keys (key, created_at, state, result_json, fingerprint) VALUES (?, ?, 'pending', NULL, ?)")
+        .run(key, now, fingerprint);
       if (Number(inserted.changes) > 0) return { reserved: true } as const;
-      const r = this.db.prepare('SELECT state, result_json FROM kit_webhook_keys WHERE key = ?').get(key);
+      const r = this.db.prepare('SELECT state, result_json, fingerprint FROM kit_webhook_keys WHERE key = ?').get(key);
+      const stored = String(r?.fingerprint ?? '');
       if (r !== undefined && r.state === 'done' && typeof r.result_json === 'string') {
-        return { reserved: false, state: 'done', resultJson: r.result_json } as const;
+        return { reserved: false, state: 'done', resultJson: r.result_json, fingerprint: stored } as const;
       }
-      return { reserved: false, state: 'pending', resultJson: null } as const;
+      return { reserved: false, state: 'pending', resultJson: null, fingerprint: stored } as const;
     });
   }
 

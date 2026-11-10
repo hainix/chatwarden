@@ -3,6 +3,7 @@ import { MAX_SANCTION_DURATION_MS } from '@chatwarden/core';
 import type { Chatwarden, KitEvent, Logger, Role } from '@chatwarden/core';
 import { createRouter } from '../../src/router.js';
 import type { KitRequest, KitResponse } from '../../src/types.js';
+import { parseSanction, sanctionFingerprint } from '../../src/admin/apply.js';
 import { webhookIn } from '../../src/webhooks/in.js';
 import type { WebhookInOptions } from '../../src/webhooks/in.js';
 import { ReplayCache, SIGNATURE_HEADER, TIMESTAMP_HEADER, sign } from '../../src/webhooks/sign.js';
@@ -572,14 +573,6 @@ describe('action: sanction', () => {
       expect(s.events.filter((e) => e.type === 'sanction.applied')).toHaveLength(1);
     });
 
-    it('the key decides, not the body: a different body with the same key returns the first result', async () => {
-      const s = await setup();
-      const first = await s.post(sanctionBody(s.w.person(), 'same'));
-      const other = await s.post(sanctionBody(s.w.person(), 'same', { kind: 'warning', durationMs: null }));
-      expect(other).toEqual(first);
-      expect(s.sanctionRows()).toHaveLength(1);
-    });
-
     it('different keys apply separately', async () => {
       const s = await setup();
       const subject = s.w.person();
@@ -649,10 +642,10 @@ describe('action: sanction', () => {
       expect(s.sanctionRows()).toHaveLength(0);
     });
 
-    it('an apply the core refuses (SanctionError, 400) releases the key so the corrected retry applies', async () => {
+    it('a sanction the core refuses (SanctionError, 400) is caught before the key is taken, so the corrected retry applies', async () => {
       const s = await setup();
       const subject = s.w.person();
-      // A warning must have a null duration: the core refuses this, after the key was taken.
+      // A warning must have a null duration: the core would refuse this; it is checked before the reserve.
       const refused = await s.post(sanctionBody(subject, 'fix', { kind: 'warning', durationMs: HOUR }));
       expect(refused.status).toBe(400);
       expect(s.keyRows()).toHaveLength(0);
@@ -755,6 +748,168 @@ describe('action: sanction', () => {
     });
   });
 
+  describe('the same key with a different request is refused', () => {
+    const MISMATCH = { error: 'idempotency_mismatch', message: 'This idempotency key was used with a different request.' };
+
+    it('done: 409 idempotency_mismatch with a fixed body; the first result is not returned and nothing is applied', async () => {
+      const s = await setup();
+      const first = await s.post(sanctionBody(s.w.person(), 'reuse'));
+      expect(first.status).toBe(200);
+      const other = await s.post(sanctionBody(s.w.person(), 'reuse'));
+      expect(other.status).toBe(409);
+      expect(other.body).toEqual(MISMATCH);
+      expect(s.sanctionRows()).toHaveLength(1);
+      expect(s.keyRows()).toHaveLength(1);
+      expect(JSON.parse(String(s.keyRows()[0]?.result_json))).toEqual(first.body);
+    });
+
+    it.each([
+      ['another kind', { kind: 'area' }],
+      ['another duration', { durationMs: 2 * HOUR }],
+      ['a warning instead', { kind: 'warning', durationMs: null }],
+      ['another rule', { rule: 2 }],
+      ['another reason', { reason: 'a different reason' }],
+      ['includeIp', { includeIp: true }],
+      ['an uncovered rule with a gap note', { rule: 'uncovered', gapNote: 'Something the rules miss.' }],
+    ])('%s is a mismatch', async (_n, over) => {
+      const s = await setup();
+      const subject = s.w.person();
+      await s.post(sanctionBody(subject, 'k'));
+      const res = await s.post(sanctionBody(subject, 'k', over));
+      expect(res.status).toBe(409);
+      expect(errorOf(res)).toBe('idempotency_mismatch');
+      expect(s.sanctionRows()).toHaveLength(1);
+    });
+
+    it('another subject is a mismatch', async () => {
+      const s = await setup();
+      await s.post(sanctionBody(s.w.person(), 'k'));
+      const res = await s.post(sanctionBody(s.w.person(), 'k'));
+      expect(errorOf(res)).toBe('idempotency_mismatch');
+    });
+
+    it('the same request written differently (key order, whitespace, defaults spelled out) is the same request', async () => {
+      const s = await setup();
+      const subject = s.w.person();
+      const first = await s.post(sanctionBody(subject, 'same'));
+      const reordered = `{ "action":"sanction",\n"input":{"idempotencyKey":"same","includeIp":false,"rule":1,"reason":"${PRIVATE_REASON}","durationMs":${HOUR},"kind":"chat","subject":"${subject}","extra":"ignored"}}`;
+      const again = await s.post(reordered);
+      expect(again.status).toBe(200);
+      expect(again.body).toEqual(first.body);
+      expect(s.sanctionRows()).toHaveLength(1);
+    });
+
+    it('a mismatch is also refused while the first request is still running in this process', async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const s = await setup({
+        wrap: (cw) => ({
+          ...cw,
+          sanctions: {
+            ...cw.sanctions,
+            apply: async (i) => {
+              await gate;
+              return cw.sanctions.apply(i);
+            },
+          },
+        }),
+      });
+      const a = s.w.person();
+      const b = s.w.person();
+      const first = s.hook(s.req(sanctionBody(a, 'busy')));
+      s.w.clock.t += 1000;
+      const second = await s.hook(s.req(sanctionBody(b, 'busy')));
+      expect(second.status).toBe(409);
+      expect(errorOf(second)).toBe('idempotency_mismatch');
+      release();
+      expect((await first).status).toBe(200);
+      expect(s.sanctionRows()).toHaveLength(1);
+    });
+
+    it('pending in another process: the same request is in_progress, a different one is idempotency_mismatch', async () => {
+      const s = await setup();
+      const subject = s.w.person();
+      const body = sanctionBody(subject, 'theirs');
+      s.cw.webhookKeys.reserve('theirs', sanctionFingerprint(parseSanction(body.input)));
+      expect(errorOf(await s.post(body))).toBe('in_progress');
+      expect(errorOf(await s.post(sanctionBody(s.w.person(), 'theirs')))).toBe('idempotency_mismatch');
+    });
+
+    it('stores a SHA-256 fingerprint (hex) and no text in the key row', async () => {
+      const s = await setup();
+      await s.post(sanctionBody(s.w.person(), 'fp'));
+      const row = s.keyRows()[0] as Record<string, unknown>;
+      expect(String(row.fingerprint)).toMatch(/^[0-9a-f]{64}$/);
+      expect(JSON.stringify(row)).not.toContain(PRIVATE_REASON);
+    });
+
+    it('the fingerprint is stable and depends on every field of the validated sanction', () => {
+      const base = { subject: 'a', kind: 'chat', durationMs: 5, rule: 1, reason: 'r' };
+      const fp = (over: Record<string, unknown> = {}) => sanctionFingerprint(parseSanction({ ...base, ...over }));
+      expect(fp()).toBe(fp());
+      expect(fp()).toBe(fp({ includeIp: false, idempotencyKey: 'ignored', unknown: 1 }));
+      const all = new Set([
+        fp(),
+        fp({ subject: 'b' }),
+        fp({ kind: 'area' }),
+        fp({ durationMs: 6 }),
+        fp({ rule: 2 }),
+        fp({ reason: 's' }),
+        fp({ includeIp: true }),
+        fp({ rule: 'uncovered', gapNote: 'n' }),
+      ]);
+      expect(all.size).toBe(8);
+    });
+  });
+
+  describe('a bad request never takes a key: pure validation runs before reserve', () => {
+    function counting() {
+      const calls = { reserve: 0 };
+      const wrap = (cw: Chatwarden): Chatwarden => ({
+        ...cw,
+        webhookKeys: {
+          ...cw.webhookKeys,
+          reserve: (k, f) => {
+            calls.reserve++;
+            return cw.webhookKeys.reserve(k, f);
+          },
+        },
+      });
+      return { calls, wrap };
+    }
+
+    it.each([
+      ['a rule that is not citable', { rule: 9999 }],
+      ['a warning with a duration (core SanctionError)', { kind: 'warning', durationMs: HOUR }],
+      ['a note with a duration (core SanctionError)', { kind: 'note', durationMs: HOUR }],
+      ['a warning with includeIp (core SanctionError)', { kind: 'warning', durationMs: null, includeIp: true }],
+      ['an uncovered rule with no gap note (core SanctionError)', { rule: 'uncovered' }],
+      ['a gap note with a numbered rule (core SanctionError)', { gapNote: 'not allowed here' }],
+      ['an over-long gap note (core SanctionError)', { rule: 'uncovered', gapNote: 'g'.repeat(501) }],
+    ])('%s: 400, reserve is never called', async (_n, over) => {
+      const c = counting();
+      const s = await setup({ wrap: c.wrap });
+      const res = await s.post(sanctionBody(s.w.person(), 'pure', over));
+      expect(res.status).toBe(400);
+      expect(c.calls.reserve).toBe(0);
+      expect(s.keyRows()).toHaveLength(0);
+    });
+
+    it('a permanent ban the role may not do (403) never reserves either', async () => {
+      const c = counting();
+      const s = await setup({ wrap: c.wrap });
+      expect((await s.post(sanctionBody(s.w.person(), 'p2', { kind: 'ban', durationMs: null }))).status).toBe(403);
+      expect(c.calls.reserve).toBe(0);
+    });
+
+    it('a valid request reserves exactly once', async () => {
+      const c = counting();
+      const s = await setup({ wrap: c.wrap });
+      expect((await s.post(sanctionBody(s.w.person(), 'good'))).status).toBe(200);
+      expect(c.calls.reserve).toBe(1);
+    });
+  });
+
   describe('concurrency', () => {
     function slow() {
       let release: () => void = () => undefined;
@@ -798,14 +953,17 @@ describe('action: sanction', () => {
 
     it('a request that finds the key pending with no apply in this process is 409 in_progress', async () => {
       const s = await setup();
-      expect(s.cw.webhookKeys.reserve('elsewhere')).toEqual({ reserved: true }); // another process holds it
-      const res = await s.post(sanctionBody(s.w.person(), 'elsewhere'));
+      const subject = s.w.person();
+      const body = sanctionBody(subject, 'elsewhere');
+      const fp = sanctionFingerprint(parseSanction(body.input));
+      expect(s.cw.webhookKeys.reserve('elsewhere', fp)).toEqual({ reserved: true }); // another process holds it
+      const res = await s.post(body);
       expect(res.status).toBe(409);
       expect(errorOf(res)).toBe('in_progress');
       expect(s.sanctionRows()).toHaveLength(0);
       // Once the other process finishes, the stored result is returned.
       s.cw.webhookKeys.complete('elsewhere', '{"groupId":"g-other","refCode":"RC-OTHER"}');
-      const done = await s.post(sanctionBody(s.w.person(), 'elsewhere'));
+      const done = await s.post(body);
       expect(done.status).toBe(200);
       expect(done.body).toEqual({ groupId: 'g-other', refCode: 'RC-OTHER' });
       expect(s.sanctionRows()).toHaveLength(0);

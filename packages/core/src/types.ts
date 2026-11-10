@@ -326,8 +326,8 @@ export const WEBHOOK_KEY_TTL_MS = 24 * 60 * 60 * 1000;
 /** What {@link Store.reserveWebhookKey} answers: this call took the key, or the row that already holds it. */
 export type WebhookKeyReservation =
   | { reserved: true }
-  | { reserved: false; state: 'pending'; resultJson: null }
-  | { reserved: false; state: 'done'; resultJson: string };
+  | { reserved: false; state: 'pending'; resultJson: null; fingerprint: string }
+  | { reserved: false; state: 'done'; resultJson: string; fingerprint: string };
 
 /** The light projection of a report the intake rules count: who reported whom, where and when. */
 export interface ReportActivity {
@@ -615,10 +615,12 @@ export interface Store {
 
   /**
    * Reserve an idempotency key for an incoming webhook. A row with `createdAt < notBefore` is expired and is replaced.
-   * Otherwise: no row yet inserts a `pending` one and answers `{ reserved: true }`; an existing row is returned as it
-   * is (`pending` carries no result, `done` carries the stored response body). Never carries chat text.
+   * Otherwise: no row yet inserts a `pending` one holding `fingerprint` (a hash of the request, so a key reused for a
+   * different request can be told apart) and answers `{ reserved: true }`; an existing row is returned as it is, with
+   * the fingerprint it was stored with (`pending` carries no result, `done` carries the stored response body). Never
+   * carries chat text.
    */
-  reserveWebhookKey(key: string, now: number, notBefore: number): WebhookKeyReservation;
+  reserveWebhookKey(key: string, now: number, notBefore: number, fingerprint: string): WebhookKeyReservation;
 
   /** Mark a `pending` key `done` with the response body it answered. True only when this call did it. */
   completeWebhookKey(key: string, resultJson: string): boolean;

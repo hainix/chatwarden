@@ -336,8 +336,11 @@ export interface Chatwarden {
    * transaction and throws the store's own error if it fails.
    */
   webhookKeys: {
-    /** Take the key (`{ reserved: true }`), or answer the row that holds it: `pending`, or `done` with its stored body. */
-    reserve(key: string): WebhookKeyReservation;
+    /**
+     * Take the key (`{ reserved: true }`), or answer the row that holds it: `pending`, or `done` with its stored body,
+     * and the `fingerprint` it was reserved with. `fingerprint` is a hash of the request (never text).
+     */
+    reserve(key: string, fingerprint: string): WebhookKeyReservation;
     /** Mark a pending key done with the response body. True only when this call did it. */
     complete(key: string, resultJson: string): boolean;
     /** Free a pending key (the apply failed, so a retry may run). A done key is never freed. */
@@ -715,9 +718,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       list: (q) => audit.list(q),
     },
     webhookKeys: {
-      reserve: (key) => {
+      reserve: (key, fingerprint) => {
         const now = clock.now();
-        return store.transaction(() => store.reserveWebhookKey(key, now, now - WEBHOOK_KEY_TTL_MS));
+        return store.transaction(() => store.reserveWebhookKey(key, now, now - WEBHOOK_KEY_TTL_MS, fingerprint));
       },
       complete: (key, resultJson) => store.transaction(() => store.completeWebhookKey(key, resultJson)),
       release: (key) => store.transaction(() => store.releaseWebhookKey(key)),

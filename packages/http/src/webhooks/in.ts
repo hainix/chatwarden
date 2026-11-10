@@ -3,10 +3,12 @@ import type { AuditAction, AuditTarget, Chatwarden, Clock, Logger, Role } from '
 import {
   applyDecision,
   applySanction,
+  checkSanction,
   needForDecision,
   needForSanction,
   parseDecision,
   parseSanction,
+  sanctionFingerprint,
 } from '../admin/apply.js';
 import { asObject, bodyId, bodyObject, has } from '../admin/validate.js';
 import { requireRole } from '../auth.js';
@@ -75,6 +77,14 @@ function idempotencyKey(v: unknown): string {
  * The actor is always `options.actor` and the source always `moderator`; an `actor`, `source` or `role` in the body is
  * ignored. The audit trail records `report.decide` / `sanction.apply` with that actor and role.
  *
+ * The key is bound to the request: the same key with a different sanction (another subject, kind, duration, rule,
+ * reason, ...) is 409 `idempotency_mismatch`, and nothing is applied. A SHA-256 fingerprint of the validated sanction is
+ * stored with the key; the same request written with another key order or spacing is the same request.
+ *
+ * Failed signatures are NOT throttled here: each costs one body read (64 KiB at most) and one HMAC. Rate-limit the route
+ * at the edge (your reverse proxy, load balancer or `express-rate-limit`) so a flood of bad requests is stopped before it
+ * reaches the process.
+ *
  * A sanction that failed (a 400 or a 500) frees its key, so the retry can run. If the sanction is live but its result
  * could not be saved, the key stays pending (`chatwarden.webhook_key_failed`): a retry is 409, never a second sanction.
  */
@@ -120,8 +130,15 @@ export function webhookIn(cw: Chatwarden, options: WebhookInOptions): RouteTable
     const parsed = parseSanction(input);
     needForSanction(parsed.action, may);
 
-    // Reserve before applying. Everything that can be refused was refused above, so a bad request never takes a key.
-    const reservation = cw.webhookKeys.reserve(key);
+    // Everything that can be refused without the store is refused here, before the key is touched: a rule that cannot be
+    // cited, or a sanction the core would refuse (a warning with a duration, an uncovered rule with no gap note, ...). A bad
+    // request never takes a key. What is left to fail after the reserve is the store (and the subject's existence); that
+    // releases the key.
+    checkSanction(cw, parsed, actor);
+
+    // Reserve before applying.
+    const fingerprint = sanctionFingerprint(parsed);
+    const reservation = cw.webhookKeys.reserve(key, fingerprint);
     if (reservation.reserved) {
       const work = (async () => {
         let done: { groupId: string; refCode: string };
@@ -152,6 +169,9 @@ export function webhookIn(cw: Chatwarden, options: WebhookInOptions): RouteTable
         inFlight.delete(key);
       }
     }
+    // The key is taken: by the same request (replay it), or by a different one (a sender bug: never answer with
+    // another request's result, and never apply this one).
+    if (reservation.fingerprint !== fingerprint) throw new HttpError('idempotency_mismatch');
     if (reservation.state === 'done') return { status: 200, body: JSON.parse(reservation.resultJson) as unknown };
     // Pending: ours (a duplicate arrived while the first is applying), or another process's.
     const shared = inFlight.get(key);

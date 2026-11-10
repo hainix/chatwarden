@@ -55,7 +55,7 @@ export class MemoryStore implements Store {
   /** Staff audit entries in insertion order. */
   protected auditRows: AuditRow[] = [];
   /** Incoming-webhook idempotency keys. */
-  protected webhookKeys = new Map<string, { createdAt: number; state: 'pending' | 'done'; resultJson: string | null }>();
+  protected webhookKeys = new Map<string, { createdAt: number; state: 'pending' | 'done'; resultJson: string | null; fingerprint: string }>();
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -292,15 +292,15 @@ export class MemoryStore implements Store {
 
   // Webhook keys (synchronous, see the Store interface)
 
-  reserveWebhookKey(key: string, now: number, notBefore: number): WebhookKeyReservation {
+  reserveWebhookKey(key: string, now: number, notBefore: number, fingerprint: string): WebhookKeyReservation {
     const existing = this.webhookKeys.get(key);
     if (existing !== undefined && existing.createdAt >= notBefore) {
       return existing.state === 'done' && existing.resultJson !== null
-        ? { reserved: false, state: 'done', resultJson: existing.resultJson }
-        : { reserved: false, state: 'pending', resultJson: null };
+        ? { reserved: false, state: 'done', resultJson: existing.resultJson, fingerprint: existing.fingerprint }
+        : { reserved: false, state: 'pending', resultJson: null, fingerprint: existing.fingerprint };
     }
     const prior = existing === undefined ? undefined : { ...existing };
-    this.webhookKeys.set(key, { createdAt: now, state: 'pending', resultJson: null });
+    this.webhookKeys.set(key, { createdAt: now, state: 'pending', resultJson: null, fingerprint });
     this.undoWith(() => {
       if (prior === undefined) this.webhookKeys.delete(key);
       else this.webhookKeys.set(key, prior);

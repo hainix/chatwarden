@@ -1,4 +1,6 @@
-import type { Chatwarden, DecisionAction, DecisionInput, SanctionKind, StaffReport } from '@chatwarden/core';
+import { createHash } from 'node:crypto';
+import { validateSanctionInput } from '@chatwarden/core';
+import type { Chatwarden, DecisionAction, DecisionInput, SanctionInput, SanctionKind, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { PermissionKey } from '../permissions.js';
 import { bodyText, has, parseAction } from './validate.js';
@@ -104,15 +106,10 @@ export function needForSanction(action: DecisionAction, need: (permission: Permi
   if (action.kind === 'ban' && action.durationMs === null) need('sanctions.apply.ban_permanent');
 }
 
-/** Apply one sanction as `actor` (never from a body); the source is always `moderator`. 400 when the rule cannot be cited. */
-export async function applySanction(
-  cw: Chatwarden,
-  sanction: ParsedSanction,
-  actor: string,
-): Promise<{ groupId: string; refCode: string }> {
+/** The facade's input for a parsed sanction: `actor` is never from a body, the source is always `moderator`. */
+function sanctionInput(sanction: ParsedSanction, actor: string): SanctionInput {
   const { action, reason } = sanction;
-  if (!cw.rules.isCitable(action.rule)) throw new ValidationError();
-  const done = await cw.sanctions.apply({
+  return {
     kind: action.kind,
     subject: action.subject,
     includeIp: action.includeIp ?? false,
@@ -123,6 +120,46 @@ export async function applySanction(
     automated: false,
     rule: action.rule,
     ...(action.gapNote === undefined ? {} : { gapNote: action.gapNote }),
-  });
+  };
+}
+
+/**
+ * Every refusal that needs no store, run without writing anything: the rule must be citable (400) and the core's own
+ * sanction checks must pass (`SanctionError`, 400: a warning has no duration, an uncovered rule needs a gap note, ...).
+ * A caller that reserves something before applying (the webhook's idempotency key) calls this first, so a request that
+ * cannot succeed never takes it.
+ */
+export function checkSanction(cw: Chatwarden, sanction: ParsedSanction, actor: string): void {
+  if (!cw.rules.isCitable(sanction.action.rule)) throw new ValidationError();
+  validateSanctionInput(sanctionInput(sanction, actor));
+}
+
+/** Apply one sanction as `actor` (never from a body); the source is always `moderator`. 400 when the rule cannot be cited. */
+export async function applySanction(
+  cw: Chatwarden,
+  sanction: ParsedSanction,
+  actor: string,
+): Promise<{ groupId: string; refCode: string }> {
+  checkSanction(cw, sanction, actor);
+  const done = await cw.sanctions.apply(sanctionInput(sanction, actor));
   return { groupId: done.groupId, refCode: done.refCode };
+}
+
+/**
+ * A fingerprint of a validated sanction: the SHA-256 (hex) of its fields in a fixed order, defaults filled in, so the same
+ * request written with another key order or spacing gives the same value and any change to it gives another. The webhook
+ * stores it with an idempotency key to refuse the key being reused for a different request. A hash: it holds no text.
+ */
+export function sanctionFingerprint(sanction: ParsedSanction): string {
+  const { action, reason } = sanction;
+  const canonical = JSON.stringify([
+    action.subject,
+    action.kind,
+    action.durationMs,
+    action.rule,
+    action.includeIp ?? false,
+    action.gapNote ?? null,
+    reason,
+  ]);
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }

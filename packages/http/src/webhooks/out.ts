@@ -11,6 +11,8 @@ export const QUEUE_MAX = 1000;
 export const ATTEMPT_TIMEOUT_MS = 10_000;
 /** The first backoff; each retry doubles it (1, 2, 4, 8, 16 s), with plus or minus 20 percent jitter. */
 export const BACKOFF_BASE_MS = 1000;
+/** The shortest a `retry-after` on a 429 is honoured as: a receiver cannot make us retry at once. */
+export const RETRY_AFTER_FLOOR_MS = 1000;
 /** The longest a `retry-after` on a 429 is honoured. */
 export const RETRY_AFTER_CAP_MS = 60_000;
 
@@ -54,6 +56,8 @@ export interface WebhooksOut {
 }
 
 const systemClock: Clock = { now: () => Date.now() };
+/** Drop warnings are coalesced: at most one line per endpoint in this window. */
+const DROP_LOG_WINDOW_MS = 60_000;
 const IMF_DATE_RE = /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 
 const errName = (err: unknown): string => {
@@ -72,26 +76,40 @@ function parseUrl(value: unknown): URL | null {
   }
 }
 
-function checkEndpoint(raw: unknown, index: number): WebhookEndpoint {
+/** An endpoint as it is used: a private copy, validated once. The adopter's object is never read again. */
+interface Endpoint {
+  readonly href: string;
+  readonly secret: string;
+  readonly events: readonly KitEvent['type'][] | '*';
+  readonly includeExcerpts: boolean;
+}
+
+function checkEndpoint(raw: unknown, index: number): Endpoint {
   const at = `webhooksOut: endpoints[${index}]`;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new RangeError(`${at} must be an object`);
   const e = raw as Partial<WebhookEndpoint>;
+  // Every field is read exactly once, here.
+  const { secret, events, includeExcerpts } = e;
   const url = parseUrl(e.url);
   const local = url !== null && url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
   if (url === null || (url.protocol !== 'https:' && !local) || url.username !== '' || url.password !== '') {
     throw new RangeError(`${at}.url must be an https URL (http only for localhost and 127.0.0.1) without credentials`);
   }
-  checkSecret(e.secret, `${at}.secret`);
-  const events = e.events;
+  checkSecret(secret, `${at}.secret`);
   if (events !== '*') {
     if (!Array.isArray(events) || events.length === 0 || !events.every((t) => (KIT_EVENT_TYPES as readonly unknown[]).includes(t))) {
       throw new RangeError(`${at}.events must be '*' or a non-empty list of event types`);
     }
   }
-  if (e.includeExcerpts !== undefined && typeof e.includeExcerpts !== 'boolean') {
+  if (includeExcerpts !== undefined && typeof includeExcerpts !== 'boolean') {
     throw new RangeError(`${at}.includeExcerpts must be a boolean`);
   }
-  return e as WebhookEndpoint;
+  return {
+    href: url.href,
+    secret,
+    events: events === '*' ? '*' : Object.freeze([...new Set(events as readonly KitEvent['type'][])]),
+    includeExcerpts: includeExcerpts === true,
+  };
 }
 
 /** One event, ready to send. The body is fixed at the moment the event was raised; every attempt sends these bytes. */
@@ -99,6 +117,8 @@ interface Delivery {
   id: string;
   type: KitEvent['type'];
   body: string;
+  /** The timestamp of the last attempt of THIS delivery (0 before the first). A retry is signed later than it. */
+  lastTimestamp: number;
 }
 
 type Attempt =
@@ -122,7 +142,10 @@ type Attempt =
  * an HTTP date) replaces the wait, capped at 60 s. Any other status (a 4xx, a redirect: none is followed) is final. A
  * delivery that fails for good is logged (`chatwarden.webhook_failed`: event type, status or error class, attempts)
  * and dropped. The queue is in memory (lost on restart), one per endpoint, delivered in order, one delivery at a time,
- * and bounded at 1000 waiting; past that the oldest is dropped and `chatwarden.webhook_dropped` logs a count.
+ * and bounded at 1000 waiting; past that the oldest is dropped. Drops are logged as a count
+ * (`chatwarden.webhook_dropped`): the first at once, then at most once a minute per endpoint, and what is left when
+ * `dispose()` runs. A 429's `retry-after` is honoured from 1 s (a receiver cannot make us retry at once) to 60 s.
+ * The endpoints are copied when this is called: changing your config object afterwards changes nothing.
  *
  * Everything is checked once, here: a bad URL or a secret under 32 characters throws `RangeError` (the message never
  * holds the value) and subscribes nothing. Call `dispose()` on shutdown.
@@ -142,6 +165,7 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
   const timers = new Set<{ timer: ReturnType<typeof setTimeout>; wake: () => void }>();
   const aborts = new Set<AbortController>();
   const queues: Delivery[][] = [];
+  const flushers: Array<() => void> = [];
 
   /** Sleep `ms`, or until dispose. */
   const sleep = (ms: number): Promise<void> =>
@@ -158,13 +182,16 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
 
   const backoff = (retry: number): number => Math.round(BACKOFF_BASE_MS * 2 ** retry * (1 + (random() * 0.4 - 0.2)));
 
+  /** A receiver's `retry-after` is honoured between 1 s (it cannot make us retry at once) and 60 s. */
+  const floorAndCap = (ms: number): number => Math.min(Math.max(ms, RETRY_AFTER_FLOOR_MS), RETRY_AFTER_CAP_MS);
+
   /** How long a 429 asks us to wait, or undefined for no usable `retry-after`. */
   const retryAfter = (value: string | null): number | undefined => {
     if (value === null) return undefined;
-    if (/^\d{1,12}$/.test(value)) return Math.min(Number(value) * 1000, RETRY_AFTER_CAP_MS);
+    if (/^\d{1,12}$/.test(value)) return floorAndCap(Number(value) * 1000);
     if (IMF_DATE_RE.test(value)) {
       const at = Date.parse(value);
-      if (Number.isFinite(at)) return Math.min(Math.max(0, at - clock.now()), RETRY_AFTER_CAP_MS);
+      if (Number.isFinite(at)) return floorAndCap(at - clock.now());
     }
     return undefined;
   };
@@ -172,17 +199,41 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
   for (const endpoint of endpoints) {
     const queue: Delivery[] = [];
     let busy = false;
-    let lastTimestamp = 0;
+    let dropped = 0;
+    let lastDropLog: number | null = null;
+    let dropTimer: ReturnType<typeof setTimeout> | undefined;
+
+    /** Log the drops counted since the last line, as one count. */
+    const flushDrops = (): void => {
+      if (dropTimer !== undefined) clearTimeout(dropTimer);
+      dropTimer = undefined;
+      if (dropped === 0) return;
+      safeWarn(logger, 'chatwarden.webhook_dropped', { count: dropped });
+      dropped = 0;
+      lastDropLog = clock.now();
+    };
+    /** Count a drop. The first logs at once; after that at most one line per 60 s (the rest waits for the window or dispose). */
+    const noteDrop = (): void => {
+      dropped++;
+      const since = lastDropLog === null ? Infinity : clock.now() - lastDropLog;
+      if (since >= DROP_LOG_WINDOW_MS) flushDrops();
+      else if (dropTimer === undefined) {
+        dropTimer = setTimeout(flushDrops, DROP_LOG_WINDOW_MS - since);
+        dropTimer.unref?.();
+      }
+    };
+    flushers.push(flushDrops);
 
     const attempt = async (d: Delivery): Promise<Attempt> => {
-      // A fresh timestamp for every attempt, and strictly later than the last, so a retry in the same second is not a replay.
-      const timestamp = Math.max(Math.floor(clock.now() / 1000), lastTimestamp + 1);
-      lastTimestamp = timestamp;
+      // A fresh timestamp for every attempt, and strictly later than this delivery's last, so a retry (same body) in the same
+      // second is not a replay. Different deliveries have different bodies and signatures: they never push each other later.
+      const timestamp = Math.max(Math.floor(clock.now() / 1000), d.lastTimestamp + 1);
+      d.lastTimestamp = timestamp;
       const controller = new AbortController();
       aborts.add(controller);
       const timeout = setTimeout(() => controller.abort(new DOMException('The attempt timed out.', 'TimeoutError')), ATTEMPT_TIMEOUT_MS);
       try {
-        const res = await fetchFn(endpoint.url, {
+        const res = await fetchFn(endpoint.href, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
@@ -256,7 +307,7 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
       if (disposed) return;
       try {
         let data: Record<string, unknown> = { ...event };
-        if (endpoint.includeExcerpts === true && event.type === 'report.created') {
+        if (endpoint.includeExcerpts && event.type === 'report.created') {
           try {
             const report = cw.reports.get(event.reportId);
             if (report !== null) {
@@ -280,9 +331,9 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
         const body = JSON.stringify({ id, type: event.type, at: clock.now(), data });
         if (queue.length >= QUEUE_MAX) {
           queue.shift();
-          safeWarn(logger, 'chatwarden.webhook_dropped', { count: 1 });
+          noteDrop();
         }
-        queue.push({ id, type: event.type, body });
+        queue.push({ id, type: event.type, body, lastTimestamp: 0 });
         void drain();
       } catch (err) {
         safeWarn(logger, 'chatwarden.webhook_failed', { type: event.type, error: errName(err), attempts: 0 });
@@ -310,6 +361,8 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
       aborts.clear();
       for (const queue of queues) queue.length = 0;
       queues.length = 0;
+      // The drops not logged yet, once, and no timer left behind.
+      for (const flush of flushers.splice(0)) flush();
     },
   };
 }
