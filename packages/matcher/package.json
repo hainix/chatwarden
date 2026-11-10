@@ -5,7 +5,21 @@
   "description": "Chatwarden matcher package.",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "keywords": [
+    "chatwarden",
+    "moderation",
+    "chat",
+    "matcher",
+    "blocklist",
+    "text-matching"
+  ],
+  "homepage": "https://github.com/hainix/chatwarden/tree/main/packages/matcher#readme",
+  "bugs": {
+    "url": "https://github.com/hainix/chatwarden/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hainix/chatwarden.git",
@@ -18,13 +32,40 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
+    "./fixtures": {
+      "types": "./dist/src/fixtures/index.d.ts",
+      "default": "./dist/src/fixtures/index.js"
+    },
     "./test-fixtures": {
-      "types": "./dist/test/fixtures/index.d.ts",
-      "default": "./dist/test/fixtures/index.js"
+      "types": "./dist/src/fixtures/testFixtures.d.ts",
+      "default": "./dist/src/fixtures/testFixtures.js"
     }
   },
-  "typesVersions": { "*": { "test-fixtures": ["dist/test/fixtures/index.d.ts"] } },
-  "files": ["dist/src"],
-  "dependencies": { "@chatwarden/core": "0.0.0", "obscenity": "^0.4.6" },
-  "publishConfig": { "access": "public" }
+  "typesVersions": {
+    "*": {
+      "fixtures": [
+        "dist/src/fixtures/index.d.ts"
+      ],
+      "test-fixtures": [
+        "dist/src/fixtures/testFixtures.d.ts"
+      ]
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist/src",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "tsc -b"
+  },
+  "dependencies": {
+    "@chatwarden/core": "0.0.0",
+    "obscenity": "^0.4.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

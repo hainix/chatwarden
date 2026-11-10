@@ -1,5 +1,5 @@
 import type { ExceptionRow, TermRow } from '../../src/index.js';
-import { SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS } from './syntheticPack.js';
+import { SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS } from '../../src/fixtures/syntheticPack.js';
 
 export const term = (id: string, t: string, active = true, language = 'en'): TermRow => ({ id, term: t, language, active });
 export const exception = (id: string, phrase: string, active = true, language = 'en'): ExceptionRow => ({

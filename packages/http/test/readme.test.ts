@@ -293,7 +293,7 @@ declare const authorize: import('@chatwarden/http').Authenticate;
         '@chatwarden/core': src('core/src/index.ts'),
         '@chatwarden/store-sqlite': src('store-sqlite/src/index.ts'),
         '@chatwarden/matcher': src('matcher/src/index.ts'),
-        '@chatwarden/matcher/test-fixtures': src('matcher/test/fixtures/index.ts'),
+        '@chatwarden/matcher/fixtures': src('matcher/src/fixtures/index.ts'),
         '@chatwarden/profanity': src('profanity/src/index.ts'),
         '@chatwarden/discord': src('discord/src/index.ts'),
         '@chatwarden/http': src('http/src/index.ts'),

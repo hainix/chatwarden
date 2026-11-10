@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     // Workspace packages resolve to their TypeScript source, so tests need no prior `tsc -b`.
-    // Order matters: the more specific `@chatwarden/matcher/test-fixtures` must come before `@chatwarden/matcher`.
+    // Order matters: the more specific `@chatwarden/matcher/fixtures` subpaths must come before `@chatwarden/matcher`.
     alias: [
       {
         find: '@chatwarden/core',
@@ -16,7 +16,11 @@ export default defineConfig({
       },
       {
         find: '@chatwarden/matcher/test-fixtures',
-        replacement: fileURLToPath(new URL('./packages/matcher/test/fixtures/index.ts', import.meta.url)),
+        replacement: fileURLToPath(new URL('./packages/matcher/src/fixtures/testFixtures.ts', import.meta.url)),
+      },
+      {
+        find: '@chatwarden/matcher/fixtures',
+        replacement: fileURLToPath(new URL('./packages/matcher/src/fixtures/index.ts', import.meta.url)),
       },
       {
         find: '@chatwarden/matcher',
@@ -41,7 +45,7 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'scripts/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
     setupFiles: ['./packages/store-sqlite/test/setup.ts'],
   },

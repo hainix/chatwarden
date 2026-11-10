@@ -8,7 +8,11 @@
   "engines": { "node": ">=22.13" },
   "workspaces": ["packages/*", "examples/*"],
   "scripts": {
+    "build": "tsc -b",
+    "clean": "node scripts/clean.mjs",
     "typecheck": "tsc -b",
+    "check:pack": "npm run build && node scripts/check-pack.mjs",
+    "license:sync": "node scripts/sync-license.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "changeset": "changeset"

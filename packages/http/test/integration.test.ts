@@ -9,7 +9,7 @@ import type { Chatwarden, Logger, RawWho } from '@chatwarden/core';
 import { discordFeed } from '@chatwarden/discord';
 import type { DiscordFeed } from '@chatwarden/discord';
 import { LiveTerms } from '@chatwarden/matcher';
-import { syntheticTermPack } from '@chatwarden/matcher/test-fixtures';
+import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { openStore } from '@chatwarden/store-sqlite';
 import { adminRoutes, healthRoutes, playerRoutes, ReplayCache, sign, verify, webhookIn, webhooksOut } from '../src/index.js';
 import type { KitRequest, WebhooksOut } from '../src/index.js';

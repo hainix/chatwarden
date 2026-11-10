@@ -124,5 +124,5 @@ turns a subject into a seat on the server, and no player-facing frame or respons
 The store is in-memory (`openStore({ path: ':memory:' })`), so everything resets on restart.
 
 **The term list here is synthetic.** The demo blocks invented words (such as `zorbak`) from
-`@chatwarden/matcher/test-fixtures`, which is a test fixture and is not published. A real adopter installs a term
+`@chatwarden/matcher/fixtures`, the synthetic pack the matcher package ships for tests and demos. A real adopter installs a term
 pack, loads it with `loadTermPack`, and passes `new LiveTerms({ store, pack, clock })` as the `matcher` option.

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LiveTerms, type ExceptionRecord, type TermRecord, type TermStore } from '@chatwarden/matcher';
-import { SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS, syntheticTermPack } from '@chatwarden/matcher/test-fixtures';
+import { SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MIGRATIONS, openStore, type SqliteStore } from '../src/index.js';
 
 const T0 = 1_700_000_000_000;

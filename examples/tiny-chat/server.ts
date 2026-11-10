@@ -49,7 +49,7 @@ import { discordFeed, type DiscordFeed } from '@chatwarden/discord';
 import { adminRoutes, healthRoutes, playerRoutes, type KitRequest } from '@chatwarden/http';
 import { toExpress } from '@chatwarden/http/express';
 import { LiveTerms, type TermPack } from '@chatwarden/matcher';
-import { syntheticTermPack } from '@chatwarden/matcher/test-fixtures';
+import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { createProfanityFilter } from '@chatwarden/profanity';
 import { openStore } from '@chatwarden/store-sqlite';
 

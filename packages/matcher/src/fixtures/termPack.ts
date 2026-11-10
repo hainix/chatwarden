@@ -1,4 +1,4 @@
-import type { TermPack } from '../../src/index.js';
+import type { TermPack } from '../termPack.js';
 import { SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS } from './syntheticPack.js';
 
 /** The synthetic terms as a TermPack. The negative corpus is every term's negative lines (all fine under

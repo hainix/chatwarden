@@ -5,7 +5,7 @@ import {
   SYNTHETIC_EXCEPTIONS,
   SYNTHETIC_TERMS,
   syntheticTermPack,
-} from './fixtures/index.js';
+} from '../src/fixtures/index.js';
 
 const T0 = 1_700_000_000_000;
 const ID = /^[A-Za-z0-9_-]{22}$/;
