@@ -147,7 +147,7 @@ export interface ChatwardenOptions {
   /**
    * The numbers the kit enforces: chat length and rate, the slur filter's strikes and timeouts, report limits and
    * reporter feedback. Any field, groups included (`{ strikes: { count: 2 } }` keeps the other strike settings);
-   * the defaults are Moxgate's. Every number must be a whole number above 0 (durations at most 100 years), else a
+   * the defaults are Moxgate's. Every number must be a whole number above 0 (durations at most 365 days), else a
    * `ProfileError` is thrown at creation. Read the result back as `cw.limits`.
    */
   limits?: LimitsInput;

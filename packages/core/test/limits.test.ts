@@ -106,7 +106,7 @@ describe('resolveLimits() validation', () => {
   }
 
   for (const [path, build] of DURATION_FIELDS) {
-    it(`${path} refuses a duration over 100 years`, () => {
+    it(`${path} refuses a duration over 365 days`, () => {
       expect(failure(build(MAX_DURATION_MS + 1)).path).toBe(path);
     });
   }
@@ -144,4 +144,14 @@ describe('resolveLimits() validation', () => {
     expect(LIMITS_DEFAULTS.reports.suspendWindowMs).toBe(30 * DAY);
     expect(LIMITS_DEFAULTS.strikes.repeatLookbackMs).toBe(7 * DAY);
   });
+});
+
+describe('resolveLimits() durations are capped at 365 days', () => {
+  const YEAR = 365 * DAY;
+  for (const [path, build] of DURATION_FIELDS) {
+    it(`${path}: exactly 365 days is accepted, 365 days + 1 ms is refused`, () => {
+      expect(() => resolveLimits(build(YEAR) as never)).not.toThrow();
+      expect(failure(build(YEAR + 1)).path).toBe(path);
+    });
+  }
 });

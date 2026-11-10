@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_SANCTION_DURATION_MS } from '../src/sanctions.js';
 import {
   defineProfile,
   MAX_DURATION_MS,
@@ -769,8 +770,8 @@ describe('validation: the repeat rule', () => {
     expect(failure(() => defineProfile(custom as unknown as ModerationProfile)).path).toBe('profile.repeat.windowDays');
   });
 
-  it('every durationMs is capped at 100 years; the boundary passes (outcomes and ladder cells)', () => {
-    expect(MAX_DURATION_MS).toBe(100 * 365 * DAY);
+  it('every durationMs is capped at 365 days; the boundary passes (outcomes and ladder cells)', () => {
+    expect(MAX_DURATION_MS).toBe(365 * DAY);
     const ok = resolveProfile('relaxed', { firstOffense: { severe: { kind: 'ban', durationMs: MAX_DURATION_MS } } });
     expect(ok.firstOffense.severe).toEqual({ kind: 'ban', durationMs: MAX_DURATION_MS });
     const over = invalid((p) => (p.firstOffense.severe = { kind: 'ban', durationMs: MAX_DURATION_MS + 1 }));
@@ -1060,5 +1061,45 @@ describe('areaRules and severeRules (K3a Task 4)', () => {
     const p = resolveProfile('relaxed', { areaRules: [5] });
     expect(Object.isFrozen(p.areaRules)).toBe(true);
     expect(Object.isFrozen(p.severeRules)).toBe(true);
+  });
+});
+
+describe('outcome durations are capped at 365 days (what decide accepts)', () => {
+  const YEAR = 365 * DAY;
+  it('MAX_DURATION_MS is the sanction cap, one source of truth', () => {
+    expect(MAX_DURATION_MS).toBe(YEAR);
+    expect(MAX_DURATION_MS).toBe(MAX_SANCTION_DURATION_MS);
+  });
+
+  it('an outcome, a repeat outcome and a ladder cell at exactly 365 days are accepted', () => {
+    const p = resolveProfile('relaxed', { firstOffense: { severe: { kind: 'ban', durationMs: YEAR } } });
+    expect(p.firstOffense.severe).toEqual({ kind: 'ban', durationMs: YEAR });
+    const atCap = copy(PRESETS.relaxed) as { ladder: Array<{ high: { durationMs: number } }>; repeat: { outcome: unknown } };
+    atCap.ladder[2]!.high.durationMs = YEAR;
+    atCap.repeat.outcome = { kind: 'chat', durationMs: YEAR } as never;
+    expect(() => defineProfile(atCap as unknown as ModerationProfile)).not.toThrow();
+  });
+
+  it('365 days + 1 ms is refused, with the path of the outcome, repeat outcome and ladder cell', () => {
+    expect(invalid((p) => (p.firstOffense.severe = { kind: 'ban', durationMs: YEAR + 1 })).path).toBe('profile.firstOffense.severe.durationMs');
+    expect(invalid((p) => (p.repeat.outcome = { kind: 'chat', durationMs: YEAR + 1 })).path).toBe('profile.repeat.outcome.durationMs');
+    expect(invalid((p) => (p.ladder[2].high.durationMs = YEAR + 1)).path).toBe('profile.ladder[2].high.durationMs');
+    expect(invalid((p) => (p.ladder[2].high.durationMs = 2 * YEAR)).path).toBe('profile.ladder[2].high.durationMs');
+  });
+
+  it('the message names the 365 day limit and never the value', () => {
+    const err = invalid((p) => (p.firstOffense.severe = { kind: 'ban', durationMs: YEAR + 12345 }));
+    expect(err.message).toContain('365 days');
+    expect(err.message).not.toContain('12345');
+  });
+
+  it('no preset names a duration decide would refuse', () => {
+    for (const preset of Object.values(PRESETS)) {
+      for (const outcome of Object.values(preset.firstOffense)) {
+        if (typeof outcome === 'object' && outcome !== null && 'durationMs' in outcome && outcome.durationMs !== null) {
+          expect(outcome.durationMs).toBeLessThanOrEqual(YEAR);
+        }
+      }
+    }
   });
 });

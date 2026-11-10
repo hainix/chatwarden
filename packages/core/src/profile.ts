@@ -1,4 +1,5 @@
 import { HISTORY_LOOKBACK_MS, LADDER_TABLE } from './ladder.js';
+import { MAX_SANCTION_DURATION_MS } from './sanctions.js';
 import type { LadderRow } from './ladder.js';
 import { CONDUCT_LEVELS } from './types.js';
 import type { ConductLevel } from './types.js';
@@ -164,8 +165,11 @@ const LADDER_ROWS = 6;
 const WORD_MAX = 40;
 const MAX_DEPTH = 24;
 
-/** The longest any duration may be: 100 years, so later date arithmetic cannot overflow. */
-export const MAX_DURATION_MS = 3_153_600_000_000;
+/**
+ * The longest any duration may be: 365 days, the same cap `decide` and `applySanction` enforce (one source of truth), so a
+ * suggested outcome or an automatic timeout can never name a length the moderator's own decision would refuse.
+ */
+export const MAX_DURATION_MS = MAX_SANCTION_DURATION_MS;
 /** The longest `repeat.windowDays`: the history lookback (90 days), since the record reaches back no further. */
 export const MAX_WINDOW_DAYS = HISTORY_LOOKBACK_MS / DAY;
 
@@ -202,7 +206,7 @@ function positiveInt(v: unknown): v is number {
 
 function duration(v: unknown, path: string): void {
   if (v !== null && (!positiveInt(v) || v > MAX_DURATION_MS)) {
-    fail(path, 'must be a whole number of milliseconds above 0 and at most 100 years, or null for permanent');
+    fail(path, 'must be a whole number of milliseconds above 0 and at most 365 days, or null for permanent');
   }
 }
 
