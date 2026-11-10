@@ -98,6 +98,7 @@ export function Guide() {
           {t('hub.guide.title')}
         </h2>
       </div>
+      <p className="cw-hint">{t('hub.guide.intro')}</p>
       <Fetched state={state} what={t('hub.state.what.guide')}>
         {(doc) => {
           // A profile always carries its ladder; a server on an older kit might not, and then the default table is the truth.

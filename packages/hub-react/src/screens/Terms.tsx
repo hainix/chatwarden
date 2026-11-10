@@ -268,6 +268,7 @@ export function Terms() {
       }
     >
       <p className="cw-hint">{t('hub.terms.intro')}</p>
+      <p className="cw-hint">{t('hub.terms.showWords.hint')}</p>
       {list.error !== null && <ErrorBlock error={list.error} what={t('hub.state.what.terms')} onRetry={list.reload} />}
       {notice !== null && (
         <Notice tone="bad" role="alert">

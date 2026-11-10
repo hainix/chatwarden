@@ -278,7 +278,7 @@ describe('closing a gap', () => {
     const r = await openGaps({}, twoGaps);
     r.w.intercept.fn = (req) => (req.path === '/policy' ? SERVER_500 : undefined);
     await r.user.click(screen.getAllByRole('button', { name: /^Close the gap with ref/ })[0]!);
-    expect(await screen.findByText(/The rules could not be loaded/)).toBeInTheDocument();
+    expect(await screen.findByText(/The Community Rules could not be loaded/)).toBeInTheDocument();
     const select = screen.getByLabelText('Close it as') as HTMLSelectElement;
     expect([...select.options].map((o) => o.textContent)).toEqual(['Choose', 'Not a rule']);
     fireEvent.change(select, { target: { value: 'none' } });

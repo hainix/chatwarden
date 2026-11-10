@@ -190,6 +190,7 @@ export function Audit() {
           {t('hub.audit.title')}
         </h2>
       </div>
+      <p className="cw-hint">{t('hub.audit.intro')}</p>
       <Panel title={t('hub.audit.filter')}>
         <form
           className="cw-form cw-panel-pad cw-audit-filter"
@@ -200,7 +201,10 @@ export function Audit() {
         >
           <div className="cw-field">
             <label htmlFor={`${id}-actor`}>{t('hub.audit.actor')}</label>
-            <input id={`${id}-actor`} type="text" className="cw-input" autoComplete="off" spellCheck={false} value={draft.actor} onChange={(e) => setDraft({ ...draft, actor: e.target.value })} />
+            <input id={`${id}-actor`} type="text" className="cw-input" autoComplete="off" spellCheck={false} aria-describedby={`${id}-actor-hint`} value={draft.actor} onChange={(e) => setDraft({ ...draft, actor: e.target.value })} />
+            <p id={`${id}-actor-hint`} className="cw-hint">
+              {t('hub.audit.actor.hint')}
+            </p>
           </div>
           <div className="cw-field">
             <label htmlFor={`${id}-action`}>{t('hub.audit.action')}</label>

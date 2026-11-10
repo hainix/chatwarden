@@ -195,6 +195,7 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, showW
             <Field
               id={`${base}-word`}
               label={t(label)}
+              hint={t(kind === 'term' ? 'hub.terms.form.word.hint' : 'hub.terms.form.phrase.hint', { max: WORD_MAX })}
               counter={t('hub.terms.form.counter', { count: word.trim().length, max: WORD_MAX })}
               problem={shown.word}
             >
