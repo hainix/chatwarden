@@ -88,6 +88,20 @@ describe('checkFileList', () => {
     const extra = ['src/latest.ts', 'dist/src/latest.js', 'dist/src/latest.js.map', 'dist/src/latest.d.ts', 'dist/src/latest.d.ts.map'];
     expect(check([...goodFiles(), ...extra])).toEqual([]);
   });
+  it('accepts a .tsx source next to its compiled files (a React package)', () => {
+    const extra = ['src/Hub.tsx', 'dist/src/Hub.js', 'dist/src/Hub.js.map', 'dist/src/Hub.d.ts', 'dist/src/Hub.d.ts.map'];
+    expect(check([...goodFiles(), ...extra])).toEqual([]);
+  });
+  it('still reports a compiled file with no source at all', () => {
+    const extra = ['dist/src/Hub.js', 'dist/src/Hub.js.map', 'dist/src/Hub.d.ts', 'dist/src/Hub.d.ts.map'];
+    expect(check([...goodFiles(), ...extra]).join('\n')).toContain('src/Hub.ts');
+  });
+  it('requires a CSS export target to be in the tarball', () => {
+    const pkg = goodPkg();
+    (pkg.exports as Record<string, unknown>)['./styles.css'] = './src/styles.css';
+    expect(check(goodFiles(), pkg).join('\n')).toContain('src/styles.css');
+    expect(check([...goodFiles(), 'src/styles.css'], pkg)).toEqual([]);
+  });
   it('allows src/fixtures (shipped synthetic fixtures)', () => {
     const files = [
       ...goodFiles(),
@@ -130,6 +144,23 @@ describe('checkManifest', () => {
 
   it('accepts a good manifest', () => {
     expect(run(goodPkg())).toEqual([]);
+  });
+  it('requires sideEffects false, or a list of stylesheets only (a package that ships a CSS file)', () => {
+    const pkg = goodPkg();
+    pkg.sideEffects = true;
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+    delete pkg.sideEffects;
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+    pkg.sideEffects = ['./src/styles.css'];
+    expect(run(pkg)).toEqual([]);
+    pkg.sideEffects = ['./src/styles.css', './src/other.css'];
+    expect(run(pkg)).toEqual([]);
+    pkg.sideEffects = ['./src/polyfill.js'];
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+    pkg.sideEffects = ['./src/styles.css', './dist/src/index.js'];
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+    pkg.sideEffects = [];
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
   });
   it('requires a prepack script that builds', () => {
     const pkg = goodPkg();
@@ -283,8 +314,8 @@ describe('nodeImports', () => {
 
 describe('nodeImportProblems (browser-safe packages)', () => {
   const file = (path: string, source: string) => ({ path, source });
-  it('names core and store-memory as the browser-safe packages', () => {
-    expect([...BROWSER_SAFE].sort()).toEqual(['@chatwarden/core', '@chatwarden/store-memory']);
+  it('names core, hub-react and store-memory as the browser-safe packages', () => {
+    expect([...BROWSER_SAFE].sort()).toEqual(['@chatwarden/core', '@chatwarden/hub-react', '@chatwarden/store-memory']);
   });
   it('flags a node import in a browser-safe package, per file and module', () => {
     const out: string[] = nodeImportProblems({

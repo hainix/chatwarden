@@ -135,8 +135,11 @@ describe('the smoke scenario', () => {
     .filter((m) => m.private !== true)
     .map((m) => m.name);
 
+  // The React packages need a DOM and react to do anything; the consumer projects here are server-side Node. A UI package is
+  // installed with the rest (the tarball must install, with its peers) but the scenario has nothing of it to run.
+  const UI_ONLY = new Set(['@chatwarden/hub-react']);
   it('imports every published package, so a package left out of the smoke run is caught here', () => {
-    for (const name of published) expect(scenario, name).toContain(`from '${name}'`);
+    for (const name of published.filter((n) => !UI_ONLY.has(n))) expect(scenario, name).toContain(`from '${name}'`);
   });
   it('imports and runs every published subpath, including @chatwarden/http/admin (GET /me)', () => {
     for (const sub of ['@chatwarden/http/express', '@chatwarden/http/admin', '@chatwarden/matcher/fixtures']) expect(scenario, sub).toContain(`from '${sub}'`);

@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import { builtinModules } from 'node:module';
 import tseslint from 'typescript-eslint';
 
-// @chatwarden/core, @chatwarden/matcher and @chatwarden/store-memory must stay portable (they run in a browser) and dependency-free: their src
+// @chatwarden/core, @chatwarden/matcher, @chatwarden/store-memory and @chatwarden/hub-react must stay portable (they run in a browser): their src
 // may import nothing from a node: module or any Node builtin, not even node:crypto (see core's src/crypto.ts for the
 // process.getBuiltinModule route). Applies to src only; tests may use node:crypto as the reference implementation.
 const builtins = builtinModules.filter((name) => !name.startsWith('_') && !name.startsWith('node:') && !name.includes('/'));
@@ -41,7 +41,12 @@ export default tseslint.config(
     languageOptions: { globals: { localStorage: 'readonly', document: 'readonly' } },
   },
   {
-    files: ['packages/core/src/**/*.ts', 'packages/store-memory/src/**/*.ts', 'packages/matcher/src/**/*.ts'],
+    files: [
+      'packages/core/src/**/*.ts',
+      'packages/store-memory/src/**/*.ts',
+      'packages/matcher/src/**/*.ts',
+      'packages/hub-react/src/**/*.{ts,tsx}',
+    ],
     rules: { 'no-restricted-imports': browserSafeImports, 'no-restricted-syntax': browserSafeSyntax },
   },
 );

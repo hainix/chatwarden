@@ -27,14 +27,20 @@ const VERSION = readJson<Manifest>('packages', 'core', 'package.json').version a
 // The peer range stays at the first release it was written for: a 0.1.0 consumer is not forced to move for a patch.
 const PEER_RANGE = '^0.1.0';
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
+// The React UI packages are new in this release line: they peer on ^0.1.1 (the first version that has the routes they call)
+// until the release changeset raises every peer. The exception is named here, so any other package keeps ^0.1.0.
+const UI_PEER_RANGE = '^0.1.1';
+const UI_PACKAGES = new Set(['@chatwarden/hub-react']);
+const peerRangeOf = (pkgName: string): string => (UI_PACKAGES.has(pkgName) ? UI_PEER_RANGE : PEER_RANGE);
 
 describe('published package set', () => {
-  it('is the seven expected packages, none private', () => {
+  it('is the eight expected packages, none private', () => {
     expect(names.sort()).toEqual(
       [
         '@chatwarden/core',
         '@chatwarden/discord',
         '@chatwarden/http',
+        '@chatwarden/hub-react',
         '@chatwarden/matcher',
         '@chatwarden/profanity',
         '@chatwarden/store-memory',
@@ -83,9 +89,9 @@ describe('core is a peer, never a dependency', () => {
     expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
-    '%s peers on core ^0.1.0 and dev-depends on core 0.1.1',
+    '%s peers on core (^0.1.0, UI packages ^0.1.1) and dev-depends on core 0.1.1',
     (_n, pkg) => {
-      expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(PEER_RANGE);
+      expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(peerRangeOf(pkg.name));
       expect(pkg.devDependencies?.['@chatwarden/core']).toBe(VERSION);
       expect(pkg.peerDependenciesMeta?.['@chatwarden/core']).toBeUndefined();
     },
@@ -101,7 +107,7 @@ describe('core is a peer, never a dependency', () => {
 describe('every @chatwarden peer is linked locally at the exact version', () => {
   it.each(published.map((p) => [p.pkg.name, p.pkg] as const))('%s', (_n, pkg) => {
     for (const peer of Object.keys(pkg.peerDependencies ?? {}).filter(ownScope)) {
-      expect(pkg.peerDependencies![peer]).toBe(PEER_RANGE);
+      expect(pkg.peerDependencies![peer]).toBe(peerRangeOf(pkg.name));
       expect(pkg.devDependencies?.[peer]).toBe(VERSION);
     }
     for (const dev of Object.keys(pkg.devDependencies ?? {}).filter(ownScope)) {
@@ -160,14 +166,35 @@ describe('http optional peers', () => {
   });
 });
 
+describe('hub-react', () => {
+  const hub = (): Manifest & { sideEffects?: unknown; exports?: Record<string, unknown> } =>
+    published.find((p) => p.pkg.name === '@chatwarden/hub-react')!.pkg as Manifest & { sideEffects?: unknown; exports?: Record<string, unknown> };
+  it('peers on react, react-dom, core and http; bundles none of them', () => {
+    expect(Object.keys(hub().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', '@chatwarden/http', 'react', 'react-dom']);
+    expect(hub().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
+    expect(hub().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
+    expect(hub().peerDependencies?.['@chatwarden/http']).toBe('^0.1.1');
+    expect(hub().dependencies).toBeUndefined();
+  });
+  it('ships one stylesheet as ./styles.css and lists only it under sideEffects', () => {
+    expect(hub().exports?.['./styles.css']).toBe('./src/styles.css');
+    expect(hub().sideEffects).toEqual(['./src/styles.css']);
+  });
+  it('dev-depends on the kit the tests run on and on the test tools, not as peers', () => {
+    for (const d of ['@chatwarden/matcher', '@chatwarden/store-memory', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {
+      expect(hub().devDependencies?.[d], d).toBeDefined();
+    }
+  });
+});
+
 describe('tiny-chat example', () => {
   const tiny = readJson<Manifest>('examples', 'tiny-chat', 'package.json');
   it('is private and named as the changeset config expects', () => {
     expect(tiny.private).toBe(true);
     expect(tiny.name).toBe('@chatwarden/example-tiny-chat');
   });
-  it('depends on every published package as a regular dependency at the group version', () => {
-    for (const n of names) expect(tiny.dependencies?.[n]).toBe(VERSION);
+  it('depends on every published server package as a regular dependency at the group version (the React UI packages are for a front end)', () => {
+    for (const n of names.filter((n) => !UI_PACKAGES.has(n))) expect(tiny.dependencies?.[n]).toBe(VERSION);
   });
 });
 

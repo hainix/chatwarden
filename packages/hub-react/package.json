@@ -1,0 +1,73 @@
+{
+  "name": "@chatwarden/hub-react",
+  "version": "0.1.1",
+  "private": false,
+  "description": "Moderator hub for Chatwarden: a themeable React UI over the staff HTTP API, with the report queue, decisions, sanctions, blocked terms and audit trail.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "keywords": [
+    "chatwarden",
+    "moderation",
+    "chat",
+    "react",
+    "moderator",
+    "hub"
+  ],
+  "homepage": "https://github.com/hainix/chatwarden/tree/main/packages/hub-react#readme",
+  "bugs": {
+    "url": "https://github.com/hainix/chatwarden/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hainix/chatwarden.git",
+    "directory": "packages/hub-react"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./styles.css": "./src/styles.css"
+  },
+  "sideEffects": [
+    "./src/styles.css"
+  ],
+  "files": [
+    "dist/src",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "tsc -b"
+  },
+  "peerDependencies": {
+    "@chatwarden/core": "^0.1.1",
+    "@chatwarden/http": "^0.1.1",
+    "react": "^18.3.0 || ^19.0.0",
+    "react-dom": "^18.3.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@chatwarden/core": "0.1.1",
+    "@chatwarden/http": "0.1.1",
+    "@chatwarden/matcher": "0.1.1",
+    "@chatwarden/store-memory": "0.1.1",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.9",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "axe-core": "^4.14.0",
+    "jsdom": "^31.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

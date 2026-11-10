@@ -15,6 +15,7 @@ Status: pre-release, as-is, no support promise; PRs welcome.
 | [`@chatwarden/profanity`](packages/profanity) | Optional ordinary-swearing filter (allow, star or refuse; style, add, remove, custom list). Slurs stay the matcher's job. |
 | [`@chatwarden/http`](packages/http) | HTTP routes: the staff API (reports, decisions, sanctions, terms, audit), the player API (notices, record, rules), health probes, signed webhooks in and out, and an Express adapter. |
 | [`@chatwarden/discord`](packages/discord) | Posts the staff review queue into a Discord forum through a channel webhook, one thread per reported person. |
+| [`@chatwarden/hub-react`](packages/hub-react) | The moderator hub: a themeable React UI over the staff API (report queue, decisions, sanctions, blocked terms, audit). Runs in a browser. |
 | [`examples/tiny-chat`](examples/tiny-chat) | A one-room Express + `ws` chat server wired through `createChatwarden`, the kit's HTTP routes and an optional Discord feed (private, not published). |
 
 ## Install
@@ -28,12 +29,13 @@ project gets exactly one copy of it. `store-sqlite` and `profanity` also need `m
 | Give moderators and players HTTP routes (Express) | add `npm install @chatwarden/http express @types/express` |
 | Mask or refuse ordinary swearing | add `npm install @chatwarden/profanity` |
 | Post the review queue into a Discord forum | add `npm install @chatwarden/discord` |
+| Give moderators a web UI over the staff routes | add `npm install @chatwarden/hub-react react react-dom` (it also needs `@chatwarden/http` as a peer) |
 | Run tests or a demo with no database (everything is lost on restart) | swap `@chatwarden/store-sqlite` for `npm install @chatwarden/store-memory` |
 | Try it with invented test words, no real term list | nothing extra: `@chatwarden/matcher/fixtures` is part of `@chatwarden/matcher` |
 
 Express 5 ships no types, so `@types/express` goes with `express` in a TypeScript project (a plain JavaScript project can skip it).
 
-Each package has its own README with the options, a copy-paste start and its security notes: [core](packages/core), [store-sqlite](packages/store-sqlite), [store-memory](packages/store-memory), [matcher](packages/matcher), [profanity](packages/profanity), [http](packages/http), [discord](packages/discord).
+Each package has its own README with the options, a copy-paste start and its security notes: [core](packages/core), [store-sqlite](packages/store-sqlite), [store-memory](packages/store-memory), [matcher](packages/matcher), [profanity](packages/profanity), [http](packages/http), [discord](packages/discord), [hub-react](packages/hub-react).
 
 ## Quick start
 

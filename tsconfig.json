@@ -10,6 +10,7 @@
     { "path": "packages/profanity" },
     { "path": "packages/http" },
     { "path": "packages/discord" },
+    { "path": "packages/hub-react" },
     { "path": "examples/tiny-chat" }
   ]
 }

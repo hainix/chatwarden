@@ -53,8 +53,28 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'scripts/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**'],
-    setupFiles: ['./packages/store-sqlite/test/setup.ts'],
+    // Two projects, so no test file runs twice: the kit's tests run in Node; the hub UI's tests need a DOM (jsdom).
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'kit',
+          include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'scripts/*.test.ts'],
+          exclude: ['**/node_modules/**', '**/dist/**', 'packages/hub-react/**'],
+          setupFiles: ['./packages/store-sqlite/test/setup.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'hub-react',
+          environment: 'jsdom',
+          include: ['packages/hub-react/test/**/*.test.{ts,tsx}'],
+          exclude: ['**/node_modules/**', '**/dist/**'],
+          setupFiles: ['./packages/hub-react/test/setup.ts'],
+          testTimeout: 30_000,
+        },
+      },
+    ],
   },
 });

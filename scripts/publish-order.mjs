@@ -17,6 +17,7 @@ export const PUBLISH_ORDER = [
   '@chatwarden/profanity',
   '@chatwarden/http',
   '@chatwarden/discord',
+  '@chatwarden/hub-react',
 ];
 
 const rankOf = (name) => {

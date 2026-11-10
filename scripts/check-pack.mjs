@@ -50,7 +50,7 @@ export function checkFileList({ pkg, files }) {
   const dist = files.filter((f) => f.startsWith('dist/src/'));
   if (!dist.some((f) => f.endsWith('.js'))) problems.push('no dist/src/**/*.js (was the package built?)');
   if (!dist.some((f) => f.endsWith('.d.ts'))) problems.push('no dist/src/**/*.d.ts (was the package built?)');
-  if (!files.some((f) => f.startsWith('src/') && f.endsWith('.ts') && !f.endsWith('.d.ts'))) {
+  if (!files.some((f) => f.startsWith('src/') && /\.tsx?$/.test(f) && !f.endsWith('.d.ts'))) {
     problems.push('no src/**/*.ts (source maps would not resolve)');
   }
 
@@ -58,9 +58,11 @@ export function checkFileList({ pkg, files }) {
     const m = /^dist\/src\/(.*)\.js$/.exec(f);
     if (m) {
       const stem = m[1];
-      for (const sibling of [`dist/src/${stem}.js.map`, `dist/src/${stem}.d.ts`, `dist/src/${stem}.d.ts.map`, `src/${stem}.ts`]) {
+      for (const sibling of [`dist/src/${stem}.js.map`, `dist/src/${stem}.d.ts`, `dist/src/${stem}.d.ts.map`]) {
         if (!have.has(sibling)) problems.push(`missing ${sibling} (next to ${f})`);
       }
+      // The source is a .ts file, or a .tsx file in a React package.
+      if (!have.has(`src/${stem}.ts`) && !have.has(`src/${stem}.tsx`)) problems.push(`missing src/${stem}.ts (next to ${f})`);
     }
   }
 
@@ -78,7 +80,11 @@ export function checkFileList({ pkg, files }) {
 export function checkManifest(pkg, dir) {
   const problems = [];
   if (pkg.license !== 'Apache-2.0') problems.push(`license must be Apache-2.0, got ${JSON.stringify(pkg.license)}`);
-  if (pkg.sideEffects !== false) problems.push('sideEffects must be false');
+  // false, or a list of stylesheets only: importing a CSS file is a side effect a bundler must keep, nothing else may be one.
+  const sideEffectsOk =
+    pkg.sideEffects === false ||
+    (Array.isArray(pkg.sideEffects) && pkg.sideEffects.length > 0 && pkg.sideEffects.every((f) => typeof f === 'string' && /\.css$/.test(f)));
+  if (!sideEffectsOk) problems.push('sideEffects must be false, or a list of .css files only');
   const prepack = pkg.scripts?.prepack;
   if (typeof prepack !== 'string' || !/\btsc -b\b/.test(prepack)) problems.push('scripts.prepack must run "tsc -b"');
   if (JSON.stringify(pkg.files) !== JSON.stringify(REQUIRED_FILES)) {
@@ -131,7 +137,7 @@ export function bareImports(source) {
 }
 
 /** The packages that must run in a browser: their compiled code may import no Node builtin, not even `node:crypto`. */
-export const BROWSER_SAFE = new Set(['@chatwarden/core', '@chatwarden/store-memory']);
+export const BROWSER_SAFE = new Set(['@chatwarden/core', '@chatwarden/hub-react', '@chatwarden/store-memory']);
 
 /**
  * The Node builtins a JavaScript source imports (`node:fs`, `crypto`, `node:fs/promises` -> `fs`), one entry per import, in
