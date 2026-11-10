@@ -9,7 +9,10 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = 'https://github.com/hainix/chatwarden';
 const REQUIRED_KEYWORDS = ['chatwarden', 'moderation', 'chat'];
-const REQUIRED_FILES = ['dist/src', 'src', 'README.md', 'LICENSE'];
+/** Static assets a package ships beside its source, listed after `src` (hub-react: the optional self-hosted font and its licence). */
+const STATIC_ASSETS = { 'hub-react': ['font.css', 'fonts'] };
+/** The `files` a package must declare. */
+const requiredFilesFor = (dir) => ['dist/src', 'src', ...(STATIC_ASSETS[dir] ?? []), 'README.md', 'LICENSE'];
 
 /** Every file path an `exports`, `main`, `types` or `typesVersions` entry points at, without the leading `./`. */
 export function exportTargets(pkg) {
@@ -87,8 +90,8 @@ export function checkManifest(pkg, dir) {
   if (!sideEffectsOk) problems.push('sideEffects must be false, or a list of .css files only');
   const prepack = pkg.scripts?.prepack;
   if (typeof prepack !== 'string' || !/\btsc -b\b/.test(prepack)) problems.push('scripts.prepack must run "tsc -b"');
-  if (JSON.stringify(pkg.files) !== JSON.stringify(REQUIRED_FILES)) {
-    problems.push(`files must be ${JSON.stringify(REQUIRED_FILES)}, got ${JSON.stringify(pkg.files)}`);
+  if (JSON.stringify(pkg.files) !== JSON.stringify(requiredFilesFor(dir))) {
+    problems.push(`files must be ${JSON.stringify(requiredFilesFor(dir))}, got ${JSON.stringify(pkg.files)}`);
   }
   const homepage = `${REPO}/tree/main/packages/${dir}#readme`;
   if (pkg.homepage !== homepage) problems.push(`homepage must be ${homepage}, got ${JSON.stringify(pkg.homepage)}`);

@@ -174,6 +174,19 @@ describe('checkManifest', () => {
     pkg.files = ['dist/src'];
     expect(run(pkg).join('\n')).toMatch(/files/);
   });
+  it('lets hub-react, and only hub-react, ship its font files after src', () => {
+    const hub = goodPkg();
+    hub.name = '@chatwarden/hub-react';
+    hub.homepage = 'https://github.com/hainix/chatwarden/tree/main/packages/hub-react#readme';
+    hub.repository = { type: 'git', url: 'git+https://github.com/hainix/chatwarden.git', directory: 'packages/hub-react' };
+    hub.files = ['dist/src', 'src', 'font.css', 'fonts', 'README.md', 'LICENSE'];
+    expect(run(hub, 'hub-react')).toEqual([]);
+    hub.files = ['dist/src', 'src', 'README.md', 'LICENSE'];
+    expect(run(hub, 'hub-react').join('\n')).toMatch(/files must be/);
+    const other = goodPkg();
+    other.files = ['dist/src', 'src', 'font.css', 'fonts', 'README.md', 'LICENSE'];
+    expect(run(other).join('\n')).toMatch(/files must be/);
+  });
   it('requires sideEffects: false', () => {
     const pkg = goodPkg();
     delete pkg.sideEffects;

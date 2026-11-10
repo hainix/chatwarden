@@ -176,9 +176,10 @@ describe('hub-react', () => {
     expect(hub().peerDependencies?.['@chatwarden/http']).toBe('^0.1.1');
     expect(hub().dependencies).toBeUndefined();
   });
-  it('ships one stylesheet as ./styles.css and lists only it under sideEffects', () => {
+  it('ships the stylesheet as ./styles.css and the optional font as ./font.css, and lists only those under sideEffects', () => {
     expect(hub().exports?.['./styles.css']).toBe('./src/styles.css');
-    expect(hub().sideEffects).toEqual(['./src/styles.css']);
+    expect(hub().exports?.['./font.css']).toBe('./font.css');
+    expect(hub().sideEffects).toEqual(['./src/styles.css', './font.css']);
   });
   it('dev-depends on the kit the tests run on and on the test tools, not as peers', () => {
     for (const d of ['@chatwarden/matcher', '@chatwarden/store-memory', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {

@@ -1,8 +1,9 @@
 # @chatwarden/hub-react
 
-The moderator hub for Chatwarden, the open-source chat moderation kit for games: a React UI over the kit's staff HTTP API. A
-moderator sees the report queue grouped by person, what was done lately, reads a report and decides it, and (as the later
-screens land) sanctions people, edits blocked terms and reads the audit trail. It talks to the API through a small injected transport, so the
+The moderator hub for Chatwarden, the open-source chat moderation kit for games: a React UI over the kit's staff HTTP API, built
+as a workbench for a team of moderators. The queue of open cases is always at the left, the case or screen in the middle; a
+moderator takes the next case, sees who else is on what, reads a report and decides it, and (as the later screens land) sanctions
+people, edits blocked terms and reads the audit trail. It talks to the API through a small injected transport, so the
 same hub runs against a real server (`fetch`) or against the real staff routes running in the page (a demo).
 
 Status: pre-release, as-is, no support promise.
@@ -81,18 +82,59 @@ export const client = createHubClient(routerTransport(handle));
 | `onNavigate` | `(route, path) => void` | Called when the hub first shows and each time the route changes. |
 | `now` | `() => number` | The clock for "5 minutes ago". Default `Date.now`. Tests pass their own. |
 | `className` | `string` | Extra class names for the root element, handy for theming. |
+| `gameName` | `string` | Your game's name, shown beside the product name in the top bar. Default: none. |
+| `shortcuts` | `boolean` | Set `false` to turn every keyboard shortcut off (J, K, N, ?, Ctrl or Cmd+K, Escape), for a page that has its own. Default `true`. |
 
 ### Screens
 
 | Route | Screen | Needs |
 | --- | --- | --- |
-| `#/` | Overview: people waiting, open reports, longest wait, the people who need review, recent actions | any signed-in role (panels follow `reports.read` and `history.read`) |
-| `#/reports`, `#/reports?status=actioned` | Reports: the queue grouped by reported person, filtered by status | `reports.read` |
+| `#/` | Overview, the team view: people waiting, open reports, the longest wait, unclaimed cases, who is on and what each is holding, recent actions | any signed-in role (panels follow `reports.read` and `history.read`) |
+| `#/reports`, `#/reports?status=actioned` | Reports: every report, grouped by reported person, filtered by status (the queue pane beside it is always the open cases) | `reports.read` |
 | `#/reports/:id` | Report: who is in it, their last 90 days, the saved chat (the reported line marked, blocked lines struck through, a filter to one person) and the decision panel | `reports.read`; deciding needs `reports.decide`, actions need `sanctions.apply` |
 | `#/people/:ref`, `#/terms`, `#/blocked`, `#/gaps`, `#/audit`, `#/guide` | Routes and tabs exist; the screens arrive in later releases and show a short "not available yet" page until then | the permission of the tab |
 
 The tabs a role cannot use are not shown: Audit appears for a senior and above, and every tab follows the permission table the
 server reports in `GET /me` (so a `permissions` override on the server is respected).
+
+### The workbench
+
+Three panes from 1200px wide: the queue (left), the case or screen (middle), and, beside an open case, a panel saying who is
+handling it and who else is looking. Two panes from 820px (the panel moves under the case); narrower, everything stacks and the page
+scrolls as one, with no horizontal scroll down to 360px. A slim rail of sections sits at the far left, and a top bar holds the
+product, your game's name, whether the queue is live, the command bar and who is on. The hub fills `--cw-hub-height` (the viewport
+by default; set it to fit under your own header). Everything async is quiet: skeletons while loading (no spinners), a toast for news,
+a banner when the connection is lost.
+
+**Claims are soft locks.** Opening a case claims it if nobody holds it (`POST /cases/:ref/claim`), and while it stays open and the
+tab is visible the hub renews the claim every 60 seconds and a "viewing" hint every 20. The server releases a claim after 10 minutes
+without a renewal. A case someone else holds opens to read, with a notice; the server refuses a decision on it unless a senior
+takes it over. Each queue row shows who handles it (you in blue, others by name, or Unclaimed) and who is viewing; your own row has
+a Release button (the toast offers Undo). "Take next case" (N) claims the oldest unclaimed case that matches the category filter and
+opens it. The hub does not yet release a case when you navigate away from it: the claim lapses on its own.
+
+**The queue stays still.** The queue is read once, then the hub asks `GET /changes` every 5 seconds while the tab is visible and every
+30 while it is hidden, never while the browser is offline, and reads the queue again only when the token changed. New cases wait behind
+an "N new cases" pill; a claim arrives in place; a case that closes while the pointer or keyboard focus is in the list (or while it is
+the open case) stays in its place, marked "No longer open", until you move away. After two failed polls in a row a banner says the
+connection is lost (and polling slows to every 15 seconds); a toast says "Back online." when it recovers. Viewing and claim lapses
+move no change token, so a row's viewers refresh whenever the queue does and your own open case's viewers refresh every 20 seconds.
+
+**Keyboard.** Shortcuts never fire while you are typing in a field, a select or an editable region, or with Ctrl, Cmd or Alt held
+(except Ctrl or Cmd+K), and `shortcuts={false}` turns them all off.
+
+| Key | What it does |
+| --- | --- |
+| `J` / `K` | Move focus to the next or previous case in the queue. It moves; it does not open or claim. Enter opens the one you are on. |
+| `N` | Take the next case. A held key takes one. |
+| `Ctrl+K` or `Cmd+K` | Open the command bar: jump to a person or report in the queue, a term, a screen, or run Take next. |
+| `?` | List the shortcuts. |
+| `Esc` | Close the window that is open; otherwise go back to the queue. |
+
+**Toasts and Undo.** Toasts pause while the pointer or focus is on them. `useToasts()` (exported) gives `push`, `dismiss` and `hold`:
+`hold({ text, run, onUndo })` waits 5 seconds with an Undo button and a progress bar, then runs `run` once; Undo cancels it, and it
+runs at once if the toast is dismissed early or the page is closing. Releasing a claim uses `push` with an action; decisions will
+use `hold`.
 
 ### The report page and the decision
 
@@ -111,7 +153,7 @@ everything typed and offers "Try again", which sends the same body. The panel's 
 ### `HubClient`
 
 `createHubClient(transport)` returns one method per staff route. Each resolves with the parsed answer or rejects with a `HubError`
-(`status`, `code`, `message`, `retryAfter`). Codes are the kit's (`forbidden`, `not_found`, `already_decided`, ...), plus `network`
+(`status`, `code`, `message`, `retryAfter`; for a 409 `claimed`, also `heldBy` and `heldUntil`). Codes are the kit's (`forbidden`, `not_found`, `already_decided`, ...), plus `network`
 (no answer), `bad_response` and `unexpected`.
 
 | Method | Route |
@@ -120,7 +162,7 @@ everything typed and offers "Try again", which sends the same body. The panel's 
 | `listReports({ status?, cursor?, limit? })` | `GET /reports` |
 | `getReport(id, { level? })` | `GET /reports/:id` |
 | `suggest(id, { level, rule?, person? })` | `POST /reports/:id/suggest` |
-| `decide(id, { verdict, reason, actions, evidence? })` | `POST /reports/:id/decide` |
+| `decide(id, { verdict, reason, actions, evidence?, takeOver? })` | `POST /reports/:id/decide` |
 | `personHistory(ref, { limit? })` | `GET /people/:ref/history` |
 | `listSanctions({ cursor?, limit?, source? })` | `GET /sanctions` |
 | `applySanction({ subject, kind, durationMs, rule, ... })` | `POST /sanctions` |
@@ -135,6 +177,12 @@ everything typed and offers "Try again", which sends the same body. The panel's 
 | `listBlocked({ days? })` | `GET /blocked` |
 | `policy({ format? })` | `GET /policy` |
 | `listAudit({ cursor?, limit?, actor?, action? })` | `GET /audit` |
+| `changes(since?)` | `GET /changes` |
+| `claimCase(person, { takeOver? })` | `POST /cases/:ref/claim` |
+| `releaseCase(person)` | `POST /cases/:ref/release` |
+| `takeNext({ category? })` | `POST /cases/next` |
+| `viewing(person)` | `POST /cases/:ref/viewing` |
+| `listReasons()`, `addReason(input)`, `updateReason(id, patch)`, `setReasonActive(id, active)` | `GET /reasons`, `POST /reasons`, `PATCH /reasons/:id`, `POST /reasons/:id/active` |
 
 `fetchAll(loadPage, { maxPages? })` follows `next` for you and joins the pages.
 
@@ -193,62 +241,83 @@ radius, font and space is a `--cw-*` custom property, with a light and a dark va
 }
 ```
 
-The look is a calm, dense console: cool neutrals, one accent, and the signal colours kept for what needs a decision. A queue row
-carries a coloured rail on its left edge that follows how long the oldest open report has waited (green under an hour, amber under
-a day, red after), and the words beside it say the same, so colour is never the only signal.
+The look is a calm, dense workbench in the style of a professional triage tool. Neutrals carry the screen, and the chrome and
+navigation recede. **Colour only where it means something:**
+
+| Colour | It means |
+| --- | --- |
+| Blue (`--cw-accent`) | You, and your next action: the primary button, a selection, your own claims, the focus ring. |
+| Red (`--cw-red`) | Overdue (a wait over 24 hours), the reported line, a ban, a failure. |
+| Yellow (`--cw-yellow`) | A warning. |
+| Green (`--cw-live`) | The small dot that says the queue is live. Nothing else. |
+| Everything else | Neutral. No colour per category, per speaker or per person. |
+
+The one signature detail is the referee card, shown wherever a sanction is: a yellow card for a warning, half yellow and half red
+for a restriction, red for a ban, and a dashed outline for a note. The words always say the same as the colour, so colour is never
+the only signal. Every text token is at least 4.5:1 against every surface it is drawn on, in both themes; a test computes it from the
+values below, and another keeps the colour tokens to exactly this list.
 
 The tokens:
 
 | Token | Default (light, dark) | Used for |
 | --- | --- | --- |
-| `--cw-bg` | `#eef1f4`, `#10161b` | Page background behind everything. |
-| `--cw-surface` | `#ffffff`, `#182028` | Panels, rows, buttons. |
-| `--cw-surface-sunken` | `#f4f6f8`, `#1e2832` | Hover fill, code and tag chips. |
-| `--cw-border` | `#d5dce3`, `#2b3743` | Hairlines between rows and around panels. |
-| `--cw-border-strong` | `#a9b6c2`, `#435464` | Control borders and the default queue rail. |
-| `--cw-ink` | `#17212b`, `#e7edf2` | Body text. |
-| `--cw-ink-muted` | `#4a5866`, `#a6b4c1` | Secondary text, labels. |
-| `--cw-accent` | `#115e67`, `#6cc3cc` | Primary buttons, links, the current tab. |
-| `--cw-accent-ink` | `#ffffff`, `#07262a` | Text on an accent background. |
-| `--cw-accent-soft` | `#dbeced`, `#183840` | Selected filter, accent tags. |
-| `--cw-focus` | `#1a5fd1`, `#8ab4ff` | The focus ring. |
-| `--cw-ok` | `#1c7a45`, `#5ec98a` | Solid green: a fresh wait rail. |
-| `--cw-ok-soft` | `#dcf1e3`, `#173826` | Green tag background. |
-| `--cw-ok-ink` | `#14502c`, `#a6e8c0` | Text on the green background. |
-| `--cw-warn` | `#b86e00`, `#e8a93a` | Solid amber: an aging wait rail. |
-| `--cw-warn-soft` | `#fbeccc`, `#3a2c10` | Amber tag background. |
-| `--cw-warn-ink` | `#6b4300`, `#f2cd85` | Text on the amber background. |
-| `--cw-bad` | `#b3261e`, `#f0766d` | Solid red: a stale wait rail, danger borders. |
-| `--cw-bad-soft` | `#fbe0dd`, `#40201d` | Red tag and error background. |
-| `--cw-bad-ink` | `#8c1b15`, `#ffbab4` | Text on the red background. |
-| `--cw-idle-soft` | `#e6eaee`, `#26313c` | Neutral tag background. |
-| `--cw-idle-ink` | `#3b4753`, `#c6d1db` | Text on the neutral background. |
-| `--cw-font` | `ui-sans-serif, system-ui, -apple-system, 'Segoe UI Variab...` | Text font stack. |
-| `--cw-font-mono` | `ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, 'Libe...` | Person tags. |
-| `--cw-text-s` | `0.8125rem` | Small text: labels, facts, tags. |
-| `--cw-text-m` | `0.9375rem` | Body text. |
-| `--cw-text-l` | `1.125rem` | Screen titles. |
-| `--cw-text-xl` | `1.5rem` | The hub title. |
-| `--cw-text-stat` | `2.25rem` | The big numbers on the Overview. |
-| `--cw-weight-medium` | `500` | Buttons, tabs, labels. |
-| `--cw-weight-strong` | `650` | Headings, names, the current tab. |
-| `--cw-leading` | `1.5` | Body line height. |
+| `--cw-bg` | `#f4f5f8`, `#0e131c` | The page behind every pane. |
+| `--cw-surface` | `#ffffff`, `#151c28` | Panels, the queue, the top bar, buttons. |
+| `--cw-surface-sunken` | `#eef0f4`, `#111722` | Hover fill, wells, the filter tray. |
+| `--cw-border` | `#e0e3ea`, `#242d3c` | Hairlines between rows and around panels. |
+| `--cw-border-strong` | `#7a8397`, `#6b7893` | The border of a field, a select or a checkbox (3:1 against the surface). |
+| `--cw-ink` | `#151b27`, `#e8ebf1` | Body text. |
+| `--cw-ink-muted` | `#4f5a6e`, `#9ba4b6` | Secondary text, labels. |
+| `--cw-ink-faint` | `#5b657a`, `#8f98ad` | Tags, times, the rail labels (still 4.5:1 on every surface). |
+| `--cw-accent` | `#2950d3`, `#7d9bff` | You and your next action: the primary button, a selection, your claims, the focus ring. |
+| `--cw-accent-ink` | `#ffffff`, `#0e131c` | Text on an accent background. |
+| `--cw-accent-soft` | `#e7ecfb`, `#1d2847` | The open case in the queue, a selected card. |
+| `--cw-red` | `#c42f3b`, `#ff6b74` | Overdue (a wait over 24 hours), the reported line, a ban, a failure. |
+| `--cw-red-soft` | `#fbe4e6`, `#3a1a1f` | The background of a reported line or an error. |
+| `--cw-yellow` | `#e5ad00`, `#f2c84b` | A warning: the yellow referee card, the connection banner. |
+| `--cw-yellow-soft` | `#fdf3d3`, `#33290d` | The background of a warning. |
+| `--cw-yellow-ink` | `#6b4a00`, `#f2d37a` | Text on a warning background. |
+| `--cw-live` | `#17804f`, `#4cc38a` | The small dot that says the queue is live. Nothing else is green. |
+| `--cw-shadow-ink` | `#151b27`, `#000000` | What every shadow and the dimmed backdrop are made from. |
+| `--cw-font` | `'Instrument Sans', ui-sans-serif, system-ui, -apple-syste...` | Text font stack. Instrument Sans first, so it applies once `font.css` is loaded; then the system UI font. |
+| `--cw-font-mono` | `ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, 'Libe...` | Times in a transcript. |
+| `--cw-text-s` | `0.78125rem` | Small text: labels, facts, tags. |
+| `--cw-text-m` | `0.875rem` | Body text. |
+| `--cw-text-l` | `1.0625rem` | Screen titles. |
+| `--cw-text-xl` | `1.25rem` | The title on a gate screen. |
+| `--cw-text-stat` | `2rem` | The big numbers on the Overview. |
+| `--cw-weight-medium` | `500` | Labels. |
+| `--cw-weight-strong` | `600` | Headings, names, buttons. |
+| `--cw-leading` | `1.45` | Body line height. |
 | `--cw-leading-tight` | `1.2` | Heading line height. |
-| `--cw-radius-s` | `4px` | Buttons, tags, inputs. |
-| `--cw-radius-m` | `8px` | Panels and cards. |
+| `--cw-radius-s` | `6px` | Buttons, tags, fields. |
+| `--cw-radius-m` | `10px` | Panels and windows. |
 | `--cw-border-width` | `1px` | Every border. |
-| `--cw-rail-width` | `5px` | Width of the wait rail on a queue row. |
+| `--cw-wait-width` | `4px` | The left edge of a case, a reported line and a suggestion. |
 | `--cw-space-1` | `0.25rem` | Smallest gap. |
 | `--cw-space-2` | `0.5rem` | Small gap. |
 | `--cw-space-3` | `0.75rem` | Medium gap. |
 | `--cw-space-4` | `1rem` | Standard padding. |
 | `--cw-space-5` | `1.5rem` | Large gap. |
 | `--cw-space-6` | `2.5rem` | Largest gap (page bottom, gate screens). |
-| `--cw-max-width` | `72rem` | Widest the content grows. |
+| `--cw-nav-width` | `3.5rem` | Width of the section rail. |
+| `--cw-queue-width` | `21rem` | Width of the queue pane. |
+| `--cw-context-width` | `17rem` | Width of the case panel beside an open case. |
+| `--cw-hub-height` | `100dvh` | The height the hub fills (a phone-width page grows past it). Set it to fit below your own header. |
 | `--cw-control-height` | `2.25rem` | Minimum height of buttons and filters. |
 
-The signal colours come in three: the solid one for rails and borders, the soft one for backgrounds, and the ink for text on that
-background. Keep the ink and soft pair at a readable contrast when you change them.
+### The font
+
+The hub uses your system UI font and loads nothing. For the intended look, load the optional `font.css` next to the stylesheet:
+
+```ts
+import '@chatwarden/hub-react/styles.css';
+import '@chatwarden/hub-react/font.css'; // optional: Instrument Sans, self-hosted
+```
+
+It is the latin subset of the variable font (weights 400 to 700, about 30 KB), served from your own origin, never from a third
+party. Instrument Sans is licensed under the SIL Open Font License 1.1; the licence text ships as `fonts/OFL.txt`. A strict
+Content-Security-Policy needs `font-src 'self'` for it.
 
 ## Security notes
 
@@ -259,6 +328,11 @@ background. Keep the ink and soft pair at a readable contrast when you change th
   paths `onNavigate` receives all hold it, so do not forward those to analytics.
 - **The report page shows chat as typed.** The excerpt is for staff: it holds the raw lines (blocked ones included, struck through)
   and the reporter's note. What a player sees is only the lines the moderator chose for them, as the server masks them.
+- **Polling.** Each open tab asks `GET /changes` every 5 seconds (30 while hidden). It is one cheap read with no audit row; allow for
+  it in any rate limit. Claims and the viewing hint write no audit row (a senior's takeover does); viewing is in memory on the
+  server process, so behind several processes a moderator sees only the viewers that reached the same one.
+- **The queue shows staff names.** Who holds or views a case is a staff actor from your `authorize` hook (an email shows as the part
+  before the `@`). It is shown to staff only; players never see it.
 - **Opening a report is an audited read.** The Overview and the queue are built from the queue list alone and never open a single
   report, so no `report.view` row names a report just because someone looked at the Overview.
 - **Authorization stays on the server.** The hub hides what the role cannot use, but the server still refuses it (403). Mount the

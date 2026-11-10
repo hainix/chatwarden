@@ -61,6 +61,7 @@ describe('bundle size', () => {
     const css = await readFile(fileURLToPath(new URL('../src/styles.css', import.meta.url)));
     const gzip = gzipSync(css, { level: 9 }).byteLength;
     console.log(`hub-react styles.css: ${css.byteLength} bytes, ${gzip} bytes gzipped`);
-    expect(gzip).toBeLessThan(7 * 1024);
+    // Design v2 (the shell, the windows, the toasts, the team view): 10 KB gzipped, up from 7.
+    expect(gzip).toBeLessThan(10 * 1024);
   });
 });

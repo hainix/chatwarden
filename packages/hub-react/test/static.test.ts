@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { en } from '../src/i18n.js';
+import { UNDO_MS } from '../src/toasts.js';
 
 // Rules that bind every screen of the hub, checked on the source itself: no words outside the catalog, no inline styles, no
 // injected HTML, and a stylesheet whose tokens are a complete, documented contract.
@@ -137,7 +138,7 @@ describe('the stylesheet is a complete token contract', () => {
 
   it('gives every colour a light and a dark value', () => {
     const colours = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*(.+);$/gm)].filter(([, , v]) => /#[0-9a-f]{3,8}\b/i.test(v as string));
-    expect(colours.length).toBeGreaterThan(20);
+    expect(colours.length).toBe(COLOUR_TOKENS.length);
     for (const [, name, value] of colours) expect(value, name).toMatch(/^light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\)$/i);
   });
 
@@ -183,34 +184,296 @@ describe('the stylesheet is a complete token contract', () => {
     expect(fallback).toMatch(/@supports not \(color: light-dark\(#000, #fff\)\)/);
     expect(fallback).toMatch(/:where\(\.cw-hub\)\s*\{/);
     const colours = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), #[0-9a-f]{6}\);$/gim)];
-    expect(colours.length).toBeGreaterThan(20);
+    expect(colours.length).toBe(COLOUR_TOKENS.length);
     for (const [, name, light] of colours) expect(fallback, name).toContain(`${name}: ${light};`);
     const inFallback = [...fallback.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1]);
     expect(inFallback.sort()).toEqual(colours.map((c) => c[1]).sort());
   });
 
-  it('draws the focus ring inside the status filter and the tabs, where their boxes clip an outside ring', () => {
+  it('draws the focus ring inside the status filter and the rail, where their boxes clip an outside ring', () => {
     const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
-    const rule = /\.cw-hub \.cw-seg button:focus-visible,\s*\.cw-hub \.cw-tabs a:focus-visible\s*\{([^}]*)\}/.exec(stripped);
+    const rule = /\.cw-hub \.cw-seg button:focus-visible,\s*\.cw-hub \.cw-rail a:focus-visible\s*\{([^}]*)\}/.exec(stripped);
     expect(rule, 'a focus-visible rule for both').not.toBeNull();
     expect(rule?.[1]).toMatch(/outline-offset:\s*-\d+px/);
     // The segment box clips; the rule above is what keeps the ring visible.
     expect(stripped).toMatch(/\.cw-hub \.cw-seg\s*\{[^}]*overflow:\s*hidden/);
   });
 
-  it('lets the tabs wrap onto more lines instead of scrolling sideways with tabs out of sight', () => {
+  it('lets the rail wrap onto more lines on a phone instead of scrolling sideways with sections out of sight', () => {
     const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
-    const tabs = /\.cw-hub \.cw-tabs\s*\{([^}]*)\}/.exec(stripped)?.[1] ?? '';
-    expect(tabs).toMatch(/flex-wrap:\s*wrap/);
-    expect(tabs).not.toMatch(/overflow/);
+    const phone = /@media \(max-width: 51\.1875rem\)\s*\{([\s\S]*?)\n\}\n/.exec(stripped)?.[1] ?? '';
+    const rail = /\.cw-hub \.cw-rail ul\s*\{([^}]*)\}/.exec(phone)?.[1] ?? '';
+    expect(rail).toMatch(/flex-wrap:\s*wrap/);
+    expect(rail).not.toMatch(/overflow/);
   });
 
   it('keeps the token defaults at zero specificity so an adopter rule always wins', () => {
     expect(tokenBlock).toMatch(/:where\(\.cw-hub\)\s*\{/);
   });
 
-  it('is under 32 KB raw (the size test holds it to 7 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(32 * 1024);
+  // v2 sized the sheet for the shell, the windows, the toasts and the team view: 52 KB raw, 10 KB gzipped (the size test).
+  it('is under 52 KB raw (the size test holds it to 10 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(52 * 1024);
+  });
+});
+
+// ---- Design v2: colour only where it means something ------------------------------------------------------------------
+
+/** The colour tokens, exactly. Adding or dropping one is a design decision: change this list, the README table and the test below together. */
+const COLOUR_TOKENS = [
+  '--cw-bg',
+  '--cw-surface',
+  '--cw-surface-sunken',
+  '--cw-border',
+  '--cw-border-strong',
+  '--cw-ink',
+  '--cw-ink-muted',
+  '--cw-ink-faint',
+  '--cw-accent',
+  '--cw-accent-ink',
+  '--cw-accent-soft',
+  '--cw-red',
+  '--cw-red-soft',
+  '--cw-yellow',
+  '--cw-yellow-soft',
+  '--cw-yellow-ink',
+  '--cw-live',
+  '--cw-shadow-ink',
+];
+
+describe('design v2: the palette', () => {
+  const css = read(join(src, 'styles.css'));
+  const block = css.slice(css.indexOf('/* ---- Tokens'), css.indexOf('/* ---- End of tokens'));
+  const pairs = [...block.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\);$/gim)];
+  const theme = (which: 'light' | 'dark'): Record<string, string> =>
+    Object.fromEntries(pairs.map((m) => [m[1] as string, (which === 'light' ? m[2] : m[3]) as string]));
+
+  it('has exactly the documented colour tokens: a neutral base, one accent, red, yellow, the live dot and the shadow ink', () => {
+    expect(pairs.map((m) => m[1]).sort()).toEqual([...COLOUR_TOKENS].sort());
+  });
+
+  it('has no per-category, per-speaker or per-person colour token', () => {
+    for (const name of pairs.map((m) => m[1] as string)) expect(name, name).not.toMatch(/categor|speaker|person|player|avatar|harass|hate|spam|cheat|disrupt|green|blue|teal|purple|orange|pink/);
+  });
+
+  // WCAG 2.x relative luminance and contrast ratio, from the token values themselves.
+  const channel = (c: number): number => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = (hex: string): number => {
+    const n = Number.parseInt(hex.slice(1), 16);
+    return 0.2126 * channel(n >> 16) + 0.7152 * channel((n >> 8) & 255) + 0.0722 * channel(n & 255);
+  };
+  const ratio = (a: string, b: string): number => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+    return (hi + 0.05) / (lo + 0.05);
+  };
+
+  // Every text token on every surface it is drawn on. 4.5 is WCAG AA for body text.
+  const TEXT: Array<[string, string[]]> = [
+    ['--cw-ink', ['--cw-bg', '--cw-surface', '--cw-surface-sunken', '--cw-accent-soft', '--cw-red-soft', '--cw-yellow-soft']],
+    ['--cw-ink-muted', ['--cw-bg', '--cw-surface', '--cw-surface-sunken', '--cw-accent-soft', '--cw-red-soft', '--cw-yellow-soft']],
+    ['--cw-ink-faint', ['--cw-bg', '--cw-surface', '--cw-surface-sunken', '--cw-accent-soft', '--cw-red-soft']],
+    ['--cw-accent', ['--cw-bg', '--cw-surface', '--cw-surface-sunken', '--cw-accent-soft']],
+    ['--cw-accent-ink', ['--cw-accent']],
+    ['--cw-red', ['--cw-bg', '--cw-surface', '--cw-surface-sunken', '--cw-red-soft', '--cw-accent-soft']],
+    ['--cw-yellow-ink', ['--cw-yellow-soft']],
+    // Inverted text: the toast and the new-cases pill (surface on ink), and the initial in an avatar (surface on faint ink).
+    ['--cw-surface', ['--cw-ink', '--cw-ink-faint']],
+  ];
+  // Lines and shapes that identify a control must stand out from what is behind them (WCAG 1.4.11, 3:1).
+  const SHAPES: Array<[string, string[]]> = [
+    ['--cw-border-strong', ['--cw-bg', '--cw-surface', '--cw-surface-sunken']],
+    ['--cw-accent', ['--cw-surface']],
+    ['--cw-red', ['--cw-surface']],
+  ];
+
+  describe.each(['light', 'dark'] as const)('contrast, %s theme', (which) => {
+    const t = theme(which);
+    it.each(TEXT.flatMap(([fg, bgs]) => bgs.map((bg) => [fg, bg] as const)))('text %s on %s is at least 4.5:1 (AA)', (fg, bg) => {
+      expect(ratio(t[fg] as string, t[bg] as string)).toBeGreaterThanOrEqual(4.5);
+    });
+    it.each(SHAPES.flatMap(([fg, bgs]) => bgs.map((bg) => [fg, bg] as const)))('line %s against %s is at least 3:1', (fg, bg) => {
+      expect(ratio(t[fg] as string, t[bg] as string)).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  it('the contrast maths is right (control)', () => {
+    expect(ratio('#000000', '#ffffff')).toBeCloseTo(21, 5);
+    expect(ratio('#777777', '#ffffff')).toBeCloseTo(4.48, 2);
+    expect(ratio('#ffffff', '#ffffff')).toBe(1);
+  });
+
+  // Where each signal colour may appear. A rule outside its list is a colour that does not carry meaning.
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const body = stripped.slice(stripped.indexOf('End of fallback') === -1 ? 0 : 0);
+  const rulesUsing = (token: string): string[] => {
+    const out: string[] = [];
+    // Split a selector list on the commas that are not inside :is( ) or :where( ).
+    const split = (list: string): string[] => {
+      const parts: string[] = [];
+      let depth = 0;
+      let current = '';
+      for (const ch of list) {
+        if (ch === '(') depth += 1;
+        if (ch === ')') depth -= 1;
+        if (ch === ',' && depth === 0) {
+          parts.push(current.trim());
+          current = '';
+        } else current += ch;
+      }
+      return [...parts, current.trim()];
+    };
+    for (const m of body.matchAll(/([^{}@;]+)\{([^{}]*)\}/g)) {
+      if (new RegExp(`var\\(${token}\\b`).test(m[2] as string)) out.push(...split(m[1] as string));
+    }
+    return out.filter((s) => !/^(from|to|\d+%)$/.test(s));
+  };
+
+  const ALLOWED: Record<string, RegExp[]> = {
+    // Green: the live dot, nothing else.
+    '--cw-live': [/^\.cw-hub \.cw-live-dot$/],
+    // Yellow: a warning (a warning tag or notice, the connection banner) and the yellow side of a referee card.
+    '--cw-yellow': [/cw-tag--warn$/, /cw-card--(warning|restriction)$/, /cw-notice--warn$/, /cw-banner$/],
+    '--cw-yellow-soft': [/cw-tag--warn$/, /cw-notice--warn$/, /cw-banner$/],
+    '--cw-yellow-ink': [/cw-tag--warn$/, /cw-notice--warn$/, /cw-banner$/],
+    // Red: overdue, the reported line, a ban, a failure.
+    '--cw-red': [
+      /cw-tag--bad$/,
+      /cw-card--(restriction|ban)$/,
+      /cw-notice--bad$/,
+      /cw-error$/,
+      /cw-case\[data-wait='overdue'\]( \.cw-case-wait)?$/,
+      /cw-stat\[data-wait='overdue'\] \.cw-stat-value$/,
+      /cw-qrow\[data-wait='stale'\]( \.cw-qrow-age)?$/,
+      /cw-line\[data-reported='true'\]$/,
+      /cw-btn--danger$/,
+      /\[aria-invalid='true'\]$/,
+      /cw-field-error$/,
+      /cw-problems$/,
+      /cw-toast\[data-tone='bad'\]$/,
+    ],
+    '--cw-red-soft': [/cw-tag--bad$/, /cw-notice--bad$/, /cw-error$/, /cw-line\[data-reported='true'\]$/, /cw-problems$/],
+  };
+  it.each(Object.entries(ALLOWED))('%s is used only where it means something', (token, allowed) => {
+    const used = rulesUsing(token);
+    expect(used.length).toBeGreaterThan(0);
+    expect(used.filter((sel) => !allowed.some((re) => re.test(sel)))).toEqual([]);
+  });
+
+  it('the accent is only you, a next action, a selection or a focus', () => {
+    const allowed = [
+      /cw-mark-(shield|tick)$/,
+      /cw-skip$/,
+      /:focus(-visible)?$/,
+      /:focus-visible$/,
+      /cw-avatar--you$/,
+      /cw-tag--accent$/,
+      /cw-btn--primary(:hover)?$/,
+      /cw-link(btn)?$/,
+      /cw-take( .cw-kbd)?$/,
+      /cw-case\[data-selected='true'\]$/,
+      /cw-case\[data-claim='you'\] \.cw-case-claim$/,
+      /cw-case-state\[data-claim='you'\]$/,
+      /cw-member-you$/,
+      /cw-suggest$/,
+      /cw-radio:has\(input:checked\)$/,
+      /cw-result$/,
+      /cw-cmdk-item\[aria-selected='true'\]$/,
+      /cw-cmdk-field:has\(input:focus-visible\)$/,
+      /cw-toast-bar$/,
+      /input\[type='checkbox'\],?$/,
+      /input\[type='radio'\]$/,
+    ];
+    for (const token of ['--cw-accent', '--cw-accent-soft', '--cw-accent-ink']) {
+      const bad = rulesUsing(token).filter((sel) => !allowed.some((re) => re.test(sel)));
+      expect(bad, token).toEqual([]);
+    }
+  });
+
+  it('colours no category, speaker or person: those rules use neutral tokens only', () => {
+    const SIGNAL = /var\(--cw-(accent|accent-soft|accent-ink|red|red-soft|yellow|yellow-soft|yellow-ink|live)\b/;
+    for (const cls of ['cw-cat', 'cw-pid', 'cw-line-who', 'cw-person-name', 'cw-case-name', 'cw-qrow-name', 'cw-avatar']) {
+      for (const m of body.matchAll(new RegExp(`\\.cw-hub \\.${cls}\\s*\\{([^}]*)\\}`, 'g'))) {
+        expect(m[1], cls).not.toMatch(SIGNAL);
+      }
+    }
+  });
+});
+
+describe('design v2: the optional font', () => {
+  const fontCss = readFileSync(join(pkg, 'font.css'), 'utf8');
+  const manifest = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')) as {
+    exports: Record<string, unknown>;
+    sideEffects: string[];
+    files: string[];
+    devDependencies: Record<string, string>;
+  };
+
+  it('is a self-hosted latin subset: one relative woff2 that ships in the package, and nothing from elsewhere', () => {
+    const urls = [...fontCss.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)].map((m) => m[1] as string);
+    expect(urls).toEqual(['./fonts/instrument-sans-latin-wght-normal.woff2']);
+    const file = join(pkg, 'fonts', 'instrument-sans-latin-wght-normal.woff2');
+    expect(statSync(file).size).toBeGreaterThan(10_000);
+    expect(statSync(file).size).toBeLessThan(40_000);
+    expect(readdirSync(join(pkg, 'fonts')).sort()).toEqual(['OFL.txt', 'instrument-sans-latin-wght-normal.woff2']);
+    expect(fontCss).toMatch(/font-family:\s*'Instrument Sans'/);
+    expect(fontCss).toMatch(/font-display:\s*swap/);
+    expect(fontCss).toMatch(/font-weight:\s*400 700/);
+    // Latin only: no Cyrillic, Greek, Vietnamese or latin-ext ranges.
+    expect(fontCss).not.toMatch(/U\+0400|U\+0370|U\+1EA0|U\+0100-/);
+  });
+
+  it('ships the SIL Open Font Licence text', () => {
+    const licence = readFileSync(join(pkg, 'fonts', 'OFL.txt'), 'utf8');
+    expect(licence).toMatch(/SIL OPEN FONT LICENSE Version 1\.1/);
+    expect(licence).toMatch(/Instrument Sans Project Authors/);
+  });
+
+  it('is exported as ./font.css, listed in sideEffects and files, and the font is a devDependency only', () => {
+    expect(manifest.exports['./font.css']).toBe('./font.css');
+    expect(manifest.exports['./styles.css']).toBe('./src/styles.css');
+    expect(manifest.sideEffects).toEqual(['./src/styles.css', './font.css']);
+    for (const f of ['font.css', 'fonts', 'src']) expect(manifest.files).toContain(f);
+    expect(manifest.devDependencies['@fontsource-variable/instrument-sans']).toBeDefined();
+  });
+
+  it('the stylesheet names Instrument Sans first and falls back to the system UI font, so it applies once font.css is loaded', () => {
+    const css = read(join(src, 'styles.css'));
+    const stack = /--cw-font:\s*([^;]+);/.exec(css)?.[1] ?? '';
+    expect(stack.startsWith("'Instrument Sans', ")).toBe(true);
+    expect(stack).toMatch(/system-ui/);
+  });
+});
+
+describe('nothing is loaded from a third party', () => {
+  const URL_RE = /(?:https?:)?\/\/[a-z0-9.-]+\.[a-z]{2,}/i;
+  const strip = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  it.each(files.filter((f) => /\.(tsx?|css)$/.test(f)).map((f) => [rel(f), f] as const))('%s names no remote address in code', (_name, file) => {
+    // Comments may link to docs; code and CSS may not reach out.
+    expect(strip(read(file))).not.toMatch(URL_RE);
+  });
+
+  it('font.css names no remote address, and neither does the stylesheet use url()', () => {
+    expect(strip(readFileSync(join(pkg, 'font.css'), 'utf8'))).not.toMatch(URL_RE);
+    expect(read(join(src, 'styles.css'))).not.toMatch(/url\(/);
+  });
+
+  it('the scan sees a remote address when there is one (control)', () => {
+    expect(URL_RE.test('@import url(https://fonts.googleapis.com/css2?family=Instrument+Sans)')).toBe(true);
+    expect(URL_RE.test("src: url('//cdn.example.com/a.woff2')")).toBe(true);
+    expect(URL_RE.test("src: url('./fonts/a.woff2')")).toBe(false);
+  });
+});
+
+describe('the Undo window is 5 seconds in the stylesheet and in the code', () => {
+  it('the progress bar runs for UNDO_MS', () => {
+    const css = read(join(src, 'styles.css'));
+    const seconds = Number(/\.cw-toast-bar\s*\{[^}]*animation:\s*cw-undo\s+([\d.]+)s/.exec(css)?.[1]);
+    expect(seconds * 1000).toBe(UNDO_MS);
+    expect(UNDO_MS).toBe(5000);
   });
 });
 
