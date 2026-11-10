@@ -21,7 +21,7 @@ import type { Claim } from './types.js';
 export const QUEUE_PAGE = 200;
 export const QUEUE_MAX_PAGES = 5;
 
-export type Connection = 'live' | 'lost' | 'offline';
+export type Connection = 'live' | 'lost' | 'offline' | 'signedOut';
 
 export interface LiveQueue {
   /** `loading` until the first answer; `error` when there has never been one; `ready` after, even while a refresh fails. */
@@ -40,6 +40,12 @@ export interface LiveQueue {
   /** How many open reports were read. */
   reports: number;
   connection: Connection;
+  /** Why the hub is `signedOut`: the 401 or 403 the server answered, or null. */
+  authError: HubError | null;
+  /** Changes each minute while the tab is visible, so what depends on the clock (waits, lapsed claims) is drawn again. */
+  minute: number;
+  /** Counts every read of the queue that was put to use, so a screen can reload its own data when the queue moved. */
+  revision: number;
   /** When the last read succeeded (the hub's clock), or null. */
   updatedAt: number | null;
   filter: QueueFilter;
@@ -60,6 +66,10 @@ export interface LiveQueue {
   /** After a release the open case must not claim itself again at the next heartbeat. */
   holdOff: (person: string, on: boolean) => void;
   isHeldOff: (person: string) => boolean;
+  /** One Take-next guard for the whole hub (button, shortcut, command bar): false while one is running or cooling down. */
+  beginTake: () => boolean;
+  /** Ends a Take next; the guard stays shut for `cooldownMs` more. */
+  endTake: (cooldownMs: number) => void;
 }
 
 const QueueContext = createContext<LiveQueue | null>(null);
@@ -90,13 +100,14 @@ interface Loaded {
   partial: boolean;
   reports: number;
   updatedAt: number | null;
+  revision: number;
 }
 
 export function QueueProvider({ children }: { children: ReactNode }) {
   const { client, now, me } = useHub();
   const toasts = useToasts();
   const { t } = useHub();
-  const [loaded, setLoaded] = useState<Loaded>({ status: 'loading', error: null, groups: [], rows: [], incoming: 0, partial: false, reports: 0, updatedAt: null });
+  const [loaded, setLoaded] = useState<Loaded>({ status: 'loading', error: null, groups: [], rows: [], incoming: 0, partial: false, reports: 0, updatedAt: null, revision: 0 });
   const [connection, setConnection] = useState<Connection>(isOffline() ? 'offline' : 'live');
   const [filter, setFilterState] = useState<QueueFilter>(NO_CATEGORY_FILTER);
 
@@ -116,6 +127,13 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   const openPerson = useRef<string | null>(null);
   const heldOff = useRef(new Set<string>());
   const busy = useRef(false);
+  const seq = useRef(0);
+  const authStopped = useRef(false);
+  const retryAfterMs = useRef(0);
+  const takeBusy = useRef(false);
+  const takeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [authError, setAuthError] = useState<HubError | null>(null);
+  const [minute, setMinute] = useState(0);
   const kickRef = useRef<() => void>(() => undefined);
 
   const keep = useCallback((person: string): boolean => interacting.current || person === openPerson.current, []);
@@ -123,16 +141,20 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   /** Reads the queue and puts it on screen: in place (`refresh`), or as it is (`adopt`, for the first read and by request). */
   const read = useCallback(
     async (mode: 'adopt' | 'refresh', knownToken?: string): Promise<QueueGroup[]> => {
+      // Reads can overlap (a poll, Take next, Try again): only the one started last is put to use, so a slow old answer never
+      // overwrites a newer one.
+      const mine = ++seq.current;
       // The token is taken before the list: a change in between shows up at the next poll instead of being lost.
       const at = knownToken ?? (await client.changes()).token;
       const all = await fetchAll((cursor) => client.listReports({ status: 'open', limit: QUEUE_PAGE, ...(cursor === undefined ? {} : { cursor }) }), {
         maxPages: QUEUE_MAX_PAGES,
       });
-      token.current = at;
       const groups = groupQueue(all.items, { sort: 'oldest' });
+      if (mine !== seq.current) return groups;
+      token.current = at;
       setLoaded((prev) => {
         const shown = mode === 'adopt' || prev.status !== 'ready' ? { rows: adopt(groups), incoming: 0 } : reconcile(prev.rows, groups, keep);
-        return { status: 'ready', error: null, groups, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: all.items.length, updatedAt: nowRef.current() };
+        return { status: 'ready', error: null, groups, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: all.items.length, updatedAt: nowRef.current(), revision: prev.revision + 1 };
       });
       return groups;
     },
@@ -142,6 +164,8 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   const succeeded = useCallback((): void => {
     const was = connectionRef.current;
     failures.current = 0;
+    authStopped.current = false;
+    setAuthError(null);
     if (was !== 'live') {
       setConnection('live');
       toastsRef.current.push({ text: tRef.current('hub.toast.backOnline') });
@@ -152,6 +176,14 @@ export function QueueProvider({ children }: { children: ReactNode }) {
     failures.current += 1;
     const e = toHubError(error);
     setLoaded((prev) => (prev.status === 'ready' ? prev : { ...prev, status: 'error', error: e }));
+    if (e.status === 401 || e.status === 403) {
+      // Signed out, or no longer allowed: asking again every few seconds cannot help. Stop, say so, and offer a retry.
+      authStopped.current = true;
+      setAuthError(e);
+      setConnection('signedOut');
+      return;
+    }
+    retryAfterMs.current = e.status === 429 && e.retryAfter !== undefined ? e.retryAfter * 1000 : 0;
     if (failures.current >= BANNER_AFTER_FAILURES && !isOffline()) setConnection('lost');
   }, []);
 
@@ -162,8 +194,10 @@ export function QueueProvider({ children }: { children: ReactNode }) {
 
     const schedule = (): void => {
       clearTimeout(timer);
-      if (cancelled || isOffline()) return;
-      timer = setTimeout(() => void tick(), pollDelay({ visible: isVisible(), failures: failures.current }));
+      if (cancelled || isOffline() || authStopped.current) return;
+      const wait = Math.max(pollDelay({ visible: isVisible(), failures: failures.current }), retryAfterMs.current);
+      retryAfterMs.current = 0;
+      timer = setTimeout(() => void tick(), wait);
     };
 
     const tick = async (): Promise<void> => {
@@ -218,6 +252,22 @@ export function QueueProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('offline', onOffline);
     };
   }, [client, read, succeeded, failed]);
+
+  // A minute tick, while the tab is visible: waits, the 24 hour flip and lapsed claims are worked out from the clock at render, and
+  // a quiet queue renders nothing else.
+  useEffect(() => {
+    const bump = (): void => setMinute((m) => m + 1);
+    const timer = setInterval(() => isVisible() && bump(), 60_000);
+    const onVisible = (): void => {
+      if (isVisible()) bump();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+  useEffect(() => () => clearTimeout(takeTimer.current), []);
 
   // The cursor has moved away: a case that closed while it was on it can go now.
   const settle = useCallback((): void => {
@@ -274,6 +324,19 @@ export function QueueProvider({ children }: { children: ReactNode }) {
     kickRef.current();
   }, []);
 
+  const beginTake = useCallback((): boolean => {
+    if (takeBusy.current) return false;
+    takeBusy.current = true;
+    clearTimeout(takeTimer.current);
+    return true;
+  }, []);
+  const endTake = useCallback((cooldownMs: number): void => {
+    clearTimeout(takeTimer.current);
+    takeTimer.current = setTimeout(() => {
+      takeBusy.current = false;
+    }, cooldownMs);
+  }, []);
+
   const setFilter = useCallback((p: Partial<QueueFilter>): void => setFilterState((f) => ({ ...f, ...p })), []);
   const holdOff = useCallback((person: string, on: boolean): void => {
     if (on) heldOff.current.add(person);
@@ -298,6 +361,9 @@ export function QueueProvider({ children }: { children: ReactNode }) {
       partial: loaded.partial,
       reports: loaded.reports,
       connection,
+      authError,
+      minute,
+      revision: loaded.revision,
       updatedAt: loaded.updatedAt,
       filter,
       setFilter,
@@ -310,8 +376,10 @@ export function QueueProvider({ children }: { children: ReactNode }) {
       setOpenPerson,
       holdOff,
       isHeldOff,
+      beginTake,
+      endTake,
     }),
-    [loaded, visible, connection, filter, setFilter, showIncoming, reload, retryNow, patchClaim, patchViewing, setInteracting, setOpenPerson, holdOff, isHeldOff],
+    [loaded, visible, connection, authError, minute, beginTake, endTake, filter, setFilter, showIncoming, reload, retryNow, patchClaim, patchViewing, setInteracting, setOpenPerson, holdOff, isHeldOff],
   );
 
   return <QueueContext.Provider value={value}>{children}</QueueContext.Provider>;

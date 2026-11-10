@@ -109,7 +109,7 @@ a banner when the connection is lost.
 **Claims are soft locks.** Opening a case claims it if nobody holds it (`POST /cases/:ref/claim`), and while it stays open and the
 tab is visible the hub renews the claim every 60 seconds and a "viewing" hint every 20. The server releases a claim after 10 minutes
 without a renewal. A case someone else holds opens to read, with a notice; the server refuses a decision on it unless a senior
-takes it over. Each queue row shows who handles it (you in blue, others by name, or Unclaimed) and who is viewing; your own row has
+takes it over; a decision sent anyway is refused (409 `claimed`) and the panel says who holds it and keeps what you entered. Each queue row shows who handles it (you in blue, others by name, or Unclaimed) and who is viewing; your own row has
 a Release button (the toast offers Undo). "Take next case" (N) claims the oldest unclaimed case that matches the category filter and
 opens it. The hub does not yet release a case when you navigate away from it: the claim lapses on its own.
 
@@ -117,7 +117,9 @@ opens it. The hub does not yet release a case when you navigate away from it: th
 30 while it is hidden, never while the browser is offline, and reads the queue again only when the token changed. New cases wait behind
 an "N new cases" pill; a claim arrives in place; a case that closes while the pointer or keyboard focus is in the list (or while it is
 the open case) stays in its place, marked "No longer open", until you move away. After two failed polls in a row a banner says the
-connection is lost (and polling slows to every 15 seconds); a toast says "Back online." when it recovers. Viewing and claim lapses
+connection is lost (and polling slows to every 15 seconds); a toast says "Back online." when it recovers. A 401 or 403 is not a lost connection: the
+hub stops asking, says "You are signed out" (or "Your role cannot do this") in the banner, and offers Try again. A 429 waits its
+`retry-after`. A minute tick (while visible) redraws waits, the 24-hour overdue flip and lapsed claims, which move no token. Viewing and claim lapses
 move no change token, so a row's viewers refresh whenever the queue does and your own open case's viewers refresh every 20 seconds.
 
 **Keyboard.** Shortcuts never fire while you are typing in a field, a select or an editable region, or with Ctrl, Cmd or Alt held
@@ -127,7 +129,7 @@ move no change token, so a row's viewers refresh whenever the queue does and you
 | --- | --- |
 | `J` / `K` | Move focus to the next or previous case in the queue. It moves; it does not open or claim. Enter opens the one you are on. |
 | `N` | Take the next case. A held key takes one. |
-| `Ctrl+K` or `Cmd+K` | Open the command bar: jump to a person or report in the queue, a term, a screen, or run Take next. |
+| `Ctrl+K` (`⌘K` on a Mac) | Open the command bar: jump to a person or report in the queue, a term, a screen, or run Take next. |
 | `?` | List the shortcuts. |
 | `Esc` | Close the window that is open; otherwise go back to the queue. |
 
@@ -135,6 +137,9 @@ move no change token, so a row's viewers refresh whenever the queue does and you
 `hold({ text, run, onUndo })` waits 5 seconds with an Undo button and a progress bar, then runs `run` once; Undo cancels it, and it
 runs at once if the toast is dismissed early or the page is closing. Releasing a claim uses `push` with an action; decisions will
 use `hold`.
+
+**Limits.** "On now" lists the people who hold or are viewing a case, and you: the kit has no presence route, so someone signed in and idle is
+not shown. Recent actions is read again whenever the queue is read because the change token moved.
 
 ### The report page and the decision
 

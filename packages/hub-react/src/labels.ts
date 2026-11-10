@@ -1,6 +1,7 @@
 import type { HubError } from './client.js';
 import { DURATIONS, hasLength, outcomeChoice } from './decision.js';
 import type { Choice, DurationKey } from './decision.js';
+import { actorName } from './claims.js';
 import { formatDuration, personTag } from './format.js';
 import type { HubT, HubText } from './i18n.js';
 import type { ReportCategory, SanctionGroupView, SanctionKind, SanctionSource, Suggestion } from './types.js';
@@ -107,6 +108,9 @@ export function outcomeLabel(t: HubT, locale: string, outcome: Suggestion['outco
  * body gets the most specific line its code allows.
  */
 export function decideErrorText(t: HubT, error: HubError): string {
+  if (error.code === 'claimed') {
+    return error.heldBy === undefined ? t('hub.decide.fail.claimedUnknown') : t('hub.decide.fail.claimed', { name: actorName(error.heldBy) });
+  }
   if (error.status === 413) return t('hub.decide.fail.tooLarge');
   if (error.status === 400) {
     if (error.code === 'invalid_excerpt') return t('hub.decide.fail.excerpt');

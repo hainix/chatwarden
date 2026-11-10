@@ -179,15 +179,17 @@ describe('reading the queue again only when it changed', () => {
     expect(within(pane()).queryByRole('button', { name: /new case/ })).not.toBeInTheDocument();
   });
 
-  it('a claim that lapses is shown as unclaimed on the next render without any server change', async () => {
+  it('a claim that lapses is shown as unclaimed by the minute tick, with nothing changed on the server', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });
     const a = await w.file({ target: 'Alpha' });
     await w.clientFor('maya@example.test').claimCase(a.person);
     await started(w);
     expect(rowOf('Alpha')).toHaveAttribute('data-claim', 'other');
+    const reads = calls(w, '/reports');
     w.clock.t += 11 * 60_000;
-    await w.file({ target: 'Bravo' });
-    await tick(5_000);
+    // No report, no claim, no decision: the token does not move, so the queue is not read again, yet the row follows the clock.
+    await tick(60_000);
+    expect(calls(w, '/reports')).toBe(reads);
     expect(rowOf('Alpha')).toHaveAttribute('data-claim', 'none');
   });
 });

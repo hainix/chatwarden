@@ -84,12 +84,12 @@ export const en = {
   'hub.team.viewing.one': 'Viewing {count} case',
   'hub.team.viewing.other': 'Viewing {count} cases',
   'hub.team.alone': 'Nobody else is on right now. Teammates show here when they open or take a case.',
-  'hub.team.unknown': 'Who is on shows once the queue has loaded.',
 
   'hub.shell.live': 'Live',
   'hub.shell.liveTitle': 'Updated {time}',
   'hub.shell.reconnecting': 'Reconnecting',
   'hub.shell.offline': 'Offline',
+  'hub.shell.signedOut': 'Signed out',
   'hub.shell.onNow.label': 'On now',
   'hub.shell.onNow.more': '{count} more',
   'hub.shell.onNow.person': '{name}',
@@ -101,7 +101,6 @@ export const en = {
   'hub.queue.people.other': '{count} people',
   'hub.queue.takeNext': 'Take next case',
   'hub.queue.takeNextHint': 'oldest unclaimed',
-  'hub.queue.takeNextBusy': 'Taking the next case',
   'hub.queue.filter.claim': 'Show',
   'hub.queue.filter.category': 'Category',
   'hub.queue.claim.all': 'All',
@@ -139,7 +138,7 @@ export const en = {
   'hub.case.handling.you': 'You are handling this case.',
   'hub.case.handling.byName': '{name} is handling this case.',
   'hub.case.handling.none': 'Nobody is handling this case.',
-  'hub.case.readOnly': 'You can read it, but not decide it.',
+  'hub.case.readOnly': 'Deciding it is refused until they release it, or a senior takes it over.',
   'hub.case.idle': 'A claim is released after 10 minutes without activity.',
   'hub.case.viewing': 'Also viewing',
   'hub.case.closed': 'This case is no longer open.',
@@ -154,7 +153,7 @@ export const en = {
   'hub.toast.took': 'You took the case against {who}.',
   'hub.toast.tookNext': 'You took the next case.',
   'hub.toast.nothing': 'No unclaimed cases right now.',
-  'hub.toast.heldBy': '{name} is handling this case. You can read it, not decide it.',
+  'hub.toast.heldBy': '{name} is handling this case. Deciding it is refused until they release it.',
   'hub.toast.lostClaim': '{name} took this case over.',
   'hub.toast.backOnline': 'Back online.',
 
@@ -175,10 +174,10 @@ export const en = {
   'hub.command.kind.term': 'Term',
   'hub.command.shortcuts': 'Show keyboard shortcuts',
   'hub.command.report': 'Report {id}',
-  'hub.command.termsLoading': 'Loading terms',
   'hub.command.hint': 'Up and down to choose, Enter to open, Esc to close.',
 
   'hub.key.ctrl': 'Ctrl',
+  'hub.key.cmd': '⌘',
   'hub.key.esc': 'Esc',
 
   'hub.shortcuts.title': 'Keyboard shortcuts',
@@ -190,7 +189,6 @@ export const en = {
   'hub.shortcuts.help': 'Show this list',
   'hub.shortcuts.escape': 'Close a window, or go back to the queue',
   'hub.shortcuts.note': 'Shortcuts do not work while you are typing. Enter opens the case you have moved to.',
-  'hub.shortcuts.hint': 'Press ? for shortcuts',
 
   'hub.reports.title': 'Reports',
   'hub.reports.status.label': 'Report status',
@@ -403,6 +401,8 @@ export const en = {
   'hub.decide.fail.invalid': 'The server did not accept this decision. Check the reason, the rules and the lines, then try again.',
   'hub.decide.fail.excerpt': 'The server did not accept the lines chosen for the player. Choose only lines this person wrote.',
   'hub.decide.fail.sanction': 'The server did not accept one of the actions. Check each action.',
+  'hub.decide.fail.claimed': '{name} is handling this case, so this decision was not sent. What you entered is kept.',
+  'hub.decide.fail.claimedUnknown': 'Another moderator is handling this case, so this decision was not sent. What you entered is kept.',
   'hub.decide.fail.tooLarge': 'The decision is too large to send. Remove some actions or shorten the text.',
 
   'hub.decide.error.verdictRequired': 'Choose what you decide.',

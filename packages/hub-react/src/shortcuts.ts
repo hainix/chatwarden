@@ -58,7 +58,7 @@ export function shortcutFor(e: KeyLike): ShortcutAction | null {
 
 /** A key as it is written on a key cap: letters and symbols as they are, `Ctrl` and `Esc` from the catalog. */
 export function keyLabel(t: HubT, key: string): string {
-  return key === 'Ctrl' ? t('hub.key.ctrl') : key === 'Esc' ? t('hub.key.esc') : key;
+  return key === 'Ctrl' ? t('hub.key.ctrl') : key === 'Cmd' ? t('hub.key.cmd') : key === 'Esc' ? t('hub.key.esc') : key;
 }
 
 /** What the shortcut sheet lists, in order: the keys to press and the catalog line saying what they do. */
@@ -70,3 +70,10 @@ export const SHORTCUTS: ReadonlyArray<{ action: ShortcutAction; keys: string[]; 
   { action: 'help', keys: ['?'], label: 'hub.shortcuts.help' },
   { action: 'escape', keys: ['Esc'], label: 'hub.shortcuts.escape' },
 ];
+
+/** The key that goes with K: Cmd on a Mac, Ctrl elsewhere. */
+export function modKey(): 'Ctrl' | 'Cmd' {
+  if (typeof navigator === 'undefined') return 'Ctrl';
+  const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? '';
+  return /mac|iphone|ipad|ipod/i.test(platform) ? 'Cmd' : 'Ctrl';
+}

@@ -12,7 +12,7 @@ import type { SanctionKind } from './types.js';
 // The small parts every screen is built from. They carry the hub's class names (`cw-*`) and nothing else: no inline style,
 // every word from the catalog through `useHub().t`.
 
-export type Tone = 'ok' | 'warn' | 'bad' | 'idle' | 'accent';
+export type Tone = 'warn' | 'bad' | 'idle' | 'accent';
 
 const cx = (...names: Array<string | false | undefined>): string => names.filter(Boolean).join(' ');
 

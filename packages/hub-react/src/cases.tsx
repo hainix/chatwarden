@@ -129,7 +129,6 @@ export function useCaseActions(): CaseActions {
   const { client, t, go } = useHub();
   const queue = useOptionalQueue();
   const toasts = useToasts();
-  const busy = useRef(false);
   const queueRef = useRef(queue);
   queueRef.current = queue;
 
@@ -142,8 +141,7 @@ export function useCaseActions(): CaseActions {
 
   const takeNext = useCallback(async (): Promise<void> => {
     const q = queueRef.current;
-    if (busy.current || q === null) return;
-    busy.current = true;
+    if (q === null || !q.beginTake()) return;
     try {
       const category = q.filter.category;
       const { case: next } = await client.takeNext(category === 'all' ? {} : { category });
@@ -164,10 +162,8 @@ export function useCaseActions(): CaseActions {
       fail(e);
     } finally {
       // A short cooldown, not just "while it runs": a double click is two clicks 100 ms apart, and a fast server has answered
-      // the first by then. Without it the second would take a second case.
-      setTimeout(() => {
-        busy.current = false;
-      }, TAKE_COOLDOWN_MS);
+      // the first by then. The guard is the queue's, so a click, the N key and the command bar share it.
+      q.endTake(TAKE_COOLDOWN_MS);
     }
   }, [client, fail, go, t, toasts]);
 

@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useHub } from '../context.js';
 import { Dialog } from '../Dialog.js';
-import { SHORTCUTS, keyLabel } from '../shortcuts.js';
+import { SHORTCUTS, keyLabel, modKey } from '../shortcuts.js';
 import { Kbd } from '../ui.js';
 
 /** Every keyboard shortcut, in one window (press ?). */
@@ -23,7 +23,7 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
               {s.keys.map((k, i) => (
                 <span key={k}>
                   {i > 0 && <span className="cw-sheet-plus" aria-hidden="true">+</span>}
-                  <Kbd>{keyLabel(t, k)}</Kbd>
+                  <Kbd>{keyLabel(t, k === 'Ctrl' ? modKey() : k)}</Kbd>
                 </span>
               ))}
             </dt>

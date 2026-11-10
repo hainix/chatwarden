@@ -198,7 +198,7 @@ describe('the queue pane: who has each case', () => {
     expect(rowOf('Alpha')).toHaveAttribute('data-claim', 'none');
     const bravo = rowOf('Bravo');
     expect(within(bravo).getByText('3 people are viewing: kai, lee, and rin')).toBeInTheDocument();
-    expect(bravo.querySelector('.cw-case-viewing span[aria-hidden="true"]')).toHaveTextContent('kai, lee +1');
+    expect(bravo.querySelector('.cw-case-viewing span[aria-hidden="true"]')).toHaveTextContent('kai and 2 more');
   });
 
   it('shows no one viewing when only you have it open', async () => {
@@ -248,7 +248,7 @@ describe('the queue pane: who has each case', () => {
     await screen.findByText('You released the case against Alpha.');
     await w.clientFor('maya@example.test').claimCase(a!.person);
     await user.click(screen.getByRole('button', { name: 'Undo' }));
-    expect(await screen.findByText('maya is handling this case. You can read it, not decide it.')).toBeInTheDocument();
+    expect(await screen.findByText('maya is handling this case. Deciding it is refused until they release it.')).toBeInTheDocument();
     expect(w.cw.cases.holder(a!.person)?.by).toBe('maya@example.test');
   });
 });
@@ -416,7 +416,7 @@ describe('opening a case claims it', () => {
     await w.clientFor('maya@example.test').claimCase(a!.person);
     renderHub(w, { path: `/reports/${a!.id}` });
     await ready();
-    expect(await screen.findByText('maya is handling this case. You can read it, not decide it.')).toBeInTheDocument();
+    expect(await screen.findByText('maya is handling this case. Deciding it is refused until they release it.')).toBeInTheDocument();
     expect(w.cw.cases.holder(a!.person)?.by).toBe('maya@example.test');
     expect(rowOf('Alpha')).toHaveAttribute('data-claim', 'other');
     // The report page itself still loads: a claim never blocks a read.

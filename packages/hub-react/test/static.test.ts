@@ -512,3 +512,27 @@ describe('the README documents the token contract', () => {
     }
   });
 });
+
+describe('fix round 1: hygiene', () => {
+  const css = read(join(src, 'styles.css')).replace(/\/\*[\s\S]*?\*\//g, '');
+
+  it('no opacity below 1 dims text: contrast is computed from the tokens, and opacity would bypass it', () => {
+    const rules = [...css.matchAll(/([^{}@;]+)\{([^{}]*)\}/g)].filter((m) => /(^|[\s;])opacity:\s*0?\.\d+/.test(m[2] as string));
+    // The only dimmed things: a disabled control, and the small hint on the take-next button (white on accent, 0.9).
+    const allowed = [/cw-btn:disabled/, /cw-btn\[aria-disabled='true'\]/, /cw-take small/];
+    expect(rules.map((m) => (m[1] as string).trim()).filter((sel) => !allowed.some((re) => re.test(sel)))).toEqual([]);
+  });
+
+  it('the tones are the palette: no unstyled "ok"', () => {
+    expect(read(join(src, 'ui.tsx'))).toMatch(/export type Tone = 'warn' \| 'bad' \| 'idle' \| 'accent';/);
+  });
+
+  it('every catalog key is used by the source (no dead words)', () => {
+    const text = appCode.map(read).join('\n');
+    const literals = new Set([...text.matchAll(/'(hub\.[A-Za-z0-9_.]+)'/g)].map((m) => m[1] as string));
+    const prefixes = [...text.matchAll(/`(hub\.[A-Za-z0-9_.]*\.)\$\{/g)].map((m) => m[1] as string);
+    const bases = [...new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
+    const dead = bases.filter((k) => !literals.has(k) && !prefixes.some((p) => k.startsWith(p)));
+    expect(dead).toEqual([]);
+  });
+});

@@ -789,8 +789,13 @@
 .cw-hub .cw-case[data-selected='true'] {
   background: var(--cw-accent-soft);
 }
-.cw-hub .cw-case[data-gone='true'] {
-  opacity: 0.65;
+.cw-hub .cw-case[data-gone='true'] .cw-case-name {
+  color: var(--cw-ink-muted);
+  text-decoration: line-through;
+}
+.cw-hub .cw-case[data-gone='true'] .cw-case-closed {
+  color: var(--cw-ink);
+  font-weight: var(--cw-weight-strong);
 }
 .cw-hub .cw-case-link {
   display: grid;
@@ -873,10 +878,10 @@
   width: 0.875rem;
   height: 0.875rem;
 }
+/* Under the link, not over its corner: the wait, claim and viewing lines above it may all show, and must not be covered. */
 .cw-hub .cw-case-release {
-  position: absolute;
-  right: var(--cw-space-3);
-  bottom: 0.45rem;
+  display: block;
+  margin: 0 var(--cw-space-3) var(--cw-space-2) auto;
   padding: 0 var(--cw-space-2);
   border: var(--cw-border-width) solid var(--cw-border-strong);
   border-radius: var(--cw-radius-s);
@@ -1011,10 +1016,6 @@
     justify-content: start;
     gap: var(--cw-space-3);
     white-space: normal;
-  }
-  .cw-hub .cw-case-release {
-    position: static;
-    margin: 0 var(--cw-space-3) var(--cw-space-2);
   }
 }
 

@@ -11,7 +11,7 @@ export const UNDO_MS = 5_000;
 /** How long a plain toast stays. An error stays longer. */
 export const TOAST_MS = 4_000;
 export const TOAST_ERROR_MS = 7_000;
-/** The most toasts on screen at once; the oldest goes first. */
+/** The most toasts on screen at once. */
 export const TOAST_MAX = 3;
 
 export interface ToastInput {
@@ -66,6 +66,16 @@ interface Shown {
   held: boolean;
 }
 
+/** Keeps at most TOAST_MAX: the oldest news goes first, and a toast with an Undo is only pushed off when every toast has one. */
+function capped(list: Shown[]): Shown[] {
+  const out = [...list];
+  while (out.length > TOAST_MAX) {
+    const at = out.findIndex((s) => s.action === null);
+    out.splice(at < 0 ? 0 : at, 1);
+  }
+  return out;
+}
+
 /** Owns the toasts and draws them. It sits inside the hub's context (it reads the words), around everything that pushes one. */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const { t } = useHub();
@@ -96,7 +106,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const id = ++nextId.current;
     const tone = input.tone ?? 'neutral';
     const ms = input.ms ?? (input.action !== undefined ? UNDO_MS : tone === 'bad' ? TOAST_ERROR_MS : TOAST_MS);
-    setShown((list) => [...list, { id, text: input.text, tone, action: input.action ?? null, ms, held: false }].slice(-TOAST_MAX));
+    setShown((list) => capped([...list, { id, text: input.text, tone, action: input.action ?? null, ms, held: false }]));
     return id;
   }, []);
 
@@ -120,9 +130,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         finish(id);
       };
       const label = input.undoLabel ?? t('hub.toast.undo');
-      setShown((list) =>
-        [...list, { id, text: input.text, tone: 'neutral' as const, action: { label, run: undo }, ms: input.ms ?? UNDO_MS, held: true }].slice(-TOAST_MAX),
-      );
+      setShown((list) => capped([...list, { id, text: input.text, tone: 'neutral' as const, action: { label, run: undo }, ms: input.ms ?? UNDO_MS, held: true }]));
       return { undo, commit };
     },
     [finish, remove, t],

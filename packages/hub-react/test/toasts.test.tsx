@@ -248,8 +248,9 @@ describe('a held action with Undo', () => {
     const { api } = mount();
     const run = vi.fn();
     act(() => void api().hold({ text: 'Held.', run }));
+    // Newer toasts that also carry a button: with every slot an Undo, the oldest has to go, and its action is still sent.
     act(() => {
-      for (const text of ['A', 'B', 'C']) api().push({ text });
+      for (const text of ['A', 'B', 'C']) api().push({ text, action: { label: 'Open', run: () => undefined } });
     });
     await tick(0);
     expect(run).toHaveBeenCalledTimes(1);

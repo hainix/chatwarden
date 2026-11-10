@@ -12,7 +12,7 @@ import type { Route } from '../router.js';
 import { Avatar, Kbd, Link, PersonChip, Skeleton } from '../ui.js';
 
 /** The people shown by name on a row before it says "and N more". */
-const VIEWERS_NAMED = 2;
+const VIEWERS_NAMED = 1;
 /** Skeleton rows while the first read is out. */
 const SKELETON_ROWS = 5;
 
@@ -169,7 +169,7 @@ function CaseRow({ row, selected, onRelease }: { row: ShownRow; selected: boolea
   const viewers = g.viewing.map(actorName);
   const named = viewers.slice(0, VIEWERS_NAMED);
   const more = viewers.length - named.length;
-  const viewerText = more > 0 ? `${named.join(', ')} +${more}` : named.join(', ');
+  const viewerText = more > 0 ? t('hub.queue.row.viewingMore', { name: named[0] as string, count: more }) : (named[0] ?? '');
 
   return (
     <li className="cw-case" data-wait={overdue ? 'overdue' : 'ok'} data-claim={holder.kind} data-selected={selected ? 'true' : undefined} data-gone={row.gone ? 'true' : undefined}>

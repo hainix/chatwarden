@@ -129,12 +129,12 @@ describe('a case someone else holds', () => {
     const a = await w.file({ target: 'Alpha' });
     await w.clientFor('maya@example.test').claimCase(a.person);
     await opened(w, a.id);
-    expect(screen.getByText('maya is handling this case. You can read it, not decide it.', { selector: '.cw-toast-text' })).toBeInTheDocument();
+    expect(screen.getByText('maya is handling this case. Deciding it is refused until they release it.', { selector: '.cw-toast-text' })).toBeInTheDocument();
     expect(w.cw.cases.holder(a.person)?.by).toBe('maya@example.test');
     expect(calls(w, '/viewing')).toBe(1);
     // The next heartbeat does not say it again.
     await tick(60_000);
-    expect(screen.queryAllByText('maya is handling this case. You can read it, not decide it.', { selector: '.cw-toast-text' }).length).toBeLessThanOrEqual(1);
+    expect(screen.queryAllByText('maya is handling this case. Deciding it is refused until they release it.', { selector: '.cw-toast-text' }).length).toBeLessThanOrEqual(1);
     await tick(10_000);
     const notices = w.sent.filter((r) => r.path === `/cases/${a.person}/claim`).length;
     expect(notices).toBeGreaterThanOrEqual(2);

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { actorName, liveClaim, teamOf } from '../claims.js';
 import { useHub } from '../context.js';
 import { formatDuration, waitTone } from '../format.js';
@@ -121,6 +121,18 @@ function Team({ queue }: { queue: LiveQueue }) {
 function RecentActions() {
   const { client, t } = useHub();
   const state = useHubData('overview:recent', () => client.listSanctions({ limit: RECENT_SHOWN }));
+  // Follow the live loop: when the queue was read again because the change token moved, the actions are read again too.
+  const revision = useOptionalQueue()?.revision ?? 0;
+  const seen = useRef(revision);
+  const reload = useRef(state.reload);
+  reload.current = state.reload;
+  useEffect(() => {
+    if (revision === seen.current) return;
+    const first = seen.current === 0;
+    seen.current = revision;
+    // The queue's first read is not news: the actions were just asked for as well.
+    if (!first) reload.current();
+  }, [revision]);
   return (
     <Panel title={t('hub.overview.recent.title')}>
       <Fetched state={state} what={t('hub.state.what.actions')}>

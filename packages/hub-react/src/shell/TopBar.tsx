@@ -5,7 +5,7 @@ import { Icon, Mark } from '../icons.js';
 import type { HubText } from '../i18n.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import type { Role } from '../types.js';
-import { keyLabel } from '../shortcuts.js';
+import { keyLabel, modKey } from '../shortcuts.js';
 import { Avatar, Kbd, Tag } from '../ui.js';
 
 const ROLE_LABEL: Record<Role, HubText> = {
@@ -41,7 +41,13 @@ export function TopBar({ gameName, shortcuts, onCommand }: { gameName?: string; 
           title={queue.updatedAt === null ? undefined : t('hub.shell.liveTitle', { time: absoluteTime(queue.updatedAt, locale) })}
         >
           <i className="cw-live-dot" aria-hidden="true" />
-          {queue.connection === 'live' ? t('hub.shell.live') : queue.connection === 'lost' ? t('hub.shell.reconnecting') : t('hub.shell.offline')}
+          {queue.connection === 'live'
+            ? t('hub.shell.live')
+            : queue.connection === 'lost'
+              ? t('hub.shell.reconnecting')
+              : queue.connection === 'signedOut'
+                ? t('hub.shell.signedOut')
+                : t('hub.shell.offline')}
         </span>
       )}
       <div className="cw-top-gap" />
@@ -50,7 +56,7 @@ export function TopBar({ gameName, shortcuts, onCommand }: { gameName?: string; 
         <span className="cw-cmd-text">{t('hub.shell.command')}</span>
         {shortcuts && (
           <span className="cw-cmd-keys" aria-hidden="true">
-            <Kbd>{keyLabel(t, 'Ctrl')}</Kbd>
+            <Kbd>{keyLabel(t, modKey())}</Kbd>
             <Kbd>K</Kbd>
           </span>
         )}
