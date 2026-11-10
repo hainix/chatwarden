@@ -167,6 +167,21 @@ export function viewsContract(name: string, make: () => Store): void {
         expect(s.listSubjectSanctions({ alsoPermanent: true, limit: 10 })).toHaveLength(4);
       });
 
+      it('activeAt keeps only unrevoked rows in force at that instant (no end, or ending strictly after it), of any age', () => {
+        const s = make();
+        s.insertSanctionGroup([row({ groupId: 'live', refCode: 'M-LIVE1', startsAt: NOW - 300 * DAY, endsAt: NOW + 10 })]);
+        s.insertSanctionGroup([row({ groupId: 'perm', refCode: 'M-PERM1', startsAt: NOW - 400 * DAY, endsAt: null, kind: 'ban' })]);
+        s.insertSanctionGroup([row({ groupId: 'edge', refCode: 'M-EDGE1', startsAt: NOW - 5, endsAt: NOW })]);
+        s.insertSanctionGroup([row({ groupId: 'gone', refCode: 'M-GONE1', startsAt: NOW - 5, endsAt: NOW - 1 })]);
+        s.insertSanctionGroup([row({ groupId: 'rev', refCode: 'M-REV01', startsAt: NOW - 5, endsAt: null })]);
+        s.revokeSanctionGroup('rev', 'boss', NOW, 'x');
+        s.insertSanctionGroup(group('withip', 'M-WIP01', { startsAt: NOW - 2, endsAt: NOW + 100 }));
+        expect(groups(s.listSubjectSanctions({ activeAt: NOW, limit: 10 }))).toEqual(['withip', 'live', 'perm']);
+        expect(groups(s.listSubjectSanctions({ activeAt: NOW + 20, limit: 10 }))).toEqual(['withip', 'perm']);
+        expect(s.listSubjectSanctions({ activeAt: NOW, subjects: [], limit: 10 })).toEqual([]);
+        expect(groups(s.listSubjectSanctions({ activeAt: NOW, subjects: ['s_a'], source: 'moderator', limit: 10 }))).toEqual(['withip', 'live', 'perm']);
+      });
+
       it('pages with a keyset cursor: exactly one page, the page after it empty, and a cursor past the end', () => {
         const s = make();
         for (let i = 0; i < 5; i += 1) s.insertSanctionGroup([row({ id: `p${i}`, groupId: `g${i}`, refCode: `M-PAGE${i}`, startsAt: NOW + i })]);

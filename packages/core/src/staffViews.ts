@@ -25,7 +25,9 @@ const DAY_MS = 24 * 3_600_000;
  * - `rule`: the cited Community Rule (`parseRuleRef`); null on a row written before rules existed.
  * - `endsAt`: epoch ms the restriction stops applying, null when permanent. A warning or note has no end, so it is null too
  *   (`kind` tells the two apart; the stored row has `endsAt === startsAt` for those).
- * - `active`: see {@link isSanctionActive}.
+ * - `active`: see {@link isSanctionActive}. It is about time and revocation only, not about enforcement.
+ * - `pending`: true when the sanction was written while enforcement was off (it applies nothing until enforcement is on).
+ *   The hub can label such a row; it does not change `active`.
  * - `revokedAt`, `revokedBy`, `revokeReason`: who lifted it, when and why; all null while it stands. A group revoked
  *   before the actor was kept reads `revokedBy` and `revokeReason` as the store has them (the columns have existed since
  *   the first sanction migration, so in practice both are set).
@@ -44,6 +46,7 @@ export interface SanctionGroupView {
   source: Source;
   automated: boolean;
   active: boolean;
+  pending: boolean;
   revokedAt: number | null;
   revokedBy: string | null;
   revokeReason: string | null;
@@ -88,13 +91,14 @@ export class SanctionQueryError extends Error {
 }
 
 /**
- * Is this sanction in force at `now`? A revoked row never is. A restriction (chat, area, ban) applies strictly before its
+ * Is this sanction in force at `now`? A revoked row never is, nor is one that has not started (`startsAt` after `now`). A restriction (chat, area, ban) applies strictly before its
  * `endsAt` and, with no end, until it is revoked. A warning or note restricts nothing and has no end, so it counts for as
  * long as the escalation ladder counts it: 90 days from its `startsAt` (`HISTORY_LOOKBACK_MS`, inclusive). A row without
  * `revokedAt` (a load that does not carry it) reads as not revoked.
  */
 export function isSanctionActive(row: SanctionRow, now: number): boolean {
   if (row.revokedAt !== undefined && row.revokedAt !== null) return false;
+  if (row.startsAt > now) return false;
   if (isRecordKind(row.kind)) return row.startsAt >= now - HISTORY_LOOKBACK_MS;
   return row.endsAt === null || row.endsAt > now;
 }
@@ -125,6 +129,7 @@ export function sanctionGroupView(row: SanctionRow, now: number): SanctionGroupV
     source: row.source,
     automated: row.automated,
     active: isSanctionActive(row, now),
+    pending: row.pending,
     revokedAt: row.revokedAt ?? null,
     revokedBy: row.revokedBy ?? null,
     revokeReason: row.revokeReason ?? null,
@@ -133,16 +138,24 @@ export function sanctionGroupView(row: SanctionRow, now: number): SanctionGroupV
 
 /**
  * A person's sanctions, newest first: the last 90 days (the escalation window, by `startsAt`) plus every permanent one
- * that has not been revoked, across every alias merged into them, at most {@link PERSON_SANCTIONS_MAX}.
+ * that has not been revoked, across every alias merged into them. Every group still in force (not revoked, no end or an
+ * end in the future, of any age) is always included; the rest of the window fills what is left of
+ * {@link PERSON_SANCTIONS_MAX}, newest first.
  */
 export function sanctionsOfPerson(store: Store, subjects: SubjectIndex, person: SubjectId, now: number): SanctionGroupView[] {
-  return store
-    .listSubjectSanctions({
-      subjects: subjects.aliasesOf(person),
-      since: now - HISTORY_LOOKBACK_MS,
-      alsoPermanent: true,
-      limit: PERSON_SANCTIONS_MAX,
-    })
+  const aliases = subjects.aliasesOf(person);
+  const inForce = store.listSubjectSanctions({ subjects: aliases, activeAt: now, limit: PERSON_SANCTIONS_MAX });
+  const taken = new Set(inForce.map((r) => r.id));
+  const window = store.listSubjectSanctions({
+    subjects: aliases,
+    since: now - HISTORY_LOOKBACK_MS,
+    alsoPermanent: true,
+    limit: PERSON_SANCTIONS_MAX,
+  });
+  const room = Math.max(0, PERSON_SANCTIONS_MAX - inForce.length);
+  const rest = window.filter((r) => !taken.has(r.id)).slice(0, room);
+  return [...inForce, ...rest]
+    .sort((a, b) => b.startsAt - a.startsAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
     .map((r) => sanctionGroupView(r, now));
 }
 
@@ -274,9 +287,13 @@ export function blockedItems(store: Store, subjects: SubjectIndex, days: unknown
   }));
 }
 
-/** How many strikes each term earned in the last `days` days (1, 7 or 30; `RangeError` otherwise). Terms with none are absent. */
+/**
+ * How many strikes each term earned in the last `days` days (1, 7 or 30; `RangeError` otherwise). Terms with none are
+ * absent. The record has no prototype: read it with `counts[id]` or `Object.hasOwn`, never `counts.hasOwnProperty`.
+ */
 export function blockedCountsByTerm(store: Store, days: unknown, now: number): Record<string, number> {
+  // A null-prototype record, so a term id such as `__proto__` is an ordinary key and reads back as one.
   const out: Record<string, number> = Object.create(null) as Record<string, number>;
   for (const r of store.countStrikesByTerm(sinceOf(days, now))) out[r.termId] = r.count;
-  return { ...out };
+  return out;
 }

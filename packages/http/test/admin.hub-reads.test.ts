@@ -42,7 +42,7 @@ const strike = (w: W, id: string, at: number, over: Partial<Parameters<W['store'
   w.store.insertStrike({ id, at, subject: 's_blocked', roomId: 'ROOM1', termId: 'syn:zorbak', rawLine: 'you zorbak', ...over });
 
 const SANCTION_VIEW_KEYS = [
-  'groupId', 'refCode', 'kind', 'rule', 'startsAt', 'endsAt', 'reason', 'actor', 'source', 'automated', 'active',
+  'groupId', 'refCode', 'kind', 'rule', 'startsAt', 'endsAt', 'reason', 'actor', 'source', 'automated', 'active', 'pending',
   'revokedAt', 'revokedBy', 'revokeReason',
 ].sort();
 
@@ -93,7 +93,7 @@ describe('GET /people/:ref/history: sanctions and asReporter', () => {
     expect(sanctions.map((s) => s.groupId)).toEqual([b.groupId, a.groupId]);
     expect(sanctions[1]).toEqual({
       groupId: a.groupId, refCode: a.refCode, kind: 'chat', rule: 4, startsAt: NOW + 1000, endsAt: NOW + 1000 + DAY,
-      reason: 'spamming the lobby', actor: 'ann', source: 'moderator', automated: false, active: true,
+      reason: 'spamming the lobby', actor: 'ann', source: 'moderator', automated: false, active: true, pending: false,
       revokedAt: null, revokedBy: null, revokeReason: null,
     });
     expect(sanctions[0]).toMatchObject({ kind: 'warning', endsAt: null, rule: 'uncovered', active: true });
@@ -212,7 +212,7 @@ describe('GET /sanctions', () => {
     expect(body.next).toBeNull();
     expect(body.items[0]).toEqual({
       groupId: second.groupId, refCode: second.refCode, kind: 'ban', rule: 2, startsAt: w.clock.t, endsAt: null, reason: 'private moderator reason',
-      actor: 'ann', source: 'api', automated: false, active: true, revokedAt: null, revokedBy: null, revokeReason: null, person: b.target,
+      actor: 'ann', source: 'api', automated: false, active: true, pending: false, revokedAt: null, revokedBy: null, revokeReason: null, person: b.target,
     });
     expect(body.items[1]?.person).toBe(a.target);
     for (const item of body.items) expect(Object.keys(item).sort()).toEqual([...SANCTION_VIEW_KEYS, 'person'].sort());
@@ -328,6 +328,30 @@ describe('GET /blocked', () => {
     expect(second.items[0]).toMatchObject({ termId: 'syn:zorbak', term: null, language: null });
   });
 
+  it('term and language need terms.read as well: a caller without it gets null for both, with termId and text still there', async () => {
+    const hidden = await world({ permissions: { 'terms.read': 'senior' } });
+    strike(hidden, 'k1', NOW - HOUR, { termId: 'syn:zorbak', rawLine: 'you zorbak' });
+    const modBody = (await hidden.call('GET', '/blocked', { role: 'moderator' })).body as { items: Array<Record<string, unknown>> };
+    expect(modBody.items[0]).toMatchObject({ termId: 'syn:zorbak', term: null, language: null, text: 'you zorbak' });
+    // A senior holds both permissions and sees the term.
+    const seniorBody = (await hidden.call('GET', '/blocked', { role: 'senior' })).body as { items: Array<Record<string, unknown>> };
+    expect(seniorBody.items[0]).toMatchObject({ term: 'zorbak', language: 'en' });
+    // Control: with the default table a moderator holds both.
+    const open = await world();
+    strike(open, 'k1', NOW - HOUR, { termId: 'syn:zorbak' });
+    const body = (await open.call('GET', '/blocked', { role: 'moderator' })).body as { items: Array<Record<string, unknown>> };
+    expect(body.items[0]).toMatchObject({ term: 'zorbak', language: 'en' });
+  });
+
+  it('terms.read decides per caller, whatever blocked.read allows', async () => {
+    const w = await world({ permissions: { 'blocked.read': 'moderator', 'terms.read': 'owner' } });
+    strike(w, 'k1', NOW - HOUR, { termId: 'syn:zorbak' });
+    const owner = (await w.call('GET', '/blocked', { role: 'owner' })).body as { items: Array<Record<string, unknown>> };
+    expect(owner.items[0]).toMatchObject({ term: 'zorbak' });
+    const senior = (await w.call('GET', '/blocked', { role: 'senior' })).body as { items: Array<Record<string, unknown>> };
+    expect(senior.items[0]).toMatchObject({ term: null, language: null });
+  });
+
   it('days defaults to 7 and accepts 1, 7 and 30', async () => {
     const w = await world();
     strike(w, 'd1', NOW - HOUR);
@@ -430,6 +454,25 @@ describe('GET /terms: metadata and blocks30d', () => {
     expect(Object.keys(body.blocks30d).sort()).toEqual(body.terms.map((t) => t.id).sort());
   });
 
+  it('keeps a term whose id is __proto__ in blocks30d (a null-prototype record)', async () => {
+    const w = await world();
+    const { adminRoutes, createRouter } = await import('../src/index.js');
+    const fake: TermsAdmin = {
+      rows: { terms: [{ id: '__proto__', term: 'blorft', language: 'en', active: true }, { id: 'x1', term: 'snerp', language: 'en', active: true }], exceptions: [] },
+      check: () => ({ ok: true, hits: [] }),
+      change: () => Promise.resolve({ ok: false, error: 'no' }),
+    };
+    strike(w, 'p1', NOW - HOUR, { termId: '__proto__' });
+    strike(w, 'p2', NOW - HOUR, { termId: '__proto__' });
+    const router = createRouter(adminRoutes(w.cw, { authorize: () => ({ actor: 'ann', role: 'moderator' }), terms: fake }));
+    const res = await router({ method: 'GET', path: '/terms', query: {}, headers: {}, body: undefined });
+    const counts = (res.body as { blocks30d: Record<string, number> }).blocks30d;
+    expect(Object.hasOwn(counts, '__proto__')).toBe(true);
+    expect(counts['__proto__']).toBe(2);
+    expect(counts['x1']).toBe(0);
+    expect(Object.keys(counts).sort()).toEqual(['__proto__', 'x1']);
+  });
+
   it('is still gated by terms.read', async () => {
     const locked = await world({ permissions: { 'terms.read': 'owner' } });
     expect((await locked.call('GET', '/terms', { role: 'senior' })).status).toBe(403);
@@ -514,8 +557,8 @@ describe('POST /terms/test', () => {
   it('is mounted only with terms', async () => {
     const bare = await world({ terms: false });
     expect(Object.keys(bare.routes).filter((k) => k.includes('/terms'))).toEqual([]);
-    // `/terms/test` would read as a term id for PATCH, so the router says 405 rather than 404; either way it is not served.
-    expect([404, 405]).toContain((await test(bare, { text: 'zorbak' })).status);
+    // No term routes at all: 404.
+    expect((await test(bare, { text: 'zorbak' })).status).toBe(404);
   });
 
   it('works with any terms whose match is a function (a structural TermsAdmin)', async () => {
@@ -537,7 +580,8 @@ describe('POST /terms/test', () => {
     // And without match, the tester is not mounted.
     const noMatch: TermsAdmin = { rows: fake.rows, check: fake.check, change: fake.change };
     const router2 = createRouter(adminRoutes(w.cw, { authorize: () => ({ actor: 'ann', role: 'moderator' }), terms: noMatch }));
-    expect([404, 405]).toContain((await router2({ method: 'POST', path: '/terms/test', query: {}, headers: {}, body: undefined, rawBody: '{"text":"x"}' })).status);
+    // Terms without `match`: the other term routes exist, so `/terms/test` reads as a term id for PATCH and the router says 405.
+    expect((await router2({ method: 'POST', path: '/terms/test', query: {}, headers: {}, body: undefined, rawBody: '{"text":"x"}' })).status).toBe(405);
   });
 });
 

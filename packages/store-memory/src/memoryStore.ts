@@ -262,6 +262,7 @@ export class MemoryStore implements Store {
         if (r.targetType !== 'subject') return false;
         if (wanted !== null && !wanted.has(r.value)) return false;
         if (q.source !== undefined && r.source !== q.source) return false;
+        if (q.activeAt !== undefined && !(r.revokedAt === null && (r.endsAt === null || r.endsAt > q.activeAt))) return false;
         if (q.since !== undefined && r.startsAt < q.since && !(q.alsoPermanent === true && r.endsAt === null && r.revokedAt === null)) {
           return false;
         }

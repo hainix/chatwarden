@@ -61,7 +61,7 @@ async function setup() {
 }
 
 const KEYS = [
-  'groupId', 'refCode', 'kind', 'rule', 'startsAt', 'endsAt', 'reason', 'actor', 'source', 'automated', 'active',
+  'groupId', 'refCode', 'kind', 'rule', 'startsAt', 'endsAt', 'reason', 'actor', 'source', 'automated', 'active', 'pending',
   'revokedAt', 'revokedBy', 'revokeReason',
 ].sort();
 
@@ -86,6 +86,12 @@ describe('isSanctionActive', () => {
   it('a revoked row is never active, however long it has left', () => {
     expect(at({ revokedAt: NOW })).toBe(false);
     expect(at({ kind: 'ban', endsAt: NOW + DAY, revokedAt: NOW })).toBe(false);
+  });
+  it('a group that has not started yet is not active, whatever its end', () => {
+    expect(at({ startsAt: NOW + 1, endsAt: NOW + H })).toBe(false);
+    expect(at({ startsAt: NOW + 1, endsAt: null })).toBe(false);
+    expect(at({ startsAt: NOW, endsAt: null })).toBe(true);
+    expect(at({ kind: 'warning', startsAt: NOW + 1, endsAt: NOW + 1 })).toBe(false);
   });
   it('a missing revokedAt reads as not revoked', () => {
     const rest: SanctionRow = { ...base };
@@ -113,7 +119,7 @@ describe('sanctionGroupView', () => {
     expect(Object.keys(v).sort()).toEqual(KEYS);
     expect(v).toEqual({
       groupId: 'g1', refCode: 'M-ABCDE', kind: 'ban', rule: 3, startsAt: NOW - H, endsAt: null, reason: 'why', actor: 'ann',
-      source: 'moderator', automated: false, active: true, revokedAt: null, revokedBy: null, revokeReason: null,
+      source: 'moderator', automated: false, active: true, pending: true, revokedAt: null, revokedBy: null, revokeReason: null,
     });
   });
   it('reads the rule as a RuleRef: a number, uncovered, or null when none or unreadable', () => {
@@ -127,6 +133,10 @@ describe('sanctionGroupView', () => {
     expect(sanctionGroupView({ ...row, kind: 'warning', endsAt: row.startsAt }, NOW).endsAt).toBeNull();
     expect(sanctionGroupView({ ...row, kind: 'note', endsAt: row.startsAt }, NOW).endsAt).toBeNull();
     expect(sanctionGroupView({ ...row, kind: 'chat', endsAt: NOW + H }, NOW).endsAt).toBe(NOW + H);
+  });
+  it('pending says enforcement was off when written; active is about time and revocation only', () => {
+    expect(sanctionGroupView({ ...row, pending: true }, NOW)).toMatchObject({ pending: true, active: true });
+    expect(sanctionGroupView({ ...row, pending: false }, NOW)).toMatchObject({ pending: false, active: true });
   });
   it('carries the revoke columns and is then inactive', () => {
     const v = sanctionGroupView({ ...row, revokedAt: NOW - 5, revokedBy: 'bob', revokeReason: 'mistake' }, NOW);
@@ -156,7 +166,7 @@ describe('cw.sanctions.forPerson', () => {
     expect(views).toEqual([
       {
         groupId: made.groupId, refCode: made.refCode, kind: 'chat', rule: 4, startsAt: NOW, endsAt: NOW + DAY, reason: 'spamming the lobby',
-        actor: 'ann', source: 'moderator', automated: false, active: true, revokedAt: null, revokedBy: null, revokeReason: null,
+        actor: 'ann', source: 'moderator', automated: false, active: true, pending: false, revokedAt: null, revokedBy: null, revokeReason: null,
       },
     ]);
     // One group with an IP row is still one view, and the view names no ip, value or hash.
@@ -275,6 +285,41 @@ describe('cw.sanctions.forPerson', () => {
     expect(got[0]?.startsAt).toBe(NOW + PERSON_SANCTIONS_MAX + 3);
   });
 
+  it('never drops an active permanent ban or a still-running restriction to the cap, however many newer groups there are', async () => {
+    const { cw, person, sanction, clock } = await setup();
+    const subject = person();
+    const start = clock.t;
+    clock.t = start - 200 * DAY;
+    const oldPerm = await sanction(subject, { kind: 'ban', durationMs: null });
+    const oldRunning = await sanction(subject, { kind: 'chat', durationMs: 300 * DAY });
+    const oldRevoked = await sanction(subject, { kind: 'ban', durationMs: null });
+    await cw.sanctions.revoke(oldRevoked.groupId, 'bob', 'lifted');
+    clock.t = start;
+    for (let i = 0; i < PERSON_SANCTIONS_MAX + 50; i += 1) {
+      clock.t += 1;
+      await sanction(subject, { kind: 'warning', durationMs: null });
+    }
+    const got = cw.sanctions.forPerson(subject);
+    const ids = got.map((v) => v.groupId);
+    expect(ids).toContain(oldPerm.groupId);
+    expect(ids).toContain(oldRunning.groupId);
+    expect(ids).not.toContain(oldRevoked.groupId);
+    // The cap still bounds the rest: the two actives plus the newest warnings fill it exactly.
+    expect(got).toHaveLength(PERSON_SANCTIONS_MAX);
+    expect(new Set(ids).size).toBe(ids.length);
+    const starts = got.map((v) => v.startsAt);
+    expect([...starts].sort((a, b) => b - a)).toEqual(starts);
+    expect(got[0]?.kind).toBe('warning');
+    expect(got.filter((v) => v.kind === 'warning')).toHaveLength(PERSON_SANCTIONS_MAX - 2);
+  });
+
+  it('an active group inside the window is listed once (deduped)', async () => {
+    const { cw, person, sanction } = await setup();
+    const subject = person();
+    const made = await sanction(subject, { kind: 'ban', durationMs: null });
+    expect(cw.sanctions.forPerson(subject).map((v) => v.groupId)).toEqual([made.groupId]);
+  });
+
   it("does not return someone else's sanctions (control)", async () => {
     const { cw, person, sanction } = await setup();
     const a = person();
@@ -304,7 +349,7 @@ describe('cw.sanctions.list', () => {
     expect(page.next).toBeNull();
     expect(page.items[0]).toEqual({
       groupId: second.groupId, refCode: second.refCode, kind: 'warning', rule: 2, startsAt: NOW + 1000, endsAt: null, reason: 'private reason',
-      actor: 'ann', source: 'api', automated: false, active: true, revokedAt: null, revokedBy: null, revokeReason: null, person: b,
+      actor: 'ann', source: 'api', automated: false, active: true, pending: false, revokedAt: null, revokedBy: null, revokeReason: null, person: b,
     });
     expect(page.items[1]?.person).toBe(a);
     for (const item of page.items) expect(Object.keys(item).sort()).toEqual([...KEYS, 'person'].sort());
@@ -623,6 +668,16 @@ describe('cw.blocked', () => {
     strike(store, 'd', NOW - 10 * DAY, { termId: 'tB' });
     expect(cw.blocked.countsByTerm({ days: 30 })).toEqual({ tA: 2, tB: 2 });
     expect(cw.blocked.countsByTerm({ days: 7 })).toEqual({ tA: 2, tB: 1 });
+  });
+
+  it('countsByTerm keeps a term id of __proto__ as an own key', async () => {
+    const { cw, store } = await setup();
+    strike(store, 'a', NOW - H, { termId: '__proto__' });
+    strike(store, 'b', NOW - H, { termId: 'tA' });
+    const counts = cw.blocked.countsByTerm({ days: 1 });
+    expect(Object.hasOwn(counts, '__proto__')).toBe(true);
+    expect(counts['__proto__']).toBe(1);
+    expect(counts['tA']).toBe(1);
   });
 
   it('countsByTerm is not capped at the list size', async () => {

@@ -334,6 +334,10 @@ export class SqliteStore implements Store, TermStore {
       where.push('source = ?');
       args.push(q.source);
     }
+    if (q.activeAt !== undefined) {
+      where.push('(revoked_at IS NULL AND (ends_at IS NULL OR ends_at > ?))');
+      args.push(q.activeAt);
+    }
     if (q.since !== undefined) {
       if (q.alsoPermanent === true) {
         where.push('(starts_at >= ? OR (ends_at IS NULL AND revoked_at IS NULL))');

@@ -192,6 +192,11 @@ export interface SanctionListQuery {
   /** Only rows with `startsAt >= since`. */
   since?: number;
   /**
+   * Only rows in force at this instant, of any age: not revoked, and with no end or an end strictly after it. Combines
+   * (AND) with the other filters.
+   */
+  activeAt?: number;
+  /**
    * With `since`: also the rows older than `since` that are permanent (`endsAt` null) and not revoked. Ignored without
    * `since`.
    */

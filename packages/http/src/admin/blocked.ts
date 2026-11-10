@@ -1,6 +1,7 @@
 import { BLOCKED_DAYS } from '@chatwarden/core';
 import type { BlockedDays } from '@chatwarden/core';
 import { HttpError } from '../errors.js';
+import { roleAtLeast } from '../permissions.js';
 import type { RouteTable } from '../router.js';
 import type { AdminContext } from './context.js';
 import type { TermsAdmin } from './terms.js';
@@ -24,7 +25,7 @@ function queryDays(raw: string | undefined): BlockedDays {
  * `text` is the line as the person typed it, shown to staff only (they already see raw lines in a report's excerpt, so this is
  * not a new kind of exposure; it is a new way to reach it, hence its own permission and its own audit row). `person` is the
  * canonical subject (a staff ref). `term` and `language` come from the injected `terms` and are null when the routes were
- * built without it or the term is no longer listed. No hashed IP or key is ever part of an item.
+ * built without it, the term is no longer listed, or the caller lacks `terms.read` (the term text is that permission's). No hashed IP or key is ever part of an item.
  *
  * Audit: `blocked.view` with no target, written after the list is built; if it cannot be written the request is a 500 and
  * nothing is shown.
@@ -35,7 +36,9 @@ export function blockedRoutes(ctx: AdminContext, terms: TermsAdmin | undefined):
     'GET /blocked': ctx.secure('blocked.read', (c) => {
       const days = queryDays(c.req.query.days);
       const known = new Map<string, { term: string; language: string }>();
-      for (const t of terms?.rows.terms ?? []) known.set(t.id, { term: t.term, language: t.language });
+      // The term text is what `terms.read` guards, so a caller without it gets null here, whatever `blocked.read` allows.
+      const mayReadTerms = roleAtLeast(c.authz.role, ctx.permissions['terms.read']);
+      for (const t of mayReadTerms ? (terms?.rows.terms ?? []) : []) known.set(t.id, { term: t.term, language: t.language });
       const items = cw.blocked.list({ days }).map((b) => {
         const t = known.get(b.termId);
         return {

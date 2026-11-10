@@ -144,7 +144,8 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
       });
       // Every listed term gets a count (zero when it blocked nothing); strikes of a term that is no longer listed are left out.
       const counts = cw.blocked.countsByTerm({ days: 30 });
-      const blocks30d: Record<string, number> = {};
+      // No prototype, so a term id of `__proto__` is kept as a key like any other.
+      const blocks30d: Record<string, number> = Object.create(null) as Record<string, number>;
       for (const t of rows.terms) blocks30d[t.id] = counts[t.id] ?? 0;
       return {
         status: 200,
