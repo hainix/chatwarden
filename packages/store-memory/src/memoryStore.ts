@@ -106,7 +106,7 @@ export class MemoryStore implements Store {
     try {
       const value = fn();
       this.journal = outer;
-      if (outer !== null) outer.push(...mine);
+      if (outer !== null) for (const step of mine) outer.push(step); // not push(...mine): a big array overflows the stack
       return value;
     } catch (err) {
       this.journal = outer; // undo steps must not journal themselves
@@ -306,9 +306,9 @@ export class MemoryStore implements Store {
         if (q.action !== undefined && r.action !== q.action) return false;
         if (q.before === undefined) return true;
         if (r.at !== q.before) return r.at < q.before;
-        return q.beforeId !== undefined && r.id < q.beforeId;
+        return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
       })
-      .sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .sort((a, b) => b.at - a.at || compare(b.id, a.id))
       .slice(0, limit)
       .map((r) => structuredClone(r));
   }
@@ -318,8 +318,10 @@ export class MemoryStore implements Store {
     const kept = snapshot.filter((r) => r.at >= before);
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.auditRows.splice(0, this.auditRows.length, ...kept);
-      this.undoWith(() => this.auditRows.splice(0, this.auditRows.length, ...snapshot));
+      this.auditRows = kept;
+      this.undoWith(() => {
+        this.auditRows = snapshot;
+      });
     }
     return n;
   }
@@ -412,7 +414,11 @@ export class MemoryStore implements Store {
   }
 
   loadMutes(since: number): MuteRow[] {
-    return [...this.mutes.values()].filter((m) => m.row.createdAt >= since).map((m) => ({ ...m.row }));
+    // In write order (a refresh keeps its place, and so does a row an undo puts back), like SQLite's rowid.
+    return [...this.mutes.values()]
+      .filter((m) => m.row.createdAt >= since)
+      .sort((a, b) => a.seq - b.seq)
+      .map((m) => ({ ...m.row }));
   }
 
   pruneMutes(viewer: SubjectId, keep: number): SubjectId[] {
@@ -486,7 +492,7 @@ export class MemoryStore implements Store {
     const wanted = new Set(subjects);
     return this.reports
       .filter((r) => wanted.has(r.targetSubject))
-      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));
   }
@@ -498,9 +504,9 @@ export class MemoryStore implements Store {
         if (q.status !== undefined && r.status !== q.status) return false;
         if (q.before === undefined) return true;
         if (r.createdAt !== q.before) return r.createdAt < q.before;
-        return q.beforeId !== undefined && r.id < q.beforeId;
+        return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
       })
-      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, limit)
       .map((r) => structuredClone(r));
   }
@@ -592,13 +598,13 @@ export class MemoryStore implements Store {
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.reports.splice(0, this.reports.length, ...kept);
+      this.reports = kept;
       // A decision outlives only its report.
       const alive = new Set(kept.map((r) => r.id));
       const dropped = [...this.decisions.values()].filter((d) => !alive.has(d.reportId));
       for (const d of dropped) this.decisions.delete(d.key);
       this.undoWith(() => {
-        this.reports.splice(0, this.reports.length, ...snapshot);
+        this.reports = snapshot;
         for (const d of dropped) this.decisions.set(d.key, d);
       });
     }
@@ -614,12 +620,12 @@ export class MemoryStore implements Store {
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.sanctions.splice(0, this.sanctions.length, ...kept);
+      this.sanctions = kept;
       // A ref code is held by the rows that remain; free the codes nothing holds any more.
       const held = new Set(kept.map((r) => r.refCode));
       for (const code of [...this.refOwners.keys()]) if (!held.has(code)) this.refOwners.delete(code);
       this.undoWith(() => {
-        this.sanctions.splice(0, this.sanctions.length, ...snapshot);
+        this.sanctions = snapshot;
         this.refOwners = owners;
       });
     }
@@ -631,8 +637,10 @@ export class MemoryStore implements Store {
     const kept = snapshot.filter((r) => r.at >= before);
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.strikes.splice(0, this.strikes.length, ...kept);
-      this.undoWith(() => this.strikes.splice(0, this.strikes.length, ...snapshot));
+      this.strikes = kept;
+      this.undoWith(() => {
+        this.strikes = snapshot;
+      });
     }
     return n;
   }
@@ -711,8 +719,10 @@ export class MemoryStore implements Store {
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.notices.splice(0, this.notices.length, ...kept);
-      this.undoWith(() => this.notices.splice(0, this.notices.length, ...snapshot));
+      this.notices = kept;
+      this.undoWith(() => {
+        this.notices = snapshot;
+      });
     }
     return n;
   }
@@ -750,8 +760,22 @@ export class MemoryStore implements Store {
 
 const muteKey = (viewer: SubjectId, target: SubjectId): string => `${viewer}\u0000${target}`;
 
-/** Binary string order, like SQLite's default collation for ASCII text. */
-const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+/**
+ * String order by code point, which is the order of SQLite's default (BINARY) collation on UTF-8 text. JavaScript's `<`
+ * compares UTF-16 code units and puts a character outside the BMP before U+E000..U+FFFF; this does not.
+ */
+function compare(a: string, b: string): number {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const x = a.codePointAt(i)!;
+    const y = b.codePointAt(j)!;
+    if (x !== y) return x < y ? -1 : 1;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  return i < a.length ? 1 : j < b.length ? -1 : 0;
+}
 
 /** A new, empty {@link MemoryStore}. */
 export function createMemoryStore(): MemoryStore {

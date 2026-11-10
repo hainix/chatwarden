@@ -39,6 +39,81 @@ export function mutesContract(name: string, make: () => Store): void {
       expect(s.loadMutes(0).map((r) => r.target)).toEqual(['first', 'second', 'third']);
     });
 
+    describe('a rolled-back write puts everything back, in the same order', () => {
+      const seeded = (): Store => {
+        const s = make();
+        s.upsertMute(mute('v', 'a', T));
+        s.upsertMute(mute('v', 'b', T + 1));
+        s.upsertMute(mute('v', 'c', T + 2));
+        return s;
+      };
+      const order = (s: Store) => s.loadMutes(0).map((r) => `${r.viewer}>${r.target}`);
+      const boom = (): never => {
+        throw new Error('boom');
+      };
+
+      it('deleteMute of the first or a middle row', () => {
+        for (const target of ['a', 'b']) {
+          const s = seeded();
+          expect(() =>
+            s.transaction(() => {
+              s.deleteMute('v', target);
+              boom();
+            }),
+          ).toThrow('boom');
+          expect(order(s)).toEqual(['v>a', 'v>b', 'v>c']);
+        }
+      });
+
+      it('pruneMutes: the dropped rows come back, in their places', () => {
+        const s = seeded();
+        expect(() =>
+          s.transaction(() => {
+            expect(s.pruneMutes('v', 1)).toEqual(['a', 'b']);
+            boom();
+          }),
+        ).toThrow('boom');
+        expect(order(s)).toEqual(['v>a', 'v>b', 'v>c']);
+        expect(s.loadMutes(0).map((r) => r.createdAt)).toEqual([T, T + 1, T + 2]);
+      });
+
+      it('a partial purgeMutes', () => {
+        const s = seeded();
+        expect(() =>
+          s.transaction(() => {
+            expect(s.purgeMutes(T + 2)).toBe(2);
+            boom();
+          }),
+        ).toThrow('boom');
+        expect(order(s)).toEqual(['v>a', 'v>b', 'v>c']);
+      });
+
+      it('a delete that is then re-muted inside the same failed transaction', () => {
+        const s = seeded();
+        expect(() =>
+          s.transaction(() => {
+            s.deleteMute('v', 'a');
+            s.upsertMute(mute('v', 'a', T + 9));
+            boom();
+          }),
+        ).toThrow('boom');
+        expect(order(s)).toEqual(['v>a', 'v>b', 'v>c']);
+        expect(s.loadMutes(0)[0]?.createdAt).toBe(T);
+      });
+
+      it('after a rolled-back prune, a later prune still drops the right rows', () => {
+        const s = seeded();
+        expect(() =>
+          s.transaction(() => {
+            s.pruneMutes('v', 0);
+            boom();
+          }),
+        ).toThrow('boom');
+        expect(s.pruneMutes('v', 2)).toEqual(['a']);
+        expect(order(s)).toEqual(['v>b', 'v>c']);
+      });
+    });
+
     it('loadMutes keeps rows created at or after since', () => {
       const s = make();
       s.upsertMute(mute('v', 'old', T - 1));
@@ -104,6 +179,20 @@ export function mutesContract(name: string, make: () => Store): void {
       s.upsertMute(mute('v', 't'));
       s.loadMutes(0)[0]!.createdAt = 0;
       expect(s.loadMutes(0)[0]?.createdAt).toBe(T);
+    });
+
+    it('a rolled-back pruneMutes returns the rows it dropped', () => {
+      const s = make();
+      s.upsertMute(mute('v', 'a', T));
+      s.upsertMute(mute('v', 'b', T + 1));
+      expect(() =>
+        s.transaction(() => {
+          expect(s.pruneMutes('v', 0)).toEqual(['a', 'b']);
+          expect(s.loadMutes(0)).toEqual([]);
+          throw new Error('boom');
+        }),
+      ).toThrow('boom');
+      expect(pairs(s.loadMutes(0))).toEqual(['v>a', 'v>b']);
     });
 
     it('every write is undone with its transaction', () => {

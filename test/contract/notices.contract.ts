@@ -52,6 +52,20 @@ export function noticesContract(name: string, make: () => Store): void {
       expect(s.loadNotices(['S_A'])).toEqual([]);
     });
 
+    it('insertNotice rolls back with the transaction, and the id can be used again', () => {
+      const s = make();
+      s.insertNotice(notice('keep'));
+      expect(() =>
+        s.transaction(() => {
+          s.insertNotice(notice('gone'));
+          throw new Error('boom');
+        }),
+      ).toThrow('boom');
+      expect(ids(s.loadNotices(['s_a']))).toEqual(['keep']);
+      s.insertNotice(notice('gone'));
+      expect(ids(s.loadNotices(['s_a']))).toEqual(['keep', 'gone']);
+    });
+
     it('a duplicate id throws and the first row stays', () => {
       const s = make();
       s.insertNotice(notice('n1'));

@@ -306,6 +306,15 @@ export function reportsContract(name: string, make: () => Store): void {
         expect(ids(s.listReports({ status: 'dismissed', limit: 10 }))).toEqual(['r3']);
       });
 
+      it('ties break by code point, like SQLite bytes', () => {
+        const s = make();
+        s.insertReport(report({ id: '\uFF21', createdAt: NOW, reporterSubject: 's_1' }));
+        s.insertReport(report({ id: '\u{1F600}', createdAt: NOW, reporterSubject: 's_2' }));
+        expect(ids(s.listReports({ limit: 9 }))).toEqual(['\u{1F600}', '\uFF21']);
+        expect(ids(s.listReports({ limit: 9, before: NOW, beforeId: '\u{1F600}' }))).toEqual(['\uFF21']);
+        expect(ids(s.listReportsByPerson(['s_tgt'], 9))).toEqual(['\u{1F600}', '\uFF21']);
+      });
+
       it('walking the list two at a time by the cursor shows every row once, when several tie on createdAt', () => {
         const s = make();
         for (let i = 1; i <= 9; i++) s.insertReport(report({ id: `t${i}`, createdAt: NOW + (i <= 5 ? 5 : 6), reporterSubject: `s_t${i}` }));

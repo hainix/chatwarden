@@ -170,3 +170,73 @@ describe('subclassing for failure injection (how the core tests use it)', () => 
     expect(s.rawReports()).toEqual([]);
   });
 });
+
+describe('a big store (no spread of a large array into a call)', () => {
+  const N = 150_000;
+
+  it('purges 150k strikes, and a rolled-back purge puts them all back', () => {
+    const s = createMemoryStore();
+    for (let i = 0; i < N; i++) s.insertStrike({ id: `k${i}`, at: i < 5 ? 1 : NOW, subject: 's_a', roomId: 'R', termId: 't', rawLine: 'l' });
+    expect(s.purgeStrikes(NOW)).toBe(5);
+    expect(s.loadStrikes(0)).toHaveLength(N - 5);
+    expect(() =>
+      s.transaction(() => {
+        expect(s.purgeStrikes(NOW + 1)).toBe(N - 5);
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(s.loadStrikes(0)).toHaveLength(N - 5);
+  });
+
+  it('purges 150k notices, audit rows and reports, and undoes each purge', () => {
+    const s = createMemoryStore();
+    // The insert methods check for duplicates by scanning, so fill the rows directly: this test is about purge.
+    const rows = s as unknown as { notices: unknown[]; auditRows: unknown[]; reports: unknown[] };
+    for (let i = 0; i < N; i++) {
+      rows.notices.push({ id: `n${i}`, subject: 's_a', groupId: null, kind: 'chat', rule: null, until: 1, refCode: null, excerpt: [], createdAt: 1, ackedAt: null, withdrawnAt: null });
+      rows.auditRows.push({ id: `a${i}`, at: 1, actor: 'alice', role: 'moderator', action: 'report.view', target: null });
+      rows.reports.push({ ...report(`r${i}`, { createdAt: 1, reporterSubject: `s_${i}` }), badFaith: false, actionedAt: null, actionedBy: null, modNote: null, badFaithEvidence: null });
+    }
+    expect(() =>
+      s.transaction(() => {
+        expect(s.purgeNotices(NOW)).toBe(N);
+        expect(s.purgeAudit(NOW)).toBe(N);
+        expect(s.purgeReports(NOW, 0)).toBe(N);
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(s.rawNotices()).toHaveLength(N);
+    expect(s.rawReports()).toHaveLength(N);
+    expect(s.listAudit({ limit: 200 })).toHaveLength(200);
+    expect(s.purgeNotices(NOW)).toBe(N);
+    expect(s.purgeAudit(NOW)).toBe(N);
+    expect(s.purgeReports(NOW, 0)).toBe(N);
+  });
+
+  it('purges a 150k-row sanction group', () => {
+    const s = createMemoryStore();
+    const rows = Array.from({ length: N }, (_, i) => ({ ...gapRow('g1', 'M-AAAAA'), id: `row${i}`, gapNote: null, gapStatus: null, endsAt: 1 }));
+    expect(s.insertSanctionGroup(rows)).toBe(true);
+    expect(() =>
+      s.transaction(() => {
+        expect(s.purgeSanctions(NOW)).toBe(N);
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(s.rawSanctions()).toHaveLength(N);
+    expect(s.purgeSanctions(NOW)).toBe(N);
+  });
+
+  it('a nested transaction that journaled 150k writes hands them to the outer one, which can undo them', () => {
+    const s = createMemoryStore();
+    expect(() =>
+      s.transaction(() => {
+        s.transaction(() => {
+          for (let i = 0; i < N; i++) s.insertStrike({ id: `k${i}`, at: NOW, subject: 's_a', roomId: 'R', termId: 't', rawLine: 'l' });
+        });
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(s.loadStrikes(0)).toEqual([]);
+  });
+});

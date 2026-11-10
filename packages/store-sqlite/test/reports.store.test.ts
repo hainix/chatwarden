@@ -196,6 +196,18 @@ describe('insertReport', () => {
 
 });
 
+describe('loadBadFaithMarks: a state only raw SQL can make', () => {
+  it('a row with bad_faith = 1 but actioned_at NULL (never closed) is left out, however old the cutoff', () => {
+    const { db, store } = env();
+    store.insertReport(report({ id: 'e', roomId: 'E' }));
+    db.prepare("UPDATE kit_reports SET bad_faith = 1, actioned_at = NULL, status = 'open' WHERE id = 'e'").run();
+    store.insertReport(report({ id: 'a', roomId: 'A' }));
+    store.closeReport('a', 'dismissed', true, 'mod', NOW + 5, 'n');
+    expect(store.loadBadFaithMarks(0)).toEqual([{ reporter: 's_rep', actionedAt: NOW + 5 }]);
+    db.close();
+  });
+});
+
 describe('loadAutoChatGroups', () => {
   const sanction = async (
     s: ReturnType<typeof env>['store'],

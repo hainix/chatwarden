@@ -45,6 +45,15 @@ export function auditContract(name: string, make: () => Store): void {
       expect(s.listAudit({ limit: 10 }).map((r) => r.id)).toEqual(['e', 'c', 'b', 'a', 'd']);
     });
 
+    it('ids compare by code point, like SQLite bytes: U+FF21 sorts before a character outside the BMP', () => {
+      const s = make();
+      s.insertAudit(row('\uFF21', 10));
+      s.insertAudit(row('\u{1F600}', 10));
+      s.insertAudit(row('z', 10));
+      expect(s.listAudit({ limit: 9 }).map((r) => r.id)).toEqual(['\u{1F600}', '\uFF21', 'z']);
+      expect(s.listAudit({ limit: 9, before: 10, beforeId: '\u{1F600}' }).map((r) => r.id)).toEqual(['\uFF21', 'z']);
+    });
+
     it('keyset paging: before + beforeId, with a tie straddling the page edge', () => {
       const s = make();
       for (const [id, at] of [['a', 10], ['b', 10], ['c', 10], ['d', 10], ['e', 5]] as const) s.insertAudit(row(id, at));

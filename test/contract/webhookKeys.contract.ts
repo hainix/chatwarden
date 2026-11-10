@@ -169,6 +169,46 @@ export function webhookKeysContract(name: string, make: () => Store): void {
     expect(s.reserveWebhookKey('below', 5000, 0, FP)).toEqual({ reserved: true });
   });
 
+  it('complete rolls back with the transaction: the key is pending again and can be completed', () => {
+    const s = make();
+    s.reserveWebhookKey('k1', NOW, FLOOR, FP);
+    expect(() =>
+      s.transaction(() => {
+        expect(s.completeWebhookKey('k1', '{"a":1}')).toBe(true);
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(s.reserveWebhookKey('k1', NOW, FLOOR, FP)).toEqual({ reserved: false, state: 'pending', resultJson: null, fingerprint: FP });
+    expect(s.completeWebhookKey('k1', '{"a":2}')).toBe(true);
+  });
+
+  it('release rolls back with the transaction: the pending key is still held', () => {
+    const s = make();
+    s.reserveWebhookKey('k1', NOW, FLOOR, FP);
+    expect(() =>
+      s.transaction(() => {
+        expect(s.releaseWebhookKey('k1')).toBe(true);
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(s.reserveWebhookKey('k1', NOW, FLOOR, FP2)).toEqual({ reserved: false, state: 'pending', resultJson: null, fingerprint: FP });
+  });
+
+  it('purge rolls back with the transaction: the old rows, done and pending, come back', () => {
+    const s = make();
+    s.reserveWebhookKey('old-done', NOW - 3 * DAY, 0, FP);
+    s.completeWebhookKey('old-done', '{"x":1}');
+    s.reserveWebhookKey('old-pending', NOW - 3 * DAY, 0, FP2);
+    expect(() =>
+      s.transaction(() => {
+        expect(s.purgeWebhookKeys(FLOOR)).toBe(2);
+        throw new Error('boom');
+      }),
+    ).toThrow('boom');
+    expect(s.reserveWebhookKey('old-done', NOW, 0, FP2)).toEqual({ reserved: false, state: 'done', resultJson: '{"x":1}', fingerprint: FP });
+    expect(s.reserveWebhookKey('old-pending', NOW, 0, FP)).toEqual({ reserved: false, state: 'pending', resultJson: null, fingerprint: FP2 });
+  });
+
   it('writes inside a transaction roll back with it', () => {
     const s = make();
     expect(() =>

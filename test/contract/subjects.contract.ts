@@ -115,6 +115,30 @@ export function subjectsContract(name: string, make: () => Store): void {
       expect(second.ids[0]?.lastSeen).toBe(T);
     });
 
+    it('a NEW identifier written inside a rolled-back transaction is undone', async () => {
+      const s = make();
+      await s.saveSubject(subject('s_a'));
+      let pending: Promise<unknown> = Promise.resolve();
+      expect(() =>
+        s.transaction(() => {
+          pending = s.saveIdentifier(ident('s_a', 'key', 'fresh'));
+          throw new Error('boom');
+        }),
+      ).toThrow('boom');
+      await pending.catch(() => undefined);
+      expect((await s.loadSubjects()).ids).toEqual([]);
+      await s.saveIdentifier(ident('s_a', 'key', 'fresh', T + 5, T + 5));
+      expect((await s.loadSubjects()).ids).toEqual([ident('s_a', 'key', 'fresh', T + 5, T + 5)]);
+    });
+
+    it('identifier values order by code point, like SQLite bytes (U+FF21 sorts before a character outside the BMP)', async () => {
+      const s = make();
+      await s.saveSubject(subject('s_a'));
+      await s.saveIdentifier(ident('s_a', 'account', '\u{1F600}'));
+      await s.saveIdentifier(ident('s_a', 'account', '\uFF21'));
+      expect((await s.loadSubjects()).ids.map((r) => r.value)).toEqual(['\uFF21', '\u{1F600}']);
+    });
+
     it('writes made inside a rolled-back transaction are undone', async () => {
       const s = make();
       await s.saveSubject(subject('s_keep'));
