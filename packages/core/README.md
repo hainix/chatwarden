@@ -111,7 +111,7 @@ For the moderators' screens and the player's notices, mount the routes in
 | Part | What it is for |
 | --- | --- |
 | `cw.rooms` | `seat`, `seatConnection`, `unseat`, `close`: who is in which seat of which room. |
-| `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. |
+| `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. `restricted(who)` says whether a person is chat-restricted, for typing indicators. |
 | `cw.mutes` | A player mutes another player for themselves only. |
 | `cw.reports` | `submit` (players), `list` and `get` (staff). |
 | `cw.decide(input)` | A moderator closes a report and writes the sanctions and notices in one transaction. Safe to send twice. |
@@ -124,6 +124,31 @@ For the moderators' screens and the player's notices, mount the routes in
 | `cw.gaps`, `cw.audit` | Rule gaps for the periodic review, and the staff audit trail. |
 | `cw.on(type, listener)` | Events: `report.created`, `report.closed`, `sanction.applied`, `sanction.revoked`, `gap.created`, `auto.restricted`. |
 | `cw.purge`, `cw.ready`, `cw.flush`, `cw.close` | Housekeeping. |
+
+## Typing indicators
+
+Do not show a "typing..." indicator for a player who cannot chat. `cw.chat.restricted(who)` is the same decision `accept`
+makes for a restricted player (a chat restriction, a ban, or the automatic timeout), without sending a line. It is
+synchronous and has no side effects: it spends no rate budget and writes no evidence, strike, event or notice.
+
+```ts
+import type { Chatwarden, RawWho } from '@chatwarden/core';
+
+// Call it when a client says "I am typing", with the same `who` you give `cw.rooms.seat`.
+function relayTyping(cw: Chatwarden, who: RawWho, roomId: string, tell: () => void): void {
+  const { restricted, until, kind } = cw.chat.restricted(who, { roomId });
+  if (restricted) return; // drop it quietly: do not broadcast their typing
+  tell();
+  void until; // epoch ms when it ends (null = permanent), only for the person's own sanction
+  void kind; // 'chat', 'ban' or 'auto' (the automatic timeout), only for their own sanction
+}
+```
+
+It is safe to answer a player about themselves from their own client, because it reveals nothing about anyone else. A
+player who is restricted only because they share an address with someone else's sanction gets
+`{ restricted: true, until: null, kind: null }`: they cannot chat, and they are told nothing about the other person. An
+address alone finds nobody, a guest with no key and no account is never restricted here, and a lookup that fails reads as
+`restricted: false`. `roomId` only matters for the automatic timeout, which is kept in memory when it could not be stored.
 
 ## Options
 

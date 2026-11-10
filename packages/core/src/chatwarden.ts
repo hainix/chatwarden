@@ -3,7 +3,7 @@ import type { AuditPage, AuditQuery, AuditRecordInput } from './audit.js';
 import { ChatService } from './chat.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
-import type { ChatResult } from './chat.js';
+import type { ChatResult, RestrictedAnswer } from './chat.js';
 import { bindDocuments } from './documents.js';
 import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
@@ -195,6 +195,21 @@ export interface Chatwarden {
     accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult;
     /** Should `viewerSeat` be shown a line `senderSeat` sent (mutes applied)? */
     visibleTo(roomId: string, viewerSeat: string, senderSeat: string): boolean;
+    /**
+     * Is this person chat-restricted right now (a chat restriction, a ban or an automatic timeout)? For a typing
+     * indicator: show none while `restricted` is true. It is the very decision `accept` makes, from the same code,
+     * so it never disagrees with the refusal that follows. Synchronous and a pure read: no rate budget spent, no
+     * evidence, strike, event or notice written, and only a failure (error class) is logged; a failure reads as
+     * `restricted: false`.
+     *
+     * Safe to answer a player about THEMSELVES from their own client, because it reveals nothing about others:
+     * `until` (epoch ms, `null` = permanent) and `kind` are only given for the person's own sanction. When the
+     * restriction reaches them only through an address shared with someone else's sanction, the answer is
+     * `{ restricted: true, until: null, kind: null }`. `who` is found by key or account (an address alone finds
+     * nobody, and a guest with neither is never restricted). `roomId` limits an in-memory automatic timeout to
+     * that room; leave it out to look in every room. Never carries an identifier.
+     */
+    restricted(who: RawWho, opts?: { roomId?: string | null }): RestrictedAnswer;
   };
   mutes: {
     /** `viewerSeat`'s occupant mutes (`on`) or unmutes `targetSeat`'s occupant. Does nothing if either seat has no subject. */
@@ -593,6 +608,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     chat: {
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),
       visibleTo: (roomId, viewerSeat, senderSeat) => chat.visibleTo(roomId, viewerSeat, senderSeat),
+      restricted: (who, o) => {
+        try {
+          return chat.restricted(personOf(who), o?.roomId);
+        } catch (err) {
+          safeWarn(logger, 'chatwarden.restricted_failed', { error: err instanceof Error ? err.name : typeof err });
+          return { restricted: false, until: null, kind: null };
+        }
+      },
     },
     mutes: {
       set: (roomId, viewerSeat, targetSeat, on) => {

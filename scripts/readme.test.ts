@@ -118,6 +118,14 @@ describe('the new package READMEs', () => {
     for (const f of fields) expect(table, f).toContain(`\`${f}\``);
   });
 
+  it('core: shows the typing-indicator lookup and says it reveals nothing about other people', () => {
+    const doc = flat(section(readme('core'), 'Typing indicators'));
+    expect(doc).toContain('cw.chat.restricted(who)');
+    expect(doc).toMatch(/same decision `accept` makes/);
+    expect(doc).toMatch(/reveals nothing about anyone else/);
+    expect(doc).toMatch(/\{ restricted: true, until: null, kind: null \}/);
+  });
+
   it('store-sqlite: documents path and db, the kit_ tables, hashing and what retention does not purge', () => {
     const raw = readme('store-sqlite');
     const doc = flat(raw);

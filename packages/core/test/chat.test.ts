@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ChatService } from '../src/chat.js';
 import type { ChatResult } from '../src/chat.js';
 import { EvidenceBuffer, RoomRoster } from '../src/evidence.js';
@@ -528,6 +528,395 @@ describe('restriction', () => {
     };
     delivery(e.say('p1', 'hi'));
     expect(e.logs.some((l) => l.event === 'chat.restriction_failed')).toBe(true);
+  });
+});
+
+class FlakySanctions extends MemoryStore {
+  failWrites = false;
+  override insertSanctionGroup(...args: Parameters<MemoryStore['insertSanctionGroup']>): boolean {
+    if (this.failWrites) throw new Error('disk full');
+    return super.insertSanctionGroup(...args);
+  }
+}
+
+describe('restricted(): the typing-indicator lookup answers what accept answers', () => {
+  const NONE = { restricted: false, until: null, kind: null };
+
+  /** accept's verdict for the seat, then restricted()'s for the same person: the one must follow from the other. */
+  const agree = (e: ReturnType<typeof setup>, seat: string, subject: SubjectId | null, room: string = ROOM) => {
+    const answer = e.chat.restricted(subject, room);
+    const verdict = e.say(seat, 'hi', undefined, room);
+    if ('deliver' in verdict) {
+      expect(answer, 'accept delivered').toEqual(NONE);
+    } else {
+      const r = verdict.refuse;
+      expect(r.reason).toBe('restricted');
+      expect(answer.restricted, 'accept refused').toBe(true);
+      if (r.rule !== undefined) {
+        // The speaker's own sanction: restricted() carries the same end, and the kind explains byModerator.
+        expect(answer.until).toBe(r.until);
+        expect(answer.kind === 'auto').toBe(r.byModerator === false);
+      }
+    }
+    return answer;
+  };
+
+  it('a stored chat restriction: restricted, with its end and kind chat', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    await e.sanction(s, 'chat', H);
+    expect(e.chat.restricted(s, ROOM)).toEqual({ restricted: true, until: NOW + H, kind: 'chat' });
+    expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: NOW + H, kind: 'chat' });
+  });
+
+  it('an automated row is kind auto (accept: byModerator false)', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    await e.sanction(s, 'chat', H, { automated: true });
+    expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: NOW + H, kind: 'auto' });
+  });
+
+  it('a permanent restriction has until null', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    await e.sanction(s, 'chat', null);
+    expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: null, kind: 'chat' });
+  });
+
+  it('a stored full ban is kind ban, with its end; a permanent ban has until null', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    await e.sanction(s, 'ban', H);
+    expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: NOW + H, kind: 'ban' });
+    const e2 = setup();
+    const s2 = e2.sit('p1', who('k1')) as SubjectId;
+    await e2.sanction(s2, 'ban', null);
+    expect(agree(e2, 'p1', s2)).toEqual({ restricted: true, until: null, kind: 'ban' });
+  });
+
+  it('an account-only person, a key-only person and a linked second browser are all found; a stranger is not', async () => {
+    const e = setup();
+    const byAccount = e.sit('p1', who(null, 'acct-1')) as SubjectId;
+    const byKey = e.sit('p2', who('key-2')) as SubjectId;
+    await e.sanction(byAccount, 'chat', H);
+    await e.sanction(byKey, 'chat', H);
+    expect(agree(e, 'p1', byAccount).restricted).toBe(true);
+    expect(agree(e, 'p2', byKey).restricted).toBe(true);
+    const linked = e.sit('p3', who('key-2b', 'acct-1')) as SubjectId;
+    expect(agree(e, 'p3', linked).restricted).toBe(true);
+    const other = e.sit('p4', who('key-other')) as SubjectId;
+    expect(agree(e, 'p4', other)).toEqual(NONE);
+  });
+
+  it('chat plus ban: the longer is reported, permanent beats timed, a tie keeps the stored chat row (as accept)', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    await e.sanction(s, 'chat', H, { automated: true });
+    await e.sanction(s, 'ban', 3 * H);
+    expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: NOW + 3 * H, kind: 'ban' });
+
+    const e2 = setup();
+    const s2 = e2.sit('p1', who('k1')) as SubjectId;
+    await e2.sanction(s2, 'chat', null);
+    await e2.sanction(s2, 'ban', 3 * H);
+    expect(agree(e2, 'p1', s2)).toEqual({ restricted: true, until: null, kind: 'chat' });
+
+    const e3 = setup();
+    const s3 = e3.sit('p1', who('k1')) as SubjectId;
+    await e3.sanction(s3, 'chat', 3 * H, { automated: true });
+    await e3.sanction(s3, 'ban', H);
+    expect(agree(e3, 'p1', s3)).toEqual({ restricted: true, until: NOW + 3 * H, kind: 'auto' });
+  });
+
+  it('expired (end == now is over) is not restricted', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    await e.sanction(s, 'chat', H);
+    e.clock.t = NOW + H - 1;
+    expect(agree(e, 'p1', s).restricted).toBe(true);
+    e.clock.t = NOW + H;
+    expect(agree(e, 'p1', s)).toEqual(NONE);
+  });
+
+  it('a revoked sanction is not restricted', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    const g = await e.sanction(s, 'chat', H);
+    expect(e.chat.restricted(s, ROOM).restricted).toBe(true);
+    await revokeSanction(e.store, g.groupId, 'mod', e.clock.t, 'ok', e.sanctions);
+    expect(agree(e, 'p1', s)).toEqual(NONE);
+  });
+
+  it('a restriction of another kind (area), a warning and a note do not count', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    await e.sanction(s, 'area', H);
+    await e.sanction(s, 'warning', null);
+    await e.sanction(s, 'note', null);
+    expect(agree(e, 'p1', s)).toEqual(NONE);
+  });
+
+  it('the kill switch off: nothing is restricted; back on, it is again', async () => {
+    const e = setup();
+    const s = e.sit('p1', who('k1')) as SubjectId;
+    await e.sanction(s, 'ban', H);
+    e.flags.sanctionsOn = false;
+    expect(agree(e, 'p1', s)).toEqual(NONE);
+    e.flags.sanctionsOn = true;
+    expect(e.chat.restricted(s, ROOM).restricted).toBe(true);
+  });
+
+  it('no subject (a guest without identifiers): not restricted, even with an IP row about', async () => {
+    const e = setup();
+    const a = e.sit('p1', who('ka', null, 'ip-1')) as SubjectId;
+    await e.sanction(a, 'chat', H, { includeIp: true });
+    e.sit('p2', null);
+    expect(agree(e, 'p2', null)).toEqual(NONE);
+    expect(e.chat.restricted(null)).toEqual(NONE);
+    expect(e.chat.restricted(null, null)).toEqual(NONE);
+  });
+
+  it('an IP row reaches only a person whose latest address it is', async () => {
+    const e = setup();
+    const a = e.sit('p1', who('ka', null, 'ip-1')) as SubjectId;
+    await e.sanction(a, 'chat', H, { includeIp: true });
+    const noIp = e.sit('p2', who('kb')) as SubjectId;
+    const other = e.sit('p3', who('kc', null, 'ip-2')) as SubjectId;
+    expect(agree(e, 'p2', noIp)).toEqual(NONE);
+    expect(agree(e, 'p3', other)).toEqual(NONE);
+  });
+
+  describe('the in-memory automatic restriction', () => {
+    const memory = (store: MemoryStore = new FailingSanctions()) => {
+      const e = setup({ store });
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      const at = e.threeSlurs();
+      e.tick(SEC);
+      return { e, s, end: at + 30 * MIN };
+    };
+
+    it('is kind auto with its end, for the person who earned it', () => {
+      const { e, s, end } = memory();
+      expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: end, kind: 'auto' });
+    });
+
+    it('is scoped to its room when a room is given, and to every room when not', () => {
+      const { e, s, end } = memory();
+      expect(e.chat.restricted(s, ROOM).until).toBe(end);
+      expect(e.chat.restricted(s, 'R2')).toEqual(NONE);
+      expect(e.chat.restricted(s)).toEqual({ restricted: true, until: end, kind: 'auto' });
+      expect(e.chat.restricted(s, null)).toEqual({ restricted: true, until: end, kind: 'auto' });
+      // Control: accept agrees the other room is open.
+      e.sit('p1', who('k1'), 'H', 'R2');
+      delivery(e.say('p1', 'hi', undefined, 'R2'));
+    });
+
+    it('belongs to the person: another person is not restricted', () => {
+      const { e, s } = memory();
+      const other = e.sit('p2', who('k2')) as SubjectId;
+      expect(agree(e, 'p2', other)).toEqual(NONE);
+      expect(e.chat.restricted(s, ROOM).restricted).toBe(true);
+    });
+
+    it('ends exactly at its end (end == now is over)', () => {
+      const { e, s, end } = memory();
+      e.clock.t = end - 1;
+      expect(e.chat.restricted(s, ROOM).restricted).toBe(true);
+      e.clock.t = end;
+      expect(agree(e, 'p1', s)).toEqual(NONE);
+    });
+
+    it('a longer ban beats the memory entry; a longer memory entry beats a shorter ban (as accept)', async () => {
+      const store = new FlakySanctions();
+      store.failWrites = true;
+      const { e, s, end } = memory(store);
+      store.failWrites = false;
+      await e.sanction(s, 'ban', 10 * MIN);
+      expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: end, kind: 'auto' });
+      await e.sanction(s, 'ban', 2 * H);
+      expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: e.clock.t + 2 * H, kind: 'ban' });
+    });
+
+    it('a guest (no subject) cannot be told from another guest without a seat: restricted() says no, accept still refuses the seat', () => {
+      const e = setup();
+      e.sit('p1', null);
+      e.threeSlurs();
+      e.tick(SEC);
+      expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+      expect(e.chat.restricted(null, ROOM)).toEqual(NONE);
+    });
+  });
+
+  describe('a bystander on a shared IP learns nothing about the other person', () => {
+    const IP_A = 'ip-shared-zq7';
+    async function shared(e: ReturnType<typeof setup>) {
+      const offender = e.sit('p1', who('key-off-zq7', null, IP_A))!;
+      const bystander = e.sit('p2', who('key-by-zq7', null, IP_A))!;
+      const g = await e.sanction(offender, 'chat', H, { includeIp: true, rule: 3 });
+      const id = e.realNotices.createForSanction(
+        { groupId: g.groupId, refCode: g.refCode, kind: 'chat', until: e.clock.t + H, rule: 3, subject: offender },
+        [],
+        { notify: false },
+      );
+      return { offender, bystander, g, id };
+    }
+
+    it('the bystander is restricted with until null and kind null, and accept gives them no rule or notice either', async () => {
+      const e = setup({ notices: true });
+      const { bystander } = await shared(e);
+      expect(e.chat.restricted(bystander, ROOM)).toEqual({ restricted: true, until: null, kind: null });
+      const r = refusal(e.say('p2', 'hi'));
+      expect(r.reason).toBe('restricted');
+      expect('rule' in r).toBe(false);
+      expect('noticeId' in r).toBe(false);
+    });
+
+    it('the offender gets their own end and kind', async () => {
+      const e = setup({ notices: true });
+      const { offender } = await shared(e);
+      expect(e.chat.restricted(offender, ROOM)).toEqual({ restricted: true, until: NOW + H, kind: 'chat' });
+      expect(refusal(e.say('p1', 'hi'))).toMatchObject({ until: NOW + H, byModerator: true, rule: 3 });
+    });
+
+    it('an alias of the offender (linked by account) gets the own answer', async () => {
+      const e = setup({ notices: true });
+      await shared(e);
+      e.sit('p3', who('key-off2-zq7', 'acct-zq7', 'ip-other-zq7'));
+      const alias = e.sit('p4', who('key-off-zq7', 'acct-zq7', IP_A)) as SubjectId;
+      expect(e.chat.restricted(alias, ROOM)).toEqual({ restricted: true, until: NOW + H, kind: 'chat' });
+    });
+
+    it('a bystander with a longer sanction of their own gets their own end and kind', async () => {
+      const e = setup({ notices: true });
+      const { bystander } = await shared(e);
+      await e.sanction(bystander, 'ban', 2 * H, { rule: 4 });
+      expect(e.chat.restricted(bystander, ROOM)).toEqual({ restricted: true, until: NOW + 2 * H, kind: 'ban' });
+    });
+
+    it('a shorter own sanction under a longer shared-IP row still hides the other person', async () => {
+      const e = setup({ notices: true });
+      const { bystander } = await shared(e);
+      await e.sanction(bystander, 'chat', H / 2, { rule: 4 });
+      expect(e.chat.restricted(bystander, ROOM)).toEqual({ restricted: true, until: null, kind: null });
+    });
+
+    it('a person on another address is not touched (control); the answer is the same with no notices service', async () => {
+      const e = setup();
+      const offender = e.sit('p1', who('key-off-zq7', null, IP_A))!;
+      const by = e.sit('p2', who('key-by-zq7', null, IP_A))!;
+      const far = e.sit('p3', who('key-far-zq7', null, 'ip-far'))!;
+      await e.sanction(offender, 'chat', H, { includeIp: true, rule: 3 });
+      expect(e.chat.restricted(by, ROOM)).toEqual({ restricted: true, until: null, kind: null });
+      expect(e.chat.restricted(far, ROOM)).toEqual(NONE);
+    });
+
+    it('the bystander answer carries no identifier of the other person', async () => {
+      const e = setup({ notices: true });
+      const { offender, bystander } = await shared(e);
+      const text = JSON.stringify(e.chat.restricted(bystander, ROOM));
+      for (const secret of [offender, bystander, 'key-off-zq7', IP_A, 'M-', 'rule', 'notice']) expect(text).not.toContain(secret);
+    });
+  });
+
+  describe('same decision as accept', () => {
+    it('both go through one shared function: accept calls it, restricted calls it', async () => {
+      const e = setup();
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      await e.sanction(s, 'chat', H);
+      const spy = vi.spyOn(e.chat as unknown as { resolveRestriction: () => unknown }, 'resolveRestriction');
+      e.say('p1', 'hi');
+      expect(spy).toHaveBeenCalledTimes(1);
+      e.chat.restricted(s, ROOM);
+      expect(spy).toHaveBeenCalledTimes(2);
+    });
+
+    it('a stub of the shared function moves both answers together', () => {
+      const e = setup();
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      vi.spyOn(e.chat as unknown as { resolveRestriction: () => unknown }, 'resolveRestriction').mockReturnValue({
+        until: NOW + 9 * H,
+        byModerator: true,
+        groupId: null,
+        rule: null,
+        own: true,
+        kind: 'ban',
+      });
+      expect(refusal(e.say('p1', 'hi'))).toMatchObject({ reason: 'restricted', until: NOW + 9 * H, byModerator: true });
+      expect(e.chat.restricted(s, ROOM)).toEqual({ restricted: true, until: NOW + 9 * H, kind: 'ban' });
+    });
+  });
+
+  describe('a pure read', () => {
+    it('spends no rate budget: the speaker still has all three lines after many lookups', () => {
+      const e = setup();
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      for (let i = 0; i < 50; i++) e.chat.restricted(s, ROOM);
+      delivery(e.say('p1', 'one'));
+      delivery(e.say('p1', 'two'));
+      delivery(e.say('p1', 'three'));
+    });
+
+    it('writes no evidence, no strike, no sanction, fires no hook and logs nothing', () => {
+      const e = setup({ store: new FailingSanctions() });
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      const at = e.threeSlurs();
+      e.tick(SEC);
+      const snap = () =>
+        JSON.stringify([e.buffer.snapshot(ROOM), e.store.loadSanctions(at), e.store.loadStrikes(0), e.calls, e.logs]);
+      const before = snap();
+      for (let i = 0; i < 20; i++) expect(e.chat.restricted(s, ROOM).restricted).toBe(true);
+      expect(snap()).toBe(before);
+    });
+
+    it('does not sweep an expired in-memory entry (read only)', () => {
+      const e = setup({ store: new FailingSanctions() });
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      const at = e.threeSlurs();
+      e.clock.t = at + 31 * MIN;
+      expect(e.chat.restricted(s, ROOM)).toEqual(NONE);
+      expect((e.chat as unknown as { memRestrictions: Map<string, unknown> }).memRestrictions.size).toBe(1);
+    });
+
+    it('answers synchronously with exactly three plain fields', async () => {
+      const e = setup();
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      await e.sanction(s, 'chat', H);
+      const answer = e.chat.restricted(s, ROOM);
+      expect(answer).not.toBeInstanceOf(Promise);
+      expect(Object.keys(answer).sort()).toEqual(['kind', 'restricted', 'until']);
+    });
+  });
+
+  describe('fail-soft', () => {
+    it('a throwing sanction index reads as not restricted, logs the class only, and never throws', () => {
+      const e = setup();
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      e.sanctions.active = () => {
+        throw new TypeError('secret-detail k1');
+      };
+      expect(e.chat.restricted(s, ROOM)).toEqual(NONE);
+      expect(e.logs).toEqual([{ event: 'chat.restriction_failed', detail: { error: 'TypeError' } }]);
+      delivery(e.say('p1', 'hi')); // accept reads it the same way
+    });
+
+    it('a throwing subject index (the address lookup) reads as not restricted', () => {
+      const e = setup();
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      e.subjects.latestIp = () => {
+        throw new RangeError('x');
+      };
+      expect(e.chat.restricted(s, ROOM)).toEqual(NONE);
+      expect(e.logs.map((l) => l.event)).toEqual(['chat.restriction_failed']);
+    });
+
+    it('garbage arguments never throw', () => {
+      const e = setup();
+      for (const room of [undefined, null, '', 'nope', 5 as unknown as string, {} as unknown as string]) {
+        expect(e.chat.restricted(null, room)).toEqual(NONE);
+        expect(e.chat.restricted('s_unknown' as SubjectId, room)).toEqual(NONE);
+      }
+      expect(e.chat.restricted(undefined as unknown as SubjectId, ROOM)).toEqual(NONE);
+    });
   });
 });
 

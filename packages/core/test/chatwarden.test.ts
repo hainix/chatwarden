@@ -454,6 +454,196 @@ describe('createChatwarden: sanctions and doors', () => {
   });
 });
 
+describe('createChatwarden: chat.restricted (typing indicator)', () => {
+  const NONE = { restricted: false, until: null, kind: null };
+  const sanction = (subject: string, over: Record<string, unknown> = {}) => ({
+    kind: 'chat' as const,
+    subject,
+    includeIp: false,
+    durationMs: H,
+    reason: 'private note',
+    actor: 'mod@example.test',
+    source: 'moderator' as const,
+    automated: false,
+    rule: 1,
+    ...over,
+  });
+  const subjectOf = (cw: Awaited<ReturnType<typeof setup>>['cw'], seat: string): string => {
+    const s = cw.rooms.subjectAt(R, seat);
+    if (s === null) throw new Error('expected a subject');
+    return s;
+  };
+
+  it('is synchronous and answers { restricted: false, until: null, kind: null } for a person nobody knows', async () => {
+    const { cw } = await setup();
+    const answer = cw.chat.restricted({ clientKey: 'never-seen' });
+    expect(answer).not.toBeInstanceOf(Promise);
+    expect(answer).toEqual(NONE);
+    expect(cw.chat.restricted({})).toEqual(NONE);
+    expect(cw.chat.restricted({ ip: '203.0.113.9' })).toEqual(NONE);
+  });
+
+  it('a chat sanction: the same person is found by key, by account, or by key and address; accept agrees', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', { clientKey: 'key-alice', accountId: 'acct-alice', ip: '198.51.100.1' }, 'Alice');
+    await cw.sanctions.apply(sanction(subjectOf(cw, 'a')));
+    const expected = { restricted: true, until: NOW + H, kind: 'chat' };
+    expect(cw.chat.restricted({ clientKey: 'key-alice' })).toEqual(expected);
+    expect(cw.chat.restricted({ accountId: 'acct-alice' })).toEqual(expected);
+    expect(cw.chat.restricted({ clientKey: 'key-alice', ip: '198.51.100.1' }, { roomId: R })).toEqual(expected);
+    expect(cw.chat.restricted(alice, { roomId: null })).toEqual(expected);
+    expect(cw.chat.accept(R, 'a', 'hello')).toMatchObject({ refuse: { reason: 'restricted', until: NOW + H, byModerator: true } });
+  });
+
+  it('a ban is kind ban; permanent has until null; revoke and expiry lift it', async () => {
+    const { cw, clock } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    const subject = subjectOf(cw, 'a');
+    const ban = await cw.sanctions.apply(sanction(subject, { kind: 'ban', durationMs: null }));
+    expect(cw.chat.restricted(alice)).toEqual({ restricted: true, until: null, kind: 'ban' });
+    await cw.sanctions.revoke(ban.groupId, 'mod@example.test', 'mistake');
+    expect(cw.chat.restricted(alice)).toEqual(NONE);
+    await cw.sanctions.apply(sanction(subject));
+    expect(cw.chat.restricted(alice).restricted).toBe(true);
+    clock.t = NOW + H;
+    expect(cw.chat.restricted(alice)).toEqual(NONE);
+    expect(cw.chat.accept(R, 'a', 'hello')).toMatchObject({ deliver: {} });
+  });
+
+  it('a person who is not restricted, and another person, read false while a stranger sanction exists', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    cw.rooms.seat(R, 'b', bob, 'Bob');
+    await cw.sanctions.apply(sanction(subjectOf(cw, 'a')));
+    expect(cw.chat.restricted(bob)).toEqual(NONE);
+    expect(cw.chat.restricted(alice).restricted).toBe(true);
+  });
+
+  it('an area sanction does not restrict chat', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    await cw.sanctions.apply(sanction(subjectOf(cw, 'a'), { kind: 'area' }));
+    expect(cw.chat.restricted(alice, { roomId: R })).toEqual(NONE);
+    expect(cw.chat.accept(R, 'a', 'hello')).toMatchObject({ deliver: {} });
+  });
+
+  it('enabled() false switches it off with the rest of enforcement', async () => {
+    let on = true;
+    const { cw } = await setup({ enabled: () => on });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    await cw.sanctions.apply(sanction(subjectOf(cw, 'a'), { kind: 'ban' }));
+    expect(cw.chat.restricted(alice).restricted).toBe(true);
+    on = false;
+    expect(cw.chat.restricted(alice)).toEqual(NONE);
+    expect(cw.chat.accept(R, 'a', 'hello')).toMatchObject({ deliver: {} });
+  });
+
+  it('an address alone finds nobody, even when an address row exists', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    await cw.sanctions.apply(sanction(subjectOf(cw, 'a'), { includeIp: true }));
+    expect(cw.chat.restricted({ ip: alice.ip })).toEqual(NONE);
+  });
+
+  it('a housemate on the sanctioned address is restricted, and told nothing else: no end, no kind', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', { clientKey: 'key-alice', ip: '198.51.100.50' }, 'Alice');
+    cw.rooms.seat(R, 'b', { clientKey: 'key-bob', ip: '198.51.100.50' }, 'Bob');
+    cw.rooms.seat(R, 'c', { clientKey: 'key-cy', ip: '198.51.100.51' }, 'Cy');
+    await cw.sanctions.apply(sanction(subjectOf(cw, 'a'), { includeIp: true, rule: 3 }));
+    expect(cw.chat.restricted({ clientKey: 'key-alice' })).toEqual({ restricted: true, until: NOW + H, kind: 'chat' });
+    expect(cw.chat.restricted({ clientKey: 'key-bob' })).toEqual({ restricted: true, until: null, kind: null });
+    expect(cw.chat.restricted({ clientKey: 'key-cy' })).toEqual(NONE);
+    // accept tells the housemate the same: restricted, with no rule and no notice.
+    const frame = cw.chat.accept(R, 'b', 'hello');
+    expect(frame).toMatchObject({ refuse: { reason: 'restricted' } });
+    const refuse = (frame as { refuse: Record<string, unknown> }).refuse;
+    expect('rule' in refuse).toBe(false);
+    expect('noticeId' in refuse).toBe(false);
+    expect(JSON.stringify(cw.chat.restricted({ clientKey: 'key-bob' }))).not.toMatch(/key-|198\.51|s_|rule|notice/);
+  });
+
+  it('the automatic timeout reads as kind auto, with the same end accept reports', async () => {
+    const { cw } = await setup({ matcher: spanBlocker });
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    for (let i = 0; i < 3; i++) cw.chat.accept(R, 'a', 'zorbak');
+    const refused = cw.chat.accept(R, 'a', 'hi') as { refuse: { until: number; byModerator: boolean } };
+    expect(refused.refuse.byModerator).toBe(false);
+    expect(cw.chat.restricted(alice)).toEqual({ restricted: true, until: refused.refuse.until, kind: 'auto' });
+  });
+
+  it('an in-memory automatic timeout (the sanction could not be stored) is found, scoped by roomId', async () => {
+    class FailingSanctions extends MemoryStore {
+      override insertSanctionGroup(): boolean {
+        throw new Error('disk full');
+      }
+    }
+    const { cw } = await setup({ matcher: spanBlocker }, new FailingSanctions());
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    for (let i = 0; i < 3; i++) cw.chat.accept(R, 'a', 'zorbak');
+    const refused = cw.chat.accept(R, 'a', 'hi') as { refuse: { until: number } };
+    const expected = { restricted: true, until: refused.refuse.until, kind: 'auto' };
+    expect(cw.chat.restricted(alice)).toEqual(expected);
+    expect(cw.chat.restricted(alice, { roomId: R })).toEqual(expected);
+    expect(cw.chat.restricted(alice, { roomId: 'elsewhere' })).toEqual(NONE);
+    expect(cw.chat.restricted(bob, { roomId: R })).toEqual(NONE);
+  });
+
+  it('a guest without identifiers reads false, as does an empty identity', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'g', {}, 'Guest');
+    expect(cw.chat.restricted({})).toEqual(NONE);
+    expect(cw.chat.restricted({ clientKey: '', accountId: '', ip: 'unknown' })).toEqual(NONE);
+    expect(cw.chat.restricted({ ip: null })).toEqual(NONE);
+  });
+
+  it('is a pure read: no rate budget, no event, no new row, no log line, no notice made', async () => {
+    const { cw, store, logged } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    cw.rooms.seat(R, 'b', bob, 'Bob');
+    await cw.sanctions.apply(sanction(subjectOf(cw, 'a')));
+    const events: string[] = [];
+    for (const type of ['report.created', 'report.closed', 'sanction.applied', 'sanction.revoked', 'gap.created', 'auto.restricted'] as const) {
+      cw.on(type, () => void events.push(type));
+    }
+    const rows = () => JSON.stringify([store.loadSanctions(0), store.loadStrikes(0)]);
+    const before = rows();
+    const logsBefore = logged.length;
+    for (let i = 0; i < 50; i++) {
+      cw.chat.restricted(alice);
+      cw.chat.restricted(bob);
+    }
+    await cw.flush();
+    expect(rows()).toBe(before);
+    expect(logged).toHaveLength(logsBefore);
+    expect(events).toEqual([]);
+    // Bob never spent a line of budget: three go through.
+    for (const text of ['one', 'two', 'three']) expect(cw.chat.accept(R, 'b', text)).toMatchObject({ deliver: {} });
+  });
+
+  it('a lookup that fails reads as not restricted and logs only the error class', async () => {
+    const { cw, logged } = await setup();
+    const startup = logged.length;
+    expect(cw.chat.restricted(null as unknown as RawWho)).toEqual(NONE);
+    expect(cw.chat.restricted(undefined as unknown as RawWho, { roomId: R })).toEqual(NONE);
+    expect(logged.length).toBe(startup + 2);
+    for (const [event, detail] of logged.slice(startup)) {
+      expect(event).toBe('chatwarden.restricted_failed');
+      expect(detail).toEqual({ error: 'TypeError' });
+    }
+  });
+
+  it('never carries an identifier, whatever the person', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', { clientKey: 'key-secret-1', accountId: 'acct-secret-1', ip: '198.51.100.77' }, 'Alice');
+    const subject = subjectOf(cw, 'a');
+    await cw.sanctions.apply(sanction(subject, { includeIp: true }));
+    const text = JSON.stringify(cw.chat.restricted({ clientKey: 'key-secret-1', accountId: 'acct-secret-1', ip: '198.51.100.77' }));
+    for (const secret of [subject, 'key-secret-1', 'acct-secret-1', '198.51.100.77', 'M-']) expect(text).not.toContain(secret);
+    expect(Object.keys(JSON.parse(text) as object).sort()).toEqual(['kind', 'restricted', 'until']);
+  });
+});
+
 describe('createChatwarden: lifecycle', () => {
   it('loads stored sanctions before it returns: the first line on a restarted kit is already refused', async () => {
     const store = new MemoryStore();
