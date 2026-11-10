@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_SANCTION_DURATION_MS } from '@chatwarden/core';
 import type { Chatwarden, KitEvent, Logger, Role } from '@chatwarden/core';
 import { createRouter } from '../../src/router.js';
 import type { KitRequest, KitResponse } from '../../src/types.js';
-import { parseSanction, sanctionFingerprint } from '../../src/admin/apply.js';
+import { parseSanction } from '../../src/admin/apply.js';
+import { sanctionFingerprint } from '../../src/webhooks/fingerprint.js';
 import { webhookIn } from '../../src/webhooks/in.js';
 import type { WebhookInOptions } from '../../src/webhooks/in.js';
 import { ReplayCache, SIGNATURE_HEADER, TIMESTAMP_HEADER, sign } from '../../src/webhooks/sign.js';
@@ -265,6 +266,31 @@ describe('the signature gate', () => {
     const res = await s.post(`{"pad":"${'x'.repeat(70_000)}"}`);
     expect(res.status).toBe(413);
     expect(errorOf(res)).toBe('payload_too_large');
+  });
+
+  describe('the size cap needs no Buffer global (browser-safe byte count)', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    // `{"pad":"` and `"}` are 10 bytes, so a filler of 65527 bytes makes a body of exactly 65537 (the limit + 1).
+    const bodies: Array<[string, string]> = [
+      ['ASCII', 'x'.repeat(65_527)],
+      ['2-byte', 'é'.repeat(32_763) + 'x'], // 65526 + 1
+      ['3-byte', '€'.repeat(21_842) + 'x'], // 65526 + 1
+      ['astral', '\u{1F600}'.repeat(16_381) + 'xxx'], // 65524 + 3
+    ];
+
+    for (const [name, filler] of bodies) {
+      it(`${name}: exactly the limit + 1 byte is 413`, async () => {
+        const s = await setup();
+        const raw = `{"pad":"${filler}"}`;
+        expect(new TextEncoder().encode(raw).length).toBe(65_537);
+        const signed = s.req(raw); // signed with Buffer still there: signing is the sender's side
+        vi.stubGlobal('Buffer', undefined);
+        const res = await s.send(signed);
+        expect(res.status).toBe(413);
+        expect(errorOf(res)).toBe('payload_too_large');
+      });
+    }
   });
 
   it('an empty body with a valid signature is 400, not a crash', async () => {

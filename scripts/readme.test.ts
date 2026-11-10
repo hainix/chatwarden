@@ -383,6 +383,7 @@ declare const authorize: import('@chatwarden/http').Authenticate;
         '@chatwarden/profanity': src('profanity/src/index.ts'),
         '@chatwarden/discord': src('discord/src/index.ts'),
         '@chatwarden/http': src('http/src/index.ts'),
+        '@chatwarden/http/admin': src('http/src/admin-entry.ts'),
         '@chatwarden/http/express': src('http/src/express.ts'),
       },
       noEmit: true,

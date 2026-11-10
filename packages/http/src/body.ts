@@ -3,6 +3,13 @@ import { HttpError } from './errors.js';
 /** The largest request body, in bytes (UTF-8). */
 export const BODY_MAX_BYTES = 65536;
 
+const encoder = new TextEncoder();
+
+/** The length of `text` in UTF-8 bytes. `TextEncoder`, not `Buffer`, so it runs in a browser too. */
+export function utf8ByteLength(text: string): number {
+  return encoder.encode(text).length;
+}
+
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** True when any object key, at any depth and inside arrays, is one that can poison a prototype. Iterative: depth is attacker-chosen. */
@@ -36,7 +43,7 @@ export function parseJson(rawBody: string | undefined, max: number = BODY_MAX_BY
   if (!Number.isSafeInteger(max) || max < 1) throw new RangeError('parseJson: max must be a positive integer');
   if (rawBody === undefined || rawBody === '') return undefined;
   // A UTF-16 string has at most 3 UTF-8 bytes per unit, so a short one can skip the exact count.
-  if (rawBody.length * 3 > max && Buffer.byteLength(rawBody, 'utf8') > max) throw new HttpError('payload_too_large');
+  if (rawBody.length * 3 > max && utf8ByteLength(rawBody) > max) throw new HttpError('payload_too_large');
   let value: unknown;
   try {
     value = JSON.parse(rawBody);

@@ -4,3 +4,4 @@ export * as core from '@chatwarden/core';
 export * as matcher from '@chatwarden/matcher';
 export * as fixtures from '@chatwarden/matcher/fixtures';
 export * as storeMemory from '@chatwarden/store-memory';
+export * as httpAdmin from '@chatwarden/http/admin';

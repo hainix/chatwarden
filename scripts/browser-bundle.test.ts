@@ -39,7 +39,7 @@ let iife = '';
 let metafile: Metafile;
 
 beforeAll(async () => {
-  for (const pkg of ['core', 'matcher', 'store-memory']) {
+  for (const pkg of ['core', 'matcher', 'store-memory', 'http']) {
     if (!existsSync(`${ROOT}packages/${pkg}/dist/src/index.js`)) throw new Error(`packages/${pkg} is not built: run \`npm run build\` first`);
   }
   const a = await build({ ...common, format: 'esm' });
@@ -52,11 +52,20 @@ beforeAll(async () => {
 describe('browser bundle: static scan', () => {
   it('resolved the workspace packages through their built dist', () => {
     const inputs = Object.keys(metafile.inputs);
-    for (const pkg of ['core', 'matcher', 'store-memory']) {
+    for (const pkg of ['core', 'matcher', 'store-memory', 'http']) {
       expect(inputs.some((p) => p.replaceAll('\\', '/').startsWith(`packages/${pkg}/dist/src/`))).toBe(true);
     }
     expect(inputs.some((p) => p.replaceAll('\\', '/').startsWith('packages/matcher/dist/src/fixtures/'))).toBe(true);
     expect(inputs).toContain('scripts/browser-entry.ts'); // the entry itself
+  });
+
+  it('bundles @chatwarden/http/admin from its own entry, and none of the Node-side http modules', () => {
+    const inputs = Object.keys(metafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    expect(inputs).toContain('packages/http/dist/src/admin-entry.js');
+    expect(inputs).toContain('packages/http/dist/src/admin/index.js');
+    for (const nodeSide of ['index', 'player', 'express', 'webhooks/in', 'webhooks/out', 'webhooks/sign', 'webhooks/fingerprint']) {
+      expect(inputs, nodeSide).not.toContain(`packages/http/dist/src/${nodeSide}.js`);
+    }
   });
 
   it('has no node: import or export specifier', () => {
@@ -184,6 +193,50 @@ const SCENARIO = `(async () => {
   return JSON.stringify(out);
 })()`;
 
+// The staff API, run in the context through `CW.httpAdmin`: the same routes the hub talks to, over the in-memory store.
+const ADMIN_SCENARIO = `(async () => {
+  const { createChatwarden } = CW.core;
+  const { MemoryStore } = CW.storeMemory;
+  const { adminRoutes, createRouter } = CW.httpAdmin;
+  const R = 'room';
+  const clock = { now: () => Date.now() };
+  const cw = await createChatwarden({ store: new MemoryStore(), secret: 'admin-secret', platform: { identify: (ctx) => ctx }, clock });
+  cw.rooms.seat(R, 'a', { clientKey: 'key-alice', ip: '198.51.100.1' }, 'Alice');
+  cw.rooms.seat(R, 'b', { clientKey: 'key-bob', ip: '198.51.100.2' }, 'Bob');
+  cw.chat.accept(R, 'a', 'hello there');
+  const res = await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a', category: 'harassment' });
+  const handle = createRouter(adminRoutes(cw, { authorize: (req) => (req.headers['x-role'] ? { actor: 'demo-mod', role: req.headers['x-role'] } : null) }));
+  const call = async (method, path, role, body, raw) => {
+    const rawBody = raw !== undefined ? raw : body === undefined ? undefined : JSON.stringify(body);
+    const r = await handle({ method, path, query: {}, headers: role ? { 'x-role': role } : {}, body: undefined, ...(rawBody === undefined ? {} : { rawBody }) });
+    return { status: r.status, body: r.body };
+  };
+  const out = { noBuffer: typeof Buffer };
+  out.me = await call('GET', '/me', 'owner');
+  out.meMod = await call('GET', '/me', 'moderator');
+  out.anon = await call('GET', '/me', null);
+  out.reports = await call('GET', '/reports', 'moderator');
+  const report = cw.reports.get(res.reportId);
+  const own = report.excerpt.filter((l) => l.seatId === 'a').map((l) => l.lineId);
+  const decision = { verdict: 'upheld', reason: 'r', actions: [{ subject: cw.rooms.subjectAt(R, 'a'), kind: 'warning', durationMs: null, rule: 2, lineIds: own }] };
+  out.decided = await call('POST', '/reports/' + res.reportId + '/decide', 'moderator', decision);
+  out.replay = await call('POST', '/reports/' + res.reportId + '/decide', 'moderator', decision);
+  const pad = (filler) => '{"pad":"' + filler + '"}';
+  const bytes = (s) => new TextEncoder().encode(s).length;
+  const atLimit = pad('x'.repeat(65536 - 10));
+  const overAscii = pad('x'.repeat(65536 - 10 + 1));
+  const overEuro = pad('\\u20ac'.repeat(21842) + 'x');
+  const overAstral = pad('\\u{1F600}'.repeat(16381) + 'xxx');
+  if (bytes(atLimit) !== 65536 || bytes(overAscii) !== 65537 || bytes(overEuro) !== 65537 || bytes(overAstral) !== 65537) throw new Error('bad fixture');
+  const status = async (raw) => (await call('POST', '/sanctions', 'owner', undefined, raw)).status;
+  out.atLimit = await status(atLimit);
+  out.overAscii = await status(overAscii);
+  out.overEuro = await status(overEuro);
+  out.overAstral = await status(overAstral);
+  out.audit = await call('GET', '/audit', 'senior');
+  return JSON.stringify(out);
+})()`;
+
 describe('browser bundle: runs in a context with no Node globals', () => {
   it('the context really is bare', () => {
     const ctx = browserContext();
@@ -196,7 +249,7 @@ describe('browser bundle: runs in a context with no Node globals', () => {
   it('loads the bundle with only browser globals', () => {
     const ctx = browserContext();
     run(ctx, iife);
-    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,matcher,storeMemory');
+    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,matcher,storeMemory');
     expect(run(ctx, `typeof CW.core.createChatwarden + typeof CW.matcher.LiveTerms + typeof CW.storeMemory.MemoryStore`)).toBe('functionfunctionfunction');
   });
 
@@ -233,6 +286,44 @@ describe('browser bundle: runs in a context with no Node globals', () => {
     expect(out.ack).toBe(true);
     expect(out.after).toBe(0);
     expect(out.warningAfter).toBe(false);
+  });
+
+  it('runs the staff API (@chatwarden/http/admin) in the context: /me, a decision, and the byte cap with no Buffer', async () => {
+    const ctx = browserContext();
+    run(ctx, iife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, ADMIN_SCENARIO)) as {
+      me: { status: number; body: { actor: string; role: string; can: Record<string, boolean> } };
+      meMod: { body: { can: Record<string, boolean> } };
+      anon: { status: number; body: unknown };
+      reports: { status: number; body: { items: { id: string }[] } };
+      decided: { status: number };
+      replay: { status: number; body: { ok: boolean; replay: boolean } };
+      atLimit: number;
+      overAscii: number;
+      overEuro: number;
+      overAstral: number;
+      noBuffer: string;
+      audit: { status: number; body: { items: { action: string }[] } };
+    };
+    expect(out.noBuffer).toBe('undefined');
+    expect(out.me.status).toBe(200);
+    expect(out.me.body.actor).toBe('demo-mod');
+    expect(out.me.body.role).toBe('owner');
+    expect(Object.values(out.me.body.can).every((v) => v === true)).toBe(true);
+    expect(out.meMod.body.can['audit.read']).toBe(false);
+    expect(out.meMod.body.can['reports.decide']).toBe(true);
+    expect(out.anon.status).toBe(401);
+    expect(out.reports.status).toBe(200);
+    expect(out.reports.body.items).toHaveLength(1);
+    expect(out.decided.status).toBe(200);
+    // The same decision again is a harmless replay, not a second sanction.
+    expect(out.replay.status).toBe(200);
+    expect(out.replay.body).toMatchObject({ ok: true, replay: true });
+    // 65536 bytes is allowed (it fails later as a bad body, 400); 65537 is 413, whatever the characters.
+    expect(out.atLimit).toBe(400);
+    expect([out.overAscii, out.overEuro, out.overAstral]).toEqual([413, 413, 413]);
+    expect(out.audit.status).toBe(200);
+    expect(out.audit.body.items.length).toBeGreaterThan(0);
   });
 
   it('computes the same identity hashes in the pure-JS path as the native path', async () => {

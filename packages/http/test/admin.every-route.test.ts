@@ -68,6 +68,7 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
     // `:id~ref` is the audit-ref charset for a term id; the shape is the same.
     expect(Object.keys(routes).map((k) => k.replace('~ref', '')).sort()).toEqual(
       [
+        'GET /me',
         'GET /people/:ref/history',
         'GET /reports',
         'GET /reports/:id',

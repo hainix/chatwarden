@@ -39,6 +39,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./packages/discord/src/index.ts', import.meta.url)),
       },
       {
+        find: '@chatwarden/http/admin',
+        replacement: fileURLToPath(new URL('./packages/http/src/admin-entry.ts', import.meta.url)),
+      },
+      {
         find: '@chatwarden/http/express',
         replacement: fileURLToPath(new URL('./packages/http/src/express.ts', import.meta.url)),
       },

@@ -6,7 +6,8 @@ HTTP routes for Chatwarden, the open-source chat moderation kit for games. It gi
 - the **player API** (`playerRoutes`): a player's notices, "my record", the rules, the code of conduct and a name check;
 - **health probes** (`healthRoutes`);
 - **signed webhooks**, outgoing (`webhooksOut`) and incoming (`webhookIn`);
-- an **Express adapter** (`toExpress`, from `@chatwarden/http/express`).
+- an **Express adapter** (`toExpress`, from `@chatwarden/http/express`);
+- a **browser-safe entry** (`@chatwarden/http/admin`): the staff API, `createRouter` and the error, role and permission exports, with nothing that imports a Node builtin, so a browser app can run the staff routes in the page.
 
 The routes are plain functions over a small request and response type, so the package has no web framework in it. Express
 is the only adapter that ships; `createRouter` lets you write another.
@@ -118,10 +119,11 @@ curl -H "authorization: ..." http://localhost:3000/admin/reports
 
 ### The routes
 
-Staff, under the prefix you mount (`/admin` above). Each one is authenticated, needs a permission (see Permissions below), and writes an audit row.
+Staff, under the prefix you mount (`/admin` above). Each one is authenticated, needs a permission (see Permissions below), and writes an audit row, except `GET /me`.
 
 | Route | What it does |
 | --- | --- |
+| `GET /me` | Who is calling: `{ actor, role, can }`, where `can` is a boolean for every permission under the table in force (your `permissions` overrides included). It needs only a signed-in caller, and writes no audit row. |
 | `GET /reports?status&cursor&limit` | The queue, newest first, as summaries: `id`, `createdAt`, `roomId`, `tags`, `category`, `status`, `badFaith`, `targetPerson`, `reporterPerson`, `actionedAt`, `actionedBy`. No chat text, handles or notes. |
 | `GET /reports/:id?level` | One report with its excerpt, notes, each person's history and a suggestion. This is where evidence is read, so it is audited with the report id. |
 | `POST /reports/:id/suggest` | `{ level, rule?, person? }`: a suggestion for a person the report names (default: the reported person). |

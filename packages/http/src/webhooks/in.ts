@@ -8,16 +8,16 @@ import {
   needForSanction,
   parseDecision,
   parseSanction,
-  sanctionFingerprint,
 } from '../admin/apply.js';
 import { asObject, bodyId, bodyObject, has } from '../admin/validate.js';
 import { requireRole } from '../auth.js';
-import { BODY_MAX_BYTES } from '../body.js';
+import { BODY_MAX_BYTES, utf8ByteLength } from '../body.js';
 import { HttpError, ValidationError, withErrors } from '../errors.js';
 import { resolvePermissions } from '../permissions.js';
 import type { PermissionKey } from '../permissions.js';
 import type { RouteTable } from '../router.js';
 import type { KitRequest, KitResponse } from '../types.js';
+import { sanctionFingerprint } from './fingerprint.js';
 import { checkSecret, ReplayCache, verify } from './sign.js';
 
 /** What the adopter gives the incoming webhook. */
@@ -187,7 +187,7 @@ export function webhookIn(cw: Chatwarden, options: WebhookInOptions): RouteTable
       return { status: 500, body: { error: 'internal' } };
     }
     // Cheap size cap before any HMAC work (the byte cap the routes enforce).
-    if (raw.length * 3 > BODY_MAX_BYTES && Buffer.byteLength(raw, 'utf8') > BODY_MAX_BYTES) throw new HttpError('payload_too_large');
+    if (raw.length * 3 > BODY_MAX_BYTES && utf8ByteLength(raw) > BODY_MAX_BYTES) throw new HttpError('payload_too_large');
     // Verify BEFORE parsing. Every failure is the same 401.
     if (!verify(secret, req.headers, raw, clock.now(), replay)) throw new HttpError('unauthorized');
 

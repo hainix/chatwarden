@@ -32,6 +32,10 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
+    "./admin": {
+      "types": "./dist/src/admin-entry.d.ts",
+      "default": "./dist/src/admin-entry.js"
+    },
     "./express": {
       "types": "./dist/src/express.d.ts",
       "default": "./dist/src/express.js"
@@ -39,6 +43,9 @@
   },
   "typesVersions": {
     "*": {
+      "admin": [
+        "dist/src/admin-entry.d.ts"
+      ],
       "express": [
         "dist/src/express.d.ts"
       ]

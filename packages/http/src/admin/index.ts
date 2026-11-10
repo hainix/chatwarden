@@ -4,6 +4,7 @@ import { auditRoutes } from './audit.js';
 import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
 import { gapRoutes } from './gaps.js';
+import { meRoutes } from './me.js';
 import { policyRoutes } from './policy.js';
 import type { PolicyOptions } from './policy.js';
 import { reportRoutes } from './reports.js';
@@ -15,6 +16,8 @@ export { AuditFailedError, BadActorError, createAdminContext } from './context.j
 export type { AdminCall, AdminContext, AdminOptions } from './context.js';
 export { auditRoutes } from './audit.js';
 export { gapRoutes } from './gaps.js';
+export { meRoutes } from './me.js';
+export type { Me } from './me.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
 export { reportRoutes } from './reports.js';
@@ -45,6 +48,7 @@ export interface AdminRoutesOptions extends AdminOptions, PolicyOptions {
 export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteTable {
   const ctx = createAdminContext(cw, options);
   return {
+    ...meRoutes(ctx),
     ...reportRoutes(ctx),
     ...sanctionRoutes(ctx),
     ...gapRoutes(ctx),
