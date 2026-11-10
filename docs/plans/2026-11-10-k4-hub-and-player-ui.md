@@ -343,6 +343,123 @@ Built in the v2 look. Blocked words are masked by default on Blocked and Terms, 
   - axe
   - size
 
+Tasks 7b to 7e implement the addendum `docs/design/2026-11-10-hub-simple-mode-and-embedding.md`, which the owner approved on
+2026-11-10. Read it first; its values are binding.
+
+### Task 7b: Simple mode (the default)
+- `HubProps.mode?: 'simple' | 'detailed'`.
+  - When the prop is set, it fixes the mode and the switch is hidden.
+  - When it is not set, the mode comes from the moderator's remembered choice (localStorage key `chatwarden.hub.mode`, every
+    access in try/catch). The default is `simple`.
+  - The top bar shows a Simple/Detailed switch (a two-option segment).
+- **`CaseCard`, the Simple case view.** It holds exactly the addendum's content:
+  - the name
+  - the "Reported for" line
+  - what they said: the person's lines only, the reported line marked, and "Show the whole chat (N more lines)"
+  - a one-line record
+  - the suggestion as a referee card, with its why line
+  - the primary button named after the step, "No action needed", and "Something else…", which opens the full decision bar in
+    place
+  - the "what the player will see" line
+- **One click and "No action needed" both go through the existing decision hold.** The 5-second Undo, release-on-leave, the claims
+  and Decide-and-take-next are unchanged.
+  - One click sends: verdict Fair, the suggested rule, reason = the rule's title, and evidence = the person's own lines (up to 5).
+  - "No action needed" sends the Not-a-problem verdict with the reason "No rule was broken".
+- **Shown only when it matters:**
+  - The claim shows only when someone else holds the case.
+  - A reporter warning shows when that reporter has at least 3 past reports and under a third of them were upheld.
+- **The menu in Simple is Cases, Words, Blocked and More.**
+  - More is a menu with Recent actions, Audit, Rule gaps and Guide, each still gated by `can`.
+  - Every route and the command bar keep working.
+- **Keys:** 1 is the primary button, 2 is "No action needed", and Ctrl/Cmd+Enter is the primary button plus take next. N, J and K
+  are unchanged.
+- **Tests:**
+  - The mode precedence: prop, then stored choice, then the default. A throwing localStorage falls back to the default.
+  - Every element the addendum says is hidden in Simple is absent.
+  - The one-click body is exact.
+  - Undo works in Simple.
+  - The claim by someone else and Take over, gated.
+  - The reporter-warning thresholds, with variants (2 reports; 3 reports with 1 upheld; 3 reports with 0 upheld).
+  - The menu and More, per role.
+  - The keys.
+  - The audit-read counts match Detailed, or are fewer.
+  - axe in both themes.
+  - No overflow at 360px.
+  - Detailed is unchanged: all existing tests stay green and run in `mode="detailed"` where they test the workbench.
+
+### Task 7c: The headless controller (`@chatwarden/hub-react/headless`)
+- **Move the stateful logic into plain TypeScript with no React import:**
+  - the live queue and its change-token polling and backoff
+  - case reads
+  - the decision hold, Undo, send-now on pagehide or hidden, retry and restore
+  - claims, the heartbeat and release-on-leave
+  - toasts
+  - the session cache
+- `createHubController({ client, now? }): HubController` exposes stores with `subscribe(listener): () => void` and
+  `getSnapshot()`. It also exposes these commands:
+  - `takeNext`
+  - `open(ref)` / `leave(ref)`
+  - `decide(input, { hold })`
+  - `undo(id)`
+  - `release`
+  - `takeOver`
+  - `dispose()`
+- **The React layer becomes thin hooks over the controller,** using `useSyncExternalStore`. Behaviour must not change: every
+  existing hub-react test stays green without edits to its assertions.
+- The package exports the `./headless` subpath (ESM and types).
+- **Tests:**
+  - The controller tested directly, with no DOM: the hold window edges, send-once across timer, pagehide and dispose, release on
+    leave, the heartbeat, and the backoff while hidden.
+  - A static test that `src/headless/**` imports nothing from `react`.
+  - A bundle test that `@chatwarden/hub-react/headless` bundles without React.
+  - A vanilla usage example in the README, tested as a doc snippet.
+
+### Task 7d: Embeddable pieces, hooks and the API lock
+- **`HubProvider`** takes the props `client`, `mode`, `t`, `locale`, `now`, `theme` and `shortcuts`. `<Hub>` becomes the
+  provider plus the shell.
+- **Standalone components** that need only the provider:
+  - `CaseList`
+  - `CaseCard`
+  - `CaseWorkbench`
+  - `PersonRecord`
+  - `TermsManager`
+  - `BlockedList`
+  - `AuditLog`
+  - `RuleGaps`
+  - `Guide`
+  - `RecentActions`
+
+  Navigation is by callback props (`onOpenCase`, `onOpenPerson`, `onOpenReport`). Without a router or the shell, none of them
+  navigate.
+- **Headless hooks:** `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `useMe`, built on
+  7c's controller.
+- **The API lock:** a test snapshots the sorted export names of each entry point (hub-react, hub-react/headless, player-react).
+  Exports are marked `@experimental` in TSDoc where the addendum says so.
+- **README:** "Three ways to adopt", covering drop-in, pieces and headless, with tested snippets.
+- **Tests:**
+  - Each component mounts alone under the provider against the real routes.
+  - The callbacks fire and nothing navigates.
+  - Two pieces on one page share one controller (one change-token poller, one claim per case).
+  - axe.
+  - The JS size budget is re-measured, and the per-entry sizes are stated.
+
+### Task 7e: `@chatwarden/hub-element` (any stack)
+- **A new package** following the package pattern of hub-react and player-react. Its version and peers match.
+- **What it ships:** a custom element `<chatwarden-hub>`, in one self-contained ES module that bundles React, react-dom and
+  hub-react, with the CSS inlined into a shadow root.
+- **Attributes:** `base-url`, `mode`, `theme`, `locale`, `game-name` and `shortcuts`. Changing an attribute re-renders.
+- **Events:** `cw-navigate` with `{route, path}` and `cw-decided` with `{reportId, verdict}`, both bubbling and composed.
+- **Theming:** the `--cw-*` custom properties set on the host pass through.
+- **Registration:** the element registers once and is safe to import twice.
+- **Tests:**
+  - Mount and unmount (the controller is disposed and pending holds are sent).
+  - Attribute changes.
+  - Events.
+  - Shadow DOM isolation: a page `button { color: red }` does not reach the hub.
+  - The size budget: state it, with a reason.
+  - A Playwright smoke run against a page that only has a script tag and the element.
+- **README:** the one-script-tag quick start, including the npm CDN form.
+
 ### Task 8: The site demo uses the real hub and player UI
 - In `site/`:
   - Replace `src/demo/ModPane.tsx` with `<Hub client={hubClient(routerTransport(createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-mod', role: 'owner' }), terms }))))} router={memoryRouter} />`
