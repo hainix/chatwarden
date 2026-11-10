@@ -58,8 +58,7 @@ npm view @chatwarden/store-memory version   # must print a version; a 404 means 
 
 ```sh
 npm run build --workspace site
-cd site   # wrangler refuses to run from the workspace root
-npx wrangler pages deploy dist --project-name chatwarden --branch main
+npx wrangler pages deploy site/dist --project-name chatwarden --branch main
 ```
 
 `--branch main` is what makes it a production deploy. Pages decides production or preview from the branch: the production
@@ -72,7 +71,7 @@ branch name (`--branch preview`) and open the preview URL it prints.
 One-time setup, in the Cloudflare dashboard (or with wrangler), before the first deploy:
 
 1. **Create the Pages project** (done 2026-11-10; its pages.dev host is `chatwarden-bvf.pages.dev`). Workers & Pages, Create,
-   Pages, "Direct Upload", name it `chatwarden`. (Or, from `site/`, run
+   Pages, "Direct Upload", name it `chatwarden`. (Or run, from `site/` (wrangler refuses to create a project from the workspace root),
    `npx wrangler pages project create chatwarden --production-branch main --force` once. wrangler 4.160 and later hand Pages
    commands to Workers unless `--force` is passed on that first create; later commands need no `--force`.) Do not connect a git repo: deploys are the
    command above.
