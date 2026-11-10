@@ -53,14 +53,14 @@ export default defineConfig({
     ],
   },
   test: {
-    // Two projects, so no test file runs twice: the kit's tests run in Node; the hub UI's tests need a DOM (jsdom).
+    // Three projects, so no test file runs twice: the kit's tests run in Node; the React UIs' tests (hub-react, player-react) need a DOM (jsdom).
     projects: [
       {
         extends: true,
         test: {
           name: 'kit',
           include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'scripts/*.test.ts'],
-          exclude: ['**/node_modules/**', '**/dist/**', 'packages/hub-react/**'],
+          exclude: ['**/node_modules/**', '**/dist/**', 'packages/hub-react/**', 'packages/player-react/**'],
           setupFiles: ['./packages/store-sqlite/test/setup.ts'],
         },
       },
@@ -72,6 +72,17 @@ export default defineConfig({
           include: ['packages/hub-react/test/**/*.test.{ts,tsx}'],
           exclude: ['**/node_modules/**', '**/dist/**'],
           setupFiles: ['./packages/hub-react/test/setup.ts'],
+          testTimeout: 30_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'player-react',
+          environment: 'jsdom',
+          include: ['packages/player-react/test/**/*.test.{ts,tsx}'],
+          exclude: ['**/node_modules/**', '**/dist/**'],
+          setupFiles: ['./packages/player-react/test/setup.ts'],
           testTimeout: 30_000,
         },
       },
