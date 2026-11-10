@@ -235,7 +235,7 @@ describe('the report dialog', () => {
     await fileReport(user, /harassment/i, 'kept going');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(live().textContent).toMatch(/report filed against bo/i));
-    expect(screen.getByRole('tab', { name: /reports, 1 open/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /reports, 1 open/i })).toBeTruthy();
   });
   it('says so when the same line is reported twice', async () => {
     const { user } = await setup();
@@ -251,7 +251,7 @@ describe('the report dialog', () => {
 describe('the moderator console', () => {
   it('starts with an empty queue and an invitation to report', async () => {
     await setup();
-    expect(screen.getByRole('tab', { name: /reports, 0 open/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /reports, 0 open/i })).toBeTruthy();
     expect(screen.getByText(/no open reports/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^warn$/i })).toBeNull();
   });
@@ -305,7 +305,7 @@ describe('the moderator console', () => {
     await user.click(reportBtn(/report ada's line: ok that was close/i));
     await user.click(screen.getByRole('radio', { name: /spam/i }));
     await user.click(screen.getByRole('button', { name: /send report/i }));
-    await waitFor(() => expect(screen.getByRole('tab', { name: /reports, 2 open/i })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: /reports, 2 open/i })).toBeTruthy());
     const list = screen.getByRole('list', { name: /open reports/i });
     expect(within(list).getAllByRole('button')).toHaveLength(2);
   });
@@ -328,7 +328,7 @@ describe('decide, notice, acknowledge', () => {
     expect(within(frame).getByText(/community rule 2/i)).toBeTruthy();
     expect(within(frame).getByText(RUDE)).toBeTruthy();
     expect(within(frame).getByRole('button', { name: /acknowledge/i })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: /reports, 0 open/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /reports, 0 open/i })).toBeTruthy();
     expect(screen.getByText(/no open reports/i)).toBeTruthy();
     await waitFor(() => expect(live().textContent).toMatch(/notice|bo/i));
   });
@@ -379,7 +379,7 @@ describe('decide, notice, acknowledge', () => {
     await user.click(await screen.findByRole('button', { name: /acknowledge/i }));
     await waitFor(() => expect(screen.queryByRole('region', { name: /bo.s screen/i })).toBeNull());
     await waitFor(() => expect(live().textContent).toMatch(/bo acknowledged/i));
-    await user.click(screen.getByRole('tab', { name: /my record/i }));
+    await user.click(screen.getByRole('button', { name: /my record/i }));
     const record = await screen.findByRole('list', { name: /bo.s record/i });
     expect(within(record).getAllByRole('listitem')).toHaveLength(1);
     expect(record.textContent).toMatch(/warning/i);
@@ -537,7 +537,7 @@ describe('reset', () => {
     await user.click(screen.getByRole('button', { name: /reset demo/i }));
     await waitFor(() => expect(screen.queryByRole('region', { name: /bo.s screen/i })).toBeNull());
     await waitFor(() => expect(screen.queryByText(/refused!/i)).toBeNull());
-    expect(screen.getByRole('tab', { name: /reports, 0 open/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /reports, 0 open/i })).toBeTruthy();
     expect(screen.getByText(/no open reports/i)).toBeTruthy();
     expect(stepText()).toMatch(/step 1 of 4/i);
     expect(composer().value).toBe('');
@@ -709,29 +709,31 @@ describe('layout', () => {
   it('is side by side on a wide screen: no stacked class, no pane tabs', async () => {
     const { container } = await setup({ stacked: false });
     expect(container.querySelector('.demo')?.classList.contains('is-stacked')).toBe(false);
-    expect(screen.queryByRole('tablist', { name: /switch pane/i })).toBeNull();
+    expect(screen.queryByRole('group', { name: /switch pane/i })).toBeNull();
   });
   it('stacks below the breakpoint, game first, with a sticky mini-tab to switch to the moderator', async () => {
     const { container, user } = await setup({ stacked: true });
     expect(container.querySelector('.demo')?.classList.contains('is-stacked')).toBe(true);
-    const tabs = screen.getByRole('tablist', { name: /switch pane/i });
-    const [game, mod] = within(tabs).getAllByRole('tab');
+    const tabs = screen.getByRole('group', { name: /switch pane/i });
+    const [game, mod] = within(tabs).getAllByRole('button');
     expect(game?.textContent).toMatch(/game/i);
     expect(mod?.textContent).toMatch(/moderator/i);
-    expect(game?.getAttribute('aria-selected')).toBe('true');
+    expect(game?.getAttribute('aria-pressed')).toBe('true');
+    expect(mod?.getAttribute('aria-pressed')).toBe('false');
+    expect(tabs.querySelector('[role="tab"]')).toBeNull(); // a plain toggle pair, not a half-built tab widget
     const panes = container.querySelectorAll('.demo-panes > section');
     expect([...panes].map((p) => p.getAttribute('data-pane'))).toEqual(['game', 'mod']);
     expect((panes[1] as HTMLElement).hidden).toBe(true);
     await user.click(mod!);
-    expect(mod?.getAttribute('aria-selected')).toBe('true');
+    expect(mod?.getAttribute('aria-pressed')).toBe('true');
     expect((panes[0] as HTMLElement).hidden).toBe(true);
     expect((panes[1] as HTMLElement).hidden).toBe(false);
   });
   it('the moderator tab carries the open-report count', async () => {
     const { user } = await setup({ stacked: true });
     await fileReport(user);
-    const tabs = screen.getByRole('tablist', { name: /switch pane/i });
-    await waitFor(() => expect(within(tabs).getAllByRole('tab')[1]?.textContent).toMatch(/1/));
+    const tabs = screen.getByRole('group', { name: /switch pane/i });
+    await waitFor(() => expect(within(tabs).getAllByRole('button')[1]?.textContent).toMatch(/1/));
   });
   it('moves to the moderator pane by itself when the tour reaches the decision (and says so)', async () => {
     const { user, container } = await setup({ stacked: true });

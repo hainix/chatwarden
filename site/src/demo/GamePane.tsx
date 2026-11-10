@@ -77,7 +77,7 @@ function PlayerFrame({ name, notice, extra, onAck }: { name: string; notice: Pla
         )}
         <div className="pframe-foot">
           <small>
-            {notice.refCode !== null && <code>{notice.refCode}</code>} Only {name} gets this: no one else’s chat, no ids.
+            {notice.refCode !== null && <code>{notice.refCode}</code>} Only {name} gets this: no one else’s chat, no IP, no account or subject id.
             {extra > 0 ? ` ${extra} more waiting.` : ''}
           </small>
           <button type="button" className="pframe-ack" data-tour="ack" onClick={onAck}>
@@ -136,7 +136,9 @@ export function GamePane({
   return (
     <section className="pane pane-game" data-pane="game" aria-labelledby="pane-game-title" hidden={hidden}>
       <header className="pane-head">
-        <h3 id="pane-game-title">The game</h3>
+        <h3 id="pane-game-title" tabIndex={-1}>
+          The game
+        </h3>
         <span className="pane-tag">#lobby</span>
       </header>
       <div className="seats-wrap" data-tour="seats">

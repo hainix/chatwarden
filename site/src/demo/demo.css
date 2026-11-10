@@ -106,6 +106,7 @@
 }
 .pane h3 {
   margin: 0;
+  scroll-margin-top: 150px; /* focus lands below the sticky site header and pane switcher */
   font-family: var(--font-display);
   font-weight: 400;
   font-size: 1.05rem;
@@ -538,7 +539,7 @@
 .mod-tabs button:hover {
   border-color: var(--warden);
 }
-.mod-tabs button[aria-selected='true'] {
+.mod-tabs button[aria-pressed='true'] {
   color: #07251f;
   background: var(--warden);
   border-color: var(--warden);
@@ -1140,9 +1141,24 @@
 .drawer-source code {
   overflow-wrap: anywhere;
 }
-.demo-note {
+/* The stand-in disclosure: a small dashed badge (dashed means "not here yet" on this site). */
+.demo-badge {
+  justify-self: start;
+  max-width: 100%;
+  padding: 4px 12px;
   color: var(--muted);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  border: 2px dashed var(--edge);
+  border-radius: 999px;
+}
+.demo-error {
+  padding: 8px 12px;
+  color: var(--text);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
 }
 
 /* ---------- the report dialog ---------- */
@@ -1340,7 +1356,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.pane-tabs button[aria-selected='true'] {
+.pane-tabs button[aria-pressed='true'] {
   color: #07251f;
   background: var(--warden);
   border-color: var(--edge);

@@ -19,6 +19,8 @@ interface Props {
   body: string;
   hint: string | null;
   codeOpen: boolean;
+  /** True while a modal dialog is open: the card is then out of reach for keyboard and assistive tech. */
+  inert: boolean;
   pos: TourPos | null;
   onNext: () => void;
   onSkip: () => void;
@@ -31,7 +33,7 @@ interface Props {
  * the step is about, never covers the page (it is inside the demo) and never takes focus.
  */
 export const TourCard = forwardRef<HTMLElement, Props>(function TourCard(
-  { step, total, title, body, hint, codeOpen, pos, onNext, onSkip, onToggleCode, onPlayAgain },
+  { step, total, title, body, hint, codeOpen, inert, pos, onNext, onSkip, onToggleCode, onPlayAgain },
   ref,
 ) {
   const done = step >= total;
@@ -54,6 +56,7 @@ export const TourCard = forwardRef<HTMLElement, Props>(function TourCard(
       data-placement={pos?.placement ?? 'below'}
       data-done={done ? 'true' : undefined}
       style={style}
+      inert={inert}
       onKeyDown={onKeyDown}
     >
       <div className="tour-top">
@@ -68,7 +71,7 @@ export const TourCard = forwardRef<HTMLElement, Props>(function TourCard(
       <p className="tour-body">{body}</p>
       {hint !== null && <p className="tour-hint">{hint}</p>}
       <div className="tour-actions">
-        <button type="button" className="tbtn tbtn-code" aria-expanded={codeOpen} aria-controls="demo-code" onClick={onToggleCode}>
+        <button type="button" className="tbtn tbtn-code" aria-expanded={codeOpen} aria-controls={codeOpen ? 'demo-code' : undefined} onClick={onToggleCode}>
           <CodeIcon />
           <span>Show me the code</span>
         </button>

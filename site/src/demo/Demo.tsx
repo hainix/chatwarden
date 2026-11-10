@@ -3,9 +3,10 @@ import { ReplayIcon } from '../components/Icons';
 import './demo.css';
 import { CodeDrawer } from './CodeDrawer';
 import { CODE_STEPS } from './codeSteps';
+import { LINE_MAX } from './engine';
 import type { DemoEngine, PlayerNotice, SeatState, StaffReport, Suggestion } from './engine';
 import { FakeEngine } from './fakeEngine';
-import { GamePane } from './GamePane';
+import { GamePane, clock } from './GamePane';
 import { PauseIcon, PlayIcon, CodeIcon } from './icons';
 import { ModPane } from './ModPane';
 import type { DecideKind } from './ModPane';
@@ -27,6 +28,7 @@ export interface DemoProps {
 const STACK_QUERY = '(max-width: 899px)';
 const FEED_MAX = 60;
 const TOTAL = TOUR_STEPS.length;
+const FRIENDLY = 'Something went wrong in the demo. Reset to try again.';
 
 interface TourState {
   on: boolean;
@@ -81,6 +83,8 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const [draft, setDraft] = useState('');
   const [composerNote, setComposerNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [focusPane, setFocusPane] = useState<'game' | 'mod' | null>(null);
   const [ready, setReady] = useState(false);
   const [pos, setPos] = useState<TourPos | null>(null);
 
@@ -89,11 +93,16 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
+  const restartRef = useRef<HTMLButtonElement>(null);
+  const deciding = useRef<number | null>(null);
+  const paneNow = useRef<'game' | 'mod'>('game');
+  const prevOn = useRef(true);
   const gen = useRef(0);
   const sayId = useRef(0);
   const loopAt = useRef(0);
   const live = useRef({ paused, ready, dialog: false });
   live.current = { paused, ready, dialog: dialog !== null };
+  paneNow.current = paneTab;
 
   const announce = useCallback((text: string) => {
     sayId.current += 1;
@@ -103,13 +112,17 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   // ---------- reading the engine ----------
   const refresh = useCallback(async () => {
     const g = gen.current;
-    const [page, seatStates] = await Promise.all([engine.reports.list({ status: 'open' }), engine.rooms.seats()]);
-    const entries = await Promise.all(engine.seats.map(async (s) => [s.id, await engine.notices.pending(s.id)] as const));
-    if (!alive.current || g !== gen.current) return;
-    setReports(page.items);
-    setSeats(seatStates);
-    setPending(Object.fromEntries(entries));
-    setSelectedId((cur) => (page.items.some((r) => r.id === cur) ? cur : (page.items[0]?.id ?? null)));
+    try {
+      const [page, seatStates] = await Promise.all([engine.reports.list({ status: 'open' }), engine.rooms.seats()]);
+      const entries = await Promise.all(engine.seats.map(async (s) => [s.id, await engine.notices.pending(s.id)] as const));
+      if (!alive.current || g !== gen.current) return;
+      setReports(page.items);
+      setSeats(seatStates);
+      setPending(Object.fromEntries(entries));
+      setSelectedId((cur) => (page.items.some((r) => r.id === cur) ? cur : (page.items[0]?.id ?? null)));
+    } catch {
+      if (alive.current && g === gen.current) setError(FRIENDLY);
+    }
   }, [engine]);
 
   useEffect(() => {
@@ -118,9 +131,14 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       return;
     }
     let stale = false;
-    void engine.suggest(selectedId).then((s) => {
-      if (!stale) setSuggestion(s);
-    });
+    engine
+      .suggest(selectedId)
+      .then((s) => {
+        if (!stale) setSuggestion(s);
+      })
+      .catch(() => {
+        if (!stale) setError(FRIENDLY);
+      });
     return () => {
       stale = true;
     };
@@ -129,9 +147,14 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   useEffect(() => {
     if (modTab !== 'record') return;
     let stale = false;
-    void engine.notices.record(recordSeat).then((r) => {
-      if (!stale) setRecord(r);
-    });
+    engine.notices
+      .record(recordSeat)
+      .then((r) => {
+        if (!stale) setRecord(r);
+      })
+      .catch(() => {
+        if (!stale) setError(FRIENDLY);
+      });
     return () => {
       stale = true;
     };
@@ -141,7 +164,13 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   /** Runs one line through the engine and shows it if the visitor would see it. Returns what the engine said. */
   const play = useCallback(
     async (line: ScriptLine, g: number) => {
-      const res = await engine.chat.accept(line.seat, line.text);
+      let res: Awaited<ReturnType<DemoEngine['chat']['accept']>>;
+      try {
+        res = await engine.chat.accept(line.seat, line.text);
+      } catch {
+        if (alive.current && g === gen.current) setError(FRIENDLY);
+        return;
+      }
       if (!alive.current || g !== gen.current) return;
       if ('deliver' in res) {
         const name = engine.seats.find((s) => s.id === line.seat)?.name ?? line.seat;
@@ -155,22 +184,29 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const boot = useCallback(async () => {
     const g = ++gen.current;
     setReady(false);
-    await engine.reset();
-    if (!alive.current || g !== gen.current) return;
-    setFeed([]);
-    setReports([]);
-    setSeats([]);
-    setPending({});
-    setRecord([]);
-    setSelectedId(null);
-    loopAt.current = 0;
-    for (const line of SEED) {
+    setError(null);
+    try {
+      await engine.reset();
       if (!alive.current || g !== gen.current) return;
-      await play(line, g);
+      setFeed([]);
+      setReports([]);
+      setSeats([]);
+      setPending({});
+      setRecord([]);
+      setSelectedId(null);
+      loopAt.current = 0;
+      for (const line of SEED) {
+        if (!alive.current || g !== gen.current) return;
+        await play(line, g);
+      }
+      if (!alive.current || g !== gen.current) return;
+      await refresh();
+    } catch {
+      if (alive.current && g === gen.current) setError(FRIENDLY);
+    } finally {
+      // Whatever happened, the scripted players must not wait forever on a lobby that failed to open.
+      if (alive.current && g === gen.current) setReady(true);
     }
-    if (!alive.current || g !== gen.current) return;
-    await refresh();
-    if (alive.current && g === gen.current) setReady(true);
   }, [engine, play, refresh]);
 
   useEffect(() => {
@@ -201,8 +237,12 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
         if (line !== undefined) {
           const g = gen.current;
           await play(line, g);
-          const states = await engine.rooms.seats();
-          if (!stop && alive.current && g === gen.current) setSeats(states);
+          try {
+            const states = await engine.rooms.seats();
+            if (!stop && alive.current && g === gen.current) setSeats(states);
+          } catch {
+            if (!stop && alive.current && g === gen.current) setError(FRIENDLY);
+          }
         }
       }
       if (!stop) schedule();
@@ -237,11 +277,39 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     if (prevStep.current === tour.step) return;
     prevStep.current = tour.step;
     const title = tour.step >= TOTAL ? 'Done' : (TOUR_STEPS[tour.step]?.title ?? '');
-    const where = stacked && tour.step === 2 ? ' Showing the moderator view.' : '';
-    announce(tour.step >= TOTAL ? 'Tour done.' : `Tour step ${tour.step + 1} of ${TOTAL}: ${title}.${where}`);
+    announce(tour.step >= TOTAL ? 'Tour done.' : `Tour step ${tour.step + 1} of ${TOTAL}: ${title}.`);
     setCodeStep(null);
-    if (stacked) setPaneTab(tour.step === 2 ? 'mod' : 'game');
+    if (stacked) {
+      // One pane at a time on a phone: the tour moves you to the pane the step is about, and says so.
+      const want = tour.step === 2 ? 'mod' : 'game';
+      if (paneNow.current !== want) {
+        setPaneTab(want);
+        setFocusPane(want);
+        announce(`Showing the ${want === 'mod' ? 'moderator' : 'game'} view.`);
+      }
+    }
   }, [tour.on, tour.step, stacked, announce]);
+
+  // After an automatic pane switch, keep keyboard focus: if the control that had it is now hidden (or gone), land on the new
+  // pane's heading. Focus that is still somewhere visible (the tour card's Next button) is left alone.
+  useEffect(() => {
+    if (focusPane === null || paneTab !== focusPane) return;
+    const a = document.activeElement;
+    if (a === null || a === document.body || !a.isConnected || a.closest('[hidden]') !== null) {
+      document.getElementById(focusPane === 'mod' ? 'pane-mod-title' : 'pane-game-title')?.focus();
+    }
+    setFocusPane(null);
+  }, [focusPane, paneTab]);
+
+  // When the tour card goes away (Skip, Escape, Close) its button had focus: hand focus to a stable control instead of the body.
+  useEffect(() => {
+    const a = document.activeElement;
+    const lost = a === null || a === document.body;
+    if (prevOn.current && !tour.on && lost) restartRef.current?.focus();
+    // Restart tour removes the button that was pressed: carry on from the card that just appeared.
+    if (!prevOn.current && tour.on && lost) tourEl.current?.querySelector<HTMLElement>('.tbtn-next')?.focus();
+    prevOn.current = tour.on;
+  }, [tour.on]);
 
   // Put a ring on the control the step is about, and the tooltip next to it.
   useLayoutEffect(() => {
@@ -318,12 +386,22 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   }, []);
 
   // ---------- actions ----------
+  // Every engine call below can reject (the real kit's decide does on a store failure). Each action takes the generation
+  // it started in and drops its result if a Reset happened meanwhile, so nothing stale survives a Reset.
   async function send(text: string) {
     const line = text.trim();
     if (line === '') return;
+    const g = gen.current;
     setComposerNote(null);
-    const res = await engine.chat.accept('you', line);
-    if (!alive.current) return;
+    setError(null);
+    let res: Awaited<ReturnType<DemoEngine['chat']['accept']>>;
+    try {
+      res = await engine.chat.accept('you', line);
+    } catch {
+      if (alive.current && g === gen.current) setError(FRIENDLY);
+      return;
+    }
+    if (!alive.current || g !== gen.current) return;
     if ('deliver' in res) {
       setFeed((f) => [...f.slice(-(FEED_MAX - 1)), { id: res.deliver.lineId, seat: 'you', name: 'You', text: res.deliver.text, you: true }]);
       setDraft('');
@@ -338,15 +416,22 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       announce(`Blocked: ${engine.rules.label(rule).split(':')[0]}. Only you see this.`);
       tourEvent(0);
       inputRef.current?.focus();
-    } else if (why.reason === 'rate') {
-      setComposerNote('Too fast. Wait a moment, then send again.');
-      announce('Too fast. Wait a moment, then send again.');
-    } else if (why.reason === 'restricted') {
-      setComposerNote('You are on a timeout.');
-      announce('You are on a timeout.');
-    } else if (why.reason === 'length') {
-      setComposerNote('That line is too long.');
+      return;
     }
+    // Every other refusal says so (the kit also has 'gate' and 'profanity'), and keeps the line so it can be edited.
+    const until = typeof why.until === 'number' ? ` until ${clock(why.until)}` : '';
+    const message =
+      why.reason === 'rate'
+        ? 'Too fast. Wait a moment, then send again.'
+        : why.reason === 'restricted'
+          ? `You are on a timeout${until}.`
+          : why.reason === 'length'
+            ? `That line is too long. Keep it to ${LINE_MAX} characters or fewer.`
+            : why.reason === 'empty'
+              ? 'Type something first.'
+              : 'That line was not sent.';
+    setComposerNote(message);
+    announce(message);
   }
 
   function openReport(item: FeedItem, opener: HTMLElement) {
@@ -356,25 +441,34 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   async function submitReport(input: { category: StaffReport['category']; note: string }): Promise<string | null> {
     const d = dialog;
     if (d === null) return null;
-    const res = await engine.reports.submit({
-      reporterSeat: 'you',
-      targetSeat: d.item.seat,
-      lineId: d.item.id,
-      category: input.category,
-      note: input.note,
-    });
-    if (!alive.current) return null;
+    const g = gen.current;
+    setError(null);
+    let res: Awaited<ReturnType<DemoEngine['reports']['submit']>>;
+    try {
+      res = await engine.reports.submit({
+        reporterSeat: 'you',
+        targetSeat: d.item.seat,
+        lineId: d.item.id,
+        category: input.category,
+        note: input.note,
+      });
+    } catch {
+      return alive.current && g === gen.current ? FRIENDLY : null;
+    }
+    if (!alive.current || g !== gen.current) return null;
     if (!res.ok) {
-      return {
+      const reasons: Record<string, string> = {
         duplicate: 'You already reported that line.',
         rate: 'You are out of reports for today.',
         self: 'You cannot report yourself.',
         not_player: 'That line cannot be reported.',
         off: 'Reports are off.',
-      }[res.refused];
+      };
+      return reasons[res.refused] ?? 'That report was not filed.';
     }
     setDialog(null);
     await refresh();
+    if (!alive.current || g !== gen.current) return null;
     setSelectedId(res.reportId);
     setModTab('reports');
     announce(`Report filed against ${d.item.name}.`);
@@ -384,64 +478,86 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
 
   async function decide(kind: DecideKind, quoteId: string | null, reason: string) {
     const report = reports.find((r) => r.id === selectedId);
-    if (report === undefined || busy) return;
+    if (report === undefined || deciding.current !== null) return;
+    // A ref, not state: two clicks dispatched in one task must not both get through.
+    const token = ++sayId.current;
+    deciding.current = token;
+    const g = gen.current;
     setBusy(true);
-    const rule = suggestion?.rule ?? 2;
-    const base = { subject: report.targetPerson, rule, ...(rule === 'uncovered' ? { gapNote: 'Behaviour the rules do not cover yet.' } : {}) };
-    const lineIds = quoteId === null ? [] : [quoteId];
-    const input =
-      kind === 'warning'
-        ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'warning' as const, durationMs: null, lineIds }] }
-        : kind === 'timeout'
-          ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'chat' as const, durationMs: 600_000, lineIds }] }
-          : kind === 'note'
-            ? { verdict: 'noted' as const, actions: [{ ...base, kind: 'note' as const, durationMs: null }] }
-            : { verdict: 'no_action' as const, actions: [] };
-    const res = await engine.decide({ reportId: report.id, reason: reason.trim() || `Report: ${report.category}`, ...input });
-    if (!alive.current) return;
-    setBusy(false);
-    if (!res.ok) {
-      announce('That decision could not be applied.');
+    setError(null);
+    try {
+      const rule = suggestion?.rule ?? 2;
+      const base = { subject: report.targetPerson, rule, ...(rule === 'uncovered' ? { gapNote: 'Behaviour the rules do not cover yet.' } : {}) };
+      const lineIds = quoteId === null ? [] : [quoteId];
+      const input =
+        kind === 'warning'
+          ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'warning' as const, durationMs: null, lineIds }] }
+          : kind === 'timeout'
+            ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'chat' as const, durationMs: 600_000, lineIds }] }
+            : kind === 'note'
+              ? { verdict: 'noted' as const, actions: [{ ...base, kind: 'note' as const, durationMs: null }] }
+              : { verdict: 'no_action' as const, actions: [] };
+      const res = await engine.decide({ reportId: report.id, reason: reason.trim() || `Report: ${report.category}`, ...input });
+      if (!alive.current || g !== gen.current) return;
+      if (!res.ok) {
+        announce('That decision could not be applied.');
+        await refresh();
+        return;
+      }
+      const who = report.targetHandle;
+      const noticed = res.groups.some((x) => x.noticeId !== null);
+      const what = { warning: 'warning', timeout: 'timeout, 10 minutes', note: 'note recorded', none: 'no action' }[kind];
+      announce(
+        kind === 'none'
+          ? 'Decision made: no action. The report is closed.'
+          : `Decision made: ${what} for ${who}. ${noticed ? `Notice shown on ${who}'s screen.` : 'The player is told nothing.'}`,
+      );
       await refresh();
-      return;
-    }
-    const who = report.targetHandle;
-    const noticed = res.groups.some((g) => g.noticeId !== null);
-    const what = { warning: 'warning', timeout: 'timeout, 10 minutes', note: 'note recorded', none: 'no action' }[kind];
-    announce(
-      kind === 'none'
-        ? 'Decision made: no action. The report is closed.'
-        : `Decision made: ${what} for ${who}. ${noticed ? `Notice shown on ${who}'s screen.` : 'The player is told nothing.'}`,
-    );
-    await refresh();
-    if (noticed) {
-      tourEvent(2);
-    } else {
-      const left = reports.filter((r) => r.id !== report.id).length;
-      setTour((t) => (t.on && t.step === 2 && left === 0 ? { ...t, step: 1, hint: NO_NOTICE_HINT } : t));
+      if (!alive.current || g !== gen.current) return;
+      if (noticed) {
+        tourEvent(2);
+      } else {
+        const left = reports.filter((r) => r.id !== report.id).length;
+        setTour((t) => (t.on && t.step === 2 && left === 0 ? { ...t, step: 1, hint: NO_NOTICE_HINT } : t));
+      }
+    } catch {
+      if (alive.current && g === gen.current) setError(FRIENDLY);
+    } finally {
+      if (deciding.current === token) deciding.current = null;
+      if (alive.current && g === gen.current) setBusy(false);
     }
   }
 
   async function ack(seat: string, notice: PlayerNotice) {
+    const g = gen.current;
     const name = engine.seats.find((s) => s.id === seat)?.name ?? seat;
-    await engine.notices.ack(seat, notice.id);
-    if (!alive.current) return;
-    announce(`${name} acknowledged the notice.`);
-    await refresh();
-    tourEvent(3);
+    setError(null);
+    try {
+      await engine.notices.ack(seat, notice.id);
+      if (!alive.current || g !== gen.current) return;
+      announce(`${name} acknowledged the notice.`);
+      await refresh();
+      if (!alive.current || g !== gen.current) return;
+      tourEvent(3);
+    } catch {
+      if (alive.current && g === gen.current) setError(FRIENDLY);
+    }
   }
 
   async function reset() {
     setPaused(false);
     setTour({ on: true, step: 0, hint: null });
     prevStep.current = 0;
+    prevOn.current = true;
     setCodeOpen(false);
     setCodeStep(null);
     setDialog(null);
     setDraft('');
     setComposerNote(null);
+    setError(null);
     setModTab('reports');
     setPaneTab('game');
+    deciding.current = null;
     setBusy(false);
     setSays([]);
     await boot();
@@ -486,13 +602,14 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
         <div className="demo-tools">
           {!tour.on && (
             <>
-              <button type="button" className="tool" aria-expanded={codeOpen} aria-controls="demo-code" onClick={toggleCode}>
+              <button type="button" className="tool" aria-expanded={codeOpen} aria-controls={codeOpen ? 'demo-code' : undefined} onClick={toggleCode}>
                 <CodeIcon />
                 <span>Show me the code</span>
               </button>
               <button
                 type="button"
                 className="tool"
+                ref={restartRef}
                 onClick={() => {
                   prevStep.current = 0;
                   setTour({ on: true, step: 0, hint: null });
@@ -505,6 +622,13 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
         </div>
       </div>
 
+      <p className="demo-badge">{engine.note}</p>
+      {error !== null && (
+        <p className="demo-error" role="alert">
+          {error}
+        </p>
+      )}
+
       {tour.on && (
         <TourCard
           ref={tourEl}
@@ -514,6 +638,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
           body={cardBody}
           hint={tour.hint}
           codeOpen={codeOpen}
+          inert={dialog !== null}
           pos={pos}
           onNext={() => setTour((t) => ({ ...t, step: Math.min(t.step + 1, TOTAL), hint: null }))}
           onSkip={() => setTour((t) => ({ ...t, on: false }))}
@@ -523,11 +648,11 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       )}
 
       {stacked && (
-        <div className="pane-tabs" role="tablist" aria-label="Switch pane">
-          <button type="button" role="tab" aria-selected={paneTab === 'game'} data-tour="tab-game" onClick={() => setPaneTab('game')}>
+        <div className="pane-tabs" role="group" aria-label="Switch pane" inert={dialog !== null}>
+          <button type="button" aria-pressed={paneTab === 'game'} data-tour="tab-game" onClick={() => setPaneTab('game')}>
             Game
           </button>
-          <button type="button" role="tab" aria-selected={paneTab === 'mod'} data-tour="tab-mod" onClick={() => setPaneTab('mod')}>
+          <button type="button" aria-pressed={paneTab === 'mod'} data-tour="tab-mod" onClick={() => setPaneTab('mod')}>
             Moderator
             {reports.length > 0 && (
               <span className="badge" aria-label={`${reports.length} open`}>
@@ -546,7 +671,10 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
           allSeats={engine.seats}
           pending={pending}
           draft={draft}
-          setDraft={setDraft}
+          setDraft={(v) => {
+            setDraft(v);
+            setComposerNote(null);
+          }}
           note={composerNote}
           tourLineId={tourLineId}
           onSend={(t) => void send(t)}
@@ -577,8 +705,6 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       </div>
 
       {codeOpen && <CodeDrawer step={codeStep ?? Math.min(tour.on ? stepIndex : 0, CODE_STEPS.length - 1)} onPick={setCodeStep} />}
-
-      <p className="demo-note">{engine.note}</p>
 
       <div className="sr-only" role="status" aria-live="polite" aria-relevant="additions text" data-testid="demo-live">
         {says.map((s) => (

@@ -128,6 +128,41 @@ describe('chat.accept', () => {
   });
 });
 
+describe('the 200 cap counts UTF-16 units of the trimmed text, like the kit (chat.ts: trimmed.length)', () => {
+  it('accepts 100 emoji (200 units) and refuses 101 (202 units)', async () => {
+    const { engine, clock } = make();
+    const ok = await engine.chat.accept('you', '\u{1F600}'.repeat(100));
+    clock.advance(2000);
+    const long = await engine.chat.accept('you', '\u{1F600}'.repeat(101));
+    expect('deliver' in ok).toBe(true);
+    expect(long).toEqual({ refuse: { reason: 'length' } });
+  });
+  it('a ZWJ family emoji costs 11 units: 18 fit (198), 19 do not (209)', async () => {
+    const { engine, clock } = make();
+    const family = '\u{1F468}‍\u{1F469}‍\u{1F467}‍\u{1F466}';
+    expect(family.length).toBe(11);
+    expect('deliver' in (await engine.chat.accept('you', family.repeat(18)))).toBe(true);
+    clock.advance(2000);
+    expect(await engine.chat.accept('you', family.repeat(19))).toEqual({ refuse: { reason: 'length' } });
+  });
+  it('a lone surrogate is one unit: 200 pass, 201 do not', async () => {
+    const { engine, clock } = make();
+    expect('deliver' in (await engine.chat.accept('you', '\ud83d'.repeat(200)))).toBe(true);
+    clock.advance(2000);
+    expect(await engine.chat.accept('you', '\ud83d'.repeat(201))).toEqual({ refuse: { reason: 'length' } });
+  });
+  it('trims first: 200 units plus surrounding whitespace is fine, and whitespace alone is empty', async () => {
+    const { engine, clock } = make();
+    expect('deliver' in (await engine.chat.accept('you', `  ${'a'.repeat(200)}  `))).toBe(true);
+    clock.advance(2000);
+    expect(await engine.chat.accept('you', ' '.repeat(300))).toEqual({ refuse: { reason: 'empty' } });
+  });
+  it('a blocked word on a too-long line is refused for length first (the kit checks length before the matcher)', async () => {
+    const { engine } = make();
+    expect(await engine.chat.accept('you', `zorbak ${'\u{1F600}'.repeat(101)}`)).toEqual({ refuse: { reason: 'length' } });
+  });
+});
+
 describe('reports', () => {
   it('files a report for a delivered line and counts down the daily allowance', async () => {
     const { engine, clock } = make();

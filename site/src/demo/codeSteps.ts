@@ -56,7 +56,7 @@ console.log(filed.ok ? \`report \${filed.reportId} filed\` : \`not filed: \${fil
   },
   {
     title: "See the player's view",
-    blurb: 'The player reads their notices from the player API. It never carries anyone else’s chat, an IP or an id.',
+    blurb: 'The player reads their notices from the player API. It never carries anyone else’s chat, an IP, or an account or subject id.',
     file: 'terminal',
     lang: 'sh',
     source: 'packages/http/README.md',

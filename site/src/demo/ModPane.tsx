@@ -174,14 +174,13 @@ export function ModPane({
   return (
     <section className="pane pane-mod" data-pane="mod" aria-labelledby="pane-mod-title" hidden={hidden}>
       <header className="pane-head">
-        <h3 id="pane-mod-title">Your moderator</h3>
-        <div className="mod-tabs" role="tablist" aria-label="Moderator console">
+        <h3 id="pane-mod-title" tabIndex={-1}>
+          Your moderator
+        </h3>
+        <div className="mod-tabs" role="group" aria-label="Moderator console views">
           <button
             type="button"
-            role="tab"
-            id="mod-tab-reports"
-            aria-selected={tab === 'reports'}
-            aria-controls="mod-panel"
+            aria-pressed={tab === 'reports'}
             aria-label={`Reports, ${reports.length} open`}
             data-tour="queue-tab"
             onClick={() => setTab('reports')}
@@ -191,12 +190,12 @@ export function ModPane({
               {reports.length}
             </span>
           </button>
-          <button type="button" role="tab" id="mod-tab-record" aria-selected={tab === 'record'} aria-controls="mod-panel" onClick={() => setTab('record')}>
+          <button type="button" aria-pressed={tab === 'record'} onClick={() => setTab('record')}>
             My record
           </button>
         </div>
       </header>
-      <div className="mod-body" role="tabpanel" id="mod-panel" aria-labelledby={tab === 'reports' ? 'mod-tab-reports' : 'mod-tab-record'}>
+      <div className="mod-body">
         {tab === 'reports' ? (
           <>
             {reports.length === 0 && (

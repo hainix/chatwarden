@@ -26,6 +26,18 @@ describe('Show me the code', () => {
       expect(missing, s.title).toEqual([]);
     }
   });
+  it('each snippet is one contiguous block of its README, in order (not lines stitched together)', () => {
+    for (const s of CODE_STEPS) {
+      const readmeText = readme(s.source).join('\n');
+      const block = s.code.split('\n').map((l) => l.trimEnd()).join('\n');
+      expect(readmeText.includes(block), s.title).toBe(true);
+    }
+  });
+  it('a reordered or stitched snippet would fail the contiguity check (control)', () => {
+    const lines = (CODE_STEPS[1]?.code ?? '').split('\n');
+    const stitched = [lines[0], lines[3], lines[2]].join('\n');
+    expect(readme('packages/core/README.md').join('\n').includes(stitched)).toBe(false);
+  });
   it('keeps each snippet short (a few lines, not a page)', () => {
     for (const s of CODE_STEPS) expect(s.code.split('\n').length, s.title).toBeLessThanOrEqual(10);
   });

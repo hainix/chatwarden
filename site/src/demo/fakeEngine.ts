@@ -262,7 +262,8 @@ export class FakeEngine implements DemoEngine {
           },
         };
       }
-      if ([...trimmed].length > LINE_MAX) return { refuse: { reason: 'length' } };
+      // UTF-16 units of the trimmed text, the way the kit counts (chat.ts: trimmed.length)
+      if (trimmed.length > LINE_MAX) return { refuse: { reason: 'length' } };
       const recent = (this.sent.get(seatId) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
       if (recent.length >= RATE_MAX) {
         this.sent.set(seatId, recent);
