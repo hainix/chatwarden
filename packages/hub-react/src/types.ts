@@ -169,8 +169,9 @@ export interface ExceptionInput {
   note?: string;
 }
 
-export type TermPatch = Partial<TermInput>;
-export type ExceptionPatch = Partial<ExceptionInput>;
+/** A change to a row: any of its fields. A `null` note clears it. */
+export type TermPatch = Partial<Omit<TermInput, 'note'>> & { note?: string | null };
+export type ExceptionPatch = Partial<Omit<ExceptionInput, 'note'>> & { note?: string | null };
 
 export type TextVerdict = 'blocked' | 'clean' | 'too_long';
 

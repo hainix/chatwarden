@@ -125,6 +125,12 @@ export function decideErrorText(t: HubT, error: HubError): string {
   return errorText(t, error);
 }
 
+/** Why a term change did not go through. A flat 400 `invalid_term` names no field and no reason, so one sentence says what it may be. */
+export function termErrorText(t: HubT, error: HubError): string {
+  if (error.status === 400) return error.code === 'invalid_term' ? t('hub.terms.refused') : t('hub.terms.form.fail.invalid');
+  return errorText(t, error);
+}
+
 /** How a reported person is named in a queue or a toast: their handle, or "Person" and the short tag. */
 export function groupName(t: HubT, g: { handle: string | null; person: string }): string {
   return g.handle ?? t('hub.person.unnamed', { tag: personTag(g.person) });

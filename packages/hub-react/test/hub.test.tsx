@@ -139,7 +139,7 @@ describe('Hub: tabs by role', () => {
   });
 });
 
-describe('Hub: screens the role cannot use, unknown paths, and screens still to come', () => {
+describe('Hub: screens the role cannot use, unknown paths, and each route screen', () => {
   it('shows a plain message, not a crash, when a moderator opens #/audit', async () => {
     const w = await hubWorld({ role: 'moderator' });
     renderHub(w, { path: '/audit' });
@@ -163,10 +163,12 @@ describe('Hub: screens the role cannot use, unknown paths, and screens still to 
     ['/blocked', 'Blocked'],
     ['/gaps', 'Rule gaps'],
     ['/guide', 'Guide'],
-  ])('%s opens a titled placeholder until its screen is built', async (path, name) => {
+    ['/audit', 'Audit'],
+  ])('%s opens its own screen, titled, with no placeholder left', async (path, name) => {
     const w = await hubWorld({ role: 'owner' });
     renderHub(w, { path });
-    expect(await screen.findByRole('heading', { level: 2, name: `${name} is not available yet` })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name })).toBeInTheDocument();
+    expect(screen.queryByText(/is not available yet/)).toBeNull();
   });
 });
 

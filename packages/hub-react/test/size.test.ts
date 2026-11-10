@@ -62,7 +62,8 @@ describe('bundle size', () => {
     const gzip = gzipSync(css, { level: 9 }).byteLength;
     console.log(`hub-react styles.css: ${css.byteLength} bytes, ${gzip} bytes gzipped`);
     // Design v2 (the shell, the windows, the toasts, the team view): 10 KB gzipped, up from 7. The case pane (transcript, decision
-    // bar, context pane, phone sheet) takes it to 12.
-    expect(gzip).toBeLessThan(12 * 1024);
+    // bar, context pane, phone sheet) takes it to 12. The last five screens (Terms, Blocked, Rule gaps, Audit and the Guide: their
+    // tables, forms, the dry-run list and the guide's document typography) take it to 14 (76 KB raw, see static.test.ts).
+    expect(gzip).toBeLessThan(14 * 1024);
   });
 });

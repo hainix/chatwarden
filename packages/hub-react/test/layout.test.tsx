@@ -315,3 +315,70 @@ describe('fix round 1: the pane in the browser', () => {
     expect(rule2('.cw-hub .cw-ctx[hidden]')).toMatch(/display:\s*none/);
   });
 });
+
+// Terms, Blocked, Rule gaps, Audit and the Guide are middle-pane views. A wide table scrolls inside its own box and never widens
+// the page; every word, handle, note and guide line may break anywhere. jsdom has no layout, so this pins the structure and the
+// rules; the real-browser check at 360px is in the task report.
+describe('the admin screens on a phone', () => {
+  const rule = (selector: string): string => {
+    const lines = css.split('\n');
+    const at = lines.findIndex((l) => l.trim() === `${selector} {`);
+    if (at < 0) return '';
+    return lines.slice(at + 1, lines.findIndex((l, n) => n > at && l.includes('}'))).join('\n');
+  };
+
+  it('a table lives in a scroll box that scrolls on its own and is never wider than the pane', () => {
+    expect(rule('.cw-hub .cw-scroll')).toMatch(/overflow:\s*auto/);
+    expect(rule('.cw-hub .cw-scroll')).toMatch(/max-width:\s*100%/);
+  });
+
+  it('every column has a floor, so a phone scrolls the table instead of squeezing it to nothing, and no floor is wider than a phone', () => {
+    for (const sel of ['.cw-hub .cw-term-note', '.cw-hub .cw-term-count']) expect(rule(sel), sel).toMatch(/min-width:\s*[\d.]+rem/);
+    expect(css).toMatch(/\.cw-hub \.cw-term-word,\n\.cw-hub \.cw-term-note,\n\.cw-hub \.cw-term-changed\s*\{[^}]*min-width:\s*8rem/);
+  });
+
+  it('long words break instead of widening anything: words, notes, gaps, rules, hits and the guide', () => {
+    expect(css).toMatch(/\.cw-hub \.cw-term-word,\n\.cw-hub \.cw-term-note,\n\.cw-hub \.cw-term-changed\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    for (const sel of ['.cw-hub .cw-hits-list li', '.cw-hub .cw-doc pre']) expect(rule(sel), sel).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(css).toMatch(/\.cw-hub \.cw-gap-note,\n\.cw-hub \.cw-rule-text,\n\.cw-hub \.cw-rule-title\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    expect(css).toMatch(/\.cw-hub \.cw-doc p,\n\.cw-hub \.cw-doc li\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    expect(rule('.cw-hub .cw-doc pre')).toMatch(/white-space:\s*pre-wrap/);
+    expect(rule('.cw-hub .cw-gap-note')).toMatch(/white-space:\s*pre-wrap/);
+  });
+
+  it('the forms lay their fields out by the room there is, not by the window', () => {
+    for (const sel of ['.cw-hub .cw-termform-fields', '.cw-hub .cw-audit-filter']) {
+      expect(rule(sel), sel).toMatch(/grid-template-columns:\s*repeat\(auto-fit, minmax\(min\(14rem, 100%\), 1fr\)\)/);
+    }
+  });
+
+  it('colours nothing: these screens are neutral, and the document typography adds no link colour of its own', () => {
+    const own = ['.cw-nowrap', '.cw-term-count', '.cw-row-actions', '.cw-terms-group', '.cw-hits', '.cw-hits-list', '.cw-gap', '.cw-rule', '.cw-doc', '.cw-doc code', '.cw-doc pre', '.cw-ladder-cell'];
+    for (const sel of own) expect(rule(`.cw-hub ${sel}`), sel).not.toMatch(/var\(--cw-(accent|red|yellow|live)/);
+    expect(css).not.toMatch(/\.cw-doc a\b/);
+  });
+
+  it('adds no phone-only rule: nothing here needs the cascade order to win', () => {
+    expect(media('max-width: 51.1875rem')).not.toMatch(/cw-(term|docb|gap|rule|hits|ladder|audit|blocked-table)/);
+  });
+
+  it('each screen draws its table inside the scroll box', async () => {
+    const w = await hubWorld({ role: 'senior' });
+    w.blockLine('Vantablob', 'zorbak');
+    const f = await w.file({ target: 'Vantablob' });
+    await w.sanction(f.person, 'warning', 'uncovered');
+    for (const [path, name] of [
+      ['/terms', /^Terms in English/],
+      ['/blocked', 'Blocked lines'],
+      ['/audit', 'Audit entries'],
+      ['/guide', 'Escalation ladder by step'],
+    ] as const) {
+      const { unmount } = renderHub(w, { path });
+      const box = await screen.findByRole('region', { name });
+      expect(box).toHaveClass('cw-scroll');
+      expect(box).toHaveAttribute('tabindex', '0');
+      expect(box.querySelector('table')).not.toBeNull();
+      unmount();
+    }
+  });
+});

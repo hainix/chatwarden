@@ -41,7 +41,6 @@ const CASES: Case[] = [
   { name: 'an empty reports queue', prepare: async () => undefined, path: '/reports', heading: 'Reports' },
   { name: 'a reports queue with grouped people', prepare: crowd, path: '/reports', heading: 'Reports' },
   { name: 'the reports queue, all statuses', prepare: crowd, path: '/reports?status=all', heading: 'Reports' },
-  { name: 'a screen still to come', prepare: async () => undefined, path: '/terms', heading: 'Terms is not available yet' },
   { name: 'an unknown path', prepare: async () => undefined, path: '/nope', heading: 'That page does not exist' },
   { name: 'a screen the role cannot open', prepare: async () => undefined, path: '/audit', role: 'moderator', heading: 'Not available for your role' },
   { name: 'a senior view with the Audit tab', prepare: crowd, path: '/', role: 'senior', heading: 'Overview' },

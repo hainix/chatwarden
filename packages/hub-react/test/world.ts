@@ -205,10 +205,24 @@ export async function hubWorld(opts: WorldOptions = {}) {
     return res;
   };
 
+  /**
+   * A player types a line the term list refuses (a synthetic term such as zorbak): the kit records a blocked attempt. Returns the
+   * room and the newest blocked item (its person is the staff ref).
+   */
+  const blockLine = (handle: string, text: string, room?: string) => {
+    const roomId = room ?? `room-${++n}`;
+    cw.rooms.seat(roomId, 'p1', { clientKey: `key-blocker-${handle}` }, handle);
+    const res = cw.chat.accept(roomId, 'p1', text);
+    clock.t += 1000;
+    const item = cw.blocked.list({ days: 30 })[0];
+    if (item === undefined) throw new Error(`the line was not blocked: ${JSON.stringify(res)}`);
+    return { room: roomId, item };
+  };
+
   const raw = (req: Partial<KitRequest> & { method: string; path: string }): Promise<KitResponse> =>
     handle({ query: {}, headers: {}, body: undefined, ...req });
 
-  return { cw, clock, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, raw, live, now: () => clock.t };
+  return { cw, clock, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, blockLine, raw, live, now: () => clock.t };
 }
 
 export type HubWorld = Awaited<ReturnType<typeof hubWorld>>;

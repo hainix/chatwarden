@@ -1252,7 +1252,8 @@
 
 /* ---- Form controls ------------------------------------------------------------------------------------------------ */
 .cw-hub select,
-.cw-hub textarea {
+.cw-hub textarea,
+.cw-hub .cw-input {
   display: block;
   width: 100%;
   min-height: var(--cw-control-height);
@@ -2453,6 +2454,187 @@
 .cw-hub .cw-sheet-plus {
   margin: 0 0.25rem;
   color: var(--cw-ink-muted);
+}
+
+/* ---- Terms, Blocked, Rule gaps, Audit and the Guide ---------------------------------------------------------------------- */
+/* Middle-pane views. A wide table scrolls inside its own box (.cw-scroll) and each column has a floor, so a phone scrolls the table
+   and never the page; every word and handle may break anywhere. Nothing here uses a signal colour: they are neutral. */
+.cw-hub .cw-nowrap {
+  white-space: nowrap;
+}
+.cw-hub .cw-term-word,
+.cw-hub .cw-term-note,
+.cw-hub .cw-term-changed {
+  min-width: 8rem;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-term-note {
+  min-width: 11rem;
+}
+.cw-hub .cw-term-count {
+  text-align: right;
+  min-width: 3rem;
+}
+.cw-hub .cw-terms-table tr[aria-current='true'] {
+  background: var(--cw-surface-sunken);
+}
+.cw-hub .cw-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1) var(--cw-space-2);
+}
+.cw-hub .cw-terms-group {
+  display: grid;
+  gap: var(--cw-space-2);
+  min-width: 0;
+  padding: var(--cw-space-3) var(--cw-space-4);
+}
+.cw-hub .cw-terms-group h3,
+.cw-hub .cw-form-title {
+  font-size: var(--cw-text-m);
+}
+.cw-hub .cw-termform-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+  gap: var(--cw-space-3);
+  align-items: start;
+}
+.cw-hub .cw-hits {
+  display: grid;
+  gap: var(--cw-space-2);
+  padding: var(--cw-space-3) var(--cw-space-4);
+  border: var(--cw-border-width) solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-surface-sunken);
+}
+.cw-hub .cw-hits-list {
+  display: grid;
+  gap: 2px;
+  font-family: var(--cw-font-mono);
+  font-size: var(--cw-text-s);
+}
+.cw-hub .cw-hits-list li {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-audit-filter {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+  gap: var(--cw-space-3);
+  align-items: start;
+}
+.cw-hub .cw-audit-filter .cw-action-foot {
+  grid-column: 1 / -1;
+}
+
+/* Rule gaps and the Community Rules: a list of short entries, divided by hairlines. */
+.cw-hub .cw-gaps,
+.cw-hub .cw-rules {
+  display: grid;
+}
+.cw-hub .cw-gap,
+.cw-hub .cw-rule {
+  display: grid;
+  gap: var(--cw-space-2);
+  min-width: 0;
+  padding: var(--cw-space-3) var(--cw-space-4);
+}
+.cw-hub .cw-gap + .cw-gap,
+.cw-hub .cw-rule + .cw-rule {
+  border-top: var(--cw-border-width) solid var(--cw-border);
+}
+.cw-hub .cw-gap-head,
+.cw-hub .cw-rule-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1) var(--cw-space-3);
+  min-width: 0;
+}
+.cw-hub .cw-gap-note,
+.cw-hub .cw-rule-text,
+.cw-hub .cw-rule-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-gap-note {
+  white-space: pre-wrap;
+}
+.cw-hub .cw-gap-form {
+  max-width: 28rem;
+}
+.cw-hub .cw-ladder th[scope='row'] {
+  color: var(--cw-ink);
+  white-space: nowrap;
+}
+.cw-hub .cw-ladder-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1) var(--cw-space-2);
+}
+
+/* The generated guide, drawn by the safe renderer: plain document typography. */
+.cw-hub .cw-doc {
+  display: grid;
+  gap: var(--cw-space-3);
+  min-width: 0;
+}
+.cw-hub .cw-doc h3,
+.cw-hub .cw-doc h4,
+.cw-hub .cw-doc h5,
+.cw-hub .cw-doc h6 {
+  margin: var(--cw-space-2) 0 0;
+  line-height: var(--cw-leading-tight);
+  font-weight: var(--cw-weight-strong);
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-doc h3 {
+  font-size: var(--cw-text-l);
+}
+.cw-hub .cw-doc h4 {
+  font-size: var(--cw-text-m);
+}
+.cw-hub .cw-doc h5,
+.cw-hub .cw-doc h6 {
+  font-size: var(--cw-text-s);
+}
+.cw-hub .cw-doc p,
+.cw-hub .cw-doc li {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-doc ul,
+.cw-hub .cw-doc ol {
+  display: grid;
+  gap: var(--cw-space-1);
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.cw-hub .cw-doc ul {
+  list-style: disc;
+}
+.cw-hub .cw-doc ol {
+  list-style: decimal;
+}
+.cw-hub .cw-doc code {
+  padding: 0 0.3em;
+  border-radius: 3px;
+  background: var(--cw-surface-sunken);
+  font-family: var(--cw-font-mono);
+  font-size: 0.92em;
+}
+.cw-hub .cw-doc pre {
+  margin: 0;
+  padding: var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-surface-sunken);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.cw-hub .cw-doc pre code {
+  padding: 0;
+  background: none;
 }
 
 /* ---- Motion, forced colours -------------------------------------------------------------------------------------- */

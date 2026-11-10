@@ -212,9 +212,12 @@ describe('the stylesheet is a complete token contract', () => {
   });
 
   // v2 sized the sheet for the shell, the windows, the toasts and the team view: 52 KB raw, 10 KB gzipped. The case pane (the
-  // transcript, the decision bar, the context pane, the phone sheet) takes it to 64 KB raw, 12 KB gzipped (the size test).
-  it('is under 64 KB raw (the size test holds it to 12 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(64 * 1024);
+  // transcript, the decision bar, the context pane, the phone sheet) takes it to 64 KB raw, 12 KB gzipped. The last five screens
+  // (Terms, Blocked, Rule gaps, Audit, Guide: tables with column floors, the add and edit form and its dry-run list, the gap and
+  // rule lists, the ladder and the guide's document typography) take it to 76 KB raw, 14 KB gzipped (the size test). They reuse the
+  // table, scroll box, form, panel, tag and mask classes; what is new is only what none of those could draw.
+  it('is under 76 KB raw (the size test holds it to 14 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(76 * 1024);
   });
 });
 

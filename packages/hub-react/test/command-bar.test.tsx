@@ -227,7 +227,7 @@ describe('the command bar: the keyboard', () => {
     await open(user);
     await user.keyboard('rule gaps{Enter}');
     expect(router.path).toBe('/gaps');
-    expect(await screen.findByRole('heading', { level: 2, name: 'Rule gaps is not available yet' })).toHaveFocus();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Rule gaps' })).toHaveFocus();
   });
 
   it('Enter with no result does nothing and keeps the bar open', async () => {
