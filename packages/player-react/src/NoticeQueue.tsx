@@ -5,17 +5,18 @@ import { toPlayerError } from './client.js';
 import type { PlayerClient, PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
 import { usePlayerData } from './hooks.js';
-import { AppealLink, bodyKey, Card, errorText, Facts, isSanction, Lines, Root, titleKey, useUi } from './ui.js';
-import type { PlayerUiProps, Ui } from './ui.js';
+import { AppealLink, bodyKey, Card, errorText, Facts, isSanction, Lines, Portal, Root, titleKey, useUi } from './ui.js';
+import type { DialogHostProps, PlayerUiProps, Ui } from './ui.js';
 
-export interface NoticeQueueProps extends PlayerUiProps {
+export interface NoticeQueueProps extends PlayerUiProps, DialogHostProps {
   client: PlayerClient;
   /**
    * Whether a notice may appear now. Pass `false` during a match: notices are held (kept, not dropped, not acknowledged) and
-   * appear, oldest first, when it turns `true` again. Default: `true`.
+   * appear, oldest first, when it turns `true` again; the list is asked for once more at that moment, so a notice that arrived during
+   * the match is not missed. Default: `true`.
    */
   canShow?: boolean;
-  /** Where "Think this is a mistake?" goes: an `http(s)` address or a path starting with `/`. Left out when absent or unsafe. */
+  /** Where "Think this is a mistake?" goes: an `https` address or a relative one (`/appeal`). Left out when absent or unsafe. */
   appealUrl?: string;
   /** Change it to ask the server again (for example when your own push channel says a notice is pending). */
   refreshKey?: number | string;
@@ -30,7 +31,7 @@ export interface NoticeQueueProps extends PlayerUiProps {
  * "Acknowledge", the others with "Got it"); the dialog closes after the last one and focus returns to where it was.
  */
 export function NoticeQueue(props: NoticeQueueProps) {
-  const { client, canShow = true, appealUrl, refreshKey, onAcknowledged, onPendingChange, theme, className } = props;
+  const { client, canShow = true, appealUrl, refreshKey, onAcknowledged, onPendingChange, theme, className, container, returnFocusTo } = props;
   const ui = useUi(props);
   const state = usePlayerData(() => client.notices(), refreshKey);
   // The ids acknowledged since this list arrived. A newer list replaces both, so the server stays the truth.
@@ -39,8 +40,18 @@ export function NoticeQueue(props: NoticeQueueProps) {
   const queue = (state.data ?? []).filter((n) => !gone.includes(n.id)).sort((a, b) => a.createdAt - b.createdAt);
   const count = queue.length;
   const loaded = state.data !== undefined;
+  // "Close for now" after a failed acknowledge hides the queue until a newer list arrives (a refresh, or the next release of a hold).
+  const [later, setLater] = useState<PlayerNotice[] | undefined>(undefined);
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
+  const reload = state.reload;
+
+  // Releasing a hold asks the server once more: a warning that landed during the match must be seen before the next one.
+  const wasShown = useRef(canShow);
+  useEffect(() => {
+    if (canShow && !wasShown.current) reload();
+    wasShown.current = canShow;
+  }, [canShow, reload]);
 
   const told = useRef(onPendingChange);
   told.current = onPendingChange;
@@ -65,7 +76,7 @@ export function NoticeQueue(props: NoticeQueueProps) {
     );
   }
   const current = queue[0];
-  if (current === undefined) return null;
+  if (current === undefined || later === state.data) return null;
 
   const acknowledged = (notice: PlayerNotice): void => {
     setDone({ list: state.data, ids: [...gone, notice.id] });
@@ -73,12 +84,25 @@ export function NoticeQueue(props: NoticeQueueProps) {
   };
 
   return (
+    <Portal container={container}>
     <Root theme={theme} className={className}>
       {/* One dialog for the whole queue: it opens once and closes once, so focus comes back to where it was after the last notice. */}
-      <Dialog labelledBy={titleId} initialFocus={heading}>
-        <NoticeCard key={current.id} ui={ui} client={client} notice={current} total={count} appealUrl={appealUrl} titleId={titleId} heading={heading} onDone={acknowledged} />
+      <Dialog labelledBy={titleId} initialFocus={heading} {...(returnFocusTo === undefined ? {} : { returnFocusTo })}>
+        <NoticeCard
+          key={current.id}
+          ui={ui}
+          client={client}
+          notice={current}
+          total={count}
+          appealUrl={appealUrl}
+          titleId={titleId}
+          heading={heading}
+          onDone={acknowledged}
+          onLater={() => setLater(state.data)}
+        />
       </Dialog>
     </Root>
+    </Portal>
   );
 }
 
@@ -91,6 +115,7 @@ function NoticeCard({
   titleId,
   heading,
   onDone,
+  onLater,
 }: {
   ui: Ui;
   client: PlayerClient;
@@ -101,6 +126,7 @@ function NoticeCard({
   titleId: string;
   heading: RefObject<HTMLHeadingElement | null>;
   onDone: (notice: PlayerNotice) => void;
+  onLater: () => void;
 }) {
   const { t } = ui;
   const linesId = useId();
@@ -134,7 +160,10 @@ function NoticeCard({
   const mustAck = notice.kind === 'warning' || notice.mustAcknowledge;
   return (
     <>
-      {total > 1 && <p className="cw-position">{t('player.notice.position', { n: 1, total })}</p>}
+      {/* Always drawn, so a screen reader that has seen it empty hears it when a second notice arrives. */}
+      <p className="cw-position" aria-live="polite">
+        {total > 1 ? t('player.notice.position', { n: 1, total }) : null}
+      </p>
       <div className="cw-head">
         <Card kind={notice.kind} />
         <h2 id={titleId} ref={heading} className="cw-title" tabIndex={-1}>
@@ -152,8 +181,9 @@ function NoticeCard({
           <p>
             {t('player.notice.ackFailed')} {errorText(t, failure)}
           </p>
-          <button type="button" className="cw-btn" onClick={() => void acknowledge()}>
-            {t('player.state.retry')}
+          {/* The main button below tries again; this is the way out when it keeps failing. The notice stays pending. */}
+          <button type="button" className="cw-btn" onClick={onLater}>
+            {t('player.notice.closeForNow')}
           </button>
         </div>
       )}

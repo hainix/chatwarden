@@ -1,16 +1,34 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 
-// A modal window: it takes focus when it opens, keeps Tab inside, and hands focus back to what had it. It is a plain ARIA dialog
+// A modal window: it takes focus when it opens, keeps focus inside, and hands focus back to what had it. It is a plain ARIA dialog
 // (not <dialog>), so it works the same in every embedded browser a game may use. A click outside never closes it: a notice has to
 // be acknowledged, and a half-written report is not lost by a stray click.
+//
+// Focus is kept in three ways, because Tab alone is not enough: the keydown handler wraps Tab at the ends, a click on the backdrop
+// does not move focus (mousedown is cancelled), and a document-wide `focusin` guard pulls focus back if anything outside the window
+// gets it (a script, a click on a game control that is still reachable).
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * The controls Tab visits, in order. A radio group is one stop (the checked radio, or the first when none is checked), because the
+ * browser moves between its radios with the arrow keys: counting every radio would make "the first control" the wrong one to wrap at.
+ */
+function tabStops(box: HTMLElement): HTMLElement[] {
+  const all = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  return all.filter((el) => {
+    if (!(el instanceof HTMLInputElement) || el.type !== 'radio' || el.name === '') return true;
+    const group = all.filter((o): o is HTMLInputElement => o instanceof HTMLInputElement && o.type === 'radio' && o.name === el.name);
+    return el === (group.find((r) => r.checked) ?? group[0]);
+  });
+}
 
 export function Dialog({
   labelledBy,
   initialFocus,
   onEscape,
+  returnFocusTo,
   children,
 }: {
   /** The id of the heading that names the window. */
@@ -19,18 +37,38 @@ export function Dialog({
   initialFocus: RefObject<HTMLElement | null>;
   /** Called on Escape. Leave it out when the window must not be dismissed. */
   onEscape?: () => void;
+  /** Where focus goes on close when the element that had it before is gone. */
+  returnFocusTo?: () => HTMLElement | null;
   children: ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const fallback = useRef(returnFocusTo);
+  fallback.current = returnFocusTo;
   // What had focus before the window opened, read while rendering for the first time: a child's own effect (which moves focus to
   // its heading) runs before this component's effects, so reading it in an effect would find the heading.
   const [before] = useState<Element | null>(() => (typeof document === 'undefined' ? null : document.activeElement));
 
   useEffect(() => {
     (initialFocus.current ?? box.current)?.focus();
+    const onFocusIn = (e: FocusEvent): void => {
+      const target = e.target;
+      const inner = box.current;
+      if (inner !== null && target instanceof Node && !inner.contains(target)) (initialFocus.current ?? inner).focus();
+    };
+    document.addEventListener('focusin', onFocusIn);
     return () => {
-      // Give focus back, unless what had it is gone (the page moved on while the window was open).
+      // Stop guarding first, so giving focus back is not pulled in again.
+      document.removeEventListener('focusin', onFocusIn);
+      // Give focus back, unless what had it is gone (the page moved on while the window was open): then to `returnFocusTo()`, if
+      // the host gave one, and otherwise to wherever the browser leaves it (the page body).
       if (before instanceof HTMLElement && before.isConnected) before.focus();
+      else {
+        try {
+          fallback.current?.()?.focus();
+        } catch {
+          // A host callback that throws must not stop the window closing.
+        }
+      }
     };
     // Once, when the window opens.
   }, []);
@@ -43,8 +81,8 @@ export function Dialog({
       onEscape();
       return;
     }
-    if (e.key !== 'Tab') return;
-    const items = [...(box.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
+    if (e.key !== 'Tab' || box.current === null) return;
+    const items = tabStops(box.current);
     if (items.length === 0) {
       e.preventDefault();
       return;
@@ -64,7 +102,13 @@ export function Dialog({
   };
 
   return (
-    <div className="cw-scrim">
+    <div
+      className="cw-scrim"
+      onMouseDown={(e) => {
+        // A press on the backdrop would drop focus to the page body, and the next Tab would leave the window: keep it where it is.
+        if (e.target === e.currentTarget) e.preventDefault();
+      }}
+    >
       <div ref={box} className="cw-dialog" role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1} onKeyDown={onKeyDown}>
         {children}
       </div>

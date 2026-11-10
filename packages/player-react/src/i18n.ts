@@ -53,6 +53,7 @@ export const en = {
   'player.notice.gotIt': 'Got it',
   'player.notice.appeal': 'Think this is a mistake?',
   'player.notice.ackFailed': 'Your notice is still here.',
+  'player.notice.closeForNow': 'Close for now',
 
   'player.record.title': 'Your record',
   'player.record.loading': 'Loading your record',

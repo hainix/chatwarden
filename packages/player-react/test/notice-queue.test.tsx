@@ -185,7 +185,7 @@ describe('"Think this is a mistake?"', () => {
     expect(within(await dialog()).getByRole('link', { name: 'Think this is a mistake?' })).toHaveAttribute('href', '/help/appeal');
   });
 
-  it.each(['javascript:alert(1)', 'JaVaScRiPt:alert(1)', ' javascript:alert(1)', 'data:text/html,<b>x</b>', 'vbscript:x', '//evil.test/x', 'ftp://x.test/a', 'mailto:a@b.test', '', 'appeal', '\\\\evil.test'])(
+  it.each(['javascript:alert(1)', 'JaVaScRiPt:alert(1)', ' javascript:alert(1)', 'data:text/html,<b>x</b>', 'vbscript:x', '//evil.test/x', 'ftp://x.test/a', 'mailto:a@b.test', 'http://game.test/appeal', '/' + String.fromCharCode(9) + '/evil.test', '', '\\\\evil.test'])(
     'refuses the address %j (the link is left out, never rendered)',
     async (url) => {
       const w = await playerWorld();
@@ -269,7 +269,7 @@ describe('acknowledging', () => {
     await screen.findByRole('alert');
     expect(onAcknowledged).not.toHaveBeenCalled();
     w.intercept.fn = null;
-    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await user.click(screen.getByRole('button', { name: 'Acknowledge' }));
     await waitFor(() => expect(onAcknowledged).toHaveBeenCalledTimes(1));
     expect(onAcknowledged.mock.calls[0]?.[0]).toMatchObject({ kind: 'warning' });
   });
@@ -320,7 +320,7 @@ describe('acknowledging', () => {
       await screen.findByRole('alert');
       await user.click(screen.getByRole('button', { name: 'Acknowledge' }));
       await waitFor(() => expect(posts(w)).toHaveLength(2));
-      await user.click(screen.getByRole('button', { name: 'Try again' }));
+      await user.click(screen.getByRole('button', { name: 'Acknowledge' }));
       await waitFor(() => expect(posts(w)).toHaveLength(3));
     });
 
@@ -339,7 +339,7 @@ describe('acknowledging', () => {
     });
   });
 
-  describe('a failed acknowledge keeps the notice and says why, inline, with Try again', () => {
+  describe('a failed acknowledge keeps the notice and says why, inline, with Close for now (the main button tries again)', () => {
     const failures: Array<[string, () => { status: number; body: unknown } | Promise<never>, string]> = [
       ['a 500', () => ({ status: 500, body: { error: 'internal', message: 'x' } }), 'The server had a problem. Try again in a moment.'],
       ['a 401', () => ({ status: 401, body: { error: 'unauthorized', message: 'x' } }), 'You are signed out. Sign in again, then try again.'],
@@ -358,7 +358,8 @@ describe('acknowledging', () => {
       await user.click(within(d).getByRole('button', { name: 'Acknowledge' }));
       const alert = await within(d).findByRole('alert');
       expect(alert).toHaveTextContent(`Your notice is still here. ${text}`);
-      expect(within(alert).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+      expect(within(alert).getByRole('button', { name: 'Close for now' })).toBeInTheDocument();
+      expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull();
       // The notice is still there, and still unacknowledged on the server.
       expect(screen.getByRole('dialog')).toBe(d);
       expect(within(d).getByRole('heading', { name: 'You have a warning' })).toBeInTheDocument();
@@ -384,7 +385,7 @@ describe('acknowledging', () => {
       await user.click(await screen.findByRole('button', { name: 'Acknowledge' }));
       await screen.findByRole('alert');
       w.intercept.fn = null;
-      await user.click(screen.getByRole('button', { name: 'Try again' }));
+      await user.click(screen.getByRole('button', { name: 'Acknowledge' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     });
   });
@@ -498,7 +499,7 @@ describe('several notices', () => {
     await screen.findByRole('alert');
     expect(screen.getByRole('dialog')).toHaveTextContent('Notice 1 of 3');
     w.intercept.fn = null;
-    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await user.click(screen.getByRole('button', { name: 'Acknowledge' }));
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Notice 1 of 2'));
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('button', { name: 'Got it' })).not.toHaveAttribute('aria-busy');
@@ -624,8 +625,8 @@ describe('the hold (canShow)', () => {
     const gets = w.sent.filter((r) => r.method === 'GET').length;
     rerender(<NoticeQueue {...props(w, { canShow: true, onPendingChange })} />);
     expect(await dialog()).toHaveTextContent('You have a warning');
-    // The held notice was shown from what was already loaded: no new request was needed.
-    expect(w.sent.filter((r) => r.method === 'GET')).toHaveLength(gets);
+    // Releasing the hold asks the server once more, so a notice that arrived during the match is not missed.
+    await waitFor(() => expect(w.sent.filter((r) => r.method === 'GET')).toHaveLength(gets + 1));
   });
 
   it('holds every notice in a queue and shows them in order when released', async () => {

@@ -5,8 +5,8 @@ import { CATEGORIES, NOTE_MAX } from './categories.js';
 import { PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
 import type { PlayerText } from './i18n.js';
-import { errorText, Root, useUi } from './ui.js';
-import type { PlayerUiProps } from './ui.js';
+import { errorText, Portal, Root, useUi } from './ui.js';
+import type { DialogHostProps, PlayerUiProps } from './ui.js';
 
 /** What the player filled in. Your server adds the room and the seats and calls `cw.reports.submit`. */
 export interface ReportDraft {
@@ -15,7 +15,7 @@ export interface ReportDraft {
   note?: string;
 }
 
-export interface ReportDialogProps extends PlayerUiProps {
+export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
   /**
    * Sends the report: your server calls `cw.reports.submit({ ...draft, roomId, reporterSeat, targetSeat })` and returns its
    * `ReportResult`. A refusal is a result, not an error; reject only when no answer arrived.
@@ -25,7 +25,7 @@ export interface ReportDialogProps extends PlayerUiProps {
   onClose: () => void;
   /** Who is being reported, as the player knows them (a handle). Shown as text in the heading. */
   targetName?: string;
-  /** The categories to offer, in order. Default: all the kit has. */
+  /** The categories to offer, in order. Default (and when none of them is one the kit has): all the kit has. */
   categories?: readonly ReportCategory[];
 }
 
@@ -58,7 +58,7 @@ const failureOf = (e: unknown): PlayerError =>
  * unmount it in `onClose`.
  */
 export function ReportDialog(props: ReportDialogProps) {
-  const { onSubmit, onClose, targetName, categories = CATEGORIES, theme, className } = props;
+  const { onSubmit, onClose, targetName, categories = CATEGORIES, theme, className, container, returnFocusTo } = props;
   const ui = useUi(props);
   const { t } = ui;
   const heading = useRef<HTMLHeadingElement>(null);
@@ -75,7 +75,9 @@ export function ReportDialog(props: ReportDialogProps) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<PlayerError | null>(null);
   const [result, setResult] = useState<ReportResult | null>(null);
-  const offered = CATEGORIES.filter((c) => categories.includes(c));
+  // A list that filters to nothing would make a form that can never be sent: fall back to every category.
+  const kept = CATEGORIES.filter((c) => categories.includes(c));
+  const offered = kept.length > 0 ? kept : CATEGORIES;
 
   // The form is gone once there is an answer: focus goes back to the heading, so the answer is read and focus is not lost.
   useEffect(() => {
@@ -96,7 +98,9 @@ export function ReportDialog(props: ReportDialogProps) {
     setFailure(null);
     try {
       const trimmed = note.trim();
-      setResult(await onSubmit({ category, ...(trimmed === '' ? {} : { note: trimmed }) }));
+      const answer: unknown = await onSubmit({ category, ...(trimmed === '' ? {} : { note: trimmed }) });
+      // Anything that is not a result object (undefined, null, a string) is not a success and not a crash: it reads as an unknown refusal.
+      setResult(typeof answer === 'object' && answer !== null && !Array.isArray(answer) ? (answer as ReportResult) : ({ ok: false, refused: 'unknown' } as unknown as ReportResult));
     } catch (error) {
       setFailure(failureOf(error));
     } finally {
@@ -115,8 +119,9 @@ export function ReportDialog(props: ReportDialogProps) {
   };
 
   return (
+    <Portal container={container}>
     <Root theme={theme} className={className}>
-      <Dialog labelledBy={titleId} initialFocus={heading} onEscape={() => !sending.current && onClose()}>
+      <Dialog labelledBy={titleId} initialFocus={heading} onEscape={() => !sending.current && onClose()} {...(returnFocusTo === undefined ? {} : { returnFocusTo })}>
         <h2 id={titleId} ref={heading} className="cw-title" tabIndex={-1}>
           {title}
         </h2>
@@ -162,7 +167,8 @@ export function ReportDialog(props: ReportDialogProps) {
               <button type="submit" className="cw-btn cw-btn--primary" aria-disabled={busy || undefined} aria-busy={busy || undefined}>
                 {t('player.report.send')}
               </button>
-              <button type="button" className="cw-btn" onClick={onClose}>
+              {/* Closing while a report is on its way would lose the answer: busy, like Escape. */}
+              <button type="button" className="cw-btn" aria-disabled={busy || undefined} onClick={() => !sending.current && onClose()}>
                 {t('player.report.cancel')}
               </button>
             </div>
@@ -188,5 +194,6 @@ export function ReportDialog(props: ReportDialogProps) {
         )}
       </Dialog>
     </Root>
+    </Portal>
   );
 }

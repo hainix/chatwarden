@@ -102,16 +102,26 @@ Theming).
 | `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when. | `until` (epoch ms or `null`), `byModerator`, `refCode` |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and
-  not acknowledged, and appear in order when `canShow` turns `true`. `onPendingChange(count)` tells your game how many are waiting.
-- **Focus.** A dialog moves focus to its heading when it opens, keeps Tab inside, and gives focus back to what had it when the last
-  notice closes. Escape does not dismiss a notice (it has to be acknowledged); it closes the report dialog.
+  not acknowledged, and appear in order when `canShow` turns `true`. The list is asked for once more at that moment, so a warning that
+  landed during the match is shown before the next one. `onPendingChange(count)` tells your game how many are waiting.
+- **Focus.** A dialog moves focus to its heading when it opens and keeps it inside: Tab wraps at the ends (a radio group counts as one
+  stop), a click on the backdrop does not move focus, and anything outside that takes focus is sent back. When the last notice closes
+  focus goes back to what had it. If that element is gone, focus goes to `returnFocusTo()` when you pass one, and otherwise to the page
+  body. Escape does not dismiss a notice (it has to be acknowledged); it closes the report dialog, unless a report is on its way.
 - **Acknowledge.** One request at a time: a second click while one is on its way does nothing. A failed request keeps the notice and
-  says why, inline, with Try again. A 404 means it is already done, so the notice closes.
-- **The appeal link.** `appealUrl` makes "Think this is a mistake?" a link on a warning, restriction or ban. It must be an `http(s)`
-  address or a path starting with a single `/`; anything else (`javascript:`, `//host`, a bare word) is left out.
+  says why, inline; the main button tries again. If it keeps failing, **Close for now** closes the dialog without acknowledging: the
+  notices stay pending and come back on the next refresh (`refreshKey`) or the next release of a hold. A 404 means it is already done,
+  so the notice closes. A new notice that arrives while the dialog is open is announced to screen readers (`aria-live="polite"`).
+- **The appeal link.** `appealUrl` makes "Think this is a mistake?" a link on a warning, restriction or ban. It must be an `https:`
+  address or a relative one (`/appeal`); anything else (`http:`, `javascript:`, `//host`, spaces, control characters, a backslash, an
+  entity) is left out. It is the same rule hub-react uses for links, and a test runs both on one table.
 - **The report dialog.** Render it when the player chooses to report, and unmount it in `onClose`. A refusal is a result, not an
   error: `duplicate`, `rate`, `self`, `not_player`, `off` and `suspended` each have their own message. Reject from `onSubmit` only
   when no answer arrived; the dialog keeps what was typed and offers to send again.
+- **Where the dialog is drawn.** It is `position: fixed`, drawn in place. If an ancestor of the component has a `transform`, `filter`,
+  `contain` or `will-change: transform`, the browser makes the dialog relative to that ancestor and it can be clipped or off-centre. Pass
+  `container={document.body}` (or a layer of your own) to `NoticeQueue` or `ReportDialog` to draw it there instead; the theme and
+  `className` still apply.
 - **Refreshing.** Change `refreshKey` to ask the server again, for example when your own push channel says a notice is pending.
 
 ### `PlayerClient`
@@ -159,7 +169,7 @@ radius and space is a `--cw-*` custom property, with a light and a dark value, a
 
 - **Three inputs make it yours.** Set `--cw-surface` (the base: panels and the dialog), `--cw-accent` (your next action, links and
   the focus ring) and `--cw-radius` (how round things are) on `.cw-player`, or on the `className` you pass. Every other token has a
-  default that works on them. The font is yours already: `--cw-font` is `inherit`.
+  default that works on them. The font is yours already: the components inherit it, and `--cw-font` is only there if you want another.
 - **Light and dark.** By default the components follow the player's `prefers-color-scheme`. The `theme` prop (or `data-cw-theme="light"`
   or `"dark"` on `.cw-player` or any ancestor) forces one. Set it from your game's own setting.
 - **Re-theme it.** The defaults sit at zero specificity (`:where(.cw-player)`), so any rule of yours wins whatever its order.
@@ -200,7 +210,7 @@ it from the values below.
 | `--cw-red-soft` | `#fbe4e6`, `#3a1a1f` | The background of an error. |
 | `--cw-yellow` | `#e5ad00`, `#f2c84b` | The yellow side of a referee card. Nothing else is yellow. |
 | `--cw-shadow-ink` | `#151b27`, `#000000` | What the shadow and the dimmed backdrop are made from. |
-| `--cw-font` | `inherit` | The font: your game's own. |
+| `--cw-font` | not set (inherits) | The font. Left unset on purpose, so it is your game's own; set it to use another. |
 | `--cw-text-s` | `0.8125rem` | Small text: labels, facts, hints. |
 | `--cw-text-m` | `0.9375rem` | Body text. |
 | `--cw-text-l` | `1.125rem` | Titles. |
@@ -226,7 +236,7 @@ it from the values below.
 - **The player's lines are text.** They are rendered as text, never as HTML, whatever they contain. The kit has already masked any blocked
   word in them (`******`); the components show that as it is.
 - **Rules and the report note are text too.** Markup in a rule title or a summary is shown as the characters it is.
-- **The appeal link is checked.** Only an `http(s)` address or a path starting with a single `/` becomes a link, and it opens with
+- **The appeal link is checked.** Only an `https:` address or a relative one becomes a link (hub-react's rule: no `http:`, no whitespace or control characters, no backslash, no entity, no `//host`), and it opens with
   `rel="noopener noreferrer"`.
 - **Who is asking is the server's job.** The player routes read the caller from your `identify` hook, never from the page. The components
   send no identity of their own. Keep the routes behind your own session, and keep `cache-control: no-store` (the kit sends it) through any proxy.

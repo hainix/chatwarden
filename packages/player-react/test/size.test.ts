@@ -50,11 +50,11 @@ describe('bundle size', () => {
     expect(inputs.filter((i) => /@chatwarden|packages[\\/](core|http|store-memory|matcher|hub-react)[\\/]/.test(i))).toEqual([]);
   });
 
-  it('imports only what the peers provide: React alone (the kit is types only)', async () => {
+  it('imports only what the peers provide: React and React DOM (for the optional portal); the kit is types only', async () => {
     const { text } = await bundle();
     // `import ... from "x"` only: a catalog phrase that happens to end in "from" is not an import.
     const imports = [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(new Set(imports)).toEqual(new Set(['react', 'react/jsx-runtime']));
+    expect(new Set(imports)).toEqual(new Set(['react', 'react/jsx-runtime', 'react-dom']));
   });
 
   it('contains no Node builtin and no eval', async () => {

@@ -42,8 +42,7 @@
   /* The ink every shadow and backdrop is made from */
   --cw-shadow-ink: light-dark(#151b27, #000000);
 
-  /* Type: the game's own font */
-  --cw-font: inherit;
+  /* Type: the font is the game's own (--cw-font is not set here: set it to use another) */
   --cw-text-s: 0.8125rem;
   --cw-text-m: 0.9375rem;
   --cw-text-l: 1.125rem;
@@ -106,7 +105,7 @@
   margin: 0;
   background: var(--cw-surface);
   color: var(--cw-ink);
-  font-family: var(--cw-font);
+  font-family: var(--cw-font, inherit);
   font-size: var(--cw-text-m);
   line-height: var(--cw-leading);
   overflow-wrap: anywhere;
@@ -200,6 +199,10 @@
 }
 .cw-player .cw-position {
   margin-bottom: var(--cw-space-2);
+}
+/* Drawn even when empty (it is a live region): an empty one takes no room. */
+.cw-player .cw-position:empty {
+  margin: 0;
 }
 .cw-player .cw-hint {
   margin-bottom: var(--cw-space-3);

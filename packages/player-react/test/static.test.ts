@@ -138,7 +138,7 @@ describe('imports', () => {
   });
 
   it('imports nothing but React, the kit types and its own files', () => {
-    for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react\/jsx-runtime$|@chatwarden\/core$)/);
+    for (const f of code) for (const i of importsOf(f)) expect(i.spec, rel(f)).toMatch(/^(\.\/|\.\.\/|react$|react-dom$|react\/jsx-runtime$|@chatwarden\/core$)/);
   });
 });
 
@@ -163,8 +163,11 @@ describe('the stylesheet is a complete token contract', () => {
     expect(new Set(defined).size).toBe(defined.length);
   });
 
-  it('every var(--cw-*) a rule uses is defined', () => {
-    expect(used.filter((u) => !defined.includes(u))).toEqual([]);
+  // Tokens a rule reads with a fallback and the stylesheet leaves undefined on purpose: the game sets them if it wants.
+  const OPTIONAL = ['--cw-font'];
+
+  it('every var(--cw-*) a rule uses is defined (or is a documented optional one with a fallback)', () => {
+    expect(used.filter((u) => !defined.includes(u) && !OPTIONAL.includes(u))).toEqual([]);
   });
 
   it('every token is used by a rule, so the list stays the true size of the contract', () => {
@@ -227,8 +230,9 @@ describe('the stylesheet is a complete token contract', () => {
     expect(tokenBlock).toMatch(/:where\(\.cw-player\)\s*\{/);
   });
 
-  it('takes the font from the game by default (inherit), so the components look like they belong', () => {
-    expect(/--cw-font:\s*([^;]+);/.exec(css)?.[1]).toBe('inherit');
+  it('takes the font from the game by default: --cw-font is left unset and read with an inherit fallback', () => {
+    expect(defined).not.toContain('--cw-font');
+    expect(css).toMatch(/font-family:\s*var\(--cw-font, inherit\);/);
   });
 
   it('is small: under 14 KB raw (the size test holds it to 6 KB gzipped)', () => {
@@ -424,7 +428,7 @@ describe('the README documents the token contract', () => {
   it('lists every token under Theming, and no token the stylesheet lacks', () => {
     expect(theming.length).toBeGreaterThan(500);
     const documented = [...theming.matchAll(/^\| `(--cw-[a-z0-9-]+)` \|/gm)].map((m) => m[1] as string);
-    expect(documented.sort()).toEqual([...defined].sort());
+    expect(documented.sort()).toEqual([...defined, '--cw-font'].sort());
   });
 
   it('states each colour token default as written in the stylesheet', () => {

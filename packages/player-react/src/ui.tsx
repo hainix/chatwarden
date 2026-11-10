@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { NoticeKind, PlayerNotice } from '@chatwarden/core';
 import { WARNING_DAYS } from './categories.js';
 import type { PlayerError } from './client.js';
@@ -36,6 +37,26 @@ export interface Ui {
 export function useUi({ t, locale = 'en', now, timeZone }: PlayerUiProps): Ui {
   const words = useMemo(() => t ?? createT(en, locale), [t, locale]);
   return { t: words, locale, now: now ?? Date.now, timeZone };
+}
+
+/** What the two components that open a dialog take besides the common props. */
+export interface DialogHostProps {
+  /**
+   * Draw the dialog inside this element instead of where the component is. The dialog is `position: fixed`, so an ancestor of the
+   * component with a `transform`, `filter`, `contain` or `will-change: transform` would make it relative to that ancestor and clip it;
+   * pass `document.body` (or a layer of your own) to avoid that. The theme and `className` still apply.
+   */
+  container?: HTMLElement | null;
+  /**
+   * Where focus goes when the dialog closes and the element that had focus before it opened is gone. Without it focus is left to the
+   * browser, which is the page body.
+   */
+  returnFocusTo?: () => HTMLElement | null;
+}
+
+/** Renders `children` where they are, or into `container` when one is given. */
+export function Portal({ container, children }: { container: HTMLElement | null | undefined; children: ReactNode }) {
+  return container === undefined || container === null ? <>{children}</> : createPortal(children, container);
 }
 
 /** The root every component renders: the one class all the stylesheet's rules are scoped under. */
