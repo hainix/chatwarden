@@ -1,5 +1,7 @@
+import { safeWarn } from '@chatwarden/core';
 import type { AuditAction } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
+import { REF_PARAM_RE } from '../router.js';
 import type { RouteTable } from '../router.js';
 import type { AdminContext } from './context.js';
 import { bodyObject, has } from './validate.js';
@@ -38,6 +40,14 @@ const NOTE_MAX = 500;
 /** A language tag: `en`, `es`, `pt-BR`. */
 const LANGUAGE_RE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8}){0,3}$/;
 
+/**
+ * Every `{ ok: false }` from the matcher is 400 `invalid_term`, whatever the reason (a duplicate, a malformed word, the last
+ * active term, an exception that would unblock a pack line) and its message is dropped (it can name a row). That includes
+ * the matcher's `'not loaded'` (a change before `load()` has seeded the store): strictly a server state rather than a bad
+ * request, but the caller can only retry later, and a fixed 400 keeps one response shape and leaks nothing.
+ */
+const refused = (): HttpError => new HttpError('invalid_term');
+
 const word = (v: unknown): string => {
   if (typeof v !== 'string' || v.trim() === '' || v.length > WORD_MAX) throw new ValidationError();
   return v;
@@ -60,11 +70,22 @@ const note = (v: unknown): string | null => {
  *   (`terms.write`; audit `term.add`, `term.update`, `term.toggle`, each with the row id)
  * - `POST /exceptions { phrase, language, note? }`, `PATCH /exceptions/:id`, `POST /exceptions/:id/active`: the same for
  *   exceptions (audit `exception.add`, `exception.update`, `exception.toggle`)
+ * The row id in `:id` uses the audit-ref charset (`A-Z a-z 0-9 _ . : -`, 1..64, never only dots), so a pack's own ids such as
+ * `syn:zorbak` can be edited; a stored id outside it cannot be reached, and building the routes logs
+ * `chatwarden.http_unroutable_term_ids` with a count (never an id or text) when there is one. Term pack ids should match it.
+ *
+ * Audit: a write leaves TWO rows. The matcher's editor (`LiveTerms.change`) writes its own row in the same transaction as the
+ * edit (role null; add/edit/enable/disable read back as `term.add`/`term.update`/`term.toggle`, and the same for exceptions);
+ * the route then adds its own row with the caller's role, which is the one that meets the audit contract. A no-op toggle
+ * leaves only the route row (the editor writes nothing). Both rows hold the row id, never the text.
  * The term text appears in the `GET /terms` rows and the `check` hits only. A refused change is 400 `invalid_term` with a fixed
  * message: the matcher's reason, the term and the row ids it names are never passed on, and the text is never in an audit row.
  */
 export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: () => readonly string[]): RouteTable {
   type Kind = 'term' | 'exception';
+  // A stored id the `:id~ref` pattern would 404 can be listed but never edited: say so once, by count only.
+  const unroutable = [...terms.rows.terms, ...terms.rows.exceptions].filter((r) => !REF_PARAM_RE.test(r.id)).length;
+  if (unroutable > 0) safeWarn(ctx.logger, 'chatwarden.http_unroutable_term_ids', { count: unroutable });
   const table: RouteTable = {
     'GET /terms': ctx.secure('terms.read', () => {
       const { rows } = terms;
@@ -80,7 +101,7 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
     'POST /terms/check': ctx.secure('terms.read', (c) => {
       const body = bodyObject(c.req);
       const result = terms.check(word(body.term), language(body.language), recentLines());
-      if (!result.ok) throw new HttpError('invalid_term');
+      if (!result.ok) throw refused();
       return { status: 200, body: { hits: result.hits } };
     }),
   };
@@ -103,13 +124,13 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
           ? edit.addTerm({ term: text, language: lang, ...noteField })
           : edit.addException({ phrase: text, language: lang, ...noteField }),
       );
-      if (!result.ok) throw new HttpError('invalid_term');
+      if (!result.ok) throw refused();
       // The row is written: an audit failure is logged, never turned into an error. The target is the row id, never the text.
       c.audit(audit('add'), { type: kind, ref: result.value }, 'best-effort');
       return { status: 200, body: { id: result.value } };
     });
 
-    table[`PATCH ${base}/:id`] = ctx.secure('terms.write', async (c) => {
+    table[`PATCH ${base}/:id~ref`] = ctx.secure('terms.write', async (c) => {
       const id = c.params.id as string;
       const body = bodyObject(c.req);
       const word_ = has(body, field) ? word(body[field]) : undefined;
@@ -122,12 +143,12 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
         if (kind === 'term') edit.updateTerm(id, { ...rest, ...(word_ === undefined ? {} : { term: word_ }) });
         else edit.updateException(id, { ...rest, ...(word_ === undefined ? {} : { phrase: word_ }) });
       });
-      if (!result.ok) throw new HttpError('invalid_term');
+      if (!result.ok) throw refused();
       c.audit(audit('update'), { type: kind, ref: id }, 'best-effort');
       return { status: 200, body: { ok: true } };
     });
 
-    table[`POST ${base}/:id/active`] = ctx.secure('terms.write', async (c) => {
+    table[`POST ${base}/:id~ref/active`] = ctx.secure('terms.write', async (c) => {
       const id = c.params.id as string;
       const body = bodyObject(c.req);
       const active = body.active;
@@ -136,7 +157,7 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
       const result = await terms.change(c.authz.actor, (edit) =>
         kind === 'term' ? edit.setTermActive(id, active) : edit.setExceptionActive(id, active),
       );
-      if (!result.ok) throw new HttpError('invalid_term');
+      if (!result.ok) throw refused();
       c.audit(audit('toggle'), { type: kind, ref: id }, 'best-effort');
       return { status: 200, body: { ok: true } };
     });

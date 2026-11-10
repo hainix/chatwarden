@@ -7,7 +7,15 @@ export type RouteHandler = (req: KitRequest, params: RouteParams) => KitResponse
 export type RouteTable = Record<string, RouteHandler>;
 
 const PARAM_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const KEY_RE = /^([A-Z]+) (\/(?:[A-Za-z0-9_.~-]+|:[A-Za-z0-9_]+)(?:\/(?:[A-Za-z0-9_.~-]+|:[A-Za-z0-9_]+))*|\/)$/;
+/**
+ * The id charset of the audit trail's target refs: `A-Z a-z 0-9 _ . : -`, 1..64, and never only dots (`.` and `..` are
+ * path words, not ids). Term and exception ids need it because a term pack's own ids use `:` (`syn:zorbak`).
+ */
+export const REF_PARAM_RE = /^(?!\.+$)[A-Za-z0-9_.:-]{1,64}$/;
+/** The named param patterns a route may ask for, as `:name~ref`. A param with no `~` uses `PARAM_RE`. */
+const PATTERNS: Readonly<Record<string, RegExp>> = { ref: REF_PARAM_RE };
+const SEGMENT = '(?:[A-Za-z0-9_.~-]+|:[A-Za-z0-9_]+(?:~[a-z]+)?)';
+const KEY_RE = new RegExp(`^([A-Z]+) (/${SEGMENT}(?:/${SEGMENT})*|/)$`);
 const BAD_ROUTE = 'router: a route must look like "GET /path/:param"';
 
 interface Route {
@@ -15,6 +23,8 @@ interface Route {
   /** `null` marks a param segment. */
   segments: Array<string | null>;
   names: Array<string | null>;
+  /** What a param segment's decoded value must match. */
+  patterns: RegExp[];
   literals: number;
   handler: RouteHandler;
 }
@@ -33,7 +43,7 @@ function matchPath(route: Route, segments: string[]): RouteParams | null {
       } catch {
         return null;
       }
-      if (!PARAM_RE.test(value)) return null;
+      if (!(route.patterns[i] as RegExp).test(value)) return null;
       params[route.names[i] as string] = value;
     } else if (want !== raw) {
       return null;
@@ -46,6 +56,7 @@ function matchPath(route: Route, segments: string[]): RouteParams | null {
  * A router over a route table. `createRouter(routes)` returns `(req) => Promise<KitResponse>`.
  * - the query string is stripped; a trailing slash, an empty segment or a path without a leading `/` is no match.
  * - a param is URI-decoded, then must match `^[A-Za-z0-9_-]{1,64}$`; a malformed encoding or a bad value is no match.
+ *   `:name~ref` swaps in the audit-ref charset (`A-Z a-z 0-9 _ . : -`, never only dots) for that one param.
  * - a literal segment beats a param segment.
  * - no match -> 404; a path that matches under other methods only -> 405 with an `allow` header.
  * Handler errors propagate: wrap the router (or each handler) in `withErrors`.
@@ -60,7 +71,14 @@ export function createRouter(routes: RouteTable): (req: KitRequest) => Promise<K
     const path = m[2] as string;
     const parts = path === '/' ? [] : path.slice(1).split('/');
     const segments = parts.map((p) => (p.startsWith(':') ? null : p));
-    const names = parts.map((p) => (p.startsWith(':') ? p.slice(1) : null));
+    const names = parts.map((p) => (p.startsWith(':') ? (p.slice(1).split('~')[0] as string) : null));
+    const patterns = parts.map((p) => {
+      const name = p.startsWith(':') ? p.split('~')[1] : undefined;
+      if (name === undefined) return PARAM_RE;
+      const pattern = PATTERNS[name];
+      if (pattern === undefined) throw new RangeError(BAD_ROUTE);
+      return pattern;
+    });
     // `.` and `..` can never match a client path (no dot-segment is normalised), so such a route is a mistake.
     if (segments.some((s) => s === '.' || s === '..')) throw new RangeError('router: a route may not contain "." or ".." segments');
     const seenNames = names.filter((n): n is string => n !== null);
@@ -68,7 +86,7 @@ export function createRouter(routes: RouteTable): (req: KitRequest) => Promise<K
     const shape = `${method} /${segments.map((s) => s ?? ':').join('/')}`;
     if (seen.has(shape)) throw new RangeError('router: two routes have the same method and shape');
     seen.add(shape);
-    table.push({ method, segments, names, literals: segments.filter((s) => s !== null).length, handler });
+    table.push({ method, segments, names, patterns, literals: segments.filter((s) => s !== null).length, handler });
   }
   // Most literal segments first, so `/reports/export` wins over `/reports/:id`. An equal count is broken left to
   // right (a literal beats a param at the first segment where they differ), so the order the table was written in

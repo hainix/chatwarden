@@ -43,6 +43,8 @@ export interface AdminCall {
 /** The shared parts of the staff API: build every admin route with `secure`, so none can skip auth or the audit. */
 export interface AdminContext {
   readonly cw: Chatwarden;
+  /** Where the route groups log (event and counts only). */
+  readonly logger: Logger | undefined;
   /** Wrap a staff handler: authenticate, require `permission`, run it, and turn every throw into a fixed response. */
   secure(permission: PermissionKey, handler: (call: AdminCall) => KitResponse | Promise<KitResponse>): RouteHandler;
 }
@@ -81,6 +83,7 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
   const permissions = resolvePermissions(options.permissions);
   return {
     cw,
+    logger,
     secure(permission, handler) {
       const guarded = guard({ authenticate: authorize, permissions }, permission, (req, params, authz) =>
         handler({

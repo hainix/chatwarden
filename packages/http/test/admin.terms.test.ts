@@ -19,7 +19,7 @@ describe('terms routes exist only when `terms` is passed', () => {
 
   it('with it, the eight routes are present', async () => {
     const { routes } = await world();
-    expect(Object.keys(routes).filter((k) => /terms|exceptions/.test(k)).sort()).toEqual([
+    expect(Object.keys(routes).filter((k) => /terms|exceptions/.test(k)).map((k) => k.replace('~ref', '')).sort()).toEqual([
       'GET /terms',
       'PATCH /exceptions/:id',
       'PATCH /terms/:id',
@@ -211,7 +211,7 @@ describe('POST /terms, PATCH /terms/:id, POST /terms/:id/active', () => {
     expect((await call('PATCH', '/terms/nope', { body: { term: 'glarn' } })).status).toBe(404);
     expect((await call('POST', '/terms/nope/active', { body: { active: false } })).status).toBe(404);
     // An exception id is not a term id.
-    expect((await call('PATCH', '/terms/syn-ex_tarvo-lake', { body: { term: 'glarn' } })).status).toBe(404);
+    expect((await call('PATCH', '/terms/syn-ex:tarvo-lake', { body: { term: 'glarn' } })).status).toBe(404);
     expect(routeAudit()).toEqual([]);
   });
 
@@ -332,8 +332,8 @@ describe('exceptions: POST /exceptions, PATCH /exceptions/:id, POST /exceptions/
     expect((await call('POST', '/exceptions', { body: { phrase: '', language: 'en' } })).status).toBe(400);
     expect((await call('PATCH', '/exceptions/nope', { body: { phrase: 'abc def' } })).status).toBe(404);
     expect((await call('POST', '/exceptions/nope/active', { body: { active: true } })).status).toBe(404);
-    expect((await call('PATCH', '/exceptions/syn_zorbak', { body: { phrase: 'abc def' } })).status).toBe(404);
-    expect((await call('PATCH', '/exceptions/syn-ex_tarvo-lake', { body: {} })).status).toBe(400);
+    expect((await call('PATCH', '/exceptions/syn:zorbak', { body: { phrase: 'abc def' } })).status).toBe(404);
+    expect((await call('PATCH', '/exceptions/syn-ex:tarvo-lake', { body: {} })).status).toBe(400);
   });
 
   it('an exception that would unblock a pack positive line is refused 400 invalid_term, no echo', async () => {

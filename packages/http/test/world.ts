@@ -2,7 +2,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { createChatwarden } from '@chatwarden/core';
 import type { Chatwarden, Logger, RawWho } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
-import type { TermPack } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/test-fixtures';
 import { openStore } from '@chatwarden/store-sqlite';
 import { adminRoutes, createRouter } from '@chatwarden/http';
@@ -20,17 +19,6 @@ export const IP_TARGET = '203.0.113.99';
 export const SECRET = 'admin-world-secret';
 
 export type Logged = Array<[string, Record<string, string | number | boolean> | undefined]>;
-
-/** The synthetic pack with ids the router can address (`:` is not a path-param character). */
-export function routablePack(): TermPack {
-  const pack = syntheticTermPack();
-  const fix = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, '_');
-  return {
-    ...pack,
-    terms: pack.terms.map((t) => ({ ...t, id: fix(t.id) })),
-    exceptions: pack.exceptions.map((e) => ({ ...e, id: fix(e.id) })),
-  };
-}
 
 export interface WorldOptions {
   wrap?: (cw: Chatwarden) => Chatwarden;
@@ -56,7 +44,7 @@ export async function world(over: WorldOptions = {}) {
     logger,
     retention: false,
   });
-  const live = new LiveTerms({ store, pack: routablePack(), clock, logger });
+  const live = new LiveTerms({ store, pack: syntheticTermPack(), clock, logger });
   await live.load();
   logged.length = 0;
 

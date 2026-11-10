@@ -234,3 +234,53 @@ describe('createRouter: route table validation', () => {
     expect(() => createRouter({ 'GET /a/:x': h, 'POST /a/:y': h })).not.toThrow();
   });
 });
+
+describe('createRouter: the `~ref` param pattern', () => {
+  const echo = (_r: KitRequest, p: Record<string, string>): KitResponse => ok({ id: p['id'] });
+  const router = createRouter({ 'GET /rows/:id~ref': echo, 'GET /plain/:id': echo });
+
+  it('accepts the audit-ref charset (A-Z a-z 0-9 _ . : -), raw or percent-encoded, decoded before the check', async () => {
+    for (const [raw, id] of [
+      ['syn:zorbak', 'syn:zorbak'],
+      ['syn-ex:tarvo-lake', 'syn-ex:tarvo-lake'],
+      ['syn%3Azorbak', 'syn:zorbak'],
+      ['syn%3azorbak', 'syn:zorbak'],
+      ['a.b', 'a.b'],
+      ['.a', '.a'],
+      ['a..', 'a..'],
+      ['x'.repeat(64), 'x'.repeat(64)],
+      ['Abc_1-2', 'Abc_1-2'],
+    ] as const) {
+      expect(await router(req('GET', `/rows/${raw}`)), raw).toEqual({ status: 200, body: { id } });
+    }
+  });
+
+  it('still rejects "." ".." and every all-dot value, encoded or not', async () => {
+    for (const bad of ['.', '..', '...', '%2E', '%2E%2E', '%2e%2e%2e']) {
+      expect((await router(req('GET', `/rows/${bad}`))).status, bad).toBe(404);
+    }
+  });
+
+  it('rejects anything outside the charset or longer than 64', async () => {
+    for (const bad of ['a%2Fb', 'a%20b', 'a b', 'a%00b', 'a%0Ab', 'a%25b', 'a;b', 'a@b', 'a%E2%82%ACb', '%ZZ', 'x'.repeat(65)]) {
+      expect((await router(req('GET', `/rows/${bad}`))).status, bad).toBe(404);
+    }
+  });
+
+  it('leaves the default pattern alone: other routes still reject ":" and dots', async () => {
+    expect((await router(req('GET', '/plain/ok_1-2'))).status).toBe(200);
+    for (const bad of ['a:b', 'a%3Ab', 'a.b', '.', '..']) {
+      expect((await router(req('GET', `/plain/${bad}`))).status, bad).toBe(404);
+    }
+  });
+
+  it('an unknown pattern name, or a bare "~", is a bad route', () => {
+    expect(() => createRouter({ 'GET /rows/:id~nope': () => ok() })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /rows/:id~': () => ok() })).toThrow(RangeError);
+    expect(() => createRouter({ 'GET /rows/:id~ref~ref': () => ok() })).toThrow(RangeError);
+  });
+
+  it('a `~ref` route and a plain route of one shape collide', () => {
+    expect(() => createRouter({ 'GET /rows/:id~ref': () => ok(), 'GET /rows/:other': () => ok() })).toThrow(RangeError);
+  });
+});
