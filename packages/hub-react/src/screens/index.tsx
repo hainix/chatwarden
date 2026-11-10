@@ -38,7 +38,7 @@ export function screenFor(route: Route): ReactNode {
     case 'reports':
       return <Reports status={route.status} />;
     case 'report':
-      return <Report id={route.id} />;
+      return <Report />;
     case 'notFound':
       return null;
     default:

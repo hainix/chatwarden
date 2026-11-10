@@ -11,20 +11,26 @@ import { hubWorld } from './world.js';
 
 const css = readFileSync(join(process.cwd(), 'packages', 'hub-react', 'src', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
-/** The body of the first `@media (query) { ... }` block, matching braces. */
+/** The bodies of every `@media (query) { ... }` block, matching braces, one after the other. */
 function media(query: string): string {
-  const start = css.indexOf(`@media (${query})`);
-  if (start < 0) return '';
-  const open = css.indexOf('{', start);
-  let depth = 0;
-  for (let i = open; i < css.length; i += 1) {
-    if (css[i] === '{') depth += 1;
-    if (css[i] === '}') {
-      depth -= 1;
-      if (depth === 0) return css.slice(open + 1, i);
+  const parts: string[] = [];
+  let from = 0;
+  for (;;) {
+    const start = css.indexOf(`@media (${query})`, from);
+    if (start < 0) return parts.join('\n');
+    const open = css.indexOf('{', start);
+    let depth = 0;
+    let i = open;
+    for (; i < css.length; i += 1) {
+      if (css[i] === '{') depth += 1;
+      if (css[i] === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
     }
+    parts.push(css.slice(open + 1, i));
+    from = i + 1;
   }
-  return '';
 }
 
 describe('the pane structure', () => {
@@ -117,8 +123,72 @@ describe('the breakpoints in the stylesheet', () => {
     expect(css).toMatch(/\.cw-hub \.cw-queue\s*\{[^}]*min-width:\s*0/);
   });
 
-  it('the report page opens its own columns by the width of the case pane, not of the window', () => {
-    expect(css).toMatch(/@container cwmain \(min-width: 64rem\)\s*\{[^}]*\.cw-cols--report/);
-    expect(media('min-width: 75rem') + media('max-width: 51.1875rem')).not.toMatch(/cw-cols--report/);
+  it('the case pane reflows by its own width, not the window: the transcript drops its time and name columns when narrow', () => {
+    expect(css).toMatch(/@container cwmain \(max-width: 34rem\)\s*\{[^}]*\.cw-line\s*\{[^}]*grid-template-columns:\s*1\.5rem auto minmax\(0, 1fr\)/);
+    expect(media('min-width: 75rem') + media('max-width: 51.1875rem')).not.toMatch(/cw-line-text/);
+  });
+});
+
+// The three things that made the report page scroll sideways by 107px at 390px in the first real-browser look: the "Only <name>"
+// segment, the transcript box and the conduct-level segment (clipped to "Sever"). jsdom cannot measure, so these pin the rules that
+// fix them; the real-browser check (Playwright at 360 and 390px) is in the task report.
+describe('narrow screens: nothing makes the case pane wider than the page', () => {
+  // The declarations of the first rule written as `selector {` on its own line (top level or inside a block).
+  const rule = (selector: string): string => {
+    const lines = css.split('\n');
+    const at = lines.findIndex((l) => l.trim() === `${selector} {`);
+    if (at < 0) return '';
+    const end = lines.findIndex((l, i) => i > at && l.includes('}'));
+    return lines.slice(at + 1, end).join('\n');
+  };
+
+  it('a segmented filter wraps onto more lines instead of clipping its buttons ("Only <name>", "Banter, Rude, Hostile, Severe")', () => {
+    const seg = rule('.cw-hub .cw-seg');
+    expect(seg).toMatch(/flex-wrap:\s*wrap/);
+    expect(seg).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-seg button')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-seg button')).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it('the transcript can shrink and breaks long words: no fixed width, grid children with min-width 0', () => {
+    expect(rule('.cw-hub .cw-transcript')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-lines')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-line')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-line-text')).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(rule('.cw-hub .cw-line-text')).toMatch(/min-width:\s*0/);
+  });
+
+  it('the conduct-level picker and the verdict row wrap, and the suggestion card can shrink', () => {
+    expect(rule('.cw-hub .cw-suggest-level')).toMatch(/min-width:\s*0/);
+    expect(media('max-width: 51.1875rem')).toMatch(/\.cw-verdict-grid\s*\{[^}]*flex-wrap:\s*wrap/);
+    expect(rule('.cw-hub .cw-suggest-text')).toMatch(/min-width:\s*0/);
+  });
+
+  it('the pane columns are size-limited: the case pane, the dock body and the context sections can all shrink', () => {
+    expect(rule('.cw-hub .cw-casepane')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-dock')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-ctx-section')).toMatch(/min-width:\s*0/);
+  });
+
+  it('tabs scroll inside their own row instead of widening the page', () => {
+    expect(rule('.cw-hub .cw-tabs')).toMatch(/overflow-x:\s*auto/);
+  });
+
+  it('on a phone the decision bar is a sheet: closed it hides its body, open it scrolls inside itself, and the page keeps its own scroll', () => {
+    const phone = media('max-width: 51.1875rem');
+    expect(phone).toMatch(/\.cw-dock\[data-open='false'\] \.cw-dock-body\s*\{[^}]*display:\s*none/);
+    expect(phone).toMatch(/\.cw-dock-body\s*\{[^}]*max-height:\s*70dvh/);
+    expect(phone).toMatch(/\.cw-dock-bar\s*\{[^}]*display:\s*flex/);
+    // The bar sticks to the bottom edge, on every width.
+    expect(rule('.cw-hub .cw-dock')).toMatch(/position:\s*sticky/);
+    expect(rule('.cw-hub .cw-dock')).toMatch(/bottom:\s*0/);
+    // Outside a phone the sheet's toggle bar is not drawn.
+    expect(rule('.cw-hub .cw-dock-bar')).toMatch(/display:\s*none/);
+  });
+
+  it('a desktop case pane is a column: header and tabs stay, the evidence scrolls, the decision bar is docked', () => {
+    expect(rule('.cw-hub .cw-casepane')).toMatch(/flex-direction:\s*column/);
+    expect(rule('.cw-hub .cw-case-scroll')).toMatch(/overflow-y:\s*auto/);
+    expect(media('min-width: 75rem')).toMatch(/\.cw-body\[data-case='true'\] \.cw-main\s*\{[^}]*overflow:\s*hidden/);
   });
 });

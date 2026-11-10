@@ -1,6 +1,6 @@
 import { playerRoutes } from '@chatwarden/http';
 import { createRouter } from '@chatwarden/http/admin';
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
@@ -31,6 +31,9 @@ async function decideInUi(w: HubWorld, id: string, picks: { lines: RegExp[]; wha
   const { user } = renderHub(w, { path: `/reports/${id}` });
   const p = await screen.findByRole('region', { name: 'Decision' });
   await within(p).findByRole('radio', { name: 'Fair' });
+  // The bar opens pre-filled; these paths build their own plan, so open the editor and take the pre-filled action off.
+  await user.click(within(p).getByRole('button', { name: 'Change' }));
+  await user.click(within(p).getByRole('button', { name: 'Remove action 1' }));
   await user.click(within(p).getByRole('radio', { name: picks.verdict ?? 'Fair' }));
   await user.click(within(p).getByRole('button', { name: 'Add an action' }));
   const group = within(p).getByRole('group', { name: 'Action 1' });
@@ -39,7 +42,16 @@ async function decideInUi(w: HubWorld, id: string, picks: { lines: RegExp[]; wha
   for (const line of picks.lines) await user.click(within(group).getByRole('checkbox', { name: line }));
   await user.type(within(p).getByRole('textbox', { name: 'Reason' }), 'Clear from the chat.');
   await user.click(within(p).getByRole('button', { name: 'Decide' }));
+  await sendNow();
   await within(p).findByText('Decided. The report is closed.', { selector: 'strong' });
+}
+
+/** The Undo window passes at once (the page hides: a held decision is sent on the spot). */
+async function sendNow(): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new Event('pagehide'));
+    await Promise.resolve();
+  });
 }
 
 describe('decide in the UI, see it in the history, see it as the player', () => {
@@ -85,7 +97,7 @@ describe('decide in the UI, see it in the history, see it as the player', () => 
   it('a blocked line chosen for the player is shown to them masked, never as typed', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK, target: 'Mallory', reporter: 'Rae', bystander: 'Sam' });
-    await decideInUi(w, f.id, { what: 'Warning', lines: [/you zorbak.*Blocked/] });
+    await decideInUi(w, f.id, { what: 'Warning', lines: [/Blocked words, hidden.*Blocked/] });
     const res = await playerAs(w)('key-target-Mallory', 'GET', '/notices');
     const notices = (res.body as { notices: Array<{ kind: string; excerpt: Array<{ text: string }> }> }).notices;
     const shown = notices.find((n) => n.kind === 'warning')?.excerpt ?? [];
@@ -101,7 +113,36 @@ describe('decide in the UI, see it in the history, see it as the player', () => 
     const history = await w.client.personHistory(f.person);
     expect(history.sanctions.map((s) => s.kind)).toEqual(['note']);
     const res = await playerAs(w)('key-target-Mallory', 'GET', '/notices');
-    expect((res.body as { notices: unknown[] }).notices.filter((n) => (n as { kind: string }).kind !== 'report_outcome')).toEqual([]);
+    // Nothing at all for the reported person: not even a report outcome (the filter that used to sit here hid that).
+    expect((res.body as { notices: unknown[] }).notices).toEqual([]);
+    // And the reporter is not told either: a note is a moderator's private record, not an outcome. An upheld warning is (next test).
+    const asReporter = await playerAs(w)('key-reporter-Rae', 'GET', '/notices');
+    expect((asReporter.body as { notices: unknown[] }).notices).toEqual([]);
+  });
+
+  it('the pre-filled bar, untouched but for a verdict and a reason, reaches the player as the suggestion with the lines shown', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: TALK, target: 'Mallory', reporter: 'Rae', bystander: 'Sam' });
+    const { user } = renderHub(w, { path: `/reports/${f.id}` });
+    const p = await screen.findByRole('region', { name: 'Decision' });
+    await within(p).findByRole('radio', { name: 'Fair' });
+    await user.keyboard('1');
+    await user.type(within(p).getByRole('textbox', { name: 'Reason' }), 'Straight through.');
+    await user.click(within(p).getByRole('button', { name: 'Decide' }));
+    await sendNow();
+    await within(p).findByText('Decided. The report is closed.', { selector: 'strong' });
+    const res = await playerAs(w)('key-target-Mallory', 'GET', '/notices');
+    const notices = (res.body as { notices: Array<{ kind: string; excerpt: Array<{ text: string }> }> }).notices;
+    const restriction = notices.find((n) => n.kind === 'chat');
+    // All three of their own lines, in order; the blocked one reaches them masked, never as typed.
+    expect(restriction?.excerpt).toHaveLength(3);
+    expect(restriction?.excerpt.slice(0, 2).map((l) => l.text)).toEqual(['first line from the target', 'second line from the target']);
+    expect(restriction?.excerpt[2]?.text).toMatch(/\*/);
+    // Their own lines only: none of the others'.
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain('chill out please');
+    expect(text).not.toContain('you are all trash at this game');
+    expect(text).not.toContain('zorbak');
   });
 
   it('the reporter is told the outcome, without the other person\'s text', async () => {
@@ -129,6 +170,8 @@ describe('decide in the UI, see it in the history, see it as the player', () => 
     const { user } = renderHub(w, { path: `/reports/${f.id}` });
     const p = await screen.findByRole('region', { name: 'Decision' });
     await within(p).findByRole('radio', { name: 'Fair' });
+    await user.click(within(p).getByRole('button', { name: 'Change' }));
+    await user.click(within(p).getByRole('button', { name: 'Remove action 1' }));
     await user.click(within(p).getByRole('radio', { name: 'Not a problem' }));
     await user.click(within(p).getByRole('button', { name: 'Add an action' }));
     const group = within(p).getByRole('group', { name: 'Action 1' });
@@ -137,6 +180,7 @@ describe('decide in the UI, see it in the history, see it as the player', () => 
     await user.click(within(group).getByRole('checkbox', { name: /you are all trash at this game/ }));
     await user.type(within(p).getByRole('textbox', { name: 'Reason' }), 'Provoked it.');
     await user.click(within(p).getByRole('button', { name: 'Decide' }));
+    await sendNow();
     await within(p).findByText('Decided. The report is closed.', { selector: 'strong' });
     const asReporter = (await playerAs(w)('key-reporter-Rae', 'GET', '/notices')).body as { notices: Array<{ kind: string; excerpt: Array<{ text: string }> }> };
     expect(asReporter.notices.find((n) => n.kind === 'warning')?.excerpt.map((l) => l.text)).toEqual(['you are all trash at this game']);

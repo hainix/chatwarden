@@ -63,6 +63,9 @@ export interface LiveQueue {
   setInteracting: (inside: boolean) => void;
   /** The case that is open in the main pane: its row never disappears under the moderator, even once it closes. */
   setOpenPerson: (person: string | null) => void;
+  /** People whose decision is on its way (held for Undo, or sending): their case leaves the list at once and comes back if it fails. */
+  pending: ReadonlySet<string>;
+  setPending: (person: string, on: boolean) => void;
   /** After a release the open case must not claim itself again at the next heartbeat. */
   holdOff: (person: string, on: boolean) => void;
   isHeldOff: (person: string) => boolean;
@@ -110,6 +113,7 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState<Loaded>({ status: 'loading', error: null, groups: [], rows: [], incoming: 0, partial: false, reports: 0, updatedAt: null, revision: 0 });
   const [connection, setConnection] = useState<Connection>(isOffline() ? 'offline' : 'live');
   const [filter, setFilterState] = useState<QueueFilter>(NO_CATEGORY_FILTER);
+  const [pending, setPendingState] = useState<ReadonlySet<string>>(() => new Set());
 
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
@@ -342,13 +346,22 @@ export function QueueProvider({ children }: { children: ReactNode }) {
     if (on) heldOff.current.add(person);
     else heldOff.current.delete(person);
   }, []);
+  const setPending = useCallback((person: string, on: boolean): void => {
+    setPendingState((prev) => {
+      if (prev.has(person) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(person);
+      else next.delete(person);
+      return next;
+    });
+  }, []);
   const isHeldOff = useCallback((person: string): boolean => heldOff.current.has(person), []);
 
   const nowMs = now();
   const visible = useMemo(() => {
     const keepPersons = new Set(filterGroups(loaded.rows.map((r) => r.group), filter, me.actor, nowMs).map((g) => g.person));
-    return loaded.rows.filter((r) => keepPersons.has(r.group.person));
-  }, [loaded.rows, filter, me.actor, nowMs]);
+    return loaded.rows.filter((r) => keepPersons.has(r.group.person) && !pending.has(r.group.person));
+  }, [loaded.rows, filter, me.actor, nowMs, pending]);
 
   const value = useMemo<LiveQueue>(
     () => ({
@@ -374,12 +387,14 @@ export function QueueProvider({ children }: { children: ReactNode }) {
       patchViewing,
       setInteracting,
       setOpenPerson,
+      pending,
+      setPending,
       holdOff,
       isHeldOff,
       beginTake,
       endTake,
     }),
-    [loaded, visible, connection, authError, minute, beginTake, endTake, filter, setFilter, showIncoming, reload, retryNow, patchClaim, patchViewing, setInteracting, setOpenPerson, holdOff, isHeldOff],
+    [loaded, visible, connection, authError, minute, beginTake, endTake, filter, setFilter, showIncoming, reload, retryNow, patchClaim, patchViewing, setInteracting, setOpenPerson, pending, setPending, holdOff, isHeldOff],
   );
 
   return <QueueContext.Provider value={value}>{children}</QueueContext.Provider>;

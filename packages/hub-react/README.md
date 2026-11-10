@@ -91,7 +91,7 @@ export const client = createHubClient(routerTransport(handle));
 | --- | --- | --- |
 | `#/` | Overview, the team view: people waiting, open reports, the longest wait, unclaimed cases, who is on and what each is holding, recent actions | any signed-in role (panels follow `reports.read` and `history.read`) |
 | `#/reports`, `#/reports?status=actioned` | Reports: every report, grouped by reported person, filtered by status (the queue pane beside it is always the open cases) | `reports.read` |
-| `#/reports/:id` | Report: who is in it, their last 90 days, the saved chat (the reported line marked, blocked lines struck through, a filter to one person) and the decision panel | `reports.read`; deciding needs `reports.decide`, actions need `sanctions.apply` |
+| `#/reports/:id` | The case: header and claim, Evidence (the transcript), Reports and History tabs, the decision bar docked under them, and beside it the person's record, blocked attempts and who reported | `reports.read`; deciding needs `reports.decide`, actions need `sanctions.apply` |
 | `#/people/:ref`, `#/terms`, `#/blocked`, `#/gaps`, `#/audit`, `#/guide` | Routes and tabs exist; the screens arrive in later releases and show a short "not available yet" page until then | the permission of the tab |
 
 The tabs a role cannot use are not shown: Audit appears for a senior and above, and every tab follows the permission table the
@@ -99,8 +99,8 @@ server reports in `GET /me` (so a `permissions` override on the server is respec
 
 ### The workbench
 
-Three panes from 1200px wide: the queue (left), the case or screen (middle), and, beside an open case, a panel saying who is
-handling it and who else is looking. Two panes from 820px (the panel moves under the case); narrower, everything stacks and the page
+Three panes from 1200px wide: the queue (left), the case or screen (middle), and, beside an open case, the person's record, what they tried to say that was
+blocked and how the people who reported have fared. Two panes from 820px (the panel moves under the case); narrower, everything stacks and the page
 scrolls as one, with no horizontal scroll down to 360px. A slim rail of sections sits at the far left, and a top bar holds the
 product, your game's name, whether the queue is live, the command bar and who is on. The hub fills `--cw-hub-height` (the viewport
 by default; set it to fit under your own header). Everything async is quiet: skeletons while loading (no spinners), a toast for news,
@@ -109,9 +109,11 @@ a banner when the connection is lost.
 **Claims are soft locks.** Opening a case claims it if nobody holds it (`POST /cases/:ref/claim`), and while it stays open and the
 tab is visible the hub renews the claim every 60 seconds and a "viewing" hint every 20. The server releases a claim after 10 minutes
 without a renewal. A case someone else holds opens to read, with a notice; the server refuses a decision on it unless a senior
-takes it over; a decision sent anyway is refused (409 `claimed`) and the panel says who holds it and keeps what you entered. Each queue row shows who handles it (you in blue, others by name, or Unclaimed) and who is viewing; your own row has
+takes it over: the decision bar is read-only and names the holder, with "Take over" for a role holding `claims.override`. A decision sent anyway
+(someone took the case after you opened it) is refused (409 `claimed`); the bar turns read-only and keeps what you entered. Each queue row shows who handles it (you in blue, others by name, or Unclaimed) and who is viewing; your own row has
 a Release button (the toast offers Undo). "Take next case" (N) claims the oldest unclaimed case that matches the category filter and
-opens it. The hub does not yet release a case when you navigate away from it: the claim lapses on its own.
+opens it. Leaving a case (another case, another screen, closing the hub) releases your claim (`POST /cases/:ref/release`) unless a decision
+on it is waiting: sending that releases it. A tab that is killed cannot be sure to send a release, so then the claim lapses on its own after 10 minutes.
 
 **The queue stays still.** The queue is read once, then the hub asks `GET /changes` every 5 seconds while the tab is visible and every
 30 while it is hidden, never while the browser is offline, and reads the queue again only when the token changed. New cases wait behind
@@ -135,25 +137,55 @@ move no change token, so a row's viewers refresh whenever the queue does and you
 
 **Toasts and Undo.** Toasts pause while the pointer or focus is on them. `useToasts()` (exported) gives `push`, `dismiss` and `hold`:
 `hold({ text, run, onUndo })` waits 5 seconds with an Undo button and a progress bar, then runs `run` once; Undo cancels it, and it
-runs at once if the toast is dismissed early or the page is closing. Releasing a claim uses `push` with an action; decisions will
-use `hold`.
+runs at once if the toast is dismissed early or the page is closing (`pagehide`, the tab becoming hidden, or the hub unmounting). Releasing a claim uses
+`push` with an action; decisions use `hold`.
 
 **Limits.** "On now" lists the people who hold or are viewing a case, and you: the kit has no presence route, so someone signed in and idle is
 not shown. Recent actions is read again whenever the queue is read because the change token moved.
 
-### The report page and the decision
+### The case and the decision
 
-The decision panel sends one call, `POST /reports/:id/decide`. It offers the ladder's suggestion (and asks the server again when the
-conduct level changes), the verdict (Fair, Not a problem, Bad faith), any number of actions up to 20, each with a person, what
-happens (the ladder table's presets, a note, or a kind and length), the Community Rule it is under (or "No rule covers this" with a
-note) and up to five of that person's own lines to show them, and a reason. It refuses what the server would refuse before sending:
-no action on the reported person unless the report is fair, bad-faith evidence of 1 to 500 characters, a gap note for an uncovered
-rule, at most five lines that are the person's own, one action of a kind per person, no permanent length without
-`sanctions.apply.ban_permanent`. The role's `can` map decides what is offered, never the role name.
+**The case pane.** A header (the reported person, their short tag, the categories, who is viewing), a claim banner (you, someone else, or
+nobody), and tabs. Evidence opens first: the reporter's note and the transcript. The reported line has a red rail, the reported person's
+own lines a neutral tint, and **blocked words are hidden until shown**: a bar stands in for the line (and a screen reader hears "Blocked
+words, hidden", never the words), with a Show button per line and a "Show blocked words" switch for the case. "Only <name>" filters the
+transcript to one person. A box in the margin of the reported person's lines picks which of them the player is shown (up to five). The
+AI read has a slot above the transcript (`AiReadSlot`); it renders nothing until a read exists, and none is built yet. Reports lists
+every report in the case; History lists the person's record, newest first.
+
+**The context pane** (beside the case): the person's last 90 days with a referee card for each action (yellow warning, half yellow and
+half red restriction, red ban, dashed note), the lines they tried to send in the last 7 days that were blocked (hidden until shown; needs
+`blocked.read`), how the people who reported have fared (reports filed, how many were upheld, bad faith, suspension; at most five are read)
+and who is in the case.
+
+**The decision bar** is docked under the evidence and opens **pre-filled**: the ladder's suggestion as the reported person's action, the
+report's Community Rule, and their own lines chosen (never a verdict: that is yours). Keys: `1` Fair, `2` Not a problem, `3` Bad faith;
+Ctrl or Cmd with Enter decides and takes the next case. A saved reason (`GET /reasons`) is one chip. "Change" opens the full action editor
+(the conduct level, every field, more actions, up to 20), and the menu is built from your profile's own ladder (`GET /policy`
+`profile`), with the suggestion always on it; a length the form cannot send is said so, not hidden. It refuses what the server would
+refuse before sending: no action on the reported person unless the report is fair, bad-faith evidence of 1 to 500 characters, a gap note
+for an uncovered rule, at most five lines that are the person's own, one action of a kind per person. Only a permanent **ban** needs
+`sanctions.apply.ban_permanent`, as on the server. The role's `can` map decides what is offered, never the role name. Without
+`policy.read`, or when the rules cannot be loaded, the bar still decides: verdict, reason and no actions.
+
+**Held for five seconds.** Pressing Decide does not send. The decision waits for `UNDO_MS` (5 s) with an Undo toast, the case leaves the
+queue at once, and the bar shows "Decision queued". Undo cancels with nothing sent and gives the form back. The decision is sent at once
+if the page hides, the tab is hidden or the hub unmounts, and it always goes with `keepalive` (`fetchTransport` sets it on `fetch`; do the
+same in your own transport). If the send fails, the case comes back with the error and what you entered (when you have moved on to
+another case, a toast says so, with a button that opens it). "Decide and take next" queues the decision, takes the next case
+(`POST /cases/next`) and opens it; with none left it opens the team view. A decision does not read the report, the person or the rules
+again.
 
 There is no idempotency key to send: the server recognises a repeated decision by its content and answers `replay: true`, which the
-panel shows as a success. A `409 already_decided` reloads the report and says someone else decided it. A network failure keeps
-everything typed and offers "Try again", which sends the same body. The panel's results are announced in a polite live region.
+bar shows as a success. A `409 already_decided` reloads the report and says someone else decided it. A network failure keeps everything
+typed and offers "Try again", which sends the same body at once. A 400 names no field on the server, so the message is one sentence per
+code (`invalid_request`, `invalid_sanction`, `invalid_excerpt`); the form's own checks, which hold the server's rules, give field-level
+messages first. Results are announced in a polite live region.
+
+**What a case costs in audited reads.** Opening a case writes `report.view` once for that report, `history.view` for the reported person
+and for each reporter shown (a reporter's record is kept for 5 minutes, so a reporter in several cases is read once), `blocked.view`
+when the role can read blocked lines (kept 5 minutes), and `policy.view` once per session (the rules are kept until the hub closes).
+Deciding writes `report.decide` and nothing else about the case. The queue list is one `report.view` row with no target, as before.
 
 ### `HubClient`
 
@@ -331,8 +363,9 @@ Content-Security-Policy needs `font-src 'self'` for it.
 - **The full person ref is in the link.** The page shows only the 8 character tag, but a link to a person (`#/people/:ref`) has to
   carry the whole ref, because the server route needs it. It is staff-only, like the queue, but the address bar, the history and the
   paths `onNavigate` receives all hold it, so do not forward those to analytics.
-- **The report page shows chat as typed.** The excerpt is for staff: it holds the raw lines (blocked ones included, struck through)
-  and the reporter's note. What a player sees is only the lines the moderator chose for them, as the server masks them.
+- **The case shows chat as typed, with blocked words hidden by default.** The excerpt is for staff: it holds the raw lines and the
+  reporter's note. Blocked words are hidden until a moderator shows them (and never put in a screen-reader label). That is for the
+  moderator's sake, not a privacy boundary: the raw text is in the answer the hub already has. What a player sees is only the lines the moderator chose for them, as the server masks them.
 - **Polling.** Each open tab asks `GET /changes` every 5 seconds (30 while hidden). It is one cheap read with no audit row; allow for
   it in any rate limit. Claims and the viewing hint write no audit row (a senior's takeover does); viewing is in memory on the
   server process, so behind several processes a moderator sees only the viewers that reached the same one.

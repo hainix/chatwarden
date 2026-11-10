@@ -17,7 +17,7 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
   const { t, locale, now } = useHub();
   const [expanded, setExpanded] = useState(false);
   const name = group.handle ?? t('hub.reports.row.unnamed');
-  const who = group.handle ?? `${t('hub.person.prefix')} ${personTag(group.person)}`;
+  const who = group.handle ?? t('hub.person.unnamed', { tag: personTag(group.person) });
   const waiting = group.oldestOpenAt === null ? null : Math.max(0, now() - group.oldestOpenAt);
   const older = group.entries.slice(1);
   const shown = older.slice(0, EARLIER_SHOWN);

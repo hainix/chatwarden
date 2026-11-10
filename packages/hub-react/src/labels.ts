@@ -106,6 +106,11 @@ export function outcomeLabel(t: HubT, locale: string, outcome: Suggestion['outco
 /**
  * Why a decision did not go through, as one sentence from the catalog (the server's own words are never shown). A refused
  * body gets the most specific line its code allows.
+ *
+ * One sentence per code, on purpose: a 400 from `POST /reports/:id/decide` names no field (only `invalid_request`,
+ * `invalid_sanction` or `invalid_excerpt`), so there is nothing true to mark on a field. The form checks the same rules before it
+ * sends (`decision.ts`, held to the server's by the oracle test), so a field-level message is given there, and a 400 that still
+ * gets through (a rule retired meanwhile, say) is shown with its input kept.
  */
 export function decideErrorText(t: HubT, error: HubError): string {
   if (error.code === 'claimed') {
@@ -122,5 +127,5 @@ export function decideErrorText(t: HubT, error: HubError): string {
 
 /** How a reported person is named in a queue or a toast: their handle, or "Person" and the short tag. */
 export function groupName(t: HubT, g: { handle: string | null; person: string }): string {
-  return g.handle ?? `${t('hub.person.prefix')} ${personTag(g.person)}`;
+  return g.handle ?? t('hub.person.unnamed', { tag: personTag(g.person) });
 }

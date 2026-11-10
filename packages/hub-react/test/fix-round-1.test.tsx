@@ -226,27 +226,29 @@ describe('3: deciding a case someone else holds says who', () => {
     expect(decideErrorText(t, new HubError({ status: 409, code: 'already_decided', message: 'm' }))).not.toMatch(/handling this case/);
   });
 
-  it('the decision panel shows it in its alert, keeps the reason, and sends nothing', async () => {
+  it('a case someone else holds: the decision bar is read-only and names the holder, and nothing is sent', async () => {
     vi.useRealTimers();
     const w = await hubWorld({ actor: 'ann@example.test' });
     const a = await w.file({ target: 'Alpha' });
     await w.clientFor('maya@example.test').claimCase(a.person);
-    const { user } = renderHub(w, { path: `/reports/${a.id}` });
+    renderHub(w, { path: `/reports/${a.id}` });
     const panel = await screen.findByRole('region', { name: 'Decision' });
-    await user.click(await within(panel).findByRole('radio', { name: 'Not a problem' }));
-    await user.type(within(panel).getByRole('textbox', { name: 'Reason' }), 'Looks fine to me.');
-    await user.click(within(panel).getByRole('button', { name: 'Decide' }));
-    expect(await within(panel).findByText(/maya is handling this case, so this decision was not sent/)).toBeInTheDocument();
-    expect(within(panel).getByRole('textbox', { name: 'Reason' })).toHaveValue('Looks fine to me.');
+    expect(await within(panel).findByText('maya is handling this case.')).toBeInTheDocument();
+    expect(within(panel).getByText('You can read it, not decide it, until they release it.')).toBeInTheDocument();
+    expect(await within(panel).findByRole('radio', { name: 'Not a problem' })).toBeDisabled();
+    expect(within(panel).getByRole('textbox', { name: 'Reason' })).toBeDisabled();
+    // Not a senior: no Take over.
+    expect(within(panel).queryByRole('button', { name: 'Take over' })).toBeNull();
+    expect(w.sent.some((r) => r.path.endsWith('/decide'))).toBe(false);
     expect((await w.client.getReport(a.id)).report.status).toBe('open');
   });
 
-  it('the case panel and the toast say what really happens now: deciding is refused', async () => {
+  it('the case banner and the toast say what really happens now: deciding is refused', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });
     const a = await w.file({ target: 'Alpha' });
     await w.clientFor('maya@example.test').claimCase(a.person);
     await started(w, `/reports/${a.id}`);
-    expect(screen.getByText('Deciding it is refused until they release it, or a senior takes it over.')).toBeInTheDocument();
+    expect(screen.getByText('You can read the case. Deciding it waits until they release it.')).toBeInTheDocument();
     expect(screen.getByText('maya is handling this case. Deciding it is refused until they release it.', { selector: '.cw-toast-text' })).toBeInTheDocument();
   });
 });

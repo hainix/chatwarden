@@ -431,22 +431,25 @@ describe('opening a case claims it', () => {
     await ready();
     await screen.findByRole('heading', { level: 2, name: /report against Alpha/i });
     expect(w.sent.some((r) => r.path.startsWith('/cases/') && r.path.endsWith('/claim'))).toBe(false);
-    expect(await screen.findByText('This case is no longer open.')).toBeInTheDocument();
+    // A decided case shows what was decided in the decision bar, not a claim banner.
+    expect(await within(screen.getByRole('region', { name: 'Decision' })).findByText('Dismissed')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Who is handling this case' })).toBeNull();
   });
 
-  it('the case panel says you are handling it, with Release, and who else is viewing', async () => {
+  it('the case pane says you are handling it, with Release, and who else is viewing', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });
     const [a] = await people(w, ['Alpha']);
     await w.clientFor('ana@example.test').viewing(a!.person);
     const { user } = renderHub(w, { path: `/reports/${a!.id}` });
     await ready();
-    const panel = await screen.findByRole('complementary', { name: 'About this case' });
-    expect(await within(panel).findByText('You are handling this case.')).toBeInTheDocument();
-    expect(within(panel).getByText('ana')).toBeInTheDocument();
-    expect(within(panel).getByText('A claim is released after 10 minutes without activity.')).toBeInTheDocument();
-    expect(within(panel).getByRole('link', { name: 'Open this person’s record' })).toHaveAttribute('href', `#/people/${a!.person}`);
-    await user.click(within(panel).getByRole('button', { name: 'Release' }));
-    expect(await within(panel).findByText('Nobody is handling this case.')).toBeInTheDocument();
+    const banner = await screen.findByRole('group', { name: 'Who is handling this case' });
+    expect(await within(banner).findByText("You're handling this.")).toBeInTheDocument();
+    expect(within(banner).getByText('Released after 10 minutes idle.')).toBeInTheDocument();
+    expect(await within(screen.getByRole('main')).findByText('ana is viewing')).toBeInTheDocument();
+    const aside = screen.getByRole('complementary', { name: 'About this case' });
+    expect(within(aside).getByRole('link', { name: 'Open the history of Alpha' })).toHaveAttribute('href', `#/people/${a!.person}`);
+    await user.click(within(banner).getByRole('button', { name: 'Release' }));
+    expect(await screen.findByText('Nobody is handling this.')).toBeInTheDocument();
     expect(w.cw.cases.holder(a!.person)).toBeNull();
   });
 
@@ -455,10 +458,10 @@ describe('opening a case claims it', () => {
     const [a] = await people(w, ['Alpha']);
     const { user } = renderHub(w, { path: `/reports/${a!.id}` });
     await ready();
-    const panel = await screen.findByRole('complementary', { name: 'About this case' });
-    await within(panel).findByText('You are handling this case.');
-    await user.click(within(panel).getByRole('button', { name: 'Release' }));
-    await within(panel).findByText('Nobody is handling this case.');
+    const banner = await screen.findByRole('group', { name: 'Who is handling this case' });
+    await within(banner).findByText("You're handling this.");
+    await user.click(within(banner).getByRole('button', { name: 'Release' }));
+    await within(banner).findByText('Nobody is handling this.');
     const claims = (): number => w.sent.filter((r) => r.path === `/cases/${a!.person}/claim`).length;
     const before = claims();
     await act(async () => {

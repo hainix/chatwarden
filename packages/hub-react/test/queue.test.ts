@@ -46,6 +46,7 @@ describe('groupQueue', () => {
       dismissed: 0,
       rooms: ['room-a'],
       reporters: 1,
+      reporterPersons: ['rep-1'],
       firstAt: T,
       latestAt: T,
       oldestOpenAt: T,
@@ -76,6 +77,7 @@ describe('groupQueue', () => {
     expect(g?.reports).toBe(4);
     expect(g?.rooms.sort()).toEqual(['x', 'y']);
     expect(g?.reporters).toBe(3);
+    expect(g?.reporterPersons).toEqual(['c', 'a', 'b']);
     expect(g?.categories).toHaveLength(3);
     expect(g?.categories).toEqual(expect.arrayContaining(['hate', 'spam', 'other']));
   });
@@ -203,7 +205,7 @@ describe('groupQueue', () => {
     const [g] = groupQueue([report({ targetPerson: '__proto__' })]);
     expect(g?.person).toBe('__proto__');
     expect(Object.keys(g ?? {}).sort()).toEqual(
-      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporters', 'reports', 'rooms', 'viewing'].sort(),
+      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporterPersons', 'reporters', 'reports', 'rooms', 'viewing'].sort(),
     );
   });
 });

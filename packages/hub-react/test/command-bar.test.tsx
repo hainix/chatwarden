@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { personTag } from '../src/format.js';
 import { renderHub } from './render.js';
@@ -95,7 +95,7 @@ describe('the command bar: results', () => {
     await open(user);
     await user.keyboard('VANTA');
     expect(labels()).toContain('Vantablob');
-    const hit = options().find((o) => o.textContent?.includes('Vantablob'));
+    const hit = options().find((o) => o.getAttribute('data-kind') === 'person' && o.textContent?.includes('Vantablob'));
     expect(hit).toHaveTextContent(personTag(a.person));
     expect(hit).toHaveTextContent('Person');
     expect(document.body.textContent).not.toContain(a.person);
@@ -255,11 +255,47 @@ describe('the command bar: the keyboard', () => {
     expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
   });
 
+  it('terms arriving late do not move the result the pointer or the arrows chose', async () => {
+    const { user, w } = await setup({ actor: 'ann@example.test', role: 'owner' });
+    // A term that ranks above the people for "a": when it arrives, everything below it moves down one place.
+    await w.direct.addTerm({ term: 'abacusword', language: 'en' });
+    // The terms answer is held until the person has already chosen a result: the one flake of the full-package runs.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    w.intercept.fn = async (req) => {
+      if (req.path === '/terms') await held;
+      return undefined;
+    };
+    await open(user);
+    await user.keyboard('a');
+    const target = options().find((o) => o.getAttribute('data-kind') === 'person' && o.textContent?.includes('Vantablob'))!;
+    fireEvent.mouseMove(target);
+    expect(target).toHaveAttribute('aria-selected', 'true');
+    const before = labels();
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(options().some((o) => o.getAttribute('data-kind') === 'term')).toBe(true));
+    expect(labels().length).toBeGreaterThan(before.length);
+    // Still the same result, wherever it sits in the longer list.
+    expect(selected()).toBe(target);
+    // And Enter takes it.
+    await user.keyboard('{Enter}');
+    expect(bar()).toBeNull();
+  });
+
+  // The one flake of the full-package runs (4c fix round 1) was here: "Vantablob" is in the person's result and in the report's result
+  // (as its hint), and a report's random id decides how well it matches "a", so now and then the report ranked first and
+  // `find` took that one. These pick the person's result by its kind.
   it('a click on a result chooses it, and the pointer moving over one chooses it for Enter', async () => {
     const { user, router, a } = await setup();
     await open(user);
     await user.keyboard('a');
-    const target = options().find((o) => o.textContent?.includes('Vantablob'))!;
+    // The bar reads the terms when it opens, and they join the results whenever the answer lands: a result the pointer is over
+    // would then be a different one. Wait for the terms before touching the list, so the order cannot change under the pointer.
+    await waitFor(() => expect(options().some((o) => o.getAttribute('data-kind') === 'term')).toBe(true));
+    const target = options().find((o) => o.getAttribute('data-kind') === 'person' && o.textContent?.includes('Vantablob'))!;
     fireEvent.mouseMove(target);
     expect(target).toHaveAttribute('aria-selected', 'true');
     await user.click(target);

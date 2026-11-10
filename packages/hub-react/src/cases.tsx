@@ -2,15 +2,15 @@ import { useCallback, useEffect, useRef } from 'react';
 import { toHubError } from './client.js';
 import { useHub } from './context.js';
 import { groupName, errorText } from './labels.js';
-import { actorName } from './claims.js';
+import { CLAIM_TTL_MS, actorName, holderOf } from './claims.js';
+import { useOptionalDecisions } from './decisions.js';
 import { useOptionalQueue, useQueue } from './liveQueue.js';
 import { useToasts } from './toasts.js';
 
 // Working a case: claiming it when it is opened, keeping the claim and the "viewing" hint alive while it stays open, and the
 // three things a moderator does about a claim from the queue: take the next case, release one, open one.
 
-/** A claim lasts this long without a heartbeat (the kit's 10 minutes). Used only to show a claim someone else's 409 described. */
-export const CLAIM_TTL_MS = 10 * 60_000;
+export { CLAIM_TTL_MS };
 /** While a case is open and the tab is visible, the claim is renewed this often. */
 export const CLAIM_BEAT_MS = 60_000;
 /** The "viewing" hint lasts 30 seconds on the server, so it is renewed more often than that. */
@@ -23,11 +23,17 @@ const visible = (): boolean => document.visibilityState !== 'hidden';
 /**
  * Renders nothing. While the report page is open it makes the moderator the handler of that case if nobody is, renews the claim
  * every 60 seconds and the viewing hint every 20 while the tab is visible, and keeps their row in the queue while it is open.
- * A case someone else holds is opened to read, with a notice. Releasing on the way out is not done here.
+ * A case someone else holds is opened to read, with a notice. Leaving the case (another case, another screen, closing the hub)
+ * releases the claim, unless a decision on it is waiting: sending that releases it.
  */
 export function CaseSession({ reportId }: { reportId: string }) {
-  const { client, t, can, me } = useHub();
+  const { client, t, can, me, now } = useHub();
   const queue = useQueue();
+  const decisions = useOptionalDecisions();
+  const decisionsRef = useRef(decisions);
+  decisionsRef.current = decisions;
+  const nowRef = useRef(now);
+  nowRef.current = now;
   const toasts = useToasts();
   const group = queue.groups.find((g) => g.reportIds.includes(reportId)) ?? null;
   // The person this page is about, remembered once seen: if the case closes while it is open, its row stays (marked) in the
@@ -114,12 +120,33 @@ export function CaseSession({ reportId }: { reportId: string }) {
     };
   }, [client, person, canClaim, me.actor]);
 
+  // Leaving the case lets it go: a moderator who browses the queue must not leave a trail of cases only they seem to hold. A
+  // decision that is still waiting is the exception (sending it releases the claim). It is said by the queue copy, not by a
+  // request of its own, whether the claim is ours: a case someone else holds is theirs, and a lapsed claim is nobody's.
+  useEffect(() => {
+    if (person === null) return;
+    return () => {
+      if (decisionsRef.current?.isPending(person)) return;
+      const q = queueRef.current;
+      const group = q.groups.find((g) => g.person === person);
+      if (group === undefined || holderOf(group.claim, me.actor, nowRef.current()).kind !== 'you') return;
+      q.patchClaim(person, null);
+      void client.releaseCase(person).catch(() => undefined);
+    };
+  }, [client, person, me.actor]);
+
   return null;
 }
 
+export type TakeResult = 'taken' | 'none' | 'busy' | 'failed';
+
 export interface CaseActions {
-  /** Claim and open the oldest unclaimed case that matches the category filter. */
-  takeNext: () => Promise<void>;
+  /** Claim and open the oldest unclaimed case that matches the category filter. Says how it went. */
+  takeNext: () => Promise<TakeResult>;
+  /** Claim a free case (after you let it go). */
+  claim: (person: string) => Promise<void>;
+  /** A senior or owner moving another moderator's live claim to themselves. The server audits it. */
+  takeOver: (person: string) => Promise<void>;
   /** Release your claim on a case. The toast offers Undo, which claims it again. */
   release: (person: string) => Promise<void>;
 }
@@ -139,15 +166,15 @@ export function useCaseActions(): CaseActions {
     [t, toasts],
   );
 
-  const takeNext = useCallback(async (): Promise<void> => {
+  const takeNext = useCallback(async (): Promise<TakeResult> => {
     const q = queueRef.current;
-    if (q === null || !q.beginTake()) return;
+    if (q === null || !q.beginTake()) return 'busy';
     try {
       const category = q.filter.category;
       const { case: next } = await client.takeNext(category === 'all' ? {} : { category });
       if (next === null) {
         toasts.push({ text: t('hub.toast.nothing') });
-        return;
+        return 'none';
       }
       // The case may be newer than the list on screen: read again so it is there, then show it as the moderator's.
       const known = q.groups.some((g) => g.person === next.person) ? q.groups : await q.reload();
@@ -158,14 +185,50 @@ export function useCaseActions(): CaseActions {
       const group = known.find((g) => g.person === next.person);
       go({ name: 'report', id: next.reportId });
       toasts.push({ text: group === undefined ? t('hub.toast.tookNext') : t('hub.toast.took', { who: groupName(t, group) }) });
+      return 'taken';
     } catch (e) {
       fail(e);
+      return 'failed';
     } finally {
       // A short cooldown, not just "while it runs": a double click is two clicks 100 ms apart, and a fast server has answered
       // the first by then. The guard is the queue's, so a click, the N key and the command bar share it.
       q.endTake(TAKE_COOLDOWN_MS);
     }
   }, [client, fail, go, t, toasts]);
+
+  const claimCase = useCallback(
+    async (person: string): Promise<void> => {
+      const q = queueRef.current;
+      try {
+        const result = await client.claimCase(person);
+        q?.holdOff(person, false);
+        q?.patchClaim(person, result.claim);
+      } catch (e) {
+        const err = toHubError(e);
+        if (err.code === 'claimed' && err.heldBy !== undefined) {
+          const until = err.heldUntil ?? 0;
+          q?.patchClaim(person, { by: err.heldBy, since: until - CLAIM_TTL_MS, until });
+          toasts.push({ text: t('hub.toast.heldBy', { name: actorName(err.heldBy) }), tone: 'bad' });
+        } else fail(e);
+      }
+    },
+    [client, fail, t, toasts],
+  );
+
+  const takeOver = useCallback(
+    async (person: string): Promise<void> => {
+      const q = queueRef.current;
+      try {
+        const result = await client.claimCase(person, { takeOver: true });
+        q?.holdOff(person, false);
+        q?.patchClaim(person, result.claim);
+        toasts.push({ text: result.tookOverFrom === null ? t('hub.toast.tookCase') : t('hub.toast.tookOver', { name: actorName(result.tookOverFrom) }) });
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [client, fail, t, toasts],
+  );
 
   const release = useCallback(
     async (person: string): Promise<void> => {
@@ -206,5 +269,5 @@ export function useCaseActions(): CaseActions {
     [client, fail, t, toasts],
   );
 
-  return { takeNext, release };
+  return { takeNext, release, claim: claimCase, takeOver };
 }

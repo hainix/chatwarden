@@ -23,6 +23,8 @@ function ctx(over: Partial<HubContextValue> = {}): HubContextValue {
     router: { path: '/', navigate: () => undefined },
     me: { actor: 'ann', role: 'moderator', can: {} as HubContextValue['me']['can'] },
     can: () => true,
+    session: {} as HubContextValue['session'],
+    shortcuts: true,
     go: () => undefined,
     href: (r) => `#${r.name}`,
     ...over,

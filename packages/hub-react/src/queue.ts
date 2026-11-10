@@ -22,6 +22,8 @@ export interface QueueGroup {
   rooms: string[];
   /** Distinct people who reported. */
   reporters: number;
+  /** Their staff refs (show the short tag, never the ref), newest report first. */
+  reporterPersons: string[];
   /** When the oldest report in the group was filed, and the newest. */
   firstAt: number;
   latestAt: number;
@@ -65,6 +67,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     const categories: ReportCategory[] = [];
     const rooms = new Set<string>();
     const reporters = new Set<string>();
+    const reporterPersons: string[] = [];
     let open = 0;
     let actioned = 0;
     let dismissed = 0;
@@ -81,6 +84,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       if (!categories.includes(r.category)) categories.push(r.category);
       if (r.roomId !== '') rooms.add(r.roomId);
       reporters.add(r.reporterPerson);
+      if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
       if (r.status === 'open') {
         open += 1;
         oldestOpenAt = oldestOpenAt === null ? r.createdAt : Math.min(oldestOpenAt, r.createdAt);
@@ -98,6 +102,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       dismissed,
       rooms: [...rooms],
       reporters: reporters.size,
+      reporterPersons,
       firstAt: (list[list.length - 1] as ReportSummary).createdAt,
       latestAt: (list[0] as ReportSummary).createdAt,
       oldestOpenAt,

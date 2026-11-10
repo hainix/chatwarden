@@ -28,6 +28,8 @@ export interface WorldOptions {
   gameName?: string;
   /** Rule numbers to retire (a retired rule stays listed but cannot be cited). */
   retire?: number[];
+  /** The adopter's own ladder (six rows, steps 0 to 5): replaces the profile's. */
+  ladder?: NonNullable<Parameters<typeof createChatwarden>[0]['overrides']>['ladder'];
 }
 
 export interface FileOptions {
@@ -70,7 +72,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     clock,
     profile: 'standard',
     rules: defineRules(starterRules('standard').map((r) => (opts.retire?.includes(r.number) ? { ...r, retired: true } : r))),
-    overrides: { profanity: { mode: 'allow' } },
+    overrides: { profanity: { mode: 'allow' }, ...(opts.ladder === undefined ? {} : { ladder: opts.ladder }) },
     retention: false,
   });
   // The caller is whoever `session` says: tests change it to see a role, or nobody (401).

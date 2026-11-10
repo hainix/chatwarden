@@ -82,7 +82,8 @@ export interface Reason {
 }
 
 export interface SuggestInput {
-  level: ConductLevel;
+  /** The conduct level; absent or null asks for the default. */
+  level?: ConductLevel | null;
   rule?: number;
   /** A person the report names (default: the reported person). */
   person?: string;

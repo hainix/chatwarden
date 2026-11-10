@@ -1,69 +1,241 @@
-import { actorName, holderOf } from '../claims.js';
-import { useCaseActions } from '../cases.js';
+import { useId } from 'react';
+import type { ReactNode } from 'react';
+import { Masked } from '../case/Transcript.js';
+import { RecordItem } from '../case/Record.js';
+import { useCase } from '../case/CaseContext.js';
 import { useHub } from '../context.js';
-import { useQueue } from '../liveQueue.js';
-import { Avatar, Link, Skeleton } from '../ui.js';
+import { personName, recordSummary } from '../excerpt.js';
+import type { ReportPerson } from '../excerpt.js';
+import { absoluteTime, listOf, personTag, timeOfDay } from '../format.js';
+import { useHubData } from '../hooks.js';
+import type { HubText } from '../i18n.js';
+import type { ActionRecord, BlockedLine, SanctionKind } from '../types.js';
+import { Empty, Fetched, Link, PersonChip, Skeleton, Tag } from '../ui.js';
 
-/**
- * The pane beside an open case: who is handling it, who else is looking, and the way to the person's record. A case someone
- * else holds can be read, not decided; a claim you hold is released after 10 minutes without activity, or when you let go.
- */
-export function CasePanel({ reportId }: { reportId: string }) {
-  const { t, can, me, now } = useHub();
-  const queue = useQueue();
-  const actions = useCaseActions();
-  const group = queue.groups.find((g) => g.reportIds.includes(reportId)) ?? null;
+// The pane beside the case: what a moderator weighs before deciding. The person's record, what they tried to say that was blocked,
+// how the people who reported have fared, and who is in the case.
 
-  let body;
-  if (queue.status === 'loading') body = <Skeleton lines={3} />;
-  else if (group === null) body = <p className="cw-hint">{t('hub.case.closed')}</p>;
-  else {
-    const holder = holderOf(group.claim, me.actor, now());
-    body = (
-      <>
-        <div className="cw-case-state" data-claim={holder.kind}>
-          {holder.kind !== 'none' && <Avatar actor={holder.by} you={holder.kind === 'you'} />}
-          <p>
-            {holder.kind === 'you'
-              ? t('hub.case.handling.you')
-              : holder.kind === 'other'
-                ? t('hub.case.handling.byName', { name: actorName(holder.by) })
-                : t('hub.case.handling.none')}
-          </p>
-        </div>
-        {holder.kind === 'you' && (
-          <>
-            <p className="cw-hint">{t('hub.case.idle')}</p>
-            <button type="button" className="cw-btn" onClick={() => void actions.release(group.person)}>
-              {t('hub.case.release')}
-            </button>
-          </>
-        )}
-        {holder.kind === 'other' && can('reports.decide') && <p className="cw-hint">{t('hub.case.readOnly')}</p>}
-        {group.viewing.length > 0 && (
-          <div className="cw-case-viewers">
-            <h3>{t('hub.case.viewing')}</h3>
-            <ul>
-              {group.viewing.map((v) => (
-                <li key={v}>
-                  <Avatar actor={v} size="s" />
-                  <span>{actorName(v)}</span>
-                </li>
+/** How many reporters are shown with a record (each is a read of their history). The rest are counted. */
+export const REPORTERS_SHOWN = 5;
+/** How many blocked lines are listed (the count is of all of them). */
+const BLOCKED_SHOWN = 5;
+
+const RECORD_KIND: Record<SanctionKind, HubText> = {
+  warning: 'hub.report.record.kind.warning',
+  chat: 'hub.report.record.kind.chat',
+  area: 'hub.report.record.kind.area',
+  ban: 'hub.report.record.kind.ban',
+  note: 'hub.report.record.kind.note',
+};
+const KIND_ORDER: readonly SanctionKind[] = ['warning', 'chat', 'area', 'ban', 'note'];
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  const id = useId();
+  return (
+    <section className="cw-ctx-section" aria-labelledby={id}>
+      <h3 id={id}>{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/** The reported person's actions in the last 90 days, with the referee card for each. */
+function Record({ target, people }: { target: ReportPerson; people: ReportPerson[] }) {
+  const { t } = useHub();
+  const { history } = useCase();
+  if (history === null) return null;
+  return (
+    <Section title={t('hub.record.title', { name: personName(target, people, t) })}>
+      <Fetched state={history} what={t('hub.state.what.record')}>
+        {(h) =>
+          h === null || h.sanctions.length === 0 ? (
+            <p className="cw-hint">{t('hub.record.none')}</p>
+          ) : (
+            <ul className="cw-recs">
+              {h.sanctions.map((s) => (
+                <RecordItem key={s.groupId} s={s} />
               ))}
             </ul>
-          </div>
-        )}
-        <Link to={{ name: 'person', ref: group.person }} className="cw-link">
-          {t('hub.case.person')}
-        </Link>
-      </>
-    );
-  }
+          )
+        }
+      </Fetched>
+    </Section>
+  );
+}
 
+/** What the person tried to say in the last 7 days that the filter stopped: a count, and the latest, hidden until shown. */
+function Blocked({ target, people }: { target: ReportPerson; people: ReportPerson[] }) {
+  const { t, locale, can, session } = useHub();
+  const { reveal } = useCase();
+  const wants = can('blocked.read');
+  const state = useHubData<BlockedLine[] | null>(wants ? 'blocked' : 'blocked:idle', () => (wants ? session.blocked() : Promise.resolve(null)));
+  if (!wants) return null;
+  return (
+    <Section title={t('hub.blocked.title')}>
+      <Fetched state={state} what={t('hub.state.what.blocked')}>
+        {(items) => {
+          const mine = (items ?? []).filter((b) => b.person === target.ref);
+          if (mine.length === 0) return <p className="cw-hint">{t('hub.blocked.none')}</p>;
+          return (
+            <>
+              <p>{t('hub.blocked.count', { count: mine.length, name: personName(target, people, t) })}</p>
+              <ul className="cw-blocked-list">
+                {mine.slice(0, BLOCKED_SHOWN).map((b) => {
+                  const shown = reveal.shows(`blocked:${b.id}`);
+                  return (
+                    <li key={b.id}>
+                      <time dateTime={new Date(b.at).toISOString()} title={absoluteTime(b.at, locale)} className="cw-hint">
+                        {timeOfDay(b.at, locale)}
+                      </time>
+                      <span className="cw-blocked-text">{shown ? b.text : <Masked text={b.text} />}</span>
+                      <button
+                        type="button"
+                        className="cw-linkbtn"
+                        aria-pressed={shown}
+                        aria-label={t(shown ? 'hub.mask.hideBlocked' : 'hub.mask.showBlocked', { time: timeOfDay(b.at, locale) })}
+                        onClick={() => reveal.toggle(`blocked:${b.id}`)}
+                      >
+                        {t(shown ? 'hub.mask.hide' : 'hub.mask.show')}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {mine.length > BLOCKED_SHOWN && <p className="cw-hint">{t('hub.blocked.more', { count: mine.length - BLOCKED_SHOWN })}</p>}
+            </>
+          );
+        }}
+      </Fetched>
+    </Section>
+  );
+}
+
+/** One reporter's track record: how many reports they filed and how many held up, as a plain bar and the words. */
+function Reporter({ refId, name }: { refId: string; name: string }) {
+  const { t, locale, now, session } = useHub();
+  const state = useHubData(`reporter:${refId}`, () => session.reporter(refId));
+  const r = state.data;
+  const decided = r === undefined ? 0 : r.actioned + r.dismissed;
+  const suspended = r !== undefined && r.suspendedUntil !== null && r.suspendedUntil > now();
+  return (
+    <li className="cw-reporter">
+      <div className="cw-reporter-head">
+        <span className="cw-reporter-name">{name}</span>
+        {r !== undefined && <span className="cw-hint">{r.reports === 0 ? t('hub.reporters.none') : t('hub.reporters.record', { count: r.reports, upheld: r.actioned })}</span>}
+      </div>
+      {r === undefined ? (
+        state.error === null ? (
+          <Skeleton lines={1} />
+        ) : (
+          <p className="cw-hint">{t('hub.report.reporter.unavailable')}</p>
+        )
+      ) : (
+        <>
+          <meter className="cw-meter" min={0} max={Math.max(1, decided)} value={r.actioned} aria-label={t('hub.reporters.meter', { upheld: r.actioned, decided })} />
+          {r.badFaith > 0 && <p className="cw-hint">{t('hub.report.reporter.badFaith', { count: r.badFaith })}</p>}
+          {suspended && r.suspendedUntil !== null && (
+            <p>
+              <Tag tone="warn">{t('hub.report.reporter.suspended', { time: absoluteTime(r.suspendedUntil, locale) })}</Tag>
+            </p>
+          )}
+        </>
+      )}
+    </li>
+  );
+}
+
+/** The people who reported this case, each with how their reports have gone. */
+function Reporters({ people }: { people: ReportPerson[] }) {
+  const { t, can } = useHub();
+  const { detail, group } = useCase();
+  const report = detail.data?.report;
+  if (report === undefined || !can('history.read')) return null;
+  // This report's reporter first, then the others who reported the same person.
+  const refs = [...new Set([report.reporterPerson, ...(group?.reporterPersons ?? [])])];
+  const shown = refs.slice(0, REPORTERS_SHOWN);
+  const nameOf = (ref: string): string => {
+    const p = people.find((x) => x.ref === ref);
+    return p === undefined ? t('hub.person.unnamed', { tag: personTag(ref) }) : personName(p, people, t);
+  };
+  return (
+    <Section title={t('hub.reporters.title')}>
+      <ul className="cw-reporters" aria-label={t('hub.reporters.label')}>
+        {shown.map((ref) => (
+          <Reporter key={ref} refId={ref} name={nameOf(ref)} />
+        ))}
+      </ul>
+      {refs.length > shown.length && <p className="cw-hint">{t('hub.reporters.more', { count: refs.length - shown.length })}</p>}
+    </Section>
+  );
+}
+
+/** One person's last 90 days as a sentence: what stands, by kind, and how many were revoked. */
+function RecordLine({ history }: { history: readonly ActionRecord[] }) {
+  const { t, locale } = useHub();
+  const { counts, total, revoked } = recordSummary(history);
+  const parts = KIND_ORDER.flatMap((k) => (counts[k] === undefined ? [] : [t(RECORD_KIND[k], { count: counts[k] })]));
+  return (
+    <>
+      <p className="cw-person-record">{total === 0 ? t('hub.report.record.none') : t('hub.report.record.some', { list: listOf(parts, locale) })}</p>
+      {revoked > 0 && <p className="cw-person-record">{t('hub.report.record.revoked', { count: revoked })}</p>}
+    </>
+  );
+}
+
+/** Everyone the case names: their short tag, role, lines written and last 90 days. */
+function People({ people }: { people: ReportPerson[] }) {
+  const { t, can } = useHub();
+  const { detail } = useCase();
+  const history = detail.data?.history ?? {};
+  return (
+    <Section title={t('hub.report.people.title')}>
+      <ul className="cw-people" aria-label={t('hub.report.people.label')}>
+        {people.map((p) => {
+          const name = personName(p, people, t);
+          return (
+            <li key={p.ref} className="cw-person">
+              <div className="cw-person-head">
+                <span className="cw-person-name">{name}</span>
+                <PersonChip person={p.ref} />
+                {p.role === 'target' && <Tag tone="bad">{t('hub.report.role.target')}</Tag>}
+                {p.role === 'reporter' && <Tag>{t('hub.report.role.reporter')}</Tag>}
+              </div>
+              <p className="cw-hint">{p.lines === 0 ? t('hub.report.person.silent') : t('hub.report.person.wrote', { count: p.lines })}</p>
+              <RecordLine history={history[p.ref] ?? []} />
+              {can('history.read') && (
+                <Link to={{ name: 'person', ref: p.ref }} className="cw-link" aria-label={t('hub.reports.row.historyLabel', { who: name })}>
+                  {t('hub.reports.row.history')}
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
+  );
+}
+
+/** The pane beside an open case. */
+export function CasePanel() {
+  const { t } = useHub();
+  const { detail, people } = useCase();
+  const target = people.find((p) => p.role === 'target');
   return (
     <aside className="cw-ctx" aria-label={t('hub.case.label')}>
-      <h2 className="cw-ctx-title">{t('hub.case.title')}</h2>
-      {body}
+      {detail.data === undefined || target === undefined ? (
+        detail.error === null ? (
+          <Skeleton lines={4} />
+        ) : (
+          <Empty>{t('hub.case.unavailable')}</Empty>
+        )
+      ) : (
+        <>
+          <Record target={target} people={people} />
+          <Blocked target={target} people={people} />
+          <Reporters people={people} />
+          <People people={people} />
+        </>
+      )}
     </aside>
   );
 }

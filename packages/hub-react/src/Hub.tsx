@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { HubClient, HubError } from './client.js';
+import { CaseProvider } from './case/CaseContext.js';
 import { CaseSession, useCaseActions } from './cases.js';
+import { DecisionProvider } from './decisions.js';
 import type { CommandTarget } from './commands.js';
 import { HubContext, useHub } from './context.js';
 import type { HubContextValue } from './context.js';
@@ -21,6 +23,7 @@ import { QueuePane } from './shell/QueuePane.js';
 import { Rail } from './shell/Rail.js';
 import { ShortcutSheet } from './shell/ShortcutSheet.js';
 import { TopBar } from './shell/TopBar.js';
+import { createSession } from './session.js';
 import { shortcutFor } from './shortcuts.js';
 import { ToastProvider } from './toasts.js';
 import type { Me, PermissionKey } from './types.js';
@@ -88,6 +91,10 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
 
   const routerRef = useRef(router);
   routerRef.current = router;
+  const nowRef = useRef(now ?? Date.now);
+  nowRef.current = now ?? Date.now;
+  // One session per client: the rules, saved reasons and reporters' records are read once and reused across cases.
+  const session = useMemo(() => createSession(client, () => nowRef.current()), [client]);
   const value = useMemo<HubContextValue | null>(() => {
     if (me.data === undefined) return null;
     const meData: Me = me.data;
@@ -97,6 +104,8 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
       locale,
       now: now ?? Date.now,
       router,
+      session,
+      shortcuts,
       me: meData,
       can: (permission: PermissionKey) => meData.can[permission] === true,
       go: (to) => routerRef.current.navigate(buildPath(to)),
@@ -105,13 +114,17 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
         return routerRef.current.href?.(p) ?? `#${p}`;
       },
     };
-  }, [client, t, locale, now, router, me.data]);
+  }, [client, t, locale, now, router, session, shortcuts, me.data]);
 
   let content: ReactNode;
   if (value === null) {
     content = <Gate t={t} error={me.error} loading={me.loading} onRetry={me.reload} />;
   } else {
-    const shell = <Shell route={route} gameName={gameName} shortcuts={shortcuts} />;
+    const shell = (
+      <DecisionProvider>
+        <Shell route={route} gameName={gameName} shortcuts={shortcuts} />
+      </DecisionProvider>
+    );
     content = (
       <HubContext.Provider value={value}>
         <ToastProvider>{value.can('reports.read') ? <QueueProvider>{shell}</QueueProvider> : shell}</ToastProvider>
@@ -170,6 +183,29 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
   const allowed = needed === null || can(needed);
   const hasQueue = queue !== null;
   const reportId = route.name === 'report' ? route.id : null;
+  // An open case shares one read of the report, the person's record and the decision form between the case pane and the pane beside it.
+  const inCase = reportId !== null && allowed;
+  const workContent = (
+    <>
+      <main className="cw-main" ref={mainRef} tabIndex={-1} key={screenKey}>
+        {route.name === 'notFound' ? (
+          <NotFound />
+        ) : allowed ? (
+          screenFor(route)
+        ) : (
+          <div className="cw-screen">
+            <div className="cw-empty">
+              <h2 className="cw-screen-title" tabIndex={-1}>
+                {t('hub.route.noAccess.title')}
+              </h2>
+              <p>{t('hub.route.noAccess.body')}</p>
+            </div>
+          </div>
+        )}
+      </main>
+      {inCase && <CasePanel />}
+    </>
+  );
 
   return (
     <>
@@ -182,23 +218,13 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
         <Rail route={route} />
         {hasQueue && <QueuePane route={route} shortcuts={shortcuts} />}
         <div className="cw-work">
-          <main className="cw-main" ref={mainRef} tabIndex={-1} key={screenKey}>
-            {route.name === 'notFound' ? (
-              <NotFound />
-            ) : allowed ? (
-              screenFor(route)
-            ) : (
-              <div className="cw-screen">
-                <div className="cw-empty">
-                  <h2 className="cw-screen-title" tabIndex={-1}>
-                    {t('hub.route.noAccess.title')}
-                  </h2>
-                  <p>{t('hub.route.noAccess.body')}</p>
-                </div>
-              </div>
-            )}
-          </main>
-          {hasQueue && reportId !== null && allowed && <CasePanel reportId={reportId} />}
+          {inCase && reportId !== null ? (
+            <CaseProvider key={reportId} reportId={reportId}>
+              {workContent}
+            </CaseProvider>
+          ) : (
+            workContent
+          )}
         </div>
       </div>
       {hasQueue && reportId !== null && allowed && <CaseSession reportId={reportId} />}

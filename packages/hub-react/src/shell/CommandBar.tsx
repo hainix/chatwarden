@@ -29,7 +29,8 @@ export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolea
   const { t, can, client } = useHub();
   const queue = useOptionalQueue();
   const [query, setQuery] = useState('');
-  const [active, setActive] = useState(0);
+  // The result that is chosen, by id: results join the list as the terms arrive, and the chosen one must not slide away.
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [terms, setTerms] = useState<string[]>([]);
   const input = useRef<HTMLInputElement>(null);
   const listId = useId();
@@ -89,7 +90,8 @@ export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolea
   }, [queue, can, t, terms]);
 
   const results = useMemo(() => rankCommands(items, query), [items, query]);
-  const chosen = results.length === 0 ? -1 : Math.min(active, results.length - 1);
+  const found = activeId === null ? -1 : results.findIndex((r) => r.id === activeId);
+  const chosen = results.length === 0 ? -1 : Math.max(0, found);
 
   const choose = (item: CommandItem | undefined): void => {
     if (item !== undefined) onChoose(item.target);
@@ -99,11 +101,11 @@ export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolea
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (results.length === 0) return;
-      setActive((chosen + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length);
+      setActiveId(results[(chosen + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length]?.id ?? null);
     } else if (e.key === 'Home' || e.key === 'End') {
       if (results.length === 0) return;
       e.preventDefault();
-      setActive(e.key === 'Home' ? 0 : results.length - 1);
+      setActiveId(results[e.key === 'Home' ? 0 : results.length - 1]?.id ?? null);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       choose(results[chosen]);
@@ -129,7 +131,7 @@ export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolea
           placeholder={t('hub.command.input')}
           onChange={(e) => {
             setQuery(e.target.value);
-            setActive(0);
+            setActiveId(null);
           }}
           onKeyDown={onKeyDown}
         />
@@ -147,7 +149,7 @@ export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolea
             // The input keeps focus; a click chooses without taking it (mousedown would blur the input and drop the list).
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => choose(item)}
-            onMouseMove={() => setActive(i)}
+            onMouseMove={() => setActiveId(item.id)}
           >
             <span className="cw-cmdk-label">{item.label}</span>
             {item.hint !== undefined && <span className="cw-cmdk-hint">{item.hint}</span>}

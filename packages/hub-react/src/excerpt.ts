@@ -1,4 +1,5 @@
 import { personTag } from './format.js';
+import type { HubT } from './i18n.js';
 import type { ActionRecord, SanctionKind, StaffReport } from './types.js';
 
 // Reading a report: who is in it, whose each line is, and what a person's record says. Pure; no words here.
@@ -64,12 +65,15 @@ export function peopleOfReport(report: StaffReport): ReportPerson[] {
   });
 }
 
-/** What to call a person: their handle, or `<prefix> <tag>`; a handle two people share gets the tag too. */
-export function personName(person: ReportPerson, all: readonly ReportPerson[], prefix: string): string {
+/**
+ * What to call a person: their handle, or "Person <tag>"; a handle two people share gets the tag too. The shape of both comes
+ * from the catalog (`hub.person.unnamed`, `hub.person.named`), so a language can put the tag where it reads best.
+ */
+export function personName(person: ReportPerson, all: readonly ReportPerson[], t: HubT): string {
   const tag = personTag(person.ref);
-  if (person.handle === null) return `${prefix} ${tag}`;
+  if (person.handle === null) return t('hub.person.unnamed', { tag });
   const shared = all.some((o) => o.ref !== person.ref && o.handle === person.handle);
-  return shared ? `${person.handle} (${tag})` : person.handle;
+  return shared ? t('hub.person.named', { name: person.handle, tag }) : person.handle;
 }
 
 /** One line of the excerpt, ready to show. */

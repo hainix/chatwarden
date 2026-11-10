@@ -27,6 +27,14 @@ const personRow = (name: string): HTMLElement => {
   return row;
 };
 const filter = () => screen.getByRole('group', { name: 'Show lines from' });
+/** The reporters in the pane beside the case (their track records). */
+const reporterRow = (name: string): HTMLElement => {
+  const row = within(screen.getByRole('list', { name: 'Reporters of this case' }))
+    .getAllByRole('listitem')
+    .find((li) => within(li).queryByText(name, { selector: '.cw-reporter-name' }) !== null);
+  if (row === undefined) throw new Error(`no reporter row for ${name}`);
+  return row;
+};
 
 const TALK: RichLine[] = [
   { who: 'reporter', text: 'hello there' },
@@ -43,7 +51,8 @@ describe('ReportView: the header', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Hate report against Mallory' })).toBeInTheDocument();
     const facts = screen.getByRole('group', { name: 'About this report' });
     expect(within(facts).getByText('Open')).toBeInTheDocument();
-    expect(within(facts).getByText('Hate')).toBeInTheDocument();
+    // The category is a chip in the header, beside the name.
+    expect(screen.getByText('Hate', { selector: '.cw-casecats *' })).toBeInTheDocument();
   });
 
   it('shows the room, the tags and when it was filed', async () => {
@@ -108,9 +117,9 @@ describe('ReportView: the note', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ note: 'They keep following me <b>around</b>' });
     await open(w, f.id);
-    const panel = screen.getByRole('region', { name: 'What was reported' });
-    expect(within(panel).getByText('They keep following me <b>around</b>')).toBeInTheDocument();
-    expect(panel.querySelector('b')).toBeNull();
+    const note = screen.getByText('They keep following me <b>around</b>');
+    expect(note).toHaveClass('cw-note-text');
+    expect(note.parentElement?.querySelector('b')).toBeNull();
   });
 
   it('says so when there is no note', async () => {
@@ -132,7 +141,7 @@ describe('ReportView: the excerpt', () => {
       expect.stringMatching(/Bystander.*what is going on/),
       expect.stringMatching(/Mallory.*another line from the target/),
     ]);
-    expect(screen.getByText('4 lines saved')).toBeInTheDocument();
+    expect(screen.getByText(/: 4 lines kept$/)).toBeInTheDocument();
   });
 
   it('marks the reported line, and only that one', async () => {
@@ -152,7 +161,7 @@ describe('ReportView: the excerpt', () => {
     expect(screen.queryByText('Reported line')).not.toBeInTheDocument();
   });
 
-  it('strikes through a blocked line and labels it, and shows what was typed', async () => {
+  it('hides the blocked words behind a bar until shown, labels the line, and then shows what was typed struck through', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({
       lines: [
@@ -162,13 +171,18 @@ describe('ReportView: the excerpt', () => {
       ],
       cite: 1,
     });
-    await open(w, f.id);
-    const blocked = lineOf('you zorbak');
+    const { user } = await open(w, f.id);
+    // Hidden: the words are not in the page at all, a screen reader hears "Blocked words, hidden".
+    expect(within(chat()).queryByText('you zorbak')).toBeNull();
+    expect(chat().textContent).not.toContain('zorbak');
+    const blocked = within(chat()).getByRole('img', { name: 'Blocked words, hidden' }).closest('li') as HTMLElement;
     expect(within(blocked).getByText('Blocked')).toBeInTheDocument();
     expect(blocked).toHaveAttribute('data-blocked', 'true');
-    expect(within(blocked).getByText('you zorbak')).toHaveClass('cw-line-text');
     expect(lineOf('sorry about that')).not.toHaveAttribute('data-blocked');
     expect(within(chat()).getAllByText('Blocked')).toHaveLength(1);
+    await user.click(within(blocked).getByRole('button', { name: /^Show the blocked words in the line by Mallory/ }));
+    expect(within(blocked).getByText('you zorbak')).toHaveClass('cw-line-text');
+    expect(within(blocked).queryByRole('img', { name: 'Blocked words, hidden' })).toBeNull();
   });
 
   it('shows the time of each line', async () => {
@@ -324,7 +338,10 @@ describe('ReportView: people', () => {
     for (const ref of [f.person, f.reporter, f.bystander as string]) {
       expect(ref.length).toBeGreaterThan(8);
       expect(container.textContent).not.toContain(ref);
-      expect(container.textContent).not.toContain(ref.slice(0, 9));
+      // One more character than the tag must not be printed either. Checked on each piece of text, not on the page's whole text:
+      // the tag sits next to a word in its own element, and that word's first letter can by chance be the ref's ninth character.
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) expect(node.textContent ?? '').not.toContain(ref.slice(0, 9));
       for (const el of container.querySelectorAll('[aria-label],[title],[alt]')) {
         expect(el.getAttribute('aria-label') ?? '').not.toContain(ref);
         expect(el.getAttribute('title') ?? '').not.toContain(ref);
@@ -391,7 +408,8 @@ describe('ReportView: records', () => {
     await w.sanction(f.person, 'warning');
     await w.client.revokeSanction(s.groupId, 'mistake');
     await open(w, f.id);
-    expect(within(personRow('Mallory')).getByText('Last 90 days: 1 warning. 1 revoked.')).toBeInTheDocument();
+    expect(within(personRow('Mallory')).getByText('Last 90 days: 1 warning.')).toBeInTheDocument();
+    expect(within(personRow('Mallory')).getByText('1 revoked.')).toBeInTheDocument();
   });
 
   it('ignores what is older than 90 days', async () => {
@@ -421,8 +439,9 @@ describe('ReportView: records', () => {
     await w.client.decide(second.id, { verdict: 'bad_faith', reason: 'lied', evidence: 'made up', actions: [] });
     renderHub(w, { path: `/reports/${first.id}` });
     await heading(/report against/);
-    const reporter = personRow('Rae');
-    expect(await within(reporter).findByText('Has filed 3 reports: 1 open, 0 actioned, 2 dismissed. 1 for bad faith.')).toBeInTheDocument();
+    expect(await within(reporterRow('Rae')).findByText('3 reports, 0 upheld')).toBeInTheDocument();
+    expect(within(reporterRow('Rae')).getByText('1 for bad faith.')).toBeInTheDocument();
+    expect(within(reporterRow('Rae')).getByRole('meter', { name: '0 of 2 decided reports upheld' })).toBeInTheDocument();
   });
 
   it('says when the reporter is suspended from reporting', async () => {
@@ -432,8 +451,9 @@ describe('ReportView: records', () => {
     for (const id of ids.slice(0, 3)) await w.client.decide(id, { verdict: 'bad_faith', reason: 'lied', evidence: 'made up', actions: [] });
     renderHub(w, { path: `/reports/${ids[3]}` });
     await heading(/report against/);
-    const reporter = personRow('Rae');
-    expect(await within(reporter).findByText('Has filed 4 reports: 1 open, 0 actioned, 3 dismissed. 3 for bad faith.')).toBeInTheDocument();
+    const reporter = reporterRow('Rae');
+    expect(await within(reporter).findByText('4 reports, 0 upheld')).toBeInTheDocument();
+    expect(within(reporter).getByText('3 for bad faith.')).toBeInTheDocument();
     expect(within(reporter).getByText(/^Reporting is suspended until /)).toBeInTheDocument();
   });
 
@@ -441,7 +461,7 @@ describe('ReportView: records', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ reporter: 'Rae' });
     await open(w, f.id);
-    await within(personRow('Rae')).findByText(/Has filed 1 report/);
+    await within(reporterRow('Rae')).findByText('1 report, 0 upheld');
     expect(screen.queryByText(/suspended/)).not.toBeInTheDocument();
   });
 
@@ -451,7 +471,7 @@ describe('ReportView: records', () => {
     w.intercept.fn = (req) => (req.path.startsWith('/people/') ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
     renderHub(w, { path: `/reports/${f.id}` });
     await heading(/report against/);
-    expect(await within(personRow('Rae')).findByText('The reporter\'s record could not be loaded.')).toBeInTheDocument();
+    expect(await within(reporterRow('Rae')).findByText('The reporter\'s record could not be loaded.')).toBeInTheDocument();
     expect(lines()).toHaveLength(4);
   });
 
@@ -459,9 +479,10 @@ describe('ReportView: records', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     await open(w, f.id);
-    await screen.findByText(/Has filed 1 report/);
+    await screen.findByText('1 report, 0 upheld');
+    // The reported person's record and the reporter's track record: one read each, and nothing about the bystander.
     const calls = w.sent.filter((r) => r.path.startsWith('/people/'));
-    expect(calls.map((r) => r.path)).toEqual([`/people/${f.reporter}/history`]);
+    expect(calls.map((r) => r.path).sort()).toEqual([`/people/${f.person}/history`, `/people/${f.reporter}/history`].sort());
   });
 });
 
@@ -469,8 +490,16 @@ describe('ReportView: loading and failing', () => {
   it('shows the plain title while loading', async () => {
     const w = await hubWorld();
     const f = await w.fileRich();
+    // The report read is held, so "loading" is on screen for as long as the test looks (not a race against the router).
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    w.intercept.fn = async (req) => {
+      if (req.method === 'GET' && req.path === `/reports/${f.id}`) await held;
+      return undefined;
+    };
     renderHub(w, { path: `/reports/${f.id}` });
     expect(await screen.findByRole('heading', { level: 2, name: 'Report' })).toBeInTheDocument();
+    release();
     await heading(/report against/);
   });
 
@@ -508,7 +537,7 @@ describe('ReportView: loading and failing', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     await open(w, f.id);
-    await screen.findByText(/Has filed 1 report/);
+    await screen.findByText('1 report, 0 upheld');
     expect(w.sent.filter((r) => r.method === 'GET' && r.path === `/reports/${f.id}`)).toHaveLength(1);
   });
 

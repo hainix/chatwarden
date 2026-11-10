@@ -42,11 +42,35 @@ const outcomeWords = (outcome: unknown): string => {
 };
 const ruleText = (w: HubWorld, n: number): string => `Rule ${n}: ${w.cw.rules.get(n)?.title ?? '?'}`;
 
-async function ready(w: HubWorld, id: string, options: Parameters<typeof renderHub>[1] = {}) {
-  const r = renderHub(w, { path: `/reports/${id}`, ...options });
+/**
+ * Opens the case. The bar opens pre-filled (the suggestion is already an action, with the person's own lines), and these tests
+ * build their own plan, so by default they open the full editor with "Change" and take the pre-filled action off: the form starts
+ * as it did before the pre-fill. `prefilled: true` leaves it as the moderator finds it.
+ */
+async function ready(w: HubWorld, id: string, options: Parameters<typeof renderHub>[1] & { prefilled?: boolean } = {}) {
+  const { prefilled = false, ...render } = options;
+  const r = renderHub(w, { path: `/reports/${id}`, ...render });
   await screen.findByRole('heading', { level: 2, name: /report against/ });
   await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('radio', { name: 'Fair' });
+  if (!prefilled) {
+    const change = within(panel()).queryByRole('button', { name: 'Change' });
+    if (change !== null) await r.user.click(change);
+    const remove = within(panel()).queryByRole('button', { name: 'Remove action 1' });
+    if (remove !== null) await r.user.click(remove);
+  }
   return r;
+}
+
+/** Presses Decide, then lets the Undo window pass at once (the page hides: a held decision is sent on the spot). */
+async function sendNow(): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new Event('pagehide'));
+    await Promise.resolve();
+  });
+}
+async function decide(user: UserEvent): Promise<void> {
+  await user.click(decideButton());
+  await sendNow();
 }
 
 async function pick(user: UserEvent, select: HTMLElement, option: string | RegExp): Promise<void> {
@@ -152,7 +176,7 @@ describe('DecisionPanel: what it shows', () => {
     expect(within(panel()).getByText('Your role cannot apply sanctions. You can still decide the report.')).toBeInTheDocument();
     await user.click(verdict('Not a problem'));
     await reason(user, 'Fine.');
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)).toHaveLength(1);
     expect(decides(w)[0]!.body).toEqual({ verdict: 'no_action', reason: 'Fine.', actions: [] });
@@ -192,7 +216,8 @@ describe('DecisionPanel: the conduct level', () => {
     await user.click(within(levels).getByRole('button', { name: 'Severe' }));
     await waitFor(() => expect(within(levels).getByRole('button', { name: 'Severe' })).toHaveAttribute('aria-pressed', 'true'));
     const asked = w.sent.filter((r) => r.method === 'POST' && r.path === `/reports/${f.id}/suggest`);
-    expect(asked.at(-1)?.body).toEqual({ level: 'severe' });
+    // It names the reported person, and no rule while no action cites one.
+    expect(asked.at(-1)?.body).toEqual({ level: 'severe', person: f.person });
     const banner = within(panel()).getByRole('group', { name: 'The ladder suggests' });
     await within(banner).findByText(severe.why);
     expect(within(live()).queryByText(/./)).not.toBeNull();
@@ -240,9 +265,10 @@ describe('DecisionPanel: the conduct level', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     const { user } = await ready(w, f.id);
-    await user.click(within(panel()).getByRole('radio', { name: 'Not a problem' }));
+    // With no verdict yet, adding the action chooses "fair" (the only verdict that may act on the reported person), and says so.
     await user.click(within(panel()).getByRole('button', { name: 'Add this action' }));
     expect(verdict('Fair')).toBeChecked();
+    expect(live()).toHaveTextContent('Added action 1. Your decision is fair.');
     const group = action(1);
     expect(within(group).getByLabelText('Person')).toHaveDisplayValue(/^Mallory/);
     expect(within(group).getByLabelText('What happens')).toHaveDisplayValue('Chat restriction, 24 hours');
@@ -254,8 +280,22 @@ describe('DecisionPanel: the conduct level', () => {
     const f = await w.fileRich({ lines: TALK });
     const { user } = await ready(w, f.id);
     await user.click(within(panel()).getByRole('button', { name: 'Add this action' }));
-    await user.click(within(panel()).getByRole('button', { name: 'Add this action' }));
+    // It is in the plan now, so there is nothing more to add; the button is gone, not a second action.
+    expect(within(panel()).queryByRole('button', { name: 'Add this action' })).not.toBeInTheDocument();
     expect(within(panel()).getAllByRole('group', { name: /^Action / })).toHaveLength(1);
+  });
+
+  it('"Add this action" is not offered under a dismissal, which cannot act on the reported person, and does not flip the verdict', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = await ready(w, f.id);
+    await user.click(within(panel()).getByRole('radio', { name: 'Not a problem' }));
+    expect(within(panel()).queryByRole('group', { name: 'The ladder suggests' })).not.toBeInTheDocument();
+    expect(within(panel()).queryByRole('button', { name: 'Add this action' })).not.toBeInTheDocument();
+    expect(verdict('Not a problem')).toBeChecked();
+    await user.click(within(panel()).getByRole('radio', { name: 'Bad faith' }));
+    expect(within(panel()).queryByRole('button', { name: 'Add this action' })).not.toBeInTheDocument();
+    expect(verdict('Bad faith')).toBeChecked();
   });
 
   it('a permanent suggestion cannot be added by a moderator, and says who can', async () => {
@@ -528,7 +568,9 @@ describe('DecisionPanel: lines to show the player', () => {
     const f = await w.fileRich({ lines: [{ who: 'reporter', text: 'hi' }, { who: 'target', text: 'you zorbak' }], cite: 1 });
     const { user } = await ready(w, f.id);
     const group = await addAction(user, 1, { what: 'Warning' });
-    expect(within(group).getByRole('checkbox', { name: /you zorbak.*Blocked/ })).toBeInTheDocument();
+    // The picker hides the blocked words as the transcript does; the tag says why.
+    expect(within(group).getByRole('checkbox', { name: /Blocked words, hidden.*Blocked/ })).toBeInTheDocument();
+    expect(group.textContent).not.toContain('zorbak');
   });
 });
 
@@ -539,6 +581,11 @@ describe('DecisionPanel: permanent, by role', () => {
     const { user } = await ready(w, f.id);
     const group = await addAction(user, 1, { what: 'Something else' });
     expect(within(within(group).getByLabelText('What happens')).queryByRole('option', { name: 'Ban, permanent' })).not.toBeInTheDocument();
+    // Chat restriction is the kind it starts on: permanent is fine there (only a permanent ban needs a senior, as on the server).
+    expect(within(within(group).getByLabelText('Length')).getByRole('option', { name: 'Permanent' })).toBeInTheDocument();
+    await pick(user, within(group).getByLabelText('Kind'), 'Area restriction');
+    expect(within(within(group).getByLabelText('Length')).getByRole('option', { name: 'Permanent' })).toBeInTheDocument();
+    await pick(user, within(group).getByLabelText('Kind'), 'Ban');
     expect(within(within(group).getByLabelText('Length')).queryByRole('option', { name: 'Permanent' })).not.toBeInTheDocument();
     expect(within(within(group).getByLabelText('Length')).getAllByRole('option')).toHaveLength(4);
   });
@@ -550,7 +597,7 @@ describe('DecisionPanel: permanent, by role', () => {
     await user.click(verdict('Fair'));
     await addAction(user, 1, { what: 'Ban, permanent' });
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toMatchObject({ verdict: 'upheld', actions: [{ kind: 'ban', durationMs: null }] });
     expect(w.cw.sanctions.forPerson(f.person)[0]).toMatchObject({ kind: 'ban', endsAt: null });
@@ -570,7 +617,7 @@ describe('DecisionPanel: refusing before sending', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     const { user } = await ready(w, f.id);
-    await user.click(decideButton());
+    await decide(user);
     const summary = await within(panel()).findByRole('alert');
     expect(summary).toHaveFocus();
     expect(within(summary).getByText('Fix 2 things before deciding.')).toBeInTheDocument();
@@ -583,7 +630,7 @@ describe('DecisionPanel: refusing before sending', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     const { user } = await ready(w, f.id);
-    await user.click(decideButton());
+    await decide(user);
     const summary = await within(panel()).findByRole('alert');
     await user.click(within(summary).getByRole('button', { name: 'Write a reason. Only staff see it.' }));
     expect(within(panel()).getByRole('textbox', { name: 'Reason' })).toHaveFocus();
@@ -596,7 +643,7 @@ describe('DecisionPanel: refusing before sending', () => {
     await user.click(verdict('Fair'));
     const group = await addAction(user, 1, {});
     await pick(user, within(group).getByLabelText('Community Rule'), 'Choose a rule');
-    await user.click(decideButton());
+    await decide(user);
     const what = within(group).getByLabelText('What happens');
     expect(what).toBeInvalid();
     expect(what).toHaveAccessibleDescription(expect.stringContaining('Choose what happens.'));
@@ -611,7 +658,7 @@ describe('DecisionPanel: refusing before sending', () => {
     const { user } = await ready(w, f.id);
     await user.click(verdict('Bad faith'));
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByRole('button', { name: 'Write the evidence for bad faith.' })).toBeInTheDocument();
     expect(decides(w)).toHaveLength(0);
     const evidence = within(panel()).getByRole('textbox', { name: 'Evidence for bad faith' });
@@ -619,12 +666,12 @@ describe('DecisionPanel: refusing before sending', () => {
     await user.click(evidence);
     await user.paste('x'.repeat(501));
     expect(within(panel()).getByText('501 of 500')).toBeInTheDocument();
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByRole('button', { name: 'The evidence is over 500 characters. Shorten it.' })).toBeInTheDocument();
     expect(decides(w)).toHaveLength(0);
     await user.clear(evidence);
     await user.paste('y'.repeat(500));
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)).toHaveLength(1);
     expect(decides(w)[0]!.body).toMatchObject({ verdict: 'bad_faith', evidence: 'y'.repeat(500) });
@@ -639,7 +686,7 @@ describe('DecisionPanel: refusing before sending', () => {
     await user.click(verdict('Not a problem'));
     expect(within(panel()).queryByRole('textbox', { name: 'Evidence for bad faith' })).not.toBeInTheDocument();
     await reason(user, 'Fine.');
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toEqual({ verdict: 'no_action', reason: 'Fine.', actions: [] });
   });
@@ -651,12 +698,12 @@ describe('DecisionPanel: refusing before sending', () => {
     await user.click(verdict('Fair'));
     const group = await addAction(user, 1, { what: 'Warning', rule: 'No rule covers this' });
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByRole('button', { name: 'Say what the rules do not cover.' })).toBeInTheDocument();
     expect(within(group).getByRole('textbox', { name: 'What the rules do not cover' })).toBeInvalid();
     expect(decides(w)).toHaveLength(0);
     await user.type(within(group).getByRole('textbox', { name: 'What the rules do not cover' }), 'Nothing about fake staff.');
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toMatchObject({ actions: [{ rule: 'uncovered', gapNote: 'Nothing about fake staff.' }] });
     expect(await w.client.listGaps()).toMatchObject({ items: [{ status: 'open', note: 'Nothing about fake staff.' }] });
@@ -674,7 +721,7 @@ describe('DecisionPanel: refusing before sending', () => {
     await user.click(box);
     await user.paste('z'.repeat(501));
     expect(within(panel()).getByText('501 of 500')).toBeInTheDocument();
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByRole('button', { name: 'The reason is over 500 characters. Shorten it.' })).toBeInTheDocument();
     expect(decides(w)).toHaveLength(0);
   });
@@ -687,11 +734,11 @@ describe('DecisionPanel: refusing before sending', () => {
     await addAction(user, 1, { what: 'Warning' });
     const second = await addAction(user, 2, { what: 'Warning' });
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByRole('button', { name: 'This person already has an action of this kind.' })).toBeInTheDocument();
     expect(decides(w)).toHaveLength(0);
     await pick(user, within(second).getByLabelText('What happens'), 'Chat restriction, 24 hours');
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)).toHaveLength(1);
   });
@@ -700,7 +747,7 @@ describe('DecisionPanel: refusing before sending', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     const { user } = await ready(w, f.id);
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByRole('alert')).toBeInTheDocument();
     await user.click(verdict('Fair'));
     await reason(user);
@@ -717,7 +764,7 @@ describe('DecisionPanel: sending', () => {
     await user.click(verdict('Fair'));
     await addAction(user, 1, { what: 'Warning', rule: ruleText(w, 2) });
     await reason(user, '  Said it again.  ');
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' })).toBeInTheDocument();
     expect(decides(w)).toHaveLength(1);
     expect(decides(w)[0]!.path).toBe(`/reports/${f.id}/decide`);
@@ -742,7 +789,7 @@ describe('DecisionPanel: sending', () => {
     await user.click(verdict('Fair'));
     await addAction(user, 1, { what: 'Warning', rule: ruleText(w, 2) });
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     const facts = screen.getByRole('group', { name: 'About this report' });
     await within(facts).findByText('Actioned');
@@ -755,7 +802,7 @@ describe('DecisionPanel: sending', () => {
     const { user } = await ready(w, f.id);
     await user.click(verdict('Not a problem'));
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     const done = await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     await waitFor(() => expect(done.closest('[tabindex="-1"]')).toHaveFocus());
   });
@@ -767,7 +814,7 @@ describe('DecisionPanel: sending', () => {
     await user.click(verdict('Fair'));
     await addAction(user, 1, { what: 'Note', rule: ruleText(w, 3) });
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toMatchObject({ verdict: 'noted', actions: [{ kind: 'note', durationMs: null, rule: 3 }] });
     expect(w.cw.reports.get(f.id)?.status).toBe('actioned');
@@ -781,7 +828,7 @@ describe('DecisionPanel: sending', () => {
     await addAction(user, 1, { what: 'Note', rule: ruleText(w, 3) });
     await addAction(user, 2, { who: /^Bystander/, what: 'Warning', rule: ruleText(w, 3) });
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toMatchObject({ verdict: 'upheld' });
     expect(within(panel()).getAllByRole('listitem').map((li) => /\((\w+)\)$/.exec(li.textContent ?? '')?.[1]).sort()).toEqual(['Note', 'Warning']);
@@ -793,7 +840,7 @@ describe('DecisionPanel: sending', () => {
     const { user } = await ready(w, f.id);
     await user.click(verdict('Fair'));
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toEqual({ verdict: 'upheld', reason: 'It broke the rules.', actions: [] });
     expect(within(panel()).getByText('No sanction was applied.')).toBeInTheDocument();
@@ -806,7 +853,7 @@ describe('DecisionPanel: sending', () => {
     const { user } = await ready(w, f.id);
     await user.click(verdict('Not a problem'));
     await reason(user, 'Banter.');
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(w.cw.reports.get(f.id)).toMatchObject({ status: 'dismissed', badFaith: false });
   });
@@ -818,7 +865,7 @@ describe('DecisionPanel: sending', () => {
     await user.click(verdict('Bad faith'));
     await user.type(within(panel()).getByRole('textbox', { name: 'Evidence for bad faith' }), '  They reported a friend.  ');
     await reason(user, 'Abuse.');
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toEqual({ verdict: 'bad_faith', evidence: 'They reported a friend.', reason: 'Abuse.', actions: [] });
     expect(w.cw.reports.get(f.id)).toMatchObject({ status: 'dismissed', badFaith: true, badFaithEvidence: 'They reported a friend.' });
@@ -831,7 +878,7 @@ describe('DecisionPanel: sending', () => {
     await user.click(verdict('Not a problem'));
     await addAction(user, 1, { who: /^Reporter/, what: 'Warning', rule: ruleText(w, 4) });
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toMatchObject({ verdict: 'no_action', actions: [{ subject: f.reporter, kind: 'warning' }] });
     expect(w.cw.sanctions.forPerson(f.reporter)).toHaveLength(1);
@@ -847,7 +894,7 @@ describe('DecisionPanel: sending', () => {
     await pick(user, within(group).getByLabelText('Kind'), 'Area restriction');
     await pick(user, within(group).getByLabelText('Length'), '7 days');
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toMatchObject({ actions: [{ kind: 'area', durationMs: 7 * DAY, rule: 5 }] });
   });
@@ -860,7 +907,7 @@ describe('DecisionPanel: sending', () => {
     const group = await addAction(user, 1, { what: 'Warning', rule: ruleText(w, 2) });
     await user.click(within(group).getByRole('checkbox', { name: /^.*another line from the target/ }));
     await reason(user);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     const sent = decides(w)[0]!.body as { actions: Array<{ lineIds?: string[] }> };
     expect(sent.actions[0]?.lineIds).toEqual([f.lineIds[3]]);
@@ -874,7 +921,7 @@ describe('DecisionPanel: sending', () => {
     const group = await addAction(user, 1, { what: 'Warning', rule: 'No rule covers this' });
     await user.type(within(group).getByRole('textbox', { name: 'What the rules do not cover' }), '  odd case  ');
     await reason(user, '   because   ');
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[0]!.body).toMatchObject({ reason: 'because', actions: [{ gapNote: 'odd case' }] });
   });
@@ -894,11 +941,12 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
     const f = await w.fileRich({ lines: TALK });
     const { user } = await filled(w, f.id);
     await user.dblClick(decideButton());
+    await sendNow();
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)).toHaveLength(1);
     expect(w.cw.sanctions.forPerson(f.person)).toHaveLength(1);
-    // One decision, one reload: the second click did not run the aftermath again.
-    await waitFor(() => expect(w.sent.filter((r) => r.method === 'GET' && r.path === `/reports/${f.id}`)).toHaveLength(2));
+    // One decision, and no read of the report afterwards (it is audited): the second click did not run anything again either.
+    expect(w.sent.filter((r) => r.method === 'GET' && r.path === `/reports/${f.id}`)).toHaveLength(1);
   });
 
   it('two clicks in the same instant send one decision and run the aftermath once', async () => {
@@ -911,9 +959,10 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
       button.click();
       button.click();
     });
+    await sendNow();
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)).toHaveLength(1);
-    await waitFor(() => expect(w.sent.filter((r) => r.method === 'GET' && r.path === `/reports/${f.id}`)).toHaveLength(2));
+    expect(w.sent.filter((r) => r.method === 'GET' && r.path === `/reports/${f.id}`)).toHaveLength(1);
     expect(w.cw.sanctions.forPerson(f.person)).toHaveLength(1);
   });
 
@@ -923,6 +972,7 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
     const { user } = await filled(w, f.id);
     decideButton().focus();
     await user.keyboard('{Enter}{Enter}');
+    await sendNow();
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)).toHaveLength(1);
   });
@@ -933,10 +983,11 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
     const { user } = await filled(w, f.id);
     let release: () => void = () => undefined;
     w.intercept.fn = (req) => (isDecide(req) ? new Promise((resolve) => (release = () => resolve(undefined))) : undefined);
-    await user.click(decideButton());
-    const busy = within(panel()).getByRole('button', { name: 'Deciding' });
-    expect(busy).toHaveAttribute('aria-disabled', 'true');
-    expect(within(panel()).getByRole('textbox', { name: 'Reason' })).toHaveValue('It broke the rules.');
+    await decide(user);
+    // While it sends, the bar says so (busy), and the form is put away, not thrown away: it comes back if the send fails.
+    const busy = await within(panel()).findByText('Deciding');
+    expect(busy.closest('[aria-busy="true"]')).not.toBeNull();
+    expect(within(panel()).queryByRole('button', { name: 'Decide' })).not.toBeInTheDocument();
     await act(async () => {
       release();
       await Promise.resolve();
@@ -953,7 +1004,7 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
       reason: 'another moderator\'s words',
       actions: [{ subject: f.person, kind: 'warning', durationMs: null, rule: 2 }],
     });
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByText('This decision was already recorded. Nothing was applied twice.', { selector: 'p' })).toBeInTheDocument();
     expect(within(panel()).queryByRole('alert')).not.toBeInTheDocument();
     expect(within(panel()).getByText(`${first.groups[0]!.refCode} (Warning)`)).toBeInTheDocument();
@@ -965,8 +1016,10 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
     const f = await w.fileRich({ lines: TALK });
     const { user } = await filled(w, f.id);
     await w.client.decide(f.id, { verdict: 'no_action', reason: 'The other moderator saw banter.', actions: [] });
-    await user.click(decideButton());
-    expect(await within(panel()).findByText('Someone already decided this report.', { selector: '.cw-notice' })).toBeInTheDocument();
+    await decide(user);
+    // In an alert in the bar (the live region says it too), and focused so the keyboard is not left on a hidden form.
+    const said = await within(panel()).findAllByText('Someone already decided this report.');
+    expect(said.some((e) => e.closest('[role="alert"]') !== null)).toBe(true);
     await within(panel()).findByText('The other moderator saw banter.');
     expect(within(panel()).queryByRole('button', { name: 'Decide' })).not.toBeInTheDocument();
     expect(w.sent.filter((r) => r.method === 'GET' && r.path === `/reports/${f.id}`).length).toBeGreaterThanOrEqual(2);
@@ -983,7 +1036,7 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
       if (isDecide(req) && down) throw new TypeError('offline');
       return undefined;
     };
-    await user.click(decideButton());
+    await decide(user);
     const alert = await within(panel()).findByRole('alert');
     expect(alert).toHaveTextContent('Could not reach the server. Check your connection and try again.');
     expect(within(panel()).getByRole('textbox', { name: 'Reason' })).toHaveValue('It broke the rules.');
@@ -1011,7 +1064,7 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
       }
       return undefined;
     };
-    await user.click(decideButton());
+    await decide(user);
     const alert = await within(panel()).findByRole('alert');
     expect(w.cw.reports.get(f.id)?.status).toBe('actioned');
     await user.click(within(alert).getByRole('button', { name: 'Try again' }));
@@ -1034,7 +1087,7 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
     const f = await w.fileRich({ lines: TALK });
     const { user } = await filled(w, f.id);
     w.intercept.fn = (req) => (isDecide(req) ? { status, body: { error: code, message: 'raw server words that must not be shown' } } : undefined);
-    await user.click(decideButton());
+    await decide(user);
     const alert = await within(panel()).findByRole('alert');
     expect(alert).toHaveTextContent(message);
     expect(alert).not.toHaveTextContent('raw server words');
@@ -1049,10 +1102,10 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
     const { user } = await filled(w, f.id);
     let fail = true;
     w.intercept.fn = (req) => (isDecide(req) && fail ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByRole('alert');
     fail = false;
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(within(panel()).queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -1063,11 +1116,11 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
     const { user } = await filled(w, f.id);
     let fail = true;
     w.intercept.fn = (req) => (isDecide(req) && fail ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByRole('alert');
     fail = false;
     await pick(user, within(action(1)).getByLabelText('What happens'), 'Chat restriction, 24 hours');
-    await user.click(decideButton());
+    await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
     expect(decides(w)[1]!.body).toMatchObject({ actions: [{ kind: 'chat', durationMs: DAY }] });
   });
@@ -1077,7 +1130,7 @@ describe('DecisionPanel: double submit, replay, conflict and failure', () => {
     const f = await w.fileRich({ lines: TALK });
     const { user } = await filled(w, f.id);
     w.intercept.fn = (req) => (isDecide(req) ? { status: 404, body: { error: 'not_found', message: 'Not found.' } } : undefined);
-    await user.click(decideButton());
+    await decide(user);
     expect(await within(panel()).findByRole('alert')).toHaveTextContent('That no longer exists.');
   });
 });
@@ -1153,6 +1206,7 @@ describe('DecisionPanel: keyboard', () => {
     // Submit with Enter on the button.
     await tabTo(user, decideButton());
     await user.keyboard('{Enter}');
+    await sendNow();
     expect(await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' })).toBeInTheDocument();
     expect(decides(w)[0]!.body).toEqual({
       verdict: 'upheld',

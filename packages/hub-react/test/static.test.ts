@@ -211,9 +211,10 @@ describe('the stylesheet is a complete token contract', () => {
     expect(tokenBlock).toMatch(/:where\(\.cw-hub\)\s*\{/);
   });
 
-  // v2 sized the sheet for the shell, the windows, the toasts and the team view: 52 KB raw, 10 KB gzipped (the size test).
-  it('is under 52 KB raw (the size test holds it to 10 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(52 * 1024);
+  // v2 sized the sheet for the shell, the windows, the toasts and the team view: 52 KB raw, 10 KB gzipped. The case pane (the
+  // transcript, the decision bar, the context pane, the phone sheet) takes it to 64 KB raw, 12 KB gzipped (the size test).
+  it('is under 64 KB raw (the size test holds it to 12 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(64 * 1024);
   });
 });
 
@@ -380,6 +381,13 @@ describe('design v2: the palette', () => {
       /cw-suggest$/,
       /cw-radio:has\(input:checked\)$/,
       /cw-result$/,
+      // The case pane: your claim (a soft blue band), the open tab, your decision waiting for its Undo, the focus ring on a verdict,
+      // and the key caps on the primary button (white-ish on the accent).
+      /cw-claim\[data-claim='you'\]( strong)?$/,
+      /cw-tabs button\[aria-selected='true'\]$/,
+      /cw-queued$/,
+      /cw-radio input:focus-visible \+ label$/,
+      /cw-btn--primary \.cw-kbd$/,
       /cw-cmdk-item\[aria-selected='true'\]$/,
       /cw-cmdk-field:has\(input:focus-visible\)$/,
       /cw-toast-bar$/,

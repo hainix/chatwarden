@@ -3,6 +3,9 @@ import type { Claim } from './types.js';
 
 // Who holds a case, and what that makes of a team. Pure: the clock comes in as an argument.
 
+/** A claim lasts this long without a heartbeat (the kit's 10 minutes). */
+export const CLAIM_TTL_MS = 10 * 60_000;
+
 /**
  * The claim if it has not lapsed. The kit's rule: a claim is live strictly before `until`. A lapse moves no change token, so the
  * screen reads `until` itself.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createT, en } from '../src/i18n.js';
 import { excerptLines, filterLines, peopleOfReport, personName, recordSummary } from '../src/excerpt.js';
 import type { ActionRecord, StaffReport } from '../src/types.js';
 
@@ -120,24 +121,26 @@ describe('peopleOfReport', () => {
   });
 });
 
+const t = createT(en, 'en');
+
 describe('personName', () => {
   it('is the handle, or "Person" plus the tag when there is none', () => {
     const people = peopleOfReport(report({ targetHandle: '', excerpt: [], people: [], ownLineIds: {} }));
     const target = people.find((p) => p.role === 'target')!;
-    expect(personName(target, people, 'Person')).toBe('Person sub-targ');
+    expect(personName(target, people, t)).toBe('Person sub-targ');
     const reporter = people.find((p) => p.role === 'reporter')!;
-    expect(personName(reporter, people, 'Person')).toBe('Rae');
+    expect(personName(reporter, people, t)).toBe('Rae');
   });
 
   it('adds the tag to a handle two people share, so they can be told apart', () => {
     const r = report({ excerpt: [line('1', 0, 'Sam'), line('2', 1, 'Sam')], people: ['sub-reporter-0000', 'sub-target-0000'], ownLineIds: {} });
     const people = peopleOfReport(r);
-    expect(people.map((p) => personName(p, people, 'Person'))).toEqual(['Sam (sub-targ)', 'Sam (sub-repo)']);
+    expect(people.map((p) => personName(p, people, t))).toEqual(['Sam (sub-targ)', 'Sam (sub-repo)']);
   });
 
   it('never shows more than the 8-character tag', () => {
     const people = peopleOfReport(report({ targetHandle: '', excerpt: [], people: [], ownLineIds: {} }));
-    for (const p of people) expect(personName(p, people, 'Person')).not.toContain('0000');
+    for (const p of people) expect(personName(p, people, t)).not.toContain('0000');
   });
 });
 
@@ -202,5 +205,14 @@ describe('recordSummary', () => {
   });
   it('only revoked: total is 0 and revoked says how many', () => {
     expect(recordSummary([rec('area', { revoked: true })])).toEqual({ counts: {}, total: 0, revoked: 1 });
+  });
+
+  it('the shape of the name comes from the catalog, not from the code (a language that puts the tag first)', () => {
+    const de = createT({ ...en, 'hub.person.unnamed': '{tag} (Person)', 'hub.person.named': '{tag} / {name}' }, 'de');
+    const none = peopleOfReport(report({ targetHandle: '', excerpt: [], people: [], ownLineIds: {} }));
+    expect(personName(none.find((p) => p.role === 'target')!, none, de)).toBe('sub-targ (Person)');
+    const r = report({ excerpt: [line('1', 0, 'Sam'), line('2', 1, 'Sam')], people: ['sub-reporter-0000', 'sub-target-0000'], ownLineIds: {} });
+    const people = peopleOfReport(r);
+    expect(people.map((p) => personName(p, people, de))).toEqual(['sub-targ / Sam', 'sub-repo / Sam']);
   });
 });
