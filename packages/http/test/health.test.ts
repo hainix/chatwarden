@@ -90,6 +90,16 @@ describe('healthRoutes', () => {
     expect((await up.call('GET', '/readyz')).status).toBe(200);
   });
 
+  it('cw.close() then ready() is false on the SQLite store, and /readyz is 503 (healthz stays 200)', async () => {
+    const { cw, call, logged } = await setup();
+    expect(cw.ready()).toBe(true);
+    await cw.close();
+    expect(cw.ready()).toBe(false);
+    expect(logged.at(-1)).toEqual(['chatwarden.ready_failed', { error: 'Error' }]);
+    expect(await call('GET', '/readyz')).toMatchObject({ status: 503, body: { ok: false } });
+    expect((await call('GET', '/healthz')).status).toBe(200);
+  });
+
   it('/readyz is 503 even if cw.ready() itself throws, logging the class only', async () => {
     const { call, logged } = await setup((cw) => ({
       ...cw,

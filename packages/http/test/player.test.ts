@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createChatwarden, defineRules, STARTER_RULES } from '@chatwarden/core';
 import type { Chatwarden, Logger, Matcher, RawWho } from '@chatwarden/core';
 import { openStore } from '@chatwarden/store-sqlite';
-import { createRouter, playerRoutes } from '@chatwarden/http';
+import { CODE_OF_CONDUCT_CSP, createRouter, playerRoutes } from '@chatwarden/http';
 import type { KitRequest, KitResponse } from '@chatwarden/http';
 import { keysDeep } from './world.js';
 
@@ -507,6 +507,50 @@ describe('GET /code-of-conduct', () => {
     expect(html).toContain('https://example.test/appeal');
     const md = (await call('GET', '/code-of-conduct')).body as string;
     expect(md).toContain('example.test/appeal');
+  });
+
+  it('exports the CSP it sends, byte for byte', () => {
+    expect(CODE_OF_CONDUCT_CSP).toBe(CSP);
+  });
+
+  describe('hostile adopter rules', () => {
+    const hostile = defineRules([
+      { number: 1, title: '<script>alert(1)</script>', text: '"><img src=x onerror=alert(2)>' },
+      { number: 2, title: 'Fine <b>title</b>', text: "'><svg onload=alert(3)> & more" },
+    ]);
+
+    it('html: escaped in the full document, with the exact CSP and nosniff', async () => {
+      const { call } = await setup({ rules: hostile });
+      const res = await call('GET', '/code-of-conduct', { query: { format: 'html' } });
+      expect(res.status).toBe(200);
+      expect(res.headers).toEqual({
+        'content-type': 'text/html; charset=utf-8',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': CSP,
+      });
+      const html = res.body as string;
+      expect(html.startsWith('<!doctype html>')).toBe(true);
+      expect(html).not.toMatch(/<script|<img|<svg|<b>/i);
+      // `onerror=` survives only as inert escaped text: no tag carries an event handler
+      expect(html).not.toMatch(/<[^>]*\son[a-z]+\s*=/i);
+      expect(html).toContain('&lt;img src=x onerror=alert(2)&gt;');
+      expect(html).toContain('&lt;script&gt;');
+      // the shell's own single <style> block is the only markup of its kind
+      expect(html.match(/<style/gi)?.length).toBe(1);
+    });
+
+    it('markdown and text: the right content type and nosniff, and no live markup in the text format', async () => {
+      const { call } = await setup({ rules: hostile });
+      const md = await call('GET', '/code-of-conduct', { query: { format: 'markdown' } });
+      expect(md.headers).toEqual({ 'content-type': 'text/markdown; charset=utf-8', 'x-content-type-options': 'nosniff' });
+      expect(typeof md.body).toBe('string');
+      const text = await call('GET', '/code-of-conduct', { query: { format: 'text' } });
+      expect(text.headers).toEqual({ 'content-type': 'text/plain; charset=utf-8', 'x-content-type-options': 'nosniff' });
+      expect(typeof text.body).toBe('string');
+      // markdown is rendered by the reader's own tool; the route must not hand it out as html
+      expect(md.headers?.['content-type']).not.toMatch(/html/);
+      expect(text.headers?.['content-type']).not.toMatch(/html/);
+    });
   });
 
   it('a game name that cannot head a document fails at build', async () => {

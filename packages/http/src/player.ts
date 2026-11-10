@@ -39,8 +39,11 @@ const DEFAULT_NAMES_LIMIT: NamesRateLimit = { max: 20, windowMs: 60_000 };
 const NAME_MAX = 64;
 
 const NO_STORE = { 'cache-control': 'no-store' } as const;
-/** The code of conduct page may load nothing and run nothing; its one inline style block is the only thing allowed. */
-const CONDUCT_CSP = "default-src 'none'; style-src 'unsafe-inline'";
+/**
+ * The `content-security-policy` of the HTML code of conduct: it may load nothing and run nothing; its one inline style
+ * block is the only thing allowed. Exported so an example server serving the same page uses this value, not a copy.
+ */
+export const CODE_OF_CONDUCT_CSP = "default-src 'none'; style-src 'unsafe-inline'";
 const CONTENT_TYPES: Readonly<Record<DocumentFormat, string>> = {
   html: 'text/html; charset=utf-8',
   markdown: 'text/markdown; charset=utf-8',
@@ -188,7 +191,7 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
         'x-content-type-options': 'nosniff',
       };
       if (format !== 'html') return { status: 200, headers, body: doc };
-      headers['content-security-policy'] = CONDUCT_CSP;
+      headers['content-security-policy'] = CODE_OF_CONDUCT_CSP;
       return {
         status: 200,
         headers,

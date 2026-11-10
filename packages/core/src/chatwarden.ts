@@ -335,7 +335,8 @@ export interface Chatwarden {
   purge(policy?: Partial<RetentionPolicy>): Promise<PurgeResult>;
   /**
    * Is the store answering? True when `schemaVersion()` returns; false (logged `chatwarden.ready_failed`, error class
-   * only) when it throws, a closed store included. Synchronous, never throws, reads nothing else. For a readiness probe.
+   * only) when it throws, which the SQLite store does once closed (`close()`). A store whose `schemaVersion()` never throws, such
+   * as the in-memory test double, always reads ready. Synchronous, never throws, reads nothing else. For a readiness probe.
    */
   ready(): boolean;
   /** Wait for background store writes (identity linking) to land. */

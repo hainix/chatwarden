@@ -20,7 +20,13 @@ export interface KitRequest {
   rawBody?: string;
 }
 
-/** One HTTP response; the adapter serialises `body` (JSON). */
+/**
+ * One HTTP response. How an adapter sends `body`:
+ * - a `string` is sent RAW, as the response body, with the response's own `content-type` header (the code of conduct is
+ *   `text/html`, `text/markdown` or `text/plain`). Never JSON-encode it: that would quote the document.
+ * - anything else is serialised as JSON and sent with `content-type: application/json; charset=utf-8`.
+ * Every `headers` entry is sent as given.
+ */
 export interface KitResponse {
   status: number;
   headers?: Record<string, string>;
