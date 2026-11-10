@@ -1467,7 +1467,7 @@
   white-space: pre-wrap;
 }
 
-/* The person page: the title and its buttons, a report in the timeline (a neutral mark where a sanction has its card), the revoke
+/* The person page: the title and its buttons, a report in the timeline (no card: nothing was done by it), the revoke
    form under a sanction in force, and the sanction form. Nothing here is coloured: the cards and the red Confirm button carry it. */
 .cw-hub .cw-personhead {
   display: flex;
@@ -1486,18 +1486,20 @@
   gap: var(--cw-space-1);
   min-width: 0;
 }
-.cw-hub .cw-rec-mark {
-  width: 0.875rem;
-  height: 1.1875rem;
-  margin-top: 0.15rem;
-  border: 1.5px solid var(--cw-border-strong);
-  border-radius: 2.5px;
+.cw-hub .cw-rec--report {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cw-hub .cw-personhead .cw-screen-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .cw-hub .cw-rec .cw-facts {
   gap: var(--cw-space-1) var(--cw-space-3);
 }
 .cw-hub .cw-arow-who {
+  min-width: 0;
   margin-right: var(--cw-space-2);
+  overflow-wrap: anywhere;
   color: var(--cw-ink);
 }
 .cw-hub .cw-revoke {

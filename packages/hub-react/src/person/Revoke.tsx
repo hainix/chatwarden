@@ -24,6 +24,8 @@ export function Revoke({ s, open, onOpen, onClose, onRevoked }: { s: SanctionGro
   const [attempted, setAttempted] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  // A second click while the first is on its way does nothing: only the first call carries on to the toast and the reload.
+  const sending = useRef(false);
   const action = useHubAction((text: string) => client.revokeSanction(s.groupId, text));
 
   const what = choiceLabel(t, locale, { kind: s.kind, durationMs: s.endsAt === null ? null : s.endsAt - s.startsAt });
@@ -41,12 +43,16 @@ export function Revoke({ s, open, onOpen, onClose, onRevoked }: { s: SanctionGro
   };
 
   const submit = async (): Promise<void> => {
+    if (sending.current) return;
     setAttempted(true);
     if (problem !== undefined) {
       textRef.current?.focus();
       return;
     }
-    const result = await action.run(trimmed);
+    sending.current = true;
+    const result = await action.run(trimmed).finally(() => {
+      sending.current = false;
+    });
     if (result.ok) {
       toasts.push({ text: t('hub.person.revoke.done', { what }) });
       onRevoked('done');

@@ -48,6 +48,8 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
     (mode === 'note' ? noteRef : whatRef).current?.focus();
   }, [mode]);
 
+  // A second click while the first is on its way does nothing: only the first call carries on to the toast and the reload.
+  const sending = useRef(false);
   const apply = useHubAction(async (takeOver: boolean) => {
     const input = toSanctionInput(person, draft, mode, takeOver ? { takeOver: true } : {});
     const done = await client.applySanction(input);
@@ -55,6 +57,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   });
 
   const submit = async (takeOver: boolean): Promise<void> => {
+    if (sending.current) return;
     setAttempted(true);
     if (problems.count > 0) {
       // Focus the first field with a problem, in the order they are on the page.
@@ -62,7 +65,10 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
       document.getElementById(id(order[0] ?? 'what'))?.focus();
       return;
     }
-    const result = await apply.run(takeOver);
+    sending.current = true;
+    const result = await apply.run(takeOver).finally(() => {
+      sending.current = false;
+    });
     if (!result.ok) return;
     const { input, refCode } = { input: result.value.input, refCode: result.value.refCode };
     toasts.push({

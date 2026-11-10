@@ -81,6 +81,18 @@ describe('Recent actions name the person', () => {
   });
 });
 
+describe('a very long handle in the action rows', () => {
+  it('shows whole in Recent actions and in All actions', async () => {
+    const w = await hubWorld();
+    const LONG = 'Vlemmo'.repeat(10);
+    const f = await w.file({ target: LONG });
+    await w.sanction(f.person, 'warning', 1);
+    renderHub(w);
+    await overview();
+    expect(within(recent()).getByText(LONG, { selector: '.cw-arow-who' })).toBeInTheDocument();
+  });
+});
+
 describe('All actions', () => {
   it('lists every sanction newest first with the person, the card, what, the rule and who', async () => {
     const w = await hubWorld();

@@ -215,8 +215,15 @@ describe('the person page on a phone', () => {
     expect(rule('.cw-hub .cw-revoke-form')).not.toMatch(/\bwidth:/);
   });
 
+  it('a long unbroken handle breaks instead of widening the page: the person title and the name in an action row', () => {
+    for (const sel of ['.cw-hub .cw-personhead .cw-screen-title', '.cw-hub .cw-arow-who']) {
+      expect(rule(sel), sel).toMatch(/overflow-wrap:\s*anywhere/);
+      expect(rule(sel), sel).toMatch(/min-width:\s*0/);
+    }
+  });
+
   it('colours nothing: the person page rules use neutral tokens only', () => {
-    for (const sel of ['.cw-hub .cw-personhead', '.cw-hub .cw-rec-mark', '.cw-hub .cw-revoke-form', '.cw-hub .cw-arow-who']) {
+    for (const sel of ['.cw-hub .cw-personhead', '.cw-hub .cw-revoke-form', '.cw-hub .cw-arow-who']) {
       expect(rule(sel), sel).not.toMatch(/var\(--cw-(accent|red|yellow|live)/);
     }
   });

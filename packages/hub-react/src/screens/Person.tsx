@@ -158,12 +158,11 @@ function PersonBody({ history, revoking, setRevoking, onRevoked }: { history: Pe
   );
 }
 
-/** A report about them: when, what it was for, and a way to open it. It has no referee card: nothing was done to them by it. */
+/** A report about them: when, what it was for, and a way to open it. It has no referee card and no placeholder for one: nothing was done to them by it. */
 function ReportEntry({ report }: { report: PersonHistory['reports'][number] }) {
   const { t, can } = useHub();
   return (
     <li className="cw-rec cw-rec--report">
-      <span className="cw-rec-mark" aria-hidden="true" />
       <div className="cw-rec-body">
         <p className="cw-rec-head">
           <strong>{t('hub.person.report')}</strong>

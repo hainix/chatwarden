@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderHub } from './render.js';
 import { DAY, hubWorld } from './world.js';
@@ -418,6 +418,23 @@ describe('applying a sanction', () => {
       await waitFor(() => expect(items(inForce())).toHaveLength(1));
       expect(posts(w)).toHaveLength(1);
       expect((await w.direct.listSanctions()).items).toHaveLength(1);
+    });
+
+    it('two clicks inside the in-flight window: one POST, one more history read (2 in all), one more history.view, one toast', async () => {
+      const { w, user } = await ready();
+      w.intercept.fn = async (req) => {
+        if (req.path === '/sanctions' && req.method === 'POST') await new Promise((r) => setTimeout(r, 80));
+        return undefined;
+      };
+      fireEvent.click(apply());
+      fireEvent.click(apply());
+      await waitFor(() => expect(items(inForce())).toHaveLength(1));
+      await new Promise((r) => setTimeout(r, 100));
+      expect(posts(w)).toHaveLength(1);
+      expect(histories(w)).toHaveLength(2);
+      expect(audits(w, 'history.view')).toHaveLength(2);
+      expect(screen.getAllByText(/^Chat restriction, 24 hours applied./)).toHaveLength(1);
+      void user;
     });
 
     it('a server problem (500) is a plain sentence and keeps the form', async () => {

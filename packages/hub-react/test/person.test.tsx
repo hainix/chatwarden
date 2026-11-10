@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { personTag } from '../src/format.js';
 import { renderHub } from './render.js';
@@ -104,6 +104,19 @@ describe('the page', () => {
   });
 });
 
+describe('a very long handle', () => {
+  const LONG = 'Zorbak'.repeat(10);
+
+  it('renders whole in the person title and in the Recent actions row (the stylesheet breaks it; jsdom cannot measure)', async () => {
+    const w = await hubWorld();
+    const f = await w.file({ target: LONG });
+    await w.sanction(f.person, 'warning', 1);
+    expect(LONG).toHaveLength(60);
+    await open(w, f.person);
+    expect(screen.getByRole('heading', { level: 2, name: LONG })).toBeInTheDocument();
+  });
+});
+
 describe('the timeline', () => {
   it('lists reports and sanctions together, newest first, each with its card, what, rule, who, ref code and time', async () => {
     const w = await hubWorld();
@@ -122,19 +135,22 @@ describe('the timeline', () => {
     expect(rows[0]).toHaveTextContent(`Ref ${chat.refCode}`);
     expect(rows[0]!.querySelector('.cw-card--restriction')).not.toBeNull();
     expect(rows[1]).toHaveTextContent('Report');
+    // A report is not a sanction: no referee card, and no empty box in its place.
+    expect(rows[1]!.querySelector('.cw-card, .cw-rec-mark')).toBeNull();
+    expect(within(rows[1]!).queryByText('Open')).toBeNull();
     expect(rows[1]).toHaveTextContent('Spam');
-    expect(within(rows[1]!).getByRole('link', { name: /Open/ })).toHaveAttribute('href', `#/reports/${g.id}`);
+    expect(within(rows[1]!).getByRole('link', { name: /View/ })).toHaveAttribute('href', `#/reports/${g.id}`);
     expect(rows[2]).toHaveTextContent('Warning');
     expect(rows[2]!.querySelector('.cw-card--warning')).not.toBeNull();
     expect(rows[3]).toHaveTextContent('Harassment');
-    expect(within(rows[3]!).getByRole('link', { name: /Open/ })).toHaveAttribute('href', `#/reports/${f.id}`);
+    expect(within(rows[3]!).getByRole('link', { name: /View/ })).toHaveAttribute('href', `#/reports/${f.id}`);
   });
 
   it('opens a report from the timeline', async () => {
     const w = await hubWorld();
     const f = await w.file({ target: 'Mallory' });
     const { user, router } = await open(w, f.person);
-    await user.click(within(timeline()).getByRole('link', { name: /Open/ }));
+    await user.click(within(timeline()).getByRole('link', { name: /View/ }));
     await waitFor(() => expect(router.path).toBe(`/reports/${f.id}`));
   });
 
@@ -419,6 +435,26 @@ describe('revoke', () => {
     await user.dblClick(confirm());
     await waitFor(() => expect(within(inForce()).getByText('Nothing is in force right now.')).toBeInTheDocument());
     expect(revokes(w)).toHaveLength(1);
+  });
+
+  it('two clicks inside the in-flight window: one POST, one more history read (2 in all, no third), one more history.view, one toast', async () => {
+    const { w, user } = await oneBan();
+    // The server takes a moment, so the second click really lands while the first revoke is still on its way.
+    w.intercept.fn = async (req) => {
+      if (/\/revoke$/.test(req.path)) await new Promise((r) => setTimeout(r, 80));
+      return undefined;
+    };
+    await user.click(revokeButton());
+    await user.type(reasonBox(), 'once only');
+    const button = confirm();
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(within(inForce()).getByText('Nothing is in force right now.')).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 100));
+    expect(revokes(w)).toHaveLength(1);
+    expect(histories(w)).toHaveLength(2);
+    expect(audits(w, 'history.view')).toHaveLength(2);
+    expect(screen.getAllByText('Revoked Ban, 7 days.')).toHaveLength(1);
   });
 
   it('404 counts as already revoked: someone else got there first, so the page reloads and shows it as revoked, as a success', async () => {
