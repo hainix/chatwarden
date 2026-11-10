@@ -13,10 +13,9 @@ const stores: Array<[string, () => Store]> = [
 describe('migration 13', () => {
   it('is version 13 and creates kit_webhook_keys with the documented columns', () => {
     expect(MIGRATIONS[12]?.version).toBe(13);
-    expect(MIGRATIONS.at(-1)?.version).toBe(13);
     const db = new DatabaseSync(':memory:');
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(13);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     const cols = db.prepare('PRAGMA table_info(kit_webhook_keys)').all();
     expect(cols.map((c) => String(c.name)).sort()).toEqual(['created_at', 'fingerprint', 'key', 'result_json', 'state']);
     expect(Number(cols.find((c) => c.name === 'key')?.pk)).toBe(1);
@@ -27,7 +26,7 @@ describe('migration 13', () => {
     openStore({ db, migrations: MIGRATIONS.slice(0, 12) }).close();
     db.prepare("INSERT INTO kit_audit (id, at, actor, action, subject_type, subject_ref) VALUES ('o', 1, 'a', 'add', 'term', 't')").run();
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(13);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(db.prepare('SELECT * FROM kit_audit').all()).toHaveLength(1);
     expect(db.prepare('SELECT * FROM kit_webhook_keys').all()).toHaveLength(0);
   });

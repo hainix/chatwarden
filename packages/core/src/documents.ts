@@ -1,4 +1,4 @@
-import { lengthLabel, outcomeLabel } from './ladder.js';
+import { DEFAULT_SEVERE_RULES, lengthLabel, outcomeLabel } from './ladder.js';
 import type { LadderCell } from './ladder.js';
 import { validateProfile } from './profile.js';
 import type { GuidelineCover, GuidelineTier, ModerationProfile, Outcome } from './profile.js';
@@ -326,7 +326,6 @@ const RECORD_STEPS =
   '0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent';
 
 const DEFAULT_AREA_RULES: readonly number[] = [5, 6];
-const DEFAULT_SEVERE_RULES: readonly number[] = [1];
 
 function areaRuleList(policy: DocumentPolicy): Array<{ number: number; title: string }> {
   return ruleLabels(policy.rules, policy.profile.areaRules ?? DEFAULT_AREA_RULES);

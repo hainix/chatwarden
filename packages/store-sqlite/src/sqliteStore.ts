@@ -20,6 +20,7 @@ import type {
   StoredReport,
   StrikeRow,
   WebhookKeyReservation,
+  DiscordThreadRow,
   SubjectId,
   SubjectIdKind,
   SubjectIdRecord,
@@ -416,6 +417,28 @@ export class SqliteStore implements Store, TermStore {
 
   purgeWebhookKeys(before: number): number {
     return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_webhook_keys WHERE created_at < ?').run(before).changes));
+  }
+
+  // Discord threads. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
+
+  getDiscordThread(subject: string): DiscordThreadRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT subject, thread_id, label, created_at FROM kit_discord_threads WHERE subject = ?').get(subject);
+      return r === undefined
+        ? null
+        : { subject: String(r.subject), threadId: String(r.thread_id), label: String(r.label), createdAt: Number(r.created_at) };
+    });
+  }
+
+  putDiscordThread(row: DiscordThreadRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO kit_discord_threads (subject, thread_id, label, created_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT (subject) DO UPDATE SET thread_id = excluded.thread_id, label = excluded.label, created_at = excluded.created_at`,
+        )
+        .run(row.subject, row.threadId, row.label, row.createdAt);
+    });
   }
 
   // Mutes. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never

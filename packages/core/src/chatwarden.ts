@@ -37,6 +37,7 @@ import { SubjectIndex } from './subjects.js';
 import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type {
   Clock,
+  DiscordThreadRow,
   Logger,
   Matcher,
   Platform,
@@ -345,6 +346,23 @@ export interface Chatwarden {
     complete(key: string, resultJson: string): boolean;
     /** Free a pending key (the apply failed, so a retry may run). A done key is never freed. */
     release(key: string): boolean;
+  };
+  /**
+   * Who is who, for staff tools such as the Discord feed. `canonical` is the surviving subject a staff ref resolves to
+   * (an id nobody merged is its own); `aliases` is that survivor and every subject merged into it, sorted. Both read the
+   * in-memory index and never throw. Carries subject ids: staff channels only, never send to a player.
+   */
+  people: {
+    canonical(subject: SubjectId): SubjectId;
+    aliases(subject: SubjectId): SubjectId[];
+  };
+  /**
+   * The Discord feed's thread map (`@chatwarden/discord`): the forum thread kept per person (`kit_discord_threads`). A
+   * thin facade over the store, which throws its own error if it fails. Holds no chat text.
+   */
+  discordThreads: {
+    get(subject: string): DiscordThreadRow | null;
+    put(row: DiscordThreadRow): void;
   };
   /**
    * Delete rows past retention now. The built-in timer already does this (unless `retention: false`); the
@@ -724,6 +742,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       },
       complete: (key, resultJson) => store.transaction(() => store.completeWebhookKey(key, resultJson)),
       release: (key) => store.transaction(() => store.releaseWebhookKey(key)),
+    },
+    people: {
+      canonical: (subject) => subjects.canonical(subject),
+      aliases: (subject) => subjects.aliasesOf(subject),
+    },
+    discordThreads: {
+      get: (subject) => store.transaction(() => store.getDiscordThread(subject)),
+      put: (row) => store.transaction(() => store.putDiscordThread(row)),
     },
     purge: async (policy) => {
       const merged: Partial<RetentionPolicy> = { ...retentionPolicy };

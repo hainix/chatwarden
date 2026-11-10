@@ -6,6 +6,7 @@
     { "path": "packages/matcher" },
     { "path": "packages/profanity" },
     { "path": "packages/http" },
+    { "path": "packages/discord" },
     { "path": "examples/tiny-chat" }
   ]
 }

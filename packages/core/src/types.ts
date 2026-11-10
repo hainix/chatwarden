@@ -232,6 +232,18 @@ export interface StrikeRow {
 // Reports (storage shapes)
 // ---------------------------------------------------------------------------
 
+/**
+ * A Discord forum thread kept for one person by `@chatwarden/discord`. `label` is the neutral name the thread was
+ * created with (`Case 7K2QX`): random, never derived from an id, hash or handle.
+ */
+export interface DiscordThreadRow {
+  subject: string;
+  threadId: string;
+  label: string;
+  /** Epoch ms. */
+  createdAt: number;
+}
+
 /** What a player may report another for. */
 export type ReportCategory = 'harassment' | 'hate' | 'cheating' | 'spam' | 'disruption' | 'other';
 
@@ -630,6 +642,17 @@ export interface Store {
 
   /** Delete idempotency keys with `createdAt < before`, done or pending. Returns how many. */
   purgeWebhookKeys(before: number): number;
+
+  // Discord thread map (K3b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
+
+  /**
+   * The forum thread the Discord feed keeps for a person, or null. `subject` is a canonical subject id, or one of the
+   * feed's reserved shared-thread keys (`__unattributed__`, `__log__`). Holds no chat text.
+   */
+  getDiscordThread(subject: string): DiscordThreadRow | null;
+
+  /** Store (or replace, to repoint) a person's forum thread. One row per `subject`; two subjects may share a thread. */
+  putDiscordThread(row: DiscordThreadRow): void;
 
   // Notices. SYNCHRONOUS on purpose (like sanctions): `NoticeService` runs these inside `transaction`.
 

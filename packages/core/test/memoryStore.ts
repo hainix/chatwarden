@@ -15,6 +15,7 @@ import type {
   SubjectId,
   SubjectRecord,
   WebhookKeyReservation,
+  DiscordThreadRow,
 } from '../src/types.js';
 
 /** A report plus the moderation columns a decision fills. */
@@ -56,6 +57,8 @@ export class MemoryStore implements Store {
   protected auditRows: AuditRow[] = [];
   /** Incoming-webhook idempotency keys. */
   protected webhookKeys = new Map<string, { createdAt: number; state: 'pending' | 'done'; resultJson: string | null; fingerprint: string }>();
+  /** The Discord feed's thread map by subject. */
+  protected discordThreads = new Map<string, DiscordThreadRow>();
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -333,6 +336,22 @@ export class MemoryStore implements Store {
     for (const [key] of gone) this.webhookKeys.delete(key);
     if (gone.length > 0) this.undoWith(() => gone.forEach(([key, row]) => this.webhookKeys.set(key, row)));
     return gone.length;
+  }
+
+  // Discord threads (synchronous, see the Store interface)
+
+  getDiscordThread(subject: string): DiscordThreadRow | null {
+    const row = this.discordThreads.get(subject);
+    return row === undefined ? null : { ...row };
+  }
+
+  putDiscordThread(row: DiscordThreadRow): void {
+    const prior = this.discordThreads.get(row.subject);
+    this.discordThreads.set(row.subject, { ...row });
+    this.undoWith(() => {
+      if (prior === undefined) this.discordThreads.delete(row.subject);
+      else this.discordThreads.set(row.subject, prior);
+    });
   }
 
   // Mutes (synchronous, see the Store interface)
