@@ -64,14 +64,34 @@ describe('the permission table', () => {
 });
 
 describe('GET /people/:ref/history: sanctions and asReporter', () => {
-  it('keeps history and reports exactly as they were and adds sanctions and asReporter after them', async () => {
+  it('handle is the name on the latest report filed against the person, null for a reporter-only or blank one', async () => {
+    const w = await world();
+    await file(w, { targetHandle: 'OldName', key: 'raw-client-key-history-person-01' });
+    w.clock.t += 5000;
+    const later = await file(w, { targetHandle: 'Fenrisk', key: 'raw-client-key-history-person-01' });
+    const handleOf = async (ref: string): Promise<unknown> => ((await w.call('GET', `/people/${ref}/history`)).body as { handle: unknown }).handle;
+    expect(await handleOf(later.target)).toBe('Fenrisk');
+    expect(await handleOf(later.reporter)).toBeNull();
+    const blank = await file(w, { targetHandle: '' });
+    expect(await handleOf(blank.target)).toBeNull();
+  });
+
+  it('handle adds no audit row beyond history.view', async () => {
+    const w = await world();
+    const r = await file(w);
+    await w.call('GET', `/people/${r.target}/history`);
+    expect(w.routeAudit().map((a) => a.action)).toEqual(['history.view']);
+  });
+
+  it('keeps history and reports exactly as they were and adds sanctions, asReporter and handle after them', async () => {
     const w = await world();
     const r = await file(w);
     await sanction(w, r.target, { kind: 'warning', durationMs: null });
     const res = await w.call('GET', `/people/${r.target}/history`);
     expect(res.status).toBe(200);
     const body = res.body as Record<string, unknown>;
-    expect(Object.keys(body)).toEqual(['history', 'reports', 'sanctions', 'asReporter']);
+    expect(Object.keys(body)).toEqual(['history', 'reports', 'sanctions', 'asReporter', 'handle']);
+    expect(body.handle).toBe('TargetName');
     expect(body.history).toEqual(w.cw.history(r.target));
     expect(body.reports).toEqual([{ id: r.id, createdAt: expect.any(Number), category: 'harassment' }]);
   });
@@ -79,7 +99,7 @@ describe('GET /people/:ref/history: sanctions and asReporter', () => {
   it('an unknown person has no sanctions and a zero reporter record (200)', async () => {
     const w = await world();
     const res = await w.call('GET', '/people/s_nobody/history');
-    expect(res.body).toEqual({ history: [], reports: [], sanctions: [], asReporter: ZERO_REPORTER });
+    expect(res.body).toEqual({ history: [], reports: [], sanctions: [], asReporter: ZERO_REPORTER, handle: null });
   });
 
   it('lists the sanctions newest first as SanctionGroupView, never an ip row, value or id', async () => {

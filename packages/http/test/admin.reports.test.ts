@@ -835,6 +835,7 @@ describe('GET /people/:ref/history', () => {
       reports: [],
       sanctions: [],
       asReporter: { reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null },
+      handle: null,
     });
     expect(audit().map((a) => a.action)).toEqual(['history.view']);
   });
