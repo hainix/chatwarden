@@ -31,12 +31,14 @@ feature complete".
 
 ## Global Constraints
 
-- Both packages are **published** and join the changesets `fixed` group. Versioning: one **minor** changeset for the group
-  (0.1.1 → 0.2.0), since there are new packages and new routes. Each new package gets README, LICENSE, `files`, `exports`
+- Both packages are **published** and join the changesets `fixed` group. Versioning: one **patch** changeset for the group
+  (0.1.1 → 0.1.2). Not a minor: in 0.x a minor leaves every existing `^0.1.x` peer range out of range, and changesets would
+  then bump the dependents a major. The new work is additive. Task 9 runs `npx changeset version` in the branch, as K8a did. Each new package gets README, LICENSE, `files`, `exports`
   with types, `sideEffects` listing only its CSS, `prepack: tsc -b`, a VERSION constant synced by `scripts/sync-version.mjs`,
   and an entry in `scripts/publish-order.mjs` and `scripts/check-pack.mjs` (both browser-safe).
 - `react` and `react-dom` are **peerDependencies** only; never bundle React. `@chatwarden/core` and `@chatwarden/http` are
-  peer `^0.2.0` for hub-react, and core for player-react. Use type-only imports where possible.
+  peer `^0.1.1` while building (the workspace is at 0.1.1) and raised to `^0.1.2` by Task 9 once
+  `changeset version` has run, for hub-react (core and http) and player-react (core). Use type-only imports where possible.
 - **No identifiers leak to players.** player-react shows only what `GET /notices` / `GET /record` return. The hub shows
   opaque person refs as a short tag (first 8 characters), never `a:`/`k:` refs, accounts, keys or IPs.
 - **i18n:** every user-visible string comes from a keyed English catalog (`hub.*`, `player.*`) through a `t(key, params)`
