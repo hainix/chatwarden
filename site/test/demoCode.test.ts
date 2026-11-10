@@ -44,7 +44,8 @@ describe('Show me the code', () => {
   it('calls the real entry points the steps are about', () => {
     expect(CODE_STEPS[0]?.code).toContain('cw.chat.accept(');
     expect(CODE_STEPS[1]?.code).toContain('cw.reports.submit(');
-    expect(CODE_STEPS[2]?.code).toContain('"action": "decide"');
+    expect(CODE_STEPS[2]?.code).toContain('await cw.decide(');
+    expect(CODE_STEPS[2]?.source).toBe('packages/core/README.md');
     expect(CODE_STEPS[3]?.code).toContain('/api/notices');
   });
 });

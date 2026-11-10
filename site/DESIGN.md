@@ -116,7 +116,11 @@ a sticky bar). The REFUSED! stamp is the hero's, reused. The tour tooltip is a g
 never reads as part of a screen; it points at the control with a static gold ring (a soft ripple only when motion is allowed).
 
 - It talks to the kit through `DemoEngine` (`engine.ts`), shaped like `@chatwarden/core` (`chat.accept`, `reports.submit`,
-  `decide`, `notices.*`, `suggest`). `fakeEngine.ts` is a temporary in-browser stand-in; Task 3 replaces it with the real kit.
+  `decide`, `notices.*`, `suggest`). `kitEngine.ts` binds the REAL kit behind it (core, the in-memory store, the matcher with
+  its synthetic pack), one fixed room `lobby` and three seats. Every verdict is the kit's: the matcher refuses, the limits are
+  its defaults (3 lines per 5 s, 3 blocked lines an hour earn an automatic 30 minute timeout), the suggestion is its ladder.
+  The only demo-side judgement is `conductLevel` (a rude-word heuristic, labelled as such). The kit is in the lazy demo chunk
+  only. `vite.config.ts` cuts obscenity's unused English word list out of the bundle (the site ships invented words only).
 - "Show me the code" shows lines copied verbatim from the READMEs (`test/demoCode.test.ts` checks every line).
 - Phones (under 900px): one pane at a time, a sticky Game / Moderator switcher below the site header, the tour moves to the
   moderator pane by itself for step 3, and the decide bar sticks to the bottom of the screen.

@@ -312,7 +312,9 @@
   font-size: 1.05rem;
   color: var(--gold-bright);
 }
-.pframe-kind[data-kind='chat'] {
+.pframe-kind[data-kind='chat'],
+.pframe-kind[data-kind='area'],
+.pframe-kind[data-kind='ban'] {
   color: #ff9cc4;
 }
 .pframe-rule {
@@ -646,6 +648,8 @@
 .evidence {
   display: grid;
   gap: 4px;
+  max-height: 15rem; /* the kit keeps up to 100 lines: scroll inside the box */
+  overflow-y: auto;
   padding: 8px;
   background: #090d1d;
   border: 2px solid #1d2754;
@@ -1141,7 +1145,7 @@
 .drawer-source code {
   overflow-wrap: anywhere;
 }
-/* The stand-in disclosure: a small dashed badge (dashed means "not here yet" on this site). */
+/* The one honest line about what runs the demo: a quiet pill with a solid edge (this is the real kit, not a stand-in). */
 .demo-badge {
   justify-self: start;
   max-width: 100%;
@@ -1149,7 +1153,7 @@
   color: var(--muted);
   font-size: 0.8125rem;
   font-weight: 700;
-  border: 2px dashed var(--edge);
+  border: 2px solid var(--edge);
   border-radius: 999px;
 }
 .demo-error {

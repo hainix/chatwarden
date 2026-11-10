@@ -1,18 +1,20 @@
-// FakeEngine is the temporary stand-in behind DemoEngine (Task 3 swaps in the real kit). It has to behave like the kit:
-// invented terms refused under Community Rule 1, trash talk delivered, reports that carry the last lines as evidence,
-// a decision that makes a notice for the player with the chosen line masked, and an ack.
+// KitEngine runs the REAL @chatwarden/core kit (with the matcher's synthetic pack and the in-memory store) behind the
+// DemoEngine interface. Nothing here is a stand-in: invented terms are refused by the matcher under Community Rule 1,
+// reports carry the real evidence buffer, a decision makes the kit's own PlayerNotice with the chosen line masked, and so on.
+// (Ported from the old FakeEngine suite; every assertion that changed because the real kit differs is listed in
+// .superpowers/sdd/2026-11-10-k8b-landing-site/task-3-report.md.)
 import { describe, expect, it } from 'vitest';
 import { SYNTHETIC_TERMS } from '../../packages/matcher/src/fixtures/syntheticPack';
-import { FakeEngine, INVENTED_TERMS } from '../src/demo/fakeEngine';
+import { KitEngine } from '../src/demo/kitEngine';
 import type { DecisionInput, ReportCategory } from '../src/demo/engine';
 
 function make() {
   let t = Date.UTC(2026, 10, 10, 12, 0, 0);
   const clock = { now: () => t, advance: (ms: number) => (t += ms) };
-  return { engine: new FakeEngine({ clock }), clock };
+  return { engine: new KitEngine({ clock }), clock };
 }
 
-async function say(e: FakeEngine, seat: string, text: string, clock?: { advance(ms: number): number }) {
+async function say(e: KitEngine, seat: string, text: string, clock?: { advance(ms: number): number }) {
   const r = await e.chat.accept(seat, text);
   clock?.advance(1500);
   return r;
@@ -31,9 +33,6 @@ async function filed(category: ReportCategory = 'harassment', line = "uninstall 
 }
 
 describe('the invented terms', () => {
-  it('are exactly the matcher fixtures pack (seven terms), copied here with no real word added', () => {
-    expect([...INVENTED_TERMS].sort()).toEqual(SYNTHETIC_TERMS.map((t) => t.term).sort());
-  });
   it('every positive line of the fixtures pack is refused (the stand-in reads the same dodges as the pack)', async () => {
     const { engine, clock } = make();
     const missed: string[] = [];
@@ -115,16 +114,28 @@ describe('chat.accept', () => {
     clock.advance(10_000);
     expect('deliver' in (await engine.chat.accept('you', 'back again'))).toBe(true);
   });
-  it('does not rate-limit two different seats against each other', async () => {
+  it('does not rate-limit two different seats against each other (the kit allows 3 lines per 5 s per seat)', async () => {
     const { engine } = make();
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       expect('deliver' in (await engine.chat.accept('ada', `a${i}`))).toBe(true);
       expect('deliver' in (await engine.chat.accept('bo', `b${i}`))).toBe(true);
     }
+    // the fourth line inside the window is Ada's to be refused; You still has all of her own budget
+    expect(await engine.chat.accept('ada', 'a3')).toEqual({ refuse: { reason: 'rate' } });
+    expect('deliver' in (await engine.chat.accept('you', 'still free'))).toBe(true);
   });
-  it('refuses an unknown seat as empty rather than throwing', async () => {
+  it('the rate limit is the real one: 3 lines in 5 seconds, the 4th is refused, and the window slides', async () => {
+    const { engine, clock } = make();
+    for (let i = 0; i < 3; i++) expect('deliver' in (await engine.chat.accept('you', `line ${i}`))).toBe(true);
+    expect(await engine.chat.accept('you', 'line 3')).toEqual({ refuse: { reason: 'rate' } });
+    clock.advance(4_999);
+    expect(await engine.chat.accept('you', 'line 4')).toEqual({ refuse: { reason: 'rate' } });
+    clock.advance(2);
+    expect('deliver' in (await engine.chat.accept('you', 'line 5'))).toBe(true);
+  });
+  it('a seat nobody sits in gets the kit own answer (gate), rather than a throw', async () => {
     const { engine } = make();
-    await expect(engine.chat.accept('nobody', 'hello')).resolves.toEqual({ refuse: { reason: 'empty' } });
+    await expect(engine.chat.accept('nobody', 'hello')).resolves.toEqual({ refuse: { reason: 'gate' } });
   });
 });
 
@@ -164,16 +175,26 @@ describe('the 200 cap counts UTF-16 units of the trimmed text, like the kit (cha
 });
 
 describe('reports', () => {
-  it('files a report for a delivered line and counts down the daily allowance', async () => {
+  it('files a report for a delivered line and counts down the daily allowance (the kit allows 10)', async () => {
+    const { engine, clock } = make();
+    const a = await say(engine, 'bo', 'ez', clock);
+    const b = await say(engine, 'ada', 'rematch?', clock);
+    if (!('deliver' in a) || !('deliver' in b)) throw new Error('setup');
+    const one = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: a.deliver.lineId, category: 'harassment' });
+    const two = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'ada', lineId: b.deliver.lineId, category: 'harassment' });
+    expect(one).toMatchObject({ ok: true, remaining: 9 });
+    expect(two).toMatchObject({ ok: true, remaining: 8 });
+  });
+  it('refuses a second report of the same person in the room, even for another line (duplicate)', async () => {
     const { engine, clock } = make();
     const a = await say(engine, 'bo', 'ez', clock);
     const b = await say(engine, 'bo', 'rematch?', clock);
     if (!('deliver' in a) || !('deliver' in b)) throw new Error('setup');
-    const one = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: a.deliver.lineId, category: 'harassment' });
-    const two = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: b.deliver.lineId, category: 'harassment' });
-    expect(one).toMatchObject({ ok: true });
-    expect(two).toMatchObject({ ok: true });
-    expect(one.ok && two.ok && two.remaining).toBe(one.ok ? one.remaining - 1 : -1);
+    expect(await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: a.deliver.lineId, category: 'harassment' })).toMatchObject({ ok: true });
+    expect(await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: b.deliver.lineId, category: 'harassment' })).toEqual({
+      ok: false,
+      refused: 'duplicate',
+    });
   });
   it('refuses reporting yourself', async () => {
     const { engine, clock } = make();
@@ -187,23 +208,13 @@ describe('reports', () => {
     const again = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId, category: 'harassment' });
     expect(again).toEqual({ ok: false, refused: 'duplicate' });
   });
-  it('refuses an unknown seat and a bad category', async () => {
+  it('refuses an unknown target seat, and stores an unknown category as other (the kit coerces it)', async () => {
     const { engine } = make();
-    expect(await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'nobody', category: 'spam' })).toMatchObject({ ok: false });
-    expect(
-      await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', category: 'nonsense' as ReportCategory }),
-    ).toMatchObject({ ok: false });
-  });
-  it('rate-limits a reporter after five reports', async () => {
-    const { engine, clock } = make();
-    const out = [];
-    for (let i = 0; i < 7; i++) {
-      const r = await say(engine, 'bo', `line number ${i}`, clock);
-      if (!('deliver' in r)) throw new Error('setup');
-      out.push(await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: r.deliver.lineId, category: 'spam' }));
-    }
-    expect(out.filter((r) => r.ok)).toHaveLength(5);
-    expect(out[5]).toEqual({ ok: false, refused: 'rate', remaining: 0 });
+    expect(await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'nobody', category: 'spam' })).toEqual({ ok: false, refused: 'not_player' });
+    expect(await engine.reports.submit({ reporterSeat: 'nobody', targetSeat: 'bo', category: 'spam' })).toEqual({ ok: false, refused: 'off' });
+    const odd = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', category: 'nonsense' as ReportCategory });
+    expect(odd.ok).toBe(true);
+    if (odd.ok) expect((await engine.reports.get(odd.reportId))?.category).toBe('other');
   });
   it("cannot report a line only its sender saw (a refused line is not in anyone else's view)", async () => {
     const { engine } = make();
@@ -229,7 +240,7 @@ describe('reports', () => {
     expect(blocked[0]).toMatchObject({ handle: 'Bo', delivered: null, raw: 'you absolute zorbak' });
     expect(r.excerpt.filter((l) => !l.blocked).every((l) => l.delivered === l.raw)).toBe(true);
   });
-  it('keeps at most the last six lines around the report, whatever the history length', async () => {
+  it('the evidence is the kit buffer: every recent line of the room, not a six-line window', async () => {
     const { engine, clock } = make();
     let last = '';
     for (let i = 0; i < 20; i++) {
@@ -239,8 +250,26 @@ describe('reports', () => {
     const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: last, category: 'spam' });
     if (!res.ok) throw new Error('setup');
     const report = await engine.reports.get(res.reportId);
-    expect(report!.excerpt).toHaveLength(6);
+    expect(report!.excerpt).toHaveLength(20);
     expect(report!.excerpt.map((l) => l.lineId)).toContain(last);
+  });
+  it('the evidence buffer holds 100 lines at most and forgets lines older than 15 minutes', async () => {
+    const { engine, clock } = make();
+    const old = await engine.chat.accept('ada', 'an old line');
+    if (!('deliver' in old)) throw new Error('setup');
+    clock.advance(16 * 60_000);
+    let last = '';
+    for (let i = 0; i < 120; i++) {
+      const r = await engine.chat.accept(i % 2 ? 'ada' : 'bo', `m${i}`);
+      clock.advance(2_000);
+      if ('deliver' in r) last = r.deliver.lineId;
+    }
+    const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: last, category: 'spam' });
+    if (!res.ok) throw new Error('setup');
+    const excerpt = (await engine.reports.get(res.reportId))!.excerpt;
+    expect(excerpt).toHaveLength(100);
+    expect(excerpt.map((l) => l.raw)).not.toContain('an old line');
+    expect(excerpt.at(-1)?.raw).toBe('m119');
   });
   it("lists the target's own lines for the picker, and only theirs", async () => {
     const { engine, reportId } = await filed();
@@ -252,11 +281,11 @@ describe('reports', () => {
   it('lists open reports, newest first, and get() of an unknown id is null', async () => {
     const { engine, clock } = make();
     const a = await say(engine, 'bo', 'one', clock);
-    const b = await say(engine, 'bo', 'two', clock);
+    const b = await say(engine, 'ada', 'two', clock);
     if (!('deliver' in a) || !('deliver' in b)) throw new Error('setup');
     const r1 = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: a.deliver.lineId, category: 'spam' });
     clock.advance(1000);
-    const r2 = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: b.deliver.lineId, category: 'spam' });
+    const r2 = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'ada', lineId: b.deliver.lineId, category: 'spam' });
     if (!r1.ok || !r2.ok) throw new Error('setup');
     const page = await engine.reports.list({ status: 'open' });
     expect(page.items.map((r) => r.id)).toEqual([r2.reportId, r1.reportId]);
@@ -287,15 +316,14 @@ describe('suggest', () => {
     expect(s.outcome).toBe('warning');
     expect(s.label).toBe('Warning');
     expect(s.rule).toBe(2);
-    expect(s.why).toMatch(/first offence/i);
-    expect(s.why).toMatch(/Community Rule 2/);
+    expect(s.why).toMatch(/standard profile: first aggressive message/i); // the kit's own sentence
   });
   it('suggests no action for plain trash talk (not punished)', async () => {
     const { engine, reportId } = await filed('harassment', "ez, you're trash lol");
     const s = (await engine.suggest(reportId))!;
     expect(s.outcome).toBe('none');
     expect(s.label).toBe('No action');
-    expect(s.why).toMatch(/trash talk/i);
+    expect(s.why).toMatch(/banter is not moderated/i);
   });
   it('suggests a timeout once a warning is already on the record (the ladder climbs)', async () => {
     const first = await filed();
@@ -309,23 +337,27 @@ describe('suggest', () => {
     first.clock.advance(1000);
     const again = await first.engine.chat.accept('bo', 'worthless team, honestly');
     if (!('deliver' in again)) throw new Error('setup');
+    // the kit lets one person report another once per room, so the second report comes from Ada
     const res = await first.engine.reports.submit({
-      reporterSeat: 'you',
+      reporterSeat: 'ada',
       targetSeat: 'bo',
       lineId: again.deliver.lineId,
       category: 'harassment',
     });
     if (!res.ok) throw new Error('setup');
     const s = (await first.engine.suggest(res.reportId))!;
-    expect(s.outcome).toEqual({ kind: 'chat', durationMs: 600_000 });
-    expect(s.label).toBe('Timeout 10m');
-    expect(s.why).toMatch(/repeat|already/i);
+    // the real ladder: a warning on the record makes the next rude line "Restrict chat 24 hours"
+    expect(s.outcome).toEqual({ kind: 'chat', durationMs: 86_400_000 });
+    expect(s.label).toBe('Restrict chat 24 hours');
+    expect(s.rule).toBe(2);
   });
   it('maps the category to a rule (hate to 1, harassment to 2, spam to 4) and calls hate hostile', async () => {
     const hate = await filed('hate', 'ez');
     const sh = (await hate.engine.suggest(hate.reportId))!;
     expect(sh.rule).toBe(1);
-    expect(sh.outcome).toEqual({ kind: 'chat', durationMs: 600_000 });
+    // Community Rule 1 is a severe rule: the kit acts at once, with its own length (7 days), not a demo number
+    expect(sh.outcome).toEqual({ kind: 'chat', durationMs: 7 * 86_400_000 });
+    expect(sh.label).toBe('Restrict chat 7 days');
     const spam = await filed('spam', 'uninstall now, hopeless');
     expect((await spam.engine.suggest(spam.reportId))!.rule).toBe(4);
   });
@@ -368,7 +400,7 @@ describe('decide, notices and ack', () => {
     expect(n.until).toBeNull();
     expect(n.rule).toBe(2);
     expect(n.ruleLabel).toMatch(/^Community Rule 2: /);
-    expect(n.refCode).toMatch(/^CW-[A-Z0-9]{4,}$/);
+    expect(n.refCode).toMatch(/^[A-Z0-9]+-[A-Z0-9]{4,}$/);
     expect(n.excerpt.map((e) => e.text)).toEqual(["uninstall the game, you're hopeless"]);
     expect(n.excerpt[0]?.day).toBe('2026-11-10');
   });
@@ -435,7 +467,7 @@ describe('decide, notices and ack', () => {
     const state = (await ctx.engine.rooms.seats()).find((s) => s.id === 'bo')!;
     expect(state.restrictedUntil).toBe(n.until);
     expect(await ctx.engine.chat.accept('bo', 'hello?')).toEqual({
-      refuse: { reason: 'restricted', until: n.until, byModerator: true, rule: 2 },
+      refuse: { reason: 'restricted', until: n.until, byModerator: true, rule: 2, noticeId: n.id },
     });
     // the others chat on, and the timeout ends by itself
     expect('deliver' in (await ctx.engine.chat.accept('ada', 'hi'))).toBe(true);
@@ -506,7 +538,6 @@ describe('decide, notices and ack', () => {
       { reportId: ctx.reportId, verdict: 'upheld', reason: '', actions: [warning] }, // reason required
       { reportId: ctx.reportId, verdict: 'upheld', reason: '   ', actions: [warning] },
       { reportId: ctx.reportId, verdict: 'upheld', reason: 'x'.repeat(501), actions: [warning] },
-      { reportId: ctx.reportId, verdict: 'upheld', reason: 'x', actions: [] }, // upheld needs an action
       { reportId: ctx.reportId, verdict: 'noted', reason: 'x', actions: [warning] }, // noted needs notes only
       { reportId: ctx.reportId, verdict: 'no_action', reason: 'x', actions: [warning] }, // no action on the target
       { reportId: ctx.reportId, verdict: 'bad_faith', reason: 'x', actions: [] }, // needs evidence
@@ -567,7 +598,7 @@ describe('reset', () => {
     const line = await ctx.engine.chat.accept('bo', 'one more');
     if (!('deliver' in line)) throw new Error('setup');
     const filedAgain = await ctx.engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: line.deliver.lineId, category: 'spam' });
-    expect(filedAgain).toMatchObject({ ok: true, remaining: 4 });
+    expect(filedAgain).toMatchObject({ ok: true, remaining: 9 });
     if (filedAgain.ok) expect((await ctx.engine.reports.get(filedAgain.reportId))!.excerpt.map((l) => l.raw)).toEqual(['fresh start', 'one more']);
   });
 });
@@ -580,6 +611,7 @@ describe('seats', () => {
     expect((await engine.rooms.seats()).map((s) => s.id)).toEqual(['you', 'ada', 'bo']);
   });
   it('says plainly what runs it', () => {
-    expect(make().engine.note).toMatch(/stand-in/i);
+    expect(make().engine.note).toBe('This is the real Chatwarden kit running in your browser, with a made-up word list.');
+    expect(make().engine.note).not.toMatch(/stand-in/i);
   });
 });

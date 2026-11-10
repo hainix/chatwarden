@@ -125,6 +125,31 @@ For the moderators' screens and the player's notices, mount the routes in
 | `cw.on(type, listener)` | Events: `report.created`, `report.closed`, `sanction.applied`, `sanction.revoked`, `gap.created`, `auto.restricted`. |
 | `cw.purge`, `cw.ready`, `cw.flush`, `cw.close` | Housekeeping. |
 
+## Deciding a report
+
+A moderator reads a report and decides it with one call. `cw.decide` closes the report, writes the sanction, writes the player's
+notice and tells the people involved, all in one transaction, and sending the same decision twice applies nothing twice.
+
+```ts
+import type { DecisionResult } from '@chatwarden/core';
+
+// The moderator decides the open report: a warning that shows the player their latest line.
+const report = cw.reports.list({ status: 'open' }).items[0]!;
+const decided: DecisionResult = await cw.decide({
+  reportId: report.id,
+  verdict: 'upheld', // 'noted', 'no_action' and 'bad_faith' are the others
+  actor: 'moderator@example.com', // who decided, for the audit trail
+  reason: 'kept insulting a teammate', // private: a player never sees it
+  actions: [{ subject: report.targetPerson, kind: 'warning', durationMs: null, rule: 2, lineIds: report.ownLineIds[report.targetPerson]?.slice(-1) }],
+});
+console.log(decided.ok ? `applied ${decided.groups.length} action` : `not applied: ${decided.error}`);
+```
+
+`subject` is the staff reference the report names (`report.targetPerson`); it never goes to a player. `rule` must be an active Community
+Rule, or `'uncovered'` with a `gapNote`. `lineIds` picks up to five of that player's own lines in the report to quote in their notice,
+with blocked words starred out. A timeout is `kind: 'chat'` with `durationMs`. `cw.suggest(subject, level, rule)` says what the preset
+would do next, for a moderator who wants a starting point. A failing store rejects the call, so catch it.
+
 ## Typing indicators
 
 Do not show a "typing..." indicator for a player who cannot chat. `cw.chat.restricted(who, { roomId, seatId })` runs the

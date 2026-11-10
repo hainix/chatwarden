@@ -1,5 +1,7 @@
-// What the two scripted players say. Bo is the troublemaker, but only with trash talk and the invented blocked words.
-// `rude` is a UI hint for the tour (which of Bo's lines to point at); the engine decides what is rude on its own.
+// What the two scripted players say. Bo is the troublemaker, but only with trash talk, plus ONE invented blocked word in the
+// opening. The real kit counts blocked lines: three inside an hour earn an automatic 30 minute timeout. So the loop below
+// has none, and Bo can never time himself out however long the page is open (test/kitReal.test.ts plays ten loops).
+// `rude` is a UI hint for the tour (which of Bo's lines to point at); the kit never reads tone, the demo's heuristic does.
 
 export interface ScriptLine {
   seat: 'ada' | 'bo';
@@ -16,14 +18,14 @@ export const SEED: readonly ScriptLine[] = [
   { seat: 'bo', text: "uninstall the game, you're hopeless", rude: true },
 ];
 
-/** What they say next, one line about every 4 to 6 seconds, round and round. */
+/** What they say next, one line about every 4 to 6 seconds, round and round. No blocked words: see the note at the top. */
 export const LOOP: readonly ScriptLine[] = [
   { seat: 'ada', text: 'rematch?' },
   { seat: 'bo', text: "sure, i'll carry again" },
   { seat: 'ada', text: 'ha, you wish' },
   { seat: 'bo', text: 'that was embarrassing, uninstall already', rude: true },
   { seat: 'ada', text: 'nice dodge on the boss' },
-  { seat: 'bo', text: 'who even picked you, snerp' }, // refused: only Bo sees it
+  { seat: 'bo', text: 'who even picked you for this team' },
   { seat: 'ada', text: 'gg, same lobby after this?' },
   { seat: 'bo', text: 'worthless team, honestly', rude: true },
   { seat: 'ada', text: 'my bad, lag spike' },

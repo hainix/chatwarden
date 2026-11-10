@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Demo from '../src/demo/Demo';
-import { FakeEngine } from '../src/demo/fakeEngine';
+import { KitEngine } from '../src/demo/kitEngine';
 
 function stubMatchMedia(stacked: boolean, reduced = false) {
   window.matchMedia = ((q: string) => ({
@@ -20,7 +20,7 @@ function stubMatchMedia(stacked: boolean, reduced = false) {
 async function setup(opts: { stacked?: boolean; reduced?: boolean } = {}) {
   stubMatchMedia(opts.stacked ?? true, opts.reduced ?? false);
   const user = userEvent.setup();
-  render(<Demo engine={new FakeEngine()} scripted={false} />);
+  render(<Demo engine={new KitEngine()} scripted={false} />);
   await screen.findByText("uninstall the game, you're hopeless");
   return { user };
 }

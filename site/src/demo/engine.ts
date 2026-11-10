@@ -1,6 +1,10 @@
 // The demo talks to the moderation kit through this interface only. It is shaped like the real `@chatwarden/core` facade
-// (`cw.chat.accept`, `cw.reports.submit`, `cw.decide`, `cw.notices.*`, `cw.suggest`), and async like it, so Task 3 can bind
-// the real kit behind it without reshaping the UI. Until then `FakeEngine` (./fakeEngine.ts) stands in.
+// (`cw.chat.accept`, `cw.reports.submit`, `cw.decide`, `cw.notices.*`, `cw.suggest`). `KitEngine` (./kitEngine.ts) binds the
+// real kit behind it. Where the kit's own type is the right shape it is re-exported here (a type-only import, erased at build),
+// so a change in the kit breaks the demo's type check instead of drifting silently.
+import type { ChatResult, DecisionGroup, DecisionResult, PlayerNotice, RefuseReason, ReportRefusal } from '@chatwarden/core';
+
+export type { ChatResult, DecisionGroup, DecisionResult, PlayerNotice, RefuseReason, ReportRefusal };
 
 /** A seat in the demo lobby. `you` is the visitor's seat. */
 export interface DemoSeat {
@@ -11,17 +15,8 @@ export interface DemoSeat {
 
 export type RuleRef = number | 'uncovered';
 
-export type RefuseReason = 'empty' | 'length' | 'rate' | 'restricted' | 'blocked';
-
-/** The verdict on one chat line (the kit's `ChatResult`). A refusal is for the sender only. */
-export type ChatResult =
-  | { deliver: { lineId: string; text: string } }
-  | { refuse: { reason: RefuseReason; until?: number | null; byModerator?: boolean; rule?: number } };
-
 export type ReportCategory = 'harassment' | 'hate' | 'cheating' | 'spam' | 'disruption' | 'other';
 export const REPORT_CATEGORIES: readonly ReportCategory[] = ['harassment', 'hate', 'cheating', 'spam', 'disruption', 'other'];
-
-export type ReportRefusal = 'off' | 'not_player' | 'self' | 'rate' | 'duplicate';
 
 export interface ReportInput {
   reporterSeat: string;
@@ -69,7 +64,7 @@ export interface ReportPage {
   next: string | null;
 }
 
-export type Outcome = 'none' | 'note' | 'warning' | { kind: 'chat'; durationMs: number };
+export type Outcome = 'none' | 'note' | 'warning' | { kind: 'chat' | 'area' | 'ban'; durationMs: number | null };
 
 /** What the preset suggests: the outcome, a short label and a plain sentence on why (the kit's `Suggestion`). */
 export interface Suggestion {
@@ -79,6 +74,7 @@ export interface Suggestion {
   rule: RuleRef;
 }
 
+/** What the demo's decide buttons send. The kit also has `area` and `ban`; the demo never sends them. */
 export type SanctionKind = 'chat' | 'warning' | 'note';
 
 export interface DecisionAction {
@@ -98,34 +94,6 @@ export interface DecisionInput {
   actions: DecisionAction[];
   /** Private; required, at most 500 characters. Never shown to a player. */
   reason: string;
-}
-
-export interface DecisionGroup {
-  subject: string;
-  groupId: string;
-  refCode: string;
-  kind: SanctionKind;
-  /** The player's notice for this action; null for a note, which tells the player nothing. */
-  noticeId: string | null;
-}
-
-export type DecisionResult =
-  | { ok: true; groups: DecisionGroup[]; replay: boolean }
-  | { ok: false; error: 'not_found' | 'already_decided' | 'invalid' };
-
-/** What a player is shown about an action against them. No chat of anyone else's, no ids (the kit's `PlayerNotice`). */
-export interface PlayerNotice {
-  id: string;
-  kind: 'warning' | 'chat' | 'area' | 'ban' | 'report_outcome';
-  rule: RuleRef | null;
-  ruleLabel: string | null;
-  /** Epoch ms the sanction ends; null = no end. */
-  until: number | null;
-  refCode: string | null;
-  /** The player's own lines only, with blocked words starred out. `day` is UTC `YYYY-MM-DD`. */
-  excerpt: Array<{ text: string; day: string }>;
-  createdAt: number;
-  mustAcknowledge: boolean;
 }
 
 export interface SeatState {

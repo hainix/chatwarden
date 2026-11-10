@@ -1,10 +1,10 @@
 // The interactive demo: a chat room (left), a moderator console (right), a four-step tour and a "show me the code" drawer.
-// These tests run it against FakeEngine. They never touch the network.
+// These tests run it against KitEngine, the real Chatwarden kit. They never touch the network.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Demo from '../src/demo/Demo';
-import { FakeEngine } from '../src/demo/fakeEngine';
+import { KitEngine } from '../src/demo/kitEngine';
 
 const RUDE = "uninstall the game, you're hopeless";
 
@@ -21,7 +21,7 @@ function stubMatchMedia(stacked: boolean) {
 
 async function setup(props: { scripted?: boolean; stacked?: boolean } = {}) {
   stubMatchMedia(props.stacked ?? false);
-  const engine = new FakeEngine();
+  const engine = new KitEngine();
   const user = userEvent.setup();
   const view = render(<Demo engine={engine} scripted={props.scripted ?? false} />);
   await screen.findByText(RUDE);
@@ -271,7 +271,7 @@ describe('the moderator console', () => {
     expect(blocked).toHaveLength(1);
     expect(blocked[0]?.textContent).toMatch(/refused/i);
     expect(within(detail).getByText(/suggested: warning/i)).toBeTruthy();
-    expect(within(detail).getByText(/first offence under community rule 2/i)).toBeTruthy();
+    expect(within(detail).getByText(/standard profile: first aggressive message with a clean record gets a warning/i)).toBeTruthy(); // the kit's own sentence
   });
   it('offers Warn, Timeout 10m, Note and No action, and marks the suggested one', async () => {
     const { user } = await setup();
@@ -510,12 +510,12 @@ describe('Show me the code', () => {
     await user.click(toggle);
     expect(screen.queryByRole('region', { name: /kit code/i })).toBeNull();
   });
-  it('shows the decide and player-view lines on steps 3 and 4', async () => {
+  it('shows the cw.decide and player-view lines on steps 3 and 4', async () => {
     const { user } = await setup();
     await user.click(within(tour()!).getByRole('button', { name: /show me the code/i }));
     await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
     await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    expect(screen.getByRole('region', { name: /kit code for step 3/i }).textContent).toContain('"action": "decide"');
+    expect(screen.getByRole('region', { name: /kit code for step 3/i }).textContent).toContain('await cw.decide(');
     await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
     expect(screen.getByRole('region', { name: /kit code for step 4/i }).textContent).toContain('/api/notices');
   });
@@ -613,7 +613,7 @@ describe('the scripted players', () => {
   it('chat on a gentle timer, about every 4 to 6 seconds', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
-    const engine = new FakeEngine();
+    const engine = new KitEngine();
     render(<Demo engine={engine} scripted />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
@@ -636,7 +636,7 @@ describe('the scripted players', () => {
   it('pause stops them, resume starts them again, and the button says which', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
-    render(<Demo engine={new FakeEngine()} scripted />);
+    render(<Demo engine={new KitEngine()} scripted />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });
@@ -657,7 +657,7 @@ describe('the scripted players', () => {
   it('wait while you are typing, and while the tab is hidden', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
-    render(<Demo engine={new FakeEngine()} scripted />);
+    render(<Demo engine={new KitEngine()} scripted />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });
@@ -690,7 +690,7 @@ describe('the scripted players', () => {
   it('stop for good when the demo unmounts', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
-    const engine = new FakeEngine();
+    const engine = new KitEngine();
     const spy = vi.spyOn(engine.chat, 'accept');
     const { unmount } = render(<Demo engine={engine} scripted />);
     await act(async () => {

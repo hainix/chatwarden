@@ -2,6 +2,7 @@ import type { FormEvent, RefObject } from 'react';
 import { LINE_MAX } from './engine';
 import type { DemoSeat, PlayerNotice, SeatState } from './engine';
 import { FlagIcon, SendIcon } from './icons';
+import { noticeEnd, noticeKindLabel } from './notice';
 import type { FeedItem, PendingBySeat } from './types';
 
 const AVATAR: Record<string, string> = { you: 'avatar-you', ada: 'avatar-a', bo: 'avatar-b' };
@@ -39,32 +40,29 @@ function Message({ item, tourTarget, onReport }: { item: FeedItem; tourTarget: b
   );
 }
 
-function untilLabel(n: PlayerNotice): string {
-  if (n.until === null) return '';
-  const minutes = Math.max(1, Math.round((n.until - n.createdAt) / 60_000));
-  return `Chat is paused for ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}, until ${clock(n.until)}.`;
-}
-
 /** What a reported player sees: their notice, in a small "player's screen" frame. */
-function PlayerFrame({ name, notice, extra, onAck }: { name: string; notice: PlayerNotice; extra: number; onAck: () => void }) {
-  const timeout = notice.kind === 'chat';
+function PlayerFrame({ name, you, notice, extra, onAck }: { name: string; you: boolean; notice: PlayerNotice; extra: number; onAck: () => void }) {
+  const end = noticeEnd(notice, clock);
+  // The visitor's own screen speaks to her; the scripted players' screens are shown from outside.
+  const title = you ? 'Your screen' : `${name}’s screen`;
   return (
-    <section className="pframe" aria-label={`${name}'s screen`}>
+    <section className="pframe" aria-label={title}>
       <div className="pframe-bar">
         <span className="pframe-dots" aria-hidden="true">
           <i />
           <i />
           <i />
         </span>
-        <span className="pframe-title">{name}’s screen</span>
-        <span className="pframe-sub">what {name} sees</span>
+        <span className="pframe-title">{title}</span>
+        <span className="pframe-sub">{you ? 'what you see' : `what ${name} sees`}</span>
       </div>
       <div className="pframe-body">
         <h4 className="pframe-kind" data-kind={notice.kind}>
-          {timeout ? 'Chat timeout' : 'Warning'}
+          {noticeKindLabel(notice.kind)}
         </h4>
         {notice.ruleLabel !== null && <p className="pframe-rule">{notice.ruleLabel}</p>}
-        {timeout && <p className="pframe-until">{untilLabel(notice)}</p>}
+        {end !== '' && <p className="pframe-until">{end}</p>}
+        {notice.kind === 'report_outcome' && <p className="pframe-until">A moderator acted on a report you sent.</p>}
         {notice.excerpt.length > 0 && (
           <div className="pframe-quote">
             <span className="pframe-quote-h">Your line</span>
@@ -77,7 +75,7 @@ function PlayerFrame({ name, notice, extra, onAck }: { name: string; notice: Pla
         )}
         <div className="pframe-foot">
           <small>
-            {notice.refCode !== null && <code>{notice.refCode}</code>} Only {name} gets this: no one else’s chat, no IP, no account or subject id.
+            {notice.refCode !== null && <code>{notice.refCode}</code>} Only {you ? 'you get' : `${name} gets`} this: no one else’s chat, no IP, no account or subject id.
             {extra > 0 ? ` ${extra} more waiting.` : ''}
           </small>
           <button type="button" className="pframe-ack" data-tour="ack" onClick={onAck}>
@@ -167,6 +165,7 @@ export function GamePane({
         <PlayerFrame
           key={frameNotice.id}
           name={frameSeat.name}
+          you={frameSeat.you}
           notice={frameNotice}
           extra={(pending[frameSeat.id]?.length ?? 1) - 1}
           onAck={() => onAck(frameSeat.id, frameNotice)}

@@ -146,10 +146,34 @@ describe('built dist', () => {
     const demo = files.filter((f) => /Demo-[\w-]+\.js$/.test(f));
     expect(demo).toHaveLength(1);
     expect(html).not.toContain(relative(dist, demo[0] as string).split(sep).join('/'));
-    const js = files.filter((f) => f.endsWith('.js'));
-    const total = js.reduce((n, f) => n + gzipSync(readFileSync(f)).length, 0);
-    expect(total).toBeLessThan(120 * 1024); // even with the demo, all the JS together is small
+    // The demo chunk now carries the real kit (core, the matcher with its synthetic pack, the in-memory store): it has its own
+    // budget, and is only ever fetched when the demo wakes. The page itself stays under 120 KB gzip up front.
+    const demoGz = gzipSync(readFileSync(demo[0] as string)).length;
+    expect(demoGz).toBeLessThan(120 * 1024);
     const initialCss = texts.get(files.find((f) => /index-[\w-]+\.css$/.test(f)) ?? '') ?? '';
     expect(initialCss).not.toContain('.tour'); // the demo's styles ship with the demo chunk
+  });
+
+  it('the demo chunk is the real kit and runs in a browser: no node: import, no eval, no wasm, no network call', () => {
+    const demo = files.filter((f) => /Demo-[\w-]+\.js$/.test(f));
+    expect(demo).toHaveLength(1);
+    const text = texts.get(demo[0] as string) ?? '';
+    // The kit looks up node:crypto at run time through a guarded `process.getBuiltinModule?.(...)` (a string, never an import),
+    // and falls back to its own pure-JS hashing in a browser. Take that one guarded lookup out, and no node: is left.
+    const leftover = text.replaceAll(/\?\.getBuiltinModule\?\.\(\s*[`"']node:crypto[`"']\s*\)/g, '');
+    expect(leftover).not.toContain('node:');
+    expect(text).not.toMatch(/\b(?:from|import)\s*\(?\s*["'`]node:/);
+    expect(text).not.toMatch(/\brequire\s*\(/);
+    // The Content-Security-Policy allows no 'unsafe-eval' and no 'wasm-unsafe-eval': the kit must need neither.
+    expect(text).not.toMatch(/\beval\s*\(|new\s+Function\s*\(|\bWebAssembly\b/);
+    expect(text).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|WebSocket|sendBeacon/);
+    // and it really is the kit: the matcher's pack term id and a core string are in there
+    expect(text).toMatch(/syn:zorbak/);
+    expect(text).toMatch(/chatwarden\./);
+  });
+  it('the guarded lookup is the only way the scan above can pass: a real node: import would be caught (control)', () => {
+    const bad = 'import{createHash}from"node:crypto";';
+    expect(bad.replaceAll(/\?\.getBuiltinModule\?\.\(\s*[`"']node:crypto[`"']\s*\)/g, '')).toContain('node:');
+    expect(bad).toMatch(/\b(?:from|import)\s*\(?\s*["'`]node:/);
   });
 });

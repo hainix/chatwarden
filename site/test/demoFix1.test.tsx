@@ -1,10 +1,10 @@
 // Fix round 1: focus handling, stacked pane switches, honest copy, robustness (double dispatch, reset races, throwing
-// engine), refusal announcements, the stand-in badge and inert-ness behind the dialog.
+// engine), refusal announcements, the disclosure line and inert-ness behind the dialog.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Demo from '../src/demo/Demo';
-import { FakeEngine } from '../src/demo/fakeEngine';
+import { KitEngine } from '../src/demo/kitEngine';
 
 const RUDE = "uninstall the game, you're hopeless";
 const FRIENDLY = 'Something went wrong in the demo. Reset to try again.';
@@ -20,9 +20,9 @@ function stubMatchMedia(stacked: boolean) {
   })) as unknown as typeof window.matchMedia;
 }
 
-async function setup(opts: { stacked?: boolean; engine?: FakeEngine; scripted?: boolean } = {}) {
+async function setup(opts: { stacked?: boolean; engine?: KitEngine; scripted?: boolean } = {}) {
   stubMatchMedia(opts.stacked ?? false);
-  const engine = opts.engine ?? new FakeEngine();
+  const engine = opts.engine ?? new KitEngine();
   const user = userEvent.setup();
   const view = render(<Demo engine={engine} scripted={opts.scripted ?? false} />);
   await screen.findByText(RUDE);
@@ -276,7 +276,7 @@ describe('a failing engine never breaks the demo', () => {
   it('a failing first reset shows the message, does not hang the scripted players, and Reset recovers', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
-    const engine = new FakeEngine();
+    const engine = new KitEngine();
     vi.spyOn(engine, 'reset').mockRejectedValueOnce(new Error('store down'));
     render(<Demo engine={engine} scripted />);
     await act(async () => {
@@ -317,12 +317,12 @@ describe('every refusal is announced; the note clears when you edit', () => {
     accept.mockResolvedValueOnce({ refuse: { reason: 'restricted', until: Date.now() + 600_000, byModerator: true, rule: 2 } });
     await user.keyboard('{Enter}');
     await waitFor(() => expect(live().textContent).toMatch(/timeout until/i));
-    accept.mockResolvedValueOnce({ refuse: { reason: 'gate' as never } });
+    accept.mockResolvedValueOnce({ refuse: { reason: 'gate' } });
     await user.keyboard('{Enter}');
-    await waitFor(() => expect(live().textContent).toMatch(/that line was not sent/i));
-    accept.mockResolvedValueOnce({ refuse: { reason: 'profanity' as never } });
+    await waitFor(() => expect(live().textContent).toMatch(/cannot chat in this lobby right now/i));
+    accept.mockResolvedValueOnce({ refuse: { reason: 'profanity' } });
     await user.keyboard('{Enter}');
-    await waitFor(() => expect([...live().querySelectorAll('p')].filter((p) => /not sent/i.test(p.textContent ?? ''))).toHaveLength(2));
+    await waitFor(() => expect(live().textContent).toMatch(/language this lobby does not allow/i));
     expect(composer().value).toBe('x'); // nothing was sent, so the line is still there to edit
   });
   it('shows the reason under the composer and clears it as soon as you edit', async () => {
@@ -342,11 +342,12 @@ describe('every refusal is announced; the note clears when you edit', () => {
   });
 });
 
-describe('the stand-in badge and the modal', () => {
-  it('the stand-in disclosure sits above the panes, as a badge', async () => {
+describe('the disclosure and the modal', () => {
+  it('the one honest line about what runs the demo sits above the panes: the real kit, a made-up word list, no stand-in', async () => {
     const { container } = await setup();
     const badge = container.querySelector('.demo-badge') as HTMLElement;
-    expect(badge.textContent).toMatch(/stand-in/i);
+    expect(badge.textContent).toBe('This is the real Chatwarden kit running in your browser, with a made-up word list.');
+    expect(container.textContent).not.toMatch(/stand-in/i);
     const panes = container.querySelector('.demo-panes') as HTMLElement;
     expect(badge.compareDocumentPosition(panes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector('.demo-note')).toBeNull();

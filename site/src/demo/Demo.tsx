@@ -5,11 +5,12 @@ import { CodeDrawer } from './CodeDrawer';
 import { CODE_STEPS } from './codeSteps';
 import { LINE_MAX } from './engine';
 import type { DemoEngine, PlayerNotice, SeatState, StaffReport, Suggestion } from './engine';
-import { FakeEngine } from './fakeEngine';
+import { KitEngine } from './kitEngine';
 import { GamePane, clock } from './GamePane';
 import { PauseIcon, PlayIcon, CodeIcon } from './icons';
 import { ModPane } from './ModPane';
 import type { DecideKind } from './ModPane';
+import { durationWords, refusalMessage, reportRefusalMessage, timeoutMs } from './notice';
 import { ReportDialog } from './ReportDialog';
 import { LOOP, NO_NOTICE_HINT, NO_REPORT_HINT, SEED, TOUR_STEPS } from './script';
 import type { ScriptLine } from './script';
@@ -19,7 +20,7 @@ import type { FeedItem, PendingBySeat } from './types';
 import { useMediaQuery } from './useMediaQuery';
 
 export interface DemoProps {
-  /** The engine behind the demo. Defaults to the in-browser stand-in. */
+  /** The engine behind the demo. Defaults to the real kit, running in the browser. */
   engine?: DemoEngine;
   /** Whether Ada and Bo chat on their own after the opening conversation. */
   scripted?: boolean;
@@ -65,7 +66,7 @@ const SETTLE_CANCEL = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
 const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar', 'Home', 'End']);
 
 export default function Demo({ engine: given, scripted = true }: DemoProps) {
-  const [engine] = useState<DemoEngine>(() => given ?? new FakeEngine());
+  const [engine] = useState<DemoEngine>(() => given ?? new KitEngine());
   const stacked = useMediaQuery(STACK_QUERY);
 
   const [feed, setFeed] = useState<FeedItem[]>([]);
@@ -452,22 +453,17 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       announce(`Blocked: ${engine.rules.label(rule).split(':')[0]}. Only you see this.`);
       tourEvent(0);
       inputRef.current?.focus();
+      // A blocked line is a strike, and the third inside an hour earns the real automatic timeout: read the seats and the
+      // notices back so the visitor sees it (and its end time) as soon as it happens.
+      await refresh();
       return;
     }
-    // Every other refusal says so (the kit also has 'gate' and 'profanity'), and keeps the line so it can be edited.
-    const until = typeof why.until === 'number' ? ` until ${clock(why.until)}` : '';
-    const message =
-      why.reason === 'rate'
-        ? 'Too fast. Wait a moment, then send again.'
-        : why.reason === 'restricted'
-          ? `You are on a timeout${until}.`
-          : why.reason === 'length'
-            ? `That line is too long. Keep it to ${LINE_MAX} characters or fewer.`
-            : why.reason === 'empty'
-              ? 'Type something first.'
-              : 'That line was not sent.';
+    // Every other refusal says so, in the kit's own terms (rate, length, a timeout with its end, gate, profanity), and keeps
+    // the line so it can be edited.
+    const message = refusalMessage(why, LINE_MAX, clock, (n) => engine.rules.label(n).split(':')[0] ?? '');
     setComposerNote(message);
     announce(message);
+    if (why.reason === 'restricted') await refresh();
   }
 
   function openReport(item: FeedItem, opener: HTMLElement) {
@@ -493,14 +489,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     }
     if (!alive.current || g !== gen.current) return null;
     if (!res.ok) {
-      const reasons: Record<string, string> = {
-        duplicate: 'You already reported that line.',
-        rate: 'You are out of reports for today.',
-        self: 'You cannot report yourself.',
-        not_player: 'That line cannot be reported.',
-        off: 'Reports are off.',
-      };
-      return reasons[res.refused] ?? 'That report was not filed.';
+      return reportRefusalMessage(res.refused, d.item.name);
     }
     setDialog(null);
     await refresh();
@@ -523,13 +512,15 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     setError(null);
     try {
       const rule = suggestion?.rule ?? 2;
+      // The Timeout button is as long as the kit suggested when that was a chat timeout, else ten minutes.
+      const length = timeoutMs(suggestion);
       const base = { subject: report.targetPerson, rule, ...(rule === 'uncovered' ? { gapNote: 'Behaviour the rules do not cover yet.' } : {}) };
       const lineIds = quoteId === null ? [] : [quoteId];
       const input =
         kind === 'warning'
           ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'warning' as const, durationMs: null, lineIds }] }
           : kind === 'timeout'
-            ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'chat' as const, durationMs: 600_000, lineIds }] }
+            ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'chat' as const, durationMs: length, lineIds }] }
             : kind === 'note'
               ? { verdict: 'noted' as const, actions: [{ ...base, kind: 'note' as const, durationMs: null }] }
               : { verdict: 'no_action' as const, actions: [] };
@@ -542,7 +533,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       }
       const who = report.targetHandle;
       const noticed = res.groups.some((x) => x.noticeId !== null);
-      const what = { warning: 'warning', timeout: 'timeout, 10 minutes', note: 'note recorded', none: 'no action' }[kind];
+      const what = { warning: 'warning', timeout: `timeout, ${durationWords(length)}`, note: 'note recorded', none: 'no action' }[kind];
       announce(
         kind === 'none'
           ? 'Decision made: no action. The report is closed.'

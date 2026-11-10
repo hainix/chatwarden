@@ -1,25 +1,38 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { DemoSeat, EvidenceLine, PlayerNotice, StaffReport, Suggestion } from './engine';
 import { StarIcon } from './icons';
 import { clock } from './GamePane';
+import { noticeKindLabel, shortDuration, timeoutMs } from './notice';
 import { CATEGORY_LABEL } from './ReportDialog';
 
 export type DecideKind = 'warning' | 'timeout' | 'note' | 'none';
 
 const AVATAR: Record<string, string> = { you: 'avatar-you', ada: 'avatar-a', bo: 'avatar-b' };
 
-/** The decide button that matches a suggested outcome. */
+/**
+ * The decide button that matches what the kit suggested. A chat timeout is the Timeout button (as long as the kit said);
+ * a ban from public rooms or a full ban has no button here, so nothing is starred and the line above says what it is.
+ */
 function suggestedKind(s: Suggestion | null): DecideKind | null {
   if (s === null) return null;
-  if (s.outcome === 'none') return 'none';
-  if (s.outcome === 'note') return 'note';
-  if (s.outcome === 'warning') return 'warning';
-  return 'timeout';
+  const o = s.outcome;
+  if (o === 'none') return 'none';
+  if (o === 'note') return 'note';
+  if (o === 'warning') return 'warning';
+  return o.kind === 'chat' && typeof o.durationMs === 'number' ? 'timeout' : null;
 }
 
 function Evidence({ lines, reportedId }: { lines: EvidenceLine[]; reportedId: string | null }) {
+  // The kit keeps up to 100 lines (15 minutes) of the room as evidence, so the list can be long: it scrolls inside its box, and
+  // opens with the reported line in view.
+  const box = useRef<HTMLOListElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    const mark = el?.querySelector<HTMLElement>('[data-reported="true"]');
+    if (el && mark) el.scrollTop = Math.max(0, mark.offsetTop - el.clientHeight / 2 + mark.offsetHeight / 2);
+  }, [lines, reportedId]);
   return (
-    <ol className="evidence" aria-label="Evidence: the last lines in the room">
+    <ol className="evidence" aria-label="Evidence: the last lines in the room" ref={box} tabIndex={0}>
       {lines.map((l) => {
         const reported = l.lineId === reportedId;
         return (
@@ -48,7 +61,11 @@ interface DetailProps {
 /** One report: who, why, the evidence, the ladder suggestion, the line to quote, and the four decisions. */
 function ReportDetail({ report, suggestion, busy, onDecide }: DetailProps) {
   const own = report.ownLineIds[report.targetPerson] ?? [];
-  const ownLines = report.excerpt.filter((l) => own.includes(l.lineId));
+  // The kit lets the notice quote up to five lines, and the evidence can hold many of the player's lines: offer the reported
+  // line and their five latest.
+  const recent = new Set(own.slice(-5));
+  if (report.lineId !== null && own.includes(report.lineId)) recent.add(report.lineId);
+  const ownLines = report.excerpt.filter((l) => recent.has(l.lineId));
   const [quote, setQuote] = useState<string | null>(report.lineId !== null && own.includes(report.lineId) ? report.lineId : null);
   const [reason, setReason] = useState(`Report: ${CATEGORY_LABEL[report.category].toLowerCase()}`);
   const sug = suggestedKind(suggestion);
@@ -103,7 +120,7 @@ function ReportDetail({ report, suggestion, busy, onDecide }: DetailProps) {
           Warn
         </button>
         <button type="button" className="dec dec-time" disabled={busy} onClick={() => decide('timeout')} {...mark('timeout')}>
-          Timeout 10m
+          Timeout {shortDuration(timeoutMs(suggestion))}
         </button>
         <button type="button" className="dec dec-note" disabled={busy} onClick={() => decide('note')} {...mark('note')}>
           Note
@@ -123,7 +140,7 @@ function RecordList({ seat, notices }: { seat: DemoSeat; notices: PlayerNotice[]
       <ul className="record" aria-label={`${seat.name}'s record`}>
         {notices.map((n) => (
           <li key={n.id}>
-            <b>{n.kind === 'chat' ? 'Chat timeout' : 'Warning'}</b>
+            <b>{noticeKindLabel(n.kind)}</b>
             {n.until !== null && <span> until {clock(n.until)}</span>}
             <span className="record-rule">{n.ruleLabel}</span>
             {n.excerpt.map((e, i) => (

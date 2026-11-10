@@ -48,11 +48,19 @@ console.log(filed.ok ? \`report \${filed.reportId} filed\` : \`not filed: \${fil
   {
     title: 'Decide',
     blurb: 'A decision closes the report and writes the sanction and the player notice in one step. A replay applies nothing twice.',
-    file: 'decide.jsonc',
+    file: 'decide.ts',
     lang: 'ts',
-    source: 'packages/http/README.md',
-    code: `// Decide a report, exactly as POST /reports/:id/decide:
-{ "action": "decide", "input": { "reportId": "...", "verdict": "upheld", "reason": "...", "actions": [ { "subject": "s_...", "kind": "chat", "durationMs": 3600000, "rule": 1 } ] } }`,
+    source: 'packages/core/README.md',
+    code: `// The moderator decides the open report: a warning that shows the player their latest line.
+const report = cw.reports.list({ status: 'open' }).items[0]!;
+const decided: DecisionResult = await cw.decide({
+  reportId: report.id,
+  verdict: 'upheld', // 'noted', 'no_action' and 'bad_faith' are the others
+  actor: 'moderator@example.com', // who decided, for the audit trail
+  reason: 'kept insulting a teammate', // private: a player never sees it
+  actions: [{ subject: report.targetPerson, kind: 'warning', durationMs: null, rule: 2, lineIds: report.ownLineIds[report.targetPerson]?.slice(-1) }],
+});
+console.log(decided.ok ? \`applied \${decided.groups.length} action\` : \`not applied: \${decided.error}\`);`,
   },
   {
     title: "See the player's view",

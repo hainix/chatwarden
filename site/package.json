@@ -8,9 +8,16 @@
   "scripts": {
     "dev": "vite",
     "og": "node scripts/assets.mjs",
-    "build": "node scripts/assets.mjs && tsc --noEmit -p tsconfig.json && vite build",
+    "build": "npm run build:kit && node scripts/assets.mjs && tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:kit": "tsc -b ..",
+    "pretest": "npm run build:kit"
+  },
+  "dependencies": {
+    "@chatwarden/core": "0.1.1",
+    "@chatwarden/matcher": "0.1.1",
+    "@chatwarden/store-memory": "0.1.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
