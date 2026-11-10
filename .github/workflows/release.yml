@@ -1,0 +1,84 @@
+name: Release
+
+# Publishes the six @chatwarden packages to npm, in dependency order, with provenance.
+#   - Run it by hand (Actions tab -> Release -> Run workflow) for a dry run: everything except the upload. dry_run defaults to true.
+#   - Pushing a tag v<version> (for example v0.1.0) publishes for real. A tag push is never a dry run.
+# The steps and the one-time setup are in RELEASING.md. Nothing is uploaded until the repository secret NPM_TOKEN exists.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: build, check, smoke-test and a dry-run publish, but upload nothing'
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write # npm provenance (OIDC)
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release (${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'dry run' || 'publish' }})
+    runs-on: ubuntu-latest
+    env:
+      # A tag push is always a real publish; a manual run follows the dry_run input.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run check:pack
+      - name: Smoke test (pack, install and run in fresh ESM and CommonJS projects)
+        run: node scripts/smoke.mjs
+
+      - name: Check the tag matches the package version
+        if: ${{ github.ref_type == 'tag' }}
+        run: |
+          version="$(node -p "require('./packages/core/package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the package version v$version. Delete the tag, fix the version, and tag again."
+            exit 1
+          fi
+
+      - name: Require NPM_TOKEN for a real publish
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::The repository secret NPM_TOKEN is empty or missing, so nothing can be published. Follow the one-time setup in RELEASING.md (create the @chatwarden npm org, create an automation token, add it as the secret NPM_TOKEN), then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Publish in dependency order (dry run unless this is a tag push or dry_run is off)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Scripts are not disabled: prepack runs (tsc -b), exactly as for a real publish.
+          flags=(--provenance --access public)
+          if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
+          for spec in $(node scripts/publish-order.mjs); do
+            name="${spec%@*}"
+            version="${spec##*@}"
+            # Skip a version that is already on npm, so a re-run after a partial publish is safe.
+            existing="$(npm view "$spec" version 2>/dev/null || true)"
+            if [ "$existing" = "$version" ]; then
+              echo "skip $spec: already on npm"
+              continue
+            fi
+            echo "publish $spec (dry run: $DRY_RUN)"
+            npm publish --workspace "$name" "${flags[@]}"
+          done
