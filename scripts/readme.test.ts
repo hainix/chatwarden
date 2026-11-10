@@ -120,8 +120,12 @@ describe('the new package READMEs', () => {
 
   it('core: shows the typing-indicator lookup and says it reveals nothing about other people', () => {
     const doc = flat(section(readme('core'), 'Typing indicators'));
-    expect(doc).toContain('cw.chat.restricted(who)');
-    expect(doc).toMatch(/same decision `accept` makes/);
+    expect(doc).toContain('cw.chat.restricted(who, { roomId, seatId })');
+    expect(doc).toMatch(/same decision as `accept`/);
+    expect(doc).toMatch(/both `roomId` and `seatId`/);
+    expect(doc).toMatch(/never a key or account the client sent/);
+    expect(doc).toMatch(/after `cw\.rooms\.seat`/);
+    expect(doc).toMatch(/`gate` option is not consulted/);
     expect(doc).toMatch(/reveals nothing about anyone else/);
     expect(doc).toMatch(/\{ restricted: true, until: null, kind: null \}/);
   });

@@ -542,20 +542,27 @@ class FlakySanctions extends MemoryStore {
 describe('restricted(): the typing-indicator lookup answers what accept answers', () => {
   const NONE = { restricted: false, until: null, kind: null };
 
-  /** accept's verdict for the seat, then restricted()'s for the same person: the one must follow from the other. */
-  const agree = (e: ReturnType<typeof setup>, seat: string, subject: SubjectId | null, room: string = ROOM) => {
-    const answer = e.chat.restricted(subject, room);
+  /**
+   * accept's verdict for the seat, then restricted()'s for the same person: the one must follow from the other.
+   * `own: false` is a bystander on someone else's shared-IP row, who must get the constant { true, null, null }.
+   */
+  const agree = (e: ReturnType<typeof setup>, seat: string, subject: SubjectId | null, room: string = ROOM, own = true) => {
+    const answer = e.chat.restricted(subject, room, seat);
     const verdict = e.say(seat, 'hi', undefined, room);
     if ('deliver' in verdict) {
       expect(answer, 'accept delivered').toEqual(NONE);
     } else {
       const r = verdict.refuse;
       expect(r.reason).toBe('restricted');
-      expect(answer.restricted, 'accept refused').toBe(true);
-      if (r.rule !== undefined) {
+      if (own) {
         // The speaker's own sanction: restricted() carries the same end, and the kind explains byModerator.
+        expect('until' in r, 'accept states an end').toBe(true);
+        expect(answer.restricted, 'accept refused').toBe(true);
         expect(answer.until).toBe(r.until);
         expect(answer.kind === 'auto').toBe(r.byModerator === false);
+        expect(answer.kind).not.toBeNull();
+      } else {
+        expect(answer).toEqual({ restricted: true, until: null, kind: null });
       }
     }
     return answer;
@@ -737,13 +744,92 @@ describe('restricted(): the typing-indicator lookup answers what accept answers'
       expect(agree(e, 'p1', s)).toEqual({ restricted: true, until: e.clock.t + 2 * H, kind: 'ban' });
     });
 
-    it('a guest (no subject) cannot be told from another guest without a seat: restricted() says no, accept still refuses the seat', () => {
+    it('a guest (no subject) cannot be told from another guest without a seat: no seatId reads false, accept still refuses the seat', () => {
       const e = setup();
       e.sit('p1', null);
       e.threeSlurs();
       e.tick(SEC);
       expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
       expect(e.chat.restricted(null, ROOM)).toEqual(NONE);
+      expect(e.chat.restricted(null)).toEqual(NONE);
+    });
+
+    it('a guest after three slurs reads restricted (auto) with the seat, like accept; another guest seat does not', () => {
+      const e = setup();
+      e.sit('p1', null);
+      e.sit('p2', null);
+      const at = e.threeSlurs();
+      e.tick(SEC);
+      const end = at + 30 * MIN;
+      expect(agree(e, 'p1', null)).toEqual({ restricted: true, until: end, kind: 'auto' });
+      expect(agree(e, 'p2', null)).toEqual(NONE);
+      expect(e.chat.restricted(null, ROOM, 'p1')).toEqual({ restricted: true, until: end, kind: 'auto' });
+      expect(e.chat.restricted(null, 'R2', 'p1')).toEqual(NONE);
+      expect(e.chat.restricted(null, null, 'p1')).toEqual(NONE); // a seat id means nothing without its room
+    });
+
+    it('is per seat: a timeout earned on seat a does not restrict the same person on seat a2 (as accept)', () => {
+      const e = setup({ store: new FailingSanctions() });
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      e.sit('p1b', who('k1'));
+      const at = e.threeSlurs();
+      e.tick(SEC);
+      const end = at + 30 * MIN;
+      expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+      delivery(e.say('p1b', 'hi'));
+      expect(e.chat.restricted(s, ROOM, 'p1')).toEqual({ restricted: true, until: end, kind: 'auto' });
+      expect(e.chat.restricted(s, ROOM, 'p1b')).toEqual(NONE);
+      // Without a seat the person is what is known: they hold a timeout somewhere in the room.
+      expect(e.chat.restricted(s, ROOM)).toEqual({ restricted: true, until: end, kind: 'auto' });
+    });
+
+    it('a seat now held by a different person is not restricted by the earlier occupant entry (as accept)', () => {
+      const e = setup({ store: new FailingSanctions() });
+      e.sit('p1', who('k1'));
+      e.threeSlurs();
+      e.tick(SEC);
+      const other = e.sit('p1', who('k2')) as SubjectId;
+      delivery(e.say('p1', 'hi'));
+      expect(e.chat.restricted(other, ROOM, 'p1')).toEqual(NONE);
+    });
+
+    it('an expired entry is not swept by a seat lookup, and reads open', () => {
+      const e = setup({ store: new FailingSanctions() });
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      const at = e.threeSlurs();
+      e.clock.t = at + 30 * MIN;
+      expect(e.chat.restricted(s, ROOM, 'p1')).toEqual(NONE);
+      expect((e.chat as unknown as { memRestrictions: Map<string, unknown> }).memRestrictions.size).toBe(1);
+    });
+
+    it('the kill switch off silences the in-memory timeout too, in accept and in restricted; back on, it applies again', () => {
+      const e = setup({ store: new FailingSanctions() });
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      e.sit('g1', null);
+      e.threeSlurs();
+      e.threeSlurs('g1');
+      e.tick(SEC);
+      expect(refusal(e.say('p1', 'hi')).reason).toBe('restricted');
+      e.flags.sanctionsOn = false;
+      expect(agree(e, 'p1', s)).toEqual(NONE);
+      expect(e.chat.restricted(s, ROOM)).toEqual(NONE);
+      expect(e.chat.restricted(null, ROOM, 'g1')).toEqual(NONE);
+      delivery(e.say('g1', 'hi'));
+      e.flags.sanctionsOn = true;
+      expect(agree(e, 'p1', s).kind).toBe('auto');
+      expect(agree(e, 'g1', null).kind).toBe('auto');
+    });
+
+    it('an empty room id reads like no room (every room); an empty seat id falls back to the person', () => {
+      const e = setup({ store: new FailingSanctions() });
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      const at = e.threeSlurs();
+      e.tick(SEC);
+      const expected = { restricted: true, until: at + 30 * MIN, kind: 'auto' };
+      expect(e.chat.restricted(s, '')).toEqual(expected);
+      expect(e.chat.restricted(s, '', 'p1')).toEqual(expected);
+      expect(e.chat.restricted(s, ROOM, '')).toEqual(expected);
+      expect(e.chat.restricted(s, 'R2')).toEqual(NONE);
     });
   });
 
@@ -769,6 +855,13 @@ describe('restricted(): the typing-indicator lookup answers what accept answers'
       expect(r.reason).toBe('restricted');
       expect('rule' in r).toBe(false);
       expect('noticeId' in r).toBe(false);
+    });
+
+    it('the bystander answer equals the constant next to accept, and the offender is checked the same way', async () => {
+      const e = setup({ notices: true });
+      const { offender, bystander } = await shared(e);
+      expect(agree(e, 'p2', bystander, ROOM, false)).toEqual({ restricted: true, until: null, kind: null });
+      expect(agree(e, 'p1', offender)).toEqual({ restricted: true, until: NOW + H, kind: 'chat' });
     });
 
     it('the offender gets their own end and kind', async () => {
@@ -907,6 +1000,33 @@ describe('restricted(): the typing-indicator lookup answers what accept answers'
       };
       expect(e.chat.restricted(s, ROOM)).toEqual(NONE);
       expect(e.logs.map((l) => l.event)).toEqual(['chat.restriction_failed']);
+    });
+
+    it('logs the failure at most once a minute and counts what it held back', () => {
+      const e = setup();
+      const s = e.sit('p1', who('k1')) as SubjectId;
+      e.sanctions.active = () => {
+        throw new TypeError('x');
+      };
+      for (let i = 0; i < 50; i++) expect(e.chat.restricted(s, ROOM)).toEqual(NONE);
+      expect(e.logs).toEqual([{ event: 'chat.restriction_failed', detail: { error: 'TypeError' } }]);
+      e.clock.t += 59 * SEC;
+      e.chat.restricted(s, ROOM);
+      expect(e.logs).toHaveLength(1);
+      e.clock.t += 1 * SEC;
+      e.chat.restricted(s, ROOM);
+      expect(e.logs).toHaveLength(2);
+      expect(e.logs[1]).toEqual({ event: 'chat.restriction_failed', detail: { error: 'TypeError', suppressed: 50 } });
+    });
+
+    it('accept still logs every failure (the throttle is only for the typing lookup)', () => {
+      const e = setup();
+      e.sit('p1', who('k1'));
+      e.sanctions.active = () => {
+        throw new TypeError('x');
+      };
+      for (let i = 0; i < 3; i++) delivery(e.say('p1', 'hi'));
+      expect(e.logs.filter((l) => l.event === 'chat.restriction_failed')).toHaveLength(3);
     });
 
     it('garbage arguments never throw', () => {

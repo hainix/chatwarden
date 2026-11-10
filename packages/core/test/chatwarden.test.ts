@@ -597,6 +597,70 @@ describe('createChatwarden: chat.restricted (typing indicator)', () => {
     expect(cw.chat.restricted({ ip: null })).toEqual(NONE);
   });
 
+  it('with roomId and seatId it is accept for the seat: a guest after three slurs, and a person with two seats', async () => {
+    const { cw } = await setup({ matcher: spanBlocker });
+    cw.rooms.seat(R, 'g', {}, 'Guest');
+    cw.rooms.seat(R, 'g2', {}, 'Guest 2');
+    for (let i = 0; i < 3; i++) cw.chat.accept(R, 'g', 'zorbak');
+    const refused = cw.chat.accept(R, 'g', 'hi') as { refuse: { until: number } };
+    expect(cw.chat.accept(R, 'g2', 'hi')).toMatchObject({ deliver: {} });
+    const expected = { restricted: true, until: refused.refuse.until, kind: 'auto' };
+    expect(cw.chat.restricted({}, { roomId: R, seatId: 'g' })).toEqual(expected);
+    expect(cw.chat.restricted({}, { roomId: R, seatId: 'g2' })).toEqual(NONE);
+    expect(cw.chat.restricted({}, { roomId: R })).toEqual(NONE); // no seat: one guest cannot be told from another
+    expect(cw.chat.restricted({}, { seatId: 'g' })).toEqual(NONE); // a seat id means nothing without its room
+  });
+
+  it('a person with two seats: the timeout is on the seat that earned it, as in accept', async () => {
+    class FailingSanctions extends MemoryStore {
+      override insertSanctionGroup(): boolean {
+        throw new Error('disk full');
+      }
+    }
+    const { cw } = await setup({ matcher: spanBlocker }, new FailingSanctions());
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    cw.rooms.seat(R, 'a2', alice, 'Alice');
+    for (let i = 0; i < 3; i++) cw.chat.accept(R, 'a', 'zorbak');
+    expect(cw.chat.accept(R, 'a', 'hi')).toMatchObject({ refuse: { reason: 'restricted' } });
+    expect(cw.chat.accept(R, 'a2', 'hi')).toMatchObject({ deliver: {} });
+    expect(cw.chat.restricted(alice, { roomId: R, seatId: 'a' })).toMatchObject({ restricted: true, kind: 'auto' });
+    expect(cw.chat.restricted(alice, { roomId: R, seatId: 'a2' })).toEqual(NONE);
+    expect(cw.chat.restricted(alice, { roomId: R })).toMatchObject({ restricted: true, kind: 'auto' });
+  });
+
+  it('an empty roomId or seatId reads like none given', async () => {
+    class FailingSanctions extends MemoryStore {
+      override insertSanctionGroup(): boolean {
+        throw new Error('disk full');
+      }
+    }
+    const { cw } = await setup({ matcher: spanBlocker }, new FailingSanctions());
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    for (let i = 0; i < 3; i++) cw.chat.accept(R, 'a', 'zorbak');
+    expect(cw.chat.restricted(alice, { roomId: '' }).restricted).toBe(true);
+    expect(cw.chat.restricted(alice, { roomId: R, seatId: '' }).restricted).toBe(true);
+    expect(cw.chat.restricted(alice, { roomId: '', seatId: 'a' }).restricted).toBe(true);
+  });
+
+  it('the kill switch silences an in-memory timeout, then it applies again', async () => {
+    class FailingSanctions extends MemoryStore {
+      override insertSanctionGroup(): boolean {
+        throw new Error('disk full');
+      }
+    }
+    let on = true;
+    const { cw, clock } = await setup({ matcher: spanBlocker, enabled: () => on }, new FailingSanctions());
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    for (let i = 0; i < 3; i++) cw.chat.accept(R, 'a', 'zorbak');
+    expect(cw.chat.restricted(alice, { roomId: R, seatId: 'a' }).restricted).toBe(true);
+    clock.t += 6_000; // past the rate window, so a delivery below is the kill switch's doing
+    on = false;
+    expect(cw.chat.restricted(alice, { roomId: R, seatId: 'a' })).toEqual(NONE);
+    expect(cw.chat.accept(R, 'a', 'hi')).toMatchObject({ deliver: {} });
+    on = true;
+    expect(cw.chat.restricted(alice, { roomId: R, seatId: 'a' }).restricted).toBe(true);
+  });
+
   it('is a pure read: no rate budget, no event, no new row, no log line, no notice made', async () => {
     const { cw, store, logged } = await setup();
     cw.rooms.seat(R, 'a', alice, 'Alice');
@@ -626,11 +690,25 @@ describe('createChatwarden: chat.restricted (typing indicator)', () => {
     const startup = logged.length;
     expect(cw.chat.restricted(null as unknown as RawWho)).toEqual(NONE);
     expect(cw.chat.restricted(undefined as unknown as RawWho, { roomId: R })).toEqual(NONE);
-    expect(logged.length).toBe(startup + 2);
+    expect(logged.length).toBe(startup + 1); // the second failure inside the same minute is held back
     for (const [event, detail] of logged.slice(startup)) {
       expect(event).toBe('chatwarden.restricted_failed');
       expect(detail).toEqual({ error: 'TypeError' });
     }
+  });
+
+  it('logs a failing lookup at most once a minute and counts what it held back', async () => {
+    const { cw, logged, clock } = await setup();
+    const startup = logged.length;
+    for (let i = 0; i < 30; i++) expect(cw.chat.restricted(null as unknown as RawWho)).toEqual(NONE);
+    expect(logged).toHaveLength(startup + 1);
+    clock.t += 59_999;
+    cw.chat.restricted(null as unknown as RawWho);
+    expect(logged).toHaveLength(startup + 1);
+    clock.t += 1;
+    cw.chat.restricted(null as unknown as RawWho);
+    expect(logged).toHaveLength(startup + 2);
+    expect(logged[startup + 1]).toEqual(['chatwarden.restricted_failed', { error: 'TypeError', suppressed: 30 }]);
   });
 
   it('never carries an identifier, whatever the person', async () => {

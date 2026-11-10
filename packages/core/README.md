@@ -127,16 +127,17 @@ For the moderators' screens and the player's notices, mount the routes in
 
 ## Typing indicators
 
-Do not show a "typing..." indicator for a player who cannot chat. `cw.chat.restricted(who)` is the same decision `accept`
-makes for a restricted player (a chat restriction, a ban, or the automatic timeout), without sending a line. It is
+Do not show a "typing..." indicator for a player who cannot chat. `cw.chat.restricted(who, { roomId, seatId })` runs the
+same decision as `accept` (a chat restriction, a ban, or the automatic timeout), without sending a line. It is
 synchronous and has no side effects: it spends no rate budget and writes no evidence, strike, event or notice.
 
 ```ts
 import type { Chatwarden, RawWho } from '@chatwarden/core';
 
-// Call it when a client says "I am typing", with the same `who` you give `cw.rooms.seat`.
-function relayTyping(cw: Chatwarden, who: RawWho, roomId: string, tell: () => void): void {
-  const { restricted, until, kind } = cw.chat.restricted(who, { roomId });
+// Call it when a client says "I am typing", after `cw.rooms.seat` for that seat. `who` is what your platform's
+// `identify` returned for this connection on the server, never a key or account the client sent.
+function relayTyping(cw: Chatwarden, who: RawWho, roomId: string, seatId: string, tell: () => void): void {
+  const { restricted, until, kind } = cw.chat.restricted(who, { roomId, seatId });
   if (restricted) return; // drop it quietly: do not broadcast their typing
   tell();
   void until; // epoch ms when it ends (null = permanent), only for the person's own sanction
@@ -144,11 +145,17 @@ function relayTyping(cw: Chatwarden, who: RawWho, roomId: string, tell: () => vo
 }
 ```
 
+With both `roomId` and `seatId` the answer equals what `accept` would say for that seat. Leave them out and an
+automatic timeout that was kept only in memory (the store could not take it, or a guest with no key and no account earned
+it) is looked up by person instead; a guest cannot be found that way, because one guest cannot be told from another.
+The `gate` option is not consulted: a gate refusal is not a restriction.
+
 It is safe to answer a player about themselves from their own client, because it reveals nothing about anyone else. A
 player who is restricted only because they share an address with someone else's sanction gets
-`{ restricted: true, until: null, kind: null }`: they cannot chat, and they are told nothing about the other person. An
-address alone finds nobody, a guest with no key and no account is never restricted here, and a lookup that fails reads as
-`restricted: false`. `roomId` only matters for the automatic timeout, which is kept in memory when it could not be stored.
+`{ restricted: true, until: null, kind: null }`: they cannot chat, and they are told nothing about the other person. The
+address checked is the one `seat` last recorded for the person (as in `accept`), not `who.ip`, and an address alone finds
+nobody. A lookup that fails reads as `restricted: false` and is logged at most once a minute (error class only, with a count of
+the failures held back).
 
 ## Options
 
