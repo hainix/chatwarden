@@ -54,6 +54,19 @@ async function main(): Promise<void> {
   assert.ok(aliceSubject && bobSubject, 'both seats resolve to a subject');
   assert.notEqual(aliceSubject, bobSubject, 'two players are two subjects');
 
+  // The Discord feed, with a fake fetch that never leaves the machine. It is wired before the report so it sees it.
+  const posted: Array<{ url: string; body: { content?: unknown; thread_name?: unknown } }> = [];
+  const feed = discordFeed(cw, {
+    webhookUrl: WEBHOOK,
+    hubLink: (kind, id) => `https://hub.example/${kind}/${encodeURIComponent(id)}`,
+    fetch: (input, init) => {
+      const url = String(input);
+      posted.push({ url, body: JSON.parse(String(init?.body ?? '{}')) as { content?: unknown; thread_name?: unknown } });
+      // Discord answers a new thread with the message, whose channel_id is the thread id.
+      return Promise.resolve(new Response(JSON.stringify({ id: '111111111111111111', channel_id: '222222222222222222' }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    },
+  });
+
   // 4. A clean line is delivered; a synthetic slur line is refused.
   const clean = cw.chat.accept(ROOM, 'a', 'hello there');
   assert.ok('deliver' in clean, 'a clean line is delivered');
@@ -67,6 +80,16 @@ async function main(): Promise<void> {
   assert.ok(reported.ok, 'the report was accepted');
   const reportId = reported.reportId;
   assert.equal(cw.reports.get(reportId)?.status, 'open');
+
+  // The report reached the fake Discord: one request that opens a thread, in plain staff text with no chat text.
+  for (let i = 0; i < 200 && posted.length === 0; i++) await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  assert.ok(posted.length >= 1, 'the Discord fake received a post for the report');
+  const first = posted[0];
+  assert.ok(first, 'the first post');
+  assert.ok(first.url.startsWith(WEBHOOK), 'it was posted to the webhook');
+  assert.equal(typeof first.body.thread_name, 'string', 'the first post opens a forum thread');
+  assert.equal(typeof first.body.content, 'string');
+  assert.ok(!String(first.body.content).includes('zorbak'), 'no chat text reaches Discord');
 
   // 6. A moderator decides: Alice gets a warning citing Community Rule 2.
   const decided = await cw.decide({
@@ -104,21 +127,10 @@ async function main(): Promise<void> {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
-  // 9. The Discord feed, with a fake fetch that never leaves the machine.
-  const posted: string[] = [];
-  const feed = discordFeed(cw, {
-    webhookUrl: WEBHOOK,
-    hubLink: (kind, id) => `https://hub.example/${kind}/${encodeURIComponent(id)}`,
-    fetch: (input) => {
-      posted.push(String(input));
-      return Promise.resolve(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }));
-    },
-  });
+  // 9. Close everything. The feed's dispose is safe to call twice.
   assert.equal(typeof feed.dispose, 'function');
   feed.dispose();
-  feed.dispose(); // safe to call twice
-
-  // 10. Close everything.
+  feed.dispose();
   await cw.close();
   await store.close();
   console.log('smoke scenario: ok');

@@ -1,13 +1,17 @@
 // Consumer smoke test. Packs every published @chatwarden/* package (a real `npm pack`, so `prepack` runs), installs the
 // tarballs into a fresh ESM project and a fresh CommonJS project, typechecks each, and runs a real scenario in each
-// (scripts/smoke/scenario.ts). The tarballs are what an adopter, Moxgate first, vendors. Output goes to `.smoke/`.
+// (scripts/smoke/scenario.ts). The tarballs are what an adopter, Moxgate first, vendors; they are left in `.smoke/tarballs/`.
+// The two projects are created in the OS temp directory (chatwarden-smoke-*), never inside the repository: from there Node
+// cannot fall back on the monorepo's node_modules, so a package that imports something it forgot to declare fails here.
+// They are deleted afterwards unless SMOKE_KEEP=1. Every child process has a timeout (5 minutes to install, 60 s to run).
 //   ESM: type "module", NodeNext, TypeScript 5.9.
 //   CJS: module commonjs, moduleResolution node, esModuleInterop, strict, TypeScript 5.7 (Moxgate's server). The compiled
 //        scenario `require()`s the ESM packages, so Node's require(esm) path runs for real.
 // The pure helpers are exported and unit-tested in scripts/smoke.test.ts; the end-to-end run is at the bottom.
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Per-project settings. `typescript` is the pinned `typescript@<spec>` installed into the project. */
@@ -58,13 +62,37 @@ export function renderTemplate(text, vars) {
   });
 }
 
+/** The prefix of the temp directory holding the two consumer projects. */
+export const TEMP_PREFIX = 'chatwarden-smoke-';
+
+const TIMEOUTS = { install: 5 * 60_000, run: 60_000 };
+
+/** The child-process timeout in ms: `install` (also build and pack) 5 minutes, `run` (typecheck, compile, scenario) 60 s. */
+export function timeoutFor(kind) {
+  if (typeof kind !== 'string' || !Object.hasOwn(TIMEOUTS, kind)) throw new Error(`timeoutFor: unknown kind ${String(kind)}`);
+  return TIMEOUTS[kind];
+}
+
+/** True when the temp projects should survive the run (SMOKE_KEEP=1), for debugging a failure. */
+export function keepTemp(env) {
+  return env.SMOKE_KEEP === '1';
+}
+
+/** True when `child` is `parent` or lies inside it. */
+export function isInside(parent, child) {
+  const rel = relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
 const WIN = process.platform === 'win32';
 
-function run(cmd, args, cwd, label) {
+function run(cmd, args, cwd, label, kind) {
   console.log(`\n[smoke] ${label}: ${cmd} ${args.join(' ')}`);
   // npm and npx are .cmd shims on Windows and need a shell; node itself is spawned directly (its path may hold spaces).
   const shimmed = WIN && (cmd === 'npm' || cmd === 'npx');
-  const res = spawnSync(shimmed ? `${cmd}.cmd` : cmd, args, { cwd, stdio: 'inherit', shell: shimmed });
+  const timeout = timeoutFor(kind);
+  const res = spawnSync(shimmed ? `${cmd}.cmd` : cmd, args, { cwd, stdio: 'inherit', shell: shimmed, timeout });
+  if (res.error?.code === 'ETIMEDOUT') throw new Error(`${label} timed out after ${timeout / 1000} s`);
   if (res.status !== 0) throw new Error(`${label} failed (exit ${res.status ?? res.signal ?? 'unknown'})`);
 }
 
@@ -91,21 +119,31 @@ function main() {
     .map((d) => JSON.parse(readFileSync(join(base, d.name, 'package.json'), 'utf8')));
   const packages = publishedPackages(manifests);
 
-  run('npm', ['run', 'build'], root, 'build');
+  run('npm', ['run', 'build'], root, 'build', 'install');
   for (const p of packages) {
     // A real pack: `prepack` runs here, so a package whose prepack is broken fails the smoke test.
-    run('npm', ['pack', '--workspace', p.name, '--pack-destination', tarballDir], root, `pack ${p.name}`);
+    run('npm', ['pack', '--workspace', p.name, '--pack-destination', tarballDir], root, `pack ${p.name}`, 'install');
     if (!existsSync(join(tarballDir, p.tarball))) throw new Error(`npm pack did not produce ${p.tarball}`);
   }
 
-  const tarballs = packages.map((p) => `../tarballs/${p.tarball}`);
-  for (const project of Object.keys(PROJECTS)) {
-    const dir = join(smoke, project);
-    copyTemplates(root, project, dir);
-    run('npm', installArgs(project, tarballs), dir, `${project}: install`);
-    run('npx', ['tsc', '--noEmit'], dir, `${project}: typecheck`);
-    run('npx', ['tsc'], dir, `${project}: compile`);
-    run(process.execPath, ['dist/index.js'], dir, `${project}: scenario`);
+  // Absolute paths: the projects are not next to the tarballs.
+  const tarballs = packages.map((p) => join(tarballDir, p.tarball));
+  // Outside the repository on purpose (see the header): no node_modules above these folders.
+  const work = mkdtempSync(join(tmpdir(), TEMP_PREFIX));
+  if (isInside(root, work)) throw new Error(`the temp directory ${work} is inside the repository`);
+  console.log(`[smoke] consumer projects in ${work}`);
+  try {
+    for (const project of Object.keys(PROJECTS)) {
+      const dir = join(work, project);
+      copyTemplates(root, project, dir);
+      run('npm', installArgs(project, tarballs), dir, `${project}: install`, 'install');
+      run('npx', ['tsc', '--noEmit'], dir, `${project}: typecheck`, 'run');
+      run('npx', ['tsc'], dir, `${project}: compile`, 'run');
+      run(process.execPath, ['dist/index.js'], dir, `${project}: scenario`, 'run');
+    }
+  } finally {
+    if (keepTemp(process.env)) console.log(`[smoke] SMOKE_KEEP=1: left ${work} in place`);
+    else rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
   console.log(`\n[smoke] ok: ${packages.length} tarballs, ESM and CJS consumers typecheck and run`);
 }

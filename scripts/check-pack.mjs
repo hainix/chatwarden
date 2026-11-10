@@ -3,6 +3,7 @@
 // scripts/check-pack.test.ts; the real run is at the bottom.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { builtinModules } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -93,6 +94,57 @@ export function checkManifest(pkg, dir) {
   return problems;
 }
 
+const BUILTINS = new Set(builtinModules.map((m) => m.replace(/^node:/, '').split('/')[0]));
+
+/** The package name of a bare specifier: `@scope/name/sub` -> `@scope/name`, `name/sub` -> `name`. */
+const packageOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]);
+
+/**
+ * The npm packages a JavaScript source imports: static imports and re-exports, side-effect imports, `import()` and
+ * `require()`. Relative and absolute paths and Node builtins (`node:x` or bare `fs`) are left out. Comments are ignored.
+ * @param {string} source
+ * @returns {string[]} package names, each once
+ */
+export function bareImports(source) {
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+  const found = new Set();
+  const patterns = [
+    /(?:^|[\s;}])(?:import|export)\s[^'";]*?\sfrom\s*(['"])([^'"\n]+)\1/g, // import x from 'y', export * from 'y'
+    /(?:^|[\s;}])import\s*(['"])([^'"\n]+)\1/g, // import 'y'
+    /(?:^|[^\w$.])(?:import|require)\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g, // import('y'), require('y')
+  ];
+  for (const re of patterns) {
+    for (const m of code.matchAll(re)) {
+      const spec = m[2];
+      if (spec.startsWith('.') || spec.startsWith('/')) continue;
+      if (spec.startsWith('node:')) continue;
+      const name = packageOf(spec);
+      if (BUILTINS.has(name)) continue;
+      found.add(name);
+    }
+  }
+  return [...found];
+}
+
+/**
+ * One message per (file, package) where a compiled `dist/src/**` `.js` file imports a package that an installer would not
+ * have: it must be a Node builtin, the package itself, or in dependencies or peerDependencies. devDependencies do not count.
+ * @param {{ pkg: Record<string, any>, files: Array<{ path: string, source: string }> }} input
+ */
+export function undeclaredImports({ pkg, files }) {
+  const declared = new Set([pkg.name, ...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {})]);
+  const problems = [];
+  for (const { path, source } of files) {
+    if (!/^dist\/src\/.*\.js$/.test(path)) continue;
+    for (const name of bareImports(source)) {
+      if (!declared.has(name)) {
+        problems.push(`${path} imports "${name}", which is not in dependencies or peerDependencies (a consumer would not have it)`);
+      }
+    }
+  }
+  return problems;
+}
+
 function main() {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const base = join(root, 'packages');
@@ -112,9 +164,13 @@ function main() {
       { cwd: root, encoding: 'utf8', shell: process.platform === 'win32', maxBuffer: 64 * 1024 * 1024 },
     );
     const files = JSON.parse(raw)[0].files.map((f) => f.path.replaceAll('\\', '/'));
+    const sources = files
+      .filter((f) => /^dist\/src\/.*\.js$/.test(f))
+      .map((f) => ({ path: f, source: readFileSync(join(base, dir, f), 'utf8') }));
     const problems = [
       ...checkManifest(pkg, dir),
       ...checkFileList({ pkg, files }),
+      ...undeclaredImports({ pkg, files: sources }),
     ];
     if (problems.length === 0) console.log(`ok   ${pkg.name} (${files.length} files)`);
     else {

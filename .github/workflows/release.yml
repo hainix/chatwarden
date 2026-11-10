@@ -2,7 +2,10 @@ name: Release
 
 # Publishes the six @chatwarden packages to npm, in dependency order, with provenance.
 #   - Run it by hand (Actions tab -> Release -> Run workflow) for a dry run: everything except the upload. dry_run defaults to true.
-#   - Pushing a tag v<version> (for example v0.1.0) publishes for real. A tag push is never a dry run.
+#   - A real publish runs on a tag only: push a tag v<version> (for example v0.1.0). A tag push is never a dry run.
+#   - Provenance needs a PUBLIC source repository. The owner makes hainix/chatwarden public first (see RELEASING.md); until
+#     then a real publish stops with a clear message. The provenance input (default true) lets a manual run deliberately
+#     publish without provenance; a tag push always uses it.
 # The steps and the one-time setup are in RELEASING.md. Nothing is uploaded until the repository secret NPM_TOKEN exists.
 
 on:
@@ -10,6 +13,10 @@ on:
     inputs:
       dry_run:
         description: 'Dry run: build, check, smoke-test and a dry-run publish, but upload nothing'
+        type: boolean
+        default: true
+      provenance:
+        description: 'Publish with provenance (needs a public repository). Untick only to publish deliberately without it'
         type: boolean
         default: true
   push:
@@ -31,7 +38,15 @@ jobs:
     env:
       # A tag push is always a real publish; a manual run follows the dry_run input.
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      # A tag push always has provenance (the first operand is true); a manual run follows the provenance input.
+      PROVENANCE: ${{ github.event_name != 'workflow_dispatch' || inputs.provenance }}
     steps:
+      - name: Real publishes run on a tag
+        if: ${{ env.DRY_RUN != 'true' && github.ref_type != 'tag' }}
+        run: |
+          echo "::error::A real publish must run on a version tag (v0.1.0, ...), but this run is on ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}. Push the tag, or run this workflow again with Dry run ticked."
+          exit 1
+
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -40,6 +55,8 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
       - run: npm run check:pack
       - name: Smoke test (pack, install and run in fresh ESM and CommonJS projects)
         run: node scripts/smoke.mjs
@@ -53,13 +70,30 @@ jobs:
             exit 1
           fi
 
+      - name: Check the repository is public (npm provenance needs it)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          private="$(gh api repos/${{ github.repository }} -q .private)"
+          if [ "$private" != "true" ]; then
+            echo "repository is public"
+          elif [ "$DRY_RUN" = "true" ]; then
+            echo "::warning::${GITHUB_REPOSITORY} is private. A dry run skips provenance, but a real publish with provenance will fail until the owner makes hainix/chatwarden public (see RELEASING.md, one-time setup)."
+          elif [ "$PROVENANCE" = "true" ]; then
+            echo "::error::${GITHUB_REPOSITORY} is private, and npm provenance refuses a private source repository, so nothing can be published. The owner has to make hainix/chatwarden public first (see RELEASING.md, one-time setup). To publish without provenance on purpose, run this workflow by hand from a tag with the provenance box unticked."
+            exit 1
+          else
+            echo "::warning::${GITHUB_REPOSITORY} is private and provenance is off, so this publish carries no provenance statement."
+          fi
+
       - name: Require NPM_TOKEN for a real publish
         if: ${{ env.DRY_RUN != 'true' }}
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::The repository secret NPM_TOKEN is empty or missing, so nothing can be published. Follow the one-time setup in RELEASING.md (create the @chatwarden npm org, create an automation token, add it as the secret NPM_TOKEN), then re-run this workflow."
+            echo "::error::The repository secret NPM_TOKEN is empty or missing, so nothing can be published. Follow the one-time setup in RELEASING.md (create the @chatwarden npm org, create a granular access token, add it as the secret NPM_TOKEN), then re-run this workflow."
             exit 1
           fi
 
@@ -67,10 +101,18 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -euo pipefail
           # Scripts are not disabled: prepack runs (tsc -b), exactly as for a real publish.
-          flags=(--provenance --access public)
+          flags=(--access public)
+          if [ "$PROVENANCE" = "true" ]; then flags+=(--provenance); fi
           if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
-          for spec in $(node scripts/publish-order.mjs); do
+          # An assignment (unlike the list of a for loop) passes a failure of publish-order.mjs on to set -e.
+          specs="$(node scripts/publish-order.mjs)"
+          if [ -z "$specs" ]; then
+            echo "::error::scripts/publish-order.mjs printed no packages, so there is nothing to publish."
+            exit 1
+          fi
+          for spec in $specs; do
             name="${spec%@*}"
             version="${spec##*@}"
             # Skip a version that is already on npm, so a re-run after a partial publish is safe.
@@ -79,6 +121,6 @@ jobs:
               echo "skip $spec: already on npm"
               continue
             fi
-            echo "publish $spec (dry run: $DRY_RUN)"
+            echo "publish $spec (dry run: $DRY_RUN, provenance: $PROVENANCE)"
             npm publish --workspace "$name" "${flags[@]}"
           done

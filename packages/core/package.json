@@ -2,7 +2,7 @@
   "name": "@chatwarden/core",
   "version": "0.1.0",
   "private": false,
-  "description": "Chatwarden core package.",
+  "description": "Chat moderation engine for games: reports, warnings, timeouts and bans, a moderator queue and player notices. No sockets, HTTP or disk.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {

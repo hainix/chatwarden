@@ -35,7 +35,7 @@ npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher
 
 `@chatwarden/store-sqlite` and `@chatwarden/matcher` (and the other kit packages) list `@chatwarden/core` as a peer dependency,
 so your project has exactly one copy of it. Node 22.13 or newer. The package is ESM only; a CommonJS app can `require()` it on
-Node 22.12 or newer (see the [root README](https://github.com/hainix/chatwarden#commonjs)).
+Node 22.13 or newer (see the [root README](https://github.com/hainix/chatwarden#commonjs)).
 
 ## Quick start
 

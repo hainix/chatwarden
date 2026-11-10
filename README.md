@@ -24,10 +24,12 @@ project gets exactly one copy of it. `store-sqlite` and `profanity` also need `m
 | I want to | Install |
 | --- | --- |
 | Moderate chat: the engine, a store and a slur matcher | `npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher` |
-| Give moderators and players HTTP routes (Express) | add `npm install @chatwarden/http express` |
+| Give moderators and players HTTP routes (Express) | add `npm install @chatwarden/http express @types/express` |
 | Mask or refuse ordinary swearing | add `npm install @chatwarden/profanity` |
 | Post the review queue into a Discord forum | add `npm install @chatwarden/discord` |
 | Try it with invented test words, no real term list | nothing extra: `@chatwarden/matcher/fixtures` is part of `@chatwarden/matcher` |
+
+Express 5 ships no types, so `@types/express` goes with `express` in a TypeScript project (a plain JavaScript project can skip it).
 
 Each package has its own README with the options, a copy-paste start and its security notes: [core](packages/core), [store-sqlite](packages/store-sqlite), [matcher](packages/matcher), [profanity](packages/profanity), [http](packages/http), [discord](packages/discord).
 
@@ -87,7 +89,7 @@ Always pass a term pack (a slur `matcher`): profanity starring is not slur prote
 
 ## CommonJS
 
-The packages are ESM only. A CommonJS app can still `require()` them on Node 22.12 or newer (and 24): Node loads an ES module
+The packages are ESM only. A CommonJS app can still `require()` them on Node 22.13 or newer (and 24): Node loads an ES module
 from `require()` as long as it has no top-level `await`, and none of the Chatwarden packages has one. On older Node, use
 `await import(...)`.
 

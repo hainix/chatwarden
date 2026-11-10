@@ -17,14 +17,17 @@ Status: pre-release, as-is, no support promise.
 
 ```sh
 npm install @chatwarden/http @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher
-npm install express        # only for the Express adapter (peer dependency, version 5)
+npm install express @types/express   # only for the Express adapter (peer dependencies, version 5)
 ```
+
+Express 5 ships no types, so a TypeScript project that imports `@chatwarden/http/express` needs `@types/express` too: the
+adapter's type declarations import from it. A plain JavaScript project can leave it out.
 
 Node 22.13 or newer.
 
 ### CommonJS
 
-The package is ESM only. A CommonJS app can still `require('@chatwarden/http')` on Node 22.12 or newer (and 24): Node loads an
+The package is ESM only. A CommonJS app can still `require('@chatwarden/http')` on Node 22.13 or newer (and 24): Node loads an
 ES module from `require()` as long as it has no top-level `await`, and none of the Chatwarden packages has one. On older
 Node, use `await import('@chatwarden/http')`.
 

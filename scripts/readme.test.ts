@@ -67,6 +67,10 @@ describe('every published package has a README', () => {
     expect(install).toMatch(/Node 22\.13 or newer/);
   });
 
+  it.each(published)('%s: never names Node 22.12 as the floor (engines and CI say 22.13)', (dir) => {
+    expect(readme(dir)).not.toMatch(/22\.12/);
+  });
+
   it.each(published)('%s: has at least one ```ts snippet that is a whole program', (dir) => {
     expect(readme(dir)).toMatch(/```ts\nimport /);
   });
@@ -185,9 +189,16 @@ describe('the root README', () => {
     expect(section(doc, 'Install')).toMatch(/peer dependenc/i);
   });
 
-  it('has a CommonJS note: require() of ESM on Node 22.12 or newer, and typesVersions for subpaths', () => {
+  it('installs @types/express next to express for the HTTP routes, and says why', () => {
+    const http = rows(section(doc, 'Install')).find((r) => (r[1] ?? '').includes('@chatwarden/http'));
+    expect(http?.[1]).toContain('npm install @chatwarden/http express @types/express');
+    expect(flat(section(doc, 'Install'))).toMatch(/Express 5 ships no types/);
+  });
+
+  it('has a CommonJS note: require() of ESM on Node 22.13 or newer, and typesVersions for subpaths', () => {
     const cjs = section(doc, 'CommonJS');
-    expect(cjs).toMatch(/Node 22\.12 or newer/);
+    expect(cjs).toMatch(/Node 22\.13 or newer/);
+    expect(doc).not.toMatch(/22\.12/);
     expect(cjs).toContain('require(');
     expect(cjs).toContain('typesVersions');
     expect(cjs).toContain('moduleResolution: node');
@@ -213,15 +224,63 @@ describe('the root README', () => {
   });
 });
 
+describe('the http README Install section', () => {
+  const install = section(readme('http'), 'Install');
+  it('installs @types/express with express (TypeScript), and says Express 5 ships no types', () => {
+    expect(install).toMatch(/^npm install express @types\/express/m);
+    expect(flat(install)).toMatch(/Express 5 ships no types/);
+  });
+});
+
 describe('RELEASING.md', () => {
   const doc = read('RELEASING.md');
   it('gives the owner setup and the per-release steps, in plain words', () => {
     for (const heading of ['## One-time setup (the owner)', '## Each release', '## Running a dry run', '## Before the first publish: vendoring tarballs']) {
       expect(doc, heading).toContain(heading);
     }
-    for (const needle of ['@chatwarden', 'NPM_TOKEN', 'v*', 'trusted publishing', 'npx changeset', 'npx changeset version', 'tiny-chat', 'git tag v', 'dry_run=true', 'node scripts/smoke.mjs', '.smoke/tarballs', 'overrides', 'file:']) {
+    for (const needle of ['@chatwarden', 'NPM_TOKEN', 'v*', 'trusted publishing', 'npx changeset', 'npm run version', 'scripts/sync-version.mjs', 'tiny-chat', 'git tag v', 'dry_run=true', 'node scripts/smoke.mjs', '.smoke/tarballs', 'overrides', 'file:']) {
       expect(doc, needle).toContain(needle);
     }
+  });
+  it('puts making the repository public first in the one-time setup, with the reason', () => {
+    const setup = section(doc, 'One-time setup (the owner)');
+    const first = /^1\. (.*(?:\n(?! {0,3}\d+\. ).*)*)/m.exec(setup)?.[1] ?? '';
+    expect(first).toContain('make hainix/chatwarden public');
+    expect(flat(first)).toMatch(/provenance/);
+    expect(flat(first)).toMatch(/tag ruleset/i);
+    expect(flat(first)).toMatch(/free plan/i);
+  });
+  it('recommends a granular token scoped to @chatwarden that bypasses 2FA, and points at trusted publishing and the current npm docs', () => {
+    const setup = flat(section(doc, 'One-time setup (the owner)'));
+    expect(setup).toMatch(/granular access token/i);
+    expect(setup).toMatch(/scoped to the `@chatwarden` org/);
+    expect(setup).toMatch(/publish/i);
+    expect(setup).toMatch(/bypass 2FA/i);
+    expect(setup).toMatch(/trusted publishing \(OIDC\)/);
+    expect(setup).toMatch(/check npm's current docs/i);
+    expect(setup).not.toMatch(/classic/i);
+  });
+  it('documents the provenance input of the workflow', () => {
+    expect(flat(doc)).toMatch(/provenance=false/);
+  });
+  it('has a Docker note for vendoring: copy vendor/ before npm install, list core and matcher as direct file: deps under legacy-peer-deps', () => {
+    const vendoring = section(doc, 'Before the first publish: vendoring tarballs');
+    expect(vendoring).toContain('Docker');
+    const docker = flat(vendoring.slice(vendoring.indexOf('Docker')));
+    expect(docker).toContain('COPY vendor');
+    expect(docker).toMatch(/before the first `npm install`/);
+    expect(docker).toContain('legacy-peer-deps=true');
+    expect(docker).toMatch(/peers are NOT auto-installed/);
+    expect(docker).toContain('@chatwarden/core');
+    expect(docker).toContain('@chatwarden/matcher');
+  });
+  it('the Docker example Dockerfile copies vendor/ before the install that reads it', () => {
+    const block = /```dockerfile\n([\s\S]*?)```/.exec(doc)?.[1] ?? '';
+    const lines = block.split('\n');
+    const copyVendor = lines.findIndex((l) => /^COPY vendor/.test(l));
+    const firstInstall = lines.findIndex((l) => /npm (install|ci)/.test(l));
+    expect(copyVendor).toBeGreaterThanOrEqual(0);
+    expect(firstInstall).toBeGreaterThan(copyVendor);
   });
   it('the vendoring example is valid JSON that overrides core and matcher to the direct dependency', () => {
     const json = /```json\n([\s\S]*?)```/.exec(doc)?.[1] ?? '';

@@ -1,6 +1,8 @@
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { installArgs, publishedPackages, PROJECTS, renderTemplate, tarballName } from './smoke.mjs';
+import { installArgs, isInside, keepTemp, publishedPackages, PROJECTS, renderTemplate, tarballName, TEMP_PREFIX, timeoutFor } from './smoke.mjs';
 
 describe('tarballName', () => {
   it('maps a scoped name the way npm pack names the file', () => {
@@ -80,5 +82,44 @@ describe('renderTemplate', () => {
   });
   it('does not re-expand a value that itself looks like a placeholder', () => {
     expect(renderTemplate('{{a}}', { a: '{{b}}', b: 'no' })).toBe('{{b}}');
+  });
+});
+
+describe('timeoutFor', () => {
+  it('gives installs (and the build and pack that precede them) 5 minutes', () => {
+    expect(timeoutFor('install')).toBe(300_000);
+  });
+  it('gives runs (typecheck, compile, the scenario) 60 seconds', () => {
+    expect(timeoutFor('run')).toBe(60_000);
+  });
+  it('refuses an unknown kind rather than running without a limit', () => {
+    expect(() => timeoutFor('forever')).toThrow(/unknown/i);
+    expect(() => timeoutFor(undefined)).toThrow();
+  });
+});
+
+describe('keepTemp', () => {
+  it('keeps the temp projects only when SMOKE_KEEP is exactly 1', () => {
+    expect(keepTemp({ SMOKE_KEEP: '1' })).toBe(true);
+    expect(keepTemp({})).toBe(false);
+    expect(keepTemp({ SMOKE_KEEP: '' })).toBe(false);
+    expect(keepTemp({ SMOKE_KEEP: '0' })).toBe(false);
+    expect(keepTemp({ SMOKE_KEEP: 'true' })).toBe(false);
+  });
+});
+
+describe('the temp projects live outside the repository', () => {
+  it('names its temp directories chatwarden-smoke-*', () => {
+    expect(TEMP_PREFIX).toBe('chatwarden-smoke-');
+  });
+  it('isInside is true for a descendant and for the directory itself, false for siblings and parents', () => {
+    expect(isInside('/repo', '/repo/.smoke/esm')).toBe(true);
+    expect(isInside('/repo', '/repo')).toBe(true);
+    expect(isInside('/repo', '/repo-other/x')).toBe(false);
+    expect(isInside('/repo/.smoke', '/repo')).toBe(false);
+    expect(isInside('/repo', '/tmp/chatwarden-smoke-abc')).toBe(false);
+  });
+  it('the OS temp directory is not inside this repository', () => {
+    expect(isInside(fileURLToPath(new URL('..', import.meta.url)), tmpdir())).toBe(false);
   });
 });

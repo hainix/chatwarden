@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { checkFileList, checkManifest, exportTargets } from './check-pack.mjs';
+import { bareImports, checkFileList, checkManifest, exportTargets, undeclaredImports } from './check-pack.mjs';
 
 type Pkg = Record<string, unknown>;
 
@@ -168,5 +168,93 @@ describe('checkManifest', () => {
     const pkg = goodPkg();
     pkg.license = 'MIT';
     expect(run(pkg).join('\n')).toMatch(/license/);
+  });
+});
+
+describe('bareImports', () => {
+  it('finds static imports, re-exports, side-effect imports, dynamic imports and require calls', () => {
+    const src = [
+      "import { a } from 'alpha';",
+      "import b from 'beta/sub/path.js';",
+      "import * as c from '@scope/gamma';",
+      "import '@scope/delta/side';",
+      "export { e } from 'epsilon';",
+      "export * from 'zeta';",
+      "const f = await import('eta');",
+      "const g = require('theta');",
+      "import type { T } from 'iota';",
+    ].join('\n');
+    expect(bareImports(src).sort()).toEqual(['@scope/delta', '@scope/gamma', 'alpha', 'beta', 'epsilon', 'eta', 'iota', 'theta', 'zeta']);
+  });
+  it('reads multi-line import lists and double-quoted specifiers', () => {
+    expect(bareImports('import {\n  a,\n  b,\n} from "multi";\n')).toEqual(['multi']);
+  });
+  it('ignores relative and absolute paths, node: builtins and bare builtins', () => {
+    const src = "import a from './a.js';\nimport b from '../b.js';\nimport c from '/abs.js';\nimport d from 'node:sqlite';\nimport e from 'fs';\nimport f from 'node:fs/promises';\nimport g from 'crypto';\nimport h from 'fs/promises';\n";
+    expect(bareImports(src)).toEqual([]);
+  });
+  it('ignores specifiers inside comments', () => {
+    const src = "// import x from 'commented';\n/* import y from 'blocked'; */\n/**\n * import z from 'doc';\n */\nimport real from 'real';\n";
+    expect(bareImports(src)).toEqual(['real']);
+  });
+  it('does not mistake a word that merely contains import for one', () => {
+    expect(bareImports("const reimport = 'from x';\nconst important = require_not('y');\n")).toEqual([]);
+  });
+  it('lists a package once however often it is imported', () => {
+    expect(bareImports("import a from 'dup';\nimport b from 'dup/sub';\n")).toEqual(['dup']);
+  });
+});
+
+describe('undeclaredImports', () => {
+  const pkg = {
+    name: '@chatwarden/demo',
+    dependencies: { dep: '^1.0.0' },
+    peerDependencies: { '@chatwarden/core': '^0.1.0', peer: '^2.0.0' },
+    devDependencies: { devonly: '^1.0.0', vitest: '^5.0.0' },
+  };
+  const file = (path: string, source: string): { path: string; source: string } => ({ path, source });
+
+  it('is empty when every bare import is a builtin, a self-reference, a dependency or a peer', () => {
+    const files = [
+      file('dist/src/index.js', "import { x } from 'dep';\nimport { y } from '@chatwarden/core';\nimport z from 'peer/sub';\nimport db from 'node:sqlite';\nimport { w } from '@chatwarden/demo/extra';\nimport q from './q.js';\n"),
+    ];
+    expect(undeclaredImports({ pkg, files })).toEqual([]);
+  });
+  it('flags an import that is only a devDependency (it is not installed for consumers)', () => {
+    const out: string[] = undeclaredImports({ pkg, files: [file('dist/src/a.js', "import { t } from 'devonly';\n")] });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('devonly');
+    expect(out[0]).toContain('dist/src/a.js');
+  });
+  it('flags a phantom import that is declared nowhere', () => {
+    const out: string[] = undeclaredImports({ pkg, files: [file('dist/src/a.js', "import ws from 'ws';\nimport { m } from '@chatwarden/matcher';\n")] });
+    expect(out).toHaveLength(2);
+    expect(out.join('\n')).toContain('ws');
+    expect(out.join('\n')).toContain('@chatwarden/matcher');
+  });
+  it('flags a dynamic import and a require too', () => {
+    const out: string[] = undeclaredImports({ pkg, files: [file('dist/src/a.js', "const a = await import('lazy');\nconst b = require('cjsdep');\n")] });
+    expect(out.join('\n')).toContain('lazy');
+    expect(out.join('\n')).toContain('cjsdep');
+  });
+  it('reports a package once per file, and each file separately', () => {
+    const out: string[] = undeclaredImports({
+      pkg,
+      files: [file('dist/src/a.js', "import 'ws';\nimport 'ws/lib';\n"), file('dist/src/b.js', "import 'ws';\n")],
+    });
+    expect(out).toHaveLength(2);
+  });
+  it('only looks at dist/src/**/*.js, not declarations, maps or other folders', () => {
+    const files = [
+      file('dist/src/a.d.ts', "import ws from 'ws';\n"),
+      file('dist/src/a.js.map', '{"sources":["import x from \'ws\'"]}'),
+      file('src/a.ts', "import ws from 'ws';\n"),
+      file('README.md', "import ws from 'ws'"),
+    ];
+    expect(undeclaredImports({ pkg, files })).toEqual([]);
+  });
+  it('treats a package with no dependency fields at all as declaring nothing', () => {
+    const out: string[] = undeclaredImports({ pkg: { name: '@chatwarden/bare' }, files: [file('dist/src/a.js', "import x from 'x';\nimport fs from 'node:fs';\n")] });
+    expect(out).toHaveLength(1);
   });
 });

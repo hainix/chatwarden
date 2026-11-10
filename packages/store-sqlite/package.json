@@ -2,7 +2,7 @@
   "name": "@chatwarden/store-sqlite",
   "version": "0.1.0",
   "private": false,
-  "description": "Chatwarden store-sqlite package.",
+  "description": "SQLite store for Chatwarden chat moderation, on the SQLite built into Node: reports, sanctions, notices and the audit trail in one file.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 type Manifest = {
   name: string;
   version: string;
+  description?: string;
   private?: boolean;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
@@ -44,8 +45,25 @@ describe('versions', () => {
   it.each(published.map((p) => [p.pkg.name, p.pkg] as const))('%s is at the shared version', (_n, pkg) => {
     expect(pkg.version).toBe(VERSION);
   });
+  it.each(published.map((p) => [p.pkg.name, p.dir, p.pkg.version] as const))('%s exports a VERSION constant equal to its manifest version', (_n, dir, version) => {
+    const src = readFileSync(join(root, 'packages', dir, 'src', 'index.ts'), 'utf8').replaceAll('\r\n', '\n');
+    expect(/^export const VERSION = '([^']*)';$/m.exec(src)?.[1]).toBe(version);
+  });
   it('are identical across the fixed group', () => {
     expect(new Set(published.map((p) => p.pkg.version)).size).toBe(1);
+  });
+});
+
+describe('descriptions', () => {
+  it.each(published.map((p) => [p.pkg.name, p.pkg] as const))('%s has a real description, not a placeholder', (_n, pkg) => {
+    const d = pkg.description ?? '';
+    expect(d.length, 'long enough to say something').toBeGreaterThanOrEqual(40);
+    expect(d.length, 'short enough for a search result').toBeLessThanOrEqual(200);
+    expect(d).not.toMatch(/^Chatwarden [\w-]+ package\.?$/);
+    expect(d.trim().endsWith('.')).toBe(true);
+  });
+  it('are all different', () => {
+    expect(new Set(published.map((p) => p.pkg.description)).size).toBe(published.length);
   });
 });
 

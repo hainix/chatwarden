@@ -32,15 +32,16 @@ describe('.github/workflows/release.yml', () => {
     expect(wf).toContain('registry-url: https://registry.npmjs.org');
   });
 
-  it('runs ci, typecheck, check:pack and smoke before it publishes', () => {
+  it('runs ci, typecheck, lint, the tests, check:pack and smoke before it publishes', () => {
     const at = (s: string): number => wf.indexOf(s);
-    const order = ['npm ci', 'npm run typecheck', 'npm run check:pack', 'node scripts/smoke.mjs', 'npm publish --workspace'];
+    const order = ['npm ci', 'npm run typecheck', 'npm run lint', 'npm test', 'npm run check:pack', 'node scripts/smoke.mjs', 'npm publish --workspace'];
     for (const s of order) expect(at(s), s).toBeGreaterThan(-1);
     for (let i = 1; i < order.length; i++) expect(at(order[i] as string), order[i]).toBeGreaterThan(at(order[i - 1] as string));
   });
 
   it('publishes with provenance and public access, takes the order from publish-order.mjs, and never skips prepack', () => {
-    expect(wf).toContain('--provenance --access public');
+    expect(wf).toContain('flags=(--access public)');
+    expect(wf).toContain('flags+=(--provenance)');
     expect(wf).toContain('--dry-run');
     expect(wf).toContain('node scripts/publish-order.mjs');
     expect(wf).toContain('npm publish --workspace "$name"');
@@ -63,5 +64,69 @@ describe('.github/workflows/release.yml', () => {
 
   it('refuses a tag that does not match the package version', () => {
     expect(wf).toContain('does not match the package version');
+  });
+
+  it('has a provenance input (boolean, default true) after dry_run', () => {
+    expect(wf).toMatch(/provenance:\n {8}description: .*\n {8}type: boolean\n {8}default: true/);
+    const inputs = wf.slice(wf.indexOf('workflow_dispatch:'), wf.indexOf('push:'));
+    expect(inputs.indexOf('dry_run:')).toBeLessThan(inputs.indexOf('provenance:'));
+  });
+
+  it('always uses provenance for a tag push, and follows the input only for a manual run', () => {
+    // 'event != dispatch || inputs.provenance' is true on a tag push (the first operand) and the input on a dispatch.
+    // The tempting 'dispatch && inputs.provenance || true' would turn an unticked box back into true.
+    expect(wf).toContain("PROVENANCE: ${{ github.event_name != 'workflow_dispatch' || inputs.provenance }}");
+    expect(wf).not.toMatch(/PROVENANCE:.*\|\| true/);
+  });
+
+  it('adds --provenance to the publish flags only when PROVENANCE is true', () => {
+    expect(wf).toContain('if [ "$PROVENANCE" = "true" ]; then flags+=(--provenance); fi');
+    expect(wf).not.toMatch(/flags=\([^)]*--provenance/);
+  });
+
+  it('checks the repository visibility with gh api and GITHUB_TOKEN, before it publishes', () => {
+    const step = wf.indexOf('Check the repository is public');
+    expect(step).toBeGreaterThan(-1);
+    expect(step).toBeLessThan(wf.indexOf('npm publish --workspace'));
+    expect(wf).toContain('gh api repos/${{ github.repository }} -q .private');
+    expect(wf).toContain('GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}');
+  });
+
+  const visibilityStep = (): string => wf.slice(wf.indexOf('Check the repository is public'), wf.indexOf('Require NPM_TOKEN'));
+
+  it('fails a real publish from a private repository, naming the owner decision, and only warns on a dry run', () => {
+    const body = visibilityStep();
+    expect(body).toContain('make hainix/chatwarden public');
+    expect(body).toMatch(/provenance/i);
+    expect(body).toContain('if [ "$DRY_RUN" = "true" ]; then');
+    const warn = body.indexOf('::warning::');
+    const err = body.indexOf('::error::');
+    expect(warn).toBeGreaterThan(-1);
+    expect(err).toBeGreaterThan(warn);
+    // The dry-run branch (up to the error) never exits non-zero; the error branch does.
+    expect(body.slice(warn, err)).not.toContain('exit 1');
+    expect(body.indexOf('exit 1')).toBeGreaterThan(err);
+  });
+
+  it('lets a deliberate no-provenance publish from a private repository through', () => {
+    expect(visibilityStep()).toContain('"$PROVENANCE" = "true"');
+  });
+
+  it('does not let a failing publish-order.mjs pass: set -euo pipefail, an assignment, a non-empty check, then the loop', () => {
+    const run = wf.slice(wf.indexOf('Publish in dependency order'));
+    expect(run).not.toMatch(/for spec in \$\(/);
+    const order = ['set -euo pipefail', 'specs="$(node scripts/publish-order.mjs)"', '-z "$specs"', 'for spec in $specs'];
+    for (const s of order) expect(run.indexOf(s), s).toBeGreaterThan(-1);
+    for (let i = 1; i < order.length; i++) expect(run.indexOf(order[i] as string), order[i]).toBeGreaterThan(run.indexOf(order[i - 1] as string));
+  });
+
+  it('refuses a real publish that is not on a tag ref, before anything is installed', () => {
+    const step = wf.indexOf('Real publishes run on a tag');
+    expect(step).toBeGreaterThan(-1);
+    expect(step).toBeLessThan(wf.indexOf('npm ci'));
+    const body = wf.slice(step, wf.indexOf('- uses: actions/setup-node'));
+    expect(body).toContain("if: ${{ env.DRY_RUN != 'true' && github.ref_type != 'tag' }}");
+    expect(body).toContain('::error::');
+    expect(body).toContain('exit 1');
   });
 });

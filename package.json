@@ -16,7 +16,8 @@
     "license:sync": "node scripts/sync-license.mjs",
     "lint": "eslint .",
     "test": "vitest run",
-    "changeset": "changeset"
+    "changeset": "changeset",
+    "version": "changeset version && node scripts/sync-version.mjs && npm install --package-lock-only"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",

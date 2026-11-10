@@ -162,7 +162,7 @@ describe('packages/http/README.md', () => {
   it('says how a CommonJS app consumes it, and that CORS middleware mounts before toExpress', () => {
     const install = section(http, 'Install');
     expect(install).toContain('### CommonJS');
-    expect(install).toMatch(/Node 22\.12 or newer/);
+    expect(install).toMatch(/Node 22\.13 or newer/);
     expect(install).toMatch(/no top-level `await`/);
     expect(install).toContain('moduleResolution: node');
     expect(install).toContain('typesVersions');

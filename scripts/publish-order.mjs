@@ -1,7 +1,8 @@
 // The order in which the release workflow publishes the packages, derived from the manifests. A package is published after
 // every @chatwarden package it needs when an adopter installs it (peerDependencies and dependencies). devDependencies are
-// left out on purpose: npm strips them from the published manifest, and http's devDependency on discord (for its tests) is not
-// a reason to publish discord first. Where the edges leave a choice, PUBLISH_ORDER decides, so the list stays stable.
+// left out on purpose: npm does not strip them from the published manifest, but it never installs a dependency's
+// devDependencies for a consumer, so they are harmless there, and http's devDependency on discord (for its tests) is not a
+// reason to publish discord first. Where the edges leave a choice, PUBLISH_ORDER decides, so the list stays stable.
 // `node scripts/publish-order.mjs` prints `name@version` lines in publish order. Unit-tested in publish-order.test.ts.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

@@ -2,7 +2,7 @@
   "name": "@chatwarden/matcher",
   "version": "0.1.0",
   "private": false,
-  "description": "Chatwarden matcher package.",
+  "description": "Slur matcher for game chat: whole-word term matching that resists Unicode, look-alike and leetspeak evasion, for chat lines and player names.",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
