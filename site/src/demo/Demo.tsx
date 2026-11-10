@@ -99,14 +99,16 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const prevOn = useRef(true);
   const gen = useRef(0);
   const sayId = useRef(0);
+  const settle = useRef<number | undefined>(undefined);
   const loopAt = useRef(0);
   const live = useRef({ paused, ready, dialog: false });
   live.current = { paused, ready, dialog: dialog !== null };
   paneNow.current = paneTab;
 
   const announce = useCallback((text: string) => {
-    sayId.current += 1;
-    setSays((s) => [...s.slice(-3), { id: sayId.current, text }]);
+    // Take the id before the updater runs: React may run it later, and two announcements in one tick must not share a key.
+    const id = ++sayId.current;
+    setSays((s) => [...s.slice(-3), { id, text }]);
   }, []);
 
   // ---------- reading the engine ----------
@@ -215,6 +217,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     return () => {
       alive.current = false;
       gen.current += 1;
+      window.clearTimeout(settle.current);
     };
   }, [boot]);
 
@@ -296,7 +299,21 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     if (focusPane === null || paneTab !== focusPane) return;
     const a = document.activeElement;
     if (a === null || a === document.body || !a.isConnected || a.closest('[hidden]') !== null) {
-      document.getElementById(focusPane === 'mod' ? 'pane-mod-title' : 'pane-game-title')?.focus();
+      const heading = document.getElementById(focusPane === 'mod' ? 'pane-mod-title' : 'pane-game-title');
+      if (heading) {
+        // preventScroll first: the layout swap can leave the heading above the viewport, so bring it back ourselves. The jump
+        // is instant: a smooth scroll gets cut short when the swapped pane changes the page height, and it is the
+        // reduced-motion-safe choice too.
+        heading.focus({ preventScroll: true });
+        const bring = () => heading.scrollIntoView?.({ block: 'nearest', behavior: 'instant' });
+        bring();
+        // The swapped pane and the closing dialog keep moving the page for a moment (entrance animations, the scroll lock
+        // lifting), so once more when they have settled, if focus is still on the heading.
+        window.clearTimeout(settle.current);
+        settle.current = window.setTimeout(() => {
+          if (document.activeElement === heading) bring();
+        }, 650);
+      }
     }
     setFocusPane(null);
   }, [focusPane, paneTab]);
