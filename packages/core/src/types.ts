@@ -1,6 +1,8 @@
 // Core types for @chatwarden/core. Organized by section; later tasks append
 // their own sections below.
 
+import type { AuditListQuery, AuditRow } from './audit.js';
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
@@ -230,6 +232,21 @@ export interface StrikeRow {
 // Reports (storage shapes)
 // ---------------------------------------------------------------------------
 
+/**
+ * A Discord forum thread kept for one person by `@chatwarden/discord`. `label` is the neutral name the thread was
+ * created with (`Case 7K2QX`): random, never derived from an id, hash or handle.
+ *
+ * Staff-only (`subject` is a subject id), and NOT purged by `purge()`: rows live as long as the table does. Subjects are not
+ * purged either today; whatever starts deleting subjects must delete their rows here too.
+ */
+export interface DiscordThreadRow {
+  subject: string;
+  threadId: string;
+  label: string;
+  /** Epoch ms. */
+  createdAt: number;
+}
+
 /** What a player may report another for. */
 export type ReportCategory = 'harassment' | 'hate' | 'cheating' | 'spam' | 'disruption' | 'other';
 
@@ -317,6 +334,15 @@ export interface DecisionRow {
   at: number;
   resultJson: string;
 }
+
+/** How long an incoming-webhook idempotency key is remembered: 24 hours. */
+export const WEBHOOK_KEY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** What {@link Store.reserveWebhookKey} answers: this call took the key, or the row that already holds it. */
+export type WebhookKeyReservation =
+  | { reserved: true }
+  | { reserved: false; state: 'pending'; resultJson: null; fingerprint: string }
+  | { reserved: false; state: 'done'; resultJson: string; fingerprint: string };
 
 /** The light projection of a report the intake rules count: who reported whom, where and when. */
 export interface ReportActivity {
@@ -423,6 +449,20 @@ export interface Store {
    */
   revokeSanctionGroup(groupId: string, actor: string, at: number, reason: string): number;
 
+  /**
+   * The player-quotable ref code of a sanction group, or null for an unknown group. Revoked and ended groups are
+   * still found: the code never changes. For the `sanction.revoked` event.
+   */
+  sanctionRefCode(groupId: string): string | null;
+
+  /**
+   * The person a sanction group is about and the rule it cites, for the `sanction.revoked` event: the group's SUBJECT row
+   * (its IP row is not a person) and its stored rule text (`'1'`.., `'uncovered'`, or null on a row written before rules
+   * existed). Revoked and ended groups are still found. Null for an unknown group. `subject` is the id as stored; the
+   * facade makes it canonical.
+   */
+  sanctionGroupTarget(groupId: string): { subject: SubjectId; rule: string | null } | null;
+
   /** Every unrevoked row that has not ended by `now`, for rebuilding the sanction index. */
   loadSanctions(now: number): SanctionRow[];
 
@@ -499,6 +539,13 @@ export interface Store {
   listReports(q: ReportListQuery): ReportRecord[];
 
   /**
+   * Reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id and every
+   * alias merged into it), newest first (`created_at` descending, then `id` descending), whole records. `limit` is
+   * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
+   */
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+
+  /**
    * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`,
    * and the bad-faith `evidence` (null or omitted when there is none). Returns true when this call closed it; false
    * (nothing changed, the first closer's evidence kept) for an unknown report or one already closed.
@@ -534,7 +581,29 @@ export interface Store {
    */
   loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }>;
 
-  // Retention. SYNCHRONOUS on purpose: `purge` runs all five inside one `transaction`. Each deletes rows
+  // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
+  // editor write; none of these methods ever returns the json columns those carry (they may hold term text).
+
+  /** Insert one audit entry. A duplicate id throws (nothing is written). Both json columns are written NULL. */
+  insertAudit(row: AuditRow): void;
+
+  /**
+   * Audit entries newest first (`at` descending, then `id` descending, so a tie is stable). `actor` and `action`
+   * filter by equality. `before` keeps only entries older than that instant (exclusive), and with `beforeId` also the
+   * ones AT that instant whose id sorts below it (keyset paging: pass the last row's `at` and `id`). `beforeId`
+   * without `before` is ignored. `limit` is clamped to 1..200 (a fraction is floored).
+   *
+   * Rows written before roles existed read with `role: null`. A legacy term-editor row is mapped into the
+   * {@link AuditRow} action union (`add` -> `term.add` or `exception.add`, `edit` -> `*.update`, `enable` / `disable` ->
+   * `*.toggle`); any other action it does not recognise reads as `term.update`, and a target type outside the union
+   * reads as no target. The `action` filter matches the mapped name.
+   */
+  listAudit(q: AuditListQuery): AuditRow[];
+
+  /** Delete audit entries with `at < before`. Returns how many. */
+  purgeAudit(before: number): number;
+
+  // Retention. SYNCHRONOUS on purpose: `purge` runs all six inside one `transaction`. Each deletes rows
   // strictly older than the cutoff (epoch ms) and returns how many it deleted.
 
   /**
@@ -564,6 +633,37 @@ export interface Store {
    * is seen or withdrawn.
    */
   purgeNotices(before: number): number;
+
+  // Webhook idempotency keys (K3b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
+
+  /**
+   * Reserve an idempotency key for an incoming webhook. A row with `createdAt < notBefore` is expired and is replaced.
+   * Otherwise: no row yet inserts a `pending` one holding `fingerprint` (a hash of the request, so a key reused for a
+   * different request can be told apart) and answers `{ reserved: true }`; an existing row is returned as it is, with
+   * the fingerprint it was stored with (`pending` carries no result, `done` carries the stored response body). Never
+   * carries chat text.
+   */
+  reserveWebhookKey(key: string, now: number, notBefore: number, fingerprint: string): WebhookKeyReservation;
+
+  /** Mark a `pending` key `done` with the response body it answered. True only when this call did it. */
+  completeWebhookKey(key: string, resultJson: string): boolean;
+
+  /** Delete a key that is still `pending` (the apply failed, so a retry may proceed). A `done` key is never deleted. True when it did. */
+  releaseWebhookKey(key: string): boolean;
+
+  /** Delete idempotency keys with `createdAt < before`, done or pending. Returns how many. */
+  purgeWebhookKeys(before: number): number;
+
+  // Discord thread map (K3b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
+
+  /**
+   * The forum thread the Discord feed keeps for a person, or null. `subject` is a canonical subject id, or the
+   * feed's reserved shared-thread key (`__unattributed__`). Holds no chat text.
+   */
+  getDiscordThread(subject: string): DiscordThreadRow | null;
+
+  /** Store (or replace, to repoint) a person's forum thread. One row per `subject`; two subjects may share a thread. */
+  putDiscordThread(row: DiscordThreadRow): void;
 
   // Notices. SYNCHRONOUS on purpose (like sanctions): `NoticeService` runs these inside `transaction`.
 
@@ -620,6 +720,12 @@ export interface Matcher {
    * Empty exactly when `match` is null.
    */
   spans?(text: string): Array<{ start: number; end: number; termId: string }>;
+  /**
+   * The same check for a NAME (a handle, a table or deck name) rather than a chat line: the matcher also reads the
+   * name split into words (underscores, camel-case humps, digit runs), so `Zorbak_99` is caught. Optional: without
+   * it `names.check` falls back to `match`.
+   */
+  matchName?(name: string): { termId: string } | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,8 @@ import {
   SANCTION_KINDS,
   SanctionError,
   SanctionIndex,
+  MAX_SANCTION_DURATION_MS,
+  validateSanctionInput,
   type SanctionInput,
 } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
@@ -1130,5 +1132,104 @@ describe('SanctionIndex.active: own', () => {
     const { store, subjects, index, s1 } = await person();
     await applySanction(store, subjects, input(s1), NOW, index);
     expect(index.active('chat', none, s1, NOW)?.own).toBe(true);
+  });
+});
+
+describe('MemoryStore.sanctionRefCode', () => {
+  it('returns the ref code of a known group and null for an unknown one', async () => {
+    const { MemoryStore } = await import('./memoryStore.js');
+    const store = new MemoryStore();
+    const row = {
+      id: 'r1',
+      groupId: 'g1',
+      refCode: 'M-ABCDE',
+      kind: 'chat' as const,
+      targetType: 'subject' as const,
+      value: 's_x',
+      startsAt: 1,
+      endsAt: 2,
+      reason: 'r',
+      rule: '1',
+      gapNote: null,
+      gapStatus: null,
+      roomId: null,
+      actor: 'mod',
+      source: 'moderator' as const,
+      automated: false,
+      pending: false,
+    };
+    store.transaction(() => store.insertSanctionGroup([row]));
+    expect(store.sanctionRefCode('g1')).toBe('M-ABCDE');
+    expect(store.sanctionRefCode('nope')).toBeNull();
+    expect(store.sanctionRefCode('')).toBeNull();
+  });
+});
+
+describe('MemoryStore.sanctionGroupTarget', () => {
+  it('names the subject row and the stored rule of a group (the IP row is not the target), null for an unknown group', async () => {
+    const { MemoryStore } = await import('./memoryStore.js');
+    const store = new MemoryStore();
+    const base = {
+      kind: 'chat' as const,
+      startsAt: 1,
+      endsAt: 2,
+      reason: 'r',
+      gapNote: null,
+      gapStatus: null,
+      roomId: null,
+      actor: 'mod',
+      source: 'moderator' as const,
+      automated: false,
+      pending: false,
+    };
+    store.transaction(() =>
+      store.insertSanctionGroup([
+        { ...base, id: 'r1', groupId: 'g1', refCode: 'M-ABCDE', targetType: 'ip', value: 'iphash', rule: '4' },
+        { ...base, id: 'r2', groupId: 'g1', refCode: 'M-ABCDE', targetType: 'subject', value: 's_x', rule: '4' },
+        { ...base, id: 'r3', groupId: 'g2', refCode: 'M-FGHJK', targetType: 'subject', value: 's_y', rule: 'uncovered' },
+        { ...base, id: 'r4', groupId: 'g3', refCode: 'M-LMNPQ', targetType: 'subject', value: 's_z', rule: null },
+      ]),
+    );
+    expect(store.sanctionGroupTarget('g1')).toEqual({ subject: 's_x', rule: '4' });
+    expect(store.sanctionGroupTarget('g2')).toEqual({ subject: 's_y', rule: 'uncovered' });
+    expect(store.sanctionGroupTarget('g3')).toEqual({ subject: 's_z', rule: null });
+    expect(store.sanctionGroupTarget('nope')).toBeNull();
+    expect(store.sanctionGroupTarget('')).toBeNull();
+  });
+});
+
+describe('MAX_SANCTION_DURATION_MS: null is the only permanent value', () => {
+  it('is 365 days', () => {
+    expect(MAX_SANCTION_DURATION_MS).toBe(365 * DAY);
+  });
+
+  it.each(['chat', 'area', 'ban'] as const)('a %s at exactly the cap is accepted', async (kind) => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { kind, durationMs: MAX_SANCTION_DURATION_MS }), NOW);
+    expect(rows(store)).toHaveLength(1);
+  });
+
+  it.each([MAX_SANCTION_DURATION_MS + 1, MAX_SANCTION_DURATION_MS + DAY, 9e15, Number.MAX_SAFE_INTEGER, 1e300, 2 ** 60])(
+    'a duration of %s is refused with SanctionError and nothing is written',
+    async (durationMs) => {
+      const { store, subjects, index, s1 } = await person();
+      await expect(applySanction(store, subjects, input(s1, { durationMs }), NOW, index)).rejects.toThrow(SanctionError);
+      await expect(applySanction(store, subjects, input(s1, { kind: 'ban', durationMs }), NOW, index)).rejects.toThrow(/duration/i);
+      expect(rows(store)).toEqual([]);
+      expect(index.active('chat', none, s1, NOW)).toBeNull();
+    },
+  );
+
+  it('validateSanctionInput refuses the same way, and null (permanent) stays valid', async () => {
+    const { s1 } = await person();
+    expect(() => validateSanctionInput(input(s1, { durationMs: MAX_SANCTION_DURATION_MS + 1 }))).toThrow(SanctionError);
+    expect(() => validateSanctionInput(input(s1, { durationMs: MAX_SANCTION_DURATION_MS }))).not.toThrow();
+    expect(() => validateSanctionInput(input(s1, { kind: 'ban', durationMs: null }))).not.toThrow();
+  });
+
+  it('the cap does not touch a warning or a note (they take null only)', async () => {
+    const { s1 } = await person();
+    expect(() => validateSanctionInput(input(s1, { kind: 'warning', durationMs: null }))).not.toThrow();
+    expect(() => validateSanctionInput(input(s1, { kind: 'note', durationMs: null }))).not.toThrow();
   });
 });

@@ -9,6 +9,7 @@ import {
   type TermRow,
 } from './matcher.js';
 import { collapseLikePreset, foldPhrase, foldTerm } from './normalise.js';
+import { matchName } from './names.js';
 import type { TermPack } from './termPack.js';
 import type { ExceptionRecord, TermRecord, TermStore } from './termStore.js';
 
@@ -22,8 +23,8 @@ interface Rows {
  *  audit row (a no-op toggle or an empty patch writes nothing). `hits` is the dry-run result
  *  ({@link LiveTerms.check}) the moderator went ahead despite; it is kept in the audit row.
  *
- *  WARNING: `hits` are chat lines, and they are PERSISTED into the audit log (kept as long as the log is, with
- *  nothing purging them). Pass counts or a few capped, trimmed lines rather than everything `check` returned,
+ *  WARNING: `hits` are chat lines, and they are PERSISTED into the audit log (kept until the audit
+ *  retention purges them: `retention.auditMs`, 365 days by default). Pass counts or a few capped, trimmed lines rather than everything `check` returned,
  *  and remember that players typed them. */
 export interface TermEditor {
   /** Returns the new row id. */
@@ -62,7 +63,7 @@ const plainException = (r: ExceptionRecord): ExceptionRow => ({
 const isThenable = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && typeof (v as { then?: unknown }).then === 'function';
 
-const NEVER: Matcher = { match: () => null, spans: () => [] };
+const NEVER: Matcher = { match: () => null, spans: () => [], matchName: () => null };
 
 /** Terms and exceptions share a shape apart from the word column, so one set of edit internals serves both. */
 interface Kind {
@@ -115,6 +116,11 @@ export class LiveTerms implements Matcher {
 
   match(text: string): { termId: string } | null {
     return this.current.match(text);
+  }
+
+  /** {@link match} for a name (a handle, a table or deck name): also reads the name split into words. */
+  matchName(name: string): { termId: string } | null {
+    return matchName(this.current, name);
   }
 
   /** Every match as a range on the original text (end exclusive), for masking. Same rules as {@link match}. */

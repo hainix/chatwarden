@@ -140,7 +140,7 @@ export const LADDER_TABLE: readonly LadderRow[] = Object.freeze([
 /** The rules that swap a chat restriction for a ban from public rooms, when a profile does not say. */
 const DEFAULT_AREA_RULES: readonly number[] = Object.freeze([5, 6]);
 /** The rules that always read the severe (high) column, when a profile does not say. */
-const DEFAULT_SEVERE_RULES: readonly number[] = Object.freeze([1]);
+export const DEFAULT_SEVERE_RULES: readonly number[] = Object.freeze([1]);
 
 /** What {@link suggest} knows about the incident in front of the moderator, beyond the record. */
 export interface SuggestContext {

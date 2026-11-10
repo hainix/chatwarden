@@ -797,3 +797,67 @@ describe('SqliteStore loadSubjectActions', () => {
     expect(store.loadSanctions(NOW)[0]).not.toHaveProperty('revokedAt');
   });
 });
+
+describe('SqliteStore.sanctionGroupTarget', () => {
+  it('names the subject row and the rule of a group (also revoked, also with an IP row), null for an unknown one', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const withIp = await applySanction(store, subjects, input(s, { includeIp: true, rule: 4 }), NOW, index);
+    const gap = await applySanction(store, subjects, input(s, { rule: 'uncovered', gapNote: 'a note', kind: 'warning', durationMs: null }), NOW, index);
+    store.revokeSanctionGroup(withIp.groupId, 'mod', NOW, 'oops');
+    expect(store.sanctionGroupTarget(withIp.groupId)).toEqual({ subject: s, rule: '4' });
+    expect(store.sanctionGroupTarget(gap.groupId)).toEqual({ subject: s, rule: 'uncovered' });
+    expect(store.sanctionGroupTarget('no-such-group')).toBeNull();
+    expect(store.sanctionGroupTarget('')).toBeNull();
+  });
+});
+
+describe('SqliteStore.sanctionGroupTarget with a NULL rule', () => {
+  it('answers rule: null for a row written before rules existed (a NULL column), with the subject still named', async () => {
+    const { db, store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const legacy = await applySanction(store, subjects, input(s, { rule: 4 }), NOW, index);
+    const other = await applySanction(store, subjects, input(s, { rule: 5 }), NOW, index);
+    db.prepare('UPDATE kit_sanctions SET rule = NULL WHERE group_id = ?').run(legacy.groupId);
+    expect(store.sanctionGroupTarget(legacy.groupId)).toEqual({ subject: s, rule: null });
+    // A neighbouring group keeps its rule: only that group's rows changed.
+    expect(store.sanctionGroupTarget(other.groupId)).toEqual({ subject: s, rule: '5' });
+  });
+
+  it('also for a NULL rule on a revoked group with an IP row (the IP row is not the target)', async () => {
+    const { db, store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const withIp = await applySanction(store, subjects, input(s, { includeIp: true, rule: 4 }), NOW, index);
+    db.prepare('UPDATE kit_sanctions SET rule = NULL WHERE group_id = ?').run(withIp.groupId);
+    store.revokeSanctionGroup(withIp.groupId, 'mod', NOW, 'oops');
+    expect(store.sanctionGroupTarget(withIp.groupId)).toEqual({ subject: s, rule: null });
+  });
+});
+
+describe('SqliteStore.sanctionRefCode', () => {
+  it('finds the ref code of a group, revoked or ended, and null for an unknown group', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const live = await applySanction(store, subjects, input(s), NOW, index);
+    const ended = await applySanction(store, subjects, input(s, { durationMs: 1 }), NOW - DAY, index);
+    const revoked = await applySanction(store, subjects, input(s, { kind: 'ban', durationMs: null }), NOW, index);
+    store.revokeSanctionGroup(revoked.groupId, 'mod', NOW, 'oops');
+    expect(store.sanctionRefCode(live.groupId)).toBe(live.refCode);
+    expect(store.sanctionRefCode(ended.groupId)).toBe(ended.refCode);
+    expect(store.sanctionRefCode(revoked.groupId)).toBe(revoked.refCode);
+    expect(store.sanctionRefCode('no-such-group')).toBeNull();
+    expect(store.sanctionRefCode('')).toBeNull();
+  });
+
+  it('gives the same code for a group that has an IP row too', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const g = await applySanction(store, subjects, input(s, { includeIp: true }), NOW, index);
+    expect(store.sanctionRefCode(g.groupId)).toBe(g.refCode);
+  });
+});

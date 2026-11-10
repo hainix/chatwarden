@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -315,6 +315,48 @@ ALTER TABLE kit_sanctions_v11 RENAME TO kit_sanctions;
 CREATE UNIQUE INDEX kit_sanctions_ref_code ON kit_sanctions (ref_code) WHERE target_type = 'subject';
 CREATE INDEX kit_sanctions_by_group ON kit_sanctions (group_id);
 CREATE INDEX kit_sanctions_by_target ON kit_sanctions (target_type, target_value);
+`,
+  },
+  {
+    version: 12,
+    // The staff audit trail (K3b): `kit_audit` gains the actor's role (NULL on every row written before roles existed)
+    // and an index on (at, id) for newest-first paging. Existing rows, and their json columns, are untouched. A new
+    // entry writes NULL to both json columns and '' to subject_type / subject_ref when it has no target.
+    sql: `
+ALTER TABLE kit_audit ADD COLUMN role TEXT CHECK (role IN ('moderator', 'senior', 'owner'));
+CREATE INDEX kit_audit_by_at ON kit_audit (at, id);
+`,
+  },
+  {
+    version: 13,
+    // Incoming-webhook idempotency keys (K3b): `key` is the sender's idempotencyKey, `state` is `pending` while the
+    // action is being applied and `done` once it has answered, and `result_json` holds the response body only (ids and
+    // ref codes, never chat text). A `pending` row has no result and a `done` row always has one. `fingerprint` is the SHA-256 of
+    // the canonical validated request, so a key reused for a different request is refused. Purged after 24 h.
+    sql: `
+CREATE TABLE kit_webhook_keys (
+  key         TEXT PRIMARY KEY,
+  created_at  INTEGER NOT NULL,
+  state       TEXT NOT NULL CHECK (state IN ('pending', 'done')),
+  result_json TEXT,
+  fingerprint TEXT NOT NULL,
+  CHECK ((state = 'pending' AND result_json IS NULL) OR (state = 'done' AND result_json IS NOT NULL))
+);
+CREATE INDEX kit_webhook_keys_by_created ON kit_webhook_keys (created_at);
+`,
+  },
+  {
+    version: 14,
+    // The Discord review feed's thread map (K3b): one forum thread per person. `subject` is a canonical subject id (or a
+    // reserved shared-thread key), `label` the random neutral name the thread was created with. No chat text, no handle.
+    // Rows hold subject ids (staff-only) and are not removed by `purge()`: a future subject purge must clear this table too.
+    sql: `
+CREATE TABLE kit_discord_threads (
+  subject    TEXT PRIMARY KEY,
+  thread_id  TEXT NOT NULL,
+  label      TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 `,
   },
 ];

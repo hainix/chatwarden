@@ -1,3 +1,5 @@
+import { AuditService } from './audit.js';
+import type { AuditPage, AuditQuery, AuditRecordInput } from './audit.js';
 import { ChatService } from './chat.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
@@ -7,6 +9,8 @@ import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
 import type { DoorKind, DoorRefusal } from './doors.js';
 import { EvidenceBuffer, RoomRoster } from './evidence.js';
+import { EventBus } from './events.js';
+import type { Subscribe } from './events.js';
 import { hashWho, makeHasher } from './hasher.js';
 import { safeWarn } from './log.js';
 import { historyOf, suggest } from './ladder.js';
@@ -22,7 +26,7 @@ import { ReportService } from './reports.js';
 import type { ReportCounts, ReportInput, ReportResult } from './reports.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
-import { defineRules, starterRules } from './rules.js';
+import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
 import { applySanction, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
@@ -30,8 +34,10 @@ import { StrikeService } from './strikes.js';
 import { listStaffReports, staffReport } from './staffReports.js';
 import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 import { SubjectIndex } from './subjects.js';
+import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type {
   Clock,
+  DiscordThreadRow,
   Logger,
   Matcher,
   Platform,
@@ -41,6 +47,7 @@ import type {
   Store,
   StoredReport,
   SubjectId,
+  WebhookKeyReservation,
 } from './types.js';
 
 /** The wall clock, used only when the adopter injects none. Tests and replays pass their own. */
@@ -105,7 +112,10 @@ export interface ChatwardenOptions {
    * Carries subject ids: staff channels only, never send to a player.
    */
   onReport?: (report: StoredReport, counts: ReportCounts) => void;
-  /** Told once when a blocked line earned an automatic timeout; `second` is true for the 24 h repeat. */
+  /**
+   * Told once when a blocked line earned an automatic timeout; `second` is true for the 24 h repeat. The same moment
+   * is also the `auto.restricted` event (`cw.on`), which names the stored group; this option keeps its shape.
+   */
   onAutoRestrict?: (subject: SubjectId | null, second: boolean) => void;
   /**
    * Retention purge. On by default: the kit deletes rows past their retention (see `RETENTION_DEFAULTS`) every
@@ -114,10 +124,12 @@ export interface ChatwardenOptions {
    * `purge()` yourself. A failing purge is logged (`chatwarden.purge_failed`) and never thrown; `close()`
    * stops the timer.
    *
-   * Floors, checked at creation (and on every `purge(policy)`), each a `ProfileError` naming the field: `sanctionAfterEndMs`
-   * and `noticesMs` at least 90 days (the ladder and "My record" reach back that far), `badFaithMs` at least
-   * `limits.reports.suspendWindowMs`. Not enforced, but `strikesMs` should be at least `limits.strikes.windowMs`, or strikes are
-   * deleted before the window that counts them closes. When you leave `badFaithMs` out it follows a longer suspension window.
+   * Floors, checked at creation (and on every `purge(policy)`), each a `ProfileError` naming the field:
+   * `sanctionAfterEndMs` and `noticesMs` at least 90 days (the ladder and "My record" reach back that far),
+   * `auditMs` at least 90 days (default 365), `badFaithMs` at least `limits.reports.suspendWindowMs`. Every field
+   * must be a finite number (Infinity and NaN are refused). Not enforced, but `strikesMs` should be at least
+   * `limits.strikes.windowMs`, or strikes are deleted before the window that counts them closes. When you leave
+   * `badFaithMs` out it follows a longer suspension window.
    */
   retention?: false | ({ everyMs?: number } & Partial<RetentionPolicy>);
   /**
@@ -138,7 +150,7 @@ export interface ChatwardenOptions {
   /**
    * The numbers the kit enforces: chat length and rate, the slur filter's strikes and timeouts, report limits and
    * reporter feedback. Any field, groups included (`{ strikes: { count: 2 } }` keeps the other strike settings);
-   * the defaults are Moxgate's. Every number must be a whole number above 0 (durations at most 100 years), else a
+   * the defaults are Moxgate's. Every number must be a whole number above 0 (durations at most 365 days), else a
    * `ProfileError` is thrown at creation. Read the result back as `cw.limits`.
    */
   limits?: LimitsInput;
@@ -220,6 +232,30 @@ export interface Chatwarden {
      */
     revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
   };
+  /**
+   * Subscribe to what happens in the kit: `'report.created'`, `'report.closed'`, `'sanction.applied'`,
+   * `'sanction.revoked'`, `'gap.created'`, `'auto.restricted'`, or `'*'` for all. Returns the unsubscribe function.
+   *
+   * Events are announced after the operation has committed, once each, and never for a refused or failed one (a
+   * replayed decision announces nothing). A listener may be async; it is fenced: a throw or a rejection is logged
+   * (`chatwarden.listener_failed`, error class only) and never reaches the operation. Staff only: a `sanction.applied`
+   * event carries the target's subject id. They hold no chat text, reason, evidence or gap note.
+   * Carries subject ids: staff channels only, never send to a player.
+   *
+   * Listeners run synchronously, in the call that raised the event. `auto.restricted` is raised inside
+   * `chat.accept`, on the chat hot path: keep a listener cheap, or hand the work off (queue it, or return a promise
+   * after a quick synchronous start) so it never delays a chat line.
+   */
+  on: Subscribe;
+  names: {
+    /**
+     * May a player use this as a name (a handle, a table or deck name)? Reads it with the matcher's name rules
+     * (`Zorbak_99` is caught, not only `zorbak`). `rule` is the Community Rule the slur filter cites
+     * (`autoRestrictRule`). No matcher, and a matcher that fails (logged, class only), both let the name through.
+     * Throws a TypeError for a value that is not a string.
+     */
+    check(text: string): { ok: true } | { ok: false; reason: 'name_not_allowed'; rule: number };
+  };
   /** The registry in use (the one given, or the starter rules for the profile). Retired rules stay listed. */
   rules: CommunityRules;
   /** The profile in force: the preset, the overrides and the validation applied. Deep-frozen. */
@@ -278,10 +314,67 @@ export interface Chatwarden {
     close(groupId: string, status: 'ruled' | 'not_a_rule', ref: string | null, actor: string): boolean;
   };
   /**
+   * The staff audit trail: who (actor and role) did what to which id, and when. Staff only. Stores ids and the action
+   * name, never chat text, a reason or a note. Rows from the term editor and from `gaps.close` read here too (role
+   * null). Kept `retention.auditMs` (default 365 days, at least 90).
+   */
+  audit: {
+    /**
+     * Write one entry, stamped with the clock. Synchronous and fenced: it never throws; it returns false, and logs
+     * (`chatwarden.audit_refused` / `chatwarden.audit_failed`, the error class only), when the input is outside the
+     * closed lists or the store fails.
+     */
+    record(input: AuditRecordInput): boolean;
+    /**
+     * One page, newest first. `limit` is an integer 1..200 (`RangeError` otherwise); a bad `before`, `actor` or
+     * `action` throws `AuditQueryError`. Never carries the json the term editor kept.
+     */
+    list(q: AuditQuery): AuditPage;
+  };
+  /**
+   * Idempotency keys for incoming webhooks (`@chatwarden/http`'s `webhookIn`), on the kit's clock. A key is remembered
+   * for 24 hours and holds the response body of the first call only (never chat text). Each call is one store
+   * transaction and throws the store's own error if it fails.
+   */
+  webhookKeys: {
+    /**
+     * Take the key (`{ reserved: true }`), or answer the row that holds it: `pending`, or `done` with its stored body,
+     * and the `fingerprint` it was reserved with. `fingerprint` is a hash of the request (never text).
+     */
+    reserve(key: string, fingerprint: string): WebhookKeyReservation;
+    /** Mark a pending key done with the response body. True only when this call did it. */
+    complete(key: string, resultJson: string): boolean;
+    /** Free a pending key (the apply failed, so a retry may run). A done key is never freed. */
+    release(key: string): boolean;
+  };
+  /**
+   * Who is who, for staff tools such as the Discord feed. `canonical` is the surviving subject a staff ref resolves to
+   * (an id nobody merged is its own); `aliases` is that survivor and every subject merged into it, sorted. Both read the
+   * in-memory index and never throw. Carries subject ids: staff channels only, never send to a player.
+   */
+  people: {
+    canonical(subject: SubjectId): SubjectId;
+    aliases(subject: SubjectId): SubjectId[];
+  };
+  /**
+   * The Discord feed's thread map (`@chatwarden/discord`): the forum thread kept per person (`kit_discord_threads`). A
+   * thin facade over the store, which throws its own error if it fails. Holds no chat text.
+   */
+  discordThreads: {
+    get(subject: string): DiscordThreadRow | null;
+    put(row: DiscordThreadRow): void;
+  };
+  /**
    * Delete rows past retention now. The built-in timer already does this (unless `retention: false`); the
    * policy given at creation is the default here, and `policy` overrides it field by field.
    */
   purge(policy?: Partial<RetentionPolicy>): Promise<PurgeResult>;
+  /**
+   * Is the store answering? True when `schemaVersion()` returns; false (logged `chatwarden.ready_failed`, error class
+   * only) when it throws, which the SQLite store does once closed (`close()`). A store whose `schemaVersion()` never throws, such
+   * as the in-memory test double, always reads ready. Synchronous, never throws, reads nothing else. For a readiness probe.
+   */
+  ready(): boolean;
   /** Wait for background store writes (identity linking) to land. */
   flush(): Promise<void>;
   /** Flush, then close the store (a database handed in by the host stays open). */
@@ -346,6 +439,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const profanity = buildProfanityFilter(opts, profile.profanity);
   if (profanity === undefined && profile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
 
+  const bus = new EventBus(logger);
   const subjects = new SubjectIndex(store, clock, { logger });
   const sanctions = new SanctionIndex({ enabled, subjects });
   const roster = new RoomRoster();
@@ -385,6 +479,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     profanityMode: profile.profanity.mode,
     gate: opts.gate,
     onAutoRestrict: opts.onAutoRestrict,
+    onAutoRestricted: ({ groupId, refCode, second, subject }) => {
+      bus.emit({ type: 'auto.restricted', groupId, refCode, second, subject: subjects.canonical(subject) });
+    },
     logger,
     notices,
     autoRestrictRule,
@@ -429,6 +526,26 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     }
   };
 
+  const eventFailed = (err: unknown): void => {
+    safeWarn(logger, 'chatwarden.event_failed', { error: err instanceof Error ? err.name : typeof err });
+  };
+  /** `report.created` for a stored report: read back from the store, so the event states what was stored. */
+  const announceReport = (reportId: string): void => {
+    try {
+      const stored = store.loadReport(reportId);
+      if (stored === null) return;
+      bus.emit({
+        type: 'report.created',
+        reportId: stored.id,
+        createdAt: stored.createdAt,
+        category: stored.category,
+        roomTags: { ...stored.tags },
+      });
+    } catch (err) {
+      eventFailed(err);
+    }
+  };
+
   const seat: Chatwarden['rooms']['seat'] = (roomId, seatId, who, handle, tags) => {
     const subject = subjects.resolve(hashWho(hasher, who));
     roster.seat(roomId, seatId, subject, handle, tags);
@@ -452,6 +569,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     }, purgeEveryMs);
     (timer as { unref?: () => void }).unref?.();
   }
+
+  const audit = new AuditService({ store, clock, logger });
 
   return {
     rooms: {
@@ -485,7 +604,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       mutedSeats: (roomId, viewerSeat) => mutes.mutedSeats(roomId, viewerSeat, roster),
     },
     reports: {
-      submit: (input) => reports.submit(input),
+      submit: async (input) => {
+        const res = await reports.submit(input);
+        if (res.ok) announceReport(res.reportId);
+        return res;
+      },
       list: (q) => listStaffReports(store, subjects, q),
       get: (id) => {
         const record = typeof id === 'string' ? store.loadReport(id) : null;
@@ -494,9 +617,78 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
-      apply: (input) => applySanction(store, subjects, input, clock.now(), sanctions),
-      revoke: async (groupId, actor, reason) =>
-        (await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock, index: sanctions })).revoked,
+      apply: async (input) => {
+        const now = clock.now();
+        const done = await applySanction(store, subjects, input, now, sanctions);
+        try {
+          const rule: RuleRef = input.rule === undefined ? 'uncovered' : input.rule;
+          const noEnd = input.kind === 'warning' || input.kind === 'note' || input.durationMs === null;
+          bus.emit({
+            type: 'sanction.applied',
+            groupId: done.groupId,
+            refCode: done.refCode,
+            kind: input.kind,
+            until: noEnd ? null : now + (input.durationMs ?? 0),
+            rule,
+            source: input.source,
+            automated: input.automated,
+            target: subjects.canonical(input.subject),
+          });
+          // A gap row exists only for a moderator's uncovered rule (the sanction check requires its note).
+          if (rule === 'uncovered' && input.source === 'moderator') {
+            bus.emit({ type: 'gap.created', groupId: done.groupId, refCode: done.refCode, at: now, subject: subjects.canonical(input.subject) });
+          }
+        } catch (err) {
+          eventFailed(err);
+        }
+        return done;
+      },
+      revoke: async (groupId, actor, reason) => {
+        // One instant for the stored revokedAt and the event, so a consumer correlating the two sees the same time.
+        const at = clock.now();
+        const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock: { now: () => at }, index: sanctions });
+        if (revoked) {
+          try {
+            const code = store.sanctionRefCode(groupId);
+            const target = store.sanctionGroupTarget(groupId);
+            if (code !== null && target !== null) {
+              // A stored rule the reader cannot parse is `rule: null`, never a throw: the revoke happened, and the event still goes out.
+              let rule: ReturnType<typeof parseRuleRef> | null = null;
+              try {
+                rule = parseRuleRef(target.rule ?? 'uncovered');
+              } catch {
+                rule = null;
+              }
+              bus.emit({
+                type: 'sanction.revoked',
+                groupId,
+                refCode: code,
+                at,
+                subject: subjects.canonical(target.subject),
+                rule: typeof rule === 'number' ? rule : null,
+              });
+            }
+          } catch (err) {
+            eventFailed(err);
+          }
+        }
+        return revoked;
+      },
+    },
+    on: bus.on,
+    names: {
+      check: (text) => {
+        if (typeof text !== 'string') throw new TypeError('names.check: the name must be a string');
+        const m = opts.matcher;
+        if (m === undefined) return { ok: true };
+        try {
+          const hit = typeof m.matchName === 'function' ? m.matchName(text) : m.match(text);
+          return hit === null ? { ok: true } : { ok: false, reason: 'name_not_allowed', rule: autoRestrictRule };
+        } catch (err) {
+          safeWarn(logger, 'chatwarden.names_matcher_failed', { error: err instanceof Error ? err.name : typeof err });
+          return { ok: true };
+        }
+      },
     },
     rules,
     profile,
@@ -509,7 +701,33 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
     },
-    decide: (input) => decisions.decide(input),
+    decide: async (input) => {
+      const { result, committed } = await decisions.decideDetailed(input);
+      if (committed !== null) {
+        try {
+          bus.emit({ type: 'report.closed', reportId: committed.reportId, verdict: committed.verdict, at: committed.at });
+          for (const g of committed.applied) {
+            bus.emit({
+              type: 'sanction.applied',
+              groupId: g.groupId,
+              refCode: g.refCode,
+              kind: g.kind,
+              until: g.until,
+              rule: g.rule,
+              source: g.source,
+              automated: false,
+              target: g.target,
+            });
+          }
+          for (const g of committed.applied) {
+            if (g.gap) bus.emit({ type: 'gap.created', groupId: g.groupId, refCode: g.refCode, at: committed.at, subject: subjects.canonical(g.target) });
+          }
+        } catch (err) {
+          eventFailed(err);
+        }
+      }
+      return result;
+    },
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
     suggest: (subject, level, rule, context) => {
       const now = clock.now();
@@ -530,11 +748,40 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         ),
       close: (groupId, status, ref, actor) => store.transaction(() => store.closeGap(groupId, status, ref, actor, clock.now())),
     },
+    audit: {
+      record: (input) => audit.record(input),
+      list: (q) => audit.list(q),
+    },
+    webhookKeys: {
+      reserve: (key, fingerprint) => {
+        const now = clock.now();
+        return store.transaction(() => store.reserveWebhookKey(key, now, now - WEBHOOK_KEY_TTL_MS, fingerprint));
+      },
+      complete: (key, resultJson) => store.transaction(() => store.completeWebhookKey(key, resultJson)),
+      release: (key) => store.transaction(() => store.releaseWebhookKey(key)),
+    },
+    people: {
+      canonical: (subject) => subjects.canonical(subject),
+      aliases: (subject) => subjects.aliasesOf(subject),
+    },
+    discordThreads: {
+      get: (subject) => store.transaction(() => store.getDiscordThread(subject)),
+      put: (row) => store.transaction(() => store.putDiscordThread(row)),
+    },
     purge: async (policy) => {
       const merged: Partial<RetentionPolicy> = { ...retentionPolicy };
       for (const [k, v] of Object.entries(policy ?? {})) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
       checkRetentionFloors(merged, limits.reports.suspendWindowMs);
       return await purge(store, clock.now(), merged);
+    },
+    ready: () => {
+      try {
+        store.schemaVersion();
+        return true;
+      } catch (err) {
+        safeWarn(logger, 'chatwarden.ready_failed', { error: err instanceof Error ? err.name : typeof err });
+        return false;
+      }
     },
     flush: () => subjects.flush(),
     close: async () => {

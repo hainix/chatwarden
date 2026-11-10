@@ -492,7 +492,7 @@ describe('createChatwarden: lifecycle', () => {
 
   it('purge runs against the store with the injected clock and the given policy', async () => {
     const { cw } = await setup();
-    expect(await cw.purge()).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0 });
+    expect(await cw.purge()).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0 });
     await expect(cw.purge({ reportsMs: -1 })).rejects.toThrow(/invalid reportsMs/);
   });
 
@@ -1584,5 +1584,145 @@ describe('createChatwarden: the same scripted conversation under each preset', (
     expect(cw.limits.chatMaxLength).toBe(200);
     expect(cw.documents.codeOfConduct({ format: 'html', gameName: 'Test Game' })).toContain(cw.summary);
     expect(cw.rules.active().length).toBeGreaterThan(0);
+  });
+});
+
+describe('createChatwarden: names.check', () => {
+  /** Reads a name the way `@chatwarden/matcher` does: a handle form is split into words before it is matched. */
+  const viewMatcher = (): Matcher & { names: string[]; plain: string[] } => {
+    const names: string[] = [];
+    const plain: string[] = [];
+    // Whole word, with underscores and digits counting as word characters, as chat reads a line.
+    const word = /(^|[^\p{L}\p{N}_])zorbak([^\p{L}\p{N}_]|$)/iu;
+    const nameWord = /(^|[^\p{L}\p{N}])zorbak([^\p{L}\p{N}]|$)/iu;
+    return {
+      names,
+      plain,
+      match: (t) => {
+        plain.push(t);
+        return word.test(t) ? { termId: 'syn:zorbak' } : null;
+      },
+      matchName: (n) => {
+        names.push(n);
+        const view = n.replace(/_+/g, ' ').replace(/\p{N}+/gu, ' ');
+        return nameWord.test(view) ? { termId: 'syn:zorbak' } : null;
+      },
+    };
+  };
+
+  it('blocks the synthetic term in handle forms and passes clean names', async () => {
+    const { cw } = await setup({ matcher: viewMatcher() });
+    for (const name of ['Zorbak_99', 'x_zorbak', 'zorbak123', 'ZORBAK', 'big zorbak']) {
+      expect(cw.names.check(name)).toEqual({ ok: false, reason: 'name_not_allowed', rule: 1 });
+    }
+    for (const name of ['Alice', 'quill_42', 'Nightowl', '']) {
+      expect(cw.names.check(name)).toEqual({ ok: true });
+    }
+  });
+
+  it('prefers the matcher\'s matchName over match', async () => {
+    const m = viewMatcher();
+    const { cw } = await setup({ matcher: m });
+    cw.names.check('Zorbak_99');
+    expect(m.names).toEqual(['Zorbak_99']);
+    expect(m.plain).toEqual([]);
+    // The plain matcher alone would have missed it: that is what matchName is for.
+    expect(m.match('Zorbak_99')).toBeNull();
+  });
+
+  it('falls back to match(name) when the matcher has no matchName', async () => {
+    const { cw } = await setup({ matcher: blocker });
+    expect(cw.names.check('big zorbak')).toEqual({ ok: false, reason: 'name_not_allowed', rule: 1 });
+    expect(cw.names.check('Alice')).toEqual({ ok: true });
+  });
+
+  it('reports the configured autoRestrictRule', async () => {
+    const { cw } = await setup({ matcher: viewMatcher(), rules: customRules(), autoRestrictRule: 3 });
+    expect(cw.names.check('zorbak')).toEqual({ ok: false, reason: 'name_not_allowed', rule: 3 });
+  });
+
+  it('with no matcher every name is ok', async () => {
+    const { cw } = await setup();
+    expect(cw.names.check('Zorbak_99')).toEqual({ ok: true });
+  });
+
+  it('a throwing matcher lets the name through and logs the error class only', async () => {
+    const { cw, logged } = await setup({
+      matcher: {
+        match: () => {
+          throw new RangeError('term list secret');
+        },
+      },
+    });
+    expect(cw.names.check('Alice')).toEqual({ ok: true });
+    expect(logged).toContainEqual(['chatwarden.names_matcher_failed', { error: 'RangeError' }]);
+    expect(JSON.stringify(logged)).not.toContain('secret');
+  });
+
+  it('the result holds no term id, subject or the name itself', async () => {
+    const { cw } = await setup({ matcher: viewMatcher() });
+    const out = JSON.stringify(cw.names.check('Zorbak_99'));
+    expect(out).not.toContain('syn:');
+    expect(out).not.toContain('Zorbak');
+  });
+
+  it('a name that is not a string is a TypeError, not a pass', async () => {
+    const { cw } = await setup({ matcher: viewMatcher() });
+    for (const bad of [undefined, null, 5, {}, ['zorbak']]) {
+      expect(() => cw.names.check(bad as never)).toThrow(TypeError);
+    }
+  });
+});
+
+describe('createChatwarden: names.check, odd inputs', () => {
+  const m: Matcher = {
+    match: (t) => (/(^|[^\p{L}\p{N}_])zorbak([^\p{L}\p{N}_]|$)/iu.test(t) ? { termId: 'syn:zorbak' } : null),
+  };
+
+  it('a whitespace-only name is ok (the caller decides whether a blank name is allowed)', async () => {
+    const { cw } = await setup({ matcher: m });
+    for (const name of [' ', '   ', '\t\n', '  ']) expect(cw.names.check(name)).toEqual({ ok: true });
+  });
+
+  it('a very long name is checked in full, not capped: clean passes, a term at the end is still caught', async () => {
+    const { cw } = await setup({ matcher: m });
+    const clean = 'a'.repeat(10_000);
+    expect(cw.names.check(clean)).toEqual({ ok: true });
+    expect(cw.names.check(`${'a '.repeat(5_000)}zorbak`)).toEqual({ ok: false, reason: 'name_not_allowed', rule: 1 });
+    expect(cw.names.check(`zorbak ${'a '.repeat(5_000)}`)).toEqual({ ok: false, reason: 'name_not_allowed', rule: 1 });
+  });
+});
+
+describe('createChatwarden: ready', () => {
+  it('is true while the store answers schemaVersion()', async () => {
+    const { cw } = await setup();
+    expect(cw.ready()).toBe(true);
+    expect(cw.ready()).toBe(true);
+  });
+
+  it('is false, logged by class only, when schemaVersion() throws; true again when it recovers', async () => {
+    const store = new MemoryStore();
+    const { cw, logged } = await setup({}, store);
+    logged.length = 0;
+    let down = true;
+    const spy = vi.spyOn(store, 'schemaVersion').mockImplementation(() => {
+      if (down) throw new TypeError('secret detail 203.0.113.9');
+      return 3;
+    });
+    expect(cw.ready()).toBe(false);
+    expect(logged).toEqual([['chatwarden.ready_failed', { error: 'TypeError' }]]);
+    expect(JSON.stringify(logged)).not.toContain('secret');
+    down = false;
+    expect(cw.ready()).toBe(true);
+    spy.mockRestore();
+  });
+
+  it('never throws, even for a thrown non-error, and never touches anything else in the store', async () => {
+    const store = new MemoryStore();
+    const { cw } = await setup({}, store);
+    vi.spyOn(store, 'schemaVersion').mockImplementation(() => {
+      throw 'plain string';
+    });
+    expect(cw.ready()).toBe(false);
   });
 });

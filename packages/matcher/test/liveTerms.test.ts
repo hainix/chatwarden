@@ -920,3 +920,35 @@ describe('check', () => {
     expect(r.store.state).toEqual(before);
   });
 });
+
+describe('LiveTerms.matchName', () => {
+  it('reads a name by its words once loaded, where plain match does not', async () => {
+    const r = await loaded();
+    expect(r.live.match('Zorbak_99')).toBeNull();
+    expect(r.live.matchName('Zorbak_99')).toEqual({ termId: 'syn:zorbak' });
+    expect(r.live.matchName('TheZorbak')).toEqual({ termId: 'syn:zorbak' });
+    expect(r.live.matchName('Alice_42')).toBeNull();
+  });
+
+  it('never matches before load when there is no pack, and follows the pack fallback otherwise', () => {
+    expect(rig({ pack: null }).live.matchName('Zorbak_99')).toBeNull();
+    expect(rig().live.matchName('Zorbak_99')).toEqual({ termId: 'syn:zorbak' });
+  });
+
+  it('follows a live edit: a term added through change() blocks names at once, one switched off stops', async () => {
+    const r = await loaded();
+    expect(r.live.matchName('Blorft_7')).toBeNull();
+    expect(ok(await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' })))).toBe(true);
+    expect(r.live.matchName('Blorft_7')).not.toBeNull();
+    expect(r.live.matchName('Zorbak_99')).not.toBeNull();
+    await r.live.change('a', (e) => e.setTermActive('syn:zorbak', false));
+    expect(r.live.matchName('Zorbak_99')).toBeNull();
+    expect(r.live.matchName('Blorft_7')).not.toBeNull();
+  });
+
+  it('is usable as the facade Matcher (match and matchName both present)', async () => {
+    const r = await loaded();
+    expect(typeof r.live.match).toBe('function');
+    expect(typeof r.live.matchName).toBe('function');
+  });
+});

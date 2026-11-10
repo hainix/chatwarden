@@ -9,11 +9,20 @@ export const REPORT_PAGE_MAX = 200;
 
 const STATUSES: ReadonlyArray<ReportRecord['status']> = ['open', 'actioned', 'dismissed'];
 
-/** A report query that cannot be answered: an unknown `status` or a `before` cursor that is not one we issued. */
+/**
+ * A report query that cannot be answered: an unknown `status`, a `before` cursor that is not one we issued, or a `person`
+ * that is not a subject id (or one combined with a `status` / `before`, which a person query does not take).
+ */
 export class ReportQueryError extends Error {
-  readonly field: 'status' | 'before';
-  constructor(field: 'status' | 'before') {
-    super(field === 'status' ? 'reports.list: unknown status' : 'reports.list: invalid cursor');
+  readonly field: 'status' | 'before' | 'person';
+  constructor(field: 'status' | 'before' | 'person') {
+    super(
+      field === 'status'
+        ? 'reports.list: unknown status'
+        : field === 'person'
+          ? 'reports.list: invalid person'
+          : 'reports.list: invalid cursor',
+    );
     this.name = 'ReportQueryError';
     this.field = field;
   }
@@ -48,6 +57,12 @@ export interface ReportQuery {
   limit?: number;
   /** The `next` of the previous page. Omit or null for the first page. */
   before?: string | null;
+  /**
+   * Only reports filed AGAINST this person (a staff ref; a merged alias finds the same person). A person query is one
+   * page, newest first: `limit` applies, `next` is always null, and it does not combine with `status` or `before`
+   * (`ReportQueryError`).
+   */
+  person?: SubjectId;
 }
 
 /**
@@ -60,13 +75,13 @@ export interface ReportPage {
   next: string | null;
 }
 
-const b64urlEncode = (text: string): string => {
+export const b64urlEncode = (text: string): string => {
   let bin = '';
   for (const byte of new TextEncoder().encode(text)) bin += String.fromCharCode(byte);
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
-const b64urlDecode = (cursor: string): string | null => {
+export const b64urlDecode = (cursor: string): string | null => {
   if (!/^[A-Za-z0-9_-]+$/.test(cursor) || cursor.length % 4 === 1) return null;
   try {
     const bin = atob(cursor.replace(/-/g, '+').replace(/_/g, '/'));
@@ -110,6 +125,13 @@ export function staffReport(record: ReportRecord, subjects: SubjectIndex): Staff
 
 /** One page of the staff queue. Throws {@link ReportQueryError} for an unknown status or a bad cursor. */
 export function listStaffReports(store: Store, subjects: SubjectIndex, q: ReportQuery = {}): ReportPage {
+  if (q.person !== undefined) {
+    if (typeof q.person !== 'string' || q.person === '') throw new ReportQueryError('person');
+    if (q.status !== undefined) throw new ReportQueryError('status');
+    if (q.before !== undefined && q.before !== null) throw new ReportQueryError('before');
+    const rows = store.listReportsByPerson(subjects.aliasesOf(q.person), clampLimit(q.limit));
+    return { items: rows.map((r) => staffReport(r, subjects)), next: null };
+  }
   if (q.status !== undefined && !STATUSES.includes(q.status)) throw new ReportQueryError('status');
   const cursor = q.before === undefined || q.before === null ? null : decodeReportCursor(q.before);
   const limit = clampLimit(q.limit);

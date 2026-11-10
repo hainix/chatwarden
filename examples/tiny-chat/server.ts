@@ -15,11 +15,20 @@
 //        { type: 'notices', items }                 the player's pending notices (PlayerNotice[]): on connect when
 //                                                   any are waiting, and whenever a decision adds one
 //        { type: 'acked', id, ok }                  the answer to an 'ack'
-// HTTP: POST /report { key, targetSeat, category, note?, lineId? } -> 200 { ok, remaining } | 4xx { ok: false, refused }
-//       GET  /code-of-conduct   the players' code of conduct (generated from the profile and rules) as HTML
-//       GET  /record?key=...   DEMO ONLY: the key's "My record" -> { ok, items }. A real app authenticates the player.
-//       POST /decide           DEMO ONLY, guarded by the `x-admin-token` header. A real app authenticates its moderators.
-//                              { reportId, verdict, reason, actions: [{ seat, kind, durationMs, rule, lineIds?, gapNote? }] }
+// HTTP, by the kit's own routes (`@chatwarden/http`, mounted through its Express adapter):
+//   /admin/*   the staff API (`adminRoutes`). DEMO ONLY auth: the `x-admin-token` header, role owner, actor `demo-admin`.
+//              A real app authenticates its moderators with its own session. Off (404) without a token.
+//              GET  /admin/reports, GET /admin/reports/:id   the queue and one report (names the people by subject id)
+//              POST /admin/reports/:id/decide  { verdict, reason, actions: [{ subject, kind, durationMs, rule, lineIds?, gapNote? }] }
+//                                              `subject` comes from the report detail; the answer carries ref codes only
+//              Also the gap, sanction, term, policy and audit routes (the live term list is passed as `terms`).
+//   /api/*     the player API (`playerRoutes`): GET /api/notices, POST /api/notices/:id/ack, GET /api/record,
+//              GET /api/rules, GET /api/code-of-conduct?format=html|markdown|text, POST /api/names/check.
+//              DEMO ONLY identity: the `x-chatwarden-key` header, or `?key=` (a key in a URL is unsafe, see the README).
+//   /healthz, /readyz   the probes (`healthRoutes`)
+// Optional Discord feed (`@chatwarden/discord`): set DISCORD_WEBHOOK_URL (and DISCORD_MENTION_ROLE_ID) to post reports and
+//   outcomes into a forum channel. Off otherwise. The links in the posts open the /admin routes above.
+// Tiny chat's own HTTP: POST /report { key, targetSeat, category, note?, lineId? } -> 200 { ok, remaining } | 4xx { ok: false, refused }
 //
 // "key" stands in for whatever credential your game already has (a session token, a device id). It is sent as a
 // query parameter on the socket and in the report body to keep this demo short; no frame or response ever
@@ -33,11 +42,12 @@ import {
   createChatwarden,
   type Chatwarden,
   type ChatwardenOptions,
-  type DecisionAction,
-  type DecisionInput,
   type ProfileOverrides,
   type RawWho,
 } from '@chatwarden/core';
+import { discordFeed, type DiscordFeed } from '@chatwarden/discord';
+import { adminRoutes, healthRoutes, playerRoutes, type KitRequest } from '@chatwarden/http';
+import { toExpress } from '@chatwarden/http/express';
 import { LiveTerms, type TermPack } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/test-fixtures';
 import { createProfanityFilter } from '@chatwarden/profanity';
@@ -45,8 +55,6 @@ import { openStore } from '@chatwarden/store-sqlite';
 
 const ROOM = 'lobby';
 const GAME_NAME = 'tiny-chat';
-/** The code of conduct page may load nothing and run nothing; its one inline style block is the only thing allowed. */
-const CONDUCT_CSP = "default-src 'none'; style-src 'unsafe-inline'";
 const CATEGORIES = ['harassment', 'hate', 'cheating', 'spam', 'disruption', 'other'] as const;
 type Category = (typeof CATEGORIES)[number];
 
@@ -63,8 +71,8 @@ export interface TinyChatOptions {
    */
   secret?: string;
   /**
-   * DEMO ONLY: the token `POST /decide` wants in the `x-admin-token` header. Default: the `TINY_CHAT_ADMIN_TOKEN`
-   * environment variable. With neither, the route is switched off (404). A real app authenticates its moderators
+   * DEMO ONLY: the token the `/admin` API wants in the `x-admin-token` header. Default: the `TINY_CHAT_ADMIN_TOKEN`
+   * environment variable. With neither, the whole admin API is switched off (404). A real app authenticates its moderators
    * with its own session, never a shared token.
    */
   adminToken?: string;
@@ -74,6 +82,16 @@ export interface TinyChatOptions {
    * one. An invalid value throws at startup.
    */
   overrides?: ProfileOverrides;
+  /**
+   * Post the review queue into a Discord forum (the `@chatwarden/discord` package): the forum channel's webhook URL.
+   * Default: the `DISCORD_WEBHOOK_URL` environment variable. With neither (or an empty one) the feed is off and nothing is
+   * sent anywhere. An empty string passed here forces it off even when the environment has a URL. A URL that is not a Discord webhook URL throws at startup.
+   */
+  discordWebhookUrl?: string;
+  /** A Discord role id to ping on a severe report or sanction. Default: the `DISCORD_MENTION_ROLE_ID` environment variable. Optional. */
+  discordMentionRoleId?: string;
+  /** The `fetch` the Discord feed posts with. Default: the global one. For tests. */
+  discordFetch?: typeof fetch;
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -92,6 +110,8 @@ function resolveSecret(explicit: string | undefined): string {
 export interface TinyChat {
   port: number;
   chatwarden: Chatwarden;
+  /** True when the Discord feed is running (a webhook URL was configured). */
+  discord: boolean;
   close(): Promise<void>;
 }
 
@@ -109,8 +129,6 @@ function sameToken(given: unknown, expected: string): boolean {
   const b = createHash('sha256').update(expected).digest();
   return timingSafeEqual(a, b);
 }
-
-const VERDICTS = ['upheld', 'noted', 'no_action', 'bad_faith'] as const;
 
 export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat> {
   const secret = resolveSecret(opts.secret);
@@ -165,32 +183,85 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     onReport: opts.onReport,
   });
 
+  // The optional Discord feed. Off unless a webhook URL is configured. The hub links point at this demo's own admin routes
+  // (open them with the `x-admin-token` header); a real app links to its moderator console. `origin` is known once the
+  // server listens, long before any report can make a link.
+  let origin = '';
+  // An option that was passed wins, an empty string included (it forces the feed off, or the ping off, whatever the shell
+  // exports); an option that was left out falls back to the environment. Empty at either place is "not set".
+  const discordUrl = (opts.discordWebhookUrl !== undefined ? opts.discordWebhookUrl : process.env.DISCORD_WEBHOOK_URL) || undefined;
+  const discordRole = (opts.discordMentionRoleId !== undefined ? opts.discordMentionRoleId : process.env.DISCORD_MENTION_ROLE_ID) || undefined;
+  let discord: DiscordFeed | undefined;
+  if (discordUrl !== undefined) {
+    try {
+      discord = discordFeed(chatwarden, {
+        webhookUrl: discordUrl,
+        hubLink: (kind, id) =>
+          kind === 'report'
+            ? `${origin}/admin/reports/${encodeURIComponent(id)}`
+            : `${origin}/admin/people/${encodeURIComponent(id)}/history`,
+        ...(discordRole === undefined ? {} : { mentionRoleId: discordRole }),
+        ...(opts.discordFetch === undefined ? {} : { fetch: opts.discordFetch }),
+      });
+    } catch (err) {
+      // A bad URL or role id: stop before anything listens.
+      await chatwarden.close();
+      throw err;
+    }
+  }
+
   let nextSeat = 1;
 
   const app = express();
-  app.use(express.json());
+  app.disable('x-powered-by');
 
-  // The players' code of conduct, generated from the profile and the rules in force. Plain HTML with no script and no
-  // external reference; the CSP says so to the browser as well. Public by design: it is the rules, not a record.
-  app.get('/code-of-conduct', (_req, res) => {
-    const body = chatwarden.documents.codeOfConduct({ format: 'html', gameName: GAME_NAME });
-    res
-      .status(200)
-      .set({
-        'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': CONDUCT_CSP,
-        'x-content-type-options': 'nosniff',
-      })
-      .send(
-        '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
-          '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-          '<title>Code of conduct</title>' +
-          '<style>body{font:16px/1.5 system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem}' +
-          'table{border-collapse:collapse}th,td{border:1px solid #888;padding:.25rem .5rem;text-align:left}</style>' +
-          `</head><body>${body}</body></html>`,
-      );
-  });
-  app.post('/report', async (req, res) => {
+  // The kit's routes read the raw body themselves: mount them BEFORE any body parser. This app's own `/report` route
+  // parses JSON for itself, below, and nothing is mounted globally.
+
+  // DEMO ONLY. A shared token in a header stands in for moderator login; a real app authenticates its moderators with its
+  // own session. The role is `owner` and the actor a fixed `demo-admin`. Switched off (404) without a token.
+  if (adminToken === undefined) {
+    app.use('/admin', (_req, res) => void res.status(404).json({ ok: false, refused: 'off' }));
+  } else {
+    const token = adminToken;
+    app.use(
+      '/admin',
+      toExpress(
+        adminRoutes(chatwarden, {
+          authorize: (req: KitRequest) => (sameToken(req.headers['x-admin-token'], token) ? { actor: 'demo-admin', role: 'owner' } : null),
+          gameName: GAME_NAME,
+          // The live term list: it adds the staff term and exception routes (`/admin/terms`, `/admin/terms/check`, ...).
+          terms,
+        }),
+        // A prefix mount with nothing after it that wants these paths: the kit's JSON 404 is the answer for an unknown one.
+        { fallthrough: false },
+      ),
+    );
+  }
+
+  // The player API. DEMO ONLY identity: the key is read from the `x-chatwarden-key` header, falling back to `?key=`
+  // (a key in a URL ends up in logs and history; a real app takes it from its session). The address is the kit's
+  // `remoteAddress`: the socket peer, which a client cannot choose.
+  app.use(
+    '/api',
+    toExpress(
+      playerRoutes(chatwarden, {
+        gameName: GAME_NAME,
+        identify: (req: KitRequest): RawWho => {
+          const key = req.headers['x-chatwarden-key'] ?? req.query.key;
+          return {
+            ...(key === undefined || key === '' ? {} : { clientKey: key }),
+            // The IP must be the REAL client address. `remoteAddress` is the socket's, right for this demo that listens
+            // directly. Behind a reverse proxy it is the proxy's: parse X-Forwarded-For yourself, trusting only your own proxy.
+            ip: req.remoteAddress ?? null,
+          };
+        },
+      }),
+      { fallthrough: false },
+    ),
+  );
+
+  app.post('/report', express.json(), async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const { key, targetSeat, category, note, lineId } = body;
     if (typeof key !== 'string' || typeof targetSeat !== 'string' || !CATEGORIES.includes(category as Category)) {
@@ -215,74 +286,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     else res.status(result.refused === 'rate' ? 429 : 422).json({ ok: false, refused: result.refused });
   });
 
-  // DEMO ONLY. "My record" for whoever holds `key`. Anyone who knows (or guesses) a key can read that player's
-  // record, which is exactly why a real app authenticates the player first and never takes the key from a URL.
-  app.get('/record', (req, res) => {
-    const key = req.query.key;
-    if (typeof key !== 'string' || key === '') {
-      res.status(400).json({ ok: false, refused: 'bad_request' });
-      return;
-    }
-    res.json({ ok: true, items: chatwarden.notices.record({ clientKey: key, ip: req.socket.remoteAddress ?? null }) });
-  });
-
-  // DEMO ONLY. A moderator decides a report. A shared token in a header stands in for moderator login; a real app
-  // authenticates its moderators with its own session and writes an audit trail. Switched off without a token.
-  // Actions name SEATS (the demo has no moderator console); the server turns a seat into a subject, which never
-  // leaves it. The answer carries reference codes only.
-  app.post('/decide', async (req, res) => {
-    if (adminToken === undefined) {
-      res.status(404).json({ ok: false, refused: 'off' });
-      return;
-    }
-    if (!sameToken(req.get('x-admin-token'), adminToken)) {
-      res.status(401).json({ ok: false, refused: 'unauthorized' });
-      return;
-    }
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const { reportId, verdict, reason, actions, evidence } = body;
-    if (
-      typeof reportId !== 'string' ||
-      typeof reason !== 'string' ||
-      !VERDICTS.includes(verdict as (typeof VERDICTS)[number]) ||
-      !Array.isArray(actions) ||
-      (evidence !== undefined && typeof evidence !== 'string')
-    ) {
-      res.status(400).json({ ok: false, refused: 'bad_request' });
-      return;
-    }
-    const mapped: DecisionAction[] = [];
-    for (const raw of actions as unknown[]) {
-      const a = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
-      const { seat, ...rest } = a;
-      const subject = typeof seat === 'string' ? chatwarden.rooms.subjectAt(ROOM, seat) : null;
-      if (subject === null) {
-        res.status(422).json({ ok: false, refused: 'no_such_seat' });
-        return;
-      }
-      mapped.push({ ...rest, subject } as unknown as DecisionAction);
-    }
-    const input: DecisionInput = {
-      reportId,
-      verdict: verdict as DecisionInput['verdict'],
-      actions: mapped,
-      actor: 'demo-admin',
-      reason,
-      // Required by the kit for `bad_faith` and refused for any other verdict; the kit answers `invalid` (422).
-      ...(evidence === undefined ? {} : { evidence }),
-    };
-    try {
-      const result = await chatwarden.decide(input);
-      if (!result.ok) {
-        res.status(result.error === 'not_found' ? 404 : 422).json({ ok: false, refused: result.error });
-        return;
-      }
-      res.json({ ok: true, replay: result.replay, refCodes: result.groups.map((g) => g.refCode) });
-    } catch {
-      // `decide` rejects with the store's own error and writes nothing. Say so, and say nothing more.
-      res.status(500).json({ ok: false, refused: 'error' });
-    }
-  });
+  // Probes, last, at the root. By default `toExpress` hands a path that is not its own to the next handler, so a root mount
+  // would not hide the routes after it; here nothing comes after, so `fallthrough: false` makes an unknown path the kit's 404.
+  app.use(toExpress(healthRoutes(chatwarden), { fallthrough: false }));
 
   // Body-parser failures (malformed JSON, an oversized body) and anything else thrown in a route: always a small
   // JSON answer, never Express's HTML stack page.
@@ -365,11 +371,14 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   await new Promise<void>((resolve) => http.listen(opts.port ?? 3000, '127.0.0.1', resolve));
   const address = http.address();
   const port = typeof address === 'object' && address !== null ? address.port : 0;
+  origin = `http://127.0.0.1:${port}`;
 
   return {
     port,
     chatwarden,
+    discord: discord !== undefined,
     close: async () => {
+      discord?.dispose();
       for (const { ws } of seats.values()) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       http.closeAllConnections();

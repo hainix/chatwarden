@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as api from '../src/index.js';
 import { lengthLabel, outcomeLabel, VERSION } from '../src/index.js';
 
 describe('@chatwarden/core smoke', () => {
@@ -14,5 +15,13 @@ describe('@chatwarden/core smoke', () => {
     expect(outcomeLabel({ kind: 'ban', durationMs: null })).toBe('Full ban permanent');
     expect(lengthLabel(null)).toBe('permanent');
     expect(lengthLabel(7 * 24 * 3_600_000)).toBe('7 days');
+  });
+
+  it('does not export the implementation classes behind cw.on and cw.audit (adopters use the facade)', () => {
+    for (const name of ['EventBus', 'AuditService']) expect(Object.keys(api), name).not.toContain(name);
+    // The things adopters do use from those modules stay.
+    for (const name of ['KIT_EVENT_TYPES', 'ROLES', 'isValidAuditActor', 'AUDIT_ACTIONS', 'AuditQueryError', 'safeWarn', 'errorClass']) {
+      expect(Object.keys(api), name).toContain(name);
+    }
   });
 });

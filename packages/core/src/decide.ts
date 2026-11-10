@@ -74,6 +74,8 @@ export interface DecisionGroup {
   subject: SubjectId;
   groupId: string;
   refCode: string;
+  /** The kind of the action that made this group. */
+  kind: SanctionKind;
   /** The player's notice for this action; null for a `note`, which tells the player nothing. */
   noticeId: string | null;
 }
@@ -100,6 +102,33 @@ export interface DecisionServiceDeps {
    * nothing, and the people acted on are still told.
    */
   reporterFeedback?: boolean;
+}
+
+/**
+ * What one applied action wrote, for the facade's events. Internal: it never reaches the staff-facing result. No
+ * reason, evidence or gap note: ids, codes, kinds and times only.
+ */
+export interface AppliedGroup {
+  groupId: string;
+  refCode: string;
+  kind: SanctionKind;
+  /** When it ends; null for a permanent one and for a warning or note. */
+  until: number | null;
+  rule: RuleRef;
+  source: Source;
+  /** The canonical person sanctioned. */
+  target: SubjectId;
+  /** A rule-gap row was written for the group (an uncovered rule cited by a moderator). */
+  gap: boolean;
+}
+
+/**
+ * A decision as the facade sees it: the staff-facing `result`, plus, when THIS call committed the decision (not a
+ * replay, not a refusal), what to announce. Internal.
+ */
+export interface DecisionOutcome {
+  result: DecisionResult;
+  committed: { reportId: string; verdict: DecisionInput['verdict']; at: number; applied: AppliedGroup[] } | null;
 }
 
 const VERDICTS: readonly DecisionInput['verdict'][] = ['upheld', 'noted', 'no_action', 'bad_faith'];
@@ -263,6 +292,8 @@ interface Planned {
 const lineIsSound = (l: ReportExcerptLine): boolean =>
   typeof l.raw === 'string' && Number.isFinite(l.ts) && !Number.isNaN(new Date(l.ts).getTime());
 
+const refused = (result: DecisionResult): DecisionOutcome => ({ result, committed: null });
+
 const errName = (err: unknown): string => {
   try {
     return err instanceof Error ? err.name : typeof err;
@@ -310,6 +341,14 @@ export class DecisionService {
    * The result's groups carry subject ids. Carries subject ids: staff channels only, never send to a player.
    */
   decide(input: DecisionInput): Promise<DecisionResult> {
+    return this.decideDetailed(input).then((o) => o.result);
+  }
+
+  /**
+   * {@link decide}, plus what the commit wrote for the facade's events (`committed` is null for a replay and for every
+   * refusal). Internal: the staff-facing answer is `result`, unchanged.
+   */
+  decideDetailed(input: DecisionInput): Promise<DecisionOutcome> {
     try {
       return Promise.resolve(this.run(input));
     } catch (err) {
@@ -319,27 +358,27 @@ export class DecisionService {
 
   // --- internals -----------------------------------------------------------
 
-  private run(input: DecisionInput): DecisionResult {
+  private run(input: DecisionInput): DecisionOutcome {
     let norm: Normal;
     try {
       norm = normalize(this.subjects, input);
     } catch {
-      return INVALID;
+      return refused(INVALID);
     }
     const report = this.store.loadReport(norm.reportId);
-    if (report === null) return { ok: false, error: 'not_found' };
+    if (report === null) return refused({ ok: false, error: 'not_found' });
 
     const key = keyOf(norm);
     const prior = this.store.findDecision(key);
-    if (prior !== null) return this.replayOf(prior.resultJson);
-    if (report.status !== 'open') return { ok: false, error: 'already_decided' };
+    if (prior !== null) return refused(this.replayOf(prior.resultJson));
+    if (report.status !== 'open') return refused({ ok: false, error: 'already_decided' });
 
     let plan: Planned[];
     try {
       plan = this.plan(norm, report);
     } catch {
       // Planning reads nothing from the store, so whatever it threw, nothing has been written.
-      return INVALID;
+      return refused(INVALID);
     }
     return this.commit(norm, report, key, plan);
   }
@@ -379,7 +418,7 @@ export class DecisionService {
     };
   }
 
-  private commit(norm: Normal, report: ReportRecord, key: string, plan: Planned[]): DecisionResult {
+  private commit(norm: Normal, report: ReportRecord, key: string, plan: Planned[]): DecisionOutcome {
     const now = this.clock.now();
     const pending = this.index !== undefined && !this.index.isEnabled();
     const reporter = this.subjects.canonical(report.reporterSubject);
@@ -390,6 +429,7 @@ export class DecisionService {
         return null;
       }
       const groups: DecisionGroup[] = [];
+      const applied: AppliedGroup[] = [];
       const rows: SanctionRow[] = [];
       const told = new Set<SubjectId>();
       for (const { action: a, lines } of plan) {
@@ -412,7 +452,17 @@ export class DecisionService {
                 { notify: false },
               );
         if (noticeId !== null) told.add(a.subject);
-        groups.push({ subject: a.subject, groupId: written.groupId, refCode: written.refCode, noticeId });
+        groups.push({ subject: a.subject, groupId: written.groupId, refCode: written.refCode, kind: a.kind, noticeId });
+        applied.push({
+          groupId: written.groupId,
+          refCode: written.refCode,
+          kind: a.kind,
+          until: a.kind === 'warning' || a.kind === 'note' ? null : written.endsAt,
+          rule: a.rule,
+          source: norm.source,
+          target: a.subject,
+          gap: (written.rows[0]?.gapNote ?? null) !== null,
+        });
         rows.push(...written.rows);
       }
       // Reporter feedback only on `upheld` with at least one NON-note action: a note is staff-only and must never
@@ -422,13 +472,13 @@ export class DecisionService {
         told.add(reporter);
       }
       this.store.insertDecision(key, report.id, now, JSON.stringify({ groups }));
-      return { groups, rows, told };
+      return { groups, applied, rows, told };
     });
 
     if (done === null) {
       // Someone closed the report between our read and our write (another process). Same decision? Then it is a replay.
       const again = this.store.findDecision(key);
-      return again === null ? { ok: false, error: 'already_decided' } : this.replayOf(again.resultJson);
+      return refused(again === null ? { ok: false, error: 'already_decided' } : this.replayOf(again.resultJson));
     }
 
     // The decision is durable. Nothing below may fail it.
@@ -444,7 +494,10 @@ export class DecisionService {
         this.warn('decide.announce_failed', { error: errName(err) });
       }
     }
-    return { ok: true, groups: done.groups, replay: false };
+    return {
+      result: { ok: true, groups: done.groups, replay: false },
+      committed: { reportId: report.id, verdict: norm.verdict, at: now, applied: done.applied },
+    };
   }
 
   private replayOf(resultJson: string): DecisionResult {

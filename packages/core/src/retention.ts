@@ -1,5 +1,6 @@
 import { MUTE_TTL_MS } from './mutes.js';
 import { ProfileError } from './profile.js';
+import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type { Store } from './types.js';
 
 const DAY_MS = 86_400_000;
@@ -22,6 +23,8 @@ export interface RetentionPolicy {
    * reporter's suspension counts it (see `SUSPEND_WINDOW_MS`).
    */
   badFaithMs: number;
+  /** A staff audit entry is deleted once it is older than this. */
+  auditMs: number;
 }
 
 export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
@@ -30,10 +33,13 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   strikesMs: 30 * DAY_MS,
   noticesMs: 90 * DAY_MS,
   badFaithMs: 30 * DAY_MS,
+  auditMs: 365 * DAY_MS,
 };
 
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
+
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -41,11 +47,22 @@ const RECORD_FLOOR_MS = 90 * DAY_MS;
  * - `sanctionAfterEndMs` at least 90 days: the ladder reads that far back
  * - `noticesMs` at least 90 days: "My record" shows that far back
  * - `badFaithMs` at least `suspendWindowMs`: a bad-faith dismissal weighs against its reporter for that long
+ * - `auditMs` at least 90 days: the staff trail is how a community answers "who did that"
+ *
+ * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
  *
  * Throws {@link ProfileError} naming the field and why. Anything that is not a number at least the floor fails,
  * NaN included.
  */
 export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWindowMs: number): void {
+  // Every field present must be a finite number, whatever its floor: Infinity or NaN would make every later purge
+  // throw (and so delete nothing from any table).
+  for (const field of FIELDS) {
+    const v: unknown = policy[field];
+    if (v !== undefined && !(typeof v === 'number' && Number.isFinite(v))) {
+      throw new ProfileError(`retention.${field}`, 'must be a finite number of milliseconds');
+    }
+  }
   const below = (v: unknown, floor: number): boolean => v !== undefined && !(typeof v === 'number' && v >= floor);
   if (below(policy.sanctionAfterEndMs, RECORD_FLOOR_MS)) {
     throw new ProfileError(
@@ -55,6 +72,9 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   }
   if (below(policy.noticesMs, RECORD_FLOOR_MS)) {
     throw new ProfileError('retention.noticesMs', "must be at least 90 days: players' records reach back that far");
+  }
+  if (below(policy.auditMs, RECORD_FLOOR_MS)) {
+    throw new ProfileError('retention.auditMs', 'must be at least 90 days: the audit trail answers who did what, and when');
   }
   if (below(policy.badFaithMs, suspendWindowMs)) {
     throw new ProfileError(
@@ -72,6 +92,8 @@ export interface PurgeResult {
   strikes: number;
   mutes: number;
   notices: number;
+  audit: number;
+  webhookKeys: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -88,13 +110,16 @@ function checkWindow(name: string, ms: number): void {
  *   A warning or a note ends where it starts, so it goes `sanctionAfterEndMs` (90 days by default) after its start.
  *   A permanent, unrevoked sanction is never deleted, nor is one whose rule gap is still open.
  * - strikes: `at < now - strikesMs`
+ * - audit: `at < now - auditMs` (365 days by default, never less than 90): every staff audit entry, including the
+ *   term-editor rows written before the trail existed
+ * - webhook keys: `createdAt < now - 24 h` (incoming-webhook idempotency keys, pending or done)
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn.
  *
- * Every cutoff is strict: a row exactly on the line is kept. Subjects, terms and the audit trail are never
- * touched. The in-memory indexes need no update: they already ignore everything this removes.
+ * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are never touched. The in-memory
+ * indexes need no update: they already ignore everything this removes.
  */
 export async function purge(
   store: Store,
@@ -107,6 +132,7 @@ export async function purge(
     strikesMs: policy.strikesMs ?? RETENTION_DEFAULTS.strikesMs,
     noticesMs: policy.noticesMs ?? RETENTION_DEFAULTS.noticesMs,
     badFaithMs: policy.badFaithMs ?? RETENTION_DEFAULTS.badFaithMs,
+    auditMs: policy.auditMs ?? RETENTION_DEFAULTS.auditMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
@@ -114,11 +140,14 @@ export async function purge(
   checkWindow('strikesMs', p.strikesMs);
   checkWindow('noticesMs', p.noticesMs);
   checkWindow('badFaithMs', p.badFaithMs);
+  checkWindow('auditMs', p.auditMs);
   return store.transaction(() => ({
     reports: store.purgeReports(now - p.reportsMs, now - p.badFaithMs),
     sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
     strikes: store.purgeStrikes(now - p.strikesMs),
     mutes: store.purgeMutes(now - MUTE_TTL_MS),
     notices: store.purgeNotices(now - p.noticesMs),
+    audit: store.purgeAudit(now - p.auditMs),
+    webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
   }));
 }

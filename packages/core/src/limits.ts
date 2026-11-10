@@ -101,7 +101,7 @@ const count = (v: unknown, path: string): number => {
 
 const duration = (v: unknown, path: string): number => {
   if (!positiveInt(v) || v > MAX_DURATION_MS) {
-    throw new ProfileError(path, 'must be a whole number of milliseconds above 0 and at most 100 years');
+    throw new ProfileError(path, 'must be a whole number of milliseconds above 0 and at most 365 days');
   }
   return v;
 };
@@ -113,7 +113,7 @@ const flag = (v: unknown, path: string): boolean => {
 
 /**
  * Merge `input` onto the defaults and validate the result: every number is a whole number above 0, every duration
- * is also at most 100 years, `reporterFeedback` is a boolean, and an unknown key at any depth is refused. Groups
+ * is also at most 365 days, `reporterFeedback` is a boolean, and an unknown key at any depth is refused. Groups
  * merge key by key, so `{ strikes: { count: 2 } }` keeps the other strike settings.
  *
  * Throws {@link ProfileError} naming the field (`limits.strikes.count`); the message never echoes the value.

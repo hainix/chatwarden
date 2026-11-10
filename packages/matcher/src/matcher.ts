@@ -7,6 +7,7 @@ import {
   stripInvisible,
   type Folded,
 } from './normalise.js';
+import { matchName } from './names.js';
 import { mergeSpans, stripWithMap, toOriginal, type Span } from './spans.js';
 
 /** A row of the term list: one whole word the matcher refuses. */
@@ -20,6 +21,9 @@ export type { Span } from './spans.js';
 export interface Matcher {
   match(text: string): { termId: string } | null;
   spans?(text: string): Span[];
+  /** `match` for a NAME (a handle, a table or deck name): the name is also read split into words, so
+   *  `Zorbak_99` is caught. See `matchName`. */
+  matchName?(name: string): { termId: string } | null;
 }
 
 /** Thrown for a malformed active term or exception row; the message names the row id. */
@@ -128,7 +132,7 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
     phrases.push(normalisePhrase(row));
   }
 
-  if (terms.every((t) => !t.active)) return { match: () => null, spans: () => [] };
+  if (terms.every((t) => !t.active)) return { match: () => null, spans: () => [], matchName: () => null };
 
   // No whitelistedTerms: exceptions are applied by isExcepted (word-bounded), not by obscenity.
   const matcher = new RegExpMatcher({
@@ -155,7 +159,7 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
     }
   }
 
-  return {
+  const built: Matcher = {
     match(raw: string) {
       // Everything below, hit ranges and exception edges included, works on this one view, so a hidden
       // character can neither split a term nor make an exception phrase look cleanly bounded.
@@ -171,5 +175,9 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
       }
       return mergeSpans(found);
     },
+    matchName(name: string) {
+      return matchName(built, name);
+    },
   };
+  return built;
 }

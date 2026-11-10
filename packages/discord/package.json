@@ -1,0 +1,25 @@
+{
+  "name": "@chatwarden/discord",
+  "version": "0.0.0",
+  "private": false,
+  "description": "Chatwarden Discord package: feeds the staff review queue into a Discord forum through a channel webhook, one thread per reported person.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hainix/chatwarden.git",
+    "directory": "packages/discord"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": ["dist/src"],
+  "dependencies": { "@chatwarden/core": "0.0.0" },
+  "publishConfig": { "access": "public" }
+}

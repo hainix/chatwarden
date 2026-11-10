@@ -7,7 +7,7 @@ import { historyOf, recordStep } from '../src/ladder.js';
 import { purge } from '../src/retention.js';
 import { ReportService } from '../src/reports.js';
 import { CommunityRules, STARTER_RULES } from '../src/rules.js';
-import { SanctionIndex } from '../src/sanctions.js';
+import { MAX_SANCTION_DURATION_MS, SanctionIndex } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Identifiers, Logger, SubjectId } from '../src/types.js';
 import { MemoryStore } from './memoryStore.js';
@@ -1513,5 +1513,74 @@ describe('revokeAndWithdraw', () => {
     const res = okOf(await t.decide(reportId, { actions: [t.chat(target)] }));
     const out = await revokeAndWithdraw(t.store, res.groups[0]?.groupId ?? '', 'm', 'r', { notices: t.notices, clock: t.clock });
     expect(out.revoked).toBe(true);
+  });
+});
+
+describe('decide: the kind of each group', () => {
+  it('every group names the kind of the action that made it, in a mixed decision', async () => {
+    const t = setup();
+    const { reportId, target, bystander } = await t.table();
+    const res = okOf(
+      await t.decide(reportId, {
+        actions: [
+          t.chat(target),
+          t.note(bystander),
+          { subject: target, kind: 'ban', durationMs: 2 * DAY, rule: 2 },
+          t.warn(target),
+        ],
+      }),
+    );
+    expect(res.replay).toBe(false);
+    const stored = t.store.rawSanctions();
+    expect(res.groups).toHaveLength(4);
+    for (const g of res.groups) {
+      // Cross-check against what was written under that group id.
+      expect(stored.find((s) => s.groupId === g.groupId)?.kind, g.refCode).toBe(g.kind);
+    }
+    expect(res.groups.map((g) => [g.subject, g.kind]).sort()).toEqual(
+      [
+        [target, 'ban'],
+        [target, 'chat'],
+        [target, 'warning'],
+        [bystander, 'note'],
+      ].sort(),
+    );
+  });
+
+  it('a replay returns the same kinds, also after the person was merged under another id', async () => {
+    const t = setup();
+    const { reportId, target, bystander } = await t.table('rk-m', 'tk-m');
+    const alias = t.person(who('tk-m-other', 'acct-merge-kind'));
+    t.person(who('tk-m', 'acct-merge-kind')); // merges the two subjects
+    const canon = t.subjects.canonical(target);
+    const other = canon === target ? alias : target;
+    expect(t.subjects.canonical(other)).toBe(canon);
+    const first = okOf(await t.decide(reportId, { actions: [t.warn(canon), t.chat(canon), t.note(bystander)] }));
+    // The same decision, naming the person by their other id.
+    const again = okOf(await t.decide(reportId, { actions: [t.warn(other), t.chat(other), t.note(bystander)] }));
+    expect(again.replay).toBe(true);
+    expect(again.groups).toEqual(first.groups);
+    expect(again.groups.map((g) => g.kind).sort()).toEqual(['chat', 'note', 'warning']);
+    for (const g of again.groups) expect(first.groups.find((f) => f.groupId === g.groupId)?.kind).toBe(g.kind);
+  });
+
+  it('a decision with no actions has no groups (control)', async () => {
+    const t = setup();
+    const { reportId } = await t.table();
+    expect(okOf(await t.decide(reportId, { verdict: 'no_action' })).groups).toEqual([]);
+  });
+});
+
+describe('decide: the duration cap', () => {
+  it('a duration over 365 days is invalid and writes nothing; exactly 365 days is applied', async () => {
+    const t = setup();
+    const { reportId, target } = await t.table();
+    const before = t.snapshot();
+    for (const durationMs of [MAX_SANCTION_DURATION_MS + 1, 9e15, Number.MAX_SAFE_INTEGER]) {
+      expect(await t.decide(reportId, { actions: [{ subject: target, kind: 'ban', durationMs, rule: 2 }] })).toEqual({ ok: false, error: 'invalid' });
+    }
+    expect(t.snapshot()).toEqual(before);
+    const ok = okOf(await t.decide(reportId, { actions: [{ subject: target, kind: 'ban', durationMs: MAX_SANCTION_DURATION_MS, rule: 2 }] }));
+    expect(ok.groups[0]?.kind).toBe('ban');
   });
 });

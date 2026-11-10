@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, ROLES } from '@chatwarden/core';
 import type {
+  AuditListQuery,
+  AuditRow,
+  AuditTargetType,
   DecisionRow,
   MuteRow,
   NoticeKind,
@@ -15,6 +19,8 @@ import type {
   Store,
   StoredReport,
   StrikeRow,
+  WebhookKeyReservation,
+  DiscordThreadRow,
   SubjectId,
   SubjectIdKind,
   SubjectIdRecord,
@@ -28,6 +34,41 @@ import type {
   TermRecord,
   TermStore,
 } from '@chatwarden/matcher';
+
+/** A term-editor action name (`LiveTerms`) mapped to the audit union; the prefix is the row's subject type. */
+const LEGACY_ACTIONS: ReadonlyArray<readonly [string, string]> = [
+  ['add', 'add'],
+  ['edit', 'update'],
+  ['enable', 'toggle'],
+  ['disable', 'toggle'],
+];
+
+const sqlList = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(', ');
+
+/**
+ * SQL for the audit action a `kit_audit` row reads as: an action already in the union is itself; a term-editor row
+ * (`add` / `edit` / `enable` / `disable` on a `term` or `exception`) maps by name; anything else reads as `term.update`.
+ * Built from fixed strings only, never caller input.
+ */
+const AUDIT_ACTION_SQL = `CASE WHEN action IN (${sqlList(AUDIT_ACTIONS)}) THEN action ${(['term', 'exception'] as const)
+  .flatMap((type) =>
+    LEGACY_ACTIONS.map(([from, to]) => `WHEN subject_type = '${type}' AND action = '${from}' THEN '${type}.${to}' `),
+  )
+  .join('')}ELSE 'term.update' END`;
+
+function auditFromRow(r: Record<string, unknown>): AuditRow {
+  const type = String(r.subject_type);
+  const ref = String(r.subject_ref);
+  const role = r.role === null || r.role === undefined ? null : String(r.role);
+  return {
+    id: String(r.id),
+    at: Number(r.at),
+    actor: String(r.actor),
+    role: ROLES.find((x) => x === role) ?? null,
+    action: String(r.action) as AuditRow['action'],
+    target: ref !== '' && (AUDIT_TARGET_TYPES as readonly string[]).includes(type) ? { type: type as AuditTargetType, ref } : null,
+  };
+}
 
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
 function reportFromRow(r: Record<string, unknown>): ReportRecord {
@@ -228,6 +269,22 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  sanctionRefCode(groupId: string): string | null {
+    const row = this.transaction(() =>
+      this.db.prepare('SELECT ref_code FROM kit_sanctions WHERE group_id = ? LIMIT 1').get(groupId),
+    ) as { ref_code: string } | undefined;
+    return row === undefined ? null : row.ref_code;
+  }
+
+  sanctionGroupTarget(groupId: string): { subject: SubjectId; rule: string | null } | null {
+    const row = this.transaction(() =>
+      this.db
+        .prepare("SELECT target_value, rule FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' LIMIT 1")
+        .get(groupId),
+    ) as { target_value: string; rule: string | null } | undefined;
+    return row === undefined ? null : { subject: row.target_value, rule: row.rule };
+  }
+
   loadSanctions(now: number): SanctionRow[] {
     return this.transaction(() =>
       this.db
@@ -284,6 +341,112 @@ export class SqliteStore implements Store, TermStore {
           JSON.stringify({ gapStatus: 'open' }), JSON.stringify({ gapStatus: status, gapRef: ref }),
         );
       return true;
+    });
+  }
+
+  // Staff audit trail. SYNCHRONOUS on purpose. The json columns (before_json / after_json) are never selected: the
+  // rows the term editor wrote may hold term text there.
+
+  insertAudit(row: AuditRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO kit_audit (id, at, actor, role, action, subject_type, subject_ref, before_json, after_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+      )
+      .run(row.id, row.at, row.actor, row.role, row.action, row.target?.type ?? '', row.target?.ref ?? '');
+  }
+
+  listAudit(q: AuditListQuery): AuditRow[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    const where: string[] = [];
+    const args: Array<string | number> = [];
+    if (q.actor !== undefined) {
+      where.push('actor = ?');
+      args.push(q.actor);
+    }
+    if (q.action !== undefined) {
+      where.push(`(${AUDIT_ACTION_SQL}) = ?`);
+      args.push(q.action);
+    }
+    if (q.before !== undefined) {
+      if (q.beforeId === undefined) {
+        where.push('at < ?');
+        args.push(q.before);
+      } else {
+        // `at <= ?` is redundant with the pair below it, but it is a plain range on the indexed column, so SQLite
+        // seeks to the cursor instead of scanning the table.
+        where.push('(at <= ? AND (at < ? OR id < ?))');
+        args.push(q.before, q.before, q.beforeId);
+      }
+    }
+    const sql =
+      `SELECT id, at, actor, role, (${AUDIT_ACTION_SQL}) AS action, subject_type, subject_ref FROM kit_audit` +
+      `${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(auditFromRow));
+  }
+
+  purgeAudit(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_audit WHERE at < ?').run(before).changes));
+  }
+
+  // Webhook keys. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
+
+  reserveWebhookKey(key: string, now: number, notBefore: number, fingerprint: string): WebhookKeyReservation {
+    return this.transaction(() => {
+      this.db.prepare('DELETE FROM kit_webhook_keys WHERE key = ? AND created_at < ?').run(key, notBefore);
+      const inserted = this.db
+        .prepare("INSERT OR IGNORE INTO kit_webhook_keys (key, created_at, state, result_json, fingerprint) VALUES (?, ?, 'pending', NULL, ?)")
+        .run(key, now, fingerprint);
+      if (Number(inserted.changes) > 0) return { reserved: true } as const;
+      const r = this.db.prepare('SELECT state, result_json, fingerprint FROM kit_webhook_keys WHERE key = ?').get(key);
+      const stored = String(r?.fingerprint ?? '');
+      if (r !== undefined && r.state === 'done' && typeof r.result_json === 'string') {
+        return { reserved: false, state: 'done', resultJson: r.result_json, fingerprint: stored } as const;
+      }
+      return { reserved: false, state: 'pending', resultJson: null, fingerprint: stored } as const;
+    });
+  }
+
+  completeWebhookKey(key: string, resultJson: string): boolean {
+    return this.transaction(
+      () =>
+        Number(
+          this.db
+            .prepare("UPDATE kit_webhook_keys SET state = 'done', result_json = ? WHERE key = ? AND state = 'pending'")
+            .run(resultJson, key).changes,
+        ) > 0,
+    );
+  }
+
+  releaseWebhookKey(key: string): boolean {
+    return this.transaction(
+      () => Number(this.db.prepare("DELETE FROM kit_webhook_keys WHERE key = ? AND state = 'pending'").run(key).changes) > 0,
+    );
+  }
+
+  purgeWebhookKeys(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_webhook_keys WHERE created_at < ?').run(before).changes));
+  }
+
+  // Discord threads. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
+
+  getDiscordThread(subject: string): DiscordThreadRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT subject, thread_id, label, created_at FROM kit_discord_threads WHERE subject = ?').get(subject);
+      return r === undefined
+        ? null
+        : { subject: String(r.subject), threadId: String(r.thread_id), label: String(r.label), createdAt: Number(r.created_at) };
+    });
+  }
+
+  putDiscordThread(row: DiscordThreadRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO kit_discord_threads (subject, thread_id, label, created_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT (subject) DO UPDATE SET thread_id = excluded.thread_id, label = excluded.label, created_at = excluded.created_at`,
+        )
+        .run(row.subject, row.threadId, row.label, row.createdAt);
     });
   }
 
@@ -403,6 +566,14 @@ export class SqliteStore implements Store, TermStore {
       const r = this.db.prepare('SELECT * FROM kit_reports WHERE id = ?').get(id);
       return r === undefined ? null : reportFromRow(r);
     });
+  }
+
+  listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+    if (subjects.length === 0) return [];
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const marks = subjects.map(() => '?').join(', ');
+    const sql = `SELECT * FROM kit_reports WHERE target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
   }
 
   listReports(q: ReportListQuery): ReportRecord[] {

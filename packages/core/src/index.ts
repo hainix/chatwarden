@@ -13,7 +13,9 @@ export type {
   NoticeRow,
   RawWho,
   ReportActivity,
+  WebhookKeyReservation,
   DecisionRow,
+  DiscordThreadRow,
   ReportCategory,
   ReportExcerptLine,
   ReportListQuery,
@@ -47,10 +49,12 @@ export {
   refCode,
   revokeSanction,
   GAP_NOTE_MAX,
+  MAX_SANCTION_DURATION_MS,
   SANCTION_KINDS,
   SanctionError,
   SANCTION_SOURCES,
   SanctionIndex,
+  validateSanctionInput,
 } from './sanctions.js';
 export type { ActiveSanction, SanctionInput, WrittenSanction } from './sanctions.js';
 export { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from './mutes.js';
@@ -86,9 +90,31 @@ export {
   staffReport,
 } from './staffReports.js';
 export type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
+export {
+  AUDIT_ACTIONS,
+  AUDIT_PAGE_MAX,
+  AUDIT_TARGET_TYPES,
+  AuditQueryError,
+  isValidAuditActor,
+  ROLES,
+} from './audit.js';
+export type {
+  AuditAction,
+  AuditItem,
+  AuditListQuery,
+  AuditPage,
+  AuditQuery,
+  AuditRecordInput,
+  AuditRow,
+  AuditTarget,
+  AuditTargetType,
+  Role,
+} from './audit.js';
+export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
+export { WEBHOOK_KEY_TTL_MS } from './types.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export {
   ExcerptError,
@@ -105,6 +131,8 @@ export type {
   PlayerNotice,
   SanctionNoticeInput,
 } from './notices.js';
+export { KIT_EVENT_TYPES } from './events.js';
+export type { KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
 export { createChatwarden } from './chatwarden.js';
 export type { Chatwarden, ChatwardenOptions, GapRow } from './chatwarden.js';
 export {
@@ -131,6 +159,7 @@ export { LIMITS_DEFAULTS, resolveLimits } from './limits.js';
 export type { Limits, LimitsInput } from './limits.js';
 export {
   actionStep,
+  DEFAULT_SEVERE_RULES,
   HISTORY_LOOKBACK_MS,
   historyOf,
   LADDER_TABLE,

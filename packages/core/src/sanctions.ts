@@ -11,6 +11,12 @@ import type { SubjectIndex } from './subjects.js';
 
 export type { SanctionKind, Source } from './types.js';
 
+/**
+ * The longest a timed sanction may run: 365 days. `null` is the only permanent value, so a huge finite duration can never
+ * stand in for one (and slip past a permission that guards permanence).
+ */
+export const MAX_SANCTION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
+
 /** Every kind a sanction can have. The `kit_sanctions` CHECK constraint lists the same values. */
 export const SANCTION_KINDS: readonly SanctionKind[] = ['chat', 'area', 'ban', 'warning', 'note'];
 
@@ -126,6 +132,9 @@ function validate(input: SanctionInput): Checked {
   } else if (d !== null && (!Number.isFinite(d) || d <= 0)) {
     // NaN would otherwise store NULL (a silent permanent ban); zero or less is an already-expired row.
     throw new SanctionError(`applySanction: invalid duration ${d}`);
+  } else if (d !== null && d > MAX_SANCTION_DURATION_MS) {
+    // Only null is permanent: a finite duration above a year is refused, not stored as a near-permanent row.
+    throw new SanctionError('applySanction: duration is over the 365 day limit');
   }
   if (!SANCTION_KINDS.includes(input.kind)) throw new SanctionError('applySanction: invalid kind');
   if (!SANCTION_SOURCES.includes(input.source)) throw new SanctionError('applySanction: invalid source');
