@@ -24,11 +24,13 @@ describe('parseRoute', () => {
     ['/gaps', { name: 'gaps' }],
     ['/audit', { name: 'audit' }],
     ['/guide', { name: 'guide' }],
+    ['/actions', { name: 'actions' }],
+    ['#/actions/', { name: 'actions' }],
   ])('parses %j', (path, route) => {
     expect(parseRoute(path)).toEqual(route);
   });
 
-  it.each(['/nope', '/reports/a/b', '/people', '/people/a/b', '/terms/x', '/reports/has space', '/reports/a%2Fb', '/people/../x', '//reports'])(
+  it.each(['/nope', '/reports/a/b', '/people', '/people/a/b', '/terms/x', '/reports/has space', '/reports/a%2Fb', '/people/../x', '//reports', '/actions/x', '/actions/1/2'])(
     'sends %j to notFound, keeping the path',
     (path) => {
       const r = parseRoute(path);
@@ -64,6 +66,7 @@ describe('buildPath', () => {
     [{ name: 'gaps' }, '/gaps'],
     [{ name: 'audit' }, '/audit'],
     [{ name: 'guide' }, '/guide'],
+    [{ name: 'actions' }, '/actions'],
   ])('builds %j as %s', (route, path) => {
     expect(buildPath(route)).toBe(path);
   });
@@ -84,6 +87,7 @@ describe('buildPath', () => {
       { name: 'gaps' },
       { name: 'audit' },
       { name: 'guide' },
+      { name: 'actions' },
     ];
     for (const route of routes) expect(parseRoute(buildPath(route))).toEqual(route);
     for (const path of ['#/reports/', '/reports?status=open', 'reports', '#/people/p1']) {
@@ -100,6 +104,8 @@ describe('tabOf', () => {
     expect(tabOf({ name: 'report', id: 'a' })).toBe('reports');
     expect(tabOf({ name: 'person', ref: 'a' })).toBe('reports');
     expect(tabOf({ name: 'gaps' })).toBe('gaps');
+    // All actions is the Overview's Recent actions, in full.
+    expect(tabOf({ name: 'actions' })).toBe('overview');
     expect(tabOf({ name: 'notFound', path: '/x' })).toBeNull();
   });
 });

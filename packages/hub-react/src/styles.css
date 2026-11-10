@@ -1467,6 +1467,63 @@
   white-space: pre-wrap;
 }
 
+/* The person page: the title and its buttons, a report in the timeline (a neutral mark where a sanction has its card), the revoke
+   form under a sanction in force, and the sanction form. Nothing here is coloured: the cards and the red Confirm button carry it. */
+.cw-hub .cw-personhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1) var(--cw-space-3);
+  min-width: 0;
+}
+.cw-hub .cw-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2);
+}
+.cw-hub .cw-rec-body {
+  display: grid;
+  gap: var(--cw-space-1);
+  min-width: 0;
+}
+.cw-hub .cw-rec-mark {
+  width: 0.875rem;
+  height: 1.1875rem;
+  margin-top: 0.15rem;
+  border: 1.5px solid var(--cw-border-strong);
+  border-radius: 2.5px;
+}
+.cw-hub .cw-rec .cw-facts {
+  gap: var(--cw-space-1) var(--cw-space-3);
+}
+.cw-hub .cw-arow-who {
+  margin-right: var(--cw-space-2);
+  color: var(--cw-ink);
+}
+.cw-hub .cw-revoke {
+  display: grid;
+  justify-items: start;
+  gap: var(--cw-space-2);
+  margin-top: var(--cw-space-1);
+}
+.cw-hub .cw-revoke-form {
+  justify-self: stretch;
+  padding: var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-m);
+  background: var(--cw-surface-sunken);
+}
+.cw-hub .cw-form-body {
+  display: grid;
+  gap: var(--cw-space-3);
+  min-width: 0;
+}
+.cw-hub .cw-tick {
+  display: flex;
+  align-items: baseline;
+  gap: var(--cw-space-2);
+}
+
 /* The transcript reads like a log: a box in the margin, the time, who, what. The reported line takes a red rail, the reported
    person's own lines a neutral tint, and a line with blocked words shows a bar until it is shown. */
 .cw-hub .cw-transcript {

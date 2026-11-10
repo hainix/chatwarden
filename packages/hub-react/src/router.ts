@@ -14,6 +14,7 @@ export type Route =
   | { name: 'gaps' }
   | { name: 'audit' }
   | { name: 'guide' }
+  | { name: 'actions' }
   | { name: 'notFound'; path: string };
 
 /** The tabs. A report and a person live under Reports. */
@@ -86,6 +87,7 @@ export function parseRoute(path: string): Route {
     case 'gaps':
     case 'audit':
     case 'guide':
+    case 'actions':
       return second === undefined ? { name: first } : notFound;
     default:
       return notFound;
@@ -114,6 +116,7 @@ export function buildPath(route: Route): string {
 export function tabOf(route: Route): TabName | null {
   switch (route.name) {
     case 'overview':
+    case 'actions':
       return 'overview';
     case 'reports':
     case 'report':

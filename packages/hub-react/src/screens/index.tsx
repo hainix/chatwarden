@@ -2,14 +2,15 @@ import type { ReactNode } from 'react';
 import { useHub } from '../context.js';
 import type { HubText } from '../i18n.js';
 import type { Route } from '../router.js';
+import { Actions } from './Actions.js';
 import { Overview } from './Overview.js';
+import { Person } from './Person.js';
 import { Report } from './Report.js';
 import { Reports } from './Reports.js';
 
 // The screen for each route. Later screens replace the `Soon` entries here and nothing else in the shell changes.
 
-const SOON_NAME: Record<'person' | 'terms' | 'blocked' | 'gaps' | 'guide' | 'audit', HubText> = {
-  person: 'hub.route.soon.name.person',
+const SOON_NAME: Record<'terms' | 'blocked' | 'gaps' | 'guide' | 'audit', HubText> = {
   terms: 'hub.nav.terms',
   blocked: 'hub.nav.blocked',
   gaps: 'hub.nav.gaps',
@@ -39,6 +40,10 @@ export function screenFor(route: Route): ReactNode {
       return <Reports status={route.status} />;
     case 'report':
       return <Report />;
+    case 'person':
+      return <Person person={route.ref} />;
+    case 'actions':
+      return <Actions />;
     case 'notFound':
       return null;
     default:

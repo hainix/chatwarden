@@ -23,6 +23,7 @@ export function permissionFor(route: Route): PermissionKey | null {
     case 'report':
       return 'reports.read';
     case 'person':
+    case 'actions':
       return 'history.read';
     case 'terms':
       return 'terms.read';

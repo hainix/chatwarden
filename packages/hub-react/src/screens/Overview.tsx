@@ -3,12 +3,12 @@ import { actorName, liveClaim, teamOf } from '../claims.js';
 import { useHub } from '../context.js';
 import { formatDuration, waitTone } from '../format.js';
 import { useHubData } from '../hooks.js';
-import { groupName, kindLabel, ruleLabel, sanctionLength, sanctionState, sourceLabel } from '../labels.js';
+import { groupName } from '../labels.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import type { LiveQueue } from '../liveQueue.js';
 import { queueStats } from '../queue.js';
-import type { SanctionRow } from '../types.js';
-import { Avatar, Card, Empty, Fetched, Link, Panel, PersonChip, Skeleton, Tag, Time } from '../ui.js';
+import { Avatar, Empty, Fetched, Link, Panel, Skeleton } from '../ui.js';
+import { ActionRow } from './ActionRow.js';
 
 /** Sanctions shown under "Recent actions". */
 export const RECENT_SHOWN = 10;
@@ -134,7 +134,14 @@ function RecentActions() {
     if (!first) reload.current();
   }, [revision]);
   return (
-    <Panel title={t('hub.overview.recent.title')}>
+    <Panel
+      title={t('hub.overview.recent.title')}
+      action={
+        <Link to={{ name: 'actions' }} className="cw-link">
+          {t('hub.overview.recent.seeAll')}
+        </Link>
+      }
+    >
       <Fetched state={state} what={t('hub.state.what.actions')}>
         {(page) =>
           page.items.length === 0 ? (
@@ -149,40 +156,5 @@ function RecentActions() {
         }
       </Fetched>
     </Panel>
-  );
-}
-
-const STATE_KEY = {
-  active: 'hub.sanction.status.active',
-  pending: 'hub.sanction.status.pending',
-  ended: 'hub.sanction.status.ended',
-  revoked: 'hub.sanction.status.revoked',
-} as const;
-
-/** One sanction: the referee card for its kind, what and how long, its state, who it is on, the rule, who made it, and when. */
-function ActionRow({ sanction: s }: { sanction: SanctionRow }) {
-  const { t, locale } = useHub();
-  const state = sanctionState(s);
-  const length = sanctionLength(t, locale, s);
-  return (
-    <li className="cw-arow">
-      <Card kind={s.kind} />
-      <div className="cw-arow-body">
-        <div className="cw-arow-head">
-          <strong>{kindLabel(t, s.kind)}</strong>
-          {length !== '' && <span className="cw-arow-length">{length}</span>}
-          <Tag>{t(STATE_KEY[state])}</Tag>
-          {s.source !== 'moderator' && <Tag>{sourceLabel(t, s.source)}</Tag>}
-        </div>
-        <div className="cw-facts">
-          <Link to={{ name: 'person', ref: s.person }} className="cw-link">
-            <PersonChip person={s.person} />
-          </Link>
-          <span>{ruleLabel(t, s.rule)}</span>
-          <span>{s.automated ? t('hub.sanction.automatic') : t('hub.sanction.by', { actor: s.actor })}</span>
-          <Time at={s.startsAt} />
-        </div>
-      </div>
-    </li>
   );
 }

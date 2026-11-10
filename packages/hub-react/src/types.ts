@@ -110,10 +110,12 @@ export interface PersonHistory {
   reports: Array<{ id: string; createdAt: number; category: ReportCategory }>;
   sanctions: SanctionGroupView[];
   asReporter: ReporterRecord;
+  /** Their handle on the newest report filed against them, or null: the name to show for the person. */
+  handle: string | null;
 }
 
-/** A sanction group with the person it is on (`GET /sanctions`). */
-export type SanctionRow = SanctionGroupView & { person: string };
+/** A sanction group with the person it is on and the name to show for them (`GET /sanctions`). `handle` is null when no report recorded one. */
+export type SanctionRow = SanctionGroupView & { person: string; handle: string | null };
 
 export type SanctionSource = 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai';
 
