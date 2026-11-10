@@ -26,6 +26,7 @@ export const AUDIT_ACTIONS = [
   'history.view',
   'suggest',
   'policy.view',
+  'blocked.view',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

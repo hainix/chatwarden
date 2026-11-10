@@ -21,8 +21,10 @@ export type {
   ReportListQuery,
   ReportRecord,
   SanctionKind,
+  SanctionListQuery,
   SanctionRow,
   SanctionTargetType,
+  ReporterTally,
   ConductLevel,
   Source,
   Store,
@@ -90,6 +92,25 @@ export {
   staffReport,
 } from './staffReports.js';
 export type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
+export {
+  BLOCKED_DAYS,
+  BLOCKED_MAX,
+  PERSON_SANCTIONS_MAX,
+  SANCTION_PAGE_DEFAULT,
+  SANCTION_PAGE_MAX,
+  SanctionQueryError,
+  isSanctionActive,
+  sanctionGroupView,
+} from './staffViews.js';
+export type {
+  BlockedDays,
+  BlockedItem,
+  PersonSanctionView,
+  ReporterRecord,
+  SanctionGroupView,
+  SanctionListInput,
+  SanctionPage,
+} from './staffViews.js';
 export {
   AUDIT_ACTIONS,
   AUDIT_PAGE_MAX,

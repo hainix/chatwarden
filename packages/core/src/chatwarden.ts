@@ -31,6 +31,21 @@ import type { CommunityRules, RuleRef } from './rules.js';
 import { applySanction, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
+import {
+  blockedCountsByTerm,
+  blockedItems,
+  listSanctionGroups,
+  reporterRecord,
+  sanctionsOfPerson,
+} from './staffViews.js';
+import type {
+  BlockedDays,
+  BlockedItem,
+  ReporterRecord,
+  SanctionGroupView,
+  SanctionListInput,
+  SanctionPage,
+} from './staffViews.js';
 import { listStaffReports, staffReport } from './staffReports.js';
 import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 import { SubjectIndex } from './subjects.js';
@@ -240,6 +255,22 @@ export interface Chatwarden {
      * Carries subject ids: staff channels only, never send to a player.
      */
     get(id: string): StaffReport | null;
+    /**
+     * How the reports this person FILED stand (total, open, actioned, dismissed, bad faith) and when their reporting
+     * suspension ends (null if none), under the same rule intake uses. Folds in the person's merged aliases. Staff only:
+     * never send to a player (a player is not told who reported or how often).
+     */
+    reporterRecord(subject: SubjectId): ReporterRecord;
+  };
+  /**
+   * Blocked chat lines, from the slur filter's strikes (purged after 30 days). Staff only: the lines are raw chat text
+   * and `person` is a subject id; never send either to a player.
+   */
+  blocked: {
+    /** The last `days` days (1, 7 or 30, else `RangeError`), newest first, at most 500. */
+    list(q: { days: BlockedDays }): BlockedItem[];
+    /** Strikes per term id over the same window; a term with none is absent. */
+    countsByTerm(q: { days: BlockedDays }): Record<string, number>;
   };
   doors: { check(kind: DoorKind, who: RawWho): DoorRefusal | null };
   sanctions: {
@@ -253,6 +284,18 @@ export interface Chatwarden {
      * a seen one leaves "My record". Resolves true when this call revoked something.
      */
     revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
+    /**
+     * A person's sanctions as staff see them, newest first: the last 90 days plus every unrevoked permanent one, across
+     * the aliases merged into them, at most 200. Each is a {@link SanctionGroupView} built from the group's subject row
+     * (never an IP row, never a hashed identifier). Carries staff-only text (reason, actor): never send to a player.
+     */
+    forPerson(subject: SubjectId): SanctionGroupView[];
+    /**
+     * Every person's sanctions, newest first, one page at a time (`limit` default 50, clamped to 1..200; `cursor` is the
+     * previous `next`; `source` filters). Not windowed. Throws {@link SanctionQueryError} for a cursor that is not ours or an
+     * unknown source. Carries subject ids and staff-only text: never send to a player.
+     */
+    list(q?: SanctionListInput): SanctionPage;
   };
   /**
    * Subscribe to what happens in the kit: `'report.created'`, `'report.closed'`, `'sanction.applied'`,
@@ -646,6 +689,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         const record = typeof id === 'string' ? store.loadReport(id) : null;
         return record === null ? null : staffReport(record, subjects);
       },
+      reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now()),
+    },
+    blocked: {
+      list: (q) => blockedItems(store, subjects, q?.days, clock.now()),
+      countsByTerm: (q) => blockedCountsByTerm(store, q?.days, clock.now()),
     },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
@@ -706,6 +754,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         }
         return revoked;
       },
+      forPerson: (subject) => sanctionsOfPerson(store, subjects, subject, clock.now()),
+      list: (q) => listSanctionGroups(store, subjects, q ?? {}, clock.now()),
     },
     on: bus.on,
     names: {

@@ -43,6 +43,7 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'history.view',
       'suggest',
       'policy.view',
+      'blocked.view',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });

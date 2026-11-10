@@ -125,6 +125,23 @@ const copyReport = (r: StoredReport): StoredReport => ({
   people: [...r.people],
 });
 
+/**
+ * When a reporter's suspension ends, or null when they are not suspended. `marks` are the `actionedAt` times of the
+ * reporter's bad-faith dismissals that are still inside the window (the rows `loadBadFaithMarks` returns for it).
+ * Suspended means `suspendAfter` or more of them; the suspension lifts once enough of the oldest have aged out for the
+ * count to fall below `suspendAfter`, that is one millisecond after the window has passed the first mark that must go
+ * (a mark counts while `actionedAt >= now - suspendWindowMs`). The single place the rule lives: intake refuses with it
+ * and the staff view reports it.
+ */
+export function reporterSuspendedUntil(
+  marks: readonly number[],
+  limits: Pick<Limits['reports'], 'suspendAfter' | 'suspendWindowMs'>,
+): number | null {
+  if (marks.length < limits.suspendAfter) return null;
+  const sorted = [...marks].sort((a, b) => a - b);
+  return sorted[sorted.length - limits.suspendAfter]! + limits.suspendWindowMs + 1;
+}
+
 export class ReportService {
   private readonly roster: RoomRoster;
   private readonly buffer: EvidenceBuffer;
@@ -284,9 +301,9 @@ export class ReportService {
     now: number,
   ): { refusal: ReportResult } | { used: number } {
     const marks = this.store.loadBadFaithMarks(now - this.limits.suspendWindowMs);
-    let bad = 0;
-    for (const m of marks) if (this.subjects.canonical(m.reporter) === reporter) bad++;
-    if (bad >= this.limits.suspendAfter) return { refusal: refuse('suspended') };
+    const bad: number[] = [];
+    for (const m of marks) if (this.subjects.canonical(m.reporter) === reporter) bad.push(m.actionedAt);
+    if (reporterSuspendedUntil(bad, this.limits) !== null) return { refusal: refuse('suspended') };
 
     const used = this.reportsByInLastDay(reporter, now);
     if (used >= this.limits.perDay) return { refusal: refuse('rate', 0) };

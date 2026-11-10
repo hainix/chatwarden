@@ -13,7 +13,9 @@ import type {
   ReportCategory,
   ReportListQuery,
   ReportRecord,
+  ReporterTally,
   SanctionKind,
+  SanctionListQuery,
   SanctionRow,
   Source,
   Store,
@@ -121,6 +123,16 @@ function toSanctionRow(r: Record<string, unknown>): SanctionRow {
     pending: r.pending === 1,
     // Only a query that selects revoked_at gets the property; the other loads keep the plain row shape.
     ...(r.revoked_at === undefined ? {} : { revokedAt: r.revoked_at === null ? null : Number(r.revoked_at) }),
+  };
+}
+
+/** A subject-row listing row: `toSanctionRow` plus the three revoke columns, always present. */
+function toListedSanctionRow(r: Record<string, unknown>): SanctionRow {
+  return {
+    ...toSanctionRow(r),
+    revokedAt: r.revoked_at === null ? null : Number(r.revoked_at),
+    revokedBy: r.revoked_by === null ? null : String(r.revoked_by),
+    revokeReason: r.revoke_reason === null ? null : String(r.revoke_reason),
   };
 }
 
@@ -307,6 +319,42 @@ export class SqliteStore implements Store, TermStore {
         .all(since)
         .map(toSanctionRow),
     );
+  }
+
+  listSubjectSanctions(q: SanctionListQuery): SanctionRow[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    if (q.subjects !== undefined && q.subjects.length === 0) return [];
+    const where: string[] = ["target_type = 'subject'"];
+    const args: Array<string | number> = [];
+    if (q.subjects !== undefined) {
+      where.push(`target_value IN (${q.subjects.map(() => '?').join(', ')})`);
+      args.push(...q.subjects);
+    }
+    if (q.source !== undefined) {
+      where.push('source = ?');
+      args.push(q.source);
+    }
+    if (q.since !== undefined) {
+      if (q.alsoPermanent === true) {
+        where.push('(starts_at >= ? OR (ends_at IS NULL AND revoked_at IS NULL))');
+      } else {
+        where.push('starts_at >= ?');
+      }
+      args.push(q.since);
+    }
+    if (q.before !== undefined) {
+      if (q.beforeId === undefined) {
+        where.push('starts_at < ?');
+        args.push(q.before);
+      } else {
+        where.push('(starts_at <= ? AND (starts_at < ? OR id < ?))');
+        args.push(q.before, q.before, q.beforeId);
+      }
+    }
+    const sql =
+      `SELECT ${SANCTION_COLUMNS}, revoked_at, revoked_by, revoke_reason FROM kit_sanctions WHERE ${where.join(' AND ')} ` +
+      'ORDER BY starts_at DESC, id DESC LIMIT ?';
+    return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(toListedSanctionRow));
   }
 
   listGaps(): SanctionRow[] {
@@ -525,6 +573,34 @@ export class SqliteStore implements Store, TermStore {
     );
   }
 
+  listStrikes(since: number, limit: number): StrikeRow[] {
+    const n = Math.min(500, Math.max(1, Math.floor(limit)));
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          'SELECT id, at, subject_id, room_id, term_id, raw_line FROM kit_strikes WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?',
+        )
+        .all(since, n)
+        .map((r) => ({
+          id: String(r.id),
+          at: Number(r.at),
+          subject: String(r.subject_id),
+          roomId: String(r.room_id),
+          termId: String(r.term_id),
+          rawLine: String(r.raw_line),
+        })),
+    );
+  }
+
+  countStrikesByTerm(since: number): Array<{ termId: string; count: number }> {
+    return this.transaction(() =>
+      this.db
+        .prepare('SELECT term_id, COUNT(*) AS n FROM kit_strikes WHERE at >= ? GROUP BY term_id ORDER BY term_id')
+        .all(since)
+        .map((r) => ({ termId: String(r.term_id), count: Number(r.n) })),
+    );
+  }
+
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }> {
     return this.transaction(() =>
       this.db
@@ -574,6 +650,20 @@ export class SqliteStore implements Store, TermStore {
     const marks = subjects.map(() => '?').join(', ');
     const sql = `SELECT * FROM kit_reports WHERE target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+  }
+
+  reporterTally(reporters: readonly SubjectId[]): ReporterTally {
+    const tally: ReporterTally = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
+    if (reporters.length === 0) return tally;
+    const marks = reporters.map(() => '?').join(', ');
+    const sql = `SELECT status, bad_faith, COUNT(*) AS n FROM kit_reports WHERE reporter_subject IN (${marks}) GROUP BY status, bad_faith`;
+    for (const r of this.transaction(() => this.db.prepare(sql).all(...reporters))) {
+      const n = Number(r.n);
+      const status = String(r.status);
+      if (status === 'open' || status === 'actioned' || status === 'dismissed') tally[status] += n;
+      if (Number(r.bad_faith) === 1) tally.badFaith += n;
+    }
+    return tally;
   }
 
   listReports(q: ReportListQuery): ReportRecord[] {

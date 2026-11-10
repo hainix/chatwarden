@@ -7,6 +7,8 @@ import type {
   ReportActivity,
   ReportListQuery,
   ReportRecord,
+  ReporterTally,
+  SanctionListQuery,
   SanctionRow,
   Store,
   StoredReport,
@@ -252,6 +254,26 @@ export class MemoryStore implements Store {
     };
   }
 
+  listSubjectSanctions(q: SanctionListQuery): SanctionRow[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    const wanted = q.subjects === undefined ? null : new Set(q.subjects);
+    return this.sanctions
+      .filter((r) => {
+        if (r.targetType !== 'subject') return false;
+        if (wanted !== null && !wanted.has(r.value)) return false;
+        if (q.source !== undefined && r.source !== q.source) return false;
+        if (q.since !== undefined && r.startsAt < q.since && !(q.alsoPermanent === true && r.endsAt === null && r.revokedAt === null)) {
+          return false;
+        }
+        if (q.before === undefined) return true;
+        if (r.startsAt !== q.before) return r.startsAt < q.before;
+        return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
+      })
+      .sort((a, b) => b.startsAt - a.startsAt || compare(b.id, a.id))
+      .slice(0, limit)
+      .map((r) => ({ ...this.sanctionRow(r), revokedAt: r.revokedAt, revokedBy: r.revokedBy, revokeReason: r.revokeReason }));
+  }
+
   listGaps(): SanctionRow[] {
     // Newest first; insertion order breaks a tie, like SQLite's rowid.
     return this.sanctions
@@ -451,6 +473,21 @@ export class MemoryStore implements Store {
       .map((r) => ({ ...r }));
   }
 
+  listStrikes(since: number, limit: number): StrikeRow[] {
+    const n = Math.min(500, Math.max(1, Math.floor(limit)));
+    return this.strikes
+      .filter((r) => r.at >= since)
+      .sort((a, b) => b.at - a.at || compare(b.id, a.id))
+      .slice(0, n)
+      .map((r) => ({ ...r }));
+  }
+
+  countStrikesByTerm(since: number): Array<{ termId: string; count: number }> {
+    const counts = new Map<string, number>();
+    for (const r of this.strikes) if (r.at >= since) counts.set(r.termId, (counts.get(r.termId) ?? 0) + 1);
+    return [...counts].sort((a, b) => compare(a[0], b[0])).map(([termId, count]) => ({ termId, count }));
+  }
+
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }> {
     const latest = new Map<SubjectId, number>();
     for (const r of this.sanctions) {
@@ -496,6 +533,17 @@ export class MemoryStore implements Store {
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));
+  }
+
+  reporterTally(reporters: readonly SubjectId[]): ReporterTally {
+    const tally: ReporterTally = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
+    const wanted = new Set(reporters);
+    for (const r of this.reports) {
+      if (!wanted.has(r.reporterSubject)) continue;
+      tally[r.status] += 1;
+      if (r.badFaith) tally.badFaith += 1;
+    }
+    return tally;
   }
 
   listReports(q: ReportListQuery): ReportRecord[] {

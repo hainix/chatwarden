@@ -173,6 +173,42 @@ export interface SanctionRow {
    * other load leaves the property off.
    */
   revokedAt?: number | null;
+  /**
+   * Who revoked the group and why. Set only by `listSubjectSanctions` (null while unrevoked, and on a row revoked
+   * before the actor was kept); every other load leaves the properties off.
+   */
+  revokedBy?: string | null;
+  revokeReason?: string | null;
+}
+
+/**
+ * What {@link Store.listSubjectSanctions} takes: the SUBJECT rows of sanction groups, newest first. Never an IP row.
+ */
+export interface SanctionListQuery {
+  /** Only rows whose stored target is one of these subject ids (a person's canonical id and its aliases). Absent: everyone; empty: nobody. */
+  subjects?: readonly SubjectId[];
+  /** Only rows from this source. */
+  source?: Source;
+  /** Only rows with `startsAt >= since`. */
+  since?: number;
+  /**
+   * With `since`: also the rows older than `since` that are permanent (`endsAt` null) and not revoked. Ignored without
+   * `since`.
+   */
+  alsoPermanent?: boolean;
+  /** Keyset cursor: only rows older than this (`startsAt` below it, or equal with an id below `beforeId`). `beforeId` without `before` is ignored. */
+  before?: number;
+  beforeId?: string;
+  /** Clamped to 1..200 (a fraction is floored). */
+  limit: number;
+}
+
+/** What {@link Store.reporterTally} counts over the reports a person filed. `badFaith` is the number marked bad faith. */
+export interface ReporterTally {
+  open: number;
+  actioned: number;
+  dismissed: number;
+  badFaith: number;
 }
 
 /**
@@ -472,6 +508,13 @@ export interface Store {
    */
   loadSubjectActions(since: number): SanctionRow[];
 
+  /**
+   * The SUBJECT rows of sanction groups (never an IP row), newest first (`startsAt` descending, then `id` descending, so a
+   * tie is stable), revoked and ended ones included. Every row carries `revokedAt`, `revokedBy` and `revokeReason` (all
+   * null while unrevoked). See {@link SanctionListQuery}.
+   */
+  listSubjectSanctions(q: SanctionListQuery): SanctionRow[];
+
   /** Every subject row that carries a rule-gap note (any status, revoked or not), newest `startsAt` first. */
   listGaps(): SanctionRow[];
 
@@ -516,6 +559,15 @@ export interface Store {
    */
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }>;
 
+  /**
+   * Strikes at or after `since` (epoch ms), newest first (`at` descending, then `id` descending), at most `limit`
+   * (clamped to 1..500). The staff "blocked messages" view.
+   */
+  listStrikes(since: number, limit: number): StrikeRow[];
+
+  /** For each term id, how many strikes at or after `since` it earned (terms with none are absent). Order is unspecified. */
+  countStrikesByTerm(since: number): Array<{ termId: string; count: number }>;
+
   // Reports. SYNCHRONOUS on purpose (like sanctions): `ReportService.submit` runs these inside `transaction`.
   // Subject ids come back exactly as stored (canonical at write time, possibly merged since); the service folds
   // aliases. The table also carries `status`, `bad_faith` and `actioned_at` for K2's moderator tools.
@@ -544,6 +596,13 @@ export interface Store {
    * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
    */
   listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+
+  /**
+   * How the reports FILED BY any of the given subjects stand (`reporterSubject` as stored: pass the person's canonical id
+   * and every alias merged into it): how many are still open, actioned or dismissed, and how many carry the bad-faith
+   * mark. An empty list counts nothing.
+   */
+  reporterTally(reporters: readonly SubjectId[]): ReporterTally;
 
   /**
    * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`,
