@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { errorClass, safeWarn } from '../src/log.js';
+import { errorClass, safeWarn, ThrottledWarn } from '../src/log.js';
 import type { Logger } from '../src/types.js';
 import * as pkg from '../src/index.js';
 
@@ -112,5 +112,72 @@ describe('errorClass', () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();
     expect(errorClass(proxy)).toBe('unknown');
+  });
+});
+
+describe('ThrottledWarn', () => {
+  const make = (intervalMs?: number) => {
+    const clock = { t: 1000, now: () => clock.t };
+    const lines: Array<[string, Record<string, string | number | boolean> | undefined]> = [];
+    const logger: Logger = { warn: (event, detail) => void lines.push([event, detail]) };
+    return { clock, lines, w: new ThrottledWarn(logger, clock, intervalMs) };
+  };
+
+  it('logs the first failure as given, with no suppressed field', () => {
+    const { w, lines } = make();
+    w.warn('e', { error: 'X' });
+    expect(lines).toEqual([['e', { error: 'X' }]]);
+  });
+
+  it('holds back repeats inside the interval and reports their count on the next line', () => {
+    const { w, lines, clock } = make();
+    for (let i = 0; i < 5; i++) w.warn('e', { error: 'X' });
+    expect(lines).toHaveLength(1);
+    clock.t += 60_000;
+    w.warn('e', { error: 'X' });
+    expect(lines[1]).toEqual(['e', { error: 'X', suppressed: 4 }]);
+    clock.t += 60_000;
+    w.warn('e', { error: 'X' });
+    expect(lines[2]).toEqual(['e', { error: 'X' }]); // the count starts over
+  });
+
+  it('one millisecond short of the interval is still held back', () => {
+    const { w, lines, clock } = make();
+    w.warn('e', { error: 'X' });
+    clock.t += 59_999;
+    w.warn('e', { error: 'X' });
+    expect(lines).toHaveLength(1);
+  });
+
+  it('a clock that goes backwards does not wedge it forever', () => {
+    const { w, lines, clock } = make();
+    w.warn('e', { error: 'X' });
+    clock.t -= 10_000;
+    w.warn('e', { error: 'X' });
+    expect(lines).toHaveLength(2);
+  });
+
+  it('a throwing logger or clock never throws', () => {
+    const bad = new ThrottledWarn(
+      {
+        warn: () => {
+          throw new Error('x');
+        },
+      },
+      {
+        now: () => {
+          throw new Error('y');
+        },
+      },
+    );
+    expect(() => bad.warn('e', { error: 'X' })).not.toThrow();
+  });
+
+  it('honours a custom interval', () => {
+    const { w, lines, clock } = make(1000);
+    w.warn('e', { error: 'X' });
+    clock.t += 1000;
+    w.warn('e', { error: 'X' });
+    expect(lines).toHaveLength(2);
   });
 });

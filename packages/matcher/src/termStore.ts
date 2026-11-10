@@ -36,11 +36,25 @@ export interface ExceptionPatch {
   updatedAt: number;
 }
 
+/** The names `LiveTerms` writes: core's closed `AuditAction` names for term edits. A toggle's direction is in
+ *  `afterJson.active`. */
+export type TermAuditAction =
+  | 'term.add'
+  | 'term.update'
+  | 'term.toggle'
+  | 'exception.add'
+  | 'exception.update'
+  | 'exception.toggle';
+
+/** The raw names `LiveTerms` wrote before 0.1.1. A store may still hold such rows (core's `audit.list` maps them to
+ *  the closed names); `LiveTerms` no longer writes them. */
+export type LegacyTermAuditAction = 'add' | 'edit' | 'enable' | 'disable';
+
 /** One line of the audit trail. `subjectRef` is the id of the term or exception row. */
 export interface AuditEntry {
   at: number;
   actor: string;
-  action: 'add' | 'edit' | 'enable' | 'disable';
+  action: TermAuditAction | LegacyTermAuditAction;
   subjectType: 'term' | 'exception';
   subjectRef: string;
   /** JSON of the row before the change; null for an add. */

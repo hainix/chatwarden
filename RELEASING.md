@@ -1,7 +1,8 @@
 # Releasing Chatwarden
 
-Six packages are published to npm under the `@chatwarden` scope: `core`, `matcher`, `store-sqlite`, `profanity`, `http` and
-`discord`. They share one version number (a changesets "fixed" group), so every release bumps all six together.
+Seven packages are published to npm under the `@chatwarden` scope: `core`, `store-memory`, `matcher`, `store-sqlite`,
+`profanity`, `http` and `discord`. They share one version number (a changesets "fixed" group), so every release bumps all seven
+together.
 
 Nothing is uploaded to npm until the owner has done the one-time steps below. Until then, the release workflow can only be
 run as a dry run, and adopters can use tarballs (see "Before the first publish").
@@ -28,7 +29,7 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
 5. **Protect `v*` tags.** On GitHub: Settings, Rules, New tag ruleset, target `v*`, and restrict creation, update and
    deletion to the owner. A pushed tag publishes, so only people you trust should be able to create one.
 6. **After the first publish: switch to npm trusted publishing (OIDC), and delete the token.** On npmjs.com, open each of
-   the six packages, then Settings, Trusted Publisher, GitHub Actions. Enter the repository `hainix/chatwarden` and the workflow
+   the seven packages, then Settings, Trusted Publisher, GitHub Actions. Enter the repository `hainix/chatwarden` and the workflow
    file `release.yml`. Then delete the `NPM_TOKEN` secret on GitHub and revoke the token on npm. The workflow needs no change:
    with no secret it publishes through trusted publishing (it upgrades npm to 11.5.1+ for this and already asks for
    `id-token: write`), and each release still carries a signed provenance statement. Check npm's current docs if the
@@ -40,14 +41,18 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
    moves together, so any one of them is enough), the bump (patch, minor or major) and write one plain sentence. Commit the
    file it creates under `.changeset/`.
 2. **Prepare the release.** On a clean `main`, run `npm run version`. It is the one way to bump: it runs `changeset version`
-   (bumps all six packages to the new version, fixes the `@chatwarden/*` ranges between them and writes each `CHANGELOG.md`),
+   (bumps all seven packages to the new version, fixes the `@chatwarden/*` ranges between them and writes each `CHANGELOG.md`),
    then `node scripts/sync-version.mjs` (rewrites the `VERSION` constant each package exports so it matches its
    `package.json`; `scripts/manifests.test.ts` fails CI if they differ), then `npm install --package-lock-only`. Then bump the
    `@chatwarden/*` versions in `examples/tiny-chat/package.json` by hand to the same version. `changesets` ignores that
    private example, and `scripts/manifests.test.ts` fails CI if it is left behind. Run `npm install` once more so
    `package-lock.json` follows.
+   The `peerDependencies` ranges stay where they are (`^0.1.0`) through a compatible release:
+   `.changeset/config.json` sets `onlyUpdatePeerDependentsWhenOutOfRange`, so changesets only raises a peer range when the
+   new version falls outside it. `scripts/manifests.test.ts` fails CI if a range moves unexpectedly. The exact
+   `devDependencies` pins and the tiny-chat versions do move with the release.
 3. **Merge.** Open a pull request with those changes and merge it once CI is green.
-4. **Dry run first (recommended).** See the next section. It runs every check and `npm publish --dry-run` for all six.
+4. **Dry run first (recommended).** See the next section. It runs every check and `npm publish --dry-run` for all seven.
 5. **Tag and push.** On the merged `main`, once CI is green on it, with `X.Y.Z` the new version:
 
    ```sh
@@ -58,8 +63,8 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
    The tag must be exactly `v` plus the version in `packages/core/package.json`; the workflow refuses a tag that does not
    match. Pushing the tag starts the real publish. The release job runs the lint and the full test suite again before it
    uploads anything.
-6. **Watch it.** Open the Actions tab and follow the "Release" run. It publishes in dependency order (`core`, `matcher`,
-   `store-sqlite`, `profanity`, `http`, `discord`) and skips any package whose exact version is already on npm, so a failed
+6. **Watch it.** Open the Actions tab and follow the "Release" run. It publishes in dependency order (`core`, `store-memory`,
+   `matcher`, `store-sqlite`, `profanity`, `http`, `discord`) and skips any package whose exact version is already on npm, so a failed
    run can simply be re-run once the cause is fixed. Check each package page on npmjs.com for the provenance badge.
 
 ## Running a dry run

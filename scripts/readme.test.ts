@@ -38,12 +38,12 @@ const cells = (row: string): string[] => row.split('|').slice(1, -1).map((c) => 
 const rows = (text: string): string[][] => text.split('\n').filter((l) => l.startsWith('|') && !/^\|[ |-]+\|$/.test(l)).map(cells);
 
 const MARKETING = /\b(blazing|seamless|powerful|robust|world-class|cutting-edge|revolutionary)\b/i;
-const NEW_FOUR = ['core', 'store-sqlite', 'matcher', 'profanity'];
+const NEW_FOUR = ['core', 'store-sqlite', 'store-memory', 'matcher', 'profanity'];
 const REPO = 'https://github.com/hainix/chatwarden';
 
 describe('every published package has a README', () => {
-  it('covers the six packages', () => {
-    expect(published).toEqual(['core', 'discord', 'http', 'matcher', 'profanity', 'store-sqlite']);
+  it('covers the seven packages', () => {
+    expect(published).toEqual(['core', 'discord', 'http', 'matcher', 'profanity', 'store-memory', 'store-sqlite']);
   });
 
   it.each(published)('%s: is titled with its package name, with a status line and no marketing words', (dir) => {
@@ -76,7 +76,7 @@ describe('every published package has a README', () => {
   });
 });
 
-describe('the four new package READMEs', () => {
+describe('the new package READMEs', () => {
   it.each(NEW_FOUR)('%s: has install, quick start, options, security notes and links, in that order', (dir) => {
     const doc = readme(dir);
     const order = ['## Install', '## Quick start', '## Options', '## Security notes', '## Links'].map((h) => doc.indexOf(`\n${h}\n`));
@@ -118,6 +118,18 @@ describe('the four new package READMEs', () => {
     for (const f of fields) expect(table, f).toContain(`\`${f}\``);
   });
 
+  it('core: shows the typing-indicator lookup and says it reveals nothing about other people', () => {
+    const doc = flat(section(readme('core'), 'Typing indicators'));
+    expect(doc).toContain('cw.chat.restricted(who, { roomId, seatId })');
+    expect(doc).toMatch(/same decision as `accept`/);
+    expect(doc).toMatch(/both `roomId` and `seatId`/);
+    expect(doc).toMatch(/never a key or account the client sent/);
+    expect(doc).toMatch(/after `cw\.rooms\.seat`/);
+    expect(doc).toMatch(/`gate` option is not consulted/);
+    expect(doc).toMatch(/reveals nothing about anyone else/);
+    expect(doc).toMatch(/\{ restricted: true, until: null, kind: null \}/);
+  });
+
   it('store-sqlite: documents path and db, the kit_ tables, hashing and what retention does not purge', () => {
     const raw = readme('store-sqlite');
     const doc = flat(raw);
@@ -133,6 +145,25 @@ describe('the four new package READMEs', () => {
     expect(notes).toMatch(/not purged|not removed by `purge/);
   });
 
+  it('store-memory: says plainly it is memory only, lost on restart, and what it is for', () => {
+    const raw = readme('store-memory');
+    const doc = flat(raw);
+    expect(doc).toContain('MemoryStore');
+    expect(doc).toContain('createMemoryStore');
+    expect(doc).toMatch(/lost (when|on)[^.]*(restart|exit|stops)/i);
+    expect(doc).toMatch(/tests?, demos? and single-process prototypes/i);
+    expect(doc).toMatch(/not (for|a) production|do not use[^.]*production/i);
+    expect(doc).toMatch(/@chatwarden\/store-sqlite/);
+    expect(doc).toMatch(/no `node:` (import|module)|imports? no `node:`/i);
+    const notes = flat(section(raw, 'Security notes'));
+    expect(notes).toMatch(/never log/i);
+    expect(notes).toMatch(/subject id/i);
+    expect(notes).toMatch(/staff/);
+    expect(notes).toMatch(/retention|purge/i);
+    expect(notes).toMatch(/no timer|does not run|nothing purges|only[^.]*when core calls/i);
+    expect(notes).toMatch(/same store contract|contract suite/i);
+  });
+
   it('matcher: explains /fixtures, the deprecated /test-fixtures, and where the community corpus lives', () => {
     const raw = readme('matcher');
     const doc = flat(raw);
@@ -146,6 +177,24 @@ describe('the four new package READMEs', () => {
     const notes = flat(section(raw, 'Security notes'));
     expect(notes).toMatch(/never log/i);
     expect(notes).toMatch(/term id/);
+  });
+
+  it('matcher: documents positiveCorpus, the refusal codes, the Sync APIs, the audit names and how to read term history', () => {
+    const doc = flat(readme('matcher'));
+    expect(doc).toContain('positiveCorpus');
+    for (const code of ['duplicate', 'unblocks_known', 'invalid', 'not_found', 'not_loaded', 'build_failed']) {
+      expect(doc, code).toContain(`\`${code}\``);
+    }
+    expect(doc).toContain('loadSync()');
+    expect(doc).toContain('changeSync(');
+    for (const name of ['term.add', 'term.update', 'term.toggle', 'exception.add', 'exception.update', 'exception.toggle']) {
+      expect(doc, name).toContain(`\`${name}\``);
+    }
+    expect(doc).toContain("cw.audit.list({ action: 'term.add'");
+    expect(doc).toMatch(/after_json\.active/);
+    // The Sync boot and the refusal code are shown as real code, which the compile check further down covers.
+    const code = [...readme('matcher').matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string).filter((c) => c.startsWith('import '));
+    expect(code.some((c) => c.includes('loadSync()') && c.includes('changeSync(') && c.includes('.code'))).toBe(true);
   });
 
   it('matcher: its examples use only the invented fixture terms', () => {
@@ -327,6 +376,7 @@ declare const authorize: import('@chatwarden/http').Authenticate;
       paths: {
         '@chatwarden/core': src('core/src/index.ts'),
         '@chatwarden/store-sqlite': src('store-sqlite/src/index.ts'),
+        '@chatwarden/store-memory': src('store-memory/src/index.ts'),
         '@chatwarden/matcher': src('matcher/src/index.ts'),
         '@chatwarden/matcher/fixtures': src('matcher/src/fixtures/index.ts'),
         '@chatwarden/matcher/test-fixtures': src('matcher/src/fixtures/testFixtures.ts'),

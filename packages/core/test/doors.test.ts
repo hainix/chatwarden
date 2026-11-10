@@ -6,7 +6,7 @@ import { NoticeService } from '../src/notices.js';
 import { CommunityRules, STARTER_RULES } from '../src/rules.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Hasher, Logger, RawWho, SanctionKind, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const H = 3_600_000;
 const DAY = 24 * H;

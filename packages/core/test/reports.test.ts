@@ -5,8 +5,9 @@ import type { StoredReport } from '../src/reports.js';
 import { applySanction } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Identifiers, Logger, SanctionKind, Source, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
-import type { StoredReportRow } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
+import { markReportBadFaith } from './markBadFaith.js';
+import type { StoredReportRow } from '@chatwarden/store-memory';
 
 const MIN = 60_000;
 const H = 60 * MIN;
@@ -131,7 +132,7 @@ function setup(opts: { store?: MemoryStore; enabled?: () => boolean; onReport?: 
       ...rest,
     };
     store.insertReport(row);
-    if (badFaithAt !== undefined && badFaithAt !== null) store.markReportBadFaith(row.id, badFaithAt);
+    if (badFaithAt !== undefined && badFaithAt !== null) markReportBadFaith(store, row.id, badFaithAt);
     return row;
   };
   return { store, clock, logs, subjects, roster, buffer, reports, calls, person, sit, say, input, submit, table, seed };
@@ -1034,7 +1035,7 @@ describe('report: suspension after three bad-faith dismissals in 30 days', () =>
   it('a bad-faith row with no actioned_at (never closed) does not count', async () => {
     const t = setup();
     const { a } = t.table();
-    for (let i = 0; i < 3; i++) t.store.markReportBadFaith(t.seed({ reporterSubject: a }).id, null);
+    for (let i = 0; i < 3; i++) markReportBadFaith(t.store, t.seed({ reporterSubject: a }).id, null);
     expect(await t.submit()).toMatchObject({ ok: true });
   });
 

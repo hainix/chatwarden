@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomId } from './crypto.js';
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
 import type { Limits } from './limits.js';
 import { safeWarn } from './log.js';
@@ -92,7 +92,7 @@ export interface ReportServiceDeps {
   limits?: Limits['reports'];
 }
 
-const newId = (): string => randomBytes(16).toString('base64url');
+const newId = (): string => randomId(16);
 
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
 

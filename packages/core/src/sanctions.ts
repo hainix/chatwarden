@@ -1,4 +1,4 @@
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomId, randomIntBelow } from './crypto.js';
 import type { Identifiers, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
 import type { RuleRef } from './rules.js';
 import type { SubjectIndex } from './subjects.js';
@@ -99,12 +99,12 @@ export interface ActiveSanction {
   own: boolean;
 }
 
-const newId = (): string => randomBytes(16).toString('base64url');
+const newId = (): string => randomId(16);
 
 /** `M-` plus 5 characters from an unambiguous alphabet. Uniqueness is enforced at write time, not here. */
 export function refCode(): string {
   let out = 'M-';
-  for (let i = 0; i < 5; i++) out += REF_ALPHABET[randomInt(REF_ALPHABET.length)];
+  for (let i = 0; i < 5; i++) out += REF_ALPHABET[randomIntBelow(REF_ALPHABET.length)];
   return out;
 }
 

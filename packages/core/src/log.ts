@@ -39,3 +39,40 @@ export function errorClass(err: unknown): string {
     return 'unknown';
   }
 }
+
+/**
+ * A warning for a path that can fail on every call at high frequency (a typing indicator during a store outage): the
+ * first failure is logged, then at most one more per `intervalMs`, which carries `suppressed`, the number of failures
+ * held back since the last line. The clock is the kit's, so a test or a replay controls it.
+ */
+export class ThrottledWarn {
+  private last: number | null = null;
+  private held = 0;
+
+  private readonly logger: Logger | undefined;
+  private readonly clock: { now(): number };
+  private readonly intervalMs: number;
+
+  constructor(logger: Logger | undefined, clock: { now(): number }, intervalMs = 60_000) {
+    this.logger = logger;
+    this.clock = clock;
+    this.intervalMs = intervalMs;
+  }
+
+  warn(event: string, detail: Detail): void {
+    let now: number;
+    try {
+      now = this.clock.now();
+    } catch {
+      now = 0;
+    }
+    if (this.last !== null && now - this.last < this.intervalMs && now >= this.last) {
+      this.held++;
+      return;
+    }
+    const out: Detail = this.held > 0 ? { ...detail, suppressed: this.held } : detail;
+    this.last = now;
+    this.held = 0;
+    safeWarn(this.logger, event, out);
+  }
+}

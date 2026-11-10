@@ -6,7 +6,7 @@ import type { AuditAction, AuditRow, Role } from '../src/audit.js';
 import { ProfileError } from '../src/profile.js';
 import { RETENTION_DEFAULTS } from '../src/retention.js';
 import type { Logger, Platform, RawWho } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const NOW = 1_800_000_000_000;
 const DAY = 86_400_000;

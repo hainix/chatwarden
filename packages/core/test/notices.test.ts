@@ -5,7 +5,7 @@ import type { PlayerNotice } from '../src/notices.js';
 import { CommunityRules, STARTER_RULES } from '../src/rules.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Logger, Matcher, ReportExcerptLine, StoredReport, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2027, 0, 15, 12, 0, 0);

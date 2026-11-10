@@ -2,6 +2,9 @@
   "files": [],
   "references": [
     { "path": "packages/core" },
+    { "path": "packages/store-memory" },
+    { "path": "packages/core/tsconfig.test.json" },
+    { "path": "test/contract" },
     { "path": "packages/store-sqlite" },
     { "path": "packages/matcher" },
     { "path": "packages/profanity" },

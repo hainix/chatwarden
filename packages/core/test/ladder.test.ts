@@ -16,7 +16,7 @@ import type { RuleRef } from '../src/rules.js';
 import { SubjectIndex } from '../src/subjects.js';
 import { CONDUCT_LEVELS } from '../src/types.js';
 import type { ConductLevel, Identifiers, SanctionKind, SanctionRow } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const H = 3_600_000;
 const DAY = 24 * H;

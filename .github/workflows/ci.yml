@@ -23,6 +23,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # check:pack builds every package; scripts/browser-bundle.test.ts (run by npm test below) bundles that dist for a browser.
       - run: npm run check:pack
       - run: npm run lint
       - run: npm test

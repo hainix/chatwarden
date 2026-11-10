@@ -193,3 +193,34 @@ describe('loadTermPack: errors never carry term text', () => {
     expect(msg).not.toContain('glarn');
   });
 });
+
+describe('loadTermPack: positiveCorpus (optional flat canary)', () => {
+  it('accepts a flat list of lines and returns a copy', () => {
+    const raw = json({ positiveCorpus: ['you zorbak', 'f3nr1sk!'] });
+    const pack = loadTermPack(raw);
+    expect(pack.positiveCorpus).toEqual(['you zorbak', 'f3nr1sk!']);
+    (raw.positiveCorpus as string[]).push('later');
+    expect(pack.positiveCorpus).not.toContain('later');
+  });
+
+  it('is optional: absent stays absent (no key on the loaded pack)', () => {
+    const raw = json();
+    delete raw.positiveCorpus;
+    expect('positiveCorpus' in loadTermPack(raw)).toBe(false);
+  });
+
+  it('an empty list is fine', () => {
+    expect(loadTermPack(json({ positiveCorpus: [] })).positiveCorpus).toEqual([]);
+  });
+
+  it.each([['x'], [{}], [[1]], [[null]], [[['a']]], [null]])('rejects a bad positiveCorpus (%j) naming the field only', (bad) => {
+    expect(errorOf(json({ positiveCorpus: bad }))).toBe('pack.positiveCorpus must be an array of strings');
+  });
+
+  it('is not required, but other required keys still are', () => {
+    const raw = json();
+    delete raw.positiveCorpus;
+    delete raw.knownLosses;
+    expect(() => loadTermPack(raw)).toThrow(/knownLosses/);
+  });
+});

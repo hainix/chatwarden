@@ -11,7 +11,7 @@ import {
 } from '../src/staffReports.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { ReportExcerptLine, ReportRecord, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const NOW = 1_800_000_000_000;
 
