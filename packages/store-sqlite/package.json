@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/store-sqlite",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "Chatwarden store-sqlite package.",
   "license": "Apache-2.0",
@@ -42,11 +42,9 @@
   "scripts": {
     "prepack": "tsc -b"
   },
-  "dependencies": {
-    "@chatwarden/core": "0.0.0"
-  },
   "peerDependencies": {
-    "@chatwarden/matcher": "0.0.0"
+    "@chatwarden/core": "^0.1.0",
+    "@chatwarden/matcher": "^0.1.0"
   },
   "peerDependenciesMeta": {
     "@chatwarden/matcher": {
@@ -54,7 +52,8 @@
     }
   },
   "devDependencies": {
-    "@chatwarden/matcher": "0.0.0"
+    "@chatwarden/core": "0.1.0",
+    "@chatwarden/matcher": "0.1.0"
   },
   "publishConfig": {
     "access": "public"

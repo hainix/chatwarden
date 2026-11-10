@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/http",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "Chatwarden HTTP package: framework-free router, error mapping, auth hook and role permissions for the admin and player APIs.",
   "license": "Apache-2.0",
@@ -54,21 +54,24 @@
   "scripts": {
     "prepack": "tsc -b"
   },
-  "dependencies": {
-    "@chatwarden/core": "0.0.0"
-  },
   "peerDependencies": {
+    "@chatwarden/core": "^0.1.0",
+    "@types/express": "^5.0.0",
     "express": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "express": {
       "optional": true
+    },
+    "@types/express": {
+      "optional": true
     }
   },
   "devDependencies": {
-    "@chatwarden/discord": "0.0.0",
-    "@chatwarden/matcher": "0.0.0",
-    "@chatwarden/store-sqlite": "0.0.0",
+    "@chatwarden/core": "0.1.0",
+    "@chatwarden/discord": "0.1.0",
+    "@chatwarden/matcher": "0.1.0",
+    "@chatwarden/store-sqlite": "0.1.0",
     "@types/express": "^5.0.3",
     "express": "^5.1.0"
   },

@@ -33,8 +33,13 @@ describe('@chatwarden/matcher/fixtures (shipped synthetic fixtures)', () => {
     expect(live.match('zorbak')).toEqual({ termId: expect.any(String) });
     expect(store.isSeeded('synthetic')).toBe(true);
   });
-  it('every synthetic term is an invented word (no listed term is a dictionary-style placeholder of a real list)', () => {
-    for (const t of fixtures.SYNTHETIC_TERMS) expect(t.id).toMatch(/^syn:/);
+  it('every synthetic term is on the explicit allow-list of invented words', () => {
+    const invented = ['zorbak', 'vlemmo', 'quissel', 'drakkuun', 'fenrisk', 'tarvo', 'snerp'];
+    for (const t of fixtures.SYNTHETIC_TERMS) {
+      expect(t.id).toMatch(/^syn:/);
+      expect(invented).toContain(t.term);
+    }
+    expect(fixtures.SYNTHETIC_TERMS.map((t) => t.term).sort()).toEqual([...invented].sort());
     expect(fixtures.UNLISTED_WORDS.length).toBeGreaterThan(0);
   });
 });

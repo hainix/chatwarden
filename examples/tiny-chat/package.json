@@ -5,17 +5,19 @@
   "description": "A one-room chat server wired to Chatwarden: the smallest end-to-end example.",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "start": "tsc -b . && node dist/server.js"
   },
   "dependencies": {
-    "@chatwarden/core": "0.0.0",
-    "@chatwarden/discord": "0.0.0",
-    "@chatwarden/http": "0.0.0",
-    "@chatwarden/matcher": "0.0.0",
-    "@chatwarden/profanity": "0.0.0",
-    "@chatwarden/store-sqlite": "0.0.0",
+    "@chatwarden/core": "0.1.0",
+    "@chatwarden/discord": "0.1.0",
+    "@chatwarden/http": "0.1.0",
+    "@chatwarden/matcher": "0.1.0",
+    "@chatwarden/profanity": "0.1.0",
+    "@chatwarden/store-sqlite": "0.1.0",
     "express": "^5.1.0",
     "ws": "^8.18.3"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/matcher",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "description": "Chatwarden matcher package.",
   "license": "Apache-2.0",
@@ -62,8 +62,13 @@
     "prepack": "tsc -b"
   },
   "dependencies": {
-    "@chatwarden/core": "0.0.0",
     "obscenity": "^0.4.6"
+  },
+  "peerDependencies": {
+    "@chatwarden/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@chatwarden/core": "0.1.0"
   },
   "publishConfig": {
     "access": "public"
