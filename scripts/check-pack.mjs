@@ -99,6 +99,19 @@ const BUILTINS = new Set(builtinModules.map((m) => m.replace(/^node:/, '').split
 /** The package name of a bare specifier: `@scope/name/sub` -> `@scope/name`, `name/sub` -> `name`. */
 const packageOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]);
 
+/** Every module specifier a JavaScript source imports: static imports and re-exports, side-effect imports, `import()` and `require()`. Comments are ignored. */
+function importSpecifiers(source) {
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+  const specs = [];
+  const patterns = [
+    /(?:^|[\s;}])(?:import|export)\s[^'";]*?\sfrom\s*(['"])([^'"\n]+)\1/g, // import x from 'y', export * from 'y'
+    /(?:^|[\s;}])import\s*(['"])([^'"\n]+)\1/g, // import 'y'
+    /(?:^|[^\w$.])(?:import|require)\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g, // import('y'), require('y')
+  ];
+  for (const re of patterns) for (const m of code.matchAll(re)) specs.push(m[2]);
+  return specs;
+}
+
 /**
  * The npm packages a JavaScript source imports: static imports and re-exports, side-effect imports, `import()` and
  * `require()`. Relative and absolute paths and Node builtins (`node:x` or bare `fs`) are left out. Comments are ignored.
@@ -106,24 +119,51 @@ const packageOf = (spec) => (spec.startsWith('@') ? spec.split('/').slice(0, 2).
  * @returns {string[]} package names, each once
  */
 export function bareImports(source) {
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
   const found = new Set();
-  const patterns = [
-    /(?:^|[\s;}])(?:import|export)\s[^'";]*?\sfrom\s*(['"])([^'"\n]+)\1/g, // import x from 'y', export * from 'y'
-    /(?:^|[\s;}])import\s*(['"])([^'"\n]+)\1/g, // import 'y'
-    /(?:^|[^\w$.])(?:import|require)\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g, // import('y'), require('y')
-  ];
-  for (const re of patterns) {
-    for (const m of code.matchAll(re)) {
-      const spec = m[2];
-      if (spec.startsWith('.') || spec.startsWith('/')) continue;
-      if (spec.startsWith('node:')) continue;
-      const name = packageOf(spec);
-      if (BUILTINS.has(name)) continue;
-      found.add(name);
-    }
+  for (const spec of importSpecifiers(source)) {
+    if (spec.startsWith('.') || spec.startsWith('/')) continue;
+    if (spec.startsWith('node:')) continue;
+    const name = packageOf(spec);
+    if (BUILTINS.has(name)) continue;
+    found.add(name);
   }
   return [...found];
+}
+
+/** The packages that must run in a browser: their compiled code may import no Node builtin, not even `node:crypto`. */
+export const BROWSER_SAFE = new Set(['@chatwarden/core', '@chatwarden/store-memory']);
+
+/**
+ * The Node builtins a JavaScript source imports (`node:fs`, `crypto`, `node:fs/promises` -> `fs`), one entry per import, in
+ * every import form `bareImports` reads. A runtime lookup such as `process.getBuiltinModule('node:crypto')` is not an import.
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function nodeImports(source) {
+  const found = [];
+  for (const spec of importSpecifiers(source)) {
+    if (spec.startsWith('.') || spec.startsWith('/')) continue;
+    const name = spec.replace(/^node:/, '').split('/')[0];
+    if (spec.startsWith('node:') || BUILTINS.has(name)) found.push(name);
+  }
+  return found;
+}
+
+/**
+ * One message per (file, module) where a browser-safe package's compiled `dist/src/**` `.js` file imports a Node builtin.
+ * Packages outside {@link BROWSER_SAFE} are not checked.
+ * @param {{ pkg: Record<string, any>, files: Array<{ path: string, source: string }> }} input
+ */
+export function nodeImportProblems({ pkg, files }) {
+  if (!BROWSER_SAFE.has(pkg.name)) return [];
+  const problems = [];
+  for (const { path, source } of files) {
+    if (!/^dist\/src\/.*\.js$/.test(path)) continue;
+    for (const name of new Set(nodeImports(source))) {
+      problems.push(`${path} imports the Node builtin "node:${name}", but ${pkg.name} must run in a browser`);
+    }
+  }
+  return problems;
 }
 
 /**
@@ -171,6 +211,7 @@ function main() {
       ...checkManifest(pkg, dir),
       ...checkFileList({ pkg, files }),
       ...undeclaredImports({ pkg, files: sources }),
+      ...nodeImportProblems({ pkg, files: sources }),
     ];
     if (problems.length === 0) console.log(`ok   ${pkg.name} (${files.length} files)`);
     else {

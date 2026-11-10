@@ -10,6 +10,7 @@ The packages are small and independent. Start with the repository README, then i
 - [@chatwarden/core](https://github.com/hainix/chatwarden/blob/main/packages/core/README.md): the moderation engine (chat verdicts, reports, decisions, notices); no runtime dependencies. Start here.
 - [@chatwarden/matcher](https://github.com/hainix/chatwarden/blob/main/packages/matcher/README.md): the slur matcher that resists Unicode and leetspeak evasion without blocking innocent words; includes invented test words.
 - [@chatwarden/store-sqlite](https://github.com/hainix/chatwarden/blob/main/packages/store-sqlite/README.md): the SQLite store for reports, sanctions, notices and the audit trail, on the SQLite built into Node.
+- [@chatwarden/store-memory](https://github.com/hainix/chatwarden/blob/main/packages/store-memory/README.md): an in-memory store for tests, demos and single-process prototypes; everything is lost on restart.
 - [@chatwarden/http](https://github.com/hainix/chatwarden/blob/main/packages/http/README.md): HTTP routes for staff and players, signed webhooks and an Express adapter.
 - [@chatwarden/profanity](https://github.com/hainix/chatwarden/blob/main/packages/profanity/README.md): an optional filter for ordinary swearing that a game can allow, star or refuse.
 - [@chatwarden/discord](https://github.com/hainix/chatwarden/blob/main/packages/discord/README.md): posts the staff review queue into a Discord forum through a channel webhook.
@@ -19,6 +20,7 @@ The packages are small and independent. Start with the repository README, then i
 - [@chatwarden/core on npm](https://www.npmjs.com/package/@chatwarden/core): the engine; install this first.
 - [@chatwarden/matcher on npm](https://www.npmjs.com/package/@chatwarden/matcher): the slur matcher.
 - [@chatwarden/store-sqlite on npm](https://www.npmjs.com/package/@chatwarden/store-sqlite): the SQLite store.
+- [@chatwarden/store-memory on npm](https://www.npmjs.com/package/@chatwarden/store-memory): the in-memory store.
 - [@chatwarden/http on npm](https://www.npmjs.com/package/@chatwarden/http): the HTTP routes and Express adapter.
 - [@chatwarden/profanity on npm](https://www.npmjs.com/package/@chatwarden/profanity): the optional profanity filter.
 - [@chatwarden/discord on npm](https://www.npmjs.com/package/@chatwarden/discord): the Discord review-queue feed.

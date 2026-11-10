@@ -12,7 +12,7 @@ import {
 } from '../src/strikes.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Identifiers, Logger, SanctionKind, Source, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const MIN = 60_000;
 const H = 60 * MIN;

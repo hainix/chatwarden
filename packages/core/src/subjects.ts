@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomId } from './crypto.js';
 import { safeWarn } from './log.js';
 import type {
   Clock,
@@ -34,7 +34,7 @@ function rowKey(subjectId: SubjectId, kind: SubjectIdKind, value: string): strin
 
 function newSubjectId(): SubjectId {
   // 16 random bytes -> 22 base64url characters. Never derived from an identifier.
-  return `s_${randomBytes(16).toString('base64url')}`;
+  return `s_${randomId(16)}`;
 }
 
 function emptyOwned(): Owned {

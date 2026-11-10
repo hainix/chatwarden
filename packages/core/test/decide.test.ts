@@ -10,7 +10,7 @@ import { CommunityRules, STARTER_RULES } from '../src/rules.js';
 import { MAX_SANCTION_DURATION_MS, SanctionIndex } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Identifiers, Logger, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const MIN = 60_000;
 const H = 60 * MIN;

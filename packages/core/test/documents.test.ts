@@ -9,7 +9,7 @@ import { defineRules, starterRules } from '../src/rules.js';
 import type { CommunityRule } from '../src/rules.js';
 import type { Platform, RawWho } from '../src/types.js';
 import { CONDUCT_LEVELS } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const PRESET_NAMES: PresetName[] = ['relaxed', 'standard', 'strict'];
 const FORMATS: DocumentFormat[] = ['markdown', 'html', 'text'];

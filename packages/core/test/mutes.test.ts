@@ -3,7 +3,7 @@ import { RoomRoster } from '../src/evidence.js';
 import { MAX_MUTES_PER_VIEWER, MUTE_TTL_MS, MuteService } from '../src/mutes.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Identifiers, Logger, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const DAY = 86_400_000;
 const NOW = 1_800_000_000_000;

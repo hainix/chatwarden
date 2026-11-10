@@ -12,7 +12,7 @@ import {
 } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { Identifiers, SanctionKind, SanctionRow, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const H = 3_600_000;
 const DAY = 24 * H;
@@ -1137,7 +1137,7 @@ describe('SanctionIndex.active: own', () => {
 
 describe('MemoryStore.sanctionRefCode', () => {
   it('returns the ref code of a known group and null for an unknown one', async () => {
-    const { MemoryStore } = await import('./memoryStore.js');
+    const { MemoryStore } = await import('@chatwarden/store-memory');
     const store = new MemoryStore();
     const row = {
       id: 'r1',
@@ -1167,7 +1167,7 @@ describe('MemoryStore.sanctionRefCode', () => {
 
 describe('MemoryStore.sanctionGroupTarget', () => {
   it('names the subject row and the stored rule of a group (the IP row is not the target), null for an unknown group', async () => {
-    const { MemoryStore } = await import('./memoryStore.js');
+    const { MemoryStore } = await import('@chatwarden/store-memory');
     const store = new MemoryStore();
     const base = {
       kind: 'chat' as const,

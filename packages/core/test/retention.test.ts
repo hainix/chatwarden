@@ -3,7 +3,8 @@ import { purge, RETENTION_DEFAULTS } from '../src/retention.js';
 import { applySanction, revokeSanction } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { NoticeRow, SanctionKind, StoredReport, StrikeRow, SubjectId } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
+import { markReportBadFaith } from './markBadFaith.js';
 
 const H = 3_600_000;
 const DAY = 24 * H;
@@ -116,7 +117,7 @@ describe('purge: reports', () => {
     const { store } = setup();
     store.insertReport(report('open', NOW - 100 * DAY));
     store.insertReport(report('never', NOW - 100 * DAY));
-    store.markReportBadFaith('never', null);
+    markReportBadFaith(store, 'never', null);
     expect((await purge(store, NOW)).reports).toBe(2);
   });
 

@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomId } from './crypto.js';
 import type { Limits } from './limits.js';
 import { safeWarn } from './log.js';
 import type { SubjectIndex } from './subjects.js';
@@ -26,7 +26,7 @@ export const REPEAT_RESTRICT_MS = 24 * 3_600_000;
 /** An earlier automatic chat restriction that started within this long (7 days) makes the next one longer. */
 export const REPEAT_LOOKBACK_MS = 7 * 24 * 3_600_000;
 
-const newId = (): string => randomBytes(16).toString('base64url');
+const newId = (): string => randomId(16);
 
 const present = (id: SubjectId | null): id is SubjectId => typeof id === 'string' && id !== '';
 

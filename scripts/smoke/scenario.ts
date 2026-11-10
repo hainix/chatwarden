@@ -7,17 +7,20 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { createChatwarden } from '@chatwarden/core';
-import type { RawWho } from '@chatwarden/core';
+import type { RawWho, Store } from '@chatwarden/core';
 import { discordFeed } from '@chatwarden/discord';
 import { healthRoutes } from '@chatwarden/http';
 import { toExpress } from '@chatwarden/http/express';
-import { LiveTerms } from '@chatwarden/matcher';
+import { buildMatcher, LiveTerms } from '@chatwarden/matcher';
+import type { Matcher } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { syntheticTermPack as legacySyntheticTermPack } from '@chatwarden/matcher/test-fixtures';
 import { createProfanityFilter } from '@chatwarden/profanity';
+import { createMemoryStore } from '@chatwarden/store-memory';
 import { openStore } from '@chatwarden/store-sqlite';
 
 const ROOM = 'lobby';
+const clock = { now: () => Date.now() };
 const WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/smoke-token_ABC';
 
 async function main(): Promise<void> {
@@ -25,19 +28,29 @@ async function main(): Promise<void> {
   assert.equal(typeof legacySyntheticTermPack, 'function', 'matcher/test-fixtures alias exports syntheticTermPack');
   assert.deepEqual(legacySyntheticTermPack(), syntheticTermPack(), 'the alias and /fixtures agree');
 
-  // 1. An in-memory store.
-  const store = openStore({ path: ':memory:' });
-  assert.ok(store, 'openStore returned a store');
-
-  // 2. The kit, with the synthetic pack through LiveTerms.
-  const clock = { now: () => Date.now() };
-  const terms = new LiveTerms({ store, pack: syntheticTermPack(), clock });
+  // The same scenario on both stores. SQLite (in memory) also keeps the term list, so LiveTerms reads the pack through it.
+  const sqlite = openStore({ path: ':memory:' });
+  assert.ok(sqlite, 'openStore returned a store');
+  const terms = new LiveTerms({ store: sqlite, pack: syntheticTermPack(), clock });
   await terms.load();
+  await scenario('store-sqlite', sqlite, terms);
+
+  // store-memory has no term list; the matcher is built straight from the synthetic pack (what a browser demo does).
+  const memory = createMemoryStore();
+  assert.equal(memory.schemaVersion(), 0, 'a memory store has no schema');
+  const pack = syntheticTermPack();
+  await scenario('store-memory', memory, buildMatcher(pack.terms, pack.exceptions));
+
+  console.log('smoke scenario: ok');
+}
+
+async function scenario(label: string, store: Store, matcher: Matcher): Promise<void> {
+  // 2. The kit.
   const cw = await createChatwarden({
     store,
     secret: 'smoke-secret-not-for-production',
     platform: { identify: (ctx) => ctx as RawWho },
-    matcher: terms,
+    matcher,
     profile: 'relaxed',
     profanityPackage: { createProfanityFilter },
     clock,
@@ -133,7 +146,7 @@ async function main(): Promise<void> {
   feed.dispose();
   await cw.close();
   await store.close();
-  console.log('smoke scenario: ok');
+  console.log(`smoke scenario (${label}): ok`);
 }
 
 main().catch((err: unknown) => {

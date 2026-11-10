@@ -6,7 +6,7 @@ import { defineProfile, PRESETS, ProfileError, resolveProfile } from '../src/pro
 import { RETENTION_DEFAULTS } from '../src/retention.js';
 import { defineRules, starterRules, STARTER_RULES } from '../src/rules.js';
 import type { Logger, Matcher, Platform, RawWho } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 // The facade end of K3a Task 5: presets pick a complete setup, `limits` and `retention` tune it, and the floors
 // refuse a setup that would forget what the kit still needs.

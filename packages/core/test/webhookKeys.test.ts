@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createChatwarden } from '../src/chatwarden.js';
 import type { Platform, RawWho } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const NOW = 1_800_000_000_000;
 const DAY = 86_400_000;

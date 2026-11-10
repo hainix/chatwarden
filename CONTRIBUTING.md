@@ -29,3 +29,6 @@ npx vitest run packages/core/test/smoke.test.ts   # run only the tests you touch
 ```
 
 Run tests by path while developing. CI runs the whole suite.
+
+Some tests read the built packages: the browser bundle, pack and smoke tests. On a fresh clone, run `npm run build` once
+before them.

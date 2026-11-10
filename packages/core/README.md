@@ -17,7 +17,7 @@ What it does:
 - **Identity without identifiers.** Client keys and IP addresses are hashed on the way in, and people are tracked by an opaque
   subject id.
 
-It has no runtime dependencies and imports nothing from `node:` except `node:crypto`.
+It has no runtime dependencies and imports no `node:` module, so it also runs in a browser.
 
 Status: pre-release, as-is, no support promise.
 
@@ -111,7 +111,7 @@ For the moderators' screens and the player's notices, mount the routes in
 | Part | What it is for |
 | --- | --- |
 | `cw.rooms` | `seat`, `seatConnection`, `unseat`, `close`: who is in which seat of which room. |
-| `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. |
+| `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. `restricted(who)` says whether a person is chat-restricted, for typing indicators. |
 | `cw.mutes` | A player mutes another player for themselves only. |
 | `cw.reports` | `submit` (players), `list` and `get` (staff). |
 | `cw.decide(input)` | A moderator closes a report and writes the sanctions and notices in one transaction. Safe to send twice. |
@@ -124,6 +124,53 @@ For the moderators' screens and the player's notices, mount the routes in
 | `cw.gaps`, `cw.audit` | Rule gaps for the periodic review, and the staff audit trail. |
 | `cw.on(type, listener)` | Events: `report.created`, `report.closed`, `sanction.applied`, `sanction.revoked`, `gap.created`, `auto.restricted`. |
 | `cw.purge`, `cw.ready`, `cw.flush`, `cw.close` | Housekeeping. |
+
+## Typing indicators
+
+Do not show a "typing..." indicator for a player who cannot chat. `cw.chat.restricted(who, { roomId, seatId })` runs the
+same decision as `accept` (a chat restriction, a ban, or the automatic timeout), without sending a line. It is
+synchronous and has no side effects: it spends no rate budget and writes no evidence, strike, event or notice.
+
+```ts
+import type { Chatwarden, RawWho } from '@chatwarden/core';
+
+// Call it when a client says "I am typing", after `cw.rooms.seat` for that seat. `who` is what your platform's
+// `identify` returned for this connection on the server, never a key or account the client sent.
+function relayTyping(cw: Chatwarden, who: RawWho, roomId: string, seatId: string, tell: () => void): void {
+  const { restricted, until, kind } = cw.chat.restricted(who, { roomId, seatId });
+  if (restricted) return; // drop it quietly: do not broadcast their typing
+  tell();
+  void until; // epoch ms when it ends (null = permanent), only for the person's own sanction
+  void kind; // 'chat', 'ban' or 'auto' (the automatic timeout), only for their own sanction
+}
+```
+
+With both `roomId` and `seatId` the answer equals what `accept` would say for that seat. Leave them out and an
+automatic timeout that was kept only in memory (the store could not take it, or a guest with no key and no account earned
+it) is looked up by person instead; a guest cannot be found that way, because one guest cannot be told from another.
+The `gate` option is not consulted: a gate refusal is not a restriction.
+
+It is safe to answer a player about themselves from their own client, because it reveals nothing about anyone else. A
+player who is restricted only because they share an address with someone else's sanction gets
+`{ restricted: true, until: null, kind: null }`: they cannot chat, and they are told nothing about the other person. The
+address checked is the one `seat` last recorded for the person (as in `accept`), not `who.ip`, and an address alone finds
+nobody. A lookup that fails reads as `restricted: false` and is logged at most once a minute (error class only, with a count of
+the failures held back).
+
+## Browser support
+
+The package imports no `node:` module, so a bundler (esbuild, Vite, webpack) builds it for a browser with nothing external and no
+polyfill. Pair it with [`@chatwarden/store-memory`](https://github.com/hainix/chatwarden/tree/main/packages/store-memory), which
+is also browser-safe, and with `@chatwarden/matcher` for the live matcher. That is what the repository's CI bundles and runs,
+in a context with no `process`, `Buffer` or `require`, through a full report, decision and notice flow.
+
+The hashing of client keys and IP addresses uses `node:crypto` when the runtime offers it (looked up at run time through
+`process.getBuiltinModule`, never imported) and a small pure-JS SHA-256 and HMAC-SHA256 where it does not. Both give the same
+bytes, and they match the hashes of 0.1.0, so moving a store between a server and a browser build never unlinks a stored hash.
+The pure-JS path is slower, which only matters for a very large number of lookups. A browser build is meant for tests, demos and
+tools; the kit still decides on a server you control, because anything running on a player's machine can be changed by that
+player. `cw.chat.restricted(who, { roomId, seatId })` (see "Typing indicators") is a plain synchronous call and works the same
+in a browser.
 
 ## Options
 

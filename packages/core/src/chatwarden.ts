@@ -3,7 +3,7 @@ import type { AuditPage, AuditQuery, AuditRecordInput } from './audit.js';
 import { ChatService } from './chat.js';
 import { DecisionService, revokeAndWithdraw } from './decide.js';
 import type { DecisionInput, DecisionResult } from './decide.js';
-import type { ChatResult } from './chat.js';
+import type { ChatResult, RestrictedAnswer } from './chat.js';
 import { bindDocuments } from './documents.js';
 import type { Documents } from './documents.js';
 import { DoorService } from './doors.js';
@@ -12,7 +12,7 @@ import { EvidenceBuffer, RoomRoster } from './evidence.js';
 import { EventBus } from './events.js';
 import type { Subscribe } from './events.js';
 import { hashWho, makeHasher } from './hasher.js';
-import { safeWarn } from './log.js';
+import { safeWarn, ThrottledWarn } from './log.js';
 import { historyOf, suggest } from './ladder.js';
 import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
 import { resolveLimits } from './limits.js';
@@ -195,6 +195,28 @@ export interface Chatwarden {
     accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult;
     /** Should `viewerSeat` be shown a line `senderSeat` sent (mutes applied)? */
     visibleTo(roomId: string, viewerSeat: string, senderSeat: string): boolean;
+    /**
+     * Is this person chat-restricted right now (a chat restriction, a ban or an automatic timeout)? For a typing
+     * indicator: show none while `restricted` is true. It runs the same decision as `accept`, and equals what
+     * `accept` would answer for the seat when you pass BOTH `roomId` and `seatId`. Without them, an automatic
+     * timeout that was only kept in memory (it could not be stored, or a guest with no identity earned it) is looked
+     * up by person, over `roomId` or over every room, and a guest with no key and no account is never found: one
+     * guest cannot be told from another. The `gate` option is not consulted; a gate refusal is not a restriction.
+     * Synchronous and a pure read: no rate budget spent, no evidence, strike, event or notice written. Only a
+     * failure is logged (event and error class), at most once a minute with a count of those held back; a failure
+     * reads as `restricted: false`.
+     *
+     * Call it after `cw.rooms.seat`: the address checked is the one `seat` last recorded for the person, as in
+     * `accept`, not `who.ip`. Take `who` from your platform's `identify` on the server, never from what the client
+     * sends: a client-supplied key or account would let a caller look up another person's restriction.
+     *
+     * Safe to answer a player about THEMSELVES from their own client, because it reveals nothing about others:
+     * `until` (epoch ms, `null` = permanent) and `kind` (`'chat'`, `'ban'` or `'auto'`) are only given for the
+     * person's own sanction. When the restriction reaches them only through an address shared with someone else's
+     * sanction, the answer is `{ restricted: true, until: null, kind: null }`. `who` is found by key or account (an
+     * address alone finds nobody). An empty `roomId` or `seatId` counts as not given. Never carries an identifier.
+     */
+    restricted(who: RawWho, opts?: { roomId?: string | null; seatId?: string | null }): RestrictedAnswer;
   };
   mutes: {
     /** `viewerSeat`'s occupant mutes (`on`) or unmutes `targetSeat`'s occupant. Does nothing if either seat has no subject. */
@@ -526,6 +548,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     }
   };
 
+  /** The typing lookup runs at keystroke rate: a failing store logs once a minute, not once a keystroke. */
+  const restrictedWarn = new ThrottledWarn(logger, clock);
   const eventFailed = (err: unknown): void => {
     safeWarn(logger, 'chatwarden.event_failed', { error: err instanceof Error ? err.name : typeof err });
   };
@@ -593,6 +617,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     chat: {
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),
       visibleTo: (roomId, viewerSeat, senderSeat) => chat.visibleTo(roomId, viewerSeat, senderSeat),
+      restricted: (who, o) => {
+        try {
+          return chat.restricted(personOf(who), o?.roomId, o?.seatId);
+        } catch (err) {
+          restrictedWarn.warn('chatwarden.restricted_failed', { error: err instanceof Error ? err.name : typeof err });
+          return { restricted: false, until: null, kind: null };
+        }
+      },
     },
     mutes: {
       set: (roomId, viewerSeat, targetSeat, on) => {

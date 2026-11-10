@@ -1,6 +1,6 @@
-import { randomBytes } from 'node:crypto';
-import type { AuditListQuery, AuditRow } from '../src/audit.js';
 import type {
+  AuditListQuery,
+  AuditRow,
   DecisionRow,
   MuteRow,
   NoticeRow,
@@ -16,7 +16,25 @@ import type {
   SubjectRecord,
   WebhookKeyReservation,
   DiscordThreadRow,
-} from '../src/types.js';
+} from '@chatwarden/core';
+
+/** Local on purpose: core's randomId is internal, and this package must still link against core 0.1.0 (peer ^0.1.0).
+ *  16 random bytes as unpadded base64url (22 characters), from Web Crypto: no `node:` module, so it runs in a browser. */
+function newId(): string {
+  const web = (globalThis as { crypto?: { getRandomValues(a: Uint8Array): unknown } }).crypto;
+  if (!web || typeof web.getRandomValues !== 'function') throw new Error('chatwarden: no secure random source (globalThis.crypto)');
+  const raw = new Uint8Array(16);
+  web.getRandomValues(raw);
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  let out = '';
+  let i = 0;
+  for (; i + 2 < raw.length; i += 3) {
+    const n = (raw[i]! << 16) | (raw[i + 1]! << 8) | raw[i + 2]!;
+    out += chars[n >> 18]! + chars[(n >> 12) & 63]! + chars[(n >> 6) & 63]! + chars[n & 63]!;
+  }
+  const n = raw[i]! << 16; // 16 bytes leave one byte over
+  return out + chars[n >> 18]! + chars[(n >> 12) & 63]!;
+}
 
 /** A report plus the moderation columns a decision fills. */
 export type StoredReportRow = ReportRecord;
@@ -34,10 +52,13 @@ export interface StoredSanction extends SanctionRow {
 }
 
 /**
- * In-memory {@link Store} for core tests (and later tasks' core tests). It
- * implements the same async domain methods as the SQLite adapter with Maps.
- * Later tasks append their groups of methods here. Subclass it or overwrite a
- * method on an instance to inject failures.
+ * In-memory {@link Store}: everything lives in this object and is lost when it is garbage collected or the process ends.
+ * For tests, demos and single-process prototypes; use `@chatwarden/store-sqlite` for anything that must survive a
+ * restart. It keeps the same rows in the same order as the SQLite adapter (both run one shared contract suite), and
+ * `transaction` is real: writes are journaled and a throwing function undoes them, nested calls included.
+ *
+ * It imports no `node:` module, so it bundles for a browser. Subclass it or overwrite a method on an instance to inject
+ * failures in a test.
  */
 export class MemoryStore implements Store {
   protected subjects = new Map<SubjectId, SubjectRecord>();
@@ -86,7 +107,7 @@ export class MemoryStore implements Store {
     try {
       const value = fn();
       this.journal = outer;
-      if (outer !== null) outer.push(...mine);
+      if (outer !== null) for (const step of mine) outer.push(step); // not push(...mine): a big array overflows the stack
       return value;
     } catch (err) {
       this.journal = outer; // undo steps must not journal themselves
@@ -139,9 +160,14 @@ export class MemoryStore implements Store {
   }
 
   loadSubjects(): Promise<{ subjects: SubjectRecord[]; ids: SubjectIdRecord[] }> {
+    // Oldest subject first, then by id; identifiers by subject, kind, value: the SQLite adapter's order.
     return Promise.resolve({
-      subjects: [...this.subjects.values()].map((s) => ({ ...s })),
-      ids: [...this.subjectIds.values()].map((r) => ({ ...r })),
+      subjects: [...this.subjects.values()]
+        .sort((a, b) => a.createdAt - b.createdAt || compare(a.id, b.id))
+        .map((s) => ({ ...s })),
+      ids: [...this.subjectIds.values()]
+        .sort((a, b) => compare(a.subjectId, b.subjectId) || compare(a.kind, b.kind) || compare(a.value, b.value))
+        .map((r) => ({ ...r })),
     });
   }
 
@@ -239,19 +265,20 @@ export class MemoryStore implements Store {
     if (status !== 'ruled' && status !== 'not_a_rule') throw new Error('closeGap: invalid status');
     const row = this.sanctions.find((r) => r.groupId === groupId && r.targetType === 'subject');
     if (row === undefined || row.gapNote === null || row.gapStatus !== 'open') return false;
-    row.gapStatus = status;
-    row.gapRef = ref;
-    row.gapClosedBy = actor;
-    row.gapClosedAt = at;
-    // Like SqliteStore: who closed it and when go to the audit trail (no role, the group id as the target).
+    // Like SqliteStore: who closed it and when go to the audit trail (no role, the group id as the target). The entry is
+    // built first, so a failure drawing its random id leaves the gap open instead of half closed.
     const entry: AuditRow = {
-      id: randomBytes(16).toString('base64url'),
+      id: newId(),
       at,
       actor,
       role: null,
       action: 'gap.close',
       target: { type: 'sanction', ref: groupId },
     };
+    row.gapStatus = status;
+    row.gapRef = ref;
+    row.gapClosedBy = actor;
+    row.gapClosedAt = at;
     this.auditRows.push(entry);
     this.undoWith(() => {
       row.gapStatus = 'open';
@@ -280,9 +307,9 @@ export class MemoryStore implements Store {
         if (q.action !== undefined && r.action !== q.action) return false;
         if (q.before === undefined) return true;
         if (r.at !== q.before) return r.at < q.before;
-        return q.beforeId !== undefined && r.id < q.beforeId;
+        return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
       })
-      .sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .sort((a, b) => b.at - a.at || compare(b.id, a.id))
       .slice(0, limit)
       .map((r) => structuredClone(r));
   }
@@ -292,8 +319,10 @@ export class MemoryStore implements Store {
     const kept = snapshot.filter((r) => r.at >= before);
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.auditRows.splice(0, this.auditRows.length, ...kept);
-      this.undoWith(() => this.auditRows.splice(0, this.auditRows.length, ...snapshot));
+      this.auditRows = kept;
+      this.undoWith(() => {
+        this.auditRows = snapshot;
+      });
     }
     return n;
   }
@@ -386,7 +415,11 @@ export class MemoryStore implements Store {
   }
 
   loadMutes(since: number): MuteRow[] {
-    return [...this.mutes.values()].filter((m) => m.row.createdAt >= since).map((m) => ({ ...m.row }));
+    // In write order (a refresh keeps its place, and so does a row an undo puts back), like SQLite's rowid.
+    return [...this.mutes.values()]
+      .filter((m) => m.row.createdAt >= since)
+      .sort((a, b) => a.seq - b.seq)
+      .map((m) => ({ ...m.row }));
   }
 
   pruneMutes(viewer: SubjectId, keep: number): SubjectId[] {
@@ -411,7 +444,11 @@ export class MemoryStore implements Store {
   }
 
   loadStrikes(since: number): StrikeRow[] {
-    return this.strikes.filter((r) => r.at >= since).map((r) => ({ ...r }));
+    // Oldest first; the sort is stable, so strikes at the same instant keep their write order.
+    return this.strikes
+      .filter((r) => r.at >= since)
+      .sort((a, b) => a.at - b.at)
+      .map((r) => ({ ...r }));
   }
 
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }> {
@@ -430,6 +467,8 @@ export class MemoryStore implements Store {
       (r) => r.reporterSubject === row.reporterSubject && r.targetSubject === row.targetSubject && r.roomId === row.roomId,
     );
     if (dup) return false;
+    // Only the (reporter, target, room) clash is swallowed; a clashing id still throws, like a primary key.
+    if (this.reports.some((r) => r.id === row.id)) throw new Error('UNIQUE constraint failed: kit_reports.id');
     this.reports.push({
       ...structuredClone(row),
       badFaith: false,
@@ -454,7 +493,7 @@ export class MemoryStore implements Store {
     const wanted = new Set(subjects);
     return this.reports
       .filter((r) => wanted.has(r.targetSubject))
-      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));
   }
@@ -466,9 +505,9 @@ export class MemoryStore implements Store {
         if (q.status !== undefined && r.status !== q.status) return false;
         if (q.before === undefined) return true;
         if (r.createdAt !== q.before) return r.createdAt < q.before;
-        return q.beforeId !== undefined && r.id < q.beforeId;
+        return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
       })
-      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, limit)
       .map((r) => structuredClone(r));
   }
@@ -515,8 +554,10 @@ export class MemoryStore implements Store {
   }
 
   loadReportActivity(since: number): ReportActivity[] {
+    // Oldest first, ties in write order (the sort is stable).
     return this.reports
       .filter((r) => r.createdAt >= since)
+      .sort((a, b) => a.createdAt - b.createdAt)
       .map((r) => ({ reporter: r.reporterSubject, target: r.targetSubject, roomId: r.roomId, createdAt: r.createdAt }));
   }
 
@@ -531,7 +572,8 @@ export class MemoryStore implements Store {
         out.push({ reporter: r.reporterSubject, actionedAt: r.actionedAt });
       }
     }
-    return out;
+    // Most recently actioned first, ties in write order (the sort is stable).
+    return out.sort((a, b) => b.actionedAt - a.actionedAt);
   }
 
   loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }> {
@@ -557,13 +599,13 @@ export class MemoryStore implements Store {
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.reports.splice(0, this.reports.length, ...kept);
+      this.reports = kept;
       // A decision outlives only its report.
       const alive = new Set(kept.map((r) => r.id));
       const dropped = [...this.decisions.values()].filter((d) => !alive.has(d.reportId));
       for (const d of dropped) this.decisions.delete(d.key);
       this.undoWith(() => {
-        this.reports.splice(0, this.reports.length, ...snapshot);
+        this.reports = snapshot;
         for (const d of dropped) this.decisions.set(d.key, d);
       });
     }
@@ -579,12 +621,12 @@ export class MemoryStore implements Store {
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.sanctions.splice(0, this.sanctions.length, ...kept);
+      this.sanctions = kept;
       // A ref code is held by the rows that remain; free the codes nothing holds any more.
       const held = new Set(kept.map((r) => r.refCode));
       for (const code of [...this.refOwners.keys()]) if (!held.has(code)) this.refOwners.delete(code);
       this.undoWith(() => {
-        this.sanctions.splice(0, this.sanctions.length, ...snapshot);
+        this.sanctions = snapshot;
         this.refOwners = owners;
       });
     }
@@ -596,8 +638,10 @@ export class MemoryStore implements Store {
     const kept = snapshot.filter((r) => r.at >= before);
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.strikes.splice(0, this.strikes.length, ...kept);
-      this.undoWith(() => this.strikes.splice(0, this.strikes.length, ...snapshot));
+      this.strikes = kept;
+      this.undoWith(() => {
+        this.strikes = snapshot;
+      });
     }
     return n;
   }
@@ -676,48 +720,40 @@ export class MemoryStore implements Store {
     );
     const n = snapshot.length - kept.length;
     if (n > 0) {
-      this.notices.splice(0, this.notices.length, ...kept);
-      this.undoWith(() => this.notices.splice(0, this.notices.length, ...snapshot));
+      this.notices = kept;
+      this.undoWith(() => {
+        this.notices = snapshot;
+      });
     }
     return n;
   }
 
-  /** Test helper: every stored notice. */
+  /** Inspection helper: every stored notice. */
   rawNotices(): NoticeRow[] {
     return this.notices.map((n) => structuredClone(n));
   }
 
-  /** Test helper (K2 adds dismissing): mark a report bad-faith, dismissed at `actionedAt` (null = never closed). */
-  markReportBadFaith(id: string, actionedAt: number | null): void {
-    const r = this.reports.find((x) => x.id === id);
-    if (!r) throw new Error('unknown report');
-    r.badFaith = true;
-    r.actionedAt = actionedAt;
-    r.actionedBy = 'test';
-    r.status = 'dismissed';
-  }
-
-  /** Test helper: every recorded decision. */
+  /** Inspection helper: every recorded decision. */
   rawDecisions(): DecisionRow[] {
     return [...this.decisions.values()].map((d) => ({ ...d }));
   }
 
-  /** Test helper: every stored report. */
+  /** Inspection helper: every stored report. */
   rawReports(): StoredReportRow[] {
     return this.reports.map((r) => structuredClone(r));
   }
 
-  /** Test helper: every stored strike. */
+  /** Inspection helper: every stored strike. */
   rawStrikes(): StrikeRow[] {
     return this.strikes.map((r) => ({ ...r }));
   }
 
-  /** Test helper: every stored mute. */
+  /** Inspection helper: every stored mute. */
   rawMutes(): MuteRow[] {
     return [...this.mutes.values()].map((m) => ({ ...m.row }));
   }
 
-  /** Test helper: every stored row, revoked ones included. */
+  /** Inspection helper: every stored row, revoked ones included. */
   rawSanctions(): StoredSanction[] {
     return this.sanctions.map((r) => ({ ...r }));
   }
@@ -725,6 +761,24 @@ export class MemoryStore implements Store {
 
 const muteKey = (viewer: SubjectId, target: SubjectId): string => `${viewer}\u0000${target}`;
 
-export function memoryStore(): MemoryStore {
+/**
+ * String order by code point, which is the order of SQLite's default (BINARY) collation on UTF-8 text. JavaScript's `<`
+ * compares UTF-16 code units and puts a character outside the BMP before U+E000..U+FFFF; this does not.
+ */
+function compare(a: string, b: string): number {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const x = a.codePointAt(i)!;
+    const y = b.codePointAt(j)!;
+    if (x !== y) return x < y ? -1 : 1;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  return i < a.length ? 1 : j < b.length ? -1 : 0;
+}
+
+/** A new, empty {@link MemoryStore}. */
+export function createMemoryStore(): MemoryStore {
   return new MemoryStore();
 }

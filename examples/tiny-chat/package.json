@@ -12,12 +12,13 @@
     "start": "tsc -b . && node dist/server.js"
   },
   "dependencies": {
-    "@chatwarden/core": "0.1.0",
-    "@chatwarden/discord": "0.1.0",
-    "@chatwarden/http": "0.1.0",
-    "@chatwarden/matcher": "0.1.0",
-    "@chatwarden/profanity": "0.1.0",
-    "@chatwarden/store-sqlite": "0.1.0",
+    "@chatwarden/core": "0.1.1",
+    "@chatwarden/discord": "0.1.1",
+    "@chatwarden/http": "0.1.1",
+    "@chatwarden/matcher": "0.1.1",
+    "@chatwarden/profanity": "0.1.1",
+    "@chatwarden/store-memory": "0.1.1",
+    "@chatwarden/store-sqlite": "0.1.1",
     "express": "^5.1.0",
     "ws": "^8.18.3"
   },

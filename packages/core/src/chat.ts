@@ -1,5 +1,5 @@
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
-import { safeWarn } from './log.js';
+import { safeWarn, ThrottledWarn } from './log.js';
 import type { MuteService } from './mutes.js';
 import type { NoticeService } from './notices.js';
 import type { Limits } from './limits.js';
@@ -153,6 +153,19 @@ interface Restriction {
   rule: string | null;
   /** The sanction is the sender's own, not a bystander matched through a shared-IP row of another person. */
   own: boolean;
+  /** A full ban, a moderator's chat restriction, or an automatic one (stored or in memory). */
+  kind: 'chat' | 'ban' | 'auto';
+}
+
+/**
+ * What {@link ChatService.restricted} answers. `until` is the epoch ms the restriction ends (`null` = permanent, or
+ * unknown), `kind` what it is. Both are `null` when the restriction is not the person's own (a shared-IP row of
+ * someone else's sanction): they are restricted, and are told nothing about the other person.
+ */
+export interface RestrictedAnswer {
+  restricted: boolean;
+  until: number | null;
+  kind: 'chat' | 'ban' | 'auto' | null;
 }
 
 /** Map key for a seat. NUL cannot appear in a room or seat id the way ':' can, so keys never collide. */
@@ -188,6 +201,8 @@ export class ChatService {
   private readonly autoRestrictRule: number;
   private readonly maxLength: number;
   private readonly rate: SlidingWindow;
+  /** The typing lookup runs at keystroke rate: its failure line is limited to one a minute. */
+  private readonly typingWarn: ThrottledWarn;
 
   /**
    * Automatic restrictions that could not be stored (no subject to put a row on, or the write failed), by
@@ -213,6 +228,7 @@ export class ChatService {
     this.onAutoRestrict = deps.onAutoRestrict;
     this.onAutoRestricted = deps.onAutoRestricted;
     this.logger = deps.logger;
+    this.typingWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.notices = deps.notices;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
     this.maxLength = deps.limits?.maxLength ?? MAX_LEN;
@@ -251,6 +267,45 @@ export class ChatService {
     } catch (err) {
       this.warn('chat.visibility_failed', { error: errName(err) });
       return true;
+    }
+  }
+
+  /**
+   * Is this person chat-restricted right now? For a typing indicator: show none while `restricted` is true. It runs
+   * the same decision as `accept` (`resolveRestriction`), and equals what `accept` would answer for the seat when
+   * `roomId` and `seatId` are both given. Without them the in-memory automatic timeout (the one that could not be
+   * stored, and every one earned by a guest with no identity) is looked up by person, over `roomId` or over every
+   * room, and a guest (no subject) cannot be found at all, since one guest cannot be told from another. The `gate`
+   * hook is not consulted: a gate refusal is not a restriction.
+   *
+   * Safe for a player's own client: it reveals nothing about others. A restriction that only reaches the person
+   * through a shared address of someone else's sanction reads `{ restricted: true, until: null, kind: null }`.
+   * Call it after the person is seated, with an identity from the platform and never one sent by the client; the
+   * address checked is the one the person last had recorded, as in `accept`.
+   *
+   * Synchronous and a pure read: no rate budget, nothing written, no event, no strike. It logs only a failure (event
+   * and error class), at most once a minute with a count of those held back; a failure reads as not restricted.
+   * An empty `roomId` or `seatId` counts as not given.
+   */
+  restricted(subject: SubjectId | null, roomId?: string | null, seatId?: string | null): RestrictedAnswer {
+    try {
+      const now = this.clock.now();
+      const room = roomId === undefined || roomId === null || roomId === '' ? null : roomId;
+      const seat = seatId === undefined || seatId === null || seatId === '' ? null : seatId;
+      const memory =
+        room !== null && seat !== null
+          ? () => this.memoryHeldAt(room, seat, subject, now, false)
+          : () => this.memoryHeldBy(subject, room, now);
+      const found = this.resolveRestriction(subject, now, memory, (err) =>
+        this.typingWarn.warn('chat.restriction_failed', { error: errName(err) }),
+      );
+      if (found === null) return { restricted: false, until: null, kind: null };
+      // Someone else's row reaching this person through a shared address: restricted, nothing more.
+      if (!found.own) return { restricted: true, until: null, kind: null };
+      return { restricted: true, until: found.until, kind: found.kind };
+    } catch (err) {
+      this.typingWarn.warn('chat.restriction_failed', { error: errName(err) });
+      return { restricted: false, until: null, kind: null };
     }
   }
 
@@ -380,17 +435,61 @@ export class ChatService {
    * failure is logged and reads as "not restricted".
    */
   private activeRestriction(roomId: string, seatId: string, subject: SubjectId | null, now: number): Restriction | null {
+    return this.resolveRestriction(subject, now, () => this.memoryHeldAt(roomId, seatId, subject, now, true));
+  }
+
+  /**
+   * The in-memory automatic timeout on one seat: its end, or null when there is none, it is over, or the seat now holds a
+   * different person (two guests count as the same). The one lookup `accept` and a seat-aware `restricted` share; `sweep`
+   * drops an expired entry (`accept` does, a read-only lookup does not).
+   */
+  private memoryHeldAt(roomId: string, seatId: string, subject: SubjectId | null, now: number, sweep: boolean): number | null {
+    const key = memKey(roomId, seatId);
+    const mem = this.memRestrictions.get(key);
+    if (mem === undefined) return null;
+    if (mem.until <= now) {
+      if (sweep) this.memRestrictions.delete(key);
+      return null;
+    }
+    return this.samePerson(mem.subject, subject) ? mem.until : null;
+  }
+
+  /**
+   * The in-memory automatic timeout held by a known person, found without a seat (the longest, over `roomId` or over
+   * every room). A guest (no subject) is never matched: with no seat there is no telling one guest from another.
+   * Read only: an expired entry is skipped, not swept.
+   */
+  private memoryHeldBy(subject: SubjectId | null, roomId: string | null, now: number): number | null {
+    if (subject === null) return null;
+    const prefix = roomId === null ? null : memKey(roomId, '');
+    let best: number | null = null;
+    for (const [key, mem] of this.memRestrictions) {
+      if (mem.until <= now || mem.subject === null) continue;
+      if (prefix !== null && !key.startsWith(prefix)) continue;
+      if (best !== null && mem.until <= best) continue;
+      if (this.samePerson(mem.subject, subject)) best = mem.until;
+    }
+    return best;
+  }
+
+  /**
+   * THE restriction decision, shared by `accept` (a seat) and `restricted` (a person): the longest of the stored chat
+   * restriction, the stored full ban and the in-memory automatic one, whose end `memory` reports (null = none).
+   * Permanent beats timed; on a tie the stored one wins.
+   */
+  private resolveRestriction(
+    subject: SubjectId | null,
+    now: number,
+    memory: () => number | null,
+    failed: (err: unknown) => void = (err) => this.warn('chat.restriction_failed', { error: errName(err) }),
+  ): Restriction | null {
     try {
       // The kill switch silences the in-memory restrictions too: they are sanctions, just never stored.
       if (!this.sanctions.isEnabled()) return null;
-      const key = memKey(roomId, seatId);
       let best: Restriction | null = null;
-      const mem = this.memRestrictions.get(key);
-      if (mem !== undefined) {
-        if (mem.until <= now) this.memRestrictions.delete(key);
-        else if (this.samePerson(mem.subject, subject)) {
-          best = { until: mem.until, byModerator: false, groupId: null, rule: String(this.autoRestrictRule), own: true };
-        }
+      const memUntil = memory();
+      if (memUntil !== null) {
+        best = { until: memUntil, byModerator: false, groupId: null, rule: String(this.autoRestrictRule), own: true, kind: 'auto' };
       }
       // Only the latest IP of a seated person is known; an IP row speed-bumps them, never links two people.
       const ids: Identifiers = {
@@ -408,12 +507,13 @@ export class ChatService {
             groupId: stored.groupId,
             rule: stored.rule,
             own: stored.own,
+            kind: kind === 'ban' ? 'ban' : stored.automated ? 'auto' : 'chat',
           };
         }
       }
       return best;
     } catch (err) {
-      this.warn('chat.restriction_failed', { error: errName(err) });
+      failed(err);
       return null;
     }
   }

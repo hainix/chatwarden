@@ -11,6 +11,9 @@ import { collapseLikePreset, foldTerm } from './normalise.js';
  * `positive` lines must be blocked by their term; `negative` lines must never be blocked.
  * `negativeCorpus` is lines known to be fine (the "would have blocked" check runs a candidate term
  * against them); `knownLosses` are lines the list accepts blocking, so that check leaves them out.
+ * `positiveCorpus` (optional) is a flat list of lines the list must keep blocking, whichever term blocks them:
+ * {@link LiveTerms.change} refuses an edit that lets an exception unblock any of them that the terms alone block.
+ * It is the pack-wide counterpart of each term's own `positive` lines.
  */
 export interface TermPack {
   id: string;
@@ -19,12 +22,14 @@ export interface TermPack {
   exceptions: ExceptionRow[];
   negativeCorpus: string[];
   knownLosses: string[];
+  positiveCorpus?: string[];
 }
 
 // Every message below names a path (`terms[3]`) or a row id, never a term, a phrase or a line: a pack's
 // content is the very thing logs must not carry, and these errors get logged.
 
-const TOP_KEYS = ['id', 'version', 'terms', 'exceptions', 'negativeCorpus', 'knownLosses'];
+const REQUIRED_KEYS = ['id', 'version', 'terms', 'exceptions', 'negativeCorpus', 'knownLosses'];
+const TOP_KEYS = [...REQUIRED_KEYS, 'positiveCorpus'];
 const TERM_KEYS = ['id', 'term', 'language', 'active', 'positive', 'negative'];
 const EXCEPTION_KEYS = ['id', 'phrase', 'language', 'active'];
 
@@ -62,7 +67,7 @@ function rowBase(row: unknown, path: string, allowed: string[]): Record<string, 
 export function loadTermPack(json: unknown): TermPack {
   if (!isObject(json)) throw new Error('pack must be an object');
   if (Object.keys(json).some((k) => !TOP_KEYS.includes(k))) throw new Error('pack has an unknown top-level key');
-  for (const key of TOP_KEYS) {
+  for (const key of REQUIRED_KEYS) {
     if (json[key] === undefined) throw new Error(`pack.${key} is required`);
   }
   if (!isText(json.id)) throw new Error('pack.id must be a non-empty string');
@@ -91,6 +96,7 @@ export function loadTermPack(json: unknown): TermPack {
   });
   const negativeCorpus = stringList(json.negativeCorpus, 'pack.negativeCorpus');
   const knownLosses = stringList(json.knownLosses, 'pack.knownLosses');
+  const positiveCorpus = json.positiveCorpus === undefined ? undefined : stringList(json.positiveCorpus, 'pack.positiveCorpus');
 
   const seen = new Set<string>();
   for (const row of [...terms, ...exceptions]) {
@@ -116,5 +122,13 @@ export function loadTermPack(json: unknown): TermPack {
     byWord.set(key, i);
   });
 
-  return { id: json.id, version: json.version, terms, exceptions, negativeCorpus, knownLosses };
+  return {
+    id: json.id,
+    version: json.version,
+    terms,
+    exceptions,
+    negativeCorpus,
+    knownLosses,
+    ...(positiveCorpus === undefined ? {} : { positiveCorpus }),
+  };
 }
