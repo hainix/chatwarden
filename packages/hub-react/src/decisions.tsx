@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { useController, useStoreBatched } from './controllerContext.js';
+import { useController, useStore } from './controllerContext.js';
 import { hasLeft, isWaiting } from './headless/decisions.js';
 import type { DecisionEntry, DecisionState, SubmitDecision } from './headless/decisions.js';
 
@@ -47,7 +47,7 @@ export function useOptionalDecisions(): Decisions | null {
 
 export function DecisionProvider({ children }: { children: ReactNode }) {
   const d = useController().decisions;
-  const entries = useStoreBatched(d);
+  const entries = useStore(d);
   const value = useMemo<Decisions>(
     () => ({
       entry: (id) => entries.get(id),

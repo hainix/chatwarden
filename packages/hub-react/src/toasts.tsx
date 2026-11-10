@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useOptionalController, useStoreBatched } from './controllerContext.js';
+import { useOptionalController, useStore } from './controllerContext.js';
 import { useHub } from './context.js';
 import { TOAST_ERROR_MS, TOAST_MAX, TOAST_MS, UNDO_MS, createToastStore } from './headless/toasts.js';
 import type { Hold, HoldInput, ToastInput, ToastRecord, ToastStore, Toasts } from './headless/toasts.js';
@@ -32,7 +32,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const own = useMemo<ToastStore | null>(() => (controller === null ? createToastStore({ words: () => tRef.current }) : null), [controller]);
   useEffect(() => (own === null ? undefined : () => own.dispose()), [own]);
   const store = (controller?.toasts ?? own) as ToastStore;
-  const shown = useStoreBatched(store);
+  const shown = useStore(store);
   const api = useMemo<Toasts>(() => ({ push: store.push, hold: store.hold, dismiss: store.dismiss }), [store]);
 
   return (

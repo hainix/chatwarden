@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import type { HubController } from './headless/controller.js';
 import type { Store } from './headless/store.js';
 
@@ -19,18 +19,14 @@ export function useOptionalController(): HubController | null {
   return useContext(ControllerContext);
 }
 
-/** A store's current value, kept fresh. */
-export function useStore<T>(store: Store<T>): T {
-  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-}
-
 /**
- * A store's current value, kept fresh the way `useState` would: each change is a batched update, rendered after the code that made
- * it has finished. `useSyncExternalStore` renders at once (a synchronous lane), which is right for a value that must never be
- * stale, but the live queue is loaded in the background and its screens were written around the batched timing: a skeleton is
- * drawn before the first answer, not instead of it.
+ * A store's current value, kept fresh the way `useState` would be: each change is a batched update, rendered after the code that
+ * made it has finished. `useSyncExternalStore` is the usual bridge, but it renders in a synchronous lane, a task ahead of where
+ * these screens have always drawn: a skeleton is drawn before the first answer, not instead of it, and a held decision sent from a
+ * `pagehide` handler would render inside the event. Every screen and test was written around the batched timing, so this keeps it.
+ * It reads the store at render, so what it returns is never older than the store.
  */
-export function useStoreBatched<T>(store: Store<T>): T {
+export function useStore<T>(store: Store<T>): T {
   const [, setValue] = useState(() => store.getSnapshot());
   useEffect(() => {
     setValue(store.getSnapshot());

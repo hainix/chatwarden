@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { useController, useStoreBatched } from './controllerContext.js';
+import { useController, useStore } from './controllerContext.js';
 import { useHub } from './context.js';
 import { QUEUE_MAX_PAGES, QUEUE_PAGE, visibleRows } from './headless/liveQueue.js';
 import type { Connection, LiveQueueState, LiveQueueStore } from './headless/liveQueue.js';
@@ -61,7 +61,7 @@ export function QueueProvider({ children }: { children: ReactNode }) {
   const controller = useController();
   const { now, me } = useHub();
   const q = controller.queue;
-  const state = useStoreBatched(q);
+  const state = useStore(q);
   useEffect(() => {
     q.start();
     return () => q.stop();
