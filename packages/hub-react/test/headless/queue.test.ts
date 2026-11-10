@@ -187,6 +187,27 @@ describe('the live queue: polling', () => {
     expect(toastTexts(r)).toContain('Back online.');
   });
 
+  it('a poll that finishes after the browser went offline does not set the next timer', async () => {
+    const r = await started();
+    await r.controller.start();
+    await settle();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    r.w.intercept.fn = async (req) => {
+      if (req.path === '/changes') await gate;
+      return undefined;
+    };
+    await r.timers.advance(POLL_VISIBLE_MS);
+    r.page.goOffline();
+    release();
+    await settle();
+    const before = changes(r);
+    await r.timers.advance(120_000);
+    expect(changes(r)).toBe(before);
+  });
+
   it('a hub that starts offline says so and waits', async () => {
     const r = await started({ controller: { page: { online: () => false } } });
     await r.controller.start();
@@ -488,7 +509,7 @@ describe('the live queue: snapshots', () => {
 });
 
 describe('the live queue: reads in order', () => {
-  it('a slow old read never overwrites a newer one', async () => {
+  it('a slow old read never overwrites a newer one (its answer was made before the decision, and arrives after the newer read)', async () => {
     const r = await started();
     const a = await r.w.file({ target: 'Alpha' });
     await r.controller.start();
@@ -501,7 +522,10 @@ describe('the live queue: reads in order', () => {
     r.w.intercept.fn = async (req) => {
       if (req.method === 'GET' && req.path === '/reports' && first) {
         first = false;
+        // The server answers now, with the case still open; the answer is held back on the way.
+        const real = await r.w.raw({ method: req.method, path: req.path, query: Object.fromEntries(Object.entries(req.query ?? {}).map(([k, v]) => [k, String(v)])) });
         await gate;
+        return real;
       }
       return undefined;
     };
@@ -511,9 +535,11 @@ describe('the live queue: reads in order', () => {
     const fast = r.controller.queue.reload();
     await settle();
     expect((await fast).map((g) => g.person)).toEqual([]);
+    expect(queue(r).groups).toEqual([]);
     release();
-    await slow;
+    expect((await slow).map((g) => g.person)).toEqual([a.person]);
     await settle();
+    // The stale answer went back to its caller, but is not what the queue shows.
     expect(queue(r).groups).toEqual([]);
   });
 

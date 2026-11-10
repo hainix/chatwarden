@@ -261,6 +261,39 @@ describe('leaving a case', () => {
     expect(detail.claim).toBeNull();
   });
 
+  it('does not release while the decision waits even when a queue read shows the claim again (the server still holds it)', async () => {
+    const { r, a } = await ready();
+    await r.controller.open(a.id);
+    void r.controller.decide({ reportId: a.id, person: a.person, input: OK });
+    expect(group(r, a.person)?.claim).toBeNull();
+    await r.controller.queue.reload();
+    expect(group(r, a.person)?.claim?.by).toBe(ME);
+    r.controller.leave(a.id);
+    await settle();
+    expect(releases(r, a.person)).toBe(0);
+    expect(group(r, a.person)?.claim?.by).toBe(ME);
+  });
+
+  it('leaving while the first claim is still on its way: the answer changes nothing on screen', async () => {
+    const { r, a } = await ready();
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    r.w.intercept.fn = async (req) => {
+      if (/\/claim$/.test(req.path)) await gate;
+      return undefined;
+    };
+    const all = said(r);
+    void r.controller.open(a.id);
+    await settle();
+    r.controller.leave(a.id);
+    open();
+    await settle();
+    expect(group(r, a.person)?.claim).toBeNull();
+    expect(all).toEqual([]);
+  });
+
   it('does release after an Undo: the decision is not coming', async () => {
     const { r, a } = await ready();
     r.controller.open(a.id);

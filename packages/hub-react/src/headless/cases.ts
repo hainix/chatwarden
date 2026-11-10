@@ -265,17 +265,15 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
 
   const open = (reportId: string): Promise<void> => {
     if (disposed || current?.reportId === reportId) return Promise.resolve();
-    if (current !== null) {
-      // Another report while one is open: the same person's other report is the same case (the claim and the beat go on); a
-      // different person's lets the first go, as `derive` finds out.
-      current = { reportId, seen: null };
-      derive();
-      return active?.first ?? Promise.resolve();
-    }
+    // Another report while one is open: the same person's other report is the same case (the claim and the beat go on); a different
+    // person's lets the first go, as `derive` finds out. Either way the stores are watched once.
+    const watching = current !== null;
     current = { reportId, seen: null };
-    const q = options.queue();
-    offs = [decisions.subscribe(derive)];
-    if (q !== null) offs.push(q.subscribe(derive));
+    if (!watching) {
+      const q = options.queue();
+      offs = [decisions.subscribe(derive)];
+      if (q !== null) offs.push(q.subscribe(derive));
+    }
     derive();
     return active?.first ?? Promise.resolve();
   };
