@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createChatwarden } from '@chatwarden/core';
-import type { Chatwarden, Logger, RawWho } from '@chatwarden/core';
+import type { Chatwarden, Logger, RawWho, ReportCategory } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { openStore } from '@chatwarden/store-sqlite';
@@ -11,6 +11,8 @@ import type { Authz, KitRequest, KitResponse, Role } from '@chatwarden/http';
 // LiveTerms (the matcher is a devDependency of this package only), and a router with a header-driven `authorize`.
 
 export const NOW = 1_800_000_000_000;
+export const SEC = 1000;
+export const MIN = 60 * SEC;
 export const HOUR = 3_600_000;
 export const DAY = 24 * HOUR;
 
@@ -105,7 +107,28 @@ export async function world(over: WorldOptions = {}) {
     clock.t += 1000;
     return { ...res, subject };
   };
-  return { cw: real, live, routes, router, call, audit, routeAudit, clock, logged, store, db, person, gap };
+  let reportN = 0;
+  /**
+   * One open report against a person: a reporter and a target seated in a room of their own, the target says a line, the
+   * report is filed. `targetKey` is the target's raw client key (default: a new person each time).
+   */
+  const file = async (category: ReportCategory = 'harassment', targetKey?: string) => {
+    const n = ++reportN;
+    const room = `team-room-${n}`;
+    const key = targetKey ?? `${KEY_TARGET}-file-${n}`;
+    real.rooms.seat(room, 'p1', { clientKey: `raw-client-key-reporter-${n}`, ip: '198.51.100.23' }, 'Rep');
+    real.rooms.seat(room, 'p2', { clientKey: key, ip: IP_TARGET }, 'TargetName');
+    real.chat.accept(room, 'p2', 'a line from the target');
+    clock.t += 1000;
+    const res = await real.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', category });
+    if (!res.ok) throw new Error(`report refused: ${res.refused}`);
+    const report = real.reports.get(res.reportId);
+    if (report === null) throw new Error('report missing');
+    return { id: res.reportId, target: report.targetPerson, reporter: report.reporterPerson, room, key };
+  };
+  /** A second open report against the same person as `prev`, from another reporter in another room. */
+  const fileAgainst = (prev: { key: string }, _reporter: string, category: ReportCategory = 'harassment') => file(category, prev.key);
+  return { cw: real, live, routes, router, call, audit, routeAudit, clock, logged, store, db, person, gap, file, fileAgainst };
 }
 
 export const errorOf = (res: KitResponse): string => (res.body as { error: string }).error;

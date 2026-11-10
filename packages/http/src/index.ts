@@ -4,7 +4,7 @@ export type { Role } from '@chatwarden/core';
 export type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';
 export { compileRoutes as matchRoute, createRouter } from './router.js';
 export type { CompiledRoutes, RouteHandler, RouteTable } from './router.js';
-export { errorResponse, HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
+export { ClaimedError, errorResponse, HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
 export type { ErrorCode } from './errors.js';
 export { BODY_MAX_BYTES, parseJson } from './body.js';
 export { guard, requireRole } from './auth.js';
@@ -24,6 +24,7 @@ export {
   policyRoutes,
   reportRoutes,
   sanctionRoutes,
+  teamRoutes,
   termRoutes,
 } from './admin/index.js';
 export type {

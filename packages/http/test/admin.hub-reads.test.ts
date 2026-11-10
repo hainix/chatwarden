@@ -586,13 +586,14 @@ describe('POST /terms/test', () => {
 });
 
 describe('GET /reports: targetHandle', () => {
-  it('each item gains targetHandle, the reported person handle at filing, after the old fields', async () => {
+  it('each item gains targetHandle, the reported person handle at filing, after the old fields (then claim and viewing)', async () => {
     const w = await world();
     const r = await file(w, { targetHandle: 'SneakyPete' });
     const body = (await w.call('GET', '/reports')).body as { items: Array<Record<string, unknown>>; next: string | null };
     expect(body.items).toHaveLength(1);
     expect(Object.keys(body.items[0]!)).toEqual([
       'id', 'createdAt', 'roomId', 'tags', 'category', 'status', 'badFaith', 'targetPerson', 'reporterPerson', 'actionedAt', 'actionedBy', 'targetHandle',
+      'claim', 'viewing',
     ]);
     expect(body.items[0]).toMatchObject({ id: r.id, targetPerson: r.target, targetHandle: 'SneakyPete' });
   });

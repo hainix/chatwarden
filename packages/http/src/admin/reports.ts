@@ -1,10 +1,11 @@
-import { CATEGORY_TO_RULE } from '@chatwarden/core';
-import type { ReportQuery, StaffReport } from '@chatwarden/core';
+import { CATEGORY_TO_RULE, safeWarn } from '@chatwarden/core';
+import type { CaseClaim, ReportQuery, StaffReport } from '@chatwarden/core';
 import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { applyDecision, needForDecision, parseDecision, peopleOf } from './apply.js';
 import type { AdminContext } from './context.js';
-import { bodyId, bodyLevel, bodyObject, bodyRule, has, queryLevel, queryLimit } from './validate.js';
+import { gateCase } from './claims.js';
+import { bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
 
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
 const HISTORY_REPORTS_DEFAULT = 20;
@@ -35,10 +36,20 @@ export interface ReportSummary {
    * the queue can show a name. Null when none was recorded. Staff only, like the report page itself.
    */
   targetHandle: string | null;
+  /**
+   * Who is handling the reported person's case, from when and until when it lapses: `{ by, since, until }`, or null when
+   * nobody holds it (or the report is no longer open). Staff only. A claim is a courtesy: it never hides or blocks a read.
+   */
+  claim: { by: string; since: number; until: number } | null;
+  /** The other staff actors who have this person's case open right now (the caller left out), sorted. In-memory per process, a hint. */
+  viewing: string[];
 }
 
+/** The claim as the API shows it: exactly `{ by, since, until }`. */
+const claimView = (c: CaseClaim | undefined): ReportSummary['claim'] => (c === undefined ? null : { by: c.by, since: c.since, until: c.until });
+
 /** Project a report to its queue summary. Lists each field by name, so a field added to the record never leaks in. */
-const summarize = (r: StaffReport): ReportSummary => ({
+const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string[] | undefined): ReportSummary => ({
   id: r.id,
   createdAt: r.createdAt,
   roomId: r.roomId,
@@ -51,21 +62,30 @@ const summarize = (r: StaffReport): ReportSummary => ({
   actionedAt: r.actionedAt,
   actionedBy: r.actionedBy,
   targetHandle: r.targetHandle === '' ? null : r.targetHandle,
+  claim: claimView(claim),
+  viewing: viewing === undefined ? [] : [...viewing],
 });
 
 /**
  * The report and decision routes (staff only, each audited):
  * - `GET /reports?status&cursor&limit`: the queue as summaries, no evidence beyond the reported person's `targetHandle`
  *   (`report.view`, no target)
- * - `GET /reports/:id?level`: one report with each person's history and the suggestion for the reported person (`report.view`)
+ *   Each item also carries `claim` and `viewing` for its open cases (see {@link ReportSummary}).
+ * - `GET /reports/:id?level`: one report with each person's history and the suggestion for the reported person, and the
+ *   `claim` on the reported person's case (`{ by, since, until }` or null) (`report.view`)
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
- * - `POST /reports/:id/decide { verdict, actions, reason, evidence? }`: decide (`report.decide`, replays too)
+ * - `POST /reports/:id/decide { verdict, actions, reason, evidence?, takeOver? }`: decide (`report.decide`, replays too). Another
+ *   moderator's live claim on the reported person is 409 `claimed` unless `takeOver: true` and the caller holds
+ *   `claims.override` (then the takeover is audited as `case.takeover`, first). Deciding releases the caller's claim.
  * - `GET /people/:ref/history?limit`: a person's actions, recent reports against them, their sanctions as
  *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
  *   filed stand, `asReporter` (`history.view`)
  */
 export function reportRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
+
+  /** A report's claim, only while its case is open. */
+  const claimOf = (r: StaffReport): CaseClaim | undefined => (r.status === 'open' ? cw.cases.holders([r.targetPerson]).get(r.targetPerson) : undefined);
 
   const load = (id: string): StaffReport => {
     const report = cw.reports.get(id);
@@ -83,8 +103,14 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         ...(cursor === undefined ? {} : { before: cursor }),
         ...(limit === undefined ? {} : { limit }),
       });
+      const open = [...new Set(page.items.filter((r) => r.status === 'open').map((r) => r.targetPerson))];
+      const claims = cw.cases.holders(open);
+      const viewers = cw.cases.viewersOf(open, c.authz.actor);
       c.audit('report.view');
-      return { status: 200, body: { items: page.items.map(summarize), next: page.next } };
+      const items = page.items.map((r) =>
+        r.status === 'open' ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson)) : summarize(r, undefined, undefined),
+      );
+      return { status: 200, body: { items, next: page.next } };
     }),
 
     'GET /reports/:id': ctx.secure('reports.read', (c) => {
@@ -94,8 +120,9 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const rule = CATEGORY_TO_RULE[report.category];
       const history = Object.fromEntries(peopleOf(report).map((p) => [p, cw.history(p)]));
       const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report) });
+      const claim = claimView(claimOf(report));
       c.audit('report.view', { type: 'report', ref: id });
-      return { status: 200, body: { report, history, suggest, rule } };
+      return { status: 200, body: { report, history, suggest, rule, claim } };
     }),
 
     'POST /reports/:id/suggest': ctx.secure('reports.read', (c) => {
@@ -118,15 +145,31 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
 
     'POST /reports/:id/decide': ctx.secure('reports.decide', async (c) => {
       const id = c.params.id as string;
-      const decision = parseDecision(bodyObject(c.req));
+      const body = bodyObject(c.req);
+      const decision = parseDecision(body);
+      const takeOver = bodyTakeOver(body);
 
       // Authorization for what the decision DOES, before anything is read or written.
       needForDecision(decision.actions, c.need);
+
+      // Another moderator's live claim on the reported person stops the decision, unless a senior takes the case over.
+      // A report that is no longer open is a replay or an already_decided: a claim taken since must not turn that into a 409.
+      const existing = cw.reports.get(id);
+      const person = existing !== null && existing.status === 'open' ? existing.targetPerson : null;
+      if (person !== null) gateCase(ctx, c, person, takeOver);
 
       // Never from the body: the caller is who the auth hook says, and an admin route is always a moderator's.
       const result = await applyDecision(cw, id, decision, c.authz.actor);
       // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
       c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
+      // Deciding ends the caller's own claim. Not on a replay: the caller may hold a fresh claim on the person's next report.
+      if (person !== null && !result.replay) {
+        try {
+          cw.cases.release(person, c.authz.actor);
+        } catch {
+          safeWarn(ctx.logger, 'chatwarden.http_release_failed');
+        }
+      }
       return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups } };
     }),
 

@@ -43,6 +43,9 @@ describe('PERMISSIONS defaults', () => {
       'terms.write': 'moderator',
       'policy.read': 'moderator',
       'audit.read': 'senior',
+      'claims.override': 'senior',
+      'reasons.read': 'moderator',
+      'reasons.write': 'senior',
       settings: 'owner',
     });
   });

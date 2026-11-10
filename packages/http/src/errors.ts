@@ -4,6 +4,7 @@ import {
   ExcerptError,
   ProfileError,
   ReportQueryError,
+  ReasonError,
   RulesError,
   safeWarn,
   SanctionError,
@@ -31,6 +32,7 @@ const TABLE = {
   not_found: { status: 404, message: 'Not found.' },
   method_not_allowed: { status: 405, message: 'Method not allowed.' },
   already_decided: { status: 409, message: 'The report has already been decided.' },
+  claimed: { status: 409, message: 'Another moderator is handling this case.' },
   in_progress: { status: 409, message: 'A request with this idempotency key is still being processed.' },
   idempotency_mismatch: { status: 409, message: 'This idempotency key was used with a different request.' },
   payload_too_large: { status: 413, message: 'The request body is too large.' },
@@ -70,10 +72,25 @@ export class NotFoundError extends HttpError {
   }
 }
 
-/** The fixed response for a code. */
-export function errorResponse(code: ErrorCode, headers?: Record<string, string>): KitResponse {
+/**
+ * Another moderator holds the case. 409 `claimed`, and the body also carries who and until when (`{ error, message, by,
+ * until }`): the claim's holder is a staff actor and `until` the epoch ms it lapses, both for staff only.
+ */
+export class ClaimedError extends HttpError {
+  readonly by: string;
+  readonly until: number;
+  constructor(claim: { by: string; until: number }) {
+    super('claimed');
+    this.name = 'ClaimedError';
+    this.by = claim.by;
+    this.until = claim.until;
+  }
+}
+
+/** The fixed response for a code. `extra` adds fields after `error` and `message` (only {@link ClaimedError} uses it). */
+export function errorResponse(code: ErrorCode, headers?: Record<string, string>, extra?: Record<string, unknown>): KitResponse {
   const { status, message } = TABLE[code];
-  const res: KitResponse = { status, body: { error: code, message } };
+  const res: KitResponse = { status, body: { error: code, message, ...extra } };
   // A 405 must carry `allow` (RFC 9110); an empty one means "no method is allowed here".
   if (code === 'method_not_allowed') res.headers = { allow: '', ...headers };
   else if (headers !== undefined) res.headers = { ...headers };
@@ -87,6 +104,7 @@ const codeFor = (err: unknown): ErrorCode | null => {
   if (err instanceof SanctionError) return 'invalid_sanction';
   if (err instanceof RulesError) return 'invalid_rules';
   if (err instanceof ExcerptError) return 'invalid_excerpt';
+  if (err instanceof ReasonError) return err.field === 'limit' ? 'invalid_value' : 'invalid_request';
   if (err instanceof RangeError) return 'invalid_value';
   return null;
 };
@@ -94,7 +112,8 @@ const codeFor = (err: unknown): ErrorCode | null => {
 /**
  * Wrap a handler so that nothing it throws (or rejects with) escapes:
  * - a validation-type error (`ReportQueryError`, `AuditQueryError`, `SanctionQueryError`, `RangeError`, `ProfileError`, `SanctionError`,
- *   `RulesError`, `ExcerptError`, `ValidationError`) -> 400
+ *   `RulesError`, `ExcerptError`, `ReasonError`, `ValidationError`) -> 400
+ * - `ClaimedError` -> 409 `claimed`, whose body also names the holder (`by`) and when the claim lapses (`until`)
  * - `NotFoundError` -> 404; `HttpError` -> its own status and headers (401, 403, 413, ...); a `RangeError` is
  *   also logged, class only
  * - anything else -> 500 `{ error: 'internal' }`, logged with the error class only.
@@ -109,6 +128,7 @@ export function withErrors<A extends unknown[]>(
       return await handler(...args);
     } catch (err) {
       const code = codeFor(err);
+      if (err instanceof ClaimedError) return errorResponse('claimed', undefined, { by: err.by, until: err.until });
       if (err instanceof HttpError) return errorResponse(err.code, err.headers === undefined ? undefined : { ...err.headers });
       if (code !== null) {
         // A RangeError is a 400 by contract, but an engine RangeError (stack overflow, invalid array length) looks the

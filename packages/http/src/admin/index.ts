@@ -10,6 +10,7 @@ import { policyRoutes } from './policy.js';
 import type { PolicyOptions } from './policy.js';
 import { reportRoutes } from './reports.js';
 import { sanctionRoutes } from './sanctions.js';
+import { teamRoutes } from './team.js';
 import { termRoutes } from './terms.js';
 import type { TermsAdmin } from './terms.js';
 
@@ -25,6 +26,7 @@ export type { PolicyOptions } from './policy.js';
 export { reportRoutes } from './reports.js';
 export type { ReportSummary } from './reports.js';
 export { sanctionRoutes } from './sanctions.js';
+export { teamRoutes } from './team.js';
 export { termRoutes } from './terms.js';
 export type { ExceptionListRow, TermListRow, TermMetadata, TermsAdmin, TermsEditor } from './terms.js';
 
@@ -46,13 +48,14 @@ export interface AdminRoutesOptions extends AdminOptions, PolicyOptions {
 /**
  * The staff API as a route table: hand it to `createRouter` (alone, or spread beside your own routes). Every route is
  * authenticated by `options.authorize`, needs a permission, and writes its audit row. All groups (reports, sanctions,
- * gaps, terms, policy, audit) are built from one `createAdminContext`, so there is one auth and audit path.
+ * gaps, terms, policy, audit, and the team's claims, change token and saved reasons) are built from one `createAdminContext`, so there is one auth and audit path.
  */
 export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteTable {
   const ctx = createAdminContext(cw, options);
   return {
     ...meRoutes(ctx),
     ...reportRoutes(ctx),
+    ...teamRoutes(ctx),
     ...sanctionRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),

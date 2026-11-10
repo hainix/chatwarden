@@ -147,7 +147,7 @@ describe('GET /reports', () => {
     const res = await call('GET', '/reports');
     const item = (res.body as { items: Array<Record<string, unknown>> }).items[0] as Record<string, unknown>;
     expect(Object.keys(item).sort()).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'createdAt', 'id', 'reporterPerson', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reporterPerson', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
     expect(item).toMatchObject({ id: r.id, category: 'harassment', status: 'open', roomId: r.room, targetPerson: r.target, reporterPerson: r.reporter, badFaith: false, actionedAt: null, actionedBy: null });
     // Keys are the same on a decided report, and the decision shows through status / badFaith / actioned*.

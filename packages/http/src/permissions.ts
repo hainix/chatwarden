@@ -16,6 +16,9 @@ export const PERMISSION_KEYS = [
   'terms.write',
   'policy.read',
   'audit.read',
+  'claims.override',
+  'reasons.read',
+  'reasons.write',
   'settings',
 ] as const;
 
@@ -39,6 +42,9 @@ export const PERMISSIONS: Permissions = Object.freeze({
   'terms.write': 'moderator',
   'policy.read': 'moderator',
   'audit.read': 'senior',
+  'claims.override': 'senior',
+  'reasons.read': 'moderator',
+  'reasons.write': 'senior',
   settings: 'owner',
 });
 

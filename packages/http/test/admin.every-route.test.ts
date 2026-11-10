@@ -12,6 +12,10 @@ interface Ids {
   term: string;
   exception: string;
   subject: string;
+  /** A person with one open report, so a case can be claimed. */
+  person: string;
+  /** A saved reason. */
+  reason: string;
 }
 interface Spec {
   name: string;
@@ -41,6 +45,15 @@ const SPECS: Spec[] = [
   { name: 'GET /blocked', method: 'GET', path: () => '/blocked', lock: { 'blocked.read': 'owner' }, min: 'moderator' },
   { name: 'POST /terms/test', method: 'POST', path: () => '/terms/test', body: { text: 'a harmless line' }, lock: { 'terms.read': 'owner' }, min: 'moderator' },
   { name: 'GET /policy', method: 'GET', path: () => '/policy', lock: { 'policy.read': 'owner' }, min: 'moderator' },
+  { name: 'POST /cases/next', method: 'POST', path: () => '/cases/next', body: {}, lock: { 'reports.decide': 'owner' }, min: 'moderator' },
+  { name: 'POST /cases/:ref/claim', method: 'POST', path: (i) => `/cases/${i.person}/claim`, body: {}, lock: { 'reports.decide': 'owner' }, min: 'moderator' },
+  { name: 'POST /cases/:ref/release', method: 'POST', path: (i) => `/cases/${i.person}/release`, body: {}, lock: { 'reports.decide': 'owner' }, min: 'moderator' },
+  { name: 'POST /cases/:ref/viewing', method: 'POST', path: (i) => `/cases/${i.person}/viewing`, body: {}, lock: { 'reports.read': 'owner' }, min: 'moderator' },
+  { name: 'GET /changes', method: 'GET', path: () => '/changes', lock: { 'reports.read': 'owner' }, min: 'moderator' },
+  { name: 'GET /reasons', method: 'GET', path: () => '/reasons', lock: { 'reasons.read': 'owner' }, min: 'moderator' },
+  { name: 'POST /reasons', method: 'POST', path: () => '/reasons', body: { label: 'Spam', text: 'Spamming the lobby.' }, lock: { 'reasons.write': 'owner' }, min: 'senior' },
+  { name: 'PATCH /reasons/:id', method: 'PATCH', path: (i) => `/reasons/${i.reason}`, body: { label: 'Spam!' }, lock: { 'reasons.write': 'owner' }, min: 'senior' },
+  { name: 'POST /reasons/:id/active', method: 'POST', path: (i) => `/reasons/${i.reason}/active`, body: { active: false }, lock: { 'reasons.write': 'owner' }, min: 'senior' },
   { name: 'GET /audit', method: 'GET', path: () => '/audit', lock: { 'audit.read': 'owner' }, min: 'senior' },
 ];
 
@@ -60,13 +73,15 @@ async function ids(w: Awaited<ReturnType<typeof world>>): Promise<Ids> {
   const gap = await w.gap();
   const term = w.live.rows.terms[0]?.id as string;
   const exception = w.live.rows.exceptions[0]?.id as string;
-  return { group: made.groupId, gap: gap.groupId, term, exception, subject };
+  const filed = await w.file();
+  const reason = w.cw.reasons.add({ label: 'Seed', text: 'A seeded reason.' });
+  return { group: made.groupId, gap: gap.groupId, term, exception, subject, person: filed.target, reason: reason.id };
 }
 const bodyOf = (s: Spec, i: Ids): unknown =>
   s.body === undefined ? undefined : JSON.parse(JSON.stringify(s.body).replace('SUBJ', i.subject));
 
 describe('every new admin route: 401 without authz, 403 below the needed role', () => {
-  it('the route table has exactly the new routes plus the five report routes', async () => {
+  it('the route table has exactly the new routes plus the report and team routes', async () => {
     const { routes } = await world();
     // `:id~ref` is the audit-ref charset for a term id; the shape is the same.
     expect(Object.keys(routes).map((k) => k.replace('~ref', '')).sort()).toEqual(
