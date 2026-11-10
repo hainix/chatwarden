@@ -97,6 +97,8 @@ describe('matcher peers', () => {
     const p = byName('@chatwarden/store-sqlite');
     expect(p.peerDependencies?.['@chatwarden/matcher']).toBe('^0.1.0');
     expect(p.devDependencies?.['@chatwarden/matcher']).toBe(VERSION);
+    // Required, not optional: the store's .d.ts references matcher types, so a consumer without matcher fails typecheck.
+    expect(p.peerDependenciesMeta?.['@chatwarden/matcher']?.optional).not.toBe(true);
   });
   it('matcher keeps obscenity as a regular dependency', () => {
     expect(byName('@chatwarden/matcher').dependencies?.obscenity).toBeDefined();

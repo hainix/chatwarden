@@ -46,11 +46,6 @@
     "@chatwarden/core": "^0.1.0",
     "@chatwarden/matcher": "^0.1.0"
   },
-  "peerDependenciesMeta": {
-    "@chatwarden/matcher": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@chatwarden/core": "0.1.0",
     "@chatwarden/matcher": "0.1.0"
