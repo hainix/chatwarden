@@ -92,7 +92,9 @@ export const client = createHubClient(routerTransport(handle));
 | `#/` | Overview, the team view: people waiting, open reports, the longest wait, unclaimed cases, who is on and what each is holding, recent actions | any signed-in role (panels follow `reports.read` and `history.read`) |
 | `#/reports`, `#/reports?status=actioned` | Reports: every report, grouped by reported person, filtered by status (the queue pane beside it is always the open cases) | `reports.read` |
 | `#/reports/:id` | The case: header and claim, Evidence (the transcript), Reports and History tabs, the decision bar docked under them, and beside it the person's record, blocked attempts and who reported | `reports.read`; deciding needs `reports.decide`, actions need `sanctions.apply` |
-| `#/people/:ref`, `#/terms`, `#/blocked`, `#/gaps`, `#/audit`, `#/guide` | Routes and tabs exist; the screens arrive in later releases and show a short "not available yet" page until then | the permission of the tab |
+| `#/people/:ref` | The person page, in the middle pane (the queue stays at the left): what is in force now (each with a Revoke that asks for a reason), the timeline of reports about them and every sanction (kind, rule, time left, ref code, who, where it came from, revoked), how the reports they filed have gone, and buttons to Sanction them or add a note. A sanction is a kind, a length, a rule (or "No rule covers this" with a note for the rules review), a reason and "also block their IP address for up to 24 hours"; a permanent ban needs `sanctions.apply.ban_permanent`. Nothing is sent to the player from here. Opening it writes one `history.view`; a write reads the history once more | `history.read`; Sanction and Add a note need `sanctions.apply`, Revoke needs `sanctions.revoke` |
+| `#/actions` | All actions: everyone's sanctions, newest first, 25 at a time, with an "Automatic only" filter (the kit's `auto_filter` source). The Overview's Recent actions links here with "See all" | `history.read` |
+| `#/terms`, `#/blocked`, `#/gaps`, `#/audit`, `#/guide` | Routes and tabs exist; the screens arrive in later releases and show a short "not available yet" page until then | the permission of the tab |
 
 The tabs a role cannot use are not shown: Audit appears for a senior and above, and every tab follows the permission table the
 server reports in `GET /me` (so a `permissions` override on the server is respected).
@@ -359,7 +361,7 @@ Content-Security-Policy needs `font-src 'self'` for it.
 ## Security notes
 
 - **No identifiers reach the page beyond the staff API's own.** The hub shows a person as the first 8 characters of their opaque
-  ref and never the full ref. It shows a reported person's handle (staff only, from the queue) and nothing of a reporter.
+  ref and never the full ref. It shows a reported person's handle (staff only, from the queue) and a reporter's handle where a report recorded one (the case's Who reported list), else their tag.
 - **The full person ref is in the link.** The page shows only the 8 character tag, but a link to a person (`#/people/:ref`) has to
   carry the whole ref, because the server route needs it. It is staff-only, like the queue, but the address bar, the history and the
   paths `onNavigate` receives all hold it, so do not forward those to analytics.

@@ -75,7 +75,7 @@ describe('N1: a decided case can be visited again', () => {
     const f = await w.fileRich({ lines: TALK, target: 'Mallory' });
     const { router } = await decideIt(w, f.id);
     act(() => router.navigate(`/people/${f.person}`));
-    await screen.findByRole('heading', { level: 2, name: /not available yet/ });
+    await screen.findByRole('heading', { level: 2, name: 'Mallory' });
     act(() => router.navigate(`/reports/${f.id}`));
     await expectClosedCase(w, f);
   });

@@ -380,6 +380,14 @@ describe('revoke', () => {
     expect(audits(w, 'sanction.revoke')).toHaveLength(1);
   });
 
+  it('after a revoke, keyboard focus goes to the page title (the row that had it is gone)', async () => {
+    const { user } = await oneBan();
+    await user.click(revokeButton());
+    await user.type(reasonBox(), 'done');
+    await user.click(confirm());
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Mallory' })).toHaveFocus());
+  });
+
   it('Cancel closes the form without sending, and the reason is not kept for the next time', async () => {
     const { w, user } = await oneBan();
     await user.click(revokeButton());

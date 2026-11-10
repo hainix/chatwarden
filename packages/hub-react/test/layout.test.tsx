@@ -195,6 +195,33 @@ describe('narrow screens: nothing makes the case pane wider than the page', () =
   });
 });
 
+describe('the person page on a phone', () => {
+  const rule = (selector: string): string => {
+    const lines = css.split('\n');
+    const at = lines.findIndex((l) => l.trim() === `${selector} {`);
+    if (at < 0) return '';
+    return lines.slice(at + 1, lines.findIndex((l, n) => n > at && l.includes('}'))).join('\n');
+  };
+
+  it('the title and its buttons wrap instead of widening the page, and can shrink', () => {
+    expect(rule('.cw-hub .cw-personhead')).toMatch(/flex-wrap:\s*wrap/);
+    expect(rule('.cw-hub .cw-personhead')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-bar-actions')).toMatch(/flex-wrap:\s*wrap/);
+  });
+
+  it('a line of the timeline can shrink, and the revoke form fills the line instead of having a width', () => {
+    expect(rule('.cw-hub .cw-rec-body')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-revoke-form')).toMatch(/justify-self:\s*stretch/);
+    expect(rule('.cw-hub .cw-revoke-form')).not.toMatch(/\bwidth:/);
+  });
+
+  it('colours nothing: the person page rules use neutral tokens only', () => {
+    for (const sel of ['.cw-hub .cw-personhead', '.cw-hub .cw-rec-mark', '.cw-hub .cw-revoke-form', '.cw-hub .cw-arow-who']) {
+      expect(rule(sel), sel).not.toMatch(/var\(--cw-(accent|red|yellow|live)/);
+    }
+  });
+});
+
 // Fix round 1 (the real-browser check B2, B3, B5, B6): where the toasts stand, how tall the docked bar may be, what a hidden line
 // looks like, and what is left of a decided case.
 describe('fix round 1: the pane in the browser', () => {
