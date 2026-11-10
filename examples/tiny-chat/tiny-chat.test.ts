@@ -1513,6 +1513,175 @@ describe('the READMEs show the preset and the overrides', () => {
   });
 });
 
+// --- K3b: the optional Discord feed ---------------------------------------------------------------------------
+
+const DISCORD_URL = 'https://discord.com/api/webhooks/123456789012345678/tok_ABC-def_123XYZ';
+const DISCORD_ROLE = '987654321098765432';
+
+/** A fake Discord forum webhook: records every call, opens thread T1, accepts posts. */
+function fakeDiscord() {
+  const calls: Array<{ url: URL; body: Record<string, unknown> }> = [];
+  const fetchFn = ((url: string | URL, init?: RequestInit) => {
+    const u = new URL(String(url));
+    calls.push({ url: u, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+    const reply = u.searchParams.has('thread_id') ? { id: 'm' } : { id: 'm', channel_id: 'T1' };
+    return Promise.resolve(new Response(JSON.stringify(reply), { status: 200 }));
+  }) as typeof fetch;
+  return { fetch: fetchFn, calls };
+}
+
+async function waitFor(check: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting');
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+describe('tiny-chat: the optional Discord feed', () => {
+  const saved = { url: process.env.DISCORD_WEBHOOK_URL, role: process.env.DISCORD_MENTION_ROLE_ID };
+  afterEach(() => {
+    if (saved.url === undefined) delete process.env.DISCORD_WEBHOOK_URL;
+    else process.env.DISCORD_WEBHOOK_URL = saved.url;
+    if (saved.role === undefined) delete process.env.DISCORD_MENTION_ROLE_ID;
+    else process.env.DISCORD_MENTION_ROLE_ID = saved.role;
+  });
+
+  /** Two players; the second reports the first. Returns the report. */
+  async function reportOne(server: TinyChat, reports: StoredReport[], category = 'harassment'): Promise<StoredReport> {
+    const a = await join(server, 'key-dc1');
+    await join(server, 'key-dc2');
+    a.say('a line in the lobby');
+    await a.next('chat');
+    const res = await reportHttp(server, { key: 'key-dc2', targetSeat: 'p1', category });
+    expect(res.status).toBe(200);
+    await waitFor(() => reports.length > 0);
+    return reports[0] as StoredReport;
+  }
+
+  it('is off without DISCORD_WEBHOOK_URL: nothing is posted, and the server says so', async () => {
+    delete process.env.DISCORD_WEBHOOK_URL;
+    delete process.env.DISCORD_MENTION_ROLE_ID;
+    const d = fakeDiscord();
+    const reports: StoredReport[] = [];
+    const server = await boot({ adminToken: ADMIN, discordFetch: d.fetch, onReport: (r) => void reports.push(r) });
+    expect(server.discord).toBe(false);
+    const report = await reportOne(server, reports);
+    await decideHttp(server, {
+      reportId: report.id,
+      verdict: 'upheld',
+      reason: 'private',
+      actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }],
+    });
+    await settle();
+    expect(d.calls).toEqual([]);
+  });
+
+  it.each([
+    ['an empty DISCORD_WEBHOOK_URL', { url: '' }],
+    ['only a role id', { role: DISCORD_ROLE }],
+    ['an empty option', { option: '' }],
+  ])('stays off with %s', async (_name, env) => {
+    delete process.env.DISCORD_WEBHOOK_URL;
+    delete process.env.DISCORD_MENTION_ROLE_ID;
+    if ('url' in env) process.env.DISCORD_WEBHOOK_URL = env.url;
+    if ('role' in env) process.env.DISCORD_MENTION_ROLE_ID = env.role;
+    const d = fakeDiscord();
+    const reports: StoredReport[] = [];
+    const server = await boot({
+      discordFetch: d.fetch,
+      ...('option' in env ? { discordWebhookUrl: env.option } : {}),
+      onReport: (r) => void reports.push(r),
+    });
+    expect(server.discord).toBe(false);
+    await reportOne(server, reports);
+    await settle();
+    expect(d.calls).toEqual([]);
+  });
+
+  it('is on with DISCORD_WEBHOOK_URL: a report opens a thread whose links point at the demo admin routes, and the decision posts into it', async () => {
+    process.env.DISCORD_WEBHOOK_URL = DISCORD_URL;
+    process.env.DISCORD_MENTION_ROLE_ID = DISCORD_ROLE;
+    const d = fakeDiscord();
+    const reports: StoredReport[] = [];
+    const server = await boot({ adminToken: ADMIN, discordFetch: d.fetch, onReport: (r) => void reports.push(r) });
+    expect(server.discord).toBe(true);
+    const report = await reportOne(server, reports, 'hate');
+    await waitFor(() => d.calls.length >= 1);
+    const first = d.calls[0] as (typeof d.calls)[number];
+    expect(first.url.searchParams.has('thread_id')).toBe(false);
+    expect(String(first.body.thread_name)).toMatch(/^Case [0-9A-HJKMNP-TV-Z]{5}$/);
+    const text = String(first.body.content);
+    expect(text).toContain('**Severe report**');
+    expect(text).toContain(`<@&${DISCORD_ROLE}>`);
+    expect(first.body.allowed_mentions).toEqual({ parse: [], roles: [DISCORD_ROLE] });
+    expect(text).toContain(`[Open report](<http://127.0.0.1:${server.port}/admin/reports/${report.id}>)`);
+    expect(text).toMatch(new RegExp(`\\[Open person\\]\\(<http://127\\.0\\.0\\.1:${server.port}/admin/people/s_[A-Za-z0-9_-]+/history>\\)`));
+
+    // The link works with the demo token, and shows the same report.
+    const link = /\(<(http:\/\/127\.0\.0\.1:\d+\/admin\/reports\/[^>]+)>\)/.exec(text)?.[1] as string;
+    const opened = await fetch(link, { headers: { 'x-admin-token': ADMIN } });
+    expect(opened.status).toBe(200);
+    expect(((await opened.json()) as { report: { id: string } }).report.id).toBe(report.id);
+
+    // A decision posts into the same thread.
+    const decided = await decideHttp(server, {
+      reportId: report.id,
+      verdict: 'upheld',
+      reason: 'PRIVATE-REASON',
+      actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }],
+    });
+    expect(decided.status).toBe(200);
+    await waitFor(() => d.calls.length >= 3);
+    expect(d.calls.filter((c) => !c.url.searchParams.has('thread_id'))).toHaveLength(1);
+    for (const c of d.calls.slice(1)) expect(c.url.searchParams.get('thread_id')).toBe('T1');
+    const all = d.calls.map((c) => String(c.body.content)).join('\n');
+    expect(all).toContain('**Report closed** · Upheld');
+    expect(all).toContain('**Sanction applied** · Warning');
+    // No chat text and no reason in what staff read in Discord.
+    expect(all).not.toContain('a line in the lobby');
+    expect(all).not.toContain('PRIVATE-REASON');
+  });
+
+  it('the options win over the environment, and a mention role is optional', async () => {
+    process.env.DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/111111111111111111/from-env';
+    delete process.env.DISCORD_MENTION_ROLE_ID;
+    const d = fakeDiscord();
+    const reports: StoredReport[] = [];
+    const server = await boot({ discordWebhookUrl: DISCORD_URL, discordFetch: d.fetch, onReport: (r) => void reports.push(r) });
+    expect(server.discord).toBe(true);
+    await reportOne(server, reports, 'hate');
+    await waitFor(() => d.calls.length >= 1);
+    expect(d.calls[0]?.url.pathname).toBe('/api/webhooks/123456789012345678/tok_ABC-def_123XYZ');
+    // Severe, but no role was configured: nobody is pinged.
+    expect(String(d.calls[0]?.body.content)).not.toContain('<@&');
+    expect(d.calls[0]?.body.allowed_mentions).toEqual({ parse: [] });
+  });
+
+  it.each([
+    ['a webhook URL that is not a Discord one', { discordWebhookUrl: 'https://example.com/api/webhooks/123456789012345678/x' }],
+    ['a role id that is not digits', { discordWebhookUrl: DISCORD_URL, discordMentionRoleId: 'everyone' }],
+  ])('refuses %s at startup, without echoing it', async (_name, opts) => {
+    delete process.env.DISCORD_WEBHOOK_URL;
+    let caught: unknown;
+    try {
+      await boot({ ...opts, discordFetch: fakeDiscord().fetch });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RangeError);
+    for (const v of Object.values(opts)) expect(String((caught as Error).message)).not.toContain(v);
+  });
+
+  it('the README documents the variables, the package and that it is off unless the variable is set', () => {
+    const tiny = readFileSync(fileURLToPath(new URL('./README.md', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
+    expect(tiny).toContain('DISCORD_WEBHOOK_URL');
+    expect(tiny).toContain('DISCORD_MENTION_ROLE_ID');
+    expect(tiny).toContain('@chatwarden/discord');
+    expect(tiny).toMatch(/off unless|off by default/i);
+  });
+});
+
 // --- leak scans that run after everything else has pushed its bodies -----------------------------------------------
 
 /** A raw demo key as these tests name them (`key-na`, `key-bucket-3`), a 32+ hex hash, an IPv4 address. */

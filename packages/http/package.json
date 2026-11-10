@@ -28,6 +28,7 @@
   "peerDependencies": { "express": "^5.0.0" },
   "peerDependenciesMeta": { "express": { "optional": true } },
   "devDependencies": {
+    "@chatwarden/discord": "0.0.0",
     "@chatwarden/matcher": "0.0.0",
     "@chatwarden/store-sqlite": "0.0.0",
     "@types/express": "^5.0.3",

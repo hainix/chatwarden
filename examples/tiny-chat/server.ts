@@ -26,6 +26,8 @@
 //              GET /api/rules, GET /api/code-of-conduct?format=html|markdown|text, POST /api/names/check.
 //              DEMO ONLY identity: the `x-chatwarden-key` header, or `?key=` (a key in a URL is unsafe, see the README).
 //   /healthz, /readyz   the probes (`healthRoutes`)
+// Optional Discord feed (`@chatwarden/discord`): set DISCORD_WEBHOOK_URL (and DISCORD_MENTION_ROLE_ID) to post reports and
+//   outcomes into a forum channel. Off otherwise. The links in the posts open the /admin routes above.
 // Tiny chat's own HTTP: POST /report { key, targetSeat, category, note?, lineId? } -> 200 { ok, remaining } | 4xx { ok: false, refused }
 //
 // "key" stands in for whatever credential your game already has (a session token, a device id). It is sent as a
@@ -43,6 +45,7 @@ import {
   type ProfileOverrides,
   type RawWho,
 } from '@chatwarden/core';
+import { discordFeed, type DiscordFeed } from '@chatwarden/discord';
 import { adminRoutes, healthRoutes, playerRoutes, type KitRequest } from '@chatwarden/http';
 import { toExpress } from '@chatwarden/http/express';
 import { LiveTerms, type TermPack } from '@chatwarden/matcher';
@@ -79,6 +82,16 @@ export interface TinyChatOptions {
    * one. An invalid value throws at startup.
    */
   overrides?: ProfileOverrides;
+  /**
+   * Post the review queue into a Discord forum (the `@chatwarden/discord` package): the forum channel's webhook URL.
+   * Default: the `DISCORD_WEBHOOK_URL` environment variable. With neither (or an empty one) the feed is off and nothing is
+   * sent anywhere. A URL that is not a Discord webhook URL throws at startup.
+   */
+  discordWebhookUrl?: string;
+  /** A Discord role id to ping on a severe report or sanction. Default: the `DISCORD_MENTION_ROLE_ID` environment variable. Optional. */
+  discordMentionRoleId?: string;
+  /** The `fetch` the Discord feed posts with. Default: the global one. For tests. */
+  discordFetch?: typeof fetch;
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -97,6 +110,8 @@ function resolveSecret(explicit: string | undefined): string {
 export interface TinyChat {
   port: number;
   chatwarden: Chatwarden;
+  /** True when the Discord feed is running (a webhook URL was configured). */
+  discord: boolean;
   close(): Promise<void>;
 }
 
@@ -167,6 +182,31 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     clock,
     onReport: opts.onReport,
   });
+
+  // The optional Discord feed. Off unless a webhook URL is configured. The hub links point at this demo's own admin routes
+  // (open them with the `x-admin-token` header); a real app links to its moderator console. `origin` is known once the
+  // server listens, long before any report can make a link.
+  let origin = '';
+  const discordUrl = opts.discordWebhookUrl || process.env.DISCORD_WEBHOOK_URL || undefined;
+  const discordRole = opts.discordMentionRoleId || process.env.DISCORD_MENTION_ROLE_ID || undefined;
+  let discord: DiscordFeed | undefined;
+  if (discordUrl !== undefined) {
+    try {
+      discord = discordFeed(chatwarden, {
+        webhookUrl: discordUrl,
+        hubLink: (kind, id) =>
+          kind === 'report'
+            ? `${origin}/admin/reports/${encodeURIComponent(id)}`
+            : `${origin}/admin/people/${encodeURIComponent(id)}/history`,
+        ...(discordRole === undefined ? {} : { mentionRoleId: discordRole }),
+        ...(opts.discordFetch === undefined ? {} : { fetch: opts.discordFetch }),
+      });
+    } catch (err) {
+      // A bad URL or role id: stop before anything listens.
+      await chatwarden.close();
+      throw err;
+    }
+  }
 
   let nextSeat = 1;
 
@@ -326,11 +366,14 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   await new Promise<void>((resolve) => http.listen(opts.port ?? 3000, '127.0.0.1', resolve));
   const address = http.address();
   const port = typeof address === 'object' && address !== null ? address.port : 0;
+  origin = `http://127.0.0.1:${port}`;
 
   return {
     port,
     chatwarden,
+    discord: discord !== undefined,
     close: async () => {
+      discord?.dispose();
       for (const { ws } of seats.values()) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       http.closeAllConnections();

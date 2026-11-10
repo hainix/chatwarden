@@ -652,7 +652,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
             const code = store.sanctionRefCode(groupId);
             const target = store.sanctionGroupTarget(groupId);
             if (code !== null && target !== null) {
-              const rule = parseRuleRef(target.rule ?? 'uncovered');
+              // A stored rule the reader cannot parse is `rule: null`, never a throw: the revoke happened, and the event still goes out.
+              let rule: ReturnType<typeof parseRuleRef> | null = null;
+              try {
+                rule = parseRuleRef(target.rule ?? 'uncovered');
+              } catch {
+                rule = null;
+              }
               bus.emit({
                 type: 'sanction.revoked',
                 groupId,

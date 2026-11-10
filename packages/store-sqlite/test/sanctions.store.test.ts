@@ -813,6 +813,30 @@ describe('SqliteStore.sanctionGroupTarget', () => {
   });
 });
 
+describe('SqliteStore.sanctionGroupTarget with a NULL rule', () => {
+  it('answers rule: null for a row written before rules existed (a NULL column), with the subject still named', async () => {
+    const { db, store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const legacy = await applySanction(store, subjects, input(s, { rule: 4 }), NOW, index);
+    const other = await applySanction(store, subjects, input(s, { rule: 5 }), NOW, index);
+    db.prepare('UPDATE kit_sanctions SET rule = NULL WHERE group_id = ?').run(legacy.groupId);
+    expect(store.sanctionGroupTarget(legacy.groupId)).toEqual({ subject: s, rule: null });
+    // A neighbouring group keeps its rule: only that group's rows changed.
+    expect(store.sanctionGroupTarget(other.groupId)).toEqual({ subject: s, rule: '5' });
+  });
+
+  it('also for a NULL rule on a revoked group with an IP row (the IP row is not the target)', async () => {
+    const { db, store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const withIp = await applySanction(store, subjects, input(s, { includeIp: true, rule: 4 }), NOW, index);
+    db.prepare('UPDATE kit_sanctions SET rule = NULL WHERE group_id = ?').run(withIp.groupId);
+    store.revokeSanctionGroup(withIp.groupId, 'mod', NOW, 'oops');
+    expect(store.sanctionGroupTarget(withIp.groupId)).toEqual({ subject: s, rule: null });
+  });
+});
+
 describe('SqliteStore.sanctionRefCode', () => {
   it('finds the ref code of a group, revoked or ended, and null for an unknown group', async () => {
     const { store, subjects, index } = env();

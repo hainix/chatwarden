@@ -12,6 +12,8 @@ const DROP_LOG_WINDOW_MS = 60_000;
 /** The thread rows kept in memory before the oldest are forgotten (they are re-read from the store). */
 const CACHE_MAX = 10_000;
 const RULE_TITLE_MAX = 120;
+/** The most (kind, reason) pairs of dropped links counted apart; any further reason is counted as `other`. */
+const LINK_KEYS_MAX = 16;
 /** A hub link longer than this (as the URL parser writes it) is dropped, never truncated. */
 export const LINK_MAX = 512;
 
@@ -118,7 +120,8 @@ interface Job {
  *   off 1, 2, 4, 8, 16 s; at most 5 retries; 10 s per request. The queue is in memory, bounded at 1000 waiting events
  *   (the oldest is dropped, logged as a coalesced count `chatwarden.discord_dropped`).
  * - A hub link over 512 characters is dropped (never cut) and logged as `chatwarden.discord_link_dropped` (the link
- *   kind and a reason, nothing else). Only the facts of a post are ever shortened to fit Discord's 2000 characters; the
+ *   kind, a reason and a count, nothing else): the first of each kind and reason at once, then at most one line a minute
+ *   for it with the count since, and what is left when `dispose()` runs. Only the facts of a post are ever shortened to fit Discord's 2000 characters; the
  *   head, the role ping and the links are not.
  * - Every listener is fenced: a throw or a rejection (fetch, store, lookup) never reaches the kit, and only the error
  *   class is logged (`chatwarden.discord_failed`).
@@ -191,6 +194,47 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     else if (dropTimer === undefined) {
       dropTimer = setTimeout(flushDrops, DROP_LOG_WINDOW_MS - since);
       dropTimer.unref?.();
+    }
+  };
+
+  // ---- dropped hub links, logged as a coalesced count per kind and reason ----
+
+  interface LinkDrops {
+    kind: 'report' | 'person';
+    reason: string;
+    count: number;
+    lastLog: number | null;
+    timer: ReturnType<typeof setTimeout> | undefined;
+  }
+  const linkDrops = new Map<string, LinkDrops>();
+  const flushLinkDrop = (entry: LinkDrops): void => {
+    if (entry.timer !== undefined) clearTimeout(entry.timer);
+    entry.timer = undefined;
+    if (entry.count === 0) return;
+    safeWarn(logger, 'chatwarden.discord_link_dropped', { kind: entry.kind, reason: entry.reason, count: entry.count });
+    entry.count = 0;
+    entry.lastLog = clock.now();
+  };
+  /** Count a dropped link. The first of a kind and reason logs at once; after that at most one line a minute for it. */
+  const noteLinkDrop = (kind: 'report' | 'person', reason: string): void => {
+    let key = `${kind}:${reason}`;
+    // A hubLink that throws a new error class every time must not grow this without bound: past the cap they share one entry.
+    if (!linkDrops.has(key) && linkDrops.size >= LINK_KEYS_MAX) {
+      reason = 'other';
+      key = `${kind}:other`;
+    }
+    let entry = linkDrops.get(key);
+    if (entry === undefined) {
+      entry = { kind, reason, count: 0, lastLog: null, timer: undefined };
+      linkDrops.set(key, entry);
+    }
+    entry.count++;
+    const since = entry.lastLog === null ? Infinity : clock.now() - entry.lastLog;
+    if (since >= DROP_LOG_WINDOW_MS) flushLinkDrop(entry);
+    else if (entry.timer === undefined) {
+      const pending = entry;
+      pending.timer = setTimeout(() => flushLinkDrop(pending), DROP_LOG_WINDOW_MS - since);
+      pending.timer.unref?.();
     }
   };
 
@@ -318,7 +362,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
    */
   const link = (kind: 'report' | 'person', id: string, label: string): string | null => {
     const dropped = (reason: string): null => {
-      safeWarn(logger, 'chatwarden.discord_link_dropped', { kind, reason });
+      noteLinkDrop(kind, reason);
       return null;
     };
     try {
@@ -471,6 +515,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       queue.length = 0;
       forum.dispose();
       flushDrops();
+      for (const entry of linkDrops.values()) flushLinkDrop(entry);
     },
   };
 }

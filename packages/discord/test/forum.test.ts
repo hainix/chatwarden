@@ -490,6 +490,7 @@ describe('dispose', () => {
     answer(new Response(JSON.stringify({ id: 'm', channel_id: 'T7' }), { status: 200 }));
     await settle();
     expect(await r).toEqual({ threadId: 'T7' });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('is idempotent', () => {

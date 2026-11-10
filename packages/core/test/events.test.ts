@@ -865,6 +865,49 @@ describe('events: subject on auto.restricted, sanction.revoked and gap.created',
     expect(s.events.map((e) => (e.type === 'sanction.revoked' ? e.rule : 'x'))).toEqual([4, null]);
   });
 
+  it.each([
+    ['text', 'not-a-rule'],
+    ['zero', '0'],
+    ['a negative number', '-3'],
+    ['a decimal', '2.5'],
+    ['an empty string', ''],
+    ['a huge number', '99999999999999999999'],
+    ['padded', ' 4 '],
+  ])('a stored rule that is malformed (%s) still emits sanction.revoked, with rule null, and logs nothing', async (_n, stored) => {
+    // A store whose rows carry a rule value the reader cannot parse (a hand-edited or newer-schema row).
+    class OddRules extends MemoryStore {
+      override sanctionGroupTarget(groupId: string) {
+        const row = super.sanctionGroupTarget(groupId);
+        return row === null ? null : { ...row, rule: stored };
+      }
+    }
+    const s = await setup({}, new OddRules());
+    s.cw.rooms.seat(R, 'a', alice, 'Alice');
+    const subject = s.cw.rooms.subjectAt(R, 'a') ?? '';
+    const { groupId, refCode } = await s.cw.sanctions.apply(input(subject, { rule: 4 }));
+    s.events.length = 0;
+    s.logged.length = 0;
+    await expect(s.cw.sanctions.revoke(groupId, 'mod', 'x')).resolves.toBe(true);
+    expect(s.events).toEqual([{ type: 'sanction.revoked', groupId, refCode, at: NOW, subject, rule: null }]);
+    expect(failures(s)).toEqual([]);
+  });
+
+  it('a stored rule that is missing (null) also emits sanction.revoked with rule null', async () => {
+    class NoRule extends MemoryStore {
+      override sanctionGroupTarget(groupId: string) {
+        const row = super.sanctionGroupTarget(groupId);
+        return row === null ? null : { ...row, rule: null };
+      }
+    }
+    const s = await setup({}, new NoRule());
+    s.cw.rooms.seat(R, 'a', alice, 'Alice');
+    const subject = s.cw.rooms.subjectAt(R, 'a') ?? '';
+    const { groupId } = await s.cw.sanctions.apply(input(subject, { rule: 4 }));
+    s.events.length = 0;
+    await s.cw.sanctions.revoke(groupId, 'mod', 'x');
+    expect(s.events).toEqual([expect.objectContaining({ type: 'sanction.revoked', subject, rule: null })]);
+  });
+
   it('a revoke after a restart (a fresh kit on the same store) still names the subject and rule', async () => {
     const store = new MemoryStore();
     const s = await setup({}, store);

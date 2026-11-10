@@ -152,13 +152,16 @@ export async function applySanction(
  */
 export function sanctionFingerprint(sanction: ParsedSanction): string {
   const { action, reason } = sanction;
+  // `subject` is fingerprinted exactly as sent, on purpose (strict): a differently spelled subject is another request.
+  // The gap note is fingerprinted TRIMMED, because the core trims it before it is stored: two spellings that store the
+  // same note are the same request.
   const canonical = JSON.stringify([
     action.subject,
     action.kind,
     action.durationMs,
     action.rule,
     action.includeIp ?? false,
-    action.gapNote ?? null,
+    action.gapNote?.trim() ?? null,
     reason,
   ]);
   return createHash('sha256').update(canonical, 'utf8').digest('hex');

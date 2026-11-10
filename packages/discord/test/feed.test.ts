@@ -1380,8 +1380,8 @@ describe('hubLink output is bounded', () => {
     expect(text).not.toContain('https://h.test');
     expect((d.calls[0]!.body.allowed_mentions as { roles: string[] }).roles).toEqual([ROLE]);
     expect(logged).toEqual([
-      ['chatwarden.discord_link_dropped', { kind: 'report', reason: 'too_long' }],
-      ['chatwarden.discord_link_dropped', { kind: 'person', reason: 'too_long' }],
+      ['chatwarden.discord_link_dropped', { kind: 'report', reason: 'too_long', count: 1 }],
+      ['chatwarden.discord_link_dropped', { kind: 'person', reason: 'too_long', count: 1 }],
     ]);
     expect(JSON.stringify(logged)).not.toContain('h.test');
     expect(JSON.stringify(logged)).not.toContain(subject);
@@ -1415,7 +1415,7 @@ describe('hubLink output is bounded', () => {
     const text = String(d.calls[0]!.body.content);
     expect(text).not.toContain('Open report');
     expect(text).toContain(`[Open person](<https://hub.example.test/person/${subject}>)`);
-    expect(logged).toEqual([['chatwarden.discord_link_dropped', { kind: 'report', reason: 'too_long' }]]);
+    expect(logged).toEqual([['chatwarden.discord_link_dropped', { kind: 'report', reason: 'too_long', count: 1 }]]);
   });
 
   it('logs an unusable link and a throwing hubLink by class, never the value', async () => {
@@ -1425,8 +1425,8 @@ describe('hubLink output is bounded', () => {
     await k.emit(created(r.id));
     await settle();
     expect(a.logged).toEqual([
-      ['chatwarden.discord_link_dropped', { kind: 'report', reason: 'invalid' }],
-      ['chatwarden.discord_link_dropped', { kind: 'person', reason: 'invalid' }],
+      ['chatwarden.discord_link_dropped', { kind: 'report', reason: 'invalid', count: 1 }],
+      ['chatwarden.discord_link_dropped', { kind: 'person', reason: 'invalid', count: 1 }],
     ]);
     a.feed.dispose();
     const b = start(k, undefined, {
@@ -1436,8 +1436,105 @@ describe('hubLink output is bounded', () => {
     });
     await k.emit(created(r.id));
     await settle();
-    expect(b.logged[0]).toEqual(['chatwarden.discord_link_dropped', { kind: 'report', reason: 'RangeError' }]);
+    expect(b.logged[0]).toEqual(['chatwarden.discord_link_dropped', { kind: 'report', reason: 'RangeError', count: 1 }]);
     expect(JSON.stringify(b.logged)).not.toContain('secret-token');
+  });
+});
+
+describe('dropped hub links are logged as a coalesced count', () => {
+  const bad = (): string => 'javascript:alert(1)';
+  const lines = (logged: Array<[string, unknown]>) => logged.filter(([e]) => e === 'chatwarden.discord_link_dropped');
+
+  it('the first drop of a kind and reason is logged at once; the rest of the minute is one count', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { logged, feed } = start(k, undefined, { hubLink: bad });
+    for (let i = 0; i < 6; i++) await k.emit(created(r.id));
+    await settle();
+    // Each post has two bad links (report and person): the first of each kind is logged now.
+    expect(lines(logged)).toEqual([
+      ['chatwarden.discord_link_dropped', { kind: 'report', reason: 'invalid', count: 1 }],
+      ['chatwarden.discord_link_dropped', { kind: 'person', reason: 'invalid', count: 1 }],
+    ]);
+    await settle(59_000);
+    expect(lines(logged)).toHaveLength(2);
+    await settle(2000);
+    expect(lines(logged).slice(2)).toEqual([
+      ['chatwarden.discord_link_dropped', { kind: 'report', reason: 'invalid', count: 5 }],
+      ['chatwarden.discord_link_dropped', { kind: 'person', reason: 'invalid', count: 5 }],
+    ]);
+    feed.dispose();
+    expect(lines(logged)).toHaveLength(4);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a new window starts after a flush: the next drop after the minute is logged at once', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { logged } = start(k, undefined, { hubLink: bad });
+    await k.emit(created(r.id));
+    await settle(61_000);
+    await k.emit(created(r.id));
+    await settle();
+    expect(lines(logged)).toHaveLength(4);
+    expect(lines(logged).every(([, d]) => (d as { count: number }).count === 1)).toBe(true);
+  });
+
+  it('too_long and invalid are counted apart', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { logged } = start(k, undefined, {
+      hubLink: (kind) => (kind === 'report' ? `https://h.test/${'a'.repeat(600)}` : bad()),
+    });
+    await k.emit(created(r.id));
+    await k.emit(created(r.id));
+    await settle(61_000);
+    const reasons = lines(logged).map(([, d]) => `${(d as { kind: string }).kind}:${(d as { reason: string }).reason}:${(d as { count: number }).count}`);
+    expect(reasons).toEqual(['report:too_long:1', 'person:invalid:1', 'report:too_long:1', 'person:invalid:1']);
+  });
+
+  it('flushes what is pending when the feed is disposed, with no timer left', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { logged, feed } = start(k, undefined, { hubLink: bad });
+    for (let i = 0; i < 4; i++) await k.emit(created(r.id));
+    await settle();
+    expect(lines(logged)).toHaveLength(2);
+    feed.dispose();
+    expect(lines(logged).slice(2).map(([, d]) => (d as { count: number }).count)).toEqual([3, 3]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a feed with no dropped link logs nothing and holds no timer; the lines never hold a link or an id', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject });
+    const good = start(k);
+    await k.emit(created(r.id));
+    await settle();
+    expect(lines(good.logged)).toEqual([]);
+    good.feed.dispose();
+    const badOne = start(k, undefined, { hubLink: (kind, id) => `javascript:${kind}/${id}` });
+    for (let i = 0; i < 3; i++) await k.emit(created(r.id));
+    await settle(61_000);
+    expect(JSON.stringify(badOne.logged)).not.toContain(subject);
+    expect(JSON.stringify(badOne.logged)).not.toContain('javascript');
+  });
+
+  it('an unbounded variety of thrown error classes still logs a bounded number of lines', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    let n = 0;
+    const { logged } = start(k, undefined, {
+      hubLink: () => {
+        const e = new Error('x');
+        e.name = `Err${n++}`;
+        throw e;
+      },
+    });
+    for (let i = 0; i < 100; i++) await k.emit(created(r.id));
+    await settle();
+    expect(lines(logged).length).toBeLessThanOrEqual(18);
   });
 });
 
@@ -1456,6 +1553,7 @@ describe('a created thread is always remembered', () => {
     await settle();
     expect(k.threads.get(subject)).toMatchObject({ threadId: 'T77' });
     expect(String(k.threads.get(subject)?.label)).toMatch(LABEL_RE);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

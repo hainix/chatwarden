@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@chatwarden/core": "0.0.0",
+    "@chatwarden/discord": "0.0.0",
     "@chatwarden/http": "0.0.0",
     "@chatwarden/matcher": "0.0.0",
     "@chatwarden/profanity": "0.0.0",

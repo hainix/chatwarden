@@ -26,6 +26,27 @@ The player API identifies the caller from `x-chatwarden-key` (or the demo's `?ke
 adapter hands over as `req.remoteAddress` (never a header, so a client cannot choose it). Behind a reverse proxy that is the
 proxy's address: parse `X-Forwarded-For` in your own `identify`, trusting only your own proxy.
 
+## Discord feed (optional)
+
+Off unless `DISCORD_WEBHOOK_URL` is set. With it, tiny-chat starts the `@chatwarden/discord` feed: each reported player gets one
+thread in a Discord forum channel, and the report, the decision, any automatic timeout and a lifted sanction are posted into it.
+
+```sh
+DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/<id>/<token>' DISCORD_MENTION_ROLE_ID='<role id>' TINY_CHAT_ADMIN_TOKEN=demo npm start -w @chatwarden/example-tiny-chat
+```
+
+- `DISCORD_WEBHOOK_URL` is the forum channel's webhook (see [`packages/discord/README.md`](../../packages/discord/README.md) for how
+  to make one). It is a credential: keep it out of the repository. A value that is not a Discord webhook URL stops the server
+  at startup. Empty counts as unset.
+- `DISCORD_MENTION_ROLE_ID` is optional: the role to ping on a severe report (category `hate`) or a severe sanction. Without
+  it nobody is pinged.
+- The links in the posts point at this demo's own staff routes, `http://127.0.0.1:<port>/admin/reports/<id>` and
+  `http://127.0.0.1:<port>/admin/people/<subject>/history`. Open them with the `x-admin-token` header (the admin API is off
+  without `TINY_CHAT_ADMIN_TOKEN`). A real app links to its moderator console.
+- Posts hold no chat text, handle, note or reason, and ids only inside those links.
+- `startServer({ discordWebhookUrl, discordMentionRoleId, discordFetch })` takes the same settings as options (they win over
+  the environment); `discordFetch` replaces `fetch` for tests.
+
 ## The profile, swearing and the code of conduct
 
 tiny-chat runs the one-line preset `profile: 'relaxed'` with the optional `@chatwarden/profanity` package

@@ -860,6 +860,36 @@ describe('action: sanction', () => {
       ]);
       expect(all.size).toBe(8);
     });
+
+    it('the fingerprint covers the TRIMMED gap note (core trims it), and is strict about everything else', () => {
+      const base = { subject: 'a', kind: 'warning', durationMs: null, rule: 'uncovered', reason: 'r' };
+      const fp = (over: Record<string, unknown> = {}) => sanctionFingerprint(parseSanction({ ...base, gapNote: 'n', ...over }));
+      expect(fp({ gapNote: '  n  ' })).toBe(fp());
+      expect(fp({ gapNote: ` \tn\n` })).toBe(fp());
+      expect(fp({ gapNote: 'n m' })).not.toBe(fp({ gapNote: 'nm' }));
+      expect(fp({ gapNote: ' n m ' })).toBe(fp({ gapNote: 'n m' }));
+      // `subject` is fingerprinted exactly as sent, on purpose (strict); an id with padding never gets that far.
+      expect(() => fp({ subject: ' a ' })).toThrow();
+      expect(fp({ subject: 'A' })).not.toBe(fp({ subject: 'a' }));
+      // Without a gap note (a numbered rule) the field is null, and a default spelled out changes nothing.
+      const numbered = (over: Record<string, unknown> = {}) =>
+        sanctionFingerprint(parseSanction({ subject: 'a', kind: 'chat', durationMs: 5, rule: 1, reason: 'r', ...over }));
+      expect(numbered()).toBe(numbered({ includeIp: false }));
+    });
+
+    it('the same key with a gap note that differs only by surrounding whitespace is a replay, not a mismatch', async () => {
+      const s = await setup();
+      const subject = s.w.person();
+      const over = { rule: 'uncovered', kind: 'warning', durationMs: null };
+      const first = await s.post(sanctionBody(subject, 'gap-ws', { ...over, gapNote: 'Griefing the exit.' }));
+      expect(first.status).toBe(200);
+      const again = await s.post(sanctionBody(subject, 'gap-ws', { ...over, gapNote: '  Griefing the exit.\n' }));
+      expect(again.status).toBe(200);
+      expect(again.body).toEqual(first.body);
+      expect(s.sanctionRows()).toHaveLength(1);
+      const other = await s.post(sanctionBody(subject, 'gap-ws', { ...over, gapNote: 'Another gap.' }));
+      expect(errorOf(other)).toBe('idempotency_mismatch');
+    });
   });
 
   describe('a bad request never takes a key: pure validation runs before reserve', () => {
