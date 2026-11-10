@@ -2129,15 +2129,6 @@
   .cw-hub .cw-radio .cw-kbd {
     display: none;
   }
-  .cw-hub .cw-toasts {
-    top: calc(3.5rem + env(safe-area-inset-top, 0px));
-    right: var(--cw-space-3);
-    bottom: auto;
-    left: var(--cw-space-3);
-    justify-items: center;
-    width: auto;
-    max-width: none;
-  }
   .cw-hub .cw-submit .cw-btn {
     flex: 1 1 10rem;
   }
@@ -2184,6 +2175,18 @@
   width: max-content;
   max-width: calc(var(--cw-queue-width) - var(--cw-space-4));
   pointer-events: none;
+}
+/* After the base rule, so it wins: same specificity, source order decides. */
+@media (max-width: 51.1875rem) {
+  .cw-hub .cw-toasts {
+    top: calc(3.5rem + env(safe-area-inset-top, 0px));
+    right: var(--cw-space-3);
+    bottom: auto;
+    left: var(--cw-space-3);
+    justify-items: center;
+    width: auto;
+    max-width: none;
+  }
 }
 .cw-hub .cw-toast {
   position: relative;

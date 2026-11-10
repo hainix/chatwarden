@@ -221,6 +221,42 @@ describe('fix round 1: the pane in the browser', () => {
     expect(phone).toMatch(/\.cw-toasts\s*\{[^}]*bottom:\s*auto/);
   });
 
+  // The phone rules only win if they come after the base rule they override: same specificity, so source order decides. A phone
+  // block placed before its base rule lost to it in the browser (the toast stack kept the base bottom and left, took the phone top,
+  // and stretched over the whole screen).
+  it('every phone override comes after the base rule it overrides, so it wins the cascade', () => {
+    const query = '@media (max-width: 51.1875rem)';
+    const blocks: { start: number; body: string }[] = [];
+    for (let from = css.indexOf(query); from >= 0; from = css.indexOf(query, from + 1)) {
+      const open = css.indexOf('{', from);
+      let depth = 0;
+      let i = open;
+      for (; i < css.length; i += 1) {
+        if (css[i] === '{') depth += 1;
+        if (css[i] === '}') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      blocks.push({ start: from, body: css.slice(open + 1, i) });
+    }
+    expect(blocks.length).toBeGreaterThan(0);
+    const late: string[] = [];
+    let checked = 0;
+    for (const { start, body } of blocks) {
+      for (const m of body.matchAll(/^\s+([^{}\n@][^{}\n]*?)\s*\{\s*$/gm)) {
+        for (const selector of (m[1] as string).split(',').map((s) => s.trim())) {
+          for (let at = css.indexOf(`\n${selector} {`); at >= 0; at = css.indexOf(`\n${selector} {`, at + 1)) {
+            checked += 1;
+            if (at > start) late.push(selector);
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(10);
+    expect(late).toEqual([]);
+  });
+
   it('B5: the docked bar is capped to a third of the screen and scrolls inside itself, its buttons kept in view', () => {
     const body = rule2('.cw-hub .cw-dock-body');
     expect(body).toMatch(/max-height:\s*min\(34vh, 21rem\)/);
