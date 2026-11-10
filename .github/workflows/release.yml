@@ -6,7 +6,8 @@ name: Release
 #   - Provenance needs a PUBLIC source repository. The owner makes hainix/chatwarden public first (see RELEASING.md); until
 #     then a real publish stops with a clear message. The provenance input (default true) lets a manual run deliberately
 #     publish without provenance; a tag push always uses it.
-# The steps and the one-time setup are in RELEASING.md. Nothing is uploaded until the repository secret NPM_TOKEN exists.
+# The steps and the one-time setup are in RELEASING.md. Auth: the NPM_TOKEN secret when it is set (needed for the very first
+# publish), otherwise npm trusted publishing (OIDC) once each package lists this repository and workflow on npmjs.com.
 
 on:
   workflow_dispatch:
@@ -87,14 +88,19 @@ jobs:
             echo "::warning::${GITHUB_REPOSITORY} is private and provenance is off, so this publish carries no provenance statement."
           fi
 
-      - name: Require NPM_TOKEN for a real publish
+      # Trusted publishing (OIDC) needs npm 11.5.1 or later; Node 24 may ship an older npm.
+      - name: Use an npm with trusted publishing
+        run: npm install -g npm@^11.5.1
+
+      - name: Choose npm auth for a real publish
         if: ${{ env.DRY_RUN != 'true' }}
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::The repository secret NPM_TOKEN is empty or missing, so nothing can be published. Follow the one-time setup in RELEASING.md (create the @chatwarden npm org, create a granular access token, add it as the secret NPM_TOKEN), then re-run this workflow."
-            exit 1
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "publishing with the NPM_TOKEN secret"
+          else
+            echo "::notice::No NPM_TOKEN secret: publishing through npm trusted publishing (OIDC). Each package must list hainix/chatwarden and release.yml as its trusted publisher on npmjs.com; a package without it fails with an auth error. The first publish of a new package needs NPM_TOKEN (see RELEASING.md)."
           fi
 
       - name: Publish in dependency order (dry run unless this is a tag push or dry_run is off)
