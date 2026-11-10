@@ -302,6 +302,12 @@ export interface Chatwarden {
     /** End `actor`'s own claim. True only when it ended a live one; never touches another moderator's. */
     release(person: SubjectId, actor: string): boolean;
     /**
+     * What a decision does to the claim: end `actor`'s own claim only when the person has no other open report (one case per
+     * person: deciding one report of several keeps the claim, and the last one releases it). While reports remain the claim is
+     * not touched at all. True only when it ended a live claim.
+     */
+    releaseWhenDone(person: SubjectId, actor: string): boolean;
+    /**
      * Claim and return the oldest OPEN case nobody holds, optionally only cases with an open report of `category`
      * (`RangeError` for an unknown one), or null. A case is a person, ranked by their oldest open report and opened on
      * their newest. A case anyone holds is skipped without a write (held cases are read once per page of reports). `category`
@@ -774,6 +780,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       holders: (people) => desk.holders(people),
       claim: (person, actor, o) => desk.claim(person, actor, o),
       release: (person, actor) => desk.release(person, actor),
+      releaseWhenDone: (person, actor) => desk.releaseWhenDone(person, actor),
       next: (actor, filter) => desk.next(actor, filter),
       view: (person, actor) => desk.view(person, actor),
       viewers: (person, except) => desk.viewers(person, except),

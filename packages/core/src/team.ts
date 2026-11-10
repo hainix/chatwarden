@@ -243,6 +243,21 @@ export class CaseDesk {
   }
 
   /**
+   * After a decision: end `actor`'s own claim on the person only when the person has no open report left (any alias counts).
+   * While another report about them is open the claim is kept untouched, so its heartbeat and its 10 minutes go on as normal and
+   * nobody else can take the case from under the moderator who is working through it. True only when it ended a live claim.
+   * The check and the release are one transaction.
+   */
+  releaseWhenDone(person: SubjectId, actor: string): boolean {
+    needActor(actor);
+    const canonical = this.subjects.canonical(needPerson(person));
+    return this.store.transaction(() => {
+      if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1).length > 0) return false;
+      return this.store.releaseClaim(canonical, actor, this.clock.now());
+    });
+  }
+
+  /**
    * Claim and return the oldest open case nobody holds (`category` limits it to cases with an open report of that
    * category), or null. A case is a person, ranked by their OLDEST open report; it opens on their NEWEST. A case
    * `actor` already holds is skipped. Each candidate is one atomic conditional claim, so two moderators racing never

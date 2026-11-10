@@ -76,7 +76,8 @@ const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
  * - `POST /reports/:id/decide { verdict, actions, reason, evidence?, takeOver? }`: decide (`report.decide`, replays too). Another
  *   moderator's live claim on the reported person is 409 `claimed` unless `takeOver: true` and the caller holds
- *   `claims.override` (then the takeover is audited as `case.takeover`, first). Deciding releases the caller's claim.
+ *   `claims.override` (then the takeover is audited as `case.takeover`, first). Deciding the person's last open report releases the
+ *   caller's claim; while they have other open reports it is kept (one case per person).
  * - `GET /people/:ref/history?limit`: a person's actions, recent reports against them, their sanctions as
  *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
  *   filed stand, `asReporter` (`history.view`)
@@ -162,10 +163,12 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const result = await applyDecision(cw, id, decision, c.authz.actor);
       // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
       c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
-      // Deciding ends the caller's own claim. Not on a replay: the caller may hold a fresh claim on the person's next report.
+      // Deciding the person's last open report ends the caller's own claim; while other reports about them are open the claim is
+      // kept (one case per person), so nobody else can take the case from the moderator who is working through it. Not on a
+      // replay: the caller may hold a fresh claim on the person's next report.
       if (person !== null && !result.replay) {
         try {
-          cw.cases.release(person, c.authz.actor);
+          cw.cases.releaseWhenDone(person, c.authz.actor);
         } catch {
           safeWarn(ctx.logger, 'chatwarden.http_release_failed');
         }

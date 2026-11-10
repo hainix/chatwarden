@@ -120,7 +120,7 @@ export function webhookIn(cw: Chatwarden, options: WebhookInOptions): RouteTable
     const decision = parseDecision(input);
     needForDecision(decision.actions, may);
     // The reported person, read before the decision (a claim is held on them). A webhook is a service, not a moderator: it
-    // is never held up by a claim and holds none, so a decision releases whoever held the case.
+    // is never held up by a claim and holds none, so a decision of the person's last open report releases whoever held the case (while other reports about them are open, the holder keeps it).
     const person = cw.reports.get(reportId)?.targetPerson ?? null;
     const result = await applyDecision(cw, reportId, decision, actor);
     // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
@@ -128,7 +128,7 @@ export function webhookIn(cw: Chatwarden, options: WebhookInOptions): RouteTable
     if (person !== null && !result.replay) {
       try {
         const holder = cw.cases.holder(person);
-        if (holder !== null) cw.cases.release(person, holder.by);
+        if (holder !== null) cw.cases.releaseWhenDone(person, holder.by);
       } catch {
         safeWarn(logger, 'chatwarden.http_release_failed');
       }

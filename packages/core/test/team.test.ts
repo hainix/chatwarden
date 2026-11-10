@@ -223,6 +223,103 @@ describe('cases.release', () => {
   });
 });
 
+describe('cases.releaseWhenDone: a decision keeps the claim while the person has other open reports', () => {
+  it('3 open reports: deciding one keeps the claim as it was (same holder, same expiry), the second too, the last releases it', async () => {
+    const { cw, file, fileAgain, decide, clock } = await setup();
+    const a = await file('harassment', 'same-target-key');
+    const b = await fileAgain(a, 'same-target-key');
+    const c = await fileAgain(a, 'same-target-key');
+    expect(b.person).toBe(a.person);
+    expect(c.person).toBe(a.person);
+    cw.cases.claim(a.person, 'ann');
+    const held = cw.cases.holder(a.person);
+
+    await decide(cw, a.id, a.person);
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(false);
+    expect(cw.cases.holder(a.person)).toEqual(held);
+
+    clock.t += MIN;
+    await decide(cw, b.id, a.person);
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(false);
+    expect(cw.cases.holder(a.person)?.by).toBe('ann');
+
+    await decide(cw, c.id, a.person);
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(true);
+    expect(cw.cases.holder(a.person)).toBeNull();
+    // Nothing left to release: false, and not an error.
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(false);
+  });
+
+  it('a kept claim carries on as normal: its heartbeat and its lapse', async () => {
+    const { cw, file, fileAgain, decide, clock } = await setup();
+    const a = await file('harassment', 'same-target-key');
+    await fileAgain(a, 'same-target-key');
+    cw.cases.claim(a.person, 'ann');
+    await decide(cw, a.id, a.person);
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(false);
+    clock.t += 9 * MIN;
+    expect(cw.cases.claim(a.person, 'ann').ok).toBe(true);
+    clock.t += CLAIM_TTL_MS;
+    expect(cw.cases.holder(a.person)).toBeNull();
+  });
+
+  it('only the actor named: another moderator claim, a lapsed one and no claim are all false, and never freed', async () => {
+    const { cw, file, decide, clock } = await setup();
+    const a = await file();
+    cw.cases.claim(a.person, 'ann');
+    await decide(cw, a.id, a.person);
+    expect(cw.cases.releaseWhenDone(a.person, 'bea')).toBe(false);
+    expect(cw.cases.holder(a.person)?.by).toBe('ann');
+    clock.t += CLAIM_TTL_MS;
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(false);
+    expect(cw.cases.releaseWhenDone('s_nobody', 'ann')).toBe(false);
+  });
+
+  it('a report about someone else does not count as "another open report" of this person', async () => {
+    const { cw, file, decide } = await setup();
+    const a = await file();
+    await file();
+    cw.cases.claim(a.person, 'ann');
+    await decide(cw, a.id, a.person);
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(true);
+  });
+
+  it('a report that arrives after the decision still counts: the claim is kept', async () => {
+    const { cw, file, fileAgain, decide } = await setup();
+    const a = await file('harassment', 'same-target-key');
+    cw.cases.claim(a.person, 'ann');
+    await decide(cw, a.id, a.person);
+    await fileAgain(a, 'same-target-key');
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(false);
+    expect(cw.cases.holder(a.person)?.by).toBe('ann');
+  });
+
+  it('the change token moves when a claim is released and not when it is kept (the decision itself moves it)', async () => {
+    const { cw, file, fileAgain, decide } = await setup();
+    const a = await file('harassment', 'same-target-key');
+    const b = await fileAgain(a, 'same-target-key');
+    cw.cases.claim(a.person, 'ann');
+    await decide(cw, a.id, a.person);
+    const afterDecide = cw.changes.token();
+    cw.cases.releaseWhenDone(a.person, 'ann');
+    expect(cw.changes.token()).toBe(afterDecide);
+    await decide(cw, b.id, a.person);
+    const afterLast = cw.changes.token();
+    expect(afterLast).not.toBe(afterDecide);
+    cw.cases.releaseWhenDone(a.person, 'ann');
+    expect(cw.changes.token()).not.toBe(afterLast);
+  });
+
+  it('releases once nothing is open, and an empty actor is a RangeError', async () => {
+    const { cw, file, decide } = await setup();
+    const a = await file();
+    cw.cases.claim(a.person, 'ann');
+    await decide(cw, a.id, a.person);
+    expect(cw.cases.releaseWhenDone(a.person, 'ann')).toBe(true);
+    expect(() => cw.cases.releaseWhenDone(a.person, '')).toThrow(RangeError);
+  });
+});
+
 describe('cases.holders', () => {
   it('answers the live claims among the people asked, keyed by person, and ignores the rest', async () => {
     const { cw, file, clock } = await setup();

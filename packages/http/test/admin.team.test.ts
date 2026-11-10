@@ -572,17 +572,93 @@ describe('POST /reports/:id/decide and POST /sanctions with a claim in the way',
     expect(w.audit()).toHaveLength(before);
   });
 
-  it('the holder decides; the claim is released and the case is free', async () => {
+  it('the holder decides the last open report: the claim is released and the case is free', async () => {
     const w = await world();
     const r = await w.file();
-    const second = await w.fileAgainst(r, 'second-reporter');
     await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
     const res = await w.call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: warn(r.target) });
     expect(res.status).toBe(200);
     expect(w.cw.cases.holder(r.target)).toBeNull();
-    // The other report is still open and now anyone may take it.
+    expect((await w.call('POST', `/cases/${r.target}/claim`, { actor: 'bea' })).status).toBe(404);
+  });
+
+  it('one case per person: deciding one of three open reports keeps the claim (same holder and expiry); only the last releases it', async () => {
+    const w = await world();
+    const r = await w.file();
+    const second = await w.fileAgainst(r, 'second-reporter');
+    const third = await w.fileAgainst(r, 'third-reporter');
+    await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
+    const held = w.cw.cases.holder(r.target);
+    expect((await w.call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: warn(r.target) })).status).toBe(200);
+    expect(w.cw.cases.holder(r.target)).toEqual(held);
+    // The other reports are still open, and nobody else can take the case while Ann works through it.
     expect(w.cw.reports.get(second.id)?.status).toBe('open');
-    expect((await w.call('POST', `/cases/${r.target}/claim`, { actor: 'bea' })).status).toBe(200);
+    const refused = await w.call('POST', `/cases/${r.target}/claim`, { actor: 'bea' });
+    expect(refused.status).toBe(409);
+    expect(refused.body).toMatchObject({ error: 'claimed', by: 'ann' });
+    expect((await w.call('POST', `/reports/${second.id}/decide`, { actor: 'ann', body: { ...warn(r.target), actions: [{ subject: r.target, kind: 'chat', durationMs: DAY, rule: 2 }] } })).status).toBe(200);
+    expect(w.cw.cases.holder(r.target)?.by).toBe('ann');
+    expect((await w.call('POST', `/reports/${third.id}/decide`, { actor: 'ann', body: { verdict: 'no_action', reason: 'fine', actions: [] } })).status).toBe(200);
+    expect(w.cw.cases.holder(r.target)).toBeNull();
+  });
+
+  it('a kept claim carries on as normal: its heartbeat extends it and it lapses on its own', async () => {
+    const w = await world();
+    const r = await w.file();
+    await w.fileAgainst(r, 'second-reporter');
+    await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
+    await w.call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: warn(r.target) });
+    expect(w.cw.cases.holder(r.target)?.by).toBe('ann');
+    w.clock.t += 9 * MIN;
+    const beat = await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
+    expect(beat.status).toBe(200);
+    w.clock.t += CLAIM_TTL_MS;
+    expect(w.cw.cases.holder(r.target)).toBeNull();
+  });
+
+  it('a senior who took the case over by deciding holds it under the same rule: kept while reports remain, released by the last', async () => {
+    const w = await world();
+    const r = await w.file();
+    const second = await w.fileAgainst(r, 'second-reporter');
+    await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
+    expect((await w.call('POST', `/reports/${r.id}/decide`, { actor: 'sam', role: 'senior', body: warn(r.target, { takeOver: true }) })).status).toBe(200);
+    expect(w.cw.cases.holder(r.target)?.by).toBe('sam');
+    expect((await w.call('POST', `/reports/${second.id}/decide`, { actor: 'sam', role: 'senior', body: { verdict: 'no_action', reason: 'fine', actions: [] } })).status).toBe(200);
+    expect(w.cw.cases.holder(r.target)).toBeNull();
+  });
+
+  it('a replay of a decision changes nothing about the claim, kept or released', async () => {
+    const w = await world();
+    const r = await w.file();
+    const second = await w.fileAgainst(r, 'second-reporter');
+    await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
+    const decision = warn(r.target);
+    await w.call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: decision });
+    const held = w.cw.cases.holder(r.target);
+    const again = await w.call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: decision });
+    expect(body(again).replay).toBe(true);
+    expect(w.cw.cases.holder(r.target)).toEqual(held);
+    const last = { verdict: 'no_action', reason: 'fine', actions: [] };
+    await w.call('POST', `/reports/${second.id}/decide`, { actor: 'ann', body: last });
+    expect(w.cw.cases.holder(r.target)).toBeNull();
+    // A replay of the last decision after it released the claim changes nothing either.
+    const replayLast = await w.call('POST', `/reports/${second.id}/decide`, { actor: 'ann', body: last });
+    expect(body(replayLast).replay).toBe(true);
+    expect(w.cw.cases.holder(r.target)).toBeNull();
+  });
+
+  it('every decision moves the change token, whether the claim is kept or released', async () => {
+    const w = await world();
+    const r = await w.file();
+    const second = await w.fileAgainst(r, 'second-reporter');
+    await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
+    const token = async (): Promise<string> => body(await w.call('GET', '/changes')).token as string;
+    const t0 = await token();
+    await w.call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: warn(r.target) });
+    const t1 = await token();
+    expect(t1).not.toBe(t0);
+    await w.call('POST', `/reports/${second.id}/decide`, { actor: 'ann', body: { verdict: 'no_action', reason: 'fine', actions: [] } });
+    expect(await token()).not.toBe(t1);
   });
 
   it('a decision on an unclaimed case, or on a case whose claim lapsed, goes through', async () => {
@@ -662,7 +738,8 @@ describe('POST /reports/:id/decide and POST /sanctions with a claim in the way',
     await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
     const decision = warn(r.target);
     expect((await w.call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: decision })).status).toBe(200);
-    // Bea picks up the other report on the same person; Ann's double-click replays harmlessly.
+    // Ann lets go of the case; Bea picks up the other report on the same person; Ann's double-click replays harmlessly.
+    await w.call('POST', `/cases/${r.target}/release`, { actor: 'ann' });
     expect((await w.call('POST', `/cases/${r.target}/claim`, { actor: 'bea' })).status).toBe(200);
     const replay = await w.call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: decision });
     expect(replay.status).toBe(200);

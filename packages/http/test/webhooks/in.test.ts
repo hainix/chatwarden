@@ -1108,12 +1108,53 @@ describe('logging and a shared replay cache', () => {
 });
 
 describe('action: decide and a moderator claim', () => {
-  it('releases the claim on the reported person after a decision (the service actor is not held up by it)', async () => {
+  it('releases the claim on the reported person after the decision of their last open report (the service actor is not held up by it)', async () => {
     const s = await setup();
     const { reportId, target } = await s.filed();
     expect(s.cw.cases.claim(target, 'ann').ok).toBe(true);
     expect((await s.post(decideBody(reportId, target))).status).toBe(200);
     expect(s.cw.cases.holder(target)).toBeNull();
+  });
+
+  it('one case per person: a decision of one of three open reports keeps the holder\'s claim, and only the last releases it', async () => {
+    const s = await setup();
+    const first = await s.w.file();
+    const second = await s.w.fileAgainst(first, 'second-reporter');
+    const third = await s.w.fileAgainst(first, 'third-reporter');
+    expect(s.cw.cases.claim(first.target, 'ann').ok).toBe(true);
+    const held = s.cw.cases.holder(first.target);
+    expect((await s.post(decideBody(first.id, first.target))).status).toBe(200);
+    expect(s.cw.cases.holder(first.target)).toEqual(held);
+    expect((await s.post(decideBody(second.id, first.target, { actions: [{ subject: first.target, kind: 'chat', durationMs: DAY, rule: 2 }] }))).status).toBe(200);
+    expect(s.cw.cases.holder(first.target)?.by).toBe('ann');
+    expect((await s.post(decideBody(third.id, first.target, { verdict: 'no_action', actions: [] }))).status).toBe(200);
+    expect(s.cw.cases.holder(first.target)).toBeNull();
+  });
+
+  it('whoever holds it (a senior who took it over) is treated the same: kept while reports remain', async () => {
+    const s = await setup();
+    const first = await s.w.file();
+    await s.w.fileAgainst(first, 'second-reporter');
+    s.cw.cases.claim(first.target, 'ann');
+    s.cw.cases.claim(first.target, 'sam', { takeOver: true });
+    await s.post(decideBody(first.id, first.target));
+    expect(s.cw.cases.holder(first.target)?.by).toBe('sam');
+  });
+
+  it('a replay of a kept decision changes nothing, and the change token moves on each decision', async () => {
+    const s = await setup();
+    const first = await s.w.file();
+    await s.w.fileAgainst(first, 'second-reporter');
+    s.cw.cases.claim(first.target, 'ann');
+    const before = s.cw.changes.token();
+    await s.post(decideBody(first.id, first.target));
+    const after = s.cw.changes.token();
+    expect(after).not.toBe(before);
+    const held = s.cw.cases.holder(first.target);
+    const again = await s.post(decideBody(first.id, first.target));
+    expect((again.body as { replay: boolean }).replay).toBe(true);
+    expect(s.cw.cases.holder(first.target)).toEqual(held);
+    expect(s.cw.changes.token()).toBe(after);
   });
 
   it('does not touch a claim on someone else', async () => {
