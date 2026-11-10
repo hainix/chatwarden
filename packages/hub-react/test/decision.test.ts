@@ -9,11 +9,16 @@ import {
   durationOf,
   emptyForm,
   newDraft,
+  defaultLines,
+  initialForm,
+  needsBanPermission,
+  parseChoiceKey,
   presets,
   resolveDraft,
   serverVerdict,
   toInput,
   validate,
+  whyNotAdded,
   withSuggestion,
 } from '../src/decision.js';
 import type { Draft, DecisionForm, ValidationContext } from '../src/decision.js';
@@ -77,8 +82,18 @@ describe('resolveDraft', () => {
     expect(resolveDraft(draft({ what: 'ban:null' }))).toEqual({ kind: 'ban', durationMs: null });
     expect(resolveDraft(draft({ what: 'note:null' }))).toEqual({ kind: 'note', durationMs: null });
   });
-  it('an unknown preset is nothing', () => {
-    expect(resolveDraft(draft({ what: 'ban:12345' }))).toBeNull();
+  it('a one-off length written in the choice is read as it is (a profile ladder may use any length)', () => {
+    expect(resolveDraft(draft({ what: 'ban:12345' }))).toEqual({ kind: 'ban', durationMs: 12_345 });
+  });
+  it.each(['', 'ban', 'ban:0', 'ban:-5', 'ban:1.5', 'ban:abc', 'jail:1000', 'warning:1000', 'note:5', `chat:${365 * 86_400_000 + 1}`, 'chat:99999999999999999'])(
+    'a choice the server could not take is nothing: %j',
+    (what) => {
+      expect(resolveDraft(draft({ what }))).toBeNull();
+    },
+  );
+  it('the longest length, 365 days, is read; one millisecond more is not', () => {
+    expect(resolveDraft(draft({ what: `chat:${365 * 86_400_000}` }))).toEqual({ kind: 'chat', durationMs: 365 * 86_400_000 });
+    expect(parseChoiceKey(`chat:${365 * 86_400_000 + 1}`)).toBeNull();
   });
   it('something else uses the chosen kind and length', () => {
     expect(resolveDraft(draft({ what: 'other', customKind: 'area', customDuration: '30d' }))).toEqual({ kind: 'area', durationMs: 2_592_000_000 });
@@ -223,12 +238,22 @@ describe('validate: what happens', () => {
     expect(problems(form({ actions: [d] }), ctx({ canPermanent: false })).actions.p?.what?.key).toBe('hub.decide.error.permanent');
     expect(problems(form({ actions: [d] }), ctx({ canPermanent: true })).count).toBe(0);
   });
-  it('treats a custom permanent length the same way, for any kind', () => {
-    for (const customKind of ['chat', 'area', 'ban'] as const) {
+  it('only a permanent BAN needs the senior permission (as on the server): a permanent chat or area restriction does not', () => {
+    const ban = draft({ uid: 'p', what: 'other', customKind: 'ban', customDuration: 'permanent' });
+    expect(problems(form({ actions: [ban] }), ctx({ canPermanent: false })).actions.p?.what?.key).toBe('hub.decide.error.permanent');
+    expect(problems(form({ actions: [ban] }), ctx({ canPermanent: true })).count).toBe(0);
+    for (const customKind of ['chat', 'area'] as const) {
       const d = draft({ uid: 'p', what: 'other', customKind, customDuration: 'permanent' });
-      expect(problems(form({ actions: [d] }), ctx({ canPermanent: false })).actions.p?.what?.key, customKind).toBe('hub.decide.error.permanent');
+      expect(problems(form({ actions: [d] }), ctx({ canPermanent: false })).count, customKind).toBe(0);
       expect(problems(form({ actions: [d] }), ctx({ canPermanent: true })).count, customKind).toBe(0);
     }
+  });
+  it('a permanent ban written as a one-off choice key is gated the same way', () => {
+    const d = draft({ uid: 'p', what: 'ban:null' });
+    expect(needsBanPermission({ kind: 'ban', durationMs: null })).toBe(true);
+    expect(needsBanPermission({ kind: 'ban', durationMs: 1000 })).toBe(false);
+    expect(needsBanPermission({ kind: 'chat', durationMs: null })).toBe(false);
+    expect(problems(form({ actions: [d] }), ctx({ canPermanent: false })).actions.p?.what?.key).toBe('hub.decide.error.permanent');
   });
   it('a warning and a note are never "permanent": they have no length', () => {
     for (const customKind of ['warning', 'note'] as const) {
@@ -349,19 +374,149 @@ describe('withSuggestion', () => {
       expect(f?.actions[0], what).toMatchObject({ person: T, what, rule: '2' });
     }
   });
-  it('an area ban is a "something else" action at the suggested length', () => {
+  it('an area restriction is added as its own choice at the suggested length', () => {
     const f = withSuggestion(form(), ctx(), { kind: 'area', durationMs: 604_800_000 }, 2, 'u1');
-    expect(f?.actions[0]).toMatchObject({ what: 'other', customKind: 'area', customDuration: '7d' });
+    expect(f?.actions[0]).toMatchObject({ what: 'area:604800000' });
+    expect(resolveDraft(f?.actions[0] as Draft)).toEqual({ kind: 'area', durationMs: 604_800_000 });
   });
   it('"none" adds nothing', () => {
     expect(withSuggestion(form(), ctx(), 'none', 2, 'u1')).toBeNull();
   });
-  it('a length the form cannot offer adds nothing', () => {
-    expect(withSuggestion(form(), ctx(), { kind: 'area', durationMs: 12_345 }, 2, 'u1')).toBeNull();
+  it('a length no menu offers (a profile ladder of 3 days) is still added, as a one-off choice', () => {
+    const f = withSuggestion(form(), ctx(), { kind: 'chat', durationMs: 3 * 86_400_000 }, 2, 'u1');
+    expect(f?.actions[0]).toMatchObject({ what: 'chat:259200000' });
+    expect(whyNotAdded(form(), ctx(), { kind: 'chat', durationMs: 3 * 86_400_000 })).toBeNull();
+  });
+  it('a length the server would refuse (over 365 days) adds nothing, and says "unsupported"', () => {
+    const outcome = { kind: 'ban', durationMs: 366 * 86_400_000 } as const;
+    expect(withSuggestion(form(), ctx(), outcome, 2, 'u1')).toBeNull();
+    expect(whyNotAdded(form(), ctx(), outcome)).toBe('unsupported');
+  });
+  it('says why when it cannot add: nothing suggested, or the decision is full', () => {
+    expect(whyNotAdded(form(), ctx(), 'none')).toBe('none');
+    const full = form({ actions: Array.from({ length: MAX_ACTIONS }, (_, i) => draft({ uid: `f${i}`, person: i % 2 === 0 ? R : O, what: i < 10 ? 'warning:null' : 'note:null' })) });
+    expect(whyNotAdded(full, ctx(), 'warning')).toBe('limit');
+    expect(withSuggestion(full, ctx(), 'warning', 2, 'u1')).toBeNull();
+  });
+  it('at the limit, an action of the same kind for the reported person is still changed, not refused', () => {
+    const mine = draft({ uid: 'mine', person: T, what: 'warning:null' });
+    const full = form({ actions: [mine, ...Array.from({ length: MAX_ACTIONS - 1 }, (_, i) => draft({ uid: `f${i}`, person: R, what: 'note:null' }))] });
+    expect(whyNotAdded(full, ctx(), { kind: 'chat', durationMs: 86_400_000 })).toBe('limit');
+    expect(whyNotAdded(full, ctx(), 'warning')).toBeNull();
+  });
+  it('does not flip the verdict: an unset one becomes fair, a chosen one stays', () => {
+    expect(withSuggestion(form({ verdict: null }), ctx(), 'warning', 2, 'u1')?.verdict).toBe('fair');
+    expect(withSuggestion(form({ verdict: 'fair' }), ctx(), 'warning', 2, 'u1')?.verdict).toBe('fair');
+    expect(withSuggestion(form({ verdict: 'bad_faith' }), ctx(), 'warning', 2, 'u1')?.verdict).toBe('bad_faith');
+    expect(withSuggestion(form({ verdict: 'not_a_problem' }), ctx(), 'warning', 2, 'u1')?.verdict).toBe('not_a_problem');
+  });
+  it('carries the chosen lines for an action that shows lines, and none for a note', () => {
+    expect(withSuggestion(form(), ctx(), 'warning', 2, 'u1', ['t1', 't2'])?.actions[0]?.lineIds).toEqual(['t1', 't2']);
+    expect(withSuggestion(form(), ctx(), 'note', 2, 'u1', ['t1', 't2'])?.actions[0]?.lineIds).toEqual([]);
   });
   it('reuses the reported person\'s existing action of that kind instead of adding a duplicate', () => {
     const first = withSuggestion(form(), ctx(), 'warning', 2, 'u1')!;
     const second = withSuggestion(first, ctx(), 'warning', 2, 'u2')!;
     expect(second.actions).toHaveLength(1);
+  });
+});
+
+describe('presets from the adopter profile', () => {
+  const cell = (kind: 'warning' | 'chat' | 'area' | 'ban', durationMs: number | null) => ({ kind, durationMs, label: kind });
+  const ladder = [
+    { step: 0, lowMedium: cell('warning', null), high: cell('chat', 3 * 86_400_000) },
+    { step: 1, lowMedium: cell('chat', 3_600_000), high: cell('ban', 14 * 86_400_000) },
+  ] as const;
+
+  it('come from profile.ladder when it is given, not from the core table', () => {
+    const keys = presets({ ladder: ladder as never }).map(choiceKey);
+    expect(keys).toEqual(['warning:null', 'chat:3600000', 'chat:259200000', 'ban:1209600000', 'note:null']);
+    expect(keys).not.toContain('chat:86400000');
+  });
+  it('also hold what a first offence and a repeat can suggest', () => {
+    const keys = presets({
+      ladder: ladder as never,
+      firstOffense: { banter: 'none', rude: 'note', hostile: { kind: 'area', durationMs: 7_200_000 }, severe: 'warning' },
+      repeat: { outcome: { kind: 'chat', durationMs: 5 * 86_400_000 } },
+    }).map(choiceKey);
+    expect(keys).toContain('area:7200000');
+    expect(keys).toContain('chat:432000000');
+    expect(keys.filter((k) => k === 'warning:null')).toHaveLength(1);
+    expect(keys.filter((k) => k === 'note:null')).toHaveLength(1);
+    expect(keys.at(-1)).toBe('note:null');
+  });
+  it('add the choices asked for (the ladder suggestion), once, without a duplicate', () => {
+    const keys = presets({}, [{ kind: 'chat', durationMs: 12 * 3_600_000 }, { kind: 'chat', durationMs: 86_400_000 }]).map(choiceKey);
+    expect(keys).toContain('chat:43200000');
+    expect(keys.filter((k) => k === 'chat:86400000')).toHaveLength(1);
+  });
+  it('leave out a choice the server could not take', () => {
+    const keys = presets({}, [{ kind: 'ban', durationMs: 400 * 86_400_000 }, { kind: 'warning', durationMs: 5 }]).map(choiceKey);
+    expect(keys).not.toContain(`ban:${400 * 86_400_000}`);
+    expect(keys).not.toContain('warning:5');
+  });
+  it('are the same as before with no profile at all', () => {
+    expect(presets().map(choiceKey)).toEqual(presets({}).map(choiceKey));
+  });
+  it('are sorted lightest first: warning, chat, area, ban by length, then the note', () => {
+    const keys = presets({}, [{ kind: 'area', durationMs: 3_600_000 }]).map(choiceKey);
+    expect(keys[0]).toBe('warning:null');
+    expect(keys.at(-1)).toBe('note:null');
+    expect(keys.indexOf('chat:604800000')).toBeLessThan(keys.indexOf('area:3600000'));
+    expect(keys.indexOf('area:3600000')).toBeLessThan(keys.indexOf('ban:604800000'));
+  });
+});
+
+describe('defaultLines: the lines the player is shown by default', () => {
+  it('is all of them up to five, in order', () => {
+    expect(defaultLines([], null)).toEqual([]);
+    expect(defaultLines(['a', 'b'], 'b')).toEqual(['a', 'b']);
+    expect(defaultLines(['a', 'b', 'c', 'd', 'e'], null)).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+  it('is the latest five when there are more', () => {
+    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], null)).toEqual(['3', '4', '5', '6', '7']);
+  });
+  it('keeps the reported line in, dropping the oldest of the five instead', () => {
+    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], '1')).toEqual(['1', '4', '5', '6', '7']);
+    expect(defaultLines(['1', '2', '3', '4', '5', '6', '7'], '5')).toEqual(['3', '4', '5', '6', '7']);
+  });
+  it('ignores a reported line that is not theirs', () => {
+    expect(defaultLines(['1', '2', '3', '4', '5', '6'], 'zz')).toEqual(['2', '3', '4', '5', '6']);
+  });
+});
+
+describe('initialForm: a case opens with the suggestion ready and nothing decided', () => {
+  it('has the suggested action for the reported person, their own lines, the report rule and no verdict', () => {
+    const f = initialForm(ctx(), { kind: 'chat', durationMs: 86_400_000 }, 3, 't3', 'u1');
+    expect(f.verdict).toBeNull();
+    expect(f.reason).toBe('');
+    expect(f.actions).toHaveLength(1);
+    expect(f.actions[0]).toMatchObject({ person: T, what: 'chat:86400000', rule: '3' });
+    expect(f.actions[0]?.lineIds).toEqual(['t3', 't4', 't5', 't6', 't7']);
+  });
+  it('is empty for "no action"', () => {
+    expect(initialForm(ctx(), 'none', 3, null, 'u1').actions).toEqual([]);
+  });
+  it('is empty for a role that cannot apply sanctions', () => {
+    expect(initialForm(ctx({ canApply: false }), 'warning', 3, null, 'u1').actions).toEqual([]);
+  });
+  it('is empty for a permanent ban a moderator may not make, and not for a senior', () => {
+    expect(initialForm(ctx({ canPermanent: false }), { kind: 'ban', durationMs: null }, 3, null, 'u1').actions).toEqual([]);
+    expect(initialForm(ctx({ canPermanent: true }), { kind: 'ban', durationMs: null }, 3, null, 'u1').actions).toHaveLength(1);
+  });
+  it('a permanent chat restriction is not gated', () => {
+    expect(initialForm(ctx({ canPermanent: false }), { kind: 'chat', durationMs: null }, 3, null, 'u1').actions).toHaveLength(1);
+  });
+  it('a note carries no lines; a rule that cannot be cited starts empty', () => {
+    expect(initialForm(ctx(), 'note', 3, null, 'u1').actions[0]?.lineIds).toEqual([]);
+    expect(initialForm(ctx({ rules: [1] }), 'warning', 9, null, 'u1').actions[0]?.rule).toBe('');
+    expect(initialForm(ctx(), 'warning', 'uncovered', null, 'u1').actions[0]?.rule).toBe('');
+  });
+  it('a person who wrote nothing has no lines to show', () => {
+    expect(initialForm(ctx({ ownLineIds: { [T]: [] } }), 'warning', 3, null, 'u1').actions[0]?.lineIds).toEqual([]);
+  });
+  it('passes validation once a verdict and a reason are added', () => {
+    const f = initialForm(ctx(), { kind: 'chat', durationMs: 86_400_000 }, 3, 't3', 'u1');
+    expect(problems({ ...f, verdict: 'fair', reason: 'ok' }).count).toBe(0);
   });
 });

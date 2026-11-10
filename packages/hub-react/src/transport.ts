@@ -11,6 +11,11 @@ export interface TransportRequest {
   body?: unknown;
   /** Lets the caller abandon the call (fetch only; the in-page router answers at once). */
   signal?: AbortSignal;
+  /**
+   * Lets the call finish after the page is gone (fetch `keepalive`). A decision held for its Undo window is sent this way, so
+   * closing the tab never loses it. Ignored by the in-page router.
+   */
+  keepalive?: boolean;
 }
 
 /**
@@ -96,6 +101,7 @@ export function fetchTransport(options: FetchTransportOptions): Transport {
     }
     if (options.credentials !== undefined) init.credentials = options.credentials;
     if (req.signal !== undefined) init.signal = req.signal;
+    if (req.keepalive === true) init.keepalive = true;
     const res = await (options.fetch ?? globalThis.fetch)(url, init);
     const headersOut: Record<string, string> = {};
     res.headers.forEach((value, key) => (headersOut[key.toLowerCase()] = value));

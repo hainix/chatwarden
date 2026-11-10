@@ -233,6 +233,38 @@ describe('fetchTransport', () => {
     expect(fake.mock.calls[0]?.[1]).toMatchObject({ method: 'GET', credentials: 'include', signal: ctrl.signal });
   });
 
+  it('sets keepalive on the fetch only when the request asks for it', async () => {
+    const seen: RequestInit[] = [];
+    const fake: typeof fetch = ((_url: string, init: RequestInit) => {
+      seen.push(init);
+      return Promise.resolve(new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    }) as unknown as typeof fetch;
+    const t = fetchTransport({ baseUrl: 'http://x', fetch: fake });
+    await t({ method: 'POST', path: '/reports/r/decide', body: { a: 1 }, keepalive: true });
+    await t({ method: 'POST', path: '/reports/r/decide', body: { a: 1 }, keepalive: false });
+    await t({ method: 'GET', path: '/me' });
+    expect(seen[0]?.keepalive).toBe(true);
+    expect(seen[1]?.keepalive).toBeUndefined();
+    expect(seen[2]?.keepalive).toBeUndefined();
+  });
+
+  it('a keepalive request still carries its method, body and headers', async () => {
+    const seen: RequestInit[] = [];
+    const fake: typeof fetch = ((_url: string, init: RequestInit) => {
+      seen.push(init);
+      return Promise.resolve(new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    }) as unknown as typeof fetch;
+    await fetchTransport({ baseUrl: 'http://x', headers: { 'x-csrf': 't' }, fetch: fake })({ method: 'POST', path: '/p', body: { k: 'v' }, keepalive: true });
+    expect(seen[0]).toMatchObject({ method: 'POST', body: '{"k":"v"}', keepalive: true });
+    expect((seen[0]?.headers as Record<string, string>)['x-csrf']).toBe('t');
+  });
+
+  it('the in-page router ignores keepalive (there is no page to outlive)', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    const res = await w.transport({ method: 'GET', path: '/me', keepalive: true });
+    expect(res.status).toBe(200);
+  });
+
   it('rejects when the network fails', async () => {
     const { base } = await serve();
     await new Promise((resolve) => server?.close(resolve));

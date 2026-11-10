@@ -19,6 +19,11 @@ const TALK: RichLine[] = [
   { who: 'target', text: 'another line from the target' },
 ];
 
+const MANY: RichLine[] = [
+  { who: 'reporter', text: 'hello there' },
+  ...Array.from({ length: 7 }, (_, i): RichLine => ({ who: 'target', text: `target line ${i + 1}` })),
+];
+
 interface Case {
   w: HubWorld;
   id: string;
@@ -62,6 +67,8 @@ async function setup(w: HubWorld, role: Role): Promise<Case> {
   };
 }
 
+type ServerRefusal = 'invalid_request' | 'forbidden' | 'invalid_sanction' | 'invalid_excerpt';
+
 /** What the server says to the form's body: 'ok', 'replay', or the error code. */
 async function serverSays(c: Case, form: DecisionForm): Promise<string> {
   try {
@@ -83,8 +90,11 @@ const form = (verdict: UiVerdict, actions: Draft[], over: Partial<DecisionForm> 
   ...over,
 });
 
-/** The form and the server agree: the form passes it exactly when the server takes it. */
-async function agree(c: Case, f: DecisionForm, expectServer: 'ok' | 'refused') {
+/**
+ * The form and the server agree: the form passes it exactly when the server takes it. A refused case names the error code the
+ * server must answer with, so a case refused for some other reason than the one under test fails here.
+ */
+async function agree(c: Case, f: DecisionForm, expectServer: 'ok' | ServerRefusal) {
   const problems = validate(f, c.ctx);
   const says = await serverSays(c, f);
   if (expectServer === 'ok') {
@@ -92,7 +102,7 @@ async function agree(c: Case, f: DecisionForm, expectServer: 'ok' | 'refused') {
     expect(says).toBe('ok');
   } else {
     expect(problems.count, 'form should stop it').toBeGreaterThan(0);
-    expect(says, 'server should refuse it').not.toMatch(/^(ok|replay)$/);
+    expect(says, 'server should refuse it with exactly this code').toBe(expectServer);
   }
 }
 
@@ -113,7 +123,7 @@ describe('every verdict x person x action, as a moderator', () => {
         it(`${verdict}, ${person}, ${key}: ${accepted ? 'accepted' : 'refused'}`, async () => {
           const c = await setup(w, 'moderator');
           const ref = person === 'target' ? c.target : person === 'reporter' ? c.reporter : c.other;
-          await agree(c, form(verdict, [draft(c, { person: ref, what: key })]), accepted ? 'ok' : 'refused');
+          await agree(c, form(verdict, [draft(c, { person: ref, what: key })]), accepted ? 'ok' : 'invalid_request');
         });
       }
     }
@@ -123,25 +133,31 @@ describe('every verdict x person x action, as a moderator', () => {
 describe('the form and the server agree on the rest', () => {
   it('permanent ban: refused for a moderator, accepted for a senior', async () => {
     const m = await setup(w, 'moderator');
-    await agree(m, form('fair', [draft(m, { what: 'ban:null' })]), 'refused');
+    await agree(m, form('fair', [draft(m, { what: 'ban:null' })]), 'forbidden');
     const s = await setup(sw, 'senior');
     await agree(s, form('fair', [draft(s, { what: 'ban:null' })]), 'ok');
   });
 
-  it('a custom permanent length for every kind: the form stops what the server stops, and stops a little more', async () => {
-    const m = await setup(w, 'moderator');
-    // The server lets a moderator make a chat or area restriction permanent; only a permanent ban needs a senior. The form is
-    // stricter on purpose: permanent is offered to a senior only. It must never be looser.
-    for (const customKind of ['chat', 'area', 'ban'] as const) {
-      const f = form('fair', [draft(m, { what: 'other', customKind, customDuration: 'permanent' })]);
-      expect(validate(f, m.ctx).count, customKind).toBeGreaterThan(0);
+  it('a custom permanent length: only a permanent ban needs a senior, and the form says the same as the server', async () => {
+    for (const customKind of ['chat', 'area'] as const) {
+      const m = await setup(w, 'moderator');
+      await agree(m, form('fair', [draft(m, { what: 'other', customKind, customDuration: 'permanent' })]), 'ok');
     }
-    const s = await setup(sw, 'senior');
+    const mb = await setup(w, 'moderator');
+    await agree(mb, form('fair', [draft(mb, { what: 'other', customKind: 'ban', customDuration: 'permanent' })]), 'forbidden');
     for (const customKind of ['chat', 'area', 'ban'] as const) {
       const sc = await setup(sw, 'senior');
       await agree(sc, form('fair', [draft(sc, { what: 'other', customKind, customDuration: 'permanent' })]), 'ok');
     }
-    expect(s.ctx.canPermanent).toBe(true);
+  });
+
+  it('a one-off length from a profile ladder (3 days, 90 minutes, 365 days) is accepted; 366 days is refused by both', async () => {
+    for (const durationMs of [90 * 60_000, 3 * 86_400_000, 365 * 86_400_000]) {
+      const c = await setup(w, 'moderator');
+      await agree(c, form('fair', [draft(c, { what: `chat:${durationMs}` })]), 'ok');
+    }
+    const c = await setup(w, 'moderator');
+    expect(validate(form('fair', [draft(c, { what: `chat:${366 * 86_400_000}` })]), c.ctx).count).toBeGreaterThan(0);
   });
 
   it.each(['1h', '24h', '7d', '30d'] as const)('a custom %s length for chat, area and ban is accepted', async (customDuration) => {
@@ -172,28 +188,28 @@ describe('the form and the server agree on the rest', () => {
     const c = await setup(r, 'moderator');
     await agree(c, form('fair', [draft(c, { rule: '4' })]), 'ok');
     const d = await setup(r, 'moderator');
-    await agree(d, form('fair', [draft(d, { rule: '3' })]), 'refused');
+    await agree(d, form('fair', [draft(d, { rule: '3' })]), 'invalid_request');
     const e = await setup(r, 'moderator');
-    await agree(e, form('fair', [draft(e, { rule: '99' })]), 'refused');
+    await agree(e, form('fair', [draft(e, { rule: '99' })]), 'invalid_request');
     const f = await setup(r, 'moderator');
-    await agree(f, form('fair', [draft(f, { rule: '' })]), 'refused');
+    await agree(f, form('fair', [draft(f, { rule: '' })]), 'invalid_request');
   });
 
   it('"no rule covers this": needs a gap note of 1 to 500 characters', async () => {
     for (const [gapNote, ok] of [['', false], ['   ', false], ['n', true], ['x'.repeat(500), true], ['x'.repeat(501), false]] as const) {
       const c = await setup(w, 'moderator');
-      await agree(c, form('fair', [draft(c, { rule: 'uncovered', gapNote })]), ok ? 'ok' : 'refused');
+      await agree(c, form('fair', [draft(c, { rule: 'uncovered', gapNote })]), ok ? 'ok' : 'invalid_request');
     }
   });
 
   it('a person the report does not name is refused', async () => {
     const c = await setup(w, 'moderator');
-    await agree(c, form('fair', [draft(c, { person: 'stranger-0000000000' })]), 'refused');
+    await agree(c, form('fair', [draft(c, { person: 'stranger-0000000000' })]), 'invalid_request');
   });
 
   it('the same kind twice for one person is refused; different kinds and different people are accepted', async () => {
     const a = await setup(w, 'moderator');
-    await agree(a, form('fair', [draft(a, { what: 'warning:null' }), draft(a, { what: 'warning:null' })]), 'refused');
+    await agree(a, form('fair', [draft(a, { what: 'warning:null' }), draft(a, { what: 'warning:null' })]), 'invalid_request');
     const b = await setup(w, 'moderator');
     await agree(b, form('fair', [draft(b, { what: 'warning:null' }), draft(b, { what: 'chat:86400000' })]), 'ok');
     const c = await setup(w, 'moderator');
@@ -204,11 +220,46 @@ describe('the form and the server agree on the rest', () => {
     const a = await setup(w, 'moderator');
     await agree(a, form('fair', [draft(a, { lineIds: a.lines.target })]), 'ok');
     const b = await setup(w, 'moderator');
-    await agree(b, form('fair', [draft(b, { lineIds: [...b.lines.target, ...b.lines.reporter] })]), 'refused');
+    await agree(b, form('fair', [draft(b, { lineIds: [...b.lines.target, ...b.lines.reporter] })]), 'invalid_request');
     const c = await setup(w, 'moderator');
-    await agree(c, form('fair', [draft(c, { lineIds: c.lines.reporter })]), 'refused');
+    await agree(c, form('fair', [draft(c, { lineIds: c.lines.reporter })]), 'invalid_request');
     const d = await setup(w, 'moderator');
-    await agree(d, form('fair', [draft(d, { lineIds: ['nope'] })]), 'refused');
+    await agree(d, form('fair', [draft(d, { lineIds: ['nope'] })]), 'invalid_request');
+  });
+
+  it('the five-line limit against the route: five of their own lines are accepted, six are refused (a person with seven)', async () => {
+    const many = await hubWorld({ role: 'moderator' });
+    const mk = async (): Promise<Case> => {
+      const f = await many.fileRich({ lines: MANY, reporter: `Rep${++n}`, target: `Tgt${n}`, room: `many-${n}` });
+      const detail = await many.client.getReport(f.id);
+      const me = await many.client.me();
+      const policy = await many.client.policy();
+      const people = peopleOfReport(detail.report);
+      const ctx: ValidationContext = {
+        target: detail.report.targetPerson,
+        people: people.map((p) => p.ref),
+        rules: policy.rules.filter((r) => r.retired !== true).map((r) => r.number),
+        canApply: me.can['sanctions.apply'],
+        canPermanent: me.can['sanctions.apply.ban_permanent'],
+        ownLineIds: detail.report.ownLineIds,
+      };
+      return { w: many, id: f.id, ctx, target: f.person, reporter: f.reporter, other: f.person, lines: { target: detail.report.ownLineIds[f.person] ?? [], reporter: [], other: [] }, rule: 2 };
+    };
+    const five = await mk();
+    expect(five.lines.target).toHaveLength(7);
+    await agree(five, form('fair', [draft(five, { lineIds: five.lines.target.slice(0, 5) })]), 'ok');
+    const six = await mk();
+    await agree(six, form('fair', [draft(six, { lineIds: six.lines.target.slice(0, 6) })]), 'invalid_request');
+    const seven = await mk();
+    await agree(seven, form('fair', [draft(seven, { lineIds: seven.lines.target })]), 'invalid_request');
+  });
+
+  it('a note refuses nothing about lines it does not send: seven ticked on a note is accepted', async () => {
+    const many = await hubWorld({ role: 'moderator' });
+    const f = await many.fileRich({ lines: MANY, reporter: `Rep${++n}`, target: `Tgt${n}`, room: `many-n-${n}` });
+    const detail = await many.client.getReport(f.id);
+    const c: Case = { w: many, id: f.id, ctx: { target: f.person, people: [f.person, f.reporter], rules: [1, 2, 3, 4, 5, 6, 7], canApply: true, canPermanent: false, ownLineIds: detail.report.ownLineIds }, target: f.person, reporter: f.reporter, other: f.person, lines: { target: detail.report.ownLineIds[f.person] ?? [], reporter: [], other: [] }, rule: 2 };
+    await agree(c, form('fair', [draft(c, { what: 'note:null', lineIds: c.lines.target })]), 'ok');
   });
 
   it('lines on a note are not sent, so a note is accepted whatever was ticked before', async () => {
@@ -219,14 +270,14 @@ describe('the form and the server agree on the rest', () => {
   it('the reason: 1 to 500 characters after trimming', async () => {
     for (const [reason, ok] of [['', false], ['   ', false], ['r', true], [` ${'r'.repeat(500)} `, true], ['r'.repeat(501), false]] as const) {
       const c = await setup(w, 'moderator');
-      await agree(c, form('not_a_problem', [], { reason }), ok ? 'ok' : 'refused');
+      await agree(c, form('not_a_problem', [], { reason }), ok ? 'ok' : 'invalid_request');
     }
   });
 
   it('bad-faith evidence: 1 to 500 characters after trimming', async () => {
     for (const [evidence, ok] of [['', false], ['  ', false], ['e', true], [` ${'e'.repeat(500)} `, true], ['e'.repeat(501), false]] as const) {
       const c = await setup(w, 'moderator');
-      await agree(c, form('bad_faith', [], { evidence }), ok ? 'ok' : 'refused');
+      await agree(c, form('bad_faith', [], { evidence }), ok ? 'ok' : 'invalid_request');
     }
   });
 
@@ -260,7 +311,7 @@ describe('the form and the server agree on the rest', () => {
   it('a role that cannot apply sanctions: any action is refused (403), none is fine', async () => {
     const nw = await hubWorld({ role: 'moderator', permissions: { 'sanctions.apply': 'owner' } });
     const a = await setup(nw, 'moderator');
-    await agree(a, form('fair', [draft(a, {})]), 'refused');
+    await agree(a, form('fair', [draft(a, {})]), 'forbidden');
     const b = await setup(nw, 'moderator');
     await agree(b, form('not_a_problem', []), 'ok');
   });

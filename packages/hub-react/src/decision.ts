@@ -1,4 +1,5 @@
 import { LADDER_TABLE } from '@chatwarden/core';
+import type { LadderRow } from '@chatwarden/core';
 import type { HubParams, HubText } from './i18n.js';
 import type { DecideInput, DecisionAction, SanctionKind, Suggestion } from './types.js';
 
@@ -44,21 +45,52 @@ export const choiceKey = (c: Choice): string => `${c.kind}:${c.durationMs === nu
 
 const KIND_RANK: Record<SanctionKind, number> = { warning: 0, chat: 1, area: 2, ban: 3, note: 4 };
 
+/** The longest sanction the server takes: 365 days. */
+export const MAX_DURATION_MS = 365 * 86_400_000;
+
+/** What the menu is built from: the adopter's ladder and outcomes (`GET /policy` `profile`). Anything missing falls back to core's table. */
+export interface PresetSource {
+  ladder?: readonly LadderRow[];
+  firstOffense?: Readonly<Record<string, Suggestion['outcome'] | undefined>>;
+  repeat?: { outcome: Suggestion['outcome'] };
+}
+
 /**
- * The ready-made choices: every action the ladder table can suggest, once each, lightest first, then a note. They come from
- * core's `LADDER_TABLE`, so the menu and the suggestion cannot drift apart.
+ * The ready-made choices: every action the adopter's ladder (else core's `LADDER_TABLE`) can suggest, plus what a first offence
+ * and a repeat can suggest, once each, lightest first, then a note. `extra` choices (the ladder's current suggestion, so it can
+ * always be taken) are added when they are not there yet.
  */
-export function presets(): Choice[] {
+export function presets(source: PresetSource = {}, extra: readonly Choice[] = []): Choice[] {
   const seen = new Map<string, Choice>();
-  for (const row of LADDER_TABLE) {
-    for (const cell of [row.lowMedium, row.high]) {
-      const choice: Choice = { kind: cell.kind, durationMs: cell.durationMs };
-      seen.set(choiceKey(choice), choice);
-    }
+  const put = (choice: Choice | null): void => {
+    if (choice !== null && parseChoiceKey(choiceKey(choice)) !== null) seen.set(choiceKey(choice), choice);
+  };
+  for (const row of source.ladder ?? LADDER_TABLE) {
+    for (const cell of [row.lowMedium, row.high]) put({ kind: cell.kind, durationMs: cell.durationMs });
   }
+  if (source.ladder !== undefined || source.firstOffense !== undefined || source.repeat !== undefined) {
+    for (const outcome of Object.values(source.firstOffense ?? {})) if (outcome !== undefined) put(outcomeChoice(outcome));
+    if (source.repeat !== undefined) put(outcomeChoice(source.repeat.outcome));
+  }
+  for (const choice of extra) put(choice);
+  seen.delete('note:null');
   const sorted = [...seen.values()].sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || (a.durationMs ?? Infinity) - (b.durationMs ?? Infinity));
   return [...sorted, { kind: 'note', durationMs: null }];
 }
+
+/** The choice a {@link choiceKey} stands for, or null when it is not one the server could take (unknown kind, a length on a warning, 0 or over 365 days). */
+export function parseChoiceKey(key: string): Choice | null {
+  const m = /^(warning|chat|area|ban|note):(null|[1-9]\d{0,12})$/.exec(key);
+  if (m === null) return null;
+  const kind = m[1] as SanctionKind;
+  if (m[2] === 'null') return { kind, durationMs: null };
+  if (!hasLength(kind)) return null;
+  const durationMs = Number(m[2]);
+  return durationMs <= MAX_DURATION_MS ? { kind, durationMs } : null;
+}
+
+/** Whether a choice is the permanent ban: the one action that needs `sanctions.apply.ban_permanent` (the server's rule; a permanent chat or area restriction follows `sanctions.apply`). */
+export const needsBanPermission = (c: Choice): boolean => c.kind === 'ban' && c.durationMs === null;
 
 /** One action being set up. All text fields are what the person typed or picked, not yet checked. */
 export interface Draft {
@@ -95,7 +127,7 @@ export function newDraft(uid: string, person: string, rule: number | ''): Draft 
 export function resolveDraft(d: Draft): Choice | null {
   if (d.what === '') return null;
   if (d.what === 'other') return { kind: d.customKind, durationMs: hasLength(d.customKind) ? durationOf(d.customDuration) : null };
-  return presets().find((x) => choiceKey(x) === d.what) ?? null;
+  return parseChoiceKey(d.what);
 }
 
 /** The verdict the server is sent. "Fair" is `noted` when every action is a note (and there is one), else `upheld`. */
@@ -131,7 +163,7 @@ export interface ValidationContext {
   rules: readonly number[];
   /** `can['sanctions.apply']`. */
   canApply: boolean;
-  /** `can['sanctions.apply.ban_permanent']`. */
+  /** `can['sanctions.apply.ban_permanent']`: only a permanent ban needs it. */
   canPermanent: boolean;
   /** For each person, the ids of the lines they wrote themselves. */
   ownLineIds: Readonly<Record<string, readonly string[]>>;
@@ -190,7 +222,7 @@ export function validate(form: DecisionForm, ctx: ValidationContext): Problems {
 
     const choice = resolveDraft(d);
     if (choice === null) found.what = problem('hub.decide.error.whatRequired');
-    else if (choice.durationMs === null && hasLength(choice.kind) && !ctx.canPermanent) found.what = problem('hub.decide.error.permanent');
+    else if (needsBanPermission(choice) && !ctx.canPermanent) found.what = problem('hub.decide.error.permanent');
     if (choice !== null && found.what === undefined) {
       const key = `${d.person}\u0000${choice.kind}`;
       if (used.has(key)) found.what = problem('hub.decide.error.duplicate');
@@ -239,13 +271,10 @@ export function dropTargetActions(form: DecisionForm, target: string): { form: D
   return dropped === 0 ? { form, dropped } : { form: { ...form, actions: kept }, dropped };
 }
 
-/** The draft fields that say `choice`, or null when the form has no way to say it. */
+/** The draft fields that say `choice`, or null when the form cannot say it (a length over 365 days). */
 function draftFor(choice: Choice): Pick<Draft, 'what' | 'customKind' | 'customDuration'> | null {
   const key = choiceKey(choice);
-  if (presets().some((x) => choiceKey(x) === key)) return { what: key, customKind: 'chat', customDuration: '24h' };
-  const length = DURATIONS.find((d) => d.ms === choice.durationMs);
-  if (!hasLength(choice.kind) || length === undefined) return null;
-  return { what: 'other', customKind: choice.kind, customDuration: length.key };
+  return parseChoiceKey(key) === null ? null : { what: key, customKind: 'chat', customDuration: '24h' };
 }
 
 /** The choice a suggestion's outcome stands for, or null for "no action". */
@@ -256,9 +285,22 @@ export function outcomeChoice(outcome: Suggestion['outcome']): Choice | null {
   return { kind: outcome.kind, durationMs: outcome.durationMs };
 }
 
+/** Why a suggestion cannot be added as an action: there is none, the decision is full, or its length is not one the server takes. */
+export type NotAdded = 'none' | 'limit' | 'unsupported';
+
+/** Why {@link withSuggestion} would return null, or null when it would add (or change) an action. */
+export function whyNotAdded(form: DecisionForm, ctx: ValidationContext, outcome: Suggestion['outcome']): NotAdded | null {
+  const choice = outcomeChoice(outcome);
+  if (choice === null) return 'none';
+  if (draftFor(choice) === null) return 'unsupported';
+  const same = form.actions.some((a) => a.person === ctx.target && resolveDraft(a)?.kind === choice.kind);
+  return !same && form.actions.length >= MAX_ACTIONS ? 'limit' : null;
+}
+
 /**
- * The form with the ladder's suggestion as the reported person's action under "fair". An action of the same kind they already
- * have is changed, not doubled. Null when there is nothing to add (no action suggested, or a length the form cannot offer).
+ * The form with the ladder's suggestion as the reported person's action. An action of the same kind they already have is
+ * changed, not doubled. The verdict is left alone, except that an unset one becomes "fair" (the only verdict that may act on
+ * the reported person). Null when there is nothing to add: see {@link whyNotAdded}.
  */
 export function withSuggestion(
   form: DecisionForm,
@@ -266,14 +308,41 @@ export function withSuggestion(
   outcome: Suggestion['outcome'],
   reportRule: number | 'uncovered',
   uid: string,
+  lineIds: readonly string[] = [],
 ): DecisionForm | null {
-  const choice = outcomeChoice(outcome);
-  if (choice === null) return null;
-  const fields = draftFor(choice);
-  if (fields === null) return null;
-  const base: DecisionForm = { ...form, verdict: 'fair' };
+  if (whyNotAdded(form, ctx, outcome) !== null) return null;
+  const choice = outcomeChoice(outcome) as Choice;
+  const fields = draftFor(choice) as NonNullable<ReturnType<typeof draftFor>>;
+  const base: DecisionForm = form.verdict === null ? { ...form, verdict: 'fair' } : form;
+  const lines = choice.kind === 'note' ? [] : [...lineIds];
   const same = base.actions.find((a) => a.person === ctx.target && resolveDraft(a)?.kind === choice.kind);
   if (same !== undefined) return { ...base, actions: base.actions.map((a) => (a === same ? { ...a, ...fields } : a)) };
-  if (base.actions.length >= MAX_ACTIONS) return null;
-  return { ...base, actions: [...base.actions, { ...newDraft(uid, ctx.target, startRule(ctx, reportRule)), ...fields }] };
+  return { ...base, actions: [...base.actions, { ...newDraft(uid, ctx.target, startRule(ctx, reportRule)), ...fields, lineIds: lines }] };
+}
+
+/**
+ * Which of the person's own lines the player is shown by default: at most {@link LINES_MAX}, in the order they were said. The
+ * reported line is always among them when it is theirs; the rest are their latest.
+ */
+export function defaultLines(own: readonly string[], reported: string | null): string[] {
+  if (own.length <= LINES_MAX) return [...own];
+  const keep = new Set(own.slice(-LINES_MAX));
+  if (reported !== null && own.includes(reported) && !keep.has(reported)) {
+    keep.delete(own.slice(-LINES_MAX)[0] as string);
+    keep.add(reported);
+  }
+  return own.filter((id) => keep.has(id));
+}
+
+/**
+ * The form a case opens with: nothing decided, and the ladder's suggestion ready as the reported person's action (their own lines
+ * chosen, the report's rule filled in). A suggestion that is "no action", that the role may not apply (no `sanctions.apply`, or a
+ * permanent ban without the senior permission), or that has no representable length, leaves the action list empty.
+ */
+export function initialForm(ctx: ValidationContext, outcome: Suggestion['outcome'], reportRule: number | 'uncovered', reportedLine: string | null, uid: string): DecisionForm {
+  const choice = outcomeChoice(outcome);
+  if (choice === null || !ctx.canApply || (needsBanPermission(choice) && !ctx.canPermanent)) return emptyForm();
+  const lines = defaultLines(ctx.ownLineIds[ctx.target] ?? [], reportedLine);
+  const form = withSuggestion(emptyForm(), ctx, outcome, reportRule, uid, lines);
+  return form === null ? emptyForm() : { ...form, verdict: null };
 }

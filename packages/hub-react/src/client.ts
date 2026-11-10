@@ -118,7 +118,7 @@ export interface HubClient {
   /** `POST /reports/:id/suggest`: the suggestion for another conduct level, rule or person on the report. */
   suggest(id: string, input: SuggestInput): Promise<Suggestion>;
   /** `POST /reports/:id/decide`: decide the report. A replay of the same decision applies nothing twice. */
-  decide(id: string, input: DecideInput): Promise<DecideResult>;
+  decide(id: string, input: DecideInput, options?: { keepalive?: boolean }): Promise<DecideResult>;
 
   // People and sanctions
   /** `GET /people/:ref/history`. */
@@ -196,7 +196,8 @@ export function createHubClient(transport: Transport): HubClient {
     return res.body as T;
   };
   const get = <T>(path: string, query?: Record<string, string | number | undefined>) => call<T>({ method: 'GET', path, ...(query === undefined ? {} : { query }) });
-  const post = <T>(path: string, body: unknown) => call<T>({ method: 'POST', path, body });
+  const post = <T>(path: string, body: unknown, extra: { keepalive?: boolean } = {}) =>
+    call<T>({ method: 'POST', path, body, ...(extra.keepalive === true ? { keepalive: true } : {}) });
   const patch = <T>(path: string, body: unknown) => call<T>({ method: 'PATCH', path, body });
 
   return {
@@ -205,7 +206,7 @@ export function createHubClient(transport: Transport): HubClient {
     listReports: (query = {}) => get<Page<ReportSummary>>('/reports', q({ status: query.status, cursor: query.cursor, limit: query.limit })),
     getReport: (id, options = {}) => get<ReportDetail>(`/reports/${enc(id)}`, q({ level: options.level })),
     suggest: (id, input) => post<Suggestion>(`/reports/${enc(id)}/suggest`, input),
-    decide: (id, input) => post<DecideResult>(`/reports/${enc(id)}/decide`, input),
+    decide: (id, input, options = {}) => post<DecideResult>(`/reports/${enc(id)}/decide`, input, options),
 
     personHistory: (ref, options = {}) => get<PersonHistory>(`/people/${enc(ref)}/history`, q({ limit: options.limit })),
     listSanctions: (query = {}) => get<Page<SanctionRow>>('/sanctions', q({ cursor: query.cursor, limit: query.limit, source: query.source })),

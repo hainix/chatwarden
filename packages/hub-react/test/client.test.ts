@@ -24,6 +24,22 @@ describe('HubError', () => {
   });
 });
 
+describe('decide with keepalive', () => {
+  it('passes keepalive to the transport only when asked', async () => {
+    const seen: Array<boolean | undefined> = [];
+    const spy: Transport = (req) => {
+      seen.push(req.keepalive);
+      return Promise.resolve({ status: 200, headers: {}, body: { ok: true, replay: false, groups: [] } });
+    };
+    const c = createHubClient(spy);
+    const input = { verdict: 'no_action' as const, reason: 'fine', actions: [] };
+    await c.decide('r1', input);
+    await c.decide('r1', input, { keepalive: true });
+    await c.decide('r1', input, { keepalive: false });
+    expect(seen).toEqual([undefined, true, undefined]);
+  });
+});
+
 describe('errors from the transport', () => {
   const get = (t: Transport) => createHubClient(t).me();
 
