@@ -364,6 +364,57 @@ export interface ReportListQuery {
   limit: number;
 }
 
+/** What {@link Store.listOpenReports} takes: the take-next scan, oldest first. */
+export interface OpenReportQuery {
+  /** Only reports of this category. */
+  category?: ReportCategory;
+  /** Keyset cursor: only reports newer than this (`createdAt` above it, or equal with an id above `afterId`). `afterId` without `after` is ignored. */
+  after?: number;
+  afterId?: string;
+  /** Clamped to 1..200 (a fraction is floored). */
+  limit: number;
+}
+
+// ---------------------------------------------------------------------------
+// Team workbench (storage shapes): soft claims and saved reasons
+// ---------------------------------------------------------------------------
+
+/** How long a claim lasts after the last claim or heartbeat: 10 minutes. */
+export const CLAIM_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * A soft claim on a person's case: `by` (a staff actor) is handling it from `since` until `until` (epoch ms). It is live
+ * strictly before `until`; an expired claim reads as absent. Staff only: `person` is a subject id.
+ */
+export interface ClaimRow {
+  person: SubjectId;
+  by: string;
+  since: number;
+  until: number;
+}
+
+/**
+ * How {@link Store.claimCase} treats a claim that someone else holds:
+ * - `claim`: wins when the case is free or the caller already holds it (a heartbeat).
+ * - `free`: wins only when nobody holds a live claim, the caller included (take next uses it to skip what it holds).
+ * - `takeover`: wins always (a senior moving a claim to themselves).
+ */
+export type ClaimMode = 'claim' | 'free' | 'takeover';
+
+/**
+ * What {@link Store.claimCase} answers. A win carries the claim now in force and `from`, the other actor whose LIVE claim
+ * this one replaced (null for a fresh claim, a heartbeat or an expired claim). A loss carries the live claim that stands.
+ */
+export type ClaimAttempt = { won: true; claim: ClaimRow; from: string | null } | { won: false; claim: ClaimRow };
+
+/** A saved decision reason: a short label for the picker and the text it fills in. */
+export interface ReasonRow {
+  id: string;
+  label: string;
+  text: string;
+  active: boolean;
+}
+
 /**
  * One recorded moderator decision, kept so the same decision sent twice is a replay and not a second action.
  * `key` is a hash of the report and the decision; `resultJson` is what the first call answered.
@@ -603,6 +654,21 @@ export interface Store {
   listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
 
   /**
+   * Reports that are still `open`, OLDEST first (`createdAt` ascending, then `id` ascending, so a tie is stable), whole
+   * records. `category` filters; `after` keeps only reports newer than that instant (exclusive), and with `afterId` also
+   * the ones filed AT that instant whose id sorts above it (keyset paging: pass the last row's `createdAt` and `id`).
+   * `limit` is clamped to 1..200 (a fraction is floored). The scan behind "take next".
+   */
+  listOpenReports(q: OpenReportQuery): ReportRecord[];
+
+  /**
+   * The OPEN reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id
+   * and every alias merged into it), newest first (`createdAt` descending, then `id` descending), whole records. `limit` is
+   * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
+   */
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+
+  /**
    * How the reports FILED BY any of the given subjects stand (`reporterSubject` as stored: pass the person's canonical id
    * and every alias merged into it): how many are still open, actioned or dismissed, and how many carry the bad-faith
    * mark. An empty list counts nothing.
@@ -644,6 +710,48 @@ export interface Store {
    * subject row's stored target (revoked and expired groups included). Never IP rows.
    */
   loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }>;
+
+  // Team workbench (K4 Task 4b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
+
+  /**
+   * The change token: an opaque string that is different after every change a moderator's queue shows, and the same
+   * otherwise. It persists with the store (a restart does not rewind it) and is shared by every process on the same
+   * database. An adapter must move it INSIDE the same transaction as the write, so an undone write leaves it as it was,
+   * on exactly these events: `insertReport` (true), `closeReport` (true), `insertSanctionGroup` (true),
+   * `revokeSanctionGroup` (more than 0), `closeGap` (true), `claimCase` (a win that changes the owner of the case, so a
+   * heartbeat does not), `releaseClaim` (true), `insertReason`, and `updateReason` / `setReasonActive` when a value changes.
+   * Nothing else moves it, and reading it never does.
+   */
+  changeToken(): string;
+
+  /**
+   * Claim a person's case for `by` at `now`, the claim ending at `until`, as ONE atomic conditional write: of two callers
+   * racing for the same free case, exactly one wins, even from two processes on one database. See {@link ClaimMode} and
+   * {@link ClaimAttempt}. A claim is live strictly before its `until`; an expired one is replaced as if absent. `since` is
+   * kept across a heartbeat and set to `now` otherwise. The token moves when the owner of the case changes.
+   */
+  claimCase(person: SubjectId, by: string, now: number, until: number, mode: ClaimMode): ClaimAttempt;
+
+  /**
+   * Release `by`'s claim on the person. True only when it removed a LIVE claim held by `by`; someone else's claim, no claim
+   * and an expired claim (already absent) answer false and the first two are left alone.
+   */
+  releaseClaim(person: SubjectId, by: string, now: number): boolean;
+
+  /** The claims in force at `now` (not expired) among these people, ordered by person. An empty list matches nobody. */
+  loadClaims(persons: readonly SubjectId[], now: number): ClaimRow[];
+
+  /** Every saved reason (active or not), in the order they were added. */
+  listReasons(): ReasonRow[];
+
+  /** Add a reason. A duplicate `id` throws and writes nothing. */
+  insertReason(row: ReasonRow): void;
+
+  /** Change a reason's label and/or text. False for an unknown id; true otherwise (also when nothing differs). */
+  updateReason(id: string, patch: { label?: string; text?: string }): boolean;
+
+  /** Switch a reason on or off. False for an unknown id; true otherwise (also when it already was so). */
+  setReasonActive(id: string, active: boolean): boolean;
 
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).

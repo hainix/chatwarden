@@ -25,6 +25,11 @@ export type {
   SanctionRow,
   SanctionTargetType,
   ReporterTally,
+  ClaimAttempt,
+  ClaimMode,
+  ClaimRow,
+  OpenReportQuery,
+  ReasonRow,
   ConductLevel,
   Source,
   Store,
@@ -35,7 +40,18 @@ export type {
   StrikeRow,
   SubjectRecord,
 } from './types.js';
-export { CONDUCT_LEVELS } from './types.js';
+export { CLAIM_TTL_MS, CONDUCT_LEVELS } from './types.js';
+export {
+  CaseDesk,
+  REASON_LABEL_MAX,
+  REASON_TEXT_MAX,
+  REASONS_MAX,
+  ReasonBook,
+  ReasonError,
+  ViewingPresence,
+  VIEWING_TTL_MS,
+} from './team.js';
+export type { CaseClaim, ClaimOutcome, NextCase } from './team.js';
 export { hashWho, makeHasher } from './hasher.js';
 export { maskSpans, type MaskSpan } from './mask.js';
 export { SubjectIndex } from './subjects.js';

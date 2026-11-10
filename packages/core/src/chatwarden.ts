@@ -49,6 +49,8 @@ import type {
 import { listStaffReports, staffReport } from './staffReports.js';
 import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 import { SubjectIndex } from './subjects.js';
+import { CaseDesk, ReasonBook } from './team.js';
+import type { CaseClaim, ClaimOutcome, NextCase } from './team.js';
 import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type {
   Clock,
@@ -58,6 +60,8 @@ import type {
   Platform,
   ProfanityFilter,
   RawWho,
+  ReasonRow,
+  ReportCategory,
   ConductLevel,
   Store,
   StoredReport,
@@ -271,6 +275,67 @@ export interface Chatwarden {
     list(q: { days: BlockedDays }): BlockedItem[];
     /** Strikes per term id over the same window; a term with none is absent. */
     countsByTerm(q: { days: BlockedDays }): Record<string, number>;
+  };
+  /**
+   * The team workbench: soft claims on a person's case, take next, and who has a case open. Staff only; every `person` is
+   * a staff ref (an alias is folded into the surviving person) and every `actor` a staff ref the audit trail accepts
+   * (`RangeError` otherwise). Claims live in the store and last 10 minutes from the last beat (`CLAIM_TTL_MS`), on the
+   * injected clock; an expired claim reads as absent everywhere. They are a courtesy, not a security boundary: nothing
+   * in the core refuses a decision because of one (`@chatwarden/http` does, with a 409 `claimed`).
+   * Carries subject ids: staff channels only, never send to a player.
+   */
+  cases: {
+    /** The live claim on the person's case, or null. */
+    holder(person: SubjectId): CaseClaim | null;
+    /** The live claims among these people in one read, keyed by their canonical person. */
+    holders(people: readonly SubjectId[]): Map<SubjectId, CaseClaim>;
+    /**
+     * Claim the person's case, or beat the claim `actor` already holds (the claim then lasts 10 minutes from now; `since`
+     * is kept). Needs an open report against the person (`no_case` otherwise). Somebody else's live claim answers
+     * `claimed` with it, unless `takeOver` is true, which moves it to `actor` (`tookOverFrom` names the previous holder).
+     * `takeOver` is not permission-checked here: the caller decides who may use it. The write is one atomic conditional
+     * statement, so two moderators racing for one case never both win, even from two processes on one database.
+     */
+    claim(person: SubjectId, actor: string, opts?: { takeOver?: boolean }): ClaimOutcome;
+    /** End `actor`'s own claim. True only when it ended a live one; never touches another moderator's. */
+    release(person: SubjectId, actor: string): boolean;
+    /**
+     * Claim and return the oldest OPEN case nobody holds, optionally only cases with an open report of `category`
+     * (`RangeError` for an unknown one), or null. A case is a person, ranked by their oldest open report and opened on
+     * their newest. A case `actor` already holds is skipped.
+     */
+    next(actor: string, filter?: { category?: ReportCategory }): NextCase | null;
+    /** `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only. */
+    view(person: SubjectId, actor: string): void;
+    /** Who has the person's case open now (sorted), leaving `except` out. In this process's memory: other processes are not seen. */
+    viewers(person: SubjectId, except?: string): string[];
+    /** `viewers` for several people at once; people nobody is viewing are absent. */
+    viewersOf(people: readonly SubjectId[], except?: string): Map<SubjectId, string[]>;
+  };
+  /** A cheap "did anything change?" for the moderator queue. */
+  changes: {
+    /**
+     * An opaque token, persisted in the store, that is different after any report filed or decided, sanction applied or
+     * revoked, rule gap closed, claim taken, taken over or released, or saved reason changed, and the same otherwise
+     * (a claim heartbeat, a refused claim, viewing and every read leave it alone). A claim that merely expires does not
+     * move it. Compare it for equality only; one read of one row, no audit, no other reads.
+     */
+    token(): string;
+  };
+  /**
+   * Saved decision reasons (label up to 40 characters, text up to 500, at most 200 of them), shared by the team and
+   * kept in the store. Text is staff-written and may be quoted into a decision; it is not player-facing by itself.
+   * `ReasonError` for a label, text or id outside its limits, or when the list is full.
+   */
+  reasons: {
+    /** Every reason, active or not, in the order they were added. */
+    list(): ReasonRow[];
+    /** Add an active reason (trimmed). */
+    add(input: { label: string; text: string }): ReasonRow;
+    /** Change the label and/or text (at least one). Null for an unknown id. */
+    update(id: string, patch: { label?: string; text?: string }): ReasonRow | null;
+    /** Switch a reason on or off. Null for an unknown id. */
+    setActive(id: string, active: boolean): ReasonRow | null;
   };
   doors: { check(kind: DoorKind, who: RawWho): DoorRefusal | null };
   sanctions: {
@@ -638,6 +703,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   }
 
   const audit = new AuditService({ store, clock, logger });
+  const desk = new CaseDesk({ store, subjects, clock });
+  const reasonBook = new ReasonBook(store);
 
   return {
     rooms: {
@@ -694,6 +761,23 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),
       countsByTerm: (q) => blockedCountsByTerm(store, q?.days, clock.now()),
+    },
+    cases: {
+      holder: (person) => desk.holder(person),
+      holders: (people) => desk.holders(people),
+      claim: (person, actor, o) => desk.claim(person, actor, o),
+      release: (person, actor) => desk.release(person, actor),
+      next: (actor, filter) => desk.next(actor, filter),
+      view: (person, actor) => desk.view(person, actor),
+      viewers: (person, except) => desk.viewers(person, except),
+      viewersOf: (people, except) => desk.viewersOf(people, except),
+    },
+    changes: { token: () => store.changeToken() },
+    reasons: {
+      list: () => reasonBook.list(),
+      add: (input) => reasonBook.add(input),
+      update: (id, patch) => reasonBook.update(id, patch),
+      setActive: (id, active) => reasonBook.setActive(id, active),
     },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {

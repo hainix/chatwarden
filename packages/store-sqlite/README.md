@@ -89,6 +89,12 @@ How it behaves:
   of it or a query on it to a player, and keep the file readable by the app's user only (`chmod 600`).
 - **What is never logged.** The store itself logs nothing. Errors it throws are SQLite's own and may name a table or column but
   never a value; the kit logs only an event name and the error class.
+- **Claims and saved reasons.** Migration 15 adds `kit_claims` (a soft claim per person: the staff actor holding the case and when it
+  lapses) and `kit_reasons` (the moderators' saved decision reasons). A claim is taken with one conditional statement, so two
+  server processes on the same file never both win a case. The queue's change token is a counter row in `kit_meta` that every
+  report, decision, sanction, gap, claim-owner and reason change moves in the same transaction. Nothing here holds chat; the
+  claim table holds subject ids and staff actors, so it is staff-only like the rest. Expired claim rows are replaced by the
+  next claim and are not purged.
 - **What retention does not purge.** `cw.purge()` and the built-in timer delete old reports, sanctions, strikes, mutes, notices,
   audit rows and webhook keys. The subject tables (`kit_subjects`, `kit_subject_ids`) and the Discord thread map
   (`kit_discord_threads`) are not purged, because the ladder and a returning player's record depend on knowing who is who. They

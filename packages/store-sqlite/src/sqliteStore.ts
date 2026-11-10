@@ -5,10 +5,15 @@ import type {
   AuditListQuery,
   AuditRow,
   AuditTargetType,
+  ClaimAttempt,
+  ClaimMode,
+  ClaimRow,
   DecisionRow,
   MuteRow,
   NoticeKind,
   NoticeRow,
+  OpenReportQuery,
+  ReasonRow,
   ReportActivity,
   ReportCategory,
   ReportListQuery,
@@ -136,6 +141,16 @@ function toListedSanctionRow(r: Record<string, unknown>): SanctionRow {
   };
 }
 
+function toClaimRow(r: Record<string, unknown>): ClaimRow {
+  return { person: String(r.person), by: String(r.claimed_by), since: Number(r.since), until: Number(r.until) };
+}
+
+/** The kit_meta key of the change token's counter. */
+const CHANGE_TOKEN_KEY = 'change_token';
+
+/** How many people one `loadClaims` statement names at most (well under any SQLite parameter limit). */
+const CLAIM_BATCH = 500;
+
 let savepointSeq = 0;
 
 /** Runs `fn` in a SAVEPOINT: it nests inside any open transaction and also works outside one. */
@@ -185,6 +200,19 @@ export class SqliteStore implements Store, TermStore {
     if (this.closed) return;
     this.closed = true;
     if (this.ownsDb) this.db.close();
+  }
+
+  /**
+   * Move the change token (one statement, atomic across processes on the same file). Always called inside the
+   * transaction of the write it announces, so an undone write undoes the move.
+   */
+  private bump(): void {
+    this.db
+      .prepare(
+        `INSERT INTO kit_meta (key, value) VALUES (?, '1')
+         ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1`,
+      )
+      .run(CHANGE_TOKEN_KEY);
   }
 
   // --- Domain methods (async) are added below by later tasks. ---
@@ -266,6 +294,7 @@ export class SqliteStore implements Store, TermStore {
           r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus, r.roomId,
         );
       }
+      this.bump();
       return true;
     });
   }
@@ -277,6 +306,7 @@ export class SqliteStore implements Store, TermStore {
           'UPDATE kit_sanctions SET revoked_by = ?, revoked_at = ?, revoke_reason = ? WHERE group_id = ? AND revoked_at IS NULL',
         )
         .run(actor, at, reason, groupId);
+      if (Number(res.changes) > 0) this.bump();
       return Number(res.changes);
     });
   }
@@ -382,6 +412,7 @@ export class SqliteStore implements Store, TermStore {
         )
         .run(status, ref, groupId);
       if (Number(res.changes) === 0) return false;
+      this.bump();
       // Who closed it and when go to the audit trail, in the same transaction. The sanction group id names no person.
       this.db
         .prepare(
@@ -392,6 +423,112 @@ export class SqliteStore implements Store, TermStore {
           randomBytes(16).toString('base64url'), at, actor, groupId,
           JSON.stringify({ gapStatus: 'open' }), JSON.stringify({ gapStatus: status, gapRef: ref }),
         );
+      return true;
+    });
+  }
+
+  // Team workbench. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
+
+  changeToken(): string {
+    const r = this.transaction(() => this.db.prepare('SELECT value FROM kit_meta WHERE key = ?').get(CHANGE_TOKEN_KEY));
+    return r === undefined ? '0' : String(r.value);
+  }
+
+  claimCase(person: SubjectId, by: string, now: number, until: number, mode: ClaimMode): ClaimAttempt {
+    return this.transaction((): ClaimAttempt => {
+      const prior = this.db.prepare('SELECT claimed_by, since, until FROM kit_claims WHERE person = ?').get(person);
+      const live = prior !== undefined && Number(prior.until) > now ? prior : undefined;
+      const mine = live !== undefined && String(live.claimed_by) === by;
+      // The one conditional write: it takes the case only when it is free or expired, or the caller holds it (not for
+      // 'free'), or the caller is taking over. Whoever runs this statement first wins; the other's WHERE is then false.
+      const won = this.db
+        .prepare(
+          `INSERT INTO kit_claims (person, claimed_by, since, until) VALUES (?, ?, ?, ?)
+           ON CONFLICT (person) DO UPDATE SET
+             claimed_by = excluded.claimed_by,
+             since = CASE WHEN kit_claims.claimed_by = excluded.claimed_by AND kit_claims.until > ? THEN kit_claims.since ELSE excluded.since END,
+             until = excluded.until
+           WHERE kit_claims.until <= ? OR (kit_claims.claimed_by = excluded.claimed_by AND ? = 1) OR ? = 1
+           RETURNING person, claimed_by, since, until`,
+        )
+        .get(person, by, now, until, now, now, mode === 'free' ? 0 : 1, mode === 'takeover' ? 1 : 0);
+      if (won === undefined) {
+        const holder = this.db.prepare('SELECT person, claimed_by, since, until FROM kit_claims WHERE person = ?').get(person);
+        if (holder === undefined) throw new Error('claimCase: the claim vanished');
+        return { won: false, claim: toClaimRow(holder) };
+      }
+      // A heartbeat keeps the owner; everything else (fresh, expired, taken over) changes it.
+      if (!mine) this.bump();
+      return { won: true, claim: toClaimRow(won), from: live !== undefined && !mine ? String(live.claimed_by) : null };
+    });
+  }
+
+  releaseClaim(person: SubjectId, by: string, now: number): boolean {
+    return this.transaction(() => {
+      const gone = this.db.prepare('DELETE FROM kit_claims WHERE person = ? AND claimed_by = ? RETURNING until').get(person, by);
+      if (gone === undefined || Number(gone.until) <= now) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  loadClaims(persons: readonly SubjectId[], now: number): ClaimRow[] {
+    const unique = [...new Set(persons)];
+    if (unique.length === 0) return [];
+    return this.transaction(() => {
+      const out: ClaimRow[] = [];
+      for (let i = 0; i < unique.length; i += CLAIM_BATCH) {
+        const batch = unique.slice(i, i + CLAIM_BATCH);
+        const rows = this.db
+          .prepare(
+            `SELECT person, claimed_by, since, until FROM kit_claims
+             WHERE until > ? AND person IN (${batch.map(() => '?').join(', ')})`,
+          )
+          .all(now, ...batch);
+        out.push(...rows.map(toClaimRow));
+      }
+      return out.sort((a, b) => (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+    });
+  }
+
+  listReasons(): ReasonRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare('SELECT id, label, text, active FROM kit_reasons ORDER BY rowid')
+        .all()
+        .map((r) => ({ id: String(r.id), label: String(r.label), text: String(r.text), active: Number(r.active) === 1 })),
+    );
+  }
+
+  insertReason(row: ReasonRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare('INSERT INTO kit_reasons (id, label, text, active) VALUES (?, ?, ?, ?)')
+        .run(row.id, row.label, row.text, row.active ? 1 : 0);
+      this.bump();
+    });
+  }
+
+  updateReason(id: string, patch: { label?: string; text?: string }): boolean {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT label, text FROM kit_reasons WHERE id = ?').get(id);
+      if (r === undefined) return false;
+      const label = patch.label ?? String(r.label);
+      const text = patch.text ?? String(r.text);
+      if (label === String(r.label) && text === String(r.text)) return true;
+      this.db.prepare('UPDATE kit_reasons SET label = ?, text = ? WHERE id = ?').run(label, text, id);
+      this.bump();
+      return true;
+    });
+  }
+
+  setReasonActive(id: string, active: boolean): boolean {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT active FROM kit_reasons WHERE id = ?').get(id);
+      if (r === undefined) return false;
+      if ((Number(r.active) === 1) === active) return true;
+      this.db.prepare('UPDATE kit_reasons SET active = ? WHERE id = ?').run(active ? 1 : 0, id);
+      this.bump();
       return true;
     });
   }
@@ -637,7 +774,9 @@ export class SqliteStore implements Store, TermStore {
           r.targetSubject, r.targetSeat, r.targetHandle, r.category, r.note, r.lineId, JSON.stringify(r.excerpt),
           JSON.stringify(r.people), r.status,
         );
-      return Number(res.changes) > 0;
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
     });
   }
 
@@ -653,6 +792,35 @@ export class SqliteStore implements Store, TermStore {
     const n = Math.min(200, Math.max(1, Math.floor(limit)));
     const marks = subjects.map(() => '?').join(', ');
     const sql = `SELECT * FROM kit_reports WHERE target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+  }
+
+  listOpenReports(q: OpenReportQuery): ReportRecord[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    const where: string[] = ["status = 'open'"];
+    const args: Array<string | number> = [];
+    if (q.category !== undefined) {
+      where.push('category = ?');
+      args.push(q.category);
+    }
+    if (q.after !== undefined) {
+      if (q.afterId === undefined) {
+        where.push('created_at > ?');
+        args.push(q.after);
+      } else {
+        where.push('(created_at >= ? AND (created_at > ? OR id > ?))');
+        args.push(q.after, q.after, q.afterId);
+      }
+    }
+    const sql = `SELECT * FROM kit_reports WHERE ${where.join(' AND ')} ORDER BY created_at, id LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
+  }
+
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+    if (subjects.length === 0) return [];
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const marks = subjects.map(() => '?').join(', ');
+    const sql = `SELECT * FROM kit_reports WHERE status = 'open' AND target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
   }
 
@@ -711,7 +879,9 @@ export class SqliteStore implements Store, TermStore {
            WHERE id = ? AND status = 'open'`,
         )
         .run(status, badFaith ? 1 : 0, at, actor, note, evidence, id);
-      return Number(res.changes) > 0;
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
     });
   }
 

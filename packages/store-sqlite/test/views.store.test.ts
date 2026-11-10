@@ -7,8 +7,8 @@ import { createChatwarden } from '@chatwarden/core';
 import type { RawWho } from '@chatwarden/core';
 import { MIGRATIONS, openStore } from '../src/index.js';
 
-// The staff read views over a database written by an earlier 0.1.x: the K4 views add no migration, so a database at the
-// current schema is exactly "0.1.x-shaped". Rows are written with raw SQL the way the old code wrote them (no revoke
+// The staff read views over a database written by an earlier 0.1.x: the K4 views add no migration of their own, so a database at the
+// current schema is exactly "0.1.x-shaped" for them. Rows are written with raw SQL the way the old code wrote them (no revoke
 // actor on a row that was never revoked, a NULL rule from before rules existed, a pre-room sanction), then reopened.
 
 const H = 3_600_000;
@@ -26,8 +26,8 @@ const tmpPath = (): string => {
 };
 
 describe('the staff read views on an existing 0.1.x database', () => {
-  it('adds no migration: the schema stays at the version 0.1.1 shipped', () => {
-    expect(MIGRATIONS.at(-1)?.version).toBe(14);
+  it('the staff views add no migration of their own: the latest one is the team workbench tables (15)', () => {
+    expect(MIGRATIONS.at(-1)?.version).toBe(15);
   });
 
   it('reads old rows through the new store queries, and revoke info that was always stored', () => {

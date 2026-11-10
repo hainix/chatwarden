@@ -1,9 +1,14 @@
 import type {
   AuditListQuery,
   AuditRow,
+  ClaimAttempt,
+  ClaimMode,
+  ClaimRow,
   DecisionRow,
   MuteRow,
   NoticeRow,
+  OpenReportQuery,
+  ReasonRow,
   ReportActivity,
   ReportListQuery,
   ReportRecord,
@@ -84,11 +89,25 @@ export class MemoryStore implements Store {
   protected discordThreads = new Map<string, DiscordThreadRow>();
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
+  /** Soft claims by person (one row each; an expired one is replaced or ignored, never swept). */
+  protected claims = new Map<SubjectId, ClaimRow>();
+  /** Saved reasons in the order they were added. */
+  protected reasons: ReasonRow[] = [];
+  /** The change token's counter (see `changeToken`). */
+  private changes = 0;
   /** Undo steps of the innermost open transaction, or null outside one. */
   private journal: Array<() => void> | null = null;
 
   private undoWith(step: () => void): void {
     this.journal?.push(step);
+  }
+
+  /** Move the change token; an undone transaction moves it back. */
+  private bump(): void {
+    this.changes += 1;
+    this.undoWith(() => {
+      this.changes -= 1;
+    });
   }
 
   schemaVersion(): number {
@@ -189,6 +208,7 @@ export class MemoryStore implements Store {
       this.sanctions.length -= rows.length;
       if (addedCode) this.refOwners.delete(first.refCode);
     });
+    this.bump();
     return true;
   }
 
@@ -208,6 +228,7 @@ export class MemoryStore implements Store {
         r.revokeReason = null;
       }
     });
+    if (touched.length > 0) this.bump();
     return touched.length;
   }
 
@@ -310,6 +331,88 @@ export class MemoryStore implements Store {
       row.gapClosedAt = null;
       this.auditRows.splice(this.auditRows.indexOf(entry), 1);
     });
+    this.bump();
+    return true;
+  }
+
+  // Team workbench (synchronous, see the Store interface). Single-threaded, so each check-and-set below is atomic.
+
+  changeToken(): string {
+    return String(this.changes);
+  }
+
+  claimCase(person: SubjectId, by: string, now: number, until: number, mode: ClaimMode): ClaimAttempt {
+    const prior = this.claims.get(person);
+    const live = prior !== undefined && prior.until > now ? prior : undefined;
+    const mine = live !== undefined && live.by === by;
+    const wins = live === undefined || (mode === 'takeover') || (mine && mode === 'claim');
+    if (!wins) return { won: false, claim: { ...live! } };
+    const claim: ClaimRow = { person, by, since: mine ? live.since : now, until };
+    this.claims.set(person, claim);
+    this.undoWith(() => {
+      if (prior === undefined) this.claims.delete(person);
+      else this.claims.set(person, prior);
+    });
+    // A heartbeat keeps the owner; everything else (fresh, expired, taken over) changes it.
+    if (!mine) this.bump();
+    return { won: true, claim: { ...claim }, from: live !== undefined && !mine ? live.by : null };
+  }
+
+  releaseClaim(person: SubjectId, by: string, now: number): boolean {
+    const prior = this.claims.get(person);
+    if (prior === undefined || prior.by !== by) return false;
+    this.claims.delete(person);
+    this.undoWith(() => this.claims.set(person, prior));
+    if (prior.until <= now) return false;
+    this.bump();
+    return true;
+  }
+
+  loadClaims(persons: readonly SubjectId[], now: number): ClaimRow[] {
+    const out: ClaimRow[] = [];
+    for (const person of new Set(persons)) {
+      const c = this.claims.get(person);
+      if (c !== undefined && c.until > now) out.push({ ...c });
+    }
+    return out.sort((a, b) => compare(a.person, b.person));
+  }
+
+  listReasons(): ReasonRow[] {
+    return this.reasons.map((r) => ({ ...r }));
+  }
+
+  insertReason(row: ReasonRow): void {
+    if (this.reasons.some((r) => r.id === row.id)) throw new Error('UNIQUE constraint failed: kit_reasons.id');
+    this.reasons.push({ id: row.id, label: row.label, text: row.text, active: row.active });
+    this.undoWith(() => {
+      this.reasons.length -= 1;
+    });
+    this.bump();
+  }
+
+  updateReason(id: string, patch: { label?: string; text?: string }): boolean {
+    const r = this.reasons.find((x) => x.id === id);
+    if (r === undefined) return false;
+    const before = { label: r.label, text: r.text };
+    const label = patch.label ?? r.label;
+    const text = patch.text ?? r.text;
+    if (label === before.label && text === before.text) return true;
+    r.label = label;
+    r.text = text;
+    this.undoWith(() => Object.assign(r, before));
+    this.bump();
+    return true;
+  }
+
+  setReasonActive(id: string, active: boolean): boolean {
+    const r = this.reasons.find((x) => x.id === id);
+    if (r === undefined) return false;
+    if (r.active === active) return true;
+    r.active = active;
+    this.undoWith(() => {
+      r.active = !active;
+    });
+    this.bump();
     return true;
   }
 
@@ -518,6 +621,7 @@ export class MemoryStore implements Store {
     this.undoWith(() => {
       this.reports.length -= 1;
     });
+    this.bump();
     return true;
   }
 
@@ -531,6 +635,31 @@ export class MemoryStore implements Store {
     const wanted = new Set(subjects);
     return this.reports
       .filter((r) => wanted.has(r.targetSubject))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, n)
+      .map((r) => structuredClone(r));
+  }
+
+  listOpenReports(q: OpenReportQuery): ReportRecord[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    return this.reports
+      .filter((r) => {
+        if (r.status !== 'open') return false;
+        if (q.category !== undefined && r.category !== q.category) return false;
+        if (q.after === undefined) return true;
+        if (r.createdAt !== q.after) return r.createdAt > q.after;
+        return q.afterId !== undefined && compare(r.id, q.afterId) > 0;
+      })
+      .sort((a, b) => a.createdAt - b.createdAt || compare(a.id, b.id))
+      .slice(0, limit)
+      .map((r) => structuredClone(r));
+  }
+
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const wanted = new Set(subjects);
+    return this.reports
+      .filter((r) => r.status === 'open' && wanted.has(r.targetSubject))
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));
@@ -588,6 +717,7 @@ export class MemoryStore implements Store {
     r.modNote = note;
     r.badFaithEvidence = evidence;
     this.undoWith(() => Object.assign(r, before));
+    this.bump();
     return true;
   }
 

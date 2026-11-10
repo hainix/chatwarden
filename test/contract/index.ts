@@ -11,6 +11,7 @@ import { reportsContract } from './reports.contract.js';
 import { retentionContract } from './retention.contract.js';
 import { sanctionsContract } from './sanctions.contract.js';
 import { strikesContract } from './strikes.contract.js';
+import { teamContract } from './team.contract.js';
 import { subjectsContract } from './subjects.contract.js';
 import { transactionsContract } from './transactions.contract.js';
 import { viewsContract } from './views.contract.js';
@@ -26,6 +27,7 @@ export {
   sanctionsContract,
   strikesContract,
   subjectsContract,
+  teamContract,
   transactionsContract,
   viewsContract,
   webhookKeysContract,
@@ -45,6 +47,7 @@ export const CONTRACT_AREAS = [
   'webhook keys',
   'discord threads',
   'staff views',
+  'team',
 ] as const;
 
 /** Registers every area suite against the stores `make` builds (a fresh, empty store on each call). */
@@ -61,4 +64,5 @@ export function storeContract(name: string, make: () => Store): void {
   webhookKeysContract(name, make);
   discordThreadsContract(name, make);
   viewsContract(name, make);
+  teamContract(name, make);
 }

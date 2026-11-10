@@ -1,7 +1,7 @@
 # @chatwarden/store-memory
 
 The in-memory store for Chatwarden, the open-source chat moderation kit for games. It keeps everything the kit stores (people as
-hashed identifiers, reports, sanctions, strikes, mutes, notices, decisions, the audit trail) in plain JavaScript objects inside
+hashed identifiers, reports, sanctions, strikes, mutes, notices, decisions, the audit trail, moderators' claims and saved reasons) in plain JavaScript objects inside
 your process. Nothing is written to disk.
 
 **It is memory only. Everything is lost when the process restarts, exits or stops.** It is for tests, demos and single-process

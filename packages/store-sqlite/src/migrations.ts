@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map, migration 15 is soft claims on a person's case and saved decision reasons. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -356,6 +356,28 @@ CREATE TABLE kit_discord_threads (
   thread_id  TEXT NOT NULL,
   label      TEXT NOT NULL,
   created_at INTEGER NOT NULL
+);
+`,
+  },
+  {
+    version: 15,
+    // The team workbench (K4): a soft claim per person (`person` is the canonical subject id the staff refs show, so a
+    // merge is resolved in code and there is no foreign key) and the saved decision reasons. A claim is live while
+    // `until` is in the future; an expired row is replaced by the next claim, never swept. `claimed_by` is a staff actor.
+    // Nothing here holds chat text, and it is staff-only. The change token needs no table: it is a counter in kit_meta
+    // that the write methods move.
+    sql: `
+CREATE TABLE kit_claims (
+  person     TEXT PRIMARY KEY,
+  claimed_by TEXT NOT NULL,
+  since      INTEGER NOT NULL,
+  until      INTEGER NOT NULL
+);
+CREATE TABLE kit_reasons (
+  id     TEXT PRIMARY KEY,
+  label  TEXT NOT NULL,
+  text   TEXT NOT NULL,
+  active INTEGER NOT NULL CHECK (active IN (0, 1))
 );
 `,
   },

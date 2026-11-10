@@ -27,11 +27,15 @@ export const AUDIT_ACTIONS = [
   'suggest',
   'policy.view',
   'blocked.view',
+  'case.takeover',
+  'reason.add',
+  'reason.update',
+  'reason.toggle',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
-/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id or an exception id. */
-export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception'] as const;
+/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id or a saved reason id. */
+export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason'] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
 export interface AuditTarget {
