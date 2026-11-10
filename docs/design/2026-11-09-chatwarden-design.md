@@ -244,17 +244,22 @@ implementation plus `rooms.*` / `chat.*` / `doors.*` calls at the existing hook 
 ### Roles
 
 The kit's role check is per route, enforced by `@chatwarden/http` from the `role` the adopter's guard supplies.
+There are three roles, in order: `moderator` < `senior` < `owner`. A permission names the lowest role that has it, and
+a higher role always has it too. These are the defaults; an adopter can move any permission to another role (there are
+no floors), and the kit only governs its own routes.
 
-| | moderator | owner |
-|---|---|---|
-| Queue, reports, decide, sanction, revoke, notes, history | yes | yes |
-| Edit the live term list (with the negative-corpus check) | yes | yes |
-| Rule gaps: see the list, close it out | see only | yes |
-| Settings: kill switches, AI read on/off, Discord and webhook config, retention | no | yes |
-| Audit log | read | read |
+| | moderator | senior | owner |
+|---|---|---|---|
+| Queue, reports, decide, sanction, revoke, notes, history | yes | yes | yes |
+| Permanent ban (`sanctions.apply.ban_permanent`) | no | yes | yes |
+| Edit the live term list (with the negative-corpus check) | yes | yes | yes |
+| Rule gaps: see the list | yes | yes | yes |
+| Rule gaps: close one out | no | no | yes |
+| Audit log | no | read | read |
+| Settings: kill switches, AI read on/off, Discord and webhook config, retention | no | no | yes |
 
 This matches Moxgate's 2026-11-07 decision (moderators maintain the slur list themselves). Moxgate's ops server
-keeps its read-only-elsewhere rules; the kit only governs its own routes.
+keeps its read-only-elsewhere rules.
 
 ### Stacks
 
@@ -267,7 +272,7 @@ keeps its read-only-elsewhere rules; the kit only governs its own routes.
 
 - **Built-in hub** (default). `@chatwarden/http` + `@chatwarden/hub-react` against the kit's store. One process, SQLite.
   Access control is the adopter's: the kit takes an `actor` string per request and a role (`moderator |
-  owner`), and ships a guide for putting it behind Cloudflare Access or similar, as Moxgate does.
+  senior | owner`), and ships a guide for putting it behind Cloudflare Access or similar, as Moxgate does.
 - **Coop** (`@chatwarden/coop`). The kit keeps evidence, sanctions and notices; Coop does review.
   - **Item model.** Each kit report is sent as its **own item**: a `chat-report` item type whose id is the
     kit report id. So every Coop callback names the report it concerns, and the adapter knows which report
@@ -470,7 +475,7 @@ kit, picks it, and wires it in one session, with the safe defaults on. So:
    - The term pack is installed only on an explicit `--terms en` (the engine stays empty otherwise; the
      prompt says so).
    - AI read stays off.
-   - Discord excerpts stay off.
+   - Webhook `includeExcerpts` stays off (Discord posts never carry excerpts).
    - Retention defaults stay on.
    - The hub is refused until an access guard is configured (`init` scaffolds a shared-secret guard and
      says to replace it).
@@ -482,7 +487,9 @@ kit, picks it, and wires it in one session, with the safe defaults on. So:
   configurable.
 - Never in a player-facing frame: keys, hashes, account ids, other players' lines, reporter identity, the
   moderator's reason.
-- Discord: no chat text by default. An adopter can turn excerpts on explicitly, with a warning in the docs.
+- Discord: posts never carry chat text or excerpts, and there is no option to turn them on. The one excerpt channel is the
+  outgoing webhook's `includeExcerpts` option (off by default, set per endpoint, with a warning in the docs): an adopter
+  who wants chat text in a staff tool receives it there, on an endpoint they sign and control.
 - AI read: role labels only; no identifiers. Off by default.
 - A privacy-policy paragraph template ships with the docs, labelled "not legal advice", after counsel
   reviews Moxgate's wording.
@@ -610,7 +617,7 @@ waits for K1's schema.
   - `core` has no IO imports (lint rule)
   - every package is exercised by `examples/tiny-chat`
   - a Coop callback replay is idempotent
-  - the Discord payload never contains excerpt text unless opted in
+  - the Discord payload never contains excerpt text (there is no opt-in); a webhook body has it only with `includeExcerpts`
   - the term-pack checksum is verified
 
 ## Left to the builder

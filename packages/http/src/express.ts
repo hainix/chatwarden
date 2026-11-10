@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { safeWarn } from '@chatwarden/core';
+import { errorClass, safeWarn } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
 import { BODY_MAX_BYTES } from './body.js';
 import { errorResponse, withErrors } from './errors.js';
@@ -22,7 +22,9 @@ export interface ExpressOptions {
    * it reads the body, so the rest of your app (your own routes, a later `express.json()`) sees the request untouched. With
    * `false` the kit answers it itself with its 404 `{ error: 'not_found' }`, so nothing mounted after it is reached.
    * Either way a path that matches a route under another method is the kit's 405, and a handler that answers 404 (an
-   * unknown id) is the kit's 404: those are answers, not "no route". Must be a boolean (`TypeError`).
+   * unknown id) is the kit's 404: those are answers, not "no route". The exception is `OPTIONS` with `true`: unless the
+   * table has an `OPTIONS` route for the path it goes on too, so your CORS middleware (mounted BEFORE the kit) can answer
+   * the preflight. Must be a boolean (`TypeError`).
    */
   fallthrough?: boolean;
 }
@@ -164,7 +166,9 @@ function send(res: Response, kit: KitResponse, applied: string[], head = false):
  *   logged once per adapter. If your app needs `express.json()`, mount it on your own routes, not globally.
  * - A path that matches none of its routes goes on to the next Express handler (`fallthrough`, default true), and the body
  *   is not read, so a kit mounted at `/` does not hide the routes and body parsers mounted after it. A wrong method on a
- *   known path is still the kit's 405, and a handler's own 404 (an unknown report id) still the kit's 404. With
+ *   known path is still the kit's 405, and a handler's own 404 (an unknown report id) still the kit's 404. The one
+ *   exception is `OPTIONS`: unless the table has an `OPTIONS` route for the path, it goes on too, so the CORS middleware
+ *   you mount BEFORE `toExpress` answers a preflight (the kit does no CORS itself). With
  *   `{ fallthrough: false }` the adapter answers EVERY path under its mount point itself (an unknown path is the kit's
  *   404), so mount it after your own routes, or at a prefix.
  * - `path` is relative to the mount point; `query` holds the first string value of each key; header names are
@@ -210,7 +214,7 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
     const applied: string[] = [];
     try {
       // Not ours: hand it on before touching anything, the body included.
-      if (fallthrough && !compiled.matches(req.path)) {
+      if (fallthrough && !compiled.matches(req.path, req.method)) {
         next();
         return;
       }
@@ -243,7 +247,7 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
       };
       send(res, await handle(kit), applied, req.method === 'HEAD');
     } catch (err) {
-      safeWarn(logger, 'chatwarden.http_error', { error: err instanceof Error ? err.name : typeof err });
+      safeWarn(logger, 'chatwarden.http_error', { error: errorClass(err) });
       if (res.headersSent || res.writableEnded) {
         res.destroy();
         return;

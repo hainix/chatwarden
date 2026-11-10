@@ -156,6 +156,17 @@ describe('construction: endpoints are validated once', () => {
     expect(k.listeners.size).toBe(0);
   });
 
+  it('subscribes once per endpoint, with the typed "*" overload (the event list filters in the listener)', () => {
+    const k = fakeKit();
+    const f = fakeFetch();
+    webhooksOut(k.kit, {
+      endpoints: [endpointA({ events: ['report.created', 'report.closed'] }), { url: URL_B, secret: SECRET_B, events: '*' }],
+      fetch: f.fetch,
+      clock,
+    });
+    expect([...k.listeners].map((l) => l.type)).toEqual(['*', '*']);
+  });
+
   it('exposes the documented limits', () => {
     expect(MAX_RETRIES).toBe(5);
     expect(QUEUE_MAX).toBe(1000);

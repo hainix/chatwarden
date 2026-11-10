@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { safeWarn } from '../src/log.js';
+import { errorClass, safeWarn } from '../src/log.js';
 import type { Logger } from '../src/types.js';
 import * as pkg from '../src/index.js';
 
@@ -70,5 +70,47 @@ describe('safeWarn', () => {
       throw new Error('console broke');
     });
     expect(() => safeWarn(undefined, 'a.b')).not.toThrow();
+  });
+});
+
+describe('errorClass', () => {
+  it('is exported from the package entry', () => {
+    expect(pkg.errorClass).toBe(errorClass);
+  });
+
+  it('is the error name for an Error, a subclass and an error with a custom name', () => {
+    class QueryError extends Error {
+      constructor() {
+        super('secret detail that must never be logged');
+        this.name = 'QueryError';
+      }
+    }
+    expect(errorClass(new Error('x'))).toBe('Error');
+    expect(errorClass(new TypeError('x'))).toBe('TypeError');
+    expect(errorClass(new RangeError('x'))).toBe('RangeError');
+    expect(errorClass(new QueryError())).toBe('QueryError');
+  });
+
+  it('is the typeof for anything that is not an Error, never its content', () => {
+    expect(errorClass('boom with an id s_abc')).toBe('string');
+    expect(errorClass(42)).toBe('number');
+    expect(errorClass(undefined)).toBe('undefined');
+    expect(errorClass(null)).toBe('object');
+    expect(errorClass({ message: 'm' })).toBe('object');
+    expect(errorClass(() => 1)).toBe('function');
+    expect(errorClass(Symbol('s'))).toBe('symbol');
+  });
+
+  it('never throws: a hostile name getter or a revoked proxy is "unknown"', () => {
+    const hostile = new Error('x');
+    Object.defineProperty(hostile, 'name', {
+      get() {
+        throw new Error('no');
+      },
+    });
+    expect(errorClass(hostile)).toBe('unknown');
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    expect(errorClass(proxy)).toBe('unknown');
   });
 });

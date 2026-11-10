@@ -141,6 +141,59 @@ describe('GET /reports', () => {
     ]);
   });
 
+  it('a list item is a summary: exactly these keys, nothing of the evidence', async () => {
+    const { call, file } = await world();
+    const r = await file();
+    const res = await call('GET', '/reports');
+    const item = (res.body as { items: Array<Record<string, unknown>> }).items[0] as Record<string, unknown>;
+    expect(Object.keys(item).sort()).toEqual(
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'createdAt', 'id', 'reporterPerson', 'roomId', 'status', 'tags', 'targetPerson'].sort(),
+    );
+    expect(item).toMatchObject({ id: r.id, category: 'harassment', status: 'open', roomId: r.room, targetPerson: r.target, reporterPerson: r.reporter, badFaith: false, actionedAt: null, actionedBy: null });
+    // Keys are the same on a decided report, and the decision shows through status / badFaith / actioned*.
+    await call('POST', `/reports/${r.id}/decide`, { actor: 'ann', body: decideBody([warning(r.target)]) });
+    const after = ((await call('GET', '/reports')).body as { items: Array<Record<string, unknown>> }).items[0] as Record<string, unknown>;
+    expect(Object.keys(after).sort()).toEqual(Object.keys(item).sort());
+    expect(after).toMatchObject({ status: 'actioned', actionedBy: 'ann', actionedAt: expect.any(Number) });
+  });
+
+  it('the list never carries the excerpt, a planted chat line, handles, notes or evidence (in any key, at any depth)', async () => {
+    const { cw, call, file } = await world();
+    const room = 'room-plant';
+    cw.rooms.seat(room, 'p1', { clientKey: `${KEY_REPORTER}-x`, ip: IP_REPORTER }, 'RepHandle');
+    cw.rooms.seat(room, 'p2', { clientKey: `${KEY_TARGET}-x`, ip: IP_TARGET }, 'TgtHandle');
+    const PLANTED = 'planted-excerpt-line-zzz-4417';
+    cw.chat.accept(room, 'p2', PLANTED);
+    const res = await cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', category: 'harassment', note: 'planted-reporter-note-8842' });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    // The record itself does hold the planted line (so the control is real).
+    expect(JSON.stringify(cw.reports.get(res.reportId))).toContain(PLANTED);
+    await call('POST', `/reports/${res.reportId}/decide`, { body: decideBody([], { verdict: 'noted', reason: 'planted-mod-note-5530' }) });
+    await file();
+    const listed = (await call('GET', '/reports')).body;
+    const text = JSON.stringify(listed);
+    for (const needle of [PLANTED, 'planted-reporter-note-8842', 'planted-mod-note-5530', 'RepHandle', 'TgtHandle']) expect(text).not.toContain(needle);
+    const keys = keysDeep(listed);
+    for (const k of ['excerpt', 'note', 'modNote', 'badFaithEvidence', 'reporterHandle', 'targetHandle', 'people', 'ownLineIds', 'lineId', 'reporterSubject', 'targetSubject', 'reporterSeat', 'targetSeat']) {
+      expect(keys.has(k), k).toBe(false);
+    }
+    // The audited single-report route still carries the evidence.
+    const one = (await call('GET', `/reports/${res.reportId}`)).body as { report: { excerpt: unknown } };
+    expect(JSON.stringify(one.report.excerpt)).toContain(PLANTED);
+  });
+
+  it('a dismissed bad-faith report is a summary too, evidence withheld', async () => {
+    const { call, file } = await world();
+    const r = await file();
+    await call('POST', `/reports/${r.id}/decide`, {
+      body: decideBody([], { verdict: 'bad_faith', evidence: 'planted-bad-faith-evidence-9901' }),
+    });
+    const body = (await call('GET', '/reports')).body as { items: Array<Record<string, unknown>> };
+    expect(body.items[0]).toMatchObject({ status: 'dismissed', badFaith: true });
+    expect(JSON.stringify(body)).not.toContain('planted-bad-faith-evidence-9901');
+  });
+
   it('filters by status', async () => {
     const { call, file } = await world();
     const a = await file();

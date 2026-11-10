@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { CATEGORY_TO_RULE, CONDUCT_LEVELS, DEFAULT_SEVERE_RULES, safeWarn } from '@chatwarden/core';
+import { CATEGORY_TO_RULE, CONDUCT_LEVELS, DEFAULT_SEVERE_RULES, errorClass, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, Clock, DiscordThreadRow, KitEvent, KitEventOf, Limits, Logger, ModerationProfile } from '@chatwarden/core';
 import { isSnowflake, makeForumClient, parseWebhookUrl } from './forum.js';
 import type { ForumMessage } from './forum.js';
@@ -68,14 +68,6 @@ export interface DiscordFeed {
 }
 
 const systemClock: Clock = { now: () => Date.now() };
-
-const errName = (err: unknown): string => {
-  try {
-    return err instanceof Error ? err.name : typeof err;
-  } catch {
-    return 'unknown';
-  }
-};
 
 const isString = (v: unknown): v is string => typeof v === 'string' && v !== '';
 
@@ -163,7 +155,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
   const rows = new Map<string, DiscordThreadRow>();
 
   const fail = (op: string, err: unknown): void => {
-    safeWarn(logger, 'chatwarden.discord_failed', { op, error: errName(err) });
+    safeWarn(logger, 'chatwarden.discord_failed', { op, error: errorClass(err) });
   };
 
   const remember = (key: string, value: DiscordThreadRow): void => {
@@ -316,7 +308,8 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       noteDrop();
     }
     queue.push(job);
-    void drain();
+    // Not on the caller's stack: a listener of `auto.restricted` runs inside `chat.accept`, and the first step of a delivery reads the store.
+    queueMicrotask(() => void drain());
   };
 
   // ---- reading the kit ----
@@ -370,7 +363,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       if (url.protocol !== 'https:' && url.protocol !== 'http:') return dropped('invalid');
       return url.href.length > LINK_MAX ? dropped('too_long') : `[${label}](<${url.href}>)`;
     } catch (err) {
-      return dropped(errName(err) === 'TypeError' ? 'invalid' : errName(err));
+      return dropped(errorClass(err) === 'TypeError' ? 'invalid' : errorClass(err));
     }
   };
 

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { safeWarn } from '@chatwarden/core';
+import { errorClass, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, DocumentFormat, Logger, RawWho } from '@chatwarden/core';
 import { bodyObject } from './admin/validate.js';
 import { DEFAULT_GAME_NAME } from './admin/policy.js';
@@ -147,7 +147,7 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
     try {
       raw = await identifyHook(req);
     } catch (err) {
-      safeWarn(logger, 'chatwarden.http_identify_failed', { error: err instanceof Error ? err.name : typeof err });
+      safeWarn(logger, 'chatwarden.http_identify_failed', { error: errorClass(err) });
       return {};
     }
     if (typeof raw !== 'object' || raw === null) return {};

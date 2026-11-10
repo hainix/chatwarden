@@ -657,8 +657,8 @@ export interface Store {
   // Discord thread map (K3b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
 
   /**
-   * The forum thread the Discord feed keeps for a person, or null. `subject` is a canonical subject id, or one of the
-   * feed's reserved shared-thread keys (`__unattributed__`, `__log__`). Holds no chat text.
+   * The forum thread the Discord feed keeps for a person, or null. `subject` is a canonical subject id, or the
+   * feed's reserved shared-thread key (`__unattributed__`). Holds no chat text.
    */
   getDiscordThread(subject: string): DiscordThreadRow | null;
 

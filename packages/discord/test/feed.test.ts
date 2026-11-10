@@ -1240,27 +1240,75 @@ describe('queue', () => {
     expect(QUEUE_MAX).toBe(1000);
     const k = fakeKit();
     const { d, logged } = start(k, (n) => (n === 0 ? { status: 429, json: { retry_after: 5 } } : undefined));
-    // Event 0 is taken at once (and held up by a 429); events 1..1004 wait; 4 of them are over the bound.
-    const total = 1 + QUEUE_MAX + 4;
+    // Delivery starts a microtask after the first event, so a burst raised in one tick all waits: 1005 events, 5 over the bound
+    // (the oldest, 0..4, are dropped). The first delivery that remains (event 5) is held up by a 429.
+    const total = QUEUE_MAX + 5;
     const subject = sid();
     for (let i = 0; i < total; i++) void k.emit(gapEv(subject, { refCode: `M-N${String(i).padStart(4, '0')}` }));
     await settle();
     expect(logged).toEqual([['chatwarden.discord_dropped', { count: 1 }]]);
     await settle(6000);
-    // Everything that was kept is delivered, in order: event 0, then 5..1004 (1..4 were dropped, the oldest waiting).
+    // Everything that was kept is delivered, in order: 5..1004.
     const refs = contents(d.calls).map((t) => /Ref: (M-N\d{4})/.exec(t)?.[1]);
     const delivered = refs.filter((r): r is string => r !== undefined);
-    expect(new Set(delivered).size).toBe(1 + QUEUE_MAX);
-    expect(delivered[0]).toBe('M-N0000');
-    expect(delivered).not.toContain('M-N0001');
+    expect(new Set(delivered).size).toBe(QUEUE_MAX);
+    expect(delivered[0]).toBe('M-N0005');
+    expect(delivered).not.toContain('M-N0000');
     expect(delivered).not.toContain('M-N0004');
-    expect(delivered).toContain('M-N0005');
     expect(delivered.at(-1)).toBe(`M-N${String(total - 1).padStart(4, '0')}`);
     await settle(60_000);
     expect(logged).toEqual([
       ['chatwarden.discord_dropped', { count: 1 }],
-      ['chatwarden.discord_dropped', { count: 3 }],
+      ['chatwarden.discord_dropped', { count: 4 }],
     ]);
+  });
+});
+
+describe('the chat hot path: a listener returns before it does any work', () => {
+  it('auto.restricted: the listener returns at once, with no thread lookup and no request until a microtask later', async () => {
+    const k = fakeKit();
+    const get = vi.spyOn(k.kit.discordThreads, 'get');
+    const { d } = start(k);
+    const subject = sid();
+    const listener = [...k.listeners].find((l) => l.type === 'auto.restricted' || l.type === '*');
+    expect(listener).toBeDefined();
+    const out = (listener as { fn: (e: KitEvent) => unknown }).fn(auto(subject));
+    // Back on the caller's stack: nothing was read from the store and nothing was sent.
+    expect(get).not.toHaveBeenCalled();
+    expect(d.calls).toHaveLength(0);
+    await out;
+    await settle();
+    expect(get).toHaveBeenCalled();
+    expect(d.calls).toHaveLength(1);
+  });
+
+  it.each([
+    ['report.created', (s: string) => created(s)],
+    ['report.closed', (s: string) => closed(s)],
+    ['sanction.applied', (s: string) => applied(s)],
+    ['sanction.revoked', (s: string) => lifted(s)],
+    ['gap.created', (s: string) => gapEv(s)],
+  ])('%s: the same, the listener does no lookup before it returns', async (_n, make) => {
+    const k = fakeKit();
+    const person = sid();
+    const report = k.addReport({ targetPerson: person });
+    const get = vi.spyOn(k.kit.discordThreads, 'get');
+    const { d } = start(k);
+    const e = make(_n === 'report.created' || _n === 'report.closed' ? report.id : person);
+    for (const l of [...k.listeners]) if (l.type === '*' || l.type === e.type) l.fn(e);
+    expect(get).not.toHaveBeenCalled();
+    expect(d.calls).toHaveLength(0);
+    await settle();
+    expect(d.calls).toHaveLength(1);
+  });
+
+  it('events raised in one tick are still delivered once each, in order', async () => {
+    const k = fakeKit();
+    const { d } = start(k);
+    const subject = sid();
+    for (let i = 0; i < 3; i++) for (const l of [...k.listeners]) if (l.type === '*' || l.type === 'gap.created') l.fn(gapEv(subject, { refCode: `M-ORD0${i}` }));
+    await settle();
+    expect(contents(d.calls).map((t) => /M-ORD0\d/.exec(t)?.[0]).filter(Boolean)).toEqual(['M-ORD00', 'M-ORD01', 'M-ORD02']);
   });
 });
 
@@ -1308,7 +1356,7 @@ describe('dispose', () => {
     feed.dispose();
     expect(logged).toEqual([
       ['chatwarden.discord_dropped', { count: 1 }],
-      ['chatwarden.discord_dropped', { count: 2 }],
+      ['chatwarden.discord_dropped', { count: 3 }],
     ]);
     await settle();
     expect(vi.getTimerCount()).toBe(0);

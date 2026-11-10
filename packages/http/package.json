@@ -23,6 +23,7 @@
       "default": "./dist/src/express.js"
     }
   },
+  "typesVersions": { "*": { "express": ["dist/src/express.d.ts"] } },
   "files": ["dist/src"],
   "dependencies": { "@chatwarden/core": "0.0.0" },
   "peerDependencies": { "express": "^5.0.0" },

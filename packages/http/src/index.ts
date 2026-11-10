@@ -29,6 +29,7 @@ export type {
   AdminOptions,
   AdminRoutesOptions,
   PolicyOptions,
+  ReportSummary,
   TermsAdmin,
   TermsEditor,
 } from './admin/index.js';

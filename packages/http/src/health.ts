@@ -1,4 +1,4 @@
-import { safeWarn } from '@chatwarden/core';
+import { errorClass, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, Logger } from '@chatwarden/core';
 import type { RouteTable } from './router.js';
 
@@ -26,7 +26,7 @@ export function healthRoutes(cw: Chatwarden, options: HealthOptions = {}): Route
       try {
         ready = cw.ready() === true;
       } catch (err) {
-        safeWarn(logger, 'chatwarden.http_ready_failed', { error: err instanceof Error ? err.name : typeof err });
+        safeWarn(logger, 'chatwarden.http_ready_failed', { error: errorClass(err) });
       }
       return ready
         ? { status: 200, headers: { ...NO_STORE }, body: { ok: true } }

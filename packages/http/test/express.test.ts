@@ -1099,6 +1099,76 @@ describe('toExpress: fallthrough (a path that is not the kit\'s goes on to the n
     expect(ran).toEqual(['last']);
   });
 
+  it('OPTIONS on a known path falls through by default, so a CORS handler before the kit can answer the preflight', async () => {
+    const app = express();
+    const seen: string[] = [];
+    // The documented order: CORS middleware first, then the kit.
+    app.use((req, res, next) => {
+      if (req.method !== 'OPTIONS') return next();
+      seen.push(req.path);
+      res.status(204).setHeader('access-control-allow-origin', '*').end();
+    });
+    app.use('/kit', toExpress(echoRoutes));
+    const base = await listen(app);
+    const res = await fetch(`${base}/kit/ping`, { method: 'OPTIONS' });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(seen).toEqual(['/kit/ping']);
+  });
+
+  it('OPTIONS on a known path reaches an OPTIONS handler mounted after the kit', async () => {
+    const ran: string[] = [];
+    const fresh = express();
+    fresh.use('/kit', toExpress(echoRoutes));
+    fresh.options('/kit/ping', (_req, res) => {
+      ran.push('options');
+      res.status(204).setHeader('allow', 'GET, HEAD, OPTIONS').end();
+    });
+    const base = await listen(fresh);
+    const res = await fetch(`${base}/kit/ping`, { method: 'OPTIONS' });
+    expect(res.status).toBe(204);
+    expect(ran).toEqual(['options']);
+    expect(res.headers.get('allow')).toBe('GET, HEAD, OPTIONS');
+  });
+
+  it('with no handler anywhere an OPTIONS falls through to the app 404, not the kit 405', async () => {
+    const { app, ran } = app2('/kit');
+    const base = await listen(app);
+    const res = await fetch(`${base}/kit/echo`, { method: 'OPTIONS' });
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe('app 404');
+    expect(ran).toEqual(['last']);
+  });
+
+  it('fallthrough: false still answers OPTIONS on a known path itself (405 with allow), the app is not reached', async () => {
+    const { app, ran } = app2('/kit', { fallthrough: false });
+    const base = await listen(app);
+    const res = await fetch(`${base}/kit/echo`, { method: 'OPTIONS' });
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('GET, HEAD, POST');
+    expect(ran).toEqual([]);
+  });
+
+  it('other wrong methods on a known path are still the kit 405 with fallthrough on (only OPTIONS is handed on)', async () => {
+    const { app, ran } = app2('/kit');
+    const base = await listen(app);
+    for (const method of ['DELETE', 'PUT', 'PATCH']) {
+      expect((await fetch(`${base}/kit/ping`, { method })).status, method).toBe(405);
+    }
+    expect(ran).toEqual([]);
+  });
+
+  it('a route table with its own OPTIONS route keeps answering it, fallthrough on', async () => {
+    const { app, ran } = app2('/kit', undefined, { ...echoRoutes, 'OPTIONS /ping': () => ({ status: 204, headers: { 'x-own': '1' }, body: undefined }) });
+    const base = await listen(app);
+    const res = await fetch(`${base}/kit/ping`, { method: 'OPTIONS' });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('x-own')).toBe('1');
+    expect(ran).toEqual([]);
+    // Another known path without an OPTIONS route still goes on.
+    expect((await fetch(`${base}/kit/echo`, { method: 'OPTIONS' })).status).toBe(404);
+  });
+
   it.each([['yes'], [1], [null]])('refuses a fallthrough option that is not a boolean (%j)', (value) => {
     expect(() => toExpress(echoRoutes, { fallthrough: value as never })).toThrow(TypeError);
   });

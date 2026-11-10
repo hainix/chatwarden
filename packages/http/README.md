@@ -22,6 +22,18 @@ npm install express        # only for the Express adapter (peer dependency, vers
 
 Node 22.13 or newer.
 
+### CommonJS
+
+The package is ESM only. A CommonJS app can still `require('@chatwarden/http')` on Node 22.12 or newer (and 24): Node loads an
+ES module from `require()` as long as it has no top-level `await`, and none of the Chatwarden packages has one. On older
+Node, use `await import('@chatwarden/http')`.
+
+For types, a TypeScript project with `module: commonjs` and `moduleResolution: node` does not read the `exports` map, so the
+`@chatwarden/http/express` subpath is found through `typesVersions` in the package's `package.json`, and
+`import { toExpress } from '@chatwarden/http/express'` type-checks. `module: node16` or `nodenext` reads `exports` directly.
+(TypeScript before 5.8 reports TS1479 when CommonJS code `require()`s an ES module under `node16`; use `nodenext` with 5.8 or
+newer, or `await import(...)`.)
+
 ## Set up
 
 Copy this and change the two hooks (`authorize` for your moderators, `identify` for your players).
@@ -107,8 +119,8 @@ Staff, under the prefix you mount (`/admin` above). Each one is authenticated, n
 
 | Route | What it does |
 | --- | --- |
-| `GET /reports?status&cursor&limit` | The queue, newest first. |
-| `GET /reports/:id?level` | One report with each person's history and a suggestion. Audited with the report id. |
+| `GET /reports?status&cursor&limit` | The queue, newest first, as summaries: `id`, `createdAt`, `roomId`, `tags`, `category`, `status`, `badFaith`, `targetPerson`, `reporterPerson`, `actionedAt`, `actionedBy`. No chat text, handles or notes. |
+| `GET /reports/:id?level` | One report with its excerpt, notes, each person's history and a suggestion. This is where evidence is read, so it is audited with the report id. |
 | `POST /reports/:id/suggest` | `{ level, rule?, person? }`: a suggestion for a person the report names (default: the reported person). |
 | `POST /reports/:id/decide` | `{ verdict, reason, actions, evidence? }`. A replay of the same decision applies nothing twice. |
 | `GET /people/:ref/history` | A person's actions and recent reports against them. |
@@ -153,6 +165,17 @@ report id) is the kit's 404 `not_found`. Neither falls through, because they are
 ```ts
 app.use('/admin', toExpress(adminRoutes(cw, options)));                      // an unknown /admin/... goes on to your app
 app.use('/admin', toExpress(adminRoutes(cw, options), { fallthrough: false })); // an unknown /admin/... is the kit's JSON 404
+```
+
+**CORS.** The kit does no CORS handling. If a staff page on another origin calls these routes, mount your CORS middleware
+BEFORE `toExpress`: the browser's `OPTIONS` preflight then reaches it first. With `fallthrough` on (the default) an `OPTIONS`
+request to a known path, which the kit has no route for, goes on to the next handler like an unknown path does, so a CORS
+handler mounted after the kit still answers it. With `fallthrough: false` the kit answers that `OPTIONS` itself with 405, so
+the CORS middleware must come first.
+
+```ts
+app.use(yourCorsMiddleware);                       // answers OPTIONS preflights, adds the allow-origin headers
+app.use('/admin', toExpress(adminRoutes(cw, options)));
 ```
 
 Use `fallthrough: false` for a prefix that is wholly the kit's, when you want every path under it to get the kit's

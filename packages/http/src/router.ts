@@ -79,8 +79,12 @@ export interface CompiledRoutes {
    * unlike a handler that answers 404 (which is a match), it means the path is not this table's. A path that matches only
    * under another method is true, because `run` answers it 405. An adapter uses this to hand a foreign path back to its
    * framework (`toExpress` calls `next()`) before it reads the body.
+   *
+   * With `method`, an `OPTIONS` request is the table's only when a route of the table answers `OPTIONS` itself. A
+   * preflight to a known path is otherwise the app's to answer (its CORS middleware), not `run`'s 405. Any other method
+   * behaves as without it.
    */
-  matches(path: string): boolean;
+  matches(path: string, method?: string): boolean;
 }
 
 /** Compile a route table once. Validates it exactly as {@link createRouter} does (`RangeError`). */
@@ -132,9 +136,11 @@ export function compileRoutes(routes: RouteTable): CompiledRoutes {
     return segments.some((s) => s === '') ? null : segments;
   };
 
-  const matches = (full: string): boolean => {
+  const matches = (full: string, method?: string): boolean => {
     const segments = segmentsOf(full);
-    return segments !== null && table.some((route) => matchPath(route, segments) !== null);
+    if (segments === null) return false;
+    const preflight = method !== undefined && method.toUpperCase() === 'OPTIONS';
+    return table.some((route) => (!preflight || route.method === 'OPTIONS') && matchPath(route, segments) !== null);
   };
 
   const run = async (req: KitRequest): Promise<KitResponse> => {

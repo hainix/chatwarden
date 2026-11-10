@@ -1,4 +1,4 @@
-import { safeWarn } from '@chatwarden/core';
+import { errorClass, safeWarn } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
 
 // The Discord forum, as a channel webhook. A forum webhook can open a thread (`thread_name`) and post into one
@@ -101,14 +101,6 @@ type Attempt =
 
 type Outcome = { kind: 'ok'; json: Json } | { kind: 'final'; status: number; json: Json } | { kind: 'failed' };
 
-const errName = (err: unknown): string => {
-  try {
-    return err instanceof Error ? err.name : typeof err;
-  } catch {
-    return 'unknown';
-  }
-};
-
 const parseJson = (text: string): Json => {
   try {
     const v: unknown = JSON.parse(text);
@@ -180,7 +172,7 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
       if (status >= 500) return { kind: 'retry', status };
       return { kind: 'final', status, json };
     } catch (err) {
-      return { kind: 'retry', error: errName(err) };
+      return { kind: 'retry', error: errorClass(err) };
     } finally {
       clearTimeout(timeout);
       aborts.delete(controller);

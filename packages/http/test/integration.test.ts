@@ -345,6 +345,9 @@ describe('integration: the kit over real Express', () => {
     const list = await call(w, 'GET', '/admin/reports', { headers: staff(MOD_TOKEN) });
     expect(list.status).toBe(200);
     expect((list.json.items as Array<{ id: string }>).map((r) => r.id)).toContain(reportId);
+    // The queue is a summary: the reporter's note and the excerpt are only on the audited single-report route.
+    expect(JSON.stringify(list.json)).not.toContain(NOTE);
+    expect(Object.keys((list.json.items as Array<Record<string, unknown>>)[0] as object)).not.toContain('excerpt');
 
     const got = await call(w, 'GET', `/admin/reports/${reportId}`, { headers: staff(MOD_TOKEN) });
     expect(got.status).toBe(200);

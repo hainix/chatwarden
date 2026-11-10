@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { KIT_EVENT_TYPES, safeWarn } from '@chatwarden/core';
+import { errorClass, KIT_EVENT_TYPES, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, Clock, KitEvent, Logger } from '@chatwarden/core';
 import { checkSecret, DELIVERY_HEADER, SIGNATURE_HEADER, sign, TIMESTAMP_HEADER } from './sign.js';
 
@@ -59,14 +59,6 @@ const systemClock: Clock = { now: () => Date.now() };
 /** Drop warnings are coalesced: at most one line per endpoint in this window. */
 const DROP_LOG_WINDOW_MS = 60_000;
 const IMF_DATE_RE = /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
-
-const errName = (err: unknown): string => {
-  try {
-    return err instanceof Error ? err.name : typeof err;
-  } catch {
-    return 'unknown';
-  }
-};
 
 function parseUrl(value: unknown): URL | null {
   try {
@@ -257,7 +249,7 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
         if (status === 429 || status >= 500) return { kind: 'retry', status, ...(wait === undefined ? {} : { afterMs: wait }) };
         return { kind: 'final', status };
       } catch (err) {
-        return { kind: 'retry', error: errName(err) };
+        return { kind: 'retry', error: errorClass(err) };
       } finally {
         clearTimeout(timeout);
         aborts.delete(controller);
@@ -295,7 +287,7 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
           try {
             await deliver(next);
           } catch (err) {
-            safeWarn(logger, 'chatwarden.webhook_failed', { type: next.type, error: errName(err), attempts: 0 });
+            safeWarn(logger, 'chatwarden.webhook_failed', { type: next.type, error: errorClass(err), attempts: 0 });
           }
         }
       } finally {
@@ -324,7 +316,7 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
               };
             }
           } catch (err) {
-            safeWarn(logger, 'chatwarden.webhook_excerpt_failed', { error: errName(err) });
+            safeWarn(logger, 'chatwarden.webhook_excerpt_failed', { error: errorClass(err) });
           }
         }
         const id = randomUUID();
@@ -336,14 +328,17 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
         queue.push({ id, type: event.type, body, lastTimestamp: 0 });
         void drain();
       } catch (err) {
-        safeWarn(logger, 'chatwarden.webhook_failed', { type: event.type, error: errName(err), attempts: 0 });
+        safeWarn(logger, 'chatwarden.webhook_failed', { type: event.type, error: errorClass(err), attempts: 0 });
       }
     };
 
-    const types: Array<KitEvent['type'] | '*'> = endpoint.events === '*' ? ['*'] : [...new Set(endpoint.events)];
-    for (const type of types) {
-      unsubscribes.push(cw.on(type as never, onEvent as never));
-    }
+    // One typed `'*'` subscription per endpoint; the endpoint's own list is checked in the listener.
+    const wanted: ReadonlySet<string> | null = endpoint.events === '*' ? null : new Set<string>(endpoint.events);
+    unsubscribes.push(
+      cw.on('*', (event) => {
+        if (wanted === null || wanted.has(event.type)) onEvent(event);
+      }),
+    );
     queues.push(queue);
   }
 

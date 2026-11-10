@@ -161,6 +161,32 @@ describe('packages/http/README.md', () => {
     expect(find('POST /exceptions`')).toMatch(/\{ phrase, language, note\? \}/);
   });
 
+  it('says how a CommonJS app consumes it, and that CORS middleware mounts before toExpress', () => {
+    const install = section(http, 'Install');
+    expect(install).toContain('### CommonJS');
+    expect(install).toMatch(/Node 22\.12 or newer/);
+    expect(install).toMatch(/no top-level `await`/);
+    expect(install).toContain('moduleResolution: node');
+    expect(install).toContain('typesVersions');
+    const mounting = section(http, 'Set up').slice(section(http, 'Set up').indexOf('### Mounting'));
+    expect(mounting).toMatch(/\*\*CORS\.\*\*/);
+    expect(mounting).toMatch(/mount your CORS middleware\s+BEFORE `toExpress`/);
+    expect(mounting).toContain('OPTIONS');
+  });
+
+  it('the queue row lists the summary fields and the evidence stays on the single-report row', () => {
+    const routes = http.slice(http.indexOf('### The routes'), http.indexOf('### Mounting'));
+    const list = rows(routes).find((r) => r[0]?.startsWith('`GET /reports?'))?.[1] ?? '';
+    for (const field of ['id', 'createdAt', 'roomId', 'tags', 'category', 'status', 'badFaith', 'targetPerson', 'reporterPerson', 'actionedAt', 'actionedBy']) {
+      expect(list, field).toContain(`\`${field}\``);
+    }
+    expect(list).not.toContain('`excerpt`');
+    expect(list).toMatch(/No chat text/);
+    const one = rows(routes).find((r) => r[0]?.startsWith('`GET /reports/:id'))?.[1] ?? '';
+    expect(one).toMatch(/excerpt/);
+    expect(one).toMatch(/audited with the report id/);
+  });
+
   it('uses no marketing words', () => {
     expect(http).not.toMatch(MARKETING);
     expect(discord).not.toMatch(MARKETING);
@@ -228,7 +254,7 @@ describe('the root README', () => {
   });
 });
 
-describe('every ```ts block in the READMEs compiles against the built types', () => {
+describe('every ```ts block in the READMEs compiles against the package sources', () => {
   const docs: Array<[string, string]> = [
     ['http', http],
     ['discord', discord],
@@ -257,8 +283,22 @@ declare const authorize: import('@chatwarden/http').Authenticate;
     const dir = join(here, '__snippets__').replaceAll('\\', '/');
     const cfg = ts.readConfigFile(join(here, '../../../tsconfig.base.json'), ts.sys.readFile);
     const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, join(here, '../../..'));
+    // The workspace packages resolve to their TypeScript source (the same map vitest.config.ts uses), so this check needs no
+    // prior `tsc -b` and never reads a stale `dist`. Exact keys, so the subpath `/express` is not taken by the bare name.
+    const src = (rel: string): string[] => [`packages/${rel}`];
     const options: ts.CompilerOptions = {
       ...parsed.options,
+      pathsBasePath: join(here, '../../..'),
+      paths: {
+        '@chatwarden/core': src('core/src/index.ts'),
+        '@chatwarden/store-sqlite': src('store-sqlite/src/index.ts'),
+        '@chatwarden/matcher': src('matcher/src/index.ts'),
+        '@chatwarden/matcher/test-fixtures': src('matcher/test/fixtures/index.ts'),
+        '@chatwarden/profanity': src('profanity/src/index.ts'),
+        '@chatwarden/discord': src('discord/src/index.ts'),
+        '@chatwarden/http': src('http/src/index.ts'),
+        '@chatwarden/http/express': src('http/src/express.ts'),
+      },
       noEmit: true,
       composite: false,
       incremental: false,

@@ -1,5 +1,6 @@
 import {
   AuditQueryError,
+  errorClass,
   ExcerptError,
   ProfileError,
   ReportQueryError,
@@ -114,7 +115,7 @@ export function withErrors<A extends unknown[]>(
         if (err instanceof RangeError) safeWarn(logger, 'chatwarden.http_range_error', { error: err.name });
         return errorResponse(code);
       }
-      safeWarn(logger, 'chatwarden.http_error', { error: err instanceof Error ? err.name : typeof err });
+      safeWarn(logger, 'chatwarden.http_error', { error: errorClass(err) });
       return { status: 500, body: { error: 'internal' } };
     }
   };

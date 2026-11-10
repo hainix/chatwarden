@@ -399,6 +399,20 @@ describe('compileRoutes: "no route matched" is not a handler 404', () => {
     expect(res.headers?.allow).toBe('GET, HEAD');
   });
 
+  it('with a method, OPTIONS belongs to the table only when a route of its own answers it', () => {
+    const { matches } = compileRoutes(table);
+    expect(matches('/reports/abc', 'OPTIONS')).toBe(false);
+    expect(matches('/reports/abc', 'options')).toBe(false);
+    expect(matches('/reports/abc/decide', 'OPTIONS')).toBe(false);
+    expect(matches('/nothing', 'OPTIONS')).toBe(false);
+    // Every other method keeps the old answer, and no method is the old answer too.
+    for (const method of ['GET', 'POST', 'DELETE', 'HEAD', 'PUT']) expect(matches('/reports/abc', method), method).toBe(true);
+    expect(matches('/reports/abc')).toBe(true);
+    const own = compileRoutes({ ...table, 'OPTIONS /reports/:id': () => ok({ preflight: true }) });
+    expect(own.matches('/reports/abc', 'OPTIONS')).toBe(true);
+    expect(own.matches('/reports/abc/decide', 'OPTIONS')).toBe(false);
+  });
+
   it('a handler that answers 404 is a match: run returns its response', async () => {
     const { matches, run } = compileRoutes(table);
     expect(matches('/missing')).toBe(true);

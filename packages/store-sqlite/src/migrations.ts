@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {

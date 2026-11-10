@@ -23,6 +23,7 @@
       "default": "./dist/test/fixtures/index.js"
     }
   },
+  "typesVersions": { "*": { "test-fixtures": ["dist/test/fixtures/index.d.ts"] } },
   "files": ["dist/src"],
   "dependencies": { "@chatwarden/core": "0.0.0", "obscenity": "^0.4.6" },
   "publishConfig": { "access": "public" }

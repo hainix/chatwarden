@@ -13,8 +13,43 @@ const HISTORY_REPORTS_DEFAULT = 20;
 const roomOf = (report: StaffReport): string | null => (report.roomId === '' ? null : report.roomId);
 
 /**
+ * One row of the queue: enough to sort, filter and group by person, and nothing of the evidence. No excerpt, chat text,
+ * handle, seat, reporter note, moderator note or bad-faith evidence: those are on `GET /reports/:id`, which is audited
+ * with the report id. `targetPerson` / `reporterPerson` are the canonical staff refs a hub groups by. The decision shows
+ * as `status` (`actioned` / `dismissed`), `badFaith`, `actionedAt` and `actionedBy`.
+ */
+export interface ReportSummary {
+  id: string;
+  createdAt: number;
+  roomId: string;
+  tags: Record<string, string>;
+  category: StaffReport['category'];
+  status: StaffReport['status'];
+  badFaith: boolean;
+  targetPerson: string;
+  reporterPerson: string;
+  actionedAt: number | null;
+  actionedBy: string | null;
+}
+
+/** Project a report to its queue summary. Lists each field by name, so a field added to the record never leaks in. */
+const summarize = (r: StaffReport): ReportSummary => ({
+  id: r.id,
+  createdAt: r.createdAt,
+  roomId: r.roomId,
+  tags: { ...r.tags },
+  category: r.category,
+  status: r.status,
+  badFaith: r.badFaith,
+  targetPerson: r.targetPerson,
+  reporterPerson: r.reporterPerson,
+  actionedAt: r.actionedAt,
+  actionedBy: r.actionedBy,
+});
+
+/**
  * The report and decision routes (staff only, each audited):
- * - `GET /reports?status&cursor&limit`: the queue (`report.view`, no target)
+ * - `GET /reports?status&cursor&limit`: the queue as summaries, no evidence (`report.view`, no target)
  * - `GET /reports/:id?level`: one report with each person's history and the suggestion for the reported person (`report.view`)
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
  * - `POST /reports/:id/decide { verdict, actions, reason, evidence? }`: decide (`report.decide`, replays too)
@@ -40,7 +75,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         ...(limit === undefined ? {} : { limit }),
       });
       c.audit('report.view');
-      return { status: 200, body: page };
+      return { status: 200, body: { items: page.items.map(summarize), next: page.next } };
     }),
 
     'GET /reports/:id': ctx.secure('reports.read', (c) => {

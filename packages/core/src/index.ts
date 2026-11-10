@@ -95,7 +95,6 @@ export {
   AUDIT_PAGE_MAX,
   AUDIT_TARGET_TYPES,
   AuditQueryError,
-  AuditService,
   isValidAuditActor,
   ROLES,
 } from './audit.js';
@@ -111,7 +110,7 @@ export type {
   AuditTargetType,
   Role,
 } from './audit.js';
-export { safeWarn } from './log.js';
+export { errorClass, safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
@@ -132,7 +131,7 @@ export type {
   PlayerNotice,
   SanctionNoticeInput,
 } from './notices.js';
-export { EventBus, KIT_EVENT_TYPES } from './events.js';
+export { KIT_EVENT_TYPES } from './events.js';
 export type { KitEvent, KitEventOf, KitListener, StaffRef, Subscribe } from './events.js';
 export { createChatwarden } from './chatwarden.js';
 export type { Chatwarden, ChatwardenOptions, GapRow } from './chatwarden.js';
@@ -172,7 +171,6 @@ export {
 export type { ActionRecord, LadderCell, LadderRow, LadderStep, Suggestion, SuggestContext } from './ladder.js';
 export { DECISION_EVIDENCE_MAX, DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
 export type {
-  AppliedGroup,
   DecisionAction,
   DecisionGroup,
   DecisionInput,

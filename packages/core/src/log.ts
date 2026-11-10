@@ -26,3 +26,16 @@ export function safeWarn(logger: Logger | undefined, event: string, detail?: Det
     // A broken logger is not allowed to break the caller.
   }
 }
+
+/**
+ * The only thing about a caught value that may be logged: an `Error`'s name (its class), or the `typeof` of anything
+ * else. Never the message, which can carry an id, a URL or user text. Never throws: a hostile `name` getter or a revoked
+ * proxy gives `'unknown'`.
+ */
+export function errorClass(err: unknown): string {
+  try {
+    return err instanceof Error ? err.name : typeof err;
+  } catch {
+    return 'unknown';
+  }
+}
