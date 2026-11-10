@@ -58,25 +58,31 @@ npm view @chatwarden/store-memory version   # must print a version; a 404 means 
 
 ```sh
 npm run build --workspace site
-npx wrangler pages deploy site/dist --project-name chatwarden --branch main
+cd site   # wrangler refuses to run from the workspace root
+npx wrangler pages deploy dist --project-name chatwarden --branch main
 ```
 
 `--branch main` is what makes it a production deploy. Pages decides production or preview from the branch: the production
 deployment is the one made from the project's production branch (`main`, set when the project was created). wrangler takes the
 branch from git, so run from a worktree, a detached HEAD or any other branch, the deploy lands as a preview
-(`<hash>.chatwarden.pages.dev`) and `chatwarden.dev` keeps saying there is no production deployment, with no error. Passing the
+(`<hash>.chatwarden-bvf.pages.dev`) and `chatwarden.dev` keeps saying there is no production deployment, with no error. Passing the
 branch explicitly makes it production from anywhere. To check a build before it goes live, deploy it as a preview with another
 branch name (`--branch preview`) and open the preview URL it prints.
 
 One-time setup, in the Cloudflare dashboard (or with wrangler), before the first deploy:
 
-1. **Create the Pages project.** Workers & Pages, Create, Pages, "Direct Upload", name it `chatwarden`. (Or run
-   `npx wrangler pages project create chatwarden --production-branch main` once.) Do not connect a git repo: deploys are the
+1. **Create the Pages project** (done 2026-11-10; its pages.dev host is `chatwarden-bvf.pages.dev`). Workers & Pages, Create,
+   Pages, "Direct Upload", name it `chatwarden`. (Or, from `site/`, run
+   `npx wrangler pages project create chatwarden --production-branch main --force` once. wrangler 4.160 and later hand Pages
+   commands to Workers unless `--force` is passed on that first create; later commands need no `--force`.) Do not connect a git repo: deploys are the
    command above.
 2. **Add the custom domain.** In the project, Custom domains, Set up a custom domain, enter `chatwarden.dev`. Optionally add
    `www.chatwarden.dev` and redirect it to the apex.
-3. **DNS.** If `chatwarden.dev` is a zone on this Cloudflare account, Cloudflare creates the `CNAME` to
-   `chatwarden.pages.dev` for you and issues the certificate; there is nothing to enter by hand. If the domain is registered
+3. **DNS.** If `chatwarden.dev` is a zone on this Cloudflare account, the dashboard's custom-domain flow creates the
+   `CNAME` to `chatwarden-bvf.pages.dev` for you and issues the certificate. Adding the domain through the API (or a wrangler
+   login, which has no DNS scope) does not create the record: the domain then waits with "CNAME record not set" until you add
+   a proxied `CNAME` `chatwarden.dev` -> `chatwarden-bvf.pages.dev` in DNS, or press "Activate domain" in the project's Custom
+   domains tab. If the domain is registered
    elsewhere, first add the domain to Cloudflare (Websites, Add a site) and point the registrar's nameservers at the two
    Cloudflare ones it shows, then do step 2.
 4. Check `https://chatwarden.dev/`, `/og.png`, `/llms.txt` and `/robots.txt`, and look at the response headers once
@@ -84,14 +90,14 @@ One-time setup, in the Cloudflare dashboard (or with wrangler), before the first
 
 5. **Turn on HSTS in the dashboard** (SSL/TLS, Edge Certificates, HTTP Strict Transport Security, and "Always Use HTTPS"), for
    `chatwarden.dev`. It is deliberately not in `public/_headers`: Pages sends `_headers` on every preview URL too
-   (`<hash>.chatwarden.pages.dev`), and a preview host should not get an HSTS policy. Start with a short max-age and raise it
+   (`<hash>.chatwarden-bvf.pages.dev`), and a preview host should not get an HSTS policy. Start with a short max-age and raise it
    once the site has been fine for a while.
 
 6. **Leave Cloudflare's script injectors off.** Do not turn on Web Analytics (the one-click Pages option or the zone's beacon),
    Rocket Loader or email address obfuscation for this project or zone. They inject scripts, the CSP blocks them (console
    errors), and Web Analytics would contradict "no analytics".
 
-Later deploys are only the build and the deploy command above. Each deploy gets a preview URL (`<hash>.chatwarden.pages.dev`);
+Later deploys are only the build and the deploy command above. Each deploy gets a preview URL (`<hash>.chatwarden-bvf.pages.dev`);
 a production deploy also goes to the production alias.
 
 `/` is the only route and there is no `404.html`, so Pages serves `index.html` for unknown paths (with a 200). That is fine for
