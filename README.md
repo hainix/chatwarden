@@ -16,6 +16,21 @@ Status: pre-release, as-is, no support promise; PRs welcome.
 | [`@chatwarden/discord`](packages/discord) | Posts the staff review queue into a Discord forum through a channel webhook, one thread per reported person. |
 | [`examples/tiny-chat`](examples/tiny-chat) | A one-room Express + `ws` chat server wired through `createChatwarden`, the kit's HTTP routes and an optional Discord feed (private, not published). |
 
+## Install
+
+Pick what you need. `@chatwarden/core` is a peer dependency of every other package, so you install it yourself and your
+project gets exactly one copy of it. `store-sqlite` and `profanity` also need `matcher` as a peer.
+
+| I want to | Install |
+| --- | --- |
+| Moderate chat: the engine, a store and a slur matcher | `npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher` |
+| Give moderators and players HTTP routes (Express) | add `npm install @chatwarden/http express` |
+| Mask or refuse ordinary swearing | add `npm install @chatwarden/profanity` |
+| Post the review queue into a Discord forum | add `npm install @chatwarden/discord` |
+| Try it with invented test words, no real term list | nothing extra: `@chatwarden/matcher/fixtures` is part of `@chatwarden/matcher` |
+
+Each package has its own README with the options, a copy-paste start and its security notes: [core](packages/core), [store-sqlite](packages/store-sqlite), [matcher](packages/matcher), [profanity](packages/profanity), [http](packages/http), [discord](packages/discord).
+
 ## Quick start
 
 Add the kit to a server that already has chat. The engine (`createChatwarden`) decides; `@chatwarden/http` puts it behind
@@ -69,6 +84,27 @@ createChatwarden({ profile: 'relaxed', overrides: { profanity: { remove: ['damn'
 See the [moderation standards](docs/design/2026-11-09-moderation-standards.md) for the exact tables behind each preset.
 
 Always pass a term pack (a slur `matcher`): profanity starring is not slur protection.
+
+## CommonJS
+
+The packages are ESM only. A CommonJS app can still `require()` them on Node 22.12 or newer (and 24): Node loads an ES module
+from `require()` as long as it has no top-level `await`, and none of the Chatwarden packages has one. On older Node, use
+`await import(...)`.
+
+For types, a TypeScript project with `module: commonjs` and `moduleResolution: node` does not read the `exports` map. The
+subpaths (`@chatwarden/http/express`, `@chatwarden/matcher/fixtures`) are found through `typesVersions` in each package, so
+`import { toExpress } from "@chatwarden/http/express"` type-checks. CI installs the packed tarballs into a fresh CommonJS
+project (TypeScript 5.7, `moduleResolution: node`) and runs them.
+
+## Node support
+
+Node 22.13 or newer. CI tests on Node 22.13 and Node 24, both the full suite and an install of the packed packages into a
+fresh project. `@chatwarden/store-sqlite` uses the `node:sqlite` module that ships inside Node.
+
+## Releasing, and using it before the first release
+
+How a release is made, and how to install the packages from tarballs before they are on npm: [RELEASING.md](RELEASING.md).
+A worked example of a real app adopting the kit, with its decisions and phasing: [Moxgate](docs/adoption/moxgate.md).
 
 ## Development
 

@@ -126,7 +126,7 @@ Staff, under the prefix you mount (`/admin` above). Each one is authenticated, n
 | `GET /people/:ref/history` | A person's actions and recent reports against them. |
 | `POST /sanctions` | `{ subject, kind, durationMs, rule, reason?, gapNote?, includeIp? }`. `durationMs` is required: milliseconds up to 365 days, or `null` for permanent. Answers `{ groupId, refCode }`. |
 | `POST /sanctions/:groupId/revoke` | `{ reason }` (a non-empty string; blank is 400). Revokes the whole group. 404 if it is unknown or already revoked. |
-| `GET /gaps` | Rule gaps (sanctions filed under no rule), newest first. |
+| `GET /gaps` | Rule gaps (sanctions filed under no rule), newest first. Returns the moderator-written gap notes in bulk, so moderators must never paste chat into a gap note. |
 | `POST /gaps/:groupId/close` | `{ status, ref }`: `status` is `ruled` (with `ref`, the number of the active rule that now covers it) or `not_a_rule` (`ref` null or absent). |
 | `GET /terms` | The term and exception rows, text included. Only when you pass `terms`. |
 | `POST /terms/check` | `{ term, language }`: a dry run, answers `{ hits }`. |
@@ -338,8 +338,8 @@ signatures you accepted for 5 minutes.
 a new signature), so a receiver that already handled that id should answer 2xx and do nothing.
 
 **Retries.** A 2xx is success. A network error, a 10 second timeout, a 5xx or a 429 is retried 5 times (6 attempts in all)
-after 1, 2, 4, 8 and 16 seconds, each with plus or minus 20 percent jitter; a 429's `retry-after` (from 1 to 60 seconds) replaces
-the wait. Any other status (a 4xx, or a redirect: none is followed) is final. A delivery that fails for good is logged
+after 1, 2, 4, 8 and 16 seconds, each with plus or minus 20 percent jitter; a 429's `retry-after` replaces
+the wait, held between `RETRY_AFTER_FLOOR_MS` (1 second) and `RETRY_AFTER_CAP_MS` (60 seconds); both are exported. Any other status (a 4xx, or a redirect: none is followed) is final. A delivery that fails for good is logged
 (`chatwarden.webhook_failed`: event type, status or error class, attempt count) and dropped. The queue is in memory, one per
 endpoint, delivered in order, one at a time, and holds 1000: past that the oldest waiting delivery is dropped and logged as a
 count (`chatwarden.webhook_dropped`). A restart loses what is queued. Do not rely on webhooks as the only copy of a fact; the
@@ -387,6 +387,40 @@ One route, `POST /webhooks/in/action` (mounted at `/hooks` above, so `/hooks/web
 
 Use `/healthz` for "restart me" checks and `/readyz` for "send me traffic" checks.
 
+## Writing another adapter
+
+`toExpress` is the only adapter that ships, but the routes are plain functions, so an adapter for Fastify, Koa or a Worker is
+a few lines. `createRouter(routes)` gives you `(req) => Promise<KitResponse>`. When your framework needs to tell "this path
+is not mine" from "mine, and the answer is 404", use `matchRoute(routes)`, which is what `toExpress` uses. It returns a
+`CompiledRoutes` with two methods:
+
+- `run(req)` answers every request: a handler's response, 404 for a path no route has, and 405 (with an `allow` header) for a
+  known path under another method. It does not catch handler errors; the builders (`adminRoutes` and the rest) already wrap
+  theirs in `withErrors`.
+- `matches(path, method?)` is the question to ask first. True means the path is the table's, so answer it with `run`. False
+  means no route fits the path under any method, so hand the request back to your framework (`toExpress` calls `next()`)
+  before you read the body. A handler that answers 404 is a match; only "no route at all" is false. The query string is ignored.
+  Pass the request method so a CORS preflight (`OPTIONS`) to a known path stays your app's, unless a route answers `OPTIONS`.
+
+Also: `HEAD` runs the `GET` handler, so send its status and headers but not its body. A malformed route key throws a
+`RangeError` when you call `matchRoute`, not when a request arrives.
+
+```ts
+import { matchRoute, type KitResponse, type RouteTable } from '@chatwarden/http';
+
+export function mount(routes: RouteTable, forward: (path: string) => void): (method: string, path: string) => Promise<KitResponse | null> {
+  const compiled = matchRoute(routes);
+  return async (method, path) => {
+    if (!compiled.matches(path, method)) {
+      forward(path); // not the kit's: let your framework carry on
+      return null;
+    }
+    // Read the body only now, then build a KitRequest and call compiled.run(req) to get the KitResponse to send.
+    return null;
+  };
+}
+```
+
 ## Security notes
 
 - **A player response never holds an identifier.** No subject id, key, hash, IP, room, group id, moderator, reason or other
@@ -395,6 +429,9 @@ Use `/healthz` for "restart me" checks and `/readyz` for "send me traffic" check
   target is an id. It never stores chat text, reasons, notes or evidence. A view is audited before it is shown: if the row
   cannot be written, the answer is 500 and nothing is shown.
 - **The moderator's reason, the rule-gap note, the reporter's note and the moderator's identity are never shown to a player.**
+- **`GET /gaps` returns the gap notes in bulk.** Moderators write them as free text, and one request reads every note. Tell
+  moderators to never paste chat into a gap note (describe what the rules did not cover instead), and give `gaps.read` only to
+  people who may see all of them.
 - **Error messages are fixed text** and never repeat request input.
 - **Bodies are JSON only, up to 64 KiB** (413 above), and a body with a `__proto__`, `constructor` or `prototype` key is refused.
 - **Webhook secrets** are at least 32 characters and are never logged, nor are webhook URLs. Outgoing deliveries go over

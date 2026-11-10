@@ -1,6 +1,6 @@
 export { webhookIn } from './in.js';
 export type { WebhookInOptions } from './in.js';
-export { ATTEMPT_TIMEOUT_MS, BACKOFF_BASE_MS, MAX_RETRIES, QUEUE_MAX, RETRY_AFTER_CAP_MS, webhooksOut } from './out.js';
+export { ATTEMPT_TIMEOUT_MS, BACKOFF_BASE_MS, MAX_RETRIES, QUEUE_MAX, RETRY_AFTER_CAP_MS, RETRY_AFTER_FLOOR_MS, webhooksOut } from './out.js';
 export type { WebhookEndpoint, WebhooksOut, WebhooksOutOptions } from './out.js';
 export {
   DELIVERY_HEADER,

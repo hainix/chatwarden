@@ -39,8 +39,7 @@ const goodFiles = (): string[] => [
   'src/extra.ts',
 ];
 
-const check = (files: string[], pkg: Pkg = goodPkg(), hasReadme = true): string[] =>
-  checkFileList({ pkg, files, hasReadme });
+const check = (files: string[], pkg: Pkg = goodPkg()): string[] => checkFileList({ pkg, files });
 
 describe('exportTargets', () => {
   it('collects main, types, nested exports and typesVersions targets without the leading ./', () => {
@@ -61,13 +60,12 @@ describe('checkFileList', () => {
   it('accepts a good file list', () => {
     expect(check(goodFiles())).toEqual([]);
   });
-  it('does not require README.md when the package has none', () => {
+  it('requires README.md in the tarball of every published package', () => {
     const files = goodFiles().filter((f) => f !== 'README.md');
-    expect(check(files, goodPkg(), false)).toEqual([]);
+    expect(check(files)).toContain('missing README.md');
   });
-  it('requires README.md when the package has one', () => {
-    const files = goodFiles().filter((f) => f !== 'README.md');
-    expect(check(files, goodPkg(), true).join('\n')).toMatch(/README\.md/);
+  it('accepts a file list that has README.md', () => {
+    expect(checkFileList({ pkg: goodPkg(), files: goodFiles() })).toEqual([]);
   });
   it.each(['package.json', 'LICENSE'])('requires %s', (name) => {
     expect(check(goodFiles().filter((f) => f !== name)).join('\n')).toContain(name);

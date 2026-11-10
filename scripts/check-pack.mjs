@@ -33,14 +33,14 @@ const FORBIDDEN = [
 
 /**
  * Problems with the list of files a tarball would hold (empty array = good).
- * @param {{ pkg: Record<string, unknown>, files: string[], hasReadme: boolean }} input
+ * README.md is required for every published package.
+ * @param {{ pkg: Record<string, unknown>, files: string[] }} input
  */
-export function checkFileList({ pkg, files, hasReadme }) {
+export function checkFileList({ pkg, files }) {
   const problems = [];
   const have = new Set(files);
 
-  for (const name of ['package.json', 'LICENSE']) if (!have.has(name)) problems.push(`missing ${name}`);
-  if (hasReadme && !have.has('README.md')) problems.push('missing README.md');
+  for (const name of ['package.json', 'LICENSE', 'README.md']) if (!have.has(name)) problems.push(`missing ${name}`);
 
   for (const f of files) {
     for (const [re, what] of FORBIDDEN) if (re.test(f)) problems.push(`${what} would ship: ${f}`);
@@ -114,7 +114,7 @@ function main() {
     const files = JSON.parse(raw)[0].files.map((f) => f.path.replaceAll('\\', '/'));
     const problems = [
       ...checkManifest(pkg, dir),
-      ...checkFileList({ pkg, files, hasReadme: existsSync(join(base, dir, 'README.md')) }),
+      ...checkFileList({ pkg, files }),
     ];
     if (problems.length === 0) console.log(`ok   ${pkg.name} (${files.length} files)`);
     else {
