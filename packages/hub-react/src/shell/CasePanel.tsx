@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { Masked } from '../case/Transcript.js';
 import { RecordItem } from '../case/Record.js';
 import { useCase } from '../case/CaseContext.js';
-import { hasLeft } from '../decisions.js';
 import { useHub } from '../context.js';
 import { personName, recordSummary } from '../excerpt.js';
 import type { ReportPerson } from '../excerpt.js';
@@ -219,10 +218,10 @@ function People({ people }: { people: ReportPerson[] }) {
 /** The pane beside an open case. */
 export function CasePanel() {
   const { t } = useHub();
-  const { detail, people, entry } = useCase();
+  const { detail, people, left } = useCase();
   const target = people.find((p) => p.role === 'target');
   return (
-    <aside className="cw-ctx" aria-label={t('hub.case.label')} hidden={hasLeft(entry)}>
+    <aside className="cw-ctx" aria-label={t('hub.case.label')} hidden={left}>
       {detail.data === undefined || target === undefined ? (
         detail.error === null ? (
           <Skeleton lines={4} />

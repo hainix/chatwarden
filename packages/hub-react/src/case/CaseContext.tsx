@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { holderOf } from '../claims.js';
 import type { Holder } from '../claims.js';
 import { useHub } from '../context.js';
-import { useDecisions } from '../decisions.js';
+import { hasLeft, useDecisions } from '../decisions.js';
 import type { DecisionEntry } from '../decisions.js';
 import { peopleOfReport } from '../excerpt.js';
 import type { ReportPerson } from '../excerpt.js';
@@ -31,6 +31,8 @@ export interface CaseValue {
   holder: Holder;
   /** What is going on with this report's decision (held, sending, done, failed...), if anything. */
   entry: DecisionEntry | undefined;
+  /** The decision was made in this visit and the case is off the screen (waiting or just sent). False for a later visit to a closed case. */
+  left: boolean;
   /** The decision form, shared by the transcript's margin boxes and the decision bar. */
   draft: DecisionDraft;
   /** Blocked words are hidden until shown: for the whole case, or one line. */
@@ -87,6 +89,8 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   const claim = group !== null ? group.claim : (detail.data?.claim ?? null);
   const holder = holderOf(claim, me.actor, now());
   const entry = decisions.entry(reportId);
+  // Until the report is loaded it counts as open (the entry then decides); once loaded as closed, a sent decision no longer hides it.
+  const left = hasLeft(entry, report === undefined || report.status === 'open');
   const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide') });
 
   const value: CaseValue = {
@@ -97,6 +101,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     history: wantsHistory ? history : null,
     holder,
     entry,
+    left,
     draft,
     reveal: { all: revealAll, setAll: setRevealAll, shows: (id) => revealAll || revealed.has(id), toggle },
   };

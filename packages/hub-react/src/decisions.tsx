@@ -44,8 +44,12 @@ export interface DecisionEntry {
 /** True while a decision is held for its Undo window or being sent: it is out of the moderator's hands. */
 export const isWaiting = (entry: DecisionEntry | undefined): boolean => entry !== undefined && (entry.state.status === 'held' || entry.state.status === 'sending');
 
-/** True while the case should be off the screen: waiting, or sent. (An Undo, a failure or a conflict brings it back.) */
-export const hasLeft = (entry: DecisionEntry | undefined): boolean => isWaiting(entry) || entry?.state.status === 'done';
+/**
+ * True while the case should be off the screen: the decision is waiting, or it was sent in this visit. (An Undo, a failure or a
+ * conflict brings the case back.) "Sent" counts only while the case as loaded is still open: a case that is read as closed is a
+ * later visit to a decided case, and it is shown whole, with its result.
+ */
+export const hasLeft = (entry: DecisionEntry | undefined, reportOpen = true): boolean => isWaiting(entry) || (entry?.state.status === 'done' && reportOpen);
 
 export interface SubmitDecision {
   reportId: string;

@@ -3,18 +3,19 @@ import type { ReactNode } from 'react';
 import { actorName } from '../claims.js';
 import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
-import { hasLeft, isWaiting, useDecisions } from '../decisions.js';
+import { isWaiting, useDecisions } from '../decisions.js';
 import { EVIDENCE_MAX, MAX_ACTIONS, REASON_MAX, resolveDraft, toInput } from '../decision.js';
 import type { Problem, UiVerdict } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
 import { useHubData } from '../hooks.js';
-import { decideErrorText, kindLabel } from '../labels.js';
+import { decideErrorText } from '../labels.js';
 import { modKey, keyLabel, isTypingTarget } from '../shortcuts.js';
 import type { Reason, ReportDetail } from '../types.js';
 import { ErrorBlock, Kbd, Notice, Skeleton } from '../ui.js';
 import { ActionCard, Field } from './ActionEditor.js';
 import { ActionRow } from './ActionRow.js';
 import { Decided } from './Decided.js';
+import { DecisionResult } from './DecisionResult.js';
 import { SuggestionCard } from './SuggestionCard.js';
 import { useCase } from './CaseContext.js';
 import { UNDO_MS } from '../toasts.js';
@@ -54,7 +55,7 @@ export function DecisionBar() {
   const c = useCase();
   const decisions = useDecisions();
   const actions = useCaseActions();
-  const { detail, entry, holder, people } = c;
+  const { detail, entry, holder, people, left: gone } = c;
   const draft = c.draft;
   const report = detail.data?.report;
   const base = useId();
@@ -73,7 +74,6 @@ export function DecisionBar() {
   const status = entry?.state.status;
   const waiting = isWaiting(entry);
   // Decided (waiting or sent): the case is off the screen and this is all that is left of it.
-  const gone = hasLeft(entry);
   const open = report?.status === 'open';
   const canDecide = can('reports.decide');
   const readOnly = holder.kind === 'other';
@@ -201,10 +201,17 @@ export function DecisionBar() {
   };
   const problemsOf = (uid: string): { rule?: Problem } | undefined => shown.actions[uid];
 
+  // While the decision is waiting (held or sending) there is a way on: the next case, without waiting for the answer.
+  const takeNextButton = (
+    <button type="button" className="cw-btn" onClick={() => void actions.takeNext().then((r) => r === 'none' && go({ name: 'overview' }))}>
+      {t('hub.queue.takeNext')}
+    </button>
+  );
   let body: ReactNode;
   if (!open) {
     body = (
       <>
+        {entry?.state.status === 'done' && <DecisionResult state={entry.state} />}
         {status === 'conflict' && (
           <Notice tone="warn" role="alert">
             <div ref={conflictRef} tabIndex={-1}>
@@ -234,9 +241,7 @@ export function DecisionBar() {
             <button type="button" className="cw-btn" onClick={() => decisions.undo(report.id)}>
               {t('hub.toast.undo')}
             </button>
-            <button type="button" className="cw-btn" onClick={() => void actions.takeNext().then((r) => r === 'none' && go({ name: 'overview' }))}>
-              {t('hub.queue.takeNext')}
-            </button>
+            {takeNextButton}
           </div>
         )}
         {status === 'sending' && (
@@ -244,29 +249,15 @@ export function DecisionBar() {
             <p>
               <strong>{t('hub.decide.submitting')}</strong>
             </p>
+            {takeNextButton}
           </div>
         )}
         {status === 'done' && entry?.state.status === 'done' && (
-          <div className="cw-result" tabIndex={-1} ref={resultRef}>
-            <p>
-              <strong>{t('hub.decide.result.done')}</strong>
-            </p>
-            {entry.state.replay && <p>{t('hub.decide.result.replay')}</p>}
-            {entry.state.groups.length === 0 ? (
-              <p className="cw-hint">{t('hub.decide.result.none')}</p>
-            ) : (
-              <ul aria-label={t('hub.decide.result.codes')}>
-                {entry.state.groups.map((g) => (
-                  <li key={g.refCode}>
-                    <span className="cw-pid">{t('hub.decide.result.code', { code: g.refCode, kind: kindLabel(t, g.kind) })}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <DecisionResult state={entry.state} innerRef={resultRef}>
             <button type="button" className="cw-btn cw-btn--primary" onClick={() => void actions.takeNext().then((r) => r === 'none' && go({ name: 'overview' }))}>
               {t('hub.queue.takeNext')}
             </button>
-          </div>
+          </DecisionResult>
         )}
         {status === 'conflict' && (
           <Notice tone="warn" role="alert">

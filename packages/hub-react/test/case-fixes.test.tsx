@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { describe, expect, it } from 'vitest';
@@ -161,7 +161,7 @@ describe('Important 1: a failed send is visible on a phone', () => {
     expect(alert).toHaveFocus();
   });
 
-  it('a network failure and a 409 claimed are shown the same way', async () => {
+  it('a 409 claimed (someone took the case meanwhile) is shown the same way', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });
     const f = await w.fileRich({ lines: TALK });
     const { user, container } = await open(w, f.id);
@@ -172,6 +172,22 @@ describe('Important 1: a failed send is visible on a phone', () => {
     await pageHides();
     await within(panel()).findByText(/sen is handling this case, so this decision was not sent/);
     expect(dock(container)).toHaveAttribute('data-open', 'true');
+  });
+
+  it('a network failure is shown the same way: the sheet is open on the alert, which has focus', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich({ lines: TALK });
+    const { user, container } = await open(w, f.id);
+    await fillFair(user);
+    w.intercept.fn = (req) => {
+      if (isDecide(req)) throw new TypeError('offline');
+      return undefined;
+    };
+    await user.click(within(panel()).getByRole('button', { name: 'Decide' }));
+    await pageHides();
+    const alert = (await within(panel()).findByText('Could not reach the server. Check your connection and try again.')).closest('[role="alert"]') as HTMLElement;
+    expect(dock(container)).toHaveAttribute('data-open', 'true');
+    expect(alert).toHaveFocus();
   });
 });
 
@@ -188,9 +204,21 @@ describe('Important 2: Fair brings the suggestion back under React StrictMode to
     await screen.findByRole('heading', { level: 2, name: /report against/ });
     await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('radio', { name: 'Fair' });
     expect(within(panel()).getByRole('group', { name: 'The ladder suggests' })).toBeInTheDocument();
+    // Count what the live region is told: StrictMode runs an updater twice, and a doubled announcement is two insertions.
+    const region = within(panel()).getByRole('status', { name: 'Decision updates' });
+    const told: string[] = [];
+    const watch = new MutationObserver((records) => {
+      for (const r of records) for (const n of r.addedNodes) if ((n.textContent ?? '') !== '') told.push(n.textContent ?? '');
+    });
+    watch.observe(region, { childList: true });
     await user.keyboard('2');
     expect(within(panel()).queryByRole('group', { name: 'The ladder suggests' })).toBeNull();
-    expect(within(panel()).getByRole('status', { name: 'Decision updates' })).toHaveTextContent(/^Removed 1 action on the reported person\./);
+    expect(region).toHaveTextContent(/^Removed 1 action on the reported person\. A report that is not fair cannot act on them\.$/);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(told).toEqual(['Removed 1 action on the reported person. A report that is not fair cannot act on them.']);
+    watch.disconnect();
     await user.keyboard('1');
     expect(within(panel()).getByRole('group', { name: 'The ladder suggests' })).toBeInTheDocument();
     expect(screen.getAllByRole('checkbox', { name: /^Show the line at/ })).toHaveLength(2);
@@ -201,16 +229,19 @@ describe('Important 2: Fair brings the suggestion back under React StrictMode to
     cleanup();
   });
 
-  it('adding the same suggestion twice quickly (two keys before a render) is not doubled', async () => {
+  it('four keys in one batch (before React renders) end in one suggestion, as if they were pressed one by one', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    const { user } = await open(w, f.id);
-    await user.keyboard('2');
-    await user.keyboard('13');
-    await user.keyboard('1');
+    await open(w, f.id);
+    act(() => {
+      for (const key of ['2', '1', '3', '1']) fireEvent.keyDown(document.body, { key });
+    });
+    expect(within(panel()).getByRole('radio', { name: 'Fair' })).toBeChecked();
     expect(within(panel()).getAllByRole('group', { name: 'The ladder suggests' })).toHaveLength(1);
+    const user = userEvent.setup();
     await user.click(within(panel()).getByRole('button', { name: 'Change' }));
     expect(within(panel()).getAllByRole('group', { name: /^Action \d$/ })).toHaveLength(1);
+    expect(screen.getAllByRole('checkbox', { name: /^Show the line at/ })).toHaveLength(2);
   });
 });
 

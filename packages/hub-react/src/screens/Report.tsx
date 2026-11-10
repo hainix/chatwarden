@@ -4,7 +4,7 @@ import { AiReadSlot } from '../case/AiRead.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
 import { useCase } from '../case/CaseContext.js';
 import { DecisionBar } from '../case/DecisionBar.js';
-import { hasLeft } from '../decisions.js';
+import { isWaiting } from '../decisions.js';
 import { RecordItem } from '../case/Record.js';
 import { Transcript } from '../case/Transcript.js';
 import type { LinePicks } from '../case/Transcript.js';
@@ -69,7 +69,7 @@ function Evidence({ detail }: { detail: ReportDetail }) {
   const { report } = detail;
   const target = people.find((p) => p.role === 'target');
   const state = entry?.state.status;
-  const usable = report.status === 'open' && can('reports.decide') && draft.status === 'ready' && holder.kind !== 'other' && state !== 'held' && state !== 'sending' && state !== 'done' && state !== 'conflict';
+  const usable = report.status === 'open' && can('reports.decide') && draft.status === 'ready' && holder.kind !== 'other' && !isWaiting(entry) && state !== 'done' && state !== 'conflict';
   const primary = draft.primary;
   const picks: LinePicks | null =
     usable && primary !== null && target !== undefined
@@ -198,11 +198,10 @@ function Tabs({ detail }: { detail: ReportDetail }) {
 /** `#/reports/:id`: the case pane. The report is read once, by the case provider the hub wraps this in. */
 export function Report() {
   const { t } = useHub();
-  const { detail, entry } = useCase();
+  const { detail, left: gone } = useCase();
   // A decision that is waiting or sent takes the case off the screen at once: only the decision bar stays, as the notice that
   // says so (with Undo). Undo, a failed send or a conflict bring the case back; the bar keeps its place in the tree, so its own
   // state (the sheet, what was being edited) survives.
-  const gone = hasLeft(entry);
   const root = useRef<HTMLDivElement>(null);
   // The loading title and the case header are different elements: when the title had keyboard focus (the hub puts it there on
   // arrival), the new one takes it, so focus does not fall to the page.
