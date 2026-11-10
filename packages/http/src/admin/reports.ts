@@ -1,15 +1,12 @@
-import { CATEGORY_TO_RULE, MAX_SANCTION_DURATION_MS, SANCTION_KINDS } from '@chatwarden/core';
-import type { DecisionAction, DecisionInput, ReportQuery, SanctionKind, StaffReport } from '@chatwarden/core';
+import { CATEGORY_TO_RULE } from '@chatwarden/core';
+import type { DecisionInput, ReportQuery, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import type { AdminContext } from './context.js';
-import { asObject, bodyId, bodyLevel, bodyObject, bodyRule, has, queryLevel, queryLimit } from './validate.js';
+import { bodyId, bodyLevel, bodyObject, bodyRule, bodyText, has, parseAction, queryLevel, queryLimit } from './validate.js';
 
 /** The most actions one decision may carry. A report involves a handful of people. */
 const MAX_ACTIONS = 20;
-/** The most excerpt lines a notice may quote per action (the facade's own cap). */
-const MAX_LINE_IDS = 5;
-const MAX_TEXT = 2000;
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
 const HISTORY_REPORTS_DEFAULT = 20;
 
@@ -21,42 +18,6 @@ const roomOf = (report: StaffReport): string | null => (report.roomId === '' ? n
 /** Everyone a report names, as staff refs: the target, the reporter and the people who wrote in the excerpt. */
 function peopleOf(report: StaffReport): string[] {
   return [...new Set([report.targetPerson, report.reporterPerson, ...report.people])];
-}
-
-const text = (v: unknown, max = MAX_TEXT): string => {
-  if (typeof v !== 'string' || v.length > max) throw new ValidationError();
-  return v;
-};
-
-/** One request action, checked for shape and cut down to the fields the facade reads. Rules and limits stay with the facade. */
-function parseAction(raw: unknown): DecisionAction {
-  const a = asObject(raw);
-  if (a === undefined) throw new ValidationError();
-  const subject = bodyId(a.subject);
-  const kind = a.kind;
-  if (typeof kind !== 'string' || !(SANCTION_KINDS as readonly string[]).includes(kind)) throw new ValidationError();
-  // Required, not defaulted: leaving a duration out must never turn a chat restriction or a ban into a permanent one.
-  // Capped (as the facade caps it) so that `null` is the only permanent value and the ban_permanent check below cannot be
-  // sidestepped with a huge number.
-  const durationMs = a.durationMs;
-  if (
-    durationMs !== null &&
-    !(typeof durationMs === 'number' && Number.isSafeInteger(durationMs) && durationMs > 0 && durationMs <= MAX_SANCTION_DURATION_MS)
-  ) {
-    throw new ValidationError();
-  }
-  const action: DecisionAction = { subject, kind: kind as SanctionKind, durationMs, rule: bodyRule(a.rule) };
-  if (has(a, 'gapNote')) action.gapNote = text(a.gapNote);
-  if (has(a, 'includeIp')) {
-    if (typeof a.includeIp !== 'boolean') throw new ValidationError();
-    action.includeIp = a.includeIp;
-  }
-  if (has(a, 'lineIds')) {
-    const ids = a.lineIds;
-    if (!Array.isArray(ids) || ids.length > MAX_LINE_IDS) throw new ValidationError();
-    action.lineIds = ids.map((id) => text(id, 64));
-  }
-  return action;
 }
 
 /**
@@ -127,8 +88,8 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (typeof verdict !== 'string' || !(VERDICTS as readonly string[]).includes(verdict)) throw new ValidationError();
       if (!Array.isArray(body.actions) || body.actions.length > MAX_ACTIONS) throw new ValidationError();
       const actions = body.actions.map(parseAction);
-      const reason = text(body.reason);
-      const evidence = has(body, 'evidence') ? text(body.evidence) : undefined;
+      const reason = bodyText(body.reason);
+      const evidence = has(body, 'evidence') ? bodyText(body.evidence) : undefined;
 
       // Authorization for what the decision DOES, before anything is read or written.
       if (actions.length > 0) c.need('sanctions.apply');

@@ -1,5 +1,5 @@
-import { CONDUCT_LEVELS } from '@chatwarden/core';
-import type { ConductLevel, RuleRef } from '@chatwarden/core';
+import { CONDUCT_LEVELS, MAX_SANCTION_DURATION_MS, SANCTION_KINDS } from '@chatwarden/core';
+import type { ConductLevel, DecisionAction, RuleRef, SanctionKind } from '@chatwarden/core';
 import { parseJson } from '../body.js';
 import { HttpError, ValidationError } from '../errors.js';
 import type { KitRequest } from '../types.js';
@@ -57,4 +57,49 @@ export function bodyRule(v: unknown): RuleRef {
 export function bodyId(v: unknown): string {
   if (typeof v !== 'string' || !ID_RE.test(v)) throw new ValidationError();
   return v;
+}
+
+/** The longest free text a staff request may carry (a reason, an evidence note, a gap note before the core's own cap). */
+export const MAX_TEXT = 2000;
+/** The most excerpt lines a notice may quote per action (the facade's own cap). */
+const MAX_LINE_IDS = 5;
+
+/** A string of at most `max` characters, else 400. */
+export const bodyText = (v: unknown, max = MAX_TEXT): string => {
+  if (typeof v !== 'string' || v.length > max) throw new ValidationError();
+  return v;
+};
+
+/**
+ * One sanction action, checked for shape and cut down to the fields the facade reads. Rules and limits stay with the facade.
+ * Shared by a decision's actions and by `POST /sanctions`, so the two cannot disagree on a duration or a permanent ban.
+ */
+export function parseAction(raw: unknown): DecisionAction {
+  const a = asObject(raw);
+  if (a === undefined) throw new ValidationError();
+  const subject = bodyId(a.subject);
+  const kind = a.kind;
+  if (typeof kind !== 'string' || !(SANCTION_KINDS as readonly string[]).includes(kind)) throw new ValidationError();
+  // Required, not defaulted: leaving a duration out must never turn a chat restriction or a ban into a permanent one.
+  // Capped (as the facade caps it) so that `null` is the only permanent value and the ban_permanent check cannot be
+  // sidestepped with a huge number.
+  const durationMs = a.durationMs;
+  if (
+    durationMs !== null &&
+    !(typeof durationMs === 'number' && Number.isSafeInteger(durationMs) && durationMs > 0 && durationMs <= MAX_SANCTION_DURATION_MS)
+  ) {
+    throw new ValidationError();
+  }
+  const action: DecisionAction = { subject, kind: kind as SanctionKind, durationMs, rule: bodyRule(a.rule) };
+  if (has(a, 'gapNote')) action.gapNote = bodyText(a.gapNote);
+  if (has(a, 'includeIp')) {
+    if (typeof a.includeIp !== 'boolean') throw new ValidationError();
+    action.includeIp = a.includeIp;
+  }
+  if (has(a, 'lineIds')) {
+    const ids = a.lineIds;
+    if (!Array.isArray(ids) || ids.length > MAX_LINE_IDS) throw new ValidationError();
+    action.lineIds = ids.map((id) => bodyText(id, 64));
+  }
+  return action;
 }

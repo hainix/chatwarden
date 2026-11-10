@@ -44,6 +44,8 @@ describe('withErrors: mapping', () => {
     ['HttpError(forbidden)', () => new HttpError('forbidden'), 403, 'forbidden'],
     ['HttpError(payload_too_large)', () => new HttpError('payload_too_large'), 413, 'payload_too_large'],
     ['HttpError(invalid_json)', () => new HttpError('invalid_json'), 400, 'invalid_json'],
+    ['HttpError(invalid_term)', () => new HttpError('invalid_term'), 400, 'invalid_term'],
+    ['HttpError(invalid_gap_ref)', () => new HttpError('invalid_gap_ref'), 400, 'invalid_gap_ref'],
   ];
 
   it.each(cases)('%s -> %i %s with a fixed message', async (_n, make, status, code) => {

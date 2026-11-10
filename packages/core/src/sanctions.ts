@@ -11,13 +11,13 @@ import type { SubjectIndex } from './subjects.js';
 
 export type { SanctionKind, Source } from './types.js';
 
-/** Every kind a sanction can have. The `kit_sanctions` CHECK constraint lists the same values. */
 /**
  * The longest a timed sanction may run: 365 days. `null` is the only permanent value, so a huge finite duration can never
  * stand in for one (and slip past a permission that guards permanence).
  */
 export const MAX_SANCTION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
 
+/** Every kind a sanction can have. The `kit_sanctions` CHECK constraint lists the same values. */
 export const SANCTION_KINDS: readonly SanctionKind[] = ['chat', 'area', 'ban', 'warning', 'note'];
 
 /** A warning and a note are records, not restrictions: no end, no IP row, never in the index, never refuse. */
