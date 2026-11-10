@@ -2616,6 +2616,11 @@
 .cw-hub .cw-doc ol {
   list-style: decimal;
 }
+.cw-hub .cw-doc th,
+.cw-hub .cw-doc td {
+  min-width: 7rem;
+  overflow-wrap: anywhere;
+}
 .cw-hub .cw-doc code {
   padding: 0 0.3em;
   border-radius: 3px;
