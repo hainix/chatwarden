@@ -210,7 +210,7 @@ export function ActionCard(props: ActionProps) {
                       <label className="cw-check">
                         <input type="checkbox" checked={on} disabled={!on && full} onChange={() => onToggleLine(l.id)} />
                         <span className="cw-check-time">{timeOfDay(l.ts, locale)}</span>
-                        <span className="cw-check-text">{hidden ? <Masked text={l.raw} /> : l.raw}</span>
+                        <span className="cw-check-text">{hidden ? <Masked /> : l.raw}</span>
                         {l.blocked && <Tag>{t('hub.report.line.blocked')}</Tag>}
                       </label>
                     </li>

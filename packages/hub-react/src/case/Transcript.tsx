@@ -21,18 +21,13 @@ export interface LinePicks {
   onToggle: (lineId: string) => void;
 }
 
-/** The longest run of block characters a hidden line shows: enough to see something is there, not how long it was. */
-const MASK_MAX = 14;
-
-/** Hidden text: a bar of blocks that a screen reader announces as "blocked words, hidden" and never reads the words. */
-export function Masked({ text }: { text: string }) {
+/**
+ * Hidden text: a quiet pill that says what is there and not what it says. It holds no part of the words (not even their length), so
+ * neither the page nor a screen reader ever has them until a moderator chooses to show them.
+ */
+export function Masked() {
   const { t } = useHub();
-  const width = Math.max(4, Math.min(MASK_MAX, Array.from(text).length));
-  return (
-    <span className="cw-mask" role="img" aria-label={t('hub.mask.label')}>
-      <span aria-hidden="true">{'█'.repeat(width)}</span>
-    </span>
-  );
+  return <span className="cw-mask">{t('hub.mask.label')}</span>;
 }
 
 function Line({ line, picks, name }: { line: ExcerptLine; picks: LinePicks | null; name: (ref: string | null) => string }) {
@@ -67,7 +62,7 @@ function Line({ line, picks, name }: { line: ExcerptLine; picks: LinePicks | nul
         {time}
       </time>
       <span className="cw-line-who">{line.handle}</span>
-      <span className="cw-line-text">{hidden ? <Masked text={line.raw} /> : line.raw}</span>
+      <span className="cw-line-text">{hidden ? <Masked /> : line.raw}</span>
       {(line.reported || line.blocked || line.audience !== null || showDelivered) && (
         <span className="cw-line-meta">
           {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}

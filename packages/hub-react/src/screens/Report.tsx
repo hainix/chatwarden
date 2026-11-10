@@ -4,6 +4,7 @@ import { AiReadSlot } from '../case/AiRead.js';
 import { ClaimBanner, Viewing } from '../case/Claim.js';
 import { useCase } from '../case/CaseContext.js';
 import { DecisionBar } from '../case/DecisionBar.js';
+import { hasLeft } from '../decisions.js';
 import { RecordItem } from '../case/Record.js';
 import { Transcript } from '../case/Transcript.js';
 import type { LinePicks } from '../case/Transcript.js';
@@ -22,15 +23,12 @@ type TabId = 'evidence' | 'reports' | 'history';
 
 function Header({ detail }: { detail: ReportDetail }) {
   const { t, locale, now } = useHub();
-  const { people, group, entry } = useCase();
+  const { people, group } = useCase();
   const { report } = detail;
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
   const categories = group === null ? [report.category] : group.categories;
   const entries = Object.entries(report.tags);
-  // A decision that went through closes the report: the header says so without reading the report again.
-  const verdict = entry?.state.status === 'done' ? entry.input.verdict : null;
-  const status = verdict === null ? report.status : verdict === 'upheld' || verdict === 'noted' ? 'actioned' : 'dismissed';
   return (
     <header className="cw-casehead">
       <div className="cw-casehead-row">
@@ -50,7 +48,7 @@ function Header({ detail }: { detail: ReportDetail }) {
         <Viewing />
       </div>
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
-        <Tag>{t(`hub.reports.tag.${status}`)}</Tag>
+        <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
         {report.badFaith && <Tag tone="warn">{t('hub.report.tag.badFaith')}</Tag>}
         <span title={absoluteTime(report.createdAt, locale)}>{t('hub.report.fact.filed', { time: relativeTime(report.createdAt, now(), locale) })}</span>
         {report.roomId !== '' && <span>{t('hub.report.fact.room', { room: report.roomId })}</span>}
@@ -200,7 +198,11 @@ function Tabs({ detail }: { detail: ReportDetail }) {
 /** `#/reports/:id`: the case pane. The report is read once, by the case provider the hub wraps this in. */
 export function Report() {
   const { t } = useHub();
-  const { detail } = useCase();
+  const { detail, entry } = useCase();
+  // A decision that is waiting or sent takes the case off the screen at once: only the decision bar stays, as the notice that
+  // says so (with Undo). Undo, a failed send or a conflict bring the case back; the bar keeps its place in the tree, so its own
+  // state (the sheet, what was being edited) survives.
+  const gone = hasLeft(entry);
   const root = useRef<HTMLDivElement>(null);
   // The loading title and the case header are different elements: when the title had keyboard focus (the hub puts it there on
   // arrival), the new one takes it, so focus does not fall to the page.
@@ -213,7 +215,7 @@ export function Report() {
     }
   }, [loaded]);
   return (
-    <div className="cw-casepane" ref={root}>
+    <div className="cw-casepane" ref={root} {...(gone ? { 'data-gone': 'true' } : {})}>
       {detail.data === undefined ? (
         <div className="cw-screen">
           <h2 className="cw-screen-title" tabIndex={-1} onFocus={() => (titleFocused.current = true)}>
@@ -225,9 +227,13 @@ export function Report() {
         </div>
       ) : (
         <>
-          <Header detail={detail.data} />
-          <ClaimBanner />
-          <Tabs detail={detail.data} />
+          {!gone && (
+            <>
+              <Header detail={detail.data} />
+              <ClaimBanner />
+              <Tabs detail={detail.data} />
+            </>
+          )}
           <DecisionBar />
         </>
       )}

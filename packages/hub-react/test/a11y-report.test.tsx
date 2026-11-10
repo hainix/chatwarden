@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import type { UserEvent } from '@testing-library/user-event';
 import axe from 'axe-core';
 import { describe, expect, it } from 'vitest';
@@ -123,7 +123,7 @@ describe.each(['light', 'dark'] as const)('axe on the report page, %s theme', (t
     await user.type(within(panel()).getByRole('textbox', { name: 'Reason' }), 'Clear.');
     await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
-    await waitFor(() => expect(within(screen.getByRole('group', { name: 'About this report' })).getByText('Actioned')).toBeInTheDocument());
+    expect(within(panel()).getByRole('heading', { level: 2, name: /^Decision on / })).toBeInTheDocument();
     expect(await violations(container)).toEqual([]);
   });
 

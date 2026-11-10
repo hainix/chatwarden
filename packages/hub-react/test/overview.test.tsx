@@ -205,7 +205,9 @@ describe('Overview: the team', () => {
     for (const f of filed) {
       expect(f.person.length).toBeGreaterThan(8);
       expect(document.body.textContent).not.toContain(f.person);
-      expect(document.body.textContent).not.toContain(f.person.slice(0, 9));
+      // Each piece of text on its own (the tag sits beside a word, whose first letter can be the ref's ninth character by chance).
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) expect(node.textContent ?? '').not.toContain(f.person.slice(0, 9));
     }
   });
 

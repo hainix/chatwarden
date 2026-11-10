@@ -161,7 +161,7 @@ describe('ReportView: the excerpt', () => {
     expect(screen.queryByText('Reported line')).not.toBeInTheDocument();
   });
 
-  it('hides the blocked words behind a bar until shown, labels the line, and then shows what was typed struck through', async () => {
+  it('hides the blocked words behind a placeholder until shown, labels the line, and then shows what was typed struck through', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({
       lines: [
@@ -175,14 +175,16 @@ describe('ReportView: the excerpt', () => {
     // Hidden: the words are not in the page at all, a screen reader hears "Blocked words, hidden".
     expect(within(chat()).queryByText('you zorbak')).toBeNull();
     expect(chat().textContent).not.toContain('zorbak');
-    const blocked = within(chat()).getByRole('img', { name: 'Blocked words, hidden' }).closest('li') as HTMLElement;
+    const blocked = within(chat()).getByText('Blocked words, hidden').closest('li') as HTMLElement;
+    // A quiet placeholder (visible words), not a bar: nothing about the words, not even their length.
+    expect(within(blocked).getByText('Blocked words, hidden')).toHaveClass('cw-mask');
     expect(within(blocked).getByText('Blocked')).toBeInTheDocument();
     expect(blocked).toHaveAttribute('data-blocked', 'true');
     expect(lineOf('sorry about that')).not.toHaveAttribute('data-blocked');
     expect(within(chat()).getAllByText('Blocked')).toHaveLength(1);
     await user.click(within(blocked).getByRole('button', { name: /^Show the blocked words in the line by Mallory/ }));
     expect(within(blocked).getByText('you zorbak')).toHaveClass('cw-line-text');
-    expect(within(blocked).queryByRole('img', { name: 'Blocked words, hidden' })).toBeNull();
+    expect(within(blocked).queryByText('Blocked words, hidden')).toBeNull();
   });
 
   it('shows the time of each line', async () => {

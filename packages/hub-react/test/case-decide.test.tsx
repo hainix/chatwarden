@@ -191,7 +191,8 @@ describe('the five-second undo window', () => {
     const stored = w.cw.sanctions.forPerson(f.person);
     expect(within(within(panel()).getByRole('list', { name: 'Reference codes' })).getByText(`${stored[0]!.refCode} (Chat restriction)`)).toBeInTheDocument();
     expect(within(panel()).getByRole('button', { name: 'Take next case' })).toBeInTheDocument();
-    expect(await within(screen.getByRole('group', { name: 'About this report' })).findByText('Actioned')).toBeInTheDocument();
+    // The decided case is off the screen: no header, no transcript, no pane beside it.
+    expect(screen.queryByRole('group', { name: 'About this report' })).toBeNull();
     // Deciding let go of the claim on the server.
     expect(w.cw.cases.holder(f.person)).toBeNull();
   });
@@ -395,7 +396,9 @@ describe('a case someone else holds', () => {
     await w.clientFor('maya@example.test').claimCase(f.person);
     await open(w, f.id);
     expect(await within(await screen.findByRole('group', { name: 'Who is handling this case' })).findByRole('button', { name: 'Take over' })).toBeInTheDocument();
-    expect(within(panel()).getByRole('button', { name: 'Take over' })).toBeInTheDocument();
+    // One button, in the banner; the bar points to it.
+    expect(within(panel()).queryByRole('button', { name: 'Take over' })).toBeNull();
+    expect(within(panel()).getByText('Use Take over in the banner above.')).toBeInTheDocument();
   });
 
   it('a free case can be taken after you let it go', async () => {

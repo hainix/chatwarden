@@ -244,7 +244,7 @@ describe('the command bar: the keyboard', () => {
     await user.keyboard('take next{Enter}');
     await waitFor(() => expect(router.path).toBe(`/reports/${a.id}`));
     expect(bar()).toBeNull();
-    expect(await screen.findByText('You took the case against Vantablob.')).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: 'Who is handling this case' })).toBeInTheDocument();
   });
 
   it('the shortcuts action opens the shortcut sheet in its place', async () => {

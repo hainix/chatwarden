@@ -147,15 +147,21 @@ describe('the transcript', () => {
 });
 
 describe('blocked words', () => {
-  it('are a bar, never text, until shown; the tag says why', async () => {
+  it('are a quiet placeholder, never text, until shown; the tag says why', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: BLOCKED, cite: 2 });
-    await open(w, f.id);
-    expect(chat().textContent).not.toContain('zorbak');
-    expect(within(chat()).getByRole('img', { name: 'Blocked words, hidden' })).toBeInTheDocument();
+    const { user } = await open(w, f.id);
+    expect(within(chat()).getByText('Blocked words, hidden')).toBeInTheDocument();
     expect(within(chat()).getByText('Blocked')).toBeInTheDocument();
-    // Nowhere else in the case does it leak either: the editor's picker, the pane beside it.
-    expect(document.body.textContent).not.toContain('zorbak');
+    // Nowhere else in the case does it leak either: not in the text, and not in any attribute (aria-label, title, data-*): the
+    // whole markup is searched, including the editor's picker and the pane beside it.
+    await within(aside()).findByText('1 line from Mallory was blocked.');
+    expect(document.body.innerHTML).not.toContain('zorbak');
+    expect(document.body.innerHTML).not.toContain('you zorbak team');
+    await user.click(within(screen.getByRole('tabpanel')).getAllByRole('button', { name: /^Show the blocked words/ })[0]!);
+    expect(document.body.innerHTML).toContain('zorbak');
+    await user.click(within(screen.getByRole('tabpanel')).getByRole('button', { name: /^Hide the blocked words/ }));
+    expect(document.body.innerHTML).not.toContain('zorbak');
   });
 
   it('one line can be shown and hidden again, without touching the others', async () => {

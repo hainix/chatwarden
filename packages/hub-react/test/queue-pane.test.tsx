@@ -307,7 +307,7 @@ describe('the queue pane: filters', () => {
 });
 
 describe('take next', () => {
-  it('claims the oldest unclaimed case, opens it, and says so', async () => {
+  it('claims the oldest unclaimed case and opens it', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });
     const [a, b] = await people(w, ['Alpha', 'Bravo']);
     await w.clientFor('maya@example.test').claimCase(a!.person);
@@ -315,7 +315,9 @@ describe('take next', () => {
     await ready();
     await user.click(within(pane()).getByRole('button', { name: /Take next case/ }));
     await waitFor(() => expect(router.path).toBe(`/reports/${b!.id}`));
-    expect(await screen.findByText('You took the case against Bravo.')).toBeInTheDocument();
+    // No toast for it: the case opens, and its banner says "You're handling this".
+    expect(await screen.findByRole('group', { name: 'Who is handling this case' })).toBeInTheDocument();
+    expect(screen.queryByText(/^You took the/)).toBeNull();
     expect(w.cw.cases.holder(b!.person)?.by).toBe('ann@example.test');
     expect(rowOf('Bravo')).toHaveAttribute('data-claim', 'you');
     expect(w.sent.filter((r) => r.path === '/cases/next')).toHaveLength(1);

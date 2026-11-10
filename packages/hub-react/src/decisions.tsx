@@ -41,6 +41,12 @@ export interface DecisionEntry {
   state: DecisionState;
 }
 
+/** True while a decision is held for its Undo window or being sent: it is out of the moderator's hands. */
+export const isWaiting = (entry: DecisionEntry | undefined): boolean => entry !== undefined && (entry.state.status === 'held' || entry.state.status === 'sending');
+
+/** True while the case should be off the screen: waiting, or sent. (An Undo, a failure or a conflict brings it back.) */
+export const hasLeft = (entry: DecisionEntry | undefined): boolean => isWaiting(entry) || entry?.state.status === 'done';
+
 export interface SubmitDecision {
   reportId: string;
   person: string;
@@ -155,7 +161,7 @@ export function DecisionProvider({ children }: { children: ReactNode }) {
   const submit = useCallback(
     (d: SubmitDecision): void => {
       const existing = live.current.get(d.reportId);
-      if (existing !== undefined && (existing.state.status === 'held' || existing.state.status === 'sending')) return;
+      if (isWaiting(existing)) return;
       const entry: DecisionEntry = { ...d, state: { status: 'held' } };
       put(entry);
       const { queue: q, toasts: tt, t: words } = latest.current;
@@ -199,7 +205,7 @@ export function DecisionProvider({ children }: { children: ReactNode }) {
   );
 
   const isPending = useCallback((person: string): boolean => {
-    for (const e of live.current.values()) if (e.person === person && (e.state.status === 'held' || e.state.status === 'sending')) return true;
+    for (const e of live.current.values()) if (e.person === person && isWaiting(e)) return true;
     return false;
   }, []);
 

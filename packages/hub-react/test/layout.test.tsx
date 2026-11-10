@@ -160,7 +160,9 @@ describe('narrow screens: nothing makes the case pane wider than the page', () =
 
   it('the conduct-level picker and the verdict row wrap, and the suggestion card can shrink', () => {
     expect(rule('.cw-hub .cw-suggest-level')).toMatch(/min-width:\s*0/);
-    expect(media('max-width: 51.1875rem')).toMatch(/\.cw-verdict-grid\s*\{[^}]*flex-wrap:\s*wrap/);
+    // B6: the three verdicts are a three-column grid at every width, so they share one row at 360px (the key caps go on a phone).
+    expect(rule('.cw-hub .cw-verdict-grid')).toMatch(/grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
+    expect(media('max-width: 51.1875rem')).toMatch(/\.cw-radio \.cw-kbd\s*\{[^}]*display:\s*none/);
     expect(rule('.cw-hub .cw-suggest-text')).toMatch(/min-width:\s*0/);
   });
 
@@ -190,5 +192,56 @@ describe('narrow screens: nothing makes the case pane wider than the page', () =
     expect(rule('.cw-hub .cw-casepane')).toMatch(/flex-direction:\s*column/);
     expect(rule('.cw-hub .cw-case-scroll')).toMatch(/overflow-y:\s*auto/);
     expect(media('min-width: 75rem')).toMatch(/\.cw-body\[data-case='true'\] \.cw-main\s*\{[^}]*overflow:\s*hidden/);
+  });
+});
+
+// Fix round 1 (the real-browser check B2, B3, B5, B6): where the toasts stand, how tall the docked bar may be, what a hidden line
+// looks like, and what is left of a decided case.
+describe('fix round 1: the pane in the browser', () => {
+  // Top-level rules only (a line that starts with the selector): the phone rules are read through media().
+  const rule2 = (selector: string): string => {
+    const lines = css.split('\n');
+    const at = lines.findIndex((l) => l === `${selector} {`);
+    if (at < 0) return '';
+    const end = lines.findIndex((l, i) => i > at && l.includes('}'));
+    return lines.slice(at + 1, end).join('\n');
+  };
+
+  it('B3: the toasts stand over the queue on a desktop, never centred at the bottom where the decision buttons are', () => {
+    const toasts = rule2('.cw-hub .cw-toasts');
+    expect(toasts).toMatch(/left:\s*calc\(var\(--cw-nav-width\) \+ var\(--cw-space-4\)\)/);
+    expect(toasts).toMatch(/max-width:\s*calc\(var\(--cw-queue-width\)/);
+    expect(toasts).not.toMatch(/left:\s*50%/);
+    expect(toasts).not.toMatch(/translateX/);
+  });
+
+  it('B3: on a phone they hang from the top, under the header, inside the safe area, and not from the bottom', () => {
+    const phone = media('max-width: 51.1875rem');
+    expect(phone).toMatch(/\.cw-toasts\s*\{[^}]*top:\s*calc\(3\.5rem \+ env\(safe-area-inset-top, 0px\)\)/);
+    expect(phone).toMatch(/\.cw-toasts\s*\{[^}]*bottom:\s*auto/);
+  });
+
+  it('B5: the docked bar is capped to a third of the screen and scrolls inside itself, its buttons kept in view', () => {
+    const body = rule2('.cw-hub .cw-dock-body');
+    expect(body).toMatch(/max-height:\s*min\(34vh, 21rem\)/);
+    expect(body).toMatch(/overflow-y:\s*auto/);
+    expect(rule2('.cw-hub .cw-submit')).toMatch(/position:\s*sticky/);
+  });
+
+  it('B2: a hidden line is a quiet neutral pill (sunken surface, muted words), not an ink bar', () => {
+    const mask = rule2('.cw-hub .cw-mask');
+    expect(mask).toMatch(/background:\s*var\(--cw-surface-sunken\)/);
+    expect(mask).toMatch(/color:\s*var\(--cw-ink-muted\)/);
+    expect(mask).toMatch(/border-radius:\s*999px/);
+    expect(mask).not.toMatch(/var\(--cw-ink\)/);
+  });
+
+  it('B1: a decided case leaves only the bar: it is static, its toggle is gone and its body is always shown, even on a phone', () => {
+    expect(rule2(".cw-hub .cw-dock[data-gone='true']")).toMatch(/position:\s*static/);
+    expect(rule2(".cw-hub .cw-dock[data-gone='true'] .cw-dock-bar")).toMatch(/display:\s*none/);
+    expect(rule2(".cw-hub .cw-dock[data-gone='true'] .cw-dock-body")).toMatch(/display:\s*grid/);
+    // The rule that closes the phone sheet comes first, so the decided case's rule (same weight, later) wins.
+    expect(css.indexOf(".cw-dock[data-open='false'] .cw-dock-body")).toBeLessThan(css.indexOf(".cw-dock[data-gone='true'] .cw-dock-body"));
+    expect(rule2('.cw-hub .cw-ctx[hidden]')).toMatch(/display:\s*none/);
   });
 });

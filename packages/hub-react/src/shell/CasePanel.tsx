@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Masked } from '../case/Transcript.js';
 import { RecordItem } from '../case/Record.js';
 import { useCase } from '../case/CaseContext.js';
+import { hasLeft } from '../decisions.js';
 import { useHub } from '../context.js';
 import { personName, recordSummary } from '../excerpt.js';
 import type { ReportPerson } from '../excerpt.js';
@@ -87,7 +88,7 @@ function Blocked({ target, people }: { target: ReportPerson; people: ReportPerso
                       <time dateTime={new Date(b.at).toISOString()} title={absoluteTime(b.at, locale)} className="cw-hint">
                         {timeOfDay(b.at, locale)}
                       </time>
-                      <span className="cw-blocked-text">{shown ? b.text : <Masked text={b.text} />}</span>
+                      <span className="cw-blocked-text">{shown ? b.text : <Masked />}</span>
                       <button
                         type="button"
                         className="cw-linkbtn"
@@ -218,10 +219,10 @@ function People({ people }: { people: ReportPerson[] }) {
 /** The pane beside an open case. */
 export function CasePanel() {
   const { t } = useHub();
-  const { detail, people } = useCase();
+  const { detail, people, entry } = useCase();
   const target = people.find((p) => p.role === 'target');
   return (
-    <aside className="cw-ctx" aria-label={t('hub.case.label')}>
+    <aside className="cw-ctx" aria-label={t('hub.case.label')} hidden={hasLeft(entry)}>
       {detail.data === undefined || target === undefined ? (
         detail.error === null ? (
           <Skeleton lines={4} />

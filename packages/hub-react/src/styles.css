@@ -915,6 +915,9 @@
 .cw-hub .cw-body[data-case='true'] .cw-main {
   padding: 0;
 }
+.cw-hub .cw-ctx[hidden] {
+  display: none;
+}
 .cw-hub .cw-ctx {
   display: grid;
   align-content: start;
@@ -931,6 +934,10 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--cw-context-width);
     overflow: hidden;
+  }
+  /* A decided case hides the pane beside it: the notice takes the whole width. */
+  .cw-hub .cw-body[data-case='true'] .cw-work:has(.cw-ctx[hidden]) {
+    grid-template-columns: minmax(0, 1fr);
   }
   .cw-hub .cw-body[data-case='true'] .cw-main {
     display: flex;
@@ -1388,8 +1395,8 @@
 }
 .cw-hub .cw-tabpanel {
   display: grid;
-  gap: var(--cw-space-4);
-  padding: var(--cw-space-4) var(--cw-space-5) var(--cw-space-5);
+  gap: var(--cw-space-3);
+  padding: var(--cw-space-3) var(--cw-space-5) var(--cw-space-4);
 }
 .cw-hub .cw-note h3 {
   margin-bottom: var(--cw-space-1);
@@ -1474,8 +1481,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--cw-space-2) var(--cw-space-4);
-  padding: var(--cw-space-3) var(--cw-space-4);
+  gap: var(--cw-space-1) var(--cw-space-4);
+  padding: var(--cw-space-2) var(--cw-space-4);
   background: var(--cw-surface-sunken);
   border-bottom: var(--cw-border-width) solid var(--cw-border);
 }
@@ -1505,7 +1512,7 @@
   align-items: baseline;
   gap: 0 var(--cw-space-3);
   min-width: 0;
-  padding: var(--cw-space-2) var(--cw-space-4) var(--cw-space-2) var(--cw-space-3);
+  padding: var(--cw-space-1) var(--cw-space-4) var(--cw-space-1) var(--cw-space-3);
   border-left: var(--cw-wait-width) solid transparent;
 }
 .cw-hub .cw-line + .cw-line {
@@ -1561,12 +1568,14 @@
 }
 .cw-hub .cw-mask {
   display: inline-block;
-  padding: 0 0.2em;
-  border-radius: 3px;
-  background: var(--cw-ink);
-  color: var(--cw-ink);
-  letter-spacing: -0.12em;
-  line-height: 1.1;
+  padding: 0 0.7em;
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: 999px;
+  background: var(--cw-surface-sunken);
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+  line-height: 1.6;
+  white-space: nowrap;
   user-select: none;
 }
 
@@ -1587,8 +1596,8 @@
 .cw-hub .cw-dock-body {
   display: grid;
   gap: var(--cw-space-3);
-  max-height: min(44vh, 28rem);
-  padding: var(--cw-space-3) var(--cw-space-5) var(--cw-space-3);
+  max-height: min(34vh, 21rem);
+  padding: var(--cw-space-2) var(--cw-space-5) var(--cw-space-3);
   overflow-y: auto;
 }
 .cw-hub .cw-dock-title {
@@ -1607,7 +1616,8 @@
   min-width: 0;
 }
 .cw-hub .cw-verdict-grid {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2px;
   padding: 2px;
   border-radius: var(--cw-radius-s);
@@ -1615,7 +1625,6 @@
 }
 .cw-hub .cw-radio {
   position: relative;
-  flex: 1 1 0;
   min-width: 0;
   border-radius: calc(var(--cw-radius-s) - 1px);
 }
@@ -1660,8 +1669,8 @@
 /* The suggestion: a card for the ladder's next step, and the rule it is under. */
 .cw-hub .cw-suggest {
   display: grid;
-  gap: var(--cw-space-3);
-  padding: var(--cw-space-3) var(--cw-space-4);
+  gap: var(--cw-space-2);
+  padding: var(--cw-space-2) var(--cw-space-3);
   border: var(--cw-border-width) solid var(--cw-border-strong);
   border-left: var(--cw-wait-width) solid var(--cw-accent);
   border-radius: var(--cw-radius-m);
@@ -1684,7 +1693,7 @@
 }
 .cw-hub .cw-suggest-text .cw-hint {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -1712,6 +1721,11 @@
 @container cwmain (min-width: 36rem) {
   .cw-hub .cw-suggest-rule {
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .cw-hub .cw-suggest-rule .cw-field {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--cw-space-1) var(--cw-space-3);
   }
 }
 .cw-hub .cw-suggest .cw-btn {
@@ -2108,11 +2122,21 @@
     padding: var(--cw-space-2) var(--cw-space-3) var(--cw-space-4);
     border-top: var(--cw-border-width) solid var(--cw-border);
   }
-  .cw-hub .cw-verdict-grid {
-    flex-wrap: wrap;
+  .cw-hub .cw-radio label {
+    padding: 0 var(--cw-space-1);
+    font-size: var(--cw-text-s);
   }
-  .cw-hub .cw-radio {
-    flex: 1 1 8rem;
+  .cw-hub .cw-radio .cw-kbd {
+    display: none;
+  }
+  .cw-hub .cw-toasts {
+    top: calc(3.5rem + env(safe-area-inset-top, 0px));
+    right: var(--cw-space-3);
+    bottom: auto;
+    left: var(--cw-space-3);
+    justify-items: center;
+    width: auto;
+    max-width: none;
   }
   .cw-hub .cw-submit .cw-btn {
     flex: 1 1 10rem;
@@ -2122,18 +2146,43 @@
   }
 }
 
+/* A decision that is waiting or sent: the case is off the screen, and the bar is all that is left (the notice, Undo, the result). */
+.cw-hub .cw-dock[data-gone='true'] {
+  position: static;
+  border-top: 0;
+  box-shadow: none;
+}
+.cw-hub .cw-dock[data-gone='true'] .cw-dock-bar {
+  display: none;
+}
+.cw-hub .cw-dock[data-gone='true'] .cw-dock-body {
+  display: grid;
+  align-content: start;
+  max-height: none;
+  padding: var(--cw-space-5);
+  border-top: 0;
+}
+.cw-hub .cw-gone-title {
+  font-size: var(--cw-text-l);
+  letter-spacing: -0.01em;
+}
+.cw-hub .cw-gone-title:focus {
+  outline: none;
+}
+
 /* ---- Toasts ------------------------------------------------------------------------------------------------------ */
+/* The toasts stand over the queue (bottom left), never over the decision bar and its buttons, which are at the bottom of the case.
+   On a phone they hang from the top, under the header. */
 .cw-hub .cw-toasts {
   position: fixed;
-  left: 50%;
-  bottom: calc(var(--cw-space-5) + env(safe-area-inset-bottom, 0px));
+  left: calc(var(--cw-nav-width) + var(--cw-space-4));
+  bottom: calc(var(--cw-space-4) + env(safe-area-inset-bottom, 0px));
   z-index: 20;
   display: grid;
-  justify-items: center;
+  justify-items: start;
   gap: var(--cw-space-2);
   width: max-content;
-  max-width: calc(100vw - 2 * var(--cw-space-4));
-  transform: translateX(-50%);
+  max-width: calc(var(--cw-queue-width) - var(--cw-space-4));
   pointer-events: none;
 }
 .cw-hub .cw-toast {

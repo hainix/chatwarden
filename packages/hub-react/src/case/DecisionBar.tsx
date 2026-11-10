@@ -1,30 +1,22 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { actorName } from '../claims.js';
 import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
-import { useDecisions } from '../decisions.js';
-import {
-  EVIDENCE_MAX,
-  MAX_ACTIONS,
-  REASON_MAX,
-  needsBanPermission,
-  outcomeChoice,
-  resolveDraft,
-  toInput,
-} from '../decision.js';
-import type { Draft, Problem, UiVerdict } from '../decision.js';
+import { hasLeft, isWaiting, useDecisions } from '../decisions.js';
+import { EVIDENCE_MAX, MAX_ACTIONS, REASON_MAX, resolveDraft, toInput } from '../decision.js';
+import type { Problem, UiVerdict } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
-import type { ReportPerson } from '../excerpt.js';
-import { absoluteTime, relativeTime } from '../format.js';
 import { useHubData } from '../hooks.js';
-import { decideErrorText, kindLabel, outcomeLabel } from '../labels.js';
+import { decideErrorText, kindLabel } from '../labels.js';
 import { modKey, keyLabel, isTypingTarget } from '../shortcuts.js';
 import type { Reason, ReportDetail } from '../types.js';
-import { Card, ErrorBlock, Kbd, Notice, Segmented, Skeleton, Tag } from '../ui.js';
-import { ActionCard, ActionTitle, Field, RuleOptions } from './ActionEditor.js';
+import { ErrorBlock, Kbd, Notice, Skeleton } from '../ui.js';
+import { ActionCard, Field } from './ActionEditor.js';
+import { ActionRow } from './ActionRow.js';
+import { Decided } from './Decided.js';
+import { SuggestionCard } from './SuggestionCard.js';
 import { useCase } from './CaseContext.js';
-import type { DecisionDraft } from './useDecisionForm.js';
 import { UNDO_MS } from '../toasts.js';
 
 // The decision bar, docked under the evidence. It opens pre-filled: the ladder's suggestion as the reported person's action,
@@ -39,39 +31,7 @@ const VERDICTS: ReadonlyArray<{ verdict: UiVerdict; key: string }> = [
   { verdict: 'not_a_problem', key: '2' },
   { verdict: 'bad_faith', key: '3' },
 ];
-const LEVELS = ['banter', 'rude', 'hostile', 'severe'] as const;
 const SECONDS = UNDO_MS / 1000;
-
-/** What was decided, for a report that is closed. */
-function Decided({ detail }: { detail: ReportDetail }) {
-  const { t, locale, now } = useHub();
-  const r = detail.report;
-  return (
-    <div className="cw-decided">
-      <div className="cw-decided-head">
-        <Tag>{t(`hub.reports.tag.${r.status}`)}</Tag>
-        {r.badFaith && <Tag tone="warn">{t('hub.report.tag.badFaith')}</Tag>}
-      </div>
-      {r.actionedBy !== null && r.actionedAt !== null && (
-        <p title={absoluteTime(r.actionedAt, locale)}>{t('hub.decide.decided.by', { actor: r.actionedBy, time: relativeTime(r.actionedAt, now(), locale) })}</p>
-      )}
-      <dl className="cw-decided-notes">
-        {r.modNote !== null && (
-          <>
-            <dt>{t('hub.decide.decided.reason')}</dt>
-            <dd>{r.modNote}</dd>
-          </>
-        )}
-        {r.badFaithEvidence !== null && (
-          <>
-            <dt>{t('hub.decide.decided.evidence')}</dt>
-            <dd>{r.badFaithEvidence}</dd>
-          </>
-        )}
-      </dl>
-    </div>
-  );
-}
 
 /** The saved reasons, as chips: one press puts the text in the reason box. */
 function ReasonChips({ reasons, onPick }: { reasons: readonly Reason[]; onPick: (r: Reason) => void }) {
@@ -84,149 +44,6 @@ function ReasonChips({ reasons, onPick }: { reasons: readonly Reason[]; onPick: 
           {r.label}
         </button>
       ))}
-    </div>
-  );
-}
-
-/** The ladder's suggestion as a card, with the rule of its action, and Change, which opens the full editor. */
-function SuggestionCard({
-  draft,
-  editing,
-  setEditing,
-  dismissal,
-  panelId,
-  problemsOf,
-  nameOfTarget,
-}: {
-  draft: DecisionDraft;
-  editing: boolean;
-  setEditing: (on: boolean) => void;
-  dismissal: boolean;
-  panelId: string;
-  problemsOf: (uid: string) => { rule?: Problem } | undefined;
-  nameOfTarget: string;
-}) {
-  const { t, locale } = useHub();
-  const id = useId();
-  const choice = outcomeChoice(draft.suggestion.outcome);
-  const added = draft.suggestionIndex >= 0 ? draft.form.actions[draft.suggestionIndex] : undefined;
-  const permanentBlocked = choice !== null && needsBanPermission(choice) && !draft.ctx.canPermanent;
-  const canAdd = choice !== null && draft.ctx.canApply && added === undefined && !permanentBlocked && !dismissal && draft.cannotAdd === null;
-
-  let why: string | null = null;
-  if (choice !== null && added === undefined && draft.ctx.canApply) {
-    if (dismissal) why = t('hub.decide.suggest.fairOnly');
-    else if (permanentBlocked) why = t('hub.decide.suggest.needsSenior');
-    else if (draft.cannotAdd === 'limit') why = t('hub.decide.suggest.cannot.limit', { max: MAX_ACTIONS });
-    else if (draft.cannotAdd === 'unsupported') why = t('hub.decide.suggest.cannot.unsupported');
-  }
-
-  return (
-    <div className="cw-suggest" role="group" aria-labelledby={`${id}-title`} data-added={added === undefined ? 'false' : 'true'}>
-      <h3 id={`${id}-title`} className="cw-sr">
-        {t('hub.decide.suggest.title')}
-      </h3>
-      <div className="cw-suggest-main">
-        {choice !== null && <Card kind={choice.kind} />}
-        <div className="cw-suggest-text">
-          <p className="cw-suggest-label">{outcomeLabel(t, locale, draft.suggestion.outcome)}</p>
-          <p className="cw-hint">{draft.suggestion.why}</p>
-        </div>
-        <button type="button" className="cw-btn" aria-expanded={editing} aria-controls={panelId} onClick={() => setEditing(!editing)}>
-          {t(editing ? 'hub.decide.done' : 'hub.decide.change')}
-        </button>
-      </div>
-      {added !== undefined && !editing && (
-        <div className="cw-suggest-rule">
-          <Field id={`${id}-rule`} label={t('hub.decide.action.rule')} problem={problemsOf(added.uid)?.rule}>
-            {(a) => (
-              <select {...a} value={added.rule} onChange={(e) => draft.patchAction(added.uid, { rule: e.target.value })}>
-                <RuleOptions rules={draft.rules} />
-              </select>
-            )}
-          </Field>
-          <p className="cw-hint">{added.lineIds.length === 0 ? t('hub.decide.action.lines.noneChosen', { name: nameOfTarget }) : t('hub.decide.action.lines.summary', { count: added.lineIds.length, name: nameOfTarget })}</p>
-        </div>
-      )}
-      {editing && (
-        <div className="cw-suggest-level" aria-busy={draft.levelBusy}>
-          <Segmented
-            label={t('hub.decide.suggest.level')}
-            value={draft.level ?? ''}
-            options={LEVELS.map((l) => ({ value: l as string, label: t(`hub.decide.suggest.level.${l}`) }))}
-            onChange={(v) => draft.pickLevel(v as (typeof LEVELS)[number])}
-          />
-        </div>
-      )}
-      {draft.levelError !== null && (
-        <Notice tone="bad" role="alert">
-          <span>{t('hub.decide.suggest.failed')}</span> <span>{decideErrorText(t, draft.levelError)}</span>
-        </Notice>
-      )}
-      {canAdd && (
-        <button type="button" className="cw-btn" aria-disabled={draft.levelBusy} onClick={() => !draft.levelBusy && draft.useSuggestion()}>
-          {t('hub.decide.suggest.use')}
-        </button>
-      )}
-      {why !== null && <p className="cw-hint">{why}</p>}
-    </div>
-  );
-}
-
-/** One action in short: what, who, which rule, how many lines. Change opens the full editor. */
-function ActionRow({
-  n,
-  draft: d,
-  base,
-  people,
-  rules,
-  problems,
-  onChange,
-  onEdit,
-  onRemove,
-}: {
-  n: number;
-  draft: Draft;
-  base: string;
-  people: readonly ReportPerson[];
-  rules: ReadonlyArray<{ number: number; title: string }>;
-  problems: { rule?: Problem } | undefined;
-  onChange: (patch: Partial<Draft>) => void;
-  onEdit: () => void;
-  onRemove: () => void;
-}) {
-  const { t } = useHub();
-  const person = people.find((p) => p.ref === d.person);
-  const name = person === undefined ? '' : personName(person, people, t);
-  const choice = resolveDraft(d);
-  const labelId = `${base}-${d.uid}-row`;
-  return (
-    <div className="cw-sumrow" role="group" aria-labelledby={labelId}>
-      <div className="cw-sumrow-head">
-        <span id={labelId} className="cw-sr">
-          {t('hub.decide.action.title', { n })}
-        </span>
-        <ActionTitle draft={d} />
-        <span className="cw-hint">{t('hub.decide.action.for', { name })}</span>
-        <span className="cw-sumrow-buttons">
-          <button type="button" className="cw-btn" aria-label={t('hub.decide.action.changeLabel', { n })} onClick={onEdit}>
-            {t('hub.decide.change')}
-          </button>
-          <button type="button" className="cw-btn" aria-label={t('hub.decide.action.removeLabel', { n })} onClick={onRemove}>
-            {t('hub.decide.action.remove')}
-          </button>
-        </span>
-      </div>
-      <Field id={`${base}-${d.uid}-rule`} label={t('hub.decide.action.rule')} problem={problems?.rule}>
-        {(a) => (
-          <select {...a} value={d.rule} onChange={(e) => onChange({ rule: e.target.value })}>
-            <RuleOptions rules={rules} />
-          </select>
-        )}
-      </Field>
-      {choice !== null && choice.kind !== 'note' && (
-        <p className="cw-hint">{d.lineIds.length === 0 ? t('hub.decide.action.lines.noneChosen', { name }) : t('hub.decide.action.lines.summary', { count: d.lineIds.length, name })}</p>
-      )}
     </div>
   );
 }
@@ -254,7 +71,9 @@ export function DecisionBar() {
   const conflictRef = useRef<HTMLDivElement>(null);
 
   const status = entry?.state.status;
-  const waiting = status === 'held' || status === 'sending';
+  const waiting = isWaiting(entry);
+  // Decided (waiting or sent): the case is off the screen and this is all that is left of it.
+  const gone = hasLeft(entry);
   const open = report?.status === 'open';
   const canDecide = can('reports.decide');
   const readOnly = holder.kind === 'other';
@@ -264,7 +83,7 @@ export function DecisionBar() {
     open && canDecide && can('reasons.read') ? session.reasons() : Promise.resolve(null),
   );
 
-  const lineList = excerptLines(report ?? ({ excerpt: [], people: [], lineId: null } as unknown as NonNullable<typeof report>));
+  const lineList = useMemo(() => (report === undefined ? [] : excerptLines(report)), [report]);
   const target = report?.targetPerson ?? '';
   const targetPerson = people.find((p) => p.ref === target);
   const nameOfTarget = targetPerson === undefined ? '' : personName(targetPerson, people, t);
@@ -273,6 +92,7 @@ export function DecisionBar() {
   const shown = attempted ? draft.problems : { actions: {}, count: 0 };
   const sendError = status === 'failed' && entry?.state.status === 'failed' ? entry.state.error : null;
   const addId = `${base}-add`;
+  const submitId = `${base}-submit`;
 
   useEffect(() => {
     if (focusId === null) return;
@@ -290,8 +110,15 @@ export function DecisionBar() {
     else if (status === 'done' && entry?.state.status === 'done') {
       draft.announce(entry.state.replay ? t('hub.decide.result.replay') : t('hub.decide.result.done'));
       resultRef.current?.focus();
-    } else if (status === 'failed') failedRef.current?.focus();
-    else if (status === 'conflict') {
+    } else if (status === 'failed') {
+      // On a phone the sheet was closed when the decision was queued: open it, or the error and Try again are out of sight.
+      setSheet(true);
+      failedRef.current?.focus();
+    } else if (status === 'undone') {
+      // Undone: the case is back and the sheet with it, with focus on the button that sends it again.
+      setSheet(true);
+      setFocusId(submitId);
+    } else if (status === 'conflict') {
       draft.announce(t('hub.decide.already'));
       conflictRef.current?.focus();
       detail.reload();
@@ -394,6 +221,11 @@ export function DecisionBar() {
     const verdictChosen = form.verdict;
     body = (
       <>
+        {gone && (
+          <h2 className="cw-gone-title" tabIndex={-1}>
+            {t('hub.decide.gone.title', { who: nameOfTarget })}
+          </h2>
+        )}
         {status === 'held' && (
           <div className="cw-queued" role="status" tabIndex={-1} ref={heldRef}>
             <p>
@@ -401,6 +233,9 @@ export function DecisionBar() {
             </p>
             <button type="button" className="cw-btn" onClick={() => decisions.undo(report.id)}>
               {t('hub.toast.undo')}
+            </button>
+            <button type="button" className="cw-btn" onClick={() => void actions.takeNext().then((r) => r === 'none' && go({ name: 'overview' }))}>
+              {t('hub.queue.takeNext')}
             </button>
           </div>
         )}
@@ -443,13 +278,9 @@ export function DecisionBar() {
         {readOnly && holder.kind === 'other' && (
           <div className="cw-queued" role="status" data-readonly="true">
             <p>
-              <strong>{t('hub.decide.readOnly', { name: actorName(holder.by) })}</strong> <span>{t('hub.decide.readOnly.note')}</span>
+              <strong>{t('hub.decide.readOnly', { name: actorName(holder.by) })}</strong>{' '}
+              <span>{t(can('claims.override') ? 'hub.decide.readOnly.senior' : 'hub.decide.readOnly.note')}</span>
             </p>
-            {can('claims.override') && (
-              <button type="button" className="cw-btn" onClick={() => void actions.takeOver(report.targetPerson)}>
-                {t('hub.claim.takeOver')}
-              </button>
-            )}
           </div>
         )}
         {draft.status === 'loading' ? (
@@ -607,7 +438,7 @@ export function DecisionBar() {
                 counter={t('hub.decide.counter', { count: form.reason.trim().length, max: REASON_MAX })}
                 problem={shown.reason}
               >
-                {(a) => <textarea {...a} rows={2} value={form.reason} onChange={(e) => draft.setForm((f) => ({ ...f, reason: e.target.value }))} />}
+                {(a) => <textarea {...a} rows={1} value={form.reason} onChange={(e) => draft.setForm((f) => ({ ...f, reason: e.target.value }))} />}
               </Field>
 
               {attempted && items.length > 0 && (
@@ -639,7 +470,7 @@ export function DecisionBar() {
               )}
 
               <div className="cw-submit">
-                <button type="button" className="cw-btn cw-btn--primary" aria-disabled={readOnly} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+Enter Meta+Enter' } : {})} onClick={() => decide(true)}>
+                <button id={submitId} type="button" className="cw-btn cw-btn--primary" aria-disabled={readOnly} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+Enter Meta+Enter' } : {})} onClick={() => decide(true)}>
                   <span>{t('hub.decide.submitNext')}</span>
                   {shortcuts && (
                     <span className="cw-submit-keys" aria-hidden="true">
@@ -661,7 +492,13 @@ export function DecisionBar() {
   }
 
   return (
-    <section className="cw-dock" aria-label={t('hub.decide.title')} data-open={sheet ? 'true' : 'false'} {...(readOnly ? { 'data-readonly': 'true' } : {})}>
+    <section
+      className="cw-dock"
+      aria-label={t('hub.decide.title')}
+      data-open={sheet ? 'true' : 'false'}
+      {...(readOnly ? { 'data-readonly': 'true' } : {})}
+      {...(gone ? { 'data-gone': 'true' } : {})}
+    >
       <div className="cw-dock-bar">
         <p className="cw-dock-title" aria-hidden="true">
           {t('hub.decide.title')}

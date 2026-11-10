@@ -253,12 +253,17 @@ describe('a held action with Undo', () => {
     setVisibility('visible');
   });
 
-  it('a listener left behind by an unmounted hub does not run anything', async () => {
+  it('an action held when the hub unmounts is sent once, and a tab hidden afterwards does not send it again', async () => {
     const view = mount();
-    view.unmount();
     const run = vi.fn();
+    act(() => void view.api().hold({ text: 'Held.', run }));
+    view.unmount();
+    await tick(0);
+    expect(run).toHaveBeenCalledTimes(1);
     await act(async () => setVisibility('hidden'));
-    expect(run).not.toHaveBeenCalled();
+    window.dispatchEvent(new Event('pagehide'));
+    await tick(10_000);
+    expect(run).toHaveBeenCalledTimes(1);
     setVisibility('visible');
   });
 

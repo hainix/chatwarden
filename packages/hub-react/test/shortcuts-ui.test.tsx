@@ -100,13 +100,14 @@ describe('J and K move through the queue', () => {
 });
 
 describe('N takes the next case', () => {
-  it('claims and opens the oldest unclaimed case and says so', async () => {
+  it('claims and opens the oldest unclaimed case', async () => {
     const { w, filed } = await world();
     const { user, router } = renderHub(w);
     await ready();
     await user.keyboard('n');
     await waitFor(() => expect(router.path).toBe(`/reports/${filed[0]!.id}`));
-    expect(await screen.findByText('You took the case against Alpha.')).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: 'Who is handling this case' })).toBeInTheDocument();
+    expect(screen.queryByText(/^You took the/)).toBeNull();
     expect(w.cw.cases.holder(filed[0]!.person)?.by).toBe('ann@example.test');
   });
 

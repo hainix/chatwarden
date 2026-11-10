@@ -177,14 +177,13 @@ export function useCaseActions(): CaseActions {
         return 'none';
       }
       // The case may be newer than the list on screen: read again so it is there, then show it as the moderator's.
-      const known = q.groups.some((g) => g.person === next.person) ? q.groups : await q.reload();
+      if (!q.groups.some((g) => g.person === next.person)) await q.reload();
       q.patchClaim(next.person, next.claim);
       // A filter that would hide the case just taken is cleared: the moderator should see what they took.
       if (q.filter.claim === 'unclaimed') q.setFilter({ claim: 'all' });
       q.holdOff(next.person, false);
-      const group = known.find((g) => g.person === next.person);
+      // No toast: the case opens, and its banner says "You're handling this".
       go({ name: 'report', id: next.reportId });
-      toasts.push({ text: group === undefined ? t('hub.toast.tookNext') : t('hub.toast.took', { who: groupName(t, group) }) });
       return 'taken';
     } catch (e) {
       fail(e);

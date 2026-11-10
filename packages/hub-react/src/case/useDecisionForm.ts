@@ -143,6 +143,17 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     setFormState(initialForm(ctx, detail.suggest.outcome, detail.rule, reportedLine, nextUid()));
   }, [ready]);
 
+  // The entry for this report: after an Undo the snapshot has been taken back (nothing stale is left to be restored over newer
+  // edits), and when a send fails while the form is up, the form is what it was when Decide was pressed.
+  const entryState = detail === undefined ? undefined : decisions.entry(detail.report.id);
+  const entryStatus = entryState?.state.status;
+  useEffect(() => {
+    if (formState === null || entryState === undefined) return;
+    if (entryStatus === 'undone') decisions.dismiss(entryState.reportId);
+    else if (entryStatus === 'failed') setFormState(entryState.snapshot);
+    // Only when the entry's state changes.
+  }, [entryStatus]);
+
   // The rules came in after the form started without them (a retry worked): fill in the suggestion if nothing was touched yet.
   useEffect(() => {
     if (rulesState !== 'ok' || formState === null || detail === undefined) return;
@@ -151,6 +162,8 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     if (next.actions.length > 0) setFormState(next);
   }, [rulesState]);
 
+  const formRef = useRef<DecisionForm | null>(formState);
+  formRef.current = formState;
   const form = formState ?? emptyForm();
   const setForm = useCallback((update: (f: DecisionForm) => DecisionForm): void => setFormState((f) => update(f ?? emptyForm())), []);
   const problems = formState === null ? NO_PROBLEMS : validate(formState, ctx);
@@ -178,29 +191,30 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     return null;
   }, [form.actions, target]);
 
+  // Not an updater: React may run an updater twice (StrictMode) and keeps the second result, so nothing here may touch a ref, make
+  // an id or announce from inside one. The form is read from the ref (the latest committed or queued one) and set once.
   const setVerdict = useCallback(
     (verdict: UiVerdict): void => {
-      setFormState((f) => {
-        const base = f ?? emptyForm();
-        const next: DecisionForm = { ...base, verdict };
-        if (verdict === 'fair') {
-          // Back to fair: the suggestion that a dismissal took off comes back.
-          if (dropped.current && base.actions.length === 0 && detail !== undefined) {
-            dropped.current = false;
-            const again = initialForm(ctx, detail.suggest.outcome, detail.rule, reportedLine, `a${(uids.current += 1)}`);
-            return { ...next, actions: again.actions };
-          }
-          return next;
+      const base = formRef.current ?? emptyForm();
+      let next: DecisionForm = { ...base, verdict };
+      if (verdict === 'fair') {
+        // Back to fair: the suggestion that a dismissal took off comes back.
+        if (dropped.current && base.actions.length === 0 && detail !== undefined) {
+          dropped.current = false;
+          next = { ...next, actions: initialForm(ctx, detail.suggest.outcome, detail.rule, reportedLine, nextUid()).actions };
         }
+      } else {
         const result = dropTargetActions(next, ctx.target);
         if (result.dropped > 0) {
           dropped.current = true;
           announce(t('hub.decide.announce.dropped', { count: result.dropped }));
         }
-        return result.form;
-      });
+        next = result.form;
+      }
+      formRef.current = next;
+      setFormState(next);
     },
-    [announce, ctx, detail, reportedLine, t],
+    [announce, ctx, detail, nextUid, reportedLine, t],
   );
 
   /** Asks the ladder again: for another conduct level, and for the rule the reported person's action cites. The latest ask wins. */

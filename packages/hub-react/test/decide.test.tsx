@@ -782,7 +782,7 @@ describe('DecisionPanel: sending', () => {
     expect(within(panel()).queryByRole('button', { name: 'Decide' })).not.toBeInTheDocument();
   });
 
-  it('shows the report as actioned afterwards (the page reloads)', async () => {
+  it('shows the result afterwards, with the case off the screen and nothing read again', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     const { user } = await ready(w, f.id);
@@ -791,9 +791,10 @@ describe('DecisionPanel: sending', () => {
     await reason(user);
     await decide(user);
     await within(panel()).findByText('Decided. The report is closed.', { selector: 'strong' });
-    const facts = screen.getByRole('group', { name: 'About this report' });
-    await within(facts).findByText('Actioned');
+    // The decided case is off the screen: the result is what is left, and nothing was read again.
+    expect(screen.queryByRole('group', { name: 'About this report' })).toBeNull();
     expect(within(panel()).getByText('Decided. The report is closed.', { selector: 'strong' })).toBeInTheDocument();
+    expect(w.sent.filter((r) => r.method === 'GET' && r.path === `/reports/${f.id}`)).toHaveLength(1);
   });
 
   it('moves focus to the result', async () => {

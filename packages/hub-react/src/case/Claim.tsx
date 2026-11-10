@@ -1,5 +1,6 @@
 import { actorName } from '../claims.js';
 import { useCaseActions } from '../cases.js';
+import { isWaiting } from '../decisions.js';
 import { useHub } from '../context.js';
 import { listOf } from '../format.js';
 import { Avatar } from '../ui.js';
@@ -15,7 +16,7 @@ export function ClaimBanner() {
   const report = detail.data?.report;
   if (report === undefined || report.status !== 'open') return null;
   // A decision on its way has let go of the claim: there is nothing to say about who is handling it.
-  if (entry !== undefined && (entry.state.status === 'held' || entry.state.status === 'sending')) return null;
+  if (isWaiting(entry)) return null;
   if (group === null) {
     return (
       <div className="cw-claim" data-claim="closed">
