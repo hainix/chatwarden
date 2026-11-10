@@ -12,6 +12,7 @@
     "clean": "node scripts/clean.mjs",
     "typecheck": "tsc -b",
     "check:pack": "npm run build && node scripts/check-pack.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "license:sync": "node scripts/sync-license.mjs",
     "lint": "eslint .",
     "test": "vitest run",

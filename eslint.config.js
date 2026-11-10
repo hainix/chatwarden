@@ -24,7 +24,7 @@ const coreRestrictedImports = [
 ];
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '.superpowers/**', '**/*.tsbuildinfo'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', '.superpowers/**', '**/*.tsbuildinfo', '.smoke/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -1,0 +1,120 @@
+// Consumer smoke test. Packs every published @chatwarden/* package (a real `npm pack`, so `prepack` runs), installs the
+// tarballs into a fresh ESM project and a fresh CommonJS project, typechecks each, and runs a real scenario in each
+// (scripts/smoke/scenario.ts). The tarballs are what an adopter, Moxgate first, vendors. Output goes to `.smoke/`.
+//   ESM: type "module", NodeNext, TypeScript 5.9.
+//   CJS: module commonjs, moduleResolution node, esModuleInterop, strict, TypeScript 5.7 (Moxgate's server). The compiled
+//        scenario `require()`s the ESM packages, so Node's require(esm) path runs for real.
+// The pure helpers are exported and unit-tested in scripts/smoke.test.ts; the end-to-end run is at the bottom.
+import { spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** Per-project settings. `typescript` is the pinned `typescript@<spec>` installed into the project. */
+export const PROJECTS = {
+  esm: { typescript: '5.9' },
+  cjs: { typescript: '5.7' },
+};
+
+/** The file name `npm pack` gives a package: `@scope/name` + `0.1.0` becomes `scope-name-0.1.0.tgz`. */
+export function tarballName(name, version) {
+  if (typeof name !== 'string' || name === '') throw new Error('tarballName: a package name is required');
+  if (typeof version !== 'string' || version === '') throw new Error('tarballName: a version is required');
+  return `${name.replace(/^@/, '').replaceAll('/', '-')}-${version}.tgz`;
+}
+
+/** The non-private manifests, sorted by name, as `{ name, version, tarball }`. Throws when there are none. */
+export function publishedPackages(manifests) {
+  const out = manifests
+    .filter((m) => m.private !== true)
+    .map((m) => ({ name: m.name, version: m.version, tarball: tarballName(m.name, m.version) }))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  if (out.length === 0) throw new Error('no published packages found');
+  return out;
+}
+
+/** The `npm install` arguments for one project: the tarballs, what Moxgate has beside them, and the pinned TypeScript. */
+export function installArgs(project, tarballPaths) {
+  const settings = PROJECTS[project];
+  if (settings === undefined) throw new Error(`unknown smoke project: ${project}`);
+  if (tarballPaths.length === 0) throw new Error('installArgs: no tarballs to install');
+  return [
+    'install',
+    '--no-audit',
+    '--no-fund',
+    ...tarballPaths,
+    'express@5',
+    '@types/express@5',
+    '@types/node@22',
+    `typescript@${settings.typescript}`,
+  ];
+}
+
+/** Fills `{{name}}` placeholders. A placeholder with no value throws; a substituted value is not expanded again. */
+export function renderTemplate(text, vars) {
+  return text.replace(/\{\{\s*([\w-]+)\s*\}\}/g, (_m, key) => {
+    if (!Object.hasOwn(vars, key)) throw new Error(`renderTemplate: no value for {{${key}}}`);
+    return vars[key];
+  });
+}
+
+const WIN = process.platform === 'win32';
+
+function run(cmd, args, cwd, label) {
+  console.log(`\n[smoke] ${label}: ${cmd} ${args.join(' ')}`);
+  // npm and npx are .cmd shims on Windows and need a shell; node itself is spawned directly (its path may hold spaces).
+  const shimmed = WIN && (cmd === 'npm' || cmd === 'npx');
+  const res = spawnSync(shimmed ? `${cmd}.cmd` : cmd, args, { cwd, stdio: 'inherit', shell: shimmed });
+  if (res.status !== 0) throw new Error(`${label} failed (exit ${res.status ?? res.signal ?? 'unknown'})`);
+}
+
+function copyTemplates(root, project, dest) {
+  mkdirSync(join(dest, 'src'), { recursive: true });
+  const from = join(root, 'scripts', 'smoke', project);
+  for (const f of readdirSync(from)) {
+    const text = readFileSync(join(from, f), 'utf8');
+    writeFileSync(join(dest, f), renderTemplate(text, { project }));
+  }
+  cpSync(join(root, 'scripts', 'smoke', 'scenario.ts'), join(dest, 'src', 'index.ts'));
+}
+
+function main() {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const smoke = join(root, '.smoke');
+  const tarballDir = join(smoke, 'tarballs');
+  rmSync(smoke, { recursive: true, force: true });
+  mkdirSync(tarballDir, { recursive: true });
+
+  const base = join(root, 'packages');
+  const manifests = readdirSync(base, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && existsSync(join(base, d.name, 'package.json')))
+    .map((d) => JSON.parse(readFileSync(join(base, d.name, 'package.json'), 'utf8')));
+  const packages = publishedPackages(manifests);
+
+  run('npm', ['run', 'build'], root, 'build');
+  for (const p of packages) {
+    // A real pack: `prepack` runs here, so a package whose prepack is broken fails the smoke test.
+    run('npm', ['pack', '--workspace', p.name, '--pack-destination', tarballDir], root, `pack ${p.name}`);
+    if (!existsSync(join(tarballDir, p.tarball))) throw new Error(`npm pack did not produce ${p.tarball}`);
+  }
+
+  const tarballs = packages.map((p) => `../tarballs/${p.tarball}`);
+  for (const project of Object.keys(PROJECTS)) {
+    const dir = join(smoke, project);
+    copyTemplates(root, project, dir);
+    run('npm', installArgs(project, tarballs), dir, `${project}: install`);
+    run('npx', ['tsc', '--noEmit'], dir, `${project}: typecheck`);
+    run('npx', ['tsc'], dir, `${project}: compile`);
+    run(process.execPath, ['dist/index.js'], dir, `${project}: scenario`);
+  }
+  console.log(`\n[smoke] ok: ${packages.length} tarballs, ESM and CJS consumers typecheck and run`);
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  try {
+    main();
+  } catch (err) {
+    console.error(`\n[smoke] FAILED: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}

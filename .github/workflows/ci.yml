@@ -26,3 +26,27 @@ jobs:
       - run: npm run check:pack
       - run: npm run lint
       - run: npm test
+
+  smoke:
+    name: Smoke (consumer install) Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.13', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      # Packs every package (prepack runs), installs the tarballs into fresh ESM and CommonJS projects, typechecks and runs them.
+      - run: node scripts/smoke.mjs
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: chatwarden-tarballs-node${{ matrix.node }}
+          path: .smoke/tarballs/*.tgz
+          if-no-files-found: error
+          retention-days: 30
