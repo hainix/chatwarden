@@ -25,7 +25,9 @@ import { QueuePane } from './shell/QueuePane.js';
 import { Rail } from './shell/Rail.js';
 import { ShortcutSheet } from './shell/ShortcutSheet.js';
 import { TopBar } from './shell/TopBar.js';
-import { createSession } from './session.js';
+import { ControllerContext } from './controllerContext.js';
+import { createHubController } from './headless/controller.js';
+import type { HubController } from './headless/controller.js';
 import { shortcutFor } from './shortcuts.js';
 import { ToastProvider } from './toasts.js';
 import type { Me, PermissionKey } from './types.js';
@@ -75,6 +77,26 @@ function clientId(client: object): number {
   return id;
 }
 
+/** One controller for as long as the hub is mounted with this client. A controller that was disposed (StrictMode runs the cleanup once, in development) is replaced. */
+function useHubController(client: HubClient, now: () => number): HubController {
+  const [made, setMade] = useState(() => ({ client, controller: createHubController({ client, now }) }));
+  let current = made;
+  if (made.client !== client) {
+    current = { client, controller: createHubController({ client, now }) };
+    setMade(current);
+  }
+  const controller = current.controller;
+  useEffect(() => {
+    if (controller.disposed) {
+      setMade({ client, controller: createHubController({ client, now }) });
+      return undefined;
+    }
+    return () => controller.dispose();
+    // `now` reads a ref; a new client makes a new controller.
+  }, [controller]);
+  return controller;
+}
+
 /**
  * The moderator hub, a team workbench. It asks `GET /me` first, then lays out three panes for what the signed-in role can
  * use: the queue of open cases, the screen or case in the middle, and (beside an open case) who is handling it. Pass a
@@ -102,8 +124,11 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
   routerRef.current = router;
   const nowRef = useRef(now ?? Date.now);
   nowRef.current = now ?? Date.now;
-  // One session per client: the rules, saved reasons and reporters' records are read once and reused across cases.
-  const session = useMemo(() => createSession(client, () => nowRef.current()), [client]);
+  // One controller per hub: the session cache, the toasts and (as the hub is moved onto it) every other piece of state that does not
+  // belong to React. It is disposed with the hub, which sends a decision that is still held.
+  const controller = useHubController(client, () => nowRef.current());
+  controller.configure({ t });
+  const session = controller.session;
   const value = useMemo<HubContextValue | null>(() => {
     if (me.data === undefined) return null;
     const meData: Me = me.data;
@@ -135,11 +160,13 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
       </DecisionProvider>
     );
     content = (
-      <HubContext.Provider value={value}>
-        <ModeProvider value={mode}>
-          <ToastProvider>{value.can('reports.read') ? <QueueProvider>{shell}</QueueProvider> : shell}</ToastProvider>
-        </ModeProvider>
-      </HubContext.Provider>
+      <ControllerContext.Provider value={controller}>
+        <HubContext.Provider value={value}>
+          <ModeProvider value={mode}>
+            <ToastProvider>{value.can('reports.read') ? <QueueProvider>{shell}</QueueProvider> : shell}</ToastProvider>
+          </ModeProvider>
+        </HubContext.Provider>
+      </ControllerContext.Provider>
     );
   }
 
