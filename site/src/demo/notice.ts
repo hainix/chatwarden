@@ -4,6 +4,8 @@
 import type { PlayerNotice, RefuseReason, ReportRefusal, Suggestion } from './engine';
 
 const MIN = 60_000;
+const HOUR_MS = 60 * MIN;
+const DAY_MS = 24 * HOUR_MS;
 
 /** What the notice is, in the player's words. Never a default: every kind has its own name. */
 export function noticeKindLabel(kind: PlayerNotice['kind'] | 'note'): string {
@@ -49,6 +51,30 @@ export function durationWords(ms: number): string {
 export function shortDuration(ms: number): string {
   const u = unit(ms);
   return `${u.n}${u.unit === 'day' ? 'd' : u.unit === 'hour' ? 'h' : 'm'}`;
+}
+
+/**
+ * When a timeout ends, for every place that shows one (the seat chip, the notice, "My record", the composer note). A bare
+ * clock time is only honest when the end is soon and today: a 24 hour or 7 day timeout ending at "12:14 AM" reads as "now".
+ * So: the time alone when it ends within 12 hours on the same day; the weekday and time when it is further off or on another
+ * day (up to five days); the date and time beyond that.
+ */
+export function formatUntil(ms: number, now: number): string {
+  const d = new Date(ms);
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const away = ms - now;
+  if (away <= 12 * HOUR_MS && d.toDateString() === new Date(now).toDateString()) return time;
+  if (away < 6 * DAY_MS) return `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+}
+
+/** A timeout longer than this leaves a scripted player silent for long enough that the visitor needs to be told why. */
+export const QUIET_AFTER_MS = 5 * MIN;
+
+/** Why a timed out scripted player has gone quiet, with the way out. Null for a timeout of a few minutes or less. */
+export function quietNote(name: string, ms: number, pronoun: 'he' | 'she'): string | null {
+  if (ms <= QUIET_AFTER_MS) return null;
+  return `${name} is timed out for ${durationWords(ms)}, so ${pronoun} stays quiet. Press Reset demo to replay.`;
 }
 
 /** How long the Timeout button times out for when the suggestion is not a chat timeout. */

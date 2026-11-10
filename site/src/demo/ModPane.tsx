@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { DemoSeat, EvidenceLine, PlayerNotice, StaffReport, Suggestion } from './engine';
 import { StarIcon } from './icons';
-import { clock } from './GamePane';
+import { endTime } from './GamePane';
 import { noticeKindLabel, shortDuration, timeoutMs } from './notice';
 import { CATEGORY_LABEL } from './ReportDialog';
 
@@ -90,9 +90,11 @@ function ReportDetail({ report, suggestion, busy, onDecide }: DetailProps) {
           <>
             <strong>Suggested: {suggestion.label}</strong>
             <span> — {suggestion.why}</span>
+            {sug === null && <span> (this demo has no button for that; Timeout is the closest)</span>}
           </>
         )}
       </p>
+      {suggestion !== null && <p className="suggest-hint">Demo tone check: a simple keyword heuristic. Your game supplies this.</p>}
       <fieldset className="picker">
         <legend>Line to show the player</legend>
         <label>
@@ -141,7 +143,7 @@ function RecordList({ seat, notices }: { seat: DemoSeat; notices: PlayerNotice[]
         {notices.map((n) => (
           <li key={n.id}>
             <b>{noticeKindLabel(n.kind)}</b>
-            {n.until !== null && <span> until {clock(n.until)}</span>}
+            {n.until !== null && <span> until {endTime(n.until)}</span>}
             <span className="record-rule">{n.ruleLabel}</span>
             {n.excerpt.map((e, i) => (
               <q key={i}>{e.text}</q>

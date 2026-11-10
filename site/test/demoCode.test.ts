@@ -38,6 +38,13 @@ describe('Show me the code', () => {
     const stitched = [lines[0], lines[3], lines[2]].join('\n');
     expect(readme('packages/core/README.md').join('\n').includes(stitched)).toBe(false);
   });
+  it('step 4 says the code is the HTTP route and that the demo calls cw.notices.pending in process', () => {
+    const blurb = CODE_STEPS[3]?.blurb ?? '';
+    expect(blurb).toMatch(/HTTP/);
+    expect(blurb).toContain('cw.notices.pending');
+    expect(blurb).toMatch(/in process/);
+    expect(blurb).toMatch(/never carries anyone else’s chat, an IP, or an account or subject id/);
+  });
   it('keeps each snippet short (a few lines, not a page)', () => {
     for (const s of CODE_STEPS) expect(s.code.split('\n').length, s.title).toBeLessThanOrEqual(10);
   });

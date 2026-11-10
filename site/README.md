@@ -23,7 +23,7 @@ The tests cover the copy (every code line is a verbatim README line), the built 
 meta and OG tags, the 1200x630 OG image, `llms.txt` links that resolve to real repo paths, the `_headers` rules), the demo, and
 a real-browser pass that loads the built page under the actual Content-Security-Policy and asserts zero violations, runs axe
 (no serious or critical issues, both themes, phone and desktop) and checks the layout at several widths. A global setup builds
-the kit packages the demo imports (`tsc -b ..`, a no-op when up to date) and then `dist/`, once, before the files run.
+the kit packages the demo imports (`tsc -b` on core, matcher and store-memory, a no-op when up to date) and then `dist/`, once, before the files run.
 
 ## Build and preview
 

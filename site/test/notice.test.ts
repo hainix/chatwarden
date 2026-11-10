@@ -1,7 +1,7 @@
 // The words the demo uses for what the real kit says. Every kind, reason and refusal has its own wording, never a default.
 import { describe, expect, it } from 'vitest';
 import type { PlayerNotice, RefuseReason, ReportRefusal, Suggestion } from '../src/demo/engine';
-import { DEFAULT_TIMEOUT_MS, durationWords, noticeEnd, noticeKindLabel, refusalMessage, reportRefusalMessage, shortDuration, timeoutMs } from '../src/demo/notice';
+import { DEFAULT_TIMEOUT_MS, durationWords, formatUntil, quietNote, noticeEnd, noticeKindLabel, refusalMessage, reportRefusalMessage, shortDuration, timeoutMs } from '../src/demo/notice';
 
 const at = (ms: number) => `T${ms}`;
 const rule = (n: number) => `Community Rule ${n}`;
@@ -134,5 +134,60 @@ describe('reportRefusalMessage covers every ReportRefusal, suspended included', 
   });
   it('an unknown refusal fails loudly', () => {
     expect(() => reportRefusalMessage('mystery' as never, 'Bo')).toThrow(/unhandled/);
+  });
+});
+
+describe('formatUntil: one clock for every end time', () => {
+  const tm = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const wd = (ms: number) => new Date(ms).toLocaleDateString([], { weekday: 'short' });
+  const md = (ms: number) => new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const now = new Date(2026, 10, 10, 9, 0, 0).getTime(); // Tue 10 Nov, 09:00 local
+  const H = 3_600_000;
+
+  it('a 10 minute timeout is just the time', () => {
+    expect(formatUntil(now + 10 * MIN, now)).toBe(tm(now + 10 * MIN));
+  });
+  it('up to 12 hours away on the same day is still just the time', () => {
+    expect(formatUntil(now + 11 * H, now)).toBe(tm(now + 11 * H)); // 20:00 the same day
+  });
+  it('more than 12 hours away says the weekday, even on the same day', () => {
+    const end = now + 13 * H; // 22:00 the same day
+    expect(formatUntil(end, now)).toBe(`${wd(end)} ${tm(end)}`);
+  });
+  it('another calendar day says the weekday, even when close', () => {
+    const late = new Date(2026, 10, 10, 23, 55, 0).getTime();
+    const end = late + 10 * MIN; // 00:05 the next day
+    expect(formatUntil(end, late)).toBe(`${wd(end)} ${tm(end)}`);
+  });
+  it('24 hours reads as tomorrow by weekday, never as "now"', () => {
+    const end = now + 24 * H;
+    expect(formatUntil(end, now)).toBe(`${wd(end)} ${tm(end)}`);
+    expect(wd(end)).not.toBe(wd(now));
+  });
+  it('5 days 23 hours is a weekday; 7 days is a date (the weekday would repeat today)', () => {
+    const near = now + 5 * 24 * H + 23 * H;
+    expect(formatUntil(near, now)).toBe(`${wd(near)} ${tm(near)}`);
+    const week = now + 7 * 24 * H;
+    expect(formatUntil(week, now)).toBe(`${md(week)}, ${tm(week)}`);
+    expect(formatUntil(week, now)).toContain('17');
+  });
+  it('is used by the notice end line and the refusal message', () => {
+    const at = (ms: number) => formatUntil(ms, now);
+    const end = now + 7 * 24 * H;
+    expect(noticeEnd({ kind: 'chat', until: end, createdAt: now }, at)).toBe(`Chat is paused for 7 days, until ${md(end)}, ${tm(end)}.`);
+    expect(refusalMessage({ reason: 'restricted', until: end, byModerator: true }, 200, at, rule)).toContain(`until ${md(end)}, ${tm(end)}`);
+  });
+});
+
+describe('quietNote: why a timed out scripted player goes silent', () => {
+  it('names the player, the real length and Reset, for a long timeout', () => {
+    expect(quietNote('Bo', 7 * DAY, 'he')).toBe('Bo is timed out for 7 days, so he stays quiet. Press Reset demo to replay.');
+    expect(quietNote('Ada', 24 * HOUR, 'she')).toBe('Ada is timed out for 24 hours, so she stays quiet. Press Reset demo to replay.');
+    expect(quietNote('Bo', 30 * MIN, 'he')).toMatch(/^Bo is timed out for 30 minutes/);
+  });
+  it('says nothing for a few minutes or less', () => {
+    expect(quietNote('Bo', 5 * MIN, 'he')).toBeNull();
+    expect(quietNote('Bo', MIN, 'he')).toBeNull();
+    expect(quietNote('Bo', 6 * MIN, 'he')).not.toBeNull();
   });
 });

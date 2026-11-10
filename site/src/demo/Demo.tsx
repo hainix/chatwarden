@@ -6,11 +6,11 @@ import { CODE_STEPS } from './codeSteps';
 import { LINE_MAX } from './engine';
 import type { DemoEngine, PlayerNotice, SeatState, StaffReport, Suggestion } from './engine';
 import { KitEngine } from './kitEngine';
-import { GamePane, clock } from './GamePane';
+import { GamePane, endTime } from './GamePane';
 import { PauseIcon, PlayIcon, CodeIcon } from './icons';
 import { ModPane } from './ModPane';
 import type { DecideKind } from './ModPane';
-import { durationWords, refusalMessage, reportRefusalMessage, timeoutMs } from './notice';
+import { durationWords, quietNote, refusalMessage, reportRefusalMessage, timeoutMs } from './notice';
 import { ReportDialog } from './ReportDialog';
 import { LOOP, NO_NOTICE_HINT, NO_REPORT_HINT, SEED, TOUR_STEPS } from './script';
 import type { ScriptLine } from './script';
@@ -29,6 +29,8 @@ export interface DemoProps {
 const STACK_QUERY = '(max-width: 899px)';
 const FEED_MAX = 60;
 const TOTAL = TOUR_STEPS.length;
+/** The scripted players, for the one sentence that says why a timed out player has gone quiet. */
+const PRONOUN: Record<string, 'he' | 'she'> = { ada: 'she', bo: 'he' };
 const FRIENDLY = 'Something went wrong in the demo. Reset to try again.';
 
 interface TourState {
@@ -88,6 +90,8 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const [draft, setDraft] = useState('');
   const [composerNote, setComposerNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // How long each scripted player was timed out for (the real length of the decision), so the seats can say why one went quiet.
+  const [quiet, setQuiet] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [focusPane, setFocusPane] = useState<'game' | 'mod' | null>(null);
   const [ready, setReady] = useState(false);
@@ -460,7 +464,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     }
     // Every other refusal says so, in the kit's own terms (rate, length, a timeout with its end, gate, profanity), and keeps
     // the line so it can be edited.
-    const message = refusalMessage(why, LINE_MAX, clock, (n) => engine.rules.label(n).split(':')[0] ?? '');
+    const message = refusalMessage(why, LINE_MAX, endTime, (n) => engine.rules.label(n).split(':')[0] ?? '');
     setComposerNote(message);
     announce(message);
     if (why.reason === 'restricted') await refresh();
@@ -534,10 +538,14 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       const who = report.targetHandle;
       const noticed = res.groups.some((x) => x.noticeId !== null);
       const what = { warning: 'warning', timeout: `timeout, ${durationWords(length)}`, note: 'note recorded', none: 'no action' }[kind];
+      // A long timeout leaves a scripted player silent: say why, and how to replay, in the announcement and under the seats.
+      const target = engine.seats.find((s) => s.name === who);
+      const quietLine = kind === 'timeout' && target !== undefined ? quietNote(who, length, PRONOUN[target.id] ?? 'he') : null;
+      if (quietLine !== null && target !== undefined) setQuiet((q) => ({ ...q, [target.id]: length }));
       announce(
         kind === 'none'
           ? 'Decision made: no action. The report is closed.'
-          : `Decision made: ${what} for ${who}. ${noticed ? `Notice shown on ${who}'s screen.` : 'The player is told nothing.'}`,
+          : `Decision made: ${what} for ${who}. ${noticed ? `Notice shown on ${who}'s screen.` : 'The player is told nothing.'}${quietLine !== null ? ` ${quietLine}` : ''}`,
       );
       await refresh();
       if (!alive.current || g !== gen.current) return;
@@ -586,6 +594,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     setPaneTab('game');
     deciding.current = null;
     setBusy(false);
+    setQuiet({});
     setSays([]);
     await boot();
     if (alive.current) announce('Demo reset. The lobby is back to the start.');
@@ -605,6 +614,11 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       : tour.step === 2 && noReports
         ? NO_REPORT_HINT
         : (TOUR_STEPS[tour.step]?.body ?? '');
+  // While a scripted player is still timed out for a long time, the line under the seats says why they are quiet.
+  const seatsNote =
+    engine.seats
+      .map((s) => (quiet[s.id] !== undefined && seats.find((x) => x.id === s.id)?.restrictedUntil != null ? quietNote(s.name, quiet[s.id] as number, PRONOUN[s.id] ?? 'he') : null))
+      .find((n) => n !== null) ?? null;
   const gameHidden = stacked && paneTab !== 'game';
   const modHidden = stacked && paneTab !== 'mod';
 
@@ -650,6 +664,12 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       </div>
 
       <p className="demo-badge">{engine.note}</p>
+      {engine.noteDetails !== undefined && (
+        <details className="demo-details">
+          <summary>What is different here</summary>
+          <p>{engine.noteDetails}</p>
+        </details>
+      )}
       {error !== null && (
         <p className="demo-error" role="alert">
           {error}
@@ -703,6 +723,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
             setComposerNote(null);
           }}
           note={composerNote}
+          seatsNote={seatsNote}
           tourLineId={tourLineId}
           onSend={(t) => void send(t)}
           onBlockedWord={() => {

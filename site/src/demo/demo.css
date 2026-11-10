@@ -1156,6 +1156,28 @@
   border: 2px solid var(--edge);
   border-radius: 999px;
 }
+.demo-details {
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.demo-details summary {
+  display: inline-block;
+  min-height: 24px;
+  cursor: pointer;
+  font-weight: 700;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.demo-details p {
+  margin-top: 4px;
+  max-width: 60ch;
+}
+.suggest-hint {
+  margin: -4px 0 0;
+  font-size: 0.8125rem;
+  color: var(--screen-muted);
+}
 .demo-error {
   padding: 8px 12px;
   color: var(--text);

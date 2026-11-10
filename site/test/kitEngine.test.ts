@@ -1,5 +1,5 @@
 // KitEngine runs the REAL @chatwarden/core kit (with the matcher's synthetic pack and the in-memory store) behind the
-// DemoEngine interface. Nothing here is a stand-in: invented terms are refused by the matcher under Community Rule 1,
+// DemoEngine interface. Nothing here is faked: invented terms are refused by the matcher under Community Rule 1,
 // reports carry the real evidence buffer, a decision makes the kit's own PlayerNotice with the chosen line masked, and so on.
 // (Ported from the old FakeEngine suite; every assertion that changed because the real kit differs is listed in
 // .superpowers/sdd/2026-11-10-k8b-landing-site/task-3-report.md.)
@@ -33,17 +33,12 @@ async function filed(category: ReportCategory = 'harassment', line = "uninstall 
 }
 
 describe('the invented terms', () => {
-  it('every positive line of the fixtures pack is refused (the stand-in reads the same dodges as the pack)', async () => {
-    const { engine, clock } = make();
+  it('every positive line of the fixtures pack is refused as blocked, each on a fresh kit (no strike carries over)', async () => {
     const missed: string[] = [];
     for (const term of SYNTHETIC_TERMS) {
       for (const line of term.positive) {
-        // The stand-in is simpler than the real matcher: it only has to refuse the plain, cased, accented, look-alike,
-        // glued-punctuation and repeated-letter forms. Lines that rely on the exception phrases are skipped here.
-        if (/tarvo lake|glarn zorbak/i.test(line)) continue;
-        const r = await engine.chat.accept('you', line);
-        clock.advance(2000);
-        if (!('refuse' in r)) missed.push(line);
+        const r = await make().engine.chat.accept('you', line);
+        if (!('refuse' in r) || r.refuse.reason !== 'blocked') missed.push(line);
       }
     }
     expect(missed).toEqual([]);
@@ -53,8 +48,6 @@ describe('the invented terms', () => {
     const wrongly: string[] = [];
     for (const term of SYNTHETIC_TERMS) {
       for (const line of term.negative) {
-        // quisel / quissel differ only by a doubled letter that the stand-in folds; the real matcher keeps it.
-        if (/^(equissel|quisel)/.test(line)) continue;
         const r = await engine.chat.accept('you', line);
         clock.advance(2000);
         if (!('deliver' in r)) wrongly.push(line);

@@ -2,12 +2,13 @@ import type { FormEvent, RefObject } from 'react';
 import { LINE_MAX } from './engine';
 import type { DemoSeat, PlayerNotice, SeatState } from './engine';
 import { FlagIcon, SendIcon } from './icons';
-import { noticeEnd, noticeKindLabel } from './notice';
+import { formatUntil, noticeEnd, noticeKindLabel } from './notice';
 import type { FeedItem, PendingBySeat } from './types';
 
 const AVATAR: Record<string, string> = { you: 'avatar-you', ada: 'avatar-a', bo: 'avatar-b' };
 
-export const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/** When a timeout ends, in the one format every surface uses (see `formatUntil`). */
+export const endTime = (ms: number) => formatUntil(ms, Date.now());
 
 function Message({ item, tourTarget, onReport }: { item: FeedItem; tourTarget: boolean; onReport: (item: FeedItem, opener: HTMLElement) => void }) {
   const refused = item.refused !== undefined;
@@ -42,7 +43,7 @@ function Message({ item, tourTarget, onReport }: { item: FeedItem; tourTarget: b
 
 /** What a reported player sees: their notice, in a small "player's screen" frame. */
 function PlayerFrame({ name, you, notice, extra, onAck }: { name: string; you: boolean; notice: PlayerNotice; extra: number; onAck: () => void }) {
-  const end = noticeEnd(notice, clock);
+  const end = noticeEnd(notice, endTime);
   // The visitor's own screen speaks to her; the scripted players' screens are shown from outside.
   const title = you ? 'Your screen' : `${name}’s screen`;
   return (
@@ -96,6 +97,8 @@ interface Props {
   draft: string;
   setDraft: (v: string) => void;
   note: string | null;
+  /** Replaces the default line under the seats, e.g. why a timed out player has gone quiet. */
+  seatsNote: string | null;
   tourLineId: string | null;
   onSend: (text: string) => void;
   onBlockedWord: () => void;
@@ -114,6 +117,7 @@ export function GamePane({
   draft,
   setDraft,
   note,
+  seatsNote,
   tourLineId,
   onSend,
   onBlockedWord,
@@ -149,12 +153,12 @@ export function GamePane({
                   {s.name.slice(0, 1)}
                 </span>
                 <span className="seat-name">{s.name}</span>
-                {until !== null && <span className="seat-flag">timed out until {clock(until)}</span>}
+                {until !== null && <span className="seat-flag">timed out until {endTime(until)}</span>}
               </li>
             );
           })}
         </ul>
-        <p className="seats-note">Ada and Bo are scripted. Only you type.</p>
+        <p className="seats-note">{seatsNote ?? 'Ada and Bo are scripted. Only you type.'}</p>
       </div>
       <div className="chat" role="log" aria-label="Lobby chat" aria-live="off" ref={logRef} tabIndex={0}>
         {feed.map((item) => (

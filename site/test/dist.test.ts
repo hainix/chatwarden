@@ -6,12 +6,9 @@
 // in dist. The only terms the site may mention are the invented ones from @chatwarden/matcher/fixtures.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
-import {
-  RegExpMatcher,
-  englishDataset,
-  englishRecommendedTransformers,
-} from 'obscenity';
+import { RegExpMatcher, englishDataset, englishRecommendedTransformers } from 'obscenity';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { datasetWords, scanForSlurs, wordSafeChunks } from './helpers/slurScan';
 import { SYNTHETIC_TERMS } from '../../packages/matcher/src/fixtures/syntheticPack';
 
 const siteDir = join(__dirname, '..');
@@ -101,24 +98,37 @@ describe('built dist', () => {
   });
 
   it('mentions no word from the obscenity English deny set', () => {
-    const dataset = englishDataset.build();
     // Control: the deny set is really loaded, so an empty result means a clean dist and not an empty list.
-    expect(dataset.blacklistedTerms.length).toBeGreaterThan(100);
-    const matcher = new RegExpMatcher({ ...dataset, ...englishRecommendedTransformers });
+    expect(englishDataset.build().blacklistedTerms.length).toBeGreaterThan(100);
     const hits: string[] = [];
     for (const [file, text] of texts) {
       if (isFontLicence(file)) continue;
       // A minified bundle is mostly code, which the matcher's look-alike folding would misread (`f(k`). Scan the
       // words a visitor could read instead: for scripts, every string literal; for everything else, the whole file.
       const readable = extname(file) === '.js' ? (text.match(STRING_LITERAL) ?? []).filter((l) => !/[{};]|=>|function/.test(l)).join('\n') : text;
-      for (let i = 0; i < readable.length; i += 4000) {
-        const chunk = readable.slice(i, i + 4000 + 40);
-        for (const m of matcher.getAllMatches(chunk, true)) {
-          hits.push(`${relative(dist, file)}: ${chunk.slice(m.startIndex, m.endIndex + 1)}`);
-        }
-      }
+      for (const hit of scanForSlurs(readable)) hits.push(`${relative(dist, file)}: ${hit}`);
     }
     expect(hits).toEqual([]);
+  });
+
+  it('the scan reads whole tokens: "document" is not flagged where a fixed window would cut it (control)', () => {
+    // 3998 characters of harmless words, then "document.body" starting at index 3998: a window that restarts at 4000 begins
+    // inside the word ("cument") and the matcher reads a slur in it.
+    const text = `${'ab '.repeat(1332)}a document.body is fine`;
+    expect(text.indexOf('document')).toBe(3998);
+    const naive = new RegExpMatcher({ ...englishDataset.build(), ...englishRecommendedTransformers });
+    expect(naive.getAllMatches(text.slice(4000, 4040), true).length, 'the fixed window false-positive is real').toBeGreaterThan(0);
+    expect(scanForSlurs(text)).toEqual([]);
+    expect(wordSafeChunks(text).join('')).toBe(text); // nothing lost, nothing repeated
+    expect(wordSafeChunks(text).every((c, i, all) => i === all.length - 1 || /\s$/.test(c) || /^\s/.test(all[i + 1] ?? ''))).toBe(true); // cut only at whitespace
+  });
+  it('the scan still catches a real deny-set word, wherever it falls (control)', () => {
+    // The word comes from obscenity's own file at run time: no real slur is written in this repo.
+    const sample = datasetWords().find((w) => w.length >= 6) as string;
+    expect(sample).toBeDefined();
+    for (const pad of [0, 3990, 3998, 4000, 4010]) {
+      expect(scanForSlurs(`${'ab '.repeat(2000).slice(0, pad)} ${sample} tail`).length, `pad ${pad}`).toBeGreaterThan(0);
+    }
   });
 
   it('the invented-word allow-list is exactly the matcher fixtures pack, and the demo word ships', () => {
@@ -149,7 +159,7 @@ describe('built dist', () => {
     // The demo chunk now carries the real kit (core, the matcher with its synthetic pack, the in-memory store): it has its own
     // budget, and is only ever fetched when the demo wakes. The page itself stays under 120 KB gzip up front.
     const demoGz = gzipSync(readFileSync(demo[0] as string)).length;
-    expect(demoGz).toBeLessThan(120 * 1024);
+    expect(demoGz).toBeLessThan(85 * 1024); // 67.8 KB when measured: a new dependency or the word list creeping back shows up here
     const initialCss = texts.get(files.find((f) => /index-[\w-]+\.css$/.test(f)) ?? '') ?? '';
     expect(initialCss).not.toContain('.tour'); // the demo's styles ship with the demo chunk
   });

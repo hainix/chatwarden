@@ -107,6 +107,8 @@ export interface SeatState {
 export interface DemoEngine {
   /** One honest line shown under the demo about what is running it. */
   readonly note: string;
+  /** The demo's own settings and heuristics that a visitor would not otherwise know about. Short; shown beside the note. */
+  readonly noteDetails?: string;
   readonly seats: readonly DemoSeat[];
   /** Clears every line, report, decision and notice. */
   reset(): Promise<void>;

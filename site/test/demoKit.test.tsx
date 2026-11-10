@@ -150,6 +150,78 @@ describe('a long evidence buffer (the kit keeps up to 100 lines)', () => {
   });
 });
 
+describe('honest about the demo', () => {
+  it('says under Suggested that the tone check is a keyword heuristic', async () => {
+    const { user } = await setup();
+    expect(screen.queryByText(/demo tone check/i)).toBeNull(); // nothing to suggest yet
+    await fileReport(user);
+    expect(screen.getByText('Demo tone check: a simple keyword heuristic. Your game supplies this.')).toBeTruthy();
+  });
+  it('lists the demo settings next to the note: swearing filter allowed, reporter feedback off', async () => {
+    await setup();
+    const more = document.querySelector('.demo-details') as HTMLElement;
+    expect(more).toBeTruthy();
+    expect(more.textContent).toMatch(/swearing filter: allowed/i);
+    expect(more.textContent).toMatch(/reporter feedback: off/i);
+    expect(more.textContent).toMatch(/keyword/i);
+  });
+  it('an area or ban suggestion stars nothing and says why there is no button', async () => {
+    const { engine, user } = await setup();
+    vi.spyOn(engine, 'suggest').mockImplementation(async () => ({ outcome: { kind: 'ban', durationMs: 7 * 86_400_000 }, label: 'Full ban 7 days', why: 'x', rule: 2 }));
+    await fileReport(user);
+    await screen.findByText(/suggested: full ban 7 days/i);
+    expect(document.getElementById('demo-suggest')?.textContent).toContain('this demo has no button for that; Timeout is the closest');
+  });
+  it('a suggestion that has a button does not say that', async () => {
+    const { user } = await setup();
+    await fileReport(user);
+    expect(document.getElementById('demo-suggest')?.textContent).not.toMatch(/no button for that/);
+  });
+});
+
+describe('a long timeout is dated and explained', () => {
+  const md = (ms: number) => new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  async function timeout7d() {
+    const ctx = await setup();
+    await fileReport(ctx.user, /hate/i);
+    await ctx.user.click(await screen.findByRole('button', { name: 'Timeout 7d' }));
+    await screen.findByRole('region', { name: /bo.s screen/i });
+    return ctx;
+  }
+  it('the seat chip, the notice and My record all say the date, not a bare clock time', async () => {
+    const { user } = await timeout7d();
+    const date = md(Date.now() + 7 * 86_400_000);
+    const seats = screen.getByRole('list', { name: /players in the lobby/i });
+    expect(within(seats).getAllByRole('listitem')[2]?.textContent).toContain(`timed out until ${date}`);
+    expect(screen.getByRole('region', { name: /bo.s screen/i }).textContent).toContain(`Chat is paused for 7 days, until ${date}`);
+    await user.click(screen.getByRole('button', { name: /my record/i }));
+    expect((await screen.findByRole('list', { name: /bo.s record/i })).textContent).toContain(`until ${date}`);
+  });
+  it('replaces the seats note: Bo is timed out for 7 days, so he stays quiet, and Reset puts it back', async () => {
+    const { user } = await timeout7d();
+    const sentence = 'Bo is timed out for 7 days, so he stays quiet. Press Reset demo to replay.';
+    await waitFor(() => expect(document.querySelector('.seats-note')?.textContent).toBe(sentence));
+    expect(live().textContent).toContain(`Notice shown on Bo's screen. ${sentence}`);
+    await user.click(screen.getByRole('button', { name: /reset demo/i }));
+    await waitFor(() => expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are scripted. Only you type.'));
+    expect(live().textContent).not.toContain('stays quiet');
+  });
+  it('a warning leaves the note alone', async () => {
+    const { user } = await setup();
+    await fileReport(user);
+    await user.click(screen.getByRole('button', { name: 'Warn' }));
+    await screen.findByRole('region', { name: /bo.s screen/i });
+    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are scripted. Only you type.');
+    expect(live().textContent).not.toContain('stays quiet');
+  });
+  it('the visitor own 30 minute automatic timeout shows an end time and does not claim anyone stays quiet', async () => {
+    const { user } = await setup();
+    for (const w of ['zorbak', 'vlemmo', 'snerp']) await say(user, `you ${w}`);
+    await screen.findByRole('region', { name: /^your screen$/i });
+    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are scripted. Only you type.');
+  });
+});
+
 describe('the player notice is the kit own, labelled for what it is', () => {
   it('a decided warning shows Bo a Warning with the chosen line, a ref code and Acknowledge; ack clears it and fills "My record"', async () => {
     const { engine, user } = await setup();

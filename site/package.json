@@ -11,13 +11,13 @@
     "build": "npm run build:kit && node scripts/assets.mjs && tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "build:kit": "tsc -b ..",
+    "build:kit": "tsc -b ../packages/core ../packages/matcher ../packages/store-memory",
     "pretest": "npm run build:kit"
   },
   "dependencies": {
-    "@chatwarden/core": "0.1.1",
-    "@chatwarden/matcher": "0.1.1",
-    "@chatwarden/store-memory": "0.1.1"
+    "@chatwarden/core": "*",
+    "@chatwarden/matcher": "*",
+    "@chatwarden/store-memory": "*"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",

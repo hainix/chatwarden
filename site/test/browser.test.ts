@@ -78,6 +78,39 @@ describe('the built page under the _headers CSP', () => {
     }, 60_000);
   }
 
+  it('the built demo refuses the invented word: the matcher in the bundle works without obscenity’s word list', async () => {
+    // Vitest runs the real, unstripped obscenity. Only the built bundle has its word list cut out, so this is the test that
+    // proves the cut matcher still blocks: the visitor's word, and Bo's opening line.
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const { page, violations, consoleProblems } = await watch(ctx);
+    await page.goto(server.url, { waitUntil: 'networkidle' });
+    await scrollThrough(page);
+    await page.getByText("uninstall the game, you're hopeless").waitFor({ timeout: 15_000 });
+    // 1. "try a blocked word" -> Send: the REFUSED stamp and the rule, in the chat
+    // (the hero above has a decorative REFUSED! mock of its own, so every query is inside the demo)
+    const demo = page.getByRole('group', { name: /chatwarden interactive demo/i });
+    await demo.getByRole('button', { name: /try a blocked word/i }).click();
+    await demo.getByRole('button', { name: /^send$/i }).click();
+    await demo.getByText('Refused!').waitFor();
+    await demo.getByText('Blocked by Community Rule 1. Only you see this.').waitFor();
+    expect(await demo.locator('.msg-refused').count()).toBe(1);
+    // 2. Bo's opening line was refused too: staff see it, struck through, in the evidence of a report
+    await demo.getByRole('button', { name: /report bo's line: uninstall/i }).click();
+    await page.getByRole('radio', { name: /harassment/i }).check();
+    await page.getByRole('button', { name: /send report/i }).click();
+    const blocked = page.locator('.evidence li[data-blocked="true"]');
+    await blocked.first().waitFor();
+    const texts = await blocked.allInnerTexts();
+    expect(texts.some((t) => t.includes('you absolute zorbak') && /refused, only Bo saw it/.test(t))).toBe(true);
+    expect(texts.some((t) => t.includes('Bo') || t.includes('You'))).toBe(true);
+    // and a delivered line is NOT marked (the matcher does not over-block)
+    expect(await page.locator('.evidence li[data-blocked="true"]').count()).toBe(2); // Bo's opening line and the visitor's
+    expect(await page.locator('.evidence li:not([data-blocked="true"])').count()).toBeGreaterThanOrEqual(3);
+    expect(violations).toEqual([]);
+    expect(consoleProblems).toEqual([]); // no pageerror either: nothing in the cut matcher threw
+    await ctx.close();
+  }, 60_000);
+
   it('control: a page with an inline script IS blocked by this policy (the test can see violations)', async () => {
     const ctx = await browser.newContext();
     const { page, violations } = await watch(ctx);

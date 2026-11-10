@@ -55,6 +55,11 @@ const RULES = defineRules(starterRules('standard'));
 
 export const KIT_NOTE = 'This is the real Chatwarden kit running in your browser, with a made-up word list.';
 
+/** What the demo sets or judges itself, so nothing about the verdicts is hidden. */
+export const KIT_NOTE_DETAILS =
+  "Swearing filter: allowed (no profanity word list ships). Reporter feedback: off, so the tour stays on Bo's screen. " +
+  "Tone check for the suggestion: a keyword heuristic. Everything else is the kit's defaults.";
+
 // ---------- the demo heuristic ----------
 
 /**
@@ -85,6 +90,7 @@ export interface KitEngineOptions {
 
 export class KitEngine implements DemoEngine {
   readonly note = KIT_NOTE;
+  readonly noteDetails = KIT_NOTE_DETAILS;
   readonly seats = SEATS;
   private readonly clock: Clock;
   private cw: Promise<Chatwarden> | null = null;

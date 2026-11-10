@@ -9,7 +9,7 @@ const TSC_BIN = join(siteDir, '..', 'node_modules', 'typescript', 'bin', 'tsc');
 export default function setup(): void {
   // The demo imports the kit packages through their package exports, which point at their built dist. `tsc -b` is a no-op
   // when it is up to date, and builds it when a fresh checkout runs the tests without the npm `pretest` hook.
-  execFileSync(process.execPath, [TSC_BIN, '-b', '..'], { cwd: siteDir, stdio: 'inherit' });
+  execFileSync(process.execPath, [TSC_BIN, '-b', '../packages/core', '../packages/matcher', '../packages/store-memory'], { cwd: siteDir, stdio: 'inherit' });
   execFileSync(process.execPath, [VITE_BIN, 'build', '--logLevel', 'error'], {
     cwd: siteDir,
     stdio: 'inherit',
