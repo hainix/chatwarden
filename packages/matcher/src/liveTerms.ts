@@ -86,6 +86,24 @@ function describeBuildError(err: MatcherBuildError, withRow: boolean): string {
   return `malformed ${where}: ${err.reason ?? 'invalid'}`;
 }
 
+/** A term row with who added or last changed it and when. `null` metadata means it is not known (the pack stands in for the store). */
+export interface TermListRow extends TermRow {
+  note: string | null;
+  addedBy: string | null;
+  addedAt: number | null;
+  updatedBy: string | null;
+  updatedAt: number | null;
+}
+
+/** An exception row with who added or last changed it and when. `null` metadata means it is not known. */
+export interface ExceptionListRow extends ExceptionRow {
+  note: string | null;
+  addedBy: string | null;
+  addedAt: number | null;
+  updatedBy: string | null;
+  updatedAt: number | null;
+}
+
 const plainTerm = (r: TermRecord): TermRow => ({ id: r.id, term: r.term, language: r.language, active: r.active });
 const plainException = (r: ExceptionRecord): ExceptionRow => ({
   id: r.id,
@@ -146,6 +164,36 @@ export class LiveTerms implements Matcher {
   /** The rows the current matcher was built from. */
   get rows(): Rows {
     return this.loaded;
+  }
+
+  /**
+   * The rows with their metadata (note, who added them, who last changed them, and when), for a staff list. Read from the
+   * store, so it is current after a {@link change}. Same ids and order as {@link rows}. If the store cannot be read (or the
+   * pack stands in for it) it falls back to the matcher rows with null metadata, logging `terms.records_failed` (error
+   * class only) for a read that failed: it never throws. Copies; nothing here can edit a row.
+   */
+  records(): { terms: TermListRow[]; exceptions: ExceptionListRow[] } {
+    if (!this.fromPack) {
+      try {
+        return {
+          terms: this.store.listTerms().map((r) => ({
+            id: r.id, term: r.term, language: r.language, active: r.active,
+            note: r.note, addedBy: r.addedBy, addedAt: r.addedAt, updatedBy: r.updatedBy, updatedAt: r.updatedAt,
+          })),
+          exceptions: this.store.listExceptions().map((r) => ({
+            id: r.id, phrase: r.phrase, language: r.language, active: r.active,
+            note: r.note, addedBy: r.addedBy, addedAt: r.addedAt, updatedBy: r.updatedBy, updatedAt: r.updatedAt,
+          })),
+        };
+      } catch (err) {
+        this.logger.warn('terms.records_failed', { error: errName(err) });
+      }
+    }
+    const unknown = { note: null, addedBy: null, addedAt: null, updatedBy: null, updatedAt: null };
+    return {
+      terms: this.loaded.terms.map((t) => ({ ...t, ...unknown })),
+      exceptions: this.loaded.exceptions.map((e) => ({ ...e, ...unknown })),
+    };
   }
 
   match(text: string): { termId: string } | null {

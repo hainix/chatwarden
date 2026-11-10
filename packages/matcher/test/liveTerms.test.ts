@@ -1441,3 +1441,86 @@ describe('audit action names', () => {
     expect(rows.map((a) => JSON.parse(a.beforeJson!).active)).toEqual([true, false, true, false]);
   });
 });
+
+describe('records (the rows with who changed them and when)', () => {
+  it('carries the seed stamp, an added row with its note and a changed row with its editor', async () => {
+    const r = await loaded();
+    const added = await r.live.change('alice', (e) => e.addTerm({ term: 'blorft', language: 'en', note: 'seen in lobby' }));
+    if (!added.ok) throw new Error('setup');
+    r.clock.t = T0 + 50;
+    await r.live.change('bob', (e) => e.updateTerm(added.value, { note: 'confirmed' }));
+    const { terms, exceptions } = r.live.records();
+    expect(terms[0]).toEqual({
+      id: 'syn:zorbak', term: 'zorbak', language: 'en', active: true, note: null, addedBy: 'seed', addedAt: T0, updatedBy: null, updatedAt: null,
+    });
+    expect(terms.find((t) => t.id === added.value)).toEqual({
+      id: added.value, term: 'blorft', language: 'en', active: true, note: 'confirmed', addedBy: 'alice', addedAt: T0, updatedBy: 'bob', updatedAt: T0 + 50,
+    });
+    expect(exceptions[0]).toMatchObject({ id: 'syn-ex:tarvo-lake', phrase: 'tarvo lake', addedBy: 'seed', note: null, updatedBy: null, updatedAt: null });
+    expect(terms).toHaveLength(SYNTHETIC_TERMS.length + 1);
+    expect(exceptions).toHaveLength(SYNTHETIC_EXCEPTIONS.length);
+  });
+
+  it('shows a disabled term as inactive and an exception edit with its editor', async () => {
+    const r = await loaded();
+    await r.live.change('carol', (e) => e.setTermActive('syn:zorbak', false));
+    r.clock.t = T0 + 9;
+    await r.live.change('dave', (e) => e.updateException('syn-ex:tarvo-lake', { note: 'lake name' }));
+    const { terms, exceptions } = r.live.records();
+    expect(terms[0]).toMatchObject({ id: 'syn:zorbak', active: false, updatedBy: 'carol', updatedAt: T0 });
+    expect(exceptions[0]).toMatchObject({ id: 'syn-ex:tarvo-lake', note: 'lake name', updatedBy: 'dave', updatedAt: T0 + 9 });
+  });
+
+  it('lists the same ids in the same order as rows', async () => {
+    const r = await loaded();
+    await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }));
+    expect(r.live.records().terms.map((t) => t.id)).toEqual(r.live.rows.terms.map((t) => t.id));
+    expect(r.live.records().exceptions.map((t) => t.id)).toEqual(r.live.rows.exceptions.map((t) => t.id));
+  });
+
+  it('rows is unchanged: the matcher rows only', async () => {
+    const r = await loaded();
+    expect(Object.keys(r.live.rows.terms[0]!).sort()).toEqual(['active', 'id', 'language', 'term']);
+  });
+
+  it('reads the matcher rows with null metadata while the pack stands in for an unusable store', async () => {
+    const store = new MemoryTermStore();
+    store.fail = () => {
+      throw new Error('db locked');
+    };
+    const r = rig({ store });
+    await r.live.load();
+    expect(r.live.usingPack).toBe(true);
+    const { terms, exceptions } = r.live.records();
+    expect(terms[0]).toEqual({
+      id: 'syn:zorbak', term: 'zorbak', language: 'en', active: true, note: null, addedBy: null, addedAt: null, updatedBy: null, updatedAt: null,
+    });
+    expect(terms).toHaveLength(SYNTHETIC_TERMS.length);
+    expect(exceptions[0]).toMatchObject({ phrase: 'tarvo lake', addedBy: null });
+  });
+
+  it('a store that fails after load falls back the same way, never throws and logs the class only', async () => {
+    const r = await loaded();
+    r.warn.mockClear();
+    r.store.fail = () => {
+      throw new Error('db locked: zorbak');
+    };
+    const { terms } = r.live.records();
+    expect(terms[0]).toMatchObject({ id: 'syn:zorbak', addedBy: null });
+    expect(r.warn).toHaveBeenCalledTimes(1);
+    expect(r.warn.mock.calls[0]).toEqual(['terms.records_failed', { error: 'Error' }]);
+    expectLogsFree(r.warn);
+  });
+
+  it('is empty with no pack and an empty store', async () => {
+    const r = await loaded({ pack: null });
+    expect(r.live.records()).toEqual({ terms: [], exceptions: [] });
+  });
+
+  it('returns copies: editing the result changes nothing', async () => {
+    const r = await loaded();
+    r.live.records().terms[0]!.note = 'tampered';
+    expect(r.live.records().terms[0]!.note).toBeNull();
+    expect(r.store.state.terms[0]!.note).toBeNull();
+  });
+});

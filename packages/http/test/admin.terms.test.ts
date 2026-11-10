@@ -17,7 +17,7 @@ describe('terms routes exist only when `terms` is passed', () => {
     expect((await call('POST', '/terms/check', { body: { term: 'glarn', language: 'en' } })).status).toBe(404);
   });
 
-  it('with it, the eight routes are present', async () => {
+  it('with it, the nine routes are present', async () => {
     const { routes } = await world();
     expect(Object.keys(routes).filter((k) => /terms|exceptions/.test(k)).map((k) => k.replace('~ref', '')).sort()).toEqual([
       'GET /terms',
@@ -28,12 +28,13 @@ describe('terms routes exist only when `terms` is passed', () => {
       'POST /terms',
       'POST /terms/:id/active',
       'POST /terms/check',
+      'POST /terms/test',
     ]);
   });
 });
 
 describe('GET /terms', () => {
-  it('returns the term and exception rows (staff only), with no audit row and no note or author', async () => {
+  it('returns the term and exception rows (staff only) with their metadata, and no audit row', async () => {
     const { call, live, audit } = await world();
     const res = await call('GET', '/terms');
     expect(res.status).toBe(200);
@@ -41,7 +42,10 @@ describe('GET /terms', () => {
     expect(body.terms.map((t) => t.term)).toEqual(live.rows.terms.map((t) => t.term));
     expect(body.terms.map((t) => t.term)).toEqual(expect.arrayContaining(['zorbak', 'vlemmo', 'snerp']));
     expect(body.exceptions.map((e) => e.phrase)).toEqual(expect.arrayContaining(['tarvo lake', 'glarn zorbak']));
-    expect(body.terms[0]).toEqual({ id: expect.any(String), term: expect.any(String), language: 'en', active: true });
+    expect(body.terms[0]).toEqual({
+      id: expect.any(String), term: expect.any(String), language: 'en', active: true,
+      note: null, addedBy: 'seed', addedAt: expect.any(Number), updatedBy: null, updatedAt: null,
+    });
     expect(audit().filter((r) => r.role !== null)).toEqual([]);
   });
 
@@ -140,7 +144,9 @@ describe('POST /terms, PATCH /terms/:id, POST /terms/:id/active', () => {
     expect(JSON.stringify(routeAudit())).not.toContain('glarn');
     // And it shows in the list.
     const list = (await call('GET', '/terms')).body as Rows;
-    expect(list.terms.find((t) => t.id === id)).toEqual({ id, term: 'glarn', language: 'en', active: true });
+    expect(list.terms.find((t) => t.id === id)).toEqual({
+      id, term: 'glarn', language: 'en', active: true, note: 'new slang', addedBy: 'ann', addedAt: clock.t, updatedBy: null, updatedAt: null,
+    });
   });
 
   it('the note is optional; a null or string note is accepted, other types are 400', async () => {

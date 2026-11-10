@@ -30,6 +30,11 @@ export interface ReportSummary {
   reporterPerson: string;
   actionedAt: number | null;
   actionedBy: string | null;
+  /**
+   * The reported person's handle as it was when the report was filed (the target seat's, or the cited line's author's), so
+   * the queue can show a name. Null when none was recorded. Staff only, like the report page itself.
+   */
+  targetHandle: string | null;
 }
 
 /** Project a report to its queue summary. Lists each field by name, so a field added to the record never leaks in. */
@@ -45,15 +50,19 @@ const summarize = (r: StaffReport): ReportSummary => ({
   reporterPerson: r.reporterPerson,
   actionedAt: r.actionedAt,
   actionedBy: r.actionedBy,
+  targetHandle: r.targetHandle === '' ? null : r.targetHandle,
 });
 
 /**
  * The report and decision routes (staff only, each audited):
- * - `GET /reports?status&cursor&limit`: the queue as summaries, no evidence (`report.view`, no target)
+ * - `GET /reports?status&cursor&limit`: the queue as summaries, no evidence beyond the reported person's `targetHandle`
+ *   (`report.view`, no target)
  * - `GET /reports/:id?level`: one report with each person's history and the suggestion for the reported person (`report.view`)
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
  * - `POST /reports/:id/decide { verdict, actions, reason, evidence? }`: decide (`report.decide`, replays too)
- * - `GET /people/:ref/history?limit`: a person's actions and recent reports against them (`history.view`)
+ * - `GET /people/:ref/history?limit`: a person's actions, recent reports against them, their sanctions as
+ *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
+ *   filed stand, `asReporter` (`history.view`)
  */
 export function reportRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
@@ -130,8 +139,10 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         createdAt: r.createdAt,
         category: r.category,
       }));
+      const sanctions = cw.sanctions.forPerson(ref);
+      const asReporter = cw.reports.reporterRecord(ref);
       c.audit('history.view', { type: 'person', ref });
-      return { status: 200, body: { history, reports } };
+      return { status: 200, body: { history, reports, sanctions, asReporter } };
     }),
   };
 }

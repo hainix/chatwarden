@@ -16,4 +16,12 @@ export type {
   TermRecord,
   TermStore,
 } from './termStore.js';
-export { LiveTerms, type ChangeRefusalCode, type ChangeResult, type CheckResult, type TermEditor } from './liveTerms.js';
+export {
+  LiveTerms,
+  type ChangeRefusalCode,
+  type ChangeResult,
+  type CheckResult,
+  type ExceptionListRow,
+  type TermEditor,
+  type TermListRow,
+} from './liveTerms.js';

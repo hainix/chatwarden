@@ -124,17 +124,20 @@ Staff, under the prefix you mount (`/admin` above). Each one is authenticated, n
 | Route | What it does |
 | --- | --- |
 | `GET /me` | Who is calling: `{ actor, role, can }`, where `can` is a boolean for every permission under the table in force (your `permissions` overrides included). It needs only a signed-in caller, and writes no audit row. |
-| `GET /reports?status&cursor&limit` | The queue, newest first, as summaries: `id`, `createdAt`, `roomId`, `tags`, `category`, `status`, `badFaith`, `targetPerson`, `reporterPerson`, `actionedAt`, `actionedBy`. No chat text, handles or notes. |
+| `GET /reports?status&cursor&limit` | The queue, newest first, as summaries: `id`, `createdAt`, `roomId`, `tags`, `category`, `status`, `badFaith`, `targetPerson`, `reporterPerson`, `actionedAt`, `actionedBy`, `targetHandle`. `targetHandle` is the reported person's handle as it was when the report was filed (null if none was recorded), so a row can show a name; it is staff-only, like the report page. No chat text, reporter handle or notes. |
 | `GET /reports/:id?level` | One report with its excerpt, notes, each person's history and a suggestion. This is where evidence is read, so it is audited with the report id. |
 | `POST /reports/:id/suggest` | `{ level, rule?, person? }`: a suggestion for a person the report names (default: the reported person). |
 | `POST /reports/:id/decide` | `{ verdict, reason, actions, evidence? }`. A replay of the same decision applies nothing twice. |
-| `GET /people/:ref/history` | A person's actions and recent reports against them. |
+| `GET /people/:ref/history` | `{ history, reports, sanctions, asReporter }`. `history` and `reports` are the person's counted actions and the recent reports against them. `sanctions` is a list of sanction groups, newest first: the last 90 days plus every permanent one that has not been revoked (at most 200), each `{ groupId, refCode, kind, rule, startsAt, endsAt, reason, actor, source, automated, active, revokedAt, revokedBy, revokeReason }`. `rule` is a rule number, `"uncovered"`, or null on a row written before rules existed; `endsAt` is null for a permanent sanction and for a warning or note (which have no end); `active` is true while a restriction applies (not revoked, and not past its end), and for a warning or note while it is inside the 90-day window the escalation ladder counts; the revoke fields are null until someone revokes it. A group is built from the person's own row, so no IP, hash or stored value is ever part of it. `asReporter` is how the reports this person *filed* stand: `{ reports, open, actioned, dismissed, badFaith, suspendedUntil }`, where `suspendedUntil` is the epoch ms their reporting suspension ends (`limits.reports`: that many bad-faith dismissals inside the window), or null. |
+| `GET /sanctions?cursor&limit&source` | Every person's sanctions, newest first, `{ items, next }`: the same group object as above plus `person` (the canonical subject, a staff ref). `limit` is 1 to 200 (default 50, a bigger number is clamped), `cursor` is the previous `next` (null on the last page; a full page always carries one, so the page after an exactly-full last page is empty), `source` is one of `moderator`, `auto_filter`, `coop`, `api`, `ai`. A bad limit, cursor or source is 400 `invalid_query`. Not windowed, and it writes no audit row. |
+| `GET /blocked?days=1\|7\|30` | The chat lines the slur filter blocked, newest first, at most 500: `{ items: [{ id, at, roomId, termId, term, language, person, text }] }`. `days` defaults to 7; any other value is 400 `invalid_query`. `text` is the line exactly as the person typed it and `person` the canonical subject: staff only. `term` and `language` come from the `terms` you passed (null without it, or for a term no longer listed). The kit keeps these lines 30 days. Staff already read raw lines in a report's excerpt, so this is not a new kind of exposure, but it is a new way to reach it: it has its own permission, `blocked.read`, and writes an audit row, `blocked.view` (no target). |
 | `POST /sanctions` | `{ subject, kind, durationMs, rule, reason?, gapNote?, includeIp? }`. `durationMs` is required: milliseconds up to 365 days, or `null` for permanent. Answers `{ groupId, refCode }`. |
 | `POST /sanctions/:groupId/revoke` | `{ reason }` (a non-empty string; blank is 400). Revokes the whole group. 404 if it is unknown or already revoked. |
 | `GET /gaps` | Rule gaps (sanctions filed under no rule), newest first. Returns the moderator-written gap notes in bulk, so moderators must never paste chat into a gap note. |
 | `POST /gaps/:groupId/close` | `{ status, ref }`: `status` is `ruled` (with `ref`, the number of the active rule that now covers it) or `not_a_rule` (`ref` null or absent). |
-| `GET /terms` | The term and exception rows, text included. Only when you pass `terms`. |
+| `GET /terms` | `{ terms, exceptions, blocks30d }`: the rows, text included, each with `note`, `addedBy`, `addedAt`, `updatedBy` and `updatedAt` (null when unknown), and `blocks30d`, a map from every listed term id to how many lines it blocked in the last 30 days (0 for none). Only when you pass `terms`. |
 | `POST /terms/check` | `{ term, language }`: a dry run, answers `{ hits }`. |
+| `POST /terms/test` | `{ text }`: would the live list block this chat line? Answers `{ verdict, termId }`, where `verdict` is `blocked` (with the id of the term that matched), `clean` (`termId` null) or `too_long` (the line is longer than `limits.chatMaxLength`, 200 by default, after trimming; it is not checked). It changes nothing: no strike, no audit row, no rate charge. Only when the `terms` you passed has a `match` (a `LiveTerms` does). |
 | `POST /terms` | `{ term, language, note? }`. `PATCH /terms/:id` takes `{ term?, language?, note? }`; `POST /terms/:id/active` takes `{ active }`. |
 | `POST /exceptions` | `{ phrase, language, note? }`. `PATCH /exceptions/:id` and `POST /exceptions/:id/active` work like the term ones. |
 | `GET /policy?format` | The code of conduct, moderator guide and agent brief, generated from your profile and rules. |
@@ -254,10 +257,11 @@ The minimum role for each action. These are defaults; override any of them with 
 | `sanctions.apply` | moderator | `POST /sanctions`, and any decision that carries actions. |
 | `sanctions.apply.ban_permanent` | senior | A ban with `durationMs: null`, on top of `sanctions.apply`. |
 | `sanctions.revoke` | moderator | `POST /sanctions/:groupId/revoke`. |
-| `history.read` | moderator | `GET /people/:ref/history`. |
+| `history.read` | moderator | `GET /people/:ref/history`, `GET /sanctions`. |
+| `blocked.read` | moderator | `GET /blocked`. Raw blocked chat lines, so it is separate from `history.read`. |
 | `gaps.read` | moderator | `GET /gaps`. |
 | `gaps.close` | owner | `POST /gaps/:groupId/close`. |
-| `terms.read` | moderator | `GET /terms`, `POST /terms/check`. |
+| `terms.read` | moderator | `GET /terms`, `POST /terms/check`, `POST /terms/test`. |
 | `terms.write` | moderator | Adding, editing and switching terms and exceptions. |
 | `policy.read` | moderator | `GET /policy`. |
 | `audit.read` | senior | `GET /audit`. |
@@ -456,6 +460,9 @@ export function mount(routes: RouteTable, forward: (path: string) => void): (met
 
 - **A player response never holds an identifier.** No subject id, key, hash, IP, room, group id, moderator, reason or other
   player's text. Staff responses do carry subject ids (staff need them); keep `/admin` behind your own login.
+- **`GET /blocked` returns raw chat lines.** They are lines the filter refused, with the subject that typed each one. Staff
+  already read raw lines in a report's excerpt; this lists them without a report, so it has its own permission
+  (`blocked.read`) and every call is audited (`blocked.view`). Give it only to people who may read them.
 - **Every staff request is authenticated and audited.** The audit row is `{ at, actor, role, action, target }` where the
   target is an id. It never stores chat text, reasons, notes or evidence. A view is audited before it is shown: if the row
   cannot be written, the answer is 500 and nothing is shown.

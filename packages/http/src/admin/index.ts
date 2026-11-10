@@ -1,6 +1,7 @@
 import type { Chatwarden } from '@chatwarden/core';
 import type { RouteTable } from '../router.js';
 import { auditRoutes } from './audit.js';
+import { blockedRoutes } from './blocked.js';
 import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
 import { gapRoutes } from './gaps.js';
@@ -15,6 +16,7 @@ import type { TermsAdmin } from './terms.js';
 export { AuditFailedError, BadActorError, createAdminContext } from './context.js';
 export type { AdminCall, AdminContext, AdminOptions } from './context.js';
 export { auditRoutes } from './audit.js';
+export { blockedRoutes } from './blocked.js';
 export { gapRoutes } from './gaps.js';
 export { meRoutes } from './me.js';
 export type { Me } from './me.js';
@@ -24,13 +26,14 @@ export { reportRoutes } from './reports.js';
 export type { ReportSummary } from './reports.js';
 export { sanctionRoutes } from './sanctions.js';
 export { termRoutes } from './terms.js';
-export type { TermsAdmin, TermsEditor } from './terms.js';
+export type { ExceptionListRow, TermListRow, TermMetadata, TermsAdmin, TermsEditor } from './terms.js';
 
 /** What the adopter gives the whole staff API: the auth hook and permissions, plus what the term and policy routes need. */
 export interface AdminRoutesOptions extends AdminOptions, PolicyOptions {
   /**
    * The live term list (the matcher package's `LiveTerms` fits). Without it there are no term or exception routes.
-   * Term text is shown in `GET /terms` and `POST /terms/check` only, to staff.
+   * Term text is shown in `GET /terms`, `POST /terms/check` and the `term` of `GET /blocked`, to staff. `POST /terms/test` is
+   * mounted when it has a `match` (a `LiveTerms` does).
    */
   terms?: TermsAdmin;
   /**
@@ -51,6 +54,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...meRoutes(ctx),
     ...reportRoutes(ctx),
     ...sanctionRoutes(ctx),
+    ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
     ...(options.terms === undefined ? {} : termRoutes(ctx, options.terms, options.recentLines ?? (() => []))),
     ...policyRoutes(ctx, {

@@ -7,6 +7,7 @@ import {
   RulesError,
   safeWarn,
   SanctionError,
+  SanctionQueryError,
 } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
 import type { KitResponse } from './types.js';
@@ -81,7 +82,7 @@ export function errorResponse(code: ErrorCode, headers?: Record<string, string>)
 
 const codeFor = (err: unknown): ErrorCode | null => {
   if (err instanceof HttpError) return err.code;
-  if (err instanceof ReportQueryError || err instanceof AuditQueryError) return 'invalid_query';
+  if (err instanceof ReportQueryError || err instanceof AuditQueryError || err instanceof SanctionQueryError) return 'invalid_query';
   if (err instanceof ProfileError) return 'invalid_profile';
   if (err instanceof SanctionError) return 'invalid_sanction';
   if (err instanceof RulesError) return 'invalid_rules';
@@ -92,7 +93,7 @@ const codeFor = (err: unknown): ErrorCode | null => {
 
 /**
  * Wrap a handler so that nothing it throws (or rejects with) escapes:
- * - a validation-type error (`ReportQueryError`, `AuditQueryError`, `RangeError`, `ProfileError`, `SanctionError`,
+ * - a validation-type error (`ReportQueryError`, `AuditQueryError`, `SanctionQueryError`, `RangeError`, `ProfileError`, `SanctionError`,
  *   `RulesError`, `ExcerptError`, `ValidationError`) -> 400
  * - `NotFoundError` -> 404; `HttpError` -> its own status and headers (401, 403, 413, ...); a `RangeError` is
  *   also logged, class only

@@ -37,6 +37,9 @@ const SPECS: Spec[] = [
   { name: 'POST /exceptions', method: 'POST', path: () => '/exceptions', body: { phrase: 'zorbak party', language: 'en' }, lock: { 'terms.write': 'owner' }, min: 'moderator' },
   { name: 'PATCH /exceptions/:id', method: 'PATCH', path: (i) => `/exceptions/${i.exception}`, body: { note: 'n' }, lock: { 'terms.write': 'owner' }, min: 'moderator' },
   { name: 'POST /exceptions/:id/active', method: 'POST', path: (i) => `/exceptions/${i.exception}/active`, body: { active: true }, lock: { 'terms.write': 'owner' }, min: 'moderator' },
+  { name: 'GET /sanctions', method: 'GET', path: () => '/sanctions', lock: { 'history.read': 'owner' }, min: 'moderator' },
+  { name: 'GET /blocked', method: 'GET', path: () => '/blocked', lock: { 'blocked.read': 'owner' }, min: 'moderator' },
+  { name: 'POST /terms/test', method: 'POST', path: () => '/terms/test', body: { text: 'a harmless line' }, lock: { 'terms.read': 'owner' }, min: 'moderator' },
   { name: 'GET /policy', method: 'GET', path: () => '/policy', lock: { 'policy.read': 'owner' }, min: 'moderator' },
   { name: 'GET /audit', method: 'GET', path: () => '/audit', lock: { 'audit.read': 'owner' }, min: 'senior' },
 ];
@@ -140,6 +143,9 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
       for (const [method, path] of [
         ['GET', '/gaps'],
         ['GET', '/terms'],
+        ['GET', '/sanctions'],
+        ['GET', '/blocked'],
+        ['POST', '/terms/test'],
         ['GET', '/policy'],
         ['GET', '/audit'],
         ['POST', '/sanctions'],
@@ -173,7 +179,10 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
     const { call } = await world();
     expect((await call('GET', '/nope', { role: null })).status).toBe(404);
     expect((await call('DELETE', '/sanctions', { role: null })).status).toBe(405);
-    expect((await call('GET', '/sanctions', { role: null })).status).toBe(405);
+    expect((await call('PUT', '/sanctions', { role: null })).status).toBe(405);
+    expect((await call('GET', '/sanctions', { role: null })).status).toBe(401);
+    expect((await call('GET', '/blocked', { role: null })).status).toBe(401);
+    expect((await call('POST', '/blocked', { role: null })).status).toBe(405);
     expect((await call('PUT', '/terms', { role: null })).status).toBe(405);
   });
 });

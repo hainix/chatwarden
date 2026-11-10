@@ -36,6 +36,7 @@ describe('PERMISSIONS defaults', () => {
       'sanctions.apply.ban_permanent': 'senior',
       'sanctions.revoke': 'moderator',
       'history.read': 'moderator',
+      'blocked.read': 'moderator',
       'gaps.read': 'moderator',
       'gaps.close': 'owner',
       'terms.read': 'moderator',

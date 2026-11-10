@@ -108,6 +108,7 @@ The main parts of the API:
 | `new LiveTerms({ store, pack, clock, logger? })` | The live matcher. `load()` seeds the store from `pack` once, then builds from the store. `check(term, language, recentLines)` is the dry run. `change(actor, fn)` edits atomically and refuses an edit that would leave no active term, duplicate a word, or unblock a line the pack requires blocked. A refusal is `{ ok: false, error, code }`. |
 | `LiveTerms.loadSync()`, `LiveTerms.changeSync(actor, fn)` | `load()` and `change()` without a promise, for a host that cannot await (a relay boot). `load()` and `change()` are thin async wrappers over them and return the same results. `fn` must be synchronous: an async `fn` throws `TypeError` (and is rolled back). |
 | `LiveTerms.usingPack` | True while the matcher runs on the pack because the store could not be read. |
+| `LiveTerms.rows`, `LiveTerms.records()` | `rows` are the matcher's rows (`id`, the word, `language`, `active`). `records()` adds `note`, `addedBy`, `addedAt`, `updatedBy` and `updatedAt` from the store (all `null` while the pack stands in for it), for a staff list. |
 | `TermStore` | The storage `LiveTerms` needs. `@chatwarden/store-sqlite` implements it. |
 | `stripInvisible`, `foldTerm`, `collapseLikePreset` | The normalisation steps, if you build tools around the matcher. |
 

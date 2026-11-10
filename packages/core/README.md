@@ -113,9 +113,10 @@ For the moderators' screens and the player's notices, mount the routes in
 | `cw.rooms` | `seat`, `seatConnection`, `unseat`, `close`: who is in which seat of which room. |
 | `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. `restricted(who)` says whether a person is chat-restricted, for typing indicators. |
 | `cw.mutes` | A player mutes another player for themselves only. |
-| `cw.reports` | `submit` (players), `list` and `get` (staff). |
+| `cw.reports` | `submit` (players), `list`, `get` and `reporterRecord` (staff). `reporterRecord(person)` is how the reports a person filed stand: `{ reports, open, actioned, dismissed, badFaith, suspendedUntil }`. |
 | `cw.decide(input)` | A moderator closes a report and writes the sanctions and notices in one transaction. Safe to send twice. |
-| `cw.sanctions` | `apply` and `revoke`, for a moderator who acts without a report. |
+| `cw.sanctions` | `apply` and `revoke`, for a moderator who acts without a report. `forPerson(subject)` and `list({ cursor?, limit?, source? })` (staff) read sanctions as `SanctionGroupView`s: one per group, built from the person's own row, so no IP, hash or stored value is in them. |
+| `cw.blocked` | `list({ days })` and `countsByTerm({ days })` (staff), with `days` 1, 7 or 30: the lines the slur filter blocked, with the raw text, and the strikes per term. |
 | `cw.notices` | A player's pending notices, acknowledgements and "My record". Built so no identifier can leak. |
 | `cw.doors` | `check` a person at the door (login, join) against bans. |
 | `cw.names.check` | May a player use this as a name? |
