@@ -72,8 +72,10 @@ describe('POST /sanctions', () => {
     const rows = rowsOf(b);
     expect(rows.map((r) => r.targetType).sort()).toEqual(['ip', 'subject']);
     expect(rows.find((r) => r.targetType === 'ip')?.endsAt).toBe(clock.t + DAY);
-    // Neither response carries an ip or hash.
-    expect(JSON.stringify(b.body)).not.toMatch(/203\.0\.113|ip/i);
+    // Neither response carries an ip or hash: the body is exactly the two opaque ids. (Not a /ip/i text scan: a random base64url
+    // id contains "ip" in about 1 run in 20.)
+    expect(Object.keys(b.body as object).sort()).toEqual(['groupId', 'refCode']);
+    expect(JSON.stringify(b.body)).not.toMatch(/203\.0\.113/);
   });
 
   it('a non-boolean includeIp is 400', async () => {
