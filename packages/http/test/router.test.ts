@@ -192,13 +192,14 @@ describe('createRouter: 404 and 405', () => {
 });
 
 describe('createRouter: HEAD', () => {
-  it('runs the GET handler and returns its status and headers with no body', async () => {
+  it('runs the GET handler and returns the GET response (an adapter drops the body on the wire)', async () => {
     const h = vi.fn((r: KitRequest) => (void r, { status: 201, headers: { 'x-a': '1', 'cache-control': 'no-store' }, body: { big: 'payload' } }));
     const router = createRouter({ 'GET /things/:id': h });
     const res = await router(req('HEAD', '/things/abc'));
     expect(res.status).toBe(201);
     expect(res.headers).toEqual({ 'x-a': '1', 'cache-control': 'no-store' });
-    expect(res.body).toBeUndefined();
+    // The GET answer, whole: an adapter sends its headers (and the length of this body) but never the body itself.
+    expect(res.body).toEqual({ big: 'payload' });
     expect(h).toHaveBeenCalledTimes(1);
     expect(h.mock.calls[0]?.[0].method).toBe('HEAD');
   });
@@ -211,10 +212,10 @@ describe('createRouter: HEAD', () => {
     expect(seen[0]?.[1].query).toEqual({ q: '1' });
   });
 
-  it('a GET error response keeps its status (a handler 404 stays 404) and has no body', async () => {
+  it('a GET error response keeps its status (a handler 404 stays 404) and its body', async () => {
     const router = createRouter({ 'GET /a': () => ({ status: 404, body: { error: 'not_found' } }) });
     const res = await router(req('HEAD', '/a'));
-    expect([res.status, res.body]).toEqual([404, undefined]);
+    expect([res.status, res.body]).toEqual([404, { error: 'not_found' }]);
   });
 
   it('an explicit HEAD route wins over the GET fallback', async () => {

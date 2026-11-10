@@ -70,6 +70,8 @@ curl http://127.0.0.1:3000/admin/reports/<id> \
 
 The answer's `report.targetSubject` and `report.reporterSubject` are the ids (staff only: they never go to a player).
 
+`/admin` also has the sanction, gap, term (the demo passes its `LiveTerms` as `terms`), policy and audit routes; see `adminRoutes`.
+
 ```sh
 curl -X POST http://127.0.0.1:3000/admin/reports/<id>/decide \
   -H 'content-type: application/json' \

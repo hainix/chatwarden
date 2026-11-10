@@ -1585,14 +1585,38 @@ describe('tiny-chat: every staff (/admin) response, scanned for what staff must 
     await http(server, `/admin/reports/${id}/suggest`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': ADMIN }, body: '{}' });
     await decideHttp(server, { reportId: id, verdict: 'upheld', reason: 'private note', actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }] });
     // Rejected calls too: a 401 and a 404.
+    // The gap, sanction and term routes. A chat restriction under no rule opens a gap; a second one is revoked.
+    const json = { 'content-type': 'application/json', 'x-admin-token': ADMIN };
+    const staffPost = (path: string, body: unknown): Promise<Reply> =>
+      http(server, `/admin${path}`, { method: 'POST', headers: json, body: JSON.stringify(body) });
+    const gapped = await staffPost('/sanctions', { subject: who.target, kind: 'chat', durationMs: 60_000, rule: 'uncovered', gapNote: 'a private gap note', reason: 'r' });
+    const plain = await staffPost('/sanctions', { subject: who.target, kind: 'chat', durationMs: 60_000, rule: 4, reason: 'r' });
+    await staffGet(server, '/gaps');
+    await staffPost(`/gaps/${String(gapped.json.groupId)}/close`, { status: 'not_a_rule' });
+    await staffPost(`/sanctions/${String(plain.json.groupId)}/revoke`, { reason: 'mistake' });
+    await staffGet(server, '/terms');
+    await staffPost('/terms/check', { term: 'vlemmo', language: 'en' });
+    await staffGet(server, '/policy');
+    // Rejected calls too: a 401 and a 404.
     await staffGet(server, `/reports/${id}`, 'wrong');
     await staffGet(server, '/reports/no-such-report');
     await staffGet(server, '/audit');
   });
 
+  it('every one of the 13 staff routes answered 200 at least once', () => {
+    const ok = new Set(staffLog.filter((e) => e.text !== '' && !e.text.includes('"error"')).map((e) => e.path.replace(/^(\/admin\/(?:reports|people|gaps|sanctions))\/[^/]+/, '$1/:id')));
+    const want = [
+      '/admin/reports', '/admin/reports/:id', '/admin/reports/:id/suggest', '/admin/reports/:id/decide', '/admin/people/:id/history',
+      '/admin/sanctions', '/admin/sanctions/:id/revoke', '/admin/gaps', '/admin/gaps/:id/close',
+      '/admin/terms', '/admin/terms/check', '/admin/policy', '/admin/audit',
+    ];
+    expect(want).toHaveLength(13);
+    for (const route of want) expect(ok.has(route), route).toBe(true);
+  });
+
   it('covers the report queue, the detail, a person, the policy, suggest, decide and the audit trail', () => {
     const paths = new Set(staffLog.map((e) => e.path.replace(/\/(reports|people)\/[^/]+/, '/$1/:id')));
-    for (const route of ['/admin/reports', '/admin/reports/:id', '/admin/people/:id/history', '/admin/policy', '/admin/reports/:id/suggest', '/admin/reports/:id/decide', '/admin/audit']) {
+    for (const route of ['/admin/reports', '/admin/reports/:id', '/admin/people/:id/history', '/admin/policy', '/admin/reports/:id/suggest', '/admin/reports/:id/decide', '/admin/audit', '/admin/gaps', '/admin/terms', '/admin/terms/check']) {
       expect(paths.has(route), route).toBe(true);
     }
     // Staff do see subject ids: the report detail names the people (a control for the id pattern below).

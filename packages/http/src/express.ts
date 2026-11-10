@@ -11,13 +11,16 @@ import type { KitRequest, KitResponse } from './types.js';
 export interface ExpressOptions {
   /**
    * The largest request body the adapter will read, in bytes. A positive whole number; default 65536 (the same cap
-   * `parseJson` enforces). More than that is a 413 in the kit's error shape, and the adapter stops reading. Raising it
-   * does not raise the routes' own 64 KiB JSON cap.
+   * `parseJson` enforces). More than that is a 413 in the kit's error shape, and the adapter stops reading. At most
+   * 16 MiB (`RangeError` above). Raising it does not raise the routes' own 64 KiB JSON cap.
    */
   maxBody?: number;
   /** Where the adapter logs (event and error class only). Defaults to `console.warn`. */
   logger?: Logger;
 }
+
+/** The largest `maxBody` the adapter accepts: the body is buffered and decoded to a single string. */
+const MAX_BODY_LIMIT = 16 * 1024 * 1024;
 
 type Query = Record<string, string>;
 
@@ -48,35 +51,58 @@ const consumed = (req: Request): boolean => (req.body as unknown) !== undefined 
 /** What reading the body came to: the text, "too big", or "the client went away". */
 type Read = { kind: 'ok'; text: string } | { kind: 'too_large' } | { kind: 'aborted' };
 
+/**
+ * Read the raw body. Every listener runs inside a try/catch that REJECTS the promise, so a throw in a stream listener (a
+ * decoder failure, say) reaches the caller's catch instead of escaping as an uncaught exception with the request hanging.
+ */
 function readBody(req: Request, max: number): Promise<Read> {
   const declared = req.headers['content-length'];
   if (declared !== undefined && /^\d+$/.test(declared) && Number(declared) > max) {
     return Promise.resolve({ kind: 'too_large' });
   }
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     let done = false;
-    const finish = (result: Read): void => {
-      if (done) return;
+    const detach = (): void => {
       done = true;
       req.off('data', onData);
       req.off('end', onEnd);
       req.off('error', onGone);
       req.off('close', onClose);
+    };
+    const finish = (result: Read): void => {
+      if (done) return;
+      detach();
       if (result.kind === 'too_large') req.pause();
       resolve(result);
     };
-    const onData = (chunk: Buffer | string): void => {
-      const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
-      size += buf.length;
-      if (size > max) {
-        finish({ kind: 'too_large' });
-        return;
-      }
-      chunks.push(buf);
+    const fail = (err: unknown): void => {
+      if (done) return;
+      detach();
+      req.pause();
+      reject(err);
     };
-    const onEnd = (): void => finish({ kind: 'ok', text: Buffer.concat(chunks).toString('utf8') });
+    const onData = (chunk: Buffer | string): void => {
+      try {
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
+        size += buf.length;
+        if (size > max) {
+          finish({ kind: 'too_large' });
+          return;
+        }
+        chunks.push(buf);
+      } catch (err) {
+        fail(err);
+      }
+    };
+    const onEnd = (): void => {
+      try {
+        finish({ kind: 'ok', text: Buffer.concat(chunks).toString('utf8') });
+      } catch (err) {
+        fail(err);
+      }
+    };
     const onGone = (): void => finish({ kind: 'aborted' });
     const onClose = (): void => {
       if (!req.readableEnded) finish({ kind: 'aborted' });
@@ -90,9 +116,10 @@ function readBody(req: Request, max: number): Promise<Read> {
 
 /**
  * Send a KitResponse with `status().end(payload)`: no `res.send` or `res.json`, so no ETag, no 304 and no guessing of a
- * content type. `applied` collects the header names set, so a failure can take them back off.
+ * content type. `applied` collects the header names set, so a failure can take them back off. For `head` the payload is
+ * built exactly as for a GET (same content type, and its byte length as `content-length`) but not written.
  */
-function send(res: Response, kit: KitResponse, applied: string[]): void {
+function send(res: Response, kit: KitResponse, applied: string[], head = false): void {
   res.status(kit.status);
   for (const [name, value] of Object.entries(kit.headers ?? {})) {
     res.setHeader(name, value);
@@ -103,15 +130,19 @@ function send(res: Response, kit: KitResponse, applied: string[]): void {
     res.setHeader(name, value);
     applied.push(name);
   };
+  let payload: string | undefined;
   if (typeof kit.body === 'string') {
     set('content-type', 'text/plain; charset=utf-8');
-    res.end(kit.body, 'utf8');
-    return;
+    payload = kit.body;
+  } else {
+    // `undefined` has no payload; anything else is JSON. JSON.stringify can throw: the caller handles it.
+    payload = kit.body === undefined ? undefined : JSON.stringify(kit.body);
+    set('content-type', 'application/json; charset=utf-8');
   }
-  // `undefined` (a HEAD answer) has no payload; anything else is JSON. JSON.stringify can throw: the caller handles it.
-  const payload = kit.body === undefined ? undefined : JSON.stringify(kit.body);
-  set('content-type', 'application/json; charset=utf-8');
-  if (payload === undefined) res.end();
+  if (head) {
+    if (payload !== undefined) set('content-length', String(Buffer.byteLength(payload, 'utf8')));
+    res.end();
+  } else if (payload === undefined) res.end();
   else res.end(payload, 'utf8');
 }
 
@@ -128,12 +159,15 @@ function send(res: Response, kit: KitResponse, applied: string[]): void {
  * - `path` is relative to the mount point; `query` holds the first string value of each key; header names are
  *   lowercased and an array is joined with ", ".
  * - A body over `maxBody` bytes is 413 `payload_too_large`; the adapter stops reading and closes the connection.
+ *   `maxBody` is a positive whole number of bytes, at most 16 MiB (a larger one is a `RangeError` when the adapter is
+ *   built): the body is held in memory and decoded to one string before the routes see it.
  * - `remoteAddress` is the socket peer, never a header; behind a proxy, your `identify` decides what to trust.
  * - `rawBody` is the body decoded as UTF-8: exact for valid UTF-8; an invalid byte becomes U+FFFD, so a signature over
  *   the original bytes fails to verify (it fails closed).
  * - A `KitResponse` becomes status + headers; a string body is sent raw (with its own `content-type`, `text/plain` if
  *   none), anything else as JSON. The response is written with `end`, so there is no ETag and no 304, and
- *   `x-powered-by` is removed. HEAD on a GET route has the GET status and headers and no body.
+ *   `x-powered-by` is removed. HEAD on a GET route has the GET status, headers, content type and `content-length`, and
+ *   no body bytes.
  * - A handler's own error is the kit's 500 `internal` (the router wraps it). An error while SENDING (an invalid status,
  *   a CR/LF in a header, a body that is not JSON-serialisable) never goes to Express's error handlers, so no stack page
  *   can reach a client: it is logged (`chatwarden.http_error`, error class only), the headers the adapter set are
@@ -149,8 +183,8 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
   }
   const { logger } = options;
   const max = options.maxBody ?? BODY_MAX_BYTES;
-  if (typeof max !== 'number' || !Number.isSafeInteger(max) || max < 1) {
-    throw new RangeError('toExpress: maxBody must be a positive whole number of bytes');
+  if (typeof max !== 'number' || !Number.isSafeInteger(max) || max < 1 || max > MAX_BODY_LIMIT) {
+    throw new RangeError('toExpress: maxBody must be a positive whole number of bytes, at most 16 MiB');
   }
   const handle = withErrors(createRouter(routes), logger);
   let warnedParsed = false;
@@ -168,14 +202,14 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
           warnedParsed = true;
           safeWarn(logger, 'chatwarden.http_body_already_parsed');
         }
-        send(res, { status: 500, body: { error: 'internal' } }, applied);
+        send(res, { status: 500, body: { error: 'internal' } }, applied, req.method === 'HEAD');
         return;
       }
       const body = await readBody(req, max);
       if (body.kind === 'aborted') return;
       if (body.kind === 'too_large') {
         res.setHeader('connection', 'close');
-        send(res, errorResponse('payload_too_large'), applied);
+        send(res, errorResponse('payload_too_large'), applied, req.method === 'HEAD');
         return;
       }
       const kit: KitRequest = {
@@ -187,7 +221,7 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
         rawBody: body.text,
         ...(typeof req.socket.remoteAddress === 'string' ? { remoteAddress: req.socket.remoteAddress } : {}),
       };
-      send(res, await handle(kit), applied);
+      send(res, await handle(kit), applied, req.method === 'HEAD');
     } catch (err) {
       safeWarn(logger, 'chatwarden.http_error', { error: err instanceof Error ? err.name : typeof err });
       if (res.headersSent || res.writableEnded) {
@@ -197,7 +231,7 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
       try {
         for (const name of applied) res.removeHeader(name);
         res.statusCode = 200;
-        send(res, { status: 500, body: { error: 'internal' } }, []);
+        send(res, { status: 500, body: { error: 'internal' } }, [], req.method === 'HEAD');
       } catch {
         res.destroy();
       }

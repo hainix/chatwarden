@@ -130,13 +130,14 @@ describe('healthRoutes', () => {
     }
   });
 
-  it('answers HEAD like GET without a body: /healthz and /readyz are 200 and no-store', async () => {
+  it('answers HEAD exactly like GET (an adapter drops the body): /healthz and /readyz are 200 and no-store', async () => {
     const { call } = await setup();
     for (const path of ['/healthz', '/readyz']) {
-      const res = await call('HEAD', path);
-      expect(res.status).toBe(200);
-      expect(res.headers?.['cache-control']).toBe('no-store');
-      expect(res.body).toBeUndefined();
+      const head = await call('HEAD', path);
+      const get = await call('GET', path);
+      expect(head.status).toBe(200);
+      expect(head.headers?.['cache-control']).toBe('no-store');
+      expect(head).toEqual(get);
     }
   });
 

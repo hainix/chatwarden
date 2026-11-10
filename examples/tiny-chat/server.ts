@@ -21,6 +21,7 @@
 //              GET  /admin/reports, GET /admin/reports/:id   the queue and one report (names the people by subject id)
 //              POST /admin/reports/:id/decide  { verdict, reason, actions: [{ subject, kind, durationMs, rule, lineIds?, gapNote? }] }
 //                                              `subject` comes from the report detail; the answer carries ref codes only
+//              Also the gap, sanction, term, policy and audit routes (the live term list is passed as `terms`).
 //   /api/*     the player API (`playerRoutes`): GET /api/notices, POST /api/notices/:id/ack, GET /api/record,
 //              GET /api/rules, GET /api/code-of-conduct?format=html|markdown|text, POST /api/names/check.
 //              DEMO ONLY identity: the `x-chatwarden-key` header, or `?key=` (a key in a URL is unsafe, see the README).
@@ -187,6 +188,8 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
         adminRoutes(chatwarden, {
           authorize: (req: KitRequest) => (sameToken(req.headers['x-admin-token'], token) ? { actor: 'demo-admin', role: 'owner' } : null),
           gameName: GAME_NAME,
+          // The live term list: it adds the staff term and exception routes (`/admin/terms`, `/admin/terms/check`, ...).
+          terms,
         }),
       ),
     );

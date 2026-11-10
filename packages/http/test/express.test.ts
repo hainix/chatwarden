@@ -314,6 +314,119 @@ describe('toExpress: building the KitRequest', () => {
   });
 });
 
+/** One raw HTTP/1.1 exchange: the status line, the headers (lowercased) and the exact body bytes after the blank line. */
+function rawExchange(base: string, method: string, path: string): Promise<{ status: number; headers: Record<string, string>; body: Buffer }> {
+  const url = new URL(base);
+  return new Promise((resolve, reject) => {
+    const socket = connect(Number(url.port), url.hostname, () => {
+      socket.write(`${method} ${path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`);
+    });
+    const parts: Buffer[] = [];
+    socket.on('data', (d: Buffer) => parts.push(d));
+    socket.on('error', reject);
+    socket.on('close', () => {
+      const all = Buffer.concat(parts);
+      const split = all.indexOf('\r\n\r\n');
+      const head = all.subarray(0, split).toString('latin1').split('\r\n');
+      const headers: Record<string, string> = {};
+      for (const line of head.slice(1)) headers[line.slice(0, line.indexOf(':')).toLowerCase()] = line.slice(line.indexOf(':') + 1).trim();
+      resolve({ status: Number(head[0]?.split(' ')[1]), headers, body: all.subarray(split + 4) });
+    });
+  });
+}
+
+describe('toExpress: HEAD on the wire (raw sockets: fetch never reads a HEAD body)', () => {
+  const paths = ['/kit/ping', '/kit/doc', '/kit/plain', '/kit/md', '/kit/created', '/kit/array', '/kit/empty-string', '/kit/teapot', '/kit/missing', '/kit/throws'];
+
+  it.each(paths)('HEAD %s: zero body bytes, and the GET status, content type and Content-Length', async (path) => {
+    const base = await listen(build().app);
+    const get = await rawExchange(base, 'GET', path);
+    const head = await rawExchange(base, 'HEAD', path);
+    expect(head.body.length).toBe(0);
+    expect(head.status).toBe(get.status);
+    expect(head.headers['content-type']).toBe(get.headers['content-type']);
+    expect(head.headers['content-length']).toBe(get.headers['content-length']);
+    expect(Number(head.headers['content-length'])).toBe(get.body.length);
+    expect(get.body.length > 0 || path.endsWith('empty-string')).toBe(true);
+  });
+
+  it('a string body with no content type is text/plain on HEAD too, not JSON', async () => {
+    const base = await listen(build().app);
+    const head = await rawExchange(base, 'HEAD', '/kit/plain');
+    expect(head.headers['content-type']).toMatch(/^text\/plain/);
+    expect(head.headers['content-length']).toBe(String(Buffer.byteLength('no content type given')));
+  });
+
+  it('Content-Length counts bytes for multi-byte text', async () => {
+    const base = await listen(build().app);
+    const head = await rawExchange(base, 'HEAD', '/kit/doc');
+    expect(head.headers['content-length']).toBe(String(Buffer.byteLength('<p>"quoted" & <b>bold</b> \u00e9 \u65e5\u672c</p>')));
+  });
+
+  it('a GET still sends its body (control)', async () => {
+    const base = await listen(build().app);
+    const get = await rawExchange(base, 'GET', '/kit/ping');
+    expect(JSON.parse(get.body.toString('utf8'))).toEqual({ pong: true });
+  });
+});
+
+describe('toExpress: the body reader cannot escape the adapter', () => {
+  const realConcat = Buffer.concat.bind(Buffer);
+  const TRIGGER = 'READER-THROW-TRIGGER';
+  const trip = (what: unknown): void => {
+    vi.spyOn(Buffer, 'concat').mockImplementation(((list: readonly Uint8Array[], length?: number) => {
+      if (list.length > 0 && Buffer.from(list[0] as Uint8Array).toString('utf8').startsWith(TRIGGER)) throw what;
+      return realConcat(list, length);
+    }) as typeof Buffer.concat);
+  };
+  afterEach(() => void vi.restoreAllMocks());
+
+  it.each([
+    ['an Error', new TypeError('decoder blew up with a secret detail'), 'TypeError'],
+    ['a string', 'thrown string', 'string'],
+  ])('a throw while decoding the body (%s) is the kit 500, logged by class, with no uncaught exception', async (_name, thrown, cls) => {
+    const uncaught: unknown[] = [];
+    const onUncaught = (err: unknown): void => void uncaught.push(err);
+    process.on('uncaughtException', onUncaught);
+    try {
+      trip(thrown);
+      const calls = vi.fn(() => ({ status: 200, body: {} }));
+      const { app, logged } = build({ 'POST /echo': calls });
+      const base = await listen(app);
+      const res = await post(`${base}/kit/echo`, `${TRIGGER} payload`);
+      expect(res.status).toBe(500);
+      const text = await res.text();
+      expect(JSON.parse(text)).toEqual({ error: 'internal' });
+      expect(text).not.toContain('secret');
+      expect(calls).not.toHaveBeenCalled();
+      expect(logged).toEqual([['chatwarden.http_error', { error: cls }]]);
+      await new Promise((r) => setTimeout(r, 30));
+      expect(uncaught).toEqual([]);
+      // The server carries on.
+      vi.restoreAllMocks();
+      expect((await post(`${base}/kit/echo`, 'fine')).status).toBe(200);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+  });
+
+  it('control: a body that does not trip the injected failure is read normally', async () => {
+    trip(new TypeError('x'));
+    const { app } = build();
+    const base = await listen(app);
+    const res = await post(`${base}/kit/echo`, 'ordinary body');
+    expect(((await res.json()) as { rawBody: string }).rawBody).toBe('ordinary body');
+  });
+
+  it('maxBody is capped at 16 MiB: the cap itself is fine, one byte more is a RangeError at construction', () => {
+    const cap = 16 * 1024 * 1024;
+    expect(() => toExpress({}, { maxBody: cap })).not.toThrow();
+    for (const maxBody of [cap + 1, 512 * 1024 * 1024, Number.MAX_SAFE_INTEGER]) {
+      expect(() => toExpress({}, { maxBody })).toThrow(RangeError);
+    }
+  });
+});
+
 describe('toExpress: the peer address and the response headers', () => {
   it('remoteAddress is the socket peer, whatever the client claims in headers', async () => {
     const base = await listen(build().app);
