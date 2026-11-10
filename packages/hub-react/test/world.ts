@@ -26,6 +26,8 @@ export interface WorldOptions {
   /** Mount the term routes (default true). */
   terms?: boolean;
   gameName?: string;
+  /** Rule numbers to retire (a retired rule stays listed but cannot be cited). */
+  retire?: number[];
 }
 
 export interface FileOptions {
@@ -35,6 +37,24 @@ export interface FileOptions {
   reporter?: string;
   category?: ReportCategory;
   room?: string;
+}
+
+export interface RichLine {
+  who: 'reporter' | 'target' | 'bystander';
+  text: string;
+}
+
+export interface RichOptions extends FileOptions {
+  /** The third person in the room. */
+  bystander?: string;
+  /** What is said, in order (default: a short exchange). A blocked term makes a blocked line. */
+  lines?: RichLine[];
+  /** The index in `lines` the report cites (default: the first line the reported person wrote); null cites none. */
+  cite?: number | null;
+  /** The reporter's note. */
+  note?: string;
+  /** Tags on the room when the report is filed. */
+  tags?: Record<string, string>;
 }
 
 export async function hubWorld(opts: WorldOptions = {}) {
@@ -49,7 +69,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     platform: { identify: (ctx) => ctx as RawWho },
     clock,
     profile: 'standard',
-    rules: defineRules(starterRules('standard')),
+    rules: defineRules(starterRules('standard').map((r) => (opts.retire?.includes(r.number) ? { ...r, retired: true } : r))),
     overrides: { profanity: { mode: 'allow' } },
     retention: false,
   });
@@ -77,6 +97,8 @@ export async function hubWorld(opts: WorldOptions = {}) {
     return real(req);
   };
   const client: HubClient = createHubClient(transport);
+  /** A client straight to the real routes: not recorded, never intercepted (for a test's own fake answers). */
+  const direct: HubClient = createHubClient(real);
 
   let n = 0;
   /** Files one report in a new room and returns its id, the reported person's staff ref and the reporter's. */
@@ -96,13 +118,71 @@ export async function hubWorld(opts: WorldOptions = {}) {
     return { id: res.reportId, person: report.targetPerson, reporter: report.reporterPerson, room };
   };
 
+  /**
+   * Files a report with a chosen conversation: up to three people (reporter, reported, bystander), each line in order, a cited
+   * line and a note. Returns the line id of each line (by index), the three people's staff refs and the room.
+   */
+  const fileRich = async (o: RichOptions = {}) => {
+    const target = o.target ?? 'Mallory';
+    const reporter = o.reporter ?? `Reporter${++n}`;
+    const bystander = o.bystander ?? 'Bystander';
+    const room = o.room ?? `room-${++n}`;
+    const lines: RichLine[] = o.lines ?? [
+      { who: 'reporter', text: 'hello there' },
+      { who: 'target', text: 'a line from the target' },
+      { who: 'bystander', text: 'what is going on' },
+      { who: 'target', text: 'another line from the target' },
+    ];
+    const seats = { reporter: 'p1', target: 'p2', bystander: 'p3' } as const;
+    cw.rooms.seat(room, 'p1', { clientKey: `key-reporter-${reporter}` }, reporter, o.tags);
+    cw.rooms.seat(room, 'p2', { clientKey: `key-target-${target}` }, target);
+    if (lines.some((l) => l.who === 'bystander')) cw.rooms.seat(room, 'p3', { clientKey: `key-bystander-${bystander}` }, bystander);
+    const lineIds: string[] = [];
+    for (const [i, l] of lines.entries()) {
+      cw.chat.accept(room, seats[l.who], l.text);
+      // The evidence buffer numbers every line it keeps, blocked ones included, from 1.
+      lineIds.push(String(i + 1));
+      clock.t += 2000;
+    }
+    const cite = o.cite === undefined ? lines.findIndex((l) => l.who === 'target') : o.cite;
+    const res = await cw.reports.submit({
+      roomId: room,
+      reporterSeat: 'p1',
+      targetSeat: 'p2',
+      category: o.category ?? 'harassment',
+      ...(o.note === undefined ? {} : { note: o.note }),
+      ...(cite === null || cite < 0 ? {} : { lineId: lineIds[cite] as string }),
+    });
+    if (!res.ok) throw new Error(`report refused: ${res.refused}`);
+    const report = cw.reports.get(res.reportId);
+    if (report === null) throw new Error('report missing');
+    const byHandle = (handle: string): string | null => {
+      const i = report.excerpt.findIndex((l) => l.handle === handle && l.p !== null);
+      const p = i < 0 ? null : report.excerpt[i]?.p;
+      return p === null || p === undefined ? null : (report.people[p] ?? null);
+    };
+    return {
+      id: res.reportId,
+      person: report.targetPerson,
+      reporter: report.reporterPerson,
+      bystander: byHandle(bystander),
+      room,
+      lineIds,
+    };
+  };
+
   /** A direct sanction as the first moderator, so Recent actions has something to show. */
-  const sanction = async (person: string, kind: 'warning' | 'chat' | 'ban' | 'area' | 'note' = 'chat', rule: number | 'uncovered' = 1) => {
+  const sanction = async (
+    person: string,
+    kind: 'warning' | 'chat' | 'ban' | 'area' | 'note' = 'chat',
+    rule: number | 'uncovered' = 1,
+    durationMs: number | null = DAY,
+  ) => {
     const res = await cw.sanctions.apply({
       kind,
       subject: person,
       includeIp: false,
-      durationMs: kind === 'warning' || kind === 'note' ? null : DAY,
+      durationMs: kind === 'warning' || kind === 'note' ? null : durationMs,
       reason: 'private moderator reason',
       actor: 'ann@example.test',
       source: 'moderator',
@@ -117,7 +197,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
   const raw = (req: Partial<KitRequest> & { method: string; path: string }): Promise<KitResponse> =>
     handle({ query: {}, headers: {}, body: undefined, ...req });
 
-  return { cw, clock, session, routes, handle, transport, client, sent, intercept, file, sanction, raw, live, now: () => clock.t };
+  return { cw, clock, session, routes, handle, transport, client, direct, sent, intercept, file, fileRich, sanction, raw, live, now: () => clock.t };
 }
 
 export type HubWorld = Awaited<ReturnType<typeof hubWorld>>;

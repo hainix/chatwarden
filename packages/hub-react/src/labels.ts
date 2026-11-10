@@ -1,7 +1,9 @@
 import type { HubError } from './client.js';
+import { DURATIONS, hasLength, outcomeChoice } from './decision.js';
+import type { Choice, DurationKey } from './decision.js';
 import { formatDuration } from './format.js';
 import type { HubT, HubText } from './i18n.js';
-import type { ReportCategory, SanctionGroupView, SanctionKind, SanctionSource } from './types.js';
+import type { ReportCategory, SanctionGroupView, SanctionKind, SanctionSource, Suggestion } from './types.js';
 
 // Words for the kit's fixed vocabularies. One table per vocabulary, typed against the catalog, so a new category or kind in the
 // kit is a compile error here until it has a word.
@@ -69,4 +71,44 @@ export function errorText(t: HubT, error: HubError): string {
   }
   if (error.status >= 500) return t('hub.error.server');
   return t('hub.error.generic');
+}
+
+const LENGTH_WORD = {
+  '1h': 'hub.decide.choice.length.hour',
+  '24h': 'hub.decide.choice.length.day',
+  '7d': 'hub.decide.choice.length.week',
+  '30d': 'hub.decide.choice.length.month',
+  permanent: 'hub.decide.choice.length.permanent',
+} as const satisfies Record<DurationKey, HubText>;
+
+/** A length as a phrase: `24 hours`, `permanent`; a length the menus do not offer falls back to a short unit (`90m`). */
+export function lengthPhrase(t: HubT, locale: string, durationMs: number | null): string {
+  const known = DURATIONS.find((d) => d.ms === durationMs);
+  return known === undefined ? formatDuration(durationMs ?? 0, locale) : t(LENGTH_WORD[known.key]);
+}
+
+/** What an action does, in words: `Warning`, `Note`, `Chat restriction, 24 hours`, `Ban, permanent`. */
+export function choiceLabel(t: HubT, locale: string, choice: Choice): string {
+  if (!hasLength(choice.kind)) return kindLabel(t, choice.kind);
+  return t('hub.decide.choice.timed', { kind: kindLabel(t, choice.kind), length: lengthPhrase(t, locale, choice.durationMs) });
+}
+
+/** The ladder's suggested outcome, in words. */
+export function outcomeLabel(t: HubT, locale: string, outcome: Suggestion['outcome']): string {
+  const choice = outcomeChoice(outcome);
+  return choice === null ? t('hub.decide.suggest.none') : choiceLabel(t, locale, choice);
+}
+
+/**
+ * Why a decision did not go through, as one sentence from the catalog (the server's own words are never shown). A refused
+ * body gets the most specific line its code allows.
+ */
+export function decideErrorText(t: HubT, error: HubError): string {
+  if (error.status === 413) return t('hub.decide.fail.tooLarge');
+  if (error.status === 400) {
+    if (error.code === 'invalid_excerpt') return t('hub.decide.fail.excerpt');
+    if (error.code === 'invalid_sanction') return t('hub.decide.fail.sanction');
+    return t('hub.decide.fail.invalid');
+  }
+  return errorText(t, error);
 }

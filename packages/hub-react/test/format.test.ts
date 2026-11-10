@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { absoluteTime, formatDuration, personTag, relativeTime, waitTone } from '../src/format.js';
+import { absoluteTime, formatDuration, listOf, personTag, relativeTime, timeOfDay, waitTone } from '../src/format.js';
 
 const NOW = 1_800_000_000_000;
 const MIN = 60_000;
@@ -71,5 +71,28 @@ describe('waitTone', () => {
     expect(waitTone(DAY)).toBe('stale');
     expect(waitTone(10 * DAY)).toBe('stale');
     expect(waitTone(-1)).toBe('fresh');
+  });
+});
+
+describe('timeOfDay', () => {
+  it('is the clock time of a moment, in the given zone and locale', () => {
+    expect(timeOfDay(Date.UTC(2027, 0, 15, 8, 5, 9), 'en', 'UTC')).toBe('8:05:09 AM');
+    expect(timeOfDay(Date.UTC(2027, 0, 15, 20, 5, 9), 'de', 'UTC')).toBe('20:05:09');
+  });
+  it('survives an unknown locale', () => {
+    expect(timeOfDay(Date.UTC(2027, 0, 15, 8, 5, 9), 'not a locale', 'UTC')).toMatch(/8:05:09/);
+  });
+});
+
+describe('listOf', () => {
+  it('joins in the locale', () => {
+    expect(listOf(['a', 'b', 'c'], 'en')).toBe('a, b, and c');
+    expect(listOf(['a', 'b'], 'en')).toBe('a and b');
+    expect(listOf(['a'], 'en')).toBe('a');
+    expect(listOf([], 'en')).toBe('');
+    expect(listOf(['a', 'b', 'c'], 'de')).toBe('a, b und c');
+  });
+  it('survives an unknown locale', () => {
+    expect(listOf(['a', 'b'], 'not a locale')).toMatch(/a.*b/);
   });
 });

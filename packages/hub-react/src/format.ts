@@ -61,3 +61,13 @@ export function waitTone(ms: number): WaitTone {
   if (ms < DAY) return 'aging';
   return 'stale';
 }
+
+/** The clock time of a moment, `8:05:09 AM`. Pass a time zone in tests; the default is the viewer's. */
+export function timeOfDay(at: number, locale: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat(safeLocale(locale), { timeStyle: 'medium', ...(timeZone === undefined ? {} : { timeZone }) }).format(at);
+}
+
+/** A list read aloud in the locale: `a, b, and c`. */
+export function listOf(items: readonly string[], locale: string): string {
+  return new Intl.ListFormat(safeLocale(locale), { style: 'long', type: 'conjunction' }).format(items);
+}
