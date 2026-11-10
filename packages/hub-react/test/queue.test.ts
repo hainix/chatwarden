@@ -1,0 +1,211 @@
+import { describe, expect, it } from 'vitest';
+import type { ReportSummary } from '@chatwarden/http/admin';
+import { groupQueue, queueStats } from '../src/queue.js';
+
+const T = 1_800_000_000_000;
+const MIN = 60_000;
+
+let seq = 0;
+function report(over: Partial<ReportSummary> = {}): ReportSummary {
+  seq += 1;
+  return {
+    id: over.id ?? `r${String(seq).padStart(4, '0')}`,
+    createdAt: T,
+    roomId: 'room-a',
+    tags: {},
+    category: 'harassment',
+    status: 'open',
+    badFaith: false,
+    targetPerson: 'person-a',
+    reporterPerson: 'rep-1',
+    actionedAt: null,
+    actionedBy: null,
+    targetHandle: 'Mallory',
+    ...over,
+  };
+}
+
+describe('groupQueue', () => {
+  it('is empty for no reports', () => {
+    expect(groupQueue([])).toEqual([]);
+  });
+
+  it('makes one group for one report', () => {
+    const [g, ...rest] = groupQueue([report({ id: 'r1', createdAt: T })]);
+    expect(rest).toEqual([]);
+    expect(g).toEqual({
+      person: 'person-a',
+      handle: 'Mallory',
+      handles: ['Mallory'],
+      categories: ['harassment'],
+      reports: 1,
+      open: 1,
+      actioned: 0,
+      dismissed: 0,
+      rooms: ['room-a'],
+      reporters: 1,
+      firstAt: T,
+      latestAt: T,
+      oldestOpenAt: T,
+      reportIds: ['r1'],
+    });
+  });
+
+  it('groups by the reported person, not by handle', () => {
+    const groups = groupQueue([
+      report({ id: 'a', targetPerson: 'p1', targetHandle: 'One' }),
+      report({ id: 'b', targetPerson: 'p2', targetHandle: 'One' }),
+      report({ id: 'c', targetPerson: 'p1', targetHandle: 'Uno' }),
+    ]);
+    expect(groups.map((g) => [g.person, g.reports])).toEqual(expect.arrayContaining([['p1', 2], ['p2', 1]]));
+    expect(groups).toHaveLength(2);
+  });
+
+  it('counts distinct rooms, reporters and categories, ignoring a blank room', () => {
+    const [g] = groupQueue([
+      report({ id: '1', roomId: 'x', reporterPerson: 'a', category: 'hate', createdAt: T }),
+      report({ id: '2', roomId: 'x', reporterPerson: 'b', category: 'hate', createdAt: T + 1 }),
+      report({ id: '3', roomId: 'y', reporterPerson: 'a', category: 'spam', createdAt: T + 2 }),
+      report({ id: '4', roomId: '', reporterPerson: 'c', category: 'other', createdAt: T + 3 }),
+    ]);
+    expect(g?.reports).toBe(4);
+    expect(g?.rooms.sort()).toEqual(['x', 'y']);
+    expect(g?.reporters).toBe(3);
+    expect(g?.categories).toHaveLength(3);
+    expect(g?.categories).toEqual(expect.arrayContaining(['hate', 'spam', 'other']));
+  });
+
+  it('lists report ids newest first, and tracks the first and latest time', () => {
+    const [g] = groupQueue([
+      report({ id: 'old', createdAt: T }),
+      report({ id: 'new', createdAt: T + 10 * MIN }),
+      report({ id: 'mid', createdAt: T + 5 * MIN }),
+    ]);
+    expect(g?.reportIds).toEqual(['new', 'mid', 'old']);
+    expect(g?.firstAt).toBe(T);
+    expect(g?.latestAt).toBe(T + 10 * MIN);
+  });
+
+  it('breaks a tie on time by id, so the order never depends on input order', () => {
+    const a = groupQueue([report({ id: 'a', createdAt: T }), report({ id: 'b', createdAt: T })]);
+    const b = groupQueue([report({ id: 'b', createdAt: T }), report({ id: 'a', createdAt: T })]);
+    expect(a[0]?.reportIds).toEqual(b[0]?.reportIds);
+  });
+
+  it('uses the newest known handle, lists the others, and has none when no report recorded one', () => {
+    const [g] = groupQueue([
+      report({ id: '1', createdAt: T, targetHandle: 'Old' }),
+      report({ id: '2', createdAt: T + 2, targetHandle: null }),
+      report({ id: '3', createdAt: T + 1, targetHandle: 'New' }),
+    ]);
+    expect(g?.handle).toBe('New');
+    expect(g?.handles).toEqual(['New', 'Old']);
+    const [none] = groupQueue([report({ targetHandle: null })]);
+    expect(none?.handle).toBeNull();
+    expect(none?.handles).toEqual([]);
+  });
+
+  it('counts reports by status', () => {
+    const [g] = groupQueue([
+      report({ status: 'open' }),
+      report({ status: 'open' }),
+      report({ status: 'actioned' }),
+      report({ status: 'dismissed' }),
+      report({ status: 'dismissed' }),
+      report({ status: 'dismissed' }),
+    ]);
+    expect([g?.open, g?.actioned, g?.dismissed]).toEqual([2, 1, 3]);
+  });
+
+  it('tracks the oldest OPEN report apart from the oldest report; null when none is open', () => {
+    const [g] = groupQueue([
+      report({ id: 'd', createdAt: T, status: 'dismissed' }),
+      report({ id: 'o1', createdAt: T + 5 * MIN, status: 'open' }),
+      report({ id: 'o2', createdAt: T + 9 * MIN, status: 'open' }),
+    ]);
+    expect(g?.firstAt).toBe(T);
+    expect(g?.oldestOpenAt).toBe(T + 5 * MIN);
+    const [none] = groupQueue([report({ status: 'actioned' })]);
+    expect(none?.oldestOpenAt).toBeNull();
+  });
+
+  it('sorts groups by newest activity first by default, and a tie by person', () => {
+    const groups = groupQueue([
+      report({ targetPerson: 'p-old', createdAt: T }),
+      report({ targetPerson: 'p-new', createdAt: T + 9 * MIN }),
+      report({ targetPerson: 'p-mid', createdAt: T + 3 * MIN }),
+      report({ targetPerson: 'p-tie', createdAt: T + 3 * MIN }),
+    ]);
+    expect(groups.map((g) => g.person)).toEqual(['p-new', 'p-mid', 'p-tie', 'p-old']);
+  });
+
+  it('sorts by longest wait or by report count on request', () => {
+    const items = [
+      report({ targetPerson: 'a', createdAt: T + 5 * MIN }),
+      report({ targetPerson: 'b', createdAt: T }),
+      report({ targetPerson: 'b', createdAt: T + 9 * MIN }),
+      report({ targetPerson: 'c', createdAt: T + 2 * MIN }),
+      report({ targetPerson: 'c', createdAt: T + 3 * MIN }),
+      report({ targetPerson: 'c', createdAt: T + 4 * MIN }),
+    ];
+    expect(groupQueue(items, { sort: 'oldest' }).map((g) => g.person)).toEqual(['b', 'c', 'a']);
+    expect(groupQueue(items, { sort: 'reports' }).map((g) => g.person)).toEqual(['c', 'b', 'a']);
+  });
+
+  it('counts a report once when the same page overlaps (same id twice)', () => {
+    const r = report({ id: 'dup' });
+    const [g] = groupQueue([r, r, { ...r }]);
+    expect(g?.reports).toBe(1);
+    expect(g?.reportIds).toEqual(['dup']);
+  });
+
+  it('does not change its input', () => {
+    const items = [report({ createdAt: T + 1 }), report({ createdAt: T })];
+    const copy = JSON.stringify(items);
+    groupQueue(items);
+    expect(JSON.stringify(items)).toBe(copy);
+  });
+
+  it('handles 60+ reports from many people', () => {
+    const items: ReportSummary[] = [];
+    for (let i = 0; i < 130; i += 1) {
+      items.push(report({ targetPerson: `p${i % 13}`, reporterPerson: `r${i}`, createdAt: T + i * MIN, roomId: `room-${i % 4}` }));
+    }
+    const groups = groupQueue(items);
+    expect(groups).toHaveLength(13);
+    expect(groups.reduce((n, g) => n + g.reports, 0)).toBe(130);
+    for (const g of groups) {
+      expect(g.reports).toBe(10);
+      expect(g.reporters).toBe(10);
+      expect(g.reportIds).toHaveLength(10);
+    }
+    for (let i = 1; i < groups.length; i += 1) expect(groups[i - 1]!.latestAt).toBeGreaterThanOrEqual(groups[i]!.latestAt);
+  });
+
+  it('keeps a person id with odd characters as is, and never invents keys on the group', () => {
+    const [g] = groupQueue([report({ targetPerson: '__proto__' })]);
+    expect(g?.person).toBe('__proto__');
+    expect(Object.keys(g ?? {}).sort()).toEqual(
+      ['actioned', 'categories', 'dismissed', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporters', 'reports', 'rooms'].sort(),
+    );
+  });
+});
+
+describe('queueStats', () => {
+  it('is zero for an empty queue', () => {
+    expect(queueStats([], T)).toEqual({ people: 0, reports: 0, longestWaitMs: null, oldestGroup: null });
+  });
+  it('counts people, reports and the longest wait of an open report', () => {
+    const groups = groupQueue([
+      report({ targetPerson: 'a', createdAt: T - 30 * MIN }),
+      report({ targetPerson: 'a', createdAt: T - 5 * MIN }),
+      report({ targetPerson: 'b', createdAt: T - 90 * MIN }),
+    ]);
+    const stats = queueStats(groups, T);
+    expect([stats.people, stats.reports, stats.longestWaitMs, stats.oldestGroup?.person]).toEqual([2, 3, 90 * MIN, 'b']);
+  });
+  it('never reports a negative wait', () => {
+    const groups = groupQueue([report({ createdAt: T + 5 * MIN })]);
+    expect(queueStats(groups, T).longestWaitMs).toBe(0);
+  });
+});
