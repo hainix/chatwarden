@@ -1,0 +1,20 @@
+# Cloudflare Pages headers. Cloudflare joins a header that several rules set, so each header below is set by exactly one
+# rule. Cache-Control is only set for the hashed build output; everything else keeps the Pages default
+# (public, max-age=0, must-revalidate), so the HTML, theme-init.js and the icons always revalidate.
+#
+# No Strict-Transport-Security here on purpose: Pages preview URLs (<hash>.chatwarden.pages.dev) would inherit it. Turn HSTS on
+# for chatwarden.dev in the Cloudflare dashboard instead (see README.md).
+#
+# The page loads only same-origin files, so the policy is default-src 'self' with nothing added: no inline script (the theme
+# bootstrap is /theme-init.js), no inline style, no third-party host. test/meta.test.ts and test/browser.test.ts check this.
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
+
+# Vite names every file here with a content hash, so a year of immutable caching is safe.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

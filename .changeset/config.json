@@ -12,7 +12,8 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "@chatwarden/example-tiny-chat"
+    "@chatwarden/example-tiny-chat",
+    "@chatwarden/site"
   ],
   "___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH": {
     "onlyUpdatePeerDependentsWhenOutOfRange": true

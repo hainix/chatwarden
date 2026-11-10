@@ -1,0 +1,39 @@
+{
+  "name": "@chatwarden/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "chatwarden.dev landing page (not published).",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "og": "node scripts/assets.mjs",
+    "build": "npm run build:kit && node scripts/assets.mjs && tsc --noEmit -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "build:kit": "tsc -b ../packages/core ../packages/matcher ../packages/store-memory",
+    "pretest": "npm run build:kit"
+  },
+  "dependencies": {
+    "@chatwarden/core": "*",
+    "@chatwarden/matcher": "*",
+    "@chatwarden/store-memory": "*"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.9",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "jsdom": "^31.0.0",
+    "obscenity": "^0.4.6",
+    "playwright": "^1.65.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "vite": "^8.3.7",
+    "wawoff2": "^2.0.1"
+  }
+}
