@@ -1,4 +1,4 @@
-import { safeWarn } from '@chatwarden/core';
+import { isValidAuditActor, safeWarn } from '@chatwarden/core';
 import type { AuditAction, AuditTarget, Chatwarden, Logger, Role } from '@chatwarden/core';
 import { guard, requireRole } from '../auth.js';
 import type { Authenticate } from '../auth.js';
@@ -12,7 +12,8 @@ import type { Authz, KitRequest, KitResponse, RouteParams } from '../types.js';
 export interface AdminOptions {
   /**
    * Who is calling: the adopter's own auth (session, token, SSO). Returns the staff member's `actor` (a staff ref or
-   * login, as the audit trail takes it) and `role`, or `null` for nobody (401). May be async. A throw is a 500.
+   * login, as the audit trail takes it: 1..128 characters of `A-Z a-z 0-9 _ . : @ + -`, no spaces; any other actor is a
+   * 500 `internal` and a `chatwarden.http_bad_actor` log) and `role`, or `null` for nobody (401). May be async. A throw is a 500.
    */
   authorize: Authenticate;
   /** Overrides of the default minimum roles. Validated once, when the routes are built (`RangeError` for a bad one). */
@@ -46,6 +47,14 @@ export interface AdminContext {
   secure(permission: PermissionKey, handler: (call: AdminCall) => KitResponse | Promise<KitResponse>): RouteHandler;
 }
 
+/** `authorize` returned an actor the audit trail cannot hold: a bug in the adopter's hook. Fixed message, never the value. */
+export class BadActorError extends Error {
+  constructor() {
+    super('authorize: the actor is not an allowed staff ref');
+    this.name = 'BadActorError';
+  }
+}
+
 /** The audit row for a view could not be written. Fixed message, no input. */
 export class AuditFailedError extends Error {
   constructor() {
@@ -55,7 +64,19 @@ export class AuditFailedError extends Error {
 }
 
 export function createAdminContext(cw: Chatwarden, options: AdminOptions): AdminContext {
-  const { authorize, logger } = options;
+  const { logger } = options;
+  // The audit trail takes an actor of 1..128 of `A-Z a-z 0-9 _ . : @ + -` only. A hook that returns another (a display name,
+  // say) would make every view fail its audit write for no visible reason, and a decision store a name: refuse it here,
+  // once, before any handler runs. An empty or non-string actor is left to the guard (401, a malformed authz).
+  const authorize: typeof options.authorize = async (req) => {
+    const authz = await options.authorize(req);
+    const actor = (authz as { actor?: unknown } | null | undefined)?.actor;
+    if (typeof actor === 'string' && actor !== '' && !isValidAuditActor(actor)) {
+      safeWarn(logger, 'chatwarden.http_bad_actor');
+      throw new BadActorError();
+    }
+    return authz;
+  };
   // Validated once, here: a bad override fails at start-up, not on the first request.
   const permissions = resolvePermissions(options.permissions);
   return {

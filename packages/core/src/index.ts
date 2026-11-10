@@ -47,6 +47,7 @@ export {
   refCode,
   revokeSanction,
   GAP_NOTE_MAX,
+  MAX_SANCTION_DURATION_MS,
   SANCTION_KINDS,
   SanctionError,
   SANCTION_SOURCES,
@@ -92,6 +93,7 @@ export {
   AUDIT_TARGET_TYPES,
   AuditQueryError,
   AuditService,
+  isValidAuditActor,
   ROLES,
 } from './audit.js';
 export type {

@@ -120,6 +120,9 @@ export class AuditQueryError extends Error {
 const REF_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
 const ACTOR_RE = /^[A-Za-z0-9_.:@+-]{1,128}$/;
 
+/** True when `actor` is a string the audit trail accepts: 1..128 characters of `A-Z a-z 0-9 _ . : @ + -`. */
+export const isValidAuditActor = (actor: unknown): actor is string => typeof actor === 'string' && ACTOR_RE.test(actor);
+
 const newId = (): string => randomBytes(16).toString('base64url');
 
 const isAction = (v: unknown): v is AuditAction => typeof v === 'string' && (AUDIT_ACTIONS as readonly string[]).includes(v);

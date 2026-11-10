@@ -896,6 +896,127 @@ describe('responses carry no ip, hash or raw key', () => {
   });
 });
 
+describe('durations are capped at 365 days: null is the only permanent value', () => {
+  const YEAR = 365 * 24 * HOUR;
+  it('exactly the cap is accepted for a moderator (chat and ban)', async () => {
+    const { call, file } = await world();
+    for (const kind of ['chat', 'ban'] as const) {
+      const r = await file();
+      const res = await call('POST', `/reports/${r.id}/decide`, {
+        role: 'moderator',
+        body: decideBody([{ subject: r.target, kind, durationMs: YEAR, rule: 2 }]),
+      });
+      expect(res.status, kind).toBe(200);
+    }
+  });
+
+  it('one millisecond over, 9e15 and MAX_SAFE_INTEGER are 400 and decide nothing', async () => {
+    const { call, file, cw, audit } = await world();
+    const r = await file();
+    for (const durationMs of [YEAR + 1, 2 * YEAR, 9e15, Number.MAX_SAFE_INTEGER]) {
+      for (const kind of ['chat', 'area', 'ban']) {
+        const res = await call('POST', `/reports/${r.id}/decide`, {
+          role: 'senior',
+          body: decideBody([{ subject: r.target, kind, durationMs, rule: 2 }]),
+        });
+        expect(res.status, `${kind} ${durationMs}`).toBe(400);
+      }
+    }
+    expect(cw.reports.get(r.id)?.status).toBe('open');
+    expect(audit()).toEqual([]);
+  });
+
+  it('a moderator can no longer get a near-permanent ban: 9e15 is 400, null is 403, only a senior gets permanent', async () => {
+    const { call, file } = await world();
+    const r = await file();
+    const path = `/reports/${r.id}/decide`;
+    const ban = (durationMs: number | null) => decideBody([{ subject: r.target, kind: 'ban', durationMs, rule: 2 }]);
+    expect((await call('POST', path, { role: 'moderator', body: ban(9e15) })).status).toBe(400);
+    expect((await call('POST', path, { role: 'moderator', body: ban(null) })).status).toBe(403);
+    expect((await call('POST', path, { role: 'senior', body: ban(null) })).status).toBe(200);
+  });
+});
+
+describe('an authorize result with an actor the audit trail cannot hold is an adopter bug (500)', () => {
+  const bad = ['Jane Doe', 'jane\ndoe', 'a/b', 'x'.repeat(129), 'ann<script>', 'é'];
+  const ask = (cw: Chatwarden, logger: Logger, actor: string, method: string, path: string, body?: unknown) =>
+    createRouter(adminRoutes(cw, { authorize: () => ({ actor, role: 'owner' }), logger }))({
+      method,
+      path,
+      query: {},
+      headers: {},
+      body: undefined,
+      ...(body === undefined ? {} : { rawBody: JSON.stringify(body) }),
+    });
+
+  it('every route answers 500 internal before the handler runs, and logs chatwarden.http_bad_actor without the value', async () => {
+    const { cw, file, audit, logged } = await world();
+    const logger: Logger = { warn: (event, detail) => void logged.push([event, detail]) };
+    const r = await file();
+    logged.length = 0;
+    const routes: Array<[string, string, unknown]> = [
+      ['GET', '/reports', undefined],
+      ['GET', `/reports/${r.id}`, undefined],
+      ['POST', `/reports/${r.id}/suggest`, { level: null }],
+      ['POST', `/reports/${r.id}/decide`, decideBody([warning(r.target)])],
+      ['GET', `/people/${r.target}/history`, undefined],
+    ];
+    for (const actor of bad) {
+      for (const [method, path, body] of routes) {
+        const res = await ask(cw, logger, actor, method, path, body);
+        expect(res.status, `${actor} ${path}`).toBe(500);
+        expect(res.body).toEqual({ error: 'internal' });
+      }
+    }
+    expect(audit()).toEqual([]);
+    expect(cw.reports.get(r.id)?.status).toBe('open');
+    expect(logged.some(([e]) => e === 'chatwarden.http_bad_actor')).toBe(true);
+    for (const actor of bad) expect(JSON.stringify(logged)).not.toContain(actor);
+  });
+
+  it('controls: actors of the allowed charset (logins, emails, refs) are served', async () => {
+    const { cw, file, logged } = await world();
+    const logger: Logger = { warn: (event, detail) => void logged.push([event, detail]) };
+    const r = await file();
+    for (const actor of ['ann', 'a.b@x.com', 'staff:42', 'u_1-2+3', 'x'.repeat(128)]) {
+      const res = await ask(cw, logger, actor, 'GET', `/reports/${r.id}`);
+      expect(res.status, actor).toBe(200);
+    }
+  });
+
+  it('an empty or non-string actor is still 401 (a malformed authz), not 500', async () => {
+    const { cw } = await world();
+    const logger: Logger = { warn() {} };
+    for (const actor of ['', 5 as never, null as never]) {
+      const res = await ask(cw, logger, actor, 'GET', '/reports');
+      expect(res.status).toBe(401);
+    }
+  });
+});
+
+describe('decide answers each group with the kind the facade recorded', () => {
+  it('a mixed decision on a merged person, then a replay, report the same correct kinds', async () => {
+    const { call, file, cw } = await world();
+    const r = await file();
+    const body = decideBody([
+      { subject: r.target, kind: 'warning', durationMs: null, rule: 2 },
+      { subject: r.target, kind: 'chat', durationMs: HOUR, rule: 2 },
+      { subject: r.bystander, kind: 'note', durationMs: null, rule: 2 },
+      { subject: r.target, kind: 'ban', durationMs: 2 * HOUR, rule: 2 },
+    ]);
+    // Merge the target with another person first, so the decision is keyed by the surviving id.
+    cw.rooms.seat('merge-room', 'm1', { clientKey: 'merge-other-key', accountId: 'acct-merge-http' }, 'Other');
+    cw.rooms.seat('merge-room', 'm2', { clientKey: `${KEY_TARGET}-1`, accountId: 'acct-merge-http' }, 'Tgt');
+    const first = await call('POST', `/reports/${r.id}/decide`, { body });
+    expect(first.status).toBe(200);
+    const kinds = (first.body as { groups: Array<{ kind: string }> }).groups.map((g) => g.kind);
+    expect([...kinds].sort()).toEqual(['ban', 'chat', 'note', 'warning']);
+    const again = await call('POST', `/reports/${r.id}/decide`, { body });
+    expect(again.status).toBe(200);
+    expect(again.body).toEqual({ ok: true, replay: true, groups: (first.body as { groups: unknown[] }).groups });
+  });
+});
+
 describe('audit rows hold ids and the action name only', () => {
   it('no reason, evidence or chat text is stored', async () => {
     const { call, file, audit } = await world();

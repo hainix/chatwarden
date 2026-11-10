@@ -309,16 +309,16 @@ describe('events: decide', () => {
     expect(r.events).toEqual([]);
   });
 
-  it('the staff-facing result keeps its shape: groups carry subject, groupId, refCode, noticeId only', async () => {
+  it('the staff-facing result keeps its shape: groups carry subject, groupId, refCode, kind, noticeId only', async () => {
     const r = await reported();
     const res = await decideUpheld(r, [{ subject: r.a, kind: 'chat', durationMs: H, rule: 2 }]);
     if (!res.ok) throw new Error('expected ok');
     expect(Object.keys(res).sort()).toEqual(['groups', 'ok', 'replay']);
-    expect(Object.keys(res.groups[0] ?? {}).sort()).toEqual(['groupId', 'noticeId', 'refCode', 'subject']);
+    expect(Object.keys(res.groups[0] ?? {}).sort()).toEqual(['groupId', 'kind', 'noticeId', 'refCode', 'subject']);
     // The replay answers with the same shape.
     const again = await decideUpheld(r, [{ subject: r.a, kind: 'chat', durationMs: H, rule: 2 }]);
     if (!again.ok) throw new Error('expected ok');
-    expect(Object.keys(again.groups[0] ?? {}).sort()).toEqual(['groupId', 'noticeId', 'refCode', 'subject']);
+    expect(Object.keys(again.groups[0] ?? {}).sort()).toEqual(['groupId', 'kind', 'noticeId', 'refCode', 'subject']);
   });
 });
 

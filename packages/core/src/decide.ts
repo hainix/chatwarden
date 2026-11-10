@@ -74,6 +74,8 @@ export interface DecisionGroup {
   subject: SubjectId;
   groupId: string;
   refCode: string;
+  /** The kind of the action that made this group. */
+  kind: SanctionKind;
   /** The player's notice for this action; null for a `note`, which tells the player nothing. */
   noticeId: string | null;
 }
@@ -450,7 +452,7 @@ export class DecisionService {
                 { notify: false },
               );
         if (noticeId !== null) told.add(a.subject);
-        groups.push({ subject: a.subject, groupId: written.groupId, refCode: written.refCode, noticeId });
+        groups.push({ subject: a.subject, groupId: written.groupId, refCode: written.refCode, kind: a.kind, noticeId });
         applied.push({
           groupId: written.groupId,
           refCode: written.refCode,

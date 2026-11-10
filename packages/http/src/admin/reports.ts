@@ -1,5 +1,5 @@
-import { CATEGORY_TO_RULE, SANCTION_KINDS } from '@chatwarden/core';
-import type { DecisionAction, DecisionInput, SanctionKind, StaffReport } from '@chatwarden/core';
+import { CATEGORY_TO_RULE, MAX_SANCTION_DURATION_MS, SANCTION_KINDS } from '@chatwarden/core';
+import type { DecisionAction, DecisionInput, ReportQuery, SanctionKind, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import type { AdminContext } from './context.js';
@@ -36,8 +36,13 @@ function parseAction(raw: unknown): DecisionAction {
   const kind = a.kind;
   if (typeof kind !== 'string' || !(SANCTION_KINDS as readonly string[]).includes(kind)) throw new ValidationError();
   // Required, not defaulted: leaving a duration out must never turn a chat restriction or a ban into a permanent one.
+  // Capped (as the facade caps it) so that `null` is the only permanent value and the ban_permanent check below cannot be
+  // sidestepped with a huge number.
   const durationMs = a.durationMs;
-  if (durationMs !== null && !(typeof durationMs === 'number' && Number.isSafeInteger(durationMs) && durationMs > 0)) {
+  if (
+    durationMs !== null &&
+    !(typeof durationMs === 'number' && Number.isSafeInteger(durationMs) && durationMs > 0 && durationMs <= MAX_SANCTION_DURATION_MS)
+  ) {
     throw new ValidationError();
   }
   const action: DecisionAction = { subject, kind: kind as SanctionKind, durationMs, rule: bodyRule(a.rule) };
@@ -52,23 +57,6 @@ function parseAction(raw: unknown): DecisionAction {
     action.lineIds = ids.map((id) => text(id, 64));
   }
   return action;
-}
-
-/**
- * Pair each decided group with the kind of the action that made it. The facade writes groups in the order of its sorted
- * actions (canonical subject, then kind), and the subjects here were checked to be the report's canonical staff refs, so
- * each person's kinds, sorted, line up with that person's groups.
- */
-function kindsOf(groups: ReadonlyArray<{ subject: string }>, actions: readonly DecisionAction[]): SanctionKind[] {
-  const bySubject = new Map<string, SanctionKind[]>();
-  for (const a of actions) bySubject.set(a.subject, [...(bySubject.get(a.subject) ?? []), a.kind]);
-  for (const kinds of bySubject.values()) kinds.sort();
-  const spare = [...actions].map((a) => a.kind).sort();
-  return groups.map((g) => {
-    const own = bySubject.get(g.subject)?.shift();
-    // A person merged since the first (replayed) decision has no list under their old id: fall back to what is left.
-    return own ?? spare.shift() ?? actions[0]?.kind ?? 'note';
-  });
 }
 
 /**
@@ -94,7 +82,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const limit = queryLimit(c.req.query.limit);
       // The facade validates `status` and the cursor (ReportQueryError -> 400) and clamps the limit.
       const page = cw.reports.list({
-        ...(status === undefined ? {} : { status: status as never }),
+        ...(status === undefined ? {} : { status: status as NonNullable<ReportQuery['status']> }),
         ...(cursor === undefined ? {} : { before: cursor }),
         ...(limit === undefined ? {} : { limit }),
       });
@@ -147,7 +135,9 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (actions.some((a) => a.kind === 'ban' && a.durationMs === null)) c.need('sanctions.apply.ban_permanent');
 
       const report = load(id);
-      const named = new Set(peopleOf(report));
+      // The staff refs the report shows, or the ids it was filed under (the facade makes them canonical, so a ref gone
+      // stale through a later merge still replays).
+      const named = new Set([...peopleOf(report), report.targetSubject, report.reporterSubject]);
       if (!actions.every((a) => named.has(a.subject))) throw new ValidationError();
 
       const result = await cw.decide({
@@ -167,13 +157,12 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       }
       // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
       c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
-      const kinds = kindsOf(result.groups, actions);
       return {
         status: 200,
         body: {
           ok: true,
           replay: result.replay,
-          groups: result.groups.map((g, i) => ({ refCode: g.refCode, kind: kinds[i] })),
+          groups: result.groups.map((g) => ({ refCode: g.refCode, kind: g.kind })),
         },
       };
     }),

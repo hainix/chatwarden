@@ -4,7 +4,7 @@ import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
 import { reportRoutes } from './reports.js';
 
-export { AuditFailedError, createAdminContext } from './context.js';
+export { AuditFailedError, BadActorError, createAdminContext } from './context.js';
 export type { AdminCall, AdminContext, AdminOptions } from './context.js';
 export { reportRoutes } from './reports.js';
 

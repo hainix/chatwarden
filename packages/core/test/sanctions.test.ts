@@ -6,6 +6,8 @@ import {
   SANCTION_KINDS,
   SanctionError,
   SanctionIndex,
+  MAX_SANCTION_DURATION_MS,
+  validateSanctionInput,
   type SanctionInput,
 } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
@@ -1160,5 +1162,41 @@ describe('MemoryStore.sanctionRefCode', () => {
     expect(store.sanctionRefCode('g1')).toBe('M-ABCDE');
     expect(store.sanctionRefCode('nope')).toBeNull();
     expect(store.sanctionRefCode('')).toBeNull();
+  });
+});
+
+describe('MAX_SANCTION_DURATION_MS: null is the only permanent value', () => {
+  it('is 365 days', () => {
+    expect(MAX_SANCTION_DURATION_MS).toBe(365 * DAY);
+  });
+
+  it.each(['chat', 'area', 'ban'] as const)('a %s at exactly the cap is accepted', async (kind) => {
+    const { store, subjects, s1 } = await person();
+    await applySanction(store, subjects, input(s1, { kind, durationMs: MAX_SANCTION_DURATION_MS }), NOW);
+    expect(rows(store)).toHaveLength(1);
+  });
+
+  it.each([MAX_SANCTION_DURATION_MS + 1, MAX_SANCTION_DURATION_MS + DAY, 9e15, Number.MAX_SAFE_INTEGER, 1e300, 2 ** 60])(
+    'a duration of %s is refused with SanctionError and nothing is written',
+    async (durationMs) => {
+      const { store, subjects, index, s1 } = await person();
+      await expect(applySanction(store, subjects, input(s1, { durationMs }), NOW, index)).rejects.toThrow(SanctionError);
+      await expect(applySanction(store, subjects, input(s1, { kind: 'ban', durationMs }), NOW, index)).rejects.toThrow(/duration/i);
+      expect(rows(store)).toEqual([]);
+      expect(index.active('chat', none, s1, NOW)).toBeNull();
+    },
+  );
+
+  it('validateSanctionInput refuses the same way, and null (permanent) stays valid', async () => {
+    const { s1 } = await person();
+    expect(() => validateSanctionInput(input(s1, { durationMs: MAX_SANCTION_DURATION_MS + 1 }))).toThrow(SanctionError);
+    expect(() => validateSanctionInput(input(s1, { durationMs: MAX_SANCTION_DURATION_MS }))).not.toThrow();
+    expect(() => validateSanctionInput(input(s1, { kind: 'ban', durationMs: null }))).not.toThrow();
+  });
+
+  it('the cap does not touch a warning or a note (they take null only)', async () => {
+    const { s1 } = await person();
+    expect(() => validateSanctionInput(input(s1, { kind: 'warning', durationMs: null }))).not.toThrow();
+    expect(() => validateSanctionInput(input(s1, { kind: 'note', durationMs: null }))).not.toThrow();
   });
 });
