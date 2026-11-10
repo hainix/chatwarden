@@ -24,6 +24,8 @@ export interface QueueGroup {
   reporters: number;
   /** Their staff refs (show the short tag, never the ref), newest report first. */
   reporterPersons: string[];
+  /** The newest handle a report recorded for each of those reporters; a reporter none recorded one for has no entry (name them by their tag). */
+  reporterHandles: Record<string, string>;
   /** When the oldest report in the group was filed, and the newest. */
   firstAt: number;
   latestAt: number;
@@ -68,6 +70,8 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     const rooms = new Set<string>();
     const reporters = new Set<string>();
     const reporterPersons: string[] = [];
+    // No prototype: a reporter's ref is an opaque string, and `__proto__` or `constructor` must be a key like any other.
+    const reporterHandles: Record<string, string> = Object.create(null) as Record<string, string>;
     let open = 0;
     let actioned = 0;
     let dismissed = 0;
@@ -85,6 +89,9 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       if (r.roomId !== '') rooms.add(r.roomId);
       reporters.add(r.reporterPerson);
       if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
+      // Newest first, so the first handle seen for a reporter is their latest. An older server sends none at all.
+      const reporterHandle = r.reporterHandle ?? null;
+      if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) reporterHandles[r.reporterPerson] = reporterHandle;
       if (r.status === 'open') {
         open += 1;
         oldestOpenAt = oldestOpenAt === null ? r.createdAt : Math.min(oldestOpenAt, r.createdAt);
@@ -103,6 +110,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       rooms: [...rooms],
       reporters: reporters.size,
       reporterPersons,
+      reporterHandles,
       firstAt: (list[list.length - 1] as ReportSummary).createdAt,
       latestAt: (list[0] as ReportSummary).createdAt,
       oldestOpenAt,

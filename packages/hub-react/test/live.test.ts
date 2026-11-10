@@ -15,6 +15,7 @@ const group = (person: string, over: Partial<QueueGroup> = {}): QueueGroup => ({
   rooms: [],
   reporters: 1,
   reporterPersons: ['rep-1'],
+  reporterHandles: {},
   firstAt: 1,
   latestAt: 1,
   oldestOpenAt: 1,

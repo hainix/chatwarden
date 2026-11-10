@@ -21,6 +21,7 @@ function report(over: Partial<ReportSummary> = {}): ReportSummary {
     actionedAt: null,
     actionedBy: null,
     targetHandle: 'Mallory',
+    reporterHandle: 'Rae',
     claim: null,
     viewing: [],
     ...over,
@@ -47,6 +48,7 @@ describe('groupQueue', () => {
       rooms: ['room-a'],
       reporters: 1,
       reporterPersons: ['rep-1'],
+      reporterHandles: { 'rep-1': 'Rae' },
       firstAt: T,
       latestAt: T,
       oldestOpenAt: T,
@@ -122,6 +124,39 @@ describe('groupQueue', () => {
     const [none] = groupQueue([report({ targetHandle: null })]);
     expect(none?.handle).toBeNull();
     expect(none?.handles).toEqual([]);
+  });
+
+  describe('reporterHandles: how a reporter is named', () => {
+    it('is the newest handle a report of theirs recorded, one entry per reporter', () => {
+      const [g] = groupQueue([
+        report({ id: '1', createdAt: T, reporterPerson: 'a', reporterHandle: 'OldRae' }),
+        report({ id: '2', createdAt: T + 2, reporterPerson: 'a', reporterHandle: 'NewRae' }),
+        report({ id: '3', createdAt: T + 1, reporterPerson: 'b', reporterHandle: 'Kes' }),
+      ]);
+      expect(g?.reporterHandles).toEqual({ a: 'NewRae', b: 'Kes' });
+    });
+
+    it('skips a report with no handle and falls back to an older one; a reporter with none at all has no entry', () => {
+      const [g] = groupQueue([
+        report({ id: '1', createdAt: T, reporterPerson: 'a', reporterHandle: 'Rae' }),
+        report({ id: '2', createdAt: T + 1, reporterPerson: 'a', reporterHandle: null }),
+        report({ id: '3', createdAt: T + 2, reporterPerson: 'b', reporterHandle: null }),
+      ]);
+      expect(g?.reporterHandles).toEqual({ a: 'Rae' });
+      expect('b' in (g?.reporterHandles ?? {})).toBe(false);
+    });
+
+    it('reads a report from an older server (no reporterHandle field) as no handle', () => {
+      const old = report({ id: '1' }) as Partial<ReportSummary>;
+      delete old.reporterHandle;
+      const [g] = groupQueue([old as ReportSummary]);
+      expect(g?.reporterHandles).toEqual({});
+    });
+
+    it('a handle that is only the reported person has is never used for a reporter', () => {
+      const [g] = groupQueue([report({ id: '1', targetHandle: 'Mallory', reporterHandle: null })]);
+      expect(g?.reporterHandles).toEqual({});
+    });
   });
 
   it('counts reports by status', () => {
@@ -205,8 +240,23 @@ describe('groupQueue', () => {
     const [g] = groupQueue([report({ targetPerson: '__proto__' })]);
     expect(g?.person).toBe('__proto__');
     expect(Object.keys(g ?? {}).sort()).toEqual(
-      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporterPersons', 'reporters', 'reports', 'rooms', 'viewing'].sort(),
+      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporterHandles', 'reporterPersons', 'reporters', 'reports', 'rooms', 'viewing'].sort(),
     );
+  });
+});
+
+describe('groupQueue: reporter handles with odd ref names', () => {
+  it('a reporter whose ref is __proto__ or constructor gets a handle of their own and pollutes nothing', () => {
+    const [g] = groupQueue([
+      report({ id: '1', createdAt: T, reporterPerson: '__proto__', reporterHandle: 'Glarn' }),
+      report({ id: '2', createdAt: T + 1, reporterPerson: 'constructor', reporterHandle: 'Snerp' }),
+      report({ id: '3', createdAt: T + 2, reporterPerson: 'toString', reporterHandle: null }),
+    ]);
+    expect(Object.hasOwn(g?.reporterHandles ?? {}, '__proto__')).toBe(true);
+    expect(g?.reporterHandles['__proto__']).toBe('Glarn');
+    expect(g?.reporterHandles['constructor']).toBe('Snerp');
+    expect(Object.hasOwn(g?.reporterHandles ?? {}, 'toString')).toBe(false);
+    expect(({} as Record<string, unknown>)['Glarn']).toBeUndefined();
   });
 });
 

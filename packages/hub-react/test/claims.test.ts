@@ -86,6 +86,7 @@ describe('teamOf', () => {
     rooms: [],
     reporters: 1,
     reporterPersons: ['rep-1'],
+    reporterHandles: {},
     firstAt: NOW - MIN,
     latestAt: NOW - MIN,
     oldestOpenAt: NOW - MIN,

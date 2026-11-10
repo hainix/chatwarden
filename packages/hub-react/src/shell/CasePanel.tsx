@@ -2,6 +2,7 @@ import { useId } from 'react';
 import type { ReactNode } from 'react';
 import { Masked } from '../case/Transcript.js';
 import { RecordItem } from '../case/Record.js';
+import { ReporterStanding, ReporterTotals } from '../case/ReporterStanding.js';
 import { useCase } from '../case/CaseContext.js';
 import { useHub } from '../context.js';
 import { personName, recordSummary } from '../excerpt.js';
@@ -112,34 +113,16 @@ function Blocked({ target, people }: { target: ReportPerson; people: ReportPerso
 
 /** One reporter's track record: how many reports they filed and how many held up, as a plain bar and the words. */
 function Reporter({ refId, name }: { refId: string; name: string }) {
-  const { t, locale, now, session } = useHub();
+  const { t, session } = useHub();
   const state = useHubData(`reporter:${refId}`, () => session.reporter(refId));
   const r = state.data;
-  const decided = r === undefined ? 0 : r.actioned + r.dismissed;
-  const suspended = r !== undefined && r.suspendedUntil !== null && r.suspendedUntil > now();
   return (
     <li className="cw-reporter">
       <div className="cw-reporter-head">
         <span className="cw-reporter-name">{name}</span>
-        {r !== undefined && <span className="cw-hint">{r.reports === 0 ? t('hub.reporters.none') : t('hub.reporters.record', { count: r.reports, upheld: r.actioned })}</span>}
+        {r !== undefined && <ReporterTotals record={r} />}
       </div>
-      {r === undefined ? (
-        state.error === null ? (
-          <Skeleton lines={1} />
-        ) : (
-          <p className="cw-hint">{t('hub.report.reporter.unavailable')}</p>
-        )
-      ) : (
-        <>
-          <meter className="cw-meter" min={0} max={Math.max(1, decided)} value={r.actioned} aria-label={t('hub.reporters.meter', { upheld: r.actioned, decided })} />
-          {r.badFaith > 0 && <p className="cw-hint">{t('hub.report.reporter.badFaith', { count: r.badFaith })}</p>}
-          {suspended && r.suspendedUntil !== null && (
-            <p>
-              <Tag tone="warn">{t('hub.report.reporter.suspended', { time: absoluteTime(r.suspendedUntil, locale) })}</Tag>
-            </p>
-          )}
-        </>
-      )}
+      {r === undefined ? state.error === null ? <Skeleton lines={1} /> : <p className="cw-hint">{t('hub.report.reporter.unavailable')}</p> : <ReporterStanding record={r} />}
     </li>
   );
 }
@@ -153,9 +136,12 @@ function Reporters({ people }: { people: ReportPerson[] }) {
   // This report's reporter first, then the others who reported the same person.
   const refs = [...new Set([report.reporterPerson, ...(group?.reporterPersons ?? [])])];
   const shown = refs.slice(0, REPORTERS_SHOWN);
+  // A reporter on this report is named from it; one from an earlier report by the handle that report recorded; else by their tag.
   const nameOf = (ref: string): string => {
     const p = people.find((x) => x.ref === ref);
-    return p === undefined ? t('hub.person.unnamed', { tag: personTag(ref) }) : personName(p, people, t);
+    if (p !== undefined) return personName(p, people, t);
+    const recorded = group?.reporterHandles[ref];
+    return recorded ?? t('hub.person.unnamed', { tag: personTag(ref) });
   };
   return (
     <Section title={t('hub.reporters.title')}>

@@ -731,9 +731,43 @@ describe('the pane beside the case', () => {
     expect(within(rows[0]!).getByText('1 report, 0 upheld')).toBeInTheDocument();
     expect(await within(rows[1]!).findByText('2 reports, 1 upheld')).toBeInTheDocument();
     expect(within(rows[1]!).getByRole('meter', { name: '1 of 1 decided reports upheld' })).toBeInTheDocument();
-    // The other reporter has no handle on this report: the short tag names them.
-    expect(within(rows[1]!).getByText(/^Person \S{8}$/)).toBeInTheDocument();
+    // The other reporter is not on this report, but an earlier report recorded their handle: it names them.
+    expect(within(rows[1]!).getByText('Rae', { selector: '.cw-reporter-name' })).toBeInTheDocument();
+    expect(within(list).queryByText(/^Person \S{8}$/)).toBeNull();
     void first;
+  });
+
+  it('who reported: a reporter from an earlier report is named by the handle that report recorded', async () => {
+    const w = await hubWorld();
+    await w.fileRich({ lines: TALK, reporter: 'Rae-old', room: 'e1' });
+    w.clock.t += 1000;
+    const current = await w.fileRich({ lines: TALK, reporter: 'Kes', room: 'e2' });
+    await open(w, current.id);
+    const list = await within(aside()).findByRole('list', { name: 'Reporters of this case' });
+    expect(within(list).getByText('Rae-old', { selector: '.cw-reporter-name' })).toBeInTheDocument();
+    expect(within(list).getByText('Kes', { selector: '.cw-reporter-name' })).toBeInTheDocument();
+  });
+
+  it('who reported: a reporter no report has a handle for still falls back to the short tag', async () => {
+    const w = await hubWorld();
+    await w.fileRich({ lines: TALK, reporter: '', room: 'b1' });
+    w.clock.t += 1000;
+    const current = await w.fileRich({ lines: TALK, reporter: 'Kes', room: 'b2' });
+    await open(w, current.id);
+    const list = await within(aside()).findByRole('list', { name: 'Reporters of this case' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(list).getByText('Kes', { selector: '.cw-reporter-name' })).toBeInTheDocument();
+    expect(within(list).getByText(/^Person \S{8}$/, { selector: '.cw-reporter-name' })).toBeInTheDocument();
+  });
+
+  it('who reported: a reporter shown by a handle never shows their ref, only the handle', async () => {
+    const w = await hubWorld();
+    const early = await w.fileRich({ lines: TALK, reporter: 'Rae', room: 'p1' });
+    w.clock.t += 1000;
+    const current = await w.fileRich({ lines: TALK, reporter: 'Kes', room: 'p2' });
+    await open(w, current.id);
+    await within(aside()).findByRole('list', { name: 'Reporters of this case' });
+    expect(aside().textContent).not.toContain(early.reporter);
   });
 
   it('shows five reporters at most and counts the rest, reading only five histories', async () => {
