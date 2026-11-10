@@ -30,12 +30,12 @@ export function CopyButton({ text, label, className = '' }: { text: string; labe
     <>
       <button
         type="button"
-        className={`copy ${copied ? 'is-copied' : ''} ${className}`.trim()}
+        className={`copy ${copied ? 'is-copied' : ''} ${state === 'failed' ? 'is-failed' : ''} ${className}`.replace(/\s+/g, ' ').trim()}
         aria-label={label}
         onClick={copy}
       >
         {copied ? <CheckIcon /> : <CopyIcon />}
-        <span aria-hidden="true">{copied ? 'Copied' : 'Copy'}</span>
+        <span aria-hidden="true">{copied ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}</span>
       </button>
       <span className="sr-only" role="status" aria-live="polite">
         {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed. Select the text and copy it.' : ''}

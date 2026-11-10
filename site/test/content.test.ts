@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FAQ, FEATURES, HERO_CHAT, INSTALL_ONE, INSTALL_KIT, LEVELS, STEPS, WORKS_WITH } from '../src/content';
+import { CEILINGS_INTRO, CEILINGS_TITLE, FAQ, FEATURES, HERO_CHAT, INSTALL_KIT, LEVELS, STEPS, WORKS_WITH } from '../src/content';
 
 const repo = join(__dirname, '..', '..');
 const readmes = [
@@ -16,8 +16,7 @@ describe('content is grounded in the READMEs', () => {
   it('the install commands appear in the README as written', () => {
     expect(allReadme).toContain('npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher');
     expect(INSTALL_KIT).toBe('npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher');
-    expect(INSTALL_ONE).toBe('npm i @chatwarden/core');
-    expect(allReadme).toContain('npm install @chatwarden/core');
+    expect(STEPS[0]?.code).toBe(INSTALL_KIT);
   });
   it('every import line in the step snippets is a real line from a README', () => {
     const lines = STEPS.flatMap((s) => s.code.split('\n')).filter((l) => /^import /.test(l));
@@ -27,11 +26,24 @@ describe('content is grounded in the READMEs', () => {
       expect(normal(allReadme), line).toContain(normal(line));
     }
   });
-  it('the API calls in the snippets exist in a README', () => {
+  it('every non-blank line of every code snippet is a verbatim line of a README', () => {
+    const readmeLines = new Set(allReadme.split('\n').map((l) => l.trimEnd()));
+    const lines = STEPS.flatMap((s) => s.code.split('\n')).filter((l) => l.trim() !== '');
+    expect(lines.length).toBeGreaterThan(25);
+    const missing = lines.filter((l) => !readmeLines.has(l.trimEnd()));
+    expect(missing).toEqual([]);
+  });
+  it('the snippets still call the real entry points (so the verbatim check is not vacuous)', () => {
     const code = STEPS.map((s) => s.code).join('\n');
-    for (const call of ['createChatwarden(', 'openStore(', 'cw.chat.accept(', 'cw.rooms.seat', 'new LiveTerms(', 'syntheticTermPack()']) {
-      if (code.includes(call)) expect(allReadme, call).toContain(call);
+    for (const call of ['createChatwarden(', 'openStore(', 'cw.chat.accept(', 'cw.rooms.seatConnection(', 'new LiveTerms(']) {
+      expect(code, call).toContain(call);
     }
+  });
+  it('the AI limits are worded as a commitment, not as shipped code (the levels are not built yet)', () => {
+    const copy = CEILINGS_TITLE + ' ' + CEILINGS_INTRO;
+    expect(copy).toMatch(/building in/i);
+    expect(copy).toMatch(/won.t be settings/i);
+    expect(copy).not.toMatch(/written into the code|are not settings/i);
   });
   it('snippets use only synthetic terms (when they use any)', () => {
     const all = JSON.stringify([STEPS, HERO_CHAT, FEATURES, FAQ, LEVELS, WORKS_WITH]);

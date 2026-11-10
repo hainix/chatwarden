@@ -20,7 +20,7 @@ export function CodeBlock({
         <span className="code-title">{title}</span>
         <CopyButton text={code} label={copyLabel} />
       </figcaption>
-      <pre tabIndex={0} aria-label={`${title}: code`}>
+      <pre tabIndex={0} role="region" aria-label={`${title}: code`}>
         <code>
           {tokens.map((t, i) =>
             t.kind === 'plain' ? t.text : (

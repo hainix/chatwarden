@@ -124,13 +124,12 @@ describe('built dist', () => {
     expect(hits).toEqual([]);
   });
 
-  it('names the invented terms and only those: the fixtures allow-list is exactly what the matcher ships', () => {
+  it('the invented-word allow-list is exactly the matcher fixtures pack, and the demo word ships', () => {
+    // The real guard against a stray term is the obscenity scan above; this pins the allow-list to the fixtures.
     const fixtureTerms = SYNTHETIC_TERMS.map((t) => t.term).sort();
     expect(fixtureTerms).toEqual(INVENTED.filter((t) => t !== 'glarn').sort());
-    const html = [...texts].filter(([f]) => f.endsWith('.js') || f.endsWith('.html')).map(([, t]) => t).join('\n');
-    const mentioned = INVENTED.filter((t) => new RegExp(t, 'i').test(html));
-    expect(mentioned).toContain('zorbak');
-    for (const t of mentioned) expect(INVENTED).toContain(t);
+    const js = [...texts].filter(([f]) => f.endsWith('.js')).map(([, t]) => t).join('\n');
+    expect(js).toMatch(/zorbak/i);
   });
 
   it('ships the favicon and keeps the initial JS small (under 120 KB gzip)', async () => {

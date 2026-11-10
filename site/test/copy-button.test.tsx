@@ -76,6 +76,37 @@ describe('CopyButton', () => {
     expect(status).toMatch(/copy failed/i);
   });
 
+  it('shows "Copy failed" visibly on the button for about 2 seconds, then resets', async () => {
+    stubClipboard(async () => {
+      throw new Error('denied');
+    });
+    render(<CopyButton text="a" label="Copy" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'));
+    });
+    const btn = screen.getByRole('button');
+    expect(btn.textContent).toContain('Copy failed');
+    expect(btn.className).toContain('is-failed');
+    await act(async () => {
+      vi.advanceTimersByTime(1900);
+    });
+    expect(screen.getByRole('button').textContent).toContain('Copy failed');
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+    });
+    expect(screen.getByRole('button').textContent).not.toContain('failed');
+    expect(screen.getByRole('button').className).not.toContain('is-failed');
+  });
+
+  it('shows "Copy failed" visibly when there is no clipboard API', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    render(<CopyButton text="a" label="Copy" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'));
+    });
+    expect(screen.getByRole('button').textContent).toContain('Copy failed');
+  });
+
   it('does not throw when there is no clipboard API at all', async () => {
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
     render(<CopyButton text="a" label="Copy" />);

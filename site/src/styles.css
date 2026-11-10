@@ -62,6 +62,8 @@
   --radius: 6px;
 }
 
+/* The light tokens are written twice on purpose: a CSS rule cannot share one selector list between an attribute and a
+   media query. The toggled theme and the first-visit system theme must stay in sync; test/styles.test.ts compares them. */
 :root[data-theme='light'] {
   color-scheme: light;
   --bg: #f6f4ff;
@@ -391,6 +393,10 @@ h3 {
   border-color: var(--warden);
   color: var(--warden);
 }
+.copy.is-failed {
+  border-color: #ff7a8d;
+  color: #ff7a8d;
+}
 .copy:focus-visible {
   outline-color: #ffc83d;
 }
@@ -584,6 +590,11 @@ h3 {
   animation-delay: calc(var(--d, 0s) + 0.7s);
 }
 .msg-refused .said {
+  /* Struck through in the base style, so it still is when animation is off. */
+  color: var(--screen-muted);
+  text-decoration: line-through;
+  text-decoration-color: #ff5b9c;
+  text-decoration-thickness: 2px;
   animation: strike 0.4s ease both;
   animation-delay: calc(var(--d, 0s) + 0.75s);
 }
@@ -663,11 +674,9 @@ h3 {
   }
 }
 @keyframes strike {
-  to {
-    color: var(--screen-muted);
-    text-decoration: line-through;
-    text-decoration-color: #ff5b9c;
-    text-decoration-thickness: 2px;
+  from {
+    color: var(--screen-text);
+    text-decoration-color: transparent;
   }
 }
 

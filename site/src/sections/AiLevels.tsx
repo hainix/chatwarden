@@ -1,5 +1,5 @@
 import { LockIcon } from '../components/Icons';
-import { CEILINGS, LEVELS } from '../content';
+import { CEILINGS, CEILINGS_INTRO, CEILINGS_TITLE, LEVELS } from '../content';
 
 export function AiLevels() {
   return (
@@ -34,9 +34,9 @@ export function AiLevels() {
           </ol>
           <aside className="ceilings" aria-labelledby="ceilings-title">
             <h3 id="ceilings-title">
-              <LockIcon /> Hard limits, written into the code
+              <LockIcon /> {CEILINGS_TITLE}
             </h3>
-            <p>These hold at every level. They are not settings.</p>
+            <p>{CEILINGS_INTRO}</p>
             <ul>
               {CEILINGS.map((c) => (
                 <li key={c}>{c}</li>

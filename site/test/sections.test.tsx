@@ -38,9 +38,9 @@ describe('Hero', () => {
     expect(screen.getByRole('link', { name: /try the demo/i }).getAttribute('href')).toBe('#demo');
     expect(screen.getAllByText(/free, open.source/i).length).toBeGreaterThan(0);
   });
-  it('shows the real install command with a copy button', () => {
+  it('shows the same three-package install command as step 1, with a copy button', () => {
     render(<Hero />);
-    expect(screen.getByText('npm i @chatwarden/core')).toBeTruthy();
+    expect(screen.getByText('npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher')).toBeTruthy();
     expect(screen.getByRole('button', { name: /copy install command/i })).toBeTruthy();
   });
   it('shows an animated chat snippet in which a synthetic term is refused with a stamp', () => {
@@ -134,6 +134,16 @@ describe('Steps', () => {
     const { container } = render(<Steps />);
     for (const pre of container.querySelectorAll('pre')) expect(pre.getAttribute('tabindex')).toBe('0');
   });
+  it('names each scrollable code block as a region (aria-label alone is not allowed on a bare pre)', () => {
+    const { container } = render(<Steps />);
+    const pres = [...container.querySelectorAll('pre')];
+    expect(pres).toHaveLength(3);
+    for (const pre of pres) {
+      expect(pre.getAttribute('role')).toBe('region');
+      expect(pre.getAttribute('aria-label')).toBeTruthy();
+    }
+    expect(screen.getAllByRole('region').length).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe('AiLevels', () => {
@@ -152,6 +162,13 @@ describe('AiLevels', () => {
     const { container } = render(<AiLevels />);
     expect(container.querySelector('[data-level="1"]')?.getAttribute('data-status')).toBe('coming');
     expect(screen.getAllByText(/coming soon/i).length).toBeGreaterThanOrEqual(4);
+  });
+  it('words the limits as a design commitment, not as shipped behaviour', () => {
+    render(<AiLevels />);
+    expect(screen.getByRole('heading', { name: /hard limits we.re building in/i })).toBeTruthy();
+    expect(screen.queryByText(/written into the code/i)).toBeNull();
+    expect(screen.queryByText(/are not settings/i)).toBeNull();
+    expect(screen.getAllByText(/won.t be settings/i).length).toBeGreaterThan(0);
   });
   it('states the hard ceilings', () => {
     render(<AiLevels />);

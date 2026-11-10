@@ -156,15 +156,21 @@ describe('changesets config', () => {
   it('versions every @chatwarden package together', () => {
     expect(config.fixed).toEqual([['@chatwarden/*']]);
   });
-  it('ignores the example', () => {
-    expect(config.ignore).toEqual(['@chatwarden/example-tiny-chat']);
+  it('ignores the example and the landing site (private, never versioned or published)', () => {
+    expect(config.ignore).toEqual(['@chatwarden/example-tiny-chat', '@chatwarden/site']);
   });
   it('has no linked groups', () => {
     expect(config.linked).toEqual([]);
   });
   it('ignores only private packages', () => {
     const tiny = readJson<Manifest>('examples', 'tiny-chat', 'package.json');
-    expect(config.ignore).toEqual([tiny.name]);
+    const site = readJson<Manifest>('site', 'package.json');
+    expect(config.ignore).toEqual([tiny.name, site.name]);
     expect(tiny.private).toBe(true);
+    expect(site.private).toBe(true);
+    expect(site.name).toBe('@chatwarden/site');
+  });
+  it('keeps the landing site out of the published package set', () => {
+    expect(names).not.toContain('@chatwarden/site');
   });
 });

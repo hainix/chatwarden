@@ -12,6 +12,7 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "@chatwarden/example-tiny-chat"
+    "@chatwarden/example-tiny-chat",
+    "@chatwarden/site"
   ]
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CopyButton } from '../components/CopyButton';
 import { ReplayIcon } from '../components/Icons';
-import { HERO_CHAT, INSTALL_ONE } from '../content';
+import { HERO_CHAT, INSTALL_KIT } from '../content';
 
 // Delays (seconds) for the one orchestrated moment: lines arrive, the invented slur is refused with a stamp.
 const DELAYS = [0.5, 1.7, 3.1, 5.4];
@@ -65,8 +65,8 @@ export function Hero() {
               Try the demo
             </a>
             <div className="cmd">
-              <code>{INSTALL_ONE}</code>
-              <CopyButton text={INSTALL_ONE} label="Copy install command" />
+              <code>{INSTALL_KIT}</code>
+              <CopyButton text={INSTALL_KIT} label="Copy install command" />
             </div>
           </div>
           <p className="hero-note">Made for indie developers and the coding agents that help them.</p>

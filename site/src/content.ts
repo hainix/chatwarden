@@ -8,7 +8,6 @@ export const NPM_URL = 'https://www.npmjs.com/package/@chatwarden/core';
 export const ISSUES_URL = `${REPO_URL}/issues`;
 export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`;
 
-export const INSTALL_ONE = 'npm i @chatwarden/core';
 export const INSTALL_KIT = 'npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher';
 
 export type Verdict = 'delivered' | 'refused';
@@ -195,6 +194,9 @@ export const LEVELS: Level[] = [
     status: 'coming',
   },
 ];
+
+export const CEILINGS_TITLE = "Hard limits we're building in";
+export const CEILINGS_INTRO = "When the AI levels ship, these will hold at every level, and they won't be settings.";
 
 export const CEILINGS: string[] = [
   'The AI can never ban.',
