@@ -178,6 +178,9 @@
   font-size: var(--cw-text-m);
   font-weight: 600;
 }
+.cw-player .cw-dialog > .cw-title {
+  margin-bottom: var(--cw-space-3);
+}
 .cw-player .cw-head {
   display: flex;
   align-items: center;
@@ -263,6 +266,10 @@
   background: var(--cw-surface);
 }
 
+.cw-player .cw-restricted .cw-text {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
 .cw-player .cw-restricted {
   display: flex;
   align-items: center;

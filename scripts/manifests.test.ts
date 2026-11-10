@@ -30,11 +30,11 @@ const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
 // The React UI packages are new in this release line: they peer on ^0.1.1 (the first version that has the routes they call)
 // until the release changeset raises every peer. The exception is named here, so any other package keeps ^0.1.0.
 const UI_PEER_RANGE = '^0.1.1';
-const UI_PACKAGES = new Set(['@chatwarden/hub-react']);
+const UI_PACKAGES = new Set(['@chatwarden/hub-react', '@chatwarden/player-react']);
 const peerRangeOf = (pkgName: string): string => (UI_PACKAGES.has(pkgName) ? UI_PEER_RANGE : PEER_RANGE);
 
 describe('published package set', () => {
-  it('is the eight expected packages, none private', () => {
+  it('is the nine expected packages, none private', () => {
     expect(names.sort()).toEqual(
       [
         '@chatwarden/core',
@@ -42,6 +42,7 @@ describe('published package set', () => {
         '@chatwarden/http',
         '@chatwarden/hub-react',
         '@chatwarden/matcher',
+        '@chatwarden/player-react',
         '@chatwarden/profanity',
         '@chatwarden/store-memory',
         '@chatwarden/store-sqlite',
@@ -184,6 +185,27 @@ describe('hub-react', () => {
   it('dev-depends on the kit the tests run on and on the test tools, not as peers', () => {
     for (const d of ['@chatwarden/matcher', '@chatwarden/store-memory', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {
       expect(hub().devDependencies?.[d], d).toBeDefined();
+    }
+  });
+});
+
+describe('player-react', () => {
+  const player = (): Manifest & { sideEffects?: unknown; exports?: Record<string, unknown> } =>
+    published.find((p) => p.pkg.name === '@chatwarden/player-react')!.pkg as Manifest & { sideEffects?: unknown; exports?: Record<string, unknown> };
+  it('peers on react, react-dom and core only, at the hub ranges; bundles none of them', () => {
+    expect(Object.keys(player().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', 'react', 'react-dom']);
+    expect(player().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
+    expect(player().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
+    expect(player().peerDependencies?.['@chatwarden/core']).toBe(UI_PEER_RANGE);
+    expect(player().dependencies).toBeUndefined();
+  });
+  it('ships the stylesheet as ./styles.css and lists only it under sideEffects', () => {
+    expect(player().exports?.['./styles.css']).toBe('./src/styles.css');
+    expect(player().sideEffects).toEqual(['./src/styles.css']);
+  });
+  it('dev-depends on the kit the tests run on, on hub-react for the transport type check, and on the test tools, not as peers', () => {
+    for (const d of ['@chatwarden/http', '@chatwarden/store-memory', '@chatwarden/hub-react', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {
+      expect(player().devDependencies?.[d], d).toBeDefined();
     }
   });
 });

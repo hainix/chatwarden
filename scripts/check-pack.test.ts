@@ -327,8 +327,8 @@ describe('nodeImports', () => {
 
 describe('nodeImportProblems (browser-safe packages)', () => {
   const file = (path: string, source: string) => ({ path, source });
-  it('names core, hub-react and store-memory as the browser-safe packages', () => {
-    expect([...BROWSER_SAFE].sort()).toEqual(['@chatwarden/core', '@chatwarden/hub-react', '@chatwarden/store-memory']);
+  it('names core, hub-react, player-react and store-memory as the browser-safe packages', () => {
+    expect([...BROWSER_SAFE].sort()).toEqual(['@chatwarden/core', '@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/store-memory']);
   });
   it('flags a node import in a browser-safe package, per file and module', () => {
     const out: string[] = nodeImportProblems({

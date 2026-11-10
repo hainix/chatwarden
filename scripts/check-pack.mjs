@@ -140,7 +140,7 @@ export function bareImports(source) {
 }
 
 /** The packages that must run in a browser: their compiled code may import no Node builtin, not even `node:crypto`. */
-export const BROWSER_SAFE = new Set(['@chatwarden/core', '@chatwarden/hub-react', '@chatwarden/store-memory']);
+export const BROWSER_SAFE = new Set(['@chatwarden/core', '@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/store-memory']);
 
 /**
  * The Node builtins a JavaScript source imports (`node:fs`, `crypto`, `node:fs/promises` -> `fs`), one entry per import, in

@@ -29,7 +29,7 @@ export function RestrictedChatLine(props: RestrictedChatLineProps) {
     <Root theme={theme} className={className}>
       <p className="cw-restricted" role="status">
         <Card kind="chat" />
-        <span>{text}</span>
+        <span className="cw-text">{text}</span>
         {refCode !== undefined && (
           <>
             {' '}

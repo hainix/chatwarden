@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
 
-// The browser-safe packages (core, matcher, store-memory and hub-react) may import no Node builtin from src: not statically, not through a
+// The browser-safe packages (core, matcher, store-memory, hub-react and player-react) may import no Node builtin from src: not statically, not through a
 // dynamic import(), not through a bare name. This lints snippets as if they sat in those folders with the repo's real
 // eslint config, so a weakened ban fails here.
 
@@ -20,6 +20,8 @@ const BROWSER_SAFE_SRC = [
   'packages/matcher/src/x.ts',
   'packages/hub-react/src/x.ts',
   'packages/hub-react/src/x.tsx',
+  'packages/player-react/src/x.ts',
+  'packages/player-react/src/x.tsx',
 ];
 
 describe.each(BROWSER_SAFE_SRC)('%s', (file) => {
