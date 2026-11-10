@@ -952,3 +952,45 @@ describe('LiveTerms.matchName', () => {
     expect(typeof r.live.matchName).toBe('function');
   });
 });
+
+describe('row ids come from Web Crypto, not a node: import', () => {
+  const letters = (n: number) => String.fromCharCode(97 + Math.floor(n / 26), 97 + (n % 26));
+  it('are 22 base64url characters, all distinct across many adds', async () => {
+    const r = await loaded();
+    const ids = new Set<string>();
+    for (let i = 0; i < 300; i++) {
+      const res = await r.live.change('a', (e) => e.addTerm({ term: `blorft${letters(i)}`, language: 'en' }));
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.value).toMatch(ID);
+        ids.add(res.value);
+      }
+    }
+    expect(ids.size).toBe(300);
+  });
+
+  it('use every byte of the random source (the last id character carries only 2 bits of the final byte)', async () => {
+    const spy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(a: T): T => {
+      (a as unknown as Uint8Array).fill(0xff);
+      return a;
+    });
+    try {
+      const r = await loaded();
+      const res = await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }));
+      expect(res.ok && res.value).toBe('_'.repeat(21) + 'w');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('the matcher source has no node: or Node builtin import', async () => {
+    const { readFileSync, readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : f.endsWith('.ts') ? [join(dir, f)] : []));
+    const { fileURLToPath } = await import('node:url');
+    for (const file of walk(fileURLToPath(new URL('../src', import.meta.url)))) {
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/(?:from|import\s*\()\s*['"]node:/);
+    }
+  });
+});

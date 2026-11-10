@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
 
-// The browser-safe packages (core and store-memory) may import no Node builtin from src: not statically, not through a
+// The browser-safe packages (core, matcher and store-memory) may import no Node builtin from src: not statically, not through a
 // dynamic import(), not through a bare name. This lints snippets as if they sat in those folders with the repo's real
 // eslint config, so a weakened ban fails here.
 
@@ -14,7 +14,7 @@ async function messages(code: string, file: string): Promise<string[]> {
   return (result?.messages ?? []).filter((m) => m.ruleId === 'no-restricted-imports' || m.ruleId === 'no-restricted-syntax').map((m) => `${m.ruleId}: ${m.message}`);
 }
 
-const BROWSER_SAFE_SRC = ['packages/core/src/x.ts', 'packages/store-memory/src/x.ts'];
+const BROWSER_SAFE_SRC = ['packages/core/src/x.ts', 'packages/store-memory/src/x.ts', 'packages/matcher/src/x.ts'];
 
 describe.each(BROWSER_SAFE_SRC)('%s', (file) => {
   it.each([

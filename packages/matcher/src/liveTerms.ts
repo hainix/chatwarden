@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import type { Clock, Logger } from '@chatwarden/core';
 import {
   buildMatcher,
@@ -43,7 +42,20 @@ export type CheckResult = { ok: true; hits: string[] } | { ok: false; error: str
 /** A change the rules refuse. The message is safe to hand back to a moderator (it never quotes a term). */
 class Refusal extends Error {}
 
-const newId = () => randomBytes(16).toString('base64url');
+const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+/** 16 random bytes as 22 unpadded base64url characters. Web Crypto (`globalThis.crypto`, present in Node and every browser),
+ *  never a `node:` import, so the matcher bundles for a browser. */
+function newId(): string {
+  const raw = new Uint8Array(16);
+  (globalThis as { crypto: { getRandomValues(a: Uint8Array): unknown } }).crypto.getRandomValues(raw);
+  let out = '';
+  for (let i = 0; i < 15; i += 3) {
+    const n = (raw[i]! << 16) | (raw[i + 1]! << 8) | raw[i + 2]!;
+    out += B64URL[n >> 18]! + B64URL[(n >> 12) & 63]! + B64URL[(n >> 6) & 63]! + B64URL[n & 63]!;
+  }
+  const last = raw[15]! << 16;
+  return out + B64URL[last >> 18]! + B64URL[(last >> 12) & 63]!;
+}
 const errName = (err: unknown) => (err instanceof Error ? err.name : typeof err);
 
 /** Describes a build failure without quoting the term, which MatcherBuildError's message does. */
