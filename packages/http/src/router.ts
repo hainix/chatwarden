@@ -13,7 +13,7 @@ const PARAM_RE = /^[A-Za-z0-9_-]{1,64}$/;
  */
 export const REF_PARAM_RE = /^(?!\.+$)[A-Za-z0-9_.:-]{1,64}$/;
 /** The named param patterns a route may ask for, as `:name~ref`. A param with no `~` uses `PARAM_RE`. */
-const PATTERNS: Readonly<Record<string, RegExp>> = { ref: REF_PARAM_RE };
+const PATTERNS: ReadonlyMap<string, RegExp> = new Map([['ref', REF_PARAM_RE]]);
 const SEGMENT = '(?:[A-Za-z0-9_.~-]+|:[A-Za-z0-9_]+(?:~[a-z]+)?)';
 const KEY_RE = new RegExp(`^([A-Z]+) (/${SEGMENT}(?:/${SEGMENT})*|/)$`);
 const BAD_ROUTE = 'router: a route must look like "GET /path/:param"';
@@ -75,7 +75,7 @@ export function createRouter(routes: RouteTable): (req: KitRequest) => Promise<K
     const patterns = parts.map((p) => {
       const name = p.startsWith(':') ? p.split('~')[1] : undefined;
       if (name === undefined) return PARAM_RE;
-      const pattern = PATTERNS[name];
+      const pattern = PATTERNS.get(name);
       if (pattern === undefined) throw new RangeError(BAD_ROUTE);
       return pattern;
     });

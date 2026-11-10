@@ -278,6 +278,10 @@ describe('createRouter: the `~ref` param pattern', () => {
     expect(() => createRouter({ 'GET /rows/:id~nope': () => ok() })).toThrow(RangeError);
     expect(() => createRouter({ 'GET /rows/:id~': () => ok() })).toThrow(RangeError);
     expect(() => createRouter({ 'GET /rows/:id~ref~ref': () => ok() })).toThrow(RangeError);
+    // Names that exist on Object.prototype are not patterns.
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf', 'prototype']) {
+      expect(() => createRouter({ [`GET /rows/:x~${name}`]: () => ok() }), name).toThrow(RangeError);
+    }
   });
 
   it('a `~ref` route and a plain route of one shape collide', () => {

@@ -333,6 +333,11 @@ export interface Chatwarden {
    * policy given at creation is the default here, and `policy` overrides it field by field.
    */
   purge(policy?: Partial<RetentionPolicy>): Promise<PurgeResult>;
+  /**
+   * Is the store answering? True when `schemaVersion()` returns; false (logged `chatwarden.ready_failed`, error class
+   * only) when it throws, a closed store included. Synchronous, never throws, reads nothing else. For a readiness probe.
+   */
+  ready(): boolean;
   /** Wait for background store writes (identity linking) to land. */
   flush(): Promise<void>;
   /** Flush, then close the store (a database handed in by the host stays open). */
@@ -698,6 +703,15 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       for (const [k, v] of Object.entries(policy ?? {})) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
       checkRetentionFloors(merged, limits.reports.suspendWindowMs);
       return await purge(store, clock.now(), merged);
+    },
+    ready: () => {
+      try {
+        store.schemaVersion();
+        return true;
+      } catch (err) {
+        safeWarn(logger, 'chatwarden.ready_failed', { error: err instanceof Error ? err.name : typeof err });
+        return false;
+      }
     },
     flush: () => subjects.flush(),
     close: async () => {

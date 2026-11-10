@@ -32,3 +32,7 @@ export type {
   TermsAdmin,
   TermsEditor,
 } from './admin/index.js';
+export { playerRoutes } from './player.js';
+export type { NamesRateLimit, PlayerOptions } from './player.js';
+export { healthRoutes } from './health.js';
+export type { HealthOptions } from './health.js';

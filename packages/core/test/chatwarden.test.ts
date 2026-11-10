@@ -1692,3 +1692,37 @@ describe('createChatwarden: names.check, odd inputs', () => {
     expect(cw.names.check(`zorbak ${'a '.repeat(5_000)}`)).toEqual({ ok: false, reason: 'name_not_allowed', rule: 1 });
   });
 });
+
+describe('createChatwarden: ready', () => {
+  it('is true while the store answers schemaVersion()', async () => {
+    const { cw } = await setup();
+    expect(cw.ready()).toBe(true);
+    expect(cw.ready()).toBe(true);
+  });
+
+  it('is false, logged by class only, when schemaVersion() throws; true again when it recovers', async () => {
+    const store = new MemoryStore();
+    const { cw, logged } = await setup({}, store);
+    logged.length = 0;
+    let down = true;
+    const spy = vi.spyOn(store, 'schemaVersion').mockImplementation(() => {
+      if (down) throw new TypeError('secret detail 203.0.113.9');
+      return 3;
+    });
+    expect(cw.ready()).toBe(false);
+    expect(logged).toEqual([['chatwarden.ready_failed', { error: 'TypeError' }]]);
+    expect(JSON.stringify(logged)).not.toContain('secret');
+    down = false;
+    expect(cw.ready()).toBe(true);
+    spy.mockRestore();
+  });
+
+  it('never throws, even for a thrown non-error, and never touches anything else in the store', async () => {
+    const store = new MemoryStore();
+    const { cw } = await setup({}, store);
+    vi.spyOn(store, 'schemaVersion').mockImplementation(() => {
+      throw 'plain string';
+    });
+    expect(cw.ready()).toBe(false);
+  });
+});

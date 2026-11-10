@@ -29,6 +29,7 @@ const TABLE = {
   method_not_allowed: { status: 405, message: 'Method not allowed.' },
   already_decided: { status: 409, message: 'The report has already been decided.' },
   payload_too_large: { status: 413, message: 'The request body is too large.' },
+  rate_limited: { status: 429, message: 'Too many requests. Try again later.' },
 } as const;
 
 export type ErrorCode = keyof typeof TABLE;
