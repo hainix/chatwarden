@@ -359,7 +359,7 @@ describe('the admin screens on a phone', () => {
   });
 
   it('adds no phone-only rule: nothing here needs the cascade order to win', () => {
-    expect(media('max-width: 51.1875rem')).not.toMatch(/cw-(term|docb|gap|rule|hits|ladder|audit|blocked-table)/);
+    expect(media('max-width: 51.1875rem')).not.toMatch(/cw-(term|doc\b|gap|rule|hits|ladder|audit|blocked-table)/);
   });
 
   it('each screen draws its table inside the scroll box', async () => {

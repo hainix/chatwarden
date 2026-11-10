@@ -2,8 +2,8 @@
 
 The moderator hub for Chatwarden, the open-source chat moderation kit for games: a React UI over the kit's staff HTTP API, built
 as a workbench for a team of moderators. The queue of open cases is always at the left, the case or screen in the middle; a
-moderator takes the next case, sees who else is on what, reads a report and decides it, and (as the later screens land) sanctions
-people, edits blocked terms and reads the audit trail. It talks to the API through a small injected transport, so the
+moderator takes the next case, sees who else is on what, reads a report and decides it, sanctions
+people, edits the blocked terms, closes rule gaps and reads the audit trail and the guide. It talks to the API through a small injected transport, so the
 same hub runs against a real server (`fetch`) or against the real staff routes running in the page (a demo).
 
 Status: pre-release, as-is, no support promise.
@@ -94,7 +94,11 @@ export const client = createHubClient(routerTransport(handle));
 | `#/reports/:id` | The case: header and claim, Evidence (the transcript), Reports and History tabs, the decision bar docked under them, and beside it the person's record, blocked attempts and who reported | `reports.read`; deciding needs `reports.decide`, actions need `sanctions.apply` |
 | `#/people/:ref` | The person page, in the middle pane (the queue stays at the left): what is in force now (each with a Revoke that asks for a reason), the timeline of reports about them and every sanction (kind, rule, time left, ref code, who, where it came from, revoked), how the reports they filed have gone, and buttons to Sanction them or add a note. A sanction is a kind, a length, a rule (or "No rule covers this" with a note for the rules review), a reason and "also block their IP address for up to 24 hours"; a permanent ban needs `sanctions.apply.ban_permanent`. Nothing is sent to the player from here. Opening it writes one `history.view`; a write reads the history once more | `history.read`; Sanction and Add a note need `sanctions.apply`, Revoke needs `sanctions.revoke` |
 | `#/actions` | All actions: everyone's sanctions, newest first, 25 at a time, with an "Automatic only" filter (the kit's `auto_filter` source). The Overview's Recent actions links here with "See all" | `history.read` |
-| `#/terms`, `#/blocked`, `#/gaps`, `#/audit`, `#/guide` | Routes and tabs exist; the screens arrive in later releases and show a short "not available yet" page until then | the permission of the tab |
+| `#/terms` | Terms and exceptions by language (named by `Intl.DisplayNames`, the code where it has no name): word, note, last changed by and when, blocks in the last 30 days, and an Active switch. The words are hidden until "Show words" is on. Add or edit a term (a dry run first: `POST /terms/check`), add or edit an exception, and "Test a message" | `terms.read`; Add, Edit and the switches need `terms.write` |
+| `#/blocked` | The lines the term filter refused, over 24 hours, 7 or 30 days: time, person tag, room, the term and the blocked text, both hidden until shown (per line, or "Show blocked words"). "Add exception" opens the exception form on Terms, filled in; "View term" opens Terms at that term. Opening it, and each change of window, writes one `blocked.view`; showing a word reads nothing | `blocked.read`; the term needs `terms.read`; Add exception needs `terms.write` |
+| `#/gaps` | Rule gaps: open gaps with their note and ref code, closed ones below. An owner closes one as "Made it rule N" (the rules in force) or "Not a rule" | `gaps.read`; closing needs `gaps.close` |
+| `#/audit` | The audit trail, newest first, 50 at a time: time, staff member, role, action and target, filtered by staff member and action | `audit.read` (a senior and up) |
+| `#/guide` | The Community Rules and the escalation ladder (the profile's own, else the kit's `LADDER_TABLE`) from the policy data, then the generated moderator guide (`GET /policy?format=markdown`) through a safe renderer | `policy.read` |
 
 The tabs a role cannot use are not shown: Audit appears for a senior and above, and every tab follows the permission table the
 server reports in `GET /me` (so a `permissions` override on the server is respected).
@@ -188,6 +192,32 @@ messages first. Results are announced in a polite live region.
 and for each reporter shown (a reporter's record is kept for 5 minutes, so a reporter in several cases is read once), `blocked.view`
 when the role can read blocked lines (kept 5 minutes), and `policy.view` once per session (the rules are kept until the hub closes).
 Deciding writes `report.decide` and nothing else about the case. The queue list is one `report.view` row with no target, as before.
+
+### Terms, Blocked, Rule gaps, Audit and the Guide
+
+**Words stay hidden.** A blocked word is hidden until a moderator chooses to see it, on every screen that holds one. On Terms, "Show words" (off by default)
+shows the words, and until then each row is named by its place ("Edit term 3", never by the word) so a screen reader hears none. On Blocked, the term and the
+blocked text of a line show behind that line's Show button, or all at once with "Show blocked words". A hidden word is not in the page at all (a test checks
+the markup), and showing one reads nothing again. A note is staff text and shows as written.
+
+**Adding a term.** The form asks for the word, its language and an optional note. A new or changed word is first checked with a dry run (`POST /terms/check`,
+which writes nothing). If it would also block lines that are fine today, the lines are listed (twenty, then a count) and the save waits for "Save anyway", an
+in-page confirm. An exception is saved at once, since it only lets things through. A flat 400 `invalid_term` reads "The list refused this word (it may be a
+duplicate, malformed, or the last active word)." The same sentence covers a switch that would turn off the last active term. A network failure keeps what you typed and offers Try again.
+
+**Blocked to Terms.** "Add exception" and "View term" go to Terms through the hub's session, not the address, so nothing but `#/terms` is in the URL. The exception
+form opens with the blocked line (cut to 200 characters) and its language filled in; cut it down to the phrase that should be allowed.
+
+**What they cost in audited reads.** Terms writes nothing to the trail by reading (the kit audits each change: `term.add`, `term.update`, `term.toggle` and the
+exception forms). Blocked writes one `blocked.view` each time it opens and each time the window changes. Rule gaps reads no rules until an owner opens a close form
+(then the session reads them once: one `policy.view`). The Guide reads the policy once per hub session. Audit writes nothing.
+
+**Audit shows ids, not text.** A person or report is a short tag and a link; a term or exception is only "A term" or "An exception", because the id of a row can be
+the word itself. The trail never holds chat text.
+
+**The guide is rendered safely.** `Markdown` (internal) draws headings, paragraphs, lists, emphasis, code, tables and links, and nothing else. Raw HTML, images,
+quotes and entities are shown as the text they are. A link is drawn only for `https:` or a relative address; any other link keeps its words and loses its address.
+No string is ever turned into HTML.
 
 ### `HubClient`
 
@@ -380,6 +410,10 @@ Content-Security-Policy needs `font-src 'self'` for it.
 - **No caching of staff answers.** The kit sends `cache-control: no-store` on every staff response; keep that through your proxy.
 - **Content-Security-Policy.** Nothing is injected at run time. Allow the stylesheet file and, if the hub calls another origin,
   that origin in `connect-src`.
+- **Blocked words are not in the page until shown.** The Terms and Blocked screens do not put a term or a blocked line in the markup, a label or a screen-reader
+  name until a moderator shows it. That is for the moderator's sake, not a privacy boundary: the words are in the answer the hub already has.
+- **Opening Blocked is an audited read.** It writes one `blocked.view` each time it opens and each time the window changes. Term text needs `terms.read`
+  (without it the term column says so). Add exception and View term pass a handoff in memory, never in the address.
 - **Server text is not echoed.** Error messages come from the hub's own catalog, not from the response body.
 
 ## Links
