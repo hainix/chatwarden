@@ -14,8 +14,17 @@ export type { HubCatalog, HubParams, HubT, HubText } from './i18n.js';
 export { buildPath, hashRouter, memoryRouter, normalizePath, parseRoute, tabOf } from './router.js';
 export type { HubRouter, MemoryRouter, ObservableRouter, QueueStatus, Route, TabName } from './router.js';
 
-export { groupQueue, queueStats } from './queue.js';
-export type { QueueGroup, QueueSort, QueueStats } from './queue.js';
+export { filterGroups, groupQueue, queueStats } from './queue.js';
+export type { QueueFilter, QueueGroup, QueueSort, QueueStats } from './queue.js';
+
+export { actorInitial, actorName, holderOf, liveClaim, teamOf } from './claims.js';
+export type { Holder, TeamMember } from './claims.js';
+
+export { UNDO_MS, useToasts } from './toasts.js';
+export type { Hold, HoldInput, ToastInput, Toasts } from './toasts.js';
+
+export { shortcutFor } from './shortcuts.js';
+export type { ShortcutAction } from './shortcuts.js';
 
 export { useHub } from './context.js';
 export type { HubContextValue } from './context.js';

@@ -1,94 +1,46 @@
 import { useMemo } from 'react';
-import { fetchAll } from '../client.js';
+import { actorName, liveClaim, teamOf } from '../claims.js';
 import { useHub } from '../context.js';
-import { formatDuration, personTag, waitTone } from '../format.js';
+import { formatDuration, waitTone } from '../format.js';
 import { useHubData } from '../hooks.js';
-import type { HubData } from '../hooks.js';
-import { kindLabel, ruleLabel, sanctionLength, sanctionState, sourceLabel } from '../labels.js';
-import { groupQueue, queueStats } from '../queue.js';
-import type { QueueGroup } from '../queue.js';
-import { QueueRow } from '../QueueRow.js';
-import type { Page, ReportSummary, SanctionRow } from '../types.js';
-import { Empty, Fetched, Link, Panel, PersonChip, Tag, Time } from '../ui.js';
-import type { Tone } from '../ui.js';
+import { groupName, kindLabel, ruleLabel, sanctionLength, sanctionState, sourceLabel } from '../labels.js';
+import { useOptionalQueue } from '../liveQueue.js';
+import type { LiveQueue } from '../liveQueue.js';
+import { queueStats } from '../queue.js';
+import type { SanctionRow } from '../types.js';
+import { Avatar, Card, Empty, Fetched, Link, Panel, PersonChip, Skeleton, Tag, Time } from '../ui.js';
 
-/** The open queue is read 200 reports a page, up to 5 pages: 1,000 reports. Past that the numbers say they are partial. */
-export const OVERVIEW_PAGE = 200;
-export const OVERVIEW_MAX_PAGES = 5;
-/** Groups shown under "Needs review". */
-export const REVIEW_SHOWN = 5;
 /** Sanctions shown under "Recent actions". */
 export const RECENT_SHOWN = 10;
 
-interface OpenQueue {
-  groups: QueueGroup[];
-  reports: number;
-  partial: boolean;
-}
-
 /**
- * The landing screen: what is waiting (the numbers and the people who have waited longest), and what was done lately. The
- * numbers come from the open queue alone, grouped here; no single report is opened, because opening one is an audited read.
- * Each panel loads and fails on its own, and a panel the role cannot read is left out.
+ * The landing screen, now the team view: what is waiting (the numbers and the oldest wait), who is on and what each person is
+ * holding, and what was done lately. The numbers come from the live queue the shell already keeps, so this screen asks the
+ * server for nothing of its own except the recent actions. There is no ranking of moderators: load is shown so a team can
+ * share it out, and speed is not shown because it rewards the wrong thing.
  */
 export function Overview() {
   const { t, can } = useHub();
-  const showQueue = can('reports.read');
+  const queue = useOptionalQueue();
   const showRecent = can('history.read');
   return (
     <div className="cw-screen">
       <h2 className="cw-screen-title" tabIndex={-1}>{t('hub.overview.title')}</h2>
-      {showQueue && <QueueSection withRecent={showRecent} />}
-      {!showQueue && showRecent && <RecentActions />}
+      {queue !== null && <Stats queue={queue} />}
+      <div className={queue !== null && showRecent ? 'cw-cols' : undefined}>
+        {queue !== null && <Team queue={queue} />}
+        {showRecent && <RecentActions />}
+      </div>
     </div>
   );
 }
 
-function QueueSection({ withRecent }: { withRecent: boolean }) {
-  const { client, t } = useHub();
-  const state: HubData<OpenQueue> = useHubData('overview:queue', async () => {
-    const all: Page<ReportSummary> = await fetchAll(
-      (cursor) => client.listReports({ status: 'open', limit: OVERVIEW_PAGE, ...(cursor === undefined ? {} : { cursor }) }),
-      { maxPages: OVERVIEW_MAX_PAGES },
-    );
-    return { groups: groupQueue(all.items, { sort: 'oldest' }), reports: all.items.length, partial: all.next !== null };
-  });
-  return (
-    <>
-      <Stats queue={state.data} />
-      <div className={withRecent ? 'cw-cols' : undefined}>
-        <Panel
-          title={t('hub.overview.review.title')}
-          action={
-            <Link to={{ name: 'reports', status: 'open' }} className="cw-link">
-              {t('hub.overview.review.all')}
-            </Link>
-          }
-        >
-          <Fetched state={state} what={t('hub.state.what.reports')}>
-            {(queue) =>
-              queue.groups.length === 0 ? (
-                <Empty title={t('hub.overview.review.empty.title')}>{t('hub.overview.review.empty.body')}</Empty>
-              ) : (
-                <ul className="cw-qlist" aria-label={t('hub.reports.list.label')}>
-                  {queue.groups.slice(0, REVIEW_SHOWN).map((g) => (
-                    <QueueRow key={g.person} group={g} earlier={false} />
-                  ))}
-                </ul>
-              )
-            }
-          </Fetched>
-        </Panel>
-        {withRecent && <RecentActions />}
-      </div>
-    </>
-  );
-}
-
-function Stats({ queue }: { queue: OpenQueue | undefined }) {
+function Stats({ queue }: { queue: LiveQueue }) {
   const { t, locale, now } = useHub();
   const numbers = useMemo(() => new Intl.NumberFormat(locale), [locale]);
-  const stats = queue === undefined ? null : queueStats(queue.groups, now());
+  const ready = queue.status === 'ready';
+  const stats = ready ? queueStats(queue.groups, now()) : null;
+  const unclaimed = ready ? queue.groups.filter((g) => liveClaim(g.claim, now()) === null).length : 0;
   const dash = '–';
   const wait = stats?.longestWaitMs ?? null;
   const oldest = stats?.oldestGroup ?? null;
@@ -97,9 +49,9 @@ function Stats({ queue }: { queue: OpenQueue | undefined }) {
   let note = '';
   if (stats !== null) {
     longest = wait === null ? t('hub.overview.stat.none') : formatDuration(wait, locale);
-    const who = oldest === null ? '' : (oldest.handle ?? `${t('hub.person.prefix')} ${personTag(oldest.person)}`);
-    note = oldest === null ? t('hub.overview.stat.nobody') : t('hub.overview.stat.longestNote', { who });
+    note = oldest === null ? t('hub.overview.stat.nobody') : t('hub.overview.stat.longestNote', { who: groupName(t, oldest) });
   }
+  const overdue = wait !== null && waitTone(wait) === 'stale';
 
   return (
     <section className="cw-stats" aria-label={t('hub.overview.stats.label')}>
@@ -111,16 +63,58 @@ function Stats({ queue }: { queue: OpenQueue | undefined }) {
         <div className="cw-stat">
           <dt>{t('hub.overview.stat.reports')}</dt>
           <dd className="cw-stat-value">{stats === null ? dash : numbers.format(stats.reports)}</dd>
-          {queue?.partial === true && <dd className="cw-stat-note">{t('hub.overview.stat.partial', { count: queue.reports })}</dd>}
+          {queue.partial && <dd className="cw-stat-note">{t('hub.overview.stat.partial', { count: queue.reports })}</dd>}
         </div>
-        <div className="cw-stat" data-wait={wait === null ? undefined : waitTone(wait)}>
+        <div className="cw-stat" data-wait={wait === null ? undefined : overdue ? 'overdue' : 'ok'}>
           <dt>{t('hub.overview.stat.longest')}</dt>
           <dd className="cw-stat-value">{longest}</dd>
           <dd className="cw-stat-note">{note}</dd>
-          {queue?.partial === true && wait !== null && <dd className="cw-stat-note">{t('hub.overview.stat.longestPartial')}</dd>}
+          {queue.partial && wait !== null && <dd className="cw-stat-note">{t('hub.overview.stat.longestPartial')}</dd>}
+        </div>
+        <div className="cw-stat">
+          <dt>{t('hub.overview.stat.unclaimed')}</dt>
+          <dd className="cw-stat-value">{stats === null ? dash : numbers.format(unclaimed)}</dd>
+          <dd className="cw-stat-note">{stats === null ? '' : unclaimed === 0 ? t('hub.overview.stat.unclaimedNone') : t('hub.overview.stat.unclaimedNote')}</dd>
         </div>
       </dl>
     </section>
+  );
+}
+
+/** Who is on, from who holds or views a case, with what each is carrying. */
+function Team({ queue }: { queue: LiveQueue }) {
+  const { t, me, now } = useHub();
+  const team = teamOf(queue.groups, me.actor, now());
+  return (
+    <Panel title={t('hub.team.title')}>
+      {queue.status === 'loading' ? (
+        <div className="cw-panel-pad">
+          <p role="status" className="cw-sr">
+            {t('hub.queue.loading')}
+          </p>
+          <Skeleton lines={3} />
+        </div>
+      ) : (
+        <>
+          <ul className="cw-team" aria-label={t('hub.team.list')}>
+            {team.map((m) => (
+              <li key={m.actor} className="cw-member">
+                <Avatar actor={m.actor} you={m.you} />
+                <div className="cw-member-text">
+                  <strong>
+                    {actorName(m.actor)}
+                    {m.you && <span className="cw-member-you"> {t('hub.team.you')}</span>}
+                  </strong>
+                  <span>{t('hub.team.handling', { count: m.handling })}</span>
+                  {m.viewing > 0 && <span>{t('hub.team.viewing', { count: m.viewing })}</span>}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {team.length === 1 && <p className="cw-hint cw-panel-pad">{t('hub.team.alone')}</p>}
+        </>
+      )}
+    </Panel>
   );
 }
 
@@ -146,7 +140,6 @@ function RecentActions() {
   );
 }
 
-const STATE_TONE: Record<ReturnType<typeof sanctionState>, Tone> = { active: 'accent', pending: 'idle', ended: 'idle', revoked: 'idle' };
 const STATE_KEY = {
   active: 'hub.sanction.status.active',
   pending: 'hub.sanction.status.pending',
@@ -154,26 +147,29 @@ const STATE_KEY = {
   revoked: 'hub.sanction.status.revoked',
 } as const;
 
-/** One sanction: what and how long, its state, who it is on, the rule, who made it, and when. */
+/** One sanction: the referee card for its kind, what and how long, its state, who it is on, the rule, who made it, and when. */
 function ActionRow({ sanction: s }: { sanction: SanctionRow }) {
   const { t, locale } = useHub();
   const state = sanctionState(s);
   const length = sanctionLength(t, locale, s);
   return (
     <li className="cw-arow">
-      <div className="cw-arow-head">
-        <strong>{kindLabel(t, s.kind)}</strong>
-        {length !== '' && <span className="cw-arow-length">{length}</span>}
-        <Tag tone={STATE_TONE[state]}>{t(STATE_KEY[state])}</Tag>
-        {s.source !== 'moderator' && <Tag tone="accent">{sourceLabel(t, s.source)}</Tag>}
-      </div>
-      <div className="cw-facts">
-        <Link to={{ name: 'person', ref: s.person }} className="cw-link">
-          <PersonChip person={s.person} />
-        </Link>
-        <span>{ruleLabel(t, s.rule)}</span>
-        <span>{s.automated ? t('hub.sanction.automatic') : t('hub.sanction.by', { actor: s.actor })}</span>
-        <Time at={s.startsAt} />
+      <Card kind={s.kind} />
+      <div className="cw-arow-body">
+        <div className="cw-arow-head">
+          <strong>{kindLabel(t, s.kind)}</strong>
+          {length !== '' && <span className="cw-arow-length">{length}</span>}
+          <Tag>{t(STATE_KEY[state])}</Tag>
+          {s.source !== 'moderator' && <Tag>{sourceLabel(t, s.source)}</Tag>}
+        </div>
+        <div className="cw-facts">
+          <Link to={{ name: 'person', ref: s.person }} className="cw-link">
+            <PersonChip person={s.person} />
+          </Link>
+          <span>{ruleLabel(t, s.rule)}</span>
+          <span>{s.automated ? t('hub.sanction.automatic') : t('hub.sanction.by', { actor: s.actor })}</span>
+          <Time at={s.startsAt} />
+        </div>
       </div>
     </li>
   );

@@ -144,7 +144,9 @@ describe('Hub: screens the role cannot use, unknown paths, and screens still to 
     const w = await hubWorld({ role: 'moderator' });
     renderHub(w, { path: '/audit' });
     expect(await screen.findByRole('heading', { name: 'Not available for your role' })).toBeInTheDocument();
-    expect(w.sent.map((r) => r.path)).toEqual(['/me']);
+    // The queue still loads beside it (a moderator reads reports); the audit trail is never asked for.
+    expect(w.sent[0]?.path).toBe('/me');
+    expect(w.sent.map((r) => r.path)).not.toContain('/audit');
   });
 
   it('shows "that page does not exist" for an unknown path, with a way back that works', async () => {

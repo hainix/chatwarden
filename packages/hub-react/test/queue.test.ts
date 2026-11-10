@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ReportSummary } from '@chatwarden/http/admin';
-import { groupQueue, queueStats } from '../src/queue.js';
+import { filterGroups, groupQueue, queueStats } from '../src/queue.js';
 
 const T = 1_800_000_000_000;
 const MIN = 60_000;
@@ -51,6 +51,8 @@ describe('groupQueue', () => {
       oldestOpenAt: T,
       reportIds: ['r1'],
       entries: [{ id: 'r1', category: 'harassment', createdAt: T }],
+      claim: null,
+      viewing: [],
     });
   });
 
@@ -201,7 +203,7 @@ describe('groupQueue', () => {
     const [g] = groupQueue([report({ targetPerson: '__proto__' })]);
     expect(g?.person).toBe('__proto__');
     expect(Object.keys(g ?? {}).sort()).toEqual(
-      ['actioned', 'categories', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporters', 'reports', 'rooms'].sort(),
+      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporters', 'reports', 'rooms', 'viewing'].sort(),
     );
   });
 });
@@ -222,5 +224,94 @@ describe('queueStats', () => {
   it('never reports a negative wait', () => {
     const groups = groupQueue([report({ createdAt: T + 5 * MIN })]);
     expect(queueStats(groups, T).longestWaitMs).toBe(0);
+  });
+});
+
+describe('groupQueue: claims and viewing', () => {
+  const claim = { by: 'maya@example.test', since: T - MIN, until: T + 9 * MIN };
+
+  it('takes the claim and the viewers from the open reports of the person', () => {
+    const [g] = groupQueue([
+      report({ id: 'a', createdAt: T - 2 * MIN, claim, viewing: ['rin@example.test'] }),
+      report({ id: 'b', createdAt: T - MIN, claim, viewing: ['rin@example.test', 'ana@example.test'] }),
+    ]);
+    expect(g?.claim).toEqual(claim);
+    expect(g?.viewing).toEqual(['ana@example.test', 'rin@example.test']);
+  });
+
+  it('is unclaimed and unviewed when no report says otherwise', () => {
+    const [g] = groupQueue([report({}), report({})]);
+    expect([g?.claim, g?.viewing]).toEqual([null, []]);
+  });
+
+  it('copes with a server that sends neither field (an older server)', () => {
+    const old = report({}) as Partial<ReportSummary>;
+    delete old.claim;
+    delete old.viewing;
+    const [g] = groupQueue([old as ReportSummary]);
+    expect([g?.claim, g?.viewing]).toEqual([null, []]);
+  });
+
+  it('ignores a claim on a report that is no longer open', () => {
+    const [g] = groupQueue([report({ id: 'a', status: 'actioned', claim, viewing: ['x@example.test'] })]);
+    expect([g?.claim, g?.viewing]).toEqual([null, []]);
+  });
+
+  it('keeps people apart: one person claimed does not claim the next', () => {
+    const groups = groupQueue([report({ targetPerson: 'p1', claim }), report({ targetPerson: 'p2' })]);
+    expect(groups.find((g) => g.person === 'p1')?.claim).toEqual(claim);
+    expect(groups.find((g) => g.person === 'p2')?.claim).toBeNull();
+  });
+
+  it('copies the claim and the viewers, so a later change to the input does not leak in', () => {
+    const input = report({ claim: { ...claim }, viewing: ['a@example.test'] });
+    const [g] = groupQueue([input]);
+    input.claim!.by = 'changed';
+    input.viewing.push('b@example.test');
+    expect(g?.claim?.by).toBe('maya@example.test');
+    expect(g?.viewing).toEqual(['a@example.test']);
+  });
+});
+
+describe('filterGroups', () => {
+  const ann = 'ann@example.test';
+  const live = (by: string) => ({ by, since: T - MIN, until: T + MIN });
+  const groups = groupQueue([
+    report({ targetPerson: 'p1', category: 'harassment', claim: live(ann) }),
+    report({ targetPerson: 'p2', category: 'hate', claim: live('maya@example.test') }),
+    report({ targetPerson: 'p3', category: 'harassment' }),
+    report({ targetPerson: 'p3', category: 'spam' }),
+    report({ targetPerson: 'p4', category: 'spam', claim: { by: 'maya@example.test', since: T - 20 * MIN, until: T - 10 * MIN } }),
+  ]);
+  const people = (list: typeof groups): string[] => list.map((g) => g.person).sort();
+
+  it('all and all keeps everything', () => {
+    expect(people(filterGroups(groups, { claim: 'all', category: 'all' }, ann, T))).toEqual(['p1', 'p2', 'p3', 'p4']);
+  });
+
+  it('unclaimed keeps cases nobody holds, a lapsed claim counting as nobody', () => {
+    expect(people(filterGroups(groups, { claim: 'unclaimed', category: 'all' }, ann, T))).toEqual(['p3', 'p4']);
+  });
+
+  it('mine keeps only your live claims', () => {
+    expect(people(filterGroups(groups, { claim: 'mine', category: 'all' }, ann, T))).toEqual(['p1']);
+    expect(people(filterGroups(groups, { claim: 'mine', category: 'all' }, 'maya@example.test', T))).toEqual(['p2']);
+  });
+
+  it('a category keeps a person who has any report in it', () => {
+    expect(people(filterGroups(groups, { claim: 'all', category: 'spam' }, ann, T))).toEqual(['p3', 'p4']);
+    expect(people(filterGroups(groups, { claim: 'all', category: 'cheating' }, ann, T))).toEqual([]);
+  });
+
+  it('the two filters combine, and the order of the input is kept', () => {
+    expect(people(filterGroups(groups, { claim: 'unclaimed', category: 'harassment' }, ann, T))).toEqual(['p3']);
+    const ordered = filterGroups([...groups].reverse(), { claim: 'all', category: 'all' }, ann, T);
+    expect(ordered.map((g) => g.person)).toEqual([...groups].reverse().map((g) => g.person));
+  });
+
+  it('does not change its input', () => {
+    const before = groups.map((g) => g.person);
+    filterGroups(groups, { claim: 'mine', category: 'hate' }, ann, T);
+    expect(groups.map((g) => g.person)).toEqual(before);
   });
 });

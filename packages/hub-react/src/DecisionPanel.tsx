@@ -265,7 +265,7 @@ function ActionCard(props: CardProps) {
                         <input type="checkbox" checked={on} disabled={!on && full} onChange={() => onToggleLine(l.id)} />
                         <span className="cw-check-time">{timeOfDay(l.ts, locale)}</span>
                         <span className="cw-check-text">{l.raw}</span>
-                        {l.blocked && <Tag tone="bad">{t('hub.report.line.blocked')}</Tag>}
+                        {l.blocked && <Tag>{t('hub.report.line.blocked')}</Tag>}
                       </label>
                     </li>
                   );
@@ -572,8 +572,8 @@ function Decided({ detail }: { detail: ReportDetail }) {
   return (
     <div className="cw-decided">
       <div className="cw-decided-head">
-        <Tag tone={r.status === 'actioned' ? 'ok' : 'idle'}>{t(`hub.reports.tag.${r.status}`)}</Tag>
-        {r.badFaith && <Tag tone="bad">{t('hub.report.tag.badFaith')}</Tag>}
+        <Tag>{t(`hub.reports.tag.${r.status}`)}</Tag>
+        {r.badFaith && <Tag tone="warn">{t('hub.report.tag.badFaith')}</Tag>}
       </div>
       {r.actionedBy !== null && r.actionedAt !== null && (
         <p title={absoluteTime(r.actionedAt, locale)}>{t('hub.decide.decided.by', { actor: r.actionedBy, time: relativeTime(r.actionedAt, now(), locale) })}</p>

@@ -1,4 +1,5 @@
-import type { ReportCategory, ReportSummary } from './types.js';
+import { liveClaim } from './claims.js';
+import type { Claim, ReportCategory, ReportSummary } from './types.js';
 
 /**
  * Everything waiting on one reported person. The unit of work in the queue is a person, not a report: the kit's queue is a flat,
@@ -30,6 +31,10 @@ export interface QueueGroup {
   reportIds: string[];
   /** The same reports, newest first, with what a moderator can tell them apart by. */
   entries: Array<{ id: string; category: ReportCategory; createdAt: number }>;
+  /** Who holds the case (the person's open reports share one claim), or null. It may have lapsed: read it with `liveClaim`. */
+  claim: Claim | null;
+  /** The other staff who have the case open, sorted. A hint, never a lock. */
+  viewing: string[];
 }
 
 export type QueueSort = 'latest' | 'oldest' | 'reports';
@@ -64,7 +69,14 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     let actioned = 0;
     let dismissed = 0;
     let oldestOpenAt: number | null = null;
+    let claim: Claim | null = null;
+    const viewing = new Set<string>();
     for (const r of list) {
+      // Claims and viewers belong to the case, and the server sends them only on open reports (and, from an older server, not at all).
+      if (r.status === 'open') {
+        if (claim === null && r.claim !== null && r.claim !== undefined) claim = { by: r.claim.by, since: r.claim.since, until: r.claim.until };
+        for (const v of r.viewing ?? []) viewing.add(v);
+      }
       if (r.targetHandle !== null && !handles.includes(r.targetHandle)) handles.push(r.targetHandle);
       if (!categories.includes(r.category)) categories.push(r.category);
       if (r.roomId !== '') rooms.add(r.roomId);
@@ -91,6 +103,8 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       oldestOpenAt,
       reportIds: list.map((r) => r.id),
       entries: list.map((r) => ({ id: r.id, category: r.category, createdAt: r.createdAt })),
+      claim,
+      viewing: [...viewing].sort(),
     });
   }
 
@@ -102,6 +116,25 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     reports: (a, b) => b.reports - a.reports || b.latestAt - a.latestAt,
   };
   return groups.sort((a, b) => order[sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+}
+
+export interface QueueFilter {
+  claim: 'all' | 'unclaimed' | 'mine';
+  category: ReportCategory | 'all';
+}
+
+/**
+ * The cases a moderator has asked to see: by who holds them (a lapsed claim is nobody) and by category (a person with any report
+ * in it). Order is kept; the input is not changed.
+ */
+export function filterGroups(groups: readonly QueueGroup[], filter: QueueFilter, me: string, now: number): QueueGroup[] {
+  return groups.filter((g) => {
+    if (filter.category !== 'all' && !g.categories.includes(filter.category)) return false;
+    const held = liveClaim(g.claim, now);
+    if (filter.claim === 'unclaimed') return held === null;
+    if (filter.claim === 'mine') return held !== null && held.by === me;
+    return true;
+  });
 }
 
 export interface QueueStats {

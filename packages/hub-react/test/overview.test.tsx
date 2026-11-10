@@ -38,9 +38,11 @@ describe('Overview: an empty hub', () => {
     expect(stat('People waiting')).toBe('0');
     expect(stat('Open reports')).toBe('0');
     expect(stat('Longest wait')).toBe('None');
+    expect(stat('Unclaimed cases')).toBe('0');
     expect(within(panel('At a glance')).getByText('Nobody is waiting')).toBeInTheDocument();
-    expect(within(panel('Needs review')).getByText('All clear')).toBeInTheDocument();
-    expect(within(panel('Needs review')).getByText('No open reports. Nothing is waiting on you.')).toBeInTheDocument();
+    expect(within(panel('At a glance')).getByText('Every case has someone on it')).toBeInTheDocument();
+    // The all-clear is the queue pane's, beside the screen.
+    expect(within(screen.getByRole('region', { name: 'Open cases' })).getByText('All clear')).toBeInTheDocument();
     expect(within(panel('Recent actions')).getByText(/No actions yet/)).toBeInTheDocument();
   });
 });
@@ -77,7 +79,7 @@ describe('Overview: the numbers come from the open queue', () => {
     await ready();
     expect(stat('People waiting')).toBe('13');
     expect(stat('Open reports')).toBe('65');
-    expect(rows('Needs review')).toHaveLength(5);
+    expect(stat('Unclaimed cases')).toBe('13');
   });
 
   it('follows next across pages and stops after five pages, saying the count is partial', async () => {
@@ -126,42 +128,72 @@ describe('Overview: the numbers come from the open queue', () => {
     renderHub(w);
     await ready();
     expect(w.sent.filter((r) => /^\/reports\/[^/]+/.test(r.path))).toEqual([]);
-    expect(w.sent.map((r) => `${r.method} ${r.path}`).sort()).toEqual(['GET /me', 'GET /reports', 'GET /sanctions']);
+    // The live queue reads the queue once for the whole hub (the screen, the pane and the top bar share it).
+    expect([...new Set(w.sent.map((r) => `${r.method} ${r.path}`))].sort()).toEqual(['GET /changes', 'GET /me', 'GET /reports', 'GET /sanctions']);
+    expect(w.sent.filter((r) => r.path === '/reports')).toHaveLength(1);
   });
 });
 
-describe('Overview: Needs review', () => {
-  it('shows the five longest-waiting people first, with a link to all reports', async () => {
-    const w = await hubWorld();
-    await queue(w, 7, 1);
-    const { user, router } = renderHub(w);
-    await ready();
-    const list = rows('Needs review');
-    expect(list).toHaveLength(5);
-    expect(list.map((li) => li.textContent)).toEqual(
-      ['Target0', 'Target1', 'Target2', 'Target3', 'Target4'].map((n) => expect.stringContaining(n)),
-    );
-    await user.click(within(panel('Needs review')).getByRole('link', { name: 'All reports' }));
-    expect(router.path).toBe('/reports');
-  });
-
-  it('each row has the handle, a short person tag, the counts and links to the newest report and the history', async () => {
-    const w = await hubWorld();
-    const [a, b] = await queue(w, 1, 2);
+describe('Overview: the team', () => {
+  it('lists you alone when nobody else holds or views a case, and says teammates show here', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    await queue(w, 2, 1);
     renderHub(w);
     await ready();
-    const [row] = rows('Needs review');
-    expect(row).toBeDefined();
-    const r = within(row!);
-    expect(r.getByText('Target0')).toBeInTheDocument();
-    expect(r.getByText(personTag(a!.person))).toBeInTheDocument();
-    expect(r.getByText('2 reports')).toBeInTheDocument();
-    expect(r.getByText('2 rooms')).toBeInTheDocument();
-    expect(r.getByText('2 reporters')).toBeInTheDocument();
-    expect(r.getByText('Harassment')).toBeInTheDocument();
-    // newest first: b was filed after a
-    expect(r.getByRole('link', { name: 'Review the newest report against Target0' })).toHaveAttribute('href', `#/reports/${b!.id}`);
-    expect(r.getByRole('link', { name: 'Open the history of Target0' })).toHaveAttribute('href', `#/people/${a!.person}`);
+    const team = within(panel('On now')).getByRole('list', { name: 'Moderators on now' });
+    expect(within(team).getAllByRole('listitem')).toHaveLength(1);
+    expect(team).toHaveTextContent('ann');
+    expect(team).toHaveTextContent('you');
+    expect(team).toHaveTextContent('Not handling a case');
+    expect(panel('On now')).toHaveTextContent('Nobody else is on right now');
+  });
+
+  it('shows each teammate with what they hold and what they have open, and you first', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const [a, b, c] = await queue(w, 3, 1);
+    const maya = w.clientFor('maya@example.test');
+    const rin = w.clientFor('rin@example.test');
+    await maya.claimCase(a!.person);
+    await maya.claimCase(b!.person);
+    await rin.viewing(c!.person);
+    await w.client.claimCase(c!.person);
+    renderHub(w);
+    await ready();
+    const items = within(panel('On now')).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual([
+      expect.stringContaining('ann'),
+      expect.stringContaining('maya'),
+      expect.stringContaining('rin'),
+    ]);
+    expect(items[0]).toHaveTextContent('Handling 1 case');
+    expect(items[1]).toHaveTextContent('Handling 2 cases');
+    expect(items[2]).toHaveTextContent('Not handling a case');
+    expect(items[2]).toHaveTextContent('Viewing 1 case');
+    expect(panel('On now')).not.toHaveTextContent('Nobody else is on right now');
+  });
+
+  it('counts the unclaimed cases and shows no ranking of moderators', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const [a, b] = await queue(w, 3, 1);
+    await w.clientFor('maya@example.test').claimCase(a!.person);
+    await w.client.claimCase(b!.person);
+    renderHub(w);
+    await ready();
+    expect(stat('Unclaimed cases')).toBe('1');
+    expect(within(panel('At a glance')).getByText('Nobody is handling them yet')).toBeInTheDocument();
+    const text = panel('On now').textContent ?? '';
+    expect(text).not.toMatch(/decision|rank|leaderboard|fastest|top|score/i);
+  });
+
+  it('a lapsed claim is not a load', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const [a] = await queue(w, 1, 1);
+    await w.clientFor('maya@example.test').claimCase(a!.person);
+    w.clock.t += 11 * 60_000;
+    renderHub(w);
+    await ready();
+    expect(within(panel('On now')).queryByText('maya')).not.toBeInTheDocument();
+    expect(stat('Unclaimed cases')).toBe('1');
   });
 
   it('never prints a person ref longer than its 8 character tag', async () => {
@@ -175,6 +207,22 @@ describe('Overview: Needs review', () => {
       expect(document.body.textContent).not.toContain(f.person);
       expect(document.body.textContent).not.toContain(f.person.slice(0, 9));
     }
+  });
+
+  it('shows the longest wait in red only once it is over 24 hours', async () => {
+    const w = await hubWorld();
+    const [a] = await queue(w, 1, 1);
+    const filedAt = w.cw.reports.get(a!.id)!.createdAt;
+    w.clock.t = filedAt + 23 * HOUR;
+    const first = renderHub(w);
+    await ready();
+    const fresh = within(panel('At a glance')).getByText('Longest wait').closest('.cw-stat');
+    expect(fresh).not.toHaveAttribute('data-wait', 'overdue');
+    first.unmount();
+    w.clock.t = filedAt + 25 * HOUR;
+    renderHub(w);
+    await ready();
+    expect(within(panel('At a glance')).getByText('Longest wait').closest('.cw-stat')).toHaveAttribute('data-wait', 'overdue');
   });
 });
 
@@ -256,7 +304,8 @@ describe('Overview: roles', () => {
     renderHub(w);
     await ready();
     expect(screen.queryByRole('region', { name: 'Recent actions' })).not.toBeInTheDocument();
-    expect(rows('Needs review')).toHaveLength(1);
+    expect(within(panel('On now')).getAllByRole('listitem')).toHaveLength(1);
+    expect(stat('People waiting')).toBe('1');
     expect(w.sent.some((r) => r.path === '/sanctions')).toBe(false);
   });
 
@@ -264,25 +313,28 @@ describe('Overview: roles', () => {
     const w = await hubWorld({ role: 'moderator', permissions: { 'reports.read': 'owner' } });
     renderHub(w);
     await screen.findByRole('region', { name: 'Recent actions' });
-    expect(screen.queryByRole('region', { name: 'Needs review' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'On now' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Open cases' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'At a glance' })).not.toBeInTheDocument();
-    expect(w.sent.some((r) => r.path === '/reports')).toBe(false);
+    expect(w.sent.some((r) => r.path === '/reports' || r.path === '/changes')).toBe(false);
   });
 });
 
 describe('Overview: failures', () => {
-  it('a failed queue shows an error with Try again in that panel, and Recent actions still works', async () => {
+  it('a failed queue shows an error with Try again in the queue pane, dashes in the numbers, and Recent actions still works', async () => {
     const w = await hubWorld();
     const [t] = await queue(w, 1, 1);
     await w.sanction(t!.person, 'chat', 1);
     w.intercept.fn = (req) => (req.path === '/reports' ? { status: 500, body: { error: 'internal', message: 'Something went wrong.' } } : undefined);
     const { user } = renderHub(w);
-    const review = await screen.findByRole('region', { name: 'Needs review' });
-    expect(await within(review).findByRole('alert')).toHaveTextContent('Could not load the reports.');
+    const pane = await screen.findByRole('region', { name: 'Open cases' });
+    expect(await within(pane).findByRole('alert')).toHaveTextContent('Could not load the reports.');
+    expect(stat('People waiting')).toBe('\u2013');
     expect(rows('Recent actions')).toHaveLength(1);
     w.intercept.fn = null;
-    await user.click(within(review).getByRole('button', { name: 'Try again' }));
-    expect(await within(review).findByText('Target0')).toBeInTheDocument();
+    await user.click(within(pane).getByRole('button', { name: 'Try again' }));
+    expect(await within(pane).findByText('Target0')).toBeInTheDocument();
+    expect(stat('People waiting')).toBe('1');
   });
 
   it('a failed recent-actions load says so in its panel', async () => {

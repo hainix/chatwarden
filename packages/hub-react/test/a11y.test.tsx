@@ -64,7 +64,8 @@ describe.each(['light', 'dark'] as const)('axe, %s theme', (theme) => {
     w.intercept.fn = (req) => (req.path === '/reports' ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
     const { container } = renderHub(w, { path: '/reports', theme });
     expect(await violations(container)).toEqual([]);
-    await screen.findByRole('alert');
+    // The queue pane and the Reports screen both read the queue, so both say it failed.
+    expect((await screen.findAllByRole('alert')).length).toBeGreaterThanOrEqual(1);
     expect(await violations(container)).toEqual([]);
   });
 });
@@ -90,6 +91,9 @@ describe('keyboard and structure', () => {
     expect(container.querySelectorAll('nav')).toHaveLength(1);
     await user.tab();
     expect(screen.getByRole('button', { name: 'Skip to the main content' })).toHaveFocus();
+    // Then the top bar (the command bar), then the rail, in the order they are on screen.
+    await user.tab();
+    expect(screen.getByRole('button', { name: /Search or jump to/ })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole('link', { name: 'Overview' })).toHaveFocus();
     await user.tab();

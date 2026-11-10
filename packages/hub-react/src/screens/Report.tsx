@@ -64,7 +64,7 @@ function PeopleList({ people, history, version }: { people: ReportPerson[]; hist
               <span className="cw-person-name">{name}</span>
               <PersonChip person={p.ref} />
               {p.role === 'target' && <Tag tone="bad">{t('hub.report.role.target')}</Tag>}
-              {p.role === 'reporter' && <Tag tone="accent">{t('hub.report.role.reporter')}</Tag>}
+              {p.role === 'reporter' && <Tag>{t('hub.report.role.reporter')}</Tag>}
             </div>
             <p className="cw-hint">{p.lines === 0 ? t('hub.report.person.silent') : t('hub.report.person.wrote', { count: p.lines })}</p>
             <RecordLine history={history[p.ref] ?? []} />
@@ -93,8 +93,8 @@ function Line({ line }: { line: ExcerptLine }) {
       <span className="cw-line-text">{line.raw}</span>
       {(line.reported || line.blocked || line.audience !== null || showDelivered) && (
         <span className="cw-line-meta">
-          {line.reported && <Tag tone="accent">{t('hub.report.line.reported')}</Tag>}
-          {line.blocked && <Tag tone="bad">{t('hub.report.line.blocked')}</Tag>}
+          {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}
+          {line.blocked && <Tag>{t('hub.report.line.blocked')}</Tag>}
           {line.audience !== null && <Tag>{t('hub.report.line.audience', { count: line.audience.length })}</Tag>}
           {showDelivered && <span className="cw-hint">{t('hub.report.line.delivered', { text: line.delivered ?? '' })}</span>}
         </span>
@@ -155,9 +155,9 @@ function ReportBody({ detail, reload }: { detail: ReportDetail; reload: () => vo
   return (
     <>
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
-        <Tag tone="bad">{categoryLabel(t, report.category)}</Tag>
-        <Tag tone={report.status === 'open' ? 'warn' : report.status === 'actioned' ? 'ok' : 'idle'}>{t(`hub.reports.tag.${report.status}`)}</Tag>
-        {report.badFaith && <Tag tone="bad">{t('hub.report.tag.badFaith')}</Tag>}
+        <Tag>{categoryLabel(t, report.category)}</Tag>
+        <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
+        {report.badFaith && <Tag tone="warn">{t('hub.report.tag.badFaith')}</Tag>}
         <span title={absoluteTime(report.createdAt, locale)}>{t('hub.report.fact.filed', { time: relativeTime(report.createdAt, now(), locale) })}</span>
         {report.roomId !== '' && <span>{t('hub.report.fact.room', { room: report.roomId })}</span>}
         {entries.map(([key, value]) => (

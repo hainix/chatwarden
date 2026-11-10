@@ -1,7 +1,7 @@
 import type { HubError } from './client.js';
 import { DURATIONS, hasLength, outcomeChoice } from './decision.js';
 import type { Choice, DurationKey } from './decision.js';
-import { formatDuration } from './format.js';
+import { formatDuration, personTag } from './format.js';
 import type { HubT, HubText } from './i18n.js';
 import type { ReportCategory, SanctionGroupView, SanctionKind, SanctionSource, Suggestion } from './types.js';
 
@@ -32,6 +32,9 @@ const SOURCE: Record<SanctionSource, HubText> = {
   api: 'hub.source.api',
   ai: 'hub.source.ai',
 };
+
+/** Every report category, in the order the catalog lists them. */
+export const CATEGORY_LIST = Object.keys(CATEGORY) as ReportCategory[];
 
 export const categoryLabel = (t: HubT, category: ReportCategory): string => t(CATEGORY[category]);
 export const kindLabel = (t: HubT, kind: SanctionKind): string => t(KIND[kind]);
@@ -111,4 +114,9 @@ export function decideErrorText(t: HubT, error: HubError): string {
     return t('hub.decide.fail.invalid');
   }
   return errorText(t, error);
+}
+
+/** How a reported person is named in a queue or a toast: their handle, or "Person" and the short tag. */
+export function groupName(t: HubT, g: { handle: string | null; person: string }): string {
+  return g.handle ?? `${t('hub.person.prefix')} ${personTag(g.person)}`;
 }

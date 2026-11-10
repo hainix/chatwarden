@@ -3,9 +3,11 @@ import type { MouseEvent, ReactNode } from 'react';
 import type { HubError } from './client.js';
 import type { HubData } from './hooks.js';
 import { useHub } from './context.js';
+import { actorInitial } from './claims.js';
 import { absoluteTime, personTag, relativeTime } from './format.js';
 import { errorText } from './labels.js';
 import type { Route } from './router.js';
+import type { SanctionKind } from './types.js';
 
 // The small parts every screen is built from. They carry the hub's class names (`cw-*`) and nothing else: no inline style,
 // every word from the catalog through `useHub().t`.
@@ -25,7 +27,7 @@ export function Link({
   className?: string;
   children: ReactNode;
   'aria-label'?: string;
-  'aria-current'?: 'page';
+  'aria-current'?: 'page' | 'true';
 }) {
   const { href, go } = useHub();
   const onClick = (e: MouseEvent<HTMLAnchorElement>): void => {
@@ -118,14 +120,59 @@ export function Notice({ tone = 'idle', role, children }: { tone?: Tone; role?: 
   );
 }
 
-/** "Loading": announced politely to a screen reader. */
+/** "Loading": announced politely to a screen reader, with placeholder bars where the content will be (not spinners). */
 export function Loading({ label }: { label?: string }) {
   const { t } = useHub();
   return (
-    <p className="cw-loading" role="status">
-      {label ?? t('hub.state.loading')}
-    </p>
+    <div className="cw-loading">
+      <p role="status">{label ?? t('hub.state.loading')}</p>
+      <Skeleton lines={3} />
+    </div>
   );
+}
+
+/** Grey bars the size of the text that is coming. Decoration only: the words that say "loading" live beside it. */
+export function Skeleton({ lines = 2 }: { lines?: number }) {
+  return (
+    <div className="cw-skel" aria-hidden="true">
+      {Array.from({ length: lines }, (_, i) => (
+        <span key={i} className="cw-skel-bar" />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A person's initial in a circle. Neutral for everyone; the accent marks you. The name is never only in the circle: a
+ * person is always named beside it or in `title`.
+ */
+export function Avatar({ actor, you = false, size = 'm' }: { actor: string; you?: boolean; size?: 's' | 'm' }) {
+  return (
+    <span className={cx('cw-avatar', you && 'cw-avatar--you', size === 's' && 'cw-avatar--s')} aria-hidden="true">
+      {actorInitial(actor)}
+    </span>
+  );
+}
+
+const CARD_OF: Record<SanctionKind, 'warning' | 'restriction' | 'ban' | 'note'> = {
+  warning: 'warning',
+  chat: 'restriction',
+  area: 'restriction',
+  ban: 'ban',
+  note: 'note',
+};
+
+/**
+ * The referee card: a yellow card for a warning, half yellow and half red for a restriction, red for a ban, and a dashed
+ * outline for a note (no card). Used wherever a sanction is shown. Decoration: the kind is always written beside it.
+ */
+export function Card({ kind }: { kind: SanctionKind }) {
+  return <span className={cx('cw-card', `cw-card--${CARD_OF[kind]}`)} aria-hidden="true" />;
+}
+
+/** A key cap, for a shortcut. */
+export function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="cw-kbd">{children}</kbd>;
 }
 
 /** A failed load: what could not be loaded, why, and a way to try again. */

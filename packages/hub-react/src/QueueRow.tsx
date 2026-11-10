@@ -30,12 +30,12 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
           <span className="cw-qrow-name">{name}</span>
           <PersonChip person={group.person} />
           {group.categories.map((c) => (
-            <Tag key={c} tone="bad">
+            <Tag key={c}>
               {categoryLabel(t, c)}
             </Tag>
           ))}
-          {showStatus && group.open > 0 && <Tag tone="warn">{t('hub.reports.tag.open')}</Tag>}
-          {showStatus && group.actioned > 0 && <Tag tone="ok">{t('hub.reports.tag.actioned')}</Tag>}
+          {showStatus && group.open > 0 && <Tag>{t('hub.reports.tag.open')}</Tag>}
+          {showStatus && group.actioned > 0 && <Tag>{t('hub.reports.tag.actioned')}</Tag>}
           {showStatus && group.dismissed > 0 && <Tag>{t('hub.reports.tag.dismissed')}</Tag>}
         </div>
         <div className="cw-facts">

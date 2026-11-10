@@ -5,6 +5,12 @@ import { renderHub } from './render.js';
 import { HOUR, hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
 
+// The queue pane beside the screen lists the same people and loads the same data, so the screen's own words are read inside <main>.
+const inMain = () => within(screen.getByRole('main'));
+async function mainAlert(): Promise<HTMLElement> {
+  return within(await screen.findByRole('main')).findByRole('alert');
+}
+
 const list = (): HTMLElement => screen.getByRole('list', { name: 'Reported people' });
 const rows = (): HTMLElement[] => within(list()).getAllByRole('listitem').filter((li) => li.classList.contains('cw-qrow'));
 const status = (name: string): HTMLElement => within(screen.getByRole('group', { name: 'Report status' })).getByRole('button', { name });
@@ -189,19 +195,19 @@ describe('Reports: paging with 60+ reports', () => {
     await queue(w, 13, 5); // 65 reports over 13 people
     const { user } = renderHub(w, { path: '/reports' });
     await ready();
-    expect(w.sent.find((r) => r.path === '/reports')?.query).toMatchObject({ status: 'open', limit: 50 });
+    expect(w.sent.find((r) => r.path === '/reports' && r.query?.limit === 50)?.query).toMatchObject({ status: 'open', limit: 50 });
     expect(screen.getByText('Showing 50 reports.')).toBeInTheDocument();
     expect(screen.getByText('Load more to add older reports to the groups.')).toBeInTheDocument();
     const before = rows().length;
     expect(before).toBeLessThanOrEqual(13);
     await user.click(screen.getByRole('button', { name: 'Load more' }));
     await waitFor(() => expect(screen.getByText('Showing 65 reports.')).toBeInTheDocument());
-    expect(screen.getByRole('status')).toHaveTextContent('Loaded 15 more reports.');
+    expect(inMain().getByRole('status')).toHaveTextContent('Loaded 15 more reports.');
     expect(rows()).toHaveLength(13);
     for (const li of rows()) expect(li).toHaveTextContent('5 reports');
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
     expect(screen.queryByText('Load more to add older reports to the groups.')).not.toBeInTheDocument();
-    const reportPages = w.sent.filter((r) => r.path === '/reports');
+    const reportPages = w.sent.filter((r) => r.path === '/reports' && r.query?.limit === 50);
     expect(reportPages).toHaveLength(2);
     expect(reportPages[1]?.query?.cursor).toBeTruthy();
   });
@@ -215,7 +221,7 @@ describe('Reports: paging with 60+ reports', () => {
     await user.click(screen.getByRole('button', { name: 'Load more' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument());
     expect(rows()).toHaveLength(50);
-    expect(screen.getByRole('status').textContent).toBe('');
+    expect(inMain().getByRole('status').textContent).toBe('');
   });
 
   it('keeps the rows and offers a retry when a later page fails', async () => {
@@ -226,7 +232,7 @@ describe('Reports: paging with 60+ reports', () => {
     const first = rows().length;
     w.intercept.fn = (req) => (req.path === '/reports' && req.query?.cursor !== undefined ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
     await user.click(screen.getByRole('button', { name: 'Load more' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('The server had a problem');
+    expect(await mainAlert()).toHaveTextContent('The server had a problem');
     expect(rows()).toHaveLength(first);
     w.intercept.fn = null;
     await user.click(screen.getByRole('button', { name: 'Load more' }));
@@ -321,7 +327,7 @@ describe('Reports: the status filter', () => {
     await act(async () => release());
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.getByText('No dismissed reports yet.')).toBeInTheDocument();
-    expect(screen.queryByText('Target0')).not.toBeInTheDocument();
+    expect(inMain().queryByText('Target0')).not.toBeInTheDocument();
   });
 });
 
@@ -331,18 +337,18 @@ describe('Reports: failures and roles', () => {
     await queue(w, 1, 1);
     w.intercept.fn = (req) => (req.path === '/reports' ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
     const { user } = renderHub(w, { path: '/reports' });
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the reports.');
+    expect(await mainAlert()).toHaveTextContent('Could not load the reports.');
     w.intercept.fn = null;
-    await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByText('Target0')).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(inMain().getByRole('button', { name: 'Try again' }));
+    expect(await inMain().findByText('Target0')).toBeInTheDocument();
+    expect(inMain().queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('shows a 403 from the server as a plain sentence', async () => {
     const w = await hubWorld();
     w.intercept.fn = (req) => (req.path === '/reports' ? { status: 403, body: { error: 'forbidden', message: 'x' } } : undefined);
     renderHub(w, { path: '/reports' });
-    expect(await screen.findByRole('alert')).toHaveTextContent('Your role cannot do this.');
+    expect(await mainAlert()).toHaveTextContent('Your role cannot do this.');
   });
 
   it('says how long to wait on a 429', async () => {
@@ -350,7 +356,7 @@ describe('Reports: failures and roles', () => {
     w.intercept.fn = (req) =>
       req.path === '/reports' ? { status: 429, headers: { 'retry-after': '1' }, body: { error: 'rate_limited', message: 'x' } } : undefined;
     renderHub(w, { path: '/reports' });
-    expect(await screen.findByRole('alert')).toHaveTextContent('Try again in 1 second.');
+    expect(await mainAlert()).toHaveTextContent('Try again in 1 second.');
   });
 
   it('a moderator without reports.read sees the not-available message and sends no queue request', async () => {
