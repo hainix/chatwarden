@@ -113,6 +113,9 @@ export const en = {
   'hub.shell.command': 'Search or jump to',
 
   'hub.queue.title': 'Open cases',
+  'hub.queue.toggle': 'Open cases ({count})',
+  'hub.queue.toggle.show': 'Show',
+  'hub.queue.toggle.hide': 'Hide',
   'hub.queue.people.one': '{count} person',
   'hub.queue.people.other': '{count} people',
   'hub.queue.takeNext': 'Take next case',

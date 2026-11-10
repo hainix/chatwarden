@@ -1,4 +1,4 @@
-import { useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { FocusEvent } from 'react';
 import { actorName, holderOf } from '../claims.js';
 import { useCaseActions } from '../cases.js';
@@ -28,6 +28,11 @@ export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boole
   const titleId = useId();
   const canTake = can('reports.decide');
   const openReport = route.name === 'report' ? route.id : null;
+  // While a case or a person is open the queue can fold to one row (on a phone, where it would sit above the open pane). Each
+  // screen starts folded; the fold is the stylesheet's, so a desktop never sees it.
+  const paneKey = route.name === 'report' ? `report:${route.id}` : route.name === 'person' ? `person:${route.ref}` : null;
+  const [unfolded, setUnfolded] = useState(false);
+  useEffect(() => setUnfolded(false), [paneKey]);
 
   // Pointer and focus both count as "the cursor is in the list".
   const pointerIn = useRef(false);
@@ -89,7 +94,15 @@ export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boole
   }
 
   return (
-    <section className="cw-queue" aria-labelledby={titleId}>
+    <section className="cw-queue" aria-labelledby={titleId} {...(paneKey === null ? {} : { 'data-collapsed': unfolded ? 'false' : 'true' })}>
+      {paneKey !== null && (
+        <button type="button" className="cw-queue-toggle" aria-expanded={unfolded} onClick={() => setUnfolded((v) => !v)}>
+          <span>{queue.status === 'ready' ? t('hub.queue.toggle', { count: people }) : t('hub.queue.title')}</span>
+          <span className="cw-queue-toggle-state" aria-hidden="true">
+            {t(unfolded ? 'hub.queue.toggle.hide' : 'hub.queue.toggle.show')}
+          </span>
+        </button>
+      )}
       <div className="cw-queue-head">
         <div className="cw-queue-title">
           <h2 id={titleId}>{t('hub.queue.title')}</h2>

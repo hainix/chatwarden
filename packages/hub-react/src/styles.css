@@ -777,6 +777,10 @@
   padding: var(--cw-space-3) var(--cw-space-4);
   font-size: var(--cw-text-s);
 }
+/* The fold of the queue above an open case or person: a phone only (see the phone block below). */
+.cw-hub .cw-queue-toggle {
+  display: none;
+}
 
 /* One case. The left edge is the wait: it turns red only once the oldest open report is over 24 hours old. */
 .cw-hub .cw-case {
@@ -979,6 +983,29 @@
   }
   .cw-hub .cw-queue-list {
     max-height: 20rem;
+  }
+  .cw-hub .cw-queue-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cw-space-3);
+    width: 100%;
+    min-height: var(--cw-control-height);
+    padding: var(--cw-space-1) var(--cw-space-3);
+    border: 0;
+    background: var(--cw-surface);
+    color: var(--cw-ink);
+    font-weight: var(--cw-weight-strong);
+    text-align: left;
+    cursor: pointer;
+  }
+  .cw-hub .cw-queue-toggle-state {
+    color: var(--cw-ink-muted);
+    font-size: var(--cw-text-s);
+    font-weight: var(--cw-weight-medium);
+  }
+  .cw-hub .cw-queue[data-collapsed='true'] > :not(.cw-queue-toggle) {
+    display: none;
   }
   .cw-hub .cw-work {
     overflow: visible;
