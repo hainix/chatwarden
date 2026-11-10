@@ -23,7 +23,7 @@ function Soon({ name }: { name: keyof typeof SOON_NAME }) {
   return (
     <div className="cw-screen">
       <div className="cw-empty">
-        <h2 className="cw-screen-title">{t('hub.route.soon.title', { name: t(SOON_NAME[name]) })}</h2>
+        <h2 className="cw-screen-title" tabIndex={-1}>{t('hub.route.soon.title', { name: t(SOON_NAME[name]) })}</h2>
         <p>{t('hub.route.soon.body')}</p>
       </div>
     </div>

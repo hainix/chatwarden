@@ -6,3 +6,9 @@ import { afterEach } from 'vitest';
 afterEach(() => {
   cleanup();
 });
+
+// axe probes <canvas> for colour work; jsdom does not implement it and logs a "not implemented" error each time. (A few test
+// files run in the node environment, where there is no canvas to stub.)
+if (typeof HTMLCanvasElement !== 'undefined') {
+  HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement['getContext'];
+}

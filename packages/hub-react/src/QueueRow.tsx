@@ -5,8 +5,8 @@ import { categoryLabel } from './labels.js';
 import type { QueueGroup } from './queue.js';
 import { Link, PersonChip, Tag } from './ui.js';
 
-/** How many earlier reports show before the "N more" toggle. */
-export const EARLIER_SHOWN = 3;
+/** How many earlier reports the disclosure lists; older ones are in the person's history. */
+export const EARLIER_SHOWN = 10;
 
 /**
  * One reported person in a queue: who, how much is waiting, how long, and the two ways in (their newest report, their history).
@@ -19,9 +19,9 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
   const name = group.handle ?? t('hub.reports.row.unnamed');
   const who = group.handle ?? `${t('hub.person.prefix')} ${personTag(group.person)}`;
   const waiting = group.oldestOpenAt === null ? null : Math.max(0, now() - group.oldestOpenAt);
-  const older = group.reportIds.slice(1);
-  const shown = expanded ? older : older.slice(0, EARLIER_SHOWN);
-  const hidden = older.length - EARLIER_SHOWN;
+  const older = group.entries.slice(1);
+  const shown = older.slice(0, EARLIER_SHOWN);
+  const hidden = older.length - shown.length;
 
   return (
     <li className="cw-qrow" data-wait={waiting === null ? 'none' : waitTone(waiting)}>
@@ -46,20 +46,21 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
         </div>
         {earlier && older.length > 0 && (
           <div className="cw-earlier">
-            <ul aria-label={t('hub.reports.row.earlier')}>
-              {shown.map((id) => (
-                <li key={id}>
-                  <Link to={{ name: 'report', id }} aria-label={t('hub.reports.row.earlierLabel', { id: id.slice(0, 8) })}>
-                    {id.slice(0, 8)}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            {hidden > 0 && (
-              <button type="button" className="cw-linkbtn" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
-                {expanded ? t('hub.reports.row.lessEarlier') : t('hub.reports.row.moreEarlier', { count: hidden })}
-              </button>
+            <button type="button" className="cw-linkbtn" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
+              {expanded ? t('hub.reports.row.earlierHide') : t('hub.reports.row.earlierShow', { count: older.length })}
+            </button>
+            {expanded && (
+              <ul aria-label={t('hub.reports.row.earlier')}>
+                {shown.map((e) => (
+                  <li key={e.id}>
+                    <Link to={{ name: 'report', id: e.id }} className="cw-link">
+                      {t('hub.reports.row.earlierItem', { category: categoryLabel(t, e.category), time: relativeTime(e.createdAt, now(), locale) })}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             )}
+            {expanded && hidden > 0 && <p className="cw-hint">{t('hub.reports.row.earlierMore', { count: hidden })}</p>}
           </div>
         )}
       </div>

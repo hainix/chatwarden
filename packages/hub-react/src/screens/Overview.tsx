@@ -37,7 +37,7 @@ export function Overview() {
   const showRecent = can('history.read');
   return (
     <div className="cw-screen">
-      <h2 className="cw-screen-title">{t('hub.overview.title')}</h2>
+      <h2 className="cw-screen-title" tabIndex={-1}>{t('hub.overview.title')}</h2>
       {showQueue && <QueueSection withRecent={showRecent} />}
       {!showQueue && showRecent && <RecentActions />}
     </div>
@@ -117,6 +117,7 @@ function Stats({ queue }: { queue: OpenQueue | undefined }) {
           <dt>{t('hub.overview.stat.longest')}</dt>
           <dd className="cw-stat-value">{longest}</dd>
           <dd className="cw-stat-note">{note}</dd>
+          {queue?.partial === true && wait !== null && <dd className="cw-stat-note">{t('hub.overview.stat.longestPartial')}</dd>}
         </div>
       </dl>
     </section>

@@ -240,8 +240,22 @@ describe('fetchTransport', () => {
     await expect(fetchTransport({ baseUrl: base })({ method: 'GET', path: '/me' })).rejects.toBeInstanceOf(Error);
   });
 
-  it('does not follow a relative baseUrl into the wrong origin: it needs an absolute URL or a root-relative path', () => {
-    expect(() => fetchTransport({ baseUrl: '' })).toThrow(/baseUrl/);
+  it('takes a root-relative path, and the server root ("/" or "") as the base', async () => {
     expect(() => fetchTransport({ baseUrl: '/api/admin' })).not.toThrow();
+    const urls: string[] = [];
+    const record: typeof fetch = ((url: string) => {
+      urls.push(url);
+      return Promise.resolve(new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    }) as unknown as typeof fetch;
+    for (const baseUrl of ['/', '', '//']) await fetchTransport({ baseUrl, fetch: record })({ method: 'GET', path: '/me', query: { a: 1 } });
+    expect(urls).toEqual(['/me?a=1', '/me?a=1', '/me?a=1']);
+    await fetchTransport({ baseUrl: 'https://h.example/', fetch: record })({ method: 'GET', path: '/me' });
+    expect(urls.at(-1)).toBe('https://h.example/me');
+  });
+
+  it('refuses a baseUrl that is not a string', () => {
+    expect(() => fetchTransport({ baseUrl: undefined as unknown as string })).toThrow(/baseUrl/);
+    expect(() => fetchTransport({} as never)).toThrow(/baseUrl/);
+    expect(() => fetchTransport({ baseUrl: 5 as unknown as string })).toThrow(/baseUrl/);
   });
 });

@@ -108,6 +108,16 @@ describe('Overview: the numbers come from the open queue', () => {
     expect(stat('Open reports')).toBe('1,000');
     expect(stat('People waiting')).toBe('40');
     expect(within(panel('At a glance')).getByText(/Counted from the newest 1,000 reports/)).toBeInTheDocument();
+    // The reports left out are the oldest, so the longest wait is a floor, not the answer.
+    expect(within(panel('At a glance')).getByText('At least this long. Older reports were not counted.')).toBeInTheDocument();
+  });
+
+  it('does not call the longest wait a floor when every open report was counted', async () => {
+    const w = await hubWorld();
+    await queue(w, 2, 1);
+    renderHub(w);
+    await ready();
+    expect(within(panel('At a glance')).queryByText(/At least this long/)).not.toBeInTheDocument();
   });
 
   it('never opens a single report (that is an audited read) to build the overview', async () => {

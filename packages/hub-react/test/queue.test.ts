@@ -48,6 +48,7 @@ describe('groupQueue', () => {
       latestAt: T,
       oldestOpenAt: T,
       reportIds: ['r1'],
+      entries: [{ id: 'r1', category: 'harassment', createdAt: T }],
     });
   });
 
@@ -84,6 +85,18 @@ describe('groupQueue', () => {
     expect(g?.reportIds).toEqual(['new', 'mid', 'old']);
     expect(g?.firstAt).toBe(T);
     expect(g?.latestAt).toBe(T + 10 * MIN);
+  });
+
+  it('keeps each report with its category and time, newest first, beside the ids', () => {
+    const [g] = groupQueue([
+      report({ id: 'old', createdAt: T, category: 'hate' }),
+      report({ id: 'new', createdAt: T + 10 * MIN, category: 'spam' }),
+    ]);
+    expect(g?.entries).toEqual([
+      { id: 'new', category: 'spam', createdAt: T + 10 * MIN },
+      { id: 'old', category: 'hate', createdAt: T },
+    ]);
+    expect(g?.entries.map((e) => e.id)).toEqual(g?.reportIds);
   });
 
   it('breaks a tie on time by id, so the order never depends on input order', () => {
@@ -186,7 +199,7 @@ describe('groupQueue', () => {
     const [g] = groupQueue([report({ targetPerson: '__proto__' })]);
     expect(g?.person).toBe('__proto__');
     expect(Object.keys(g ?? {}).sort()).toEqual(
-      ['actioned', 'categories', 'dismissed', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporters', 'reports', 'rooms'].sort(),
+      ['actioned', 'categories', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporters', 'reports', 'rooms'].sort(),
     );
   });
 });

@@ -93,7 +93,7 @@ describe('Reports: grouping by person', () => {
     expect(rows().map((li) => li.querySelector('.cw-qrow-name')?.textContent)).toEqual(['Newer', 'Old']);
   });
 
-  it('links Review to the newest report and History to the person; earlier reports link too', async () => {
+  it('links Review to the newest report and History to the person', async () => {
     const w = await hubWorld();
     const filed = await queue(w, 1, 3);
     renderHub(w, { path: '/reports' });
@@ -101,27 +101,51 @@ describe('Reports: grouping by person', () => {
     const r = within(rows()[0]!);
     expect(r.getByRole('link', { name: 'Review the newest report against Target0' })).toHaveAttribute('href', `#/reports/${filed[2]!.id}`);
     expect(r.getByRole('link', { name: 'Open the history of Target0' })).toHaveAttribute('href', `#/people/${filed[0]!.person}`);
-    const earlier = r.getByRole('list', { name: 'Earlier reports' });
-    expect(within(earlier).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual([`#/reports/${filed[1]!.id}`, `#/reports/${filed[0]!.id}`]);
   });
 
-  it('caps earlier reports at three and offers the rest behind a toggle', async () => {
+  it('offers earlier reports behind a disclosure, each as its category and how long ago, never the raw id', async () => {
     const w = await hubWorld();
-    const filed = await queue(w, 1, 7);
+    const first = await w.file({ target: 'Mallory', reporter: 'A', category: 'hate' });
+    w.clock.t += 3 * HOUR;
+    const second = await w.file({ target: 'Mallory', reporter: 'B', category: 'spam' });
+    w.clock.t += 5 * 60_000;
+    await w.file({ target: 'Mallory', reporter: 'C', category: 'harassment' });
     const { user } = renderHub(w, { path: '/reports' });
     await ready();
     const r = within(rows()[0]!);
-    const earlier = r.getByRole('list', { name: 'Earlier reports' });
-    expect(within(earlier).getAllByRole('link')).toHaveLength(3);
-    const more = r.getByRole('button', { name: '3 more earlier reports' });
-    expect(more).toHaveAttribute('aria-expanded', 'false');
-    await user.click(more);
-    expect(within(earlier).getAllByRole('link')).toHaveLength(6);
-    expect(within(earlier).getAllByRole('link').map((a) => a.getAttribute('href'))).toContain(`#/reports/${filed[0]!.id}`);
-    const less = r.getByRole('button', { name: 'Show fewer' });
-    expect(less).toHaveAttribute('aria-expanded', 'true');
-    await user.click(less);
-    expect(within(earlier).getAllByRole('link')).toHaveLength(3);
+    expect(r.queryByRole('list', { name: 'Earlier reports' })).not.toBeInTheDocument();
+    const toggle = r.getByRole('button', { name: 'Show 2 earlier reports' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
+    const links = within(r.getByRole('list', { name: 'Earlier reports' })).getAllByRole('link');
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute('href', `#/reports/${second.id}`);
+    expect(links[0]).toHaveAccessibleName('Spam, 5 minutes ago');
+    expect(links[0]).toHaveTextContent('Spam, 5 minutes ago');
+    expect(links[1]).toHaveAttribute('href', `#/reports/${first.id}`);
+    expect(links[1]).toHaveAccessibleName('Hate, 3 hours ago');
+    expect(document.body.textContent).not.toContain(first.id);
+    expect(document.body.textContent).not.toContain(second.id);
+    const hide = r.getByRole('button', { name: 'Hide earlier reports' });
+    expect(hide).toHaveAttribute('aria-expanded', 'true');
+    await user.click(hide);
+    expect(r.queryByRole('list', { name: 'Earlier reports' })).not.toBeInTheDocument();
+  });
+
+  it('has no disclosure for one report, and points to the history past ten earlier reports', async () => {
+    const w = await hubWorld();
+    await queue(w, 1, 1);
+    const one = renderHub(w, { path: '/reports' });
+    await ready();
+    expect(within(rows()[0]!).queryByRole('button', { name: /earlier/ })).not.toBeInTheDocument();
+    one.unmount();
+    for (let i = 0; i < 14; i += 1) await w.file({ target: 'Target0', reporter: `More${i}` });
+    const { user } = renderHub(w, { path: '/reports' });
+    await ready();
+    const r = within(rows()[0]!);
+    await user.click(r.getByRole('button', { name: 'Show 14 earlier reports' }));
+    expect(within(r.getByRole('list', { name: 'Earlier reports' })).getAllByRole('link')).toHaveLength(10);
+    expect(r.getByText('4 older reports are in their history.')).toBeInTheDocument();
   });
 
   it('an unnamed person is shown by tag', async () => {

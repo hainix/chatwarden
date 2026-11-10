@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHub } from '../context.js';
 import { usePagedList } from '../hooks.js';
 import { errorText } from '../labels.js';
@@ -29,7 +29,19 @@ export function Reports({ status }: { status: QueueStatus }) {
   const [announcement, setAnnouncement] = useState('');
   useEffect(() => setAnnouncement(''), [status]);
 
+  // Keyboard focus stays on the button while pages remain. If the last page makes the button go away, it moves to the count.
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const countRef = useRef<HTMLParagraphElement>(null);
+  const hadFocus = useRef(false);
+  useEffect(() => {
+    if (pager.loadingMore || !hadFocus.current) return;
+    hadFocus.current = false;
+    if (pager.next === null) countRef.current?.focus();
+  }, [pager.loadingMore, pager.next]);
+
   const loadMore = async (): Promise<void> => {
+    if (pager.loadingMore) return;
+    hadFocus.current = document.activeElement === moreRef.current;
     setAnnouncement('');
     const added = await pager.loadMore();
     if (added > 0) setAnnouncement(t('hub.reports.loadedMore', { count: added }));
@@ -49,7 +61,9 @@ export function Reports({ status }: { status: QueueStatus }) {
           ))}
         </ul>
         <div className="cw-more">
-          <p>{t('hub.reports.shown', { count: pager.items.length })}</p>
+          <p ref={countRef} tabIndex={-1}>
+            {t('hub.reports.shown', { count: pager.items.length })}
+          </p>
           {pager.next !== null && <p className="cw-hint">{t('hub.reports.moreHint')}</p>}
           {pager.error !== null && (
             <Notice tone="bad" role="alert">
@@ -57,7 +71,14 @@ export function Reports({ status }: { status: QueueStatus }) {
             </Notice>
           )}
           {pager.next !== null && (
-            <button type="button" className="cw-btn" disabled={pager.loadingMore} aria-busy={pager.loadingMore} onClick={() => void loadMore()}>
+            <button
+              ref={moreRef}
+              type="button"
+              className="cw-btn"
+              aria-disabled={pager.loadingMore}
+              aria-busy={pager.loadingMore}
+              onClick={() => void loadMore()}
+            >
               {pager.loadingMore ? t('hub.reports.loadingMore') : t('hub.reports.loadMore')}
             </button>
           )}
@@ -69,7 +90,7 @@ export function Reports({ status }: { status: QueueStatus }) {
   return (
     <div className="cw-screen">
       <div className="cw-bar">
-        <h2 className="cw-screen-title">{t('hub.reports.title')}</h2>
+        <h2 className="cw-screen-title" tabIndex={-1}>{t('hub.reports.title')}</h2>
         <Segmented
           label={t('hub.reports.status.label')}
           value={status}

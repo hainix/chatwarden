@@ -112,7 +112,11 @@ describe('the stylesheet is a complete token contract', () => {
   const start = css.indexOf('/* ---- Tokens');
   const end = css.indexOf('/* ---- End of tokens');
   const tokenBlock = css.slice(start, end);
-  const rest = css.slice(end);
+  const fbStart = css.indexOf('/* ---- Fallback');
+  const fbEnd = css.indexOf('/* ---- End of fallback');
+  const fallback = css.slice(fbStart, fbEnd);
+  // Everything after the tokens, without the fallback block (which holds plain colours on purpose).
+  const rest = fbStart === -1 ? css.slice(end) : css.slice(end, fbStart) + css.slice(fbEnd);
   const defined = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1] as string);
   const used = [...new Set([...rest.matchAll(/var\((--cw-[a-z0-9-]+)/g)].map((m) => m[1] as string))];
 
@@ -173,6 +177,34 @@ describe('the stylesheet is a complete token contract', () => {
     expect(css).toMatch(/:focus-visible/);
   });
 
+  it('has a light fallback for browsers without light-dark(), holding every colour token at its light value', () => {
+    expect(fbStart).toBeGreaterThan(end);
+    expect(fbEnd).toBeGreaterThan(fbStart);
+    expect(fallback).toMatch(/@supports not \(color: light-dark\(#000, #fff\)\)/);
+    expect(fallback).toMatch(/:where\(\.cw-hub\)\s*\{/);
+    const colours = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), #[0-9a-f]{6}\);$/gim)];
+    expect(colours.length).toBeGreaterThan(20);
+    for (const [, name, light] of colours) expect(fallback, name).toContain(`${name}: ${light};`);
+    const inFallback = [...fallback.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1]);
+    expect(inFallback.sort()).toEqual(colours.map((c) => c[1]).sort());
+  });
+
+  it('draws the focus ring inside the status filter and the tabs, where their boxes clip an outside ring', () => {
+    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const rule = /\.cw-hub \.cw-seg button:focus-visible,\s*\.cw-hub \.cw-tabs a:focus-visible\s*\{([^}]*)\}/.exec(stripped);
+    expect(rule, 'a focus-visible rule for both').not.toBeNull();
+    expect(rule?.[1]).toMatch(/outline-offset:\s*-\d+px/);
+    // The segment box clips; the rule above is what keeps the ring visible.
+    expect(stripped).toMatch(/\.cw-hub \.cw-seg\s*\{[^}]*overflow:\s*hidden/);
+  });
+
+  it('lets the tabs wrap onto more lines instead of scrolling sideways with tabs out of sight', () => {
+    const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const tabs = /\.cw-hub \.cw-tabs\s*\{([^}]*)\}/.exec(stripped)?.[1] ?? '';
+    expect(tabs).toMatch(/flex-wrap:\s*wrap/);
+    expect(tabs).not.toMatch(/overflow/);
+  });
+
   it('keeps the token defaults at zero specificity so an adopter rule always wins', () => {
     expect(tokenBlock).toMatch(/:where\(\.cw-hub\)\s*\{/);
   });
@@ -193,6 +225,22 @@ describe('the README documents the token contract', () => {
     expect(theming.length).toBeGreaterThan(500);
     const documented = [...theming.matchAll(/^\| `(--cw-[a-z0-9-]+)` \|/gm)].map((m) => m[1] as string);
     expect(documented.sort()).toEqual([...defined].sort());
+  });
+
+  it('says the ref is in the address, so onNavigate paths must not go to analytics', () => {
+    const flat = readme.replace(/\s+/g, ' ');
+    expect(flat).toMatch(/full person ref is in the (link|address)/i);
+    expect(flat).toMatch(/onNavigate[^.]*analytics|analytics[^.]*onNavigate/i);
+  });
+
+  it('says React 18.3 is declared but the tests run on React 19', () => {
+    const flat = readme.replace(/\s+/g, ' ');
+    expect(flat).toMatch(/18\.3/);
+    expect(flat).toMatch(/tested (only )?(on|against|with) React 19/i);
+  });
+
+  it('describes the light fallback', () => {
+    expect(theming.replace(/\s+/g, ' ')).toMatch(/older browsers[^.]*light/i);
   });
 
   it('states each colour token default as written in the stylesheet', () => {

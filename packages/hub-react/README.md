@@ -13,7 +13,8 @@ Status: pre-release, as-is, no support promise.
 npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom
 ```
 
-`react` and `react-dom` (18.3 or 19) are peer dependencies, so your app has one copy of React. `@chatwarden/core` and
+`react` and `react-dom` (18.3 or 19) are peer dependencies, so your app has one copy of React. The hub uses only APIs that exist in
+18.3 (`useSyncExternalStore`, `useId`), but it is tested only on React 19 so far. `@chatwarden/core` and
 `@chatwarden/http` are peers too: the hub imports only their types, but its own type declarations name them. Node 22.13 or newer
 for the tooling; the hub itself runs in a browser and imports no `node:` module.
 
@@ -164,6 +165,8 @@ radius, font and space is a `--cw-*` custom property, with a light and a dark va
 - **Strict CSP.** The stylesheet is a file. The hub injects no `<style>`, sets no inline `style` and uses no
   `dangerouslySetInnerHTML`.
 - **Browsers.** The colours use `light-dark()` (Chrome 123, Firefox 120, Safari 17.5, all 2024), and the line-height unit `lh`.
+  Older browsers that lack `light-dark()` get the light colours from a fallback block in the stylesheet, so the hub keeps its
+  colours; they follow neither the visitor's dark setting nor the `theme` prop.
 
 ```css
 .cw-hub.acme {
@@ -205,7 +208,7 @@ The tokens:
 | `--cw-idle-soft` | `#e6eaee`, `#26313c` | Neutral tag background. |
 | `--cw-idle-ink` | `#3b4753`, `#c6d1db` | Text on the neutral background. |
 | `--cw-font` | `ui-sans-serif, system-ui, -apple-system, 'Segoe UI Variab...` | Text font stack. |
-| `--cw-font-mono` | `ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, 'Libe...` | Person tags and report ids. |
+| `--cw-font-mono` | `ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, 'Libe...` | Person tags. |
 | `--cw-text-s` | `0.8125rem` | Small text: labels, facts, tags. |
 | `--cw-text-m` | `0.9375rem` | Body text. |
 | `--cw-text-l` | `1.125rem` | Screen titles. |
@@ -235,6 +238,9 @@ background. Keep the ink and soft pair at a readable contrast when you change th
 
 - **No identifiers reach the page beyond the staff API's own.** The hub shows a person as the first 8 characters of their opaque
   ref and never the full ref. It shows a reported person's handle (staff only, from the queue) and nothing of a reporter.
+- **The full person ref is in the link.** The page shows only the 8 character tag, but a link to a person (`#/people/:ref`) has to
+  carry the whole ref, because the server route needs it. It is staff-only, like the queue, but the address bar, the history and the
+  paths `onNavigate` receives all hold it, so do not forward those to analytics.
 - **Opening a report is an audited read.** The Overview and the queue are built from the queue list alone and never open a single
   report, so no `report.view` row names a report just because someone looked at the Overview.
 - **Authorization stays on the server.** The hub hides what the role cannot use, but the server still refuses it (403). Mount the

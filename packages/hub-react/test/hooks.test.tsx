@@ -129,6 +129,8 @@ describe('useHubData', () => {
   });
 });
 
+const renderHub0 = <R,>(fn: () => Promise<R>) => renderHook(() => useHubAction(fn));
+
 describe('useHubAction', () => {
   it('runs the function with its arguments and returns ok with the value', async () => {
     const fn = vi.fn((a: number, b: number) => Promise.resolve(a + b));
@@ -234,6 +236,54 @@ describe('useHubAction', () => {
     });
     expect(errors).not.toHaveBeenCalled();
     errors.mockRestore();
+  });
+
+  it('a function that throws before it returns a promise is a failed run, and the next run still works', async () => {
+    let n = 0;
+    const fn = vi.fn((): Promise<string> => {
+      n += 1;
+      if (n === 1) throw new URIError('URI malformed');
+      return Promise.resolve('fine');
+    });
+    const { result } = renderHub0(fn);
+    let first: unknown;
+    await act(async () => {
+      first = await result.current.run();
+    });
+    expect(first).toMatchObject({ ok: false, error: { code: 'unexpected' } });
+    expect(result.current.busy).toBe(false);
+    expect(result.current.error?.code).toBe('unexpected');
+    let second: unknown;
+    await act(async () => {
+      second = await result.current.run();
+    });
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(second).toEqual({ ok: true, value: 'fine' });
+    expect(result.current.error).toBeNull();
+  });
+
+  it('a synchronous throw leaves no run in flight, however many times it happens', async () => {
+    const fn = vi.fn((): Promise<string> => {
+      throw new RangeError('always');
+    });
+    const { result } = renderHub0(fn);
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => void (await result.current.run()));
+    }
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it('still calls the function inside the click, so a double submit in one tick sends once', async () => {
+    const gate = deferred<string>();
+    const fn = vi.fn(() => gate.promise);
+    const { result } = renderHub0(fn);
+    act(() => {
+      void result.current.run();
+      void result.current.run();
+      void result.current.run();
+    });
+    expect(fn).toHaveBeenCalledTimes(1);
+    await act(async () => gate.resolve('x'));
   });
 
   it('uses the latest function without needing a new run function', async () => {

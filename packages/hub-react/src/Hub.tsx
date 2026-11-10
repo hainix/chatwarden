@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { HubClient, HubError } from './client.js';
 import { HubContext, useHub } from './context.js';
@@ -98,6 +98,24 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
 
   const mainRef = useRef<HTMLElement | null>(null);
 
+  // A screen is its route name, plus the id for a report or person. A query change (the status filter) keeps the same screen
+  // mounted, so the control the person just used keeps keyboard focus.
+  const screenKey = screenKeyOf(route);
+  const ready = value !== null;
+  const shownBefore = useRef<string | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  useEffect(() => {
+    if (!ready) return;
+    const previous = shownBefore.current;
+    shownBefore.current = screenKey;
+    // Not on the first screen: the person has not moved anywhere yet.
+    if (previous === null || previous === screenKey) return;
+    const heading = mainRef.current?.querySelector<HTMLElement>('.cw-screen-title');
+    if (heading === null || heading === undefined) return;
+    heading.focus();
+    setAnnouncement(heading.textContent ?? '');
+  }, [ready, screenKey]);
+
   let content: ReactNode;
   if (value === null) {
     content = <Gate t={t} error={me.error} loading={me.loading} onRetry={me.reload} />;
@@ -128,7 +146,7 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
             ))}
           </ul>
         </nav>
-        <main className="cw-main" ref={mainRef} tabIndex={-1} key={path}>
+        <main className="cw-main" ref={mainRef} tabIndex={-1} key={screenKey}>
           {route.name === 'notFound' ? (
             <NotFound />
           ) : allowed ? (
@@ -136,12 +154,15 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
           ) : (
             <div className="cw-screen">
               <div className="cw-empty">
-                <h2 className="cw-screen-title">{t('hub.route.noAccess.title')}</h2>
+                <h2 className="cw-screen-title" tabIndex={-1}>{t('hub.route.noAccess.title')}</h2>
                 <p>{t('hub.route.noAccess.body')}</p>
               </div>
             </div>
           )}
         </main>
+        <div className="cw-sr" aria-live="polite" aria-atomic="true">
+          {announcement}
+        </div>
       </HubContext.Provider>
     );
   }
@@ -153,12 +174,26 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
   );
 }
 
+/** What identifies a screen: the route, and for one report or one person, which. */
+function screenKeyOf(route: Route): string {
+  switch (route.name) {
+    case 'report':
+      return `report:${route.id}`;
+    case 'person':
+      return `person:${route.ref}`;
+    case 'notFound':
+      return `notFound:${route.path}`;
+    default:
+      return route.name;
+  }
+}
+
 function NotFound() {
   const { t } = useHub();
   return (
     <div className="cw-screen">
       <div className="cw-empty">
-        <h2 className="cw-screen-title">{t('hub.route.notFound.title')}</h2>
+        <h2 className="cw-screen-title" tabIndex={-1}>{t('hub.route.notFound.title')}</h2>
         <p>{t('hub.route.notFound.body')}</p>
         <Link to={{ name: 'overview' }} className="cw-link">
           {t('hub.route.notFound.back')}

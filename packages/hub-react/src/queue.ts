@@ -28,6 +28,8 @@ export interface QueueGroup {
   oldestOpenAt: number | null;
   /** Report ids, newest first. */
   reportIds: string[];
+  /** The same reports, newest first, with what a moderator can tell them apart by. */
+  entries: Array<{ id: string; category: ReportCategory; createdAt: number }>;
 }
 
 export type QueueSort = 'latest' | 'oldest' | 'reports';
@@ -88,6 +90,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       latestAt: (list[0] as ReportSummary).createdAt,
       oldestOpenAt,
       reportIds: list.map((r) => r.id),
+      entries: list.map((r) => ({ id: r.id, category: r.category, createdAt: r.createdAt })),
     });
   }
 

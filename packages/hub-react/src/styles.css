@@ -86,6 +86,37 @@
 }
 /* ---- End of tokens ----------------------------------------------------------------------------------------------- */
 
+/* ---- Fallback ---------------------------------------------------------------------------------------------------- */
+/* A browser without light-dark() (before 2024) would drop every colour token above. This gives it the light values, so the hub
+   keeps its colours; it follows neither prefers-color-scheme nor the theme prop. */
+@supports not (color: light-dark(#000, #fff)) {
+  :where(.cw-hub) {
+    --cw-bg: #eef1f4;
+    --cw-surface: #ffffff;
+    --cw-surface-sunken: #f4f6f8;
+    --cw-border: #d5dce3;
+    --cw-border-strong: #a9b6c2;
+    --cw-ink: #17212b;
+    --cw-ink-muted: #4a5866;
+    --cw-accent: #115e67;
+    --cw-accent-ink: #ffffff;
+    --cw-accent-soft: #dbeced;
+    --cw-focus: #1a5fd1;
+    --cw-ok: #1c7a45;
+    --cw-ok-soft: #dcf1e3;
+    --cw-ok-ink: #14502c;
+    --cw-warn: #b86e00;
+    --cw-warn-soft: #fbeccc;
+    --cw-warn-ink: #6b4300;
+    --cw-bad: #b3261e;
+    --cw-bad-soft: #fbe0dd;
+    --cw-bad-ink: #8c1b15;
+    --cw-idle-soft: #e6eaee;
+    --cw-idle-ink: #3b4753;
+  }
+}
+/* ---- End of fallback --------------------------------------------------------------------------------------------- */
+
 /* ---- Base -------------------------------------------------------------------------------------------------------- */
 .cw-hub {
   position: relative;
@@ -134,7 +165,8 @@
   outline: 2px solid var(--cw-focus);
   outline-offset: 2px;
 }
-.cw-hub .cw-main:focus {
+.cw-hub .cw-main:focus,
+.cw-hub .cw-screen-title:focus {
   outline: none;
 }
 
@@ -190,8 +222,8 @@
 }
 .cw-hub .cw-tabs {
   display: flex;
-  gap: var(--cw-space-1);
-  overflow-x: auto;
+  flex-wrap: wrap;
+  gap: 0 var(--cw-space-1);
   border-bottom: var(--cw-border-width) solid var(--cw-border);
 }
 .cw-hub .cw-tabs a {
@@ -211,6 +243,11 @@
   border-bottom-color: var(--cw-accent);
   color: var(--cw-ink);
   font-weight: var(--cw-weight-strong);
+}
+/* The status filter clips (overflow: hidden) and its buttons fill it, so an outside ring would be cut off: draw it inside. */
+.cw-hub .cw-seg button:focus-visible,
+.cw-hub .cw-tabs a:focus-visible {
+  outline-offset: -3px;
 }
 
 /* ---- Screens and panels ------------------------------------------------------------------------------------------ */
@@ -383,10 +420,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--cw-space-1) var(--cw-space-3);
-}
-.cw-hub .cw-earlier a {
-  color: var(--cw-accent);
-  font-family: var(--cw-font-mono);
 }
 .cw-hub .cw-more {
   display: grid;

@@ -82,8 +82,9 @@ export interface FetchTransportOptions {
 
 /** The default transport for a real app: `fetch` against the routes your server mounts. */
 export function fetchTransport(options: FetchTransportOptions): Transport {
+  if (typeof options?.baseUrl !== 'string') throw new TypeError('fetchTransport: baseUrl is required (for example "/admin")');
+  // "/" and "" both mean the server root: routes are then "/me", "/reports", ...
   const base = options.baseUrl.replace(/\/+$/, '');
-  if (base === '') throw new TypeError('fetchTransport: baseUrl is required (for example "/admin")');
   return async (req) => {
     const params = new URLSearchParams(queryOf(req.query)).toString();
     const url = `${base}${req.path}${params === '' ? '' : `?${params}`}`;

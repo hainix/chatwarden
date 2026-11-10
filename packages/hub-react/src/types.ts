@@ -16,7 +16,7 @@ import type {
   StaffReport,
   Suggestion,
 } from '@chatwarden/core';
-import type { Me, PermissionKey, ReportSummary, Role } from '@chatwarden/http/admin';
+import type { ExceptionListRow, Me, PermissionKey, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 export type { Me, PermissionKey, ReportSummary, Role };
@@ -102,29 +102,11 @@ export interface CloseGapInput {
   ref?: number | null;
 }
 
-export interface TermRow {
-  id: string;
-  term: string;
-  language: string;
-  active: boolean;
-  note: string | null;
-  addedBy: string | null;
-  addedAt: number | null;
-  updatedBy: string | null;
-  updatedAt: number | null;
-}
+/** A term as `GET /terms` lists it: the kit's row with its metadata always present (null when unknown). Derived, so the kit changing a field is a compile error here. */
+export type TermRow = Required<TermListRow>;
 
-export interface ExceptionRow {
-  id: string;
-  phrase: string;
-  language: string;
-  active: boolean;
-  note: string | null;
-  addedBy: string | null;
-  addedAt: number | null;
-  updatedBy: string | null;
-  updatedAt: number | null;
-}
+/** An exception as `GET /terms` lists it. */
+export type ExceptionRow = Required<ExceptionListRow>;
 
 /** `GET /terms`. `blocks30d` has an entry for every listed term. */
 export interface TermsList {

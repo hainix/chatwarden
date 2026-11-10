@@ -97,19 +97,21 @@ export function useHubAction<A extends unknown[], R>(fn: (...args: A) => Promise
     if (inFlight.current !== null) return inFlight.current;
     setBusy(true);
     setError(null);
-    const p = (async (): Promise<ActionResult<R>> => {
-      try {
-        const value = await fnRef.current(...args);
-        return { ok: true, value };
-      } catch (e) {
-        const err = toHubError(e);
-        if (mounted.current) setError(err);
-        return { ok: false, error: err };
-      } finally {
-        inFlight.current = null;
-        if (mounted.current) setBusy(false);
+    // `fn` is called now (inside the click), but every continuation below runs later, after `inFlight` is set. An async IIFE
+    // would run its `finally` at once when `fn` throws before returning a promise, and the guard would then point at a
+    // settled promise for good.
+    const finish = (result: ActionResult<R>): ActionResult<R> => {
+      inFlight.current = null;
+      if (mounted.current) {
+        setBusy(false);
+        if (!result.ok) setError(result.error);
       }
-    })();
+      return result;
+    };
+    const p: Promise<ActionResult<R>> = new Promise<R>((resolve) => resolve(fnRef.current(...args))).then(
+      (value) => finish({ ok: true, value }),
+      (e: unknown) => finish({ ok: false, error: toHubError(e) }),
+    );
     inFlight.current = p;
     return p;
   }, []);
