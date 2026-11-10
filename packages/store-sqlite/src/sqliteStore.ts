@@ -276,6 +276,15 @@ export class SqliteStore implements Store, TermStore {
     return row === undefined ? null : row.ref_code;
   }
 
+  sanctionGroupTarget(groupId: string): { subject: SubjectId; rule: string | null } | null {
+    const row = this.transaction(() =>
+      this.db
+        .prepare("SELECT target_value, rule FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' LIMIT 1")
+        .get(groupId),
+    ) as { target_value: string; rule: string | null } | undefined;
+    return row === undefined ? null : { subject: row.target_value, rule: row.rule };
+  }
+
   loadSanctions(now: number): SanctionRow[] {
     return this.transaction(() =>
       this.db

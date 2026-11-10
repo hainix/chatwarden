@@ -57,6 +57,17 @@ describe('cw.discordThreads (the thread map, over the store)', () => {
     expect(store.getDiscordThread('s_x')?.threadId).toBe('2');
   });
 
+  it('rows are copies: changing a returned row, or the row that was put, changes nothing stored', async () => {
+    const { cw } = await setup();
+    const given = { subject: 's_c', threadId: '1', label: 'Case AAAAA', createdAt: NOW };
+    cw.discordThreads.put(given);
+    given.threadId = 'mutated-after-put';
+    const read = cw.discordThreads.get('s_c');
+    expect(read?.threadId).toBe('1');
+    if (read !== null) read.threadId = 'mutated-after-get';
+    expect(cw.discordThreads.get('s_c')?.threadId).toBe('1');
+  });
+
   it('a failing store throws its own error (the feed fences it)', async () => {
     const { cw, store } = await setup();
     store.getDiscordThread = () => {

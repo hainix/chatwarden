@@ -1165,6 +1165,39 @@ describe('MemoryStore.sanctionRefCode', () => {
   });
 });
 
+describe('MemoryStore.sanctionGroupTarget', () => {
+  it('names the subject row and the stored rule of a group (the IP row is not the target), null for an unknown group', async () => {
+    const { MemoryStore } = await import('./memoryStore.js');
+    const store = new MemoryStore();
+    const base = {
+      kind: 'chat' as const,
+      startsAt: 1,
+      endsAt: 2,
+      reason: 'r',
+      gapNote: null,
+      gapStatus: null,
+      roomId: null,
+      actor: 'mod',
+      source: 'moderator' as const,
+      automated: false,
+      pending: false,
+    };
+    store.transaction(() =>
+      store.insertSanctionGroup([
+        { ...base, id: 'r1', groupId: 'g1', refCode: 'M-ABCDE', targetType: 'ip', value: 'iphash', rule: '4' },
+        { ...base, id: 'r2', groupId: 'g1', refCode: 'M-ABCDE', targetType: 'subject', value: 's_x', rule: '4' },
+        { ...base, id: 'r3', groupId: 'g2', refCode: 'M-FGHJK', targetType: 'subject', value: 's_y', rule: 'uncovered' },
+        { ...base, id: 'r4', groupId: 'g3', refCode: 'M-LMNPQ', targetType: 'subject', value: 's_z', rule: null },
+      ]),
+    );
+    expect(store.sanctionGroupTarget('g1')).toEqual({ subject: 's_x', rule: '4' });
+    expect(store.sanctionGroupTarget('g2')).toEqual({ subject: 's_y', rule: 'uncovered' });
+    expect(store.sanctionGroupTarget('g3')).toEqual({ subject: 's_z', rule: null });
+    expect(store.sanctionGroupTarget('nope')).toBeNull();
+    expect(store.sanctionGroupTarget('')).toBeNull();
+  });
+});
+
 describe('MAX_SANCTION_DURATION_MS: null is the only permanent value', () => {
   it('is 365 days', () => {
     expect(MAX_SANCTION_DURATION_MS).toBe(365 * DAY);

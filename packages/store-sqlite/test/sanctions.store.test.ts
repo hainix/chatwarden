@@ -798,6 +798,21 @@ describe('SqliteStore loadSubjectActions', () => {
   });
 });
 
+describe('SqliteStore.sanctionGroupTarget', () => {
+  it('names the subject row and the rule of a group (also revoked, also with an IP row), null for an unknown one', async () => {
+    const { store, subjects, index } = env();
+    const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'ip1' });
+    if (s === null) throw new Error('subject');
+    const withIp = await applySanction(store, subjects, input(s, { includeIp: true, rule: 4 }), NOW, index);
+    const gap = await applySanction(store, subjects, input(s, { rule: 'uncovered', gapNote: 'a note', kind: 'warning', durationMs: null }), NOW, index);
+    store.revokeSanctionGroup(withIp.groupId, 'mod', NOW, 'oops');
+    expect(store.sanctionGroupTarget(withIp.groupId)).toEqual({ subject: s, rule: '4' });
+    expect(store.sanctionGroupTarget(gap.groupId)).toEqual({ subject: s, rule: 'uncovered' });
+    expect(store.sanctionGroupTarget('no-such-group')).toBeNull();
+    expect(store.sanctionGroupTarget('')).toBeNull();
+  });
+});
+
 describe('SqliteStore.sanctionRefCode', () => {
   it('finds the ref code of a group, revoked or ended, and null for an unknown group', async () => {
     const { store, subjects, index } = env();

@@ -49,6 +49,11 @@ describe('parseWebhookUrl', () => {
     expect(() => parseWebhookUrl(url)).not.toThrow();
   });
 
+  it('accepts the shortest and the longest snowflake (17 and 20 digits)', () => {
+    expect(() => parseWebhookUrl('https://discord.com/api/webhooks/12345678901234567/abc')).not.toThrow();
+    expect(() => parseWebhookUrl('https://discord.com/api/webhooks/12345678901234567890/abc')).not.toThrow();
+  });
+
   it('returns the bare webhook URL (query and fragment dropped)', () => {
     expect(parseWebhookUrl(`${WEBHOOK}?wait=false&thread_id=9#frag`)).toBe(WEBHOOK);
     expect(parseWebhookUrl(`${WEBHOOK}/`)).toBe(WEBHOOK);
@@ -65,6 +70,9 @@ describe('parseWebhookUrl', () => {
     ['credentials in the URL', 'https://user:pw@discord.com/api/webhooks/123456789012345678/abc'],
     ['a port', 'https://discord.com:8443/api/webhooks/123456789012345678/abc'],
     ['no token', 'https://discord.com/api/webhooks/123456789012345678'],
+    ['a one-digit id', 'https://discord.com/api/webhooks/1/abc'],
+    ['a 16-digit id', 'https://discord.com/api/webhooks/1234567890123456/abc'],
+    ['a 21-digit id', 'https://discord.com/api/webhooks/123456789012345678901/abc'],
     ['a non-digit id', 'https://discord.com/api/webhooks/abc/def'],
     ['the wrong path', 'https://discord.com/webhooks/123456789012345678/abc'],
     ['an extra path segment', 'https://discord.com/api/webhooks/123456789012345678/abc/messages'],
@@ -470,6 +478,18 @@ describe('dispose', () => {
     await settle(60_000);
     expect(await r).toBeNull();
     expect(d.calls).toHaveLength(1);
+  });
+
+  it('an answer that already arrived is not thrown away by a dispose that follows it', async () => {
+    let answer: (r: Response) => void = () => undefined;
+    const fetchFn = (() => new Promise<Response>((resolve) => (answer = resolve))) as unknown as typeof fetch;
+    const forum = makeForumClient({ webhookUrl: WEBHOOK, fetch: fetchFn, logger: { warn: () => undefined }, random: () => 0.5 });
+    const r = forum.openThread('t', { content: 'x' });
+    await settle();
+    forum.dispose();
+    answer(new Response(JSON.stringify({ id: 'm', channel_id: 'T7' }), { status: 200 }));
+    await settle();
+    expect(await r).toEqual({ threadId: 'T7' });
   });
 
   it('is idempotent', () => {

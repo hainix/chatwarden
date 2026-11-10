@@ -29,7 +29,7 @@ const UNKNOWN_CHANNEL = 10003;
 const SUPPRESS_EMBEDS = 4;
 
 const HOSTS: readonly string[] = ['discord.com', 'discordapp.com'].flatMap((d) => [d, `ptb.${d}`, `canary.${d}`]);
-const WEBHOOK_PATH_RE = /^\/api\/webhooks\/(\d{1,25})\/([A-Za-z0-9._-]{1,200})\/?$/;
+const WEBHOOK_PATH_RE = /^\/api\/webhooks\/(\d{17,20})\/([A-Za-z0-9._-]{1,200})\/?$/;
 
 /** A Discord snowflake as text: 17 to 20 digits. */
 export const isSnowflake = (value: unknown): value is string => typeof value === 'string' && /^\d{17,20}$/.test(value);
@@ -192,8 +192,9 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
     const body = JSON.stringify(payload);
     for (let tried = 1; ; tried++) {
       const result = await attempt(target, body);
-      if (disposed) return { kind: 'failed' };
+      // An answer that arrived is kept even if dispose() came right behind it: dropping a created thread's id would open a second one.
       if (result.kind === 'ok') return result;
+      if (disposed) return { kind: 'failed' };
       if (result.kind === 'final') return result;
       if (tried > MAX_RETRIES) {
         safeWarn(logger, 'chatwarden.discord_failed', {

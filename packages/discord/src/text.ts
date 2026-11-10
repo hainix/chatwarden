@@ -1,4 +1,4 @@
-import { cutText } from './forum.js';
+import { CONTENT_MAX, cutText } from './forum.js';
 
 // Text helpers for the staff posts. Everything an adopter wrote (a rule title, a room tag) goes through `safeText`
 // before it is placed in a post: it is one line, free of invisible characters, cut, and escaped so it can neither
@@ -71,3 +71,30 @@ export const KIND_LABELS: Readonly<Record<string, string>> = Object.freeze({
 /** A label from a closed table, or undefined for a key the table does not hold (never a prototype property). */
 export const labelOf = (table: Readonly<Record<string, string>>, key: unknown): string | undefined =>
   typeof key === 'string' && Object.hasOwn(table, key) ? table[key] : undefined;
+
+const ELLIPSIS = String.fromCharCode(0x2026);
+
+/** `text` cut to `max` characters at a safe boundary: not through a surrogate pair, and not after an odd run of backslashes (a lone escape would swallow what follows). */
+function cutSafe(text: string, max: number): string {
+  let out = cutText(text, Math.max(max, 0));
+  let run = 0;
+  while (run < out.length && out[out.length - 1 - run] === '\\') run++;
+  if (run % 2 === 1) out = out.slice(0, -1);
+  return out;
+}
+
+/**
+ * Put a post together within Discord's 2000 characters: the head (with the role ping, when there is one), the facts, then
+ * the links line. Only the facts are ever shortened, at a safe boundary, with an ellipsis; the head and the links are never
+ * cut (a half-cut link is dead, and the links are what staff act through). If the head and the links could not both fit,
+ * the links line is dropped and the head kept.
+ */
+export function fitMessage(head: string, facts: readonly string[], linkLine: string): string {
+  let tail = linkLine === '' ? '' : `\n${linkLine}`;
+  if (head.length + tail.length > CONTENT_MAX) tail = '';
+  let body = facts.length === 0 ? '' : `\n${facts.join('\n')}`;
+  const room = CONTENT_MAX - head.length - tail.length;
+  if (body.length > room) body = room >= 1 ? `${cutSafe(body, room - 1)}${ELLIPSIS}` : '';
+  return `${head}${body}${tail}`;
+}
+

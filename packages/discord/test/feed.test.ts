@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DiscordThreadRow, KitEvent, Logger } from '@chatwarden/core';
 import { QUEUE_MAX, discordFeed } from '../src/feed.js';
 import type { DiscordFeedOptions, FeedKit } from '../src/feed.js';
-import { NOW, ROLE, TOKEN, WEBHOOK, fakeDiscord, leaks, settle, visibleTexts, withoutLinks } from './support.js';
+import { INJECTIONS, NOW, ROLE, TOKEN, WEBHOOK, fakeDiscord, leaks, settle, visibleTexts, withoutLinks } from './support.js';
 import type { Step } from './support.js';
 
 const H = 3_600_000;
@@ -163,6 +163,13 @@ const applied = (target: string, over: Partial<Extract<KitEvent, { type: 'sancti
   target,
   ...over,
 });
+
+const auto = (subject: string, over: Record<string, unknown> = {}): KitEvent =>
+  ({ type: 'auto.restricted', groupId: id22(), refCode: 'M-AUTO1', second: false, subject, ...over }) as KitEvent;
+const lifted = (subject: string, over: Record<string, unknown> = {}): KitEvent =>
+  ({ type: 'sanction.revoked', groupId: id22(), refCode: 'M-LIFT1', at: NOW, subject, rule: 2, ...over }) as KitEvent;
+const gapEv = (subject: string, over: Record<string, unknown> = {}): KitEvent =>
+  ({ type: 'gap.created', groupId: id22(), refCode: 'M-GAP01', at: NOW, subject, ...over }) as KitEvent;
 
 const contents = (calls: Array<{ body: Record<string, unknown> }>): string[] => calls.map((c) => String(c.body.content));
 
@@ -535,16 +542,69 @@ describe('shared threads', () => {
     expect(logged).toContainEqual(['chatwarden.discord_failed', { op: 'report.created', error: 'RangeError' }]);
   });
 
-  it('events that name no person go to a shared "Moderation log" thread', async () => {
+  it('auto timeouts, lifts and gaps with no usable subject go to the shared "Unattributed reports" thread (no "Moderation log")', async () => {
     const k = fakeKit();
     const { d } = start(k);
-    await k.emit({ type: 'auto.restricted', groupId: id22(), refCode: 'M-AUTO1', second: false });
-    await k.emit({ type: 'sanction.revoked', groupId: id22(), refCode: 'M-GONE2', at: NOW });
-    await k.emit({ type: 'gap.created', groupId: id22(), refCode: 'M-GAP33', at: NOW });
+    await k.emit(auto(''));
+    await k.emit(lifted(undefined as never));
+    await k.emit(gapEv(7 as never));
     await settle();
     expect(d.creates()).toHaveLength(1);
-    expect(d.creates()[0]!.body.thread_name).toBe('Moderation log');
+    expect(d.creates()[0]!.body.thread_name).toBe('Unattributed reports');
     expect(d.posts()).toHaveLength(2);
+    for (const c of d.calls) expect(String(c.body.content)).not.toContain('Open person');
+  });
+
+  it("auto timeouts, lifts and gaps with a subject go to that person's thread with no memory of the apply (also after a restart)", async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject });
+    const a = start(k);
+    await k.emit(created(r.id));
+    await settle();
+    a.feed.dispose();
+    const b = start(k);
+    await k.emit(auto(subject));
+    await k.emit(lifted(subject));
+    await k.emit(gapEv(subject));
+    await settle();
+    expect(b.d.creates()).toHaveLength(0);
+    expect(b.d.posts()).toHaveLength(3);
+    for (const c of b.d.posts()) {
+      expect(c.url.searchParams.get('thread_id')).toBe('T1');
+      expect(String(c.body.content)).toContain(`[Open person](<https://hub.example.test/person/${subject}>)`);
+    }
+  });
+
+  it('a person with no thread yet gets one opened by an auto timeout, a lift or a gap', async () => {
+    for (const ev of [auto, lifted, gapEv]) {
+      const k = fakeKit();
+      const subject = sid();
+      const { d } = start(k);
+      await k.emit(ev(subject));
+      await settle();
+      expect(d.creates()).toHaveLength(1);
+      expect(String(d.creates()[0]!.body.thread_name)).toMatch(LABEL_RE);
+      expect(k.threads.has(subject)).toBe(true);
+    }
+  });
+
+  it('these three events use the canonical person: an alias subject lands in the canonical thread', async () => {
+    const k = fakeKit();
+    const root = sid();
+    const alias = sid();
+    k.merged.set(alias, root);
+    k.threads.set(root, { subject: root, threadId: 'TR', label: 'Case AAAAA', createdAt: 1 });
+    const { d } = start(k);
+    await k.emit(auto(alias));
+    await k.emit(lifted(alias));
+    await k.emit(gapEv(alias));
+    await settle();
+    expect(d.creates()).toHaveLength(0);
+    for (const c of d.posts()) {
+      expect(c.url.searchParams.get('thread_id')).toBe('TR');
+      expect(String(c.body.content)).toContain(`/person/${root}>`);
+    }
   });
 });
 
@@ -704,23 +764,25 @@ describe('content', () => {
   it('auto.restricted posts "Automatic timeout" with the duration and the ref code', async () => {
     const k = fakeKit();
     const { d } = start(k);
-    await k.emit({ type: 'auto.restricted', groupId: id22(), refCode: 'M-AUT01', second: false });
-    await k.emit({ type: 'auto.restricted', groupId: id22(), refCode: 'M-AUT02', second: true });
+    const subject = sid();
+    await k.emit(auto(subject, { refCode: 'M-AUT01' }));
+    await k.emit(auto(subject, { refCode: 'M-AUT02', second: true }));
     await settle();
+    expect(d.calls[0]!.body.content).toContain(`[Open person](<https://hub.example.test/person/${subject}>)`);
     expect(d.calls[0]!.body.content).toContain('**Automatic timeout** · 1 hour');
     expect(d.calls[0]!.body.content).toContain('Ref: M-AUT01');
     expect(d.calls[1]!.body.content).toContain('**Automatic timeout** (repeat) · 24 hours');
     expect(d.calls[1]!.body.content).toContain('Ref: M-AUT02');
   });
 
-  it('sanction.revoked says "Lifted" with the ref code, in the person\'s thread when the group is known', async () => {
+  it('sanction.revoked says "Lifted" with the ref code, in the person\'s thread', async () => {
     const k = fakeKit();
     const subject = sid();
     const ev = applied(subject, { refCode: 'M-LIFT1' });
     const { d } = start(k);
     await k.emit(ev);
     await settle();
-    await k.emit({ type: 'sanction.revoked', groupId: ev.groupId, refCode: 'M-LIFT1', at: NOW });
+    await k.emit(lifted(subject, { groupId: ev.groupId }));
     await settle();
     expect(d.creates()).toHaveLength(1);
     const text = String(d.posts()[0]!.body.content);
@@ -729,13 +791,13 @@ describe('content', () => {
     expect(text).toContain(`<https://hub.example.test/person/${subject}>`);
   });
 
-  it('gap.created is a short note with a hub link to the person when the group is known', async () => {
+  it('gap.created is a short note with a hub link to the person', async () => {
     const k = fakeKit();
     const subject = sid();
     const ev = applied(subject, { rule: 'uncovered', refCode: 'M-GAP01' });
     const { d } = start(k);
     await k.emit(ev);
-    await k.emit({ type: 'gap.created', groupId: ev.groupId, refCode: 'M-GAP01', at: NOW });
+    await k.emit(gapEv(subject, { groupId: ev.groupId }));
     await settle();
     const text = String(d.posts()[0]!.body.content);
     expect(text).toContain('**Rule gap filed** for review');
@@ -906,9 +968,10 @@ describe('severe: the role mention', () => {
     const { d } = start(k, undefined, { mentionRoleId: ROLE });
     await k.emit(created(r.id, 'hate'));
     await k.emit(closed(r.id));
-    await k.emit({ type: 'sanction.revoked', groupId: id22(), refCode: 'M-AAAAA', at: NOW });
-    await k.emit({ type: 'auto.restricted', groupId: id22(), refCode: 'M-BBBBB', second: false });
-    await k.emit({ type: 'gap.created', groupId: id22(), refCode: 'M-CCCCC', at: NOW });
+    const hated = r.targetPerson;
+    await k.emit(lifted(hated, { refCode: 'M-AAAAA', rule: 1 }));
+    await k.emit(auto(hated, { refCode: 'M-BBBBB' }));
+    await k.emit(gapEv(hated, { refCode: 'M-CCCCC' }));
     await settle();
     const pinged = d.calls.filter((c) => String(c.body.content).includes('<@&'));
     expect(pinged).toHaveLength(1);
@@ -937,30 +1000,40 @@ describe('severeOnly', () => {
     expect(contents(d.calls).join('\n')).not.toContain('Respect others');
   });
 
-  it('skips auto timeouts, gaps and a lift of a group it did not post', async () => {
+  it('skips auto timeouts and gaps, and a closing it cannot read', async () => {
     const k = fakeKit();
+    const subject = sid();
     const { d } = start(k, undefined, { severeOnly: true });
-    await k.emit({ type: 'auto.restricted', groupId: id22(), refCode: 'M-AAAAA', second: false });
-    await k.emit({ type: 'gap.created', groupId: id22(), refCode: 'M-BBBBB', at: NOW });
-    await k.emit({ type: 'sanction.revoked', groupId: id22(), refCode: 'M-CCCCC', at: NOW });
+    await k.emit(auto(subject));
+    await k.emit(gapEv(subject));
     await k.emit(closed('unreadable'));
     await settle();
     expect(d.calls).toHaveLength(0);
   });
 
-  it('lifts a severe sanction it posted, and not a mild one', async () => {
+  it("lifts a sanction under a severe rule and not one under another rule or none, by the event's own rule (so also after a restart)", async () => {
     const k = fakeKit();
     const subject = sid();
-    const severe = applied(subject, { rule: 1, refCode: 'M-SEVER' });
-    const mild = applied(subject, { rule: 2, refCode: 'M-MILD1' });
     const { d } = start(k, undefined, { severeOnly: true });
-    await k.emit(severe);
-    await k.emit(mild);
-    await k.emit({ type: 'sanction.revoked', groupId: mild.groupId, refCode: 'M-MILD1', at: NOW });
-    await k.emit({ type: 'sanction.revoked', groupId: severe.groupId, refCode: 'M-SEVER', at: NOW });
+    await k.emit(lifted(subject, { rule: 2, refCode: 'M-MILD1' }));
+    await k.emit(lifted(subject, { rule: null, refCode: 'M-NONE1' }));
+    await k.emit(lifted(subject, { rule: 4, refCode: 'M-MILD2' }));
     await settle();
-    expect(d.calls).toHaveLength(2);
-    expect(String(d.calls[1]!.body.content)).toContain('M-SEVER');
+    expect(d.calls).toHaveLength(0);
+    await k.emit(lifted(subject, { rule: 1, refCode: 'M-SEVER' }));
+    await settle();
+    expect(d.calls).toHaveLength(1);
+    expect(String(d.calls[0]!.body.content)).toContain('M-SEVER');
+  });
+
+  it('a lift follows profile.severeRules', async () => {
+    const k = fakeKit();
+    k.state.severeRules = [4];
+    const { d } = start(k, undefined, { severeOnly: true });
+    await k.emit(lifted(sid(), { rule: 1 }));
+    await k.emit(lifted(sid(), { rule: 4 }));
+    await settle();
+    expect(d.calls).toHaveLength(1);
   });
 
   it('false (the default) posts everything', async () => {
@@ -989,9 +1062,9 @@ describe('privacy: what the visible text never contains', () => {
     await k.emit(closed(r2.id, 'no_action'));
     await k.emit(ev);
     await k.emit(ev2);
-    await k.emit({ type: 'sanction.revoked', groupId: ev.groupId, refCode: ev.refCode, at: NOW });
-    await k.emit({ type: 'gap.created', groupId: ev2.groupId, refCode: ev2.refCode, at: NOW });
-    await k.emit({ type: 'auto.restricted', groupId: id22(), refCode: 'M-AUTO9', second: true });
+    await k.emit(lifted(subject, { groupId: ev.groupId, refCode: ev.refCode, rule: 1 }));
+    await k.emit(gapEv(other, { groupId: ev2.groupId, refCode: ev2.refCode }));
+    await k.emit(auto(subject, { refCode: 'M-AUTO9', second: true }));
     await k.emit(created('vanished-report'));
     await settle();
     const ids = [subject, other, r.id, r2.id, ev.groupId, ev2.groupId];
@@ -1041,7 +1114,7 @@ describe('privacy: what the visible text never contains', () => {
 
   it('thread names hold no id: only the random label or a fixed shared name', async () => {
     const { d } = await everyEvent();
-    for (const c of d.creates()) expect(String(c.body.thread_name)).toMatch(/^(Case [0-9A-HJKMNP-TV-Z]{5}|Unattributed reports|Moderation log)$/);
+    for (const c of d.creates()) expect(String(c.body.thread_name)).toMatch(/^(Case [0-9A-HJKMNP-TV-Z]{5}|Unattributed reports)$/);
   });
 
   it('every request body is JSON with only the documented fields', async () => {
@@ -1150,13 +1223,15 @@ describe('fencing: nothing reaches the kit', () => {
       { type: 'report.created' },
       { type: 'report.closed', reportId: 7 },
       { type: 'auto.restricted' },
+      { type: 'auto.restricted', subject: 5 },
       { type: 'sanction.revoked', groupId: null },
+      { type: 'sanction.revoked', rule: 'x', subject: {} },
       { type: 'gap.created' },
     ]) {
       await expect(k.emit(bad as never)).resolves.toBeDefined();
     }
     await settle();
-    expect(d.calls.length).toBeLessThanOrEqual(6);
+    expect(d.calls.length).toBeLessThanOrEqual(8);
   });
 });
 
@@ -1167,7 +1242,8 @@ describe('queue', () => {
     const { d, logged } = start(k, (n) => (n === 0 ? { status: 429, json: { retry_after: 5 } } : undefined));
     // Event 0 is taken at once (and held up by a 429); events 1..1004 wait; 4 of them are over the bound.
     const total = 1 + QUEUE_MAX + 4;
-    for (let i = 0; i < total; i++) void k.emit({ type: 'gap.created', groupId: id22(), refCode: `M-N${String(i).padStart(4, '0')}`, at: NOW });
+    const subject = sid();
+    for (let i = 0; i < total; i++) void k.emit(gapEv(subject, { refCode: `M-N${String(i).padStart(4, '0')}` }));
     await settle();
     expect(logged).toEqual([['chatwarden.discord_dropped', { count: 1 }]]);
     await settle(6000);
@@ -1226,7 +1302,7 @@ describe('dispose', () => {
   it('flushes the drop count that had not been logged yet', async () => {
     const k = fakeKit();
     const { feed, logged } = start(k, () => 'hang');
-    for (let i = 0; i < 1 + QUEUE_MAX + 3; i++) void k.emit({ type: 'gap.created', groupId: id22(), refCode: 'M-AAAAA', at: NOW });
+    for (let i = 0; i < 1 + QUEUE_MAX + 3; i++) void k.emit(gapEv(sid(), { refCode: 'M-AAAAA' }));
     await settle();
     expect(logged).toEqual([['chatwarden.discord_dropped', { count: 1 }]]);
     feed.dispose();
@@ -1236,5 +1312,168 @@ describe('dispose', () => {
     ]);
     await settle();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('rendered posts: the injection matrix', () => {
+  it.each(INJECTIONS)('%s, as a rule title', async (_name, input, expected) => {
+    const k = fakeKit();
+    k.state.rules = [{ number: 2, title: input, text: 'x' }];
+    const r = k.addReport({ targetPerson: sid() });
+    const { d } = start(k, undefined, { mentionRoleId: ROLE });
+    await k.emit(created(r.id));
+    await settle();
+    const body = d.calls[0]!.body;
+    const text = String(body.content);
+    expect(text).toContain(`Rule: Community Rule 2 (${expected})`);
+    // header, category, rule, links: the title cannot add a line (a header, a quote, a fence).
+    expect(text.split('\n')).toHaveLength(4);
+    expect(body.allowed_mentions).toEqual({ parse: [] });
+    expect(text).not.toContain('@everyone');
+    expect(text).not.toContain('@here');
+    expect(text).not.toMatch(new RegExp('@(?!' + ZW + ')'));
+    expect(text).not.toContain('](<https://evil');
+    expect(text).not.toContain('```');
+    expect(text).not.toContain(`<@&${ROLE}>`);
+  });
+
+  it.each(INJECTIONS.filter(([, input]) => input.length <= 30))('%s, as an unknown category string', async (_name, input, expected) => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid(), category: input });
+    const { d } = start(k, undefined, { mentionRoleId: ROLE });
+    await k.emit(created(r.id, input));
+    await settle();
+    const text = String(d.calls[0]!.body.content);
+    expect(text).toContain(`Category: ${expected}`);
+    expect(text.split('\n')).toHaveLength(3);
+    expect(d.calls[0]!.body.allowed_mentions).toEqual({ parse: [] });
+    expect(text).not.toMatch(new RegExp('@(?!' + ZW + ')'));
+  });
+
+  it('a hostile ref code is escaped too', async () => {
+    const k = fakeKit();
+    const { d } = start(k);
+    await k.emit(applied(sid(), { refCode: '@everyone <@&1>\n# hi' }));
+    await settle();
+    const text = String(d.calls[0]!.body.content);
+    expect(text).toContain(`Ref: @${ZW}everyone \\<@${ZW}&1\\> \\# hi`);
+    expect(text.split('\n')).toHaveLength(4);
+  });
+});
+
+describe('hubLink output is bounded', () => {
+  const longLink = (n: number) => () => `https://h.test/${'a'.repeat(n)}`;
+
+  it('drops a 3000-character link, keeps the post, the head and the role ping, and logs only the class', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject, category: 'hate' });
+    const { d, logged } = start(k, undefined, { mentionRoleId: ROLE, hubLink: longLink(3000) });
+    await k.emit(created(r.id, 'hate'));
+    await settle();
+    const text = String(d.calls[0]!.body.content);
+    expect(text.length).toBeLessThanOrEqual(2000);
+    expect(text.startsWith(`<@&${ROLE}> **Severe report**`)).toBe(true);
+    expect(text).toContain('Category: Hate speech');
+    expect(text).not.toContain('Open report');
+    expect(text).not.toContain('Open person');
+    expect(text).not.toContain('https://h.test');
+    expect((d.calls[0]!.body.allowed_mentions as { roles: string[] }).roles).toEqual([ROLE]);
+    expect(logged).toEqual([
+      ['chatwarden.discord_link_dropped', { kind: 'report', reason: 'too_long' }],
+      ['chatwarden.discord_link_dropped', { kind: 'person', reason: 'too_long' }],
+    ]);
+    expect(JSON.stringify(logged)).not.toContain('h.test');
+    expect(JSON.stringify(logged)).not.toContain(subject);
+  });
+
+  it('is never truncated: a link of 512 characters is kept whole, 513 is dropped', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const keep = start(k, undefined, { hubLink: longLink(512 - 'https://h.test/'.length) });
+    await k.emit(created(r.id));
+    await settle();
+    expect(keep.logged).toEqual([]);
+    expect(String(keep.d.calls[0]!.body.content)).toContain(`(<https://h.test/${'a'.repeat(497)}>)`);
+    keep.feed.dispose();
+    const drop = start(k, undefined, { hubLink: longLink(512 - 'https://h.test/'.length + 1) });
+    await k.emit(created(r.id));
+    await settle();
+    expect(drop.logged.length).toBe(2);
+    expect(String(drop.d.calls[0]!.body.content)).not.toContain('https://h.test');
+  });
+
+  it('one long link does not take the other with it', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject });
+    const { d, logged } = start(k, undefined, {
+      hubLink: (kind, id) => (kind === 'report' ? `https://h.test/${'a'.repeat(900)}` : hubLink(kind, id)),
+    });
+    await k.emit(created(r.id));
+    await settle();
+    const text = String(d.calls[0]!.body.content);
+    expect(text).not.toContain('Open report');
+    expect(text).toContain(`[Open person](<https://hub.example.test/person/${subject}>)`);
+    expect(logged).toEqual([['chatwarden.discord_link_dropped', { kind: 'report', reason: 'too_long' }]]);
+  });
+
+  it('logs an unusable link and a throwing hubLink by class, never the value', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const a = start(k, undefined, { hubLink: () => 'javascript:alert(1)' });
+    await k.emit(created(r.id));
+    await settle();
+    expect(a.logged).toEqual([
+      ['chatwarden.discord_link_dropped', { kind: 'report', reason: 'invalid' }],
+      ['chatwarden.discord_link_dropped', { kind: 'person', reason: 'invalid' }],
+    ]);
+    a.feed.dispose();
+    const b = start(k, undefined, {
+      hubLink: () => {
+        throw new RangeError('secret-token-in-message');
+      },
+    });
+    await k.emit(created(r.id));
+    await settle();
+    expect(b.logged[0]).toEqual(['chatwarden.discord_link_dropped', { kind: 'report', reason: 'RangeError' }]);
+    expect(JSON.stringify(b.logged)).not.toContain('secret-token');
+  });
+});
+
+describe('a created thread is always remembered', () => {
+  it('even when dispose() runs while the create is in flight', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject });
+    let answer: (res: Response) => void = () => undefined;
+    const fetchFn = (() => new Promise<Response>((resolve) => (answer = resolve))) as unknown as typeof fetch;
+    const { feed } = start(k, undefined, { fetch: fetchFn });
+    await k.emit(created(r.id));
+    await settle();
+    feed.dispose();
+    answer(new Response(JSON.stringify({ id: 'm1', channel_id: 'T77' }), { status: 200 }));
+    await settle();
+    expect(k.threads.get(subject)).toMatchObject({ threadId: 'T77' });
+    expect(String(k.threads.get(subject)?.label)).toMatch(LABEL_RE);
+  });
+});
+
+describe('the known limit: an answer lost after Discord made the thread', () => {
+  it('stores nothing, so the next event opens another thread (documented, not fixable without idempotency from Discord)', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const a = k.addReport({ targetPerson: subject });
+    const b = k.addReport({ targetPerson: subject });
+    // Discord answers 200 but the body is unreadable: the thread exists there, and we never learn its id.
+    const { d, logged } = start(k, (n) => (n === 0 ? { status: 200, text: 'garbled' } : undefined));
+    await k.emit(created(a.id));
+    await settle();
+    expect(k.threads.size).toBe(0);
+    expect(logged).toContainEqual(['chatwarden.discord_failed', { op: 'openThread', error: 'bad_response', attempts: 1 }]);
+    await k.emit(created(b.id));
+    await settle();
+    expect(d.creates()).toHaveLength(2);
+    expect(k.threads.get(subject)?.threadId).toBe('T1');
   });
 });

@@ -26,7 +26,7 @@ import { ReportService } from './reports.js';
 import type { ReportCounts, ReportInput, ReportResult } from './reports.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
-import { defineRules, starterRules } from './rules.js';
+import { defineRules, parseRuleRef, starterRules } from './rules.js';
 import type { CommunityRules, RuleRef } from './rules.js';
 import { applySanction, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
@@ -479,8 +479,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     profanityMode: profile.profanity.mode,
     gate: opts.gate,
     onAutoRestrict: opts.onAutoRestrict,
-    onAutoRestricted: ({ groupId, refCode, second }) => {
-      bus.emit({ type: 'auto.restricted', groupId, refCode, second });
+    onAutoRestricted: ({ groupId, refCode, second, subject }) => {
+      bus.emit({ type: 'auto.restricted', groupId, refCode, second, subject: subjects.canonical(subject) });
     },
     logger,
     notices,
@@ -636,7 +636,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           });
           // A gap row exists only for a moderator's uncovered rule (the sanction check requires its note).
           if (rule === 'uncovered' && input.source === 'moderator') {
-            bus.emit({ type: 'gap.created', groupId: done.groupId, refCode: done.refCode, at: now });
+            bus.emit({ type: 'gap.created', groupId: done.groupId, refCode: done.refCode, at: now, subject: subjects.canonical(input.subject) });
           }
         } catch (err) {
           eventFailed(err);
@@ -650,7 +650,18 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         if (revoked) {
           try {
             const code = store.sanctionRefCode(groupId);
-            if (code !== null) bus.emit({ type: 'sanction.revoked', groupId, refCode: code, at });
+            const target = store.sanctionGroupTarget(groupId);
+            if (code !== null && target !== null) {
+              const rule = parseRuleRef(target.rule ?? 'uncovered');
+              bus.emit({
+                type: 'sanction.revoked',
+                groupId,
+                refCode: code,
+                at,
+                subject: subjects.canonical(target.subject),
+                rule: typeof rule === 'number' ? rule : null,
+              });
+            }
           } catch (err) {
             eventFailed(err);
           }
@@ -703,7 +714,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
             });
           }
           for (const g of committed.applied) {
-            if (g.gap) bus.emit({ type: 'gap.created', groupId: g.groupId, refCode: g.refCode, at: committed.at });
+            if (g.gap) bus.emit({ type: 'gap.created', groupId: g.groupId, refCode: g.refCode, at: committed.at, subject: subjects.canonical(g.target) });
           }
         } catch (err) {
           eventFailed(err);

@@ -190,7 +190,7 @@ describe('events: decide', () => {
         automated: false,
         target: r.a,
       },
-      { type: 'gap.created', groupId: warning?.groupId, refCode: warning?.refCode, at: NOW },
+      { type: 'gap.created', groupId: warning?.groupId, refCode: warning?.refCode, at: NOW, subject: r.a },
     ]);
   });
 
@@ -374,7 +374,7 @@ describe('events: sanctions.apply and sanctions.revoke', () => {
     const s = await seated();
     const { groupId, refCode } = await s.cw.sanctions.apply(input(s.subject, { rule: 'uncovered', gapNote: SECRET_TEXT.gap }));
     expect(types(s.events)).toEqual(['sanction.applied', 'gap.created']);
-    expect(s.events[1]).toEqual({ type: 'gap.created', groupId, refCode, at: NOW });
+    expect(s.events[1]).toEqual({ type: 'gap.created', groupId, refCode, at: NOW, subject: s.subject });
     expect(s.cw.gaps.list().map((g) => g.groupId)).toEqual([groupId]);
   });
 
@@ -411,7 +411,7 @@ describe('events: sanctions.apply and sanctions.revoke', () => {
     s.events.length = 0;
     s.clock.t += 5000;
     expect(await s.cw.sanctions.revoke(groupId, 'mod@example.test', SECRET_TEXT.revoke)).toBe(true);
-    expect(s.events).toEqual([{ type: 'sanction.revoked', groupId, refCode, at: NOW + 5000 }]);
+    expect(s.events).toEqual([{ type: 'sanction.revoked', groupId, refCode, at: NOW + 5000, subject: s.subject, rule: 1 }]);
     expect(await s.cw.sanctions.revoke(groupId, 'mod@example.test', 'again')).toBe(false);
     expect(await s.cw.sanctions.revoke('no-such-group', 'mod@example.test', 'x')).toBe(false);
     expect(s.events).toHaveLength(1);
@@ -423,7 +423,7 @@ describe('events: sanctions.apply and sanctions.revoke', () => {
     s.clock.t += 2 * H;
     s.events.length = 0;
     expect(await s.cw.sanctions.revoke(groupId, 'mod@example.test', 'cleanup')).toBe(true);
-    expect(s.events).toEqual([expect.objectContaining({ type: 'sanction.revoked', groupId, refCode })]);
+    expect(s.events).toEqual([expect.objectContaining({ type: 'sanction.revoked', groupId, refCode, subject: s.subject })]);
   });
 
   it('revoking a decision group emits sanction.revoked too', async () => {
@@ -433,7 +433,7 @@ describe('events: sanctions.apply and sanctions.revoke', () => {
     r.events.length = 0;
     await r.cw.sanctions.revoke(res.groups[0]?.groupId ?? '', 'mod', 'oops');
     expect(r.events).toEqual([
-      { type: 'sanction.revoked', groupId: res.groups[0]?.groupId, refCode: res.groups[0]?.refCode, at: NOW },
+      { type: 'sanction.revoked', groupId: res.groups[0]?.groupId, refCode: res.groups[0]?.refCode, at: NOW, subject: r.a, rule: 2 },
     ]);
   });
 
@@ -474,7 +474,7 @@ describe('events: auto.restricted', () => {
     const stored = s.store.loadSanctions(s.clock.t).filter((r) => r.value === subject);
     expect(stored).toHaveLength(1);
     expect(s.events).toEqual([
-      { type: 'auto.restricted', groupId: stored[0]?.groupId, refCode: stored[0]?.refCode, second: false },
+      { type: 'auto.restricted', groupId: stored[0]?.groupId, refCode: stored[0]?.refCode, second: false, subject },
     ]);
     expect(told).toEqual([[subject, false]]);
   });
@@ -771,11 +771,11 @@ describe('events: carry no player text', () => {
     const keys: Record<string, string[]> = {};
     for (const e of r.events) keys[e.type] = Object.keys(e).sort();
     expect(keys).toEqual({
-      'auto.restricted': ['groupId', 'refCode', 'second', 'type'],
+      'auto.restricted': ['groupId', 'refCode', 'second', 'subject', 'type'],
       'report.closed': ['at', 'reportId', 'type', 'verdict'],
       'sanction.applied': ['automated', 'groupId', 'kind', 'refCode', 'rule', 'source', 'target', 'type', 'until'],
-      'sanction.revoked': ['at', 'groupId', 'refCode', 'type'],
-      'gap.created': ['at', 'groupId', 'refCode', 'type'],
+      'sanction.revoked': ['at', 'groupId', 'refCode', 'rule', 'subject', 'type'],
+      'gap.created': ['at', 'groupId', 'refCode', 'subject', 'type'],
     });
   });
 
@@ -830,5 +830,93 @@ describe('events: fix round 1', () => {
     expect(stored.every((r) => r.revokedAt === revokedAt)).toBe(true);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'sanction.revoked', at: revokedAt });
+  });
+});
+
+describe('events: subject on auto.restricted, sanction.revoked and gap.created', () => {
+  const sayZorbak = (s: Setup, seat: string) => {
+    for (let i = 0; i < 3; i++) {
+      s.cw.chat.accept(R, seat, 'zorbak');
+      s.clock.t += 2000;
+    }
+  };
+  const input = (subject: string, over: Record<string, unknown> = {}) => ({
+    kind: 'chat' as const,
+    subject,
+    includeIp: false,
+    durationMs: H,
+    reason: SECRET_TEXT.reason,
+    actor: 'mod@example.test',
+    source: 'moderator' as const,
+    automated: false,
+    rule: 1,
+    ...over,
+  });
+
+  it('a revoke names the rule as a number, or null for uncovered', async () => {
+    const s = await setup();
+    s.cw.rooms.seat(R, 'a', alice, 'Alice');
+    const subject = s.cw.rooms.subjectAt(R, 'a') ?? '';
+    const numbered = await s.cw.sanctions.apply(input(subject, { rule: 4 }));
+    const gap = await s.cw.sanctions.apply(input(subject, { rule: 'uncovered', gapNote: SECRET_TEXT.gap, kind: 'warning', durationMs: null }));
+    s.events.length = 0;
+    await s.cw.sanctions.revoke(numbered.groupId, 'mod', 'x');
+    await s.cw.sanctions.revoke(gap.groupId, 'mod', 'x');
+    expect(s.events.map((e) => (e.type === 'sanction.revoked' ? e.rule : 'x'))).toEqual([4, null]);
+  });
+
+  it('a revoke after a restart (a fresh kit on the same store) still names the subject and rule', async () => {
+    const store = new MemoryStore();
+    const s = await setup({}, store);
+    s.cw.rooms.seat(R, 'a', alice, 'Alice');
+    const subject = s.cw.rooms.subjectAt(R, 'a') ?? '';
+    const { groupId } = await s.cw.sanctions.apply(input(subject, { rule: 1 }));
+    await s.cw.flush();
+    const s2 = await setup({}, store);
+    await s2.cw.sanctions.revoke(groupId, 'mod', 'x');
+    expect(s2.events).toEqual([expect.objectContaining({ type: 'sanction.revoked', subject, rule: 1 })]);
+  });
+
+  it('every one of the three carries the CANONICAL subject, also after a merge', async () => {
+    const s = await setup();
+    s.cw.rooms.seat(R, 'a', { clientKey: 'k-one' }, 'A');
+    s.cw.rooms.seat(R, 'b', { clientKey: 'k-two' }, 'B');
+    const older = s.cw.rooms.subjectAt(R, 'a') ?? '';
+    const newer = s.cw.rooms.subjectAt(R, 'b') ?? '';
+    expect(older).not.toBe(newer);
+    // The sanction is filed under one subject; then an account ties the two and one of them survives.
+    const g = await s.cw.sanctions.apply(input(newer, { rule: 'uncovered', gapNote: SECRET_TEXT.gap }));
+    s.cw.rooms.seat(R, 'c', { clientKey: 'k-one', accountId: 'acc-1' }, 'C');
+    s.cw.rooms.seat(R, 'd', { clientKey: 'k-two', accountId: 'acc-1' }, 'D');
+    await s.cw.flush();
+    const root = s.cw.people.canonical(newer);
+    expect([older, newer]).toContain(root);
+    const alias = root === older ? newer : older;
+    s.events.length = 0;
+    await s.cw.sanctions.revoke(g.groupId, 'mod', 'x');
+    expect(s.events).toEqual([expect.objectContaining({ type: 'sanction.revoked', subject: root })]);
+    // A new apply to the alias id emits gap.created with the canonical subject.
+    s.events.length = 0;
+    await s.cw.sanctions.apply(input(alias, { rule: 'uncovered', gapNote: SECRET_TEXT.gap }));
+    expect(s.events.filter((e) => e.type === 'gap.created')).toEqual([expect.objectContaining({ subject: root })]);
+  });
+
+  it('auto.restricted carries the speaker subject, for the first and the repeat timeout', async () => {
+    const s = await setup();
+    s.cw.rooms.seat(R, 'a', alice, 'Alice');
+    const subject = s.cw.rooms.subjectAt(R, 'a');
+    sayZorbak(s, 'a');
+    s.clock.t += 3 * H;
+    sayZorbak(s, 'a');
+    const autos = s.events.filter((e) => e.type === 'auto.restricted');
+    expect(autos.length).toBeGreaterThanOrEqual(1);
+    for (const e of autos) expect(e).toMatchObject({ subject });
+  });
+
+  it('an auto timeout held only in memory (no subject) emits nothing', async () => {
+    const s = await setup();
+    s.cw.rooms.seat(R, 'a', { ip: '198.51.100.9' }, 'Anon');
+    sayZorbak(s, 'a');
+    expect(s.events.filter((e) => e.type === 'auto.restricted')).toEqual([]);
   });
 });

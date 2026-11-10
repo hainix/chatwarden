@@ -116,7 +116,7 @@ export interface ChatServiceDeps {
    * and its ref code. Not called when the timeout is held only in memory (a speaker with no subject, or a failed
    * write): there is no stored group to name. The facade turns it into the `auto.restricted` event. Fenced.
    */
-  onAutoRestricted?: (info: { groupId: string; refCode: string; second: boolean }) => void;
+  onAutoRestricted?: (info: { groupId: string; refCode: string; second: boolean; subject: SubjectId }) => void;
   /** Defaults to `console.warn`. */
   logger?: Logger;
   /**
@@ -455,7 +455,7 @@ export class ChatService {
     // after a restart a strike is counted only if it is newer than this start.
     const now = this.clock.now();
     let stored = false;
-    let landed: { groupId: string; refCode: string } | null = null;
+    let landed: { groupId: string; refCode: string; subject: SubjectId } | null = null;
     if (subject !== null) {
       try {
         // The store write and the index update both happen synchronously, before this returns its promise.
@@ -484,7 +484,7 @@ export class ChatService {
         const found = this.sanctions.active('chat', none, subject, now);
         stored = found !== null && found.automated && found.until === now + durationMs;
         if (found !== null && stored) {
-          landed = { groupId: found.groupId, refCode: found.refCode };
+          landed = { groupId: found.groupId, refCode: found.refCode, subject };
           this.makeNotice(subject, found, line);
         }
       } catch (err) {

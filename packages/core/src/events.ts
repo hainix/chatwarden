@@ -39,15 +39,26 @@ export type KitEvent =
       automated: boolean;
       target: StaffRef;
     }
-  /** A sanction group was revoked by this call. */
-  | { type: 'sanction.revoked'; groupId: string; refCode: string; at: number }
-  /** A moderator filed a sanction under `'uncovered'` and a rule-gap row now exists for the group. */
-  | { type: 'gap.created'; groupId: string; refCode: string; at: number }
+  /**
+   * A sanction group was revoked by this call. `subject` is the person it was about (canonical at emit time) and `rule`
+   * the Community Rule it cited (null for 'uncovered' or a row written before rules existed), so a consumer can place and
+   * filter a lift without remembering the apply.
+   * Carries subject ids: staff channels only, never send to a player.
+   */
+  | { type: 'sanction.revoked'; groupId: string; refCode: string; at: number; subject: StaffRef; rule: number | null }
+  /**
+   * A moderator filed a sanction under `'uncovered'` and a rule-gap row now exists for the group. `subject` is the person
+   * (canonical at emit time).
+   * Carries subject ids: staff channels only, never send to a player.
+   */
+  | { type: 'gap.created'; groupId: string; refCode: string; at: number; subject: StaffRef }
   /**
    * A blocked line earned an automatic timeout that was stored; `second` is true for the 24 h repeat. It is raised
-   * inside `chat.accept`, on the chat hot path, so its listeners must be cheap or defer their work.
+   * inside `chat.accept`, on the chat hot path, so its listeners must be cheap or defer their work. `subject` is the
+   * person who was timed out (canonical at emit time).
+   * Carries subject ids: staff channels only, never send to a player.
    */
-  | { type: 'auto.restricted'; groupId: string; refCode: string; second: boolean };
+  | { type: 'auto.restricted'; groupId: string; refCode: string; second: boolean; subject: StaffRef };
 
 /** Every event type, for checking a subscription. */
 export const KIT_EVENT_TYPES: readonly KitEvent['type'][] = [

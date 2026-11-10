@@ -257,7 +257,7 @@ describe('the event filter', () => {
     webhooksOut(k.kit, { endpoints: [endpointA({ events: ['report.closed'] })], fetch: f.fetch, clock });
     k.emit(created());
     k.emit(closed(1));
-    k.emit({ type: 'gap.created', groupId: 'g', refCode: 'RC', at: NOW });
+    k.emit({ type: 'gap.created', groupId: 'g', refCode: 'RC', at: NOW, subject: 's_x' });
     await tick(0);
     expect(f.calls.map((c) => bodyOf(c).type)).toEqual(['report.closed']);
   });
@@ -270,9 +270,26 @@ describe('the event filter', () => {
     webhooksOut(k.kit, { endpoints: [endpointA({ events: '*' })], fetch: f.fetch, clock });
     k.emit(created());
     k.emit(closed(1));
-    k.emit({ type: 'auto.restricted', groupId: 'g', refCode: 'RC', second: false });
+    k.emit({ type: 'auto.restricted', groupId: 'g', refCode: 'RC', second: false, subject: 's_x' });
     await tick(0);
     expect(f.calls.map((c) => bodyOf(c).type)).toEqual(['report.created', 'report.closed', 'auto.restricted']);
+  });
+
+  it('forwards the staff subject (and the lifted rule) of the group events in the payload data', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const k = fakeKit();
+    const f = fakeFetch();
+    webhooksOut(k.kit, { endpoints: [endpointA({ events: '*' })], fetch: f.fetch, clock });
+    k.emit({ type: 'auto.restricted', groupId: 'g', refCode: 'RC', second: false, subject: 's_a' });
+    k.emit({ type: 'sanction.revoked', groupId: 'g', refCode: 'RC', at: NOW, subject: 's_b', rule: null });
+    k.emit({ type: 'gap.created', groupId: 'g', refCode: 'RC', at: NOW, subject: 's_c' });
+    await tick(0);
+    expect(f.calls.map((c) => bodyOf(c).data)).toEqual([
+      { type: 'auto.restricted', groupId: 'g', refCode: 'RC', second: false, subject: 's_a' },
+      { type: 'sanction.revoked', groupId: 'g', refCode: 'RC', at: NOW, subject: 's_b', rule: null },
+      { type: 'gap.created', groupId: 'g', refCode: 'RC', at: NOW, subject: 's_c' },
+    ]);
   });
 
   it('two endpoints get their own events, each signed with its own secret', async () => {
@@ -359,7 +376,7 @@ describe('excerpts', () => {
     const f = fakeFetch();
     webhooksOut(k.kit, { endpoints: [endpointA({ includeExcerpts: true })], fetch: f.fetch, clock });
     k.emit(closed(1));
-    k.emit({ type: 'sanction.revoked', groupId: 'g', refCode: 'RC', at: NOW });
+    k.emit({ type: 'sanction.revoked', groupId: 'g', refCode: 'RC', at: NOW, subject: 's_x', rule: 2 });
     await tick(0);
     expect(f.calls).toHaveLength(2);
     expect(get).not.toHaveBeenCalled();

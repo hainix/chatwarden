@@ -235,6 +235,9 @@ export interface StrikeRow {
 /**
  * A Discord forum thread kept for one person by `@chatwarden/discord`. `label` is the neutral name the thread was
  * created with (`Case 7K2QX`): random, never derived from an id, hash or handle.
+ *
+ * Staff-only (`subject` is a subject id), and NOT purged by `purge()`: rows live as long as the table does. Subjects are not
+ * purged either today; whatever starts deleting subjects must delete their rows here too.
  */
 export interface DiscordThreadRow {
   subject: string;
@@ -451,6 +454,14 @@ export interface Store {
    * still found: the code never changes. For the `sanction.revoked` event.
    */
   sanctionRefCode(groupId: string): string | null;
+
+  /**
+   * The person a sanction group is about and the rule it cites, for the `sanction.revoked` event: the group's SUBJECT row
+   * (its IP row is not a person) and its stored rule text (`'1'`.., `'uncovered'`, or null on a row written before rules
+   * existed). Revoked and ended groups are still found. Null for an unknown group. `subject` is the id as stored; the
+   * facade makes it canonical.
+   */
+  sanctionGroupTarget(groupId: string): { subject: SubjectId; rule: string | null } | null;
 
   /** Every unrevoked row that has not ended by `now`, for rebuilding the sanction index. */
   loadSanctions(now: number): SanctionRow[];

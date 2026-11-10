@@ -110,3 +110,34 @@ export function leaks(text: string, forbidden: readonly string[] = []): string[]
   for (const f of forbidden) if (visible.includes(f)) found.push(`forbidden:${f}`);
   return found;
 }
+
+const ZW = String.fromCharCode(0x200b);
+
+/** Every injection shape a rule title, a category string or a tag could carry, with the exact text it must become. */
+export const INJECTIONS: Array<[string, string, string]> = [
+  ['a user mention', '<@123>', `\\<@${ZW}123\\>`],
+  ['a nickname mention', '<@!123>', `\\<@${ZW}!123\\>`],
+  ['a role mention', '<@&123>', `\\<@${ZW}&123\\>`],
+  ['a channel mention', '<#123>', '\\<\\#123\\>'],
+  ['a custom emoji', '<:wave:123>', '\\<\\:wave\\:123\\>'],
+  ['a timestamp', '<t:1700000000:R>', '\\<t\\:1700000000\\:R\\>'],
+  ['a fullwidth at sign (not a mention in Discord, so shown as typed)', '＠everyone', '＠everyone'],
+  ['a zero-width space planted before the name', `@${ZW}everyone`, `@${ZW}everyone`],
+  ['a zero-width space planted before the at sign', `${ZW}@everyone`, `@${ZW}everyone`],
+  ['@everyone', '@everyone', `@${ZW}everyone`],
+  ['a standalone @here', '@here', `@${ZW}here`],
+  ['a bare @', '@', `@${ZW}`],
+  ['a code fence', '```js\nalert(1)\n```', '\\`\\`\\`js alert\\(1\\) \\`\\`\\`'],
+  ['inline code', '`x`', '\\`x\\`'],
+  ['a multi-line header and quote', '# Header\n> quote\n- item', '\\# Header \\> quote - item'],
+  ['a masked link to https', '[click here](https://evil.example/x)', '\\[click here\\]\\(https\\://evil.example/x\\)'],
+  ['an image link', '![x](https://evil.example/a.png)', '!\\[x\\]\\(https\\://evil.example/a.png\\)'],
+  ['a bare url', 'https://evil.example', 'https\\://evil.example'],
+  ['a trailing backslash', 'ends with\\', 'ends with\\\\'],
+  ['a backslash before an at sign', '\\@everyone', `\\\\@${ZW}everyone`],
+  ['a spoiler', '||secret||', '\\|\\|secret\\|\\|'],
+  ['bold, italic, strike', '**b** _i_ ~~s~~', '\\*\\*b\\*\\* \\_i\\_ \\~\\~s\\~\\~'],
+  ['a right-to-left override', 'a‮b', 'ab'],
+  ['control characters and tabs', 'a\u0007\tb\r\nc', 'a b c'],
+];
+

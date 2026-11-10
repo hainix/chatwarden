@@ -187,6 +187,11 @@ export class MemoryStore implements Store {
     return this.sanctions.find((r) => r.groupId === groupId)?.refCode ?? null;
   }
 
+  sanctionGroupTarget(groupId: string): { subject: SubjectId; rule: string | null } | null {
+    const row = this.sanctions.find((r) => r.groupId === groupId && r.targetType === 'subject');
+    return row === undefined ? null : { subject: row.value, rule: row.rule };
+  }
+
   loadSanctions(now: number): SanctionRow[] {
     return this.sanctions
       .filter((r) => r.revokedAt === null && (r.endsAt === null || r.endsAt > now))

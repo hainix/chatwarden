@@ -349,6 +349,7 @@ CREATE INDEX kit_webhook_keys_by_created ON kit_webhook_keys (created_at);
     version: 14,
     // The Discord review feed's thread map (K3b): one forum thread per person. `subject` is a canonical subject id (or a
     // reserved shared-thread key), `label` the random neutral name the thread was created with. No chat text, no handle.
+    // Rows hold subject ids (staff-only) and are not removed by `purge()`: a future subject purge must clear this table too.
     sql: `
 CREATE TABLE kit_discord_threads (
   subject    TEXT PRIMARY KEY,
