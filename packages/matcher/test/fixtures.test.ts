@@ -44,6 +44,26 @@ describe('@chatwarden/matcher/fixtures (shipped synthetic fixtures)', () => {
     expect(live.match('zorbak')).toEqual({ termId: expect.any(String) });
     expect(store.isSeeded('synthetic')).toBe(true);
   });
+  it('every positiveCorpus line is made only of invented words and a small benign set', () => {
+    const invented = ['zorbak', 'vlemmo', 'quissel', 'drakkuun', 'fenrisk', 'tarvo', 'snerp'];
+    const benign = ['you', 'seu', 'lake'];
+    const allowed = new Set([...invented, ...benign]);
+    const leet: Record<string, string> = { '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', $: 's' };
+    const fold = (w: string) => w.replace(/[0-9@$]/g, (c) => leet[c] ?? c);
+    const lines = fixtures.syntheticTermPack().positiveCorpus ?? [];
+    expect(lines.length).toBeGreaterThanOrEqual(3);
+    for (const line of lines) {
+      const words = line.toLowerCase().split(/[^a-z0-9@$]+/).filter((w) => w !== '').map(fold);
+      expect(words.length, line).toBeGreaterThan(0);
+      for (const w of words) expect(allowed.has(w), `word "${w}" in corpus line "${line}"`).toBe(true);
+    }
+  });
+  it('the corpus guard itself rejects a word outside the allow-list (control)', () => {
+    const allowed = new Set(['zorbak', 'you']);
+    const check = (line: string) => line.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w !== '').every((w) => allowed.has(w));
+    expect(check('you zorbak!')).toBe(true);
+    expect(check('you notinvented')).toBe(false);
+  });
   it('every synthetic term is on the explicit allow-list of invented words', () => {
     const invented = ['zorbak', 'vlemmo', 'quissel', 'drakkuun', 'fenrisk', 'tarvo', 'snerp'];
     for (const t of fixtures.SYNTHETIC_TERMS) {

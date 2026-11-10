@@ -47,6 +47,10 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
    `@chatwarden/*` versions in `examples/tiny-chat/package.json` by hand to the same version. `changesets` ignores that
    private example, and `scripts/manifests.test.ts` fails CI if it is left behind. Run `npm install` once more so
    `package-lock.json` follows.
+   `changeset version` also raises each package's `peerDependencies` range (`^0.1.0` to `^0.1.1`), which would force every consumer on
+   the previous version to move for a patch. Put the peer ranges back to the first release they were written for (`^0.1.0` while
+   the API is compatible); `scripts/manifests.test.ts` fails CI if one is left raised. The exact `devDependencies` pins and the
+   tiny-chat versions do move with the release.
 3. **Merge.** Open a pull request with those changes and merge it once CI is green.
 4. **Dry run first (recommended).** See the next section. It runs every check and `npm publish --dry-run` for all seven.
 5. **Tag and push.** On the merged `main`, once CI is green on it, with `X.Y.Z` the new version:

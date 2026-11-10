@@ -1277,6 +1277,83 @@ describe('synchronous API', () => {
     expect(r.store.state).toEqual(before);
   });
 
+  it('changeSync of an async fn that later rejects raises no unhandled rejection', async () => {
+    const r = rig();
+    r.live.loadSync();
+    const seen: unknown[] = [];
+    const onUnhandled = (reason: unknown) => seen.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const late = new Error('late failure');
+      const fn = () => new Promise<never>((_, reject) => setTimeout(() => reject(late), 0));
+      expect(() => r.live.changeSync('a', fn as never)).toThrow(TypeError);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(seen).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('changeSync of an already-rejected promise raises no unhandled rejection', async () => {
+    const r = rig();
+    r.live.loadSync();
+    const seen: unknown[] = [];
+    const onUnhandled = (reason: unknown) => seen.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      expect(() => r.live.changeSync('a', (() => Promise.reject(new Error('already'))) as never)).toThrow(TypeError);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(seen).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('changeSync gives a rejecting thenable a rejection handler, and survives a thenable whose then throws', () => {
+    const r = rig();
+    r.live.loadSync();
+    const onRejected = vi.fn();
+    const thenable = { then: (_ok: unknown, no?: () => void) => { onRejected(typeof no); return undefined; } };
+    expect(() => r.live.changeSync('a', (() => thenable) as never)).toThrow(TypeError);
+    expect(onRejected).toHaveBeenCalledWith('function');
+    const hostile = { then: () => { throw new RangeError('then exploded'); } };
+    expect(() => r.live.changeSync('a', (() => hostile) as never)).toThrow(TypeError);
+  });
+
+  it('change (async) of an async fn rejects with the TypeError and leaves nothing unhandled', async () => {
+    const r = rig();
+    r.live.loadSync();
+    const seen: unknown[] = [];
+    const onUnhandled = (reason: unknown) => seen.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const before = structuredClone(r.store.state);
+      await expect(r.live.change('a', (() => Promise.reject(new Error('x'))) as never)).rejects.toThrow(TypeError);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(seen).toEqual([]);
+      expect(r.store.state).toEqual(before);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('a store failure thrown inside fn (insertTerm) is rethrown by change and changeSync, with nothing written', async () => {
+    const r = await loaded();
+    const before = structuredClone(r.store.state);
+    r.store.fail = (m) => {
+      if (m === 'insertTerm') throw new Error('disk full');
+    };
+    await expect(r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }))).rejects.toThrow('disk full');
+    expect(() => r.live.changeSync('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }))).toThrow('disk full');
+    r.store.fail = () => {};
+    expect(r.store.state).toEqual(before);
+    expect(blocked(r.live, 'you blorft')).toBe(false);
+    expect(blocked(r.live, 'you zorbak')).toBe(true);
+    // The live matcher is still usable afterwards.
+    expect(ok(await r.live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' })))).toBe(true);
+    expect(blocked(r.live, 'you blorft')).toBe(true);
+  });
+
   it('loadSync fails open like load: logs, falls back to the pack, never throws', () => {
     const r = rig();
     r.store.fail = (m) => {

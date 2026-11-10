@@ -106,7 +106,7 @@ The main parts of the API:
 | `matcher.matchName?.(name)` | `match` for a handle or a table or deck name, which also reads the name split into words. |
 | `loadTermPack(json)` | Validates an untrusted `TermPack` (strict keys, unique ids, rows that build) and returns a copy. Its errors never quote a term. |
 | `new LiveTerms({ store, pack, clock, logger? })` | The live matcher. `load()` seeds the store from `pack` once, then builds from the store. `check(term, language, recentLines)` is the dry run. `change(actor, fn)` edits atomically and refuses an edit that would leave no active term, duplicate a word, or unblock a line the pack requires blocked. A refusal is `{ ok: false, error, code }`. |
-| `LiveTerms.loadSync()`, `LiveTerms.changeSync(actor, fn)` | `load()` and `change()` without a promise, for a host that cannot await (a relay boot). `load()` and `change()` are thin async wrappers over them and return the same results. |
+| `LiveTerms.loadSync()`, `LiveTerms.changeSync(actor, fn)` | `load()` and `change()` without a promise, for a host that cannot await (a relay boot). `load()` and `change()` are thin async wrappers over them and return the same results. `fn` must be synchronous: an async `fn` throws `TypeError` (and is rolled back). |
 | `LiveTerms.usingPack` | True while the matcher runs on the pack because the store could not be read. |
 | `TermStore` | The storage `LiveTerms` needs. `@chatwarden/store-sqlite` implements it. |
 | `stripInvisible`, `foldTerm`, `collapseLikePreset` | The normalisation steps, if you build tools around the matcher. |
@@ -134,6 +134,13 @@ A refusal carries a `code` next to the `error` text, so a caller can branch with
 | `not_found` | The edit named a term or exception id that does not exist. |
 | `not_loaded` | A pack is configured and `load()` or `loadSync()` has not run yet. |
 | `build_failed` | The store failed while the change was checked and committed; nothing was changed. |
+
+A refusal is a returned value. Two things are thrown (or, for `change()`, rejected) instead, because they come from your own
+function: an error that `fn` throws, and a store error raised by an editor call inside `fn` (for example `insertTerm` failing).
+Both roll the change back, write nothing and rethrow the error as it was. So the same SQLite failure is a `build_failed` result
+when it happens while the change is checked or committed, but a throw when it happens inside `fn`: a synchronous caller of
+`changeSync` still wants a `try`/`catch` around it. `fn` must be synchronous. An async `fn` throws a `TypeError`, and its promise
+is left handled, so a later rejection does not crash the process.
 
 ```ts
 import { createChatwarden, type Platform } from '@chatwarden/core';
@@ -167,6 +174,22 @@ nothing. Read term edit history with `cw.audit.list({ action: 'term.add', limit:
 word. The before and after JSON of a row stay in the store's `kit_audit` table (`before_json` and `after_json`); for a toggle,
 `after_json.active` says which way it went. Rows an earlier release wrote with the raw names (`add`, `edit`, `enable`, `disable`)
 still read through `audit.list` under the closed names.
+
+## Upgrading from 0.1.0
+
+0.1.1 changes no public signature, with one behaviour change for a **custom `TermStore`**.
+
+- **Audit names.** `LiveTerms` used to call `writeAudit` with the raw names `add`, `edit`, `enable` and `disable`. It now writes
+  `term.add`, `term.update`, `term.toggle`, `exception.add`, `exception.update` and `exception.toggle`, the closed names that
+  `cw.audit.list` filters on. If your own `TermStore` stores or switches on `entry.action` (a SQL `WHERE action = 'add'`, an
+  exhaustive `switch`, a `Record<AuditEntry['action'], ...>`), update it: match both the new names and, for the rows already
+  written, the old ones. The raw names stay in the `AuditEntry['action']` type for that reason, and the type is wider than in
+  0.1.0, so a `never` check or a `Record` over it needs the new members. A store that only saves and returns the entry as it is
+  needs no change. `@chatwarden/store-sqlite` reads old and new rows alike. A toggle no longer says enabled or disabled in its
+  name: read `after_json.active` (and `before_json.active`).
+- **New, optional.** `positiveCorpus` on a term pack, the refusal `code`, and `loadSync()` and `changeSync()`. Nothing you wrote
+  for 0.1.0 has to change to keep working.
+- **Browsers.** Term ids are generated without `node:` imports, so the package bundles for a browser.
 
 ## Security notes
 

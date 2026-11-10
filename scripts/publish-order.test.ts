@@ -56,7 +56,7 @@ describe('the real manifests', () => {
   });
 
   it('publishSpecs gives name@version in the same order', () => {
-    expect(publishSpecs(manifests)).toEqual(order(manifests).map((n) => `${n}@0.1.0`));
+    expect(publishSpecs(manifests)).toEqual(order(manifests).map((n) => `${n}@${manifests.find((m) => m.name === n)!.version}`));
   });
 });
 

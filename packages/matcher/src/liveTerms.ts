@@ -217,7 +217,10 @@ export class LiveTerms implements Matcher {
   }
 
   /** {@link change} without a promise: the same atomic edit and refusals, with the result returned directly.
-   *  A throw from `fn` is thrown (where `change` rejects). */
+   *  A throw from `fn` is thrown (where `change` rejects). That includes a store error thrown by an editor call
+   *  inside `fn`, which is rethrown with nothing written, where the same failure while the change is checked or
+   *  committed is a `build_failed` result. `fn` must be synchronous: an async `fn` throws a `TypeError` and is
+   *  rolled back (a later rejection of its promise is swallowed, not reported as unhandled). */
   changeSync<T>(actor: string, fn: (edit: TermEditor) => T): ChangeResult<T> {
     // With a pack configured, the store is not the truth until `load()` has seeded it and built from it: an
     // edit before then would act on an unseeded store. Refuse, writing nothing and never calling `fn`.
@@ -229,7 +232,15 @@ export class LiveTerms implements Matcher {
         let result: T;
         try {
           result = fn(this.editor(actor));
-          if (isThenable(result)) throw new TypeError('the change function must be synchronous');
+          if (isThenable(result)) {
+            // Refused, but the caller's promise is still live: a later rejection must not become an unhandled one.
+            try {
+              (result as PromiseLike<unknown>).then(undefined, () => {});
+            } catch {
+              // A thenable whose `then` throws is still refused with the TypeError below.
+            }
+            throw new TypeError('the change function must be synchronous');
+          }
         } catch (err) {
           if (!(err instanceof Refusal)) state.fnError = { err };
           throw err;

@@ -22,7 +22,9 @@ const dirs = readdirSync(join(root, 'packages'), { withFileTypes: true })
   .map((d) => d.name);
 const published = dirs.map((d) => ({ dir: d, pkg: readJson<Manifest>('packages', d, 'package.json') }));
 const names = published.map((p) => p.pkg.name);
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
+// The peer range stays at the first release it was written for: a 0.1.0 consumer is not forced to move for a patch.
+const PEER_RANGE = '^0.1.0';
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
 
 describe('published package set', () => {
@@ -80,9 +82,9 @@ describe('core is a peer, never a dependency', () => {
     expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
-    '%s peers on core ^0.1.0 and dev-depends on core 0.1.0',
+    '%s peers on core ^0.1.0 and dev-depends on core 0.1.1',
     (_n, pkg) => {
-      expect(pkg.peerDependencies?.['@chatwarden/core']).toBe('^0.1.0');
+      expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(PEER_RANGE);
       expect(pkg.devDependencies?.['@chatwarden/core']).toBe(VERSION);
       expect(pkg.peerDependenciesMeta?.['@chatwarden/core']).toBeUndefined();
     },
@@ -98,7 +100,7 @@ describe('core is a peer, never a dependency', () => {
 describe('every @chatwarden peer is linked locally at the exact version', () => {
   it.each(published.map((p) => [p.pkg.name, p.pkg] as const))('%s', (_n, pkg) => {
     for (const peer of Object.keys(pkg.peerDependencies ?? {}).filter(ownScope)) {
-      expect(pkg.peerDependencies![peer]).toBe('^0.1.0');
+      expect(pkg.peerDependencies![peer]).toBe(PEER_RANGE);
       expect(pkg.devDependencies?.[peer]).toBe(VERSION);
     }
     for (const dev of Object.keys(pkg.devDependencies ?? {}).filter(ownScope)) {
@@ -124,13 +126,13 @@ describe('matcher peers', () => {
   const byName = (n: string): Manifest => published.find((p) => p.pkg.name === n)!.pkg;
   it('profanity peers on matcher and dev-depends on it', () => {
     const p = byName('@chatwarden/profanity');
-    expect(p.peerDependencies?.['@chatwarden/matcher']).toBe('^0.1.0');
+    expect(p.peerDependencies?.['@chatwarden/matcher']).toBe(PEER_RANGE);
     expect(p.devDependencies?.['@chatwarden/matcher']).toBe(VERSION);
     expect(p.dependencies?.obscenity).toBeDefined();
   });
   it('store-sqlite peers on matcher (its type import) and dev-depends on it', () => {
     const p = byName('@chatwarden/store-sqlite');
-    expect(p.peerDependencies?.['@chatwarden/matcher']).toBe('^0.1.0');
+    expect(p.peerDependencies?.['@chatwarden/matcher']).toBe(PEER_RANGE);
     expect(p.devDependencies?.['@chatwarden/matcher']).toBe(VERSION);
     // Required, not optional: the store's .d.ts references matcher types, so a consumer without matcher fails typecheck.
     expect(p.peerDependenciesMeta?.['@chatwarden/matcher']?.optional).not.toBe(true);
@@ -163,7 +165,7 @@ describe('tiny-chat example', () => {
     expect(tiny.private).toBe(true);
     expect(tiny.name).toBe('@chatwarden/example-tiny-chat');
   });
-  it('depends on every published package as a regular dependency at 0.1.0', () => {
+  it('depends on every published package as a regular dependency at 0.1.1', () => {
     for (const n of names) expect(tiny.dependencies?.[n]).toBe(VERSION);
   });
 });

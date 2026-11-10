@@ -157,6 +157,21 @@ address checked is the one `seat` last recorded for the person (as in `accept`),
 nobody. A lookup that fails reads as `restricted: false` and is logged at most once a minute (error class only, with a count of
 the failures held back).
 
+## Browser support
+
+The package imports no `node:` module, so a bundler (esbuild, Vite, webpack) builds it for a browser with nothing external and no
+polyfill. Pair it with [`@chatwarden/store-memory`](https://github.com/hainix/chatwarden/tree/main/packages/store-memory), which
+is also browser-safe, and with `@chatwarden/matcher` for the live matcher. That is what the repository's CI bundles and runs,
+in a context with no `process`, `Buffer` or `require`, through a full report, decision and notice flow.
+
+The hashing of client keys and IP addresses uses `node:crypto` when the runtime offers it (looked up at run time through
+`process.getBuiltinModule`, never imported) and a small pure-JS SHA-256 and HMAC-SHA256 where it does not. Both give the same
+bytes, and they match the hashes of 0.1.0, so moving a store between a server and a browser build never unlinks a stored hash.
+The pure-JS path is slower, which only matters for a very large number of lookups. A browser build is meant for tests, demos and
+tools; the kit still decides on a server you control, because anything running on a player's machine can be changed by that
+player. `cw.chat.restricted(who, { roomId, seatId })` (see "Typing indicators") is a plain synchronous call and works the same
+in a browser.
+
 ## Options
 
 `createChatwarden(options)`. Only `store`, `secret` and `platform` are required.
