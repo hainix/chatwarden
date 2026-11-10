@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { bareImports, checkFileList, checkManifest, exportTargets, undeclaredImports } from './check-pack.mjs';
+import { BROWSER_SAFE, bareImports, checkFileList, checkManifest, exportTargets, nodeImports, undeclaredImports, nodeImportProblems } from './check-pack.mjs';
 
 type Pkg = Record<string, unknown>;
 
@@ -256,5 +256,57 @@ describe('undeclaredImports', () => {
   it('treats a package with no dependency fields at all as declaring nothing', () => {
     const out: string[] = undeclaredImports({ pkg: { name: '@chatwarden/bare' }, files: [file('dist/src/a.js', "import x from 'x';\nimport fs from 'node:fs';\n")] });
     expect(out).toHaveLength(1);
+  });
+});
+
+describe('nodeImports', () => {
+  it('finds node: specifiers and bare builtins in every import form', () => {
+    const src = [
+      "import fs from 'node:fs';",
+      "import { createHash } from 'crypto';",
+      "export * from 'node:path';",
+      "import 'node:os';",
+      "const m = await import('node:sqlite');",
+      "const c = require('buffer');",
+      "import { x } from 'node:fs/promises';",
+    ].join('\n');
+    expect(nodeImports(src).sort()).toEqual(['buffer', 'crypto', 'fs', 'fs', 'os', 'path', 'sqlite'].sort());
+  });
+  it('ignores packages, relative paths and comments', () => {
+    const src = "// import fs from 'node:fs'\n/* import 'node:os' */\nimport a from './a.js';\nimport b from '@chatwarden/core';\nimport c from 'ws';\n";
+    expect(nodeImports(src)).toEqual([]);
+  });
+  it('does not take process.getBuiltinModule("node:crypto") for an import (it is a guarded runtime lookup)', () => {
+    expect(nodeImports("const c = process.getBuiltinModule('node:crypto');")).toEqual([]);
+  });
+});
+
+describe('nodeImportProblems (browser-safe packages)', () => {
+  const file = (path: string, source: string) => ({ path, source });
+  it('names core and store-memory as the browser-safe packages', () => {
+    expect([...BROWSER_SAFE].sort()).toEqual(['@chatwarden/core', '@chatwarden/store-memory']);
+  });
+  it('flags a node import in a browser-safe package, per file and module', () => {
+    const out: string[] = nodeImportProblems({
+      pkg: { name: '@chatwarden/store-memory' },
+      files: [file('dist/src/a.js', "import { randomBytes } from 'node:crypto';\n"), file('dist/src/b.js', "import 'node:fs';\n")],
+    });
+    expect(out).toHaveLength(2);
+    expect(out.join('\n')).toContain('node:crypto');
+    expect(out.join('\n')).toContain('dist/src/b.js');
+  });
+  it('lets a browser-safe package with no node import pass', () => {
+    expect(nodeImportProblems({ pkg: { name: '@chatwarden/core' }, files: [file('dist/src/a.js', "import { x } from './x.js';\n")] })).toEqual([]);
+  });
+  it('does not apply to other packages (store-sqlite is Node by design)', () => {
+    expect(nodeImportProblems({ pkg: { name: '@chatwarden/store-sqlite' }, files: [file('dist/src/a.js', "import { DatabaseSync } from 'node:sqlite';\n")] })).toEqual([]);
+  });
+  it('only looks at dist/src/**/*.js', () => {
+    expect(
+      nodeImportProblems({
+        pkg: { name: '@chatwarden/core' },
+        files: [file('dist/src/a.d.ts', "import fs from 'node:fs';\n"), file('src/a.ts', "import fs from 'node:fs';\n")],
+      }),
+    ).toEqual([]);
   });
 });

@@ -1,4 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
@@ -121,5 +123,24 @@ describe('the temp projects live outside the repository', () => {
   });
   it('the OS temp directory is not inside this repository', () => {
     expect(isInside(fileURLToPath(new URL('..', import.meta.url)), tmpdir())).toBe(false);
+  });
+});
+
+describe('the smoke scenario', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const scenario = readFileSync(join(root, 'scripts', 'smoke', 'scenario.ts'), 'utf8');
+  const published = readdirSync(join(root, 'packages'), { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => JSON.parse(readFileSync(join(root, 'packages', d.name, 'package.json'), 'utf8')) as { name: string; private?: boolean })
+    .filter((m) => m.private !== true)
+    .map((m) => m.name);
+
+  it('imports every published package, so a package left out of the smoke run is caught here', () => {
+    for (const name of published) expect(scenario, name).toContain(`from '${name}'`);
+  });
+  it('runs the scenario on the in-memory store as well as on SQLite', () => {
+    expect(scenario).toContain("from '@chatwarden/store-memory'");
+    expect(scenario).toMatch(/createMemoryStore\(\)/);
+    expect(scenario).toMatch(/openStore\(\{ path: ':memory:' \}\)/);
   });
 });

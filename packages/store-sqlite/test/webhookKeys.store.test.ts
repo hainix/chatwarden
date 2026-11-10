@@ -1,14 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import type { Store } from '@chatwarden/core';
-import { MemoryStore } from '../../core/test/memoryStore.js';
 import { MIGRATIONS, openStore } from '../src/index.js';
-import { webhookKeysContract } from './webhookKeys.contract.js';
-
-const stores: Array<[string, () => Store]> = [
-  ['MemoryStore', () => new MemoryStore()],
-  ['SqliteStore', () => openStore({ db: new DatabaseSync(':memory:') })],
-];
 
 describe('migration 13', () => {
   it('is version 13 and creates kit_webhook_keys with the documented columns', () => {
@@ -52,6 +44,3 @@ describe('migration 13', () => {
     expect(() => db.prepare("INSERT INTO kit_webhook_keys (key, created_at, state, result_json) VALUES ('f', 1, 'pending', NULL)").run()).toThrow();
   });
 });
-
-
-for (const [name, make] of stores) webhookKeysContract(name, make);

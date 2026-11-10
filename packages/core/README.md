@@ -17,7 +17,7 @@ What it does:
 - **Identity without identifiers.** Client keys and IP addresses are hashed on the way in, and people are tracked by an opaque
   subject id.
 
-It has no runtime dependencies and imports nothing from `node:` except `node:crypto`.
+It has no runtime dependencies and imports no `node:` module, so it also runs in a browser.
 
 Status: pre-release, as-is, no support promise.
 

@@ -28,9 +28,10 @@ const m = (name: string, peers: string[] = [], extra: Partial<Manifest> = {}): M
 });
 
 describe('the real manifests', () => {
-  it('publish in the documented order: core first, then matcher, store-sqlite, profanity, http, discord', () => {
+  it('publish in the documented order: core first, then store-memory, matcher, store-sqlite, profanity, http, discord', () => {
     expect(order(manifests)).toEqual([
       '@chatwarden/core',
+      '@chatwarden/store-memory',
       '@chatwarden/matcher',
       '@chatwarden/store-sqlite',
       '@chatwarden/profanity',

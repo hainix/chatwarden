@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SubjectIndex } from '../src/subjects.js';
 import * as core from '../src/index.js';
 import type { Identifiers, Logger, SanctionRow, SubjectId, SubjectIdRecord, SubjectRecord } from '../src/types.js';
-import { MemoryStore, memoryStore } from './memoryStore.js';
+import { MemoryStore, createMemoryStore } from '@chatwarden/store-memory';
 
 const HOUR = 3_600_000;
 const ID_RE = /^s_[A-Za-z0-9_-]{22}$/;
@@ -35,7 +35,7 @@ function silent(): Logger & { calls: Array<[string, Record<string, string | numb
 }
 
 function setup(start = 1_000) {
-  const store = memoryStore();
+  const store = createMemoryStore();
   const clock = makeClock(start);
   const logger = silent();
   const index = new SubjectIndex(store, clock, { logger });
@@ -431,7 +431,7 @@ describe('SubjectIndex: load', () => {
   });
 
   it('a damaged merge cycle in storage does not hang canonical()', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     const x: SubjectRecord = { id: 's_xxxxxxxxxxxxxxxxxxxxxx', createdAt: 1, mergedInto: 's_yyyyyyyyyyyyyyyyyyyyyy' };
     const y: SubjectRecord = { id: 's_yyyyyyyyyyyyyyyyyyyyyy', createdAt: 2, mergedInto: 's_xxxxxxxxxxxxxxxxxxxxxx' };
     await store.saveSubject(x);
@@ -444,7 +444,7 @@ describe('SubjectIndex: load', () => {
 
 describe('SubjectIndex: last_seen throttle', () => {
   function counting() {
-    const store = memoryStore();
+    const store = createMemoryStore();
     const writes: SubjectIdRecord[] = [];
     const orig = store.saveIdentifier.bind(store);
     store.saveIdentifier = async (rec) => {
@@ -570,7 +570,7 @@ describe('SubjectIndex: store failures never reach the chat path', () => {
   });
 
   it('a later write still runs after an earlier one failed', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     let fail = true;
     const orig = store.saveSubject.bind(store);
     store.saveSubject = async (s) => {
@@ -590,7 +590,7 @@ describe('SubjectIndex: store failures never reach the chat path', () => {
   });
 
   it('a store method that throws synchronously is also contained', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     store.saveSubject = (() => {
       throw new RangeError('sync boom');
     }) as unknown as typeof store.saveSubject;
@@ -626,7 +626,7 @@ describe('SubjectIndex: store failures never reach the chat path', () => {
   });
 
   it('writes reach the store in order: the subject before its identifiers', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     const order: string[] = [];
     const s = store.saveSubject.bind(store);
     const i = store.saveIdentifier.bind(store);
@@ -654,9 +654,9 @@ describe('SubjectIndex: store failures never reach the chat path', () => {
   });
 });
 
-describe('memoryStore', () => {
+describe('createMemoryStore', () => {
   it('saveIdentifier is an upsert that keeps first_seen and the latest last_seen', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     await store.saveSubject({ id: 's1', createdAt: 1, mergedInto: null });
     await store.saveIdentifier({ subjectId: 's1', kind: 'key', value: 'k', firstSeen: 5, lastSeen: 5 });
     await store.saveIdentifier({ subjectId: 's1', kind: 'key', value: 'k', firstSeen: 9, lastSeen: 9 });
@@ -665,7 +665,7 @@ describe('memoryStore', () => {
   });
 
   it('transaction rolls back on throw and rethrows', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     expect(() =>
       store.transaction(() => {
         void store.saveSubject({ id: 's1', createdAt: 1, mergedInto: null });
@@ -743,14 +743,14 @@ describe('SubjectIndex.latestIp', () => {
   });
 });
 
-describe('memoryStore transactions (journaled rollback)', () => {
+describe('MemoryStore transactions (journaled rollback)', () => {
   const srow = (id: string, groupId: string, refCode: string): SanctionRow => ({
     id, groupId, refCode, kind: 'chat', targetType: 'subject', value: 's', startsAt: 0, endsAt: null,
     reason: 'r', rule: null, gapNote: null, gapStatus: null, roomId: null, actor: 'a', source: 'api', automated: false, pending: false,
   });
 
   it('an outer failure undoes writes of a successful inner transaction', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     expect(() =>
       store.transaction(() => {
         store.transaction(() => {
@@ -766,7 +766,7 @@ describe('memoryStore transactions (journaled rollback)', () => {
   });
 
   it('an inner failure caught by the outer fn undoes only the inner writes', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     store.transaction(() => {
       void store.saveSubject({ id: 'keep', createdAt: 1, mergedInto: null });
       try {
@@ -782,7 +782,7 @@ describe('memoryStore transactions (journaled rollback)', () => {
   });
 
   it('rolls back an identifier upsert, a merge mark and a revoke to their prior values', async () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     await store.saveSubject({ id: 's1', createdAt: 1, mergedInto: null });
     await store.saveSubject({ id: 's2', createdAt: 2, mergedInto: null });
     await store.saveIdentifier({ subjectId: 's1', kind: 'key', value: 'k', firstSeen: 5, lastSeen: 5 });
@@ -802,7 +802,7 @@ describe('memoryStore transactions (journaled rollback)', () => {
   });
 
   it('a ref-code collision leaves the earlier group and its code intact', () => {
-    const store = memoryStore();
+    const store = createMemoryStore();
     expect(store.insertSanctionGroup([srow('r1', 'g1', 'M-AAAAA')])).toBe(true);
     expect(store.insertSanctionGroup([srow('r2', 'g2', 'M-AAAAA')])).toBe(false);
     expect(store.rawSanctions()).toHaveLength(1);

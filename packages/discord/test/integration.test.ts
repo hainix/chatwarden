@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createChatwarden } from '@chatwarden/core';
 import type { Platform, RawWho } from '@chatwarden/core';
 import { discordFeed } from '../src/index.js';
-import { MemoryStore } from '../../core/test/memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 import { ROLE, WEBHOOK, fakeDiscord, leaks, visibleTexts } from './support.js';
 
 // The feed on the real kit: real events, real staff reports, real subject ids and report ids.

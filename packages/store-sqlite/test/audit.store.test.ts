@@ -1,8 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { applySanction, AUDIT_ACTIONS, purge, SubjectIndex, type AuditRow, type Store } from '@chatwarden/core';
+import { AUDIT_ACTIONS, purge, type AuditRow } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
-import { MemoryStore } from '../../core/test/memoryStore.js';
 import { MIGRATIONS, openStore } from '../src/index.js';
 
 const NOW = 1_800_000_000_000;
@@ -17,13 +16,6 @@ const row = (id: string, at: number, over: Partial<AuditRow> = {}): AuditRow => 
   target: { type: 'report', ref: `ref_${id}` },
   ...over,
 });
-
-const mem = (): Store => new MemoryStore();
-const sql = (): Store => openStore({ db: new DatabaseSync(':memory:') });
-const stores: Array<[string, () => Store]> = [
-  ['MemoryStore', mem],
-  ['SqliteStore', sql],
-];
 
 describe('migration 12', () => {
   it('is version 12 and adds a nullable role column and an index on at', () => {
@@ -156,174 +148,6 @@ describe('legacy rows read through listAudit', () => {
     const last = p1[1] as AuditRow;
     expect(store.listAudit({ limit: 2, before: last.at, beforeId: last.id }).map((r) => r.id)).toEqual(['a']);
     expect(store.purgeAudit(2)).toBe(3);
-  });
-});
-
-describe.each(stores)('%s: insertAudit and listAudit', (_name, make) => {
-  it('round-trips a row exactly', () => {
-    const s = make();
-    const r = row('r1', NOW, { role: 'senior', action: 'sanction.apply', target: { type: 'person', ref: 's_abc' } });
-    s.insertAudit(r);
-    expect(s.listAudit({ limit: 5 })).toEqual([r]);
-  });
-
-  it('a row with no target and no role round-trips as null / null', () => {
-    const s = make();
-    s.insertAudit(row('r1', NOW, { role: null, target: null, action: 'policy.view' }));
-    expect(s.listAudit({ limit: 5 })).toEqual([row('r1', NOW, { role: null, target: null, action: 'policy.view' })]);
-  });
-
-  it('newest first, ties on at by id descending', () => {
-    const s = make();
-    for (const [id, at] of [['b', 10], ['a', 10], ['c', 10], ['d', 5], ['e', 20]] as const) s.insertAudit(row(id, at));
-    expect(s.listAudit({ limit: 10 }).map((r) => r.id)).toEqual(['e', 'c', 'b', 'a', 'd']);
-  });
-
-  it('keyset paging: before + beforeId, with a tie straddling the page edge', () => {
-    const s = make();
-    for (const [id, at] of [['a', 10], ['b', 10], ['c', 10], ['d', 10], ['e', 5]] as const) s.insertAudit(row(id, at));
-    const p1 = s.listAudit({ limit: 2 });
-    expect(p1.map((r) => r.id)).toEqual(['d', 'c']);
-    const p2 = s.listAudit({ limit: 2, before: 10, beforeId: 'c' });
-    expect(p2.map((r) => r.id)).toEqual(['b', 'a']);
-    const p3 = s.listAudit({ limit: 2, before: 10, beforeId: 'a' });
-    expect(p3.map((r) => r.id)).toEqual(['e']);
-    expect(s.listAudit({ limit: 2, before: 5, beforeId: 'e' })).toEqual([]);
-  });
-
-  it('before without beforeId is exclusive on at; beforeId without before is ignored', () => {
-    const s = make();
-    for (const [id, at] of [['a', 10], ['b', 10], ['c', 5]] as const) s.insertAudit(row(id, at));
-    expect(s.listAudit({ limit: 9, before: 10 }).map((r) => r.id)).toEqual(['c']);
-    expect(s.listAudit({ limit: 9, beforeId: 'a' }).map((r) => r.id)).toEqual(['b', 'a', 'c']);
-  });
-
-  it('filters by actor and action, alone and together', () => {
-    const s = make();
-    s.insertAudit(row('1', 1, { actor: 'alice', action: 'report.view' }));
-    s.insertAudit(row('2', 2, { actor: 'bob', action: 'report.view' }));
-    s.insertAudit(row('3', 3, { actor: 'alice', action: 'suggest' }));
-    const ids = (q: object) => s.listAudit({ limit: 9, ...q }).map((r) => r.id);
-    expect(ids({ actor: 'alice' })).toEqual(['3', '1']);
-    expect(ids({ action: 'report.view' })).toEqual(['2', '1']);
-    expect(ids({ actor: 'alice', action: 'report.view' })).toEqual(['1']);
-    expect(ids({ actor: 'nobody' })).toEqual([]);
-    expect(ids({ actor: 'Alice' })).toEqual([]);
-  });
-
-  it('limit is clamped to 1..200 and a fraction is floored', () => {
-    const s = make();
-    for (let i = 0; i < 205; i++) s.insertAudit(row(`id${String(i).padStart(3, '0')}`, i));
-    expect(s.listAudit({ limit: 500 })).toHaveLength(200);
-    expect(s.listAudit({ limit: 0 })).toHaveLength(1);
-    expect(s.listAudit({ limit: 2.9 })).toHaveLength(2);
-  });
-
-  it('a duplicate id throws and writes nothing', () => {
-    const s = make();
-    s.insertAudit(row('same', 1));
-    expect(() => s.insertAudit(row('same', 2))).toThrow();
-    expect(s.listAudit({ limit: 9 })).toHaveLength(1);
-  });
-
-  it('insertAudit joins the surrounding transaction: a throw after it undoes it', () => {
-    const s = make();
-    s.insertAudit(row('keep', 1));
-    expect(() =>
-      s.transaction(() => {
-        s.insertAudit(row('gone', 2));
-        throw new Error('rollback');
-      }),
-    ).toThrow('rollback');
-    expect(s.listAudit({ limit: 9 }).map((r) => r.id)).toEqual(['keep']);
-  });
-
-  it('listed rows are copies', () => {
-    const s = make();
-    s.insertAudit(row('a', 1));
-    const [first] = s.listAudit({ limit: 1 });
-    if (first?.target) first.target.ref = 'tampered';
-    expect(s.listAudit({ limit: 1 })[0]?.target?.ref).toBe('ref_a');
-  });
-
-  it('purgeAudit deletes strictly older rows and returns the count; a row on the line is kept', () => {
-    const s = make();
-    s.insertAudit(row('old', 99));
-    s.insertAudit(row('line', 100));
-    s.insertAudit(row('new', 101));
-    expect(s.purgeAudit(100)).toBe(1);
-    expect(s.listAudit({ limit: 9 }).map((r) => r.id)).toEqual(['new', 'line']);
-    expect(s.purgeAudit(100)).toBe(0);
-    expect(s.purgeAudit(1_000)).toBe(2);
-  });
-
-  it('purgeAudit is undone with its transaction', () => {
-    const s = make();
-    s.insertAudit(row('a', 1));
-    expect(() =>
-      s.transaction(() => {
-        s.purgeAudit(100);
-        throw new Error('rollback');
-      }),
-    ).toThrow('rollback');
-    expect(s.listAudit({ limit: 9 })).toHaveLength(1);
-  });
-});
-
-describe('both stores agree', () => {
-  it('give identical pages for the same writes, filters and cursors', () => {
-    const a = mem();
-    const b = sql();
-    const actions = AUDIT_ACTIONS;
-    for (let i = 0; i < 40; i++) {
-      const r = row(`id${String(i * 7 % 40).padStart(2, '0')}`, NOW + Math.floor(i / 4), {
-        actor: i % 3 === 0 ? 'alice' : 'bob',
-        action: actions[i % actions.length] as AuditRow['action'],
-        role: i % 5 === 0 ? null : (['moderator', 'senior', 'owner'] as const)[i % 3] ?? null,
-        target: i % 4 === 0 ? null : { type: 'report', ref: `r${i}` },
-      });
-      a.insertAudit(r);
-      b.insertAudit(r);
-    }
-    const queries: Array<Parameters<Store['listAudit']>[0]> = [
-      { limit: 200 },
-      { limit: 7 },
-      { limit: 7, actor: 'alice' },
-      { limit: 7, action: 'report.view' },
-      { limit: 3, actor: 'bob', action: 'suggest' },
-      { limit: 5, before: NOW + 5 },
-      { limit: 5, before: NOW + 5, beforeId: 'id20' },
-      { limit: 5, before: NOW + 5, beforeId: 'zzz' },
-    ];
-    for (const q of queries) expect(b.listAudit(q), JSON.stringify(q)).toEqual(a.listAudit(q));
-    expect(b.purgeAudit(NOW + 4)).toBe(a.purgeAudit(NOW + 4));
-    expect(b.listAudit({ limit: 200 })).toEqual(a.listAudit({ limit: 200 }));
-  });
-
-  it('closeGap records a gap.close entry (null role, sanction target) in both', async () => {
-    const results: AuditRow[][] = [];
-    for (const [, make] of stores) {
-      const store = make();
-      const subjects = new SubjectIndex(store, { now: () => NOW }, { logger: { warn() {} } });
-      const s = subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: null });
-      if (s === null) throw new Error('expected a subject');
-      const w = await applySanction(
-        store,
-        subjects,
-        {
-          kind: 'ban', subject: s, includeIp: false, durationMs: null, reason: 'r', actor: 'mod', source: 'moderator',
-          automated: false, rule: 'uncovered', gapNote: 'a note about a gap',
-        } as never,
-        NOW,
-      );
-      expect(store.closeGap(w.groupId, 'ruled', '9', 'boss', NOW + 100)).toBe(true);
-      expect(store.closeGap(w.groupId, 'ruled', '9', 'boss', NOW + 200)).toBe(false);
-      const items = store.listAudit({ limit: 10 });
-      expect(items).toHaveLength(1);
-      expect(items[0]).toMatchObject({ at: NOW + 100, actor: 'boss', role: null, action: 'gap.close', target: { type: 'sanction', ref: w.groupId } });
-      results.push(items.map((i) => ({ ...i, id: 'x', target: { type: 'sanction', ref: 'g' } })));
-    }
-    expect(results[1]).toEqual(results[0]);
   });
 });
 

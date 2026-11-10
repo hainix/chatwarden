@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 /** The documented publish order. scripts/publish-order.test.ts asserts the manifests produce exactly this list. */
 export const PUBLISH_ORDER = [
   '@chatwarden/core',
+  '@chatwarden/store-memory',
   '@chatwarden/matcher',
   '@chatwarden/store-sqlite',
   '@chatwarden/profanity',

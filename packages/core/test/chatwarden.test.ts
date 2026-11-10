@@ -5,7 +5,7 @@ import type { DecisionAction } from '../src/decide.js';
 import { defineRules, STARTER_RULES } from '../src/rules.js';
 import type { ProfanityConfig } from '../src/profile.js';
 import type { Logger, Matcher, Platform, ProfanityFilter, RawWho } from '../src/types.js';
-import { MemoryStore } from './memoryStore.js';
+import { MemoryStore } from '@chatwarden/store-memory';
 
 const NOW = 1_800_000_000_000;
 const H = 3_600_000;

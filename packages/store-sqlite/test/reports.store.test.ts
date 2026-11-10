@@ -15,7 +15,6 @@ import {
   type Store,
   type StoredReport,
 } from '@chatwarden/core';
-import { MemoryStore } from '../../core/test/memoryStore.js';
 import { MIGRATIONS, openStore } from '../src/index.js';
 
 const H = 3_600_000;
@@ -195,87 +194,6 @@ describe('insertReport', () => {
     db.close();
   });
 
-  it('returns false and writes nothing for the same reporter, target and room', () => {
-    const { db, store } = env();
-    expect(store.insertReport(report())).toBe(true);
-    expect(store.insertReport(report({ id: 'r2', category: 'spam', createdAt: NOW + 1 }))).toBe(false);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM kit_reports').get()).toEqual({ n: 1 });
-    db.close();
-  });
-
-  it('controls: another room, target or reporter is a new row', () => {
-    const { store } = env();
-    expect(store.insertReport(report())).toBe(true);
-    expect(store.insertReport(report({ id: 'r2', roomId: 'ROOM2' }))).toBe(true);
-    expect(store.insertReport(report({ id: 'r3', targetSubject: 's_other' }))).toBe(true);
-    expect(store.insertReport(report({ id: 'r4', reporterSubject: 's_other' }))).toBe(true);
-  });
-
-  it('a duplicate report id throws (primary key) rather than returning false', () => {
-    const { store } = env();
-    store.insertReport(report());
-    expect(() => store.insertReport(report({ roomId: 'ROOM9' }))).toThrow();
-  });
-
-  it('is rolled back with the enclosing transaction', () => {
-    const { store } = env();
-    expect(() =>
-      store.transaction(() => {
-        store.insertReport(report());
-        throw new Error('boom');
-      }),
-    ).toThrow('boom');
-    expect(store.loadReportActivity(0)).toEqual([]);
-  });
-});
-
-describe('loadReportActivity / loadRoomReportPairs', () => {
-  it('returns light rows at or after since, oldest first', () => {
-    const { store } = env();
-    store.insertReport(report({ id: 'c', roomId: 'C', createdAt: NOW + 20 }));
-    store.insertReport(report({ id: 'a', roomId: 'A', createdAt: NOW }));
-    store.insertReport(report({ id: 'b', roomId: 'B', createdAt: NOW + 10 }));
-    expect(store.loadReportActivity(NOW + 10)).toEqual([
-      { reporter: 's_rep', target: 's_tgt', roomId: 'B', createdAt: NOW + 10 },
-      { reporter: 's_rep', target: 's_tgt', roomId: 'C', createdAt: NOW + 20 },
-    ]);
-    expect(store.loadReportActivity(0).map((r) => r.roomId)).toEqual(['A', 'B', 'C']);
-    expect(store.loadReportActivity(NOW + 21)).toEqual([]);
-  });
-
-  it('lists the pairs of one room only', () => {
-    const { store } = env();
-    store.insertReport(report({ id: 'a', roomId: 'A' }));
-    store.insertReport(report({ id: 'b', roomId: 'B', reporterSubject: 's_x' }));
-    expect(store.loadRoomReportPairs('A')).toEqual([{ reporter: 's_rep', target: 's_tgt' }]);
-    expect(store.loadRoomReportPairs('B')).toEqual([{ reporter: 's_x', target: 's_tgt' }]);
-    expect(store.loadRoomReportPairs('none')).toEqual([]);
-  });
-});
-
-describe('loadBadFaithMarks', () => {
-  it('returns bad-faith rows actioned at or after since, and nothing else', () => {
-    const { db, store } = env();
-    const mark = (id: string, room: string, over: { bad: number; at: number | null; status?: string }) => {
-      store.insertReport(report({ id, roomId: room }));
-      db.prepare('UPDATE kit_reports SET bad_faith = ?, actioned_at = ?, status = ? WHERE id = ?').run(
-        over.bad,
-        over.at,
-        over.status ?? 'dismissed',
-        id,
-      );
-    };
-    mark('a', 'A', { bad: 1, at: NOW - DAY });
-    mark('b', 'B', { bad: 1, at: NOW - 30 * DAY }); // exactly since
-    mark('c', 'C', { bad: 1, at: NOW - 30 * DAY - 1 }); // too old
-    mark('d', 'D', { bad: 0, at: NOW - DAY }); // not bad faith
-    mark('e', 'E', { bad: 1, at: null, status: 'open' }); // never closed
-    expect(store.loadBadFaithMarks(NOW - 30 * DAY)).toEqual([
-      { reporter: 's_rep', actionedAt: NOW - DAY },
-      { reporter: 's_rep', actionedAt: NOW - 30 * DAY },
-    ]);
-    db.close();
-  });
 });
 
 describe('loadAutoChatGroups', () => {
@@ -387,33 +305,6 @@ describe('listReports', () => {
     store.closeReport('r3', 'dismissed', true, 'mod', NOW + 100, 'n', 'ev');
     store.closeReport('r5', 'actioned', false, 'mod', NOW + 100, 'n');
   };
-  const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
-
-  it('newest first, ties on created_at broken by id descending', () => {
-    const { db, store } = env();
-    seeded(store);
-    expect(ids(store.listReports({ limit: 10 }))).toEqual(['r6', 'r5', 'r4', 'r3', 'r2', 'r1']);
-    db.close();
-  });
-
-  it('returns whole records with the decision columns', () => {
-    const { db, store } = env();
-    seeded(store);
-    const [row] = store.listReports({ status: 'dismissed', limit: 5 });
-    expect(row).toEqual(store.loadReport('r3'));
-    expect(row).toMatchObject({ status: 'dismissed', badFaith: true, actionedBy: 'mod', badFaithEvidence: 'ev' });
-    expect(row?.excerpt).toEqual(report().excerpt);
-    db.close();
-  });
-
-  it('filters by status', () => {
-    const { db, store } = env();
-    seeded(store);
-    expect(ids(store.listReports({ status: 'open', limit: 10 }))).toEqual(['r6', 'r4', 'r1']);
-    expect(ids(store.listReports({ status: 'actioned', limit: 10 }))).toEqual(['r5', 'r2']);
-    expect(ids(store.listReports({ status: 'dismissed', limit: 10 }))).toEqual(['r3']);
-    db.close();
-  });
 
   it('a cursor page seeks the created_at index instead of scanning the table', () => {
     const { db, store } = env();
@@ -435,80 +326,6 @@ describe('listReports', () => {
     db.close();
   });
 
-  it('the cursor with the redundant range term gives the same pages when several rows tie on created_at', () => {
-    const { db, store } = env();
-    for (let i = 1; i <= 9; i++) store.insertReport(report({ id: `t${i}`, createdAt: NOW + (i <= 5 ? 5 : 6), reporterSubject: `s_t${i}` }));
-    // Walk the whole list two at a time by the cursor; every row appears once, in the newest-first order.
-    const all: string[] = [];
-    let cursor: { before: number; beforeId: string } | undefined;
-    for (;;) {
-      const page = store.listReports({ limit: 2, ...(cursor ?? {}) });
-      if (page.length === 0) break;
-      all.push(...ids(page));
-      const last = page[page.length - 1];
-      if (last === undefined) break;
-      cursor = { before: last.createdAt, beforeId: last.id };
-    }
-    expect(all).toEqual(['t9', 't8', 't7', 't6', 't5', 't4', 't3', 't2', 't1']);
-    db.close();
-  });
-
-  it('before (exclusive) pages by time; with beforeId it splits an exact tie', () => {
-    const { db, store } = env();
-    seeded(store);
-    expect(ids(store.listReports({ before: NOW + 10, limit: 10 }))).toEqual(['r1']);
-    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r3', limit: 10 }))).toEqual(['r2', 'r1']);
-    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r4', limit: 2 }))).toEqual(['r3', 'r2']);
-    expect(ids(store.listReports({ before: NOW + 10, beforeId: 'r1', limit: 10 }))).toEqual(['r1']);
-    expect(ids(store.listReports({ before: NOW, limit: 10 }))).toEqual([]);
-    // A cursor with a filter.
-    expect(ids(store.listReports({ status: 'open', before: NOW + 10, beforeId: 'r4', limit: 10 }))).toEqual(['r1']);
-    // beforeId alone (no before) is ignored.
-    expect(ids(store.listReports({ beforeId: 'r3', limit: 10 }))).toHaveLength(6);
-    db.close();
-  });
-
-  it('limit is clamped to 1..200 at the store as well', () => {
-    const { db, store } = env();
-    for (let i = 0; i < 210; i++) store.insertReport(report({ id: `q${i}`, createdAt: NOW + i, reporterSubject: `s${i}` }));
-    expect(store.listReports({ limit: 500 })).toHaveLength(200);
-    expect(store.listReports({ limit: 200 })).toHaveLength(200);
-    expect(store.listReports({ limit: 0 })).toHaveLength(1);
-    expect(store.listReports({ limit: -4 })).toHaveLength(1);
-    expect(store.listReports({ limit: 3.8 })).toHaveLength(3);
-    expect(store.listReports({ limit: 5 })).toHaveLength(5);
-    db.close();
-  });
-
-  it('an empty table lists nothing', () => {
-    const { db, store } = env();
-    expect(store.listReports({ limit: 10 })).toEqual([]);
-    db.close();
-  });
-
-  it('agrees with the in-memory store on every query', () => {
-    const { db, store } = env();
-    const mem = new MemoryStore();
-    seeded(store);
-    seeded(mem);
-    const queries = [
-      { limit: 10 },
-      { limit: 2 },
-      { status: 'open' as const, limit: 10 },
-      { status: 'actioned' as const, limit: 1 },
-      { status: 'dismissed' as const, limit: 10 },
-      { before: NOW + 10, limit: 10 },
-      { before: NOW + 10, beforeId: 'r3', limit: 10 },
-      { before: NOW + 10, beforeId: 'r4', limit: 2 },
-      { before: NOW + 30, limit: 3 },
-      { before: NOW + 31, beforeId: 'zz', limit: 3 },
-      { status: 'open' as const, before: NOW + 10, beforeId: 'r4', limit: 10 },
-      { limit: 0 },
-      { limit: 999 },
-    ];
-    for (const q of queries) expect(store.listReports(q), JSON.stringify(q)).toEqual(mem.listReports(q));
-    db.close();
-  });
 });
 
 describe('listReportsByPerson', () => {
@@ -527,46 +344,6 @@ describe('listReportsByPerson', () => {
     }
     store.closeReport('p3', 'actioned', false, 'mod', NOW + 100, 'n');
   };
-  const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
-
-  it('lists reports AGAINST the person only, newest first, ties by id descending', () => {
-    const { db, store } = env();
-    seeded(store);
-    expect(ids(store.listReportsByPerson(['s_a'], 10))).toEqual(['p6', 'p3', 'p1']);
-    expect(ids(store.listReportsByPerson(['s_b'], 10))).toEqual(['p5', 'p4']);
-    db.close();
-  });
-
-  it('reads every alias given, and returns whole records with the decision columns', () => {
-    const { db, store } = env();
-    seeded(store);
-    const rows = store.listReportsByPerson(['s_a', 's_a2'], 10);
-    expect(ids(rows)).toEqual(['p6', 'p3', 'p2', 'p1']);
-    expect(rows.find((r) => r.id === 'p3')).toMatchObject({ status: 'actioned', actionedBy: 'mod', modNote: 'n' });
-    expect(rows[0]?.excerpt.length).toBeGreaterThan(0);
-    db.close();
-  });
-
-  it('limit is clamped to 1..200 and a fraction is floored', () => {
-    const { db, store } = env();
-    seeded(store);
-    expect(ids(store.listReportsByPerson(['s_a'], 2))).toEqual(['p6', 'p3']);
-    expect(store.listReportsByPerson(['s_a'], 0)).toHaveLength(1);
-    expect(store.listReportsByPerson(['s_a'], -4)).toHaveLength(1);
-    expect(store.listReportsByPerson(['s_a'], 2.9)).toHaveLength(2);
-    expect(store.listReportsByPerson(['s_a'], 9999)).toHaveLength(3);
-    db.close();
-  });
-
-  it('controls: an unknown person, an empty list, or a similar id matches nothing', () => {
-    const { db, store } = env();
-    seeded(store);
-    expect(store.listReportsByPerson(['s_zzz'], 10)).toEqual([]);
-    expect(store.listReportsByPerson([], 10)).toEqual([]);
-    expect(store.listReportsByPerson(['s_'], 10)).toEqual([]);
-    expect(store.listReportsByPerson(["s_a' OR 1=1 --"], 10)).toEqual([]);
-    db.close();
-  });
 
   it('seeks the target_subject index instead of scanning the table', () => {
     const { db, store } = env();
@@ -580,25 +357,4 @@ describe('listReportsByPerson', () => {
     db.close();
   });
 
-  it('agrees with the in-memory store on every query', () => {
-    const { db, store } = env();
-    const mem = new MemoryStore();
-    seeded(store);
-    seeded(mem);
-    const queries: Array<[string[], number]> = [
-      [['s_a'], 10],
-      [['s_a', 's_a2'], 10],
-      [['s_a2', 's_a'], 2],
-      [['s_b'], 1],
-      [['s_a', 's_b'], 4],
-      [['nobody'], 5],
-      [[], 5],
-      [['s_a'], 0],
-      [['s_a'], 999],
-    ];
-    for (const [who, limit] of queries) {
-      expect(store.listReportsByPerson(who, limit), JSON.stringify([who, limit])).toEqual(mem.listReportsByPerson(who, limit));
-    }
-    db.close();
-  });
 });

@@ -334,6 +334,37 @@ describe('randomIntBelow', () => {
   });
 });
 
+describe('no secure random source', () => {
+  it('randomId and randomIntBelow throw a clear error when globalThis.crypto is absent', () => {
+    vi.stubGlobal('crypto', undefined);
+    expect(() => randomId()).toThrow(/secure random/);
+    expect(() => randomIntBelow(5)).toThrow(/secure random/);
+  });
+
+  it('...and when crypto exists but has no getRandomValues', () => {
+    vi.stubGlobal('crypto', {});
+    expect(() => randomId()).toThrow(/secure random/);
+    expect(() => randomIntBelow(5)).toThrow(/secure random/);
+  });
+
+  it('...on the pure-JS path too (the random source is Web Crypto on both)', () => {
+    __forcePureJs(true);
+    vi.stubGlobal('crypto', undefined);
+    expect(() => randomId()).toThrow(/secure random/);
+    expect(() => randomIntBelow(2)).toThrow(/secure random/);
+  });
+
+  it('hashing needs no random source: sha256Hex still works without crypto', () => {
+    vi.stubGlobal('crypto', undefined);
+    expect(sha256Hex('abc')).toBe(ABC);
+  });
+
+  it('a zero-byte id draws nothing, so it does not need a source either', () => {
+    vi.stubGlobal('crypto', undefined);
+    expect(randomId(0)).toBe('');
+  });
+});
+
 describe('portability guards', () => {
   it('@chatwarden/core src has no node: specifier anywhere', () => {
     const dir = new URL('../src/', import.meta.url);

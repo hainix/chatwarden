@@ -11,6 +11,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
       },
       {
+        find: '@chatwarden/store-memory',
+        replacement: fileURLToPath(new URL('./packages/store-memory/src/index.ts', import.meta.url)),
+      },
+      {
         find: '@chatwarden/store-sqlite',
         replacement: fileURLToPath(new URL('./packages/store-sqlite/src/index.ts', import.meta.url)),
       },

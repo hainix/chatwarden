@@ -1,7 +1,8 @@
 # Releasing Chatwarden
 
-Six packages are published to npm under the `@chatwarden` scope: `core`, `matcher`, `store-sqlite`, `profanity`, `http` and
-`discord`. They share one version number (a changesets "fixed" group), so every release bumps all six together.
+Seven packages are published to npm under the `@chatwarden` scope: `core`, `store-memory`, `matcher`, `store-sqlite`,
+`profanity`, `http` and `discord`. They share one version number (a changesets "fixed" group), so every release bumps all seven
+together.
 
 Nothing is uploaded to npm until the owner has done the one-time steps below. Until then, the release workflow can only be
 run as a dry run, and adopters can use tarballs (see "Before the first publish").
@@ -58,8 +59,8 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
    The tag must be exactly `v` plus the version in `packages/core/package.json`; the workflow refuses a tag that does not
    match. Pushing the tag starts the real publish. The release job runs the lint and the full test suite again before it
    uploads anything.
-6. **Watch it.** Open the Actions tab and follow the "Release" run. It publishes in dependency order (`core`, `matcher`,
-   `store-sqlite`, `profanity`, `http`, `discord`) and skips any package whose exact version is already on npm, so a failed
+6. **Watch it.** Open the Actions tab and follow the "Release" run. It publishes in dependency order (`core`, `store-memory`,
+   `matcher`, `store-sqlite`, `profanity`, `http`, `discord`) and skips any package whose exact version is already on npm, so a failed
    run can simply be re-run once the cause is fixed. Check each package page on npmjs.com for the provenance badge.
 
 ## Running a dry run

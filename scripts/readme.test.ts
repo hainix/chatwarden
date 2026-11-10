@@ -38,12 +38,12 @@ const cells = (row: string): string[] => row.split('|').slice(1, -1).map((c) => 
 const rows = (text: string): string[][] => text.split('\n').filter((l) => l.startsWith('|') && !/^\|[ |-]+\|$/.test(l)).map(cells);
 
 const MARKETING = /\b(blazing|seamless|powerful|robust|world-class|cutting-edge|revolutionary)\b/i;
-const NEW_FOUR = ['core', 'store-sqlite', 'matcher', 'profanity'];
+const NEW_FOUR = ['core', 'store-sqlite', 'store-memory', 'matcher', 'profanity'];
 const REPO = 'https://github.com/hainix/chatwarden';
 
 describe('every published package has a README', () => {
-  it('covers the six packages', () => {
-    expect(published).toEqual(['core', 'discord', 'http', 'matcher', 'profanity', 'store-sqlite']);
+  it('covers the seven packages', () => {
+    expect(published).toEqual(['core', 'discord', 'http', 'matcher', 'profanity', 'store-memory', 'store-sqlite']);
   });
 
   it.each(published)('%s: is titled with its package name, with a status line and no marketing words', (dir) => {
@@ -76,7 +76,7 @@ describe('every published package has a README', () => {
   });
 });
 
-describe('the four new package READMEs', () => {
+describe('the new package READMEs', () => {
   it.each(NEW_FOUR)('%s: has install, quick start, options, security notes and links, in that order', (dir) => {
     const doc = readme(dir);
     const order = ['## Install', '## Quick start', '## Options', '## Security notes', '## Links'].map((h) => doc.indexOf(`\n${h}\n`));
@@ -131,6 +131,25 @@ describe('the four new package READMEs', () => {
     expect(notes).toMatch(/staff/);
     expect(notes).toMatch(/never log/i);
     expect(notes).toMatch(/not purged|not removed by `purge/);
+  });
+
+  it('store-memory: says plainly it is memory only, lost on restart, and what it is for', () => {
+    const raw = readme('store-memory');
+    const doc = flat(raw);
+    expect(doc).toContain('MemoryStore');
+    expect(doc).toContain('createMemoryStore');
+    expect(doc).toMatch(/lost (when|on)[^.]*(restart|exit|stops)/i);
+    expect(doc).toMatch(/tests?, demos? and single-process prototypes/i);
+    expect(doc).toMatch(/not (for|a) production|do not use[^.]*production/i);
+    expect(doc).toMatch(/@chatwarden\/store-sqlite/);
+    expect(doc).toMatch(/no `node:` (import|module)|imports? no `node:`/i);
+    const notes = flat(section(raw, 'Security notes'));
+    expect(notes).toMatch(/never log/i);
+    expect(notes).toMatch(/subject id/i);
+    expect(notes).toMatch(/staff/);
+    expect(notes).toMatch(/retention|purge/i);
+    expect(notes).toMatch(/no timer|does not run|nothing purges|only[^.]*when core calls/i);
+    expect(notes).toMatch(/same store contract|contract suite/i);
   });
 
   it('matcher: explains /fixtures, the deprecated /test-fixtures, and where the community corpus lives', () => {
@@ -327,6 +346,7 @@ declare const authorize: import('@chatwarden/http').Authenticate;
       paths: {
         '@chatwarden/core': src('core/src/index.ts'),
         '@chatwarden/store-sqlite': src('store-sqlite/src/index.ts'),
+        '@chatwarden/store-memory': src('store-memory/src/index.ts'),
         '@chatwarden/matcher': src('matcher/src/index.ts'),
         '@chatwarden/matcher/fixtures': src('matcher/src/fixtures/index.ts'),
         '@chatwarden/matcher/test-fixtures': src('matcher/src/fixtures/testFixtures.ts'),

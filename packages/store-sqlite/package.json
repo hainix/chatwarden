@@ -48,7 +48,8 @@
   },
   "devDependencies": {
     "@chatwarden/core": "0.1.0",
-    "@chatwarden/matcher": "0.1.0"
+    "@chatwarden/matcher": "0.1.0",
+    "@chatwarden/store-memory": "0.1.0"
   },
   "publishConfig": {
     "access": "public"

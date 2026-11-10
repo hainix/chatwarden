@@ -8,8 +8,9 @@ Status: pre-release, as-is, no support promise; PRs welcome.
 
 | Package | Description |
 | --- | --- |
-| [`@chatwarden/core`](packages/core) | Moderation engine. No runtime dependencies; imports nothing from `node:` except `node:crypto`. |
+| [`@chatwarden/core`](packages/core) | Moderation engine. No runtime dependencies; imports no `node:` module, so it runs in a browser. |
 | [`@chatwarden/store-sqlite`](packages/store-sqlite) | SQLite-backed store for sanctions, strikes and reports. |
+| [`@chatwarden/store-memory`](packages/store-memory) | In-memory store for tests, demos and single-process prototypes. Everything is lost on restart. Runs in a browser. |
 | [`@chatwarden/matcher`](packages/matcher) | Text matcher that resists Unicode evasion without blocking innocent words. |
 | [`@chatwarden/profanity`](packages/profanity) | Optional ordinary-swearing filter (allow, star or refuse; style, add, remove, custom list). Slurs stay the matcher's job. |
 | [`@chatwarden/http`](packages/http) | HTTP routes: the staff API (reports, decisions, sanctions, terms, audit), the player API (notices, record, rules), health probes, signed webhooks in and out, and an Express adapter. |
@@ -27,11 +28,12 @@ project gets exactly one copy of it. `store-sqlite` and `profanity` also need `m
 | Give moderators and players HTTP routes (Express) | add `npm install @chatwarden/http express @types/express` |
 | Mask or refuse ordinary swearing | add `npm install @chatwarden/profanity` |
 | Post the review queue into a Discord forum | add `npm install @chatwarden/discord` |
+| Run tests or a demo with no database (everything is lost on restart) | swap `@chatwarden/store-sqlite` for `npm install @chatwarden/store-memory` |
 | Try it with invented test words, no real term list | nothing extra: `@chatwarden/matcher/fixtures` is part of `@chatwarden/matcher` |
 
 Express 5 ships no types, so `@types/express` goes with `express` in a TypeScript project (a plain JavaScript project can skip it).
 
-Each package has its own README with the options, a copy-paste start and its security notes: [core](packages/core), [store-sqlite](packages/store-sqlite), [matcher](packages/matcher), [profanity](packages/profanity), [http](packages/http), [discord](packages/discord).
+Each package has its own README with the options, a copy-paste start and its security notes: [core](packages/core), [store-sqlite](packages/store-sqlite), [store-memory](packages/store-memory), [matcher](packages/matcher), [profanity](packages/profanity), [http](packages/http), [discord](packages/discord).
 
 ## Quick start
 

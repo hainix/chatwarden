@@ -3,7 +3,7 @@ import * as api from '../src/index.js';
 import { lengthLabel, outcomeLabel, VERSION } from '../src/index.js';
 
 describe('@chatwarden/core smoke', () => {
-  // core may import no node: module but node:crypto, so it cannot read its package.json here; scripts/manifests.test.ts
+  // core imports no node: module, so it cannot read its package.json here; scripts/manifests.test.ts
   // checks that VERSION equals the manifest version (and scripts/sync-version.mjs keeps it so).
   it('exports a semver VERSION, not the 0.0.0 placeholder', () => {
     expect(VERSION).toMatch(/^\d+\.\d+\.\d+/);

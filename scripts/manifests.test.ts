@@ -26,7 +26,7 @@ const VERSION = '0.1.0';
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
 
 describe('published package set', () => {
-  it('is the six expected packages, none private', () => {
+  it('is the seven expected packages, none private', () => {
     expect(names.sort()).toEqual(
       [
         '@chatwarden/core',
@@ -34,6 +34,7 @@ describe('published package set', () => {
         '@chatwarden/http',
         '@chatwarden/matcher',
         '@chatwarden/profanity',
+        '@chatwarden/store-memory',
         '@chatwarden/store-sqlite',
       ].sort(),
     );
@@ -71,8 +72,12 @@ describe('core is a peer, never a dependency', () => {
   const dependents = published.filter((p) => p.pkg.name !== '@chatwarden/core');
   it('core itself has no @chatwarden peers or dependencies', () => {
     const core = published.find((p) => p.pkg.name === '@chatwarden/core')!.pkg;
-    for (const field of [core.dependencies, core.peerDependencies, core.devDependencies])
+    for (const field of [core.dependencies, core.peerDependencies])
       expect(Object.keys(field ?? {}).filter(ownScope)).toEqual([]);
+  });
+  it('core dev-depends on nothing but store-memory (its tests run on the in-memory store)', () => {
+    const core = published.find((p) => p.pkg.name === '@chatwarden/core')!.pkg;
+    expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
     '%s peers on core ^0.1.0 and dev-depends on core 0.1.0',
@@ -100,6 +105,18 @@ describe('every @chatwarden peer is linked locally at the exact version', () => 
       expect(names).toContain(dev);
       expect(pkg.devDependencies![dev]).toBe(VERSION);
     }
+  });
+});
+
+describe('store-memory', () => {
+  const mem = (): Manifest => published.find((p) => p.pkg.name === '@chatwarden/store-memory')!.pkg;
+  it('peers on core only: no other @chatwarden peer, and no runtime dependency at all', () => {
+    expect(Object.keys(mem().peerDependencies ?? {})).toEqual(['@chatwarden/core']);
+    expect(mem().dependencies).toBeUndefined();
+  });
+  it('is the browser-safe store: its manifest mentions no node: builtin as a dependency', () => {
+    const all = Object.keys({ ...mem().dependencies, ...mem().peerDependencies });
+    expect(all.filter((n) => n.startsWith('node:'))).toEqual([]);
   });
 });
 

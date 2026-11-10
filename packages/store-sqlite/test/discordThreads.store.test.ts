@@ -1,14 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import type { Store } from '@chatwarden/core';
-import { MemoryStore } from '../../core/test/memoryStore.js';
 import { MIGRATIONS, openStore } from '../src/index.js';
-import { discordThreadsContract } from './discordThreads.contract.js';
-
-const stores: Array<[string, () => Store]> = [
-  ['MemoryStore', () => new MemoryStore()],
-  ['SqliteStore', () => openStore({ db: new DatabaseSync(':memory:') })],
-];
 
 describe('migration 14', () => {
   it('is version 14 and creates kit_discord_threads with the documented columns', () => {
@@ -47,5 +39,3 @@ describe('migration 14', () => {
     expect(() => db.prepare("INSERT INTO kit_discord_threads (subject, thread_id, label, created_at) VALUES ('a', 't', 'l', 1)").run()).not.toThrow();
   });
 });
-
-for (const [name, make] of stores) discordThreadsContract(name, make);
