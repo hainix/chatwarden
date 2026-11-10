@@ -59,6 +59,8 @@ function matchPath(route: Route, segments: string[]): RouteParams | null {
  *   `:name~ref` swaps in the audit-ref charset (`A-Z a-z 0-9 _ . : -`, never only dots) for that one param.
  * - a literal segment beats a param segment.
  * - no match -> 404; a path that matches under other methods only -> 405 with an `allow` header.
+ * - HEAD on a path with a GET route (and no HEAD route of its own) runs the GET handler and returns its status and
+ *   headers with no body (`body: undefined`); `allow` lists HEAD wherever it lists GET.
  * Handler errors propagate: wrap the router (or each handler) in `withErrors`.
  */
 export function createRouter(routes: RouteTable): (req: KitRequest) => Promise<KitResponse> {
@@ -109,12 +111,20 @@ export function createRouter(routes: RouteTable): (req: KitRequest) => Promise<K
     const method = req.method.toUpperCase();
 
     const allowed = new Set<string>();
+    let viaGet: { route: Route; params: RouteParams } | null = null;
     for (const route of table) {
       const params = matchPath(route, segments);
       if (params === null) continue;
       if (route.method === method) return route.handler(req, params);
+      if (method === 'HEAD' && route.method === 'GET' && viaGet === null) viaGet = { route, params };
       allowed.add(route.method);
     }
+    if (viaGet !== null) {
+      // The same answer as GET, without the body.
+      const res = await viaGet.route.handler(req, viaGet.params);
+      return { status: res.status, ...(res.headers === undefined ? {} : { headers: res.headers }), body: undefined };
+    }
+    if (allowed.has('GET')) allowed.add('HEAD');
     if (allowed.size > 0) return errorResponse('method_not_allowed', { allow: [...allowed].sort().join(', ') });
     return errorResponse('not_found');
   };

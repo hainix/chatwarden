@@ -18,6 +18,14 @@ The rest of the HTTP surface is the kit's own routes from `@chatwarden/http`, mo
 (`playerRoutes`), and `/healthz` and `/readyz` the probes (`healthRoutes`). The adapter reads the raw body itself, so it
 is mounted **before** any body parser: tiny-chat parses JSON only on its own `POST /report` route.
 
+Two error shapes appear in this demo. The kit routes answer `{ "error": <code>, "message": ... }`. The demo's own `POST /report`
+and its "admin API is off" switch (a 404 when no admin token is set) keep the legacy shape `{ "ok": false, "refused": ... }`;
+that shape belongs to those two only.
+
+The player API identifies the caller from `x-chatwarden-key` (or the demo's `?key=`) and the socket address, which the
+adapter hands over as `req.remoteAddress` (never a header, so a client cannot choose it). Behind a reverse proxy that is the
+proxy's address: parse `X-Forwarded-For` in your own `identify`, trusting only your own proxy.
+
 ## The profile, swearing and the code of conduct
 
 tiny-chat runs the one-line preset `profile: 'relaxed'` with the optional `@chatwarden/profanity` package

@@ -167,11 +167,11 @@ describe('createRouter: 404 and 405', () => {
   it('answers 405 with an allow header for the wrong method', async () => {
     const res = await router(req('PUT', '/things'));
     expect(res.status).toBe(405);
-    expect(res.headers).toEqual({ allow: 'GET, POST' });
+    expect(res.headers).toEqual({ allow: 'GET, HEAD, POST' });
     expect(res.body).toEqual({ error: 'method_not_allowed', message: 'Method not allowed.' });
     const res2 = await router(req('POST', '/things/abc'));
     expect(res2.status).toBe(405);
-    expect(res2.headers).toEqual({ allow: 'DELETE, GET' });
+    expect(res2.headers).toEqual({ allow: 'DELETE, GET, HEAD' });
   });
 
   it('does not echo the path or method', async () => {
@@ -188,6 +188,78 @@ describe('createRouter: 404 and 405', () => {
     await r(req('POST', '/a'));
     await r(req('GET', '/b'));
     expect(h).not.toHaveBeenCalled();
+  });
+});
+
+describe('createRouter: HEAD', () => {
+  it('runs the GET handler and returns its status and headers with no body', async () => {
+    const h = vi.fn((r: KitRequest) => (void r, { status: 201, headers: { 'x-a': '1', 'cache-control': 'no-store' }, body: { big: 'payload' } }));
+    const router = createRouter({ 'GET /things/:id': h });
+    const res = await router(req('HEAD', '/things/abc'));
+    expect(res.status).toBe(201);
+    expect(res.headers).toEqual({ 'x-a': '1', 'cache-control': 'no-store' });
+    expect(res.body).toBeUndefined();
+    expect(h).toHaveBeenCalledTimes(1);
+    expect(h.mock.calls[0]?.[0].method).toBe('HEAD');
+  });
+
+  it('passes the params, the query and the headers to the GET handler', async () => {
+    const seen: Array<[Record<string, string>, KitRequest]> = [];
+    const router = createRouter({ 'GET /a/:id': (r, p) => (seen.push([p, r]), ok()) });
+    await router(req('HEAD', '/a/xyz', { query: { q: '1' }, headers: { h: 'v' } }));
+    expect(seen[0]?.[0]).toEqual({ id: 'xyz' });
+    expect(seen[0]?.[1].query).toEqual({ q: '1' });
+  });
+
+  it('a GET error response keeps its status (a handler 404 stays 404) and has no body', async () => {
+    const router = createRouter({ 'GET /a': () => ({ status: 404, body: { error: 'not_found' } }) });
+    const res = await router(req('HEAD', '/a'));
+    expect([res.status, res.body]).toEqual([404, undefined]);
+  });
+
+  it('an explicit HEAD route wins over the GET fallback', async () => {
+    const get = vi.fn(() => ok());
+    const head = vi.fn(() => ({ status: 204, body: undefined }));
+    const router = createRouter({ 'GET /a': get, 'HEAD /a': head });
+    expect((await router(req('HEAD', '/a'))).status).toBe(204);
+    expect(get).not.toHaveBeenCalled();
+    expect(head).toHaveBeenCalledTimes(1);
+  });
+
+  it('a path with only other methods is 405, and a HEAD does not run their handlers', async () => {
+    const post = vi.fn(() => ok());
+    const router = createRouter({ 'POST /only': post });
+    const res = await router(req('HEAD', '/only'));
+    expect(res.status).toBe(405);
+    expect(res.headers).toEqual({ allow: 'POST' });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('an unknown path is 404 for HEAD, and a bad param is 404 not 405', async () => {
+    const router = createRouter({ 'GET /a/:id': () => ok() });
+    expect((await router(req('HEAD', '/b'))).status).toBe(404);
+    expect((await router(req('HEAD', '/a/bad id'))).status).toBe(404);
+  });
+
+  it('the method is case-insensitive, and allow lists HEAD only beside GET', async () => {
+    const router = createRouter({ 'GET /g': () => ok(), 'POST /p': () => ok() });
+    expect((await router(req('head', '/g'))).status).toBe(200);
+    expect((await router(req('DELETE', '/g'))).headers).toEqual({ allow: 'GET, HEAD' });
+    expect((await router(req('DELETE', '/p'))).headers).toEqual({ allow: 'POST' });
+  });
+
+  it('a literal GET route beats a param route on HEAD, as it does on GET', async () => {
+    const lit = vi.fn(() => ok({ lit: true }));
+    const par = vi.fn(() => ok({ par: true }));
+    const router = createRouter({ 'GET /r/export': lit, 'GET /r/:id': par });
+    await router(req('HEAD', '/r/export'));
+    expect(lit).toHaveBeenCalledTimes(1);
+    expect(par).not.toHaveBeenCalled();
+  });
+
+  it('handler errors propagate as on GET', async () => {
+    const router = createRouter({ 'GET /x': () => { throw new Error('boom'); } });
+    await expect(router(req('HEAD', '/x'))).rejects.toThrow('boom');
   });
 });
 

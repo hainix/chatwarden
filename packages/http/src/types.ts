@@ -16,8 +16,17 @@ export interface KitRequest {
    * The body exactly as received. Adapters MUST supply it (and must not pre-parse with a framework JSON parser), and
    * routes call `parseJson(req.rawBody)`, which enforces the byte cap and rejects forbidden keys. A route that needs
    * a body validates the parsed value itself.
+   * It is a string, so it is exact for valid UTF-8 only: a request byte that is not valid UTF-8 becomes U+FFFD. A
+   * signature computed over the original bytes then fails to verify, which fails closed (the request is refused).
    */
   rawBody?: string;
+  /**
+   * The address of the socket peer, as the server's own socket reports it. Adapters fill it from the connection and
+   * NEVER from a header: it is not `X-Forwarded-For`, so a client cannot choose it. Behind a reverse proxy or load
+   * balancer it is the proxy's address; the adopter's `identify` decides whether to trust a forwarding header from
+   * its own proxy. Absent when the adapter cannot tell.
+   */
+  remoteAddress?: string;
 }
 
 /**

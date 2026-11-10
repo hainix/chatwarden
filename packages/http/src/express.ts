@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { NextFunction, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { safeWarn } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
 import { BODY_MAX_BYTES } from './body.js';
@@ -42,9 +42,8 @@ function headersOf(raw: Request['headers']): Record<string, string> {
   return out;
 }
 
-/** True when something already read (or parsed) the request body, so the raw bytes are gone. */
-const consumed = (req: Request): boolean =>
-  (req.body as unknown) !== undefined || req.readableEnded || req.readableDidRead || req.destroyed;
+/** True when something already read (or parsed) the request body, so the raw bytes are gone. (A destroyed request is checked apart.) */
+const consumed = (req: Request): boolean => (req.body as unknown) !== undefined || req.readableEnded || req.readableDidRead;
 
 /** What reading the body came to: the text, "too big", or "the client went away". */
 type Read = { kind: 'ok'; text: string } | { kind: 'too_large' } | { kind: 'aborted' };
@@ -89,16 +88,31 @@ function readBody(req: Request, max: number): Promise<Read> {
   });
 }
 
-/** Send a KitResponse: its status and headers; a string body raw, anything else as JSON. */
-function send(res: Response, kit: KitResponse): void {
+/**
+ * Send a KitResponse with `status().end(payload)`: no `res.send` or `res.json`, so no ETag, no 304 and no guessing of a
+ * content type. `applied` collects the header names set, so a failure can take them back off.
+ */
+function send(res: Response, kit: KitResponse, applied: string[]): void {
   res.status(kit.status);
-  for (const [name, value] of Object.entries(kit.headers ?? {})) res.setHeader(name, value);
-  if (typeof kit.body === 'string') {
-    if (!res.hasHeader('content-type')) res.setHeader('content-type', 'text/plain; charset=utf-8');
-    res.send(kit.body);
-  } else {
-    res.json(kit.body);
+  for (const [name, value] of Object.entries(kit.headers ?? {})) {
+    res.setHeader(name, value);
+    applied.push(name);
   }
+  const set = (name: string, value: string): void => {
+    if (res.hasHeader(name)) return;
+    res.setHeader(name, value);
+    applied.push(name);
+  };
+  if (typeof kit.body === 'string') {
+    set('content-type', 'text/plain; charset=utf-8');
+    res.end(kit.body, 'utf8');
+    return;
+  }
+  // `undefined` (a HEAD answer) has no payload; anything else is JSON. JSON.stringify can throw: the caller handles it.
+  const payload = kit.body === undefined ? undefined : JSON.stringify(kit.body);
+  set('content-type', 'application/json; charset=utf-8');
+  if (payload === undefined) res.end();
+  else res.end(payload, 'utf8');
 }
 
 /**
@@ -114,9 +128,17 @@ function send(res: Response, kit: KitResponse): void {
  * - `path` is relative to the mount point; `query` holds the first string value of each key; header names are
  *   lowercased and an array is joined with ", ".
  * - A body over `maxBody` bytes is 413 `payload_too_large`; the adapter stops reading and closes the connection.
+ * - `remoteAddress` is the socket peer, never a header; behind a proxy, your `identify` decides what to trust.
+ * - `rawBody` is the body decoded as UTF-8: exact for valid UTF-8; an invalid byte becomes U+FFFD, so a signature over
+ *   the original bytes fails to verify (it fails closed).
  * - A `KitResponse` becomes status + headers; a string body is sent raw (with its own `content-type`, `text/plain` if
- *   none), anything else as JSON. A handler's own error is the kit's 500 `internal`; an error that escapes the mapping
- *   (an invalid status, say) goes to `next(err)`.
+ *   none), anything else as JSON. The response is written with `end`, so there is no ETag and no 304, and
+ *   `x-powered-by` is removed. HEAD on a GET route has the GET status and headers and no body.
+ * - A handler's own error is the kit's 500 `internal` (the router wraps it). An error while SENDING (an invalid status,
+ *   a CR/LF in a header, a body that is not JSON-serialisable) never goes to Express's error handlers, so no stack page
+ *   can reach a client: it is logged (`chatwarden.http_error`, error class only), the headers the adapter set are
+ *   removed and the kit 500 `{ error: 'internal' }` is sent; if the headers had already gone out the connection is
+ *   destroyed.
  *
  * `express` is a peer dependency (^5): this module imports `Router` from it, so import `@chatwarden/http/express` only
  * in an Express app.
@@ -134,21 +156,26 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
   let warnedParsed = false;
 
   const router = Router();
-  router.use(async (req: Request, res: Response, next: NextFunction) => {
+  // Never calls `next`: nothing here may reach Express's own error handling.
+  router.use(async (req: Request, res: Response) => {
+    const applied: string[] = [];
     try {
+      res.removeHeader('x-powered-by');
+      // The client is already gone: nothing to answer, and nothing the adopter did wrong.
+      if (req.destroyed) return;
       if (consumed(req)) {
         if (!warnedParsed) {
           warnedParsed = true;
           safeWarn(logger, 'chatwarden.http_body_already_parsed');
         }
-        send(res, { status: 500, body: { error: 'internal' } });
+        send(res, { status: 500, body: { error: 'internal' } }, applied);
         return;
       }
       const body = await readBody(req, max);
       if (body.kind === 'aborted') return;
       if (body.kind === 'too_large') {
         res.setHeader('connection', 'close');
-        send(res, errorResponse('payload_too_large'));
+        send(res, errorResponse('payload_too_large'), applied);
         return;
       }
       const kit: KitRequest = {
@@ -158,10 +185,22 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
         headers: headersOf(req.headers),
         body: undefined,
         rawBody: body.text,
+        ...(typeof req.socket.remoteAddress === 'string' ? { remoteAddress: req.socket.remoteAddress } : {}),
       };
-      send(res, await handle(kit));
+      send(res, await handle(kit), applied);
     } catch (err) {
-      next(err);
+      safeWarn(logger, 'chatwarden.http_error', { error: err instanceof Error ? err.name : typeof err });
+      if (res.headersSent || res.writableEnded) {
+        res.destroy();
+        return;
+      }
+      try {
+        for (const name of applied) res.removeHeader(name);
+        res.statusCode = 200;
+        send(res, { status: 500, body: { error: 'internal' } }, []);
+      } catch {
+        res.destroy();
+      }
     }
   });
   return router;

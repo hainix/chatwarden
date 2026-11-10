@@ -150,7 +150,7 @@ describe('playerRoutes: the route table', () => {
   it('other methods are 405 with allow, other paths 404', async () => {
     const { call } = await setup();
     expect((await call('POST', '/notices', { who: ALICE })).status).toBe(405);
-    expect((await call('POST', '/notices')).headers?.allow).toBe('GET');
+    expect((await call('POST', '/notices')).headers?.allow).toBe('GET, HEAD');
     expect((await call('GET', '/names/check')).headers?.allow).toBe('POST');
     expect((await call('GET', '/notices/x/ack')).headers?.allow).toBe('POST');
     expect((await call('DELETE', '/rules')).status).toBe(405);

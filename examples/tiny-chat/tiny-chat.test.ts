@@ -391,23 +391,37 @@ interface Reply {
 
 /** Every body an HTTP call returned, for the leak scan. */
 const bodies: string[] = [];
+/** Where each of those bodies came from (path without query), and every staff (`/admin`) response with its path. */
+const bodyPaths: string[] = [];
+const staffLog: Array<{ path: string; text: string }> = [];
 
 async function http(server: TinyChat, path: string, init?: RequestInit): Promise<Reply> {
   const res = await fetch(`http://127.0.0.1:${server.port}${path}`, init);
   const text = await res.text();
   bodies.push(text);
-  return { status: res.status, text, json: JSON.parse(text) as Record<string, unknown> };
+  bodyPaths.push(path.split('?')[0] as string);
+  if (path.startsWith('/admin')) staffLog.push({ path: path.split('?')[0] as string, text });
+  return { status: res.status, text, json: parseOrEmpty(text) };
 }
+const parseOrEmpty = (text: string): Record<string, unknown> => {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return {}; // a markdown or HTML document
+  }
+};
 const tokenHeader = (token: string | null): Record<string, string> => (token === null ? {} : { 'x-admin-token': token });
 
 /**
- * A staff GET that is NOT kept for the leak scan: staff responses carry subject ids by design (the report detail names the
- * people), and the scan covers what players and the decision answer see.
+ * A staff GET. It is kept out of `bodies` (the player scan: staff responses carry subject ids by design, the report detail
+ * names the people) and in `staffLog`, which the staff scan at the end of the file checks for key hashes, raw keys, the
+ * admin token and addresses.
  */
 async function staffGet(server: TinyChat, path: string, token: string | null = ADMIN): Promise<Reply> {
   const res = await fetch(`http://127.0.0.1:${server.port}/admin${path}`, { headers: tokenHeader(token) });
   const text = await res.text();
-  return { status: res.status, text, json: JSON.parse(text) as Record<string, unknown> };
+  staffLog.push({ path: `/admin${path.split('?')[0]}`, text });
+  return { status: res.status, text, json: parseOrEmpty(text) };
 }
 
 /** The subject ids a report names, from `GET /admin/reports/:id` (the only place the demo shows them). */
@@ -1161,7 +1175,7 @@ describe('tiny-chat: GET /api/code-of-conduct', () => {
     const server = await boot({ adminToken: ADMIN });
     const posted = await fetch(`http://127.0.0.1:${server.port}/api/code-of-conduct`, { method: 'POST' });
     expect(posted.status).toBe(405);
-    expect(posted.headers.get('allow')).toBe('GET');
+    expect(posted.headers.get('allow')).toBe('GET, HEAD');
     expect((await decideHttp(server, {}, null)).status).toBe(401);
   });
 
@@ -1320,11 +1334,69 @@ describe('tiny-chat: the player API (/api) and the health probes', () => {
     expect((await api(server, '/notices', { headers: { 'x-chatwarden-key': 'unknown-key' } })).json).toEqual({ notices: [] });
   });
 
-  it('a client-sent address header cannot choose the IP the kit sees', async () => {
+  it('with no key the identity is the socket address: forged address headers cannot buy a fresh names-check bucket', async () => {
+    const server = await boot();
+    const json = { 'content-type': 'application/json' };
+    const check = (i: number): Promise<Reply> =>
+      api(server, '/names/check', {
+        method: 'POST',
+        headers: {
+          ...json,
+          'x-forwarded-for': `203.0.113.${i}`,
+          'x-real-ip': `203.0.114.${i}`,
+          forwarded: `for=203.0.115.${i}`,
+          'x-tiny-chat-ip': `203.0.116.${i}`,
+        },
+        body: JSON.stringify({ name: 'Friendly Fox' }),
+      });
+    const statuses: number[] = [];
+    // The default limit is 20 a minute per identity; with no key the identity is the address.
+    for (let i = 0; i < 22; i++) statuses.push((await check(i)).status);
+    expect(statuses.slice(0, 20).every((st) => st === 200)).toBe(true);
+    expect(statuses.slice(20)).toEqual([429, 429]);
+  });
+
+  it('control: distinct keys are distinct identities, each with its own names-check bucket', async () => {
+    const server = await boot();
+    const statuses: number[] = [];
+    for (let i = 0; i < 22; i++) {
+      const res = await api(server, '/names/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-chatwarden-key': `key-bucket-${i}` },
+        body: JSON.stringify({ name: 'Friendly Fox' }),
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses.every((st) => st === 200)).toBe(true);
+  });
+
+  it('a forged address header is just a header: it does not reach a key identity either', async () => {
     const { server, key } = await warned('p4');
-    // The demo sets its own x-tiny-chat-ip from the socket; a forged one is overwritten, so the key still decides.
-    const res = await api(server, '/notices', { headers: { 'x-chatwarden-key': key, 'x-tiny-chat-ip': '203.0.113.9' } });
+    const res = await api(server, '/notices', { headers: { 'x-chatwarden-key': key, 'x-forwarded-for': '203.0.113.9' } });
     expect((res.json.notices as unknown[]).length).toBe(1);
+  });
+
+  it('answers carry no x-powered-by and no etag', async () => {
+    const server = await boot();
+    for (const path of ['/api/rules', '/healthz', '/api/nope']) {
+      const res = await fetch(`http://127.0.0.1:${server.port}${path}`);
+      expect(res.headers.get('x-powered-by')).toBeNull();
+      expect(res.headers.get('etag')).toBeNull();
+    }
+    const report = await fetch(`http://127.0.0.1:${server.port}/report`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(report.headers.get('x-powered-by')).toBeNull();
+  });
+
+  it('HEAD /healthz and /readyz are 200 with no body (probes that use HEAD)', async () => {
+    const server = await boot();
+    for (const path of ['/healthz', '/readyz']) {
+      const res = await fetch(`http://127.0.0.1:${server.port}${path}`, { method: 'HEAD' });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(await res.text()).toBe('');
+    }
+    const wrong = await fetch(`http://127.0.0.1:${server.port}/healthz`, { method: 'POST' });
+    expect(wrong.headers.get('allow')).toBe('GET, HEAD');
   });
 
   it('POST /api/notices/:id/ack acks the caller own notice; another key, an unknown id and no key are ok:false', async () => {
@@ -1438,5 +1510,109 @@ describe('the READMEs show the preset and the overrides', () => {
     expect(tiny).toContain('profanityPackage');
     expect(tiny).toContain('GET /api/code-of-conduct');
     expect(tiny).toContain("default-src 'none'; style-src 'unsafe-inline'");
+  });
+});
+
+// --- leak scans that run after everything else has pushed its bodies -----------------------------------------------
+
+/** A raw demo key as these tests name them (`key-na`, `key-bucket-3`), a 32+ hex hash, an IPv4 address. */
+const RAW_KEY_RE = /\bkey-[a-z0-9-]+/;
+const HASH_RE = /[0-9a-f]{32}/;
+const IPV4_RE = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/;
+
+describe('tiny-chat: every /api and decision body, scanned after all of them exist', () => {
+  beforeAll(async () => {
+    // Make sure every player route has answered at least once, whatever ran before this.
+    const server = await boot();
+    const headers = { 'x-chatwarden-key': 'key-final-scan' };
+    await http(server, '/api/notices', { headers });
+    await http(server, '/api/record', { headers });
+    await http(server, '/api/rules');
+    await http(server, '/api/code-of-conduct?format=html');
+    await http(server, '/api/notices/some-id/ack', { method: 'POST', headers });
+    await http(server, '/api/names/check', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Friendly Fox' }) });
+  });
+
+  it('has bodies from every player route', () => {
+    const seen = new Set(bodyPaths.map((p) => p.replace(/^\/api\/notices\/[^/]+\/ack$/, '/api/notices/:id/ack')));
+    for (const route of ['/api/notices', '/api/notices/:id/ack', '/api/record', '/api/rules', '/api/code-of-conduct', '/api/names/check']) {
+      expect(seen.has(route), route).toBe(true);
+    }
+    expect(bodies.some((t) => t.includes('"rules"'))).toBe(true);
+    expect(bodies.some((t) => t.includes('"notices"'))).toBe(true);
+  });
+
+  it('none of them has an identifier, a key, a hash, the admin token, a moderator, a reason or an address', () => {
+    for (const text of bodies) {
+      expect(text).not.toMatch(IDENTIFIER_RE);
+      expect(text).not.toMatch(RAW_KEY_RE);
+      expect(text).not.toMatch(HASH_RE);
+      expect(text).not.toMatch(IPV4_RE);
+      for (const secret of [ADMIN, 'demo-admin', 'private reason', 'private moderator reason', 'a private gap note']) {
+        expect(text).not.toContain(secret);
+      }
+    }
+  });
+
+  it('the scan would catch a leak (positive controls for each pattern)', () => {
+    expect(JSON.stringify({ notices: [], who: 'key-na' })).toMatch(RAW_KEY_RE);
+    expect(JSON.stringify({ record: [], h: 'a1b2c3d4'.repeat(4) })).toMatch(HASH_RE);
+    expect(JSON.stringify({ notices: [], ip: '203.0.113.9' })).toMatch(IPV4_RE);
+    expect(JSON.stringify({ ok: true, subject: 's_AAAAAAAAAAAAAAAAAAAAAA' })).toMatch(IDENTIFIER_RE);
+    expect(JSON.stringify({ rules: [{ number: 1, title: 'x', text: 'y' }] })).not.toMatch(IDENTIFIER_RE);
+  });
+});
+
+describe('tiny-chat: every staff (/admin) response, scanned for what staff must never see', () => {
+  const reports: StoredReport[] = [];
+  let server: TinyChat;
+
+  beforeAll(async () => {
+    server = await boot({ adminToken: ADMIN, onReport: (r) => void reports.push(r) });
+    const a = await join(server, 'key-staff-a');
+    await join(server, 'key-staff-b');
+    a.say('hello there');
+    await a.next('chat');
+    await reportHttp(server, { key: 'key-staff-b', targetSeat: 'p1', category: 'harassment' });
+    const id = reports[0]?.id ?? '';
+    const who = await subjectsOf(server, id);
+    if (who === null) throw new Error('expected a report');
+    await staffGet(server, '/reports');
+    await staffGet(server, '/reports?status=open&limit=5');
+    await staffGet(server, `/reports/${id}`);
+    await staffGet(server, `/people/${who.target}/history`);
+    await staffGet(server, '/policy');
+    await http(server, `/admin/reports/${id}/suggest`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': ADMIN }, body: '{}' });
+    await decideHttp(server, { reportId: id, verdict: 'upheld', reason: 'private note', actions: [{ seat: 'p1', kind: 'warning', durationMs: null, rule: 2 }] });
+    // Rejected calls too: a 401 and a 404.
+    await staffGet(server, `/reports/${id}`, 'wrong');
+    await staffGet(server, '/reports/no-such-report');
+    await staffGet(server, '/audit');
+  });
+
+  it('covers the report queue, the detail, a person, the policy, suggest, decide and the audit trail', () => {
+    const paths = new Set(staffLog.map((e) => e.path.replace(/\/(reports|people)\/[^/]+/, '/$1/:id')));
+    for (const route of ['/admin/reports', '/admin/reports/:id', '/admin/people/:id/history', '/admin/policy', '/admin/reports/:id/suggest', '/admin/reports/:id/decide', '/admin/audit']) {
+      expect(paths.has(route), route).toBe(true);
+    }
+    // Staff do see subject ids: the report detail names the people (a control for the id pattern below).
+    expect(staffLog.some((e) => /"targetSubject":"s_/.test(e.text))).toBe(true);
+  });
+
+  it('no key hash (32+ hex), raw client key, admin token or address in any staff response; subject ids are allowed', () => {
+    for (const { path, text } of staffLog) {
+      expect(text, path).not.toMatch(HASH_RE);
+      expect(text, path).not.toMatch(RAW_KEY_RE);
+      expect(text, path).not.toMatch(IPV4_RE);
+      expect(text, path).not.toContain(ADMIN);
+    }
+  });
+
+  it('the staff scan would catch a leak (positive controls)', () => {
+    const subjectOnly = JSON.stringify({ report: { targetSubject: 's_AAAAAAAAAAAAAAAAAAAAAA' } });
+    expect(subjectOnly).not.toMatch(HASH_RE);
+    expect(JSON.stringify({ report: { clientKeyHash: 'f'.repeat(32) } })).toMatch(HASH_RE);
+    expect(JSON.stringify({ report: { reporterKey: 'key-staff-b' } })).toMatch(RAW_KEY_RE);
+    expect(JSON.stringify({ audit: [{ ip: '127.0.0.1' }] })).toMatch(IPV4_RE);
   });
 });

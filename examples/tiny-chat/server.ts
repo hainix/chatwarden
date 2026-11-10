@@ -114,9 +114,6 @@ function sameToken(given: unknown, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** The header the demo puts the socket address in, for `identify` (the kit's request carries no socket). Always overwritten. */
-const IP_HEADER = 'x-tiny-chat-ip';
-
 export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat> {
   const secret = resolveSecret(opts.secret);
   // An empty token (option or environment variable) is no token: the route stays off rather than open to an empty header.
@@ -173,6 +170,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   let nextSeat = 1;
 
   const app = express();
+  app.disable('x-powered-by');
 
   // The kit's routes read the raw body themselves: mount them BEFORE any body parser. This app's own `/report` route
   // parses JSON for itself, below, and nothing is mounted globally.
@@ -195,14 +193,8 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   }
 
   // The player API. DEMO ONLY identity: the key is read from the `x-chatwarden-key` header, falling back to `?key=`
-  // (a key in a URL ends up in logs and history; a real app takes it from its session). The address is the socket's,
-  // handed over in a header this server always overwrites, so a client cannot choose it.
-  app.use('/api', (req, _res, next) => {
-    const address = req.socket.remoteAddress;
-    if (address === undefined) delete req.headers[IP_HEADER];
-    else req.headers[IP_HEADER] = address;
-    next();
-  });
+  // (a key in a URL ends up in logs and history; a real app takes it from its session). The address is the kit's
+  // `remoteAddress`: the socket peer, which a client cannot choose.
   app.use(
     '/api',
     toExpress(
@@ -212,8 +204,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
           const key = req.headers['x-chatwarden-key'] ?? req.query.key;
           return {
             ...(key === undefined || key === '' ? {} : { clientKey: key }),
-            // The IP must be the REAL client address (see `identify` above for the proxy caveat).
-            ip: req.headers[IP_HEADER] ?? null,
+            // The IP must be the REAL client address. `remoteAddress` is the socket's, right for this demo that listens
+            // directly. Behind a reverse proxy it is the proxy's: parse X-Forwarded-For yourself, trusting only your own proxy.
+            ip: req.remoteAddress ?? null,
           };
         },
       }),

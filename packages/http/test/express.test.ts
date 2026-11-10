@@ -76,6 +76,15 @@ const echoRoutes: RouteTable = {
   'GET /empty-string': () => ({ status: 200, headers: { 'content-type': 'text/plain' }, body: '' }),
   'GET /teapot': () => ({ status: 418, body: { error: 'teapot' } }),
   'GET /bad-status': () => ({ status: 42, body: {} }),
+  'GET /crlf-value': () => ({ status: 200, headers: { 'x-before': 'set first', 'x-evil': 'a\r\nset-cookie: pwned=1' }, body: { ok: true } }),
+  'GET /bad-header-name': () => ({ status: 200, headers: { 'x-before': 'set first', 'bad name:': 'v' }, body: { ok: true } }),
+  'GET /circular': () => {
+    const loop: Record<string, unknown> = { a: 1 };
+    loop.self = loop;
+    return { status: 200, headers: { 'x-before': 'set first' }, body: loop };
+  },
+  'GET /bigint': () => ({ status: 200, body: { n: 10n } }),
+  'GET /remote': (req) => ({ status: 200, body: { remoteAddress: req.remoteAddress ?? null, headers: req.headers } }),
   'GET /throws': () => {
     throw new TypeError('secret detail that must not leak');
   },
@@ -305,6 +314,55 @@ describe('toExpress: building the KitRequest', () => {
   });
 });
 
+describe('toExpress: the peer address and the response headers', () => {
+  it('remoteAddress is the socket peer, whatever the client claims in headers', async () => {
+    const base = await listen(build().app);
+    const plain = (await (await fetch(`${base}/kit/remote`)).json()) as { remoteAddress: string };
+    expect(plain.remoteAddress).toBe('127.0.0.1');
+    const forged = (await (
+      await fetch(`${base}/kit/remote`, {
+        headers: { 'x-forwarded-for': '203.0.113.7', 'x-real-ip': '203.0.113.8', forwarded: 'for=203.0.113.9', 'x-tiny-chat-ip': '203.0.113.10', 'x-remote-address': '203.0.113.11' },
+      })
+    ).json()) as { remoteAddress: string; headers: Record<string, string> };
+    expect(forged.remoteAddress).toBe('127.0.0.1');
+    // The forged headers are still visible as headers (the adopter decides whether to trust a proxy); they are not the address.
+    expect(forged.headers['x-forwarded-for']).toBe('203.0.113.7');
+  });
+
+  it('sends no ETag and never a 304: a conditional GET is a plain 200', async () => {
+    const base = await listen(build().app);
+    const first = await fetch(`${base}/kit/ping`);
+    expect(first.headers.get('etag')).toBeNull();
+    const second = await fetch(`${base}/kit/ping`, { headers: { 'if-none-match': '*', 'if-modified-since': new Date(Date.now() + 1e9).toUTCString() } });
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ pong: true });
+    for (const path of ['/kit/doc', '/kit/plain', '/kit/created']) {
+      expect((await fetch(`${base}${path}`)).headers.get('etag')).toBeNull();
+    }
+  });
+
+  it('does not advertise Express: no x-powered-by on the kit responses, even on an app that leaves it enabled', async () => {
+    const { app } = build();
+    app.enable('x-powered-by');
+    app.get('/mine', (_req, res) => void res.send('mine'));
+    const base = await listen(app);
+    expect((await fetch(`${base}/mine`)).headers.get('x-powered-by')).toBe('Express'); // control: the app default is on
+    for (const path of ['/kit/ping', '/kit/doc', '/kit/missing', '/kit/bad-status']) {
+      expect((await fetch(`${base}${path}`)).headers.get('x-powered-by')).toBeNull();
+    }
+  });
+
+  it('JSON bodies get an explicit content type; a response that names its own is not overridden', async () => {
+    const routes: RouteTable = {
+      'GET /own': () => ({ status: 200, headers: { 'content-type': 'application/problem+json' }, body: { a: 1 } }),
+      'GET /dflt': () => ({ status: 200, body: { a: 1 } }),
+    };
+    const base = await listen(build(routes).app);
+    expect((await fetch(`${base}/kit/own`)).headers.get('content-type')).toBe('application/problem+json');
+    expect((await fetch(`${base}/kit/dflt`)).headers.get('content-type')).toBe('application/json; charset=utf-8');
+  });
+});
+
 describe('toExpress: mount-relative paths', () => {
   it('strips the mount point, however deep', async () => {
     for (const mount of ['/kit', '/a/b/c', '/api/v1']) {
@@ -356,11 +414,43 @@ describe('toExpress: mount-relative paths', () => {
 });
 
 describe('toExpress: methods the router refuses', () => {
-  it('HEAD on a GET-only route is 405 with an allow header and no body', async () => {
+  it('HEAD on a GET route runs the GET handler: its status and headers, no body', async () => {
     const base = await listen(build().app);
+    const before = sawRequests.length;
     const res = await fetch(`${base}/kit/ping`, { method: 'HEAD' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/^application\/json/);
+    expect(await res.text()).toBe('');
+    expect(sawRequests.length).toBe(before + 1);
+    expect(sawRequests.at(-1)?.method).toBe('HEAD');
+  });
+
+  it('HEAD keeps the GET response status and headers (created, and the code of conduct)', async () => {
+    const base = await listen(build().app);
+    const created = await fetch(`${base}/kit/created`, { method: 'HEAD' });
+    expect(created.status).toBe(201);
+    expect(created.headers.get('location')).toBe('/things/7');
+    expect(await created.text()).toBe('');
+    const doc = await fetch(`${base}/kit/doc`, { method: 'HEAD' });
+    expect(doc.status).toBe(200);
+    expect(doc.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(doc.headers.get('content-security-policy')).toBe("default-src 'none'");
+    expect(await doc.text()).toBe('');
+  });
+
+  it('HEAD on a POST-only route is 405 and allows only POST; HEAD on an unknown path is 404', async () => {
+    const routes: RouteTable = { 'POST /only': () => ({ status: 200, body: {} }) };
+    const base = await listen(build(routes).app);
+    const res = await fetch(`${base}/kit/only`, { method: 'HEAD' });
     expect(res.status).toBe(405);
-    expect(res.headers.get('allow')).toBe('GET');
+    expect(res.headers.get('allow')).toBe('POST');
+    expect((await fetch(`${base}/kit/missing`, { method: 'HEAD' })).status).toBe(404);
+  });
+
+  it('HEAD on a route whose GET handler fails is the kit 500, with no body', async () => {
+    const base = await listen(build().app);
+    const res = await fetch(`${base}/kit/throws`, { method: 'HEAD' });
+    expect(res.status).toBe(500);
     expect(await res.text()).toBe('');
   });
 
@@ -369,12 +459,12 @@ describe('toExpress: methods the router refuses', () => {
     for (const method of ['DELETE', 'PUT', 'PATCH']) {
       const res = await fetch(`${base}/kit/ping`, { method, body: method === 'DELETE' ? undefined : '{}' });
       expect(res.status).toBe(405);
-      expect(res.headers.get('allow')).toBe('GET');
+      expect(res.headers.get('allow')).toBe('GET, HEAD');
       expect(await res.json()).toEqual({ error: 'method_not_allowed', message: 'Method not allowed.' });
     }
     const echo = await fetch(`${base}/kit/echo`, { method: 'DELETE' });
     expect(echo.status).toBe(405);
-    expect(echo.headers.get('allow')).toBe('GET, POST');
+    expect(echo.headers.get('allow')).toBe('GET, HEAD, POST');
   });
 
   it('OPTIONS is the router answer too (405), not a silent success', async () => {
@@ -461,19 +551,48 @@ describe('toExpress: the body cap', () => {
     expect(await send(['a'.repeat(10), 'b'.repeat(10), 'c'.repeat(10), 'd'.repeat(10)])).toBe(413);
   });
 
-  it('a much larger body is 413 and the server keeps working afterwards', async () => {
+  it('a much larger body gets a 413 response, or at worst a reset of the connection; the handler never runs', async () => {
     const spy = handlerSpy();
     const base = await listen(build(spy.routes).app);
-    let status: number;
-    try {
-      status = (await post(`${base}/kit/echo`, 'a'.repeat(2 * 1024 * 1024))).status;
-    } catch {
-      // The server may close the connection while the client is still writing; either way the handler never ran.
-      status = 413;
-    }
-    expect(status).toBe(413);
+    const url = new URL(base);
+    const total = 2 * 1024 * 1024;
+    const outcome = await new Promise<string>((resolve, reject) => {
+      const socket = connect(Number(url.port), url.hostname);
+      let answer = '';
+      socket.on('data', (d: Buffer) => (answer += d.toString('latin1')));
+      socket.on('close', () => resolve(answer.startsWith('HTTP/1.1 413') ? '413' : answer === '' ? 'closed without a response' : `unexpected: ${answer.slice(0, 40)}`));
+      socket.on('error', (err: NodeJS.ErrnoException) => {
+        // Only a reset or a broken pipe on the way out is acceptable; any other error fails the test.
+        if (err.code === 'ECONNRESET' || err.code === 'EPIPE') resolve(answer.startsWith('HTTP/1.1 413') ? '413' : 'reset');
+        else reject(err);
+      });
+      socket.on('connect', () => {
+        socket.write(`POST /kit/echo HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: ${total}\r\n\r\n`);
+        const chunk = Buffer.alloc(64 * 1024, 0x61);
+        let sent = 0;
+        const pump = (): void => {
+          while (sent < total && !socket.destroyed) {
+            sent += chunk.length;
+            if (!socket.write(chunk)) {
+              socket.once('drain', pump);
+              return;
+            }
+          }
+        };
+        pump();
+      });
+    });
+    expect(['413', 'reset']).toContain(outcome);
     expect(spy.calls()).toBe(0);
     expect((await post(`${base}/kit/echo`, 'ok')).status).toBe(200);
+  });
+
+  it('the same 413 on a plain fetch of a body just over the cap is always a real 413 (no reset)', async () => {
+    const spy = handlerSpy();
+    const base = await listen(build(spy.routes, { maxBody: 1024 }).app);
+    const res = await post(`${base}/kit/echo`, 'a'.repeat(4096));
+    expect(res.status).toBe(413);
+    expect(spy.calls()).toBe(0);
   });
 
   it('413 does not echo the body and carries no detail', async () => {
@@ -491,9 +610,10 @@ describe('toExpress: the body cap', () => {
     expect(() => toExpress({}, { maxBody: 1 })).not.toThrow();
   });
 
-  it('a client that hangs up mid-body does not run the handler or break the server', async () => {
+  it('a client that hangs up mid-body does not run the handler or break the server, and logs nothing', async () => {
     const spy = handlerSpy();
-    const base = await listen(build(spy.routes).app);
+    const { app, logged } = build(spy.routes);
+    const base = await listen(app);
     const url = new URL(base);
     await new Promise<void>((resolve) => {
       const socket = connect(Number(url.port), url.hostname, () => {
@@ -507,8 +627,35 @@ describe('toExpress: the body cap', () => {
     });
     await new Promise((r) => setTimeout(r, 30));
     expect(spy.calls()).toBe(0);
+    expect(logged).toEqual([]);
     expect((await post(`${base}/kit/echo`, 'ok')).status).toBe(200);
     expect(spy.calls()).toBe(1);
+  });
+
+  it('a request already destroyed when the adapter runs is dropped quietly: no handler, no "already parsed" log, no hang', async () => {
+    const spy = handlerSpy();
+    const logged: Logged = [];
+    const app = express();
+    // Hold the request until the client is gone, then hand it on.
+    app.use((req, _res, next) => {
+      req.on('close', () => setImmediate(next));
+    });
+    app.use('/kit', toExpress(spy.routes, { logger: { warn: (e, d) => void logged.push([e, d]) } }));
+    const base = await listen(app);
+    const url = new URL(base);
+    await new Promise<void>((resolve) => {
+      const socket = connect(Number(url.port), url.hostname, () => {
+        socket.write('POST /kit/echo HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}');
+        setTimeout(() => {
+          socket.destroy();
+          resolve();
+        }, 20);
+      });
+      socket.on('error', () => undefined);
+    });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(spy.calls()).toBe(0);
+    expect(logged).toEqual([]);
   });
 });
 
@@ -627,7 +774,33 @@ describe('toExpress: failures', () => {
     ]);
   });
 
-  it('an error that escapes (an impossible status) goes to next(err), for the app to handle', async () => {
+  const escapes: Array<[string, string]> = [
+    ['an impossible status', '/kit/bad-status'],
+    ['a CR/LF header value', '/kit/crlf-value'],
+    ['an illegal header name', '/kit/bad-header-name'],
+    ['a circular body', '/kit/circular'],
+    ['a BigInt in the body', '/kit/bigint'],
+  ];
+
+  it.each(escapes)('an error while sending (%s) is the kit 500 {error:internal}: no stack, no HTML, nothing leaked, logged by class', async (_name, path) => {
+    const { app, logged } = build();
+    const base = await listen(app);
+    const res = await fetch(`${base}${path}`);
+    expect(res.status).toBe(500);
+    expect(res.headers.get('content-type')).toMatch(/^application\/json/);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({ error: 'internal' });
+    expect(text).not.toMatch(/<html|<pre|stack|\bat .*\(|node_modules|\.ts|ERR_/i);
+    // Headers the failed response had already set are gone, and the injected cookie never arrived.
+    expect(res.headers.get('x-before')).toBeNull();
+    expect(res.headers.get('x-evil')).toBeNull();
+    expect(res.headers.get('set-cookie')).toBeNull();
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.[0]).toBe('chatwarden.http_error');
+    expect(Object.keys(logged[0]?.[1] ?? {})).toEqual(['error']);
+  });
+
+  it('an escaped error never reaches the app error handler or Express default handler', async () => {
     const { app } = build();
     const seen: unknown[] = [];
     const handler: ErrorRequestHandler = (err, _req, res, next) => {
@@ -637,17 +810,46 @@ describe('toExpress: failures', () => {
     };
     app.use(handler);
     const base = await listen(app);
-    const res = await fetch(`${base}/kit/bad-status`);
-    expect(res.status).toBe(599);
-    expect(await res.json()).toEqual({ handled: true });
-    expect(seen).toHaveLength(1);
+    for (const [, path] of escapes) {
+      const res = await fetch(`${base}${path}`);
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: 'internal' });
+    }
+    expect(seen).toHaveLength(0);
   });
 
-  it('an escaped error with no app handler is a 500, not a hang', async () => {
+  it('headers set by the app before the adapter survive an escaped error; only the adapter own are cleared', async () => {
     const { app } = build();
-    const base = await listen(app);
-    const res = await fetch(`${base}/kit/bad-status`);
+    const outer = express();
+    outer.use((_req, res, next) => {
+      res.setHeader('x-app-wide', 'kept');
+      next();
+    });
+    outer.use(app);
+    const base = await listen(outer);
+    const res = await fetch(`${base}/kit/crlf-value`);
     expect(res.status).toBe(500);
+    expect(res.headers.get('x-app-wide')).toBe('kept');
+    expect(res.headers.get('x-before')).toBeNull();
+  });
+
+  it('an error after the headers went out destroys the connection and is logged; the server carries on', async () => {
+    const logged: Logged = [];
+    const app = express();
+    app.use((_req, res, next) => {
+      res.end = (() => {
+        res.flushHeaders();
+        throw new Error('write failed after headers');
+      }) as typeof res.end;
+      next();
+    });
+    app.use('/kit', toExpress(echoRoutes, { logger: { warn: (e, d) => void logged.push([e, d]) } }));
+    const base = await listen(app);
+    await expect(fetch(`${base}/kit/ping`).then((r) => r.text())).rejects.toThrow();
+    expect(logged).toEqual([['chatwarden.http_error', { error: 'Error' }]]);
+    const ok = express();
+    ok.use('/kit', toExpress(echoRoutes));
+    expect((await fetch(`${(await listen(ok))}/kit/ping`)).status).toBe(200);
   });
 
   it('rejects a routes argument that is not a route table', () => {

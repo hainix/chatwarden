@@ -124,10 +124,26 @@ describe('healthRoutes', () => {
       for (const method of ['POST', 'PUT', 'DELETE']) {
         const res = await call(method, path);
         expect(res.status).toBe(405);
-        expect(res.headers?.allow).toBe('GET');
+        expect(res.headers?.allow).toBe('GET, HEAD');
       }
       expect((await call('GET', path)).headers?.['cache-control']).toBe('no-store');
     }
+  });
+
+  it('answers HEAD like GET without a body: /healthz and /readyz are 200 and no-store', async () => {
+    const { call } = await setup();
+    for (const path of ['/healthz', '/readyz']) {
+      const res = await call('HEAD', path);
+      expect(res.status).toBe(200);
+      expect(res.headers?.['cache-control']).toBe('no-store');
+      expect(res.body).toBeUndefined();
+    }
+  });
+
+  it('HEAD /readyz is 503 when the store is not ready, like GET', async () => {
+    const { call } = await setup((cw) => ({ ...cw, ready: () => false }));
+    expect((await call('HEAD', '/readyz')).status).toBe(503);
+    expect((await call('HEAD', '/healthz')).status).toBe(200);
   });
 
   it('is public: needs no credentials of any kind', async () => {
