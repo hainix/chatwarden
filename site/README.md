@@ -49,10 +49,24 @@ What ships, and how it is served:
 
 Deploys are manual and run from a machine that is logged in to Cloudflare (`npx wrangler login`).
 
+**Before the first deploy, release the kit.** The page links to packages on npm (`llms.txt` names
+`@chatwarden/store-memory`, which 0.1.0 does not have), so tag and publish `v0.1.1` first (see `RELEASING.md`) and check:
+
+```sh
+npm view @chatwarden/store-memory version   # must print a version; a 404 means publish the kit first
+```
+
 ```sh
 npm run build --workspace site
-npx wrangler pages deploy site/dist --project-name chatwarden
+npx wrangler pages deploy site/dist --project-name chatwarden --branch main
 ```
+
+`--branch main` is what makes it a production deploy. Pages decides production or preview from the branch: the production
+deployment is the one made from the project's production branch (`main`, set when the project was created). wrangler takes the
+branch from git, so run from a worktree, a detached HEAD or any other branch, the deploy lands as a preview
+(`<hash>.chatwarden.pages.dev`) and `chatwarden.dev` keeps saying there is no production deployment, with no error. Passing the
+branch explicitly makes it production from anywhere. To check a build before it goes live, deploy it as a preview with another
+branch name (`--branch preview`) and open the preview URL it prints.
 
 One-time setup, in the Cloudflare dashboard (or with wrangler), before the first deploy:
 
@@ -73,8 +87,20 @@ One-time setup, in the Cloudflare dashboard (or with wrangler), before the first
    (`<hash>.chatwarden.pages.dev`), and a preview host should not get an HSTS policy. Start with a short max-age and raise it
    once the site has been fine for a while.
 
-Later deploys are only the two commands above. Each deploy gets a preview URL (`<hash>.chatwarden.pages.dev`) as well as the
-production alias.
+6. **Leave Cloudflare's script injectors off.** Do not turn on Web Analytics (the one-click Pages option or the zone's beacon),
+   Rocket Loader or email address obfuscation for this project or zone. They inject scripts, the CSP blocks them (console
+   errors), and Web Analytics would contradict "no analytics".
+
+Later deploys are only the build and the deploy command above. Each deploy gets a preview URL (`<hash>.chatwarden.pages.dev`);
+a production deploy also goes to the production alias.
+
+`/` is the only route and there is no `404.html`, so Pages serves `index.html` for unknown paths (with a 200). That is fine for
+a single-page site: the page's canonical link points at `/`, and `/robots.txt`, `/llms.txt`, `/sitemap.xml` and `/og.png` are real
+files. Add a `public/404.html` (no inline script or style, because of the CSP) if real 404s are ever wanted.
+
+The CI step that fails when the OG and icon PNGs differ (the PNG drift guard) has not run on Linux yet: the committed PNGs were
+rendered on Windows, so CI is the first run on Linux. If it fails there, run `npm run og --workspace site` on Linux (or take the
+PNGs from the CI artifact), commit them, or relax the guard to a size check.
 
 ## Changing the content
 

@@ -65,7 +65,8 @@ describe('content is grounded in the READMEs', () => {
     expect(LEVELS.filter((l) => l.status === 'available').map((l) => l.level)).toEqual([0]);
   });
   it('the FAQ states the no-SLA line plainly', () => {
-    expect(JSON.stringify(FAQ)).toMatch(/free forever/i);
+    expect(JSON.stringify(FAQ)).toMatch(/free and open source under Apache-2\.0, with no paid tier/i);
+    expect(JSON.stringify(FAQ)).not.toMatch(/forever/i);
     expect(JSON.stringify(FAQ)).toMatch(/no SLA/);
   });
 });

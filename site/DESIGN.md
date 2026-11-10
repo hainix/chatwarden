@@ -102,7 +102,7 @@ so they work on both backgrounds.
 
 ## Honesty rules the copy keeps
 
-No customer logos (only the true "Used by Moxgate"), no invented numbers, install commands and code come from the READMEs
+No customer logos (only the true "Built for Moxgate, now being adopted"; flip it to "Used by Moxgate" once Moxgate is deployed on the kit), no invented numbers, install commands and code come from the READMEs
 (`test/content.test.ts`), AI levels 1 to 4 are marked coming soon, the hub UI is marked coming while the HTTP admin API
 and Discord feed are described as shipping, and "free forever, no SLA" is stated plainly. Demo words are the invented
 terms from `@chatwarden/matcher/fixtures` only.

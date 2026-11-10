@@ -246,7 +246,7 @@ export const FAQ: FaqItem[] = [
   {
     id: 'free',
     q: 'Is it really free?',
-    a: 'Free forever, under Apache-2.0, with no paid tier. There is no SLA and no support promise: the kit is provided as-is. Pull requests are welcome.',
+    a: 'Free and open source under Apache-2.0, with no paid tier. There is no SLA and no support promise: the kit is provided as-is. Pull requests are welcome.',
   },
   {
     id: 'privacy',

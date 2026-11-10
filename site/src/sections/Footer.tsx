@@ -25,7 +25,7 @@ export function Footer() {
         </nav>
       </div>
       <div className="wrap footer-fine">
-        <p>Apache-2.0. Free forever, with no SLA and no support promise. Not a child-safety tool.</p>
+        <p>Free and open source (Apache-2.0), with no SLA and no support promise. Not a child-safety tool.</p>
       </div>
     </footer>
   );

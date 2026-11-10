@@ -199,7 +199,17 @@ describe('OpenSource', () => {
   it('shows the provenance badge and the one true customer line', () => {
     render(<OpenSource />);
     expect(screen.getAllByText(/npm provenance/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/used by moxgate/i).length).toBeGreaterThan(0);
+    // Moxgate has not shipped on the kit yet: the badge says what is true. Flip it to "Used by Moxgate" only after it has.
+    expect(screen.getAllByText('Built for Moxgate, now being adopted').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/used by moxgate/i)).toBeNull();
+  });
+  it('words the licence and the version truthfully: keep the notice, 0.1.x, nothing "no strings"', () => {
+    const { container } = render(<OpenSource />);
+    const text = container.textContent ?? '';
+    expect(text).toContain('Use it, change it, ship it. Keep the licence notice.');
+    expect(text).not.toMatch(/no strings/i);
+    expect(text).toContain('The kit is pre-release (0.1.x) and provided as-is.');
+    expect(text).not.toMatch(/0\.1\.0/);
   });
   it('invents no customers, counts or stats', () => {
     const { container } = render(<OpenSource />);
@@ -212,7 +222,8 @@ describe('OpenSource', () => {
 describe('Faq', () => {
   it('answers privacy, the no-SLA line and the community term list', () => {
     render(<Faq />);
-    expect(screen.getAllByText(/free forever/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/free and open source under apache-2\.0, with no paid tier/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/forever/i)).toBeNull();
     expect(screen.getAllByText(/no sla/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/community.*term list/i).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: /player data|privacy/i })).toBeTruthy();

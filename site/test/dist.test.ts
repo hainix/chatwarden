@@ -75,7 +75,8 @@ describe('built dist', () => {
   it('loads no script, stylesheet, font, image or frame from another origin', () => {
     const html = texts.get(join(dist, 'index.html')) ?? '';
     // The canonical link is an identifier for crawlers, not a load; every other src/href must be same-origin.
-    const withoutCanonical = html.replace(/<link\s+rel="canonical"[^>]*>/, '');
+    // Links a visitor may follow (the <a> in the no-JavaScript fallback) load nothing; the host test above limits where they point.
+    const withoutCanonical = html.replace(/<link\s+rel="canonical"[^>]*>/, '').replace(/<a\s[^>]*>/g, '');
     const refs = [...withoutCanonical.matchAll(/\s(?:src|href)="([^"]+)"/g)].map((m) => m[1] as string);
     expect(refs.length).toBeGreaterThan(0);
     for (const r of refs) expect(r.startsWith('/') && !r.startsWith('//'), r).toBe(true);
