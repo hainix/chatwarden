@@ -93,7 +93,8 @@ export function withoutLinks(text: string): string {
   return text.replace(/\]\(<[^>]*>\)/g, '](link)').replace(/<https?:\/\/[^>\s]*>/g, '<link>').replace(/https?:\/\/\S+/g, 'link');
 }
 
-const SUBJECT_ID = /s_[A-Za-z0-9_-]{6,}/;
+// Left boundary: a random base64url id that merely contains "s_" mid-token is not a subject id.
+const SUBJECT_ID = /(?<![A-Za-z0-9_-])s_[A-Za-z0-9_-]{6,}/;
 const LONG_HEX = /[0-9a-f]{32,}/i;
 const OPAQUE_ID = /[A-Za-z0-9_-]{20,}/;
 

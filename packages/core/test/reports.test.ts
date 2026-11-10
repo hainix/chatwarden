@@ -650,7 +650,7 @@ describe('report: moderation off', () => {
     const text = JSON.stringify(t.logs);
     expect(text).toContain('Error');
     expect(text).not.toContain('disk full');
-    expect(text).not.toMatch(/s_[A-Za-z0-9_-]{10,}/);
+    expect(text).not.toMatch(/(?<![A-Za-z0-9_-])s_[A-Za-z0-9_-]{10,}/);
   });
 
   it('a store write that throws is off and leaves no row', async () => {

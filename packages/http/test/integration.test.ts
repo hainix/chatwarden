@@ -41,7 +41,8 @@ const ROLE = '987654321098765432';
 
 // ---- the leak scan ----
 
-const SUBJECT_ID = /s_[A-Za-z0-9_-]{6,}/;
+// Left boundary: a random base64url id that merely contains "s_" mid-token is not a subject id.
+const SUBJECT_ID = /(?<![A-Za-z0-9_-])s_[A-Za-z0-9_-]{6,}/;
 const LONG_HEX = /[0-9a-f]{32,}/i;
 
 /** Links are the one place an id may appear in Discord text: markdown links and bare URLs are cut out before a scan. */
