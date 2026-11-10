@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { safeWarn } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
 import { BODY_MAX_BYTES } from './body.js';
 import { errorResponse, withErrors } from './errors.js';
-import { createRouter } from './router.js';
+import { compileRoutes } from './router.js';
 import type { RouteTable } from './router.js';
 import type { KitRequest, KitResponse } from './types.js';
 
@@ -17,6 +17,14 @@ export interface ExpressOptions {
   maxBody?: number;
   /** Where the adapter logs (event and error class only). Defaults to `console.warn`. */
   logger?: Logger;
+  /**
+   * What happens to a request whose path matches none of the kit's routes. Default `true`: the adapter calls `next()` before
+   * it reads the body, so the rest of your app (your own routes, a later `express.json()`) sees the request untouched. With
+   * `false` the kit answers it itself with its 404 `{ error: 'not_found' }`, so nothing mounted after it is reached.
+   * Either way a path that matches a route under another method is the kit's 405, and a handler that answers 404 (an
+   * unknown id) is the kit's 404: those are answers, not "no route". Must be a boolean (`TypeError`).
+   */
+  fallthrough?: boolean;
 }
 
 /** The largest `maxBody` the adapter accepts: the body is buffered and decoded to a single string. */
@@ -154,8 +162,11 @@ function send(res: Response, kit: KitResponse, applied: string[], head = false):
  *   exact bytes) and routes parse it with the kit's own `parseJson`. If `express.json()` (or `raw`, `text`) already ran
  *   for the request, the bytes are gone: the answer is 500 `internal`, and `chatwarden.http_body_already_parsed` is
  *   logged once per adapter. If your app needs `express.json()`, mount it on your own routes, not globally.
- * - It answers EVERYTHING under its mount point: an unknown path is the kit's 404 and a wrong method its 405. Mounted at
- *   `/`, put it after your own routes.
+ * - A path that matches none of its routes goes on to the next Express handler (`fallthrough`, default true), and the body
+ *   is not read, so a kit mounted at `/` does not hide the routes and body parsers mounted after it. A wrong method on a
+ *   known path is still the kit's 405, and a handler's own 404 (an unknown report id) still the kit's 404. With
+ *   `{ fallthrough: false }` the adapter answers EVERY path under its mount point itself (an unknown path is the kit's
+ *   404), so mount it after your own routes, or at a prefix.
  * - `path` is relative to the mount point; `query` holds the first string value of each key; header names are
  *   lowercased and an array is joined with ", ".
  * - A body over `maxBody` bytes is 413 `payload_too_large`; the adapter stops reading and closes the connection.
@@ -186,14 +197,23 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
   if (typeof max !== 'number' || !Number.isSafeInteger(max) || max < 1 || max > MAX_BODY_LIMIT) {
     throw new RangeError('toExpress: maxBody must be a positive whole number of bytes, at most 16 MiB');
   }
-  const handle = withErrors(createRouter(routes), logger);
+  const fallthrough = options.fallthrough === undefined ? true : options.fallthrough;
+  if (typeof fallthrough !== 'boolean') throw new TypeError('toExpress: fallthrough must be a boolean');
+  const compiled = compileRoutes(routes);
+  const handle = withErrors(compiled.run, logger);
   let warnedParsed = false;
 
   const router = Router();
-  // Never calls `next`: nothing here may reach Express's own error handling.
-  router.use(async (req: Request, res: Response) => {
+  // Calls `next()` only with no argument and only for a path that is not the kit's: nothing here may reach Express's own
+  // error handling.
+  router.use(async (req: Request, res: Response, next: NextFunction) => {
     const applied: string[] = [];
     try {
+      // Not ours: hand it on before touching anything, the body included.
+      if (fallthrough && !compiled.matches(req.path)) {
+        next();
+        return;
+      }
       res.removeHeader('x-powered-by');
       // The client is already gone: nothing to answer, and nothing the adopter did wrong.
       if (req.destroyed) return;

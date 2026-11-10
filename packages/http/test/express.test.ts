@@ -6,6 +6,7 @@ import express from 'express';
 import type { ErrorRequestHandler, Express, RequestHandler } from 'express';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@chatwarden/core';
+import { NotFoundError } from '../src/errors.js';
 import { toExpress } from '../src/express.js';
 import type { ExpressOptions } from '../src/express.js';
 import type { KitRequest, KitResponse } from '../src/types.js';
@@ -95,7 +96,9 @@ function build(routes: RouteTable = echoRoutes, opts?: ExpressOptions, mount = '
   const logged: Logged = [];
   const logger: Logger = { warn: (event, detail) => void logged.push([event, detail]) };
   const app = express();
-  app.use(mount, toExpress(routes, { logger, ...opts }));
+  // These tests are about the kit answering for everything under its mount, so they turn the fallthrough off; the
+  // fallthrough has its own describe below.
+  app.use(mount, toExpress(routes, { logger, fallthrough: false, ...opts }));
   return { app, logged };
 }
 
@@ -989,5 +992,124 @@ describe('toExpress: failures', () => {
   it('a KitResponse typed value is what a handler can return (type check)', () => {
     const r: KitResponse = { status: 200, body: 'x' };
     expect(r.status).toBe(200);
+  });
+});
+
+describe('toExpress: fallthrough (a path that is not the kit\'s goes on to the next handler)', () => {
+  /** A kit at `mount`, then the adopter's own handlers, which record that they ran. */
+  function app2(mount: string, opts?: ExpressOptions, routes: RouteTable = echoRoutes) {
+    const ran: string[] = [];
+    const app = express();
+    app.use(mount, toExpress(routes, opts));
+    app.get('/mine', (_req, res) => {
+      ran.push('mine');
+      res.send('mine');
+    });
+    app.post('/json', express.json(), (req, res) => {
+      ran.push('json');
+      res.json({ got: req.body as unknown });
+    });
+    app.use((_req, res) => {
+      ran.push('last');
+      res.status(404).send('app 404');
+    });
+    return { app, ran };
+  }
+
+  it('by default an unmatched path under the mount calls next(): the app answers, not the kit', async () => {
+    const { app, ran } = app2('/kit');
+    const base = await listen(app);
+    const res = await fetch(`${base}/kit/nope`);
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe('app 404');
+    expect(ran).toEqual(['last']);
+  });
+
+  it('a kit mounted at the root lets the app\'s later routes and body parsers work', async () => {
+    const { app, ran } = app2('/');
+    const base = await listen(app);
+    expect(await (await fetch(`${base}/ping`)).json()).toEqual({ pong: true });
+    expect(await (await fetch(`${base}/mine`)).text()).toBe('mine');
+    const res = await post(`${base}/json`, '{"a":1}');
+    expect(await res.json()).toEqual({ got: { a: 1 } });
+    expect(ran).toEqual(['mine', 'json']);
+  });
+
+  it('the body is untouched on a fallthrough: a later express.json() still parses it, whatever its size', async () => {
+    const { app } = app2('/', { maxBody: 10 });
+    const base = await listen(app);
+    const big = JSON.stringify({ text: 'x'.repeat(5000) });
+    const res = await post(`${base}/json`, big);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { got: { text: string } }).got.text).toHaveLength(5000);
+  });
+
+  it('a HEAD on an unmatched path falls through too', async () => {
+    const { app, ran } = app2('/kit');
+    const base = await listen(app);
+    expect((await fetch(`${base}/kit/nope`, { method: 'HEAD' })).status).toBe(404);
+    expect(ran).toEqual(['last']);
+  });
+
+  it('a handler that answers 404 (an unknown id) is still the kit 404, and nothing after it runs', async () => {
+    const routes: RouteTable = {
+      'GET /reports/:id': () => {
+        throw new NotFoundError();
+      },
+    };
+    const { app, ran } = app2('/kit', undefined, routes);
+    const base = await listen(app);
+    const res = await fetch(`${base}/kit/reports/abc`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found', message: 'Not found.' });
+    expect(ran).toEqual([]);
+  });
+
+  it('a path that matches under another method is still 405 with allow, and nothing after it runs', async () => {
+    const { app, ran } = app2('/kit');
+    const base = await listen(app);
+    const res = await fetch(`${base}/kit/ping`, { method: 'DELETE' });
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toBe('GET, HEAD');
+    expect(await res.json()).toEqual({ error: 'method_not_allowed', message: 'Method not allowed.' });
+    expect(ran).toEqual([]);
+  });
+
+  it('a matched path with a bad body is still the kit\'s 413, not a fallthrough', async () => {
+    const { app, ran } = app2('/kit', { maxBody: 10 });
+    const base = await listen(app);
+    expect((await post(`${base}/kit/echo`, 'x'.repeat(100))).status).toBe(413);
+    expect(ran).toEqual([]);
+  });
+
+  it('fallthrough: false keeps the kit 404 for everything under the mount, and the app is not reached', async () => {
+    const { app, ran } = app2('/kit', { fallthrough: false });
+    const base = await listen(app);
+    const res = await fetch(`${base}/kit/nope`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found', message: 'Not found.' });
+    expect((await fetch(`${base}/kit/nope`, { method: 'HEAD' })).status).toBe(404);
+    expect(ran).toEqual([]);
+  });
+
+  it('fallthrough: true is the default, spelled out', async () => {
+    const { app, ran } = app2('/kit', { fallthrough: true });
+    const base = await listen(app);
+    expect(await (await fetch(`${base}/kit/nope`)).text()).toBe('app 404');
+    expect(ran).toEqual(['last']);
+  });
+
+  it.each([['yes'], [1], [null]])('refuses a fallthrough option that is not a boolean (%j)', (value) => {
+    expect(() => toExpress(echoRoutes, { fallthrough: value as never })).toThrow(TypeError);
+  });
+
+  it('a request whose body was already parsed still gets the misuse 500 on a MATCHED path, and falls through on an unmatched one', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/kit', toExpress(echoRoutes));
+    app.use((_req, res) => void res.status(404).send('app 404'));
+    const base = await listen(app);
+    expect((await post(`${base}/kit/echo`, '{"a":1}')).status).toBe(500);
+    expect(await (await post(`${base}/kit/nope`, '{"a":1}')).text()).toBe('app 404');
   });
 });

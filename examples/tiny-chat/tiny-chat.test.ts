@@ -80,15 +80,38 @@ class Client {
 
 const IDENTIFIER_RE = /s_[A-Za-z0-9_-]{22}|[0-9a-f]{32}/;
 
+// The tests must not depend on the developer's shell: an exported DISCORD_WEBHOOK_URL (the README's own instruction) would
+// start the real feed in every test and post to a real channel. Clear both once, restore them after the file.
+const ambient = { url: process.env.DISCORD_WEBHOOK_URL, role: process.env.DISCORD_MENTION_ROLE_ID };
+beforeAll(() => {
+  delete process.env.DISCORD_WEBHOOK_URL;
+  delete process.env.DISCORD_MENTION_ROLE_ID;
+});
+afterAll(() => {
+  if (ambient.url === undefined) delete process.env.DISCORD_WEBHOOK_URL;
+  else process.env.DISCORD_WEBHOOK_URL = ambient.url;
+  if (ambient.role === undefined) delete process.env.DISCORD_MENTION_ROLE_ID;
+  else process.env.DISCORD_MENTION_ROLE_ID = ambient.role;
+});
+
+/** Every call the default Discord fetch received: a test that did not ask for the feed must leave this empty. */
+const strayDiscordCalls: string[] = [];
+/** The default `discordFetch` of `boot()`: records the call and throws, so a feed that starts by accident fails loudly. */
+const unexpectedDiscordFetch = ((url: string | URL) => {
+  strayDiscordCalls.push(String(url));
+  throw new Error('a test that did not configure Discord reached the Discord fetch');
+}) as typeof fetch;
+
 const servers: TinyChat[] = [];
 const clients: Client[] = [];
 afterAll(async () => {
   await Promise.all(clients.map((c) => c.close()));
   for (const s of servers) await s.close();
+  expect(strayDiscordCalls).toEqual([]);
 });
 
 async function boot(opts: Parameters<typeof startServer>[0] = {}): Promise<TinyChat> {
-  const server = await startServer({ port: 0, secret: 'test-secret-not-for-production', ...opts });
+  const server = await startServer({ port: 0, secret: 'test-secret-not-for-production', discordFetch: unexpectedDiscordFetch, ...opts });
   servers.push(server);
   return server;
 }
@@ -1539,12 +1562,49 @@ async function waitFor(check: () => boolean, ms = 2000): Promise<void> {
 }
 
 describe('tiny-chat: the optional Discord feed', () => {
-  const saved = { url: process.env.DISCORD_WEBHOOK_URL, role: process.env.DISCORD_MENTION_ROLE_ID };
+  // The file clears both variables up top; each test here sets what it needs and this puts them back to cleared.
   afterEach(() => {
-    if (saved.url === undefined) delete process.env.DISCORD_WEBHOOK_URL;
-    else process.env.DISCORD_WEBHOOK_URL = saved.url;
-    if (saved.role === undefined) delete process.env.DISCORD_MENTION_ROLE_ID;
-    else process.env.DISCORD_MENTION_ROLE_ID = saved.role;
+    delete process.env.DISCORD_WEBHOOK_URL;
+    delete process.env.DISCORD_MENTION_ROLE_ID;
+  });
+
+  it('the default boot() has no feed and never reaches the Discord fetch, whatever the shell exports', async () => {
+    expect(process.env.DISCORD_WEBHOOK_URL).toBeUndefined();
+    expect(process.env.DISCORD_MENTION_ROLE_ID).toBeUndefined();
+    const server = await boot();
+    expect(server.discord).toBe(false);
+    expect(strayDiscordCalls).toEqual([]);
+  });
+
+  it('an explicitly passed empty string forces the feed off even when the environment has a URL', async () => {
+    process.env.DISCORD_WEBHOOK_URL = DISCORD_URL;
+    process.env.DISCORD_MENTION_ROLE_ID = DISCORD_ROLE;
+    const d = fakeDiscord();
+    const reports: StoredReport[] = [];
+    const server = await boot({ discordWebhookUrl: '', discordFetch: d.fetch, onReport: (r) => void reports.push(r) });
+    expect(server.discord).toBe(false);
+    await reportOne(server, reports, 'hate');
+    await settle();
+    expect(d.calls).toEqual([]);
+  });
+
+  it('an explicitly passed empty role id means no ping even when the environment has a role', async () => {
+    process.env.DISCORD_MENTION_ROLE_ID = DISCORD_ROLE;
+    const d = fakeDiscord();
+    const reports: StoredReport[] = [];
+    const server = await boot({ discordWebhookUrl: DISCORD_URL, discordMentionRoleId: '', discordFetch: d.fetch, onReport: (r) => void reports.push(r) });
+    expect(server.discord).toBe(true);
+    await reportOne(server, reports, 'hate');
+    await waitFor(() => d.calls.length >= 1);
+    expect(String(d.calls[0]?.body.content)).not.toContain('<@&');
+    expect(d.calls[0]?.body.allowed_mentions).toEqual({ parse: [] });
+  });
+
+  it('an option that is left out falls back to the environment', async () => {
+    process.env.DISCORD_WEBHOOK_URL = DISCORD_URL;
+    const d = fakeDiscord();
+    const server = await boot({ discordFetch: d.fetch });
+    expect(server.discord).toBe(true);
   });
 
   /** Two players; the second reports the first. Returns the report. */
@@ -1679,6 +1739,7 @@ describe('tiny-chat: the optional Discord feed', () => {
     expect(tiny).toContain('DISCORD_MENTION_ROLE_ID');
     expect(tiny).toContain('@chatwarden/discord');
     expect(tiny).toMatch(/off unless|off by default/i);
+    expect(tiny).toMatch(/empty string.*off/is);
   });
 });
 

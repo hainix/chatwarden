@@ -70,8 +70,6 @@ app.use('/api', toExpress(playerRoutes(cw, {
   gameName: 'My Game',
 })));
 
-app.use(toExpress(healthRoutes(cw))); // GET /healthz, GET /readyz
-
 // 2. Optional: the incoming webhook (a signed call from your own tooling).
 app.use('/hooks', toExpress(webhookIn(cw, {
   secret: process.env.WEBHOOK_IN_SECRET!, // at least 32 characters
@@ -85,6 +83,10 @@ const out = webhooksOut(cw, {
 
 // 4. Your own routes and body parsers go AFTER the kit's.
 app.use(express.json());
+
+// 5. The probes, last. A kit mounted at the root hands paths that are not its own to the next handler (`fallthrough`), so this
+//    order is not required; it is the safe habit, and it makes the kit's 404 the last word (see "Mounting").
+app.use(toExpress(healthRoutes(cw))); // GET /healthz, GET /readyz
 
 const server = app.listen(3000);
 process.on('SIGTERM', () => { out.dispose(); server.close(); void cw.close(); });
@@ -107,13 +109,17 @@ Staff, under the prefix you mount (`/admin` above). Each one is authenticated, n
 | --- | --- |
 | `GET /reports?status&cursor&limit` | The queue, newest first. |
 | `GET /reports/:id?level` | One report with each person's history and a suggestion. Audited with the report id. |
-| `POST /reports/:id/suggest` | A suggestion for a named person on the report. |
+| `POST /reports/:id/suggest` | `{ level, rule?, person? }`: a suggestion for a person the report names (default: the reported person). |
 | `POST /reports/:id/decide` | `{ verdict, reason, actions, evidence? }`. A replay of the same decision applies nothing twice. |
 | `GET /people/:ref/history` | A person's actions and recent reports against them. |
-| `POST /sanctions` | One sanction outside a report. |
-| `POST /sanctions/:groupId/revoke` | Revoke the whole group. |
-| `GET /gaps`, `POST /gaps/:groupId/close` | Rule gaps (a sanction filed under no rule). |
-| `GET /terms`, `POST /terms/check`, term and exception edits | Only when you pass `terms`. |
+| `POST /sanctions` | `{ subject, kind, durationMs, rule, reason?, gapNote?, includeIp? }`. `durationMs` is required: milliseconds up to 365 days, or `null` for permanent. Answers `{ groupId, refCode }`. |
+| `POST /sanctions/:groupId/revoke` | `{ reason }` (a non-empty string; blank is 400). Revokes the whole group. 404 if it is unknown or already revoked. |
+| `GET /gaps` | Rule gaps (sanctions filed under no rule), newest first. |
+| `POST /gaps/:groupId/close` | `{ status, ref }`: `status` is `ruled` (with `ref`, the number of the active rule that now covers it) or `not_a_rule` (`ref` null or absent). |
+| `GET /terms` | The term and exception rows, text included. Only when you pass `terms`. |
+| `POST /terms/check` | `{ term, language }`: a dry run, answers `{ hits }`. |
+| `POST /terms` | `{ term, language, note? }`. `PATCH /terms/:id` takes `{ term?, language?, note? }`; `POST /terms/:id/active` takes `{ active }`. |
+| `POST /exceptions` | `{ phrase, language, note? }`. `PATCH /exceptions/:id` and `POST /exceptions/:id/active` work like the term ones. |
 | `GET /policy?format` | The code of conduct, moderator guide and agent brief, generated from your profile and rules. |
 | `GET /audit?cursor&limit&actor&action` | The audit trail, newest first. |
 
@@ -139,8 +145,19 @@ checked over the exact bytes and the routes parse JSON with their own 64 KiB lim
 `chatwarden.http_body_already_parsed`). If your app needs `express.json()`, mount it after the kit routes, or on your own
 routes only.
 
-The adapter answers everything under its mount point: an unknown path is the kit's 404, a wrong method its 405. Mounted at
-`/`, put it after your own routes.
+**What the adapter answers.** A path that matches none of the kit's routes goes on to the next Express handler: the adapter
+calls `next()` before it reads the body, so a kit mounted at `/` does not hide your routes or a later `express.json()`. A path
+that matches a route under another method is the kit's 405 (with an `allow` header), and a handler that answers 404 (an unknown
+report id) is the kit's 404 `not_found`. Neither falls through, because they are answers.
+
+```ts
+app.use('/admin', toExpress(adminRoutes(cw, options)));                      // an unknown /admin/... goes on to your app
+app.use('/admin', toExpress(adminRoutes(cw, options), { fallthrough: false })); // an unknown /admin/... is the kit's JSON 404
+```
+
+Use `fallthrough: false` for a prefix that is wholly the kit's, when you want every path under it to get the kit's
+`{ error: 'not_found' }` and nothing after it to run. `fallthrough` must be a boolean (`TypeError` otherwise). Put the probes
+last anyway: mounted at `/` with `fallthrough: false` they would answer every path, so that mount belongs after your own routes.
 
 ## Auth
 
@@ -235,6 +252,8 @@ error class only.
 ### Outgoing: `webhooksOut`
 
 ```ts
+import { webhooksOut } from '@chatwarden/http';
+
 const out = webhooksOut(cw, {
   endpoints: [
     { url: 'https://staff.example.com/chatwarden', secret: process.env.WEBHOOK_OUT_SECRET!, events: ['report.created', 'sanction.applied'] },
@@ -270,6 +289,7 @@ import express from 'express';
 import { ReplayCache, verify } from '@chatwarden/http';
 
 const seen = new ReplayCache(); // one per secret; remembers accepted signatures
+const handled = new Set<string>(); // delivery ids already handled (use your database in production)
 const app = express();
 
 app.post('/chatwarden', express.raw({ type: 'application/json' }), (req, res) => {
@@ -277,6 +297,10 @@ app.post('/chatwarden', express.raw({ type: 'application/json' }), (req, res) =>
   const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v]));
   if (!verify(process.env.WEBHOOK_OUT_SECRET!, headers, body, Date.now(), seen)) return void res.sendStatus(401);
   const delivery = JSON.parse(body) as { id: string; type: string; data: Record<string, unknown> };
+  // A retry carries the same delivery id with a fresh signature: handle each id once, answer 2xx to a repeat.
+  const id = String(req.headers['x-chatwarden-delivery'] ?? delivery.id);
+  if (handled.has(id)) return void res.sendStatus(200);
+  handled.add(id);
   // Handle it, then answer 2xx quickly.
   res.sendStatus(200);
 });

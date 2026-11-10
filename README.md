@@ -35,6 +35,7 @@ const app = express();
 // Mount the kit BEFORE any body parser: it reads the raw body itself.
 app.use('/admin', toExpress(adminRoutes(cw, { authorize: (req) => yourModeratorLogin(req) }))); // { actor, role } or null
 app.use('/api', toExpress(playerRoutes(cw, { identify: (req) => ({ clientKey: req.headers['x-player-token'], ip: req.remoteAddress }) })));
+// The probes last, by habit: a kit mounted at '/' passes paths that are not its own to the next handler, so nothing is hidden.
 app.use(toExpress(healthRoutes(cw))); // /healthz, /readyz
 
 // Optional: a Discord forum thread per reported person.

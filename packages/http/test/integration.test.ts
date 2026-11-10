@@ -169,7 +169,7 @@ interface World {
   close(): Promise<void>;
 }
 
-async function boot(): Promise<World> {
+async function boot(o: { healthFirst?: boolean } = {}): Promise<World> {
   const db = new DatabaseSync(':memory:');
   const store = openStore({ db });
   const clock = { now: () => Date.now() };
@@ -231,8 +231,14 @@ async function boot(): Promise<World> {
       }),
     ),
   );
+  // The probes at the root. With `healthFirst` they come BEFORE the hooks and the adopter's routes: the kit hands paths that
+  // are not its own to the next handler, so nothing after it is hidden.
+  if (o.healthFirst === true) app.use(toExpress(healthRoutes(cw, { logger })));
   app.use('/hooks', toExpress(webhookIn(cw, { secret: SECRET_IN, actor: 'webhook@example.test', logger })));
-  app.use(toExpress(healthRoutes(cw, { logger })));
+  // The adopter's own routes, one of them with a body parser of its own.
+  app.get('/mine', (_req, res) => void res.send('mine'));
+  app.post('/json', express.json(), (req, res) => void res.json({ got: req.body as unknown }));
+  if (o.healthFirst !== true) app.use(toExpress(healthRoutes(cw, { logger })));
   const server = createServer(app);
   const port = await listen(server);
 
@@ -610,6 +616,52 @@ describe('integration: the incoming webhook over real HTTP', () => {
       expect(res.json).toEqual({ error: 'unauthorized', message: 'Authentication is required.' });
     }
     expect(await call(w, 'POST', '/hooks/webhooks/in/action', { body: '{}' })).toMatchObject({ status: 401 });
+  });
+});
+
+describe('integration: mount order does not hide routes (healthRoutes at the root, first)', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await boot({ healthFirst: true });
+  });
+  afterAll(async () => {
+    await w.close();
+  });
+
+  it('the probes, the incoming webhook, an adopter route and a later express.json() are all reachable', async () => {
+    expect((await call(w, 'GET', '/healthz')).json).toEqual({ ok: true });
+    expect((await call(w, 'GET', '/readyz')).json).toEqual({ ok: true });
+    // The webhook route is behind the root-mounted probes: it must still answer (a signature failure is 401, not 404).
+    const hook = await call(w, 'POST', '/hooks/webhooks/in/action', { body: '{}' });
+    expect(hook.status).toBe(401);
+    expect(hook.json.error).toBe('unauthorized');
+    expect((await call(w, 'GET', '/mine')).text).toBe('mine');
+    const parsed = await call(w, 'POST', '/json', { body: { a: [1, 2] } });
+    expect(parsed.json).toEqual({ got: { a: [1, 2] } });
+    // The staff and player mounts, ahead of the probes, are as before.
+    expect((await call(w, 'GET', '/admin/reports')).status).toBe(401);
+    expect((await call(w, 'GET', '/api/rules')).status).toBe(200);
+  });
+
+  it('a signed webhook still applies a sanction through the shadowed mount', async () => {
+    const raw = JSON.stringify({ action: 'sanction', input: { subject: w.alice, kind: 'chat', durationMs: 3_600_000, rule: 1, reason: REASON, idempotencyKey: 'order-1' } });
+    const ts = Math.floor(Date.now() / 1000);
+    const res = await call(w, 'POST', '/hooks/webhooks/in/action', {
+      headers: { [TIMESTAMP_HEADER]: String(ts), [SIGNATURE_HEADER]: sign(SECRET_IN, ts, raw) },
+      body: raw,
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.refCode).toMatch(/^M-/);
+  });
+
+  it('an unknown path is the app 404, a handler 404 (unknown report) is the kit 404, and a wrong method is 405', async () => {
+    const unknown = await call(w, 'GET', '/nope');
+    expect(unknown.status).toBe(404);
+    expect(unknown.json.error).toBeUndefined();
+    const report = await call(w, 'GET', '/admin/reports/no-such-report', { headers: staff(MOD_TOKEN) });
+    expect(report.status).toBe(404);
+    expect(report.json).toEqual({ error: 'not_found', message: 'Not found.' });
+    expect((await call(w, 'POST', '/healthz')).status).toBe(405);
   });
 });
 

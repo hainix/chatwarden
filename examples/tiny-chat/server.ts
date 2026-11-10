@@ -85,7 +85,7 @@ export interface TinyChatOptions {
   /**
    * Post the review queue into a Discord forum (the `@chatwarden/discord` package): the forum channel's webhook URL.
    * Default: the `DISCORD_WEBHOOK_URL` environment variable. With neither (or an empty one) the feed is off and nothing is
-   * sent anywhere. A URL that is not a Discord webhook URL throws at startup.
+   * sent anywhere. An empty string passed here forces it off even when the environment has a URL. A URL that is not a Discord webhook URL throws at startup.
    */
   discordWebhookUrl?: string;
   /** A Discord role id to ping on a severe report or sanction. Default: the `DISCORD_MENTION_ROLE_ID` environment variable. Optional. */
@@ -187,8 +187,10 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   // (open them with the `x-admin-token` header); a real app links to its moderator console. `origin` is known once the
   // server listens, long before any report can make a link.
   let origin = '';
-  const discordUrl = opts.discordWebhookUrl || process.env.DISCORD_WEBHOOK_URL || undefined;
-  const discordRole = opts.discordMentionRoleId || process.env.DISCORD_MENTION_ROLE_ID || undefined;
+  // An option that was passed wins, an empty string included (it forces the feed off, or the ping off, whatever the shell
+  // exports); an option that was left out falls back to the environment. Empty at either place is "not set".
+  const discordUrl = (opts.discordWebhookUrl !== undefined ? opts.discordWebhookUrl : process.env.DISCORD_WEBHOOK_URL) || undefined;
+  const discordRole = (opts.discordMentionRoleId !== undefined ? opts.discordMentionRoleId : process.env.DISCORD_MENTION_ROLE_ID) || undefined;
   let discord: DiscordFeed | undefined;
   if (discordUrl !== undefined) {
     try {
@@ -231,6 +233,8 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
           // The live term list: it adds the staff term and exception routes (`/admin/terms`, `/admin/terms/check`, ...).
           terms,
         }),
+        // A prefix mount with nothing after it that wants these paths: the kit's JSON 404 is the answer for an unknown one.
+        { fallthrough: false },
       ),
     );
   }
@@ -253,6 +257,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
           };
         },
       }),
+      { fallthrough: false },
     ),
   );
 
@@ -281,9 +286,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     else res.status(result.refused === 'rate' ? 429 : 422).json({ ok: false, refused: result.refused });
   });
 
-  // Probes, last: the adapter answers everything under its mount (the kit's 404 for an unknown path), so at the root it
-  // goes after the demo's own routes.
-  app.use(toExpress(healthRoutes(chatwarden)));
+  // Probes, last, at the root. By default `toExpress` hands a path that is not its own to the next handler, so a root mount
+  // would not hide the routes after it; here nothing comes after, so `fallthrough: false` makes an unknown path the kit's 404.
+  app.use(toExpress(healthRoutes(chatwarden), { fallthrough: false }));
 
   // Body-parser failures (malformed JSON, an oversized body) and anything else thrown in a route: always a small
   // JSON answer, never Express's HTML stack page.

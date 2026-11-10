@@ -44,8 +44,9 @@ DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/<id>/<token>' DISCORD_MENT
   `http://127.0.0.1:<port>/admin/people/<subject>/history`. Open them with the `x-admin-token` header (the admin API is off
   without `TINY_CHAT_ADMIN_TOKEN`). A real app links to its moderator console.
 - Posts hold no chat text, handle, note or reason, and ids only inside those links.
-- `startServer({ discordWebhookUrl, discordMentionRoleId, discordFetch })` takes the same settings as options (they win over
-  the environment); `discordFetch` replaces `fetch` for tests.
+- `startServer({ discordWebhookUrl, discordMentionRoleId, discordFetch })` takes the same settings as options. An option that is
+  passed wins over the environment, and an empty string passed as an option forces the feed off (or the ping off) even when the
+  shell exports a value; an option that is left out falls back to the environment. `discordFetch` replaces `fetch` for tests.
 
 ## The profile, swearing and the code of conduct
 

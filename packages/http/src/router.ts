@@ -63,8 +63,28 @@ function matchPath(route: Route, segments: string[]): RouteParams | null {
  *   the adapter must send that response's status, headers and body length for a HEAD but not the body itself. `allow`
  *   lists HEAD wherever it lists GET.
  * Handler errors propagate: wrap the router (or each handler) in `withErrors`.
+ * `compileRoutes` is the same router with a `matches(path)` check beside `run`, for an adapter that must tell "this path is
+ * not mine" (hand it on) from a handler's own 404 (answer it).
  */
 export function createRouter(routes: RouteTable): (req: KitRequest) => Promise<KitResponse> {
+  return compileRoutes(routes).run;
+}
+
+/** A route table, compiled: answer a request, or say whether a path belongs to it at all. */
+export interface CompiledRoutes {
+  /** Exactly what {@link createRouter} returns: every request gets a response, an unmatched path the kit 404. */
+  run(req: KitRequest): Promise<KitResponse>;
+  /**
+   * True when some route answers this path under SOME method (the query string is ignored). False is "no route matched":
+   * unlike a handler that answers 404 (which is a match), it means the path is not this table's. A path that matches only
+   * under another method is true, because `run` answers it 405. An adapter uses this to hand a foreign path back to its
+   * framework (`toExpress` calls `next()`) before it reads the body.
+   */
+  matches(path: string): boolean;
+}
+
+/** Compile a route table once. Validates it exactly as {@link createRouter} does (`RangeError`). */
+export function compileRoutes(routes: RouteTable): CompiledRoutes {
   const table: Route[] = [];
   const seen = new Set<string>();
   for (const [key, handler] of Object.entries(routes)) {
@@ -104,11 +124,22 @@ export function createRouter(routes: RouteTable): (req: KitRequest) => Promise<K
     return 0;
   });
 
-  return async (req) => {
-    const path = req.path.split('?', 1)[0] as string;
-    if (!path.startsWith('/')) return errorResponse('not_found');
+  /** The path's segments, or null for a path no route can match (no leading slash, an empty segment). */
+  const segmentsOf = (full: string): string[] | null => {
+    const path = full.split('?', 1)[0] as string;
+    if (!path.startsWith('/')) return null;
     const segments = path === '/' ? [] : path.slice(1).split('/');
-    if (segments.some((s) => s === '')) return errorResponse('not_found');
+    return segments.some((s) => s === '') ? null : segments;
+  };
+
+  const matches = (full: string): boolean => {
+    const segments = segmentsOf(full);
+    return segments !== null && table.some((route) => matchPath(route, segments) !== null);
+  };
+
+  const run = async (req: KitRequest): Promise<KitResponse> => {
+    const segments = segmentsOf(req.path);
+    if (segments === null) return errorResponse('not_found');
     const method = req.method.toUpperCase();
 
     const allowed = new Set<string>();
@@ -128,4 +159,6 @@ export function createRouter(routes: RouteTable): (req: KitRequest) => Promise<K
     if (allowed.size > 0) return errorResponse('method_not_allowed', { allow: [...allowed].sort().join(', ') });
     return errorResponse('not_found');
   };
+
+  return { run, matches };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRouter } from '@chatwarden/http';
+import { compileRoutes } from '../src/router.js';
 import type { KitRequest, KitResponse } from '@chatwarden/http';
 
 const req = (method: string, path: string, extra: Partial<KitRequest> = {}): KitRequest => ({
@@ -359,5 +360,58 @@ describe('createRouter: the `~ref` param pattern', () => {
 
   it('a `~ref` route and a plain route of one shape collide', () => {
     expect(() => createRouter({ 'GET /rows/:id~ref': () => ok(), 'GET /rows/:other': () => ok() })).toThrow(RangeError);
+  });
+});
+
+describe('compileRoutes: "no route matched" is not a handler 404', () => {
+  const table = {
+    'GET /reports/:id': () => ok({ got: true }),
+    'POST /reports/:id/decide': () => ok({ decided: true }),
+    'GET /missing': () => ({ status: 404, body: { error: 'not_found' } }),
+  };
+
+  it('matches a path that some route answers, under any method, ignoring the query string', () => {
+    const { matches } = compileRoutes(table);
+    expect(matches('/reports/abc')).toBe(true);
+    expect(matches('/reports/abc?x=1')).toBe(true);
+    expect(matches('/reports/abc/decide')).toBe(true);
+    expect(matches('/missing')).toBe(true);
+  });
+
+  it.each([
+    ['an unknown path', '/nothing'],
+    ['a longer path', '/reports/abc/decide/more'],
+    ['the root', '/'],
+    ['a param that fails its pattern', '/reports/a%20b'],
+    ['a malformed escape', '/reports/%E0%A4%A'],
+    ['an empty segment', '/reports//decide'],
+    ['a trailing slash', '/reports/abc/'],
+    ['no leading slash', 'reports/abc'],
+  ])('does not match %s', (_n, path) => {
+    expect(compileRoutes(table).matches(path)).toBe(false);
+  });
+
+  it('a path that matches under another method still matches, and run answers 405 with allow', async () => {
+    const { matches, run } = compileRoutes(table);
+    expect(matches('/reports/abc')).toBe(true);
+    const res = await run(req('DELETE', '/reports/abc'));
+    expect(res.status).toBe(405);
+    expect(res.headers?.allow).toBe('GET, HEAD');
+  });
+
+  it('a handler that answers 404 is a match: run returns its response', async () => {
+    const { matches, run } = compileRoutes(table);
+    expect(matches('/missing')).toBe(true);
+    expect(await run(req('GET', '/missing'))).toEqual({ status: 404, body: { error: 'not_found' } });
+  });
+
+  it('run on an unmatched path is still the kit 404, and createRouter is unchanged', async () => {
+    const { run } = compileRoutes(table);
+    expect((await run(req('GET', '/nothing'))).body).toEqual({ error: 'not_found', message: 'Not found.' });
+    expect(await createRouter(table)(req('GET', '/nothing'))).toEqual(await run(req('GET', '/nothing')));
+  });
+
+  it('validates the table like createRouter does', () => {
+    expect(() => compileRoutes({ 'nope': () => ok() })).toThrow(RangeError);
   });
 });
