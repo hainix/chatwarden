@@ -42,7 +42,7 @@ export interface Feature {
 export const FEATURES: Feature[] = [
   {
     id: 'match',
-    title: 'Catches slurs that dodge filters',
+    title: 'Catches slurs that dodge simple filters',
     body: 'Leetspeak, look-alike letters, accents, repeated letters and invisible characters are read through. Whole words only, so innocent words pass.',
   },
   {
@@ -257,6 +257,11 @@ export const FAQ: FaqItem[] = [
     id: 'terms',
     q: 'Where do the blocked words come from?',
     a: 'The packages ship with no term list. Bring your own pack, or try the invented test words that come with the matcher (zorbak and friends). Moderators can edit the list while the game runs, and each edit is checked against known-innocent lines first. A shared community term list is planned. It is not available yet.',
+  },
+  {
+    id: 'spaced',
+    q: 'Does it catch spaced or hyphenated letters?',
+    a: 'No, on purpose. The matcher reads through leetspeak, look-alike letters, accents, repeated letters and invisible characters, but not spaces or hyphens between letters (like z o r b a k), because reading those would flag innocent text. Players can report what slips through, and a moderator decides.',
   },
   {
     id: 'ai',

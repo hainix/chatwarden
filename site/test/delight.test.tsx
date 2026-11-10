@@ -142,12 +142,11 @@ describe('AI level meter', () => {
     expect(meter.textContent).toMatch(/levels 1 to 4/i);
     expect(meter.textContent).toMatch(/coming/i);
   });
-  it('has five pips: one live, four coming, hidden from assistive tech (the text carries the meaning)', () => {
+  it('shows four pips, one per AI level 1 to 4, all unlit (matching "0 of 4"), hidden from assistive tech', () => {
     render(<AiLevels />);
     const meter = screen.getByTestId('level-meter');
-    const pips = meter.querySelectorAll('.pip');
-    expect(pips).toHaveLength(5);
-    expect(meter.querySelectorAll('.pip.is-live')).toHaveLength(1);
+    expect(meter.querySelectorAll('.pip')).toHaveLength(4);
+    expect(meter.querySelectorAll('.pip.is-live')).toHaveLength(0);
     expect(meter.querySelector('.pips')?.getAttribute('aria-hidden')).toBe('true');
   });
   it('still lists every level, with 1 to 4 marked coming soon', () => {

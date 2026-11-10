@@ -39,10 +39,25 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # The CSP and accessibility tests drive a real browser.
-      - run: npx playwright install --with-deps chromium
+      # The CSP and accessibility tests drive a real browser. The browser download is cached per Playwright version; the
+      # system packages (apt) are not part of the cache, so they are installed on a hit as well.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - run: npm run test --workspace site
       - run: npm run build --workspace site
+      # The build re-renders the OG image and icons. If they differ from the committed PNGs, fail: re-render locally
+      # (`npm run og --workspace site`) and commit them.
+      - run: git diff --exit-code -- site/public/*.png
 
   smoke:
     name: Smoke (consumer install) Node ${{ matrix.node }}

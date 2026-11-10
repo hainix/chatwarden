@@ -60,6 +60,10 @@ function findTarget(root: HTMLElement, step: number, paneHidden: { game: boolean
   }
 }
 
+// What hands the page back to the person after an automatic pane switch (see the settle re-scroll).
+const SETTLE_CANCEL = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar', 'Home', 'End']);
+
 export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const [engine] = useState<DemoEngine>(() => given ?? new FakeEngine());
   const stacked = useMediaQuery(STACK_QUERY);
@@ -100,6 +104,8 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const gen = useRef(0);
   const sayId = useRef(0);
   const settle = useRef<number | undefined>(undefined);
+  const stopSettle = useRef<() => void>(() => {});
+  const decideSeq = useRef(0);
   const loopAt = useRef(0);
   const live = useRef({ paused, ready, dialog: false });
   live.current = { paused, ready, dialog: dialog !== null };
@@ -217,7 +223,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     return () => {
       alive.current = false;
       gen.current += 1;
-      window.clearTimeout(settle.current);
+      stopSettle.current();
     };
   }, [boot]);
 
@@ -309,9 +315,22 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
         bring();
         // The swapped pane and the closing dialog keep moving the page for a moment (entrance animations, the scroll lock
         // lifting), so once more when they have settled, if focus is still on the heading.
-        window.clearTimeout(settle.current);
+        stopSettle.current();
+        const stop = () => {
+          window.clearTimeout(settle.current);
+          for (const type of SETTLE_CANCEL) window.removeEventListener(type, onInput);
+          stopSettle.current = () => {};
+        };
+        // The first thing the person does (wheel, touch, click, a scroll key) means the page is theirs again: no re-scroll.
+        const onInput = (e: Event) => {
+          if (e.type === 'keydown' && !SCROLL_KEYS.has((e as KeyboardEvent).key)) return;
+          stop();
+        };
+        for (const type of SETTLE_CANCEL) window.addEventListener(type, onInput, { passive: true });
+        stopSettle.current = stop;
         settle.current = window.setTimeout(() => {
           if (document.activeElement === heading) bring();
+          stop();
         }, 650);
       }
     }
@@ -497,7 +516,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     const report = reports.find((r) => r.id === selectedId);
     if (report === undefined || deciding.current !== null) return;
     // A ref, not state: two clicks dispatched in one task must not both get through.
-    const token = ++sayId.current;
+    const token = ++decideSeq.current;
     deciding.current = token;
     const g = gen.current;
     setBusy(true);

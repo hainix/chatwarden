@@ -1,6 +1,6 @@
 // N1 from the Task 2 re-review: two announcements in one tick must keep distinct keys, and Reset must clear the live region.
 // N2: after an automatic pane switch the focused heading is brought into view.
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Demo from '../src/demo/Demo';
@@ -135,6 +135,68 @@ describe('after an automatic pane switch the focused heading is brought into vie
     (screen.getByRole('button', { name: /my record/i }) as HTMLElement).focus();
     await new Promise((r) => setTimeout(r, 900));
     expect(calls.length).toBe(first);
+  });
+
+  describe('the settle re-scroll never fights the user', () => {
+    async function switched() {
+      const calls = spyScroll();
+      const { user } = await setup();
+      await reportByKeyboard(user);
+      await waitFor(() => expect(document.activeElement?.id).toBe('pane-mod-title'));
+      return { calls, count: calls.length };
+    }
+    const idle = () => new Promise((r) => setTimeout(r, 900));
+
+    it('a wheel event before the timer cancels it', async () => {
+      const { calls, count } = await switched();
+      fireEvent.wheel(window, { deltaY: 400 });
+      await idle();
+      expect(calls.length).toBe(count);
+    });
+    it.each([
+      ['touchstart', (): Event => new Event('touchstart', { bubbles: true })],
+      ['pointerdown', (): Event => new Event('pointerdown', { bubbles: true })],
+    ])('a %s before the timer cancels it', async (_name, make) => {
+      const { calls, count } = await switched();
+      window.dispatchEvent(make());
+      await idle();
+      expect(calls.length).toBe(count);
+    });
+    it.each(['PageDown', 'PageUp', 'ArrowDown', 'ArrowUp', ' ', 'Home', 'End'])('the scroll key %j before the timer cancels it', async (key) => {
+      const { calls, count } = await switched();
+      fireEvent.keyDown(window, { key });
+      await idle();
+      expect(calls.length).toBe(count);
+    });
+    it('a key that does not scroll (a letter) does not cancel it', async () => {
+      const { calls, count } = await switched();
+      fireEvent.keyDown(window, { key: 'x' });
+      await waitFor(() => expect(calls.length).toBeGreaterThan(count), { timeout: 3000 });
+    });
+    it('without any input the settle still happens (control)', async () => {
+      const { calls, count } = await switched();
+      await waitFor(() => expect(calls.length).toBeGreaterThan(count), { timeout: 3000 });
+    });
+    it('removes its listeners once it has fired, and on unmount', async () => {
+      const add = vi.spyOn(window, 'addEventListener');
+      const remove = vi.spyOn(window, 'removeEventListener');
+      const { calls, count } = await switched();
+      const added = add.mock.calls.filter((c) => ['wheel', 'touchstart', 'pointerdown'].includes(String(c[0]))).length;
+      expect(added).toBeGreaterThanOrEqual(3);
+      await waitFor(() => expect(calls.length).toBeGreaterThan(count), { timeout: 3000 });
+      const removed = remove.mock.calls.filter((c) => ['wheel', 'touchstart', 'pointerdown'].includes(String(c[0]))).length;
+      expect(removed).toBeGreaterThanOrEqual(3);
+    });
+    it('unmounting before the timer stops it', async () => {
+      const calls = spyScroll();
+      const { user } = await setup();
+      await reportByKeyboard(user);
+      await waitFor(() => expect(document.activeElement?.id).toBe('pane-mod-title'));
+      const count = calls.length;
+      cleanup();
+      await idle();
+      expect(calls.length).toBe(count);
+    });
   });
 
   it('focuses without letting the browser jump first (preventScroll)', async () => {

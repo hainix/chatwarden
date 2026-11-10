@@ -475,7 +475,7 @@ li {
   -webkit-mask-image: radial-gradient(240px 240px at var(--mx) var(--my), #000, transparent);
   mask-image: radial-gradient(240px 240px at var(--mx) var(--my), #000, transparent);
 }
-@media (hover: hover) and (pointer: fine) {
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
   .hero:hover::before,
   .hero:hover::after {
     opacity: 1;
@@ -927,8 +927,9 @@ li {
 /* Under 1280px the words sit above the code, so a block gets the whole column. From 1280px they sit beside it and the code
    column is pulled out to the right (the left edge stays on the page grid), so the README lines are not cut off. */
 @media (min-width: 1280px) {
+  /* Up to 72px past the grid edge, less on a narrower screen so the code never gets close to the viewport edge. */
   .steps {
-    margin-right: -72px;
+    margin-right: clamp(-72px, calc((1120px - 100vw) / 2 + 24px), 0px);
   }
   .step {
     grid-template-columns: 240px minmax(0, 1fr);

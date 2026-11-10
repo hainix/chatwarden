@@ -70,6 +70,14 @@ describe('document head', () => {
   it('preloads the display font (crossorigin, as font)', () => {
     expect(html()).toMatch(/<link[^>]*rel="preload"[^>]*href="\/assets\/bungee-[^"]+\.woff2"[^>]*as="font"[^>]*type="font\/woff2"[^>]*crossorigin/);
   });
+  it('also preloads the body font at its hashed path, so body text does not swap late', () => {
+    expect(html()).toMatch(/<link[^>]*rel="preload"[^>]*href="\/assets\/atkinson-hyperlegible-next-latin-wght-normal-[^"]+\.woff2"[^>]*as="font"[^>]*type="font\/woff2"[^>]*crossorigin/);
+  });
+  it('every font preload names a file that exists in dist (a stale hash would 404 and waste the preload)', () => {
+    const hrefs = [...html().matchAll(/<link[^>]*rel="preload"[^>]*href="([^"]+)"/g)].map((m) => m[1] as string);
+    expect(hrefs.length).toBe(2);
+    for (const h of hrefs) expect(existsSync(join(dist, h.slice(1))), h).toBe(true);
+  });
   it('has no inline script: the theme bootstrap is a same-origin file', () => {
     const inline = [...html().matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/g)];
     expect(inline).toEqual([]);

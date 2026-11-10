@@ -91,7 +91,7 @@ export function Hero() {
             <span className="h1-line">Your game has chat.</span> <span className="h1-line">Give it a warden.</span>
           </h1>
           <p className="lead">
-            Chatwarden is a free, open-source moderation kit for games. It refuses slurs that dodge filters, keeps the
+            Chatwarden is a free, open-source moderation kit for games. It refuses slurs that dodge simple filters, keeps the
             evidence when players report, and lets trash talk be trash talk.
           </p>
           <div className="hero-actions">

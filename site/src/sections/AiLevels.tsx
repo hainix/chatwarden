@@ -9,7 +9,7 @@ function LevelMeter() {
   return (
     <div ref={ref} className="level-meter" data-testid="level-meter" data-phase={phase}>
       <span className="pips" aria-hidden="true">
-        {LEVELS.map((l) => (
+        {LEVELS.filter((l) => l.level > 0).map((l) => (
           <span key={l.level} className={`pip ${l.status === 'available' ? 'is-live' : ''}`} />
         ))}
       </span>

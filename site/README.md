@@ -68,6 +68,11 @@ One-time setup, in the Cloudflare dashboard (or with wrangler), before the first
 4. Check `https://chatwarden.dev/`, `/og.png`, `/llms.txt` and `/robots.txt`, and look at the response headers once
    (`curl -sI https://chatwarden.dev/`) to see the CSP.
 
+5. **Turn on HSTS in the dashboard** (SSL/TLS, Edge Certificates, HTTP Strict Transport Security, and "Always Use HTTPS"), for
+   `chatwarden.dev`. It is deliberately not in `public/_headers`: Pages sends `_headers` on every preview URL too
+   (`<hash>.chatwarden.pages.dev`), and a preview host should not get an HSTS policy. Start with a short max-age and raise it
+   once the site has been fine for a while.
+
 Later deploys are only the two commands above. Each deploy gets a preview URL (`<hash>.chatwarden.pages.dev`) as well as the
 production alias.
 

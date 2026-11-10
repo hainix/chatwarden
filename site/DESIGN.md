@@ -78,13 +78,13 @@ so they work on both backgrounds.
   - the hero grid lights up teal under a mouse (`--mx` / `--my` on `.hero`, set only for mouse and pen, never under
     reduced motion, eased by a registered `@property`);
   - feature cards: the icon tile pops on hover ("level up");
-  - the AI-levels HUD meter runs one pip scan when it scrolls into view (`useSeen`); it states only what is true,
+  - the AI-levels HUD meter (four unlit pips for levels 1 to 4) runs one pip scan when it scrolls into view (`useSeen`); it states only what is true,
     "AI levels shipped: 0 of 4";
   - the konami code (up up down down left right left right B A) turns the warden gold and says so in a polite live region;
     typing it again turns it back (`GoldWarden`, `data-gold` on `<html>`). It ignores form fields.
 - Nothing fakes data: no counters, no activity feeds.
 - Steps layout: under 1280px the words sit above each code block so the block gets the whole column; from 1280px they sit beside
-  it and the code column is pulled out 72px to the right (the left edge stays on the page grid), and the code is 12.5px, so
+  it and the code column is pulled out to the right by up to 72px (a clamp() that shrinks on narrower screens) (the left edge stays on the page grid), and the code is 12.5px, so
   the README lines (kept verbatim) are not clipped. `test/browser.test.ts` measures this at 1024 to 1920.
 - Never reuse a bare class name across the two stylesheets: the demo's lazy CSS styles `.badge` as a count chip, which once
   restyled the open-source pills (they are `.open-badge` now).
