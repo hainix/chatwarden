@@ -64,6 +64,9 @@ describe.each(['light', 'dark'] as const)('axe on the admin screens, %s theme', 
       const w = await busy();
       const { container, user } = await open(w, '/terms', /^English/);
       await user.click(screen.getByRole('button', { name: 'Edit term 2' }));
+      // The word is hidden in the form until shown: that state first, then the shown one.
+      expect(await violations(container)).toEqual([]);
+      await user.click(screen.getByRole('button', { name: 'Show the word in this form' }));
       await user.clear(screen.getByLabelText('Word'));
       await user.type(screen.getByLabelText('Word'), 'zorbak');
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -73,6 +76,28 @@ describe.each(['light', 'dark'] as const)('axe on the admin screens, %s theme', 
       await user.type(screen.getByLabelText('Message to test'), 'you zorbak');
       await user.click(within(screen.getByRole('region', { name: 'Test a message' })).getByRole('button', { name: 'Test' }));
       await screen.findByText('This message would be blocked.');
+      expect(await violations(container)).toEqual([]);
+    });
+
+    it('a term turned back on with hits on the row, hidden and then shown, has no violations', async () => {
+      const w = await busy();
+      const { id } = await w.direct.addTerm({ term: 'zorba', language: 'en' });
+      await w.direct.setTermActive(id, false);
+      const { container, user } = await open(w, '/terms', /^English/);
+      await user.click(screen.getByRole('checkbox', { name: 'Active: term 8' }));
+      await screen.findByRole('group', { name: 'Lines it would block' });
+      expect(await violations(container)).toEqual([]);
+      await user.click(screen.getByRole('button', { name: 'Show the lines' }));
+      expect(await violations(container)).toEqual([]);
+    });
+
+    it('the prefilled exception form from a blocked line, masked and shown, has no violations', async () => {
+      const w = await busy();
+      const { container, user } = await open(w, '/blocked', 'Blocked lines');
+      await user.click(screen.getAllByRole('button', { name: /^Add an exception for the line from/ })[0]!);
+      await screen.findByRole('form', { name: 'Add an exception' });
+      expect(await violations(container)).toEqual([]);
+      await user.click(screen.getByRole('button', { name: 'Show the phrase in this form' }));
       expect(await violations(container)).toEqual([]);
     });
 

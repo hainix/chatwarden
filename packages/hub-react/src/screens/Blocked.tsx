@@ -3,6 +3,7 @@ import { Masked } from '../case/Transcript.js';
 import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
 import { timeOfDay } from '../format.js';
+import type { HubText } from '../i18n.js';
 import { WORD_MAX } from '../terms/TermForm.js';
 import type { BlockedDays, BlockedLine } from '../types.js';
 import { Empty, Fetched, Link, PersonChip, Scroll, Segmented, Time } from '../ui.js';
@@ -91,13 +92,21 @@ export function Blocked() {
                     {items.map((line) => {
                       const visible = all || shown.has(line.id);
                       const time = timeOfDay(line.at, locale);
-                      const who = <PersonChip person={line.person} />;
+                      // Two lines in one minute differ by room, so each button says which line it is for.
+                      const room = line.roomId;
+                      const label = (key: HubText): string => (room === '' ? t(key, { time }) : t('hub.blocked.screen.inRoom', { what: t(key, { time }), room }));
+                      const who = (
+                        <>
+                          {line.handle !== null && <strong className="cw-arow-who">{line.handle}</strong>}
+                          <PersonChip person={line.person} />
+                        </>
+                      );
                       return (
                         <tr key={line.id}>
                           <td className="cw-nowrap">
                             <Time at={line.at} />
                           </td>
-                          <td>
+                          <td className="cw-term-word">
                             {can('history.read') ? (
                               <Link to={{ name: 'person', ref: line.person }} className="cw-link">
                                 {who}
@@ -106,29 +115,33 @@ export function Blocked() {
                               who
                             )}
                           </td>
-                          <td className="cw-term-word">{line.roomId === '' ? t('hub.blocked.screen.noRoom') : line.roomId}</td>
+                          <td className="cw-term-word">{room === '' ? t('hub.blocked.screen.noRoom') : room}</td>
                           <td className="cw-term-word">{line.term === null ? <span className="cw-hint">{t('hub.blocked.screen.termNone')}</span> : visible ? line.term : <Masked />}</td>
-                          <td className="cw-term-word">{visible ? line.text : <Masked />}</td>
-                          <td>
+                          <td className="cw-term-word">
                             <div className="cw-row-actions">
+                              {visible ? <span>{line.text}</span> : <Masked />}
                               {!all && (
                                 <button
                                   type="button"
                                   className="cw-linkbtn"
                                   aria-pressed={visible}
-                                  aria-label={t(visible ? 'hub.mask.hideBlocked' : 'hub.mask.showBlocked', { time })}
+                                  aria-label={label(visible ? 'hub.mask.hideBlocked' : 'hub.mask.showBlocked')}
                                   onClick={() => toggle(line.id)}
                                 >
                                   {t(visible ? 'hub.mask.hide' : 'hub.mask.show')}
                                 </button>
                               )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="cw-row-actions">
                               {canException && (
-                                <button type="button" className="cw-btn" aria-label={t('hub.blocked.screen.addException.label', { time })} onClick={() => addException(line)}>
+                                <button type="button" className="cw-linkbtn" aria-label={label('hub.blocked.screen.addException.label')} onClick={() => addException(line)}>
                                   {t('hub.blocked.screen.addException')}
                                 </button>
                               )}
                               {canTerms && line.term !== null && (
-                                <button type="button" className="cw-btn" aria-label={t('hub.blocked.screen.viewTerm.label', { time })} onClick={() => viewTerm(line)}>
+                                <button type="button" className="cw-linkbtn" aria-label={label('hub.blocked.screen.viewTerm.label')} onClick={() => viewTerm(line)}>
                                   {t('hub.blocked.screen.viewTerm')}
                                 </button>
                               )}

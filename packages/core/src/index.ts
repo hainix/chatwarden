@@ -199,6 +199,7 @@ export { LIMITS_DEFAULTS, resolveLimits } from './limits.js';
 export type { Limits, LimitsInput } from './limits.js';
 export {
   actionStep,
+  DEFAULT_AREA_RULES,
   DEFAULT_SEVERE_RULES,
   HISTORY_LOOKBACK_MS,
   historyOf,

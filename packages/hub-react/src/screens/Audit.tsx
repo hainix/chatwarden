@@ -1,10 +1,11 @@
 import { AUDIT_ACTIONS } from '@chatwarden/core';
 import { useId, useRef, useState } from 'react';
 import { useHub } from '../context.js';
-import type { HubText } from '../i18n.js';
+import type { HubT, HubText } from '../i18n.js';
 import { personTag } from '../format.js';
 import { usePagedList } from '../hooks.js';
 import { errorText } from '../labels.js';
+import type { Route } from '../router.js';
 import type { AuditAction, AuditItem } from '../types.js';
 import { Empty, ErrorBlock, Link, Loading, Notice, Panel, Scroll, Time } from '../ui.js';
 
@@ -47,27 +48,20 @@ function Target({ item }: { item: AuditItem }) {
   const target = item.target;
   if (target === undefined) return <span className="cw-hint">{t('hub.audit.target.none')}</span>;
   const tag = personTag(target.ref);
+  const routable = ROUTABLE.test(target.ref);
+  const link = (to: Route, text: string, allowed: boolean) =>
+    allowed && routable ? (
+      <Link to={to} className="cw-link">
+        {text}
+      </Link>
+    ) : (
+      <span>{text}</span>
+    );
   switch (target.type) {
-    case 'person': {
-      const text = t('hub.audit.target.person', { tag });
-      return can('history.read') && ROUTABLE.test(target.ref) ? (
-        <Link to={{ name: 'person', ref: target.ref }} className="cw-link">
-          {text}
-        </Link>
-      ) : (
-        <span>{text}</span>
-      );
-    }
-    case 'report': {
-      const text = t('hub.audit.target.report', { tag });
-      return can('reports.read') && ROUTABLE.test(target.ref) ? (
-        <Link to={{ name: 'report', id: target.ref }} className="cw-link">
-          {text}
-        </Link>
-      ) : (
-        <span>{text}</span>
-      );
-    }
+    case 'person':
+      return link({ name: 'person', ref: target.ref }, t('hub.audit.target.person', { tag }), can('history.read'));
+    case 'report':
+      return link({ name: 'report', id: target.ref }, t('hub.audit.target.report', { tag }), can('reports.read'));
     case 'sanction':
       return <span>{t('hub.audit.target.sanction', { tag })}</span>;
     case 'term':
@@ -79,6 +73,12 @@ function Target({ item }: { item: AuditItem }) {
     default:
       return <span className="cw-hint">{t('hub.audit.target.none')}</span>;
   }
+}
+
+/** The words for an entry's action. A `report.view` with no target is the queue being read, not one report. */
+function actionLabel(item: AuditItem, t: HubT): string {
+  if (item.action === 'report.view' && item.target === undefined) return t('hub.audit.label.report.list');
+  return Object.hasOwn(LABEL, item.action) ? t(LABEL[item.action]) : item.action;
 }
 
 interface Filters {
@@ -154,7 +154,7 @@ export function Audit() {
                   </td>
                   <td className="cw-term-word">{item.actor}</td>
                   <td>{item.role === null ? <span className="cw-hint">{t('hub.audit.noRole')}</span> : t(`hub.session.role.${item.role}`)}</td>
-                  <td>{Object.hasOwn(LABEL, item.action) ? t(LABEL[item.action]) : item.action}</td>
+                  <td>{actionLabel(item, t)}</td>
                   <td>
                     <Target item={item} />
                   </td>
@@ -190,7 +190,6 @@ export function Audit() {
           {t('hub.audit.title')}
         </h2>
       </div>
-      <p className="cw-hint">{t('hub.audit.intro')}</p>
       <Panel title={t('hub.audit.filter')}>
         <form
           className="cw-form cw-panel-pad cw-audit-filter"
@@ -201,10 +200,7 @@ export function Audit() {
         >
           <div className="cw-field">
             <label htmlFor={`${id}-actor`}>{t('hub.audit.actor')}</label>
-            <input id={`${id}-actor`} type="text" className="cw-input" autoComplete="off" spellCheck={false} aria-describedby={`${id}-actor-hint`} value={draft.actor} onChange={(e) => setDraft({ ...draft, actor: e.target.value })} />
-            <p id={`${id}-actor-hint`} className="cw-hint">
-              {t('hub.audit.actor.hint')}
-            </p>
+            <input id={`${id}-actor`} type="text" className="cw-input" autoComplete="off" spellCheck={false} value={draft.actor} onChange={(e) => setDraft({ ...draft, actor: e.target.value })} />
           </div>
           <div className="cw-field">
             <label htmlFor={`${id}-action`}>{t('hub.audit.action')}</label>

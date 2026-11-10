@@ -1,6 +1,7 @@
-import { LADDER_TABLE } from '@chatwarden/core';
+import { DEFAULT_AREA_RULES, DEFAULT_SEVERE_RULES, LADDER_TABLE } from '@chatwarden/core';
 import type { LadderCell, LadderRow } from '@chatwarden/core';
 import { useHub } from '../context.js';
+import type { HubT } from '../i18n.js';
 import { useHubData } from '../hooks.js';
 import { choiceLabel } from '../labels.js';
 import { Markdown } from '../markdown.js';
@@ -38,7 +39,16 @@ function Rules({ rules }: { rules: readonly CommunityRule[] }) {
   );
 }
 
-function Ladder({ ladder }: { ladder: readonly LadderRow[] }) {
+/** "Rule 5: Title; Rule 6: Title" for the rules in a list that are in force; empty when none is. */
+function ruleNames(t: HubT, numbers: readonly number[], rules: readonly CommunityRule[]): string {
+  return numbers
+    .map((n) => rules.find((r) => r.number === n && r.retired !== true))
+    .filter((r): r is CommunityRule => r !== undefined)
+    .map((r) => t('hub.guide.rule.named', { number: r.number, title: r.title }))
+    .join('; ');
+}
+
+function Ladder({ ladder, area, severe }: { ladder: readonly LadderRow[]; area: string; severe: string }) {
   const { t } = useHub();
   return (
     <>
@@ -67,6 +77,8 @@ function Ladder({ ladder }: { ladder: readonly LadderRow[] }) {
           </tbody>
         </table>
       </Scroll>
+      {area !== '' && <p className="cw-panel-pad">{t('hub.guide.ladder.area', { rules: area })}</p>}
+      {severe !== '' && <p className="cw-panel-pad">{t('hub.guide.ladder.severe', { rules: severe })}</p>}
     </>
   );
 }
@@ -86,7 +98,6 @@ export function Guide() {
           {t('hub.guide.title')}
         </h2>
       </div>
-      <p className="cw-hint">{t('hub.guide.intro')}</p>
       <Fetched state={state} what={t('hub.state.what.guide')}>
         {(doc) => {
           // A profile always carries its ladder; a server on an older kit might not, and then the default table is the truth.
@@ -97,7 +108,11 @@ export function Guide() {
                 <Rules rules={doc.rules} />
               </Panel>
               <Panel title={t('hub.guide.ladder')}>
-                <Ladder ladder={ladder} />
+                <Ladder
+                  ladder={ladder}
+                  area={ruleNames(t, (doc.profile as { areaRules?: readonly number[] }).areaRules ?? DEFAULT_AREA_RULES, doc.rules)}
+                  severe={ruleNames(t, (doc.profile as { severeRules?: readonly number[] }).severeRules ?? DEFAULT_SEVERE_RULES, doc.rules)}
+                />
               </Panel>
               <Panel title={t('hub.guide.full')}>
                 <div className="cw-panel-pad">

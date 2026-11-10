@@ -113,6 +113,22 @@ describe('the trail', () => {
     expect(rows[1]).toHaveTextContent('Took over a case');
   });
 
+  it('a report.view with no target is "Viewed the report list" (the queue read), and one with a target is "Viewed a report"', async () => {
+    let id = '';
+    await openAudit({}, async (x) => {
+      const f = await x.file({ target: 'Vantablob' });
+      id = f.id;
+      await x.clientFor('bea@example.test', 'senior').listReports();
+      await x.clientFor('bea@example.test', 'senior').getReport(f.id);
+    });
+    const listRows = bodyRows().filter((r) => r.textContent?.includes('Viewed the report list'));
+    expect(listRows.length).toBeGreaterThan(0);
+    for (const r of listRows) expect(within(r).getByText('None')).toBeInTheDocument();
+    const reportRow = bodyRows().find((r) => r.textContent?.includes('Viewed a report') && r.textContent.includes(personTag(id)))!;
+    expect(within(reportRow).getByRole('link', { name: `Report ${personTag(id)}` })).toBeInTheDocument();
+    expect(bodyRows().filter((r) => r.textContent?.includes('Viewed a report') && within(r).queryByText('None') !== null)).toHaveLength(0);
+  });
+
   it('opening the trail writes no audit row of its own', async () => {
     const { w } = await openAudit({}, async (x) => void (await manyRows(x, 2)));
     const before = w.cw.audit.list({ limit: 200 }).items.filter((r) => r.action !== 'report.view').length;

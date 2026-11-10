@@ -13,17 +13,15 @@ const defaultNames: LanguageNamesFactory | null =
     : null;
 
 function namesFor(make: LanguageNamesFactory | null, locale: string): LanguageNames | null {
-  if (make === null) return null;
-  try {
-    return make(locale);
-  } catch {
-    // A locale Intl refuses: names in English are better than none.
+  // A locale Intl refuses: names in English are better than none.
+  for (const loc of [locale, 'en']) {
     try {
-      return make('en');
+      return make === null ? null : make(loc);
     } catch {
-      return null;
+      // try the next
     }
   }
+  return null;
 }
 
 /**
@@ -31,29 +29,24 @@ function namesFor(make: LanguageNamesFactory | null, locale: string): LanguageNa
  * and what the server stores.
  */
 export function languageLabel(code: string, locale: string, make: LanguageNamesFactory | null = defaultNames): string {
-  const names = namesFor(make, locale);
-  if (names === null) return code;
   let name: string | undefined;
   try {
-    name = names.of(code);
+    name = namesFor(make, locale)?.of(code);
   } catch {
     return code;
   }
-  if (name === undefined || name === '' || name.toLowerCase() === code.toLowerCase()) return code;
-  return `${name} (${code})`;
+  return name === undefined || name === '' || name.toLowerCase() === code.toLowerCase() ? code : `${name} (${code})`;
 }
 
 /** Each code once, ordered by its label in the locale; codes Intl cannot name come last, in the order given. */
 export function sortLanguages(codes: readonly string[], locale: string, make: LanguageNamesFactory | null = defaultNames): string[] {
-  const unique = [...new Set(codes)];
-  const named = unique.filter((c) => languageLabel(c, locale, make) !== c);
-  const bare = unique.filter((c) => languageLabel(c, locale, make) === c);
+  const labelled = [...new Set(codes)].map((c) => ({ c, l: languageLabel(c, locale, make) }));
   let collator: Intl.Collator;
   try {
     collator = new Intl.Collator(locale);
   } catch {
     collator = new Intl.Collator('en');
   }
-  named.sort((a, b) => collator.compare(languageLabel(a, locale, make), languageLabel(b, locale, make)));
-  return [...named, ...bare];
+  const named = labelled.filter((x) => x.l !== x.c).sort((x, y) => collator.compare(x.l, y.l));
+  return [...named, ...labelled.filter((x) => x.l === x.c)].map((x) => x.c);
 }

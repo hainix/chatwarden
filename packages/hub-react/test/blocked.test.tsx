@@ -239,10 +239,18 @@ describe('when it cannot be shown', () => {
 
 describe('from a blocked line to the terms', () => {
   it('Add exception opens the exception form on Terms, filled in with the line and its language, and no text is in the address', async () => {
-    const { w, user, router } = await openBlocked({}, (x) => void x.blockLine('Vantablob', 'you zorbak lake'));
+    const { w, user, router, container } = await openBlocked({}, (x) => void x.blockLine('Vantablob', 'you zorbak lake'));
     await user.click(within(bodyRows()[0]!).getByRole('button', { name: /^Add an exception for the line from/ }));
     const form = await screen.findByRole('form', { name: 'Add an exception' });
     expect(router.path).toBe('/terms');
+    // The line is held but not shown: a mask and a Show button for this form, and no word anywhere in the markup.
+    expect(within(form).queryByLabelText('Phrase')).toBeNull();
+    expect(within(form).getByText('Blocked words, hidden')).toBeInTheDocument();
+    noWordsIn(container.innerHTML);
+    expect(screen.getByRole('checkbox', { name: 'Show words' })).not.toBeChecked();
+    await user.click(within(form).getByRole('button', { name: 'Show the phrase in this form' }));
+    // Showing it in the form is not the screen's Show words.
+    expect(screen.getByRole('checkbox', { name: 'Show words' })).not.toBeChecked();
     expect(within(form).getByLabelText('Phrase')).toHaveValue('you zorbak lake');
     expect(within(form).getByLabelText('Language')).toHaveValue('en');
     expect(screen.getByText('Filled in from a blocked line. Cut it down to the phrase that should be allowed.')).toBeInTheDocument();
@@ -253,11 +261,32 @@ describe('from a blocked line to the terms', () => {
     const { w, user } = await openBlocked({}, (x) => void x.blockLine('Vantablob', 'you zorbak lake'));
     await user.click(within(bodyRows()[0]!).getByRole('button', { name: /^Add an exception for the line from/ }));
     const form = await screen.findByRole('form', { name: 'Add an exception' });
+    await user.click(within(form).getByRole('button', { name: 'Show the phrase in this form' }));
     const phrase = within(form).getByLabelText('Phrase');
     fireEvent.change(phrase, { target: { value: 'zorbak lake' } });
     await user.click(within(form).getByRole('button', { name: 'Add exception' }));
     await waitFor(() => expect(w.sent.filter((r) => r.method === 'POST' && r.path === '/exceptions')).toHaveLength(1));
     expect(w.live.rows.exceptions.some((e) => e.phrase === 'zorbak lake')).toBe(true);
+  });
+
+  it('the prefilled line can be saved as it is without ever showing it, and the word is in no label, toast or address', async () => {
+    const { w, user, router, container } = await openBlocked({}, (x) => void x.blockLine('Vantablob', 'you zorbak lake'));
+    await user.click(within(bodyRows()[0]!).getByRole('button', { name: /^Add an exception for the line from/ }));
+    const form = await screen.findByRole('form', { name: 'Add an exception' });
+    await user.click(within(form).getByRole('button', { name: 'Add exception' }));
+    await waitFor(() => expect(w.sent.filter((r) => r.method === 'POST' && r.path === '/exceptions')).toHaveLength(1));
+    expect(w.sent.find((r) => r.path === '/exceptions')?.body).toEqual({ phrase: 'you zorbak lake', language: 'en' });
+    expect(await screen.findByText('Exception added.')).toBeInTheDocument();
+    expect(router.path).toBe('/terms');
+    noWordsIn(container.innerHTML);
+  });
+
+  it('with Show words on, the prefilled form shows its phrase at once', async () => {
+    const { user } = await openBlocked({}, (x) => void x.blockLine('Vantablob', 'you zorbak lake'));
+    await user.click(within(bodyRows()[0]!).getByRole('button', { name: /^Add an exception for the line from/ }));
+    await screen.findByRole('form', { name: 'Add an exception' });
+    await user.click(screen.getByRole('checkbox', { name: 'Show words' }));
+    expect(within(screen.getByRole('form', { name: 'Add an exception' })).getByLabelText('Phrase')).toHaveValue('you zorbak lake');
   });
 
   it('a line over 200 characters is cut to what the server accepts', async () => {
@@ -267,6 +296,7 @@ describe('from a blocked line to the terms', () => {
     const { user } = renderHub(w, { path: '/blocked' });
     await user.click(await screen.findByRole('button', { name: /^Add an exception for the line from/ }));
     const form = await screen.findByRole('form', { name: 'Add an exception' });
+    await user.click(within(form).getByRole('button', { name: 'Show the phrase in this form' }));
     expect((within(form).getByLabelText('Phrase') as HTMLInputElement).value).toHaveLength(200);
   });
 

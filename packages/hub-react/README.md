@@ -95,7 +95,7 @@ export const client = createHubClient(routerTransport(handle));
 | `#/people/:ref` | The person page, in the middle pane (the queue stays at the left): what is in force now (each with a Revoke that asks for a reason), the timeline of reports about them and every sanction (kind, rule, time left, ref code, who, where it came from, revoked), how the reports they filed have gone, and buttons to Sanction them or add a note. A sanction is a kind, a length, a rule (or "No rule covers this" with a note for the rules review), a reason and "also block their IP address for up to 24 hours"; a permanent ban needs `sanctions.apply.ban_permanent`. Nothing is sent to the player from here. Opening it writes one `history.view`; a write reads the history once more | `history.read`; Sanction and Add a note need `sanctions.apply`, Revoke needs `sanctions.revoke` |
 | `#/actions` | All actions: everyone's sanctions, newest first, 25 at a time, with an "Automatic only" filter (the kit's `auto_filter` source). The Overview's Recent actions links here with "See all" | `history.read` |
 | `#/terms` | Terms and exceptions by language (named by `Intl.DisplayNames`, the code where it has no name): word, note, last changed by and when, blocks in the last 30 days, and an Active switch. The words are hidden until "Show words" is on. Add or edit a term (a dry run first: `POST /terms/check`), add or edit an exception, and "Test a message" | `terms.read`; Add, Edit and the switches need `terms.write` |
-| `#/blocked` | The lines the term filter refused, over 24 hours, 7 or 30 days: time, person tag, room, the term and the blocked text, both hidden until shown (per line, or "Show blocked words"). "Add exception" opens the exception form on Terms, filled in; "View term" opens Terms at that term. Opening it, and each change of window, writes one `blocked.view`; showing a word reads nothing | `blocked.read`; the term needs `terms.read`; Add exception needs `terms.write` |
+| `#/blocked` | The lines the term filter refused, over 24 hours, 7 or 30 days: time, the person (their handle when a report named them, and the short tag), room, the term and the blocked text, both hidden until shown (per line, with Show beside the text, or "Show blocked words"). "Add exception" opens the exception form on Terms, filled in; "View term" opens Terms at that term. Opening it, and each change of window, writes one `blocked.view`; showing a word reads nothing | `blocked.read`; the term needs `terms.read`; Add exception needs `terms.write` |
 | `#/gaps` | Rule gaps: open gaps with their note and ref code, closed ones below. An owner closes one as "Made it rule N" (the rules in force) or "Not a rule" | `gaps.read`; closing needs `gaps.close` |
 | `#/audit` | The audit trail, newest first, 50 at a time: time, staff member, role, action and target, filtered by staff member and action | `audit.read` (a senior and up) |
 | `#/guide` | The Community Rules and the escalation ladder (the profile's own, else the kit's `LADDER_TABLE`) from the policy data, then the generated moderator guide (`GET /policy?format=markdown`) through a safe renderer | `policy.read` |
@@ -198,11 +198,13 @@ Deciding writes `report.decide` and nothing else about the case. The queue list 
 **Words stay hidden.** A blocked word is hidden until a moderator chooses to see it, on every screen that holds one. On Terms, "Show words" (off by default)
 shows the words, and until then each row is named by its place ("Edit term 3", never by the word) so a screen reader hears none. On Blocked, the term and the
 blocked text of a line show behind that line's Show button, or all at once with "Show blocked words". A hidden word is not in the page at all (a test checks
-the markup), and showing one reads nothing again. A note is staff text and shows as written.
+the markup), and showing one reads nothing again. A word that is already in a form (an edit, or a blocked line sent over to add an exception) is held in the form's state and
+shown as a mask with its own Show button until that is pressed or Show words is on; saving works without showing it, and the lines a dry run finds hide behind the same Show. A note is
+staff text, so it shows as written (it can mention a word; that is the owner's ruling, not an oversight).
 
 **Adding a term.** The form asks for the word, its language and an optional note. A new or changed word is first checked with a dry run (`POST /terms/check`,
 which writes nothing). If it would also block lines that are fine today, the lines are listed (twenty, then a count) and the save waits for "Save anyway", an
-in-page confirm. An exception is saved at once, since it only lets things through. A flat 400 `invalid_term` reads "The list refused this word (it may be a
+in-page confirm. Turning a term back on runs the same dry run, and its hits ask for the same confirm inline on that row. An exception is saved at once, since it only lets things through. A flat 400 `invalid_term` reads "The list refused this word (it may be a
 duplicate, malformed, or the last active word)." The same sentence covers a switch that would turn off the last active term. A network failure keeps what you typed and offers Try again.
 
 **Blocked to Terms.** "Add exception" and "View term" go to Terms through the hub's session, not the address, so nothing but `#/terms` is in the URL. The exception
@@ -215,8 +217,11 @@ exception forms). Blocked writes one `blocked.view` each time it opens and each 
 **Audit shows ids, not text.** A person or report is a short tag and a link; a term or exception is only "A term" or "An exception", because the id of a row can be
 the word itself. The trail never holds chat text.
 
+**The Guide draws each thing once.** The Community Rules and the ladder (with the notes on which rules turn a restriction into a ban and which always read the High column) are drawn from the
+policy data. The generated guide is asked for without those two sections (`GET /policy?format=markdown&omit=rules,ladder`; `omitSections` in core's `moderatorGuide`), so nothing is shown twice and the rest keeps the kit's order.
+
 **The guide is rendered safely.** `Markdown` (internal) draws headings, paragraphs, lists, emphasis, code, tables and links, and nothing else. Raw HTML, images,
-quotes and entities are shown as the text they are. A link is drawn only for `https:` or a relative address; any other link keeps its words and loses its address.
+quotes and entities are shown as the text they are. A link is drawn only for `https:` or a relative address on this site (no backslash, no `//` or `/ ` start, no whitespace or control character); any other link keeps its words and loses its address. A line is read for block syntax in its first 2,000 characters only, and the scans are linear, so a hostile guide cannot stall the page.
 No string is ever turned into HTML.
 
 ### `HubClient`
@@ -244,7 +249,7 @@ No string is ever turned into HTML.
 | `addTerm(input)`, `updateTerm(id, patch)`, `setTermActive(id, active)` | `POST /terms`, `PATCH /terms/:id`, `POST /terms/:id/active` |
 | `addException(input)`, `updateException(id, patch)`, `setExceptionActive(id, active)` | `POST /exceptions`, `PATCH /exceptions/:id`, `POST /exceptions/:id/active` |
 | `listBlocked({ days? })` | `GET /blocked` |
-| `policy({ format? })` | `GET /policy` |
+| `policy({ format?, omit? })` | `GET /policy` (`omit`: `['rules', 'ladder']` leaves those sections out of the generated guide) |
 | `listAudit({ cursor?, limit?, actor?, action? })` | `GET /audit` |
 | `changes(since?)` | `GET /changes` |
 | `claimCase(person, { takeOver? })` | `POST /cases/:ref/claim` |

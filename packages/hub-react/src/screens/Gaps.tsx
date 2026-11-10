@@ -164,7 +164,6 @@ export function Gaps() {
           {t('hub.gaps.title')}
         </h2>
       </div>
-      <p className="cw-hint">{t('hub.gaps.intro')}</p>
       {!canClose && <p className="cw-hint">{t('hub.gaps.ownerOnly')}</p>}
       <Fetched state={state} what={t('hub.state.what.gaps')}>
         {({ items }) => {

@@ -9,6 +9,7 @@ import type {
   ConductLevel,
   DecisionAction,
   GapRow,
+  GuideSection,
   ReporterRecord,
   ReportCategory,
   SanctionGroupView,
@@ -18,7 +19,7 @@ import type {
 } from '@chatwarden/core';
 import type { ExceptionListRow, Me, PermissionKey, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
-export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
+export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 export type { Me, PermissionKey, ReportSummary, Role };
 
 /** One page of a list that pages with a cursor. `next` is null on the last page. */
@@ -186,6 +187,8 @@ export interface BlockedLine {
   term: string | null;
   language: string | null;
   person: string;
+  /** The name to show for the person (the newest non-blank handle on a report against them), or null. */
+  handle: string | null;
   text: string;
 }
 

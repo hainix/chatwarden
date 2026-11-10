@@ -22,6 +22,11 @@ describe('isSafeHref', () => {
     '?page=2',
     'rules/one',
     'rules/a:b',
+    '/terms',
+    '#guide',
+    '/a/b?c=d#e',
+    '/%5Cevil.example.test',
+    '/path:with:colons',
   ])('allows %s', (href) => {
     expect(isSafeHref(href)).toBe(true);
   });
@@ -43,10 +48,53 @@ describe('isSafeHref', () => {
     '\\\\evil.example.test\\x',
     '',
     '   ',
+    '/\\evil.example.test',
+    '/\\/evil.example.test',
+    '/\\\\evil.example.test',
+    '/ /evil.example.test',
+    '/\t/evil.example.test',
+    '/\n/evil.example.test',
+    '/ /evil.example.test',
+    '/ /evil.example.test',
+    '\t//evil.example.test',
+    '\n//evil.example.test',
+    ' \t //evil.example.test',
+    ' //evil.example.test',
+    'rules\\x',
+    'a\\b',
+    '/rules\\..',
+    'https:\\/evil.example.test',
+    'https:/\\evil.example.test',
+    'https:\\\\evil.example.test',
+    'java\u0000script:alert(1)',
+    'jav\tascript:alert(1)',
     'https:',
     'https://',
   ])('refuses %j', (href) => {
     expect(isSafeHref(href)).toBe(false);
+  });
+});
+
+describe('relative addresses stay on this site', () => {
+  it.each(['/terms', '#guide', './x', '../x', '?q=1', 'rules/one', '/%5Cevil.example.test', '/a:b', '/a//b'])('%s resolves to the hub origin', (href) => {
+    expect(isSafeHref(href)).toBe(true);
+    expect(new URL(href, 'https://hub.example.test/app/').origin).toBe('https://hub.example.test');
+  });
+
+  it('every address it allows resolves to this origin or is a plain https one (a sweep of slash, backslash and space mixes)', () => {
+    const bits = ['/', '\\', ' ', '\t', 'a', ':', '%5C', '.', '?', '#'];
+    let checked = 0;
+    for (const a of bits)
+      for (const b of bits)
+        for (const c of bits) {
+          const href = `${a}${b}${c}evil.example.test`;
+          if (!isSafeHref(href)) continue;
+          checked += 1;
+          const url = new URL(href, 'https://hub.example.test/app/');
+          const plainHttps = href.trim().toLowerCase().startsWith('https://');
+          expect(url.origin === 'https://hub.example.test' || plainHttps, JSON.stringify(href)).toBe(true);
+        }
+    expect(checked).toBeGreaterThan(20);
   });
 });
 
@@ -233,6 +281,47 @@ describe('hostile input', () => {
   it('the output is built from elements, never from a string (control)', () => {
     const { container } = show('**x**');
     expect(container.innerHTML).toBe('<div class="cw-doc"><p><strong>x</strong></p></div>');
+  });
+});
+
+describe('long and pathological lines', () => {
+  const ms = (source: string): number => {
+    const started = performance.now();
+    show(source);
+    return performance.now() - started;
+  };
+
+  it.each([
+    ['60,000 spaces', ' '.repeat(60_000)],
+    ['a heading marker and 60,000 spaces', `# ${' '.repeat(60_000)}x`],
+    ['a table and 60,000 spaces in a row', `| a |\n| --- |\n|${' '.repeat(60_000)}|`],
+    ['a separator-looking line of spaces', `|${' '.repeat(60_000)}\n${' '.repeat(60_000)}-`],
+    ['a list marker and 60,000 spaces', `-${' '.repeat(60_000)}`],
+    ['60,000 tabs', '\t'.repeat(60_000)],
+    ['5,000 unmatched [', '['.repeat(5_000)],
+    ['unmatched link openers', '[x]('.repeat(1_000)],
+    ['5,000 unmatched stars', '*a '.repeat(2_000)],
+    ['unmatched double stars', '**a '.repeat(1_500)],
+    ['5,000 unmatched underscores', '_a '.repeat(2_000)],
+    ['5,000 unmatched backticks', '`'.repeat(5_001)],
+    ['5,000 backslashes', '\\'.repeat(5_000)],
+    ['nested openers', '[*_`'.repeat(1_250)],
+  ])('%s renders in well under 100 ms', (_name, source) => {
+    ms(source);
+    expect(Math.min(ms(source), ms(source))).toBeLessThan(100);
+  });
+
+  it('a line past the cap keeps all its words as plain text', () => {
+    const words = `${'word '.repeat(1_000)}tail-end`;
+    const { container } = show(`# ${words}`);
+    expect(container.querySelector('h3')?.textContent).toBe(words);
+    const long = show(`${'x'.repeat(5_000)} **late**`);
+    expect(long.container.textContent).toContain('late');
+  });
+
+  it('a long line that is a table row still draws a table', () => {
+    const { container } = show(`| a | b |\n| --- | --- |\n| ${'c'.repeat(2_500)} | d |`);
+    expect(container.querySelectorAll('tbody td')).toHaveLength(2);
   });
 });
 

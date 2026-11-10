@@ -8,6 +8,7 @@ import type {
   ExceptionInput,
   ExceptionPatch,
   GapRow,
+  GuideSection,
   ListAuditQuery,
   ListReportsQuery,
   ListSanctionsQuery,
@@ -180,7 +181,7 @@ export interface HubClient {
   /** `GET /blocked`: the lines the term filter refused (default the last 7 days). */
   listBlocked(options?: { days?: BlockedDays }): Promise<{ items: BlockedLine[] }>;
   /** `GET /policy`: the profile, rules and generated documents. */
-  policy(options?: { format?: PolicyFormat }): Promise<PolicyDocs>;
+  policy(options?: { format?: PolicyFormat; omit?: readonly GuideSection[] }): Promise<PolicyDocs>;
   /** `GET /audit` (senior). */
   listAudit(query?: ListAuditQuery): Promise<Page<AuditItem>>;
 }
@@ -237,7 +238,7 @@ export function createHubClient(transport: Transport): HubClient {
     setReasonActive: (id, active) => post<{ reason: Reason }>(`/reasons/${enc(id)}/active`, { active }),
 
     listBlocked: (options = {}) => get<{ items: BlockedLine[] }>('/blocked', q({ days: options.days })),
-    policy: (options = {}) => get<PolicyDocs>('/policy', q({ format: options.format })),
+    policy: (options = {}) => get<PolicyDocs>('/policy', q({ format: options.format, omit: options.omit === undefined || options.omit.length === 0 ? undefined : options.omit.join(',') })),
     listAudit: (query = {}) => get<Page<AuditItem>>('/audit', q({ cursor: query.cursor, limit: query.limit, actor: query.actor, action: query.action })),
   };
 }

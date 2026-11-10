@@ -2510,7 +2510,7 @@
 }
 .cw-hub .cw-hits-list {
   display: grid;
-  gap: 2px;
+  gap: var(--cw-space-1);
   font-family: var(--cw-font-mono);
   font-size: var(--cw-text-s);
 }
@@ -2563,6 +2563,12 @@
 .cw-hub .cw-gap-form {
   max-width: 28rem;
 }
+.cw-hub .cw-field .cw-field-label {
+  font-weight: var(--cw-weight-strong);
+}
+.cw-hub .cw-term-confirm td {
+  padding: var(--cw-space-3) var(--cw-space-4);
+}
 .cw-hub .cw-ladder th[scope='row'] {
   color: var(--cw-ink);
   white-space: nowrap;
@@ -2608,7 +2614,7 @@
   display: grid;
   gap: var(--cw-space-1);
   margin: 0;
-  padding-left: 1.25rem;
+  padding-left: var(--cw-space-5);
 }
 .cw-hub .cw-doc ul {
   list-style: disc;
@@ -2622,8 +2628,8 @@
   overflow-wrap: anywhere;
 }
 .cw-hub .cw-doc code {
-  padding: 0 0.3em;
-  border-radius: 3px;
+  padding: 0 var(--cw-space-1);
+  border-radius: var(--cw-radius-s);
   background: var(--cw-surface-sunken);
   font-family: var(--cw-font-mono);
   font-size: 0.92em;

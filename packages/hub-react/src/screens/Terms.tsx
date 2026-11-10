@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Masked } from '../case/Transcript.js';
 import { actorName } from '../claims.js';
@@ -8,6 +8,7 @@ import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
 import { termErrorText } from '../labels.js';
 import { useToasts } from '../toasts.js';
+import { HitsConfirm } from '../terms/HitsConfirm.js';
 import { TermForm } from '../terms/TermForm.js';
 import type { TermKind, TermRowDraft } from '../terms/TermForm.js';
 import { languageLabel, sortLanguages } from '../terms/languages.js';
@@ -45,6 +46,9 @@ export function Terms() {
   );
   const [notice, setNotice] = useState<HubError | null>(null);
   const toggling = useRef(false);
+  // Turning a term back on is dry-run first: lines it would also block wait for a confirm on that row.
+  const [confirm, setConfirm] = useState<{ id: string; hits: string[]; revealed: boolean } | null>(null);
+  const switches = useRef(new Map<string, HTMLInputElement>());
   const addTermButton = useRef<HTMLButtonElement>(null);
   const addExceptionButton = useRef<HTMLButtonElement>(null);
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -56,8 +60,11 @@ export function Terms() {
   const canWrite = can('terms.write');
   const data = list.data;
   const pickedId = handoff?.kind === 'term' ? handoff.id : null;
+  // The marked row takes the focus and the scroll once, when the list first arrives: a reload after a switch must not take them back.
+  const pickedDone = useRef(false);
   useEffect(() => {
-    if (pickedId === null || data === undefined) return;
+    if (pickedId === null || data === undefined || pickedDone.current) return;
+    pickedDone.current = true;
     const row = picked.current.get(pickedId);
     row?.focus({ preventScroll: true });
     row?.scrollIntoView?.({ block: 'center' });
@@ -102,18 +109,29 @@ export function Terms() {
     });
   };
 
-  const toggle = async (kind: TermKind, row: Row, next: boolean): Promise<void> => {
+  const toggle = async (kind: TermKind, row: Row, next: boolean, confirmed = false): Promise<void> => {
     if (toggling.current) return;
     toggling.current = true;
     setNotice(null);
+    let reload = true;
     try {
+      if (kind === 'term' && next && !confirmed) {
+        const check = await client.checkTerm({ term: row.word, language: row.language });
+        if (check.hits.length > 0) {
+          setConfirm({ id: row.id, hits: check.hits, revealed: false });
+          // Nothing changed on the server: there is nothing to read again.
+          reload = false;
+          return;
+        }
+      }
       await (kind === 'term' ? client.setTermActive(row.id, next) : client.setExceptionActive(row.id, next));
+      setConfirm(null);
       toasts.push({ text: t(next ? 'hub.terms.toast.on' : 'hub.terms.toast.off') });
     } catch (e) {
       setNotice(toHubError(e));
     } finally {
       toggling.current = false;
-      list.reload();
+      if (reload) list.reload();
     }
   };
 
@@ -143,8 +161,8 @@ export function Terms() {
             const by = row.updatedBy ?? row.addedBy;
             const at = row.updatedAt ?? row.addedAt;
             return (
+              <Fragment key={row.id}>
               <tr
-                key={row.id}
                 tabIndex={row.id === pickedId && kind === 'term' ? -1 : undefined}
                 ref={(el) => {
                   if (kind !== 'term') return;
@@ -176,6 +194,10 @@ export function Terms() {
                 <td>
                   <input
                     type="checkbox"
+                    ref={(el) => {
+                      if (el === null) switches.current.delete(row.id);
+                      else switches.current.set(row.id, el);
+                    }}
                     checked={row.active}
                     disabled={!canWrite}
                     aria-label={t('hub.terms.active', { name: rowName })}
@@ -199,6 +221,24 @@ export function Terms() {
                   )}
                 </td>
               </tr>
+              {kind === 'term' && confirm !== null && confirm.id === row.id && (
+                <tr className="cw-term-confirm">
+                  <td colSpan={6}>
+                    <HitsConfirm
+                      hits={confirm.hits}
+                      visible={shown || confirm.revealed}
+                      busy={toggling.current}
+                      onReveal={() => setConfirm({ ...confirm, revealed: true })}
+                      onSave={() => void toggle('term', row, true, true)}
+                      onBack={() => {
+                        setConfirm(null);
+                        queueMicrotask(() => switches.current.get(row.id)?.focus());
+                      }}
+                    />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>
@@ -228,7 +268,6 @@ export function Terms() {
       }
     >
       <p className="cw-hint">{t('hub.terms.intro')}</p>
-      <p className="cw-hint">{t('hub.terms.showWords.hint')}</p>
       {list.error !== null && <ErrorBlock error={list.error} what={t('hub.state.what.terms')} onRetry={list.reload} />}
       {notice !== null && (
         <Notice tone="bad" role="alert">
@@ -244,6 +283,7 @@ export function Terms() {
             languages={languageCodes}
             prefill={form.prefill}
             defaultLanguage={defaultLanguage}
+            showWords={shown}
             onClose={close}
             onSaved={() => {
               close();

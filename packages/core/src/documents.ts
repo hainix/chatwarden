@@ -1,4 +1,4 @@
-import { DEFAULT_SEVERE_RULES, lengthLabel, outcomeLabel } from './ladder.js';
+import { DEFAULT_AREA_RULES, DEFAULT_SEVERE_RULES, lengthLabel, outcomeLabel } from './ladder.js';
 import type { LadderCell } from './ladder.js';
 import { validateProfile } from './profile.js';
 import type { GuidelineCover, GuidelineTier, ModerationProfile, Outcome } from './profile.js';
@@ -342,8 +342,6 @@ function ruleLabels(rules: CommunityRules, numbers: readonly number[] | undefine
 /** What each record step means: the one definition the guide and the agent brief share. */
 const RECORD_STEPS =
   '0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent';
-
-const DEFAULT_AREA_RULES: readonly number[] = [5, 6];
 
 function areaRuleList(policy: DocumentPolicy): Array<{ number: number; title: string }> {
   return ruleLabels(policy.rules, policy.profile.areaRules ?? DEFAULT_AREA_RULES);

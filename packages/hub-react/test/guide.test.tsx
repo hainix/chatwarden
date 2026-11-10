@@ -100,10 +100,10 @@ describe('the generated guide', () => {
     const { w } = await openGuide();
     const panel = screen.getByRole('region', { name: 'The full moderator guide' });
     const md = w.cw.documents.moderatorGuide({ format: 'markdown' });
-    expect(md).toContain('## Escalation ladder');
+    expect(md).toContain('## Conduct levels');
     expect(within(panel).getByRole('heading', { level: 3, name: /^Moderator guide:/ })).toBeInTheDocument();
-    expect(within(panel).getByRole('heading', { level: 4, name: 'Escalation ladder' })).toBeInTheDocument();
-    expect(within(panel).getAllByRole('region', { name: /^Table \d+$/ }).length).toBeGreaterThanOrEqual(3);
+    expect(within(panel).getByRole('heading', { level: 4, name: 'Conduct levels' })).toBeInTheDocument();
+    expect(within(panel).getAllByRole('region', { name: /^Table \d+$/ }).length).toBeGreaterThanOrEqual(2);
     expect(panel.textContent).not.toMatch(/\\[.*_`#|]|\*\*/);
     expect(panel.querySelector('script, img, iframe')).toBeNull();
   });
@@ -111,7 +111,7 @@ describe('the generated guide', () => {
   it('asks for the markdown format and reads the policy once, audited once', async () => {
     const { w } = await openGuide();
     expect(policyReads(w)).toHaveLength(1);
-    expect(policyReads(w)[0]?.query).toEqual({ format: 'markdown' });
+    expect(policyReads(w)[0]?.query).toEqual({ format: 'markdown', omit: 'rules,ladder' });
     expect(audits(w, 'policy.view')).toHaveLength(1);
   });
 
@@ -129,6 +129,62 @@ describe('the generated guide', () => {
     const { w } = await openGuide();
     const name = w.cw.profile.name;
     expect(screen.getByRole('heading', { level: 3, name: new RegExp(`Moderator guide: ${name}`) })).toBeInTheDocument();
+  });
+});
+
+describe('nothing is shown twice', () => {
+  it('each rule title and rule text appears exactly once on the Guide', async () => {
+    const { w } = await openGuide();
+    const main = screen.getByRole('main');
+    for (const rule of w.cw.rules.all()) {
+      expect(within(main).queryAllByText(rule.title), `title of rule ${rule.number}`).toHaveLength(1);
+      expect(main.textContent?.split(rule.text).length, `text of rule ${rule.number}`).toBe(2);
+    }
+  });
+
+  it('the ladder is one table, with one heading, and the generated guide has no ladder or rules section', async () => {
+    const { w } = await openGuide();
+    const main = screen.getByRole('main');
+    expect(within(main).getAllByRole('columnheader', { name: 'Step' })).toHaveLength(1);
+    expect(within(main).getAllByRole('heading', { name: 'Escalation ladder' })).toHaveLength(1);
+    expect(within(main).getAllByRole('heading', { name: 'Community Rules' })).toHaveLength(1);
+    expect(within(main).queryByRole('columnheader', { name: /^Low \/ medium/ })).toBeNull();
+    const guide = screen.getByRole('region', { name: 'The full moderator guide' });
+    expect(guide.textContent).not.toContain('Low / medium');
+    for (const rule of w.cw.rules.all()) expect(guide.textContent, `rule ${rule.number}`).not.toContain(rule.title);
+  });
+
+  it('keeps the rest of the guide in the kit order, and the rules and ladder panels come before it', async () => {
+    const { w } = await openGuide();
+    const panel = screen.getByRole('region', { name: 'The full moderator guide' });
+    const md = w.cw.documents.moderatorGuide({ format: 'markdown', omitSections: ['rules', 'ladder'] });
+    const expected = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
+    expect(within(panel).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(expected);
+    const order = [...screen.getByRole('main').querySelectorAll('section > .cw-panel-head h2')].map((h) => h.textContent);
+    expect(order).toEqual(['Community Rules', 'Escalation ladder', 'The full moderator guide']);
+  });
+
+  it('says which rules turn a restriction into a ban and which always read the High column, from the data, once', async () => {
+    const { w } = await openGuide();
+    const main = screen.getByRole('main');
+    const area = w.cw.rules.all().filter((r) => [5, 6].includes(r.number) && r.retired !== true);
+    const severe = w.cw.rules.all().filter((r) => r.number === 1);
+    expect(within(main).getAllByText(/^Rules that turn a chat restriction into a ban/)).toHaveLength(1);
+    expect(within(main).getAllByText(/^Rules that always read the High column/)).toHaveLength(1);
+    const areaText = within(main).getByText(/^Rules that turn a chat restriction into a ban/).textContent ?? '';
+    for (const r of area) expect(areaText).toContain(`Rule ${r.number}: ${r.title}`);
+    expect(within(main).getByText(/^Rules that always read the High column/).textContent).toContain(`Rule ${severe[0]!.number}: ${severe[0]!.title}`);
+  });
+
+  it('follows the profile own area and severe rules, and drops a note whose rules are all retired or absent', async () => {
+    const w = await hubWorld({ retire: [5, 6] });
+    const real = await w.direct.policy({ format: 'markdown', omit: ['rules', 'ladder'] });
+    w.intercept.fn = (req) => (req.path === '/policy' ? { status: 200, body: { ...real, profile: { ...real.profile, areaRules: [2, 3], severeRules: [] } } } : undefined);
+    renderHub(w, { path: '/guide' });
+    await screen.findByRole('region', { name: 'The full moderator guide' });
+    const main = screen.getByRole('main');
+    expect(within(main).getByText(/^Rules that turn a chat restriction into a ban/).textContent).toMatch(/Rule 2: .*Rule 3: /);
+    expect(within(main).queryByText(/^Rules that always read the High column/)).toBeNull();
   });
 });
 

@@ -1,17 +1,17 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Field } from '../case/ActionEditor.js';
+import { Masked } from '../case/Transcript.js';
 import { toHubError } from '../client.js';
 import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
 import type { Problem } from '../decision.js';
 import { termErrorText } from '../labels.js';
 import { useToasts } from '../toasts.js';
+import { HitsConfirm } from './HitsConfirm.js';
 
 /** The longest word or phrase, and note, the server accepts. */
 export const WORD_MAX = 200;
 export const NOTE_MAX = 500;
-/** How many dry-run hits are listed before "and N more". */
-export const HITS_SHOWN = 20;
 /** A language tag as the server takes it: `en`, `es`, `pt-BR`. */
 const LANGUAGE_RE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8}){0,3}$/;
 
@@ -35,6 +35,8 @@ export interface TermFormProps {
   prefill: { word: string; language: string } | null;
   /** The language a new word starts with. */
   defaultLanguage: string;
+  /** The screen's "Show words" switch: when it is on, the word is shown at once. */
+  showWords: boolean;
   onClose: () => void;
   /** The change was saved. */
   onSaved: (done: 'added' | 'saved') => void;
@@ -61,7 +63,7 @@ function problemsOf(word: string, language: string, note: string): Problems {
  * hits, the lines it would block are listed and the save waits for "Save anyway", an in-page confirm. An exception is saved at once
  * (it only lets things through). A refusal keeps everything typed; a network failure offers Try again; a double click sends once.
  */
-export function TermForm({ kind, row, languages, prefill, defaultLanguage, onClose, onSaved }: TermFormProps) {
+export function TermForm({ kind, row, languages, prefill, defaultLanguage, showWords, onClose, onSaved }: TermFormProps) {
   const { t, client } = useHub();
   const toasts = useToasts();
   const base = useId();
@@ -75,20 +77,24 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, onClo
   const [unchanged, setUnchanged] = useState(false);
   const [hits, setHits] = useState<string[] | null>(null);
   const wordRef = useRef<HTMLInputElement>(null);
+  const showRef = useRef<HTMLButtonElement>(null);
+  // A word that was already there (an edit, or a blocked line) stays hidden until it is shown here or the screen shows words.
+  const [revealed, setRevealed] = useState(false);
+  const held = row !== null || prefill !== null;
+  const hidden = held && !showWords && !revealed;
   const languageRef = useRef<HTMLInputElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
-  const hitsRef = useRef<HTMLDivElement>(null);
   // A second click while one is on its way does nothing: only the first call goes on to the toast and the reload.
   const sending = useRef(false);
   // Whether the last attempt was a confirmed "Save anyway", so Try again repeats that and not the dry run.
   const confirmedRef = useRef(false);
 
   useEffect(() => {
-    wordRef.current?.focus();
+    (wordRef.current ?? showRef.current)?.focus();
   }, []);
   useEffect(() => {
-    if (hits !== null) hitsRef.current?.focus();
-  }, [hits]);
+    if (revealed) wordRef.current?.focus();
+  }, [revealed]);
 
   const problems = problemsOf(word, language, note);
   const shown: Problems = attempted ? problems : {};
@@ -101,6 +107,8 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, onClo
     confirmedRef.current = confirmed;
     setAttempted(true);
     setUnchanged(false);
+    // A problem with a hidden word cannot be fixed without seeing it.
+    if (problems.word !== undefined && hidden) setRevealed(true);
     const first = problems.word !== undefined ? wordRef : problems.language !== undefined ? languageRef : problems.note !== undefined ? noteRef : null;
     if (first !== null) {
       first.current?.focus();
@@ -155,8 +163,6 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, onClo
   };
 
   const retryable = error !== null && (error.code === 'network' || error.status >= 500 || error.status === 429);
-  const listed = hits === null ? [] : hits.slice(0, HITS_SHOWN);
-  const more = hits === null ? 0 : hits.length - listed.length;
   const decide = hits !== null;
 
   return (
@@ -173,15 +179,28 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, onClo
       {prefill !== null && !editing && <p className="cw-hint">{t('hub.terms.form.prefilled')}</p>}
       <fieldset disabled={decide}>
         <div className="cw-termform-fields">
-          <Field
-            id={`${base}-word`}
-            label={t(label)}
-            hint={t(kind === 'term' ? 'hub.terms.form.word.hint' : 'hub.terms.form.phrase.hint', { max: WORD_MAX })}
-            counter={t('hub.terms.form.counter', { count: word.trim().length, max: WORD_MAX })}
-            problem={shown.word}
-          >
-            {(a) => <input {...a} ref={wordRef} type="text" className="cw-input" autoComplete="off" spellCheck={false} value={word} onChange={(e) => setWord(e.target.value)} />}
-          </Field>
+          {hidden ? (
+            <div className="cw-field">
+              <span className="cw-field-label">
+                {t(label)}
+              </span>
+              <div className="cw-row-actions">
+                <Masked />
+                <button ref={showRef} type="button" className="cw-linkbtn" aria-label={t(kind === 'term' ? 'hub.terms.form.show.word' : 'hub.terms.form.show.phrase')} onClick={() => setRevealed(true)}>
+                  {t('hub.terms.form.show')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <Field
+              id={`${base}-word`}
+              label={t(label)}
+              counter={t('hub.terms.form.counter', { count: word.trim().length, max: WORD_MAX })}
+              problem={shown.word}
+            >
+              {(a) => <input {...a} ref={wordRef} type="text" className="cw-input" autoComplete="off" spellCheck={false} value={word} onChange={(e) => setWord(e.target.value)} />}
+            </Field>
+          )}
           <Field id={`${base}-language`} label={t('hub.terms.form.language')} hint={t('hub.terms.form.language.hint')} problem={shown.language}>
             {(a) => (
               <>
@@ -207,18 +226,17 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, onClo
       </fieldset>
 
       {hits !== null && (
-        <div className="cw-hits" role="alert" tabIndex={-1} ref={hitsRef}>
-          <p>
-            <strong>{t('hub.terms.hits.title', { count: hits.length })}</strong>
-          </p>
-          <p className="cw-hint">{t('hub.terms.hits.body')}</p>
-          <ul className="cw-hits-list" aria-label={t('hub.terms.hits.list')}>
-            {listed.map((line, i) => (
-              <li key={i}>{line}</li>
-            ))}
-          </ul>
-          {more > 0 && <p className="cw-hint">{t('hub.terms.hits.more', { count: more })}</p>}
-        </div>
+        <HitsConfirm
+          hits={hits}
+          visible={!hidden}
+          busy={busy !== null}
+          onReveal={() => setRevealed(true)}
+          onSave={() => void run(true)}
+          onBack={() => {
+            setHits(null);
+            queueMicrotask(() => (wordRef.current ?? showRef.current)?.focus());
+          }}
+        />
       )}
 
       {unchanged && <p className="cw-field-error">{t('hub.terms.form.error.unchanged')}</p>}
@@ -234,23 +252,7 @@ export function TermForm({ kind, row, languages, prefill, defaultLanguage, onClo
       )}
 
       <div className="cw-action-foot">
-        {decide ? (
-          <>
-            <button type="button" className="cw-btn cw-btn--primary" aria-disabled={busy !== null} aria-busy={busy !== null} onClick={() => void run(true)}>
-              {t('hub.terms.hits.saveAnyway')}
-            </button>
-            <button
-              type="button"
-              className="cw-btn"
-              onClick={() => {
-                setHits(null);
-                queueMicrotask(() => wordRef.current?.focus());
-              }}
-            >
-              {t('hub.terms.hits.back')}
-            </button>
-          </>
-        ) : (
+        {!decide && (
           <button type="submit" className="cw-btn cw-btn--primary" aria-disabled={busy !== null} aria-busy={busy !== null}>
             {busy === 'check' ? t('hub.terms.form.checking') : submitLabel}
           </button>

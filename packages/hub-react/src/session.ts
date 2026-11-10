@@ -20,7 +20,10 @@ export type Handoff = { kind: 'exception'; phrase: string; language: string } | 
 export interface Session {
   /** The one thing waiting for the next screen, if anything. `peek` reads it, `clear` drops it (an unmount may read twice). */
   handoff: { set(h: Handoff): void; peek(): Handoff | null; clear(): void };
-  /** The rules, the profile and the generated documents. Read once; kept until the hub closes. */
+  /**
+   * The rules, the profile and the generated documents, with the guide's Community Rules and ladder left out (the Guide draws
+   * both from the data). Read once; kept until the hub closes.
+   */
   policy(): Promise<PolicyDocs>;
   /** The saved reasons a moderator can use (switched-off ones left out). */
   reasons(): Promise<Reason[]>;
@@ -52,7 +55,7 @@ function memo<T>(load: () => Promise<T>, ttl: number | null, now: () => number):
 /** A session over one client. `now` is the hub's clock. */
 export function createSession(client: HubClient, now: () => number): Session {
   const reporters = new Map<string, Kept<ReporterRecord>>();
-  const policy = memo(() => client.policy({ format: 'markdown' }), null, now);
+  const policy = memo(() => client.policy({ format: 'markdown', omit: ['rules', 'ladder'] }), null, now);
   const reasons = memo(async () => (await client.listReasons()).reasons.filter((r) => r.active), SESSION_TTL_MS, now);
   const blocked = memo(async () => (await client.listBlocked({ days: 7 })).items, SESSION_TTL_MS, now);
   let waiting: Handoff | null = null;

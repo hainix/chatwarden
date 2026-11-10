@@ -425,7 +425,8 @@ describe('exceptions', () => {
 
   it('edits an exception through PATCH /exceptions/:id', async () => {
     const { w, user } = await openTerms();
-    await user.click(screen.getByRole('button', { name: 'Edit exception 1' }));
+    await user.click(showWords());
+    await user.click(screen.getByRole('button', { name: 'Edit tarvo lake' }));
     const form = await screen.findByRole('form', { name: 'Edit an exception' });
     expect(within(form).getByLabelText('Phrase')).toHaveValue('tarvo lake');
     await user.type(within(form).getByLabelText('Note'), 'the lake');
@@ -438,7 +439,8 @@ describe('exceptions', () => {
 describe('editing a term', () => {
   it('opens filled in; a note-only change is one PATCH with no dry run', async () => {
     const { w, user } = await openTerms();
-    await user.click(screen.getByRole('button', { name: 'Edit term 7' }));
+    await user.click(showWords());
+    await user.click(screen.getByRole('button', { name: 'Edit snerp' }));
     const form = await screen.findByRole('form', { name: 'Edit a term' });
     expect(within(form).getByLabelText('Word')).toHaveValue('snerp');
     expect(within(form).getByLabelText('Language')).toHaveValue('en');
@@ -454,7 +456,8 @@ describe('editing a term', () => {
 
   it('a changed word is checked first, and its hits need Save anyway', async () => {
     const { w, user } = await openTerms();
-    await user.click(screen.getByRole('button', { name: 'Edit term 7' }));
+    await user.click(showWords());
+    await user.click(screen.getByRole('button', { name: 'Edit snerp' }));
     const form = await screen.findByRole('form', { name: 'Edit a term' });
     await user.clear(within(form).getByLabelText('Word'));
     await user.type(within(form).getByLabelText('Word'), 'zorba');
@@ -490,9 +493,10 @@ describe('editing a term', () => {
 
   it('opening another row\'s Edit swaps the form, and a refused edit keeps the input', async () => {
     const { user } = await openTerms();
-    await user.click(screen.getByRole('button', { name: 'Edit term 1' }));
+    await user.click(showWords());
+    await user.click(screen.getByRole('button', { name: 'Edit zorbak' }));
     await screen.findByRole('form', { name: 'Edit a term' });
-    await user.click(screen.getByRole('button', { name: 'Edit term 2' }));
+    await user.click(screen.getByRole('button', { name: 'Edit vlemmo' }));
     expect(screen.getAllByRole('form', { name: 'Edit a term' })).toHaveLength(1);
     expect(screen.getByLabelText('Word')).toHaveValue('vlemmo');
     await user.clear(screen.getByLabelText('Word'));
