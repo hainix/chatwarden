@@ -187,6 +187,32 @@ Use `fallthrough: false` for a prefix that is wholly the kit's, when you want ev
 `{ error: 'not_found' }` and nothing after it to run. `fallthrough` must be a boolean (`TypeError` otherwise). Put the probes
 last anyway: mounted at `/` with `fallthrough: false` they would answer every path, so that mount belongs after your own routes.
 
+### In a browser
+
+`@chatwarden/http/admin` is the staff API without the server parts. It imports no Node builtin, so a browser or edge
+bundle can run the routes in the page, over `@chatwarden/store-memory` (a demo, or a hub that talks to the kit directly).
+It exports `adminRoutes`, `createRouter`, the errors, `parseJson`, the roles and the permissions. It leaves out the player
+routes, the webhooks and the Express adapter. The router's matcher is exported there as `matchRoute`, as in the root.
+
+```ts
+import { createChatwarden, type RawWho } from '@chatwarden/core';
+import { createMemoryStore } from '@chatwarden/store-memory';
+import { adminRoutes, createRouter } from '@chatwarden/http/admin';
+
+const cw = await createChatwarden({
+  store: createMemoryStore(),
+  secret: 'demo-secret',
+  platform: { identify: (ctx) => ctx as RawWho },
+});
+const handle = createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-mod', role: 'owner' }) }));
+
+// Pass the exact body text as `rawBody`: the routes read that, never `body`.
+const me = await handle({ method: 'GET', path: '/me', query: {}, headers: {}, body: undefined });
+```
+
+`GET /me` answers `{ actor, role, can }` for the signed-in caller, so a client can hide what the server would refuse. Every
+staff response, success or error, carries `cache-control: no-store`, because the answers differ per caller.
+
 ## Auth
 
 The kit never sees a password or a token. You give it two hooks.

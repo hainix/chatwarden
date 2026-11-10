@@ -10,6 +10,7 @@ import { createChatwarden } from '@chatwarden/core';
 import type { RawWho, Store } from '@chatwarden/core';
 import { discordFeed } from '@chatwarden/discord';
 import { healthRoutes } from '@chatwarden/http';
+import { adminRoutes, createRouter } from '@chatwarden/http/admin';
 import { toExpress } from '@chatwarden/http/express';
 import { buildMatcher, LiveTerms } from '@chatwarden/matcher';
 import type { Matcher } from '@chatwarden/matcher';
@@ -125,6 +126,19 @@ async function scenario(label: string, store: Store, matcher: Matcher): Promise<
   assert.equal(notice.rule, 2);
   assert.equal(notice.mustAcknowledge, true);
   assert.equal(cw.notices.pending({ clientKey: 'smoke-key-nobody-0000000003' }).length, 0, 'a stranger has none');
+
+  // The browser-safe staff entry (`@chatwarden/http/admin`): the same routes, called without a server. GET /me needs only a
+  // signed-in caller; a caller with no role is 401.
+  const staff = createRouter(adminRoutes(cw, { authorize: (req) => (req.headers['x-role'] === 'owner' ? { actor: 'smoke-staff', role: 'owner' } : null) }));
+  const me = await staff({ method: 'GET', path: '/me', query: {}, headers: { 'x-role': 'owner' }, body: undefined });
+  assert.equal(me.status, 200, 'GET /me is 200 for a signed-in owner');
+  const meBody = me.body as { actor: string; role: string; can: Record<string, boolean> };
+  assert.equal(meBody.role, 'owner');
+  assert.equal(meBody.actor, 'smoke-staff');
+  assert.ok(Object.values(meBody.can).length > 0 && Object.values(meBody.can).every((v) => v === true), 'an owner may do everything');
+  assert.equal(me.headers?.['cache-control'], 'no-store', 'staff answers are not cached');
+  const anon = await staff({ method: 'GET', path: '/me', query: {}, headers: {}, body: undefined });
+  assert.equal(anon.status, 401, 'GET /me is 401 with no caller');
 
   // 8. The probes, mounted through the Express adapter on an ephemeral port.
   const app = express();

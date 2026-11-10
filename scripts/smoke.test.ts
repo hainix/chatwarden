@@ -138,6 +138,11 @@ describe('the smoke scenario', () => {
   it('imports every published package, so a package left out of the smoke run is caught here', () => {
     for (const name of published) expect(scenario, name).toContain(`from '${name}'`);
   });
+  it('imports and runs every published subpath, including @chatwarden/http/admin (GET /me)', () => {
+    for (const sub of ['@chatwarden/http/express', '@chatwarden/http/admin', '@chatwarden/matcher/fixtures']) expect(scenario, sub).toContain(`from '${sub}'`);
+    expect(scenario).toMatch(/adminRoutes\(cw,/);
+    expect(scenario).toContain("path: '/me'");
+  });
   it('runs the scenario on the in-memory store as well as on SQLite', () => {
     expect(scenario).toContain("from '@chatwarden/store-memory'");
     expect(scenario).toMatch(/createMemoryStore\(\)/);

@@ -72,6 +72,12 @@ export class AuditFailedError extends Error {
   }
 }
 
+/** Staff data is per caller: no shared cache may keep an answer, success or error. Applied to every staff route, here, once. */
+const noStore = (handler: RouteHandler): RouteHandler => async (req, params) => {
+  const res = await handler(req, params);
+  return { ...res, headers: { ...res.headers, 'cache-control': 'no-store' } };
+};
+
 export function createAdminContext(cw: Chatwarden, options: AdminOptions): AdminContext {
   const { logger } = options;
   // The audit trail takes an actor of 1..128 of `A-Z a-z 0-9 _ . : @ + -` only. A hook that returns another (a display name,
@@ -93,11 +99,13 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
     logger,
     permissions,
     authenticated(handler) {
-      return withErrors(async (req, params) => {
-        const authz = await authorize(req);
-        requireAuthz(authz);
-        return handler({ req, params, authz });
-      }, logger);
+      return noStore(
+        withErrors(async (req, params) => {
+          const authz = await authorize(req);
+          requireAuthz(authz);
+          return handler({ req, params, authz });
+        }, logger),
+      );
     },
     secure(permission, handler) {
       const guarded = guard({ authenticate: authorize, permissions }, permission, (req, params, authz) =>
@@ -124,7 +132,7 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
           },
         }),
       );
-      return withErrors(guarded, logger);
+      return noStore(withErrors(guarded, logger));
     },
   };
 }

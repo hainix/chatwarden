@@ -40,6 +40,17 @@ describe('packages/http/README.md', () => {
     expect(http.indexOf('## Set up')).toBeLessThan(http.indexOf('## Security notes'));
   });
 
+  it('shows the browser-safe subpath with an import snippet, and says its matcher is matchRoute', () => {
+    const setup = section(http, 'Set up');
+    const at = setup.indexOf('### In a browser');
+    expect(at, 'an "In a browser" subsection').toBeGreaterThanOrEqual(0);
+    const part = setup.slice(at);
+    expect(part).toContain("import { adminRoutes, createRouter } from '@chatwarden/http/admin';");
+    expect(part).toContain('matchRoute');
+    expect(part).toContain('no-store');
+    expect(part).toContain('GET /me');
+  });
+
   it('the setup shows the builders and the Express adapter', () => {
     const setup = section(http, 'Set up');
     for (const name of ['adminRoutes', 'playerRoutes', 'healthRoutes', 'toExpress', 'webhooksOut', 'webhookIn', 'createRouter']) {
