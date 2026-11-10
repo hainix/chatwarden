@@ -1020,6 +1020,13 @@ li {
 }
 @media (min-width: 1280px) {
   .code pre {
+    /* The widest README line must fit with the system monospace fallback on every OS: Linux's DejaVu Sans Mono runs
+       about 4% wider than Consolas or SF Mono, so the narrow end of this range gets a slightly smaller size. */
+    font-size: 0.75rem;
+  }
+}
+@media (min-width: 1440px) {
+  .code pre {
     font-size: 0.78rem;
   }
 }
