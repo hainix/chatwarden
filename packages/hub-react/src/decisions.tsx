@@ -1,66 +1,16 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { toHubError } from './client.js';
-import type { HubError } from './client.js';
-import { CLAIM_TTL_MS, actorName } from './claims.js';
-import { useHub } from './context.js';
-import type { DecisionForm } from './decision.js';
-import { useOptionalQueue } from './liveQueue.js';
-import { nextOpenReport } from './queue.js';
-import { parseRoute } from './router.js';
-import { UNDO_MS, useToasts } from './toasts.js';
-import type { Hold } from './toasts.js';
-import type { Claim, DecideInput, DecideResult } from './types.js';
+import { useController, useStoreBatched } from './controllerContext.js';
+import { hasLeft, isWaiting } from './headless/decisions.js';
+import type { DecisionEntry, DecisionState, SubmitDecision } from './headless/decisions.js';
 
 // A decision is not sent the moment Decide is pressed. It is held for UNDO_MS (the Undo toast), then sent. The case leaves the
-// queue at once; if the send fails it comes back, with the error and what was typed. Everything about that lives here, above any
-// one case, because "Decide and take next" leaves the case (and the form) behind while the decision is still waiting.
-//
-// Closing the hub sends a held decision at once (the toast host flushes on `pagehide`, when the tab is hidden and on unmount);
-// the send always carries `keepalive`, so the page going away does not cancel it.
+// queue at once; if the send fails it comes back, with the error and what was typed. The hold, the send and the rules around them are
+// the headless controller's (`./headless/decisions.ts`); this hands them to the screens. They live above any one case, because
+// "Decide and take next" leaves the case (and the form) behind while the decision is still waiting.
 
-export type DecisionState =
-  /** In its Undo window: nothing has been sent. */
-  | { status: 'held' }
-  | { status: 'sending' }
-  | { status: 'done'; replay: boolean; groups: DecideResult['groups'] }
-  /** The server did not take it. The form comes back with this error. */
-  | { status: 'failed'; error: HubError }
-  /** Someone else decided the report first. */
-  | { status: 'conflict' }
-  /** Undone: nothing was sent, and the case comes back as it was. */
-  | { status: 'undone' };
-
-export interface DecisionEntry {
-  reportId: string;
-  person: string;
-  /** How the reported person is named in a toast. */
-  name: string;
-  input: DecideInput;
-  /** The form as it was when Decide was pressed, to give back on a failure or an Undo. */
-  snapshot: DecisionForm;
-  /** The person has other open reports: their case stays in the queue, claimed, between the decisions. */
-  keepsCase: boolean;
-  state: DecisionState;
-}
-
-/** True while a decision is held for its Undo window or being sent: it is out of the moderator's hands. */
-export const isWaiting = (entry: DecisionEntry | undefined): boolean => entry !== undefined && (entry.state.status === 'held' || entry.state.status === 'sending');
-
-/**
- * True while the case should be off the screen: the decision is waiting, or it was sent in this visit. (An Undo, a failure or a
- * conflict brings the case back.) "Sent" counts only while the case as loaded is still open: a case that is read as closed is a
- * later visit to a decided case, and it is shown whole, with its result.
- */
-export const hasLeft = (entry: DecisionEntry | undefined, reportOpen = true): boolean => isWaiting(entry) || (entry?.state.status === 'done' && reportOpen);
-
-export interface SubmitDecision {
-  reportId: string;
-  person: string;
-  name: string;
-  input: DecideInput;
-  snapshot: DecisionForm;
-}
+export { hasLeft, isWaiting };
+export type { DecisionEntry, DecisionState, SubmitDecision };
 
 export interface Decisions {
   /** What is going on with a report's decision, or undefined. */
@@ -96,152 +46,20 @@ export function useOptionalDecisions(): Decisions | null {
 }
 
 export function DecisionProvider({ children }: { children: ReactNode }) {
-  const { client, t, router, go } = useHub();
-  const queue = useOptionalQueue();
-  const toasts = useToasts();
-  const [entries, setEntries] = useState<ReadonlyMap<string, DecisionEntry>>(() => new Map());
-  // The same map, readable at once (the claim is released on leaving a case, in an effect cleanup, and must see a decision that
-  // was queued a moment before).
-  const live = useRef(new Map<string, DecisionEntry>());
-  const holds = useRef(new Map<string, Hold>());
-
-  const latest = useRef({ client, t, queue, toasts, router, go });
-  latest.current = { client, t, queue, toasts, router, go };
-  // The claim the person held when Decide was pressed. The case looks released at once; Undo or a failure gives it back.
-  const claims = useRef(new Map<string, Claim | null>());
-
-  const put = useCallback((entry: DecisionEntry): void => {
-    live.current.set(entry.reportId, entry);
-    setEntries(new Map(live.current));
-  }, []);
-  const drop = useCallback((reportId: string): void => {
-    if (live.current.delete(reportId)) setEntries(new Map(live.current));
-  }, []);
-  const stateOf = useCallback(
-    (entry: DecisionEntry, state: DecisionState): DecisionEntry => {
-      const next = { ...entry, state };
-      put(next);
-      return next;
-    },
-    [put],
-  );
-
-  /** Whether the person is looking at this report right now. */
-  const isOpen = useCallback((reportId: string): boolean => {
-    const route = parseRoute(latest.current.router.path);
-    return route.name === 'report' && route.id === reportId;
-  }, []);
-
-  const decidedIds = useCallback((): ReadonlySet<string> => {
-    const ids = new Set<string>();
-    for (const e of live.current.values()) if (isWaiting(e) || e.state.status === 'done') ids.add(e.reportId);
-    return ids;
-  }, []);
-  const willRelease = useCallback((person: string): boolean => {
-    for (const e of live.current.values()) if (e.person === person && isWaiting(e) && !e.keepsCase) return true;
-    return false;
-  }, []);
-  const send = useCallback(
-    async (start: DecisionEntry): Promise<void> => {
-      const { client: c, queue: q, toasts: tt, t: words } = latest.current;
-      let entry = stateOf(start, { status: 'sending' });
-      if (!entry.keepsCase) q?.setPending(entry.person, true);
-      try {
-        const result = await c.decide(entry.reportId, entry.input, { keepalive: true });
-        entry = stateOf(entry, { status: 'done', replay: result.replay, groups: result.groups });
-        tt.push({ text: words('hub.decide.sent', { who: entry.name }) });
-        // The case is closed now: read the queue again so it is gone, and only then let it show (it must not flash back).
-        if (q !== null) await q.reload();
-      } catch (e) {
-        const error = toHubError(e);
-        if (error.code === 'already_decided') {
-          entry = stateOf(entry, { status: 'conflict' });
-          tt.push({ text: words('hub.decide.already'), tone: 'bad' });
-          if (q !== null) await q.reload();
-        } else {
-          entry = stateOf(entry, { status: 'failed', error });
-          if (error.code === 'claimed' && error.heldBy !== undefined) {
-            const until = error.heldUntil ?? 0;
-            q?.patchClaim(entry.person, { by: error.heldBy, since: until - CLAIM_TTL_MS, until });
-          } else if (!entry.keepsCase) q?.patchClaim(entry.person, claims.current.get(entry.reportId) ?? null);
-          // The case is not open any more (the moderator took the next one): say so, with the way back.
-          if (!isOpen(entry.reportId)) {
-            const text = error.code === 'claimed' && error.heldBy !== undefined ? words('hub.decide.failedAway.claimed', { who: entry.name, name: actorName(error.heldBy) }) : words('hub.decide.failedAway', { who: entry.name });
-            const reportId = entry.reportId;
-            tt.push({ text, tone: 'bad', action: { label: words('hub.decide.failedAway.open'), run: () => latest.current.go({ name: 'report', id: reportId }) } });
-          }
-        }
-      } finally {
-        if (!entry.keepsCase) q?.setPending(entry.person, false);
-      }
-    },
-    [isOpen, stateOf],
-  );
-
-  const submit = useCallback(
-    (d: SubmitDecision): void => {
-      const existing = live.current.get(d.reportId);
-      if (isWaiting(existing)) return;
-      const { queue: q, toasts: tt, t: words } = latest.current;
-      // One case per person: with other reports of theirs open the row stays in the queue, claimed, and the claim is not let go
-      // (the server keeps it too); the case leaves the queue only with its last report.
-      const keepsCase = q !== null && nextOpenReport(q.groups, d.person, d.reportId, decidedIds()) !== null;
-      const entry: DecisionEntry = { ...d, keepsCase, state: { status: 'held' } };
-      put(entry);
-      if (!keepsCase) {
-        q?.setPending(d.person, true);
-        claims.current.set(d.reportId, q?.groups.find((g) => g.person === d.person)?.claim ?? null);
-        q?.patchClaim(d.person, null);
-      }
-      const hold = tt.hold({
-        text: words('hub.decide.held', { who: d.name, seconds: UNDO_MS / 1000 }),
-        run: () => {
-          holds.current.delete(d.reportId);
-          const current = live.current.get(d.reportId);
-          if (current !== undefined && current.state.status === 'held') return send(current);
-          return undefined;
-        },
-        onUndo: () => {
-          holds.current.delete(d.reportId);
-          const current = live.current.get(d.reportId);
-          if (current === undefined) return;
-          stateOf(current, { status: 'undone' });
-          if (!keepsCase) {
-            latest.current.queue?.setPending(d.person, false);
-            latest.current.queue?.patchClaim(d.person, claims.current.get(d.reportId) ?? null);
-          }
-          // Undo brings the case back: if the moderator has gone on to another one, they are taken back to it.
-          if (!isOpen(d.reportId)) latest.current.go({ name: 'report', id: d.reportId });
-        },
-      });
-      holds.current.set(d.reportId, hold);
-    },
-    [decidedIds, isOpen, put, send, stateOf],
-  );
-
-  const undo = useCallback((reportId: string): void => {
-    holds.current.get(reportId)?.undo();
-  }, []);
-
-  const retry = useCallback(
-    (reportId: string): void => {
-      const entry = live.current.get(reportId);
-      if (entry !== undefined && entry.state.status === 'failed') void send(entry);
-    },
-    [send],
-  );
-
-  const isPending = useCallback((person: string): boolean => {
-    for (const e of live.current.values()) if (e.person === person && isWaiting(e)) return true;
-    return false;
-  }, []);
-
-  // A held decision that never got its window to end (the hub unmounted) is sent by the toast host's own cleanup; nothing to do.
-  useEffect(() => () => holds.current.clear(), []);
-
+  const d = useController().decisions;
+  const entries = useStoreBatched(d);
   const value = useMemo<Decisions>(
-    () => ({ entry: (id) => entries.get(id), isPending, decidedIds, willRelease, submit, undo, retry, dismiss: drop }),
-    [entries, isPending, decidedIds, willRelease, submit, undo, retry, drop],
+    () => ({
+      entry: (id) => entries.get(id),
+      isPending: d.isPending,
+      decidedIds: d.decidedIds,
+      willRelease: d.willRelease,
+      submit: (decision) => void d.submit(decision),
+      undo: d.undo,
+      retry: (id) => void d.retry(id),
+      dismiss: d.dismiss,
+    }),
+    [entries, d],
   );
   return <DecisionContext.Provider value={value}>{children}</DecisionContext.Provider>;
 }

@@ -127,7 +127,15 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
   // One controller per hub: the session cache, the toasts and (as the hub is moved onto it) every other piece of state that does not
   // belong to React. It is disposed with the hub, which sends a decision that is still held.
   const controller = useHubController(client, () => nowRef.current());
-  controller.configure({ t });
+  controller.configure({
+    t,
+    // Where the moderator is looking, and the way to bring them to a report: the router's.
+    openReport: () => {
+      const at = parseRoute(routerRef.current.path);
+      return at.name === 'report' ? at.id : null;
+    },
+    show: (id) => routerRef.current.navigate(buildPath({ name: 'report', id })),
+  });
   // Who is signed in, once `GET /me` has answered: the controller needs it for claims and for the "mine" filter. Nothing listens for it.
   if (me.data !== undefined) controller.identify(me.data);
   const session = controller.session;
