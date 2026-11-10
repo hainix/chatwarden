@@ -10,7 +10,8 @@ import { bodyObject, bodyTakeOver, bodyText, queryLimit } from './validate.js';
 /**
  * Sanctions outside a report (staff only, each audited after it succeeds):
  * - `GET /sanctions?cursor&limit&source`: every person's sanctions, newest first, `{ items, next }` (`history.read`). Each
- *   item is the group's `SanctionGroupView` plus `person`, the canonical subject (a staff ref). Built from the subject row
+ *   item is the group's `SanctionGroupView` plus `person`, the canonical subject (a staff ref), and `handle`, the reported
+ *   person's handle on the latest report filed against them (null when there is none, or it recorded no handle). Built from the subject row
  *   only: never an IP row, hash or stored value. `limit` 1..200 (default 50, clamped), `cursor` is the previous `next`,
  *   `source` one of the sanction sources. A bad cursor, limit or source is 400 `invalid_query`. Writes no audit row.
  * - `POST /sanctions { subject, kind, durationMs, rule, gapNote?, includeIp?, reason?, takeOver? }`: apply one (`sanctions.apply`,
@@ -35,7 +36,15 @@ export function sanctionRoutes(ctx: AdminContext): RouteTable {
         ...(limit === undefined ? {} : { limit }),
         ...(source === undefined ? {} : { source: source as Source }),
       });
-      return { status: 200, body: { items: page.items, next: page.next } };
+      // The name to show beside a person's tag: the handle on the latest report filed against them, one read per person on the page.
+      const handles = new Map<string, string | null>();
+      for (const { person } of page.items) {
+        if (handles.has(person)) continue;
+        const latest = cw.reports.list({ person, limit: 1 }).items[0];
+        handles.set(person, latest === undefined || latest.targetHandle === '' ? null : latest.targetHandle);
+      }
+      const items = page.items.map((i) => ({ ...i, handle: handles.get(i.person) ?? null }));
+      return { status: 200, body: { items, next: page.next } };
     }),
 
     'POST /sanctions': ctx.secure('sanctions.apply', async (c) => {

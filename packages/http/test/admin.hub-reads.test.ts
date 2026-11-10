@@ -213,9 +213,63 @@ describe('GET /sanctions', () => {
     expect(body.items[0]).toEqual({
       groupId: second.groupId, refCode: second.refCode, kind: 'ban', rule: 2, startsAt: w.clock.t, endsAt: null, reason: 'private moderator reason',
       actor: 'ann', source: 'api', automated: false, active: true, pending: false, revokedAt: null, revokedBy: null, revokeReason: null, person: b.target,
+      handle: 'TargetName',
     });
     expect(body.items[1]?.person).toBe(a.target);
-    for (const item of body.items) expect(Object.keys(item).sort()).toEqual([...SANCTION_VIEW_KEYS, 'person'].sort());
+    for (const item of body.items) expect(Object.keys(item).sort()).toEqual([...SANCTION_VIEW_KEYS, 'person', 'handle'].sort());
+  });
+
+  describe('handle: the name on the latest report against the person', () => {
+    const handleOf = async (w: W, groupId: string): Promise<unknown> =>
+      ((await w.call('GET', '/sanctions')).body as { items: Array<{ groupId: string; handle: unknown }> }).items.find((i) => i.groupId === groupId)?.handle;
+
+    it('is the reported person handle, null when nobody ever reported them', async () => {
+      const w = await world();
+      const a = await file(w, { targetHandle: 'Zorbak' });
+      const unreported = await sanction(w, 's_never_reported_0000000000');
+      const named = await sanction(w, a.target);
+      expect(await handleOf(w, named.groupId)).toBe('Zorbak');
+      expect(await handleOf(w, unreported.groupId)).toBeNull();
+    });
+
+    it('is the handle on the LATEST report when the person was reported under two names', async () => {
+      const w = await world();
+      await file(w, { targetHandle: 'OldName', key: 'raw-client-key-same-person-0001' });
+      w.clock.t += 5000;
+      const later = await file(w, { targetHandle: 'NewName', key: 'raw-client-key-same-person-0001' });
+      const s = await sanction(w, later.target);
+      expect(await handleOf(w, s.groupId)).toBe('NewName');
+    });
+
+    it('is null when the latest report recorded no handle, and one person in two groups gets the same handle', async () => {
+      const w = await world();
+      const blank = await file(w, { targetHandle: '' });
+      const one = await sanction(w, blank.target);
+      expect(await handleOf(w, one.groupId)).toBeNull();
+      const named = await file(w, { targetHandle: 'Vlemmo' });
+      const x = await sanction(w, named.target);
+      w.clock.t += 1000;
+      const y = await sanction(w, named.target, { kind: 'warning', durationMs: null });
+      expect([await handleOf(w, x.groupId), await handleOf(w, y.groupId)]).toEqual(['Vlemmo', 'Vlemmo']);
+    });
+
+    it('counts only reports filed against the person (a reporter has none), and an automatic sanction carries it too', async () => {
+      const w = await world();
+      const r = await file(w, { targetHandle: 'Quissel' });
+      const asReporter = await sanction(w, r.reporter);
+      const auto = await sanction(w, r.target, { source: 'auto_filter', automated: true });
+      expect(await handleOf(w, asReporter.groupId)).toBeNull();
+      expect(await handleOf(w, auto.groupId)).toBe('Quissel');
+    });
+
+    it('adds no audit row, and the handle is a string or null', async () => {
+      const w = await world();
+      const r = await file(w, { targetHandle: 'Drakkuun' });
+      await sanction(w, r.target);
+      const items = ((await w.call('GET', '/sanctions')).body as { items: Array<{ handle: unknown }> }).items;
+      for (const i of items) expect(i.handle === null || typeof i.handle === 'string').toBe(true);
+      expect(w.routeAudit()).toEqual([]);
+    });
   });
 
   it('pages: one page, exactly one full page, the empty page after it, a cursor past the end', async () => {
@@ -593,9 +647,28 @@ describe('GET /reports: targetHandle', () => {
     expect(body.items).toHaveLength(1);
     expect(Object.keys(body.items[0]!)).toEqual([
       'id', 'createdAt', 'roomId', 'tags', 'category', 'status', 'badFaith', 'targetPerson', 'reporterPerson', 'actionedAt', 'actionedBy', 'targetHandle',
-      'claim', 'viewing',
+      'reporterHandle', 'claim', 'viewing',
     ]);
-    expect(body.items[0]).toMatchObject({ id: r.id, targetPerson: r.target, targetHandle: 'SneakyPete' });
+    expect(body.items[0]).toMatchObject({ id: r.id, targetPerson: r.target, targetHandle: 'SneakyPete', reporterHandle: 'Rep' });
+  });
+
+  it('reporterHandle is the reporter handle at filing (even after the seat changes hands), null when none was recorded', async () => {
+    const w = await world();
+    const r = await file(w, { targetHandle: 'SneakyPete' });
+    w.cw.rooms.seat(r.room, 'p1', { clientKey: 'raw-client-key-someone-else-0077' }, 'ThenSomeoneElse');
+    const first = ((await w.call('GET', '/reports')).body as { items: Array<Record<string, unknown>> }).items.find((i) => i.id === r.id);
+    expect(first?.reporterHandle).toBe('Rep');
+
+    const room = 'hub-room-blank-reporter';
+    w.cw.rooms.seat(room, 'p1', { clientKey: 'raw-client-key-reporter-blank-0001', ip: '198.51.100.24' }, '');
+    w.cw.rooms.seat(room, 'p2', { clientKey: 'raw-client-key-target-blank-0001', ip: IP_TARGET }, 'Tarvo');
+    w.cw.chat.accept(room, 'p2', 'a line');
+    w.clock.t += 1000;
+    const res = await w.cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', category: 'spam' });
+    if (!res.ok) throw new Error('refused');
+    const blank = ((await w.call('GET', '/reports')).body as { items: Array<Record<string, unknown>> }).items.find((i) => i.id === res.reportId);
+    expect(blank?.reporterHandle).toBeNull();
+    expect(blank?.targetHandle).toBe('Tarvo');
   });
 
   it('is null when no handle was recorded', async () => {

@@ -389,7 +389,7 @@ describe('GET /reports and GET /reports/:id: claim and viewing', () => {
     expect(item.claim).toBeNull();
     expect(item.viewing).toEqual([]);
     const keys = Object.keys(item);
-    expect(keys.slice(-3)).toEqual(['targetHandle', 'claim', 'viewing']);
+    expect(keys.slice(-4)).toEqual(['targetHandle', 'reporterHandle', 'claim', 'viewing']);
   });
 
   it('shows the claim { by, since, until } on every report of the claimed person, and only theirs', async () => {
@@ -457,7 +457,7 @@ describe('GET /reports and GET /reports/:id: claim and viewing', () => {
     await w.file();
     const item = body(await w.call('GET', '/reports')).items[0];
     expect(Object.keys(item).sort()).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reporterPerson', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
   });
 });

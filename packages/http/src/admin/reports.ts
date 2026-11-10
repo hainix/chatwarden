@@ -36,6 +36,8 @@ export interface ReportSummary {
    * the queue can show a name. Null when none was recorded. Staff only, like the report page itself.
    */
   targetHandle: string | null;
+  /** The reporter's handle as it was when the report was filed, on the same terms as {@link ReportSummary.targetHandle}: so a reporter from another room is named, not just tagged. Null when none was recorded. Staff only. */
+  reporterHandle: string | null;
   /**
    * Who is handling the reported person's case, from when and until when it lapses: `{ by, since, until }`, or null when
    * nobody holds it (or the report is no longer open). Staff only. A claim is a courtesy: it never hides or blocks a read.
@@ -62,13 +64,14 @@ const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string
   actionedAt: r.actionedAt,
   actionedBy: r.actionedBy,
   targetHandle: r.targetHandle === '' ? null : r.targetHandle,
+  reporterHandle: r.reporterHandle === '' ? null : r.reporterHandle,
   claim: claimView(claim),
   viewing: viewing === undefined ? [] : [...viewing],
 });
 
 /**
  * The report and decision routes (staff only, each audited):
- * - `GET /reports?status&cursor&limit`: the queue as summaries, no evidence beyond the reported person's `targetHandle`
+ * - `GET /reports?status&cursor&limit`: the queue as summaries, no evidence beyond the `targetHandle` and `reporterHandle`
  *   (`report.view`, no target)
  *   Each item also carries `claim` and `viewing` for its open cases (see {@link ReportSummary}).
  * - `GET /reports/:id?level`: one report with each person's history and the suggestion for the reported person, and the
