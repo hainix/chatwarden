@@ -53,13 +53,21 @@ describe('.github/workflows/release.yml', () => {
     expect(wf).toContain('already on npm');
   });
 
-  it('fails with a clear message when NPM_TOKEN is empty, before publishing a real release', () => {
-    const check = wf.indexOf('Require NPM_TOKEN');
+  it('chooses the auth path before a real publish: NPM_TOKEN when set, else npm trusted publishing (OIDC)', () => {
+    const check = wf.indexOf('Choose npm auth');
     expect(check).toBeGreaterThan(-1);
     expect(check).toBeLessThan(wf.indexOf('npm publish --workspace'));
     expect(wf).toContain('if: ${{ env.DRY_RUN != \'true\' }}');
-    expect(wf).toMatch(/::error::The repository secret NPM_TOKEN is empty or missing/);
+    // A missing token is no longer fatal: trusted publishing needs no secret. The notice says what happens if neither is set up.
+    expect(wf).not.toMatch(/::error::The repository secret NPM_TOKEN is empty or missing/);
+    expect(wf).toMatch(/::notice::No NPM_TOKEN secret: publishing through npm trusted publishing \(OIDC\)/);
     expect(wf).toContain('NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}');
+  });
+
+  it('upgrades npm to a version with trusted publishing before it publishes', () => {
+    const upgrade = wf.indexOf('npm install -g npm@^11.5.1');
+    expect(upgrade).toBeGreaterThan(-1);
+    expect(upgrade).toBeLessThan(wf.indexOf('npm publish --workspace'));
   });
 
   it('refuses a tag that does not match the package version', () => {
@@ -92,7 +100,7 @@ describe('.github/workflows/release.yml', () => {
     expect(wf).toContain('GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}');
   });
 
-  const visibilityStep = (): string => wf.slice(wf.indexOf('Check the repository is public'), wf.indexOf('Require NPM_TOKEN'));
+  const visibilityStep = (): string => wf.slice(wf.indexOf('Check the repository is public'), wf.indexOf('Use an npm with trusted publishing'));
 
   it('fails a real publish from a private repository, naming the owner decision, and only warns on a dry run', () => {
     const body = visibilityStep();

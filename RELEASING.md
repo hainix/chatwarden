@@ -22,15 +22,17 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
    so put the renewal in your calendar. The option names change from time to time, so check npm's current docs for granular
    access tokens before you create it.
 4. **Add it to the repository as the secret `NPM_TOKEN`.** On GitHub: Settings, Secrets and variables, Actions, New
-   repository secret. Name it exactly `NPM_TOKEN`. If it is missing or empty, the release workflow stops with a clear
-   message before it publishes anything.
+   repository secret. Name it exactly `NPM_TOKEN`. The first publish needs it, because npm only lets you set up trusted
+   publishing (step 6) on a package that already exists. Without the secret, the workflow publishes through trusted
+   publishing, and a package that has none set up fails with an auth error.
 5. **Protect `v*` tags.** On GitHub: Settings, Rules, New tag ruleset, target `v*`, and restrict creation, update and
    deletion to the owner. A pushed tag publishes, so only people you trust should be able to create one.
-6. **Preferred once it is available: npm trusted publishing (OIDC).** When npm supports it for the `@chatwarden` org (check
-   npm's current docs; it needs the packages to exist on npm first), each package's Settings page lets you add this
-   repository and the workflow file `release.yml` as a trusted publisher. With that in place you can delete the `NPM_TOKEN`
-   secret and its expiry chore: npm then accepts the workflow's own short-lived identity. The workflow already asks for
-   `id-token: write` and publishes with provenance, so each release carries a signed provenance statement either way.
+6. **After the first publish: switch to npm trusted publishing (OIDC), and delete the token.** On npmjs.com, open each of
+   the six packages, then Settings, Trusted Publisher, GitHub Actions. Enter the repository `hainix/chatwarden` and the workflow
+   file `release.yml`. Then delete the `NPM_TOKEN` secret on GitHub and revoke the token on npm. The workflow needs no change:
+   with no secret it publishes through trusted publishing (it upgrades npm to 11.5.1+ for this and already asks for
+   `id-token: write`), and each release still carries a signed provenance statement. Check npm's current docs if the
+   screens have moved.
 
 ## Each release
 
