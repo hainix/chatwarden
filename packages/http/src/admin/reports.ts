@@ -1,24 +1,16 @@
 import { CATEGORY_TO_RULE } from '@chatwarden/core';
-import type { DecisionInput, ReportQuery, StaffReport } from '@chatwarden/core';
-import { HttpError, NotFoundError, ValidationError } from '../errors.js';
+import type { ReportQuery, StaffReport } from '@chatwarden/core';
+import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
+import { applyDecision, needForDecision, parseDecision, peopleOf } from './apply.js';
 import type { AdminContext } from './context.js';
-import { bodyId, bodyLevel, bodyObject, bodyRule, bodyText, has, parseAction, queryLevel, queryLimit } from './validate.js';
+import { bodyId, bodyLevel, bodyObject, bodyRule, has, queryLevel, queryLimit } from './validate.js';
 
-/** The most actions one decision may carry. A report involves a handful of people. */
-const MAX_ACTIONS = 20;
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
 const HISTORY_REPORTS_DEFAULT = 20;
 
-const VERDICTS: readonly DecisionInput['verdict'][] = ['upheld', 'noted', 'no_action', 'bad_faith'];
-
 /** The room for `suggest`: the report's own (an empty one is no room). Never from the request. */
 const roomOf = (report: StaffReport): string | null => (report.roomId === '' ? null : report.roomId);
-
-/** Everyone a report names, as staff refs: the target, the reporter and the people who wrote in the excerpt. */
-function peopleOf(report: StaffReport): string[] {
-  return [...new Set([report.targetPerson, report.reporterPerson, ...report.people])];
-}
 
 /**
  * The report and decision routes (staff only, each audited):
@@ -82,50 +74,16 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
 
     'POST /reports/:id/decide': ctx.secure('reports.decide', async (c) => {
       const id = c.params.id as string;
-      const body = bodyObject(c.req);
-
-      const verdict = body.verdict;
-      if (typeof verdict !== 'string' || !(VERDICTS as readonly string[]).includes(verdict)) throw new ValidationError();
-      if (!Array.isArray(body.actions) || body.actions.length > MAX_ACTIONS) throw new ValidationError();
-      const actions = body.actions.map(parseAction);
-      const reason = bodyText(body.reason);
-      const evidence = has(body, 'evidence') ? bodyText(body.evidence) : undefined;
+      const decision = parseDecision(bodyObject(c.req));
 
       // Authorization for what the decision DOES, before anything is read or written.
-      if (actions.length > 0) c.need('sanctions.apply');
-      if (actions.some((a) => a.kind === 'ban' && a.durationMs === null)) c.need('sanctions.apply.ban_permanent');
+      needForDecision(decision.actions, c.need);
 
-      const report = load(id);
-      // The staff refs the report shows, or the ids it was filed under (the facade makes them canonical, so a ref gone
-      // stale through a later merge still replays).
-      const named = new Set([...peopleOf(report), report.targetSubject, report.reporterSubject]);
-      if (!actions.every((a) => named.has(a.subject))) throw new ValidationError();
-
-      const result = await cw.decide({
-        reportId: id,
-        verdict: verdict as DecisionInput['verdict'],
-        ...(evidence === undefined ? {} : { evidence }),
-        actions,
-        // Never from the body: the caller is who the auth hook says, and an admin route is always a moderator's.
-        actor: c.authz.actor,
-        reason,
-        source: 'moderator',
-      });
-      if (!result.ok) {
-        if (result.error === 'not_found') throw new NotFoundError();
-        if (result.error === 'already_decided') throw new HttpError('already_decided');
-        throw new ValidationError();
-      }
+      // Never from the body: the caller is who the auth hook says, and an admin route is always a moderator's.
+      const result = await applyDecision(cw, id, decision, c.authz.actor);
       // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
       c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
-      return {
-        status: 200,
-        body: {
-          ok: true,
-          replay: result.replay,
-          groups: result.groups.map((g) => ({ refCode: g.refCode, kind: g.kind })),
-        },
-      };
+      return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups } };
     }),
 
     'GET /people/:ref/history': ctx.secure('history.read', (c) => {

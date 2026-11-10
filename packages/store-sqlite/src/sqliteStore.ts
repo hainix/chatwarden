@@ -19,6 +19,7 @@ import type {
   Store,
   StoredReport,
   StrikeRow,
+  WebhookKeyReservation,
   SubjectId,
   SubjectIdKind,
   SubjectIdRecord,
@@ -376,6 +377,44 @@ export class SqliteStore implements Store, TermStore {
 
   purgeAudit(before: number): number {
     return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_audit WHERE at < ?').run(before).changes));
+  }
+
+  // Webhook keys. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
+
+  reserveWebhookKey(key: string, now: number, notBefore: number): WebhookKeyReservation {
+    return this.transaction(() => {
+      this.db.prepare('DELETE FROM kit_webhook_keys WHERE key = ? AND created_at < ?').run(key, notBefore);
+      const inserted = this.db
+        .prepare("INSERT OR IGNORE INTO kit_webhook_keys (key, created_at, state, result_json) VALUES (?, ?, 'pending', NULL)")
+        .run(key, now);
+      if (Number(inserted.changes) > 0) return { reserved: true } as const;
+      const r = this.db.prepare('SELECT state, result_json FROM kit_webhook_keys WHERE key = ?').get(key);
+      if (r !== undefined && r.state === 'done' && typeof r.result_json === 'string') {
+        return { reserved: false, state: 'done', resultJson: r.result_json } as const;
+      }
+      return { reserved: false, state: 'pending', resultJson: null } as const;
+    });
+  }
+
+  completeWebhookKey(key: string, resultJson: string): boolean {
+    return this.transaction(
+      () =>
+        Number(
+          this.db
+            .prepare("UPDATE kit_webhook_keys SET state = 'done', result_json = ? WHERE key = ? AND state = 'pending'")
+            .run(resultJson, key).changes,
+        ) > 0,
+    );
+  }
+
+  releaseWebhookKey(key: string): boolean {
+    return this.transaction(
+      () => Number(this.db.prepare("DELETE FROM kit_webhook_keys WHERE key = ? AND state = 'pending'").run(key).changes) > 0,
+    );
+  }
+
+  purgeWebhookKeys(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_webhook_keys WHERE created_at < ?').run(before).changes));
   }
 
   // Mutes. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`, which must never

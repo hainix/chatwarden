@@ -23,11 +23,13 @@ const TABLE = {
   invalid_excerpt: { status: 400, message: 'The excerpt is not valid.' },
   invalid_term: { status: 400, message: 'The term change was refused.' },
   invalid_gap_ref: { status: 400, message: 'The rule reference for this gap is not valid.' },
+  invalid_idempotency_key: { status: 400, message: 'The idempotency key is missing or not valid.' },
   unauthorized: { status: 401, message: 'Authentication is required.' },
   forbidden: { status: 403, message: 'You do not have permission to do this.' },
   not_found: { status: 404, message: 'Not found.' },
   method_not_allowed: { status: 405, message: 'Method not allowed.' },
   already_decided: { status: 409, message: 'The report has already been decided.' },
+  in_progress: { status: 409, message: 'A request with this idempotency key is still being processed.' },
   payload_too_large: { status: 413, message: 'The request body is too large.' },
   rate_limited: { status: 429, message: 'Too many requests. Try again later.' },
 } as const;

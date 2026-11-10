@@ -13,6 +13,7 @@ export type {
   NoticeRow,
   RawWho,
   ReportActivity,
+  WebhookKeyReservation,
   DecisionRow,
   ReportCategory,
   ReportExcerptLine,
@@ -112,6 +113,7 @@ export { safeWarn } from './log.js';
 export { DoorService } from './doors.js';
 export type { DoorKind, DoorRefusal, DoorServiceDeps } from './doors.js';
 export { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
+export { WEBHOOK_KEY_TTL_MS } from './types.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export {
   ExcerptError,

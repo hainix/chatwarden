@@ -47,6 +47,8 @@ describe('withErrors: mapping', () => {
     ['HttpError(invalid_json)', () => new HttpError('invalid_json'), 400, 'invalid_json'],
     ['HttpError(invalid_term)', () => new HttpError('invalid_term'), 400, 'invalid_term'],
     ['HttpError(invalid_gap_ref)', () => new HttpError('invalid_gap_ref'), 400, 'invalid_gap_ref'],
+    ['HttpError(invalid_idempotency_key)', () => new HttpError('invalid_idempotency_key'), 400, 'invalid_idempotency_key'],
+    ['HttpError(in_progress)', () => new HttpError('in_progress'), 409, 'in_progress'],
   ];
 
   it.each(cases)('%s -> %i %s with a fixed message', async (_n, make, status, code) => {

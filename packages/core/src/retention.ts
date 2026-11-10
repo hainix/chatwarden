@@ -1,5 +1,6 @@
 import { MUTE_TTL_MS } from './mutes.js';
 import { ProfileError } from './profile.js';
+import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type { Store } from './types.js';
 
 const DAY_MS = 86_400_000;
@@ -92,6 +93,7 @@ export interface PurgeResult {
   mutes: number;
   notices: number;
   audit: number;
+  webhookKeys: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -110,6 +112,7 @@ function checkWindow(name: string, ms: number): void {
  * - strikes: `at < now - strikesMs`
  * - audit: `at < now - auditMs` (365 days by default, never less than 90): every staff audit entry, including the
  *   term-editor rows written before the trail existed
+ * - webhook keys: `createdAt < now - 24 h` (incoming-webhook idempotency keys, pending or done)
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
@@ -145,5 +148,6 @@ export async function purge(
     mutes: store.purgeMutes(now - MUTE_TTL_MS),
     notices: store.purgeNotices(now - p.noticesMs),
     audit: store.purgeAudit(now - p.auditMs),
+    webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
   }));
 }

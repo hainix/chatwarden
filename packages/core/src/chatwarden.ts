@@ -34,6 +34,7 @@ import { StrikeService } from './strikes.js';
 import { listStaffReports, staffReport } from './staffReports.js';
 import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 import { SubjectIndex } from './subjects.js';
+import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type {
   Clock,
   Logger,
@@ -45,6 +46,7 @@ import type {
   Store,
   StoredReport,
   SubjectId,
+  WebhookKeyReservation,
 } from './types.js';
 
 /** The wall clock, used only when the adopter injects none. Tests and replays pass their own. */
@@ -327,6 +329,19 @@ export interface Chatwarden {
      * `action` throws `AuditQueryError`. Never carries the json the term editor kept.
      */
     list(q: AuditQuery): AuditPage;
+  };
+  /**
+   * Idempotency keys for incoming webhooks (`@chatwarden/http`'s `webhookIn`), on the kit's clock. A key is remembered
+   * for 24 hours and holds the response body of the first call only (never chat text). Each call is one store
+   * transaction and throws the store's own error if it fails.
+   */
+  webhookKeys: {
+    /** Take the key (`{ reserved: true }`), or answer the row that holds it: `pending`, or `done` with its stored body. */
+    reserve(key: string): WebhookKeyReservation;
+    /** Mark a pending key done with the response body. True only when this call did it. */
+    complete(key: string, resultJson: string): boolean;
+    /** Free a pending key (the apply failed, so a retry may run). A done key is never freed. */
+    release(key: string): boolean;
   };
   /**
    * Delete rows past retention now. The built-in timer already does this (unless `retention: false`); the
@@ -698,6 +713,14 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     audit: {
       record: (input) => audit.record(input),
       list: (q) => audit.list(q),
+    },
+    webhookKeys: {
+      reserve: (key) => {
+        const now = clock.now();
+        return store.transaction(() => store.reserveWebhookKey(key, now, now - WEBHOOK_KEY_TTL_MS));
+      },
+      complete: (key, resultJson) => store.transaction(() => store.completeWebhookKey(key, resultJson)),
+      release: (key) => store.transaction(() => store.releaseWebhookKey(key)),
     },
     purge: async (policy) => {
       const merged: Partial<RetentionPolicy> = { ...retentionPolicy };

@@ -14,6 +14,7 @@ import type {
   SubjectIdRecord,
   SubjectId,
   SubjectRecord,
+  WebhookKeyReservation,
 } from '../src/types.js';
 
 /** A report plus the moderation columns a decision fills. */
@@ -53,6 +54,8 @@ export class MemoryStore implements Store {
   protected notices: NoticeRow[] = [];
   /** Staff audit entries in insertion order. */
   protected auditRows: AuditRow[] = [];
+  /** Incoming-webhook idempotency keys. */
+  protected webhookKeys = new Map<string, { createdAt: number; state: 'pending' | 'done'; resultJson: string | null }>();
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -285,6 +288,51 @@ export class MemoryStore implements Store {
       this.undoWith(() => this.auditRows.splice(0, this.auditRows.length, ...snapshot));
     }
     return n;
+  }
+
+  // Webhook keys (synchronous, see the Store interface)
+
+  reserveWebhookKey(key: string, now: number, notBefore: number): WebhookKeyReservation {
+    const existing = this.webhookKeys.get(key);
+    if (existing !== undefined && existing.createdAt >= notBefore) {
+      return existing.state === 'done' && existing.resultJson !== null
+        ? { reserved: false, state: 'done', resultJson: existing.resultJson }
+        : { reserved: false, state: 'pending', resultJson: null };
+    }
+    const prior = existing === undefined ? undefined : { ...existing };
+    this.webhookKeys.set(key, { createdAt: now, state: 'pending', resultJson: null });
+    this.undoWith(() => {
+      if (prior === undefined) this.webhookKeys.delete(key);
+      else this.webhookKeys.set(key, prior);
+    });
+    return { reserved: true };
+  }
+
+  completeWebhookKey(key: string, resultJson: string): boolean {
+    const row = this.webhookKeys.get(key);
+    if (row === undefined || row.state !== 'pending') return false;
+    row.state = 'done';
+    row.resultJson = resultJson;
+    this.undoWith(() => {
+      row.state = 'pending';
+      row.resultJson = null;
+    });
+    return true;
+  }
+
+  releaseWebhookKey(key: string): boolean {
+    const row = this.webhookKeys.get(key);
+    if (row === undefined || row.state !== 'pending') return false;
+    this.webhookKeys.delete(key);
+    this.undoWith(() => this.webhookKeys.set(key, row));
+    return true;
+  }
+
+  purgeWebhookKeys(before: number): number {
+    const gone = [...this.webhookKeys].filter(([, r]) => r.createdAt < before);
+    for (const [key] of gone) this.webhookKeys.delete(key);
+    if (gone.length > 0) this.undoWith(() => gone.forEach(([key, row]) => this.webhookKeys.set(key, row)));
+    return gone.length;
   }
 
   // Mutes (synchronous, see the Store interface)

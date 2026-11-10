@@ -320,6 +320,15 @@ export interface DecisionRow {
   resultJson: string;
 }
 
+/** How long an incoming-webhook idempotency key is remembered: 24 hours. */
+export const WEBHOOK_KEY_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** What {@link Store.reserveWebhookKey} answers: this call took the key, or the row that already holds it. */
+export type WebhookKeyReservation =
+  | { reserved: true }
+  | { reserved: false; state: 'pending'; resultJson: null }
+  | { reserved: false; state: 'done'; resultJson: string };
+
 /** The light projection of a report the intake rules count: who reported whom, where and when. */
 export interface ReportActivity {
   reporter: SubjectId;
@@ -601,6 +610,24 @@ export interface Store {
    * is seen or withdrawn.
    */
   purgeNotices(before: number): number;
+
+  // Webhook idempotency keys (K3b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
+
+  /**
+   * Reserve an idempotency key for an incoming webhook. A row with `createdAt < notBefore` is expired and is replaced.
+   * Otherwise: no row yet inserts a `pending` one and answers `{ reserved: true }`; an existing row is returned as it
+   * is (`pending` carries no result, `done` carries the stored response body). Never carries chat text.
+   */
+  reserveWebhookKey(key: string, now: number, notBefore: number): WebhookKeyReservation;
+
+  /** Mark a `pending` key `done` with the response body it answered. True only when this call did it. */
+  completeWebhookKey(key: string, resultJson: string): boolean;
+
+  /** Delete a key that is still `pending` (the apply failed, so a retry may proceed). A `done` key is never deleted. True when it did. */
+  releaseWebhookKey(key: string): boolean;
+
+  /** Delete idempotency keys with `createdAt < before`, done or pending. Returns how many. */
+  purgeWebhookKeys(before: number): number;
 
   // Notices. SYNCHRONOUS on purpose (like sanctions): `NoticeService` runs these inside `transaction`.
 

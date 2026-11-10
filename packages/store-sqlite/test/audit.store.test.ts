@@ -49,7 +49,7 @@ describe('migration 12', () => {
               ('old2', ?, 'bob', 'gap.close', 'sanction', 'g1', '{"gapStatus":"open"}', '{"gapStatus":"ruled"}')`,
     ).run(NOW, NOW + 1);
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(12);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     const rows = db.prepare('SELECT * FROM kit_audit ORDER BY at').all();
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ id: 'old1', actor: 'alice', action: 'add', role: null, after_json: '{"term":"zorbak"}' });
@@ -67,7 +67,7 @@ describe('migration 12', () => {
     expect(openStore({ db, migrations: MIGRATIONS.slice(0, 11) }).schemaVersion()).toBe(11);
     expect(db.prepare('PRAGMA table_info(kit_audit)').all().some((c) => c.name === 'role')).toBe(false);
     expect(db.prepare('SELECT * FROM kit_audit').all()).toHaveLength(1);
-    expect(openStore({ db }).schemaVersion()).toBe(12);
+    expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
   });
 });
 
