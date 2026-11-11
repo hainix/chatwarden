@@ -61,14 +61,12 @@
   "scripts": {
     "prepack": "tsc -b"
   },
-  "dependencies": {
-    "obscenity": "^0.4.6"
-  },
   "peerDependencies": {
     "@chatwarden/core": "^0.1.0"
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.2"
+    "@chatwarden/core": "0.1.2",
+    "obscenity": "^0.4.6"
   },
   "publishConfig": {
     "access": "public"

@@ -159,9 +159,9 @@ describe('the built page under the _headers CSP', () => {
     }, 90_000);
   }
 
-  it('the built demo refuses the invented word: the matcher in the bundle works without obscenity’s word list', async () => {
-    // Vitest runs the real, unstripped obscenity. Only the built bundle has its word list cut out, so this is the test that
-    // proves the cut matcher still blocks: the visitor's word, and Bo's opening line.
+  it('the built demo refuses the invented word: the matcher in the bundle works, with no word list from obscenity', async () => {
+    // The built bundle holds no obscenity word list (the matcher no longer carries it, test/dist.test.ts), so this is the test that
+    // proves the matcher in the page still blocks: the visitor's word, and Bo's opening line.
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const { page, violations, consoleProblems } = await watch(ctx);
     await openDemo(page);
@@ -189,7 +189,7 @@ describe('the built page under the _headers CSP', () => {
     await hidden.first().getByRole('button', { name: /^show/i }).click();
     await demo.getByText(/zorbak/i).first().waitFor();
     expect(violations).toEqual([]);
-    expect(consoleProblems).toEqual([]); // no pageerror either: nothing in the cut matcher threw
+    expect(consoleProblems).toEqual([]); // no pageerror either: nothing in the matcher threw
     await ctx.close();
   }, 60_000);
 
