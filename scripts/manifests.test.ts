@@ -30,16 +30,20 @@ const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
 // The React UI packages are new in this release line: they peer on ^0.1.1 (the first version that has the routes they call)
 // until the release changeset raises every peer. The exception is named here, so any other package keeps ^0.1.0.
 const UI_PEER_RANGE = '^0.1.1';
-const UI_PACKAGES = new Set(['@chatwarden/hub-react', '@chatwarden/player-react']);
+const UI_PACKAGES = new Set(['@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/hub-element']);
+// hub-element bundles React, hub-react and the little of core it needs into its own script, so it peers on none of them (hub-react is an
+// optional peer for the types only).
+const BUNDLED = new Set(['@chatwarden/hub-element']);
 const peerRangeOf = (pkgName: string): string => (UI_PACKAGES.has(pkgName) ? UI_PEER_RANGE : PEER_RANGE);
 
 describe('published package set', () => {
-  it('is the nine expected packages, none private', () => {
+  it('is the ten expected packages, none private', () => {
     expect(names.sort()).toEqual(
       [
         '@chatwarden/core',
         '@chatwarden/discord',
         '@chatwarden/http',
+        '@chatwarden/hub-element',
         '@chatwarden/hub-react',
         '@chatwarden/matcher',
         '@chatwarden/player-react',
@@ -79,7 +83,7 @@ describe('descriptions', () => {
 });
 
 describe('core is a peer, never a dependency', () => {
-  const dependents = published.filter((p) => p.pkg.name !== '@chatwarden/core');
+  const dependents = published.filter((p) => p.pkg.name !== '@chatwarden/core' && !BUNDLED.has(p.pkg.name));
   it('core itself has no @chatwarden peers or dependencies', () => {
     const core = published.find((p) => p.pkg.name === '@chatwarden/core')!.pkg;
     for (const field of [core.dependencies, core.peerDependencies])
@@ -223,6 +227,32 @@ describe('player-react', () => {
   it('dev-depends on the kit the tests run on, on hub-react for the transport type check, and on the test tools, not as peers', () => {
     for (const d of ['@chatwarden/http', '@chatwarden/store-memory', '@chatwarden/hub-react', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {
       expect(player().devDependencies?.[d], d).toBeDefined();
+    }
+  });
+});
+
+describe('hub-element', () => {
+  const element = (): Manifest & { sideEffects?: unknown; exports?: Record<string, unknown>; files?: string[] } =>
+    published.find((p) => p.pkg.name === '@chatwarden/hub-element')!.pkg as Manifest & { sideEffects?: unknown; exports?: Record<string, unknown>; files?: string[] };
+  it('bundles React, react-dom, hub-react and the part of core it needs: no react peer, no dependency, hub-react only as an optional peer for the types', () => {
+    expect(Object.keys(element().peerDependencies ?? {})).toEqual(['@chatwarden/hub-react']);
+    expect(element().peerDependencies?.['@chatwarden/hub-react']).toBe(UI_PEER_RANGE);
+    expect(element().peerDependenciesMeta?.['@chatwarden/hub-react']).toEqual({ optional: true });
+    expect(element().dependencies).toBeUndefined();
+  });
+  it('ships the module as . and the self-registering script as ./standalone, each with types, and lists the script under sideEffects', () => {
+    expect(element().exports?.['.']).toEqual({ types: './dist/src/index.d.ts', default: './dist/index.js' });
+    expect(element().exports?.['./standalone']).toEqual({ types: './dist/src/standalone.d.ts', default: './dist/hub-element.js' });
+    expect(element().sideEffects).toEqual(['./dist/hub-element.js']);
+  });
+  it('builds its scripts in prepack, after tsc, and ships both', () => {
+    expect((element() as { scripts?: Record<string, string> }).scripts?.prepack).toBe('tsc -b && node build/build.mjs');
+    expect(element().files).toContain('dist/hub-element.js');
+    expect(element().files).toContain('dist/index.js');
+  });
+  it('dev-depends on what it bundles and on the tools that build and test it, not as peers', () => {
+    for (const d of ['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/matcher', '@chatwarden/store-memory', 'react', 'react-dom', 'esbuild', 'jsdom', 'playwright', '@testing-library/dom', '@testing-library/user-event']) {
+      expect(element().devDependencies?.[d], d).toBeDefined();
     }
   });
 });

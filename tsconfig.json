@@ -12,6 +12,7 @@
     { "path": "packages/discord" },
     { "path": "packages/hub-react" },
     { "path": "packages/player-react" },
+    { "path": "packages/hub-element" },
     { "path": "examples/tiny-chat" }
   ]
 }

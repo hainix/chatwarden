@@ -9,8 +9,15 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = 'https://github.com/hainix/chatwarden';
 const REQUIRED_KEYWORDS = ['chatwarden', 'moderation', 'chat'];
-/** Static assets a package ships beside its source, listed after `src` (hub-react: the optional self-hosted font and its licence). */
-const STATIC_ASSETS = { 'hub-react': ['font.css', 'fonts'] };
+/**
+ * Packages whose code is a bundle (built by esbuild in `prepack`), not tsc output: `dist/src` holds their types only, and the scripts
+ * are the files an adopter loads. `sideEffects` lists the one script that registers itself (a bundler must not drop its bare import).
+ */
+export const BUNDLED = { 'hub-element': { scripts: ['dist/hub-element.js', 'dist/index.js'], sideEffects: ['./dist/hub-element.js'] } };
+/** The directory name of a package: `@chatwarden/hub-element` is `hub-element`. */
+const dirOf = (pkg) => String(pkg.name ?? '').replace(/^@chatwarden\//, '');
+/** Static assets a package ships beside its source, listed after `src` (hub-react: the optional self-hosted font and its licence; a bundled package: its scripts). */
+const STATIC_ASSETS = { 'hub-react': ['font.css', 'fonts'], ...Object.fromEntries(Object.entries(BUNDLED).map(([dir, b]) => [dir, b.scripts])) };
 /** The `files` a package must declare. */
 const requiredFilesFor = (dir) => ['dist/src', 'src', ...(STATIC_ASSETS[dir] ?? []), 'README.md', 'LICENSE'];
 
@@ -51,13 +58,25 @@ export function checkFileList({ pkg, files }) {
   }
 
   const dist = files.filter((f) => f.startsWith('dist/src/'));
-  if (!dist.some((f) => f.endsWith('.js'))) problems.push('no dist/src/**/*.js (was the package built?)');
+  const bundled = BUNDLED[dirOf(pkg)];
+  if (bundled === undefined && !dist.some((f) => f.endsWith('.js'))) problems.push('no dist/src/**/*.js (was the package built?)');
   if (!dist.some((f) => f.endsWith('.d.ts'))) problems.push('no dist/src/**/*.d.ts (was the package built?)');
   if (!files.some((f) => f.startsWith('src/') && /\.tsx?$/.test(f) && !f.endsWith('.d.ts'))) {
     problems.push('no src/**/*.ts (source maps would not resolve)');
   }
 
-  for (const f of dist) {
+  if (bundled !== undefined) {
+    // The code is the bundle; dist/src is the types. Compiled JavaScript there would be a second, unbundled copy that imports React.
+    for (const script of bundled.scripts) if (!have.has(script)) problems.push(`missing ${script} (was the package built?)`);
+    for (const f of dist) {
+      if (f.endsWith('.js')) problems.push(`${f} would ship, but ${dirOf(pkg)} ships its code as a bundle (dist/*.js), not as dist/src/**/*.js`);
+      const m = /^dist\/src\/(.*)\.d\.ts$/.exec(f);
+      if (m && !have.has(`dist/src/${m[1]}.d.ts.map`)) problems.push(`missing dist/src/${m[1]}.d.ts.map (next to ${f})`);
+      if (m && !have.has(`src/${m[1]}.ts`) && !have.has(`src/${m[1]}.tsx`)) problems.push(`missing src/${m[1]}.ts (next to ${f})`);
+    }
+  }
+
+  for (const f of bundled === undefined ? dist : []) {
     const m = /^dist\/src\/(.*)\.js$/.exec(f);
     if (m) {
       const stem = m[1];
@@ -84,10 +103,19 @@ export function checkManifest(pkg, dir) {
   const problems = [];
   if (pkg.license !== 'Apache-2.0') problems.push(`license must be Apache-2.0, got ${JSON.stringify(pkg.license)}`);
   // false, or a list of stylesheets only: importing a CSS file is a side effect a bundler must keep, nothing else may be one.
+  // (A bundled package that registers itself on import lists that one script, exactly.)
   const sideEffectsOk =
-    pkg.sideEffects === false ||
+    BUNDLED[dir] !== undefined
+      ? JSON.stringify(pkg.sideEffects) === JSON.stringify(BUNDLED[dir].sideEffects)
+      : pkg.sideEffects === false ||
     (Array.isArray(pkg.sideEffects) && pkg.sideEffects.length > 0 && pkg.sideEffects.every((f) => typeof f === 'string' && /\.css$/.test(f)));
-  if (!sideEffectsOk) problems.push('sideEffects must be false, or a list of .css files only');
+  if (!sideEffectsOk) {
+    problems.push(
+      BUNDLED[dir] === undefined
+        ? 'sideEffects must be false, or a list of .css files only'
+        : `sideEffects must be exactly ${JSON.stringify(BUNDLED[dir].sideEffects)} (the script that registers itself), got ${JSON.stringify(pkg.sideEffects)}`,
+    );
+  }
   const prepack = pkg.scripts?.prepack;
   if (typeof prepack !== 'string' || !/\btsc -b\b/.test(prepack)) problems.push('scripts.prepack must run "tsc -b"');
   if (JSON.stringify(pkg.files) !== JSON.stringify(requiredFilesFor(dir))) {
@@ -140,7 +168,7 @@ export function bareImports(source) {
 }
 
 /** The packages that must run in a browser: their compiled code may import no Node builtin, not even `node:crypto`. */
-export const BROWSER_SAFE = new Set(['@chatwarden/core', '@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/store-memory']);
+export const BROWSER_SAFE = new Set(['@chatwarden/core', '@chatwarden/hub-element', '@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/store-memory']);
 
 /**
  * The Node builtins a JavaScript source imports (`node:fs`, `crypto`, `node:fs/promises` -> `fs`), one entry per import, in
@@ -158,8 +186,11 @@ export function nodeImports(source) {
   return found;
 }
 
+/** A JavaScript file a package ships: tsc output under `dist/src`, or a bundled package's script in `dist`. */
+const isShippedJs = (path) => /^dist\/src\/.*\.js$/.test(path) || /^dist\/[^/]+\.js$/.test(path);
+
 /**
- * One message per (file, module) where a browser-safe package's compiled `dist/src/**` `.js` file imports a Node builtin.
+ * One message per (file, module) where a browser-safe package's shipped `.js` file (`dist/src/**`, or a bundle in `dist`) imports a Node builtin.
  * Packages outside {@link BROWSER_SAFE} are not checked.
  * @param {{ pkg: Record<string, any>, files: Array<{ path: string, source: string }> }} input
  */
@@ -167,7 +198,7 @@ export function nodeImportProblems({ pkg, files }) {
   if (!BROWSER_SAFE.has(pkg.name)) return [];
   const problems = [];
   for (const { path, source } of files) {
-    if (!/^dist\/src\/.*\.js$/.test(path)) continue;
+    if (!isShippedJs(path)) continue;
     for (const name of new Set(nodeImports(source))) {
       problems.push(`${path} imports the Node builtin "node:${name}", but ${pkg.name} must run in a browser`);
     }
@@ -176,7 +207,7 @@ export function nodeImportProblems({ pkg, files }) {
 }
 
 /**
- * One message per (file, package) where a compiled `dist/src/**` `.js` file imports a package that an installer would not
+ * One message per (file, package) where a shipped `.js` file (`dist/src/**`, or a bundle in `dist`) imports a package that an installer would not
  * have: it must be a Node builtin, the package itself, or in dependencies or peerDependencies. devDependencies do not count.
  * @param {{ pkg: Record<string, any>, files: Array<{ path: string, source: string }> }} input
  */
@@ -184,7 +215,7 @@ export function undeclaredImports({ pkg, files }) {
   const declared = new Set([pkg.name, ...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {})]);
   const problems = [];
   for (const { path, source } of files) {
-    if (!/^dist\/src\/.*\.js$/.test(path)) continue;
+    if (!isShippedJs(path)) continue;
     for (const name of bareImports(source)) {
       if (!declared.has(name)) {
         problems.push(`${path} imports "${name}", which is not in dependencies or peerDependencies (a consumer would not have it)`);
@@ -214,7 +245,7 @@ function main() {
     );
     const files = JSON.parse(raw)[0].files.map((f) => f.path.replaceAll('\\', '/'));
     const sources = files
-      .filter((f) => /^dist\/src\/.*\.js$/.test(f))
+      .filter((f) => isShippedJs(f))
       .map((f) => ({ path: f, source: readFileSync(join(base, dir, f), 'utf8') }));
     const problems = [
       ...checkManifest(pkg, dir),

@@ -42,8 +42,8 @@ const NEW_FOUR = ['core', 'store-sqlite', 'store-memory', 'matcher', 'profanity'
 const REPO = 'https://github.com/hainix/chatwarden';
 
 describe('every published package has a README', () => {
-  it('covers the nine packages', () => {
-    expect(published).toEqual(['core', 'discord', 'http', 'hub-react', 'matcher', 'player-react', 'profanity', 'store-memory', 'store-sqlite']);
+  it('covers the ten packages', () => {
+    expect(published).toEqual(['core', 'discord', 'http', 'hub-element', 'hub-react', 'matcher', 'player-react', 'profanity', 'store-memory', 'store-sqlite']);
   });
 
   it.each(published)('%s: is titled with its package name, with a status line and no marketing words', (dir) => {
@@ -384,6 +384,8 @@ declare const authorize: import('@chatwarden/http').Authenticate;
         '@chatwarden/discord': src('discord/src/index.ts'),
         '@chatwarden/http': src('http/src/index.ts'),
         '@chatwarden/http/admin': src('http/src/admin-entry.ts'),
+        '@chatwarden/hub-element': src('hub-element/src/index.ts'),
+        '@chatwarden/hub-element/standalone': src('hub-element/src/standalone.ts'),
         '@chatwarden/hub-react': src('hub-react/src/index.ts'),
         '@chatwarden/hub-react/headless': src('hub-react/src/headless/index.ts'),
         '@chatwarden/player-react': src('player-react/src/index.ts'),

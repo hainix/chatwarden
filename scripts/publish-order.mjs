@@ -19,6 +19,7 @@ export const PUBLISH_ORDER = [
   '@chatwarden/discord',
   '@chatwarden/hub-react',
   '@chatwarden/player-react',
+  '@chatwarden/hub-element',
 ];
 
 const rankOf = (name) => {

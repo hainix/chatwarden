@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { hubElementPlugin } from './packages/hub-element/build/plugin.mjs';
 
 export default defineConfig({
   resolve: {
@@ -53,14 +54,14 @@ export default defineConfig({
     ],
   },
   test: {
-    // Three projects, so no test file runs twice: the kit's tests run in Node; the React UIs' tests (hub-react, player-react) need a DOM (jsdom).
+    // Four projects, so no test file runs twice: the kit's tests run in Node; the UIs' tests (hub-react, player-react, hub-element) need a DOM (jsdom).
     projects: [
       {
         extends: true,
         test: {
           name: 'kit',
           include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'scripts/*.test.ts'],
-          exclude: ['**/node_modules/**', '**/dist/**', 'packages/hub-react/**', 'packages/player-react/**'],
+          exclude: ['**/node_modules/**', '**/dist/**', 'packages/hub-react/**', 'packages/player-react/**', 'packages/hub-element/**'],
           setupFiles: ['./packages/store-sqlite/test/setup.ts'],
         },
       },
@@ -83,6 +84,32 @@ export default defineConfig({
           include: ['packages/player-react/test/**/*.test.{ts,tsx}'],
           exclude: ['**/node_modules/**', '**/dist/**'],
           setupFiles: ['./packages/player-react/test/setup.ts'],
+          testTimeout: 30_000,
+        },
+      },
+      {
+        // The element bundles hub-react: its tests run against hub-react's source, through the same two build transforms the script
+        // is built with (the hub CSS as a string, and the shadow-aware `document`).
+        extends: true,
+        plugins: [hubElementPlugin()],
+        resolve: {
+          alias: [
+            {
+              find: '@chatwarden/hub-react/headless',
+              replacement: fileURLToPath(new URL('./packages/hub-react/src/headless/index.ts', import.meta.url)),
+            },
+            {
+              find: '@chatwarden/hub-react',
+              replacement: fileURLToPath(new URL('./packages/hub-react/src/index.ts', import.meta.url)),
+            },
+          ],
+        },
+        test: {
+          name: 'hub-element',
+          environment: 'jsdom',
+          include: ['packages/hub-element/test/**/*.test.{ts,tsx}'],
+          exclude: ['**/node_modules/**', '**/dist/**'],
+          setupFiles: ['./packages/hub-element/test/setup.ts'],
           testTimeout: 30_000,
         },
       },

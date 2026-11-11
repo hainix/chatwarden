@@ -137,7 +137,7 @@ describe('the smoke scenario', () => {
 
   // The React packages need a DOM and react to do anything; the consumer projects here are server-side Node. A UI package is
   // installed with the rest (the tarball must install, with its peers) but the scenario has nothing of it to run.
-  const UI_ONLY = new Set(['@chatwarden/hub-react', '@chatwarden/player-react']);
+  const UI_ONLY = new Set(['@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/hub-element']);
   it('imports every published package, so a package left out of the smoke run is caught here', () => {
     for (const name of published.filter((n) => !UI_ONLY.has(n))) expect(scenario, name).toContain(`from '${name}'`);
   });
