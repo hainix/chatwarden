@@ -1,10 +1,11 @@
-// @chatwarden/hub-react/headless: the moderator hub's behaviour with no React and no DOM, for Vue, Svelte, Solid or plain code.
+// @chatwarden/hub-react/headless: the moderator hub's behaviour with no React, for Vue, Svelte, Solid or plain code.
 // The React hub is built on exactly this, so there is one implementation of the queue, the Undo hold, claims and toasts.
 //
 //   const hub = createHubController({ client });
 //   await hub.start();
 //   hub.queue.subscribe(() => render(hub.queue.getSnapshot()));
 //
+// Its timers and page helpers default to the browser's (`document`, `window`), optional and injectable. Its types need no DOM lib.
 // Every store has `subscribe(listener)` and `getSnapshot()`, and a snapshot is the same object until something changes.
 
 export { createHubController } from './controller.js';

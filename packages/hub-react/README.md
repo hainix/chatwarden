@@ -694,7 +694,7 @@ Content-Security-Policy needs `font-src 'self'` for it.
 
 ## Headless (any framework)
 
-`@chatwarden/hub-react/headless` is the hub's behaviour with no React and no DOM: the live queue, claims, the Undo hold on a
+`@chatwarden/hub-react/headless` is the hub's behaviour with no React: the live queue, claims, the Undo hold on a
 decision and the toasts. The React hub is built on it, so a Vue, Svelte or Solid dashboard, or a plain script, gets the same
 behaviour. Every store has `subscribe(listener)` and `getSnapshot()`, and a snapshot is the same object until something changes
 (so it works with `useSyncExternalStore`, a Vue `shallowRef`, a Svelte store, or a bare callback).
@@ -702,6 +702,11 @@ behaviour. Every store has `subscribe(listener)` and `getSnapshot()`, and a snap
 The headless entry needs no React. `react` and `react-dom` are optional peer dependencies of this package (`peerDependenciesMeta`),
 so a Vue, Svelte or plain-JS project that imports only `@chatwarden/hub-react/headless` installs without them, and its bundle holds
 no React. It does need the kit peers, `@chatwarden/core` and `@chatwarden/http` (types).
+
+The controller's timers and page awareness default to `browserTimers` and `browserPage`, which use `document` and `window` when they run
+(the page's visibility, `pagehide`, online and offline events); where there is no `document` they say the page is visible and online. They
+are optional and injectable: pass your own `schedule` and `page` to `createHubController` for a worker, Node or a native shell. Its type
+declarations need no DOM lib, so a project with `lib: ["ES2023"]` and no `@types/node` compiles an import of it.
 
 ```ts
 import { createHubClient, createHubController, fetchTransport, personTag } from '@chatwarden/hub-react/headless';

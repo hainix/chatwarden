@@ -1,5 +1,45 @@
 import type { KitRequest, KitResponse } from '@chatwarden/http/admin';
 
+// The declarations here name no DOM type (`AbortSignal`, `RequestCredentials`, `fetch`), so the headless entry compiles in a project whose
+// `lib` has no DOM. Where the platform has the type (a browser project, or @types/node) the alias below IS the platform type, so a custom
+// transport can pass `req.signal` straight to `fetch`; where it has not, it is the small shape the hub uses, which a real one also fits.
+
+/** The part of an `AbortSignal` the hub uses. */
+export interface MinimalAbortSignal {
+  readonly aborted: boolean;
+  addEventListener(type: 'abort', listener: () => void, options?: { once?: boolean }): void;
+  removeEventListener(type: 'abort', listener: () => void): void;
+}
+
+/** What `fetch` may be asked for: the options the hub sets. */
+export interface FetchInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: MinimalAbortSignal;
+  credentials?: FetchCredentials;
+  keepalive?: boolean;
+}
+
+/** The part of a `Response` the hub reads. */
+export interface FetchResponseLike {
+  status: number;
+  headers: { forEach(callback: (value: string, key: string) => void): void };
+  text(): Promise<string>;
+}
+
+/** The small `fetch` shape: a function from a URL and `FetchInit` to something that reads like a `Response`. */
+export type MinimalFetch = (url: string, init: FetchInit) => Promise<FetchResponseLike>;
+
+/** Whether the browser sends cookies and the like: the values of the DOM's `RequestCredentials`. */
+export type FetchCredentials = 'omit' | 'same-origin' | 'include';
+
+/** An `AbortSignal`: the platform's where there is one, else {@link MinimalAbortSignal}. */
+export type AbortSignalLike = typeof globalThis extends { AbortSignal: { prototype: infer S } } ? S : MinimalAbortSignal;
+
+/** `fetch`: the platform's where there is one, else {@link MinimalFetch}. */
+export type FetchLike = typeof globalThis extends { fetch: infer F } ? F : MinimalFetch;
+
 /**
  * One call to the staff API, as the hub makes it. `path` is the route path with no prefix (`/reports/abc`); the transport
  * adds whatever prefix its server uses. `query` values that are `undefined` are left out. `body` is sent as JSON.
@@ -10,7 +50,7 @@ export interface TransportRequest {
   query?: Record<string, string | number | undefined>;
   body?: unknown;
   /** Lets the caller abandon the call (fetch only; the in-page router answers at once). */
-  signal?: AbortSignal;
+  signal?: AbortSignalLike;
   /**
    * Lets the call finish after the page is gone (fetch `keepalive`). A decision held for its Undo window is sent this way, so
    * closing the tab never loses it. Ignored by the in-page router.
@@ -80,9 +120,9 @@ export interface FetchTransportOptions {
   /** Sent with every request (a CSRF token, for example). */
   headers?: Record<string, string>;
   /** `include` sends cookies to another origin. Default: the browser's (`same-origin`). */
-  credentials?: RequestCredentials;
+  credentials?: FetchCredentials;
   /** For tests, or a polyfill. Default: the global `fetch`. */
-  fetch?: typeof fetch;
+  fetch?: FetchLike;
 }
 
 /** The default transport for a real app: `fetch` against the routes your server mounts. */
@@ -94,7 +134,7 @@ export function fetchTransport(options: FetchTransportOptions): Transport {
     const params = new URLSearchParams(queryOf(req.query)).toString();
     const url = `${base}${req.path}${params === '' ? '' : `?${params}`}`;
     const headers: Record<string, string> = { accept: 'application/json', ...options.headers };
-    const init: RequestInit = { method: req.method, headers };
+    const init: FetchInit = { method: req.method, headers };
     if (req.body !== undefined) {
       headers['content-type'] = 'application/json';
       init.body = JSON.stringify(req.body);
@@ -102,7 +142,9 @@ export function fetchTransport(options: FetchTransportOptions): Transport {
     if (options.credentials !== undefined) init.credentials = options.credentials;
     if (req.signal !== undefined) init.signal = req.signal;
     if (req.keepalive === true) init.keepalive = true;
-    const res = await (options.fetch ?? globalThis.fetch)(url, init);
+    // Not called as `options.fetch(...)`: the global `fetch` must not be called with the options object as `this`.
+    const doFetch = (options.fetch ?? globalThis.fetch) as unknown as MinimalFetch;
+    const res = await doFetch(url, init);
     const headersOut: Record<string, string> = {};
     res.headers.forEach((value, key) => (headersOut[key.toLowerCase()] = value));
     const text = await res.text();

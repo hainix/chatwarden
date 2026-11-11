@@ -48,4 +48,15 @@ describe('the README sentence about what the hub imports from core', () => {
   it('says they are constants and defaults, and that the hub imports types from core as well', () => {
     expect(readme).toMatch(/imports types from both, and these values from core/);
   });
+
+  it('headless: says no React, and says plainly that the browser timer and page helpers use document and window, optional and injectable', () => {
+    const headless = readme.slice(readme.indexOf('## Headless (any framework)'));
+    expect(headless).toMatch(/with no React/);
+    expect(headless).not.toMatch(/no React and no DOM/);
+    expect(headless).toMatch(/`browserTimers` and `browserPage`/);
+    expect(headless).toMatch(/use `document` and `window` when they run/);
+    expect(headless).toMatch(/optional/);
+    expect(headless).toMatch(/`schedule` and `page`/);
+    expect(headless).toMatch(/type declarations need no DOM lib/);
+  });
 });
