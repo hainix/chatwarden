@@ -1,10 +1,14 @@
-// @vitest-environment node
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 // The export names of an entry point, read from its source by the TypeScript checker, so a type-only export counts too.
 
-const root = process.cwd();
+/** The repository root, found from this file (not from where the tests were started). */
+export const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+/** The entry points that are locked. */
+export const ENTRIES = ['packages/hub-react/src/index.ts', 'packages/hub-react/src/headless/index.ts', 'packages/player-react/src/index.ts'] as const;
 
 export interface Names {
   values: string[];
@@ -15,7 +19,10 @@ export interface Names {
   experimentalMembers: string[];
 }
 
-export function exportsOf(entry: string): Names {
+// One program for all of them, built once: reading each entry's exports is then a lookup, not a compile.
+let built: { program: ts.Program; checker: ts.TypeChecker } | undefined;
+function build(): { program: ts.Program; checker: ts.TypeChecker } {
+  if (built !== undefined) return built;
   const cfg = ts.readConfigFile(join(root, 'tsconfig.base.json'), ts.sys.readFile);
   const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, root);
   const src = (rel: string): string[] => [`packages/${rel}`];
@@ -35,9 +42,14 @@ export function exportsOf(entry: string): Names {
     declaration: false,
     declarationMap: false,
   };
+  const program = ts.createProgram({ rootNames: ENTRIES.map((e) => join(root, e)), options });
+  built = { program, checker: program.getTypeChecker() };
+  return built;
+}
+
+export function exportsOf(entry: string): Names {
   const file = join(root, entry);
-  const program = ts.createProgram({ rootNames: [file], options });
-  const checker = program.getTypeChecker();
+  const { program, checker } = build();
   const source = program.getSourceFile(file);
   if (source === undefined) throw new Error(`no source for ${entry}`);
   const moduleSymbol = checker.getSymbolAtLocation(source);

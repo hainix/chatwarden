@@ -85,8 +85,8 @@ export interface UseCases {
   showIncoming: () => void;
   /** Read the queue again now. */
   reload: () => Promise<QueueGroup[]>;
-  /** Claim and open the oldest free case that matches the filter. Says how it went. */
-  takeNext: () => Promise<TakeOutcome>;
+  /** Claim and open the oldest free case that matches the filter. Says how it went (`not_allowed` for a role that cannot read reports). */
+  takeNext: () => Promise<TakeOutcome | { status: 'not_allowed' }>;
 }
 
 /**
@@ -122,7 +122,7 @@ export function useCases(): UseCases {
     setFilter: q.setFilter,
     showIncoming: q.showIncoming,
     reload: q.reload,
-    takeNext: () => (allowed ? controller.takeNext() : Promise.resolve({ status: 'busy' })),
+    takeNext: () => (allowed ? controller.takeNext() : Promise.resolve({ status: 'not_allowed' as const })),
   };
 }
 
@@ -170,7 +170,7 @@ export function useCase(reportId: string | null, options: UseCaseOptions = {}): 
   const allowed = can('reports.read') && reportId !== null;
   useQueueRunning(allowed);
   useCaseShown(reportId, allowed && options.claim !== false);
-  const read = useHubData<ReportDetail | null>(allowed ? `case:${reportId}` : 'case:idle', () => (allowed && reportId !== null ? client.getReport(reportId) : Promise.resolve(null)));
+  const read = useHubData<ReportDetail | null>(allowed ? `report:${reportId}` : 'report:idle', () => (allowed && reportId !== null ? client.getReport(reportId) : Promise.resolve(null)));
   const queue = useStore(controller.queue);
   const decisions = useStore(controller.decisions);
   const detail = read.data ?? undefined;

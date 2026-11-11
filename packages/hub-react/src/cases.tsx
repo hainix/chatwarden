@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useContext, useEffect } from 'react';
 import { useController } from './controllerContext.js';
 import { useHub } from './context.js';
 import { CLAIM_TTL_MS } from './claims.js';
 import { CLAIM_BEAT_MS, TAKE_COOLDOWN_MS, VIEWING_BEAT_MS } from './headless/cases.js';
 import { useOptionalQueue } from './liveQueue.js';
+import { PieceNavContext, canShowNext, showNext } from './pieceRuntime.js';
 
 // Working a case: claiming it when it is opened, keeping the claim and the "viewing" hint alive while it stays open, and the
 // three things a moderator does about a claim from the queue: take the next case, release one, open one. All of it is the headless
@@ -50,15 +51,26 @@ export interface CaseActions {
 export function useCaseActions(): CaseActions {
   const controller = useController();
   const { go } = useHub();
+  // In a piece there is no router: where the next case is shown is the piece's callback, called from what happened here (so it is the
+  // same for a controller the provider made and one it was given). In the hub's shell the controller's host (the router) does it.
+  const nav = useContext(PieceNavContext);
   // A role that cannot read reports has no queue: there is nothing to take.
   const hasQueue = useOptionalQueue() !== null;
 
   const takeNext = async (): Promise<TakeResult> => {
     if (!hasQueue) return 'busy';
-    return (await controller.takeNext()).status;
+    const out = await controller.takeNext();
+    if (out.status === 'taken' && nav !== null) showNext(nav.current, out.person, out.reportId);
+    return out.status;
   };
   const continueFrom = async (decided: { reportId: string; person: string }): Promise<'same' | TakeResult> => {
+    // In a piece with nowhere to show a next case, "and next" decides only: no case is taken for nobody to see.
+    if (nav !== null && !canShowNext(nav.current)) return 'none';
     const out = await controller.continueFrom(decided);
+    if (nav !== null) {
+      if (out.status === 'same') showNext(nav.current, decided.person, out.reportId);
+      else if (out.status === 'taken') showNext(nav.current, out.person, out.reportId);
+    }
     // Nobody is waiting: the team view says so.
     if (out.status === 'none') go({ name: 'overview' });
     return out.status;

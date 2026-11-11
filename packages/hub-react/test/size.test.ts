@@ -5,11 +5,11 @@ import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
 // The package entry, bundled the way an adopter's bundler would see it: React, React DOM and the kit stay outside (they are
-// peers), everything else of ours is in. Minified and gzipped, it must stay under 72 KB. The budget was 60 KB, a guess made before the screens existed; it is a staff-only tool on the
-// adopter's admin route, raised at Task 6 so guidance copy is never cut to fit.
+// peers), everything else of ours is in. Minified and gzipped, it must stay under 84 KB. The budget was 60 KB, a guess made before the screens existed; it is a staff-only tool on the
+// adopter's admin route, raised at Task 6 (to 72 KB) so guidance copy is never cut to fit, and again to 84 KB: raised at 7d for the Steps and ladder settings screen (owner-approved feature, 2026-11-10).
 
 const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-const BUDGET = 72 * 1024;
+const BUDGET = 84 * 1024;
 
 async function bundle() {
   const result = await build({
@@ -31,7 +31,7 @@ async function bundle() {
 }
 
 describe('bundle size', () => {
-  it('is under 72 KB gzipped with React and the kit external', async () => {
+  it('is under 84 KB gzipped with React and the kit external', async () => {
     const { bytes, gzip } = await bundle();
     console.log(`hub-react bundle: ${bytes} bytes minified, ${gzip} bytes gzipped (budget ${BUDGET})`);
     expect(gzip).toBeLessThan(BUDGET);
@@ -65,6 +65,7 @@ describe('bundle size', () => {
     // Design v2 (the shell, the windows, the toasts, the team view): 10 KB gzipped, up from 7. The case pane (transcript, decision
     // bar, context pane, phone sheet) takes it to 12. The last five screens (Terms, Blocked, Rule gaps, Audit and the Guide: their
     // tables, forms, the dry-run list and the guide's document typography) take it to 14 (76 KB raw, see static.test.ts).
-    expect(gzip).toBeLessThan(14 * 1024);
+    // And 15 KB at 7d: raised at 7d for the Steps and ladder settings screen (owner-approved feature, 2026-11-10).
+    expect(gzip).toBeLessThan(15 * 1024);
   });
 });

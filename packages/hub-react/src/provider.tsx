@@ -14,7 +14,6 @@ import { errorText } from './labels.js';
 import { QueueProvider } from './liveQueue.js';
 import { ModeProvider, useModeState } from './mode.js';
 import type { HubMode } from './mode.js';
-import { bindRuntime, createRuntime, runtimeOf } from './pieceRuntime.js';
 import { buildPath, memoryRouter } from './router.js';
 import type { HubRouter } from './router.js';
 import { ToastProvider } from './toasts.js';
@@ -141,13 +140,7 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
   hostRef.current = shell?.host;
 
   // One controller per provider: the session cache, the toasts, the live queue, claims and decisions.
-  const controller = useControllerOf(given, client, () => {
-    const runtime = createRuntime(true);
-    const made = createHubController({ client, now: () => nowRef.current(), t: tRef.current, host: hostRef.current ?? runtime.host });
-    bindRuntime(made, runtime);
-    return made;
-  });
-  const runtime = runtimeOf(controller);
+  const controller = useControllerOf(given, client, () => createHubController({ client, now: () => nowRef.current(), t: tRef.current, ...(hostRef.current === undefined ? {} : { host: hostRef.current }) }));
 
   // Who is signed in: asked once per client, unless a controller of the adopter's already knows.
   const known = given?.me.getSnapshot() ?? null;
@@ -200,7 +193,6 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
       </ControllerContext.Provider>
     );
   }
-  void runtime;
 
   if (bare) return <>{content}</>;
   return (

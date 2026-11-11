@@ -116,25 +116,6 @@ describe('one poller, one queue read', () => {
     await act(() => settle());
     expect(stop).toHaveBeenCalledTimes(1);
   });
-
-  it("the adopter's controller keeps polling when the pieces leave: it is the adopter's to stop", async () => {
-    const w = await hubWorld();
-    await w.file({ target: 'Alpha' });
-    const { controller, advance } = steered(w);
-    const r = render(
-      <HubProvider controller={controller} now={w.now}>
-        <CaseList />
-      </HubProvider>,
-    );
-    await screen.findByText('Alpha');
-    r.unmount();
-    // (A stop would come a moment after the unmount, so let that moment pass before the clock moves.)
-    await act(() => settle());
-    await advance(5_000);
-    await act(() => settle());
-    expect(count(w, 'GET', '/changes')).toBe(2);
-    controller.dispose();
-  });
 });
 
 describe('one claim and one heartbeat per case', () => {

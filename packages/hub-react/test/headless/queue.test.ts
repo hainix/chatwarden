@@ -84,6 +84,36 @@ describe('the live queue: the first load', () => {
   });
 });
 
+describe('the live queue: running', () => {
+  it('says whether it is polling: false before start, true after, false after stop, and a start after a stop polls again', async () => {
+    const r = await started();
+    expect(r.controller.queue.running).toBe(false);
+    await r.controller.start();
+    expect(r.controller.queue.running).toBe(true);
+    await r.controller.queue.start();
+    expect(r.controller.queue.running).toBe(true);
+    r.controller.queue.stop();
+    expect(r.controller.queue.running).toBe(false);
+    await r.controller.queue.start();
+    expect(r.controller.queue.running).toBe(true);
+  });
+
+  it('is false after dispose, and a disposed queue never runs again', async () => {
+    const r = await started();
+    await r.controller.start();
+    r.controller.dispose();
+    expect(r.controller.queue.running).toBe(false);
+    await r.controller.queue.start();
+    expect(r.controller.queue.running).toBe(false);
+  });
+
+  it('a role that cannot read reports never runs', async () => {
+    const r = await started({ world: { role: 'moderator', permissions: { 'reports.read': 'owner' } } });
+    await r.controller.start();
+    expect(r.controller.queue.running).toBe(false);
+  });
+});
+
 describe('the live queue: polling', () => {
   it('asks GET /changes every 5 seconds while visible, and reads the queue again only when the token moved', async () => {
     const r = await started();

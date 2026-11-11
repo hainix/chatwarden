@@ -56,6 +56,8 @@ export interface LiveQueueState {
 }
 
 export interface LiveQueueStore extends Store<LiveQueueState> {
+  /** True while it is polling (after `start`, until `stop` or `dispose`). A part that starts the queue for itself can ask first, and stop only what it started. */
+  readonly running: boolean;
   /** Begin loading and polling. Safe to call twice. Resolves once the first read has been tried (it never rejects: a failure is in the snapshot). */
   start: () => Promise<void>;
   /** Stop the polling, the minute and every listener (the state stays). */
@@ -302,6 +304,9 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   const api: LiveQueueStore = {
     subscribe: store.subscribe,
     getSnapshot: store.getSnapshot,
+    get running() {
+      return run !== null;
+    },
     start() {
       if (run === null && !disposed) run = begin();
       return run?.first ?? Promise.resolve();

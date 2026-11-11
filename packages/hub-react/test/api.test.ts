@@ -2,7 +2,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { exportsOf } from './apiNames.js';
+import { ENTRIES, exportsOf, root } from './apiNames.js';
 
 // The public API is locked: every export name of each entry point, as committed inline snapshots. Changing one is a deliberate
 // snapshot edit, so the diff shows exactly what was added or removed, and the changeset says which way. Names are read from the
@@ -10,16 +10,12 @@ import { exportsOf } from './apiNames.js';
 //
 // `@experimental` names (see the README's list) may change before 0.2; the lock still shows when they do.
 
-const root = process.cwd();
-
 async function loaded(entry: string): Promise<string[]> {
   const mod = (await import(/* @vite-ignore */ pathToFileURL(join(root, entry)).href)) as Record<string, unknown>;
   return Object.keys(mod).sort();
 }
 
-const HUB = 'packages/hub-react/src/index.ts';
-const HEADLESS = 'packages/hub-react/src/headless/index.ts';
-const PLAYER = 'packages/player-react/src/index.ts';
+const [HUB, HEADLESS, PLAYER] = ENTRIES;
 
 describe('@chatwarden/hub-react', () => {
   it('exports exactly these values', () => {
@@ -517,7 +513,8 @@ describe('what is marked @experimental', () => {
     const hub = exportsOf(HUB);
     const settled = new Set(exportsOf(HEADLESS).values);
     const embedding = hub.values.filter((name) => /^(Hub.*Provider|HubProvider|use(Cases?|Decide|Claim|Terms|Blocked|Person|Me|HubController)|CaseList|CaseCard|CaseWorkbench|PersonRecord|TermsManager|BlockedList|AuditLog|RuleGaps|Guide|RecentActions)$/.test(name) && !settled.has(name));
-    expect(embedding.length).toBe(20);
+    // (The list itself is locked by the snapshot above; this only asks that what looks like embedding API is in it.)
+    expect(embedding.length).toBeGreaterThan(0);
     for (const name of embedding) expect(hub.experimental, name).toContain(name);
   });
 });

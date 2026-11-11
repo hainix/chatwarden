@@ -30,8 +30,10 @@ function Body({ reportId }: { reportId: string }) {
 /**
  * One case as the full workbench: the header and who is handling it, the evidence in tabs (the transcript, the person's reports and
  * their history), the decision bar, and beside it the person's record, what they tried to say that was blocked, how the reporters
- * have fared and who is in the case. Everything the Detailed hub shows for a case, without the queue or the nav. The case is claimed
- * while it is shown; the keys (1, 2, 3 and Ctrl or Cmd+Enter) work only while focus is inside this piece.
+ * have fared and who is in the case. Everything the Detailed hub shows for a case, without the queue or the nav. The hub holds one case
+ * at a time: the workbench for the case you last entered is claimed; with several people's cases on one page the others are shown
+ * unclaimed, with no heartbeat, but reading and deciding on them work. The keys (1, 2, 3 and Ctrl or Cmd+Enter) work only while
+ * focus is inside this piece. Without `onOpenCase` or `onOpenReport`, "decide and next" only decides.
  *
  * `onOpenPerson` and `onOpenReport` make the person's History button and the other reports of the case open where you say; without
  * them they are plain text.

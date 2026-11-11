@@ -130,14 +130,20 @@ and nothing is asked of the server.
 
 - **`client`**: the provider makes the controller (the live queue, claims, the Undo hold and the toasts) and disposes it when it unmounts. A
   new client makes a new controller.
-- **`controller`**: yours, from `createHubController` (see "Headless" below). The provider uses it and never disposes it.
+- **`controller`**: yours, from `createHubController` (see "Headless" below). The provider uses it and never disposes it. The pieces
+  start its queue only if it is not already running, and stop it only if they started it, so a queue you started stays running. The
+  callbacks fire the same way as with a `client`.
 - **`bare`**: by default the provider draws the `.cw-hub` theme root around its children, so the pieces are styled where they sit. With
   `bare` it draws none, and you place an element with the classes `cw-hub cw-hub--embed` (and `data-cw-theme="dark"` to force a theme).
 - Until `GET /me` answers, the provider shows a plain message (loading, signed out, no access, or a failed start with Try again), so a
   piece never renders for someone who is not signed in.
 
 Pieces under one provider share one controller. That is one poll of the change token however many pieces show the queue, and one claim
-and one heartbeat per case however many pieces show it (only one case is held at a time: the one most recently shown or entered). A page
+and one heartbeat per case however many pieces show it. The hub holds one case at a time (the one most recently shown or entered by
+focus): with cards for different people on one page, the other cards are shown unclaimed, with no heartbeat, so another moderator can
+take them; reading and deciding on them still work, and a decision on a card affects only that card's case. In development the hub
+warns once when two different people are shown at once. A card with neither `onOpenCase` nor `onOpenReport` has nowhere to show a next
+case, so Ctrl or Cmd+Enter only decides. A page
 that shows only `TermsManager` asks the server for no cases. The keys of a piece (1, 2 and Ctrl or Cmd+Enter on a `CaseCard`; 1, 2, 3 and
 Ctrl or Cmd+Enter on a `CaseWorkbench`) work only while keyboard focus is inside that piece, so several can share a page.
 `shortcuts={false}` turns them off.

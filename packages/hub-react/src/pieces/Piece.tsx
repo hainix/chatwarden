@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { HubContext, useHub } from '../context.js';
 import { KeyScope } from '../keyScope.js';
+import { PieceNavContext } from '../pieceRuntime.js';
 import type { PieceNav } from '../pieceRuntime.js';
-import { useRuntime } from '../pieceRuntime.js';
 import type { Route } from '../router.js';
 import type { PermissionKey } from '../types.js';
 
@@ -51,11 +51,9 @@ export function Piece({
   children: ReactNode;
 }) {
   const hub = useHub();
-  const runtime = useRuntime();
   const root = useRef<HTMLDivElement>(null);
   const latest = useRef<PieceNav>(links);
   latest.current = links;
-  useEffect(() => runtime.addNav(latest), [runtime]);
 
   const allowed = hub.can(need);
   const value = useMemo(() => {
@@ -85,14 +83,18 @@ export function Piece({
   if (!allowed) {
     return (
       <div className={cx('cw-piece', 'cw-piece--denied', className)} data-cw-piece={name}>
-        <p className="cw-hint">{hub.t('hub.piece.noAccess')}</p>
+        <p className="cw-hint" data-cw-need={need}>
+          {hub.t('hub.piece.noAccess')}
+        </p>
       </div>
     );
   }
   return (
     <div ref={root} className={cx('cw-piece', className)} data-cw-piece={name} {...(onEnter === undefined ? {} : { onFocus: onEnter })}>
       <KeyScope.Provider value={root}>
-        <HubContext.Provider value={value}>{children}</HubContext.Provider>
+        <HubContext.Provider value={value}>
+          <PieceNavContext.Provider value={latest}>{children}</PieceNavContext.Provider>
+        </HubContext.Provider>
       </KeyScope.Provider>
     </div>
   );

@@ -105,6 +105,17 @@ describe('useCases', () => {
     expect(out?.status).toBe('none');
   });
 
+  it('takeNext for a role that cannot read reports says not_allowed, not busy', async () => {
+    const w = await hubWorld({ role: 'moderator', permissions: { 'reports.read': 'owner' } });
+    const { result } = await hook(w, () => useCases());
+    let out: Awaited<ReturnType<typeof result.current.takeNext>> | undefined;
+    await act(async () => {
+      out = await result.current.takeNext();
+    });
+    expect(out).toEqual({ status: 'not_allowed' });
+    expect(w.sent.filter((r) => r.path === '/cases/next')).toEqual([]);
+  });
+
   it('the filter narrows the cases', async () => {
     const w = await hubWorld();
     await w.file({ target: 'Alpha', category: 'harassment' });
