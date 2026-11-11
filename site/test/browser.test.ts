@@ -107,7 +107,7 @@ describe('the built page under the _headers CSP', () => {
           return await wait;
         } catch (error) {
           const html = await page.evaluate(() => document.querySelector('[data-pane="mod"]')?.outerHTML.slice(0, 600) ?? '(no mod pane)');
-          throw new Error(`${step}: ${String(error).split('\n')[0]}\nviolations: ${JSON.stringify(violations)}\nconsole: ${JSON.stringify(consoleProblems)}\nfailed: ${JSON.stringify(failed)}\nmod pane: ${html}`);
+          throw new Error(`${step}: ${String(error).split('\n')[0]}\nviolations: ${JSON.stringify(violations)}\nconsole: ${JSON.stringify(consoleProblems)}\nfailed: ${JSON.stringify(failed)}\nmod pane: ${html}`, { cause: error });
         }
       };
       await said('first chat line', page.getByText('gg, that last clutch was wild').first().waitFor({ timeout: 30_000 }));
