@@ -130,6 +130,32 @@ export function ReportMessage({ client, line, name, close }: { client: PlayerCli
   `GET /rules` cannot be loaded. Pass `reporting` before the dialog opens: one that arrives later changes the flow under the player.
 - **Stale settings.** If the studio changes the list while a dialog is open, the kit refuses an unknown reason (`reason_unknown`) or a
   missing one (`reason_required`) and the dialog says so. Read `GET /rules` again before the next report.
+- **Your own controls (`extra`, experimental).** A node placed inside the form under the reason and the note, above Report and Cancel,
+  for something of your own, such as an "Also mute this player" checkbox. You own its state; the dialog only places it (spacing, no other
+  styling), keeps its controls in the Tab order (reason, note, yours, Report, Cancel) and in the focus trap, and drops it once the report
+  is sent. Send what you chose from your own `onSubmit`:
+
+```tsx
+import { useState } from 'react';
+import { ReportDialog } from '@chatwarden/player-react';
+import type { PlayerReporting, ReportResult } from '@chatwarden/player-react';
+
+export function ReportAndMaybeMute(props: { reporting: PlayerReporting; close: () => void; send: (mute: boolean, draft: object) => Promise<ReportResult> }) {
+  const [mute, setMute] = useState(false);
+  return (
+    <ReportDialog
+      reporting={props.reporting}
+      onClose={props.close}
+      onSubmit={(draft) => props.send(mute, draft)}
+      extra={
+        <label>
+          <input type="checkbox" checked={mute} onChange={(e) => setMute(e.target.checked)} /> Also mute this player
+        </label>
+      }
+    />
+  );
+}
+```
 
 ## Put it on your server
 
@@ -212,7 +238,7 @@ Theming).
 | `NoticeQueue` | The pending notices, oldest first, one at a time in a modal dialog. A warning has an Acknowledge button; every other notice has Got it. Both call `POST /notices/:id/ack`. Nothing is rendered when there is nothing to show. | `client`, `canShow` (default `true`), `appealUrl`, `refreshKey`, `onAcknowledged(notice)`, `onPendingChange(count)` |
 | `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `refreshKey` |
 | `RulesPage` | The summary and the numbered rules from `GET /rules`. The numbers are the kit's: a retired rule leaves a gap. | `client`, `refreshKey` |
-| `ReportDialog` | A one-step report: "Report this message?", the line, an optional "Why?" select (the studio's reasons in groups; required in the reason-required flow) and a note behind "Add a note". Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `line`, `targetName` (`onAddDetail` is deprecated and unused) |
+| `ReportDialog` | A one-step report: "Report this message?", the line, an optional "Why?" select (the studio's reasons in groups; required in the reason-required flow) and a note behind "Add a note". Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `line`, `targetName`, `extra` (experimental: your own controls in the form) (`onAddDetail` is deprecated and unused) |
 | `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when. | `until` (epoch ms or `null`), `byModerator`, `refCode` |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and

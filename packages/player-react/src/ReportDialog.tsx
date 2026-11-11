@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import type { PlayerReporting, ReportDetailResult, ReportRefusal, ReportResult } from '@chatwarden/core';
 import { NOTE_MAX } from './constants.js';
 import { PlayerError } from './client.js';
@@ -53,6 +53,13 @@ export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
   targetName?: string;
   /** The message being reported. Shown as quoted text (cut if very long) so the player sees what they are reporting. */
   line?: string;
+  /**
+   * @experimental Your own controls, placed inside the form under the reason and the note and above Report and Cancel (for example
+   * an "Also mute this player" checkbox and a line about false reports). You own their state; the dialog only places them, adds no
+   * styling beyond the spacing, and keeps their focusable controls in its Tab order (reason, note, yours, Report, Cancel) and its
+   * focus trap. They are not shown once the report is sent.
+   */
+  extra?: ReactNode;
 }
 
 // One plain message for each refusal the kit has. Anything else (a refusal a newer kit adds) gets the last one.
@@ -91,7 +98,7 @@ const quoted = (line: string | undefined): string => {
  * Every refusal the kit can give has its own plain message. Render it when the player chooses to report, and unmount it in `onClose`.
  */
 export function ReportDialog(props: ReportDialogProps) {
-  const { onSubmit, onClose, targetName, line, theme, className, container, returnFocusTo } = props;
+  const { onSubmit, onClose, targetName, line, theme, className, container, returnFocusTo, extra } = props;
   const ui = useUi(props);
   const { t } = ui;
   const heading = useRef<HTMLHeadingElement>(null);
@@ -270,6 +277,7 @@ export function ReportDialog(props: ReportDialogProps) {
                 {t('player.report.addNote')}
               </button>
             )}
+            {extra !== undefined && extra !== null && extra !== false && <div className="cw-extra">{extra}</div>}
             {failure !== null && (
               <p className="cw-error" role="alert">
                 {t('player.report.failed')} {errorText(t, failure)}
