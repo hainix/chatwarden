@@ -1,6 +1,6 @@
 // The local transport that lets player-react's components talk to the kit in the page: the same four calls as the player routes,
 // answered for one seat, with the shapes the routes use. It runs the REAL kit (KitEngine) and the REAL player client.
-import { playerClient } from '@chatwarden/player-react';
+import { createPlayerClient } from '@chatwarden/player-react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { KitEngine } from '../src/demo/kitEngine';
 import { seatTransport } from '../src/demo/playerTransport';
@@ -106,7 +106,7 @@ describe('seatTransport', () => {
 
   it('the real player client reads it: notices(), ack(), record()', async () => {
     const { engine } = await withWarning();
-    const client = playerClient({ transport: seatTransport(engine, 'bo') });
+    const client = createPlayerClient({ transport: seatTransport(engine, 'bo') });
     const pending = await client.notices();
     expect(pending.map((n) => n.kind)).toEqual(['warning']);
     expect(await client.ack(pending[0]?.id as string)).toBe(true);

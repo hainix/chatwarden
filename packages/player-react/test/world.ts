@@ -3,7 +3,7 @@ import type { Chatwarden, ProfileOverrides, RawWho, ReportCategory } from '@chat
 import { MemoryStore } from '@chatwarden/store-memory';
 import { createRouter, playerRoutes } from '@chatwarden/http';
 import type { KitResponse } from '@chatwarden/http';
-import { playerClient } from '../src/client.js';
+import { createPlayerClient } from '../src/client.js';
 import type { PlayerClient } from '../src/client.js';
 import { routerTransport } from '../src/transport.js';
 import type { Transport, TransportRequest } from '../src/transport.js';
@@ -82,7 +82,7 @@ export async function playerWorld(opts: WorldOptions = {}) {
     if (faked !== undefined) return { status: faked.status, headers: faked.headers ?? {}, body: faked.body };
     return real(req);
   };
-  const client: PlayerClient = playerClient({ transport });
+  const client: PlayerClient = createPlayerClient({ transport });
 
   const room = (n: number): string => `room-${n}`;
   let rooms = 0;

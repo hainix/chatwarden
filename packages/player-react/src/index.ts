@@ -7,11 +7,11 @@ export type { MyRecordProps } from './MyRecord.js';
 export { RulesPage } from './RulesPage.js';
 export type { RulesPageProps } from './RulesPage.js';
 export { ReportDialog } from './ReportDialog.js';
-export type { ReportDetail, ReportDialogProps, ReportDraft } from './ReportDialog.js';
+export type { ReportFollowUp, ReportDialogProps, ReportDraft } from './ReportDialog.js';
 export { RestrictedChatLine } from './RestrictedChatLine.js';
 export type { RestrictedChatLineProps } from './RestrictedChatLine.js';
 
-export { playerClient, PlayerError, toPlayerError } from './client.js';
+export { createPlayerClient, PlayerError, toPlayerError } from './client.js';
 export type { PlayerClient, PlayerClientOptions, PlayerRule, PlayerRules } from './client.js';
 export { fetchTransport, routerTransport } from './transport.js';
 export type {
@@ -29,4 +29,4 @@ export type { PlayerCatalog, PlayerParams, PlayerT, PlayerText } from './i18n.js
 export type { PlayerUiProps } from './ui.js';
 export { dayText, timeLeft, untilText } from './format.js';
 
-export type { NoticeKind, PlayerNotice, PlayerReporting, ReportCategory, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';
+export type { NoticeKind, PlayerNotice, PlayerReporting, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';

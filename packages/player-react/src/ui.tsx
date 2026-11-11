@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { NoticeKind, PlayerNotice } from '@chatwarden/core';
-import { WARNING_DAYS } from './categories.js';
+import { WARNING_DAYS } from './constants.js';
 import type { PlayerError } from './client.js';
 import { dayText, timeLeft, untilText } from './format.js';
 import { createT, en } from './i18n.js';

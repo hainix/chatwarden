@@ -45,10 +45,9 @@ describe('the heading says what happened', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Report sent' })).toHaveFocus();
   });
 
-  it('the old dialog too', async () => {
+  it('no reporting at all: the same words after the one tap', async () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok()), { reporting: undefined })} />);
-    await user.click(screen.getByRole('radio', { name: 'Spam' }));
-    await user.click(press('Send report'));
+    await user.click(press('Report'));
     await screen.findByRole('status');
     expect(screen.getByRole('heading', { level: 2, name: 'Report sent' })).toHaveFocus();
   });

@@ -76,10 +76,10 @@ console.log(decided.ok ? \`applied \${decided.groups.length} action\` : \`not ap
     file: 'client.ts',
     lang: 'ts',
     source: 'packages/player-react/README.md',
-    code: `import { fetchTransport, playerClient } from '@chatwarden/player-react';
+    code: `import { fetchTransport, createPlayerClient } from '@chatwarden/player-react';
 
 // The player routes are mounted at /player on this origin. Cookies go along with each call: the server decides who is asking.
-export const client = playerClient({ transport: fetchTransport({ baseUrl: '/player', credentials: 'same-origin' }) });
+export const client = createPlayerClient({ transport: fetchTransport({ baseUrl: '/player', credentials: 'same-origin' }) });
 
 const notices = await client.notices(); // what is waiting for this player, oldest first
 console.log(notices.length);`,

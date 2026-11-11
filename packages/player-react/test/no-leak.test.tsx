@@ -5,7 +5,7 @@ import { NoticeQueue } from '../src/NoticeQueue.js';
 import { ReportDialog } from '../src/ReportDialog.js';
 import { RestrictedChatLine } from '../src/RestrictedChatLine.js';
 import { RulesPage } from '../src/RulesPage.js';
-import { FIXED, findStatus, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi, SIX_REASONS } from './render.js';
 import { ALICE, BOB, CARA, DAY, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 
@@ -162,7 +162,8 @@ describe('no identifier leaks into the page', () => {
     const { user } = renderUi(
       <ReportDialog
         {...FIXED}
-        onSubmit={(d) => w.cw.reports.submit({ roomId: 'rd-room', reporterSeat: 'a', targetSeat: 'b', category: d.category })}
+        reporting={SIX_REASONS}
+        onSubmit={(d) => w.cw.reports.submit({ roomId: 'rd-room', reporterSeat: 'a', targetSeat: 'b', reason: d.reason })}
         onClose={() => undefined}
       />,
     );

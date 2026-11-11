@@ -109,7 +109,7 @@ export interface PlayerClientOptions {
 }
 
 /** A client over the kit's player routes. It resolves with typed values and rejects with a `PlayerError`. */
-export function playerClient({ transport }: PlayerClientOptions): PlayerClient {
+export function createPlayerClient({ transport }: PlayerClientOptions): PlayerClient {
   return {
     notices: async () => noticesOf(await send(transport, { method: 'GET', path: '/notices' }), 'notices'),
     record: async () => noticesOf(await send(transport, { method: 'GET', path: '/record' }), 'record'),

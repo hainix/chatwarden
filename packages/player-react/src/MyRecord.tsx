@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import type { PlayerClient } from './client.js';
 import { usePlayerData } from './hooks.js';
-import { WARNING_DAYS } from './categories.js';
+import { WARNING_DAYS } from './constants.js';
 import { AppealLink, Card, ErrorBlock, Facts, kindKey, Lines, Root, useUi } from './ui.js';
 import type { PlayerUiProps } from './ui.js';
 

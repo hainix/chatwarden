@@ -27,10 +27,10 @@ with React external, and the stylesheet under 6 KB.
 On the server you already mount the kit's player routes (see `@chatwarden/http`). In the game, make a client once and render what you need.
 
 ```ts
-import { fetchTransport, playerClient } from '@chatwarden/player-react';
+import { fetchTransport, createPlayerClient } from '@chatwarden/player-react';
 
 // The player routes are mounted at /player on this origin. Cookies go along with each call: the server decides who is asking.
-export const client = playerClient({ transport: fetchTransport({ baseUrl: '/player', credentials: 'same-origin' }) });
+export const client = createPlayerClient({ transport: fetchTransport({ baseUrl: '/player', credentials: 'same-origin' }) });
 
 const notices = await client.notices(); // what is waiting for this player, oldest first
 console.log(notices.length);
@@ -59,7 +59,7 @@ dialog. Your server adds the room and the seats and calls the kit:
 
 ```ts
 import type { ReportDetailResult, ReportResult } from '@chatwarden/core';
-import type { ReportDetail, ReportDraft } from '@chatwarden/player-react';
+import type { ReportFollowUp, ReportDraft } from '@chatwarden/player-react';
 
 // `cw` is your createChatwarden(...) instance. Call these behind your own routes, for example POST /report and POST /report/:id/detail:
 // `roomId` and the seats come from your session, never from the client.
@@ -68,13 +68,14 @@ export function takeReport(roomId: string, mySeat: string, theirSeat: string, dr
 }
 
 // The optional follow-up of a one-tap report: a reason and a note, within ten minutes, once, from the reporter only.
-export function addToReport(reportId: string, mySeat: string, detail: ReportDetail): Promise<ReportDetailResult> {
+export function addToReport(reportId: string, mySeat: string, detail: ReportFollowUp): Promise<ReportDetailResult> {
   return cw.reports.addDetail(reportId, mySeat, detail);
 }
 ```
 
 Load the settings before the dialog is drawn, so it opens in the right flow and never changes under the player's hands. A failed load
-should still give the studio's default (one tap), not the old dialog, so the fallback below is one tap with the dialog's own words:
+should still give the studio's default (one tap). That is also what the dialog does when it gets no `reporting`, so the fallback below only
+spells it out, with the dialog's own words:
 
 ```ts
 import { useEffect, useState } from 'react';
@@ -127,8 +128,8 @@ export function ReportMessage({ client, line, name, close }: { client: PlayerCli
 - **Pick a reason first / reason required.** The reasons in groups, with "Something else" last, then a note when the reason asks for one.
   A reason is optional in the first ("Skip and report") and required in the second.
 - **A reason is a hint.** The kit stores it as `reportedReason`; the moderators (and later the AI) decide what the report really is.
-- **Without `reporting`** the dialog is the 0.1.1 one: a required category from `categories` and an optional note, and `draft.category` is set.
-  Pass `reporting` before the dialog opens: one that arrives later changes the flow under the player.
+- **Without `reporting`** the dialog is one tap with its own words and no reasons to offer afterwards: the same as when `GET /rules` cannot be
+  loaded. Pass `reporting` before the dialog opens: one that arrives later changes the flow under the player.
 - **Stale settings.** If the studio changes the list while a dialog is open, the kit refuses an unknown reason (`reason_unknown`) or a
   missing one (`reason_required`) and the dialog says so. Read `GET /rules` again before the next report.
 
@@ -178,7 +179,7 @@ Two ways to carry the credential:
   The headers are fixed when the transport is made; for a token that changes, make the transport on each call:
 
 ```ts
-import { fetchTransport, playerClient } from '@chatwarden/player-react';
+import { fetchTransport, createPlayerClient } from '@chatwarden/player-react';
 import type { Transport } from '@chatwarden/player-react';
 
 declare function currentSessionToken(): string;
@@ -186,7 +187,7 @@ declare function currentSessionToken(): string;
 // A new fetchTransport per call, so the header is always the current token.
 const rotating: Transport = (req) => fetchTransport({ baseUrl: '/player', headers: { 'x-chatwarden-key': currentSessionToken() } })(req);
 
-export const client = playerClient({ transport: rotating });
+export const client = createPlayerClient({ transport: rotating });
 ```
 
 The key in a header or cookie is a credential: keep it out of URLs and logs, and have `identify` read it from there (the kit hashes it and
@@ -213,7 +214,7 @@ Theming).
 | `NoticeQueue` | The pending notices, oldest first, one at a time in a modal dialog. A warning has an Acknowledge button; every other notice has Got it. Both call `POST /notices/:id/ack`. Nothing is rendered when there is nothing to show. | `client`, `canShow` (default `true`), `appealUrl`, `refreshKey`, `onAcknowledged(notice)`, `onPendingChange(count)` |
 | `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `refreshKey` |
 | `RulesPage` | The summary and the numbered rules from `GET /rules`. The numbers are the kit's: a retired rule leaves a gap. | `client`, `refreshKey` |
-| `ReportDialog` | The studio's report flow (one tap, reason first, reason required) with grouped reasons and an optional note, and an optional "Add a reason" step after a one-tap report. Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `onAddDetail(reportId, detail)`, `line`, `targetName`, `categories` (old dialog only) |
+| `ReportDialog` | The studio's report flow (one tap, reason first, reason required) with grouped reasons and an optional note, and an optional "Add a reason" step after a one-tap report. Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `onAddDetail(reportId, detail)`, `line`, `targetName` |
 | `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when. | `until` (epoch ms or `null`), `byModerator`, `refCode` |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and
@@ -241,7 +242,7 @@ Theming).
 
 ### `PlayerClient`
 
-`playerClient({ transport })` gives four methods over the kit's player routes. They resolve with typed values and reject with a `PlayerError`
+`createPlayerClient({ transport })` gives four methods over the kit's player routes. They resolve with typed values and reject with a `PlayerError`
 (`status`, `code`, `retryAfter`). The types are the kit's own (`PlayerNotice`, `ReportResult`, `ReportRefusal`).
 
 | Method | Route |

@@ -180,7 +180,7 @@ describe('the smoke scenario', () => {
   });
   it('really runs them: a server render of the hub, a player client over the player routes, and the element in Node (no registry, no throw)', () => {
     expect(scenario).toContain('renderToString(');
-    expect(scenario).toContain('playerClient(');
+    expect(scenario).toContain('createPlayerClient(');
     expect(scenario).toContain('defineChatwardenHub()');
   });
   it('the headless project imports hub-react/headless and proves React is absent, by resolve and by import', () => {

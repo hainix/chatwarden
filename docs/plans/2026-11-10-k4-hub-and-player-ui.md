@@ -333,7 +333,7 @@ Built in the v2 look. Blocked words are masked by default on Blocked and Terms, 
     note, and maps each `ReportRefusal` (`duplicate`, `rate`, `self`, `not_player`, `off`, `suspended`) to a plain message.
     It shows `remaining`.
   - **`RestrictedChatLine`**: `until`, `byModerator`, optional `refCode`.
-- `playerClient({ transport })` mirrors hub-react's transport (re-export the same type, without depending on hub-react).
+- `createPlayerClient({ transport })` mirrors hub-react's transport (re-export the same type, without depending on hub-react).
 - Tests:
   - each component's states
   - acknowledge removes the notice and moves focus correctly

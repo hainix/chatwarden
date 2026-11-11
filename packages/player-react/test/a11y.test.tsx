@@ -7,7 +7,7 @@ import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps } from '../src/ReportDialog.js';
 import { RestrictedChatLine } from '../src/RestrictedChatLine.js';
 import { RulesPage } from '../src/RulesPage.js';
-import { FIXED, findStatus, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi, SIX_REASONS } from './render.js';
 import { ALICE, DAY, HOUR, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 
@@ -149,10 +149,10 @@ describe.each(['light', 'dark'] as const)('axe, %s theme', (theme) => {
     const ok: ReportDialogProps['onSubmit'] = () => Promise.resolve({ ok: true, reportId: 'r', remaining: 3 });
 
     it('the form, its validation error and the note', async () => {
-      const { container, user } = renderUi(<ReportDialog {...FIXED} theme={theme} onSubmit={ok} onClose={() => undefined} targetName="Cara" />);
+      const { container, user } = renderUi(<ReportDialog {...FIXED} theme={theme} reporting={SIX_REASONS} onSubmit={ok} onClose={() => undefined} targetName="Cara" />);
       expect(await violations(container)).toEqual([]);
       await user.click(screen.getByRole('button', { name: 'Send report' }));
-      await screen.findByText('Choose what happened.');
+      await screen.findByText('Choose a reason.');
       expect(await violations(container)).toEqual([]);
       await user.click(screen.getByRole('radio', { name: 'Cheating' }));
       await user.type(screen.getByLabelText('Add a note (optional)'), 'a note');
@@ -221,21 +221,21 @@ describe.each(['light', 'dark'] as const)('axe, %s theme', (theme) => {
     });
 
     it('the thank-you, a refusal and a failed send', async () => {
-      const a = renderUi(<ReportDialog {...FIXED} theme={theme} onSubmit={ok} onClose={() => undefined} />);
+      const a = renderUi(<ReportDialog {...FIXED} theme={theme} reporting={SIX_REASONS} onSubmit={ok} onClose={() => undefined} />);
       await a.user.click(screen.getByRole('radio', { name: 'Spam' }));
       await a.user.click(screen.getByRole('button', { name: 'Send report' }));
       await findStatus();
       expect(await violations(a.container)).toEqual([]);
       a.unmount();
 
-      const b = renderUi(<ReportDialog {...FIXED} theme={theme} onSubmit={() => Promise.resolve({ ok: false, refused: 'rate', remaining: 0 })} onClose={() => undefined} />);
+      const b = renderUi(<ReportDialog {...FIXED} theme={theme} reporting={SIX_REASONS} onSubmit={() => Promise.resolve({ ok: false, refused: 'rate', remaining: 0 })} onClose={() => undefined} />);
       await b.user.click(screen.getByRole('radio', { name: 'Spam' }));
       await b.user.click(screen.getByRole('button', { name: 'Send report' }));
       await screen.findByRole('alert');
       expect(await violations(b.container)).toEqual([]);
       b.unmount();
 
-      const c = renderUi(<ReportDialog {...FIXED} theme={theme} onSubmit={() => Promise.reject(new TypeError('x'))} onClose={() => undefined} />);
+      const c = renderUi(<ReportDialog {...FIXED} theme={theme} reporting={SIX_REASONS} onSubmit={() => Promise.reject(new TypeError('x'))} onClose={() => undefined} />);
       await c.user.click(screen.getByRole('radio', { name: 'Spam' }));
       await c.user.click(screen.getByRole('button', { name: 'Send report' }));
       await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());

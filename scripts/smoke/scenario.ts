@@ -21,7 +21,7 @@ import { buildMatcher, LiveTerms } from '@chatwarden/matcher';
 import type { Matcher } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { syntheticTermPack as legacySyntheticTermPack } from '@chatwarden/matcher/test-fixtures';
-import { playerClient, routerTransport as playerTransport, VERSION as PLAYER_VERSION } from '@chatwarden/player-react';
+import { createPlayerClient, routerTransport as playerTransport, VERSION as PLAYER_VERSION } from '@chatwarden/player-react';
 import { createProfanityFilter } from '@chatwarden/profanity';
 import { createMemoryStore } from '@chatwarden/store-memory';
 import { openStore } from '@chatwarden/store-sqlite';
@@ -157,7 +157,7 @@ async function scenario(label: string, store: Store, matcher: Matcher): Promise<
 
   // The player side: the player client reads Alice's notice (step 7) over the real player routes, with her key as her identity.
   const playerHandle = createRouter(playerRoutes(cw, { identify: (req) => ({ clientKey: req.headers['x-chatwarden-key'] }) }));
-  const player = playerClient({ transport: playerTransport(playerHandle, { headers: { 'x-chatwarden-key': alice.clientKey ?? '' } }) });
+  const player = createPlayerClient({ transport: playerTransport(playerHandle, { headers: { 'x-chatwarden-key': alice.clientKey ?? '' } }) });
   const pending = await player.notices();
   assert.equal(pending.length, 1, 'the player client sees the one pending notice');
   assert.equal(pending[0]?.kind, 'warning');

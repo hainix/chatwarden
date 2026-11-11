@@ -6,11 +6,11 @@ import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps, ReportDraft } from '../src/ReportDialog.js';
 import { PlayerError } from '../src/client.js';
 import { createT, en } from '../src/i18n.js';
-import { FIXED, findStatus, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi, SIX_REASONS } from './render.js';
 import { ALICE, BOB, CARA, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 
-const props = (onSubmit: ReportDialogProps['onSubmit'], more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit, onClose: () => undefined, ...FIXED, ...more });
+const props = (onSubmit: ReportDialogProps['onSubmit'], more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit, onClose: () => undefined, ...FIXED, reporting: SIX_REASONS, ...more });
 const ok = (remaining: number): ReportResult => ({ ok: true, reportId: 'r1', remaining });
 const refused = (refused: ReportRefusal, remaining?: number): ReportResult => (remaining === undefined ? { ok: false, refused } : { ok: false, refused, remaining });
 const pick = async (user: ReturnType<typeof renderUi>['user'], name: string) => user.click(screen.getByRole('radio', { name }));
@@ -29,14 +29,14 @@ function realSubmit(w: PlayerWorld, o: { roomId?: string; reporter?: typeof ALIC
       roomId,
       reporterSeat: o.reporterSeat ?? reporter.seat,
       targetSeat: o.targetSeat ?? target.seat,
-      category: draft.category,
+      ...(draft.reason === undefined ? {} : { reason: draft.reason }),
       ...(draft.note === undefined ? {} : { note: draft.note }),
     });
 }
 
 describe('the form', () => {
-  it('is a labelled modal dialog with a heading, a category picker and an optional note', () => {
-    renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)))} />);
+  it('is a labelled modal dialog with a heading, a reason picker and a note once a reason is chosen', async () => {
+    const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)))} />);
     const d = screen.getByRole('dialog');
     expect(d).toHaveAttribute('aria-modal', 'true');
     expect(d).toHaveAccessibleName('Report a player');
@@ -44,6 +44,8 @@ describe('the form', () => {
     const group = within(d).getByRole('radiogroup', { name: 'What happened?' });
     expect(within(group).getAllByRole('radio').map((r) => (r as HTMLInputElement).value)).toEqual([...REPORT_CATEGORIES]);
     expect(within(group).getAllByRole('radio')).toHaveLength(6);
+    expect(within(d).queryByLabelText('Add a note (optional)')).toBeNull();
+    await user.click(within(group).getAllByRole('radio')[0] as HTMLElement);
     expect(within(d).getByLabelText('Add a note (optional)')).toBeInstanceOf(HTMLTextAreaElement);
     expect(within(d).getByRole('button', { name: 'Send report' })).toBeInTheDocument();
     expect(within(d).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
@@ -61,30 +63,26 @@ describe('the form', () => {
     expect(screen.getByRole('dialog').querySelector('b')).toBeNull();
   });
 
-  it('offers only the categories it is given', () => {
-    renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)), { categories: ['harassment', 'cheating'] })} />);
-    expect(screen.getAllByRole('radio')).toHaveLength(2);
-  });
-
-  it('tells the player what the note is for and its limit, and caps the note at the kit limit', () => {
-    renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)))} />);
+  it('tells the player what the note is for and its limit, and caps the note at the kit limit', async () => {
+    const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)))} />);
+    await user.click(screen.getAllByRole('radio')[0] as HTMLElement);
     const note = screen.getByLabelText('Add a note (optional)');
     expect(note).toHaveAttribute('maxlength', String(REPORT_NOTE_MAX));
     expect(note).toHaveAccessibleDescription(`A moderator will read this. Up to ${REPORT_NOTE_MAX} characters. Do not include passwords or personal details.`);
   });
 
-  it('sending with no category picked asks for one and sends nothing', async () => {
+  it('sending with no reason picked asks for one and sends nothing', async () => {
     const onSubmit = vi.fn(() => Promise.resolve(ok(9)));
     const { user } = renderUi(<ReportDialog {...props(onSubmit)} />);
     await send(user);
     expect(onSubmit).not.toHaveBeenCalled();
-    const error = screen.getByText('Choose what happened.');
+    const error = screen.getByText('Choose a reason.');
     expect(error).toHaveAttribute('role', 'alert');
     expect(screen.getByRole('radiogroup', { name: 'What happened?' })).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByRole('radiogroup')).toHaveAccessibleDescription(/Choose what happened\./);
+    expect(screen.getByRole('radiogroup')).toHaveAccessibleDescription(/Choose a reason./);
     // Picking one clears the message.
     await pick(user, 'Spam');
-    expect(screen.queryByText('Choose what happened.')).toBeNull();
+    expect(screen.queryByText('Choose a reason.')).toBeNull();
     expect(screen.getByRole('radiogroup')).not.toHaveAttribute('aria-invalid');
   });
 
@@ -94,14 +92,14 @@ describe('the form', () => {
     expect(screen.getAllByRole('radio')[0]).toHaveFocus();
   });
 
-  it('sends the chosen category, and the note trimmed', async () => {
+  it('sends the chosen reason, and the note trimmed', async () => {
     const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok(9)));
     const { user } = renderUi(<ReportDialog {...props(onSubmit)} />);
     await pick(user, 'Cheating');
     await user.type(screen.getByLabelText('Add a note (optional)'), '   they used a snerp hack  ');
     await send(user);
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ category: 'cheating', note: 'they used a snerp hack' });
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ reason: 'cheating', note: 'they used a snerp hack' });
   });
 
   it.each(['', '   ', '\n\t '])('leaves the note out when it is blank (%j)', async (blank) => {
@@ -110,16 +108,16 @@ describe('the form', () => {
     await pick(user, 'Spam');
     if (blank !== '') fireEvent.change(screen.getByLabelText('Add a note (optional)'), { target: { value: blank } });
     await send(user);
-    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ category: 'spam' });
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ reason: 'spam' });
   });
 
-  it('sends each category as the kit knows it', async () => {
+  it('sends each reason id as the picker has it', async () => {
     for (const [i, category] of REPORT_CATEGORIES.entries()) {
       const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok(9)));
       const { user, unmount } = renderUi(<ReportDialog {...props(onSubmit)} />);
       await user.click(screen.getAllByRole('radio')[i] as HTMLElement);
       await send(user);
-      expect(onSubmit.mock.calls[0]?.[0]).toEqual({ category });
+      expect(onSubmit.mock.calls[0]?.[0]).toEqual({ reason: category });
       unmount();
     }
   });
@@ -215,7 +213,7 @@ describe('every refusal has its own plain message', () => {
     it('duplicate: the same reporter reports the same player in the same room twice', async () => {
       const w = await playerWorld();
       const submit = realSubmit(w);
-      await submit({ category: 'harassment' });
+      await submit({ reason: 'harassment' });
       const { user } = renderUi(<ReportDialog {...props(submit)} />);
       await pick(user, 'Harassment');
       await send(user);
@@ -250,7 +248,7 @@ describe('every refusal has its own plain message', () => {
       const w = await playerWorld();
       // Ten different rooms, ten reports.
       for (let i = 0; i < 10; i += 1) {
-        const r = await realSubmit(w, { roomId: `rate-room-${i}` })({ category: 'spam' });
+        const r = await realSubmit(w, { roomId: `rate-room-${i}` })({ reason: 'spam' });
         expect(r.ok).toBe(true);
       }
       const { user } = renderUi(<ReportDialog {...props(realSubmit(w, { roomId: 'rate-room-10' }))} />);
@@ -261,7 +259,7 @@ describe('every refusal has its own plain message', () => {
 
     it('a different player is a different report (no duplicate)', async () => {
       const w = await playerWorld();
-      await realSubmit(w)({ category: 'spam' });
+      await realSubmit(w)({ reason: 'spam' });
       const { user } = renderUi(<ReportDialog {...props(realSubmit(w, { target: CARA }))} />);
       await pick(user, 'Spam');
       await send(user);
@@ -296,7 +294,7 @@ describe('when sending fails', () => {
     await send(user);
     expect(await findStatus()).toHaveTextContent('Thanks.');
     expect(onSubmit).toHaveBeenCalledTimes(2);
-    expect(onSubmit.mock.calls[1]?.[0]).toEqual({ category: 'hate', note: 'what they said' });
+    expect(onSubmit.mock.calls[1]?.[0]).toEqual({ reason: 'hate', note: 'what they said' });
   });
 
   it.each([

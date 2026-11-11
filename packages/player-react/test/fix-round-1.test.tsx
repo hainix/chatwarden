@@ -4,7 +4,7 @@ import { NoticeQueue } from '../src/NoticeQueue.js';
 import type { NoticeQueueProps } from '../src/NoticeQueue.js';
 import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps } from '../src/ReportDialog.js';
-import { FIXED, findStatus, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi, SIX_REASONS } from './render.js';
 import { ALICE, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 import type { ReportResult } from '@chatwarden/core';
@@ -67,7 +67,7 @@ describe('the focus trap holds (NoticeQueue)', () => {
 
 describe('the focus trap holds (ReportDialog)', () => {
   const ok = () => Promise.resolve<ReportResult>({ ok: true, reportId: 'r', remaining: 9 });
-  const rd = (more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit: ok, onClose: () => undefined, ...FIXED, ...more });
+  const rd = (more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit: ok, onClose: () => undefined, ...FIXED, reporting: SIX_REASONS, ...more });
 
   it('after choosing Spam, Shift+Tab from it goes to the last control, not out of the dialog', async () => {
     const { user } = renderUi(
@@ -349,7 +349,7 @@ describe('returnFocusTo and container', () => {
     document.body.appendChild(host);
     const onClose = vi.fn();
     const { container, user } = renderUi(
-      <ReportDialog {...FIXED} container={host} onClose={onClose} onSubmit={() => Promise.resolve<ReportResult>({ ok: true, reportId: 'r', remaining: 1 })} />,
+      <ReportDialog {...FIXED} reporting={SIX_REASONS} container={host} onClose={onClose} onSubmit={() => Promise.resolve<ReportResult>({ ok: true, reportId: 'r', remaining: 1 })} />,
     );
     const d = screen.getByRole('dialog');
     expect(host).toContainElement(d);
@@ -363,7 +363,7 @@ describe('returnFocusTo and container', () => {
 
 describe('ReportDialog: small fixes', () => {
   const ok = () => Promise.resolve<ReportResult>({ ok: true, reportId: 'r', remaining: 9 });
-  const rd = (more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit: ok, onClose: () => undefined, ...FIXED, ...more });
+  const rd = (more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit: ok, onClose: () => undefined, ...FIXED, reporting: SIX_REASONS, ...more });
   const pick = (user: ReturnType<typeof renderUi>['user'], name: string) => user.click(screen.getByRole('radio', { name }));
 
   it('Cancel does nothing while a report is on its way, and says it is busy', async () => {
@@ -404,20 +404,5 @@ describe('ReportDialog: small fixes', () => {
     await user.click(screen.getByRole('button', { name: 'Send report' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('We could not take that report.');
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
-  });
-
-  it('a categories list that filters to nothing falls back to every category', () => {
-    renderUi(<ReportDialog {...rd({ categories: [] })} />);
-    expect(screen.getAllByRole('radio')).toHaveLength(6);
-  });
-
-  it('a categories list of names the kit does not know falls back too', () => {
-    renderUi(<ReportDialog {...rd({ categories: ['nope'] as unknown as ReportDialogProps['categories'] })} />);
-    expect(screen.getAllByRole('radio')).toHaveLength(6);
-  });
-
-  it('a list that keeps some is used as given', () => {
-    renderUi(<ReportDialog {...rd({ categories: ['spam', 'nope'] as unknown as ReportDialogProps['categories'] })} />);
-    expect(screen.getAllByRole('radio')).toHaveLength(1);
   });
 });

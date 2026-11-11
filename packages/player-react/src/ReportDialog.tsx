@@ -1,11 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { PlayerReporting, ReportCategory, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';
-import { CATEGORIES, NOTE_MAX } from './categories.js';
+import type { PlayerReporting, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';
+import { NOTE_MAX } from './constants.js';
 import { PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
 import { DETAIL_REFUSED_TEXT, FollowUp } from './FollowUp.js';
-import type { FollowUpOutcome, ReportDetail } from './FollowUp.js';
+import type { FollowUpOutcome, ReportFollowUp } from './FollowUp.js';
 import { Picker } from './Picker.js';
 import type { PlayerText } from './i18n.js';
 import { groupReasons, readReporting } from './reporting.js';
@@ -15,19 +15,17 @@ import type { DialogHostProps, PlayerUiProps } from './ui.js';
 
 /**
  * What the player filled in. Your server adds the room and the seats and calls `cw.reports.submit({ ...draft, roomId, reporterSeat,
- * targetSeat })`. A dialog given the studio's `reporting` settings sends `reason` (an id from the list, or nothing); the old dialog
- * (no `reporting`) sends `category`. Either way a reason is only a hint: the moderators decide what a report really is.
+ * targetSeat })`. The dialog sends `reason` (an id from the studio's `reporting` list, or nothing, as in one tap). A reason is only a
+ * hint: the moderators decide what a report really is.
  */
 export interface ReportDraft {
   /** The reason the player chose: an id from `reporting.reasons`. Left out when none was chosen. */
   reason?: string;
-  /** Set instead of `reason` by the old dialog (no `reporting`). */
-  category?: ReportCategory;
   /** The note, trimmed; left out when blank. */
   note?: string;
 }
 
-export type { ReportDetail } from './FollowUp.js';
+export type { ReportFollowUp } from './FollowUp.js';
 
 export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
   /**
@@ -39,31 +37,20 @@ export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
    * The optional follow-up after a one-tap report: your server calls `cw.reports.addDetail(reportId, reporterSeat, detail)` (the seat
    * from its own session, never from the page) and returns its `ReportDetailResult`. Without it the "Add a reason" step is not shown.
    */
-  onAddDetail?: (reportId: string, detail: ReportDetail) => Promise<ReportDetailResult>;
+  onAddDetail?: (reportId: string, detail: ReportFollowUp) => Promise<ReportDetailResult>;
   /** Called on Escape, Cancel and Close. Unmount the dialog in answer. */
   onClose: () => void;
   /**
-   * How reporting works here: `(await playerClient.rules()).reporting`, the `reporting` part of `GET /rules`. It sets the flow
+   * How reporting works here: `(await createPlayerClient.rules()).reporting`, the `reporting` part of `GET /rules`. It sets the flow
    * (one tap, pick a reason first, reason required), the reasons (grouped, with hints) and the thank-you. Without it the dialog is
-   * the old one: a required category, an optional note.
+   * one tap with the dialog's own words, the same as when `GET /rules` cannot be loaded.
    */
   reporting?: PlayerReporting;
   /** Who is being reported, as the player knows them (a handle). Shown as text in the heading. */
   targetName?: string;
   /** The message being reported. Shown as quoted text (cut if very long) so the player sees what they are reporting. */
   line?: string;
-  /** The old categories to offer, in order. Used only without `reporting`. Default (and when none of them is one the kit has): all the kit has. */
-  categories?: readonly ReportCategory[];
 }
-
-const CATEGORY_TEXT: Readonly<Record<ReportCategory, PlayerText>> = {
-  harassment: 'player.report.category.harassment',
-  hate: 'player.report.category.hate',
-  cheating: 'player.report.category.cheating',
-  spam: 'player.report.category.spam',
-  disruption: 'player.report.category.disruption',
-  other: 'player.report.category.somethingElse',
-};
 
 // One plain message for each refusal the kit has. Anything else (a refusal a newer kit adds) gets the last one.
 const REFUSED_TEXT: Readonly<Record<ReportRefusal, PlayerText>> = {
@@ -92,12 +79,11 @@ const quoted = (line: string | undefined): string => {
   return plain.length > LINE_MAX ? `${plain.slice(0, LINE_MAX).trimEnd()}…` : plain;
 };
 
-/** The screen to draw: the flow, the reasons as the dialog will list them, and the thank-you. `legacy` is the old category dialog. */
+/** The screen to draw: the flow, the reasons as the dialog will list them, and the thank-you. */
 interface Screen {
   flow: ReportFlow;
   reasons: ReasonItem[];
   thanks: string;
-  legacy: boolean;
 }
 
 /**
@@ -110,7 +96,7 @@ interface Screen {
  * chooses to report, and unmount it in `onClose`.
  */
 export function ReportDialog(props: ReportDialogProps) {
-  const { onSubmit, onAddDetail, onClose, targetName, line, categories = CATEGORIES, theme, className, container, returnFocusTo } = props;
+  const { onSubmit, onAddDetail, onClose, targetName, line, theme, className, container, returnFocusTo } = props;
   const ui = useUi(props);
   const { t } = ui;
   const heading = useRef<HTMLHeadingElement>(null);
@@ -133,21 +119,16 @@ export function ReportDialog(props: ReportDialogProps) {
   const [expired, setExpired] = useState(false);
 
   const screen: Screen = (() => {
-    const read = readReporting(props.reporting);
-    if (read === undefined) {
-      // The old dialog. A list that filters to nothing would make a form that can never be sent: fall back to every category.
-      const kept = CATEGORIES.filter((c) => categories.includes(c));
-      const reasons = (kept.length > 0 ? kept : CATEGORIES).map((c) => ({ id: c, label: t(CATEGORY_TEXT[c]), hint: '', group: '', asksNote: false }));
-      return { flow: 'reason_required', reasons, thanks: '', legacy: true };
-    }
+    // No `reporting` (or something that is not the payload): one tap with the dialog's own words, as when `GET /rules` cannot be loaded.
+    const read = readReporting(props.reporting) ?? { flow: 'one_tap' as const, reasons: [], thanks: '' };
     // A flow that asks for a reason has nothing to ask with when the list is empty: it is one tap.
-    return { flow: read.reasons.length === 0 ? 'one_tap' : read.flow, reasons: read.reasons, thanks: read.thanks.trim(), legacy: false };
+    return { flow: read.reasons.length === 0 ? 'one_tap' : read.flow, reasons: read.reasons, thanks: read.thanks.trim() };
   })();
-  const { flow, legacy } = screen;
+  const { flow } = screen;
   const groups = groupReasons(screen.reasons);
   const chosen = screen.reasons.find((r) => r.id === reason);
-  // The note: always in the old dialog; in the new ones when the chosen reason asks for it.
-  const showNote = legacy || chosen?.asksNote === true;
+  // The note: when the chosen reason asks for it.
+  const showNote = chosen?.asksNote === true;
 
   // The form is gone once there is an answer: focus goes back to the heading, so the answer is read and focus is not lost.
   useEffect(() => {
@@ -194,7 +175,7 @@ export function ReportDialog(props: ReportDialogProps) {
       picker.current?.querySelector<HTMLElement>('input')?.focus();
       return;
     }
-    const draft: ReportDraft = flow === 'one_tap' ? {} : legacy ? { category: reason as ReportCategory } : { reason: reason as string };
+    const draft: ReportDraft = flow === 'one_tap' ? {} : { reason: reason as string };
     if (showNote && trimmed !== '') draft.note = trimmed;
     void send(draft);
   };
@@ -219,8 +200,8 @@ export function ReportDialog(props: ReportDialogProps) {
   const detailRefusedKey = (refused: string): PlayerText => (Object.hasOwn(DETAIL_REFUSED_TEXT, refused) ? (DETAIL_REFUSED_TEXT[refused] as PlayerText) : 'player.report.detail.failed');
   const detailUntil = taken && typeof result.detailUntil === 'number' && Number.isFinite(result.detailUntil) ? result.detailUntil : null;
   const timeUp = expired || (detailUntil !== null && ui.now() > detailUntil);
-  const canFollow = taken && flow === 'one_tap' && !legacy && reportId !== null && onAddDetail !== undefined && screen.reasons.length > 0 && !timeUp;
-  const needText: PlayerText = legacy ? 'player.report.needCategory' : flow === 'reason_first' ? 'player.report.needReasonOrSkip' : 'player.report.needReason';
+  const canFollow = taken && flow === 'one_tap' && reportId !== null && onAddDetail !== undefined && screen.reasons.length > 0 && !timeUp;
+  const needText: PlayerText = flow === 'reason_first' ? 'player.report.needReasonOrSkip' : 'player.report.needReason';
 
   return (
     <Portal container={container}>

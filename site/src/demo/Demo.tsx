@@ -1,6 +1,6 @@
 import { playerReporting } from '@chatwarden/core';
-import { NoticeQueue, playerClient, ReportDialog } from '@chatwarden/player-react';
-import type { PlayerClient, PlayerReporting, ReportDetail, ReportDraft, ReportResult } from '@chatwarden/player-react';
+import { NoticeQueue, createPlayerClient, ReportDialog } from '@chatwarden/player-react';
+import type { PlayerClient, PlayerReporting, ReportFollowUp, ReportDraft, ReportResult } from '@chatwarden/player-react';
 import '@chatwarden/player-react/styles.css';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ReplayIcon } from '../components/Icons';
@@ -203,7 +203,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
 
   // The player's side: one client per seat, over the small local transport that asks the kit directly.
   const clients = useMemo<Record<string, PlayerClient>>(
-    () => Object.fromEntries(engine.seats.map((s) => [s.id, playerClient({ transport: seatTransport(engine, s.id) })])),
+    () => Object.fromEntries(engine.seats.map((s) => [s.id, createPlayerClient({ transport: seatTransport(engine, s.id) })])),
     [engine],
   );
 
@@ -612,7 +612,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     return res;
   }
 
-  async function addDetail(reportId: string, detail: ReportDetail) {
+  async function addDetail(reportId: string, detail: ReportFollowUp) {
     const res = await engine.reports.addDetail(reportId, 'you', detail);
     if (res.ok) nudgeHub(); // the hub reads the reason now, not in a few seconds
     return res;

@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import type { FormEvent, MutableRefObject } from 'react';
 import type { ReportDetailResult } from '@chatwarden/core';
-import { NOTE_MAX } from './categories.js';
+import { NOTE_MAX } from './constants.js';
 import { PlayerError } from './client.js';
 import type { PlayerText } from './i18n.js';
 import { Picker } from './Picker.js';
@@ -10,7 +10,7 @@ import { errorText } from './ui.js';
 import type { PlayerT } from './i18n.js';
 
 /** What the player adds after a one-tap report. Your server calls `cw.reports.addDetail(reportId, reporterSeat, detail)`. */
-export interface ReportDetail {
+export interface ReportFollowUp {
   reason?: string;
   note?: string;
 }
@@ -31,7 +31,7 @@ export function FollowUp(props: {
   t: PlayerT;
   groups: readonly ReasonGroup[];
   reportId: string;
-  onAddDetail: (reportId: string, detail: ReportDetail) => Promise<ReportDetailResult>;
+  onAddDetail: (reportId: string, detail: ReportFollowUp) => Promise<ReportDetailResult>;
   sending: MutableRefObject<boolean>;
   busy: boolean;
   onBusy: (busy: boolean) => void;
@@ -60,7 +60,7 @@ export function FollowUp(props: {
     onBusy(true);
     setFailure(null);
     try {
-      const detail: ReportDetail = { ...(reason === null ? {} : { reason }), ...(trimmed === '' ? {} : { note: trimmed }) };
+      const detail: ReportFollowUp = { ...(reason === null ? {} : { reason }), ...(trimmed === '' ? {} : { note: trimmed }) };
       const raw: unknown = await onAddDetail(reportId, detail);
       // Anything that is not a result object (undefined, null, a string) is not a success and not a crash: it reads as an unknown refusal.
       const answer = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as ReportDetailResult) : ({ ok: false, refused: 'unknown' } as unknown as ReportDetailResult);

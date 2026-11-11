@@ -738,35 +738,59 @@ describe('reason_required', () => {
   });
 });
 
-describe('the old category props still work', () => {
-  it('with no reporting payload the dialog is the old one: categories, required, draft with a category', async () => {
+describe('with no reporting payload the dialog is one tap with the default words', () => {
+  // The same fallback as a failed GET /rules: there is no 0.1.1 dialog to stay compatible with.
+  const none = { reporting: undefined } as const;
+
+  it('is one tap: "Report this player?", a Report button, no reason picker and no note', async () => {
     const s = await setup();
-    const props = await s.dialog({ reporting: undefined, categories: ['harassment', 'cheating'] });
-    const { user } = renderUi(<ReportDialog {...props} />);
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('Report a player');
-    expect(screen.getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['harassment', 'cheating']);
-    expect(screen.getByLabelText('Add a note (optional)')).toBeInTheDocument();
-    await user.click(btn('Send report'));
-    expect(s.submit).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('radio', { name: 'Cheating' }));
-    await user.click(btn('Send report'));
+    renderUi(<ReportDialog {...await s.dialog(none)} />);
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Report this player?');
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(screen.queryByLabelText('Add a note (optional)')).toBeNull();
+    expect(btn('Report')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send report' })).toBeNull();
+  });
+
+  it('files the report at once with an empty draft (no reason, no category), and says thanks in the catalog words', async () => {
+    const s = await setup();
+    const { user } = renderUi(<ReportDialog {...await s.dialog(none)} />);
+    await user.click(btn('Report'));
+    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    expect(s.submit).toHaveBeenCalledTimes(1);
+    expect(s.submit.mock.calls[0]?.[0]).toEqual({});
+    expect(Object.keys(s.submit.mock.calls[0]?.[0] ?? {})).not.toContain('category');
+    expect(oneReport(s.w).id).toBeTruthy();
+  });
+
+  it('offers no "Add a reason" step afterwards (there are no reasons to offer)', async () => {
+    const s = await setup();
+    const { user } = renderUi(<ReportDialog {...await s.dialog(none)} />);
+    await user.click(btn('Report'));
     await findStatus();
-    expect(s.submit.mock.calls[0]?.[0]).toEqual({ category: 'cheating' });
-    expect(s.w.cw.reports.get(oneReport(s.w).id)?.reportedReason).toBe('cheating');
     expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
   });
 
-  it('the legacy dialog says thanks in the catalog words', async () => {
+  it('is the same screen as a failed rules fetch (the one-tap fallback payload)', async () => {
     const s = await setup();
-    const { user } = renderUi(<ReportDialog {...await s.dialog({ reporting: undefined })} />);
-    await user.click(screen.getByRole('radio', { name: 'Spam' }));
-    await user.click(btn('Send report'));
-    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    const a = renderUi(<ReportDialog {...await s.dialog(none)} />);
+    const ids = (html: string) => html.replace(/_r_[a-z0-9]+_/g, 'ID');
+    const without = ids(a.container.innerHTML);
+    a.unmount();
+    const b = renderUi(<ReportDialog {...await s.dialog({ reporting: { flow: 'one_tap', thanks: '', reasons: [] } })} />);
+    expect(ids(b.container.innerHTML)).toBe(without);
   });
 
-  it('when the studio payload is given, the categories prop is not used', async () => {
+  it('a categories prop is gone: passing one changes nothing', async () => {
+    const s = await setup();
+    const withOld = await s.dialog({ ...none, ...({ categories: ['spam'] } as object) });
+    renderUi(<ReportDialog {...withOld} />);
+    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+  });
+
+  it('when the studio payload is given it is used as it is', async () => {
     const s = await setup({ flow: 'reason_first' });
-    renderUi(<ReportDialog {...await s.dialog({ categories: ['spam'] })} />);
+    renderUi(<ReportDialog {...await s.dialog()} />);
     expect(screen.getAllByRole('radio')).toHaveLength(10);
   });
 });

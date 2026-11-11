@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PlayerError, playerClient, toPlayerError } from '../src/client.js';
+import { PlayerError, createPlayerClient, toPlayerError } from '../src/client.js';
 import type { Transport, TransportResponse } from '../src/transport.js';
 import { ALICE, BOB, CARA, DAY, playerWorld } from './world.js';
 
@@ -112,7 +112,7 @@ describe('the four calls, against the real player routes', () => {
 });
 
 describe('errors from the transport', () => {
-  const notices = (t: Transport) => playerClient({ transport: t }).notices();
+  const notices = (t: Transport) => createPlayerClient({ transport: t }).notices();
 
   it.each([
     [401, 'unauthorized'],
@@ -201,7 +201,7 @@ describe('errors from the transport', () => {
   });
 
   it('rules(): a body without a summary and a list is bad_response; a rule that is malformed is dropped', async () => {
-    const rules = (b: unknown) => playerClient({ transport: fake(reply(200, b)) }).rules();
+    const rules = (b: unknown) => createPlayerClient({ transport: fake(reply(200, b)) }).rules();
     expect(await caught(rules({ summary: 5, rules: [] }))).toMatchObject({ code: 'bad_response' });
     expect(await caught(rules({ summary: 's' }))).toMatchObject({ code: 'bad_response' });
     const kept = await rules({ summary: 's', rules: [{ number: 1, title: 't', text: 'x', extra: 1 }, { number: 'a', title: 't', text: 'x' }, null] });
@@ -209,12 +209,12 @@ describe('errors from the transport', () => {
   });
 
   it('ack() on a 404 rejects with status 404 (the component decides what that means)', async () => {
-    const err = await caught(playerClient({ transport: fake(reply(404, { error: 'not_found', message: 'gone' })) }).ack('x'));
+    const err = await caught(createPlayerClient({ transport: fake(reply(404, { error: 'not_found', message: 'gone' })) }).ack('x'));
     expect(err.status).toBe(404);
   });
 
   it('ack() with a body that is not { ok: boolean } is bad_response', async () => {
-    expect(await caught(playerClient({ transport: fake(reply(200, { ok: 'yes' })) }).ack('x'))).toMatchObject({ code: 'bad_response' });
-    expect(await caught(playerClient({ transport: fake(reply(200, null)) }).ack('x'))).toMatchObject({ code: 'bad_response' });
+    expect(await caught(createPlayerClient({ transport: fake(reply(200, { ok: 'yes' })) }).ack('x'))).toMatchObject({ code: 'bad_response' });
+    expect(await caught(createPlayerClient({ transport: fake(reply(200, null)) }).ack('x'))).toMatchObject({ code: 'bad_response' });
   });
 });

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { REPORT_CATEGORIES } from '@chatwarden/core';
 import { dayText, timeLeft, untilText } from '../src/format.js';
 import { DAY, HOUR, MINUTE, T0 } from './world.js';
 
@@ -53,12 +52,5 @@ describe('timeLeft', () => {
   });
   it('follows the locale', () => {
     expect(timeLeft(now + 2 * DAY, now, 'de')).toBe('in 2 Tagen');
-  });
-});
-
-describe('the report constants match the kit', () => {
-  it('the categories the dialog offers are the kit categories, in the kit order', async () => {
-    const { CATEGORIES } = await import('../src/categories.js');
-    expect([...CATEGORIES]).toEqual([...REPORT_CATEGORIES]);
   });
 });
