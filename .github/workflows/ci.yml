@@ -11,6 +11,7 @@ jobs:
   check:
     name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +34,7 @@ jobs:
   site:
     name: Site (test and build)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,6 +69,7 @@ jobs:
   element-browser:
     name: Hub element (Chromium smoke)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
       CW_REQUIRE_BROWSER: '1'
     steps:
@@ -96,6 +99,7 @@ jobs:
   smoke:
     name: Smoke (consumer install) Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

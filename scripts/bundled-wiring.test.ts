@@ -92,3 +92,22 @@ describe('the element\'s browser smoke runs in CI and in the release checks', ()
     expect(pkg.scripts['smoke:browser']).toMatch(/^cd \.\.\/\.\. && vitest run --project hub-element /);
   });
 });
+
+// GitHub Actions: standard GitHub-hosted runners are free and uncapped for this PUBLIC repository (a larger runner never is), and
+// every job has a time limit so a hung step cannot run for GitHub's default six hours.
+describe('every workflow job runs on a free standard runner, with a time limit', () => {
+  for (const file of ['ci.yml', 'release.yml']) {
+    const yml = read('.github', 'workflows', file);
+    const jobs = yml.slice(yml.indexOf('\njobs:\n')).split(/\n {2}(?=[a-z][\w-]*:\n)/).slice(1);
+    it(`${file} has jobs`, () => expect(jobs.length).toBeGreaterThan(0));
+    for (const job of jobs) {
+      const name = job.slice(0, job.indexOf(':'));
+      it(`${file} ${name}: ubuntu-latest and timeout-minutes of at most 60`, () => {
+        expect(job).toMatch(/\n {4}runs-on: ubuntu-latest\n/);
+        const t = /\n {4}timeout-minutes: (\d+)\n/.exec(job);
+        expect(t, 'timeout-minutes').not.toBeNull();
+        expect(Number(t?.[1])).toBeLessThanOrEqual(60);
+      });
+    }
+  }
+});
