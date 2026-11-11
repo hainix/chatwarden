@@ -1,12 +1,15 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { FormEvent, RefObject } from 'react';
+import type { FormEvent } from 'react';
 import type { PlayerReporting, ReportCategory, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';
 import { CATEGORIES, NOTE_MAX } from './categories.js';
 import { PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
+import { DETAIL_REFUSED_TEXT, FollowUp } from './FollowUp.js';
+import type { FollowUpOutcome, ReportDetail } from './FollowUp.js';
+import { Picker } from './Picker.js';
 import type { PlayerText } from './i18n.js';
 import { groupReasons, readReporting } from './reporting.js';
-import type { ReasonGroup, ReasonItem } from './reporting.js';
+import type { ReasonItem } from './reporting.js';
 import { errorText, Portal, Root, useUi } from './ui.js';
 import type { DialogHostProps, PlayerUiProps } from './ui.js';
 
@@ -24,11 +27,7 @@ export interface ReportDraft {
   note?: string;
 }
 
-/** What the player adds after a one-tap report. Your server calls `cw.reports.addDetail(reportId, reporterSeat, detail)`. */
-export interface ReportDetail {
-  reason?: string;
-  note?: string;
-}
+export type { ReportDetail } from './FollowUp.js';
 
 export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
   /**
@@ -78,16 +77,6 @@ const REFUSED_TEXT: Readonly<Record<ReportRefusal, PlayerText>> = {
   reason_unknown: 'player.report.refused.reason_unknown',
 };
 
-// The same for the follow-up's refusals.
-const DETAIL_REFUSED_TEXT: Readonly<Record<string, PlayerText>> = {
-  off: 'player.report.detail.refused.off',
-  not_found: 'player.report.detail.refused.not_found',
-  not_reporter: 'player.report.detail.refused.not_reporter',
-  too_late: 'player.report.detail.refused.too_late',
-  already_added: 'player.report.detail.refused.already_added',
-  reason_unknown: 'player.report.detail.refused.reason_unknown',
-};
-
 /** How much of the reported message is quoted on the screen. */
 const LINE_MAX = 280;
 
@@ -111,63 +100,6 @@ interface Screen {
   legacy: boolean;
 }
 
-/** The radios, by group. One radio group (one name) across the groups, so the arrow keys walk all of them and Tab stops once. */
-function Picker(props: {
-  groups: readonly ReasonGroup[];
-  name: string;
-  value: string | null;
-  onChange: (id: string) => void;
-  legend: string;
-  invalid?: boolean;
-  describedBy?: string | undefined;
-  fieldset?: RefObject<HTMLFieldSetElement | null>;
-}) {
-  const { groups, name, value, onChange, legend, invalid, describedBy, fieldset } = props;
-  const base = useId();
-  const choice = (r: ReasonItem) => {
-    const label = `${base}-${r.id}-l`;
-    const hint = `${base}-${r.id}-h`;
-    return (
-      <label key={r.id} className="cw-choice">
-        <input
-          type="radio"
-          name={name}
-          value={r.id}
-          checked={value === r.id}
-          aria-labelledby={label}
-          aria-describedby={r.hint === '' ? undefined : hint}
-          onChange={() => onChange(r.id)}
-        />
-        <span className="cw-choice-text">
-          <span id={label}>{r.label}</span>
-          {r.hint !== '' && (
-            <span id={hint} className="cw-choice-hint">
-              {r.hint}
-            </span>
-          )}
-        </span>
-      </label>
-    );
-  };
-  return (
-    <fieldset ref={fieldset} className="cw-fieldset" role="radiogroup" aria-invalid={invalid || undefined} aria-describedby={invalid ? describedBy : undefined}>
-      <legend className="cw-legend">{legend}</legend>
-      {groups.map((g, i) =>
-        g.name === '' ? (
-          <div key={`g${i}`} className="cw-group">
-            {g.items.map(choice)}
-          </div>
-        ) : (
-          <fieldset key={`g${i}`} className="cw-fieldset cw-group">
-            <legend className="cw-group-legend">{g.name}</legend>
-            {g.items.map(choice)}
-          </fieldset>
-        ),
-      )}
-    </fieldset>
-  );
-}
-
 /**
  * A dialog for reporting a message or a player. How it works is the studio's setting (`reporting`, from `GET /rules`):
  * - `one_tap` (the default): one step, "Report this message?" and a Report button. The report is filed at once and the thank-you
@@ -187,26 +119,18 @@ export function ReportDialog(props: ReportDialogProps) {
   const sending = useRef(false);
   const titleId = useId();
   const groupName = useId();
-  const detailName = useId();
   const noteId = useId();
   const hintId = useId();
   const missingId = useId();
-  const detailNoteId = useId();
-  const detailMissingId = useId();
-  const panelId = useId();
   const [reason, setReason] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<PlayerError | null>(null);
   const [result, setResult] = useState<ReportResult | null>(null);
-  // The follow-up after a one-tap report.
-  const [open, setOpen] = useState(false);
-  const [dReason, setDReason] = useState<string | null>(null);
-  const [dNote, setDNote] = useState('');
-  const [dMissing, setDMissing] = useState(false);
-  const [dFailure, setDFailure] = useState<PlayerError | null>(null);
-  const [dDone, setDDone] = useState<{ ok: true } | { ok: false; refused: string } | null>(null);
+  // How the follow-up after a one-tap report ended, and whether its time is up (the kit takes one until `detailUntil`).
+  const [dDone, setDDone] = useState<FollowUpOutcome | null>(null);
+  const [expired, setExpired] = useState(false);
 
   const screen: Screen = (() => {
     const read = readReporting(props.reporting);
@@ -232,6 +156,20 @@ export function ReportDialog(props: ReportDialogProps) {
   useEffect(() => {
     if (dDone !== null) heading.current?.focus();
   }, [dDone]);
+  // The follow-up stops being offered when the kit would no longer take it.
+  const until = result?.ok === true && typeof result.detailUntil === 'number' && Number.isFinite(result.detailUntil) ? result.detailUntil : null;
+  useEffect(() => {
+    if (until === null) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Looks at the clock again when the time comes, so a clock that has not moved does not end the offer early.
+    const check = (): void => {
+      const left = until - ui.now();
+      if (left < 0) setExpired(true);
+      else timer = setTimeout(check, Math.min(Math.max(left + 1, 50), 2_000_000_000));
+    };
+    check();
+    return () => clearTimeout(timer);
+  }, [until]);
 
   const send = async (draft: ReportDraft): Promise<void> => {
     sending.current = true;
@@ -266,41 +204,22 @@ export function ReportDialog(props: ReportDialogProps) {
   };
 
   const reportId = result?.ok === true && typeof result.reportId === 'string' && result.reportId !== '' ? result.reportId : null;
-  const dTrimmed = dNote.trim();
-  const addDetail = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
-    if (sending.current || reportId === null || onAddDetail === undefined) return;
-    if (dReason === null && dTrimmed === '') {
-      setDMissing(true);
-      return;
-    }
-    sending.current = true;
-    setBusy(true);
-    setDFailure(null);
-    try {
-      const detail: ReportDetail = { ...(dReason === null ? {} : { reason: dReason }), ...(dTrimmed === '' ? {} : { note: dTrimmed }) };
-      const answer = resultOf<ReportDetailResult>(await onAddDetail(reportId, detail), { ok: false, refused: 'unknown' } as unknown as ReportDetailResult);
-      setDDone(answer.ok === true ? { ok: true } : { ok: false, refused: String((answer as { refused?: unknown }).refused) });
-    } catch (error) {
-      setDFailure(failureOf(error));
-    } finally {
-      sending.current = false;
-      setBusy(false);
-    }
-  };
-
   const quote = quoted(line);
   const oneTapTitle = quote !== '' ? t('player.report.titleOneTap') : targetName === undefined ? t('player.report.titleOneTapPlayer') : t('player.report.titleOneTapNamed', { name: targetName });
   const title = flow === 'one_tap' ? oneTapTitle : targetName === undefined ? t('player.report.title') : t('player.report.titleNamed', { name: targetName });
   const taken = result?.ok === true;
   const refusal = result !== null && !taken ? result : null;
+  // After an answer the heading says what happened (a question would be stale), and focus is on it.
+  const shownTitle = result === null ? title : taken ? t('player.report.titleSent') : t('player.report.titleRefused');
   const remaining = taken && typeof result.remaining === 'number' && Number.isFinite(result.remaining) && result.remaining >= 0 ? result.remaining : null;
   const refusedKey = (r: unknown): PlayerText => {
     const refused = (r as { refused?: unknown }).refused;
     return typeof refused === 'string' && Object.hasOwn(REFUSED_TEXT, refused) ? REFUSED_TEXT[refused as ReportRefusal] : 'player.report.refused.unknown';
   };
   const detailRefusedKey = (refused: string): PlayerText => (Object.hasOwn(DETAIL_REFUSED_TEXT, refused) ? (DETAIL_REFUSED_TEXT[refused] as PlayerText) : 'player.report.detail.failed');
-  const canFollow = taken && flow === 'one_tap' && !legacy && reportId !== null && onAddDetail !== undefined && screen.reasons.length > 0;
+  const detailUntil = taken && typeof result.detailUntil === 'number' && Number.isFinite(result.detailUntil) ? result.detailUntil : null;
+  const timeUp = expired || (detailUntil !== null && ui.now() > detailUntil);
+  const canFollow = taken && flow === 'one_tap' && !legacy && reportId !== null && onAddDetail !== undefined && screen.reasons.length > 0 && !timeUp;
   const needText: PlayerText = legacy ? 'player.report.needCategory' : flow === 'reason_first' ? 'player.report.needReasonOrSkip' : 'player.report.needReason';
 
   return (
@@ -308,8 +227,18 @@ export function ReportDialog(props: ReportDialogProps) {
     <Root theme={theme} className={className}>
       <Dialog labelledBy={titleId} initialFocus={heading} onEscape={() => !sending.current && onClose()} {...(returnFocusTo === undefined ? {} : { returnFocusTo })}>
         <h2 id={titleId} ref={heading} className="cw-title" tabIndex={-1}>
-          {title}
+          {shownTitle}
         </h2>
+        {/* Always there, so what is written into it is announced: the thank-you, and "Added. Thanks.". */}
+        <div role="status" className="cw-live">
+          {taken && (
+            <p className="cw-result">
+              {screen.thanks === '' ? t('player.report.thanks') : screen.thanks}
+              {remaining !== null && ` ${t('player.report.remaining', { count: remaining })}`}
+            </p>
+          )}
+          {dDone?.ok === true && <p className="cw-result">{t('player.report.detail.added')}</p>}
+        </div>
         {result === null ? (
           <form onSubmit={submit} noValidate>
             <p className="cw-body">{flow === 'one_tap' ? t('player.report.oneTap.intro') : t('player.report.intro')}</p>
@@ -367,73 +296,13 @@ export function ReportDialog(props: ReportDialogProps) {
           </form>
         ) : (
           <>
-            {taken ? (
-              <p className="cw-result" role="status">
-                {screen.thanks === '' ? t('player.report.thanks') : screen.thanks}
-                {remaining !== null && ` ${t('player.report.remaining', { count: remaining })}`}
-              </p>
-            ) : (
+            {!taken && (
               <p className="cw-error" role="alert">
                 {t(refusedKey(refusal))}
               </p>
             )}
             {canFollow && dDone === null && (
-              <form onSubmit={(e) => void addDetail(e)} noValidate>
-                <button type="button" className="cw-btn cw-disclosure" aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen(!open)}>
-                  {t('player.report.addReason')}
-                </button>
-                {open && (
-                  <div id={panelId} className="cw-panel">
-                    <p className="cw-hint">{t('player.report.addReasonHint')}</p>
-                    <Picker
-                      groups={groups}
-                      name={detailName}
-                      value={dReason}
-                      legend={t('player.report.detail.legend')}
-                      invalid={dMissing}
-                      describedBy={detailMissingId}
-                      onChange={(id) => {
-                        setDReason(id);
-                        setDMissing(false);
-                      }}
-                    />
-                    {dMissing && (
-                      <p id={detailMissingId} className="cw-field-error" role="alert">
-                        {t('player.report.detail.need')}
-                      </p>
-                    )}
-                    <label className="cw-label" htmlFor={detailNoteId}>
-                      {t('player.report.note')}
-                    </label>
-                    <textarea
-                      id={detailNoteId}
-                      className="cw-textarea"
-                      rows={3}
-                      maxLength={NOTE_MAX}
-                      value={dNote}
-                      onChange={(e) => {
-                        setDNote(e.target.value);
-                        setDMissing(false);
-                      }}
-                    />
-                    {dFailure !== null && (
-                      <p className="cw-error" role="alert">
-                        {t('player.report.detail.failed')} {errorText(t, dFailure)}
-                      </p>
-                    )}
-                    <div className="cw-actions">
-                      <button type="submit" className="cw-btn cw-btn--primary" aria-disabled={busy || undefined} aria-busy={busy || undefined}>
-                        {t('player.report.detail.send')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </form>
-            )}
-            {dDone?.ok === true && (
-              <p className="cw-result" role="status">
-                {t('player.report.detail.added')}
-              </p>
+              <FollowUp t={t} groups={groups} reportId={reportId} onAddDetail={onAddDetail} sending={sending} busy={busy} onBusy={setBusy} onDone={setDDone} />
             )}
             {dDone !== null && !dDone.ok && (
               <p className="cw-error" role="alert">

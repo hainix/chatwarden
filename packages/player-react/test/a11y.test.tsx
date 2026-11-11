@@ -7,7 +7,7 @@ import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps } from '../src/ReportDialog.js';
 import { RestrictedChatLine } from '../src/RestrictedChatLine.js';
 import { RulesPage } from '../src/RulesPage.js';
-import { FIXED, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi } from './render.js';
 import { ALICE, DAY, HOUR, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 
@@ -173,7 +173,7 @@ describe.each(['light', 'dark'] as const)('axe, %s theme', (theme) => {
         const { container, user } = renderUi(<ReportDialog {...FIXED} theme={theme} reporting={r} line="you play like a snerp" targetName="Cara" onSubmit={ok} onAddDetail={added} onClose={() => undefined} />);
         expect(await violations(container)).toEqual([]);
         await user.click(screen.getByRole('button', { name: 'Report' }));
-        await screen.findByRole('status');
+        await findStatus();
         expect(await violations(container)).toEqual([]);
         await user.click(screen.getByRole('button', { name: 'Add a reason' }));
         expect(await violations(container)).toEqual([]);
@@ -194,11 +194,11 @@ describe.each(['light', 'dark'] as const)('axe, %s theme', (theme) => {
         ] as const) {
           const { container, user, unmount } = renderUi(<ReportDialog {...FIXED} theme={theme} reporting={r} onSubmit={ok} onAddDetail={onAddDetail as ReportDialogProps['onAddDetail']} onClose={() => undefined} />);
           await user.click(screen.getByRole('button', { name: 'Report' }));
-          await screen.findByRole('status');
+          await findStatus();
           await user.click(screen.getByRole('button', { name: 'Add a reason' }));
           await user.click(screen.getByRole('radio', { name: 'Hate' }));
           await user.click(screen.getByRole('button', { name: 'Add to my report' }));
-          await waitFor(() => expect(screen.getAllByRole(expectedRole).length).toBeGreaterThan(expectedRole === 'status' ? 1 : 0));
+          await waitFor(() => expect(expectedRole === 'status' ? screen.getByRole('status').textContent : screen.getAllByRole(expectedRole).map((e) => e.textContent).join()).toMatch(expectedRole === 'status' ? /Added. Thanks./ : /./));
           expect(await violations(container)).toEqual([]);
           unmount();
         }
@@ -224,7 +224,7 @@ describe.each(['light', 'dark'] as const)('axe, %s theme', (theme) => {
       const a = renderUi(<ReportDialog {...FIXED} theme={theme} onSubmit={ok} onClose={() => undefined} />);
       await a.user.click(screen.getByRole('radio', { name: 'Spam' }));
       await a.user.click(screen.getByRole('button', { name: 'Send report' }));
-      await screen.findByRole('status');
+      await findStatus();
       expect(await violations(a.container)).toEqual([]);
       a.unmount();
 

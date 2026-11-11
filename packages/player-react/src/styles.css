@@ -445,8 +445,10 @@
   background: var(--cw-surface-sunken);
   overflow-wrap: anywhere;
 }
-.cw-player .cw-result + form {
-  margin-top: var(--cw-space-3);
+.cw-player .cw-live:not(:empty) {
+  display: grid;
+  gap: var(--cw-space-2);
+  margin-bottom: var(--cw-space-3);
 }
 .cw-player .cw-disclosure {
   margin-bottom: var(--cw-space-3);

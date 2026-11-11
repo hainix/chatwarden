@@ -73,18 +73,45 @@ export function addToReport(reportId: string, mySeat: string, detail: ReportDeta
 }
 ```
 
-```tsx
-import { ReportDialog } from '@chatwarden/player-react';
+Load the settings before the dialog is drawn, so it opens in the right flow and never changes under the player's hands. A failed load
+should still give the studio's default (one tap), not the old dialog, so the fallback below is one tap with the dialog's own words:
+
+```ts
+import { useEffect, useState } from 'react';
 import type { PlayerClient, PlayerReporting } from '@chatwarden/player-react';
 
-export function ReportMessage({ client, line, name, close }: { client: PlayerClient; line: string; name: string; close: () => void }) {
+/** One tap, no reasons to offer afterwards, the dialog's own thank-you: what a player gets when the settings cannot be loaded. */
+const ONE_TAP: PlayerReporting = { flow: 'one_tap', thanks: '', reasons: [] };
+
+/** The studio's reporting settings from `GET /rules`: `undefined` while they load, the one-tap fallback if that fails. */
+export function useReporting(client: PlayerClient): PlayerReporting | undefined {
   const [reporting, setReporting] = useState<PlayerReporting>();
-  useEffect(() => void client.rules().then((r) => setReporting(r.reporting)), [client]);
+  useEffect(() => {
+    let live = true;
+    client.rules().then(
+      (rules) => live && setReporting(rules.reporting ?? ONE_TAP),
+      () => live && setReporting(ONE_TAP),
+    );
+    return () => {
+      live = false;
+    };
+  }, [client]);
+  return reporting;
+}
+```
+
+```tsx
+import { ReportDialog } from '@chatwarden/player-react';
+import type { PlayerClient } from '@chatwarden/player-react';
+
+export function ReportMessage({ client, line, name, close }: { client: PlayerClient; line: string; name: string; close: () => void }) {
+  const reporting = useReporting(client);
+  if (reporting === undefined) return <p role="status">Loading…</p>;
   return (
     <ReportDialog
       line={line}
       targetName={name}
-      {...(reporting === undefined ? {} : { reporting })}
+      reporting={reporting}
       onClose={close}
       onSubmit={(draft) => fetch('/report', { method: 'POST', body: JSON.stringify(draft) }).then((r) => r.json())}
       onAddDetail={(id, detail) => fetch(`/report/${id}/detail`, { method: 'POST', body: JSON.stringify(detail) }).then((r) => r.json())}
@@ -93,13 +120,15 @@ export function ReportMessage({ client, line, name, close }: { client: PlayerCli
 }
 ```
 
-- **One tap (the default).** The dialog asks "Report this message?" with the line in quotes and a Report button. The report is filed at once
-  and the studio's thank-you is shown. With `onAddDetail` there is then an optional "Add a reason" step (a reason and a note) that attaches
-  to the same report. Closing at any point is fine: the report is already filed.
+- **One tap is the studio's default, applied when you pass `reporting`.** The dialog asks "Report this message?" with the line in quotes and a
+  Report button. The report is filed at once and the studio's thank-you is shown. With `onAddDetail` there is then an optional "Add a reason"
+  step (a reason and a note) that attaches to the same report, offered until `detailUntil` (the kit's ten minutes). Closing at any point is
+  fine: the report is already filed. The heading then reads "Report sent" and the thank-you is announced.
 - **Pick a reason first / reason required.** The reasons in groups, with "Something else" last, then a note when the reason asks for one.
   A reason is optional in the first ("Skip and report") and required in the second.
 - **A reason is a hint.** The kit stores it as `reportedReason`; the moderators (and later the AI) decide what the report really is.
 - **Without `reporting`** the dialog is the 0.1.1 one: a required category from `categories` and an optional note, and `draft.category` is set.
+  Pass `reporting` before the dialog opens: one that arrives later changes the flow under the player.
 - **Stale settings.** If the studio changes the list while a dialog is open, the kit refuses an unknown reason (`reason_unknown`) or a
   missing one (`reason_required`) and the dialog says so. Read `GET /rules` again before the next report.
 

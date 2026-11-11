@@ -4,7 +4,7 @@ import { NoticeQueue } from '../src/NoticeQueue.js';
 import type { NoticeQueueProps } from '../src/NoticeQueue.js';
 import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps } from '../src/ReportDialog.js';
-import { FIXED, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi } from './render.js';
 import { ALICE, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 import type { ReportResult } from '@chatwarden/core';
@@ -377,7 +377,7 @@ describe('ReportDialog: small fixes', () => {
     await user.click(cancel);
     expect(onClose).not.toHaveBeenCalled();
     await act(async () => release({ ok: true, reportId: 'r', remaining: 9 }));
-    await screen.findByRole('status');
+    await findStatus();
   });
 
   it('Cancel works again after a failed send', async () => {
@@ -403,7 +403,7 @@ describe('ReportDialog: small fixes', () => {
     await pick(user, 'Spam');
     await user.click(screen.getByRole('button', { name: 'Send report' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('We could not take that report.');
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });
 
   it('a categories list that filters to nothing falls back to every category', () => {

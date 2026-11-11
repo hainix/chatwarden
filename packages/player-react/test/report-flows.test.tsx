@@ -6,7 +6,7 @@ import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps, ReportDraft } from '../src/ReportDialog.js';
 import { PlayerError } from '../src/client.js';
 import { createT, en } from '../src/i18n.js';
-import { FIXED, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi } from './render.js';
 import { ALICE, BOB, MINUTE, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 
@@ -32,7 +32,7 @@ async function setup(reporting?: Reporting) {
   const payload = async () => (await w.client.rules()).reporting;
   const dialog = async (more: Partial<ReportDialogProps> = {}): Promise<ReportDialogProps> => {
     const reporting = await payload();
-    return { onSubmit: submit, onAddDetail: addDetail, onClose: () => undefined, ...(reporting === undefined ? {} : { reporting }), ...FIXED, ...more };
+    return { onSubmit: submit, onAddDetail: addDetail, onClose: () => undefined, ...(reporting === undefined ? {} : { reporting }), ...FIXED, now: w.now, ...more };
   };
   return { w, submit, addDetail, payload, dialog, report: () => w.cw.reports.list().items };
 }
@@ -132,19 +132,19 @@ describe('one_tap: the default', () => {
     const { w, dialog, submit } = await setup({ thanks: 'Got it. A moderator will have a look.' });
     const { user } = renderUi(<ReportDialog {...await dialog({ line: 'a line' })} />);
     await user.click(btn('Report'));
-    expect(await screen.findByRole('status')).toHaveTextContent('Got it. A moderator will have a look. You can send 9 more reports today.');
+    expect(await findStatus()).toHaveTextContent('Got it. A moderator will have a look. You can send 9 more reports today.');
     expect(submit).toHaveBeenCalledTimes(1);
     expect(submit.mock.calls[0]?.[0]).toEqual({});
     const report = oneReport(w);
     expect(w.cw.reports.get(report.id)?.reportedReason).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Report this message?' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: 'Report sent' })).toHaveFocus();
   });
 
   it('uses the default thank-you when the studio has not changed it', async () => {
     const { dialog } = await setup();
     const { user } = renderUi(<ReportDialog {...await dialog()} />);
     await user.click(btn('Report'));
-    expect(await screen.findByRole('status')).toHaveTextContent("Thanks for the report. We'll look into it.");
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it.");
   });
 
   it('three presses in one tick send one report', async () => {
@@ -156,7 +156,7 @@ describe('one_tap: the default', () => {
       b.click();
       b.click();
     });
-    await screen.findByRole('status');
+    await findStatus();
     expect(submit).toHaveBeenCalledTimes(1);
     expect(w.cw.reports.list().items).toHaveLength(1);
     await user.click(btn('Close'));
@@ -170,7 +170,7 @@ describe('one_tap: the default', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Your report was not sent. Could not reach the server.');
     expect(screen.getByRole('button', { name: 'Report' })).not.toHaveAttribute('aria-busy');
     await user.click(btn('Report'));
-    expect(await screen.findByRole('status')).toHaveTextContent('Thanks');
+    expect(await findStatus()).toHaveTextContent('Thanks');
     expect(submit).toHaveBeenCalledTimes(2);
   });
 
@@ -195,7 +195,7 @@ describe('one_tap: the default', () => {
     const { dialog } = await setup();
     const first = renderUi(<ReportDialog {...await dialog()} />);
     await first.user.click(btn('Report'));
-    await screen.findByRole('status');
+    await findStatus();
     first.unmount();
     const { user } = renderUi(<ReportDialog {...await dialog()} />);
     await user.click(btn('Report'));
@@ -209,7 +209,7 @@ describe('one_tap: the optional reason afterwards', () => {
     const s = await setup(reporting);
     const ui = renderUi(<ReportDialog {...await s.dialog(more)} />);
     await ui.user.click(btn('Report'));
-    await screen.findByRole('status');
+    await findStatus();
     return { ...s, ...ui };
   }
 
@@ -308,7 +308,7 @@ describe('one_tap: the optional reason afterwards', () => {
     void _unused;
     const { user } = renderUi(<ReportDialog {...rest} />);
     await user.click(btn('Report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
     expect(btn('Close')).toBeInTheDocument();
   });
@@ -318,7 +318,7 @@ describe('one_tap: the optional reason afterwards', () => {
     submit.mockImplementationOnce(() => Promise.resolve({ ok: true, remaining: 4 } as unknown as ReportResult));
     const { user } = renderUi(<ReportDialog {...await dialog()} />);
     await user.click(btn('Report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
   });
 
@@ -326,7 +326,7 @@ describe('one_tap: the optional reason afterwards', () => {
     const s = await setup({ reasons: [{ id: 'a', label: 'A', enabled: false }, { id: 'other', label: 'Something else' }] });
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
     await user.click(btn('Report'));
-    await screen.findByRole('status');
+    await findStatus();
     await user.click(btn('Add a reason'));
     expect(screen.getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['other']);
   });
@@ -335,7 +335,7 @@ describe('one_tap: the optional reason afterwards', () => {
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog({ reporting: { flow: 'one_tap', thanks: 'Thanks.', reasons: [] } })} />);
     await user.click(btn('Report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
   });
 
@@ -624,7 +624,7 @@ describe('reason_first', () => {
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
     await user.click(screen.getByRole('radio', { name: 'Hate' }));
     await user.click(btn('Send report'));
-    expect(await screen.findByRole('status')).toHaveTextContent("Thanks for the report. We'll look into it.");
+    expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it.");
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ reason: 'hate' });
     expect(s.w.cw.reports.get(oneReport(s.w).id)?.reportedReason).toBe('hate');
   });
@@ -635,7 +635,7 @@ describe('reason_first', () => {
     await user.click(screen.getByRole('radio', { name: 'Something else' }));
     await user.type(screen.getByLabelText('Add a note (optional)'), '  odd thing  ');
     await user.click(btn('Send report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ reason: 'other', note: 'odd thing' });
   });
 
@@ -643,7 +643,7 @@ describe('reason_first', () => {
     const s = await setup(FIRST);
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
     await user.click(btn('Skip and report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({});
     expect(s.w.cw.reports.get(oneReport(s.w).id)?.reportedReason).toBeNull();
   });
@@ -666,7 +666,7 @@ describe('reason_first', () => {
     await user.click(screen.getByRole('radio', { name: 'Something else' }));
     await user.type(screen.getByLabelText('Add a note (optional)'), 'wrote this');
     await user.click(btn('Skip and report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ note: 'wrote this' });
   });
 
@@ -675,7 +675,7 @@ describe('reason_first', () => {
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
     await user.click(screen.getByRole('radio', { name: 'Hate' }));
     await user.click(btn('Send report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
   });
 
@@ -712,7 +712,7 @@ describe('reason_required', () => {
     expect(screen.getByText('Choose a reason.')).toHaveAttribute('role', 'alert');
     await user.click(screen.getByRole('radio', { name: 'Threats' }));
     await user.click(btn('Send report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ reason: 'threat' });
   });
 
@@ -750,7 +750,7 @@ describe('the old category props still work', () => {
     expect(s.submit).not.toHaveBeenCalled();
     await user.click(screen.getByRole('radio', { name: 'Cheating' }));
     await user.click(btn('Send report'));
-    await screen.findByRole('status');
+    await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ category: 'cheating' });
     expect(s.w.cw.reports.get(oneReport(s.w).id)?.reportedReason).toBe('cheating');
     expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
@@ -761,7 +761,7 @@ describe('the old category props still work', () => {
     const { user } = renderUi(<ReportDialog {...await s.dialog({ reporting: undefined })} />);
     await user.click(screen.getByRole('radio', { name: 'Spam' }));
     await user.click(btn('Send report'));
-    expect(await screen.findByRole('status')).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
   });
 
   it('when the studio payload is given, the categories prop is not used', async () => {
@@ -804,7 +804,7 @@ describe('a payload the dialog cannot trust', () => {
     expect(screen.getByRole('group', { name: '<b>Group</b>' })).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: '<i>Bold</i> label' }));
     await user.click(btn('Send report'));
-    expect(await screen.findByRole('status')).toHaveTextContent('<img src=x onerror=alert(1)> thanks');
+    expect(await findStatus()).toHaveTextContent('<img src=x onerror=alert(1)> thanks');
     expect(container.querySelector('img')).toBeNull();
   });
 
@@ -812,7 +812,7 @@ describe('a payload the dialog cannot trust', () => {
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog(bad({ flow: 'one_tap', thanks: '   ', reasons: [] }))} />);
     await user.click(btn('Report'));
-    expect(await screen.findByRole('status')).toHaveTextContent('Thanks. We got your report.');
+    expect(await findStatus()).toHaveTextContent('Thanks. We got your report.');
   });
 
   it('a staff field in the payload (rule numbers, enabled) is never shown', async () => {
@@ -869,7 +869,7 @@ describe('the studio edits settings and the dialog changes (real routes, real ki
     expect(screen.getByRole('radio', { name: 'Lag switching' })).toHaveAccessibleDescription('Cutting their own connection');
     await user.click(screen.getByRole('radio', { name: 'Lag switching' }));
     await user.click(btn('Send report'));
-    expect(await screen.findByRole('status')).toHaveTextContent('We have it. Thank you.');
+    expect(await findStatus()).toHaveTextContent('We have it. Thank you.');
     expect(s.w.cw.reports.get(oneReport(s.w).id)?.reportedReason).toBe('lag_switch');
   });
 
@@ -878,7 +878,7 @@ describe('the studio edits settings and the dialog changes (real routes, real ki
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
     await user.click(screen.getByRole('radio', { name: 'Throwing or griefing' }));
     await user.click(btn('Send report'));
-    await screen.findByRole('status');
+    await findStatus();
     const report = s.w.cw.reports.get(oneReport(s.w).id);
     expect(report?.reportedReason).toBe('griefing');
     expect(report?.category).toBe('disruption');
@@ -891,7 +891,7 @@ describe('words', () => {
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog({ t, locale: 'de', reporting: { flow: 'one_tap', thanks: '', reasons: [{ id: 'other', label: 'Anderes', hint: '', group: '', asksNote: true }] } })} />);
     await user.click(btn('Melden'));
-    expect(await screen.findByRole('status')).toHaveTextContent('Danke');
+    expect(await findStatus()).toHaveTextContent('Danke');
     expect(btn('Grund nennen')).toBeInTheDocument();
   });
 
@@ -899,7 +899,7 @@ describe('words', () => {
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
     await user.click(btn('Report'));
-    await screen.findByRole('status');
+    await findStatus();
     await waitFor(() => expect(btn('Add a reason')).not.toHaveAttribute('aria-busy'));
   });
 });

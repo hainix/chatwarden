@@ -5,7 +5,7 @@ import { NoticeQueue } from '../src/NoticeQueue.js';
 import { ReportDialog } from '../src/ReportDialog.js';
 import { RestrictedChatLine } from '../src/RestrictedChatLine.js';
 import { RulesPage } from '../src/RulesPage.js';
-import { FIXED, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi } from './render.js';
 import { ALICE, BOB, CARA, DAY, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 
@@ -168,7 +168,7 @@ describe('no identifier leaks into the page', () => {
     );
     await user.click(screen.getByRole('radio', { name: 'Spam' }));
     await user.click(screen.getByRole('button', { name: 'Send report' }));
-    await screen.findByRole('status');
+    await findStatus();
     const html = document.body.innerHTML;
     const [report] = w.cw.reports.list().items.filter((r) => r.roomId === 'rd-room');
     expect(report).toBeDefined();

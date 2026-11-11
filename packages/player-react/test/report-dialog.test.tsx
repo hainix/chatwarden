@@ -6,7 +6,7 @@ import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps, ReportDraft } from '../src/ReportDialog.js';
 import { PlayerError } from '../src/client.js';
 import { createT, en } from '../src/i18n.js';
-import { FIXED, renderUi } from './render.js';
+import { FIXED, findStatus, renderUi } from './render.js';
 import { ALICE, BOB, CARA, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 
@@ -131,7 +131,7 @@ describe('a report that is taken', () => {
     const { user } = renderUi(<ReportDialog {...props(realSubmit(w), { targetName: 'Bob' })} />);
     await pick(user, 'Harassment');
     await send(user);
-    expect(await screen.findByRole('status')).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
+    expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send report' })).toBeNull();
@@ -147,14 +147,14 @@ describe('a report that is taken', () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(remaining)))} />);
     await pick(user, 'Spam');
     await send(user);
-    expect(await screen.findByRole('status')).toHaveTextContent(text);
+    expect(await findStatus()).toHaveTextContent(text);
   });
 
   it('never makes up a number: a result with no remaining says only thanks', async () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve({ ok: true, reportId: 'r' } as unknown as ReportResult))} />);
     await pick(user, 'Spam');
     await send(user);
-    expect(await screen.findByRole('status')).toHaveTextContent(/^Thanks\. We got your report\.$/);
+    expect(await findStatus()).toHaveTextContent(/^Thanks\. We got your report\.$/);
   });
 
   it('moves focus to the heading once the form is gone, and Close calls onClose', async () => {
@@ -162,8 +162,9 @@ describe('a report that is taken', () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)), { onClose })} />);
     await pick(user, 'Spam');
     await send(user);
-    await screen.findByRole('status');
-    expect(screen.getByRole('heading', { name: 'Report a player' })).toHaveFocus();
+    await findStatus();
+    // The question is over: the heading says what happened.
+    expect(screen.getByRole('heading', { name: 'Report sent' })).toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -201,9 +202,9 @@ describe('every refusal has its own plain message', () => {
     expect(alert).toHaveTextContent(text);
     // A refusal is final: the form is gone, with a way to close, and nothing says "Thanks".
     expect(screen.queryByRole('radio')).toBeNull();
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Report a player' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: "Couldn't send the report" })).toHaveFocus();
   });
 
   it('shows a refusal in the words of its own key only: the catalog has one key per refusal', () => {
@@ -264,7 +265,7 @@ describe('every refusal has its own plain message', () => {
       const { user } = renderUi(<ReportDialog {...props(realSubmit(w, { target: CARA }))} />);
       await pick(user, 'Spam');
       await send(user);
-      expect(await screen.findByRole('status')).toHaveTextContent('You can send 8 more reports today.');
+      expect(await findStatus()).toHaveTextContent('You can send 8 more reports today.');
     });
   });
 
@@ -293,7 +294,7 @@ describe('when sending fails', () => {
     expect(screen.getByRole('button', { name: 'Send report' })).not.toHaveAttribute('aria-busy');
     fail = false;
     await send(user);
-    expect(await screen.findByRole('status')).toHaveTextContent('Thanks.');
+    expect(await findStatus()).toHaveTextContent('Thanks.');
     expect(onSubmit).toHaveBeenCalledTimes(2);
     expect(onSubmit.mock.calls[1]?.[0]).toEqual({ category: 'hate', note: 'what they said' });
   });
@@ -335,7 +336,7 @@ describe('double submit', () => {
       button.click();
       button.click();
     });
-    await screen.findByRole('status');
+    await findStatus();
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
@@ -353,7 +354,7 @@ describe('double submit', () => {
     expect(button).toHaveAttribute('aria-busy', 'true');
     expect(button).toHaveFocus();
     await act(async () => release(ok(9)));
-    await screen.findByRole('status');
+    await findStatus();
   });
 
   it('the guard is cleared after a failure', async () => {
