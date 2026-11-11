@@ -166,6 +166,23 @@ What it means in the kit:
 - **A "no reason given" report** shows the moderator the lines and asks which rule applies, with the suggestion computed once the
   rule is picked. When the AI levels arrive (K3), the AI read proposes the rule and the step.
 
+What was built in the kit (Task 7h):
+
+- **Profile section `reporting`** `{ flow, reasons, thanks }`, every field optional on input and filled on output, and one more editable
+  section of the policy layer (audit section name `reporting`). The reasons list is replaced whole by a layer. Validation: ids are unique
+  lowercase slugs (`none` is reserved), 1 to 20 reasons, at least one on, `other` present and on (relabel and re-map only), rules are whole
+  numbers, at most 20 per reason, labels, hints and groups have length caps.
+- **Reports.** `ReportInput.reason` (optional) with `category` kept as an alias; `one_tap` and `reason_first` take a report with no reason,
+  `reason_required` refuses it (`reason_required`), an unknown or switched-off reason is `reason_unknown` in every flow. Stored as
+  `reportedReason`. The stored `category` stays one of the six old ids, derived from the reason, so 0.1.1 readers keep working.
+- **Follow-up.** `cw.reports.addDetail(reportId, reporterSeat, { reason?, note? })`: the reporter only, in the seat and room of the report,
+  once, within ten minutes, while the report is open. The kit has no player report route, so adopters expose it beside their own `submit` call.
+- **Staff.** `reportedReason` and `reportedReasonLabel` on the queue and the report, `GET /reports?reason=<id>|none`, the suggested rule
+  from the reason's first still-citable rule, and `reasonMatched` / `reasonDecided` on the reporter record. No new audit rows.
+- **Player.** `GET /rules` returns `reporting: { flow, reasons, thanks }` with the enabled reasons only and no rule mapping.
+- **Storage.** SQLite migration 17 adds nullable `reported_reason` and `detail_at` and backfills old rows from their category
+  (`disruption` becomes `griefing`). Two optional `Store` methods, `addReportDetail` and `loadReporterDecisions`.
+
 ## Part 2: the roadmap (later releases; each gets its own brainstorm before building)
 
 - **Offensive names.** Check player names against the term list at sign-up and rename. Moderators can force a rename, and the player

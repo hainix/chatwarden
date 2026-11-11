@@ -26,8 +26,8 @@ const tmpPath = (): string => {
 };
 
 describe('the staff read views on an existing 0.1.x database', () => {
-  it('the staff views add no migration of their own: the latest one is the team workbench tables (15)', () => {
-    expect(MIGRATIONS.at(-1)?.version).toBe(15);
+  it('the staff views add no migration of their own: migration 15 is the team workbench tables', () => {
+    expect(MIGRATIONS.find((m) => m.version === 15)?.sql).toContain('kit_claims');
   });
 
   it('reads old rows through the new store queries, and revoke info that was always stored', () => {

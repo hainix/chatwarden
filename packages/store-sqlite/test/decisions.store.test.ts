@@ -13,6 +13,7 @@ import {
   type StoredReport,
 } from '@chatwarden/core';
 import { MIGRATIONS, openStore } from '../src/index.js';
+import { insertOldReport } from './oldRows.js';
 
 const DAY = 86_400_000;
 const NOW = 1_800_000_000_000;
@@ -64,7 +65,7 @@ describe('migration 9: kit_decisions', () => {
     const db = new DatabaseSync(':memory:');
     const old = openStore({ db, migrations: MIGRATIONS.slice(0, 8) });
     expect(old.schemaVersion()).toBe(8);
-    old.insertReport(report('r1', NOW));
+    insertOldReport(db, report('r1', NOW));
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(store.loadReport('r1')?.id).toBe('r1');
@@ -91,7 +92,8 @@ describe('migration 10: kit_reports.bad_faith_evidence', () => {
     const info = db.prepare('PRAGMA table_info(kit_reports)').all();
     const col = info.find((c) => c.name === 'bad_faith_evidence');
     expect(col).toMatchObject({ type: 'TEXT', notnull: 0, dflt_value: null });
-    expect(String(info.at(-1)?.name)).toBe('bad_faith_evidence');
+    // It was the last column when it was added; migration 17 has since added two more after it.
+    expect(info.map((c) => String(c.name)).slice(-3)).toEqual(['bad_faith_evidence', 'reported_reason', 'detail_at']);
     db.close();
   });
 
@@ -99,8 +101,8 @@ describe('migration 10: kit_reports.bad_faith_evidence', () => {
     const db = new DatabaseSync(':memory:');
     const old = openStore({ db, migrations: MIGRATIONS.slice(0, 9) });
     expect(old.schemaVersion()).toBe(9);
-    old.insertReport(report('r1', NOW));
-    old.insertReport(report('r2', NOW, { reporterSubject: 's_other', roomId: 'R2' }));
+    insertOldReport(db, report('r1', NOW));
+    insertOldReport(db, report('r2', NOW, { reporterSubject: 's_other', roomId: 'R2' }));
     // K2's closeReport, as SQL: the column does not exist yet.
     db.prepare("UPDATE kit_reports SET status = 'dismissed', bad_faith = 1, actioned_at = ?, actioned_by = 'mod-a', mod_note = 'K2 bad faith' WHERE id = 'r2'").run(NOW + 1);
     old.insertDecision('k2-key-with-old-verdict', 'r2', NOW + 1, JSON.stringify({ groups: [] }));
@@ -132,6 +134,8 @@ describe('loadReport / closeReport', () => {
     store.insertReport(r);
     expect(store.loadReport('r1')).toEqual({
       ...r,
+      reportedReason: null,
+      detailAt: null,
       badFaith: false,
       actionedAt: null,
       actionedBy: null,

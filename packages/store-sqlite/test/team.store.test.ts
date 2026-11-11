@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createChatwarden } from '@chatwarden/core';
 import type { RawWho } from '@chatwarden/core';
 import { MIGRATIONS, openStore } from '../src/index.js';
+import { insertOldReport } from './oldRows.js';
 import type { SqliteStore } from '../src/index.js';
 
 // The SQLite side of the team workbench: the tables, an upgrade from the previous schema, the token persisting, and two
@@ -47,13 +48,15 @@ describe('migration 15', () => {
 
   it('upgrades a database left at version 14 and keeps its rows', () => {
     const path = tmpPath();
-    const old = openStore({ path, migrations: MIGRATIONS.slice(0, 14) });
+    const rawDb = new DatabaseSync(path);
+    const old = openStore({ db: rawDb, migrations: MIGRATIONS.slice(0, 14) });
     expect(old.schemaVersion()).toBe(14);
-    old.insertReport({
+    insertOldReport(rawDb, {
       id: 'old-report', createdAt: NOW, roomId: 'R', tags: {}, reporterSubject: 's_a', reporterSeat: 'p1', reporterHandle: 'A',
       targetSubject: 's_b', targetSeat: 'p2', targetHandle: 'B', category: 'spam', note: null, lineId: null, excerpt: [], people: [], status: 'open',
     });
     old.close();
+    rawDb.close();
 
     const s = openAt(path);
     expect(s.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);

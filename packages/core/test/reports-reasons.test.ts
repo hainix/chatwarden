@@ -268,6 +268,19 @@ describe('refusal order', () => {
     expect(await w.submit(t.room, { reason: 'hate' })).toMatchObject({ ok: true, remaining: 9 });
   });
 
+  it('the reason is checked before the limits: a bad reason is reason_unknown even for a duplicate or past the daily allowance', async () => {
+    const w = await world({ overrides: { reporting: { flow: 'reason_required' } } });
+    const t = w.table();
+    expect(await w.submit(t.room, { reason: 'hate' })).toMatchObject({ ok: true });
+    expect(await w.submit(t.room, { reason: 'bogus' })).toEqual({ ok: false, refused: 'reason_unknown' });
+    expect(await w.submit(t.room)).toEqual({ ok: false, refused: 'reason_required' });
+    for (let i = 0; i < 9; i++) await w.file({ reason: 'spam' }, { reporter: 'key-reporter' });
+    const late = w.table();
+    expect(await w.submit(late.room, { reason: 'hate' })).toEqual({ ok: false, refused: 'rate', remaining: 0 });
+    expect(await w.submit(late.room, { reason: 'bogus' })).toEqual({ ok: false, refused: 'reason_unknown' });
+    expect(await w.submit(late.room)).toEqual({ ok: false, refused: 'reason_required' });
+  });
+
   it('a valid reason does not bypass the later refusals: self, duplicate, rate still apply', async () => {
     const w = await world();
     const t = w.table();
