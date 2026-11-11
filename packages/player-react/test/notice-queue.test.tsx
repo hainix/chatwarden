@@ -523,7 +523,8 @@ describe('focus', () => {
     renderUi(<NoticeQueue {...props(w)} />);
     const d = await dialog();
     const heading = within(d).getByRole('heading', { name: 'You have a warning' });
-    expect(heading).toHaveFocus();
+    // Focus moves in an effect after the dialog renders: wait for it (a loaded CI runner can be a tick late).
+    await waitFor(() => expect(heading).toHaveFocus());
     expect(heading).toHaveAttribute('tabindex', '-1');
   });
 

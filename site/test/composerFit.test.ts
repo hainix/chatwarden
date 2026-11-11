@@ -229,12 +229,12 @@ describe('the demo composer fits the game pane (built page, real Chromium)', () 
       const box = await page.locator('.send').boundingBox();
       const pane = await page.locator('.composer').evaluate((el) => (el.closest('.pane') as HTMLElement).getBoundingClientRect().right);
       expect(box).not.toBeNull();
-      // The point a user clicks (the right edge of the button) is inside the pane, so it hits Send and not the page behind.
-      const hit = await page.evaluate(
-        ({ x, y }) => (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('.send') !== null,
-        { x: (box as { x: number; width: number }).x + (box as { width: number }).width - 4, y: (box as { y: number; height: number }).y + (box as { height: number }).height / 2 },
-      );
       expect((box as { x: number; width: number }).x + (box as { width: number }).width).toBeLessThanOrEqual(pane);
+      // The point a user clicks (the right edge of the button) hits Send and not the page behind. A trial click at that point
+      // retries until the element there receives the click (a loaded runner can still be settling the layout or the tour
+      // bubble), and fails if something else is on top of Send at that point.
+      const b = box as { width: number; height: number };
+      const hit = await page.locator('.send').click({ trial: true, position: { x: b.width - 4, y: b.height / 2 }, timeout: 10_000 }).then(() => true, () => false);
       expect(hit).toBe(true);
       await page.context().close();
     }
