@@ -142,6 +142,30 @@ describe('the 0.1.3 notes (all ten CHANGELOGs)', () => {
     expect(section013(dir)).toMatch(/demo/);
   });
 
+  // Published notes cannot be edited, so what an upgrading studio must know is pinned here (final review I1, I2, M3, M4).
+  it.each(dirs)('%s: warns that a store opened by 0.1.3 cannot go back to 0.1.2, and says to back up first', (dir) => {
+    const s = section013(dir);
+    expect(s).toMatch(/back up/i);
+    expect(s).toMatch(/0\.1\.2 (will not|cannot) open/);
+    expect(s).not.toContain('There is nothing to migrate.');
+    expect(s).not.toContain('needs nothing from you');
+  });
+
+  it.each(dirs)('%s: tells translators the new and changed words, for the player dialog and the hub', (dir) => {
+    const s = section013(dir);
+    for (const key of ['player.report.why', 'whyRequired', 'choose', 'chooseRequired', 'addNote', 'intro', 'note']) expect(s, key).toContain(`\`${key}\``);
+    for (const key of ['hub.reporting.preview.*', 'hub.state.what.reportingSettings', 'hub.state.reloadHint']) expect(s, key).toContain(`\`${key}\``);
+    expect(s).toMatch(/raw key/);
+  });
+
+  it.each(dirs)('%s: says hand-written HubController and LiveQueueStore doubles need refresh(), and the dialog class names changed', (dir) => {
+    const s = section013(dir);
+    expect(s).toContain('`HubController`');
+    expect(s).toContain('`LiveQueueStore`');
+    expect(s).toMatch(/class names/);
+    expect(s).toMatch(/tokens/);
+  });
+
   it('the 0.1.3 section is the same text in all ten', () => {
     const first = section013(dirs[0] as string);
     for (const dir of dirs) expect(section013(dir), dir).toBe(first);

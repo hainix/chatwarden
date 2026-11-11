@@ -220,7 +220,7 @@ pays far less with `@chatwarden/hub-react`.
   from your staff routes, so they must stay behind your own sign-in: the element is a view over them and decides nothing about who
   may use them.
 - The shadow root is `open`: scripts on your page can reach inside it. It keeps styles apart, not secrets.
-- Pin the CDN version (`@0.1` follows patch releases of 0.1; `@0.1.2` is exact), or self-host the file, so a release you have not looked at
+- Pin the CDN version (`@0.1` follows patch releases of 0.1; `@0.1.3` is exact), or self-host the file, so a release you have not looked at
   never loads into a moderator's panel.
 
 ## Links

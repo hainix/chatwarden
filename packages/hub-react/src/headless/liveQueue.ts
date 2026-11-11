@@ -100,7 +100,7 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   /** Ask now, instead of waiting for the next poll (the banner's "Try now"). */
   retryNow: () => void;
   /**
-   * Poll the change token now, as a normal poll would (and read the queue when it moved). Only reads: it sends nothing that writes.
+   * @experimental Poll the change token now, as a normal poll would (and read the queue when it moved). Only reads: it sends nothing that writes.
    * Does nothing while the queue is not running (before `start`), after `dispose`, while the browser is offline, or once the session has
    * ended. At most one read a second: a call made while a read is on its way is ignored, and one made within a second of the last
    * refresh is held and sent once, when the second is up (calls in between add nothing). Do not call it in a loop: it is for "something

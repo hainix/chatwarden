@@ -223,7 +223,7 @@ cw.policy.reset('durations'); // put one section back to the base; reset() puts 
 How players report is part of the profile, so it has defaults and an owner can edit it with the rest (`cw.policy`, section `reporting`). Nothing
 is required: a profile that says nothing about reporting gets the defaults.
 
-- **`flow`**: `'one_tap'` (the default: "Report this message" sends at once, and an optional reason and note follow), `'reason_first'`
+- **`flow`**: `'one_tap'` (the default: one step, where the player may pick a reason and add a note in the same dialog and neither is needed), `'reason_first'`
   (the screen asks for a reason first; the kit takes a report with no reason all the same, only the screen differs) or `'reason_required'`
   (a report with no reason is refused `reason_required`).
 - **`reasons`**: the ordered list a player picks from, 1 to 20 of them. Each is `{ id, label, hint, group, rules, asksNote, enabled }`; only
@@ -242,7 +242,7 @@ await cw.reports.submit({ roomId: 'lobby', reporterSeat: 'seat-1', targetSeat: '
 // A reason the studio did not list, or switched off, is refused in every flow.
 await cw.reports.submit({ roomId: 'lobby', reporterSeat: 'seat-1', targetSeat: 'seat-3', reason: 'not_a_reason' }); // { ok: false, refused: 'reason_unknown' }
 
-// The one-tap follow-up: an optional reason and note on the same report.
+// A follow-up of your own (the kit's dialog sends the reason and note with the report): add them to an existing report.
 const res = await cw.reports.addDetail(reportId, 'seat-1', { reason: 'cheating', note: 'speed hacking in the last round' });
 // { ok: true }, or { ok: false, refused: 'not_found' | 'not_reporter' | 'too_late' | 'already_added' | 'reason_unknown' | 'off' }
 ```

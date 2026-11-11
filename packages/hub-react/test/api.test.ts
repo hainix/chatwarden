@@ -782,6 +782,7 @@ describe('what is marked @experimental', () => {
         "HubController.configure",
         "HubController.refresh",
         "HubControllerOptions.host",
+        "LiveQueueStore.refresh",
       ]
     `);
     // The prop that hands a page the controller is marked too: `<Hub onController>`.

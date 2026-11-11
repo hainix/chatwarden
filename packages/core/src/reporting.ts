@@ -13,7 +13,7 @@ export type ReportFlow = 'one_tap' | 'reason_first' | 'reason_required';
 /** Every flow, in the order a settings screen lists them. */
 export const REPORT_FLOWS: readonly ReportFlow[] = ['one_tap', 'reason_first', 'reason_required'];
 
-/** The default flow: "Report this message" sends at once; a reason is offered afterwards and is optional. */
+/** The default flow: one step. The player may pick a reason and add a note in the same dialog; neither is needed to send. */
 export const DEFAULT_REPORT_FLOW: ReportFlow = 'one_tap';
 
 /** The default thank-you shown to the reporter. */
