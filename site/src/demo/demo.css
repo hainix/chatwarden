@@ -376,9 +376,11 @@
 }
 
 /* ---------- the tour tooltip ---------- */
+/* Under the sticky Game / Moderator switcher (z-index 30 below): the card floats over the panes, and on a phone it can sit where the
+   switcher is stuck, which must stay pressable. */
 .tour {
   position: absolute;
-  z-index: 40;
+  z-index: 25;
   left: 8px;
   top: 8px;
   width: min(350px, calc(100% - 16px));

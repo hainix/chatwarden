@@ -149,6 +149,17 @@ describe('the tour follows the visitor through the hub', () => {
     expect(stepText()).toMatch(/step 6 of 7/i);
   });
 
+  it('step 7 after the visitor switched to Detailed: the ring is on Settings (More is not in that view)', async () => {
+    const { user } = await setup();
+    for (let i = 0; i < 5; i++) await user.click(next());
+    await waitFor(() => expect(targetName()).toBe('Detailed'));
+    await user.click(target() as HTMLElement);
+    await user.click(next());
+    expect(stepText()).toMatch(/step 7 of 7/i);
+    await waitFor(() => expect(targetName()).toBe('Settings'));
+    expect(modPane().contains(target())).toBe(true);
+  });
+
   it('step 7: the ring is on More, then on Steps and ladder once More is open; the page then shows the 1, 6 and 12 hour lengths', async () => {
     const { user } = await setup();
     for (let i = 0; i < 6; i++) await user.click(next());

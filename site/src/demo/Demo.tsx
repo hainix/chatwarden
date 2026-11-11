@@ -462,7 +462,13 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       // Under a chat line's report button, sit below the whole line so its text stays readable.
       const anchor = target.closest('.msg, .notice-bar');
       const a = anchor?.getBoundingClientRect() ?? t;
-      const below = !anchor?.classList.contains('notice-bar') && (c.bottom - a.bottom >= h + gap + 8 || c.bottom - a.bottom >= a.top - c.top);
+      // A hub control sits among its sibling buttons (the suggested step has "No action needed" and "Send a warning" right under it),
+      // so the card goes ABOVE it, over the reading, and only below when there is no room above.
+      const inHub = target.closest('[data-pane="mod"]') !== null;
+      const roomAbove = a.top - c.top >= h + gap + 8;
+      const below = inHub
+        ? !roomAbove
+        : !anchor?.classList.contains('notice-bar') && (c.bottom - a.bottom >= h + gap + 8 || c.bottom - a.bottom >= a.top - c.top);
       placement = below ? 'below' : 'above';
       top = clamp(below ? a.bottom - c.top + gap : a.top - c.top - h - gap, 8, c.height - h - 8);
       left = clamp(cx - w / 2, 8, c.width - w - 8);

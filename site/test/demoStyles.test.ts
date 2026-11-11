@@ -55,6 +55,7 @@ describe('demo.css', () => {
     expect(Number(/--cw-layer:\s*(\d+)/.exec(playerCss)?.[1])).toBeGreaterThan(50);
     expect(z('.tour')).toBeLessThan(50);
     expect(z('.pane-tabs')).toBeLessThan(50);
+    expect(z('.tour')).toBeLessThan(z('.pane-tabs')); // the pane switcher stays pressable where the card sits over it
   });
   it('the notice button is a 44px target and has its own ring when the tour points at it', () => {
     expect(bodies('.notice-btn').join(';')).toMatch(/min-height:\s*44px/);
