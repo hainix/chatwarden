@@ -61,7 +61,19 @@ async function setup() {
   };
   const decide = (c: Chatwarden, id: string, person: string) =>
     c.decide({ reportId: id, verdict: 'upheld', actions: [{ subject: person, kind: 'warning', durationMs: null, rule: 1 }], actor: 'ann', reason: 'r' });
-  return { cw, store, clock, file, fileAgain, decide };
+  /** A report with the given reason (null: none given), against a brand-new person. */
+  const fileReason = async (reason: string | null) => {
+    n += 1;
+    const room = `team-room-${n}`;
+    cw.rooms.seat(room, 'p1', { clientKey: `reporter-key-${n}` }, 'Rep');
+    cw.rooms.seat(room, 'p2', { clientKey: `target-key-${n}` }, 'Tgt');
+    cw.chat.accept(room, 'p2', 'a line');
+    clock.t += 1000;
+    const res = await cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', reason });
+    if (!res.ok) throw new Error(`refused: ${res.refused}`);
+    return { id: res.reportId, person: cw.reports.get(res.reportId)!.targetPerson };
+  };
+  return { cw, store, clock, file, fileAgain, fileReason, decide };
 }
 
 describe('constants', () => {
@@ -405,6 +417,67 @@ describe('cases.next', () => {
     const out = cw.cases.next('ann', { category: 'spam' });
     expect(out?.person).toBe(spam.person);
     expect(cw.cases.next('ann', { category: 'cheating' })).toBeNull();
+  });
+
+  describe('filters by reason', () => {
+    it('the oldest case with an open report that gave that reason', async () => {
+      const { cw, fileReason } = await setup();
+      await fileReason('harassment');
+      const spam = await fileReason('spam');
+      await fileReason('spam');
+      expect(cw.cases.next('ann', { reason: 'spam' })?.person).toBe(spam.person);
+      expect(cw.cases.next('ann', { reason: 'spam' })?.person).not.toBe(spam.person);
+      expect(cw.cases.next('ann', { reason: 'spam' })).toBeNull();
+    });
+
+    it('null takes a case whose report gave no reason; a reason takes none of those', async () => {
+      const { cw, fileReason } = await setup();
+      await fileReason('hate');
+      const none = await fileReason(null);
+      expect(cw.cases.next('ann', { reason: null })?.person).toBe(none.person);
+      expect(cw.cases.next('ann', { reason: null })).toBeNull();
+      expect(cw.cases.next('bea', { reason: 'hate' })).not.toBeNull();
+    });
+
+    it('never hands out a case outside the filter, however many there are', async () => {
+      const { cw, fileReason } = await setup();
+      const want = new Set<string>();
+      for (let i = 0; i < 6; i += 1) {
+        const f = await fileReason(i % 3 === 0 ? 'cheating' : 'harassment');
+        if (i % 3 === 0) want.add(f.person);
+      }
+      const got: string[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        const out = cw.cases.next('ann', { reason: 'cheating' });
+        if (out !== null) got.push(out.person);
+      }
+      expect(got).toHaveLength(2);
+      for (const p of got) expect(want.has(p)).toBe(true);
+    });
+
+    it('the old disruption id finds griefing, an unknown but well-formed id finds nothing, and a bad id is a RangeError that claims nothing', async () => {
+      const { cw, fileReason } = await setup();
+      const a = await fileReason('griefing');
+      expect(cw.cases.next('ann', { reason: 'nobody_used_this' })).toBeNull();
+      for (const bad of ['', 'Has Space', 'none', 'x'.repeat(40), 5 as never]) expect(() => cw.cases.next('ann', { reason: bad }), String(bad)).toThrow(RangeError);
+      expect(cw.cases.holder(a.person)).toBeNull();
+      expect(cw.cases.next('ann', { reason: 'disruption' })?.person).toBe(a.person);
+    });
+
+    it('combines with category: both must hold', async () => {
+      const { cw, fileReason, file } = await setup();
+      await fileReason('hate');
+      await file('hate');
+      expect(cw.cases.next('ann', { reason: 'hate', category: 'hate' })).not.toBeNull();
+      expect(cw.cases.next('ann', { reason: 'hate', category: 'spam' })).toBeNull();
+    });
+
+    it('a case is found by the reason as it was stored, even after the studio switched that reason off', async () => {
+      const { cw, fileReason } = await setup();
+      const a = await fileReason('spam');
+      expect(cw.policy.save({ reporting: { reasons: [{ id: 'spam', label: 'Spam', enabled: false }, { id: 'other', label: 'Else' }] } }, { version: 0, actor: 'o', reason: 'x' }).ok).toBe(true);
+      expect(cw.cases.next('ann', { reason: 'spam' })?.person).toBe(a.person);
+    });
   });
 
   it('an unknown category is a RangeError and claims nothing', async () => {

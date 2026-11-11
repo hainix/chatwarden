@@ -229,11 +229,11 @@ describe('report: stored row', () => {
     expect(stored(t.store)).toMatchObject({ lineId: id, targetSeat: 'p2', targetHandle: 'h-p2' });
   });
 
-  it('the result carries the report id and remaining only, never an identifier', async () => {
+  it('the result carries the report id, remaining and the end of the follow-up window only, never an identifier', async () => {
     const t = setup();
     const { a, b } = t.table();
     const ok = await t.submit();
-    expect(Object.keys(ok).sort()).toEqual(['ok', 'remaining', 'reportId']);
+    expect(Object.keys(ok).sort()).toEqual(['detailUntil', 'ok', 'remaining', 'reportId']);
     const refused = await t.submit({ targetSeat: 'p1' });
     expect(Object.keys(refused).sort()).toEqual(['ok', 'refused']);
     for (const v of [ok, refused]) {

@@ -669,6 +669,7 @@ export class MemoryStore implements Store {
       .filter((r) => {
         if (r.status !== 'open') return false;
         if (q.category !== undefined && r.category !== q.category) return false;
+        if (q.reason !== undefined && (r.reportedReason ?? null) !== q.reason) return false;
         if (q.after === undefined) return true;
         if (r.createdAt !== q.after) return r.createdAt > q.after;
         return q.afterId !== undefined && compare(r.id, q.afterId) > 0;

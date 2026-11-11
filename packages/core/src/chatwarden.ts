@@ -328,11 +328,12 @@ export interface Chatwarden {
     releaseWhenDone(person: SubjectId, actor: string): boolean;
     /**
      * Claim and return the oldest OPEN case nobody holds, optionally only cases with an open report of `category`
-     * (`RangeError` for an unknown one), or null. A case is a person, ranked by their oldest open report and opened on
-     * their newest. A case anyone holds is skipped without a write (held cases are read once per page of reports). `category`
-     * is the only filter: the order is already oldest first. A candidate lost to a rival in between is retried like `claim`.
+     * or that gave `reason` (an id, the old `disruption` reading as `griefing`; `null`: none given; `RangeError` for an unknown category or a
+     * malformed id), or null. A case is a person, ranked by their oldest open report and opened on
+     * their newest. A case anyone holds is skipped without a write (held cases are read once per page of reports). `category` and
+     * `reason` are the only filters: the order is already oldest first. A candidate lost to a rival in between is retried like `claim`.
      */
-    next(actor: string, filter?: { category?: ReportCategory }): NextCase | null;
+    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null }): NextCase | null;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
      * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
@@ -775,7 +776,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   }
 
   const audit = new AuditService({ store, clock, logger });
-  const desk = new CaseDesk({ store, subjects, clock });
+  const desk = new CaseDesk({ store, subjects, clock, reasons: () => policy.profileNow().reporting.reasons });
   const reasonBook = new ReasonBook(store);
 
   return {

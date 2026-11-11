@@ -131,6 +131,41 @@ export function reportReasonsContract(name: string, make: () => Store): void {
       });
     });
 
+    describe('listOpenReports reason filter (take next)', () => {
+      const seed = (s: Store) => {
+        for (const reason of ['hate', 'spam', 'hate', null, 'other', null] as const) s.insertReport(filed({ reportedReason: reason }));
+      };
+      it('keeps only open reports with that reason, oldest first', () => {
+        const s = make();
+        seed(s);
+        const hate = s.listOpenReports({ reason: 'hate', limit: 10 });
+        expect(hate.map((r) => r.reportedReason)).toEqual(['hate', 'hate']);
+        expect(hate[0]!.createdAt <= hate[1]!.createdAt).toBe(true);
+        expect(s.listOpenReports({ reason: 'spam', limit: 10 })).toHaveLength(1);
+      });
+      it('null keeps only reports with none; undefined keeps all', () => {
+        const s = make();
+        seed(s);
+        expect(s.listOpenReports({ reason: null, limit: 10 })).toHaveLength(2);
+        expect(s.listOpenReports({ limit: 10 })).toHaveLength(6);
+      });
+      it('is exact (no prefix, no case folding) and an unused id is empty', () => {
+        const s = make();
+        seed(s);
+        for (const r of ['gone', 'hat', 'HATE', '']) expect(s.listOpenReports({ reason: r, limit: 10 }), r).toEqual([]);
+      });
+      it('combines with the category and with the keyset cursor, and a closed report is never listed', () => {
+        const s = make();
+        for (const [reason, category] of [['hate', 'hate'], ['hate', 'harassment'], ['hate', 'hate']] as const) s.insertReport(filed({ reportedReason: reason, category }));
+        expect(s.listOpenReports({ reason: 'hate', category: 'hate', limit: 10 })).toHaveLength(2);
+        const first = s.listOpenReports({ reason: 'hate', limit: 2 });
+        const rest = s.listOpenReports({ reason: 'hate', limit: 2, after: first[1]!.createdAt, afterId: first[1]!.id });
+        expect(rest).toHaveLength(1);
+        s.closeReport(first[0]!.id, 'dismissed', false, 'mod', NOW, 'ok');
+        expect(ids(s.listOpenReports({ reason: 'hate', limit: 10 }))).toEqual([first[1]!.id, rest[0]!.id]);
+      });
+    });
+
     describe('addReportDetail', () => {
       it('sets the reason, the category, the note and detailAt, and answers true', () => {
         const s = make();

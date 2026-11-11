@@ -92,8 +92,11 @@ export interface ReportInput {
 }
 
 export type ReportResult =
-  /** `remaining` is how many more reports the reporter may file today, this one counted. */
-  | { ok: true; reportId: string; remaining: number }
+  /**
+   * `remaining` is how many more reports the reporter may file today, this one counted. `detailUntil` (epoch ms) is the last instant
+   * `addDetail` still takes a follow-up (the filing time plus `REPORT_DETAIL_WINDOW_MS`); a screen can stop offering one after it.
+   */
+  | { ok: true; reportId: string; remaining: number; detailUntil?: number }
   /** `remaining` is present on `'rate'` (always 0). */
   | { ok: false; refused: ReportRefusal; remaining?: number };
 
@@ -420,7 +423,7 @@ export class ReportService {
     }
 
     this.notify(row, targetPerson, now);
-    return { ok: true, reportId: row.id, remaining };
+    return { ok: true, reportId: row.id, remaining, detailUntil: row.createdAt + REPORT_DETAIL_WINDOW_MS };
   }
 
   /**

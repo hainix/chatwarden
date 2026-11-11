@@ -1,4 +1,4 @@
-import { REPORT_CATEGORIES } from '@chatwarden/core';
+import { REPORT_CATEGORIES, isReasonId } from '@chatwarden/core';
 import type { ReportCategory } from '@chatwarden/core';
 import { ClaimedError, HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
@@ -18,9 +18,10 @@ const TOKEN_RE = /^[A-Za-z0-9_.-]{1,64}$/;
  *   row is written before the move, so it means the takeover was attempted: if the last report closed in between, the answer
  *   is 404 and nothing moved.
  * - `POST /cases/:ref/release` (`reports.decide`): `{ released: boolean }`. Only your own live claim is released.
- * - `POST /cases/next { category? }` (`reports.decide`): claim and return the oldest open case nobody holds (a case you
- *   already hold is skipped), `{ case: { person, reportId, claim } }`, or `{ case: null }`. `category` is the only filter:
- *   the order is already oldest first, and there is no wait filter.
+ * - `POST /cases/next { category?, reason? }` (`reports.decide`): claim and return the oldest open case nobody holds (a case you
+ *   already hold is skipped), `{ case: { person, reportId, claim } }`, or `{ case: null }`. `reason` is a reason id (the old
+ *   `disruption` finds `griefing`) or `none` for the reports that gave none; `category` still works, and both together must hold.
+ *   They are the only filters: the order is already oldest first, and there is no wait filter. A malformed one is 400.
  * - `POST /cases/:ref/viewing` (`reports.read`): a heartbeat that you have the case open (30 s, in memory, never stored).
  *   `{ viewers: string[] }`, the others. 404 `not_found` when the person has no open case (nothing is tracked); one actor
  *   keeps at most 20 cases open, a newer beat dropping their oldest.
@@ -46,7 +47,13 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
         if (typeof v !== 'string' || !(REPORT_CATEGORIES as readonly string[]).includes(v)) throw new ValidationError();
         category = v as ReportCategory;
       }
-      const found = cw.cases.next(c.authz.actor, category === undefined ? {} : { category });
+      let reason: string | null | undefined;
+      if (has(body, 'reason')) {
+        const v = body.reason;
+        if (typeof v !== 'string' || (v !== 'none' && !isReasonId(v))) throw new ValidationError();
+        reason = v === 'none' ? null : v;
+      }
+      const found = cw.cases.next(c.authz.actor, { ...(category === undefined ? {} : { category }), ...(reason === undefined ? {} : { reason }) });
       return {
         status: 200,
         body: {

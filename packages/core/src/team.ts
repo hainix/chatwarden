@@ -1,6 +1,8 @@
 import { randomId } from './crypto.js';
 import { isValidAuditActor } from './audit.js';
 import { REPORT_CATEGORIES } from './reports.js';
+import { canonicalReasonId, isReasonId } from './reporting.js';
+import type { ReportReason } from './reporting.js';
 import type { SubjectIndex } from './subjects.js';
 import { CLAIM_TTL_MS } from './types.js';
 import type { Clock, ReasonRow, ReportCategory, Store, SubjectId } from './types.js';
@@ -181,6 +183,8 @@ export interface TeamDeps {
   store: Store;
   subjects: SubjectIndex;
   clock: Clock;
+  /** The reporting reasons in force, so an old id (`disruption`) finds the reason that replaced it. Default: none. */
+  reasons?: () => readonly ReportReason[];
 }
 
 /** Claims, take next and viewing. The facade exposes it as `cw.cases`. */
@@ -188,12 +192,14 @@ export class CaseDesk {
   private readonly store: Store;
   private readonly subjects: SubjectIndex;
   private readonly clock: Clock;
+  private readonly reasons: () => readonly ReportReason[];
   private readonly presence: ViewingPresence;
 
   constructor(deps: TeamDeps) {
     this.store = deps.store;
     this.subjects = deps.subjects;
     this.clock = deps.clock;
+    this.reasons = deps.reasons ?? (() => []);
     this.presence = new ViewingPresence(deps.clock);
   }
 
@@ -259,19 +265,23 @@ export class CaseDesk {
 
   /**
    * Claim and return the oldest open case nobody holds (`category` limits it to cases with an open report of that
-   * category), or null. A case is a person, ranked by their OLDEST open report; it opens on their NEWEST. A case
+   * category, `reason` to cases with an open report that gave that reason id, or none at all for `null`; both may be given), or null. A case is a person, ranked by their OLDEST open report; it opens on their NEWEST. A case
    * `actor` already holds is skipped. Each candidate is one atomic conditional claim, so two moderators racing never
    * get the same case.
    */
-  next(actor: string, filter: { category?: ReportCategory } = {}): NextCase | null {
+  next(actor: string, filter: { category?: ReportCategory; reason?: string | null } = {}): NextCase | null {
     needActor(actor);
     const category = filter.category;
     if (category !== undefined && !REPORT_CATEGORIES.includes(category)) throw new RangeError('cases: unknown category');
+    const asked = filter.reason;
+    if (asked !== undefined && asked !== null && !isReasonId(asked)) throw new RangeError('cases: unknown reason');
+    const reason = asked === undefined || asked === null ? asked : canonicalReasonId(this.reasons(), asked);
     const seen = new Set<SubjectId>();
     let after: { createdAt: number; id: string } | undefined;
     for (;;) {
       const page = this.store.listOpenReports({
         ...(category === undefined ? {} : { category }),
+        ...(reason === undefined ? {} : { reason }),
         ...(after === undefined ? {} : { after: after.createdAt, afterId: after.id }),
         limit: NEXT_PAGE,
       });

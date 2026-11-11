@@ -338,6 +338,39 @@ describe('POST /cases/next', () => {
     expect((await w.call('POST', '/cases/next', { actor: 'cy', raw: '{nope' })).status).toBe(400);
   });
 
+  it('takes a reason: an id, the old disruption id, or none; a bad one is 400 and claims nothing', async () => {
+    const w = await world();
+    let seq = 0;
+    const file = async (reason: string | null) => {
+      seq += 1;
+      const room = `reason-room-${seq}`;
+      w.cw.rooms.seat(room, 'p1', { clientKey: `raw-reporter-${seq}` }, 'Rep');
+      w.cw.rooms.seat(room, 'p2', { clientKey: `raw-target-${seq}` }, 'Tgt');
+      w.cw.chat.accept(room, 'p2', 'a line');
+      w.clock.t += 1000;
+      const res = await w.cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', reason });
+      if (!res.ok) throw new Error(res.refused);
+      return w.cw.reports.get(res.reportId)!.targetPerson;
+    };
+    const hate = await file('hate');
+    const none = await file(null);
+    const grief = await file('griefing');
+    expect(body(await w.call('POST', '/cases/next', { actor: 'a1', body: { reason: 'hate' } })).case.person).toBe(hate);
+    expect(body(await w.call('POST', '/cases/next', { actor: 'a1', body: { reason: 'hate' } }))).toEqual({ case: null });
+    expect(body(await w.call('POST', '/cases/next', { actor: 'a2', body: { reason: 'none' } })).case.person).toBe(none);
+    expect(body(await w.call('POST', '/cases/next', { actor: 'a3', body: { reason: 'disruption' } })).case.person).toBe(grief);
+    expect(body(await w.call('POST', '/cases/next', { actor: 'a4', body: { reason: 'spam' } }))).toEqual({ case: null });
+    for (const bad of ['', 'Has Space', 5, null, ['hate']]) expect((await w.call('POST', '/cases/next', { actor: 'cy', body: { reason: bad } })).status, JSON.stringify(bad)).toBe(400);
+    expect(w.cw.cases.holder(hate)?.by).toBe('a1');
+  });
+
+  it('a reason and a category together both apply; a category alone still works', async () => {
+    const w = await world();
+    const a = await w.file('spam');
+    expect(body(await w.call('POST', '/cases/next', { actor: 'ann', body: { category: 'spam', reason: 'harassment' } }))).toEqual({ case: null });
+    expect(body(await w.call('POST', '/cases/next', { actor: 'ann', body: { category: 'spam', reason: 'spam' } })).case.person).toBe(a.target);
+  });
+
   it('works with no body at all', async () => {
     const w = await world();
     const a = await w.file();

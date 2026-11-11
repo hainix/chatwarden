@@ -407,6 +407,8 @@ export interface ReportListQuery {
 export interface OpenReportQuery {
   /** Only reports of this category. */
   category?: ReportCategory;
+  /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. A store must apply it. */
+  reason?: string | null;
   /** Keyset cursor: only reports newer than this (`createdAt` above it, or equal with an id above `afterId`). `afterId` without `after` is ignored. */
   after?: number;
   afterId?: string;

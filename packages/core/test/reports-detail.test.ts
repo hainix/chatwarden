@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryStore } from '@chatwarden/store-memory';
 import type { StoredReportRow } from '@chatwarden/store-memory';
-import { REPORT_NOTE_MAX } from '../src/reports.js';
+import { REPORT_DETAIL_WINDOW_MS, REPORT_NOTE_MAX } from '../src/reports.js';
 import type { Store } from '../src/types.js';
 import { MIN, OWNER, world } from './reportingWorld.js';
 import type { World } from './reportingWorld.js';
@@ -335,5 +335,37 @@ describe('when the kit cannot take it: off', () => {
     await expect(w.cw.reports.addDetail(f.id, 'p1', null as never)).resolves.toBeDefined();
     await expect(w.cw.reports.addDetail(f.id, 'p1', undefined as never)).resolves.toBeDefined();
     await expect(w.cw.reports.addDetail(f.id, 'p1', 'text' as never)).resolves.toBeDefined();
+  });
+});
+
+describe('detailUntil: when the follow-up stops being offered', () => {
+  it('a filed report says when its follow-up window ends: the filing time plus the window', async () => {
+    const w = await world();
+    const t = w.table();
+    w.cw.chat.accept(t.room, 'p2', 'a line');
+    const at = w.clock.t;
+    const res = await w.submit(t.room);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.detailUntil).toBe(at + REPORT_DETAIL_WINDOW_MS);
+  });
+
+  it('it is the exact edge: a follow-up at detailUntil works, one millisecond later is too late', async () => {
+    const { w, f } = await oneTap();
+    const report = w.cw.reports.get(f.id);
+    const until = (report?.createdAt ?? 0) + REPORT_DETAIL_WINDOW_MS;
+    w.clock.t = until;
+    expect(await w.cw.reports.addDetail(f.id, 'p1', { reason: 'hate' })).toEqual({ ok: true });
+    const g = await oneTap();
+    g.w.clock.t = (g.w.cw.reports.get(g.f.id)?.createdAt ?? 0) + REPORT_DETAIL_WINDOW_MS + 1;
+    expect(await g.w.cw.reports.addDetail(g.f.id, 'p1', { reason: 'hate' })).toEqual({ ok: false, refused: 'too_late' });
+  });
+
+  it('a refusal carries no detailUntil, and the window constant is ten minutes', async () => {
+    const w = await world();
+    const t = w.table();
+    const res = await w.submit(t.room, { reporterSeat: 'p1', targetSeat: 'p1' });
+    expect(res.ok).toBe(false);
+    expect('detailUntil' in res).toBe(false);
+    expect(REPORT_DETAIL_WINDOW_MS).toBe(10 * MIN);
   });
 });

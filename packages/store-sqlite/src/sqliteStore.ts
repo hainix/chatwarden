@@ -869,6 +869,11 @@ export class SqliteStore implements Store, TermStore {
       where.push('category = ?');
       args.push(q.category);
     }
+    if (q.reason === null) where.push('reported_reason IS NULL');
+    else if (q.reason !== undefined) {
+      where.push('reported_reason = ?');
+      args.push(q.reason);
+    }
     if (q.after !== undefined) {
       if (q.afterId === undefined) {
         where.push('created_at > ?');
