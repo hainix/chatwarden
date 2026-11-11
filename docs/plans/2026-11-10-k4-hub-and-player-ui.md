@@ -619,6 +619,34 @@ Tasks 7h and 7i implement Part 1b of `docs/design/2026-11-10-editable-ladder-and
   - 320 and 360 px
   - the API snapshot updated
 
+### Task 7j: hub-react is shadow-DOM safe and themable from any ancestor (then drop hub-element's workarounds)
+Task 7e found that hub-react reads `document` directly. Its uses are `document.addEventListener('keydown')` in the shell, and
+`document.activeElement`, `document.getElementById` and `document.querySelector` in Dialog, DecisionBar, CaseCard, SimpleNav and
+others. It also declares its `--cw-*` tokens on `.cw-hub`, which blocks inheritance from ancestors. hub-element works around both at
+build time. Fix them at the source.
+- **Find nodes through the hub's own root.** Every lookup goes through a `rootOf(el)` helper, `el.getRootNode()`, which is a
+  `Document` or a `ShadowRoot`. Focus checks use that root's `activeElement`.
+- **Keyboard shortcuts.**
+  - Listen on the shell element, through the 7d `KeyScope`, never on `document`.
+  - The "typing?" check uses `event.composedPath()[0]`.
+  - The command bar and the shortcut sheet keep working.
+- **A static test** forbids `document.` in `packages/hub-react/src`, except in a small allow-list file (the root helper and the
+  page-hide source).
+- **Theming tokens.**
+  - Every `--cw-*` token is read as `var(--cw-x, <default>)`.
+  - The defaults live in private `--cwd-*` names on `.cw-hub`.
+  - A value set on any ancestor wins, so `<Hub>` can be themed from `body` too.
+  - Light-dark behaviour is unchanged.
+  - A CSS test checks that no rule declares a public `--cw-*` name on `.cw-hub`.
+- **hub-element cleanup.** Delete the build-time `document` shim and the CSS token transform. Its tests, including the Chromium
+  smoke, must stay green unchanged.
+- **Tests:**
+  - shadow-root mounts of `<Hub>` and of pieces in jsdom: keys, dialogs, focus return, J/K and the command bar
+  - two hubs on one page, with keys scoped to the focused one
+  - themed from an ancestor in both themes
+  - the static test and the CSS test
+  - axe
+
 ### Task 8: The site demo uses the real hub and player UI
 - In `site/`:
   - Replace `src/demo/ModPane.tsx` with `<Hub client={hubClient(routerTransport(createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-mod', role: 'owner' }), terms }))))} router={memoryRouter} />`
