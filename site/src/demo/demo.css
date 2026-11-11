@@ -104,7 +104,7 @@
   background: #121935;
   border-bottom: 2px solid var(--screen-edge);
 }
-.pane h3 {
+.pane-head h3 {
   margin: 0;
   scroll-margin-top: 150px; /* focus lands below the sticky site header and pane switcher */
   font-family: var(--font-display);
@@ -437,6 +437,63 @@
   outline: 3px solid #14102e;
   outline-offset: 2px;
 }
+/* A phone (Demo.tsx has the matching max-width: 599px): the card is a bar that sticks to the bottom of the window while the demo is in
+   view, "Step 4 of 7: Apply the suggestion" with Next and Skip, and a tap opens the full text. It never floats over the hub. */
+.tour[data-compact] {
+  position: sticky;
+  top: auto;
+  left: auto;
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  z-index: 25;
+  width: auto;
+  margin: 0 8px;
+  padding: 6px 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 8px;
+  transition: none;
+}
+.tour[data-compact]::before {
+  display: none;
+}
+.tour[data-compact] .tour-toggle {
+  grid-column: 1;
+  grid-row: 1;
+  display: grid;
+  gap: 0;
+  min-height: 44px;
+  align-content: center;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.tour[data-compact] .tour-title {
+  font-size: 0.95rem;
+}
+.tour[data-compact] .tour-text {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.tour[data-compact] .tour-actions {
+  grid-column: 2;
+  grid-row: 1;
+  flex-wrap: nowrap;
+}
+.tour[data-compact][data-open] .tour-actions {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  flex-wrap: wrap;
+}
+.tour[data-compact] .tour-actions .tbtn:not(.tbtn-code) {
+  flex: 0 0 auto;
+}
+.tour[data-compact][data-open] .tour-actions .tbtn:not(.tbtn-code) {
+  flex: 1 1 0;
+}
 .tour-top {
   display: flex;
   align-items: center;
@@ -526,6 +583,8 @@
 
 /* The control the tour is pointing at: a static gold ring (so it shows with reduced motion too) and a soft ripple. */
 [data-tour-target] {
+  /* When the tour scrolls to it (a phone): clear of the 64px site header and the pane switcher above, and the tour bar below. */
+  scroll-margin: 150px 0 100px;
   outline: 3px solid #ffc83d;
   outline-offset: 3px;
   border-radius: 8px;

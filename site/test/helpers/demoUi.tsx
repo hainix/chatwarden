@@ -9,9 +9,10 @@ import { KitEngine } from '../../src/demo/kitEngine';
 export const RUDE = "uninstall the game, you're hopeless";
 export type User = ReturnType<typeof userEvent.setup>;
 
-export function stubMatchMedia(stacked: boolean, reduced = false): void {
+/** `compact` is the phone query (under 600px, the tour is a bar); `stacked` is the one-pane-at-a-time query (under 1152px). */
+export function stubMatchMedia(stacked: boolean, reduced = false, compact = false): void {
   window.matchMedia = ((q: string) => ({
-    matches: /reduced-motion/.test(q) ? reduced : /max-width/.test(q) ? stacked : false,
+    matches: /reduced-motion/.test(q) ? reduced : /599px/.test(q) ? compact : /max-width/.test(q) ? stacked : false,
     media: q,
     addEventListener: () => {},
     removeEventListener: () => {},
@@ -23,13 +24,15 @@ export function stubMatchMedia(stacked: boolean, reduced = false): void {
 export interface SetupOptions {
   stacked?: boolean;
   reduced?: boolean;
+  /** A phone: the tour is a bar at the bottom. Implies stacked. */
+  compact?: boolean;
   scripted?: boolean;
   engine?: KitEngine;
 }
 
 /** The demo over the real kit, once the seeded chat and the hub are on screen. */
 export async function setup(opts: SetupOptions = {}) {
-  stubMatchMedia(opts.stacked ?? false, opts.reduced ?? false);
+  stubMatchMedia(opts.stacked ?? opts.compact ?? false, opts.reduced ?? false, opts.compact ?? false);
   try {
     localStorage.clear(); // the hub keeps the moderator's Simple/Detailed choice there
   } catch {

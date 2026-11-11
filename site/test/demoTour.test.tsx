@@ -347,3 +347,122 @@ describe('typing in the game does not disturb the tour', () => {
     expect(targetName()).toMatch(/report bo's line/i);
   });
 });
+
+describe('on a phone (under 600px) the tour is a compact bar', () => {
+  const bar = () => tour() as HTMLElement;
+  const toggle = () => within(bar()).getByRole('button', { name: /step \d of 7/i });
+
+  it('is a bar: "Step 1 of 7: Report a message" with Next and Skip, and the instruction hidden until it is opened', async () => {
+    await setup({ compact: true });
+    expect(bar().hasAttribute('data-compact')).toBe(true);
+    expect(bar().textContent).toMatch(/step 1 of 7/i);
+    expect(bar().textContent).toMatch(/report a message/i);
+    expect(within(bar()).getByRole('button', { name: /^next$/i })).toBeTruthy();
+    expect(within(bar()).getByRole('button', { name: /skip tour/i })).toBeTruthy();
+    expect(bar().textContent).not.toMatch(/Bo is being rude/); // the body waits for a tap
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('a tap on the step opens the full text (and Show me the code); another closes it again', async () => {
+    const { user } = await setup({ compact: true });
+    await user.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(bar().textContent).toMatch(/Bo is being rude/);
+    expect(within(bar()).getByRole('button', { name: /show me the code/i })).toBeTruthy();
+    await user.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(bar().textContent).not.toMatch(/Bo is being rude/);
+  });
+
+  it('the control the bar opens points at its text (aria-controls) only while open', async () => {
+    const { user } = await setup({ compact: true });
+    expect(toggle().hasAttribute('aria-controls')).toBe(false);
+    await user.click(toggle());
+    const id = toggle().getAttribute('aria-controls') as string;
+    expect(document.getElementById(id)?.textContent).toMatch(/Bo is being rude/);
+  });
+
+  it('a new step closes it: the bar stays small as the tour moves on', async () => {
+    const { user } = await setup({ compact: true });
+    await user.click(toggle());
+    await user.click(next());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(stepText()).toMatch(/step 2 of 7/i);
+  });
+
+  it('is the last thing in the demo, so it can stick to the bottom of the screen while the demo is in view', async () => {
+    const { container } = await setup({ compact: true });
+    const demo = container.querySelector('.demo') as HTMLElement;
+    expect(demo.lastElementChild === bar() || bar().compareDocumentPosition(demo.querySelector('.demo-panes') as HTMLElement) === Node.DOCUMENT_POSITION_PRECEDING).toBe(true);
+  });
+
+  it('the finished card is a bar too, with Close and Play again', async () => {
+    const { user } = await setup({ compact: true });
+    for (let i = 0; i < 7; i++) await user.click(next());
+    expect(bar().hasAttribute('data-compact')).toBe(true);
+    expect(within(bar()).getByRole('button', { name: /play again/i })).toBeTruthy();
+    expect(within(bar()).getByRole('button', { name: /^close$/i })).toBeTruthy();
+  });
+
+  it('wider than a phone the card is the floating one: no bar, no toggle, the text shown', async () => {
+    await setup({ stacked: true });
+    expect(bar().hasAttribute('data-compact')).toBe(false);
+    expect(bar().textContent).toMatch(/Bo is being rude/);
+    expect(within(bar()).queryByRole('button', { name: /step \d of 7/i })).toBeNull();
+  });
+
+  describe('scrolling the target above the bar', () => {
+    function spyScroll() {
+      const calls: Array<{ el: Element; arg: ScrollIntoViewOptions | undefined }> = [];
+      Element.prototype.scrollIntoView = function (this: Element, arg?: boolean | ScrollIntoViewOptions) {
+        calls.push({ el: this, arg: typeof arg === 'object' ? arg : undefined });
+      };
+      return calls;
+    }
+
+    it('brings the control the step points at into view (nearest, instantly), once per target', async () => {
+      const calls = spyScroll();
+      const { user } = await setup({ compact: true });
+      await oneTapReport(user);
+      await closeReport(user);
+      await waitFor(() => expect(targetName()).toBe('1 new case'));
+      await waitFor(() => expect(calls.some((c) => c.el === target())).toBe(true));
+      const mine = calls.filter((c) => c.el === target());
+      expect(mine[0]?.arg?.block).toBe('nearest');
+      expect(mine[0]?.arg?.behavior).toBe('instant');
+      const count = calls.filter((c) => c.el === target()).length;
+      await new Promise((r) => setTimeout(r, 150)); // the hub redraws; the same target is not scrolled to again
+      expect(calls.filter((c) => c.el === target()).length).toBe(count);
+    });
+
+    it('scrolls again for the next target (the case link, then the rule picker, then the suggested step)', async () => {
+      const calls = spyScroll();
+      const { user } = await setup({ compact: true });
+      await oneTapReport(user);
+      await closeReport(user);
+      await openCase(user);
+      await waitFor(() => expect(target()?.tagName).toBe('SELECT'));
+      await waitFor(() => expect(calls.some((c) => c.el.tagName === 'SELECT')).toBe(true));
+      await pickRule(user);
+      await waitFor(() => expect(targetName()).toMatch(/^Restrict chat, 24 hours/));
+      await waitFor(() => expect(calls.some((c) => /^Restrict chat/.test(c.el.textContent ?? ''))).toBe(true));
+    });
+
+    it('does not scroll on a wider screen, where the card floats beside the control', async () => {
+      const calls = spyScroll();
+      const { user } = await setup({ stacked: true });
+      await oneTapReport(user);
+      await closeReport(user);
+      await waitFor(() => expect(targetName()).toBe('1 new case'));
+      await new Promise((r) => setTimeout(r, 120));
+      expect(calls.filter((c) => c.el === target())).toEqual([]);
+    });
+
+    it('does not scroll to a target in a hidden pane (the bar points at the Moderator switch until the pane shows)', async () => {
+      const calls = spyScroll();
+      await setup({ compact: true });
+      await new Promise((r) => setTimeout(r, 120));
+      expect(calls.filter((c) => (c.el as HTMLElement).closest('[hidden]') !== null)).toEqual([]);
+    });
+  });
+});

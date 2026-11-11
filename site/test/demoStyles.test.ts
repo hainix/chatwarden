@@ -33,6 +33,35 @@ describe('demo.css', () => {
     expect(block).toMatch(/\.cw-main\s*\{[^}]*display:\s*block/);
     expect(block).toMatch(/\.cw-ctx\s*\{[^}]*border-left:\s*0/);
   });
+  it('the two overrides name hub-react classes that still exist, in the rules the site means to undo (hub-react has no prop or token for either)', () => {
+    const hub = readFileSync(join(__dirname, '..', '..', 'packages', 'hub-react', 'src', 'styles.css'), 'utf8').split('\r\n').join('\n');
+    // the three-pane layout from a 1200px window: these are the rules `demo.css` reverts
+    const threePane = /@media \(min-width: 75rem\)\s*\{([\s\S]*?)\n\}/.exec(hub)?.[1] ?? '';
+    expect(threePane).toContain(".cw-hub .cw-body[data-case='true'] .cw-work");
+    expect(threePane).toContain(".cw-hub .cw-body[data-case='true'] .cw-main");
+    expect(threePane).toContain(".cw-hub .cw-body[data-case='true'] .cw-ctx");
+    // the toasts are fixed to the window, which is why the host contains them
+    expect(hub).toMatch(/\.cw-hub \.cw-toasts\s*\{[^}]*position:\s*fixed/);
+    // and no token reaches either: if one is added, use it and delete the override
+    expect(hub).not.toMatch(/--cw-(layout|panes|toast-position|contain)/);
+  });
+  it('under 600px the tour is a bar that sticks to the bottom of the window while the demo is in view', () => {
+    expect(demoSrc).toMatch(/\(max-width: 599px\)/);
+    const b = bodies(".tour[data-compact]").join(';');
+    expect(b).toMatch(/position:\s*sticky/);
+    expect(b).toMatch(/bottom:\s*calc\(\d+px \+ env\(safe-area-inset-bottom/);
+    expect(b).toMatch(/z-index:\s*(\d+)/);
+    expect(Number(/z-index:\s*(\d+)/.exec(b)?.[1])).toBeLessThan(50);
+    // the card the wide layouts float is placed by script; the bar must not inherit that offset
+    expect(b).toMatch(/left:\s*auto/);
+  });
+  it('a control the tour points at keeps clear of the sticky site header, the pane switcher and the bar when it is scrolled to', () => {
+    const margin = bodies('[data-tour-target]').join(';');
+    expect(margin).toMatch(/scroll-margin:\s*(\d+)px 0 (\d+)px/);
+    const [, top, bottom] = /scroll-margin:\s*(\d+)px 0 (\d+)px/.exec(margin) ?? [];
+    expect(Number(top)).toBeGreaterThanOrEqual(130); // 64px header + the 60px switcher + room
+    expect(Number(bottom)).toBeGreaterThanOrEqual(90); // the collapsed bar
+  });
   it('a hidden pane really hides (its display rule must not beat the hidden attribute)', () => {
     expect(bodies('.pane[hidden]').join(';')).toMatch(/display:\s*none/);
   });

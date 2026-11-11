@@ -38,6 +38,8 @@ export interface DemoProps {
  * switches for them). demo.css has the matching `min-width: 1152px`.
  */
 const STACK_QUERY = '(max-width: 1151px)';
+/** A phone: the tour is a compact bar at the bottom of the window instead of a card beside the control. */
+const PHONE_QUERY = '(max-width: 599px)';
 const FEED_MAX = 60;
 const TOTAL = TOUR_STEPS.length;
 /** The scripted players, for the one sentence that says why a timed out player has gone quiet. */
@@ -96,6 +98,7 @@ const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', ' ', 
 export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const [engine] = useState<DemoEngine>(() => given ?? new KitEngine());
   const stacked = useMediaQuery(STACK_QUERY);
+  const compact = useMediaQuery(PHONE_QUERY);
   const theme = useSiteTheme();
 
   const [feed, setFeed] = useState<FeedItem[]>([]);
@@ -144,6 +147,8 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const settle = useRef<number | undefined>(undefined);
   const stopSettle = useRef<() => void>(() => {});
   const loopAt = useRef(0);
+  /** The control the tour last scrolled to, so a redraw of the same control does not scroll again. */
+  const scrolledTo = useRef<HTMLElement | null>(null);
   const live = useRef({ paused, ready, dialog: false });
   const modalOpen = report !== null || (viewing !== null && (waiting[viewing] ?? 0) > 0);
   live.current = { paused, ready, dialog: modalOpen };
@@ -288,12 +293,13 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   }, [feed]);
 
   // The hub's keys answer with nothing focused only while the visitor is working in the demo: a press inside it turns that on, a
-  // press anywhere else on the page turns it off. (With focus inside the hub its keys always work; with focus in the chat box or a
+  // press in the chat box or anywhere else on the page turns it off (leaving the box with nothing focused does not turn it back on). (With focus inside the hub its keys always work; with focus in the chat box or a
   // dialog they never do.)
   useEffect(() => {
     const on = (e: Event) => {
       const t = e.target;
-      setActive(t instanceof Node && root.current?.contains(t) === true);
+      // On while the visitor works in the demo, off once they are in the chat box (or its quick lines) or anywhere else on the page.
+      setActive(t instanceof Element && root.current?.contains(t) === true && t.closest('.composer') === null);
     };
     document.addEventListener('pointerdown', on, true);
     document.addEventListener('focusin', on, true);
@@ -424,10 +430,22 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     const wantRule = tour.on && tour.step === STEP.apply && target !== null && target.tagName === 'SELECT';
     setNeedsRule((v) => (v === wantRule ? v : wantRule));
     if (target === null) {
+      scrolledTo.current = null;
       setPos((p) => (p === null ? p : null));
       return;
     }
     target.setAttribute('data-tour-target', 'true');
+    if (compact) {
+      // The bar is fixed to the bottom of the window: bring the control the step is about into view above it (scroll-margin in
+      // demo.css keeps it clear of the header, the pane switcher and the bar). Once per control: a redraw does not scroll again.
+      if (scrolledTo.current !== target) {
+        scrolledTo.current = target;
+        target.scrollIntoView?.({ block: 'nearest', behavior: 'instant' });
+      }
+      setPos((p) => (p === null ? p : null));
+      return;
+    }
+    scrolledTo.current = null;
     const card = tourEl.current;
     if (card === null) return;
     const c = host.getBoundingClientRect();
@@ -724,24 +742,6 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
         </p>
       )}
 
-      {tour.on && (
-        <TourCard
-          ref={tourEl}
-          step={tour.step}
-          total={TOTAL}
-          optional={TOUR_STEPS[tour.step]?.optional === true}
-          title={cardTitle}
-          body={cardBody}
-          hint={cardHint}
-          codeOpen={codeOpen}
-          inert={modalOpen}
-          pos={pos}
-          onNext={() => setTour((t) => ({ ...t, step: Math.min(t.step + 1, TOTAL), hint: null }))}
-          onSkip={() => setTour((t) => ({ ...t, on: false }))}
-          onToggleCode={toggleCode}
-          onPlayAgain={() => void reset()}
-        />
-      )}
 
       {stacked && (
         <div className="pane-tabs" role="group" aria-label="Switch pane" inert={modalOpen}>
@@ -786,6 +786,27 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
         />
         <ModeratorPane world={world} hidden={modHidden} theme={theme} active={active} onEvent={(e) => void onStaffEvent(e)} />
       </div>
+
+      {/* After the panes: on a phone the card is a bar that sticks to the bottom of the window while the demo is in view. */}
+      {tour.on && (
+        <TourCard
+          ref={tourEl}
+          step={tour.step}
+          total={TOTAL}
+          optional={TOUR_STEPS[tour.step]?.optional === true}
+          title={cardTitle}
+          body={cardBody}
+          hint={cardHint}
+          codeOpen={codeOpen}
+          inert={modalOpen}
+          pos={pos}
+          compact={compact}
+          onNext={() => setTour((t) => ({ ...t, step: Math.min(t.step + 1, TOTAL), hint: null }))}
+          onSkip={() => setTour((t) => ({ ...t, on: false }))}
+          onToggleCode={toggleCode}
+          onPlayAgain={() => void reset()}
+        />
+      )}
 
       {codeOpen && <CodeDrawer step={codeStep ?? Math.min(tour.on ? stepIndex : 0, CODE_STEPS.length - 1)} onPick={setCodeStep} />}
 

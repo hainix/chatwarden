@@ -356,6 +356,59 @@ describe('accessibility (axe) on the built page, with the real hub inside the de
   }
 });
 
+describe('the site’s heading styles do not leak into the hub', () => {
+  // The site styles h1 and h2 in its display font (Bungee) and h3 in bold. The hub is a guest on the page and keeps its own.
+  const headings = (page: Page) =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.cw-hub h1, .cw-hub h2, .cw-hub h3')].map((h) => {
+        const cs = getComputedStyle(h);
+        return { text: (h.textContent ?? '').slice(0, 24), family: cs.fontFamily, transform: cs.textTransform, size: parseFloat(cs.fontSize) };
+      }),
+    );
+
+  it('every heading in the hub (the top bar, the queue, a case) is in the hub’s font, not in capitals and not in the site’s display size', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const { page } = await watch(ctx);
+    await openDemo(page);
+    await reportBo(page);
+    await openCaseInHub(page);
+    const hs = await headings(page);
+    expect(hs.length).toBeGreaterThanOrEqual(3);
+    for (const h of hs) {
+      expect(h.family, h.text).not.toMatch(/Bungee/);
+      expect(h.family, h.text).toMatch(/Instrument Sans|system-ui|ui-sans-serif/);
+      expect(h.transform, h.text).toBe('none');
+    }
+    // the site's own headings keep theirs (the control: the rule is still there, and it is the hub that is exempt)
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('#demo-title') as HTMLElement).fontFamily)).toMatch(/Bungee/);
+    expect(await page.evaluate(() => getComputedStyle(document.getElementById('pane-mod-title') as HTMLElement).fontFamily)).toMatch(/Bungee/);
+    await ctx.close();
+  }, 60_000);
+
+  it('a hostile host stylesheet added after the hub’s still changes nothing inside it', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, bypassCSP: true });
+    const { page } = await watch(ctx);
+    await openDemo(page);
+    await reportBo(page);
+    await openCaseInHub(page);
+    await page.addStyleTag({ content: 'h1,h2,h3,h4,h5,h6 { font-family: Georgia, serif; text-transform: uppercase; letter-spacing: 0.3em; font-weight: 100; }' });
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.cw-hub h1, .cw-hub h2, .cw-hub h3')].map((h) => {
+        const cs = getComputedStyle(h);
+        return { text: (h.textContent ?? '').slice(0, 24), family: cs.fontFamily, transform: cs.textTransform, spacing: cs.letterSpacing, weight: cs.fontWeight };
+      }),
+    );
+    expect(rows.length).toBeGreaterThanOrEqual(3);
+    for (const r of rows) {
+      expect(r.family, r.text).not.toMatch(/Georgia/);
+      expect(r.transform, r.text).toBe('none');
+      expect(r.spacing, r.text).not.toBe('0.3em');
+      expect(r.weight, r.text).not.toBe('100');
+    }
+    await ctx.close();
+  }, 60_000);
+});
+
 describe('layout on the built page', () => {
   // The README snippets stay verbatim, so the layout gives the code room instead of cutting long lines.
   for (const width of [1024, 1200, 1280, 1440, 1920]) {
@@ -436,6 +489,59 @@ describe('layout on the built page', () => {
     expect(where).toEqual({ insideX: true, insideY: true });
     await ctx.close();
   });
+  it('on a phone the tour is a bar at the bottom and every control it points at is scrolled into view, uncovered, above it', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', hasTouch: true });
+    const page = await ctx.newPage();
+    await openDemo(page);
+    const demo = demoOf(page);
+    // the bar: small, at the bottom of the window while the demo is in view
+    const bar = async () =>
+      page.evaluate(() => {
+        const r = (document.querySelector('.tour') as HTMLElement).getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, height: r.height, vh: window.innerHeight, compact: (document.querySelector('.tour') as HTMLElement).hasAttribute('data-compact') };
+      });
+    await demo.scrollIntoViewIfNeeded();
+    const first = await bar();
+    expect(first.compact).toBe(true);
+    expect(first.height).toBeLessThan(110);
+    expect(first.bottom).toBeLessThanOrEqual(first.vh);
+    // the target of each step is visible and not under the bar, the header or the pane switcher
+    const clear = async (label: string) => {
+      await page.waitForTimeout(250);
+      const m = await page.evaluate(() => {
+        const t = document.querySelector('[data-tour-target]') as HTMLElement | null;
+        if (t === null) return null;
+        const r = t.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = Math.min(Math.max(r.top + r.height / 2, 0), window.innerHeight - 1);
+        const hit = document.elementFromPoint(cx, cy);
+        const tour = (document.querySelector('.tour') as HTMLElement).getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, hitsTarget: hit !== null && (t === hit || t.contains(hit) || hit.contains(t)), barTop: tour.top, name: (t.getAttribute('aria-label') ?? t.textContent ?? '').slice(0, 30) };
+      });
+      expect(m, label).not.toBeNull();
+      expect(m?.hitsTarget, `${label}: ${m?.name} is under something`).toBe(true);
+      expect(m?.bottom ?? 0, `${label}: above the bar`).toBeLessThanOrEqual((m?.barTop ?? 0) + 1);
+      expect(m?.top ?? 0, `${label}: below the header and switcher`).toBeGreaterThanOrEqual(100);
+    };
+    await demo.getByRole('button', { name: /report bo's line: uninstall/i }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Report', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await demo.getByRole('button', { name: /^\d+ new cases?$/ }).waitFor({ timeout: 15_000 });
+    await clear('the new-case pill');
+    await demo.getByRole('button', { name: /^\d+ new cases?$/ }).click();
+    await clear('the case link');
+    await demo.getByRole('link', { name: /^Bo/ }).click();
+    await demo.getByRole('combobox', { name: /which rule does this break/i }).waitFor();
+    await clear('the rule picker');
+    await demo.getByRole('combobox', { name: /which rule does this break/i }).selectOption('2');
+    await demo.getByRole('button', { name: /^Restrict chat, 24 hours/ }).waitFor();
+    await clear('the suggested step');
+    // and the bar opens to the full text on a tap
+    await demo.getByRole('button', { name: /step 4 of 7/i }).click();
+    expect(await page.locator(".tour .tour-body").innerText()).toMatch(/suggested step/i);
+    await ctx.close();
+  }, 90_000);
   it('on a phone the tour moves to the moderator pane, keeps its card on screen, and the hub is usable', async () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', hasTouch: true });
     const page = await ctx.newPage();

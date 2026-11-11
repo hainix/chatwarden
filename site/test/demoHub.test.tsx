@@ -110,6 +110,39 @@ describe('the hub’s keys never fire while the visitor types in the game', () =
     await within(modPane()).findByRole('region', { name: /case against bo/i });
   });
 
+  it('the keys are off once focus moves into the chat box (even if the box is later left with nothing focused), and on again when the visitor presses in the hub', async () => {
+    const { engine } = await setup();
+    const sent = await engine.chat.accept('bo', 'a rude line for the keys test');
+    await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: 'deliver' in sent ? sent.deliver.lineId : '' });
+    // the visitor works in the hub (keys on), then clicks into the chat box (keys off)
+    fireEvent.pointerDown(hubRoot());
+    composer().focus();
+    fireEvent.focusIn(composer());
+    // leaving the box with nothing focused must not hand the page's keys back to the hub
+    composer().blur();
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.body, { key: 'n' });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(within(modPane()).queryByRole('region', { name: /case against/i })).toBeNull();
+    // pressing in the hub turns them on again
+    fireEvent.pointerDown(hubRoot());
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(document.body, { key: 'n' });
+    await within(modPane()).findByRole('region', { name: /case against bo/i });
+  });
+
+  it('the composer’s quick lines count as the chat box too', async () => {
+    const { engine } = await setup();
+    const sent = await engine.chat.accept('bo', 'another rude line for the keys test');
+    await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: 'deliver' in sent ? sent.deliver.lineId : '' });
+    fireEvent.pointerDown(hubRoot());
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'gg' }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(document.body, { key: 'n' });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(within(modPane()).queryByRole('region', { name: /case against/i })).toBeNull();
+  });
+
   it('a press outside the demo hands the keys back to the page', async () => {
     const { engine } = await setup();
     const sent = await engine.chat.accept('bo', 'yet another rude line');
