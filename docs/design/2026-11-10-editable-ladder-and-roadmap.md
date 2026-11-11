@@ -96,13 +96,70 @@ Where the kit stood:
 - **Light tap.** The Simple card adds "Send a warning" beside the suggestion when the suggestion is harsher than a warning. This is
   Lae's light tap, in one click, with the same Undo.
 
+## Part 1b: Reporting is editable too (this release)
+
+The owner asked for this on 2026-11-10: "The reasons a user gives for reporting should be configurable by the person integrating
+it, so it should be part of the settings. It should have good defaults, and it should also have an option for generic reporting
+where someone just reports like a message, and then we on our end either tell them thanks for the report, we'll look into it, so
+that the AI can parse what's going on and make the judgment, as opposed to oftentimes the reporter will put in the wrong reason or
+just put in any reason."
+
+Research behind it (2026-11-10):
+
+- **Roblox**
+  - Reporting starts from one Report entry, aimed at the exact chat message.
+  - Its creator dashboard says the categories players pick "may sometimes be inaccurate", and moderators confirm the category
+    before acting.
+  - In July 2026 it changed the flow to adapt its questions to the type of report.
+- **Discord:** "Report Message" leads to a short tree (abuse or harassment, spam, other). On mobile the labels describe feelings.
+- **Riot**
+  - Valorant groups reasons into Communication, Gameplay integrity and Participation.
+  - League's system reads the chat log and the report history rather than trusting the chosen reason.
+- **Research** ("Too Difficult to Report?", Policy & Internet): longer category trees bring more abandonment and more
+  misclassification.
+
+The owner's decisions:
+
+- **Default flow: one tap, reason optional.**
+  - "Report this message" sends at once and shows the thank-you.
+  - A short follow-up then offers an optional reason and note, which attach to the same report.
+  - Studios can switch to "pick a reason first" or "reason required".
+- **Default reasons: grouped and game-style.**
+  - Chat: insults or harassment, hate, sexual content, threats, spam or ads, sharing personal info.
+  - Gameplay: cheating, throwing or griefing, leaving or AFK.
+  - Plus "Something else".
+  - Each reason maps to its usual Community Rules.
+  - Studios edit labels, hints, groups, rule mapping, "asks for a note", and on/off.
+- **Ships in 0.1.2,** after the ladder settings.
+
+What it means in the kit:
+
+- **The reporter's reason is a hint.**
+  - It is stored as `reportedReason` (a reason id or null).
+  - The case's category is what the moderator's decision, or later the AI read, settles.
+  - The hub shows "Reported as …" or "No reason given".
+  - Reporter accuracy (how often the reported reason matched the decided rule) joins the reporter's record.
+- **Compatibility.** The six existing category ids stay valid and map onto the new default list, so existing adopters and stored
+  reports keep working. A report's reason must be an enabled id from the list, or null.
+- **The thank-you.** Its copy ("Thanks for the report. We'll look into it.") and the outcome notice copy are part of the reporting
+  settings.
+- **A "no reason given" report** shows the moderator the lines and asks which rule applies, with the suggestion computed once the
+  rule is picked. When the AI levels arrive (K3), the AI read proposes the rule and the step.
+
 ## Part 2: the roadmap (later releases; each gets its own brainstorm before building)
 
 - **Offensive names.** Check player names against the term list at sign-up and rename. Moderators can force a rename, and the player
   is told to choose a new name. Names show masked in the hub, like chat lines.
 - **Appeals inbox.** "Think this is a mistake?" becomes a player route that files an appeal against a sanction or decision, with a
   rate limit. Appeals land in the hub as their own queue. An appeal is decided by uphold, reduce or revoke, and the player gets an
-  outcome notice. The appeal outcome is a label for the AI casebook.
+  outcome notice. The owner (2026-11-10): "granted appeals should flow back into the decision engine that makes the ai call so it
+  reduces further false positives". So a granted appeal:
+  - marks the original decision reversed, which keeps it out of the casebook as a positive example
+  - adds a corrective "false positive" example for that rule and conduct level
+  - counts toward a per-rule false-positive rate
+
+  A rule whose false-positive rate is high needs more confidence before the AI may act on it alone. The rate also counts toward
+  the gates for AI levels 3 and 4.
 - **Slow mode and flood control.** Per-room settings: a minimum time between lines, a burst limit, and duplicate-line suppression.
   They are set by the adopter's defaults and adjustable in the hub, and the kit's chat path enforces them. Flooding is a signal (see
   below).

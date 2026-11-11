@@ -550,6 +550,75 @@ Tasks 7f and 7g implement Part 1 of `docs/design/2026-11-10-editable-ladder-and-
   - layout at 360 px (the grid scrolls inside its own container)
   - the API snapshot updated
 
+Tasks 7h and 7i implement Part 1b of `docs/design/2026-11-10-editable-ladder-and-roadmap.md`, which the owner approved on
+2026-11-10.
+
+### Task 7h: Reporting settings in the kit
+- **Policy layer.** Extend it (Task 7f) with a `reporting` section:
+  - `flow`: `'one_tap' | 'reason_first' | 'reason_required'`, default `one_tap`.
+  - `reasons`: an ordered list of `{ id, label, hint, group, rules: number[], asksNote: boolean, enabled: boolean }`.
+  - `thanks`: a string, default "Thanks for the report. We'll look into it."
+- **Default reasons:**
+  - Chat: `harassment` (Insults or harassment), `hate` (Hate), `sexual` (Sexual content), `threat` (Threats), `spam` (Spam or ads),
+    `personal_info` (Sharing personal info).
+  - Gameplay: `cheating` (Cheating), `griefing` (Throwing or griefing), `afk` (Leaving or AFK).
+  - Then `other` (Something else).
+  - Each reason maps to the matching starter Community Rules.
+  - The old ids keep working: `disruption` maps to `griefing`.
+- **Validation:** ids are unique slugs, there are 1 to 20 reasons, and at least one is enabled. `other` cannot be removed, only
+  relabelled.
+- **Reports:**
+  - `ReportInput.reason?: string | null` replaces the required `category`. `category` stays accepted as an alias.
+  - With `flow: 'reason_required'`, a missing reason is refused with a new `ReportRefusal`, `reason_required`.
+  - An unknown or disabled reason is refused with `reason_unknown`.
+  - The stored report has `reportedReason: string | null`.
+  - `cw.reports.addDetail(reportId, reporterSeat, { reason?, note? })` adds the optional follow-up. It works once, only for the
+    reporter, and only within 10 minutes.
+- **Staff views and routes:**
+  - `ReportSummary` and the details carry `reportedReason` and its label.
+  - `GET /reports` filters by `reason`, including `none`.
+  - The reporter record gains `reasonMatched` and `reasonDecided` counts. A reason "matched" when the decided rule is in its
+    `rules`.
+  - `GET /policy/profile` and `PUT /policy/profile` include `reporting`.
+  - The player route `GET /rules` returns the enabled reasons (id, label, hint, group, asksNote), the flow and the thank-you, so the
+    player UI can render them.
+- **Tests:**
+  - validation tables
+  - each flow
+  - every refusal
+  - legacy category aliases
+  - the follow-up's window and ownership
+  - reporter accuracy counts
+  - filters
+  - the player `/rules` payload, with no leak
+  - both stores
+  - a SQLite migration for `reportedReason`
+
+### Task 7i: Reporting in player-react and the hub
+- **player-react `ReportDialog`:**
+  - It renders the flow from `/rules` data, or from props.
+  - `one_tap`: a single "Report" button sends at once and shows the thank-you, with an optional "Add a reason" step that calls the
+    follow-up.
+  - `reason_first` and `reason_required`: grouped reasons (radio groups per group, keyboard-friendly), with the note shown when
+    `asksNote`.
+  - Map the new refusals to plain messages. Keep the transport-agnostic `onSubmit`, plus an `onAddDetail`.
+- **Hub:**
+  - Settings gains a "Reporting" section for the flow, the reasons (add, edit, reorder, enable, rule mapping, asks a note) and the
+    thank-you copy.
+  - Case views show "Reported as X" or "No reason given".
+  - The Simple card for a report with no reason asks "Which rule does this break?" with a rule picker. The suggestion and one-click
+    button appear once a rule is picked.
+  - The reporter record shows reason accuracy.
+  - Add the `reason` filter in the queue (Detailed).
+- **Tests:**
+  - each flow end to end against the real routes
+  - the follow-up
+  - settings edits, then the dialog changing
+  - the no-reason Simple card
+  - axe
+  - 320 and 360 px
+  - the API snapshot updated
+
 ### Task 8: The site demo uses the real hub and player UI
 - In `site/`:
   - Replace `src/demo/ModPane.tsx` with `<Hub client={hubClient(routerTransport(createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-mod', role: 'owner' }), terms }))))} router={memoryRouter} />`
