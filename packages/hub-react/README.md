@@ -14,7 +14,8 @@ Status: pre-release, as-is, no support promise.
 npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom
 ```
 
-`react` and `react-dom` (18.3 or 19) are peer dependencies, so your app has one copy of React. The hub uses only APIs that exist in
+`react` and `react-dom` (18.3 or 19) are peer dependencies, so your app has one copy of React (they are optional only if you import just
+`@chatwarden/hub-react/headless`; see "Three ways to adopt"). The hub uses only APIs that exist in
 18.3 (`useSyncExternalStore`, `useId`), but it is tested only on React 19 so far. `@chatwarden/core` and
 `@chatwarden/http` are peers too: the hub imports types from both and one value from core (`LADDER_TABLE`, so the decision menu
 and the suggestion cannot drift apart), and its own type declarations name them. Node 22.13 or newer
@@ -67,6 +68,150 @@ const handle = createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-m
 
 export const client = createHubClient(routerTransport(handle));
 ```
+
+## Three ways to adopt
+
+Start with the first. Each later one is optional and builds on the one above it, so nothing you wrote for an earlier way is thrown away.
+
+### 1. Drop in `<Hub>`
+
+The whole moderator hub, in a few lines. Simple mode by default.
+
+```tsx
+import '@chatwarden/hub-react/styles.css';
+import { Hub } from '@chatwarden/hub-react';
+import { client } from './client';
+
+export const ModeratorPage = () => <Hub client={client} />;
+```
+
+### 2. Pieces in your own dashboard
+
+Already have an ops page? Put single parts of the hub in it. `HubProvider` is the one thing every piece needs above it. The pieces need
+no router, no shell and no nav, and they never navigate by themselves: you say where a case, a person or a report opens with a callback,
+and a piece that is not told shows it as plain text.
+
+```tsx
+import '@chatwarden/hub-react/styles.css';
+import { useState } from 'react';
+import { CaseCard, CaseList, HubProvider, RecentActions } from '@chatwarden/hub-react';
+import { client } from './client';
+
+export function Moderation() {
+  const [open, setOpen] = useState<string | null>(null); // the report your page is showing
+  return (
+    <HubProvider client={client}>
+      <CaseList selected={open} onOpenCase={(_person, reportId) => setOpen(reportId)} />
+      {open !== null && <CaseCard reportId={open} onOpenReport={setOpen} />}
+      <RecentActions />
+    </HubProvider>
+  );
+}
+```
+
+| Piece | What it is | Needs | Tell it where things open |
+| --- | --- | --- | --- |
+| `CaseList` | The queue: one row per reported person, who is on it, Take next | `reports.read` | `onOpenCase(person, reportId)`; `selected` marks the open row |
+| `CaseCard` | One case as the Simple card: what they said, the suggestion, three buttons | `reports.read` (`reports.decide` to answer) | `onOpenReport(reportId)` for the next report of the same person; also `onOpenCase`, `onOpenPerson` |
+| `CaseWorkbench` | One case as the Detailed workbench: tabs, transcript, decision bar, the record beside it | `reports.read` | `onOpenPerson(person)`, `onOpenReport(reportId)`, `onOpenCase` |
+| `PersonRecord` | One person: in force now, timeline, Revoke, the sanction and note forms | `history.read` | `onOpenReport`, `onOpenPerson` |
+| `TermsManager` | Blocked terms and exceptions, with the dry run | `terms.read` | none |
+| `BlockedList` | The lines the filter refused, masked until shown | `blocked.read` | `onOpenPerson`; `onOpenTerms()` shows its two Terms buttons |
+| `AuditLog` | Who did what | `audit.read` | `onOpenPerson`, `onOpenReport` |
+| `RuleGaps` | Cases no rule covered | `gaps.read` | none |
+| `Guide` | The guide the kit generates from your rules | `policy.read` | none |
+| `RecentActions` | Everything done to anyone, a page at a time | `history.read` | `onOpenPerson` |
+
+Every piece takes `className` for its root element. A role without the permission sees one plain line ("Your role can't open this.")
+and nothing is asked of the server.
+
+`HubProvider` takes exactly one of `client` or `controller`, then `mode`, `t`, `locale`, `now`, `theme` and `shortcuts` (the same as on
+`<Hub>`), `className`, and `bare`.
+
+- **`client`**: the provider makes the controller (the live queue, claims, the Undo hold and the toasts) and disposes it when it unmounts. A
+  new client makes a new controller.
+- **`controller`**: yours, from `createHubController` (see "Headless" below). The provider uses it and never disposes it.
+- **`bare`**: by default the provider draws the `.cw-hub` theme root around its children, so the pieces are styled where they sit. With
+  `bare` it draws none, and you place an element with the classes `cw-hub cw-hub--embed` (and `data-cw-theme="dark"` to force a theme).
+- Until `GET /me` answers, the provider shows a plain message (loading, signed out, no access, or a failed start with Try again), so a
+  piece never renders for someone who is not signed in.
+
+Pieces under one provider share one controller. That is one poll of the change token however many pieces show the queue, and one claim
+and one heartbeat per case however many pieces show it (only one case is held at a time: the one most recently shown or entered). A page
+that shows only `TermsManager` asks the server for no cases. The keys of a piece (1, 2 and Ctrl or Cmd+Enter on a `CaseCard`; 1, 2, 3 and
+Ctrl or Cmd+Enter on a `CaseWorkbench`) work only while keyboard focus is inside that piece, so several can share a page.
+`shortcuts={false}` turns them off.
+
+### 3. Headless hooks, or the controller
+
+Draw it yourself and keep the behaviour: the Undo hold, claims, heartbeat and the live queue are the hub's own. Under a `HubProvider`
+(or a `<Hub>`) these hooks work with no markup. Each answers with a value for what it expects (a 409, a 404, a role without the permission,
+a dropped connection), never a throw.
+
+```tsx
+import { HubProvider, useCases, useDecide } from '@chatwarden/hub-react';
+import { client } from './client';
+
+function Queue() {
+  const { cases, status, takeNext } = useCases();
+  const { decide } = useDecide();
+  if (status !== 'ready') return <p>Loading the cases</p>;
+  return (
+    <>
+      <ul>
+        {cases.map((c) => (
+          <li key={c.person}>
+            {c.handle ?? 'Someone'}: {c.open} open
+            <button
+              type="button"
+              onClick={() => decide({ reportId: c.reportIds[0] as string, person: c.person, input: { verdict: 'no_action', reason: 'Banter.', actions: [] } })}
+            >
+              No action
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={() => takeNext()}>
+        Take next
+      </button>
+    </>
+  );
+}
+
+export const Dashboard = () => (
+  <HubProvider client={client} bare>
+    <Queue />
+  </HubProvider>
+);
+```
+
+| Hook | Gives you |
+| --- | --- |
+| `useMe()` | `{ me, can(permission) }`: who is signed in and what the role may do |
+| `useCases()` | The open cases, kept fresh: `cases`, `status`, `incoming`, `connection`, `filter`, `setFilter`, `showIncoming`, `reload`, `takeNext()` |
+| `useCase(reportId, { claim })` | One case: `report`, `detail` (with the suggestion), `holder`, `decision`. It claims the case while in use unless `claim` is `false` |
+| `useDecide()` | `decide(command, { hold })`, `undo`, `retry`, `dismiss`, `entry(reportId)`. An outcome is `done`, `failed`, `conflict` or `undone`, never a throw |
+| `useClaim(person)` | `holder`, and `claim()`, `takeOver()`, `release()` as `{ ok, value }` or `{ ok: false, error }` |
+| `useTerms()`, `useBlocked({ days })`, `usePerson(ref)` | `{ allowed, data, error, loading, reload }`; nothing is asked of a role without the permission |
+| `useHubController()` | The provider's controller, for the headless API next to your pieces |
+
+Past the hooks, `@chatwarden/hub-react/headless` is the same controller with no React at all (see "Headless" below), for Vue, Svelte, Solid
+or plain code. Below all of it, the HTTP routes and `createHubClient` are the contract for anyone who wants none of the UI.
+
+`react` and `react-dom` are optional peer dependencies of this package for one reason only: the `/headless` entry needs no React. `<Hub>`,
+`HubProvider`, the pieces and the hooks do need React at runtime (18.3 or 19), so a project that imports any of them installs both.
+
+### Experimental until 0.2
+
+The embedding API is new and may change before 0.2. It is marked `@experimental` in its TSDoc, and `test/api.test.ts` locks every export
+name of each entry point, so any change shows up as a snapshot diff and the changeset says which way. The experimental names are:
+
+- `HubProvider`, `useHubController`, and the types `HubProviderProps`, `HubProviderOptions` and `HubControllerSource`
+- the pieces `CaseList`, `CaseCard`, `CaseWorkbench`, `PersonRecord`, `TermsManager`, `BlockedList`, `AuditLog`, `RuleGaps`, `Guide` and
+  `RecentActions`, their `*Props` types, `PieceProps` and `PieceLinks`
+- the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked` and `usePerson`, and the types `HubRead`,
+  `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide` and `UseClaim`
+- in `/headless`: `HubController.configure`, `HubControllerOptions.host`, and the types `HubHost` and `HubControllerSettings`
 
 ## Options
 
