@@ -179,6 +179,27 @@ describe('the reasons', () => {
     expect((await rules(w)).reasons.map((r) => r.id).slice(0, 5)).toEqual(['harassment', 'hate', 'sexual', 'spam', 'threat']);
   });
 
+  it('"Something else" stays last: it has no move buttons, and the reason above it cannot be moved below it', async () => {
+    const w = await owner();
+    await open(w);
+    expect(within(row('Something else')).queryByRole('button', { name: /^Move/ })).toBeNull();
+    expect(within(row('Leaving or AFK')).getByRole('button', { name: 'Move Leaving or AFK down' })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(row('Leaving or AFK')).getByRole('button', { name: 'Move Leaving or AFK up' })).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  it('says where a row went after a move, in a polite status', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(within(row('Hate')).getByRole('button', { name: 'Move Hate up' }));
+    const note = await screen.findByText('Moved Hate to 1 of 10.');
+    expect(note.closest('[role="status"]')).not.toBeNull();
+    await user.click(within(row('Hate')).getByRole('button', { name: 'Move Hate down' }));
+    expect(await screen.findByText('Moved Hate to 2 of 10.')).toBeInTheDocument();
+    // A move that goes nowhere says nothing new.
+    await user.click(within(row('Leaving or AFK')).getByRole('button', { name: 'Move Leaving or AFK down' }));
+    expect(screen.queryByText(/Moved Leaving or AFK/)).toBeNull();
+  });
+
   it('a moved row keeps keyboard focus on its button', async () => {
     const w = await owner();
     const { user } = await open(w);
@@ -212,10 +233,12 @@ describe('the reasons', () => {
     const { user } = await open(w);
     const hate = within(row('Hate'));
     const toggle = hate.getByRole('button', { name: /^Rules/ });
+    expect(hate.queryByText(/lowest-numbered/)).toBeNull();
     expect(toggle).toHaveTextContent('Rules: 1');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(hate.getByText('In Detailed the lowest-numbered rule is suggested. In Simple the moderator is asked when there is more than one. A decision under any of them counts as a match for the reporter.')).toBeInTheDocument();
     const picker = hate.getByRole('group', { name: 'Rules this usually means' });
     expect(within(picker).getByRole('checkbox', { name: /^Rule 1:/ })).toBeChecked();
     await user.click(within(picker).getByRole('checkbox', { name: /^Rule 3:/ }));
@@ -425,13 +448,13 @@ describe('reset', () => {
     expect(screen.getByRole('button', { name: 'Reset reporting' })).toHaveAttribute('aria-disabled', 'true');
   });
 
-  it('"Reset everything" on the Steps and ladder screen leaves reporting alone', async () => {
+  it('"Reset steps and ladder" leaves reporting alone', async () => {
     const w = await savedWorld();
     const { user } = renderHub(w, { path: '/settings/ladder' });
     await screen.findByRole('list', { name: 'Lengths offered' });
-    await user.click(screen.getByRole('button', { name: 'Reset everything' }));
+    await user.click(screen.getByRole('button', { name: 'Reset steps and ladder' }));
     await user.type(screen.getByRole('textbox', { name: /Why are you resetting this/ }), 'ladder only');
-    await user.click(within(screen.getByRole('group', { name: 'Reset everything?' })).getByRole('button', { name: 'Reset' }));
+    await user.click(within(screen.getByRole('group', { name: 'Reset steps and ladder?' })).getByRole('button', { name: 'Reset' }));
     await screen.findByText('Reset the steps and ladder.');
     expect(w.cw.profile.reporting.flow).toBe('reason_required');
     expect(w.cw.profile.durations).not.toEqual([3_600_000, 7_200_000]);
@@ -535,5 +558,60 @@ describe('leaving with unsaved edits', () => {
     await user.click(screen.getByRole('link', { name: 'Steps and ladder' }));
     await user.click(within(await screen.findByRole('dialog', { name: 'Leave without saving?' })).getByRole('button', { name: 'Leave' }));
     await screen.findByRole('heading', { level: 2, name: 'Steps and ladder' });
+  });
+});
+
+describe('the picture matches what players are sent (the real /rules after a save)', () => {
+  /** The picture's groups, from the draft the screen was left on, read off the page. */
+  const pictureOf = (): Array<{ name: string; labels: string[] }> =>
+    [...mock().querySelectorAll('.cw-mock-group')].map((g) => ({ name: g.querySelector('.cw-mock-heading')?.textContent ?? '', labels: [...g.querySelectorAll('li')].map((li) => li.textContent ?? '') }));
+  /** What the player dialog draws from the payload: groups in order of first appearance, "Something else" last, enabled reasons only. */
+  const playerGroupsOf = (reasons: Array<{ id: string; label: string; group: string }>) => {
+    const groups: Array<{ name: string; labels: string[] }> = [];
+    for (const r of reasons) {
+      if (r.id === 'other') continue;
+      const into = groups.find((g) => g.name === r.group);
+      if (into === undefined) groups.push({ name: r.group, labels: [r.label] });
+      else into.labels.push(r.label);
+    }
+    const other = reasons.find((r) => r.id === 'other');
+    if (other !== undefined) {
+      const last = groups.at(-1);
+      if (last !== undefined && last.name === '') last.labels.push(other.label);
+      else groups.push({ name: '', labels: [other.label] });
+    }
+    return groups;
+  };
+
+  it.each([
+    ['the defaults', async () => undefined],
+    [
+      'a renamed reason, a new group, one switched off and one moved',
+      async (user: User) => {
+        fireEvent.change(within(row('Hate')).getByLabelText('Name players see'), { target: { value: 'Hate speech' } });
+        fireEvent.change(within(row('Cheating')).getByLabelText('Group (optional)'), { target: { value: 'Tricks' } });
+        await user.click(within(row('Sexual content')).getByRole('checkbox', { name: 'Switched on' }));
+        await user.click(within(row('Threats')).getByRole('button', { name: 'Move Threats up' }));
+      },
+    ],
+    [
+      'a new reason with no group, a group on Something else, and a reason with spaces around its group',
+      async (user: User) => {
+        await user.click(screen.getByRole('button', { name: 'Add a reason' }));
+        const fresh = within(screen.getByRole('list', { name: 'Reasons' })).getAllByRole('listitem')[9] as HTMLElement;
+        fireEvent.change(within(fresh).getByLabelText('Name players see'), { target: { value: 'Tilt' } });
+        fireEvent.change(within(row('Something else')).getByLabelText('Group (optional)'), { target: { value: 'Chat' } });
+        fireEvent.change(within(row('Spam or ads')).getByLabelText('Group (optional)'), { target: { value: '  Chat  ' } });
+      },
+    ],
+  ])('%s', async (_name, edit) => {
+    const w = await owner();
+    const { user } = await open(w, { mode: 'detailed' });
+    await user.click(screen.getByRole('radio', { name: 'Pick a reason first' }));
+    await edit(user);
+    const picture = pictureOf();
+    await save(user, 'matching the picture');
+    await screen.findByText('Saved the reporting settings.');
+    expect(playerGroupsOf((await rules(w)).reasons)).toEqual(picture);
   });
 });

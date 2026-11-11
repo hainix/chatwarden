@@ -39,7 +39,7 @@ describe('the LadderSettings piece', () => {
     await screen.findByRole('list', { name: 'Lengths offered' });
     const box = container.querySelector('[data-cw-piece="LadderSettings"]');
     expect(box).toHaveClass('mine');
-    expect(screen.getByRole('button', { name: 'Reset everything' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset steps and ladder' })).toBeInTheDocument();
   });
 
   it('says so in one line when the role cannot read the policy, and asks the server nothing', async () => {

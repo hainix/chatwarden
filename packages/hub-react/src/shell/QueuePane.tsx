@@ -5,7 +5,7 @@ import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
 import { absoluteTime, formatDuration, listOf, waitTone } from '../format.js';
 import { Icon } from '../icons.js';
-import { CATEGORY_LIST, categoryLabel, errorText, groupName, reasonChip } from '../labels.js';
+import { errorText, groupName, reasonChip } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
 import { useMode } from '../mode.js';
 import type { ShownRow } from '../live.js';
@@ -86,7 +86,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
     body = (
       <div className="cw-empty">
         <p>{t('hub.queue.empty.filtered')}</p>
-        <button type="button" className="cw-linkbtn" onClick={() => queue.setFilter({ claim: 'all', category: 'all' })}>
+        <button type="button" className="cw-linkbtn" onClick={() => queue.setFilter({ claim: 'all', category: 'all', reason: 'all' })}>
           {t('hub.queue.clearFilters')}
         </button>
       </div>
@@ -133,19 +133,6 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
               </button>
             ))}
           </div>
-        )}
-        {!simple && (
-          <label className="cw-select">
-            <span className="cw-sr">{t('hub.queue.filter.category')}</span>
-            <select value={queue.filter.category} onChange={(e) => queue.setFilter({ category: e.target.value as typeof queue.filter.category })}>
-              <option value="all">{t('hub.queue.category.all')}</option>
-              {CATEGORY_LIST.map((c) => (
-                <option key={c} value={c}>
-                  {categoryLabel(t, c)}
-                </option>
-              ))}
-            </select>
-          </label>
         )}
         {!simple && <ReasonFilter />}
       </div>

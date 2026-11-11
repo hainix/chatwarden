@@ -171,6 +171,7 @@ export function nextOpenReport(groups: readonly QueueGroup[], person: string, ex
 
 export interface QueueFilter {
   claim: 'all' | 'unclaimed' | 'mine';
+  /** @deprecated The hub no longer offers it (the reason a reporter chose is the filter); kept for embedders, and still applied and sent to take next. */
   category: ReportCategory | 'all';
   /** A reason id, `none` for reports that gave no reason, or `all` (also when left out). */
   reason?: string;

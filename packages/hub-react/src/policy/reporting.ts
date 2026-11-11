@@ -37,10 +37,13 @@ export const isLocked = (r: Pick<ReasonDraft, 'id'>): boolean => r.id === OTHER_
 /** The draft the reporting settings in force make. A kit that does not send them yet has the defaults. */
 export function reportingDraftOf(reporting: ResolvedReporting | undefined): ReportingDraft {
   const r = reporting ?? defaultReporting();
+  // Players always see "Something else" last, so the screen lists it last too (whatever order the saved list has it in).
+  const other = r.reasons.filter((x) => x.id === OTHER_REASON_ID);
+  const ordered = [...r.reasons.filter((x) => x.id !== OTHER_REASON_ID), ...other];
   return {
     flow: r.flow,
     thanks: r.thanks,
-    reasons: r.reasons.map((x, i) => ({ key: `r${i}`, id: x.id, label: x.label, hint: x.hint, group: x.group, rules: [...x.rules], asksNote: x.asksNote, enabled: x.enabled })),
+    reasons: ordered.map((x, i) => ({ key: `r${i}`, id: x.id, label: x.label, hint: x.hint, group: x.group, rules: [...x.rules], asksNote: x.asksNote, enabled: x.enabled })),
   };
 }
 
@@ -148,11 +151,25 @@ export function removeReason(d: ReportingDraft, key: string): ReportingDraft {
   return { ...d, reasons: d.reasons.filter((r) => r.key !== key) };
 }
 
-/** Moves one reason up (-1) or down (+1) in the list; the list's ends stay put. */
-export function moveReason(d: ReportingDraft, key: string, by: -1 | 1): ReportingDraft {
+/** Whether a row can move up (-1) or down (+1): the list's ends stay put, and "Something else" stays last (it cannot move, and nothing moves below it). */
+export function canMove(d: ReportingDraft, key: string, by: -1 | 1): boolean {
   const i = d.reasons.findIndex((r) => r.key === key);
   const j = i + by;
-  if (i < 0 || j < 0 || j >= d.reasons.length) return d;
+  if (i < 0 || j < 0 || j >= d.reasons.length) return false;
+  return !isLocked(d.reasons[i] as ReasonDraft) && !isLocked(d.reasons[j] as ReasonDraft);
+}
+
+/** Where a row is now: its place counted from 1, and how many reasons there are. Null for a row that is not there. */
+export function positionOf(d: ReportingDraft, key: string): { n: number; total: number } | null {
+  const i = d.reasons.findIndex((r) => r.key === key);
+  return i < 0 ? null : { n: i + 1, total: d.reasons.length };
+}
+
+/** Moves one reason up (-1) or down (+1) in the list (see {@link canMove}). */
+export function moveReason(d: ReportingDraft, key: string, by: -1 | 1): ReportingDraft {
+  if (!canMove(d, key, by)) return d;
+  const i = d.reasons.findIndex((r) => r.key === key);
+  const j = i + by;
   const reasons = [...d.reasons];
   [reasons[i], reasons[j]] = [reasons[j] as ReasonDraft, reasons[i] as ReasonDraft];
   return { ...d, reasons };

@@ -12,7 +12,7 @@ import { useHub } from '../context.js';
 import { LINES_MAX } from '../decision.js';
 import { personName } from '../excerpt.js';
 import { absoluteTime, relativeTime } from '../format.js';
-import { reasonChip, reasonSaid } from '../labels.js';
+import { reasonSaid } from '../labels.js';
 import type { ReportDetail } from '../types.js';
 import { Empty, Fetched, Link, PersonChip, Tag, Time } from '../ui.js';
 
@@ -42,7 +42,7 @@ function Header({ detail }: { detail: ReportDetail }) {
         {target !== undefined && <PersonChip person={target.ref} />}
         <span className="cw-casecats">
           {reasons.map((r) => (
-            <Tag key={r.id ?? 'none'}>{reasonChip(t, r.label)}</Tag>
+            <Tag key={r.id ?? 'none'}>{reasonSaid(t, r.label)}</Tag>
           ))}
         </span>
         <span className="cw-casehead-gap" />
@@ -50,7 +50,6 @@ function Header({ detail }: { detail: ReportDetail }) {
       </div>
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
         <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
-        <span>{reasonSaid(t, label)}</span>
         {report.badFaith && <Tag tone="warn">{t('hub.report.tag.badFaith')}</Tag>}
         <span title={absoluteTime(report.createdAt, locale)}>{t('hub.report.fact.filed', { time: relativeTime(report.createdAt, now(), locale) })}</span>
         {report.roomId !== '' && <span>{t('hub.report.fact.room', { room: report.roomId })}</span>}

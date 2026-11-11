@@ -339,3 +339,18 @@ describe('filters', () => {
     await waitFor(() => expect(bodyRows()).toHaveLength(50));
   });
 });
+
+describe('settings rows say which screen was changed', () => {
+  it('a reporting save, a ladder save and a reset of reporting read differently', async () => {
+    await openAudit({ role: 'owner' }, async (w) => {
+      const owner = w.clientFor('owen@example.test', 'owner');
+      await owner.savePolicyProfile({ layer: { reporting: { flow: 'reason_first' } }, version: 0, reason: 'a' });
+      await owner.savePolicyProfile({ layer: { reporting: { flow: 'reason_first' }, durations: [3_600_000, 7_200_000] }, version: 1, reason: 'b' });
+      await owner.resetPolicyProfile({ section: 'reporting', reason: 'c' });
+    });
+    const texts = within(list()).getAllByRole('row').map((r) => r.textContent ?? '');
+    expect(texts.some((x) => x.includes('Changed the reporting settings'))).toBe(true);
+    expect(texts.some((x) => x.includes('Changed the steps and ladder'))).toBe(true);
+    expect(texts.some((x) => x.includes('Reset the reporting settings'))).toBe(true);
+  });
+});

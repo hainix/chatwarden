@@ -479,6 +479,32 @@ describe('take next', () => {
     expect(r.count('POST', '/cases/next')).toBe(2);
   });
 
+  it('takes from the reason the filter names, and sends none or a reason id as the kit expects', async () => {
+    const r = await rig();
+    await r.w.file({ target: 'Alpha', reason: 'hate' });
+    const c = await r.w.file({ target: 'Cheater', reason: 'cheating' });
+    const none = await r.w.file({ target: 'Quiet', reason: null });
+    await r.controller.start();
+    await settle();
+    r.controller.queue.setFilter({ reason: 'cheating' });
+    expect(await r.controller.takeNext()).toMatchObject({ status: 'taken', reportId: c.id });
+    expect(r.w.sent.filter((q) => q.path === '/cases/next').at(-1)?.body).toEqual({ reason: 'cheating' });
+    await r.timers.advance(500);
+    r.controller.queue.setFilter({ reason: 'none' });
+    expect(await r.controller.takeNext()).toMatchObject({ status: 'taken', reportId: none.id });
+    expect(r.w.sent.filter((q) => q.path === '/cases/next').at(-1)?.body).toEqual({ reason: 'none' });
+  });
+
+  it('a category set through the (deprecated) filter is still sent, beside a reason', async () => {
+    const r = await rig();
+    await r.w.file({ target: 'Alpha', reason: 'harassment' });
+    await r.controller.start();
+    await settle();
+    r.controller.queue.setFilter({ category: 'harassment', reason: 'harassment' });
+    await r.controller.takeNext();
+    expect(r.w.sent.filter((q) => q.path === '/cases/next').at(-1)?.body).toEqual({ category: 'harassment', reason: 'harassment' });
+  });
+
   it('takes from the category the filter names', async () => {
     const r = await rig();
     await r.w.file({ target: 'Alpha', category: 'harassment' });

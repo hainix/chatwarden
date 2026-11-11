@@ -6,7 +6,9 @@ import {
   addReason,
   groupsOf,
   isLocked,
+  canMove,
   moveReason,
+  positionOf,
   patchReason,
   playerGroups,
   removeReason,
@@ -235,6 +237,37 @@ describe('the rows', () => {
     expect(moveReason(d, 'no-such-key', 1)).toBe(d);
   });
 
+  it('"Something else" stays last: it cannot be moved, and nothing can be moved below it', () => {
+    const d = fresh();
+    const k = (id: string) => row(d, id).key;
+    expect(moveReason(d, k('other'), -1)).toBe(d);
+    expect(moveReason(d, k('afk'), 1)).toBe(d);
+    expect(moveReason(d, k('afk'), -1).reasons.at(-1)?.id).toBe('other');
+    expect(canMove(d, k('other'), -1)).toBe(false);
+    expect(canMove(d, k('afk'), 1)).toBe(false);
+    expect(canMove(d, k('afk'), -1)).toBe(true);
+    expect(canMove(d, k('harassment'), -1)).toBe(false);
+    expect(canMove(d, k('harassment'), 1)).toBe(true);
+  });
+
+  it('says where a row is after a move, one-based, out of the whole list', () => {
+    const d = fresh();
+    const moved = moveReason(d, row(d, 'hate').key, -1);
+    expect(positionOf(moved, row(moved, 'hate').key)).toEqual({ n: 1, total: 10 });
+    expect(positionOf(moved, 'no-such-key')).toBeNull();
+  });
+
+  it('a saved list that has "Something else" in the middle is shown with it last, and that is not a change', () => {
+    const b = base();
+    const odd: ResolvedReporting = { ...b, reasons: [b.reasons.at(-1)!, ...b.reasons.slice(0, -1)] };
+    const d = reportingDraftOf(odd);
+    expect(d.reasons.at(-1)?.id).toBe('other');
+    expect(d.reasons.slice(0, -1).map((r) => r.id)).toEqual(b.reasons.slice(0, -1).map((r) => r.id));
+    expect(reportingDirty(d, odd)).toBe(false);
+    expect(reportingLayer(d, odd)).toBeNull();
+    expect(reportingLayer(reportingDraftOf(b), odd)).toBeNull();
+  });
+
   it('adds a blank row on, before "Something else", up to 20 reasons, and then adds nothing', () => {
     let d = fresh();
     const a = addReason(d);
@@ -302,10 +335,9 @@ describe('playerGroups: what players see', () => {
     expect(playerGroups(a.draft).flatMap((g) => g.labels)).toHaveLength(10);
   });
 
-  it('puts "Something else" last even when moved first or given a group', () => {
+  it('puts "Something else" last even when it has a group', () => {
     let d = fresh();
     d = patchReason(d, row(d, 'other').key, { group: 'Chat' });
-    d = moveReason(moveReason(d, row(d, 'other').key, -1), row(d, 'other').key, -1);
     const groups = playerGroups(d);
     expect(groups.at(-1)).toEqual({ name: '', labels: ['Something else'] });
     expect(groups.flatMap((g) => g.labels).at(-1)).toBe('Something else');

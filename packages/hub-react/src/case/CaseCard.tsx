@@ -4,7 +4,7 @@ import { actorName } from '../claims.js';
 import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
 import { isWaiting, useDecisions } from '../decisions.js';
-import { outcomeChoice, toInput } from '../decision.js';
+import { initialForm, outcomeChoice, toInput } from '../decision.js';
 import type { DecisionForm } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
 import type { ReportPerson } from '../excerpt.js';
@@ -20,10 +20,9 @@ import type { QueueGroup } from '../queue.js';
 import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
-import { Field } from './ActionEditor.js';
 import { DecisionBar } from './DecisionBar.js';
+import { RuleField } from './RuleField.js';
 import { useRulePick } from './useRulePick.js';
-import type { RulePick } from './useRulePick.js';
 import { Line } from './Transcript.js';
 
 // The Simple case view: one card per case. Who, why, what they said, their record, the ladder's suggestion and three ways to
@@ -129,52 +128,8 @@ function ReporterWarning({ report, people }: { report: StaffReport; people: Repo
   );
 }
 
-/**
- * The rule the report breaks. When the reason points at one rule it is preselected and says what the report was filed as, so it can be
- * changed; when no rule is clear it asks, leading with the rules the reason usually means. Nothing is suggested until one is picked.
- */
-function RuleField({ pick, rules, report }: { pick: RulePick; rules: ReadonlyArray<{ number: number; title: string }>; report: StaffReport & { reportedReasonLabel?: string | null } }) {
-  const { t } = useHub();
-  const id = useId();
-  const ask = pick.mode === 'ask';
-  const mapped = pick.choice?.kind === 'ask' ? pick.choice.mapped : [];
-  const option = (r: { number: number; title: string }): ReactNode => (
-    <option key={r.number} value={r.number}>
-      {t('hub.guide.rule.named', { number: r.number, title: r.title })}
-    </option>
-  );
-  const lead = rules.filter((r) => mapped.includes(r.number));
-  const rest = rules.filter((r) => !mapped.includes(r.number));
-  const hint = ask
-    ? pick.picked === null
-      ? t('hub.simple.rule.askHint')
-      : undefined
-    : t('hub.simple.rule.knownHint', { reason: report.reportedReasonLabel ?? report.reportedReason ?? '', rule: pick.picked ?? '' });
-  return (
-    <div className="cw-scard-rule">
-      <Field id={`${id}-rule`} label={t(ask ? 'hub.simple.rule.ask' : 'hub.simple.rule.known')} {...(hint === undefined ? {} : { hint })}>
-        {(a) => (
-          <select {...a} value={pick.picked ?? ''} onChange={(e) => pick.pick(e.target.value === '' ? null : Number(e.target.value))}>
-            {ask && <option value="">{t('hub.simple.rule.pick')}</option>}
-            {lead.length > 0 ? (
-              <>
-                <optgroup label={t('hub.simple.rule.usual')}>{lead.map(option)}</optgroup>
-                <optgroup label={t('hub.simple.rule.rest')}>{rest.map(option)}</optgroup>
-              </>
-            ) : (
-              rules.map(option)
-            )}
-          </select>
-        )}
-      </Field>
-      {pick.error !== null && (
-        <p className="cw-field-error" role="alert">
-          {t('hub.simple.rule.failed')}
-        </p>
-      )}
-    </div>
-  );
-}
+/** A form without its action ids, to tell whether the moderator has changed it. */
+const shape = (form: DecisionForm): string => JSON.stringify({ verdict: form.verdict, reason: form.reason, actions: form.actions.map((a) => ({ ...a, uid: '' })) });
 
 /** The card for a case. Read through `<CaseProvider>`, the one the hub wraps a case in. */
 export function CaseCard() {
@@ -255,6 +210,25 @@ export function CaseCard() {
   );
   const sendError = status === 'failed' && entry?.state.status === 'failed' ? entry.state.error : null;
 
+  /**
+   * "Something else" opens the decision bar. When a rule was picked on the card, the bar opens on that rule and the step the ladder suggests
+   * for it, unless the moderator has already changed the bar's form (what was filled in from the case, or from an earlier pick, is replaced).
+   */
+  const seeded = useRef<string | null>(null);
+  const openElse = (): void => {
+    const suggestion = pick.suggestion;
+    if (pick.mode !== 'none' && pick.picked !== null && suggestion !== null && detail.data !== undefined) {
+      const first = initialForm(draft.ctx, detail.data.suggest.outcome, detail.data.rule, detail.data.report.lineId, 'a0');
+      const untouched = shape(draft.form) === shape(first) || shape(draft.form) === seeded.current;
+      if (untouched) {
+        const next = initialForm(draft.ctx, suggestion.outcome, pick.picked, detail.data.report.lineId, 'a0');
+        seeded.current = shape(next);
+        draft.setForm(() => next);
+      }
+    }
+    setElseOpen(true);
+  };
+
   /** Hands a form to the hold the decision bar uses; `andNext` goes on to the person's next report or the next case. */
   const send = (form: DecisionForm, andNext: boolean): void => {
     if (!usable || report === undefined) return;
@@ -292,7 +266,9 @@ export function CaseCard() {
         s.sendPrimary(true);
         return;
       }
-      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
+      // The rule field is a select: a digit cannot type into it, so 1, 2 and 3 keep working while it has focus (after picking a rule by keyboard).
+      const onRuleField = e.target instanceof Element && e.target.closest('.cw-scard-rule') !== null;
+      if (e.ctrlKey || e.metaKey || e.altKey || (isTypingTarget(e.target) && !onRuleField)) return;
       if (e.key === '1' && s.one !== null) {
         e.preventDefault();
         s.sendPrimary(false);
@@ -456,7 +432,7 @@ export function CaseCard() {
                 {kbd('3')}
               </button>
             )}
-            <button ref={elseRef} type="button" className={one === null ? 'cw-btn cw-btn--primary' : 'cw-btn'} onClick={() => setElseOpen(true)}>
+            <button ref={elseRef} type="button" className={one === null ? 'cw-btn cw-btn--primary' : 'cw-btn'} onClick={openElse}>
               {t('hub.simple.else')}
             </button>
           </div>

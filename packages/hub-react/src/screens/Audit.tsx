@@ -1,3 +1,4 @@
+import { policyAuditKey } from '../auditLabel.js';
 import { AUDIT_ACTIONS } from '@chatwarden/core';
 import { useId, useRef, useState } from 'react';
 import { useHub } from '../context.js';
@@ -80,6 +81,8 @@ function Target({ item }: { item: AuditItem }) {
 /** The words for an entry's action. A `report.view` with no target is the queue being read, not one report. */
 function actionLabel(item: AuditItem, t: HubT): string {
   if (item.action === 'report.view' && item.target === undefined) return t('hub.audit.label.report.list');
+  const settings = policyAuditKey(item.action, item.detail);
+  if (settings !== null) return t(settings);
   return Object.hasOwn(LABEL, item.action) ? t(LABEL[item.action]) : item.action;
 }
 

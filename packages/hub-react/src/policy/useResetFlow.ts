@@ -55,9 +55,9 @@ export function useResetFlow({ policy, state, editable, pending, onDone, onClose
   };
   const run = async (key: ResetKey, why: string): Promise<void> => {
     if (!editable) return;
-    // Everything on this screen is one call that names no section, unless reporting has settings saved too (it has its own screen and its
-    // own reset): then only this screen's own sections.
-    const sections = key === 'all' && !saved.includes('reporting') ? undefined : sectionsOf(key);
+    // Always the sections this screen knows, by name: what another screen saved after this page loaded is never wiped. The one exception is
+    // an unreadable saved layer (`layerError`): there is nothing to name, so one call that names no section clears it whole.
+    const sections = key === 'all' && state.layerError !== undefined && sectionsOf(key).length === 0 ? undefined : sectionsOf(key);
     pending.current = sections ?? 'all';
     const res = await policy.reset(sections, why);
     if (!res.ok) {

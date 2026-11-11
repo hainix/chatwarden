@@ -293,8 +293,12 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
     if (q === null || !q.beginTake()) return { status: 'busy' };
     const words = options.words();
     try {
-      const category = q.getSnapshot().filter.category;
-      const { case: next } = await client.takeNext(category === 'all' ? {} : { category });
+      const { category, reason } = q.getSnapshot().filter;
+      // Take next asks the kit for the same cases the rows show: the reason the filter is on (`none`: gave none), and a category if an embedder set one.
+      const { case: next } = await client.takeNext({
+        ...(category === 'all' ? {} : { category }),
+        ...(reason === undefined || reason === 'all' ? {} : { reason: reason === 'none' ? null : reason }),
+      });
       if (next === null) {
         toasts.push({ text: words('hub.toast.nothing') });
         return { status: 'none' };

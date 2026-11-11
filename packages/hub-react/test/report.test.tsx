@@ -52,7 +52,7 @@ describe('ReportView: the header', () => {
     const facts = screen.getByRole('group', { name: 'About this report' });
     expect(within(facts).getByText('Open')).toBeInTheDocument();
     // The category is a chip in the header, beside the name.
-    expect(screen.getByText('Hate', { selector: '.cw-casecats *' })).toBeInTheDocument();
+    expect(screen.getByText('Reported as Hate', { selector: '.cw-casecats *' })).toBeInTheDocument();
   });
 
   it('shows the room, the tags and when it was filed', async () => {

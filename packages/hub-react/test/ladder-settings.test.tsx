@@ -135,20 +135,22 @@ describe('who can open and change it', () => {
     expect(screen.getByLabelText('Add a length')).toBeDisabled();
   });
 
-  it('a stored layer the kit cannot use is said plainly, and Reset everything clears it', async () => {
+  it('a stored layer the kit cannot use is said plainly, and Reset steps and ladder clears it, in one call that names no section', async () => {
     const store = new MemoryStore();
     const w = await owner({ store });
     // A layer a newer kit wrote, straight into the store: this kit cannot read it and ignores it.
     store.savePolicyLayer?.({ profanity: { mode: 'refuse' } } as never, 0);
     w.cw.policy.refresh();
     const { user } = await open(w);
-    expect(screen.getByText('The saved settings could not be used, so the default settings are in force. Reset everything to clear them.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Reset everything' }));
+    expect(screen.getByText('The saved settings could not be used, so the default settings are in force. Reset the steps and ladder to clear them.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reset steps and ladder' }));
     await user.type(screen.getByRole('textbox', { name: /Why are you resetting this/ }), 'Clear the bad layer');
-    await user.click(within(screen.getByRole('group', { name: 'Reset everything?' })).getByRole('button', { name: 'Reset' }));
+    await user.click(within(screen.getByRole('group', { name: 'Reset steps and ladder?' })).getByRole('button', { name: 'Reset' }));
     await screen.findByText('Reset the steps and ladder.');
     await waitFor(() => expect(screen.queryByText(/could not be used/)).toBeNull());
     expect(w.cw.policy.get().layerError).toBeUndefined();
+    // Nothing readable is saved, so there is no section to name: this one call clears the unreadable layer whole.
+    expect(requests(w, 'DELETE', '/policy/profile').map((r) => r.query?.section)).toEqual([undefined]);
   });
 });
 
@@ -642,23 +644,22 @@ describe('Reset', () => {
   it('a section with nothing saved cannot be reset', async () => {
     const w = await owner();
     await open(w);
-    for (const name of ['Reset lengths', 'Reset the ladder', 'Reset first offence', 'Reset repeated', 'Reset rules', 'Reset guidelines', 'Reset everything']) {
+    for (const name of ['Reset lengths', 'Reset the ladder', 'Reset first offence', 'Reset repeated', 'Reset rules', 'Reset guidelines', 'Reset steps and ladder']) {
       expect(screen.getByRole('button', { name })).toHaveAttribute('aria-disabled', 'true');
     }
   });
 
-  it('Reset everything drops every saved edit with one call that names no section', async () => {
+  it('Reset steps and ladder drops every saved edit, one call for each section it names (never a call that names none)', async () => {
     const w = await owner();
     const { user } = await open(w);
     await savedTwo(w, user);
-    await user.click(screen.getByRole('button', { name: 'Reset everything' }));
-    const confirm = screen.getByRole('group', { name: 'Reset everything?' });
+    await user.click(screen.getByRole('button', { name: 'Reset steps and ladder' }));
+    const confirm = screen.getByRole('group', { name: 'Reset steps and ladder?' });
     await user.type(within(confirm).getByRole('textbox', { name: /Why are you resetting this/ }), 'Start over');
     await user.click(within(confirm).getByRole('button', { name: 'Reset' }));
     await screen.findByText('Reset the steps and ladder.');
     const sent = requests(w, 'DELETE', '/policy/profile');
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.query?.section).toBeUndefined();
+    expect(sent.map((r) => r.query?.section).sort()).toEqual(['customDuration', 'durations', 'firstOffense']);
     expect(w.cw.policy.get().layer).toEqual({});
     expect(screen.getByLabelText('Hostile: how long')).toHaveValue('24h');
   });
@@ -737,15 +738,30 @@ describe('fix round 1', () => {
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
   });
 
-  it('Reset everything says that unsaved edits are lost too, only when there are some', async () => {
+  it('a section saved by someone else after this page loaded survives Reset steps and ladder (the call names only what this screen knows)', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(screen.getByRole('button', { name: 'Remove 30 days' }));
+    await save(user);
+    await screen.findByText('Saved the steps and ladder.');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reset lengths' })).toBeEnabled());
+    expect(w.cw.policy.save({ reporting: { flow: 'reason_first' }, ...w.cw.policy.get().layer }, { version: w.cw.policy.get().version, actor: 'maya@example.test', reason: 'reporting' }).ok).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Reset steps and ladder' }));
+    await user.type(screen.getByRole('textbox', { name: /Why are you resetting this/ }), 'ladder only');
+    await user.click(within(screen.getByRole('group', { name: 'Reset steps and ladder?' })).getByRole('button', { name: 'Reset' }));
+    await screen.findByText('Reset the steps and ladder.');
+    expect(w.cw.profile.reporting.flow).toBe('reason_first');
+  });
+
+  it('Reset steps and ladder says that unsaved edits are lost too, only when there are some', async () => {
     const w = await owner();
     w.cw.policy.save({ durations: [H] }, { version: 0, actor: 'x', reason: 'seed' });
     const { user } = await open(w);
-    await user.click(screen.getByRole('button', { name: 'Reset everything' }));
+    await user.click(screen.getByRole('button', { name: 'Reset steps and ladder' }));
     expect(screen.queryByText(/unsaved changes will be lost/i)).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Keep my settings' }));
     await user.click(screen.getByRole('checkbox', { name: 'Let moderators type their own length' }));
-    await user.click(screen.getByRole('button', { name: 'Reset everything' }));
+    await user.click(screen.getByRole('button', { name: 'Reset steps and ladder' }));
     expect(screen.getByText(/Your unsaved changes will be lost too./)).toBeInTheDocument();
   });
 

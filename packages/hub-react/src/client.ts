@@ -173,8 +173,11 @@ export interface HubClient {
   claimCase(person: string, options?: { takeOver?: boolean }): Promise<ClaimResult>;
   /** `POST /cases/:ref/release`: release your own claim. `released` is false when there was nothing of yours to release. */
   releaseCase(person: string): Promise<{ released: boolean }>;
-  /** `POST /cases/next`: claim and return the oldest open case nobody holds, or `{ case: null }`. */
-  takeNext(options?: { category?: ReportCategory }): Promise<{ case: NextCase | null }>;
+  /**
+   * `POST /cases/next`: claim and return the oldest open case nobody holds, or `{ case: null }`. `reason` limits it to cases with an open report
+   * that gave that reason id (`null`: gave none); `category` still works and is deprecated, since the reason is what a reporter chose.
+   */
+  takeNext(options?: { category?: ReportCategory; reason?: string | null }): Promise<{ case: NextCase | null }>;
   /** `POST /cases/:ref/viewing`: say you have the case open (a hint for 30 seconds); answers who else has. */
   viewing(person: string): Promise<{ viewers: string[] }>;
   /** `GET /reasons`: the saved reasons, switched-off ones included. */
@@ -250,7 +253,10 @@ export function createHubClient(transport: Transport): HubClient {
     changes: (since) => get<Changes>('/changes', q({ since })),
     claimCase: (person, options = {}) => post<ClaimResult>(`/cases/${enc(person)}/claim`, options.takeOver === true ? { takeOver: true } : undefined),
     releaseCase: (person) => post<{ released: boolean }>(`/cases/${enc(person)}/release`, undefined),
-    takeNext: (options = {}) => post<{ case: NextCase | null }>('/cases/next', options.category === undefined ? undefined : { category: options.category }),
+    takeNext: (options = {}) => {
+      const body = { ...(options.category === undefined ? {} : { category: options.category }), ...(options.reason === undefined ? {} : { reason: options.reason === null ? 'none' : options.reason }) };
+      return post<{ case: NextCase | null }>('/cases/next', Object.keys(body).length === 0 ? undefined : body);
+    },
     viewing: (person) => post<{ viewers: string[] }>(`/cases/${enc(person)}/viewing`, undefined),
     listReasons: () => get<{ reasons: Reason[] }>('/reasons'),
     addReason: (input) => post<{ reason: Reason }>('/reasons', input),

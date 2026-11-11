@@ -20,6 +20,8 @@ export interface RulePick {
   /** The rule shown picked, or null while nothing is. */
   picked: number | null;
   pick: (rule: number | null) => void;
+  /** Asks again for the picked rule after a failure. */
+  retry: () => void;
   /** The ladder's suggestion for the picked rule, or null while there is none (nothing picked, or the answer is on its way). */
   suggestion: Suggestion | null;
   busy: boolean;
@@ -48,6 +50,8 @@ export function useRulePick({
   const picked = touched !== undefined ? touched : choice?.kind === 'one' ? choice.rule : null;
   const [fetched, setFetched] = useState<{ rule: number; suggestion: Suggestion } | null>(null);
   const [error, setError] = useState<HubError | null>(null);
+  // Bumped by a retry, so the same pick is asked again.
+  const [attempt, setAttempt] = useState(0);
   const seq = useRef(0);
 
   const known = detail !== undefined && picked === detail.rule ? detail.suggest : fetched !== null && fetched.rule === picked ? fetched.suggestion : null;
@@ -73,11 +77,12 @@ export function useRulePick({
     return () => {
       seq.current += 1;
     };
-  }, [picked, need]);
+  }, [picked, need, attempt]);
 
   const pick = (rule: number | null): void => {
     setTouched(rule);
     setError(null);
   };
-  return { mode: choice === null ? 'none' : choice.kind === 'one' ? 'known' : 'ask', choice, picked, pick, suggestion: known, busy: need && error === null, error };
+  const retry = (): void => setAttempt((n) => n + 1);
+  return { mode: choice === null ? 'none' : choice.kind === 'one' ? 'known' : 'ask', choice, picked, pick, retry, suggestion: known, busy: need && error === null, error };
 }

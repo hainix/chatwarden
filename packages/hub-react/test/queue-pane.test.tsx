@@ -1,5 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { personTag } from '../src/format.js';
 import { renderHub } from './render.js';
 import { DAY, HOUR, hubWorld } from './world.js';
@@ -291,13 +291,14 @@ describe('the queue pane: filters', () => {
     expect(names()).toHaveLength(4);
   });
 
-  it('filters by category from a select that lists every category', async () => {
+  it('has no Category select any more: the reason the reporter gave is the one filter', async () => {
     const w = await mixed();
     const { user } = renderHub(w);
     await ready();
-    const select = within(pane()).getByRole('combobox', { name: 'Category' });
-    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['All categories', 'Harassment', 'Hate', 'Cheating', 'Spam', 'Disruption', 'Other']);
-    await user.selectOptions(select, 'Spam');
+    expect(within(pane()).queryByRole('combobox', { name: 'Category' })).toBeNull();
+    const select = within(pane()).getByRole('combobox', { name: 'Reported as' });
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['All reasons', 'Insults or harassment', 'Hate', 'Spam or ads']);
+    await user.selectOptions(select, 'Spam or ads');
     expect(names()).toEqual(['Delta']);
     await user.selectOptions(select, 'Hate');
     expect(names()).toEqual(['Charlie']);
@@ -307,12 +308,12 @@ describe('the queue pane: filters', () => {
     const w = await mixed();
     const { user } = renderHub(w);
     await ready();
-    await user.selectOptions(within(pane()).getByRole('combobox', { name: 'Category' }), 'Spam');
+    await user.selectOptions(within(pane()).getByRole('combobox', { name: 'Reported as' }), 'Spam or ads');
     await user.click(within(pane()).getByRole('button', { name: 'Mine' }));
     expect(within(pane()).getByText('No cases match these filters.')).toBeInTheDocument();
     await user.click(within(pane()).getByRole('button', { name: 'Show all cases' }));
     expect(names()).toHaveLength(4);
-    expect(within(pane()).getByRole('combobox', { name: 'Category' })).toHaveValue('all');
+    expect(within(pane()).getByRole('combobox', { name: 'Reported as' })).toHaveValue('all');
   });
 });
 
@@ -344,17 +345,80 @@ describe('take next', () => {
     expect(router.path).toBe('/');
   });
 
-  it('asks for the category the filter is on', async () => {
+  it('asks for the reason the filter is on', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });
     await people(w, ['Alpha']);
     const spam = await w.file({ target: 'Spammer', reporter: 'RS', category: 'spam' });
     const { user, router } = renderHub(w);
     await ready();
-    await user.selectOptions(within(pane()).getByRole('combobox', { name: 'Category' }), 'Spam');
+    await user.selectOptions(within(pane()).getByRole('combobox', { name: 'Reported as' }), 'Spam or ads');
     await user.click(within(pane()).getByRole('button', { name: /Take next case/ }));
     await waitFor(() => expect(router.path).toBe(`/reports/${spam.id}`));
-    expect(w.sent.find((r) => r.path === '/cases/next')?.body).toEqual({ category: 'spam' });
+    expect(w.sent.find((r) => r.path === '/cases/next')?.body).toEqual({ reason: 'spam' });
   });
+
+  it('with "No reason given" selected it asks for none, and never takes a case that gave a reason', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    await w.file({ target: 'Alpha', reporter: 'R1', reason: 'hate' });
+    const none = await w.file({ target: 'Bravo', reporter: 'R2', reason: null });
+    const { user, router } = renderHub(w);
+    await ready();
+    await user.selectOptions(within(pane()).getByRole('combobox', { name: 'Reported as' }), 'No reason given');
+    await user.click(within(pane()).getByRole('button', { name: /Take next case/ }));
+    await waitFor(() => expect(router.path).toBe(`/reports/${none.id}`));
+    expect(w.sent.find((r) => r.path === '/cases/next')?.body).toEqual({ reason: 'none' });
+    expect(w.cw.cases.holder(none.person)?.by).toBe('ann@example.test');
+  });
+
+  it('with no reason filter it sends no body at all, as before', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    await people(w, ['Alpha']);
+    const { user } = renderHub(w);
+    await ready();
+    await user.click(within(pane()).getByRole('button', { name: /Take next case/ }));
+    await waitFor(() => expect(w.sent.filter((r) => r.path === '/cases/next')).toHaveLength(1));
+    expect(w.sent.find((r) => r.path === '/cases/next')?.body).toBeUndefined();
+  });
+
+  it('with a reason filter on, every case taken is one the rows show under that filter', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const everyone: Array<{ person: string; cheating: boolean }> = [];
+    for (const [i, reason] of ['cheating', 'hate', 'cheating', null, 'harassment', 'cheating'].entries()) {
+      const f = await w.file({ target: "P" + String(i), reporter: "R" + String(i), reason });
+      everyone.push({ person: f.person, cheating: reason === 'cheating' });
+      w.clock.t += 1000;
+    }
+    const { user } = renderHub(w);
+    await ready();
+    const names = (): string[] => rows().map((li) => (li.querySelector('.cw-case-name') as HTMLElement).textContent ?? '');
+    await user.selectOptions(within(pane()).getByRole('combobox', { name: 'Reported as' }), 'Cheating');
+    expect(names().sort()).toEqual(['P0', 'P2', 'P5']);
+    const claimedEver = new Set<string>();
+    const real = w.cw.cases.next.bind(w.cw.cases);
+    const handed: Array<string | null> = [];
+    vi.spyOn(w.cw.cases, 'next').mockImplementation((actor, filter) => {
+      const out = real(actor, filter);
+      handed.push(out === null ? null : out.person);
+      return out;
+    });
+    for (let i = 0; i < 4; i += 1) {
+      // The button rests for half a second after each take.
+      await new Promise((r) => setTimeout(r, 520));
+      await user.click(within(pane()).getByRole('button', { name: /Take next case/ }));
+      await waitFor(() => expect(w.sent.filter((r) => r.path === '/cases/next')).toHaveLength(i + 1));
+      await new Promise((r) => setTimeout(r, 30));
+      for (const p of everyone) if (w.cw.cases.holder(p.person)?.by === 'ann@example.test') claimedEver.add(p.person);
+    }
+    // Three cases are Cheating, and only those were ever claimed: the fourth press found none left.
+    const cheaters = everyone.filter((p) => p.cheating).map((p) => p.person).sort();
+    // Every case the kit handed out is one with a Cheating report (a case left open is let go, so it may be handed out again).
+    expect(handed).toHaveLength(4);
+    for (const p of handed) expect(cheaters).toContain(p);
+    for (const p of claimedEver) expect(cheaters).toContain(p);
+    // The rows agree with the filter all the way through.
+    expect(names().every((n) => ['P0', 'P2', 'P5'].includes(n))).toBe(true);
+  });
+
 
   it('a filter that would hide what you took is cleared', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });

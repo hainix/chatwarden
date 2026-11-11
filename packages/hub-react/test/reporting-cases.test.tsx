@@ -37,19 +37,19 @@ describe('Detailed: what the reporter said it was', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ reason: 'harassment' });
     await openDetailed(w, f.id);
-    const facts = screen.getByRole('group', { name: 'About this report' });
-    expect(within(facts).getByText('Reported as Insults or harassment')).toBeInTheDocument();
+    // Once, as the chip beside the name (where the category used to be), not again in the facts row.
+    expect(screen.getByText('Reported as Insults or harassment', { selector: '.cw-casecats *' })).toBeInTheDocument();
+    expect(screen.getAllByText('Reported as Insults or harassment')).toHaveLength(1);
+    expect(within(screen.getByRole('group', { name: 'About this report' })).queryByText(/Reported as/)).toBeNull();
     expect(screen.getByRole('heading', { level: 2, name: 'Insults or harassment report against Mallory' })).toBeInTheDocument();
-    expect(screen.getByText('Insults or harassment', { selector: '.cw-casecats *' })).toBeInTheDocument();
   });
 
   it('a report that gave no reason says so, in the header, the heading and the chip', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ reason: null });
-    await openDetailed(w, f.id);
-    const facts = screen.getByRole('group', { name: 'About this report' });
-    expect(within(facts).getByText('No reason given')).toBeInTheDocument();
-    expect(within(facts).queryByText(/^Reported as/)).toBeNull();
+    const { container } = await openDetailed(w, f.id);
+    expect(within(container.querySelector('.cw-casehead') as HTMLElement).getAllByText('No reason given')).toHaveLength(1);
+    expect(within(screen.getByRole('group', { name: 'About this report' })).queryByText(/No reason given|Reported as/)).toBeNull();
     expect(screen.getByRole('heading', { level: 2, name: 'No-reason report against Mallory' })).toBeInTheDocument();
     expect(screen.getByText('No reason given', { selector: '.cw-casecats *' })).toBeInTheDocument();
   });
@@ -58,7 +58,7 @@ describe('Detailed: what the reporter said it was', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ category: 'disruption' });
     await openDetailed(w, f.id);
-    expect(within(screen.getByRole('group', { name: 'About this report' })).getByText('Reported as Throwing or griefing')).toBeInTheDocument();
+    expect(screen.getByText('Reported as Throwing or griefing', { selector: '.cw-casecats *' })).toBeInTheDocument();
   });
 
   it('a relabelled reason shows its new name at once; a removed reason shows its id, not nothing', async () => {
@@ -66,11 +66,11 @@ describe('Detailed: what the reporter said it was', () => {
     const f = await w.fileRich({ reason: 'cheating' });
     expect(w.cw.policy.save({ reporting: { reasons: [{ id: 'cheating', label: 'Using hacks' }, { id: 'other', label: 'Something else' }] } }, { version: 0, actor: 'owen@example.test', reason: 'edit' }).ok).toBe(true);
     const a = await openDetailed(w, f.id);
-    expect(within(screen.getByRole('group', { name: 'About this report' })).getByText('Reported as Using hacks')).toBeInTheDocument();
+    expect(screen.getByText('Reported as Using hacks', { selector: '.cw-casecats *' })).toBeInTheDocument();
     a.unmount();
     expect(w.cw.policy.save({ reporting: { reasons: [{ id: 'other', label: 'Something else' }] } }, { version: 1, actor: 'owen@example.test', reason: 'edit again' }).ok).toBe(true);
     await openDetailed(w, f.id);
-    expect(within(screen.getByRole('group', { name: 'About this report' })).getByText('Reported as cheating')).toBeInTheDocument();
+    expect(screen.getByText('Reported as cheating', { selector: '.cw-casecats *' })).toBeInTheDocument();
   });
 
   it('the reports tab names the reason of each report in the case', async () => {
@@ -384,6 +384,83 @@ describe('Simple: the rule behind a reason', () => {
       await openSimple(w, f.id);
       expect(within(decision()).getByRole('combobox', { name: 'The rule it breaks' })).toHaveValue('3');
       expect(within(decision()).getByText('Reported as Insults, which usually means rule 3. Change it if it is wrong.')).toBeInTheDocument();
+    });
+  });
+
+  describe('the rest of the card follows the pick', () => {
+    const barRule = (): HTMLElement => screen.getByLabelText('Community Rule');
+
+    it('"Something else…" opens with the rule just picked, and the step the ladder suggests for it', async () => {
+      const w = await hubWorld();
+      const f = await w.fileRich({ lines: TALK, reason: null });
+      const { user } = await openSimple(w, f.id);
+      await user.selectOptions(picker(), '3');
+      await step();
+      await user.click(within(decision()).getByRole('button', { name: /^Something else/ }));
+      expect(barRule()).toHaveValue('3');
+    });
+
+    it('with a reason that maps to one rule changed to another, the bar opens on the changed rule', async () => {
+      const w = await hubWorld();
+      const f = await w.fileRich({ lines: TALK, reason: 'harassment' });
+      const { user } = await openSimple(w, f.id);
+      await user.selectOptions(within(decision()).getByRole('combobox', { name: 'The rule it breaks' }), '4');
+      await step();
+      await user.click(within(decision()).getByRole('button', { name: /^Something else/ }));
+      expect(barRule()).toHaveValue('4');
+    });
+
+    it('with nothing picked the bar opens as it always did, with no rule chosen for the moderator', async () => {
+      const w = await hubWorld();
+      const f = await w.fileRich({ lines: TALK, reason: null });
+      const { user } = await openSimple(w, f.id);
+      await user.click(within(decision()).getByRole('button', { name: /^Something else/ }));
+      const group = screen.queryByRole('group', { name: 'Action 1' });
+      if (group !== null) expect(within(group).getByLabelText('Community Rule')).not.toHaveValue('3');
+    });
+
+    it('a bar the moderator has already started is not overwritten by the pick', async () => {
+      const w = await hubWorld();
+      const f = await w.fileRich({ lines: TALK, reason: null });
+      const { user } = await openSimple(w, f.id);
+      await user.selectOptions(picker(), '3');
+      await step();
+      await user.click(within(decision()).getByRole('button', { name: /^Something else/ }));
+      await user.selectOptions(barRule(), '5');
+      await user.click(screen.getByRole('button', { name: /^Back to the suggestion/ }));
+      await user.selectOptions(picker(), '2');
+      await step();
+      await user.click(within(decision()).getByRole('button', { name: /^Something else/ }));
+      expect(barRule()).toHaveValue('5');
+    });
+
+    it('the keys work with the rule field focused: 1 sends the step, 2 sends no action (a digit cannot type into this field)', async () => {
+      const w = await hubWorld();
+      const f = await w.fileRich({ lines: TALK, reason: null });
+      const { user } = await openSimple(w, f.id);
+      await user.selectOptions(picker(), '2');
+      await step();
+      expect(picker()).toHaveFocus();
+      await user.keyboard('1');
+      await pageHides();
+      expect(decides(w)).toHaveLength(1);
+      expect((decides(w)[0]?.body as { actions: Array<{ rule: number }> }).actions[0]?.rule).toBe(2);
+    });
+
+    it('a failed suggestion offers Try again, which asks again for the same rule and shows the step', async () => {
+      const w = await hubWorld();
+      const f = await w.fileRich({ lines: TALK, reason: null });
+      const { user } = await openSimple(w, f.id);
+      let failing = true;
+      w.intercept.fn = (req) => (isSuggest(req) && failing ? { status: 500, body: { error: 'server_error', message: 'x' } } : undefined);
+      await user.selectOptions(picker(), '2');
+      expect(await within(decision()).findByRole('alert')).toHaveTextContent('We could not get a suggestion for that rule.');
+      failing = false;
+      await user.click(within(decision()).getByRole('button', { name: 'Try again' }));
+      await step();
+      expect(w.sent.filter(isSuggest)).toHaveLength(2);
+      expect(within(decision()).queryByRole('alert')).toBeNull();
+      expect(picker()).toHaveValue('2');
     });
   });
 

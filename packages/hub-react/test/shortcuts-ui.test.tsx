@@ -259,9 +259,9 @@ describe('no shortcut fires while typing', () => {
     expect(reason).toHaveFocus();
   });
 
-  it('in a select (the category filter)', async () => {
+  it('in a select (the reason filter)', async () => {
     const { w, user } = await setup();
-    const select = within(pane()).getByRole('combobox', { name: 'Category' });
+    const select = within(pane()).getByRole('combobox', { name: 'Reported as' });
     select.focus();
     await user.keyboard('n?jk');
     expect(nextCalls(w)).toBe(0);

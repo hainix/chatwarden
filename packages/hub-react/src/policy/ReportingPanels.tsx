@@ -8,7 +8,7 @@ import type { CommunityRule } from '../types.js';
 import { Panel } from '../ui.js';
 import { RulePicker } from './panels.js';
 import type { Problems } from './panels.js';
-import { MAX_REPORT_REASONS, addReason, groupsOf, isLocked, moveReason, patchReason, playerGroups, removeReason } from './reporting.js';
+import { MAX_REPORT_REASONS, addReason, canMove, groupsOf, isLocked, moveReason, patchReason, playerGroups, positionOf, removeReason } from './reporting.js';
 import type { ReasonDraft, ReportingDraft } from './reporting.js';
 
 // The panels of the Reporting screen. Each edits the local draft; none of them sends anything. A field carries `data-field`, the key the
@@ -65,8 +65,6 @@ export function FlowPanel({ draft, set, problems }: { draft: ReportingDraft; set
 
 function ReasonRow({
   r,
-  index,
-  last,
   draft,
   set,
   problems,
@@ -75,8 +73,6 @@ function ReasonRow({
   onRemoved,
 }: {
   r: ReasonDraft;
-  index: number;
-  last: boolean;
   draft: ReportingDraft;
   set: SetReporting;
   problems: Problems;
@@ -135,34 +131,38 @@ function ReasonRow({
             {t('hub.reporting.reason.rules', { count: r.rules.length })}
           </button>
           <span className="cw-reason-moves">
-            <button
-              type="button"
-              className="cw-btn"
-              data-act={`${r.key}-up`}
-              aria-disabled={index === 0}
-              aria-label={t('hub.reporting.reason.up', { name })}
-              onClick={() => {
-                if (index === 0) return;
-                set((d) => moveReason(d, r.key, -1));
-                onMoved(r.key, 'up');
-              }}
-            >
-              <span aria-hidden="true">↑</span>
-            </button>
-            <button
-              type="button"
-              className="cw-btn"
-              data-act={`${r.key}-down`}
-              aria-disabled={last}
-              aria-label={t('hub.reporting.reason.down', { name })}
-              onClick={() => {
-                if (last) return;
-                set((d) => moveReason(d, r.key, 1));
-                onMoved(r.key, 'down');
-              }}
-            >
-              <span aria-hidden="true">↓</span>
-            </button>
+            {!locked && (
+              <>
+                <button
+                  type="button"
+                  className="cw-btn"
+                  data-act={`${r.key}-up`}
+                  aria-disabled={!canMove(draft, r.key, -1)}
+                  aria-label={t('hub.reporting.reason.up', { name })}
+                  onClick={() => {
+                    if (!canMove(draft, r.key, -1)) return;
+                    set((d) => moveReason(d, r.key, -1));
+                    onMoved(r.key, 'up');
+                  }}
+                >
+                  <span aria-hidden="true">↑</span>
+                </button>
+                <button
+                  type="button"
+                  className="cw-btn"
+                  data-act={`${r.key}-down`}
+                  aria-disabled={!canMove(draft, r.key, 1)}
+                  aria-label={t('hub.reporting.reason.down', { name })}
+                  onClick={() => {
+                    if (!canMove(draft, r.key, 1)) return;
+                    set((d) => moveReason(d, r.key, 1));
+                    onMoved(r.key, 'down');
+                  }}
+                >
+                  <span aria-hidden="true">↓</span>
+                </button>
+              </>
+            )}
             {!locked && (
               <button
                 type="button"
@@ -197,6 +197,8 @@ export function ReasonsPanel({ draft, set, problems, rules }: { draft: Reporting
   // What to focus after the list changes: a new row's name, the button of a row that moved, or the Add button after a removal.
   const [after, setAfter] = useState<{ kind: 'new' } | { kind: 'moved'; key: string; dir: 'up' | 'down' } | { kind: 'removed' } | null>(null);
   const added = useRef<string | null>(null);
+  // Where a row went after a move, for a screen reader (the focus stays on the button, so nothing else says it).
+  const [moved, setMoved] = useState('');
   useEffect(() => {
     if (after === null) return;
     if (after.kind === 'new' && added.current !== null) list.current?.querySelector<HTMLElement>(`[data-field="reason-${added.current}-label"]`)?.focus();
@@ -212,21 +214,27 @@ export function ReasonsPanel({ draft, set, problems, rules }: { draft: Reporting
         <p className="cw-hint">{t('hub.reporting.reasons.hint')}</p>
         {problem !== undefined && <FieldError id="cw-reasons-err" problem={problem} />}
         <ul ref={list} className="cw-reasons" aria-label={t('hub.reporting.reasons.list')} data-field="reasons" tabIndex={-1}>
-          {draft.reasons.map((r, i) => (
+          {draft.reasons.map((r) => (
             <ReasonRow
               key={r.key}
               r={r}
-              index={i}
-              last={i === draft.reasons.length - 1}
               draft={draft}
               set={set}
               problems={problems}
               rules={rules}
-              onMoved={(key, dir) => setAfter({ kind: 'moved', key, dir })}
+              onMoved={(key, dir) => {
+                setAfter({ kind: 'moved', key, dir });
+                const at = positionOf(moveReason(draft, key, dir === 'up' ? -1 : 1), key);
+                const label = draft.reasons.find((x) => x.key === key)?.label.trim() ?? '';
+                if (at !== null) setMoved(t('hub.reporting.reason.moved', { name: label === '' ? t('hub.reporting.reason.new') : label, n: at.n, total: at.total }));
+              }}
               onRemoved={() => setAfter({ kind: 'removed' })}
             />
           ))}
         </ul>
+        <p role="status" className="cw-sr">
+          {moved}
+        </p>
         <div className="cw-action-foot">
           <button
             ref={addButton}
