@@ -32,6 +32,7 @@ describe('the focus trap holds (NoticeQueue)', () => {
     await w.warn();
     const { container, user } = renderUi(<Outside {...props(w, { appealUrl: 'https://game.test/appeal' })} />);
     const d = await dialog();
+    await waitFor(() => inside(d)); // the trap is armed (see below)
     await user.click(container.querySelector('.cw-scrim') as HTMLElement);
     inside(d);
     await user.tab();
@@ -47,6 +48,9 @@ describe('the focus trap holds (NoticeQueue)', () => {
     await w.warn();
     renderUi(<Outside {...props(w)} />);
     const d = await dialog();
+    // The guard is armed in the dialog's effect, which also moves focus inside. Wait for that first: on a loaded CI runner the
+    // dialog could be in the DOM before the effect ran (one failed run, 2026-11-11), and a real player cannot act in that instant.
+    await waitFor(() => inside(d));
     act(() => screen.getByRole('button', { name: 'Settings' }).focus());
     inside(d);
     act(() => screen.getByRole('button', { name: 'Game menu' }).focus());
