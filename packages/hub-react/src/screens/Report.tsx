@@ -55,7 +55,7 @@ function Header({ detail }: { detail: ReportDetail }) {
         {entries.map(([key, value]) => (
           <span key={key}>{t('hub.report.fact.tag', { key, value })}</span>
         ))}
-        <Link to={{ name: 'reports', status: 'open' }} className="cw-link">
+        <Link to={{ name: 'reports', status: 'open' }} className="cw-link" omit>
           {t('hub.report.back')}
         </Link>
       </div>
@@ -109,7 +109,7 @@ function Reports({ detail }: { detail: ReportDetail }) {
           {e.id === detail.report.id ? (
             <span className="cw-hint">{t('hub.case.reports.current')}</span>
           ) : (
-            <Link to={{ name: 'report', id: e.id }} className="cw-link">
+            <Link to={{ name: 'report', id: e.id }} className="cw-link" omit>
               {t('hub.case.reports.open')}
             </Link>
           )}

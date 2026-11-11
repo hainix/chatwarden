@@ -171,7 +171,7 @@ function ReportEntry({ report }: { report: PersonHistory['reports'][number] }) {
         <p className="cw-facts cw-rec-meta">
           <Time at={report.createdAt} />
           {can('reports.read') && (
-            <Link to={{ name: 'report', id: report.id }} className="cw-link" aria-label={t('hub.person.report.openLabel', { category: categoryLabel(t, report.category) })}>
+            <Link to={{ name: 'report', id: report.id }} className="cw-link" omit aria-label={t('hub.person.report.openLabel', { category: categoryLabel(t, report.category) })}>
               {t('hub.person.report.open')}
             </Link>
           )}

@@ -22,12 +22,13 @@ const DAYS_KEY = { 1: 'hub.blocked.screen.days.day', 7: 'hub.blocked.screen.days
  * screen is in an address.
  */
 export function Blocked() {
-  const { client, t, locale, can, session, go } = useHub();
+  const { client, t, locale, can, session, go, canGo } = useHub();
   const [days, setDays] = useState<BlockedDays>(7);
   const [all, setAll] = useState(false);
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
   const state = useHubData(`blocked:${days}`, () => client.listBlocked({ days }));
-  const canTerms = can('terms.read');
+  // In a piece the Terms buttons are there only when the page said where Terms is.
+  const canTerms = can('terms.read') && (canGo === undefined || canGo({ name: 'terms' }));
   const canException = canTerms && can('terms.write');
 
   const toggle = (id: string): void =>

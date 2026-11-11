@@ -7,10 +7,10 @@ import type { Store } from './headless/store.js';
 
 export const ControllerContext = createContext<HubController | null>(null);
 
-/** The hub's controller. Throws outside a `<Hub>`. */
+/** The hub's controller. Throws outside a `<Hub>` or `<HubProvider>`. */
 export function useController(): HubController {
   const value = useContext(ControllerContext);
-  if (value === null) throw new Error('This must be used inside <Hub>');
+  if (value === null) throw new Error('This must be used inside <HubProvider> (or <Hub>)');
   return value;
 }
 

@@ -4,6 +4,33 @@ export { Hub } from './Hub.js';
 export type { HubProps } from './Hub.js';
 export type { HubMode } from './mode.js';
 
+// Embedding: the provider, the pieces and the hooks. All `@experimental` until 0.2 (see the README's list).
+export { HubProvider, useHubController } from './provider.js';
+export type { HubControllerSource, HubProviderOptions, HubProviderProps } from './provider.js';
+export type { PieceLinks, PieceProps } from './pieces/Piece.js';
+export { CaseList } from './pieces/CaseList.js';
+export type { CaseListProps } from './pieces/CaseList.js';
+export { CaseCard } from './pieces/CaseCard.js';
+export type { CaseCardProps } from './pieces/CaseCard.js';
+export { CaseWorkbench } from './pieces/CaseWorkbench.js';
+export type { CaseWorkbenchProps } from './pieces/CaseWorkbench.js';
+export { PersonRecord } from './pieces/PersonRecord.js';
+export type { PersonRecordProps } from './pieces/PersonRecord.js';
+export { TermsManager } from './pieces/TermsManager.js';
+export type { TermsManagerProps } from './pieces/TermsManager.js';
+export { BlockedList } from './pieces/BlockedList.js';
+export type { BlockedListProps } from './pieces/BlockedList.js';
+export { AuditLog } from './pieces/AuditLog.js';
+export type { AuditLogProps } from './pieces/AuditLog.js';
+export { RuleGaps } from './pieces/RuleGaps.js';
+export type { RuleGapsProps } from './pieces/RuleGaps.js';
+export { Guide } from './pieces/Guide.js';
+export type { GuideProps } from './pieces/Guide.js';
+export { RecentActions } from './pieces/RecentActions.js';
+export type { RecentActionsProps } from './pieces/RecentActions.js';
+export { useBlocked, useCase, useCases, useClaim, useDecide, useMe, usePerson, useTerms } from './embedHooks.js';
+export type { HubRead, UseCase, UseCaseOptions, UseCases, UseClaim, UseDecide, UseMe } from './embedHooks.js';
+
 export { createHubClient, fetchAll, HubError, toHubError } from './client.js';
 export type { HubClient } from './client.js';
 export { fetchTransport, routerTransport } from './transport.js';

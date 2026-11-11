@@ -11,6 +11,7 @@ import type { ReportPerson } from '../excerpt.js';
 import { personTag, relativeTime } from '../format.js';
 import { useHubData } from '../hooks.js';
 import { categoryLabel, decideErrorText, outcomeLabel } from '../labels.js';
+import { useKeyListener } from '../keyScope.js';
 import { isTypingTarget } from '../shortcuts.js';
 import { needsSenior, noActionForm, oneClickOf, ownLinesOf, recordLine, reporterDecided, reporterWarrants, stepLabel } from '../simple.js';
 import type { OneClick } from '../simple.js';
@@ -137,7 +138,7 @@ export function CaseCard() {
   const { detail, entry, holder, people, group, left, draft } = c;
   const report = detail.data?.report;
   const [elseOpen, setElseOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLElement>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
   const noActionRef = useRef<HTMLButtonElement>(null);
   const elseRef = useRef<HTMLButtonElement>(null);
@@ -145,6 +146,7 @@ export function CaseCard() {
   const lastUsed = useRef<'primary' | 'none'>('primary');
   const titleFocused = useRef(false);
   const base = useId();
+  const listen = useKeyListener();
 
   // The loading title and the card's own are different elements: when the title had keyboard focus (the hub puts it there on
   // arrival), the new one takes it.
@@ -230,9 +232,8 @@ export function CaseCard() {
         s.sendNoAction();
       }
     };
-    // 7d: this listener is on the whole document. Once pieces can mount several times on a page, keys must be scoped to the hub root.
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    // In the shell this listens on the page; in a piece, on the piece's own root (see `keyScope.ts`).
+    return listen(onKeyDown);
   }, [shortcuts]);
 
   // Undone: the card is back, with keyboard focus on the button that sent it. Failed: on the message.
@@ -253,7 +254,7 @@ export function CaseCard() {
 
   if (detail.data === undefined || report === undefined || target === undefined) {
     return (
-      <div className="cw-scard" ref={root}>
+      <section className="cw-scard" ref={root}>
         <div className="cw-screen">
           <h2 className="cw-screen-title" tabIndex={-1} onFocus={() => (titleFocused.current = true)}>
             {t('hub.report.heading')}
@@ -262,7 +263,7 @@ export function CaseCard() {
             {() => null}
           </Fetched>
         </div>
-      </div>
+      </section>
     );
   }
 
@@ -380,7 +381,7 @@ export function CaseCard() {
   }
 
   return (
-    <div className="cw-scard" ref={root} aria-label={t('hub.simple.case.label', { who: name })} role="region" {...(left ? { 'data-gone': 'true' } : {})}>
+    <section className="cw-scard" ref={root} aria-label={t('hub.simple.case.label', { who: name })} {...(left ? { 'data-gone': 'true' } : {})}>
       {!left && (
         <>
           <header className="cw-scard-head">
@@ -397,6 +398,6 @@ export function CaseCard() {
         </>
       )}
       {decision}
-    </div>
+    </section>
   );
 }

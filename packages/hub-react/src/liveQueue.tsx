@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useController, useStore } from './controllerContext.js';
+import { useRuntime } from './pieceRuntime.js';
 import { useHub } from './context.js';
 import { QUEUE_MAX_PAGES, QUEUE_PAGE, visibleRows } from './headless/liveQueue.js';
 import type { Connection, LiveQueueState, LiveQueueStore } from './headless/liveQueue.js';
@@ -57,15 +58,17 @@ export function useOptionalQueue(): LiveQueue | null {
   return useContext(QueueContext);
 }
 
-export function QueueProvider({ children }: { children: ReactNode }) {
+/**
+ * Hands the queue to the screens below. `run` (the hub's shell) also keeps it loading and polling while mounted; a provider that
+ * places pieces leaves that to the pieces that need the queue, so a page with only a Terms screen asks the server for no cases.
+ */
+export function QueueProvider({ children, run = true }: { children: ReactNode; run?: boolean }) {
   const controller = useController();
+  const runtime = useRuntime();
   const { now, me } = useHub();
   const q = controller.queue;
   const state = useStore(q);
-  useEffect(() => {
-    q.start();
-    return () => q.stop();
-  }, [q]);
+  useEffect(() => (run ? runtime.needQueue() : undefined), [runtime, run]);
 
   // `visible` depends on the clock (a claim lapses without a change token), so it is worked out here, at render, as it always was.
   const nowMs = now();

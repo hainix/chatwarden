@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { FocusEvent } from 'react';
+import type { FocusEvent, ReactNode } from 'react';
 import { actorName, holderOf } from '../claims.js';
 import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
@@ -17,22 +17,28 @@ const VIEWERS_NAMED = 1;
 /** Skeleton rows while the first read is out. */
 const SKELETON_ROWS = 5;
 
+/** How a `CaseList` piece (no router, no shell) opens a row: the open case to mark, and where a click goes, if anywhere. */
+export interface PieceRows {
+  selected: string | null;
+  onOpenCase: ((person: string, reportId: string) => void) | undefined;
+}
+
 /**
  * The queue pane: the open cases, one row per person, longest wait first. Each row says who is handling it (you in blue,
  * others plain), who is looking, the categories and how long it has waited (red only once it is overdue, over 24 hours). The
  * list never moves under the pointer or the keyboard focus: new cases wait behind a pill.
  */
-export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boolean }) {
+export function QueuePane({ route, shortcuts, piece }: { route: Route | null; shortcuts: boolean; piece?: PieceRows }) {
   const { t, locale, can } = useHub();
   const simple = useMode().mode === 'simple';
   const queue = useQueue();
   const actions = useCaseActions();
   const titleId = useId();
   const canTake = can('reports.decide');
-  const openReport = route.name === 'report' ? route.id : null;
+  const openReport = piece !== undefined ? piece.selected : route?.name === 'report' ? route.id : null;
   // While a case or a person is open the queue can fold to one row (on a phone, where it would sit above the open pane). Each
   // screen starts folded; the fold is the stylesheet's, so a desktop never sees it.
-  const paneKey = route.name === 'report' ? `report:${route.id}` : route.name === 'person' ? `person:${route.ref}` : null;
+  const paneKey = route === null ? null : route.name === 'report' ? `report:${route.id}` : route.name === 'person' ? `person:${route.ref}` : null;
   const [unfolded, setUnfolded] = useState(false);
   useEffect(() => setUnfolded(false), [paneKey]);
 
@@ -89,7 +95,7 @@ export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boole
     body = (
       <ul className="cw-case-list" aria-label={t('hub.queue.list')}>
         {queue.visible.map((row) => (
-          <CaseRow key={row.group.person} row={row} simple={simple} selected={openReport !== null && row.group.reportIds.includes(openReport)} onRelease={() => void actions.release(row.group.person)} />
+          <CaseRow key={row.group.person} row={row} simple={simple} selected={openReport !== null && row.group.reportIds.includes(openReport)} piece={piece} onRelease={() => void actions.release(row.group.person)} />
         ))}
       </ul>
     );
@@ -180,7 +186,7 @@ export function QueuePane({ route, shortcuts }: { route: Route; shortcuts: boole
  * One case. The link opens it (and so claims it); the row's own button releases your claim. In Simple mode a claim is not shown
  * unless someone else holds the case ("maya is on it"), and nothing offers a release: leaving a case lets it go.
  */
-function CaseRow({ row, simple, selected, onRelease }: { row: ShownRow; simple: boolean; selected: boolean; onRelease: () => void }) {
+function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; simple: boolean; selected: boolean; piece: PieceRows | undefined; onRelease: () => void }) {
   const { t, locale, now, me } = useHub();
   const g = row.group;
   const name = groupName(t, g);
@@ -193,62 +199,84 @@ function CaseRow({ row, simple, selected, onRelease }: { row: ShownRow; simple: 
   const more = viewers.length - named.length;
   const viewerText = more > 0 ? t('hub.queue.row.viewingMore', { name: named[0] as string, count: more }) : (named[0] ?? '');
 
+  const inner = (
+    <>
+      <span className="cw-case-main">
+        <span className="cw-case-who">
+          <span className="cw-case-name">{name}</span>
+          {!simple && <PersonChip person={g.person} />}
+        </span>
+        <span className="cw-case-cats">
+          {g.categories.map((c) => (
+            <span key={c} className="cw-cat">
+              {categoryLabel(t, c)}
+            </span>
+          ))}
+        </span>
+        <span className="cw-case-facts">
+          {t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}
+          {row.gone && <span className="cw-case-closed"> {t('hub.queue.row.gone')}</span>}
+        </span>
+      </span>
+      <span className="cw-case-side">
+        <span className="cw-case-wait" title={g.oldestOpenAt === null ? undefined : absoluteTime(g.oldestOpenAt, locale)}>
+          {waiting === null ? '' : t('hub.reports.row.waiting', { duration: formatDuration(waiting, locale) })}
+          {overdue && <span className="cw-sr"> {t('hub.queue.row.overdue')}</span>}
+        </span>
+        {simple ? (
+          holder.kind === 'other' && (
+            <span className="cw-case-claim">
+              <span>{t('hub.simple.claim.rowTheirs', { name: actorName(holder.by) })}</span>
+            </span>
+          )
+        ) : (
+          <span className="cw-case-claim">
+            {holder.kind === 'none' ? (
+              <span className="cw-case-free">
+                {t('hub.queue.row.unclaimed')}
+                <span className="cw-sr"> {t('hub.queue.row.notHandled')}</span>
+              </span>
+            ) : (
+              <>
+                <Avatar actor={holder.by} you={holder.kind === 'you'} size="s" />
+                <span aria-hidden="true">{holder.kind === 'you' ? t('hub.queue.row.you') : actorName(holder.by)}</span>
+                <span className="cw-sr">{holder.kind === 'you' ? t('hub.queue.row.handledByYou') : t('hub.queue.row.handledBy', { name: actorName(holder.by) })}</span>
+              </>
+            )}
+          </span>
+        )}
+        {!simple && viewers.length > 0 && (
+          <span className="cw-case-viewing">
+            <Icon name="eye" />
+            <span aria-hidden="true">{viewerText}</span>
+            <span className="cw-sr">{t('hub.queue.row.viewing', { count: viewers.length, names: listOf(viewers, locale) })}</span>
+          </span>
+        )}
+      </span>
+    </>
+  );
+  const current = selected ? { 'aria-current': 'true' as const } : {};
+  // In the hub a row is a link to the case. In a piece there is no router: a button that tells the adopter's callback, or plain text.
+  const rowFor = (body: ReactNode): ReactNode => {
+    if (piece === undefined) {
+      return (
+        <Link to={route} className="cw-case-link" {...current}>
+          {body}
+        </Link>
+      );
+    }
+    const open = piece.onOpenCase;
+    if (open === undefined) return <div className="cw-case-link" {...current}>{body}</div>;
+    return (
+      <button type="button" className="cw-case-link" {...current} onClick={() => open(g.person, g.reportIds[0] as string)}>
+        {body}
+      </button>
+    );
+  };
+
   return (
     <li className="cw-case" data-wait={overdue ? 'overdue' : 'ok'} data-claim={holder.kind} data-selected={selected ? 'true' : undefined} data-gone={row.gone ? 'true' : undefined}>
-      <Link to={route} className="cw-case-link" {...(selected ? { 'aria-current': 'true' as const } : {})}>
-        <span className="cw-case-main">
-          <span className="cw-case-who">
-            <span className="cw-case-name">{name}</span>
-            {!simple && <PersonChip person={g.person} />}
-          </span>
-          <span className="cw-case-cats">
-            {g.categories.map((c) => (
-              <span key={c} className="cw-cat">
-                {categoryLabel(t, c)}
-              </span>
-            ))}
-          </span>
-          <span className="cw-case-facts">
-            {t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}
-            {row.gone && <span className="cw-case-closed"> {t('hub.queue.row.gone')}</span>}
-          </span>
-        </span>
-        <span className="cw-case-side">
-          <span className="cw-case-wait" title={g.oldestOpenAt === null ? undefined : absoluteTime(g.oldestOpenAt, locale)}>
-            {waiting === null ? '' : t('hub.reports.row.waiting', { duration: formatDuration(waiting, locale) })}
-            {overdue && <span className="cw-sr"> {t('hub.queue.row.overdue')}</span>}
-          </span>
-          {simple ? (
-            holder.kind === 'other' && (
-              <span className="cw-case-claim">
-                <span>{t('hub.simple.claim.rowTheirs', { name: actorName(holder.by) })}</span>
-              </span>
-            )
-          ) : (
-            <span className="cw-case-claim">
-              {holder.kind === 'none' ? (
-                <span className="cw-case-free">
-                  {t('hub.queue.row.unclaimed')}
-                  <span className="cw-sr"> {t('hub.queue.row.notHandled')}</span>
-                </span>
-              ) : (
-                <>
-                  <Avatar actor={holder.by} you={holder.kind === 'you'} size="s" />
-                  <span aria-hidden="true">{holder.kind === 'you' ? t('hub.queue.row.you') : actorName(holder.by)}</span>
-                  <span className="cw-sr">{holder.kind === 'you' ? t('hub.queue.row.handledByYou') : t('hub.queue.row.handledBy', { name: actorName(holder.by) })}</span>
-                </>
-              )}
-            </span>
-          )}
-          {!simple && viewers.length > 0 && (
-            <span className="cw-case-viewing">
-              <Icon name="eye" />
-              <span aria-hidden="true">{viewerText}</span>
-              <span className="cw-sr">{t('hub.queue.row.viewing', { count: viewers.length, names: listOf(viewers, locale) })}</span>
-            </span>
-          )}
-        </span>
-      </Link>
+      {rowFor(inner)}
       {!simple && holder.kind === 'you' && (
         <button type="button" className="cw-case-release" aria-label={t('hub.queue.row.releaseLabel', { who: name })} onClick={onRelease}>
           {t('hub.queue.row.release')}

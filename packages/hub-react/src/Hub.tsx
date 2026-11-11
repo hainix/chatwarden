@@ -1,20 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { ReactNode } from 'react';
-import type { HubClient, HubError } from './client.js';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { CaseProvider } from './case/CaseContext.js';
 import { CaseSession, useCaseActions } from './cases.js';
-import { DecisionProvider } from './decisions.js';
 import type { CommandTarget } from './commands.js';
-import { HubContext, useHub } from './context.js';
-import type { HubContextValue } from './context.js';
-import { useHubData } from './hooks.js';
-import { createT, en } from './i18n.js';
+import { useHub } from './context.js';
+import type { HubClient } from './client.js';
+import type { HubHost } from './headless/controller.js';
 import type { HubT } from './i18n.js';
-import { errorText } from './labels.js';
-import { QueueProvider, useOptionalQueue } from './liveQueue.js';
-import { ModeProvider, useMode, useModeState } from './mode.js';
+import { useOptionalQueue } from './liveQueue.js';
+import { useMode } from './mode.js';
 import type { HubMode } from './mode.js';
 import { permissionFor } from './nav.js';
+import { HubRoot } from './provider.js';
 import { buildPath, hashRouter, memoryRouter, parseRoute } from './router.js';
 import type { HubRouter, Route } from './router.js';
 import { screenFor } from './screens/index.js';
@@ -25,12 +21,7 @@ import { QueuePane } from './shell/QueuePane.js';
 import { Rail } from './shell/Rail.js';
 import { ShortcutSheet } from './shell/ShortcutSheet.js';
 import { TopBar } from './shell/TopBar.js';
-import { ControllerContext } from './controllerContext.js';
-import { createHubController } from './headless/controller.js';
-import type { HubController, HubControllerOptions } from './headless/controller.js';
 import { shortcutFor } from './shortcuts.js';
-import { ToastProvider } from './toasts.js';
-import type { Me, PermissionKey } from './types.js';
 import { Link } from './ui.js';
 
 export interface HubProps {
@@ -62,54 +53,15 @@ export interface HubProps {
   mode?: HubMode;
 }
 
-/** `useLayoutEffect` where there is a page to lay out; on a server (which runs no effects) a plain effect, so React 18 does not warn. */
-const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 const noopSubscribe = (): (() => void) => () => undefined;
-const cx = (...names: Array<string | false | undefined>): string => names.filter(Boolean).join(' ');
-
-// A hub is told its client through a prop; this gives each client object a number so a new client reloads `GET /me`.
-const clientIds = new WeakMap<object, number>();
-let nextClientId = 0;
-function clientId(client: object): number {
-  let id = clientIds.get(client);
-  if (id === undefined) {
-    id = ++nextClientId;
-    clientIds.set(client, id);
-  }
-  return id;
-}
 
 /**
- * One controller for as long as the hub is mounted with this client. A controller that was disposed (StrictMode runs the cleanup
- * once, in development) is replaced. The router is the controller's host: it says which report is open and brings the moderator to one.
+ * The moderator hub, a team workbench: a {@link HubProvider} (which asks `GET /me` first and owns the controller) and the shell that
+ * lays out three panes for what the signed-in role can use: the queue of open cases, the screen or case in the middle, and (beside
+ * an open case) who is handling it. Pass a `client`; everything else has a default. To put single parts of it in your own page,
+ * use `HubProvider` and the pieces instead.
  */
-function useHubController(client: HubClient, make: () => HubControllerOptions): HubController {
-  const [made, setMade] = useState(() => ({ client, controller: createHubController(make()) }));
-  let current = made;
-  if (made.client !== client) {
-    current = { client, controller: createHubController(make()) };
-    setMade(current);
-  }
-  const controller = current.controller;
-  useEffect(() => {
-    if (controller.disposed) {
-      setMade({ client, controller: createHubController(make()) });
-      return undefined;
-    }
-    return () => controller.dispose();
-    // `make` reads refs; a new client makes a new controller.
-  }, [controller]);
-  return controller;
-}
-
-/**
- * The moderator hub, a team workbench. It asks `GET /me` first, then lays out three panes for what the signed-in role can
- * use: the queue of open cases, the screen or case in the middle, and (beside an open case) who is handling it. Pass a
- * `client`; everything else has a default.
- */
-export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme, onNavigate, now, className, gameName, shortcuts = true, mode: modeProp }: HubProps) {
-  const mode = useModeState(modeProp);
-  const t = useMemo(() => tProp ?? createT(en, locale), [tProp, locale]);
+export function Hub({ client, t, locale = 'en', router: routerProp, theme, onNavigate, now, className, gameName, shortcuts = true, mode }: HubProps) {
   const fallbackRouter = useMemo(() => (typeof window === 'undefined' ? memoryRouter('/') : hashRouter()), []);
   const router = routerProp ?? fallbackRouter;
   const subscribe = useCallback((listener: () => void) => router.subscribe?.(listener) ?? noopSubscribe(), [router]);
@@ -123,81 +75,27 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
     // Once per path: a new route object for the same path is not a navigation.
   }, [path]);
 
-  const me = useHubData(`me:${clientId(client)}`, () => client.me());
-
+  // The router is the controller's host: it says which report is open and brings the moderator to one.
   const routerRef = useRef(router);
   routerRef.current = router;
-  const nowRef = useRef(now ?? Date.now);
-  nowRef.current = now ?? Date.now;
-  const tRef = useRef(t);
-  tRef.current = t;
-  // One controller per hub: the session cache, the toasts, the live queue, claims and decisions. It is disposed with the hub, which
-  // sends a decision that is still held.
-  const controller = useHubController(client, () => ({
-    client,
-    now: () => nowRef.current(),
-    t: tRef.current,
-    host: {
-      openReport: () => {
-        const at = parseRoute(routerRef.current.path);
-        return at.name === 'report' ? at.id : null;
-      },
-      show: (id) => routerRef.current.navigate(buildPath({ name: 'report', id })),
-    },
-  }));
-  // The controller is told the words and who is signed in in a layout effect, not while rendering: a component that listens to
-  // `controller.me` must not be updated during another's render. A layout effect runs before any passive effect, so the effects of
-  // the screens below (which open the case and start the queue) already find it told.
-  useIsomorphicLayoutEffect(() => {
-    controller.configure({ t });
-    if (me.data !== undefined) controller.identify(me.data);
-  }, [controller, t, me.data]);
-  const session = controller.session;
-  const value = useMemo<HubContextValue | null>(() => {
-    if (me.data === undefined) return null;
-    const meData: Me = me.data;
-    return {
-      client,
-      t,
-      locale,
-      now: now ?? Date.now,
+  const shell = useMemo(
+    () => ({
       router,
-      session,
-      shortcuts,
-      me: meData,
-      can: (permission: PermissionKey) => meData.can[permission] === true,
-      go: (to) => routerRef.current.navigate(buildPath(to)),
-      href: (to) => {
-        const p = buildPath(to);
-        return routerRef.current.href?.(p) ?? `#${p}`;
-      },
-    };
-  }, [client, t, locale, now, router, session, shortcuts, me.data]);
-
-  let content: ReactNode;
-  if (value === null) {
-    content = <Gate t={t} error={me.error} loading={me.loading} onRetry={me.reload} />;
-  } else {
-    const shell = (
-      <DecisionProvider>
-        <Shell route={route} gameName={gameName} shortcuts={shortcuts} />
-      </DecisionProvider>
-    );
-    content = (
-      <ControllerContext.Provider value={controller}>
-        <HubContext.Provider value={value}>
-          <ModeProvider value={mode}>
-            <ToastProvider>{value.can('reports.read') ? <QueueProvider>{shell}</QueueProvider> : shell}</ToastProvider>
-          </ModeProvider>
-        </HubContext.Provider>
-      </ControllerContext.Provider>
-    );
-  }
+      host: {
+        openReport: () => {
+          const at = parseRoute(routerRef.current.path);
+          return at.name === 'report' ? at.id : null;
+        },
+        show: (id: string) => routerRef.current.navigate(buildPath({ name: 'report', id })),
+      } satisfies HubHost,
+    }),
+    [router],
+  );
 
   return (
-    <div className={cx('cw-hub', className)} {...(theme === 'light' || theme === 'dark' ? { 'data-cw-theme': theme } : {})}>
-      {content}
-    </div>
+    <HubRoot client={client} controller={undefined} t={t} locale={locale} now={now} theme={theme} className={className} shortcuts={shortcuts} mode={mode} shell={shell}>
+      <Shell route={route} gameName={gameName} shortcuts={shortcuts} />
+    </HubRoot>
   );
 }
 
@@ -383,41 +281,5 @@ function NotFound() {
         </Link>
       </div>
     </div>
-  );
-}
-
-/** What shows before the hub knows who is signed in: loading, a sign-in message, no access, or a failed start. */
-function Gate({ t, error, loading, onRetry }: { t: HubT; error: HubError | null; loading: boolean; onRetry: () => void }) {
-  if (error === null) {
-    return (
-      <div className="cw-gate">
-        <p role="status">{loading ? t('hub.gate.loading') : ''}</p>
-      </div>
-    );
-  }
-  if (error.status === 401) {
-    return (
-      <main className="cw-gate">
-        <h1>{t('hub.gate.unauthorized.title')}</h1>
-        <p>{t('hub.gate.unauthorized.body')}</p>
-      </main>
-    );
-  }
-  if (error.status === 403) {
-    return (
-      <main className="cw-gate">
-        <h1>{t('hub.gate.forbidden.title')}</h1>
-        <p>{t('hub.gate.forbidden.body')}</p>
-      </main>
-    );
-  }
-  return (
-    <main className="cw-gate">
-      <h1>{t('hub.gate.failed.title')}</h1>
-      <p role="alert">{errorText(t, error)}</p>
-      <button type="button" className="cw-btn" onClick={onRetry}>
-        {t('hub.state.retry')}
-      </button>
-    </main>
   );
 }

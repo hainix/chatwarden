@@ -2847,6 +2847,82 @@
   }
 }
 
+/* ---- Pieces: the hub's parts placed in somebody else's page ---------------------------------------------------------------- */
+/* The provider's root when it is not the whole page: as tall as its content, clear so the page behind shows, toasts at the corner. */
+.cw-hub--embed {
+  display: block;
+  height: auto;
+  overflow: visible;
+  background: transparent;
+}
+.cw-hub--embed .cw-toasts {
+  left: var(--cw-space-4);
+}
+/* A piece: a box with padding of its own, and the container that the width queries measure (in the shell that is `.cw-main`). It
+   reads no grid area of the shell. */
+.cw-hub .cw-piece {
+  display: block;
+  min-width: 0;
+  padding: var(--cw-space-3);
+  container-type: inline-size;
+  container-name: cwmain;
+}
+.cw-hub .cw-piece--denied {
+  color: var(--cw-ink-muted);
+}
+/* The queue and the workbench are boxes of their own, so they carry their own edge and no outer padding. */
+.cw-hub .cw-piece[data-cw-piece='CaseList'],
+.cw-hub .cw-piece[data-cw-piece='CaseWorkbench'] {
+  padding: 0;
+}
+.cw-hub .cw-piece .cw-queue {
+  max-height: min(36rem, 80dvh);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-m);
+  overflow: hidden;
+}
+.cw-hub .cw-piece .cw-case-link {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.cw-hub .cw-piece button.cw-case-link {
+  cursor: pointer;
+}
+/* The case beside its panel when there is room; stacked when there is not. The page scrolls, not the pane. */
+.cw-hub .cw-wb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-m);
+  background: var(--cw-bg);
+}
+.cw-hub .cw-piece .cw-casepane {
+  display: block;
+  height: auto;
+}
+.cw-hub .cw-piece .cw-case-scroll {
+  overflow: visible;
+}
+@container cwmain (min-width: 52rem) {
+  .cw-hub .cw-wb {
+    grid-template-columns: minmax(0, 1fr) var(--cw-context-width);
+  }
+  .cw-hub .cw-wb .cw-ctx {
+    border-top: 0;
+    border-left: var(--cw-border-width) solid var(--cw-border);
+  }
+}
+@container cwmain (max-width: 30rem) {
+  .cw-hub .cw-piece .cw-scard,
+  .cw-hub .cw-piece .cw-screen {
+    padding-inline: 0;
+  }
+}
+
 /* ---- Motion, forced colours -------------------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: no-preference) {
   .cw-hub .cw-btn,

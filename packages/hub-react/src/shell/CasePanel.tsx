@@ -189,7 +189,7 @@ function People({ people }: { people: ReportPerson[] }) {
               <p className="cw-hint">{p.lines === 0 ? t('hub.report.person.silent') : t('hub.report.person.wrote', { count: p.lines })}</p>
               <RecordLine history={history[p.ref] ?? []} />
               {can('history.read') && (
-                <Link to={{ name: 'person', ref: p.ref }} className="cw-link" aria-label={t('hub.reports.row.historyLabel', { who: name })}>
+                <Link to={{ name: 'person', ref: p.ref }} className="cw-link" omit aria-label={t('hub.reports.row.historyLabel', { who: name })}>
                   {t('hub.reports.row.history')}
                 </Link>
               )}

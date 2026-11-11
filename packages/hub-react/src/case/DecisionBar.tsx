@@ -8,6 +8,7 @@ import { EVIDENCE_MAX, MAX_ACTIONS, REASON_MAX, resolveDraft, toInput } from '..
 import type { Problem, UiVerdict } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
 import { useHubData } from '../hooks.js';
+import { useKeyListener } from '../keyScope.js';
 import { decideErrorText } from '../labels.js';
 import { modKey, keyLabel, isTypingTarget } from '../shortcuts.js';
 import type { Reason, ReportDetail } from '../types.js';
@@ -52,6 +53,7 @@ function ReasonChips({ reasons, onPick }: { reasons: readonly Reason[]; onPick: 
 /** The dock: verdict, plan, reason, and the buttons. All of the case's decision lives here. */
 export function DecisionBar() {
   const { t, can, session, shortcuts, go } = useHub();
+  const listen = useKeyListener();
   const c = useCase();
   const decisions = useDecisions();
   const actions = useCaseActions();
@@ -167,9 +169,8 @@ export function DecisionBar() {
         stateRef.current.setVerdict(hit.verdict);
       }
     };
-    // 7d: this listener is on the whole document. Once pieces can mount several times on a page, keys must be scoped to the hub root.
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    // In the shell this listens on the page; in a piece, on the piece's own root (see `keyScope.ts`).
+    return listen(onKeyDown);
   }, [shortcuts]);
 
   if (report === undefined) return null;

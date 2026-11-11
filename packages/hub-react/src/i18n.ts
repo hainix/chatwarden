@@ -89,6 +89,7 @@ export const en = {
 
   'hub.route.noAccess.title': 'Not available for your role',
   'hub.route.noAccess.body': 'Ask an owner if you need this screen.',
+  'hub.piece.noAccess': "Your role can't open this.",
   'hub.route.notFound.title': 'That page does not exist',
   'hub.route.notFound.body': 'The link may be old or mistyped.',
   'hub.route.notFound.back': 'Back to the overview',

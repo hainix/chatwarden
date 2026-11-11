@@ -51,7 +51,10 @@ export interface HubHost {
   show?: (reportId: string) => void;
 }
 
-/** What a host may change after the controller is made. */
+/**
+ * What a host may change after the controller is made.
+ * @experimental
+ */
 export interface HubControllerSettings {
   t?: HubT;
 }
@@ -110,7 +113,10 @@ export interface HubController {
   retry(reportId: string): Promise<DecisionOutcome | { status: 'none' }>;
   /** Forget a finished, failed or undone decision (its form has been taken back). */
   dismiss(reportId: string): void;
-  /** Tell the controller what the host has changed since it was made: the words. */
+  /**
+   * Tell the controller what the host has changed since it was made: the words.
+   * @experimental
+   */
   configure(patch: HubControllerSettings): void;
   /** True once `dispose()` has run. */
   readonly disposed: boolean;

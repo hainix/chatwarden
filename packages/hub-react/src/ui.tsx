@@ -16,20 +16,41 @@ export type Tone = 'warn' | 'bad' | 'idle' | 'accent';
 
 const cx = (...names: Array<string | false | undefined>): string => names.filter(Boolean).join(' ');
 
-/** A link to a hub route: a real address (it opens in a new tab), and a plain click moves without reloading. */
+/** The classes that make an element look like a link or a button to follow; a part that goes nowhere must not wear them. */
+const goesSomewhere = (className: string | undefined): string | undefined => {
+  const kept = (className ?? '').split(/\s+/).filter((c) => c !== '' && c !== 'cw-link' && !c.startsWith('cw-btn'));
+  return kept.length === 0 ? undefined : kept.join(' ');
+};
+
+/**
+ * A link to a hub route: a real address (it opens in a new tab), and a plain click moves without reloading. In a piece placed in the
+ * adopter's own page there is no router: a route the piece was told about is a button that calls the adopter's callback, and any
+ * other is plain text (or nothing, with `omit`). It never moves the page by itself.
+ */
 export function Link({
   to,
   className,
   children,
+  omit = false,
   ...aria
 }: {
   to: Route;
   className?: string;
   children: ReactNode;
+  /** Draw nothing at all when there is nowhere to go (a "back to the list" that has no list). */
+  omit?: boolean;
   'aria-label'?: string;
   'aria-current'?: 'page' | 'true';
 }) {
-  const { href, go } = useHub();
+  const { href, go, canGo } = useHub();
+  if (canGo !== undefined) {
+    if (!canGo(to)) return omit ? null : <span className={goesSomewhere(className)}>{children}</span>;
+    return (
+      <button type="button" className={className?.split(/\s+/).map((c) => (c === 'cw-link' ? 'cw-linkbtn' : c)).join(' ')} onClick={() => go(to)} {...aria}>
+        {children}
+      </button>
+    );
+  }
   const onClick = (e: MouseEvent<HTMLAnchorElement>): void => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();

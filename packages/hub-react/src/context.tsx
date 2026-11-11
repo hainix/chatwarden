@@ -24,13 +24,20 @@ export interface HubContextValue {
   go: (route: Route) => void;
   /** The address of a route, for a link. */
   href: (route: Route) => string;
+  /**
+   * Set only for a piece placed in the adopter's own page (see `HubProvider`): whether the piece was told where this route goes.
+   * A link to a route it cannot go to is plain text, and one it can go to is a button that calls the adopter's callback; neither
+   * is an address. Left out in the hub, where every link is an `<a href>` to a route of its own.
+   * @experimental
+   */
+  canGo?: (route: Route) => boolean;
 }
 
 export const HubContext = createContext<HubContextValue | null>(null);
 
-/** The hub's context. Throws outside a `<Hub>`: a screen cannot work without one. */
+/** The hub's context. Throws outside a `<Hub>` or `<HubProvider>`: a screen cannot work without one. */
 export function useHub(): HubContextValue {
   const value = useContext(HubContext);
-  if (value === null) throw new Error('useHub must be used inside <Hub>');
+  if (value === null) throw new Error('useHub must be used inside <Hub> or <HubProvider>');
   return value;
 }
