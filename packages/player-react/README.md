@@ -133,7 +133,8 @@ export function ReportMessage({ client, line, name, close }: { client: PlayerCli
 - **Your own controls (`extra`, experimental).** A node placed inside the form under the reason and the note, above Report and Cancel,
   for something of your own, such as an "Also mute this player" checkbox. You own its state; the dialog only places it (spacing, no other
   styling), keeps its controls in the Tab order (reason, note, yours, Report, Cancel) and in the focus trap, and drops it once the report
-  is sent. Send what you chose from your own `onSubmit`:
+  is sent. It is inside the dialog's form, so give your buttons `type="button"`: a plain `<button>`, or Enter in a text field of
+  yours, sends the report. Send what you chose from your own `onSubmit`:
 
 ```tsx
 import { useState } from 'react';

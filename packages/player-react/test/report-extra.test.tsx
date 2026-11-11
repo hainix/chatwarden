@@ -6,6 +6,8 @@ import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps } from '../src/ReportDialog.js';
 import { FIXED, findStatus, renderUi } from './render.js';
 import axe from 'axe-core';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // jsdom paints no colours, so color-contrast is computed from the tokens in static.test.ts; every other rule runs here.
 const axeViolations = async (container: HTMLElement): Promise<string[]> =>
@@ -123,6 +125,47 @@ describe('the extra node (experimental)', () => {
     await user.click(screen.getByRole('button', { name: 'Report' }));
     await screen.findByRole('alert');
     expect(screen.getByRole('checkbox')).toBeChecked();
+  });
+
+  // `extra` sits inside the dialog's <form>, so HTML form rules apply to it: a type="button" control never sends, while a plain
+  // <button> (type submit by default) or Enter in a host text field sends the report. The TSDoc and README say so.
+  it('a type="button" control in extra does not send the report', async () => {
+    const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok()));
+    const onHost = vi.fn();
+    const { user } = renderUi(
+      <ReportDialog {...FIXED} reporting={reporting} onClose={() => undefined} onSubmit={onSubmit} extra={<button type="button" onClick={onHost}>Block</button>} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Block' }));
+    expect(onHost).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Report' })).toBeInTheDocument();
+  });
+
+  it('a checkbox toggled with Space in extra does not send the report', async () => {
+    const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok()));
+    const { user } = renderUi(<Host onSubmit={onSubmit} />);
+    screen.getByRole('checkbox').focus();
+    await user.keyboard(' ');
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('as documented, a button without type="button" in extra sends the report (it is a submit button of the form)', async () => {
+    const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok()));
+    const { user } = renderUi(<ReportDialog {...FIXED} reporting={reporting} onClose={() => undefined} onSubmit={onSubmit} extra={<button>Plain</button>} />);
+    await user.click(screen.getByRole('button', { name: 'Plain' }));
+    await findStatus();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('the TSDoc and the README warn that extra is inside the form (use type="button")', () => {
+    const pkg = join(process.cwd(), 'packages', 'player-react');
+    const src = readFileSync(join(pkg, 'src', 'ReportDialog.tsx'), 'utf8').replace(/\r\n/g, '\n');
+    const readme = readFileSync(join(pkg, 'README.md'), 'utf8').replace(/\r\n/g, '\n');
+    const doc = src.slice(src.lastIndexOf('/**', src.indexOf('extra?: ReactNode')), src.indexOf('extra?: ReactNode'));
+    expect(doc).toContain('type="button"');
+    const section = readme.slice(readme.indexOf('Your own controls (`extra`'), readme.indexOf('## Put it on your server'));
+    expect(section).toContain('type="button"');
   });
 
   it('with no extra there is nothing extra: the form is as before', () => {

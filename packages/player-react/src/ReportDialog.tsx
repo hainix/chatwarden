@@ -57,7 +57,8 @@ export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
    * @experimental Your own controls, placed inside the form under the reason and the note and above Report and Cancel (for example
    * an "Also mute this player" checkbox and a line about false reports). You own their state; the dialog only places them, adds no
    * styling beyond the spacing, and keeps their focusable controls in its Tab order (reason, note, yours, Report, Cancel) and its
-   * focus trap. They are not shown once the report is sent.
+   * focus trap. They are not shown once the report is sent. They sit inside the dialog's form, so give your buttons `type="button"`:
+   * a plain button, or Enter in a text field of yours, sends the report.
    */
   extra?: ReactNode;
 }
