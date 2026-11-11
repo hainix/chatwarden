@@ -3,6 +3,7 @@ import type { Choice, DecisionForm, ValidationContext } from './decision.js';
 import { formatDuration, listOf } from './format.js';
 import type { HubT } from './i18n.js';
 import { lengthPhrase } from './labels.js';
+import { LEGACY_REASON_ALIASES } from '@chatwarden/core';
 import type { ReporterRecord, SanctionGroupView, SanctionKind, Suggestion } from './types.js';
 
 // What Simple mode decides, as plain functions: the body one click sends, the body "No action needed" sends, when a reporter's
@@ -59,6 +60,41 @@ export const reporterDecided = (record: ReporterRecord): number => record.action
 export function reporterWarrants(record: ReporterRecord): boolean {
   const decided = reporterDecided(record);
   return decided >= 3 && record.actioned * 3 < decided;
+}
+
+/** The fewest decided reports before a reporter's reason accuracy is worth saying: fewer is noise. */
+export const ACCURACY_MIN = 3;
+
+/**
+ * How often this reporter's reasons matched what was decided (a report counts when a rule the reason maps to was cited against the reported
+ * person), or null when there are fewer than three decided reports to say it about, or the kit sends no counts (an older kit).
+ */
+export function reasonAccuracy(record: ReporterRecord): { matched: number; decided: number } | null {
+  const decided = record.reasonDecided;
+  const matched = record.reasonMatched;
+  if (typeof decided !== 'number' || typeof matched !== 'number' || decided < ACCURACY_MIN) return null;
+  return { matched: Math.min(matched, decided), decided };
+}
+
+/** Whether the rule a report breaks is clear from what the reporter said it was: one rule (preselect it), or not (ask which). */
+export type RuleChoice = { kind: 'one'; rule: number } | { kind: 'ask'; mapped: number[] };
+
+/**
+ * The rule the reported reason points at. A reason that maps to exactly one rule still in force is clear and preselected (the moderator
+ * can change it); no reason, a reason that maps to none or to several, or one the settings no longer list, asks which rule, leading with
+ * the rules the reason usually means. A retired rule is not counted.
+ */
+export function ruleChoiceOf(
+  reason: string | null,
+  reasons: ReadonlyArray<{ id: string; rules: readonly number[] }>,
+  active: readonly number[],
+): RuleChoice {
+  // An exact id wins; an old category id reads as the reason that replaced it (as the kit does).
+  const alias = reason !== null && Object.hasOwn(LEGACY_REASON_ALIASES, reason) ? LEGACY_REASON_ALIASES[reason] : undefined;
+  const found = reason === null || reason === '' ? undefined : (reasons.find((r) => r.id === reason) ?? reasons.find((r) => r.id === alias));
+  const mapped = [...new Set((found?.rules ?? []).filter((n) => active.includes(n)))].sort((a, b) => a - b);
+  const only = mapped[0];
+  return mapped.length === 1 && only !== undefined ? { kind: 'one', rule: only } : { kind: 'ask', mapped };
 }
 
 /** The lines one person wrote, in order. */

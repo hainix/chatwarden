@@ -5,8 +5,9 @@ import type { Route, SettingsSection } from '../router.js';
 import type { PermissionKey } from '../types.js';
 import { Link } from '../ui.js';
 import { LadderSettingsScreen } from './LadderSettings.js';
+import { ReportingSettingsScreen } from './ReportingSettings.js';
 
-// The settings screen is a list of sections, each its own address (`#/settings/ladder`) and its own component. A new section (Reporting)
+// The settings screen is a list of sections, each its own address (`#/settings/ladder`) and its own component. A new section
 // is one more entry here and one more value of `SettingsSection` in the router: nothing else is restructured. The section list shows
 // only when there is more than one to choose from.
 
@@ -17,7 +18,10 @@ interface Section {
   render: () => ReactNode;
 }
 
-const SECTIONS: readonly Section[] = [{ id: 'ladder', label: 'hub.settings.ladder.nav', need: 'policy.read', render: () => <LadderSettingsScreen /> }];
+const SECTIONS: readonly Section[] = [
+  { id: 'ladder', label: 'hub.settings.ladder.nav', need: 'policy.read', render: () => <LadderSettingsScreen /> },
+  { id: 'reporting', label: 'hub.settings.reporting.nav', need: 'policy.read', render: () => <ReportingSettingsScreen /> },
+];
 
 export function Settings({ section }: { section: SettingsSection }) {
   const { t, can } = useHub();

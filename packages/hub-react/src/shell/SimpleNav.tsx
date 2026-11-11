@@ -28,6 +28,7 @@ const MORE: ReadonlyArray<Omit<Entry, 'id'>> = [
   { route: { name: 'gaps' }, label: 'hub.nav.gaps', permission: 'gaps.read' },
   { route: { name: 'guide' }, label: 'hub.nav.guide', permission: 'policy.read' },
   { route: { name: 'settings', section: 'ladder' }, label: 'hub.settings.ladder.nav', permission: 'policy.read' },
+  { route: { name: 'settings', section: 'reporting' }, label: 'hub.settings.reporting.nav', permission: 'policy.read' },
 ];
 
 /** The entry a route belongs to: Cases holds the overview, the queue, an open case and a person. */

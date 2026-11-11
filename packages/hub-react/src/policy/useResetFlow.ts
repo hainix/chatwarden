@@ -6,7 +6,7 @@ import type { PolicySection, PolicyState } from '../types.js';
 import { SECTION_ORDER } from './model.js';
 import type { Pending } from './useSaveFlow.js';
 
-export type ResetKey = 'lengths' | 'ladder' | 'first' | 'repeat' | 'rules' | 'guidelines' | 'all';
+export type ResetKey = 'lengths' | 'ladder' | 'first' | 'repeat' | 'rules' | 'guidelines' | 'reporting' | 'all';
 
 /** What each Reset covers: the kit's sections (a panel can hold two), and the words for its button and its toast. */
 export const RESETS: Record<ResetKey, { sections: readonly PolicySection[]; what: HubText; done: HubText }> = {
@@ -16,6 +16,8 @@ export const RESETS: Record<ResetKey, { sections: readonly PolicySection[]; what
   repeat: { sections: ['repeat'], what: 'hub.settings.repeat.what', done: 'hub.settings.repeat.done' },
   rules: { sections: ['areaRules', 'severeRules'], what: 'hub.settings.rules.what', done: 'hub.settings.rules.done' },
   guidelines: { sections: ['guidelines'], what: 'hub.settings.guidelines.what', done: 'hub.settings.guidelines.done' },
+  reporting: { sections: ['reporting'], what: 'hub.reporting.what', done: 'hub.reporting.done' },
+  // Everything on the Steps and ladder screen. Reporting has its own screen and its own reset, so this leaves it alone.
   all: { sections: SECTION_ORDER, what: 'hub.settings.reset.all', done: 'hub.settings.reset.all.done' },
 };
 
@@ -53,7 +55,9 @@ export function useResetFlow({ policy, state, editable, pending, onDone, onClose
   };
   const run = async (key: ResetKey, why: string): Promise<void> => {
     if (!editable) return;
-    const sections = key === 'all' ? undefined : sectionsOf(key);
+    // Everything on this screen is one call that names no section, unless reporting has settings saved too (it has its own screen and its
+    // own reset): then only this screen's own sections.
+    const sections = key === 'all' && !saved.includes('reporting') ? undefined : sectionsOf(key);
     pending.current = sections ?? 'all';
     const res = await policy.reset(sections, why);
     if (!res.ok) {

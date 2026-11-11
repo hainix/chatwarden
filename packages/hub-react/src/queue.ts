@@ -14,6 +14,8 @@ export interface QueueGroup {
   handles: string[];
   /** Distinct categories, in the order the newest reports first gave them. */
   categories: ReportCategory[];
+  /** Distinct reasons the reporters gave, in the order the newest reports first gave them (`id` null: no reason given). A hint, never the truth. */
+  reasons: ReportedReason[];
   reports: number;
   open: number;
   actioned: number;
@@ -34,11 +36,17 @@ export interface QueueGroup {
   /** Report ids, newest first. */
   reportIds: string[];
   /** The same reports, newest first, with what a moderator can tell them apart by. */
-  entries: Array<{ id: string; category: ReportCategory; createdAt: number }>;
+  entries: Array<{ id: string; category: ReportCategory; reason: string | null; reasonLabel: string | null; createdAt: number }>;
   /** Who holds the case (the person's open reports share one claim), or null. It may have lapsed: read it with `liveClaim`. */
   claim: Claim | null;
   /** The other staff who have the case open, sorted. A hint, never a lock. */
   viewing: string[];
+}
+
+/** What a reporter said a report was for: a reason id and its label now, or both null for a report that gave none. */
+export interface ReportedReason {
+  id: string | null;
+  label: string | null;
 }
 
 export type QueueSort = 'latest' | 'oldest' | 'reports';
@@ -67,6 +75,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
   for (const [person, list] of byPerson) {
     const handles: string[] = [];
     const categories: ReportCategory[] = [];
+    const reasons: ReportedReason[] = [];
     const rooms = new Set<string>();
     const reporters = new Set<string>();
     const reporterPersons: string[] = [];
@@ -86,6 +95,9 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       }
       if (r.targetHandle !== null && !handles.includes(r.targetHandle)) handles.push(r.targetHandle);
       if (!categories.includes(r.category)) categories.push(r.category);
+      // A server from before reasons sends none at all: that reads as no reason.
+      const reason = r.reportedReason ?? null;
+      if (!reasons.some((x) => x.id === reason)) reasons.push({ id: reason, label: reason === null ? null : (r.reportedReasonLabel ?? reason) });
       if (r.roomId !== '') rooms.add(r.roomId);
       reporters.add(r.reporterPerson);
       if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
@@ -103,6 +115,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       handle: handles[0] ?? null,
       handles,
       categories,
+      reasons,
       reports: list.length,
       open,
       actioned,
@@ -115,7 +128,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       latestAt: (list[0] as ReportSummary).createdAt,
       oldestOpenAt,
       reportIds: list.map((r) => r.id),
-      entries: list.map((r) => ({ id: r.id, category: r.category, createdAt: r.createdAt })),
+      entries: list.map((r) => ({ id: r.id, category: r.category, reason: r.reportedReason ?? null, reasonLabel: r.reportedReason == null ? null : (r.reportedReasonLabel ?? r.reportedReason), createdAt: r.createdAt })),
       claim,
       viewing: [...viewing].sort(),
     });
@@ -159,15 +172,19 @@ export function nextOpenReport(groups: readonly QueueGroup[], person: string, ex
 export interface QueueFilter {
   claim: 'all' | 'unclaimed' | 'mine';
   category: ReportCategory | 'all';
+  /** A reason id, `none` for reports that gave no reason, or `all` (also when left out). */
+  reason?: string;
 }
 
 /**
- * The cases a moderator has asked to see: by who holds them (a lapsed claim is nobody) and by category (a person with any report
+ * The cases a moderator has asked to see: by who holds them (a lapsed claim is nobody) and by category and by reason (a person with any report
  * in it). Order is kept; the input is not changed.
  */
 export function filterGroups(groups: readonly QueueGroup[], filter: QueueFilter, me: string, now: number): QueueGroup[] {
   return groups.filter((g) => {
     if (filter.category !== 'all' && !g.categories.includes(filter.category)) return false;
+    const reason = filter.reason ?? 'all';
+    if (reason !== 'all' && !g.reasons.some((x) => (reason === 'none' ? x.id === null : x.id === reason))) return false;
     const held = liveClaim(g.claim, now);
     if (filter.claim === 'unclaimed') return held === null;
     if (filter.claim === 'mine') return held !== null && held.by === me;

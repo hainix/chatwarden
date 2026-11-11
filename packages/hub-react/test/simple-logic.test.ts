@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { REASON_MAX, toInput, validate } from '../src/decision.js';
 import type { ValidationContext } from '../src/decision.js';
 import { createT, en } from '../src/i18n.js';
-import { noActionForm, oneClickOf, ownLinesOf, recordLine, recordSteps, reporterWarrants, stepLabel } from '../src/simple.js';
+import { noActionForm, oneClickOf, ownLinesOf, reasonAccuracy, recordLine, recordSteps, reporterWarrants, ruleChoiceOf, stepLabel } from '../src/simple.js';
 import type { SanctionGroupView, Suggestion } from '../src/types.js';
 
 // Simple mode's two pure decisions: what one click sends, and when a reporter's record is worth a warning. Every variant of the
@@ -246,5 +246,78 @@ describe('stepLabel: the words on the primary button', () => {
     [{ kind: 'note' as const, durationMs: null }, 'Add a note'],
   ])('%j is "%s"', (choice, expected) => {
     expect(stepLabel(t, 'en', choice)).toBe(expected);
+  });
+});
+
+describe('reasonAccuracy: how often the reporter\'s reasons matched', () => {
+  const rec = (reasonMatched: number, reasonDecided: number) => ({ reports: 9, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched, reasonDecided });
+  it.each([
+    [0, 0, null],
+    [0, 1, null],
+    [1, 2, null],
+    [2, 2, null],
+  ])('%i of %i decided is too few to say anything (%j)', (m, d, expected) => {
+    expect(reasonAccuracy(rec(m, d))).toBe(expected);
+  });
+
+  it.each([
+    [0, 3],
+    [3, 3],
+    [3, 4],
+    [1, 10],
+  ])('%i of %i decided is shown', (m, d) => {
+    expect(reasonAccuracy(rec(m, d))).toEqual({ matched: m, decided: d });
+  });
+
+  it('a kit that does not send the counts shows nothing', () => {
+    const old = { reports: 9, open: 0, actioned: 5, dismissed: 5, badFaith: 0, suspendedUntil: null } as unknown as Parameters<typeof reasonAccuracy>[0];
+    expect(reasonAccuracy(old)).toBeNull();
+  });
+
+  it('never shows more matched than decided', () => {
+    expect(reasonAccuracy(rec(9, 4))).toEqual({ matched: 4, decided: 4 });
+  });
+});
+
+describe('ruleChoiceOf: is the rule clear from the reason?', () => {
+  const reasons = [
+    { id: 'harassment', rules: [2] },
+    { id: 'hate', rules: [1, 2] },
+    { id: 'spam', rules: [4] },
+    { id: 'other', rules: [] as number[] },
+  ];
+  const active = [1, 2, 3, 4, 5];
+  it('a reason that maps to exactly one rule is preselected', () => {
+    expect(ruleChoiceOf('harassment', reasons, active)).toEqual({ kind: 'one', rule: 2 });
+    expect(ruleChoiceOf('spam', reasons, active)).toEqual({ kind: 'one', rule: 4 });
+  });
+
+  it.each([
+    ['no reason', null],
+    ['a reason that maps to nothing', 'other'],
+    ['a reason that maps to two rules', 'hate'],
+    ['a reason the settings no longer list', 'removed'],
+    ['a blank reason', ''],
+  ])('%s asks which rule', (_n, reason) => {
+    expect(ruleChoiceOf(reason, reasons, active).kind).toBe('ask');
+  });
+
+  it('a retired rule is not counted: a reason mapped to one live and one retired rule is clear, and one mapped only to a retired rule asks', () => {
+    expect(ruleChoiceOf('hate', reasons, [2, 3])).toEqual({ kind: 'one', rule: 2 });
+    expect(ruleChoiceOf('spam', reasons, [1, 2, 3])).toEqual({ kind: 'ask', mapped: [] });
+  });
+
+  it('when it asks it says which rules the reason usually means, so the picker can lead with them', () => {
+    expect(ruleChoiceOf('hate', reasons, active)).toEqual({ kind: 'ask', mapped: [1, 2] });
+    expect(ruleChoiceOf(null, reasons, active)).toEqual({ kind: 'ask', mapped: [] });
+  });
+
+  it('an old category id reads as its reason (the kit keeps disruption as griefing)', () => {
+    const list = [{ id: 'griefing', rules: [6] }, { id: 'other', rules: [] as number[] }];
+    expect(ruleChoiceOf('disruption', list, [6])).toEqual({ kind: 'one', rule: 6 });
+  });
+
+  it('repeated rule numbers count once', () => {
+    expect(ruleChoiceOf('x', [{ id: 'x', rules: [2, 2] }], [2])).toEqual({ kind: 'one', rule: 2 });
   });
 });

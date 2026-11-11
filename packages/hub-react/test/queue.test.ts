@@ -43,6 +43,7 @@ describe('groupQueue', () => {
       handle: 'Mallory',
       handles: ['Mallory'],
       categories: ['harassment'],
+      reasons: [{ id: 'harassment', label: 'Insults or harassment' }],
       reports: 1,
       open: 1,
       actioned: 0,
@@ -55,7 +56,7 @@ describe('groupQueue', () => {
       latestAt: T,
       oldestOpenAt: T,
       reportIds: ['r1'],
-      entries: [{ id: 'r1', category: 'harassment', createdAt: T }],
+      entries: [{ id: 'r1', category: 'harassment', reason: 'harassment', reasonLabel: 'Insults or harassment', createdAt: T }],
       claim: null,
       viewing: [],
     });
@@ -99,12 +100,12 @@ describe('groupQueue', () => {
 
   it('keeps each report with its category and time, newest first, beside the ids', () => {
     const [g] = groupQueue([
-      report({ id: 'old', createdAt: T, category: 'hate' }),
-      report({ id: 'new', createdAt: T + 10 * MIN, category: 'spam' }),
+      report({ id: 'old', createdAt: T, category: 'hate', reportedReason: 'hate', reportedReasonLabel: 'Hate' }),
+      report({ id: 'new', createdAt: T + 10 * MIN, category: 'spam', reportedReason: 'spam', reportedReasonLabel: 'Spam or ads' }),
     ]);
     expect(g?.entries).toEqual([
-      { id: 'new', category: 'spam', createdAt: T + 10 * MIN },
-      { id: 'old', category: 'hate', createdAt: T },
+      { id: 'new', category: 'spam', reason: 'spam', reasonLabel: 'Spam or ads', createdAt: T + 10 * MIN },
+      { id: 'old', category: 'hate', reason: 'hate', reasonLabel: 'Hate', createdAt: T },
     ]);
     expect(g?.entries.map((e) => e.id)).toEqual(g?.reportIds);
   });
@@ -242,7 +243,7 @@ describe('groupQueue', () => {
     const [g] = groupQueue([report({ targetPerson: '__proto__' })]);
     expect(g?.person).toBe('__proto__');
     expect(Object.keys(g ?? {}).sort()).toEqual(
-      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reportIds', 'reporterHandles', 'reporterPersons', 'reporters', 'reports', 'rooms', 'viewing'].sort(),
+      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reasons', 'reportIds', 'reporterHandles', 'reporterPersons', 'reporters', 'reports', 'rooms', 'viewing'].sort(),
     );
   });
 });
@@ -367,5 +368,64 @@ describe('filterGroups', () => {
     const before = groups.map((g) => g.person);
     filterGroups(groups, { claim: 'mine', category: 'hate' }, ann, T);
     expect(groups.map((g) => g.person)).toEqual(before);
+  });
+});
+
+describe('reasons: what the reporters said', () => {
+  const ann = 'ann@example.test';
+  const R = (over: Partial<ReportSummary>) => report({ reportedReason: null, reportedReasonLabel: null, ...over });
+  const groups = groupQueue([
+    R({ targetPerson: 'p1', createdAt: T + 3 * MIN, reportedReason: 'harassment', reportedReasonLabel: 'Insults or harassment' }),
+    R({ targetPerson: 'p1', createdAt: T + 2 * MIN }),
+    R({ targetPerson: 'p1', createdAt: T + MIN, reportedReason: 'harassment', reportedReasonLabel: 'Insults or harassment' }),
+    R({ targetPerson: 'p2', reportedReason: 'cheating', reportedReasonLabel: 'Cheating' }),
+    R({ targetPerson: 'p3' }),
+  ]);
+  const people = (list: typeof groups): string[] => list.map((g) => g.person).sort();
+
+  it('a group lists each reason once, newest first, with "no reason" as its own entry', () => {
+    const g = groups.find((x) => x.person === 'p1');
+    expect(g?.reasons).toEqual([
+      { id: 'harassment', label: 'Insults or harassment' },
+      { id: null, label: null },
+    ]);
+  });
+
+  it('each entry of a group carries its reason, so a list of the reports can name it', () => {
+    const g = groups.find((x) => x.person === 'p1');
+    expect(g?.entries.map((e) => [e.reason, e.reasonLabel])).toEqual([
+      ['harassment', 'Insults or harassment'],
+      [null, null],
+      ['harassment', 'Insults or harassment'],
+    ]);
+  });
+
+  it('a report from a server that does not send reasons reads as no reason, and the category is still there', () => {
+    const old = { ...report({ targetPerson: 'p9' }) } as Partial<ReportSummary>;
+    delete old.reportedReason;
+    delete old.reportedReasonLabel;
+    const [g] = groupQueue([old as ReportSummary]);
+    expect(g?.reasons).toEqual([{ id: null, label: null }]);
+    expect(g?.categories).toEqual(['harassment']);
+  });
+
+  it('the reason filter keeps a person who has any report with that reason', () => {
+    expect(people(filterGroups(groups, { claim: 'all', category: 'all', reason: 'harassment' }, ann, T))).toEqual(['p1']);
+    expect(people(filterGroups(groups, { claim: 'all', category: 'all', reason: 'cheating' }, ann, T))).toEqual(['p2']);
+    expect(people(filterGroups(groups, { claim: 'all', category: 'all', reason: 'hate' }, ann, T))).toEqual([]);
+  });
+
+  it('"none" keeps a person who has any report with no reason', () => {
+    expect(people(filterGroups(groups, { claim: 'all', category: 'all', reason: 'none' }, ann, T))).toEqual(['p1', 'p3']);
+  });
+
+  it('"all", or no reason key at all, keeps everything; it combines with the other filters', () => {
+    expect(people(filterGroups(groups, { claim: 'all', category: 'all', reason: 'all' }, ann, T))).toEqual(['p1', 'p2', 'p3']);
+    expect(people(filterGroups(groups, { claim: 'all', category: 'all' }, ann, T))).toEqual(['p1', 'p2', 'p3']);
+    expect(people(filterGroups(groups, { claim: 'mine', category: 'all', reason: 'none' }, ann, T))).toEqual([]);
+  });
+
+  it('a reason id that is also the word "all" or "none" cannot be a studio reason (the kit reserves none), so the words are safe', () => {
+    expect(people(filterGroups(groups, { claim: 'all', category: 'all', reason: 'None' }, ann, T))).toEqual([]);
   });
 });

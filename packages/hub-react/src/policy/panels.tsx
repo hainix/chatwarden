@@ -353,7 +353,7 @@ export function RepeatPanel({ draft, set, problems, reset }: PanelProps) {
 
 // ---- Rules -----------------------------------------------------------------------------------------------------------------
 
-function RulePicker({ field, legend, picked, rules, onChange, problem }: { field: string; legend: string; picked: readonly number[]; rules: readonly CommunityRule[]; onChange: (next: number[]) => void; problem: Problem | undefined }) {
+export function RulePicker({ field, legend, picked, rules, onChange, problem }: { field: string; legend: string; picked: readonly number[]; rules: readonly CommunityRule[]; onChange: (next: number[]) => void; problem: Problem | undefined }) {
   const { t } = useHub();
   const named = (n: number): string => {
     const r = rules.find((x) => x.number === n);

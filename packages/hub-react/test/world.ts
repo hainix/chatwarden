@@ -43,6 +43,8 @@ export interface FileOptions {
   /** Who reports: the same name is the same reporter (the kit allows a few reports a day each). */
   reporter?: string;
   category?: ReportCategory;
+  /** A reason id from the reporting settings, or null for a report that gave none (a one-tap report). Replaces `category`. */
+  reason?: string | null;
   room?: string;
 }
 
@@ -127,7 +129,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     cw.chat.accept(room, 'p1', 'hello there');
     cw.chat.accept(room, 'p2', 'a line from the target');
     clock.t += 1000;
-    const res = await cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', category: o.category ?? 'harassment' });
+    const res = await cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', ...(o.reason === undefined ? { category: o.category ?? 'harassment' } : { reason: o.reason }) });
     if (!res.ok) throw new Error(`report refused: ${res.refused}`);
     const report = cw.reports.get(res.reportId);
     if (report === null) throw new Error('report missing');
@@ -165,7 +167,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
       roomId: room,
       reporterSeat: 'p1',
       targetSeat: 'p2',
-      category: o.category ?? 'harassment',
+      ...(o.reason === undefined ? { category: o.category ?? 'harassment' } : { reason: o.reason }),
       ...(o.note === undefined ? {} : { note: o.note }),
       ...(cite === null || cite < 0 ? {} : { lineId: lineIds[cite] as string }),
     });

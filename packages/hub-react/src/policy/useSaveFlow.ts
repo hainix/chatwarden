@@ -43,6 +43,7 @@ export function useSaveFlow({
   onBlocked,
   onSaved,
   onRefused,
+  fieldOf = fieldKeyOf,
 }: {
   policy: UsePolicy;
   /** The layer to send, or null when the draft has a problem. */
@@ -53,6 +54,8 @@ export function useSaveFlow({
   onBlocked: () => void;
   onSaved: () => void;
   onRefused: (key: string) => void;
+  /** The field a refusal's path names (the ladder's by default). */
+  fieldOf?: (path: string) => string | null;
 }): SaveFlow {
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState('');
@@ -89,7 +92,7 @@ export function useSaveFlow({
     pending.current = null;
     setSaveError(res.error);
     if (res.error.code === 'invalid_profile') {
-      const key = fieldKeyOf(res.error.path ?? '');
+      const key = fieldOf(res.error.path ?? '');
       // A field named: the form closes (the reason is kept) and the field is marked. None named: the form stays, with the sentence.
       if (key !== null) {
         setAsking(false);

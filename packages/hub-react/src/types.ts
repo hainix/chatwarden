@@ -38,6 +38,8 @@ export type ReportStatus = 'open' | 'actioned' | 'dismissed';
 
 export interface ListReportsQuery {
   status?: ReportStatus;
+  /** Only reports that gave this reason (an id; the old `disruption` finds `griefing`), or `null` for the ones that gave none. */
+  reason?: string | null;
   cursor?: string;
   limit?: number;
 }
@@ -51,7 +53,8 @@ export interface Claim {
 
 /** `GET /reports/:id`: the report with each named person's counted history and the ladder's suggestion for the reported person. */
 export interface ReportDetail {
-  report: StaffReport;
+  /** The report, with the label of the reason the reporter gave as it is now (`null`: none given, or an older server). */
+  report: StaffReport & { reportedReasonLabel?: string | null };
   history: Record<string, ActionRecord[]>;
   suggest: Suggestion;
   /** The Community Rule the category maps to, or `"uncovered"`. */

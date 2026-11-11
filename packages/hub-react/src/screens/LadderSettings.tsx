@@ -1,23 +1,20 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Field } from '../case/ActionEditor.js';
 import { useHub } from '../context.js';
-import { Dialog } from '../Dialog.js';
-import { REASON_MAX } from '../decision.js';
-import { useLeaveGuard } from '../leaveGuard.js';
 import { useHubData } from '../hooks.js';
-import { errorText } from '../labels.js';
 import { FirstPanel, GuidelinesPanel, LadderPanel, LengthsPanel, RepeatPanel, RulesPanel } from '../policy/panels.js';
 import type { Problems } from '../policy/panels.js';
 import { Preview } from '../policy/Preview.js';
 import { ResetConfirm } from '../policy/ResetConfirm.js';
 import { dirtySections, draftOf, fieldKeyOf, layerOf, otherSections, setSection } from '../policy/model.js';
 import type { PolicyDraft } from '../policy/model.js';
+import { SaveBar } from '../policy/SaveBar.js';
 import { RESETS, useResetFlow } from '../policy/useResetFlow.js';
 import type { ResetKey } from '../policy/useResetFlow.js';
 import { usePreview } from '../policy/usePreview.js';
+import { useDraftSync } from '../policy/useDraftSync.js';
 import { useSaveFlow } from '../policy/useSaveFlow.js';
-import type { Pending } from '../policy/useSaveFlow.js';
+import { useUnsavedGuard } from '../policy/useUnsavedGuard.js';
 import { usePolicy } from '../policyHooks.js';
 import type { UsePolicy } from '../policyHooks.js';
 import { useToasts } from '../toasts.js';
@@ -62,20 +59,10 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
 
   // After a save or a reset the screen is given the new state: the draft is made from it (all of it after a save; only the sections
   // that were reset after a reset, so edits elsewhere are kept). A state that arrives for another reason leaves the draft alone.
-  const pending: Pending = useRef(null);
-  const seen = useRef(state);
-  useEffect(() => {
-    if (seen.current === state) return;
-    seen.current = state;
-    const p = pending.current;
-    pending.current = null;
-    if (p === 'all') setDraftState(draftOf(state.effective));
-    else if (p !== null) setDraftState((d) => p.reduce((acc, s) => setSection(acc, s, state.effective), d));
-  }, [state]);
-  // A read that failed brings no state: the draft is not waiting for one (a later read for another reason must not replace it).
-  useEffect(() => {
-    if (policy.error !== null) pending.current = null;
-  }, [policy.error]);
+  const pending = useDraftSync(state, policy, {
+    all: (next) => setDraftState(draftOf(next.effective)),
+    sections: (sections, next) => setDraftState((d) => sections.reduce((acc, sec) => setSection(acc, sec, next.effective), d)),
+  });
 
   // The Community Rules, for the rule pickers: read once through the hub's session (it is audited as one `policy.view`).
   const rulesRead = useHubData('settings:rules', () => session.policy());
@@ -149,22 +136,7 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
       <ResetConfirm what={t(RESETS[key].what)} busy={policy.busy} error={reset.error} loses={key === 'all' && isDirty} onConfirm={(why) => void reset.run(key, why)} onCancel={() => reset.close(key)} />
     ) : null;
 
-  // ---- Leaving with unsaved edits ----
-  const [leaving, setLeaving] = useState<(() => void) | null>(null);
-  const dirtyNow = useRef(isDirty);
-  dirtyNow.current = isDirty;
-  useLeaveGuard((proceed) => {
-    if (!dirtyNow.current) return false;
-    setLeaving(() => proceed);
-    return true;
-  });
-  useEffect(() => {
-    if (!isDirty) return undefined;
-    // Closing the tab: the browser asks, in its own words.
-    const warn = (e: BeforeUnloadEvent): void => e.preventDefault();
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [isDirty]);
+  const leaveDialog = useUnsavedGuard(isDirty);
 
   const part = (key: ResetKey, panel: ReactNode): ReactNode => (
     <div className="cw-settings-part">
@@ -174,7 +146,6 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
   );
   const common = { draft, set: setDraft, problems };
   const titles = state.effective.guidelines.map((g) => g.title);
-  const err = save.saveError;
 
   return (
     <div ref={root} className="cw-settings">
@@ -193,95 +164,9 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
       </fieldset>
       <Preview state={preview} rules={rules} rule={rule} onRule={setRule} />
 
-      {editable && (
-        <section className="cw-savebar" aria-label={t('hub.settings.save.form')}>
-          {err !== null && err.code === 'conflict' && (
-            <div className="cw-error" role="alert">
-              <p>
-                <strong>{t('hub.settings.error.conflict')}</strong> {t('hub.settings.error.conflict.body')}
-              </p>
-              <button type="button" className="cw-btn" onClick={reload}>
-                {t('hub.settings.error.reload')}
-              </button>
-            </div>
-          )}
-          {err !== null && err.code === 'invalid_profile' && (
-            <div className="cw-error" role="alert">
-              <p>
-                <strong>{t(refusedField ? 'hub.settings.error.invalid' : 'hub.settings.error.invalid.general')}</strong>{' '}
-                {t(refusedField ? 'hub.settings.error.invalid.body' : 'hub.settings.error.invalid.general.body')}
-              </p>
-            </div>
-          )}
-          {err !== null && err.code !== 'conflict' && err.code !== 'invalid_profile' && (
-            <div className="cw-error" role="alert">
-              <p>{err.code === 'not_supported' ? t('hub.settings.error.unsupported') : errorText(t, err)}</p>
-              {(err.code === 'network' || err.status >= 500 || err.status === 429) && save.asking && (
-                <button type="button" className="cw-btn" onClick={() => void save.submit()}>
-                  {t('hub.state.retry')}
-                </button>
-              )}
-            </div>
-          )}
-          {save.asking ? (
-            <form
-              className="cw-form"
-              noValidate
-              onSubmit={(e) => {
-                e.preventDefault();
-                void save.submit();
-              }}
-            >
-              <Field id={`${base}-reason`} label={t('hub.settings.save.reason')} hint={t('hub.settings.save.reason.hint')} counter={t('hub.decide.counter', { count: save.trimmed.length, max: REASON_MAX })} problem={save.reasonProblem}>
-                {(a) => <textarea {...a} ref={save.reasonBox} rows={2} value={save.reason} onChange={(e) => save.setReason(e.target.value)} />}
-              </Field>
-              <div className="cw-action-foot">
-                <button type="submit" className="cw-btn cw-btn--primary" aria-disabled={policy.busy} aria-busy={policy.busy}>
-                  {t('hub.settings.save')}
-                </button>
-                <button type="button" className="cw-btn" onClick={() => save.setAsking(false)}>
-                  {t('hub.settings.save.cancel')}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="cw-action-foot">
-              <button type="button" className="cw-btn cw-btn--primary" aria-disabled={!isDirty} onClick={save.start}>
-                {t('hub.settings.save')}
-              </button>
-              <button type="button" className="cw-btn" aria-disabled={!isDirty} onClick={() => isDirty && discard()}>
-                {t('hub.settings.discard')}
-              </button>
-              <p className="cw-hint" role="status">
-                {isDirty ? t('hub.settings.dirty', { count: dirty.length }) : t('hub.settings.clean')}
-              </p>
-            </div>
-          )}
-        </section>
-      )}
+      {editable && <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={dirty.length} refusedField={refusedField} idBase={base} onDiscard={discard} onReload={reload} />}
 
-      {leaving !== null && (
-        <Dialog label={t('hub.settings.leave.title')} onClose={() => setLeaving(null)}>
-          <h2>{t('hub.settings.leave.title')}</h2>
-          <p>{t('hub.settings.leave.body')}</p>
-          <div className="cw-action-foot">
-            <button type="button" className="cw-btn cw-btn--primary" onClick={() => setLeaving(null)}>
-              {t('hub.settings.leave.stay')}
-            </button>
-            <button
-              type="button"
-              className="cw-btn"
-              onClick={() => {
-                const go = leaving;
-                setLeaving(null);
-                go();
-              }}
-            >
-              {t('hub.settings.leave.go')}
-            </button>
-          </div>
-        </Dialog>
-      )}
+      {leaveDialog}
     </div>
   );
 }

@@ -224,7 +224,7 @@ export function createHubClient(transport: Transport): HubClient {
   return {
     me: () => get<Me>('/me'),
 
-    listReports: (query = {}) => get<Page<ReportSummary>>('/reports', q({ status: query.status, cursor: query.cursor, limit: query.limit })),
+    listReports: (query = {}) => get<Page<ReportSummary>>('/reports', q({ status: query.status, reason: query.reason === null ? 'none' : query.reason, cursor: query.cursor, limit: query.limit })),
     getReport: (id, options = {}) => get<ReportDetail>(`/reports/${enc(id)}`, q({ level: options.level })),
     suggest: (id, input) => post<Suggestion>(`/reports/${enc(id)}/suggest`, input),
     decide: (id, input, options = {}) => post<DecideResult>(`/reports/${enc(id)}/decide`, input, options),
