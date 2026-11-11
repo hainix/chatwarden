@@ -65,4 +65,11 @@ describe('the element\'s browser smoke runs in CI and in the release checks', ()
     const pkg = JSON.parse(read('packages', 'hub-element', 'package.json')) as { scripts: Record<string, string> };
     expect(pkg.scripts['smoke:browser']).toContain('browser.smoke.test.ts');
   });
+
+  // `npm run --workspace` runs the script from packages/hub-element, where the root vitest.config.ts (which names the
+  // `hub-element` project) is not found: CI failed with "No projects matched the filter". The script must run from the root.
+  it('the package script runs vitest from the repository root, where the projects are defined', () => {
+    const pkg = JSON.parse(read('packages', 'hub-element', 'package.json')) as { scripts: Record<string, string> };
+    expect(pkg.scripts['smoke:browser']).toMatch(/^cd \.\.\/\.\. && vitest run --project hub-element /);
+  });
 });
