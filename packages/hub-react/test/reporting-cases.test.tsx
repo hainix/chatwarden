@@ -322,6 +322,8 @@ describe('Simple: the rule behind a reason', () => {
       held.forEach((r) => r());
       await act(async () => new Promise((r) => setTimeout(r, 50)));
       expect(picker()).toHaveValue('5');
+      // The late answer is dropped: it is not kept, and it does not make the card ask for rule 5 again.
+      expect(w.sent.filter(isSuggest)).toHaveLength(2);
       await user.click(await step());
       await pageHides();
       expect((decides(w)[0]?.body as { actions: Array<{ rule: number }> }).actions[0]?.rule).toBe(5);

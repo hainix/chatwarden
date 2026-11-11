@@ -225,7 +225,7 @@ export function CaseCard() {
   const count = group?.reports ?? null;
   const readAt = useRef<number | null>(count);
   const behind = readAt.current !== null && count !== null && readAt.current !== count;
-  const fresh = !behind && !detail.loading && !pick.busy;
+  const fresh = !behind && !detail.loading;
   const settled = useRef(left);
   settled.current = left;
   useEffect(() => {

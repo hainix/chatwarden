@@ -234,7 +234,7 @@ export function ReasonsPanel({ draft, set, problems, rules }: { draft: Reporting
             className="cw-btn"
             aria-disabled={full}
             onClick={() => {
-              if (full) return;
+              // At the limit `addReason` gives no row (the button is also marked unavailable).
               const next = addReason(draft);
               if (next.key === null) return;
               added.current = next.key;
