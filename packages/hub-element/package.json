@@ -53,6 +53,7 @@
     "src",
     "dist/hub-element.js",
     "dist/index.js",
+    "dist/THIRD_PARTY_NOTICES.txt",
     "README.md",
     "LICENSE"
   ],

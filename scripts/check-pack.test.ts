@@ -401,7 +401,7 @@ describe('a bundled package (hub-element ships dist/*.js, built by esbuild, and 
     bugs: { url: 'https://github.com/hainix/chatwarden/issues' },
     repository: { type: 'git', url: 'git+https://github.com/hainix/chatwarden.git', directory: 'packages/hub-element' },
     scripts: { prepack: 'tsc -b && node build/build.mjs' },
-    files: ['dist/src', 'src', 'dist/hub-element.js', 'dist/index.js', 'README.md', 'LICENSE'],
+    files: ['dist/src', 'src', 'dist/hub-element.js', 'dist/index.js', 'dist/THIRD_PARTY_NOTICES.txt', 'README.md', 'LICENSE'],
     main: './dist/index.js',
     types: './dist/src/index.d.ts',
     exports: {
@@ -415,6 +415,7 @@ describe('a bundled package (hub-element ships dist/*.js, built by esbuild, and 
     'LICENSE',
     'dist/hub-element.js',
     'dist/index.js',
+    'dist/THIRD_PARTY_NOTICES.txt',
     'dist/src/index.d.ts',
     'dist/src/index.d.ts.map',
     'dist/src/standalone.d.ts',
@@ -439,6 +440,18 @@ describe('a bundled package (hub-element ships dist/*.js, built by esbuild, and 
     expect(checkFileList({ pkg: elementPkg(), files }).join('\n')).toMatch(/missing dist\/hub-element\.js/);
     const files2 = elementFiles().filter((f) => f !== 'dist/index.js');
     expect(checkFileList({ pkg: elementPkg(), files: files2 }).join('\n')).toMatch(/missing dist\/index\.js/);
+  });
+  it('is named as bundled with a third-party notices file', () => {
+    expect(BUNDLED['hub-element'].notices).toBe('dist/THIRD_PARTY_NOTICES.txt');
+  });
+  it('requires the third-party notices file (it carries the licences of the code inside the bundles)', () => {
+    const files = elementFiles().filter((f) => f !== 'dist/THIRD_PARTY_NOTICES.txt');
+    expect(checkFileList({ pkg: elementPkg(), files }).join('\n')).toMatch(/missing dist\/THIRD_PARTY_NOTICES\.txt/);
+  });
+  it('requires files to list the notices file', () => {
+    const pkg = elementPkg();
+    pkg.files = ['dist/src', 'src', 'dist/hub-element.js', 'dist/index.js', 'README.md', 'LICENSE'];
+    expect(checkManifest(pkg, 'hub-element').join('\n')).toMatch(/files must be/);
   });
   it('refuses compiled JavaScript under dist/src (a second, unbundled copy that imports React)', () => {
     const files = [...elementFiles(), 'dist/src/element.js'];

@@ -8,7 +8,7 @@ import { bundle } from '../build/build.mjs';
 // script, minified and gzipped.
 //
 // Why this much: the script bundles React and react-dom so a page needs nothing else (no import map, no bundler, no peer to install).
-// Measured on 2026-11-10: 639,750 bytes minified, about 175 KB gzipped (148 KB brotli). Of the raw bytes, hub-react is about 290 KB,
+// Measured on 2026-11-10 (with the third-party licence banners kept): 676,991 bytes minified, 183,555 bytes gzipped at level 9 (155,110 brotli). Of the raw bytes, hub-react is about 290 KB,
 // react-dom and react about 220 KB, the hub's stylesheet about 100 KB and the part of core the hub uses about 20 KB. A team that already ships React should use
 // @chatwarden/hub-react and pay for the hub alone. The budgets were the measured size plus about 6%; raising one is a decision.
 // Raised at 7j to 760 KB raw and 200 KB gzipped: the script bundles hub-react, so the budget has to absorb hub-react's own growth;

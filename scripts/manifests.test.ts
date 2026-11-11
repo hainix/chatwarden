@@ -289,6 +289,7 @@ describe('hub-element', () => {
     expect((element() as { scripts?: Record<string, string> }).scripts?.prepack).toBe('tsc -b && node build/build.mjs');
     expect(element().files).toContain('dist/hub-element.js');
     expect(element().files).toContain('dist/index.js');
+    expect(element().files).toContain('dist/THIRD_PARTY_NOTICES.txt');
   });
   it('dev-depends on what it bundles and on the tools that build and test it, not as peers', () => {
     for (const d of ['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/matcher', '@chatwarden/store-memory', 'react', 'react-dom', 'esbuild', 'jsdom', 'playwright', '@testing-library/dom', '@testing-library/user-event']) {
