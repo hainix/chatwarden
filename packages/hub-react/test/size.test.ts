@@ -5,15 +5,18 @@ import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
 // The package entry, bundled the way an adopter's bundler would see it: React, React DOM and the kit stay outside (they are
-// peers), everything else of ours is in. Minified and gzipped, the entry must stay under 50 KB. The budget was 60 KB, a guess made before the screens existed; it is a staff-only tool on the
+// peers), everything else of ours is in. Minified and gzipped, what a first load fetches must stay under 75 KB. The budget was 60 KB, a guess made before the screens existed; it is a staff-only tool on the
 // adopter's admin route, raised at Task 6 (to 72 KB) so guidance copy is never cut to fit, and again to 84 KB: raised at 7d for the Steps and ladder settings screen (owner-approved feature, 2026-11-10), and to 96 KB at 7i: raised at 7i for the Reporting settings section (owner-approved, 2026-11-10).
-// Lowered to 50 KB at 0.1.3 (hardening): Terms, Blocked, Rule gaps, Audit, Guide, the Steps and ladder and Reporting settings and All
-// actions are now loaded when first opened (React.lazy), so the entry is what every moderator needs at once: 93,041 bytes gzipped
-// before, 48,812 after (50 KB is the new size plus about 5%). The bundle is built with splitting on, as an adopter's bundler splits at
-// a dynamic import(): the entry is measured on its own, and its chunks are checked against the same rules.
+// Lowered to 75 KB at 0.1.3 (hardening): Terms, Blocked, Rule gaps, Audit, Guide, the Steps and ladder and Reporting settings and All
+// actions are now loaded when first opened (React.lazy). What the budget guards is the entry plus every chunk it imports statically
+// (code the entry shares with the lazy screens is fetched up front, so it counts), gzipped as one stream: 93,041 bytes before, 72,829
+// after (-22%; 75 KB is the new size plus about 5%). The lazy-only chunks are another 29,610 bytes gzipped (summed per file), fetched
+// one screen at a time. The entry file on its own is 49,057 (it is also held, to 52 KB, so shared code cannot be moved out of it to
+// pass). The bundle is built with splitting on, as an adopter's bundler splits at a dynamic import().
 
 const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-const BUDGET = 50 * 1024;
+const BUDGET = 75 * 1024;
+const ENTRY_BUDGET = 52 * 1024;
 
 async function bundle() {
   const result = await build({
@@ -45,10 +48,31 @@ async function bundle() {
   const meta = Object.entries(result.metafile.outputs);
   const entryMeta = meta.find(([, o]) => o.entryPoint?.endsWith('src/index.ts') === true)?.[1];
   if (out === undefined || entryMeta === undefined) throw new Error('esbuild produced no entry');
+  // What a browser must fetch before the entry runs: the entry and every chunk reached by a static `import ... from`, followed all the
+  // way down. A dynamic `import()` (a screen loaded on demand) is not part of it. Rollup and webpack fold the shared code into fewer
+  // files, but the bytes are the same.
+  const outputOf = (key: string) => meta.find(([k]) => k === key)?.[1];
+  const eagerNames = new Set<string>();
+  const visit = (key: string): void => {
+    const name = key.split('/').pop() ?? key;
+    if (eagerNames.has(name)) return;
+    eagerNames.add(name);
+    for (const imp of outputOf(key)?.imports ?? []) if (imp.kind === 'import-statement' && !imp.external) visit(imp.path);
+  };
+  visit(meta.find(([, o]) => o === entryMeta)?.[0] ?? '');
+  const eager = outputs.filter((o) => eagerNames.has(o.name));
+  const eagerBytes = eager.reduce((n, o) => n + o.bytes, 0);
+  // One stream, gzipped as it would be if it were one file: the honest first-load figure.
+  const eagerGzip = gzipSync(Buffer.concat(eager.map((o) => Buffer.from(o.text))), { level: 9 }).byteLength;
+  const lazyGzip = outputs.filter((o) => !eagerNames.has(o.name)).reduce((n, o) => n + o.gzip, 0);
   return {
     text: out.text,
     bytes: out.bytes,
     gzip: out.gzip,
+    /** The entry, the chunks it imports statically (all of them eager), and the chunks loaded on demand. */
+    eager: { files: eager.length, bytes: eagerBytes, gzip: eagerGzip },
+    lazyGzip,
+    lazyFiles: outputs.length - eager.length,
     /** The entry and every chunk. */
     all: outputs,
     /** The source files the entry itself carries. */
@@ -60,11 +84,21 @@ async function bundle() {
 }
 
 describe('bundle size', () => {
-  it('is under 50 KB gzipped with React and the kit external', async () => {
-    const { bytes, gzip } = await bundle();
-    console.log(`hub-react bundle: ${bytes} bytes minified, ${gzip} bytes gzipped (budget ${BUDGET})`);
-    expect(gzip).toBeLessThan(BUDGET);
+  it('the code a first load fetches (the entry and the chunks it imports statically) is under budget, gzipped', async () => {
+    const { eager, gzip, bytes, lazyGzip, lazyFiles } = await bundle();
+    console.log(
+      `hub-react eager: ${eager.files} files, ${eager.bytes} bytes minified, ${eager.gzip} bytes gzipped (budget ${BUDGET}); entry file alone ${bytes} / ${gzip} gzipped; ${lazyFiles} lazy chunks ${lazyGzip} gzipped`,
+    );
+    expect(eager.gzip).toBeLessThan(BUDGET);
+    expect(gzip).toBeLessThan(ENTRY_BUDGET);
     expect(bytes).toBeGreaterThan(5_000);
+  });
+
+  it('the screens loaded on demand are worth having: they are a real share of what the hub holds', async () => {
+    const { eager, lazyGzip } = await bundle();
+    // If this fell to nothing, the split would be doing no work (or the closure above would be measuring the wrong files).
+    expect(lazyGzip).toBeGreaterThan(15 * 1024);
+    expect(eager.gzip).toBeGreaterThan(30 * 1024);
   });
 
   it('bundles none of React, React DOM or the kit', async () => {

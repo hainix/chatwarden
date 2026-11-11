@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { Component } from 'react';
 import type { ReactNode } from 'react';
@@ -127,5 +127,36 @@ describe('lazyScreen', () => {
     gate.resolve(Hello);
     await screen.findByText('Hello Ada');
     expect(shown).toHaveBeenCalledTimes(1);
+  });
+
+  it('tells the shell about a failed load too, with the error block, so focus can go to it', async () => {
+    const shown = vi.fn();
+    const Screen = lazyScreen<{ name: string }>('hub.state.what.terms', () => Promise.reject(new Error('x')));
+    await inHub(
+      <ScreenShown.Provider value={shown}>
+        <Screen name="Ada" />
+      </ScreenShown.Provider>,
+    );
+    const alert = await screen.findByRole('alert');
+    expect(shown).toHaveBeenCalledTimes(1);
+    expect((shown.mock.calls[0]?.[0] as HTMLElement).contains(alert)).toBe(true);
+  });
+
+  it('a failed load takes no focus outside the hub shell (a piece sits in another page)', async () => {
+    const Screen = lazyScreen<{ name: string }>('hub.state.what.terms', () => Promise.reject(new Error('x')));
+    await inHub(<Screen name="Ada" />);
+    await screen.findByRole('alert');
+    expect(document.body).toHaveFocus();
+  });
+
+  it('after Try again has failed twice it suggests reloading the page; before that it does not', async () => {
+    const Screen = lazyScreen<{ name: string }>('hub.state.what.guide', () => Promise.reject(new Error('stale')));
+    await inHub(<Screen name="Ada" />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('alert')).not.toHaveTextContent(/reload/i);
+    await user.click(await screen.findByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getByText(/reload the page/i)).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
 });

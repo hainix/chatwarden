@@ -63,6 +63,9 @@ export interface LiveQueueState {
   pending: ReadonlySet<string>;
 }
 
+/** The least time between two `refresh()` reads. */
+const REFRESH_MIN_MS = 1_000;
+
 /**
  * One hold on a live queue (see `acquire`).
  * @experimental
@@ -98,7 +101,10 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   retryNow: () => void;
   /**
    * Poll the change token now, as a normal poll would (and read the queue when it moved). Only reads: it sends nothing that writes.
-   * Does nothing while the queue is not running, after `dispose`, while the browser is offline, or once the session has ended.
+   * Does nothing while the queue is not running (before `start`), after `dispose`, while the browser is offline, or once the session has
+   * ended. At most one read a second: a call made while a read is on its way is ignored, and one made within a second of the last
+   * refresh is held and sent once, when the second is up (calls in between add nothing). Do not call it in a loop: it is for "something
+   * just changed", not for polling; the queue polls by itself.
    */
   refresh: () => void;
   /** The server told us a claim (or that there is none); show it at once rather than at the next poll. */
@@ -187,6 +193,13 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   let retryAfterMs = 0;
   let takeBusy = false;
   let takeTimer: unknown;
+  // `refresh()`: when it last read, and the trailing read that is waiting for the second to be up (undefined: none).
+  let lastRefresh = Number.NEGATIVE_INFINITY;
+  let refreshTimer: unknown;
+  const refreshNow = (): void => {
+    lastRefresh = timers.now();
+    run?.kick();
+  };
   let run: Run | null = null;
   let disposed = false;
 
@@ -340,6 +353,8 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   const holds = new Set<object>();
   let kept = false;
   const halt = (): void => {
+    timers.clearTimeout(refreshTimer);
+    refreshTimer = undefined;
     run?.stop();
     run = null;
     timers.clearTimeout(takeTimer);
@@ -397,8 +412,20 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
       run?.kick();
     },
     refresh() {
-      if (disposed || authStopped || !page.online()) return;
-      run?.kick();
+      if (disposed || authStopped || !page.online() || run === null) return;
+      // A read is on its way: it answers this call. (It must not reach the poll timer either.)
+      if (busy) return;
+      // A trailing read is already waiting: it answers this call too.
+      if (refreshTimer !== undefined) return;
+      const wait = lastRefresh + REFRESH_MIN_MS - timers.now();
+      if (wait > 0) {
+        refreshTimer = timers.setTimeout(() => {
+          refreshTimer = undefined;
+          if (!disposed && !busy && !authStopped && page.online()) refreshNow();
+        }, wait);
+        return;
+      }
+      refreshNow();
     },
     patchClaim: (person, claim) => patch(person, (g) => ({ ...g, claim })),
     patchViewing: (person, viewers) => patch(person, (g) => ({ ...g, viewing: [...viewers].sort() })),

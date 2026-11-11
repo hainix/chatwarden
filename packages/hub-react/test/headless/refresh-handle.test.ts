@@ -60,25 +60,94 @@ describe('controller.refresh()', () => {
     expect(r.count('GET', '/audit')).toBe(0);
   });
 
-  it('does not move the next poll: the loop goes on at its own pace afterwards', async () => {
+  it('the poll loop goes on after it: the next poll is a full interval after the refresh, not before', async () => {
     const r = await running();
+    await r.timers.advance(3_000);
+    const before = changes(r);
     r.controller.refresh();
     await settle();
-    const after = changes(r);
+    expect(changes(r)).toBe(before + 1);
+    // The loop asks again one whole interval after the read the refresh made (it was due at 5 s; it is now due at 8 s).
     await r.timers.advance(4_900);
-    expect(changes(r)).toBe(after);
+    expect(changes(r)).toBe(before + 1);
     await r.timers.advance(200);
-    expect(changes(r)).toBe(after + 1);
+    expect(changes(r)).toBe(before + 2);
   });
 
-  it('twice in a row: each is one read (the second waits for the first if it is still on its way)', async () => {
+  it('twice within a second: the second waits and is sent once the second is up (a trailing read), not at once', async () => {
     const r = await running();
     const before = changes(r);
     r.controller.refresh();
     await settle();
     r.controller.refresh();
     await settle();
+    expect(changes(r)).toBe(before + 1);
+    await r.timers.advance(900);
+    expect(changes(r)).toBe(before + 1);
+    await r.timers.advance(150);
     expect(changes(r)).toBe(before + 2);
+  });
+
+  it('called in a loop (each call after the last read answered): one read now, one trailing read, however many calls', async () => {
+    const r = await running();
+    const before = changes(r);
+    for (let i = 0; i < 50; i += 1) {
+      r.controller.refresh();
+      await settle(2);
+    }
+    await r.timers.advance(1_100);
+    expect(changes(r)).toBe(before + 2);
+    await r.timers.advance(900);
+    // Nothing more is queued behind them: the next read is the poll's own.
+    expect(changes(r)).toBe(before + 2);
+  });
+
+  it('called 50 times at once: one read (the others are answered by it)', async () => {
+    const r = await running();
+    const before = changes(r);
+    for (let i = 0; i < 50; i += 1) r.controller.refresh();
+    await settle();
+    await r.timers.advance(2_000);
+    expect(changes(r)).toBe(before + 1);
+  });
+
+  it('after a second of quiet it reads at once again', async () => {
+    const r = await running();
+    const before = changes(r);
+    r.controller.refresh();
+    await settle();
+    await r.timers.advance(1_000);
+    r.controller.refresh();
+    await settle();
+    expect(changes(r)).toBe(before + 2);
+  });
+
+  it('a call while a read is on its way is ignored, and leaves the poll timer alone', async () => {
+    const r = await running();
+    await r.timers.advance(3_000);
+    const before = changes(r);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    r.w.intercept.fn = async (req) => {
+      if (req.path === '/changes') await held;
+      return undefined;
+    };
+    r.controller.refresh();
+    await settle();
+    const timersWaiting = r.timers.count();
+    r.controller.refresh();
+    r.controller.refresh();
+    await settle();
+    expect(r.timers.count()).toBe(timersWaiting);
+    release();
+    await settle();
+    r.w.intercept.fn = null;
+    // One read for the refresh; the two calls made meanwhile asked for nothing, and no trailing read is waiting.
+    expect(changes(r)).toBe(before + 1);
+    await r.timers.advance(2_000);
+    expect(changes(r)).toBe(before + 1);
   });
 
   it('does nothing before the queue is running (no read, no throw)', async () => {

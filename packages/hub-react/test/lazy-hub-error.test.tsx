@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
@@ -19,10 +19,15 @@ describe('a lazy screen that fails to load', () => {
   it('shows the error block with Try again, and a retry brings the screen in (detailed)', async () => {
     attempts.n = 0;
     const w = await hubWorld({ role: 'owner' });
-    const { user, router } = renderHub(w, { path: '/guide', mode: 'detailed' });
-    const main = await screen.findByRole('main');
-    const alert = await within(main).findByRole('alert');
+    const { user, router, container } = renderHub(w, { path: '/', mode: 'detailed' });
+    await screen.findByRole('heading', { level: 2, name: /Overview|Cases/ });
+    router.navigate('/guide');
+    const alert = await screen.findByRole('alert');
+    const main = screen.getByRole('main');
     expect(alert).toHaveTextContent('Could not load the guide.');
+    // The moderator moved here: the error takes the focus (the heading it replaces would have) and is announced.
+    await waitFor(() => expect(document.activeElement).toContainElement(alert));
+    expect(container.querySelector('[aria-live="polite"]')).toHaveTextContent('Could not load the guide.');
     expect(alert).not.toHaveTextContent('Failed to fetch');
     // The shell around it is alive: the way to another screen is still there.
     expect(screen.getByRole('banner')).toBeTruthy();

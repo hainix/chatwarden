@@ -16,7 +16,7 @@ import { HubRoot } from './provider.js';
 import { buildPath, hashRouter, memoryRouter, parseRoute } from './router.js';
 import type { HubRouter, Route } from './router.js';
 import { screenFor } from './screens/index.js';
-import { ScreenShown } from './screens/lazy.js';
+import { ScreenShown, isFocusFree } from './screens/lazy.js';
 import { ConnectionBanner } from './shell/Banner.js';
 import { CasePanel } from './shell/CasePanel.js';
 import { CommandBar } from './shell/CommandBar.js';
@@ -149,12 +149,15 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
   const shownBefore = useRef<string | null>(null);
   // The person moved to a screen and its heading has not yet had the focus: a screen that loads on demand arrives after the move.
   const focusPending = useRef(false);
-  const focusHeading = useCallback((): void => {
-    const heading = mainRef.current?.querySelector<HTMLElement>('.cw-screen-title');
-    if (heading === null || heading === undefined) return;
+  /** Where focus was when the person moved: a closing window has just given it back, and a screen that arrives later may still take it from there. */
+  const focusAtMove = useRef<Element | null>(null);
+  const focusHeading = useCallback((failed?: HTMLElement): void => {
+    // The screen's heading, or (a screen that could not load) the error that stands in its place.
+    const target = failed ?? mainRef.current?.querySelector<HTMLElement>('.cw-screen-title') ?? null;
+    if (target === null) return;
     focusPending.current = false;
-    heading.focus();
-    setAnnouncement(heading.textContent ?? '');
+    target.focus();
+    setAnnouncement(failed === undefined ? (target.textContent ?? '') : (failed.querySelector('strong')?.textContent ?? ''));
   }, []);
   useEffect(() => {
     const previous = shownBefore.current;
@@ -162,12 +165,22 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
     // Not on the first screen: the person has not moved anywhere yet.
     if (previous === null || previous === screenKey) return;
     focusPending.current = true;
+    focusAtMove.current = activeOf(mainRef.current);
     focusHeading();
   }, [screenKey, focusHeading]);
-  // A lazy screen has come in: if the person moved here and the heading was not there yet, it takes the focus now.
-  const onScreenShown = useCallback((): void => {
-    if (focusPending.current) focusHeading();
-  }, [focusHeading]);
+  // A lazy screen has come in (or failed to) after the person moved here. It takes the focus only if the focus is still nowhere: a
+  // moderator who has since opened the command bar, tabbed into the queue or started typing keeps it where they put it.
+  const onScreenShown = useCallback(
+    (failed?: HTMLElement): void => {
+      if (!focusPending.current) return;
+      if (!isFocusFree(mainRef.current, focusAtMove.current)) {
+        focusPending.current = false;
+        return;
+      }
+      focusHeading(failed);
+    },
+    [focusHeading],
+  );
 
   const needed = permissionFor(route);
   const allowed = needed === null || can(needed);

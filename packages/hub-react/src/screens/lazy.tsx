@@ -1,8 +1,9 @@
-import { Component, Suspense, createContext, lazy, useContext, useEffect, useLayoutEffect } from 'react';
+import { Component, Suspense, createContext, lazy, useContext, useEffect, useLayoutEffect, useRef } from 'react';
 import type { ComponentType, LazyExoticComponent, ReactNode } from 'react';
 import { toHubError } from '../client.js';
 import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
+import { activeOf } from '../dom.js';
 import type { HubText } from '../i18n.js';
 import { ErrorBlock, Loading } from '../ui.js';
 
@@ -12,8 +13,21 @@ import { ErrorBlock, Loading } from '../ui.js';
 //
 // With a bundler that does not split (the single-file `<chatwarden-hub>`), the `import()` is part of the one file: nothing is fetched.
 
-/** What the shell hears when a lazy screen has come in, so keyboard focus can follow a screen that arrived after the move. */
-export const ScreenShown = createContext<(() => void) | null>(null);
+/**
+ * What the shell hears when a lazy screen has come in, or has failed to (it is then given the error block), so keyboard focus can follow
+ * a screen that arrived after the move. A piece has no shell above it: it hears nothing and takes no focus.
+ */
+export const ScreenShown = createContext<((failed?: HTMLElement) => void) | null>(null);
+
+/**
+ * Focus is where it was when the moderator moved here, or nowhere (the page, or the main area): a screen that arrives late may take it.
+ * Anywhere else the moderator has put it since (the command bar, the queue, a filter), and it stays. Asks the root `main` is in, so it
+ * is right inside a shadow root too (see dom.ts).
+ */
+export function isFocusFree(main: HTMLElement | null, atMove: Element | null): boolean {
+  const active = activeOf(main);
+  return active === null || active.tagName === 'BODY' || active === atMove || active === main || (main !== null && main.contains(active));
+}
 
 const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
@@ -54,7 +68,11 @@ class LoadBoundary extends Component<BoundaryProps, BoundaryState> {
     return { error };
   }
 
+  /** How many times Try again has been used: a failure that keeps coming back is probably a stale page, which only a reload fixes. */
+  private retries = 0;
+
   private retry = (): void => {
+    this.retries += 1;
     this.props.onRetry();
     this.setState({ error: null });
   };
@@ -64,16 +82,33 @@ class LoadBoundary extends Component<BoundaryProps, BoundaryState> {
     // Only a failed fetch is shown here: anything else goes on up to the page's own boundary, as it would have before.
     if (error !== null && !(error instanceof LoadFailure)) throw error;
     if (error === null) return this.props.children();
-    return <Failed what={this.props.what} reason={error.reason} onRetry={this.retry} />;
+    return <Failed what={this.props.what} reason={error.reason} onRetry={this.retry} retried={this.retries > 0} reload={this.retries >= RELOAD_AFTER} />;
   }
 }
 
-function Failed({ what, reason, onRetry }: { what: HubText; reason: unknown; onRetry: () => void }) {
+/** Try again that has failed this many times suggests reloading the page. */
+const RELOAD_AFTER = 2;
+
+function Failed({ what, reason, onRetry, retried, reload }: { what: HubText; reason: unknown; onRetry: () => void; retried: boolean; reload: boolean }) {
   const { t } = useHub();
   const error: HubError = toHubError(reason);
+  const box = useRef<HTMLDivElement>(null);
+  const shown = useContext(ScreenShown);
+  // In the hub's shell the error stands where the screen's heading would have, so it takes the focus (if the shell says it may) and is announced.
+  useIsomorphicLayoutEffect(() => {
+    const element = box.current;
+    if (element === null || shown === null) return;
+    shown(element);
+    // Try again removed the button that had the focus; the new failure is where it goes back to, so it is read out again.
+    const active = activeOf(element);
+    if (retried && (active === null || active.tagName === 'BODY')) element.focus();
+  }, [shown]);
   return (
     <div className="cw-screen">
-      <ErrorBlock error={error} what={t(what)} onRetry={onRetry} />
+      <div ref={box} tabIndex={-1}>
+        <ErrorBlock error={error} what={t(what)} onRetry={onRetry} />
+        {reload && <p className="cw-hint">{t('hub.state.reloadHint')}</p>}
+      </div>
     </div>
   );
 }

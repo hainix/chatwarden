@@ -131,7 +131,8 @@ export interface HubController {
    * through the same kit) calls this so the moderator sees it without the wait. It only reads (`GET /changes`, and the queue when the
    * token moved): it adds no audit entry beyond what a normal poll does, and it changes no permission. It does nothing while the queue is
    * not running (before `start()`, a role that cannot read reports, after `dispose()`), while the browser is offline, or once the staff
-   * session has ended.
+   * session has ended. At most one read a second: a call made while a read is on its way is ignored, and one made within a second of the
+   * last is held and sent once when the second is up. Do not call it in a loop: it is for "something just changed", the queue polls by itself.
    * @experimental
    */
   refresh(): void;
