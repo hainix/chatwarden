@@ -493,7 +493,7 @@ export interface Chatwarden {
   };
   /**
    * The staff audit trail: who (actor and role) did what to which id, and when. Staff only. Stores ids and the action
-   * name, never chat text, a reason or a note. Rows from the term editor and from `gaps.close` read here too (role
+   * name, never chat text or a note (a `policy.update` / `policy.reset` row also holds the sections changed and the owner's reason). Rows from the term editor and from `gaps.close` read here too (role
    * null). Kept `retention.auditMs` (default 365 days, at least 90).
    */
   audit: {

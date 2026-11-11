@@ -1,5 +1,5 @@
 import { isValidAuditActor, safeWarn } from '@chatwarden/core';
-import type { AuditAction, AuditTarget, Chatwarden, Logger, Role } from '@chatwarden/core';
+import type { AuditAction, AuditDetail, AuditTarget, Chatwarden, Logger, Role } from '@chatwarden/core';
 import { guard, requireAuthz, requireRole } from '../auth.js';
 import type { Authenticate } from '../auth.js';
 import { withErrors } from '../errors.js';
@@ -36,8 +36,9 @@ export interface AdminCall {
    *   nothing is shown that was not recorded.
    * - `'best-effort'` (for a write that has already committed): the failure is logged (`chatwarden.http_audit_failed`,
    *   no detail) and the answer stands.
+   * `detail` is for `policy.update` and `policy.reset` only: the sections changed and the reason.
    */
-  audit(action: AuditAction, target?: AuditTarget, mode?: 'required' | 'best-effort'): void;
+  audit(action: AuditAction, target?: AuditTarget, mode?: 'required' | 'best-effort', detail?: AuditDetail): void;
 }
 
 /** The shared parts of the staff API: build every admin route with `secure`, so none can skip auth or the audit. */
@@ -114,7 +115,7 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
           params,
           authz,
           need: (p) => void requireRole(authz, p, permissions),
-          audit: (action, target, mode = 'required') => {
+          audit: (action, target, mode = 'required', detail) => {
             let written: boolean;
             try {
               written = cw.audit.record({
@@ -122,6 +123,7 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
                 role: authz.role,
                 action,
                 ...(target === undefined ? {} : { target }),
+                ...(detail === undefined ? {} : { detail }),
               });
             } catch {
               written = false;

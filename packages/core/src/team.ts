@@ -85,7 +85,7 @@ function isBusy(err: unknown): boolean {
  * loser of a race for a case sees the winner's claim and answers the normal "claimed", not an error. Bounded by
  * {@link CLAIM_BUSY_TRIES}; any other error, and the last busy one, is thrown.
  */
-function retryBusy<T>(run: () => T): T {
+export function retryBusy<T>(run: () => T): T {
   for (let attempt = 1; ; attempt++) {
     try {
       return run();

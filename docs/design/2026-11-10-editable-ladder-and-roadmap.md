@@ -77,6 +77,26 @@ Where the kit stood:
   - New permission `policy.write`, for the owner only.
   - Each change is audited as `policy.update`, with the sections changed and the reason.
 
+### As built in the kit (Task 7f)
+
+- **`cw.profile` is live.** It is a getter that returns the effective profile (base, then the stored layer), deep-frozen; it is a
+  new object after a save, so nothing may keep one. `suggest`, `cw.summary`, `cw.documents.*` (the guide, the code of conduct, the
+  agent brief, `policyJson`) and the staff routes read it at call time.
+- **`cw.policy`:** `get()` returns `{ effective, base, layer, version, canSave }` (plus `layerError` for a stored layer the kit
+  cannot use, which is ignored and logged once); `save(layer, { version, actor, reason })`, `preview(layer, rule?)`,
+  `reset(section?)` and `refresh()`. A save replaces the whole layer; a section left out goes back to the base.
+- **Layer shape:** `durations`, `customDuration`, `ladder` (all 6 rows, cells without a `label` get a generated one),
+  `firstOffense`, `repeat`, `areaRules`, `severeRules`, and `guidelines` as `[{ outcome } | null]` by tier position. Anything
+  else, `profanity` included, is refused with the path.
+- **Versions and refresh:** version 0 is "nothing stored". A save with a stale version is `conflict`. A read looks at the store
+  at most every 10 seconds (the kit's clock), so another process sees a save within that time.
+- **Lengths:** `durations` is only the offered list; the kit still accepts any valid length up to 365 days. With
+  `customDuration` off the staff decide and sanction routes refuse a length that is not in `durations`, not one of the
+  profile's own lengths (the ladder cells, the first offences, the repeat rule) and not permanent: 400 `duration_not_offered`.
+  The incoming webhook is not restricted.
+- **Audit:** `policy.update` and `policy.reset` rows carry `detail: { sections, reason? }`: section names and the owner's reason,
+  never the values.
+
 ### The hub
 
 - **Settings, then "Steps and ladder"** (under More in Simple). The owner edits; seniors and moderators read. The sections are:

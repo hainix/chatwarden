@@ -7,6 +7,7 @@ import type { AdminOptions } from './context.js';
 import { gapRoutes } from './gaps.js';
 import { meRoutes } from './me.js';
 import { policyRoutes } from './policy.js';
+import { policyProfileRoutes } from './policyProfile.js';
 import type { PolicyOptions } from './policy.js';
 import { reportRoutes } from './reports.js';
 import { sanctionRoutes } from './sanctions.js';
@@ -48,7 +49,7 @@ export interface AdminRoutesOptions extends AdminOptions, PolicyOptions {
 /**
  * The staff API as a route table: hand it to `createRouter` (alone, or spread beside your own routes). Every route is
  * authenticated by `options.authorize`, needs a permission, and writes its audit row. All groups (reports, sanctions,
- * gaps, terms, policy, audit, and the team's claims, change token and saved reasons) are built from one `createAdminContext`, so there is one auth and audit path.
+ * gaps, terms, policy and the editable profile, audit, and the team's claims, change token and saved reasons) are built from one `createAdminContext`, so there is one auth and audit path.
  */
 export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteTable {
   const ctx = createAdminContext(cw, options);
@@ -64,6 +65,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
       ...(options.gameName === undefined ? {} : { gameName: options.gameName }),
       ...(options.contactUrl === undefined ? {} : { contactUrl: options.contactUrl }),
     }),
+    ...policyProfileRoutes(ctx),
     ...auditRoutes(ctx),
   };
 }

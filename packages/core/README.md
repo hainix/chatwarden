@@ -124,7 +124,8 @@ For the moderators' screens and the player's notices, mount the routes in
 | `cw.doors` | `check` a person at the door (login, join) against bans. |
 | `cw.names.check` | May a player use this as a name? |
 | `cw.history`, `cw.suggest` | A person's recent record, and what the preset suggests as the next step. |
-| `cw.rules`, `cw.profile`, `cw.limits`, `cw.summary`, `cw.documents` | The rules, standard and numbers in force, and the written code of conduct and guides. |
+| `cw.rules`, `cw.profile`, `cw.limits`, `cw.summary`, `cw.documents` | The rules, standard and numbers in force, and the written code of conduct and guides. `cw.profile` and `cw.summary` are read live: the profile in force is your code's profile with the owner's stored edits on top (see "The editable profile"), so read it when you need it and never keep it. |
+| `cw.policy` | The editable profile: `get`, `save`, `preview`, `reset` and `refresh`. The lengths a moderator is offered, the ladder, the first offences, the repeat rule, the area and severe rules and the guideline outcome texts can be edited at runtime and are stored in your store. |
 | `cw.gaps`, `cw.audit` | Rule gaps for the periodic review, and the staff audit trail. |
 | `cw.on(type, listener)` | Events: `report.created`, `report.closed`, `sanction.applied`, `sanction.revoked`, `gap.created`, `auto.restricted`. |
 | `cw.purge`, `cw.ready`, `cw.flush`, `cw.close` | Housekeeping. |
@@ -153,6 +154,56 @@ console.log(decided.ok ? `applied ${decided.groups.length} action` : `not applie
 Rule, or `'uncovered'` with a `gapNote`. `lineIds` picks up to five of that player's own lines in the report to quote in their notice,
 with blocked words starred out. A timeout is `kind: 'chat'` with `durationMs`. `cw.suggest(subject, level, rule)` says what the preset
 would do next, for a moderator who wants a starting point. A failing store rejects the call, so catch it.
+
+## The editable profile
+
+The profile you give `createChatwarden` (a preset and `overrides`) is the **base**. An owner can change part of it while the game
+runs: the lengths a moderator is offered (`durations`, and whether `customDuration` is allowed), the escalation `ladder`, the
+`firstOffense` per conduct level, the `repeat` rule, `areaRules` and `severeRules`, and the outcome text of each written guideline
+tier. The edits are a validated, versioned **layer** kept in your store, and `cw.profile` is the base with that layer on top.
+Profanity handling is not editable: it stays in your code. Sanctions already given are not touched.
+
+```ts
+import { createChatwarden, type Platform } from '@chatwarden/core';
+import { createMemoryStore } from '@chatwarden/store-memory';
+
+const platform: Platform = { identify: (ctx) => ctx as { clientKey: string } };
+const cw = await createChatwarden({ store: createMemoryStore(), secret: 'a-long-random-secret', platform, retention: false });
+
+const HOUR = 3_600_000;
+const { version } = cw.policy.get(); // 0 until something is saved
+
+// What would this suggest for a clean record, a warning, a 24 hour restriction and a 7 day ban? Nothing is saved.
+const layer = { durations: [HOUR, 6 * HOUR, 12 * HOUR, 24 * HOUR], firstOffense: { rude: { kind: 'chat' as const, durationMs: 6 * HOUR } } };
+const preview = cw.policy.preview(layer);
+if (preview.ok) console.log(preview.samples.clean.rude); // { label: 'Restrict chat 6 hours', kind: 'chat', durationMs: 21600000 }
+
+// Save it. `version` is the one you loaded: if someone saved since, the answer is { ok: false, error: 'conflict' }.
+const saved = cw.policy.save(layer, { version, actor: 'owner@example.com', reason: 'offer shorter timeouts' });
+if (saved.ok) console.log(cw.profile.durations, saved.changed); // in force at once, here
+
+cw.policy.reset('durations'); // put one section back to the base; reset() puts everything back
+```
+
+- **`cw.policy.get()`** returns `{ effective, base, layer, version, canSave }`. `layerError` is also there when the stored layer
+  cannot be used (a field from a newer kit, say): it is then ignored, the base stays in force, and one `chatwarden.policy_layer_invalid`
+  line is logged.
+- **`save(layer, { version, actor, reason })`** stores the whole layer: a section you leave out goes back to the base. It answers
+  `{ ok: true, version, changed }`, `{ ok: false, error: 'conflict' }` for a stale `version` (nothing is written),
+  `{ ok: false, error: 'invalid', path }` for a layer that touches a setting that is not editable or would make the profile invalid
+  (`path` names the field, such as `layer.profanity` or `layer.ladder[2].high.durationMs`; no value), and
+  `{ ok: false, error: 'unsupported' }` when the store has no `loadPolicyLayer` and `savePolicyLayer`. `actor` and `reason` are
+  checked here; `@chatwarden/http` writes them to the audit trail.
+- **A ladder cell without a `label`** gets one from its kind and length: "Restrict chat 6 hours", "Ban from public rooms 12 hours",
+  "Full ban 3 days", "Full ban permanent".
+- **`durations`** is a sorted list of lengths, each from 1 millisecond to 365 days, at most 50. It is only the list a moderator is offered:
+  `cw.decide` and `cw.sanctions.apply` still accept any valid length. The staff routes in `@chatwarden/http` refuse a length outside
+  the list (400 `duration_not_offered`) when `customDuration` is false.
+- **Other processes** see a save within 10 seconds: a read of the profile looks at the stored version at most that often, on your
+  `clock`. `cw.policy.refresh()` looks now.
+- **Your own store.** `loadPolicyLayer()` and `savePolicyLayer(layer, expectedVersion)` are optional on `Store`. The second must be
+  one atomic conditional write that returns the new version, or `null` when the stored version is not `expectedVersion`. A store
+  without them still works; `save` and `reset` answer `unsupported` and the profile stays code-only.
 
 ## Typing indicators
 

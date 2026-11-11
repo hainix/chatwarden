@@ -655,6 +655,56 @@ describe('a stored layer this kit cannot use', () => {
   });
 });
 
+describe('a save that meets another process holding the database lock', () => {
+  const busy = () => Object.assign(new Error('database is locked'), { errcode: 5 });
+
+  it('is tried again, up to 3 times in all, and then succeeds', async () => {
+    const store = new MemoryStore();
+    const { cw } = await setup({}, store);
+    const real = store.savePolicyLayer.bind(store);
+    let calls = 0;
+    vi.spyOn(store, 'savePolicyLayer').mockImplementation((layer, v) => {
+      calls += 1;
+      if (calls < 3) throw busy();
+      return real(layer, v);
+    });
+    expect(save(cw, { durations: [HOUR] }, 0)).toMatchObject({ ok: true, version: 1 });
+    expect(calls).toBe(3);
+  });
+
+  it('gives up after 3 tries with the store error, writing nothing', async () => {
+    const store = new MemoryStore();
+    const { cw } = await setup({}, store);
+    let calls = 0;
+    vi.spyOn(store, 'savePolicyLayer').mockImplementation(() => {
+      calls += 1;
+      throw busy();
+    });
+    expect(() => save(cw, { durations: [HOUR] }, 0)).toThrow('database is locked');
+    expect(calls).toBe(3);
+    expect(cw.policy.get().version).toBe(0);
+  });
+
+  it('does not retry another error, and does not retry a version conflict', async () => {
+    const store = new MemoryStore();
+    const { cw } = await setup({}, store);
+    let calls = 0;
+    const spy = vi.spyOn(store, 'savePolicyLayer').mockImplementation(() => {
+      calls += 1;
+      throw new TypeError('disk full');
+    });
+    expect(() => save(cw, {}, 0)).toThrow('disk full');
+    expect(calls).toBe(1);
+    spy.mockImplementation(() => {
+      calls += 1;
+      return null;
+    });
+    calls = 0;
+    expect(save(cw, {}, 0)).toEqual({ ok: false, error: 'conflict' });
+    expect(calls).toBe(1);
+  });
+});
+
 describe('what the layer cannot reach', () => {
   it('profanity stays code-only: the chat filter mode is the one given in code, whatever is stored', async () => {
     const { cw } = await setup({ overrides: { profanity: { mode: 'allow' } } });

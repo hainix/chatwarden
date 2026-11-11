@@ -82,7 +82,10 @@ export interface AuditRecordInput {
   detail?: AuditDetail;
 }
 
-/** One entry as the store keeps and returns it. There is no field for chat text, a reason or a note. */
+/**
+ * One entry as the store keeps and returns it. There is no field for chat text or a note. The one free text is the `reason` inside
+ * the `detail` of a `policy.update` or `policy.reset` row (the owner's own reason for changing the settings).
+ */
 export interface AuditRow {
   id: string;
   /** Epoch ms. */

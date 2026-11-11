@@ -2,7 +2,7 @@ import { SANCTION_SOURCES } from '@chatwarden/core';
 import type { Source } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
-import { applySanction, needForSanction, parseSanction } from './apply.js';
+import { applySanction, checkDurationsOffered, needForSanction, parseSanction } from './apply.js';
 import { gateCase } from './claims.js';
 import { latestHandle } from './handles.js';
 import type { AdminContext } from './context.js';
@@ -52,6 +52,7 @@ export function sanctionRoutes(ctx: AdminContext): RouteTable {
       const sanction = parseSanction(body);
       const takeOver = bodyTakeOver(body);
       needForSanction(sanction.action, c.need);
+      checkDurationsOffered(cw, [sanction.action]);
       gateCase(ctx, c, sanction.action.subject, takeOver);
       // The actor is never from the body: the caller is who the auth hook says, and an admin route is always a moderator's.
       const done = await applySanction(cw, sanction, c.authz.actor);

@@ -5,6 +5,7 @@ import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SE
 import type { ModerationProfile, PolicyLayer, PolicySection } from './profile.js';
 import type { RuleRef } from './rules.js';
 import { errorClass, safeWarn } from './log.js';
+import { retryBusy } from './team.js';
 import { CONDUCT_LEVELS } from './types.js';
 import type { Clock, ConductLevel, Logger, Store } from './types.js';
 
@@ -86,8 +87,6 @@ export class PolicyService {
   private state: { effective: ModerationProfile; layer: PolicyLayer; version: number; layerError?: { path: string } };
   /** When the store was last looked at (epoch ms), or null before the first read. */
   private lastCheck: number | null = null;
-  /** The version whose invalid layer was already logged, so one bad layer is logged once. */
-  private loggedInvalid: number | null = null;
 
   constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ModerationProfile }) {
     this.store = deps.store;
@@ -117,10 +116,8 @@ export class PolicyService {
     } catch (err) {
       if (!(err instanceof ProfileError)) throw err;
       this.state = { effective: this.base, layer, version, layerError: { path: err.path } };
-      if (this.loggedInvalid !== version) {
-        this.loggedInvalid = version;
-        safeWarn(this.logger, 'chatwarden.policy_layer_invalid', { version, path: err.path });
-      }
+      // Once per version: `adopt` runs only when the stored version changed (or at start-up), never on a plain re-read.
+      safeWarn(this.logger, 'chatwarden.policy_layer_invalid', { version, path: err.path });
     }
   }
 
@@ -171,7 +168,8 @@ export class PolicyService {
   private persist(layer: PolicyLayer, expected: number): PolicySaveResult {
     // What this save changes is judged against the layer at `expected`: ours when we are current, else read it.
     const before = this.state.version === expected ? this.state.layer : (this.store.loadPolicyLayer?.()?.layer ?? {});
-    const next = this.store.savePolicyLayer?.(layer, expected) ?? null;
+    // One conditional write; when another process holds the database lock past the busy timeout it is tried again (as a claim is).
+    const next = retryBusy(() => this.store.savePolicyLayer?.(layer, expected) ?? null);
     if (next === null) {
       try {
         this.refresh();

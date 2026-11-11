@@ -89,6 +89,11 @@ How it behaves:
   of it or a query on it to a player, and keep the file readable by the app's user only (`chmod 600`).
 - **What is never logged.** The store itself logs nothing. Errors it throws are SQLite's own and may name a table or column but
   never a value; the kit logs only an event name and the error class.
+- **The editable profile.** Migration 16 adds `kit_policy_layer` (at most one row: the owner's stored edits to the moderation
+  profile as JSON, and a version) and a nullable `detail_json` column on `kit_audit` (the sections changed and the reason of a
+  `policy.update` or `policy.reset` row; NULL on every other row). A save is one conditional `INSERT` or `UPDATE` on the version, so
+  two server processes on one file never both win; the loser gets a version conflict. An existing database upgrades in place and
+  keeps every row. Nothing here holds chat.
 - **Claims and saved reasons.** Migration 15 adds `kit_claims` (a soft claim per person: the staff actor holding the case and when it
   lapses) and `kit_reasons` (the moderators' saved decision reasons). A claim is taken with one conditional statement, so two
   server processes on the same file never both win a case. If a second process commits between the kit's read and its write,

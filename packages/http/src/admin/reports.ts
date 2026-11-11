@@ -2,7 +2,7 @@ import { CATEGORY_TO_RULE, safeWarn } from '@chatwarden/core';
 import type { CaseClaim, ReportQuery, StaffReport } from '@chatwarden/core';
 import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
-import { applyDecision, needForDecision, parseDecision, peopleOf } from './apply.js';
+import { applyDecision, checkDurationsOffered, needForDecision, parseDecision, peopleOf } from './apply.js';
 import type { AdminContext } from './context.js';
 import { gateCase } from './claims.js';
 import { bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
@@ -155,6 +155,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
 
       // Authorization for what the decision DOES, before anything is read or written.
       needForDecision(decision.actions, c.need);
+      checkDurationsOffered(cw, decision.actions);
 
       // Another moderator's live claim on the reported person stops the decision, unless a senior takes the case over.
       // A report that is no longer open is a replay or an already_decided: a claim taken since must not turn that into a 409.

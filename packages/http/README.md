@@ -2,7 +2,7 @@
 
 HTTP routes for Chatwarden, the open-source chat moderation kit for games. It gives you:
 
-- the **staff API** (`adminRoutes`): the report queue, decisions, sanctions, rule gaps, term lists, policy documents and the audit trail;
+- the **staff API** (`adminRoutes`): the report queue, decisions, sanctions, rule gaps, term lists, policy documents, the editable moderation profile and the audit trail;
 - the **player API** (`playerRoutes`): a player's notices, "my record", the rules, the code of conduct and a name check;
 - **health probes** (`healthRoutes`);
 - **signed webhooks**, outgoing (`webhooksOut`) and incoming (`webhookIn`);
@@ -131,7 +131,7 @@ Staff, under the prefix you mount (`/admin` above). Each one is authenticated, n
 | `GET /people/:ref/history` | `{ history, reports, sanctions, asReporter, handle }`. `handle` is the person's handle on the newest report filed against them that recorded one, or null. `history` and `reports` are the person's counted actions and the recent reports against them. `sanctions` is a list of sanction groups, newest first: the last 90 days plus every group still in force (a permanent one that has not been revoked, or a restriction that has not ended), at most 200 (the groups in force are always kept; the cap trims the oldest of the rest), each `{ groupId, refCode, kind, rule, startsAt, endsAt, reason, actor, source, automated, active, pending, revokedAt, revokedBy, revokeReason }`. `rule` is a rule number, `"uncovered"`, or null on a row written before rules existed; `endsAt` is null for a permanent sanction and for a warning or note (which have no end); `active` is about time and revocation only: true while a restriction has started, is not revoked and is not past its end, and for a warning or note while it is inside the 90-day window the escalation ladder counts; `pending` is true when the sanction was written while enforcement was off, so it applies nothing until enforcement is on (a hub can label it; it does not change `active`); the revoke fields are null until someone revokes it. A group is built from the person's own row, so no IP, hash or stored value is ever part of it. `asReporter` is how the reports this person *filed* stand: `{ reports, open, actioned, dismissed, badFaith, suspendedUntil }`, where `suspendedUntil` is the epoch ms their reporting suspension ends (`limits.reports`: that many bad-faith dismissals inside the window), or null. |
 | `GET /sanctions?cursor&limit&source` | Every person's sanctions, newest first, `{ items, next }`: the same group object as above plus `person` (the canonical subject, a staff ref) and `handle` (the handle on the newest report filed against that person that recorded one, or null). `limit` is 1 to 200 (default 50, a bigger number is clamped), `cursor` is the previous `next` (null on the last page; a full page always carries one, so the page after an exactly-full last page is empty), `source` is one of `moderator`, `auto_filter`, `coop`, `api`, `ai`. A bad limit, cursor or source is 400 `invalid_query`. Not windowed, and it writes no audit row. |
 | `GET /blocked?days=1\|7\|30` | The chat lines the slur filter blocked, newest first, at most 500: `{ items: [{ id, at, roomId, termId, term, language, person, handle, text }] }`. `days` defaults to 7; any other value is 400 `invalid_query`. `text` is the line exactly as the person typed it and `person` the canonical subject: staff only. `handle` is the name to show for them (the newest non-blank handle on a report filed against them), null when none recorded one or when the caller lacks `history.read`. `term` and `language` come from the `terms` you passed, and only when the caller also holds `terms.read` (the term text is that permission's); they are null without `terms`, for a term no longer listed, or for a caller who lacks `terms.read`, and `termId` and `text` are still there. The kit keeps these lines 30 days. Staff already read raw lines in a report's excerpt, so this is not a new kind of exposure, but it is a new way to reach it: it has its own permission, `blocked.read`, and writes an audit row, `blocked.view` (no target). |
-| `POST /sanctions` | `{ subject, kind, durationMs, rule, reason?, gapNote?, includeIp? }`. `durationMs` is required: milliseconds up to 365 days, or `null` for permanent. Answers `{ groupId, refCode }`. A live claim by another moderator on `subject` is 409 `claimed`, as for a decision, and `takeOver: true` works the same way (the claim then stays with the caller). Revoking is never held up by a claim. |
+| `POST /sanctions` | `{ subject, kind, durationMs, rule, reason?, gapNote?, includeIp? }`. `durationMs` is required: milliseconds up to 365 days, or `null` for permanent. When the profile has `customDuration` off, a length that is not in `durations`, not one of the profile's own lengths (the ladder, the first offences, the repeat rule) and not permanent is 400 `duration_not_offered`; a decision's actions are checked the same way. Answers `{ groupId, refCode }`. A live claim by another moderator on `subject` is 409 `claimed`, as for a decision, and `takeOver: true` works the same way (the claim then stays with the caller). Revoking is never held up by a claim. |
 | `POST /sanctions/:groupId/revoke` | `{ reason }` (a non-empty string; blank is 400). Revokes the whole group. 404 if it is unknown or already revoked. |
 | `GET /gaps` | Rule gaps (sanctions filed under no rule), newest first. Returns the moderator-written gap notes in bulk, so moderators must never paste chat into a gap note. |
 | `POST /gaps/:groupId/close` | `{ status, ref }`: `status` is `ruled` (with `ref`, the number of the active rule that now covers it) or `not_a_rule` (`ref` null or absent). |
@@ -148,7 +148,11 @@ Staff, under the prefix you mount (`/admin` above). Each one is authenticated, n
 | `GET /reasons` | `{ reasons: [{ id, label, text, active }] }`, in the order they were added, switched-off ones included (a picker shows the active ones). Needs `reasons.read`. |
 | `POST /reasons` | `{ label, text }` (trimmed; the label is up to 40 characters and the text up to 500, counted as characters so an emoji is one; at most 200 reasons; a label may hold no control character, a text none but a newline): answers `{ reason }`. Audited `reason.add` on the reason id. `PATCH /reasons/:id` takes `{ label?, text? }` (at least one) and `POST /reasons/:id/active` takes `{ active }`; both answer `{ reason }` and 404 for an unknown id, and are audited `reason.update` and `reason.toggle`. Need `reasons.write`. |
 | `GET /policy?format&omit` | The code of conduct, moderator guide and agent brief, generated from your profile and rules. `omit=rules,ladder` leaves those sections out of the moderator guide (a UI that draws them from the data uses it); an unknown name is 400 `invalid_query`. |
-| `GET /audit?cursor&limit&actor&action` | The audit trail, newest first. |
+| `GET /policy/profile` | The editable moderation profile: `{ effective, base, layer, version, canSave }`, plus `layerError` (`{ path }`) when the stored layer cannot be used and is being ignored. `effective` is what is in force (`base`, the profile from your code, with the owner's stored `layer` on top); `version` is the layer's version (0 when nothing was ever saved). `canSave` is false when your store cannot save settings. It looks at the store first, so it is never behind another process. Needs `policy.read`; audited `policy.view`. |
+| `PUT /policy/profile` | `{ layer, version, reason }`: replace the stored layer, the whole layer (a section left out goes back to the base). `layer` may hold `durations`, `customDuration`, `ladder` (all 6 rows; a cell without a `label` gets one, such as "Restrict chat 6 hours"), `firstOffense`, `repeat`, `areaRules`, `severeRules` and `guidelines` (`[{ outcome }]`, one entry per tier, `null` to keep a tier); anything else, profanity included, is refused. `version` is the one you loaded; `reason` is 1 to 2000 characters. 200 `{ ok, version, changed }`, where `changed` names the sections that differ; it takes effect at once here and within 10 seconds in other processes. 409 `conflict` when someone saved since you loaded (reload and merge). 400 `invalid_profile` with `path` (the field in your layer, such as `layer.ladder[2].high.durationMs`) for a layer the kit refuses. 501 `not_supported` for a store that cannot save settings. Needs `policy.write`; audited `policy.update` with the sections changed and the reason, never the values. |
+| `POST /policy/profile/preview` | `{ layer, rule? }`: what the candidate layer would suggest, `{ samples }`, for four fixed records (`clean`, `oneWarning`, `chat24h`, `ban7d`) at each conduct level, each as `{ label, kind, durationMs }` (`durationMs` is null for permanent and for a warning or note). Saves nothing and writes no audit row. `rule` is a Community Rule number, to see `areaRules` or `severeRules` take effect. An invalid layer is 400 `invalid_profile` with `path`. Needs `policy.read`. |
+| `DELETE /policy/profile?section=` | Reset one editable section to the base, or everything when `section` is left out. The body is optional: `{ reason?, version? }`; a `version` that is no longer current is 409 `conflict`. Answers `{ ok, version, changed }`. An unknown or empty `section` is 400 `invalid_query`. Needs `policy.write`; audited `policy.reset` with the sections changed and the reason. |
+| `GET /audit?cursor&limit&actor&action` | The audit trail, newest first. A `policy.update` or `policy.reset` row also has `detail: { sections, reason? }`, the editable sections changed and the owner's reason. |
 
 Players, under `/api` above. None needs a staff login.
 
@@ -270,7 +274,8 @@ The minimum role for each action. These are defaults; override any of them with 
 | `gaps.close` | owner | `POST /gaps/:groupId/close`. |
 | `terms.read` | moderator | `GET /terms`, `POST /terms/check`, `POST /terms/test`. |
 | `terms.write` | moderator | Adding, editing and switching terms and exceptions. |
-| `policy.read` | moderator | `GET /policy`. |
+| `policy.read` | moderator | `GET /policy`, `GET /policy/profile`, `POST /policy/profile/preview`. |
+| `policy.write` | owner | `PUT /policy/profile`, `DELETE /policy/profile`. Editing the profile changes what every moderator is suggested, so it is the owner's. |
 | `audit.read` | senior | `GET /audit`. |
 | `claims.override` | senior | Taking over another moderator's claim (`takeOver: true` on a claim, a decision or a direct sanction). |
 | `reasons.read` | moderator | `GET /reasons`. |
@@ -297,23 +302,26 @@ error class only.
 | `forbidden_key` | 400 | The body has a `__proto__`, `constructor` or `prototype` key. |
 | `invalid_query` | 400 | A query value is not valid (`limit`, `cursor`, `status`, `format`, ...). |
 | `invalid_value` | 400 | A number is out of range. |
-| `invalid_profile` | 400 | The moderation profile is not valid. |
+| `invalid_profile` | 400 | The moderation profile is not valid, or a layer sent to `PUT` / `POST /policy/profile` is not. That body also has `path`. |
 | `invalid_sanction` | 400 | The core refused the sanction (a warning with a duration, an uncovered rule with no gap note, ...). |
 | `invalid_rules` | 400 | The rules are not valid. |
 | `invalid_excerpt` | 400 | The notice excerpt is not valid. |
 | `invalid_term` | 400 | The matcher refused a term change. |
 | `invalid_gap_ref` | 400 | Closing a gap as `ruled` needs the number of an active rule. |
 | `invalid_idempotency_key` | 400 | The incoming webhook's key is missing or malformed. |
+| `duration_not_offered` | 400 | The profile has `customDuration` off and the length is not one it offers. |
 | `unauthorized` | 401 | `authorize` returned nobody, or a webhook signature did not verify. |
 | `forbidden` | 403 | The caller's role is below the permission's. |
 | `not_found` | 404 | No such id, path, or the group was already revoked. |
 | `method_not_allowed` | 405 | The path exists under other methods; the `allow` header lists them. |
 | `already_decided` | 409 | The report was decided already, differently. |
+| `conflict` | 409 | The profile settings changed since the caller loaded them (`PUT` or `DELETE /policy/profile` with an old `version`). |
 | `claimed` | 409 | Another moderator holds the case. The body also has `by` (who) and `until` (when the claim lapses, epoch ms). |
 | `in_progress` | 409 | An incoming-webhook request with this idempotency key is still running. Retry later. |
 | `idempotency_mismatch` | 409 | The idempotency key was used with a different request. |
 | `payload_too_large` | 413 | The body is over 64 KiB. |
 | `rate_limited` | 429 | Too many name checks; `retry-after` says how long. |
+| `not_supported` | 501 | The store cannot save profile settings (it has no `savePolicyLayer`). |
 | `internal` | 500 | Anything else. No detail is sent. |
 
 ## Webhooks

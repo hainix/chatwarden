@@ -27,16 +27,19 @@ const TABLE = {
   invalid_term: { status: 400, message: 'The term change was refused.' },
   invalid_gap_ref: { status: 400, message: 'The rule reference for this gap is not valid.' },
   invalid_idempotency_key: { status: 400, message: 'The idempotency key is missing or not valid.' },
+  duration_not_offered: { status: 400, message: 'That length is not one of the lengths offered.' },
   unauthorized: { status: 401, message: 'Authentication is required.' },
   forbidden: { status: 403, message: 'You do not have permission to do this.' },
   not_found: { status: 404, message: 'Not found.' },
   method_not_allowed: { status: 405, message: 'Method not allowed.' },
   already_decided: { status: 409, message: 'The report has already been decided.' },
+  conflict: { status: 409, message: 'The settings changed since you loaded them.' },
   claimed: { status: 409, message: 'Another moderator is handling this case.' },
   in_progress: { status: 409, message: 'A request with this idempotency key is still being processed.' },
   idempotency_mismatch: { status: 409, message: 'This idempotency key was used with a different request.' },
   payload_too_large: { status: 413, message: 'The request body is too large.' },
   rate_limited: { status: 429, message: 'Too many requests. Try again later.' },
+  not_supported: { status: 501, message: 'This store cannot save settings.' },
 } as const;
 
 export type ErrorCode = keyof typeof TABLE;
@@ -61,6 +64,19 @@ export class ValidationError extends HttpError {
   constructor() {
     super('invalid_request');
     this.name = 'ValidationError';
+  }
+}
+
+/**
+ * A policy layer the kit refuses. 400 `invalid_profile`, and the body also carries `path`, the field in the layer that is not
+ * acceptable (`layer.profanity`, `layer.ladder[2].high.durationMs`): a path in the layer the client sent, never a value.
+ */
+export class LayerInvalidError extends HttpError {
+  readonly path: string;
+  constructor(path: string) {
+    super('invalid_profile');
+    this.name = 'LayerInvalidError';
+    this.path = path;
   }
 }
 
@@ -129,6 +145,7 @@ export function withErrors<A extends unknown[]>(
     } catch (err) {
       const code = codeFor(err);
       if (err instanceof ClaimedError) return errorResponse('claimed', undefined, { by: err.by, until: err.until });
+      if (err instanceof LayerInvalidError) return errorResponse('invalid_profile', undefined, { path: err.path });
       if (err instanceof HttpError) return errorResponse(err.code, err.headers === undefined ? undefined : { ...err.headers });
       if (code !== null) {
         // A RangeError is a 400 by contract, but an engine RangeError (stack overflow, invalid array length) looks the

@@ -42,6 +42,7 @@ describe('PERMISSIONS defaults', () => {
       'terms.read': 'moderator',
       'terms.write': 'moderator',
       'policy.read': 'moderator',
+      'policy.write': 'owner',
       'audit.read': 'senior',
       'claims.override': 'senior',
       'reasons.read': 'moderator',
