@@ -2,7 +2,7 @@ import { isValidAuditActor, AUDIT_REASON_MAX } from './audit.js';
 import { suggest } from './ladder.js';
 import type { ActionRecord } from './ladder.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
-import type { ModerationProfile, PolicyLayer, PolicySection } from './profile.js';
+import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import type { RuleRef } from './rules.js';
 import { errorClass, safeWarn } from './log.js';
 import { retryBusy } from './team.js';
@@ -23,9 +23,9 @@ export const POLICY_REFRESH_MS = 10_000;
 /** What {@link PolicyService.get} answers. */
 export interface PolicyState {
   /** The profile in force: base, then the stored layer. Deep-frozen. */
-  effective: ModerationProfile;
+  effective: ResolvedProfile;
   /** The profile from code (preset and overrides), without the stored layer. Deep-frozen. */
-  base: ModerationProfile;
+  base: ResolvedProfile;
   /** The stored layer as last read (`{}` when none), deep-frozen. */
   layer: PolicyLayer;
   /** The stored layer's version; 0 when nothing was ever saved. Pass it back to `save`. */
@@ -83,12 +83,12 @@ export class PolicyService {
   private readonly store: Store;
   private readonly clock: Clock;
   private readonly logger: Logger | undefined;
-  private readonly base: ModerationProfile;
-  private state: { effective: ModerationProfile; layer: PolicyLayer; version: number; layerError?: { path: string } };
+  private readonly base: ResolvedProfile;
+  private state: { effective: ResolvedProfile; layer: PolicyLayer; version: number; layerError?: { path: string } };
   /** When the store was last looked at (epoch ms), or null before the first read. */
   private lastCheck: number | null = null;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ModerationProfile }) {
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile }) {
     this.store = deps.store;
     this.clock = deps.clock;
     this.logger = deps.logger;
@@ -110,21 +110,25 @@ export class PolicyService {
   /** Make `stored` the layer in force: the effective profile is rebuilt, or the base kept when the layer cannot be used. */
   private adopt(stored: { layer: PolicyLayer; version: number } | null): void {
     const version = stored?.version ?? 0;
-    const layer = frozenCopy(stored?.layer ?? {});
+    // A row the store could not read as a layer arrives as null (or any non-object): it is a layerError like any unusable layer.
+    const raw: unknown = stored === null ? {} : stored.layer;
+    const layer = frozenCopy(raw as PolicyLayer);
     try {
       this.state = { effective: applyPolicyLayer(this.base, layer), layer, version };
     } catch (err) {
       if (!(err instanceof ProfileError)) throw err;
-      this.state = { effective: this.base, layer, version, layerError: { path: err.path } };
+      // What `get()` shows is always an object: an unreadable layer reads as empty, with the error beside it.
+      const shown = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? layer : frozenCopy({});
+      this.state = { effective: this.base, layer: shown, version, layerError: { path: err.path } };
       // Once per version: `adopt` runs only when the stored version changed (or at start-up), never on a plain re-read.
       safeWarn(this.logger, 'chatwarden.policy_layer_invalid', { version, path: err.path });
     }
   }
 
-  /** Look at the store now and adopt a newer (or different) version. A store failure throws. */
+  /** Look at the store now and adopt a strictly newer version (an older one, say a restored backup, never regresses what is in force). A store failure throws. */
   private reload(): void {
     const stored = this.store.loadPolicyLayer?.() ?? null;
-    if ((stored?.version ?? 0) !== this.state.version) this.adopt(stored);
+    if ((stored?.version ?? 0) > this.state.version) this.adopt(stored);
   }
 
   /** The cheap check every read does: at most one store look per {@link POLICY_REFRESH_MS}; a failure keeps what is in force. */
@@ -147,7 +151,7 @@ export class PolicyService {
   }
 
   /** The profile in force right now. Every consumer calls this, at call time, and never keeps the result. */
-  profileNow(): ModerationProfile {
+  profileNow(): ResolvedProfile {
     this.maybeRefresh();
     return this.state.effective;
   }
@@ -249,7 +253,7 @@ export class PolicyService {
    */
   preview(layer: PolicyLayer, rule: RuleRef = 'uncovered'): PolicyPreview {
     if (!isRuleRef(rule)) return { ok: false, error: 'invalid', path: 'rule' };
-    let candidate: ModerationProfile;
+    let candidate: ResolvedProfile;
     try {
       candidate = applyPolicyLayer(this.base, layer);
     } catch (err) {

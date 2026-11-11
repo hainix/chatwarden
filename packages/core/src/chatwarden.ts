@@ -20,7 +20,7 @@ import type { Limits, LimitsInput } from './limits.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { resolveProfile } from './profile.js';
-import type { ModerationProfile, PolicyLayer, PolicySection, PresetName, ProfanityConfig, ProfileInput, ProfileOverrides } from './profile.js';
+import type { ModerationProfile, PolicyLayer, PolicySection, PresetName, ProfanityConfig, ProfileOverrides, ResolvedProfile } from './profile.js';
 import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
@@ -159,7 +159,7 @@ export interface ChatwardenOptions {
    * summary. This is the BASE profile: a moderator's stored edits (`cw.policy`) are merged on top of it, and `cw.profile` reads
    * the result.
    */
-  profile?: PresetName | ProfileInput;
+  profile?: PresetName | ModerationProfile;
   /**
    * Changes to the profile, deep-merged onto it (`{ profanity: { mode: 'allow' } }`; arrays replace). An unknown key
    * or an invalid result throws a `ProfileError` at creation.
@@ -409,7 +409,7 @@ export interface Chatwarden {
    * getter, read live: after a save (or a change another process saved, within 10 seconds) it is a new object, so never keep
    * one across calls. Everything in the kit that reads the profile reads it through this.
    */
-  readonly profile: ModerationProfile;
+  readonly profile: ResolvedProfile;
   /**
    * The editable profile. The profile from code is the base; a moderator's edits to the durations offered, the ladder, the first
    * offences, the repeat rule, the area and severe rules and the guideline outcome texts are stored in your store as a

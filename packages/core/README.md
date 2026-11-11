@@ -194,6 +194,18 @@ cw.policy.reset('durations'); // put one section back to the base; reset() puts 
   (`path` names the field, such as `layer.profanity` or `layer.ladder[2].high.durationMs`; no value), and
   `{ ok: false, error: 'unsupported' }` when the store has no `loadPolicyLayer` and `savePolicyLayer`. `actor` and `reason` are
   checked here; `@chatwarden/http` writes them to the audit trail.
+- **`guidelines` is positional.** Entry `i` of the layer's `guidelines` list is the new `outcome` text for tier `i` of the profile's
+  own `guidelines` (`null` leaves a tier alone). If you reorder or add tiers in the profile in your code, stored texts keep their
+  positions, so they land on the wrong tiers: reset `guidelines` (or save it again) after such a change. A stored list longer than the
+  profile's tiers is unusable and reported as `layerError`.
+- **Whole outcomes.** An outcome written as an object in a layer (`firstOffense`, `repeat.outcome`) needs both `kind` and `durationMs`, so a
+  stored layer never changes meaning when your base profile does. `areaRules` and `severeRules` list at most 100 rule numbers each.
+- **Types.** `ModerationProfile` is what you write; `durations` and `customDuration` are optional in it, so a profile written for 0.1.1 still
+  compiles and works everywhere (`validateProfile`, the document functions, `defineProfile`, `createChatwarden`). What the kit hands back
+  (`cw.profile`, `cw.policy.get()`, `defineProfile`, `resolveProfile`) is a `ResolvedProfile` with both filled in, and `cw.documents.policyJson()`'s
+  `profile` therefore has the two keys even for a profile that had none.
+- **Audit.** A save and a reset are recorded by `@chatwarden/http` as `policy.update` and `policy.reset` rows whose `detail` is
+  `{ sections, reason? }`. If you write your own `Store`, keep and return that `detail` from `insertAudit` and `listAudit`.
 - **A ladder cell without a `label`** gets one from its kind and length: "Restrict chat 6 hours", "Ban from public rooms 12 hours",
   "Full ban 3 days", "Full ban permanent".
 - **`durations`** is a sorted list of lengths, each from 1 millisecond to 365 days, at most 50. It is only the list a moderator is offered:

@@ -77,8 +77,21 @@ function auditFromRow(r: Record<string, unknown>): AuditRow {
     action: String(r.action) as AuditRow['action'],
     target: ref !== '' && (AUDIT_TARGET_TYPES as readonly string[]).includes(type) ? { type: type as AuditTargetType, ref } : null,
     // Only a policy row has one; every other row (the legacy term-editor rows included) has NULL here.
-    ...(r.detail_json === null || r.detail_json === undefined ? {} : { detail: JSON.parse(String(r.detail_json)) as AuditDetail }),
+    ...detailFromJson(r.detail_json),
   };
+}
+
+/** The detail of a policy audit row, or nothing when the column is empty or does not hold one: one damaged row never breaks a page. */
+function detailFromJson(json: unknown): { detail?: AuditDetail } {
+  if (json === null || json === undefined) return {};
+  try {
+    const d = JSON.parse(String(json)) as { sections?: unknown; reason?: unknown } | null;
+    if (typeof d !== 'object' || d === null || !Array.isArray(d.sections)) return {};
+    if (d.reason !== undefined && typeof d.reason !== 'string') return {};
+    return { detail: d as AuditDetail };
+  } catch {
+    return {};
+  }
 }
 
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
@@ -542,7 +555,16 @@ export class SqliteStore implements Store, TermStore {
   loadPolicyLayer(): { layer: PolicyLayer; version: number } | null {
     return this.transaction(() => {
       const r = this.db.prepare('SELECT layer_json, version FROM kit_policy_layer WHERE id = 1').get();
-      return r === undefined ? null : { layer: JSON.parse(String(r.layer_json)) as PolicyLayer, version: Number(r.version) };
+      if (r === undefined) return null;
+      // A row whose text is not JSON still has its version, so a save can replace it. Its layer is null: the kit reports that as
+      // `layerError` and keeps the base profile, instead of failing to start.
+      let layer: PolicyLayer | null;
+      try {
+        layer = JSON.parse(String(r.layer_json)) as PolicyLayer;
+      } catch {
+        layer = null;
+      }
+      return { layer: layer as PolicyLayer, version: Number(r.version) };
     });
   }
 

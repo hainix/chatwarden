@@ -61,7 +61,8 @@ export interface GuidelineTier {
 /** The starter Community Rules flavour that goes with the profile. */
 export type RulesFlavour = 'relaxed' | 'standard' | 'strict';
 
-export interface ModerationProfile {
+/** Everything a moderation profile held in 0.1.1. The two fields added later are on {@link ModerationProfile} and {@link ResolvedProfile}. */
+export interface ModerationProfileBase {
   /** `'relaxed'`, `'standard'`, `'strict'` or your own. */
   id: string;
   /** Shown in the Guide and on the public page. */
@@ -95,16 +96,6 @@ export interface ModerationProfile {
    * missing, `[1]`. Whole numbers from 1; duplicates are removed; `[]` turns it off.
    */
   severeRules?: number[];
-  /**
-   * The lengths a moderator is offered, in milliseconds: sorted from the shortest, no repeats, each from 1 up to 365
-   * days (at most {@link MAX_DURATIONS} of them). Permanent is always offered, subject to permission, and is never listed.
-   * Default {@link DEFAULT_DURATIONS}: 1 hour, 6 hours, 12 hours, 24 hours, 3 days, 7 days and 30 days. Only the offered
-   * list: a decision or a sanction may still name any valid length when `customDuration` is true, and the ladder's own
-   * lengths are always allowed.
-   */
-  durations: number[];
-  /** May a moderator type a length of their own? Default true. When false, only `durations`, permanent and the profile's own lengths are accepted. */
-  customDuration: boolean;
   /** What each conduct level means here, with examples. */
   levels: Record<ConductLevel, LevelDescription>;
   /**
@@ -117,10 +108,43 @@ export interface ModerationProfile {
 }
 
 /**
- * A profile as an adopter writes it: {@link ModerationProfile} where `durations` and `customDuration` may be left out
- * (a profile written for 0.1.1 has neither), and are then filled with their defaults.
+ * A moderation profile as you write it. A profile from 0.1.1 (without `durations` and `customDuration`) is still one: the two
+ * fields are optional here and are filled with their defaults wherever the kit reads a profile. What the kit hands back is a
+ * {@link ResolvedProfile}, which has both.
  */
-export type ProfileInput = Omit<ModerationProfile, 'durations' | 'customDuration'> & Partial<Pick<ModerationProfile, 'durations' | 'customDuration'>>;
+export interface ModerationProfile extends ModerationProfileBase {
+  /**
+   * The lengths a moderator is offered, in milliseconds: sorted from the shortest, no repeats, each from 1 up to 365
+   * days (at most {@link MAX_DURATIONS} of them). Permanent is always offered, subject to permission, and is never listed.
+   * Default {@link DEFAULT_DURATIONS}: 1 hour, 6 hours, 12 hours, 24 hours, 3 days, 7 days and 30 days. Only the offered
+   * list: a decision or a sanction may still name any valid length when `customDuration` is true, and the ladder's own
+   * lengths are always allowed.
+   */
+  durations?: number[];
+  /** May a moderator type a length of their own? Default true. When false, only `durations`, permanent and the profile's own lengths are accepted. */
+  customDuration?: boolean;
+}
+
+/**
+ * What `defineProfile`, `resolveProfile`, `applyPolicyLayer`, `cw.profile` and `cw.policy.get()` return: a validated, deep-frozen
+ * profile with `durations` and `customDuration` filled in. It is a {@link ModerationProfile}, so it can be passed wherever one is
+ * taken.
+ */
+export interface ResolvedProfile extends ModerationProfileBase {
+  /**
+   * The lengths a moderator is offered, in milliseconds: sorted from the shortest, no repeats, each from 1 up to 365
+   * days (at most {@link MAX_DURATIONS} of them). Permanent is always offered, subject to permission, and is never listed.
+   * Default {@link DEFAULT_DURATIONS}: 1 hour, 6 hours, 12 hours, 24 hours, 3 days, 7 days and 30 days. Only the offered
+   * list: a decision or a sanction may still name any valid length when `customDuration` is true, and the ladder's own
+   * lengths are always allowed.
+   */
+  durations: number[];
+  /** May a moderator type a length of their own? When false, only `durations`, permanent and the profile's own lengths are accepted. */
+  customDuration: boolean;
+}
+
+/** @deprecated The same as {@link ModerationProfile}, which now has the two fields optional. */
+export type ProfileInput = ModerationProfile;
 
 /** Like `Partial`, all the way down. Arrays are replaced, not merged; `null` is a value. */
 export type DeepPartial<T> = T extends readonly unknown[]
@@ -167,7 +191,10 @@ const TOP_KEYS = [
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
-const OPTIONAL_TOP_KEYS: readonly string[] = ['areaRules', 'severeRules'];
+const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration'];
+/** The most rule numbers `areaRules` or `severeRules` may list. */
+export const MAX_RULE_LIST = 100;
 const REPEAT_KEYS = ['windowDays', 'notes', 'distinctGames', 'outcome'] as const;
 const PROFANITY_KEYS = ['mode', 'style', 'add', 'remove', 'only', 'languages'] as const;
 const OUTCOME_KEYS = ['kind', 'durationMs'] as const;
@@ -257,7 +284,9 @@ function wordList(v: unknown, path: string): void {
 }
 
 function ruleList(v: unknown, path: string): void {
-  stringList(v, path).forEach((item, i) => {
+  const list = stringList(v, path);
+  if (list.length > MAX_RULE_LIST) fail(path, `must list at most ${MAX_RULE_LIST} rule numbers`);
+  list.forEach((item, i) => {
     if (!positiveInt(item)) fail(`${path}[${i}]`, 'must be a whole rule number from 1');
   });
 }
@@ -343,7 +372,7 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   text(p['summary'], 'profile.summary');
   text(p['aiContext'], 'profile.aiContext');
   oneOf(p['rules'], 'profile.rules', RULES_FLAVOURS, "must be 'relaxed', 'standard' or 'strict'");
-  for (const key of OPTIONAL_TOP_KEYS) if (Object.hasOwn(p, key)) ruleList(p[key], `profile.${key}`);
+  for (const key of RULE_LIST_KEYS) if (Object.hasOwn(p, key)) ruleList(p[key], `profile.${key}`);
 
   const first = obj(p['firstOffense'], 'profile.firstOffense', CONDUCT_LEVELS);
   for (const level of CONDUCT_LEVELS) outcome(first[level], `profile.firstOffense.${level}`);
@@ -368,8 +397,9 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
 
   validateLadder(p['ladder'], 'profile.ladder');
 
-  validateDurations(p['durations'], 'profile.durations');
-  if (typeof p['customDuration'] !== 'boolean') fail('profile.customDuration', 'must be true or false');
+  // Both are optional (a 0.1.1 profile has neither); when present they are checked.
+  if (Object.hasOwn(p, 'durations')) validateDurations(p['durations'], 'profile.durations');
+  if (Object.hasOwn(p, 'customDuration') && typeof p['customDuration'] !== 'boolean') fail('profile.customDuration', 'must be true or false');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
@@ -442,8 +472,10 @@ function deepFreeze<T>(v: T): T {
 /** Drop repeated numbers from `areaRules` and `severeRules` (first one wins, order kept) before they are validated. */
 function dedupeRuleLists(copy: unknown): void {
   if (!isPlain(copy)) return;
-  for (const key of OPTIONAL_TOP_KEYS) {
+  for (const key of RULE_LIST_KEYS) {
     const list = copy[key];
+    // Counted before the quadratic de-duplication below, so a huge list is refused without being worked through.
+    if (Array.isArray(list) && list.length > MAX_RULE_LIST) fail(`profile.${key}`, `must list at most ${MAX_RULE_LIST} rule numbers`);
     if (Array.isArray(list)) setOwn(copy, key, list.filter((item: unknown, i) => list.findIndex((other: unknown) => Object.is(other, item)) === i));
   }
 }
@@ -456,12 +488,20 @@ function fillDurationDefaults(copy: unknown): void {
 }
 
 /** Copy, validate and freeze. Nothing returned shares structure with the input. */
-function finalize(value: unknown): ModerationProfile {
+function finalize(value: unknown): ResolvedProfile {
   const copy = clone(value);
   fillDurationDefaults(copy);
   dedupeRuleLists(copy);
   validateProfile(copy);
-  return deepFreeze(copy);
+  return deepFreeze(copy as ResolvedProfile);
+}
+
+/**
+ * A copy of a profile with `durations` and `customDuration` filled in where it has none (a 0.1.1 profile). The input is not
+ * changed and the profile is not validated here (`validateProfile` does that). Used by the document functions.
+ */
+export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
+  return { ...p, durations: p.durations ?? [...DEFAULT_DURATIONS], customDuration: p.customDuration ?? true };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -514,7 +554,7 @@ const DEFAULT_PROFANITY: ProfanityConfig = {
   languages: ['en'],
 };
 
-const RELAXED: ModerationProfile = {
+const RELAXED: ResolvedProfile = {
   id: 'relaxed',
   name: 'Relaxed',
   summary: 'Trash talk is part of the game. Harassment, threats and hate are not.',
@@ -583,7 +623,7 @@ const RELAXED: ModerationProfile = {
   ],
 };
 
-const STANDARD: ModerationProfile = {
+const STANDARD: ResolvedProfile = {
   id: 'standard',
   name: 'Standard',
   summary: "Keep it friendly. Personal insults, harassment and hate aren't allowed.",
@@ -659,7 +699,7 @@ const STANDARD: ModerationProfile = {
  * - The table's rude first offense is "warning + chat 1 h". An Outcome is one action, so it is the 1 hour chat
  *   restriction, the stronger of the two. The window for "any note" is the same 30 days as the other presets.
  */
-const STRICT: ModerationProfile = {
+const STRICT: ResolvedProfile = {
   id: 'strict',
   name: 'Strict',
   summary: 'Be kind. No swearing, insults or bullying.',
@@ -730,7 +770,7 @@ const STRICT: ModerationProfile = {
 };
 
 /** The three presets, complete, valid and deep-frozen. Values are the standards doc's tables. */
-export const PRESETS: Readonly<Record<'relaxed' | 'standard' | 'strict', ModerationProfile>> = Object.freeze({
+export const PRESETS: Readonly<Record<'relaxed' | 'standard' | 'strict', ResolvedProfile>> = Object.freeze({
   relaxed: finalize(RELAXED),
   standard: finalize(STANDARD),
   strict: finalize(STRICT),
@@ -752,10 +792,10 @@ export type PresetName = keyof typeof PRESETS;
  * Throws {@link ProfileError} for an unknown preset name, an unknown key at any depth, or any invalid value.
  */
 export function resolveProfile(
-  preset: ProfileInput | PresetName,
+  preset: ModerationProfile | PresetName,
   overrides: ProfileOverrides = {},
-): ModerationProfile {
-  let base: ProfileInput;
+): ResolvedProfile {
+  let base: ModerationProfile;
   if (typeof preset === 'string') {
     if (!Object.hasOwn(PRESETS, preset)) return fail('preset', "must be 'relaxed', 'standard', 'strict' or a profile");
     base = PRESETS[preset];
@@ -770,7 +810,7 @@ export function resolveProfile(
  * their defaults). Returns a deep-frozen copy, so editing the object you passed afterwards cannot change a profile that
  * was already checked. Throws {@link ProfileError}.
  */
-export function defineProfile(p: ProfileInput): ModerationProfile {
+export function defineProfile(p: ModerationProfile): ResolvedProfile {
   return finalize(p);
 }
 
@@ -853,6 +893,13 @@ function guidelinesOverride(base: ModerationProfile, v: unknown): unknown {
   });
 }
 
+/** An outcome written as an object must say both `kind` and `durationMs`: a layer is self-contained, never half merged onto the base. */
+function wholeOutcome(v: unknown, path: string): void {
+  if (!isPlain(v)) return;
+  if (!Object.hasOwn(v, 'kind')) fail(`${path}.kind`, 'is required');
+  if (!Object.hasOwn(v, 'durationMs')) fail(`${path}.durationMs`, 'is required');
+}
+
 function layerToOverrides(base: ModerationProfile, layer: unknown): Record<string, unknown> {
   if (!isPlain(layer)) return fail('profile', 'must be an object');
   for (const key of Object.keys(layer)) {
@@ -862,6 +909,10 @@ function layerToOverrides(base: ModerationProfile, layer: unknown): Record<strin
   for (const key of Object.keys(layer)) {
     const value = layer[key];
     if (value === undefined) continue;
+    if (key === 'firstOffense' && isPlain(value)) {
+      for (const level of Object.keys(value)) wholeOutcome(value[level], `profile.firstOffense.${level}`);
+    }
+    if (key === 'repeat' && isPlain(value)) wholeOutcome(value['outcome'], 'profile.repeat.outcome');
     if (key === 'ladder') setOwn(out, key, ladderOverride(value));
     else if (key === 'guidelines') setOwn(out, key, guidelinesOverride(base, value));
     else setOwn(out, key, value);
@@ -881,7 +932,7 @@ function inLayerTerms(err: ProfileError): ProfileError {
  * `layer` (`layer.profanity`, `layer.ladder[2].high.durationMs`): a layer that touches a setting outside
  * {@link POLICY_SECTIONS}, or one that would make the profile invalid.
  */
-export function applyPolicyLayer(base: ModerationProfile, layer: PolicyLayer): ModerationProfile {
+export function applyPolicyLayer(base: ModerationProfile, layer: PolicyLayer): ResolvedProfile {
   try {
     return finalize(merge(base, layerToOverrides(base, layer)));
   } catch (err) {

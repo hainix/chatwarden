@@ -222,7 +222,8 @@ function parse(input: unknown): AuditRecordInput | null {
 
 /**
  * The staff audit trail: who (actor and role) did what (a name from {@link AUDIT_ACTIONS}) to which id, and when.
- * It stores no chat text, reason, note or evidence: there is no field for any, and a target must look like an id.
+ * It stores no chat text, note or evidence: there is no field for any, and a target must look like an id. The one free text it
+ * keeps is the owner's `reason` in the `detail` of a `policy.update` or `policy.reset` row, next to the section names.
  */
 export class AuditService {
   private readonly store: Store;

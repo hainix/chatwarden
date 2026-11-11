@@ -144,11 +144,16 @@ describe('savePolicyLayer on SQLite', () => {
     expect(store.loadPolicyLayer()).toEqual({ layer: { durations: [HOUR] }, version: 1 });
   });
 
-  it('a row holding text that is not JSON reads as an error, never as a silent empty layer', () => {
+  it('a row holding text that is not JSON still loads, with its version and no usable layer (the kit reports it, never crashes)', () => {
     const db = memDb();
     const store = openStore({ db });
-    db.prepare("INSERT INTO kit_policy_layer (id, layer_json, version) VALUES (1, 'not json', 1)").run();
-    expect(() => store.loadPolicyLayer()).toThrow();
+    db.prepare("INSERT INTO kit_policy_layer (id, layer_json, version) VALUES (1, 'not json', 3)").run();
+    const loaded = store.loadPolicyLayer();
+    expect(loaded?.version).toBe(3);
+    expect(loaded?.layer).toBeNull();
+    // And the next save over it works: the version is intact.
+    expect(store.savePolicyLayer({ durations: [HOUR] }, 3)).toBe(4);
+    expect(store.loadPolicyLayer()).toEqual({ layer: { durations: [HOUR] }, version: 4 });
   });
 });
 
@@ -177,5 +182,45 @@ describe('two kits on one SQLite file (the cross-process refresh)', () => {
     expect(b.policy.save({ durations: [HOUR] }, { version: 0, actor: 'owner_bob', reason: 'late' })).toEqual({ ok: false, error: 'conflict' });
     await a.close();
     await b.close();
+  });
+});
+
+describe('corrupted rows never stop the kit', () => {
+  it('createChatwarden starts over a corrupted stored layer: layerError, base live, one log line, fixable by a save', async () => {
+    const db = memDb();
+    openStore({ db }).close();
+    db.prepare("INSERT INTO kit_policy_layer (id, layer_json, version) VALUES (1, '{not json', 2)").run();
+    const logged: string[] = [];
+    const cw = await createChatwarden({
+      store: openStore({ db }),
+      secret: 'corrupt',
+      platform: { identify: (ctx) => ctx as never },
+      clock: { now: () => NOW },
+      logger: { warn: (event) => void logged.push(event) },
+      retention: false,
+    });
+    expect(cw.policy.get().layerError).toEqual({ path: 'layer' });
+    expect(cw.policy.get().layer).toEqual({});
+    expect(cw.profile.durations.length).toBe(7);
+    expect(logged.filter((e) => e === 'chatwarden.policy_layer_invalid')).toHaveLength(1);
+    expect(cw.policy.save({ durations: [HOUR] }, { version: 2, actor: 'owner_ann', reason: 'repair' })).toMatchObject({ ok: true, version: 3 });
+    expect(cw.policy.get().layerError).toBeUndefined();
+    expect(cw.profile.durations).toEqual([HOUR]);
+  });
+
+  it('one corrupt detail_json never breaks an audit page: that row reads without a detail, the others are whole', () => {
+    const db = memDb();
+    const store = openStore({ db });
+    store.insertAudit({ id: 'a1', at: NOW, actor: 'ann', role: 'owner', action: 'policy.update', target: null, detail: { sections: ['ladder'], reason: 'ok' } });
+    for (const [id, bad] of [['a2', 'oops'], ['a3', '"a string"'], ['a4', '{"sections": 3}'], ['a5', 'null']] as const) {
+      db.prepare(
+        `INSERT INTO kit_audit (id, at, actor, role, action, subject_type, subject_ref, before_json, after_json, detail_json)
+         VALUES (?, ?, 'ann', 'owner', 'policy.update', '', '', NULL, NULL, ?)`,
+      ).run(id, NOW + 1, bad);
+    }
+    const rows = store.listAudit({ limit: 10 });
+    expect(rows).toHaveLength(5);
+    expect(rows.find((r) => r.id === 'a1')?.detail).toEqual({ sections: ['ladder'], reason: 'ok' });
+    for (const id of ['a2', 'a3', 'a4', 'a5']) expect(Object.keys(rows.find((r) => r.id === id) ?? {}), id).not.toContain('detail');
   });
 });

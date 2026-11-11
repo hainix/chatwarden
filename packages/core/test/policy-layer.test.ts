@@ -65,13 +65,16 @@ describe('the duration fields on every preset', () => {
     expect(resolveProfile(old as ModerationProfile).durations).toEqual(DEFAULT_DURATIONS);
   });
 
-  it('validateProfile itself requires both fields', () => {
+  it('validateProfile treats both fields as optional (a 0.1.1 profile has neither) and checks them when present', () => {
     const old = JSON.parse(JSON.stringify(PRESETS.strict)) as Loose;
     delete old.durations;
+    delete old.customDuration;
+    expect(() => validateProfile(old)).not.toThrow();
+    old.durations = [2, 1];
     expect(failure(() => validateProfile(old)).path).toBe('profile.durations');
-    const old2 = JSON.parse(JSON.stringify(PRESETS.strict)) as Loose;
-    delete old2.customDuration;
-    expect(failure(() => validateProfile(old2)).path).toBe('profile.customDuration');
+    old.durations = [1];
+    old.customDuration = 'yes';
+    expect(failure(() => validateProfile(old)).path).toBe('profile.customDuration');
   });
 });
 
@@ -323,5 +326,51 @@ describe('the layer: guideline outcome text', () => {
   it('the layer cannot change who a tier covers (the profile stays valid)', () => {
     const p = applyPolicyLayer(base(), { guidelines: [{ outcome: 'Nothing happens.' }] });
     expect(() => validateProfile(p)).not.toThrow();
+  });
+});
+
+describe('rule lists are capped', () => {
+  const many = (n: number): number[] => Array.from({ length: n }, (_, i) => i + 1);
+
+  it('accepts 100 rule numbers in each list', () => {
+    expect(applyPolicyLayer(base(), { areaRules: many(100) }).areaRules).toHaveLength(100);
+    expect(applyPolicyLayer(base(), { severeRules: many(100) }).severeRules).toHaveLength(100);
+  });
+
+  it('refuses 101, naming the field', () => {
+    expect(bad({ areaRules: many(101) }).path).toBe('layer.areaRules');
+    expect(bad({ severeRules: many(101) }).path).toBe('layer.severeRules');
+  });
+
+  it('counts before removing duplicates, so a long list of one number is refused fast', () => {
+    expect(bad({ areaRules: Array.from({ length: 101 }, () => 5) }).path).toBe('layer.areaRules');
+    expect(bad({ severeRules: Array.from({ length: 5000 }, () => 1) }).path).toBe('layer.severeRules');
+  });
+
+  it('validateProfile itself refuses a list over the cap (a profile that never went through defineProfile)', () => {
+    const p = JSON.parse(JSON.stringify(PRESETS.standard)) as Loose;
+    p.areaRules = many(101);
+    expect(failure(() => validateProfile(p)).path).toBe('profile.areaRules');
+    p.areaRules = many(100);
+    expect(() => validateProfile(p)).not.toThrow();
+  });
+
+  it('applies to a profile given in code too', () => {
+    expect(() => resolveProfile('standard', { areaRules: many(101) })).toThrow(ProfileError);
+  });
+});
+
+describe('an outcome in a layer is whole', () => {
+  it('a chat, area or ban outcome needs both kind and durationMs (no half merged onto the base)', () => {
+    expect(bad({ firstOffense: { rude: { kind: 'ban' } } }).path).toBe('layer.firstOffense.rude.durationMs');
+    expect(bad({ firstOffense: { hostile: { durationMs: HOUR } } }).path).toBe('layer.firstOffense.hostile.kind');
+    expect(bad({ repeat: { outcome: { kind: 'chat' } } }).path).toBe('layer.repeat.outcome.durationMs');
+    expect(bad({ repeat: { outcome: { durationMs: HOUR } } }).path).toBe('layer.repeat.outcome.kind');
+  });
+
+  it('a whole outcome, a word outcome and an explicit null duration are accepted', () => {
+    expect(applyPolicyLayer(base(), { firstOffense: { rude: { kind: 'ban', durationMs: null } } }).firstOffense.rude).toEqual({ kind: 'ban', durationMs: null });
+    expect(applyPolicyLayer(base(), { firstOffense: { rude: 'note' } }).firstOffense.rude).toBe('note');
+    expect(applyPolicyLayer(base(), { repeat: { outcome: { kind: 'chat', durationMs: HOUR } } }).repeat.outcome).toEqual({ kind: 'chat', durationMs: HOUR });
   });
 });

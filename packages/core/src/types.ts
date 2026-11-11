@@ -759,7 +759,8 @@ export interface Store {
 
   /**
    * The stored policy layer and its version, or null when none was ever saved (version 0). `layer` is whatever was saved,
-   * unvalidated: the kit checks it against the profile and ignores one it cannot use. Returns a copy.
+   * unvalidated: the kit checks it against the profile and ignores one it cannot use. A row that cannot be read at all (its text is
+   * not JSON) still answers its version, with a `layer` of null, which the kit reports as unusable. Returns a copy.
    */
   loadPolicyLayer?(): { layer: PolicyLayer; version: number } | null;
 
@@ -774,7 +775,11 @@ export interface Store {
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).
 
-  /** Insert one audit entry. A duplicate id throws (nothing is written). Both json columns are written NULL. */
+  /**
+   * Insert one audit entry. A duplicate id throws (nothing is written). Both json columns are written NULL. A policy row
+   * (`policy.update`, `policy.reset`) also carries `detail` (the sections changed and the owner's reason): a store MUST keep it
+   * and return it from `listAudit`, or the trail silently loses what changed and why. A row without one has no `detail` key.
+   */
   insertAudit(row: AuditRow): void;
 
   /**

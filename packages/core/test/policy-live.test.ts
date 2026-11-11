@@ -712,3 +712,60 @@ describe('what the layer cannot reach', () => {
     expect(cw.profile.profanity.mode).toBe('allow');
   });
 });
+
+describe('cw.profile and cw.summary are getters (a captured copy would be a bug)', () => {
+  it('are accessor properties on the facade, not data properties', async () => {
+    const { cw } = await setup();
+    for (const key of ['profile', 'summary'] as const) {
+      const d = Object.getOwnPropertyDescriptor(cw, key);
+      expect(typeof d?.get, key).toBe('function');
+      expect(d?.value, key).toBeUndefined();
+    }
+  });
+});
+
+describe('refresh only moves forward', () => {
+  it('a store that reports an older version than the one in force does not regress the profile', async () => {
+    const store = new MemoryStore();
+    const { cw, clock } = await setup({}, store);
+    save(cw, { durations: [HOUR] }, 0);
+    save(cw, { durations: [HOUR, 2 * HOUR] }, 1);
+    vi.spyOn(store, 'loadPolicyLayer').mockReturnValue({ layer: { durations: [3 * HOUR] }, version: 1 });
+    clock.t += REFRESH;
+    expect(cw.profile.durations).toEqual([HOUR, 2 * HOUR]);
+    expect(cw.policy.get().version).toBe(2);
+  });
+
+  it('a store with the layer gone (version back to 0) does not regress it either', async () => {
+    const store = new MemoryStore();
+    const { cw, clock } = await setup({}, store);
+    save(cw, { durations: [HOUR] }, 0);
+    vi.spyOn(store, 'loadPolicyLayer').mockReturnValue(null);
+    clock.t += REFRESH;
+    expect(cw.profile.durations).toEqual([HOUR]);
+  });
+
+  it('a strictly newer version is still adopted', async () => {
+    const store = new MemoryStore();
+    const { cw, clock } = await setup({}, store);
+    store.savePolicyLayer({ durations: [HOUR] }, 0);
+    clock.t += REFRESH;
+    expect(cw.profile.durations).toEqual([HOUR]);
+  });
+});
+
+describe('a stored layer that is null (a corrupted row)', () => {
+  it('is a layerError with the base live and an empty layer to show, never a crash', async () => {
+    const store = new MemoryStore();
+    store.savePolicyLayer(null as unknown as PolicyLayer, 0);
+    const { cw, logged } = await setup({}, store);
+    expect(cw.profile).toEqual(PRESETS.standard);
+    const state = cw.policy.get();
+    expect(state.layerError).toEqual({ path: 'layer' });
+    expect(state.layer).toEqual({});
+    expect(state.version).toBe(1);
+    expect(logged.filter(([e]) => e === 'chatwarden.policy_layer_invalid')).toHaveLength(1);
+    expect(save(cw, { durations: [HOUR] }, 1)).toMatchObject({ ok: true, version: 2 });
+    expect(cw.policy.get().layerError).toBeUndefined();
+  });
+});

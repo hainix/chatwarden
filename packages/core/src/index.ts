@@ -230,6 +230,7 @@ export {
   MAX_DURATION_MS,
   MAX_DURATIONS,
   MAX_GUIDELINE_OUTCOME,
+  MAX_RULE_LIST,
   MAX_WINDOW_DAYS,
   POLICY_SECTIONS,
   PRESETS,
@@ -252,6 +253,7 @@ export type {
   GuidelineTier,
   LevelDescription,
   ModerationProfile,
+  ModerationProfileBase,
   Outcome,
   PolicyCell,
   PolicyLadderRow,
@@ -261,5 +263,6 @@ export type {
   ProfanityConfig,
   ProfileInput,
   ProfileOverrides,
+  ResolvedProfile,
   RulesFlavour,
 } from './profile.js';

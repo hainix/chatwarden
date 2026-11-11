@@ -101,7 +101,7 @@ describe('PUT /policy/profile', () => {
     const { call, cw } = await world();
     const res = await call('PUT', '/policy/profile', PUT({ ...good, layer: { durations: [HOUR, 6 * HOUR], repeat: { notes: 3 } } }));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: 1, changed: ['durations', 'repeat'] });
+    expect(res.body).toMatchObject({ ok: true, version: 1, changed: ['durations', 'repeat'] });
     const after = (await call('GET', '/policy/profile')).body as ProfileBody;
     expect(after.version).toBe(1);
     expect(after.effective.durations).toEqual([HOUR, 6 * HOUR]);
@@ -333,7 +333,7 @@ describe('DELETE /policy/profile', () => {
     const { call, cw, routeAudit, clock } = await seeded();
     const res = await call('DELETE', '/policy/profile', { role: 'owner', actor: 'owner_ann', query: { section: 'durations' }, body: { reason: 'back to default' } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: 2, changed: ['durations'] });
+    expect(res.body).toMatchObject({ ok: true, version: 2, changed: ['durations'] });
     expect(cw.policy.get().layer).toEqual({ customDuration: false, repeat: { notes: 3 } });
     expect(routeAudit().at(0)).toEqual({
       id: expect.any(String),
@@ -345,18 +345,18 @@ describe('DELETE /policy/profile', () => {
     });
   });
 
-  it('with no section it resets everything, and the reason is optional', async () => {
+  it('with no section it resets everything', async () => {
     const { call, cw, routeAudit } = await seeded();
-    const res = await call('DELETE', '/policy/profile', { role: 'owner' });
-    expect(res.body).toEqual({ ok: true, version: 2, changed: ['durations', 'customDuration', 'repeat'] });
+    const res = await call('DELETE', '/policy/profile', { role: 'owner', body: { reason: 'start over' } });
+    expect(res.body).toMatchObject({ ok: true, version: 2, changed: ['durations', 'customDuration', 'repeat'] });
     expect(cw.policy.get().layer).toEqual({});
-    expect(routeAudit().at(0)?.detail).toEqual({ sections: ['durations', 'customDuration', 'repeat'] });
+    expect(routeAudit().at(0)?.detail).toEqual({ sections: ['durations', 'customDuration', 'repeat'], reason: 'start over' });
   });
 
   it('a section that is not in the layer is a harmless no-op, still audited with no sections', async () => {
     const { call, routeAudit } = await seeded();
-    const res = await call('DELETE', '/policy/profile', { role: 'owner', query: { section: 'ladder' } });
-    expect(res.body).toEqual({ ok: true, version: 1, changed: [] });
+    const res = await call('DELETE', '/policy/profile', { role: 'owner', query: { section: 'ladder' }, body: { reason: 'why' } });
+    expect(res.body).toMatchObject({ ok: true, version: 1, changed: [] });
     expect(routeAudit().at(0)).toMatchObject({ action: 'policy.reset', detail: { sections: [] } });
   });
 
@@ -390,16 +390,16 @@ describe('DELETE /policy/profile', () => {
 
   it('a version in the body must still be current (409 conflict), and the stored layer is unchanged', async () => {
     const { call, cw } = await seeded();
-    const res = await call('DELETE', '/policy/profile', { role: 'owner', body: { version: 0 } });
+    const res = await call('DELETE', '/policy/profile', { role: 'owner', body: { version: 0, reason: 'why' } });
     expect([res.status, errorOf(res)]).toEqual([409, 'conflict']);
     expect(cw.policy.get().layer).not.toEqual({});
-    expect((await call('DELETE', '/policy/profile', { role: 'owner', body: { version: 1 } })).status).toBe(200);
-    expect((await call('DELETE', '/policy/profile', { role: 'owner', body: { version: 'x' } })).status).toBe(400);
+    expect((await call('DELETE', '/policy/profile', { role: 'owner', body: { version: 1, reason: 'why' } })).status).toBe(200);
+    expect((await call('DELETE', '/policy/profile', { role: 'owner', body: { version: 'x', reason: 'why' } })).status).toBe(400);
   });
 
   it('answers 501 not_supported for a store that cannot save', async () => {
     const { call } = await world({ wrap: (cw) => unsupported(cw) });
-    const res = await call('DELETE', '/policy/profile', { role: 'owner' });
+    const res = await call('DELETE', '/policy/profile', { role: 'owner', body: { reason: 'why' } });
     expect([res.status, errorOf(res)]).toEqual([501, 'not_supported']);
   });
 });
@@ -467,7 +467,7 @@ describe('duration_not_offered', () => {
     expect((await call('POST', '/sanctions', { body: sanction(person(), { durationMs: 5 * HOUR }) })).status).toBe(200);
     await call('PUT', '/policy/profile', PUT({ layer: { customDuration: false }, version: 0, reason: 'r' }));
     expect(errorOf(await call('POST', '/sanctions', { body: sanction(person(), { durationMs: 5 * HOUR }) }))).toBe('duration_not_offered');
-    await call('DELETE', '/policy/profile', { role: 'owner', query: { section: 'customDuration' } });
+    await call('DELETE', '/policy/profile', { role: 'owner', query: { section: 'customDuration' }, body: { reason: 'why' } });
     expect((await call('POST', '/sanctions', { body: sanction(person(), { durationMs: 5 * HOUR }) })).status).toBe(200);
   });
 
@@ -549,3 +549,81 @@ function unsupported(cw: Chatwarden): Chatwarden {
   };
   return Object.create(cw, { policy: { value: policy } }) as Chatwarden;
 }
+
+describe('DELETE /policy/profile needs a reason, like PUT', () => {
+  it('no body, no reason, a blank reason or a reason that is not text is 400 invalid_request, and nothing is reset', async () => {
+    const { call, cw, routeAudit } = await world();
+    await call('PUT', '/policy/profile', PUT(good));
+    const before = routeAudit().length;
+    for (const o of [{ role: 'owner' as const }, { role: 'owner' as const, body: {} }, { role: 'owner' as const, body: { reason: '   ' } }, { role: 'owner' as const, body: { reason: 5 } }]) {
+      const res = await call('DELETE', '/policy/profile', o);
+      expect([res.status, errorOf(res)], JSON.stringify(o)).toEqual([400, 'invalid_request']);
+    }
+    expect(cw.policy.get().version).toBe(1);
+    expect(routeAudit()).toHaveLength(before);
+  });
+});
+
+describe('PUT and DELETE answer with the fresh state, in the shape of GET', () => {
+  const shape = ['base', 'canSave', 'changed', 'effective', 'layer', 'ok', 'version'];
+
+  it('PUT returns ok, version, changed and effective, base, layer, version, canSave', async () => {
+    const { call } = await world();
+    const res = await call('PUT', '/policy/profile', PUT({ ...good, layer: { durations: [HOUR, 6 * HOUR], customDuration: false } }));
+    expect(res.status).toBe(200);
+    const body = res.body as ProfileBody & { ok: boolean; changed: string[] };
+    expect(Object.keys(body).sort()).toEqual(shape);
+    expect(body.ok).toBe(true);
+    expect(body.version).toBe(1);
+    expect(body.changed).toEqual(['durations', 'customDuration']);
+    expect(body.layer).toEqual({ durations: [HOUR, 6 * HOUR], customDuration: false });
+    expect(body.effective.durations).toEqual([HOUR, 6 * HOUR]);
+    expect(body.effective.customDuration).toBe(false);
+    expect(body.canSave).toBe(true);
+    const get = (await call('GET', '/policy/profile')).body as ProfileBody;
+    expect(body.effective).toEqual(get.effective);
+    expect(body.base).toEqual(get.base);
+  });
+
+  it('DELETE returns the same, after the reset', async () => {
+    const { call } = await world();
+    await call('PUT', '/policy/profile', PUT({ ...good, layer: { durations: [HOUR], customDuration: false } }));
+    const res = await call('DELETE', '/policy/profile', { role: 'owner', query: { section: 'durations' }, body: { reason: 'back' } });
+    const body = res.body as ProfileBody & { changed: string[] };
+    expect(Object.keys(body).sort()).toEqual(shape);
+    expect(body.changed).toEqual(['durations']);
+    expect(body.version).toBe(2);
+    expect(body.layer).toEqual({ customDuration: false });
+    expect(body.effective.durations).toEqual(body.base.durations);
+  });
+
+  it('needs no follow-up GET: a save, a reset and the state they return write no policy.view row', async () => {
+    const { call, routeAudit } = await world();
+    await call('PUT', '/policy/profile', PUT(good));
+    await call('DELETE', '/policy/profile', { role: 'owner', body: { reason: 'back' } });
+    expect(routeAudit().map((r) => r.action).sort()).toEqual(['policy.reset', 'policy.update']);
+  });
+});
+
+describe('already_decided comes before duration_not_offered', () => {
+  it('a replay of a decision keeps working, and a different decision on a decided report is 409, whatever the length rule now says', async () => {
+    const { call, file, cw } = await world();
+    const r = await file();
+    const body = (durationMs: number) => ({ verdict: 'upheld', actions: [{ subject: r.target, kind: 'chat', durationMs, rule: 2 }], reason: 'r' });
+    expect((await call('POST', `/reports/${r.id}/decide`, { body: body(5 * HOUR) })).status).toBe(200);
+    await call('PUT', '/policy/profile', PUT({ layer: { customDuration: false, durations: [HOUR] }, version: 0, reason: 'r' }));
+    const replay = await call('POST', `/reports/${r.id}/decide`, { body: body(5 * HOUR) });
+    expect([replay.status, (replay.body as { replay?: boolean }).replay]).toEqual([200, true]);
+    const other = await call('POST', `/reports/${r.id}/decide`, { body: body(3 * HOUR) });
+    expect([other.status, errorOf(other)]).toEqual([409, 'already_decided']);
+    expect(cw.sanctions.forPerson(r.target)).toHaveLength(1);
+  });
+
+  it('an open report is still refused for a length that is not offered', async () => {
+    const { call, file } = await world();
+    await call('PUT', '/policy/profile', PUT({ layer: { customDuration: false, durations: [HOUR] }, version: 0, reason: 'r' }));
+    const r = await file();
+    const res = await call('POST', `/reports/${r.id}/decide`, { body: { verdict: 'upheld', actions: [{ subject: r.target, kind: 'chat', durationMs: 5 * HOUR, rule: 2 }], reason: 'r' } });
+    expect([res.status, errorOf(res)]).toEqual([400, 'duration_not_offered']);
+  });
+});

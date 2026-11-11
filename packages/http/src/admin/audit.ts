@@ -8,7 +8,7 @@ const AUDIT_PAGE_DEFAULT = 50;
 
 /**
  * `GET /audit?cursor&limit&actor&action` (`audit.read`, senior by default): one page of the staff audit trail, newest
- * first, `{ items, next }`. The rows hold ids and action names only. Reading the trail writes no row of its own. A bad
+ * first, `{ items, next }`. The rows hold ids and action names, and a `policy.update` / `policy.reset` row also holds `detail`: the editable sections changed and the owner's reason (the one free text). Reading the trail writes no row of its own. A bad
  * `limit` (not a whole number from 1 to 200), `cursor`, `actor` or `action` is 400.
  */
 export function auditRoutes(ctx: AdminContext): RouteTable {

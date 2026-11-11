@@ -155,11 +155,13 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
 
       // Authorization for what the decision DOES, before anything is read or written.
       needForDecision(decision.actions, c.need);
-      checkDurationsOffered(cw, decision.actions);
 
       // Another moderator's live claim on the reported person stops the decision, unless a senior takes the case over.
       // A report that is no longer open is a replay or an already_decided: a claim taken since must not turn that into a 409.
       const existing = cw.reports.get(id);
+      // The lengths on offer apply to a decision that would be applied now: a replay, or a different decision on a report that is
+      // already decided, is answered as such (`already_decided` or a replay) whatever the rule says today.
+      if (existing !== null && existing.status === 'open') checkDurationsOffered(cw, decision.actions);
       const person = existing !== null && existing.status === 'open' ? existing.targetPerson : null;
       if (person !== null) gateCase(ctx, c, person, takeOver);
 
