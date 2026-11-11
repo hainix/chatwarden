@@ -345,7 +345,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 - the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `usePolicy`, and the types `HubRead`,
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
-  includes `HubController.configure`, `HubController.refresh` and `HubControllerOptions.host`. The names are the same declarations the main entry re-exports (`createHubClient`,
+  includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh` and `HubControllerOptions.host`. The names are the same declarations the main entry re-exports (`createHubClient`,
   `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
   (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
   - functions, values and classes:
