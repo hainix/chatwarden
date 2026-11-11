@@ -147,6 +147,10 @@ export function fetchTransport(options: FetchTransportOptions): Transport {
     if (req.body !== undefined) {
       headers['content-type'] = 'application/json';
       init.body = JSON.stringify(req.body);
+    } else if (req.method !== 'GET' && req.method !== 'HEAD' && !Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
+      // Every write says JSON, body or not, so a host can refuse writes without it as a cross-site-forgery guard (a form on
+      // another site cannot send this type without a CORS preflight). The kit reads an empty body as no body.
+      headers['content-type'] = 'application/json';
     }
     if (options.credentials !== undefined) init.credentials = options.credentials;
     if (req.signal !== undefined) init.signal = req.signal;
