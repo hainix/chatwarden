@@ -100,8 +100,18 @@ describe('the built page under the _headers CSP', () => {
       await scrollThrough(page);
       // The lazy demo chunk loaded and rendered under the policy. Wait for the script's first line, not a later one: the lines
       // arrive on a timer, and on a busy CI runner the fifth (RUDE) took longer than the wait on the phone run.
-      await page.getByText('gg, that last clutch was wild').first().waitFor({ timeout: 30_000 });
-      await demoOf(page).getByRole('navigation', { name: /moderator hub sections/i, includeHidden: true }).waitFor({ state: 'attached' });
+      // If the demo or the hub never shows, fail with what the page reported (policy violations, console errors, failed
+      // requests) instead of a bare timeout: CI's phone run timed out here while every other phone test passed.
+      const said = async <T,>(step: string, wait: Promise<T>): Promise<T> => {
+        try {
+          return await wait;
+        } catch (error) {
+          const html = await page.evaluate(() => document.querySelector('[data-pane="mod"]')?.outerHTML.slice(0, 600) ?? '(no mod pane)');
+          throw new Error(`${step}: ${String(error).split('\n')[0]}\nviolations: ${JSON.stringify(violations)}\nconsole: ${JSON.stringify(consoleProblems)}\nfailed: ${JSON.stringify(failed)}\nmod pane: ${html}`);
+        }
+      };
+      await said('first chat line', page.getByText('gg, that last clutch was wild').first().waitFor({ timeout: 30_000 }));
+      await said('hub navigation', demoOf(page).getByRole('navigation', { name: /moderator hub sections/i, includeHidden: true }).waitFor({ state: 'attached', timeout: 30_000 }));
       // The hub's stylesheet and the player stylesheet really are applied (not just loaded): a rule of each is in force.
       const sheets = await page.evaluate(() => {
         const selectors = new Set<string>();

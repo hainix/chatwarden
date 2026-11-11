@@ -58,7 +58,14 @@ describe('Recent actions name the person', () => {
     await w.sanction(f.person, 'ban', 2);
     renderHub(w);
     await overview();
-    expect(recent().textContent).not.toContain(f.person.slice(0, 9));
+    // Each text node on its own, not textContent: textContent glues the tag to the next word, so a ref whose ninth character
+    // matched that word's first letter failed by chance (CI: "s_Hzs0HI" + "R…"). (The person link's href carries the full ref by
+    // design, documented in the README's security notes; this test is about what is shown.)
+    const texts: string[] = [];
+    const walk = document.createTreeWalker(recent(), NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n !== null; n = walk.nextNode()) texts.push(n.nodeValue ?? '');
+    expect(texts.some((t) => t.includes(f.person.slice(0, 8)))).toBe(true);
+    expect(texts.filter((t) => t.includes(f.person.slice(0, 9)))).toEqual([]);
   });
 
   it('has a See all link to the full list, for a role that can read history', async () => {
