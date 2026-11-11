@@ -265,6 +265,10 @@
 .composer {
   flex: none;
   display: grid;
+  /* One column that can be narrower than its content. A bare grid column is `auto`, whose floor is the row's min-content (the input's
+     intrinsic 20-character width + the counter + Send, about 370px), so in a ~340px pane the row ran past the form and the pane's
+     overflow: hidden cut Send to "Se". minmax(0, 1fr) pins the column to the form; the input then shrinks (min-width: 0). */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   padding: 12px 14px 14px;
   background: #121935;
@@ -313,6 +317,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 .composer input[type='text'] {
   flex: 1 1 auto;
