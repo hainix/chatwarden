@@ -98,6 +98,8 @@ interface ModerationProfile {
   profanity: 'allow' | 'star' | 'refuse';        // ordinary swearing in chat (slurs are always refused)
   aiContext: string;                  // the plain-language standard given to the AI read with the Community Rules
   aiAutoAct: ConductLevel[];          // levels AI level 3 may act on by itself (never 'banter' or 'rude')
+  durations: number[];                // the lengths offered to moderators (ms): 1h, 6h, 12h, 24h, 3d, 7d, 30d by default
+  customDuration: boolean;            // may a moderator type their own length? default true
 }
 type Outcome = 'none' | 'note' | 'warning' | { kind: 'chat' | 'area' | 'ban'; durationMs: number | null };
 ```
@@ -169,6 +171,11 @@ The rule for every setting in the kit:
      Unknown keys, an outcome the ladder can't express, or an AI auto-act on banter/rude all throw at creation with
      a plain message.
    - The resolved profile is readable (`cw.profile`), so the Guide and the docs show what is actually in force.
+   - The profile in code is the BASE. The owner can edit part of it at runtime (the lengths offered, the ladder, the first
+     offences, the repeat rule, the area and severe rules and the guideline outcome texts) from the hub: the edits are a
+     versioned layer in the adopter's store (`cw.policy`), and `cw.profile` is the base with that layer on top, read live.
+     Profanity handling and the rest stay code-only. See the editable ladder design
+     (`2026-11-10-editable-ladder-and-roadmap.md`).
 3. **Or write your own.** `defineProfile({...})` builds a complete custom profile with the same validation.
 4. **Defaults are documented next to every field.** The docs site's configuration page is generated from the
    profile types and the preset values, so a default can't be undocumented.

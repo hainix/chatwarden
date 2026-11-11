@@ -17,13 +17,15 @@ import { historyOf, suggest } from './ladder.js';
 import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
 import { resolveLimits } from './limits.js';
 import type { Limits, LimitsInput } from './limits.js';
+import { PolicyService } from './policy.js';
+import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { resolveProfile } from './profile.js';
-import type { ModerationProfile, PresetName, ProfanityConfig, ProfileOverrides } from './profile.js';
+import type { ModerationProfile, PolicyLayer, PolicySection, PresetName, ProfanityConfig, ProfileOverrides, ResolvedProfile } from './profile.js';
 import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
-import type { ReportCounts, ReportInput, ReportResult } from './reports.js';
+import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, ReportResult } from './reports.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
@@ -31,9 +33,26 @@ import type { CommunityRules, RuleRef } from './rules.js';
 import { applySanction, SanctionIndex } from './sanctions.js';
 import type { SanctionInput } from './sanctions.js';
 import { StrikeService } from './strikes.js';
+import {
+  blockedCountsByTerm,
+  blockedItems,
+  listSanctionGroups,
+  reporterRecord,
+  sanctionsOfPerson,
+} from './staffViews.js';
+import type {
+  BlockedDays,
+  BlockedItem,
+  ReporterRecord,
+  SanctionGroupView,
+  SanctionListInput,
+  SanctionPage,
+} from './staffViews.js';
 import { listStaffReports, staffReport } from './staffReports.js';
 import type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 import { SubjectIndex } from './subjects.js';
+import { CaseDesk, ReasonBook } from './team.js';
+import type { CaseClaim, ClaimOutcome, NextCase } from './team.js';
 import { WEBHOOK_KEY_TTL_MS } from './types.js';
 import type {
   Clock,
@@ -43,6 +62,8 @@ import type {
   Platform,
   ProfanityFilter,
   RawWho,
+  ReasonRow,
+  ReportCategory,
   ConductLevel,
   Store,
   StoredReport,
@@ -135,7 +156,8 @@ export interface ChatwardenOptions {
   /**
    * The moderation profile: a preset by name (`'relaxed'`, `'standard'` or `'strict'`) or a complete profile from
    * `defineProfile` / `resolveProfile`. Default `'standard'`. It drives `suggest`, the starter rules and the
-   * summary; read the result back as `cw.profile`.
+   * summary. This is the BASE profile: a moderator's stored edits (`cw.policy`) are merged on top of it, and `cw.profile` reads
+   * the result.
    */
   profile?: PresetName | ModerationProfile;
   /**
@@ -225,12 +247,27 @@ export interface Chatwarden {
     mutedSeats(roomId: string, viewerSeat: string): string[];
   };
   reports: {
+    /**
+     * File a report. `input.reason` (or the 0.1.1 alias `category`) is optional: with the default `one_tap` flow a report with
+     * no reason is taken; with `reason_required` it is refused `reason_required`; an unknown or switched-off reason is
+     * `reason_unknown` in every flow. The reason is stored as `reportedReason`: a hint for the moderator, never the truth.
+     * See {@link ReportInput} and {@link ReportRefusal}. The kit has no player report route: your game's own route calls this.
+     */
     submit(input: ReportInput): Promise<ReportResult>;
+    /**
+     * The reporter's one optional follow-up after a report: `{ reason?, note? }` attached to the same report. Only the original
+     * reporter (the same seat, still in the report's room), once, within ten minutes, and while the report is open; it never
+     * changes the target or the excerpt. Refusals: `off`, `not_found`, `not_reporter`, `too_late`, `already_added`,
+     * `reason_unknown`. Never rejects. The kit has no player report route: expose this from your own, the way you expose
+     * `submit`, with the seat taken from your own session and never from the request body.
+     */
+    addDetail(reportId: string, reporterSeat: string, detail: ReportDetailInput): Promise<ReportDetailResult>;
     /**
      * The staff report queue, newest first (ties broken by id), one page at a time. Filter with `status`; pass the
      * previous page's `next` as `before` for the next page; `limit` defaults to 50 and is clamped to 1..200. Each item
      * is a {@link StaffReport}: the whole record plus the canonical staff refs and the own line ids of every person.
-     * Throws `ReportQueryError` for an unknown status or a cursor that is not one of ours, and the store's own error
+     * `reason` keeps only the reports filed under that reported reason (`null`: none given). Throws `ReportQueryError` for an
+     * unknown status, a malformed reason or a cursor that is not one of ours, and the store's own error
      * if it fails, so a route handler should catch both.
      * Carries subject ids: staff channels only, never send to a player.
      */
@@ -240,6 +277,98 @@ export interface Chatwarden {
      * Carries subject ids: staff channels only, never send to a player.
      */
     get(id: string): StaffReport | null;
+    /**
+     * How the reports this person FILED stand (total, open, actioned, dismissed, bad faith) and when their reporting
+     * suspension ends (null if none), under the same rule intake uses, and how often their reported reason was borne out
+     * (`reasonMatched` of `reasonDecided`). Folds in the person's merged aliases. Staff only:
+     * never send to a player (a player is not told who reported or how often).
+     */
+    reporterRecord(subject: SubjectId): ReporterRecord;
+  };
+  /**
+   * Blocked chat lines, from the slur filter's strikes (purged after 30 days). Staff only: the lines are raw chat text
+   * and `person` is a subject id; never send either to a player.
+   */
+  blocked: {
+    /** The last `days` days (1, 7 or 30, else `RangeError`), newest first, at most 500. */
+    list(q: { days: BlockedDays }): BlockedItem[];
+    /** Strikes per term id over the same window; a term with none is absent. */
+    countsByTerm(q: { days: BlockedDays }): Record<string, number>;
+  };
+  /**
+   * The team workbench: soft claims on a person's case, take next, and who has a case open. Staff only; every `person` is
+   * a staff ref (an alias is folded into the surviving person) and every `actor` a staff ref the audit trail accepts
+   * (`RangeError` otherwise). Claims live in the store and last 10 minutes from the last beat (`CLAIM_TTL_MS`), on the
+   * injected clock; an expired claim reads as absent everywhere. They are a courtesy, not a security boundary: nothing
+   * in the core refuses a decision because of one (`@chatwarden/http` does, with a 409 `claimed`).
+   * Carries subject ids: staff channels only, never send to a player.
+   */
+  cases: {
+    /** The live claim on the person's case, or null. */
+    holder(person: SubjectId): CaseClaim | null;
+    /** The live claims among these people in one read, keyed by their canonical person. */
+    holders(people: readonly SubjectId[]): Map<SubjectId, CaseClaim>;
+    /**
+     * Claim the person's case, or beat the claim `actor` already holds (the claim then lasts 10 minutes from now; `since`
+     * is kept). Needs an open report against the person (`no_case` otherwise). Somebody else's live claim answers
+     * `claimed` with it, unless `takeOver` is true, which moves it to `actor` (`tookOverFrom` names the previous holder).
+     * `takeOver` is not permission-checked here: the caller decides who may use it. The write is one atomic conditional
+     * statement, so two moderators racing for one case never both win, even from two processes on one database. A
+     * process that loses the database lock race in between (SQLite BUSY) is retried up to `CLAIM_BUSY_TRIES` times with
+     * a fresh read, so it answers `claimed` with the winner, not an error.
+     */
+    claim(person: SubjectId, actor: string, opts?: { takeOver?: boolean }): ClaimOutcome;
+    /** End `actor`'s own claim. True only when it ended a live one; never touches another moderator's. */
+    release(person: SubjectId, actor: string): boolean;
+    /**
+     * What a decision does to the claim: end `actor`'s own claim only when the person has no other open report (one case per
+     * person: deciding one report of several keeps the claim, and the last one releases it). While reports remain the claim is
+     * not touched at all. True only when it ended a live claim.
+     */
+    releaseWhenDone(person: SubjectId, actor: string): boolean;
+    /**
+     * Claim and return the oldest OPEN case nobody holds, optionally only cases with an open report of `category`
+     * or that gave `reason` (an id, the old `disruption` reading as `griefing`; `null`: none given; `RangeError` for an unknown category or a
+     * malformed id), or null. A case is a person, ranked by their oldest open report and opened on
+     * their newest. A case anyone holds is skipped without a write (held cases are read once per page of reports). `category` and
+     * `reason` are the only filters: the order is already oldest first. A candidate lost to a rival in between is retried like `claim`.
+     */
+    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null }): NextCase | null;
+    /**
+     * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
+     * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
+     * (`VIEWING_PER_ACTOR_MAX`), a newer beat dropping their oldest. True when the beat was recorded.
+     */
+    view(person: SubjectId, actor: string): boolean;
+    /** Who has the person's case open now (sorted), leaving `except` out. In this process's memory: other processes are not seen. */
+    viewers(person: SubjectId, except?: string): string[];
+    /** `viewers` for several people at once; people nobody is viewing are absent. */
+    viewersOf(people: readonly SubjectId[], except?: string): Map<SubjectId, string[]>;
+  };
+  /** A cheap "did anything change?" for the moderator queue. */
+  changes: {
+    /**
+     * An opaque token, persisted in the store (the in-memory store starts again at "0" when the process restarts), that is different after any report filed or decided, sanction applied or
+     * revoked, rule gap closed, claim taken, taken over or released, or saved reason changed, and the same otherwise
+     * (a claim heartbeat, a refused claim, viewing and every read leave it alone). A claim that merely expires does not
+     * move it. Compare it for equality only; one read of one row, no audit, no other reads.
+     */
+    token(): string;
+  };
+  /**
+   * Saved decision reasons (label up to 40 characters, text up to 500, at most 200 of them), shared by the team and
+   * kept in the store. Text is staff-written and may be quoted into a decision; it is not player-facing by itself.
+   * `ReasonError` for a label, text or id outside its limits, or when the list is full.
+   */
+  reasons: {
+    /** Every reason, active or not, in the order they were added. */
+    list(): ReasonRow[];
+    /** Add an active reason (trimmed). */
+    add(input: { label: string; text: string }): ReasonRow;
+    /** Change the label and/or text (at least one). Null for an unknown id. */
+    update(id: string, patch: { label?: string; text?: string }): ReasonRow | null;
+    /** Switch a reason on or off. Null for an unknown id. */
+    setActive(id: string, active: boolean): ReasonRow | null;
   };
   doors: { check(kind: DoorKind, who: RawWho): DoorRefusal | null };
   sanctions: {
@@ -253,6 +382,18 @@ export interface Chatwarden {
      * a seen one leaves "My record". Resolves true when this call revoked something.
      */
     revoke(groupId: string, actor: string, reason: string): Promise<boolean>;
+    /**
+     * A person's sanctions as staff see them, newest first: the last 90 days plus every unrevoked permanent one, across
+     * the aliases merged into them, at most 200. Each is a {@link SanctionGroupView} built from the group's subject row
+     * (never an IP row, never a hashed identifier). Carries staff-only text (reason, actor): never send to a player.
+     */
+    forPerson(subject: SubjectId): SanctionGroupView[];
+    /**
+     * Every person's sanctions, newest first, one page at a time (`limit` default 50, clamped to 1..200; `cursor` is the
+     * previous `next`; `source` filters). Not windowed. Throws {@link SanctionQueryError} for a cursor that is not ours or an
+     * unknown source. Carries subject ids and staff-only text: never send to a player.
+     */
+    list(q?: SanctionListInput): SanctionPage;
   };
   /**
    * Subscribe to what happens in the kit: `'report.created'`, `'report.closed'`, `'sanction.applied'`,
@@ -280,15 +421,47 @@ export interface Chatwarden {
   };
   /** The registry in use (the one given, or the starter rules for the profile). Retired rules stay listed. */
   rules: CommunityRules;
-  /** The profile in force: the preset, the overrides and the validation applied. Deep-frozen. */
-  profile: ModerationProfile;
+  /**
+   * The profile in force: the preset, the code overrides and the stored layer from `cw.policy`, validated. Deep-frozen. A
+   * getter, read live: after a save (or a change another process saved, within 10 seconds) it is a new object, so never keep
+   * one across calls. Everything in the kit that reads the profile reads it through this.
+   */
+  readonly profile: ResolvedProfile;
+  /**
+   * The editable profile. The profile from code is the base; a moderator's edits to the durations offered, the ladder, the first
+   * offences, the repeat rule, the area and severe rules and the guideline outcome texts are stored in your store as a
+   * versioned layer. Needs a store with `loadPolicyLayer` and `savePolicyLayer` (the memory and SQLite stores have them);
+   * without them `save` and `reset` answer `{ ok: false, error: 'unsupported' }` and everything else works from code.
+   */
+  policy: {
+    /** `{ effective, base, layer, version, canSave }`, plus `layerError` when the stored layer cannot be used (it is then ignored). */
+    get(): PolicyState;
+    /**
+     * Replace the stored layer (the whole layer: a section left out goes back to the base) if `version` is still the stored
+     * one. `{ ok: true, version, changed }`, or `{ ok: false, error: 'conflict' | 'unsupported' }`, or `{ ok: false, error:
+     * 'invalid', path }` for a layer that touches anything outside the editable sections (profanity stays in code) or would
+     * make the profile invalid. `actor` and `reason` are checked (path `actor` / `reason`); the staff routes write them to
+     * the audit trail. Takes effect at once here, and within 10 seconds in other processes on the same store.
+     */
+    save(layer: PolicyLayer, ctx: PolicySaveContext): PolicySaveResult;
+    /**
+     * What `layer` would suggest for four sample records (`clean`, `oneWarning`, `chat24h`, `ban7d`) and each conduct level,
+     * without saving. Pass `rule` to see an area or severe rule take effect.
+     */
+    preview(layer: PolicyLayer, rule?: RuleRef): PolicyPreview;
+    /** Put one section (or all of them) back to the base. Stores the layer without it; a no-op when nothing is stored for it. */
+    reset(section?: PolicySection, o?: { version?: number }): PolicySaveResult;
+    /** Look at the store now, instead of waiting for the 10 second interval. */
+    refresh(): void;
+  };
   /** The limits in force, defaults filled in. Deep-frozen. */
   limits: Limits;
-  /** The profile's one-line summary, for the report dialog and the rules page. Same as `profile.summary`. */
-  summary: string;
+  /** The profile's one-line summary, for the report dialog and the rules page. Same as `profile.summary`. A getter, read live. */
+  readonly summary: string;
   /**
    * Generated policy documents, bound to the profile and rules in force: a player code of conduct, a moderator guide,
-   * an agent brief and the policy as JSON. Pure text; nothing here reads the store.
+   * an agent brief and the policy as JSON. Each call is generated from the effective profile at that moment, so a save shows
+   * in the very next call.
    */
   documents: Documents;
   /**
@@ -337,7 +510,7 @@ export interface Chatwarden {
   };
   /**
    * The staff audit trail: who (actor and role) did what to which id, and when. Staff only. Stores ids and the action
-   * name, never chat text, a reason or a note. Rows from the term editor and from `gaps.close` read here too (role
+   * name, never chat text or a note (a `policy.update` / `policy.reset` row also holds the sections changed and the owner's reason). Rows from the term editor and from `gaps.close` read here too (role
    * null). Kept `retention.auditMs` (default 365 days, at least 90).
    */
   audit: {
@@ -434,7 +607,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   const hasher = makeHasher(opts.secret);
 
   // Everything an adopter configures is checked before the store is touched or a timer started.
-  const profile = resolveProfile(opts.profile ?? 'standard', opts.overrides);
+  // The BASE profile: the preset and the code overrides. What is in force is `policy.profileNow()` (the base with the stored layer
+  // on top); never keep that in a closure. The base itself is read here only for what a layer cannot edit: the rules flavour
+  // and the profanity handling, which are code-only.
+  const baseProfile = resolveProfile(opts.profile ?? 'standard', opts.overrides);
   const limits = resolveLimits(opts.limits);
 
   const { everyMs, ...givenRetention } = opts.retention === false ? {} : (opts.retention ?? {});
@@ -451,15 +627,15 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (opts.retention !== false && purgeEveryMs > MAX_PURGE_EVERY_MS) {
     throw new RangeError(`retention.everyMs must be at most ${MAX_PURGE_EVERY_MS}`);
   }
-  const rules = opts.rules ?? defineRules(starterRules(profile.rules));
+  const rules = opts.rules ?? defineRules(starterRules(baseProfile.rules));
   const autoRestrictRule = opts.autoRestrictRule ?? 1;
   const autoRule = rules.get(autoRestrictRule);
   if (autoRule === undefined || autoRule.retired === true) {
     throw new RangeError('autoRestrictRule must be the number of an active rule in the registry');
   }
   if (opts.matcher === undefined) safeWarn(logger, 'chatwarden.no_matcher');
-  const profanity = buildProfanityFilter(opts, profile.profanity);
-  if (profanity === undefined && profile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
+  const profanity = buildProfanityFilter(opts, baseProfile.profanity);
+  if (profanity === undefined && baseProfile.profanity.mode !== 'allow') safeWarn(logger, 'chatwarden.no_profanity_filter');
 
   const bus = new EventBus(logger);
   const subjects = new SubjectIndex(store, clock, { logger });
@@ -473,6 +649,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await sanctions.load(store, clock.now());
   await mutes.load();
   await strikes.load();
+  // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile });
+  policy.load();
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
   // decisions all write to and read from it, and `platform.notify` hears of every new notice through it.
@@ -498,7 +677,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     clock,
     matcher: opts.matcher,
     profanity,
-    profanityMode: profile.profanity.mode,
+    profanityMode: baseProfile.profanity.mode,
     gate: opts.gate,
     onAutoRestrict: opts.onAutoRestrict,
     onAutoRestricted: ({ groupId, refCode, second, subject }) => {
@@ -516,6 +695,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     store,
     clock,
     enabled,
+    reporting: () => policy.profileNow().reporting,
     onReport: opts.onReport,
     logger,
     limits: limits.reports,
@@ -563,6 +743,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         reportId: stored.id,
         createdAt: stored.createdAt,
         category: stored.category,
+        reportedReason: stored.reportedReason,
         roomTags: { ...stored.tags },
       });
     } catch (err) {
@@ -595,6 +776,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   }
 
   const audit = new AuditService({ store, clock, logger });
+  const desk = new CaseDesk({ store, subjects, clock, reasons: () => policy.profileNow().reporting.reasons });
+  const reasonBook = new ReasonBook(store);
 
   return {
     rooms: {
@@ -641,11 +824,35 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         if (res.ok) announceReport(res.reportId);
         return res;
       },
-      list: (q) => listStaffReports(store, subjects, q),
+      addDetail: (reportId, reporterSeat, detail) => reports.addDetail(reportId, reporterSeat, detail),
+      list: (q) => listStaffReports(store, subjects, q, policy.profileNow().reporting.reasons),
       get: (id) => {
         const record = typeof id === 'string' ? store.loadReport(id) : null;
         return record === null ? null : staffReport(record, subjects);
       },
+      reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
+    },
+    blocked: {
+      list: (q) => blockedItems(store, subjects, q?.days, clock.now()),
+      countsByTerm: (q) => blockedCountsByTerm(store, q?.days, clock.now()),
+    },
+    cases: {
+      holder: (person) => desk.holder(person),
+      holders: (people) => desk.holders(people),
+      claim: (person, actor, o) => desk.claim(person, actor, o),
+      release: (person, actor) => desk.release(person, actor),
+      releaseWhenDone: (person, actor) => desk.releaseWhenDone(person, actor),
+      next: (actor, filter) => desk.next(actor, filter),
+      view: (person, actor) => desk.view(person, actor),
+      viewers: (person, except) => desk.viewers(person, except),
+      viewersOf: (people, except) => desk.viewersOf(people, except),
+    },
+    changes: { token: () => store.changeToken() },
+    reasons: {
+      list: () => reasonBook.list(),
+      add: (input) => reasonBook.add(input),
+      update: (id, patch) => reasonBook.update(id, patch),
+      setActive: (id, active) => reasonBook.setActive(id, active),
     },
     doors: { check: (kind, who) => doors.check(kind, who) },
     sanctions: {
@@ -706,6 +913,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         }
         return revoked;
       },
+      forPerson: (subject) => sanctionsOfPerson(store, subjects, subject, clock.now()),
+      list: (q) => listSanctionGroups(store, subjects, q ?? {}, clock.now()),
     },
     on: bus.on,
     names: {
@@ -723,10 +932,26 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       },
     },
     rules,
-    profile,
+    get profile() {
+      return policy.profileNow();
+    },
+    policy: {
+      get: () => policy.get(),
+      save: (layer, ctx) => policy.save(layer, ctx),
+      preview: (layer, rule) => policy.preview(layer, rule),
+      reset: (section, o) => policy.reset(section, o),
+      refresh: () => policy.refresh(),
+    },
     limits,
-    summary: profile.summary,
-    documents: bindDocuments({ profile, rules }),
+    get summary() {
+      return policy.profileNow().summary;
+    },
+    documents: bindDocuments({
+      get profile() {
+        return policy.profileNow();
+      },
+      rules,
+    }),
     notices: {
       pending: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.pending(s)),
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
@@ -763,7 +988,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
     suggest: (subject, level, rule, context) => {
       const now = clock.now();
-      return suggest(profile, historyOf(store, subjects, subject, now), level, rule, now, context);
+      return suggest(policy.profileNow(), historyOf(store, subjects, subject, now), level, rule, now, context);
     },
     gaps: {
       list: () =>

@@ -1,0 +1,3308 @@
+/*
+ * @chatwarden/hub-react
+ *
+ * One stylesheet. Every colour, size, radius, font and space is a --cw-* custom property with a light and a dark default
+ * (light-dark()); every rule is scoped under .cw-hub. Nothing is injected at run time, so a strict Content-Security-Policy needs
+ * nothing more than permission to load this file. Add font.css (optional) to set the hub in Instrument Sans; without it the hub
+ * uses the system UI font and loads nothing.
+ *
+ * Theming: set any --cw-* token on any element above the hub (body, a wrapper, the <chatwarden-hub> element), on .cw-hub, or on
+ * the className you pass to <Hub>. The stylesheet never declares a public --cw-* name itself: the defaults sit under private
+ * --cwd-* names (declared with :where(), so any rule of yours wins whatever its order) and every rule reads
+ * var(--cw-x, var(--cwd-x)): your value if there is one anywhere up the chain, the default if not. A custom property declared on
+ * an element beats the value it inherits, so declaring --cw-* on .cw-hub here would have hidden whatever the page sets above it.
+ * A theme is chosen by the `theme` prop (data-cw-theme="light|dark" on .cw-hub), by the same attribute on any ancestor, or, by
+ * default, by the visitor's prefers-color-scheme.
+ *
+ * The look: a calm, dense workbench in the style of a professional triage tool. Neutrals carry the screen; chrome and
+ * navigation recede, and the case in focus carries the weight. Colour only where it means something:
+ *   blue (accent)  you, and your next action: the primary button, a selection, focus, your claims
+ *   red            overdue (a wait over 24 hours), the reported line, a ban, and a failure
+ *   yellow         a warning
+ *   green          the small dot that says the connection is live, and nothing else
+ * Everything else is neutral: no colour per category, per speaker or per person. The one signature detail is the referee card
+ * (yellow for a warning, half yellow and half red for a restriction, red for a ban) wherever a sanction is shown.
+ */
+
+/* ---- Tokens ------------------------------------------------------------------------------------------------------ */
+:where(.cw-hub) {
+  /* The defaults, under private names: --cwd-x is what --cw-x falls back to (see the top of this file). */
+  color-scheme: light dark;
+
+  /* Neutral base: the page, the panels, the sunken wells, the lines between them, and the text */
+  --cwd-bg: light-dark(#f4f5f8, #0e131c);
+  --cwd-surface: light-dark(#ffffff, #151c28);
+  --cwd-surface-sunken: light-dark(#eef0f4, #111722);
+  --cwd-border: light-dark(#e0e3ea, #242d3c);
+  --cwd-border-strong: light-dark(#7a8397, #6b7893);
+  --cwd-ink: light-dark(#151b27, #e8ebf1);
+  --cwd-ink-muted: light-dark(#4f5a6e, #9ba4b6);
+  --cwd-ink-faint: light-dark(#5b657a, #8f98ad);
+
+  /* The one accent: you, and your next action. Also the selection and the focus ring. */
+  --cwd-accent: light-dark(#2950d3, #7d9bff);
+  --cwd-accent-ink: light-dark(#ffffff, #0e131c);
+  --cwd-accent-soft: light-dark(#e7ecfb, #1d2847);
+
+  /* Red: overdue, the reported line, a ban, a failure. Yellow: a warning. */
+  --cwd-red: light-dark(#c42f3b, #ff6b74);
+  --cwd-red-soft: light-dark(#fbe4e6, #3a1a1f);
+  --cwd-yellow: light-dark(#e5ad00, #f2c84b);
+  --cwd-yellow-soft: light-dark(#fdf3d3, #33290d);
+  --cwd-yellow-ink: light-dark(#6b4a00, #f2d37a);
+
+  /* The dot that says the connection is live, and the ink every shadow and backdrop is made from */
+  --cwd-live: light-dark(#17804f, #4cc38a);
+  --cwd-shadow-ink: light-dark(#151b27, #000000);
+
+  /* Type */
+  --cwd-font: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --cwd-font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, 'Liberation Mono', monospace;
+  --cwd-text-s: 0.78125rem;
+  --cwd-text-m: 0.875rem;
+  --cwd-text-l: 1.0625rem;
+  --cwd-text-xl: 1.25rem;
+  --cwd-text-stat: 2rem;
+  --cwd-weight-medium: 500;
+  --cwd-weight-strong: 600;
+  --cwd-leading: 1.45;
+  --cwd-leading-tight: 1.2;
+
+  /* Shape and space */
+  --cwd-radius-s: 6px;
+  --cwd-radius-m: 10px;
+  --cwd-border-width: 1px;
+  --cwd-wait-width: 4px;
+  --cwd-space-1: 0.25rem;
+  --cwd-space-2: 0.5rem;
+  --cwd-space-3: 0.75rem;
+  --cwd-space-4: 1rem;
+  --cwd-space-5: 1.5rem;
+  --cwd-space-6: 2.5rem;
+
+  /* Layout: the rail, the queue and the case panel, the height the hub fills, and the height of a control */
+  --cwd-nav-width: 3.5rem;
+  --cwd-queue-width: 21rem;
+  --cwd-context-width: 17rem;
+  --cwd-hub-height: 100dvh;
+  --cwd-control-height: 2.25rem;
+}
+
+/* The theme prop, or the same attribute on any ancestor, picks one scheme. Without either, the visitor's setting decides. */
+[data-cw-theme='light'] .cw-hub,
+.cw-hub[data-cw-theme='light'] {
+  color-scheme: light;
+}
+[data-cw-theme='dark'] .cw-hub,
+.cw-hub[data-cw-theme='dark'] {
+  color-scheme: dark;
+}
+/* ---- End of tokens ----------------------------------------------------------------------------------------------- */
+
+/* ---- Fallback ---------------------------------------------------------------------------------------------------- */
+/* A browser without light-dark() (before 2024) would drop every colour token above. This gives it the light values, so the hub
+   keeps its colours; it follows neither prefers-color-scheme nor the theme prop. */
+@supports not (color: light-dark(#000, #fff)) {
+  :where(.cw-hub) {
+    --cwd-bg: #f4f5f8;
+    --cwd-surface: #ffffff;
+    --cwd-surface-sunken: #eef0f4;
+    --cwd-border: #e0e3ea;
+    --cwd-border-strong: #7a8397;
+    --cwd-ink: #151b27;
+    --cwd-ink-muted: #4f5a6e;
+    --cwd-ink-faint: #5b657a;
+    --cwd-accent: #2950d3;
+    --cwd-accent-ink: #ffffff;
+    --cwd-accent-soft: #e7ecfb;
+    --cwd-red: #c42f3b;
+    --cwd-red-soft: #fbe4e6;
+    --cwd-yellow: #e5ad00;
+    --cwd-yellow-soft: #fdf3d3;
+    --cwd-yellow-ink: #6b4a00;
+    --cwd-live: #17804f;
+    --cwd-shadow-ink: #151b27;
+  }
+}
+/* ---- End of fallback --------------------------------------------------------------------------------------------- */
+
+/* ---- Base -------------------------------------------------------------------------------------------------------- */
+.cw-hub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: var(--cw-hub-height, var(--cwd-hub-height));
+  min-height: 0;
+  margin: 0;
+  background: var(--cw-bg, var(--cwd-bg));
+  color: var(--cw-ink, var(--cwd-ink));
+  font-family: var(--cw-font, var(--cwd-font));
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+  line-height: var(--cw-leading, var(--cwd-leading));
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+/* The shell's root takes focus when a press lands on empty space in it (so its keys keep working); it draws no ring. */
+.cw-hub[tabindex='-1']:focus {
+  outline: none;
+}
+.cw-hub *,
+.cw-hub *::before,
+.cw-hub *::after {
+  box-sizing: inherit;
+}
+.cw-hub h1,
+.cw-hub h2,
+.cw-hub h3,
+.cw-hub p,
+.cw-hub ul,
+.cw-hub dl,
+.cw-hub dd {
+  margin: 0;
+}
+.cw-hub ul {
+  padding: 0;
+  list-style: none;
+}
+.cw-hub h1,
+.cw-hub h2,
+.cw-hub h3 {
+  line-height: var(--cw-leading-tight, var(--cwd-leading-tight));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+/* A host page that styles its own headings (a display font, capitals, wide spacing on h1 and h2) must not restyle the hub. These set the
+   hub's font, case, spacing and weight themselves, at (0,1,1): above a host's element selector whichever sheet comes last. To change
+   them on purpose, write a selector above that (`.my-theme .cw-hub h2`, (0,2,1)), or `.my-hub h2` in a sheet that loads after this one
+   (a tie at (0,1,1), decided by order), or set the font token (`--cw-font`). A rule of the hub's own that sets a heading's spacing is
+   a class, so it is above this too. */
+.cw-hub :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--cw-font, var(--cwd-font));
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub a {
+  color: inherit;
+}
+.cw-hub button,
+.cw-hub select,
+.cw-hub input,
+.cw-hub textarea {
+  font: inherit;
+  color: inherit;
+}
+.cw-hub :is(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 2px;
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+}
+.cw-hub .cw-main:focus,
+.cw-hub .cw-screen-title:focus {
+  outline: none;
+}
+
+.cw-hub .cw-sr,
+.cw-hub .cw-skip:not(:focus) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.cw-hub .cw-skip {
+  position: absolute;
+  top: var(--cw-space-2, var(--cwd-space-2));
+  left: var(--cw-space-2, var(--cwd-space-2));
+  z-index: 3;
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-accent, var(--cwd-accent));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-accent, var(--cwd-accent));
+  color: var(--cw-accent-ink, var(--cwd-accent-ink));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+
+/* ---- Small parts ------------------------------------------------------------------------------------------------- */
+.cw-hub .cw-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: none;
+}
+.cw-hub .cw-kbd {
+  display: inline-block;
+  padding: 0 0.35rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--cw-surface, var(--cwd-surface));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-family: inherit;
+  font-size: 0.6875rem;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: 1.4;
+}
+.cw-hub .cw-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.625rem;
+  height: 1.625rem;
+  border-radius: 50%;
+  background: var(--cw-ink-faint, var(--cwd-ink-faint));
+  color: var(--cw-surface, var(--cwd-surface));
+  font-size: 0.6875rem;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: 1;
+}
+.cw-hub .cw-avatar--you {
+  background: var(--cw-accent, var(--cwd-accent));
+  color: var(--cw-accent-ink, var(--cwd-accent-ink));
+}
+.cw-hub .cw-avatar--s {
+  width: 1.125rem;
+  height: 1.125rem;
+  font-size: 0.5625rem;
+}
+
+.cw-hub .cw-tag {
+  display: inline-block;
+  padding: 0 0.5em;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: transparent;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.cw-hub .cw-tag--accent {
+  border-color: transparent;
+  background: var(--cw-accent-soft, var(--cwd-accent-soft));
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-tag--warn {
+  border-color: transparent;
+  background: var(--cw-yellow-soft, var(--cwd-yellow-soft));
+  color: var(--cw-yellow-ink, var(--cwd-yellow-ink));
+}
+.cw-hub .cw-tag--bad {
+  border-color: transparent;
+  background: var(--cw-red-soft, var(--cwd-red-soft));
+  color: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-pid {
+  display: inline-block;
+  color: var(--cw-ink-faint, var(--cwd-ink-faint));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+
+/* The referee card: yellow for a warning, half yellow and half red for a restriction, red for a ban, a dashed outline for a note. */
+.cw-hub .cw-card {
+  display: inline-block;
+  flex: none;
+  width: 0.875rem;
+  height: 1.1875rem;
+  border-radius: 2.5px;
+  transform: rotate(-8deg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 25%, transparent);
+}
+.cw-hub .cw-card--warning {
+  background: var(--cw-yellow, var(--cwd-yellow));
+}
+.cw-hub .cw-card--restriction {
+  background: linear-gradient(135deg, var(--cw-yellow, var(--cwd-yellow)) 50%, var(--cw-red, var(--cwd-red)) 50%);
+}
+.cw-hub .cw-card--ban {
+  background: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-card--note {
+  border: 1.5px dashed var(--cw-ink-faint, var(--cwd-ink-faint));
+  background: transparent;
+  box-shadow: none;
+}
+
+.cw-hub .cw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-height: var(--cw-control-height, var(--cwd-control-height));
+  padding: 0 var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid color-mix(in srgb, var(--cw-border-strong, var(--cwd-border-strong)) 45%, var(--cw-border, var(--cwd-border)));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface, var(--cwd-surface));
+  color: var(--cw-ink, var(--cwd-ink));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cw-hub .cw-btn:hover {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-btn--primary {
+  border-color: var(--cw-accent, var(--cwd-accent));
+  background: var(--cw-accent, var(--cwd-accent));
+  color: var(--cw-accent-ink, var(--cwd-accent-ink));
+}
+.cw-hub .cw-btn--primary:hover {
+  background: var(--cw-accent, var(--cwd-accent));
+  filter: brightness(1.08);
+}
+.cw-hub .cw-btn--danger {
+  border-color: var(--cw-red, var(--cwd-red));
+  color: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-btn:disabled,
+.cw-hub .cw-btn[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: default;
+}
+.cw-hub .cw-link {
+  color: var(--cw-accent, var(--cwd-accent));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.cw-hub .cw-linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cw-accent, var(--cwd-accent));
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+/* A row of buttons of which one is on: a filter. The pressed one is lifted, like a tab on a tray. */
+.cw-hub .cw-seg {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  overflow: hidden;
+}
+.cw-hub .cw-seg button {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  min-height: calc(var(--cw-control-height, var(--cwd-control-height)) - 6px);
+  padding: 0 var(--cw-space-3, var(--cwd-space-3));
+  border: 0;
+  border-radius: calc(var(--cw-radius-s, var(--cwd-radius-s)) - 1px);
+  background: transparent;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  cursor: pointer;
+}
+.cw-hub .cw-seg button:hover {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-seg button[aria-pressed='true'] {
+  background: var(--cw-surface, var(--cwd-surface));
+  color: var(--cw-ink, var(--cwd-ink));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 14%, transparent);
+}
+/* The filter clips (overflow: hidden) and its buttons fill it, so an outside ring would be cut off: draw it inside. */
+.cw-hub .cw-seg button:focus-visible,
+.cw-hub .cw-rail a:focus-visible {
+  outline-offset: -2px;
+}
+
+.cw-hub .cw-notice {
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-notice--bad {
+  border-color: var(--cw-red, var(--cwd-red));
+  background: var(--cw-red-soft, var(--cwd-red-soft));
+  color: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-notice--warn {
+  border-color: var(--cw-yellow, var(--cwd-yellow));
+  background: var(--cw-yellow-soft, var(--cwd-yellow-soft));
+  color: var(--cw-yellow-ink, var(--cwd-yellow-ink));
+}
+.cw-hub .cw-error {
+  display: grid;
+  justify-items: start;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-4, var(--cwd-space-4));
+  background: var(--cw-red-soft, var(--cwd-red-soft));
+  color: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-loading {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-4, var(--cwd-space-4));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-empty {
+  display: grid;
+  justify-items: start;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: var(--cw-space-5, var(--cwd-space-5)) var(--cw-space-4, var(--cwd-space-4));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-empty strong {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-hint {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+
+/* Skeletons: grey bars the size of what is coming, instead of a spinner. */
+.cw-hub .cw-skel {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-skel-bar {
+  display: block;
+  height: 0.75rem;
+  border-radius: 3px;
+  background: var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-skel-bar:nth-child(1) {
+  width: 60%;
+}
+.cw-hub .cw-skel-bar:nth-child(2) {
+  width: 90%;
+}
+.cw-hub .cw-skel-bar:nth-child(3) {
+  width: 40%;
+}
+
+/* A table that scrolls inside its own box instead of widening the page. */
+.cw-hub .cw-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-table th,
+.cw-hub .cw-table td {
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  text-align: left;
+  vertical-align: top;
+}
+.cw-hub .cw-table th {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  white-space: nowrap;
+}
+.cw-hub .cw-table tr + tr > * {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+
+/* What shows before the hub knows who is signed in. */
+.cw-hub .cw-gate {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  justify-items: start;
+  width: min(34rem, calc(100% - 2 * var(--cw-space-4, var(--cwd-space-4))));
+  margin: var(--cw-space-6, var(--cwd-space-6)) auto;
+  padding: var(--cw-space-5, var(--cwd-space-5));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-gate h1 {
+  font-size: var(--cw-text-xl, var(--cwd-text-xl));
+}
+
+/* ---- The top bar ------------------------------------------------------------------------------------------------- */
+.cw-hub .cw-top {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+  min-width: 0;
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-mark {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+}
+.cw-hub .cw-mark-shield {
+  fill: var(--cw-accent, var(--cwd-accent));
+}
+.cw-hub .cw-mark-tick {
+  stroke: var(--cw-accent-ink, var(--cwd-accent-ink));
+}
+.cw-hub .cw-title {
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.cw-hub .cw-game {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cw-live, var(--cwd-live));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cw-live, var(--cwd-live)) 22%, transparent);
+}
+.cw-hub .cw-live:not([data-state='live']) .cw-live-dot {
+  background: var(--cw-ink-faint, var(--cwd-ink-faint));
+  box-shadow: none;
+}
+.cw-hub .cw-top-gap {
+  flex: 1 1 0;
+}
+.cw-hub .cw-cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: min(14rem, 100%);
+  min-height: calc(var(--cw-control-height, var(--cwd-control-height)) - 4px);
+  padding: 0 var(--cw-space-2, var(--cwd-space-2)) 0 var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  cursor: pointer;
+}
+.cw-hub .cw-cmd:hover {
+  border-color: var(--cw-border-strong, var(--cwd-border-strong));
+}
+.cw-hub .cw-cmd-text {
+  flex: 1 1 auto;
+  text-align: left;
+}
+.cw-hub .cw-cmd-keys {
+  display: inline-flex;
+  gap: 2px;
+}
+.cw-hub .cw-faces {
+  display: flex;
+  align-items: center;
+}
+.cw-hub .cw-faces li {
+  margin-left: -6px;
+}
+.cw-hub .cw-faces li:first-child {
+  margin-left: 0;
+}
+.cw-hub .cw-faces .cw-avatar {
+  border: 2px solid var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-faces .cw-faces-more {
+  margin-left: var(--cw-space-2, var(--cwd-space-2));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-who {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-actor {
+  overflow-wrap: anywhere;
+}
+
+.cw-hub .cw-banner {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-yellow, var(--cwd-yellow));
+  background: var(--cw-yellow-soft, var(--cwd-yellow-soft));
+  color: var(--cw-yellow-ink, var(--cwd-yellow-ink));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+
+/* ---- The workbench: rail, queue, case, case panel --------------------------------------------------------------- */
+.cw-hub .cw-body {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: var(--cw-nav-width, var(--cwd-nav-width)) minmax(0, 1fr);
+}
+.cw-hub .cw-body[data-queue='true'] {
+  grid-template-columns: var(--cw-nav-width, var(--cwd-nav-width)) var(--cw-queue-width, var(--cwd-queue-width)) minmax(0, 1fr);
+}
+
+.cw-hub .cw-rail {
+  min-height: 0;
+  padding-block: var(--cw-space-3, var(--cwd-space-3));
+  border-right: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  background: var(--cw-surface, var(--cwd-surface));
+  overflow-y: auto;
+}
+.cw-hub .cw-rail ul {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.cw-hub .cw-rail a {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  width: 3rem;
+  padding: 0.4rem 0;
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  color: var(--cw-ink-faint, var(--cwd-ink-faint));
+  font-size: 0.65625rem;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+}
+.cw-hub .cw-rail a:hover {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-rail a[aria-current='page'] {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-rail-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.cw-hub .cw-queue {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-queue-head {
+  display: grid;
+  flex: none;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-queue-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-queue-title h2 {
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+}
+.cw-hub .cw-queue-title span {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-take {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-height: var(--cw-control-height, var(--cwd-control-height));
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: 0;
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-accent, var(--cwd-accent));
+  color: var(--cw-accent-ink, var(--cwd-accent-ink));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  cursor: pointer;
+}
+.cw-hub .cw-take:hover {
+  filter: brightness(1.08);
+}
+.cw-hub .cw-take small {
+  margin-left: var(--cw-space-2, var(--cwd-space-2));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  opacity: 0.9;
+}
+.cw-hub .cw-take .cw-kbd {
+  border-color: color-mix(in srgb, var(--cw-accent-ink, var(--cwd-accent-ink)) 55%, transparent);
+  background: transparent;
+  color: var(--cw-accent-ink, var(--cwd-accent-ink));
+}
+.cw-hub .cw-select select {
+  min-height: calc(var(--cw-control-height, var(--cwd-control-height)) - 4px);
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-newbar {
+  display: grid;
+  flex: none;
+  justify-items: center;
+}
+.cw-hub .cw-newpill {
+  margin: 0 0 var(--cw-space-2, var(--cwd-space-2));
+  padding: 0.25rem 0.9rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--cw-ink, var(--cwd-ink));
+  color: var(--cw-surface, var(--cwd-surface));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  cursor: pointer;
+}
+.cw-hub .cw-queue-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.cw-hub .cw-queue-note {
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+/* The fold of the queue above an open case or person: a phone only (see the phone block below). */
+.cw-hub .cw-queue-toggle {
+  display: none;
+}
+
+/* One case. The left edge is the wait: it turns red only once the oldest open report is over 24 hours old. */
+.cw-hub .cw-case {
+  position: relative;
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid color-mix(in srgb, var(--cw-border, var(--cwd-border)) 70%, transparent);
+  border-left: var(--cw-wait-width, var(--cwd-wait-width)) solid transparent;
+}
+.cw-hub .cw-case[data-wait='overdue'] {
+  border-left-color: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-case:hover {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-case[data-selected='true'] {
+  background: var(--cw-accent-soft, var(--cwd-accent-soft));
+}
+.cw-hub .cw-case[data-gone='true'] .cw-case-name {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  text-decoration: line-through;
+}
+.cw-hub .cw-case[data-gone='true'] .cw-case-closed {
+  color: var(--cw-ink, var(--cwd-ink));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-case-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  padding: 0.6rem var(--cw-space-4, var(--cwd-space-4)) 0.6rem var(--cw-space-3, var(--cwd-space-3));
+  text-decoration: none;
+}
+.cw-hub .cw-case-link:focus-visible {
+  outline-offset: -2px;
+}
+.cw-hub .cw-case-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.cw-hub .cw-case-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-case-name {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-case-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-cat {
+  padding: 0 0.4rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: 4px;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: 0.71875rem;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: 1.5;
+}
+.cw-hub .cw-case-facts {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-case-side {
+  display: grid;
+  justify-items: end;
+  align-content: start;
+  gap: 3px;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  white-space: nowrap;
+}
+.cw-hub .cw-case[data-wait='overdue'] .cw-case-wait {
+  color: var(--cw-red, var(--cwd-red));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-case-claim {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-case-free {
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-case[data-claim='you'] .cw-case-claim {
+  color: var(--cw-accent, var(--cwd-accent));
+}
+.cw-hub .cw-case[data-claim='other'] .cw-case-claim {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-case-viewing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--cw-ink-faint, var(--cwd-ink-faint));
+}
+.cw-hub .cw-case-viewing .cw-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+/* Under the link, not over its corner: the wait, claim and viewing lines above it may all show, and must not be covered. */
+.cw-hub .cw-case-release {
+  display: block;
+  margin: 0 var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-2, var(--cwd-space-2)) auto;
+  padding: 0 var(--cw-space-2, var(--cwd-space-2));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface, var(--cwd-surface));
+  color: var(--cw-ink, var(--cwd-ink));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  cursor: pointer;
+}
+.cw-hub .cw-case--skeleton {
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+}
+
+.cw-hub .cw-work {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.cw-hub .cw-main {
+  display: block;
+  min-width: 0;
+  padding: var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-5, var(--cwd-space-5)) var(--cw-space-6, var(--cwd-space-6));
+  container-type: inline-size;
+  container-name: cwmain;
+}
+.cw-hub .cw-body[data-case='true'] .cw-main {
+  padding: 0;
+}
+.cw-hub .cw-ctx[hidden] {
+  display: none;
+}
+.cw-hub .cw-ctx {
+  display: grid;
+  align-content: start;
+  gap: 0;
+  min-width: 0;
+  padding: var(--cw-space-4, var(--cwd-space-4));
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+/* Three panes from 75rem (1200px): queue, case, case panel. Two from 51.25rem (820px): the case panel moves under the case.
+   Narrower, everything stacks and the page scrolls as one. */
+@media (min-width: 75rem) {
+  .cw-hub .cw-body[data-case='true'] .cw-work {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--cw-context-width, var(--cwd-context-width));
+    overflow: hidden;
+  }
+  /* A decided case hides the pane beside it: the notice takes the whole width. */
+  .cw-hub .cw-body[data-case='true'] .cw-work:has(.cw-ctx[hidden]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cw-hub .cw-body[data-case='true'] .cw-main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .cw-hub .cw-body[data-case='true'] .cw-ctx {
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .cw-hub .cw-body[data-case='true'] .cw-ctx {
+    border-top: 0;
+    border-left: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  }
+}
+@media (max-width: 51.1875rem) {
+  .cw-hub {
+    height: auto;
+    overflow: visible;
+  }
+  .cw-hub .cw-body,
+  .cw-hub .cw-body[data-queue='true'] {
+    display: block;
+  }
+  .cw-hub .cw-rail {
+    padding: var(--cw-space-1, var(--cwd-space-1));
+    border-right: 0;
+    border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  }
+  .cw-hub .cw-rail ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .cw-hub .cw-queue {
+    border-right: 0;
+    border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  }
+  .cw-hub .cw-queue-list {
+    max-height: 20rem;
+  }
+  .cw-hub .cw-queue-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cw-space-3, var(--cwd-space-3));
+    width: 100%;
+    min-height: var(--cw-control-height, var(--cwd-control-height));
+    padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+    border: 0;
+    background: var(--cw-surface, var(--cwd-surface));
+    color: var(--cw-ink, var(--cwd-ink));
+    font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+    text-align: left;
+    cursor: pointer;
+  }
+  .cw-hub .cw-queue-toggle-state {
+    color: var(--cw-ink-muted, var(--cwd-ink-muted));
+    font-size: var(--cw-text-s, var(--cwd-text-s));
+    font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  }
+  .cw-hub .cw-queue[data-collapsed='true'] > :not(.cw-queue-toggle) {
+    display: none;
+  }
+  .cw-hub .cw-work {
+    overflow: visible;
+  }
+  .cw-hub .cw-main {
+    padding: var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-5, var(--cwd-space-5));
+  }
+  .cw-hub .cw-top {
+    padding-inline: var(--cw-space-3, var(--cwd-space-3));
+  }
+  .cw-hub .cw-cmd {
+    flex: 1 1 10rem;
+  }
+  .cw-hub .cw-cmd-keys {
+    display: none;
+  }
+  .cw-hub .cw-case-link {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cw-hub .cw-case-side {
+    justify-items: start;
+    grid-auto-flow: column;
+    justify-content: start;
+    gap: var(--cw-space-3, var(--cwd-space-3));
+    white-space: normal;
+  }
+}
+
+/* ---- Screens and panels ------------------------------------------------------------------------------------------ */
+.cw-hub .cw-screen {
+  display: grid;
+  gap: var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-screen-title {
+  font-size: var(--cw-text-l, var(--cwd-text-l));
+  letter-spacing: -0.01em;
+}
+.cw-hub .cw-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--cw-space-4, var(--cwd-space-4));
+  align-items: start;
+}
+.cw-hub .cw-panel {
+  min-width: 0;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-panel-head h2 {
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+}
+.cw-hub .cw-panel-pad {
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+}
+
+/* The numbers: one band, divided by hairlines, not cards. */
+.cw-hub .cw-stats {
+  overflow: hidden;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-stats dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--cw-border-width, var(--cwd-border-width));
+}
+.cw-hub .cw-stat {
+  display: grid;
+  align-content: start;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-stat dt {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-stat-value {
+  font-size: var(--cw-text-stat, var(--cwd-text-stat));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.cw-hub .cw-stat-note {
+  min-height: 1lh;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-stat[data-wait='overdue'] .cw-stat-value {
+  color: var(--cw-red, var(--cwd-red));
+}
+
+/* The team: who is on, and what each is carrying. */
+.cw-hub .cw-member {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-member + .cw-member {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-member-text {
+  display: grid;
+  min-width: 0;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-member-text strong {
+  color: var(--cw-ink, var(--cwd-ink));
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-member-you {
+  color: var(--cw-accent, var(--cwd-accent));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+
+/* The reports list: the open, actioned and dismissed history, grouped by person. */
+.cw-hub .cw-qlist {
+  overflow: hidden;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-panel .cw-qlist {
+  border: 0;
+  border-radius: 0;
+}
+.cw-hub .cw-qrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-3, var(--cwd-space-3));
+  border-left: var(--cw-wait-width, var(--cwd-wait-width)) solid transparent;
+}
+.cw-hub .cw-qrow + .cw-qrow {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-qrow[data-wait='stale'] {
+  border-left-color: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-qrow-main {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+}
+.cw-hub .cw-qrow-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-qrow-name {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-qrow-age {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-qrow[data-wait='stale'] .cw-qrow-age {
+  color: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-qrow-actions {
+  display: flex;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-4, var(--cwd-space-4));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-earlier {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-earlier ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-more {
+  display: grid;
+  justify-items: start;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+
+/* Recent actions */
+.cw-hub .cw-arow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-arow + .cw-arow {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-arow .cw-card {
+  margin-top: 0.15rem;
+}
+.cw-hub .cw-arow-body {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+}
+.cw-hub .cw-arow-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-arow-length {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+
+/* ---- Form controls ------------------------------------------------------------------------------------------------ */
+.cw-hub select,
+.cw-hub textarea,
+.cw-hub .cw-input {
+  display: block;
+  width: 100%;
+  min-height: var(--cw-control-height, var(--cwd-control-height));
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface, var(--cwd-surface));
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub textarea {
+  resize: vertical;
+}
+.cw-hub input[type='checkbox'],
+.cw-hub input[type='radio'] {
+  accent-color: var(--cw-accent, var(--cwd-accent));
+}
+.cw-hub :is(select, textarea, input):focus-visible {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 2px;
+}
+.cw-hub [aria-invalid='true'] {
+  border-color: var(--cw-red, var(--cwd-red));
+  box-shadow: inset 0 0 0 1px var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-field {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+}
+.cw-hub .cw-field label,
+.cw-hub .cw-form legend {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-form fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-form legend {
+  padding: 0;
+  margin-bottom: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-counter {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-field-error {
+  color: var(--cw-red, var(--cwd-red));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+
+/* ---- The case pane: header, claim, tabs, transcript, and the docked decision bar --------------------------------------------- */
+/* On a desktop the pane is a column that fills its height: the header and tabs stay, the evidence scrolls, the decision bar is
+   docked under it. Narrower, the page scrolls and the bar sticks to the bottom edge (on a phone it is a sheet: see below). */
+.cw-hub .cw-casepane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.cw-hub .cw-casepane > .cw-screen {
+  padding: var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-casehead,
+.cw-hub .cw-claim {
+  flex: none;
+}
+.cw-hub .cw-casehead {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding: var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-5, var(--cwd-space-5)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-casehead-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-casename {
+  font-size: var(--cw-text-xl, var(--cwd-text-xl));
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-casecats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-casehead-gap {
+  flex: 1 1 0;
+}
+.cw-hub .cw-viewing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-claim {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-5, var(--cwd-space-5));
+  border-block: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-claim-text {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.cw-hub .cw-claim[data-claim='you'] {
+  border-color: transparent;
+  background: var(--cw-accent-soft, var(--cwd-accent-soft));
+}
+.cw-hub .cw-claim[data-claim='you'] strong {
+  color: var(--cw-accent, var(--cwd-accent));
+}
+.cw-hub .cw-claim .cw-btn {
+  min-height: calc(var(--cw-control-height, var(--cwd-control-height)) - 4px);
+}
+
+.cw-hub .cw-tabs {
+  display: flex;
+  flex: none;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: 0 var(--cw-space-5, var(--cwd-space-5));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  overflow-x: auto;
+}
+.cw-hub .cw-tabs button {
+  flex: none;
+  min-height: var(--cw-control-height, var(--cwd-control-height));
+  padding: 0 var(--cw-space-3, var(--cwd-space-3));
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  cursor: pointer;
+}
+.cw-hub .cw-tabs button:hover {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--cw-accent, var(--cwd-accent));
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-tabs button:focus-visible {
+  outline-offset: -2px;
+}
+.cw-hub .cw-case-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.cw-hub .cw-tabpanel {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-5, var(--cwd-space-5)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-note h3 {
+  margin-bottom: var(--cw-space-1, var(--cwd-space-1));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-ai {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-ai h3 {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+
+/* The reports in the case, and the person's record */
+.cw-hub .cw-case-reports,
+.cw-hub .cw-recs {
+  display: grid;
+  gap: 0;
+}
+.cw-hub .cw-case-report {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-2, var(--cwd-space-2)) 0;
+}
+.cw-hub .cw-case-report + .cw-case-report,
+.cw-hub .cw-rec + .cw-rec {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-rec {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-2, var(--cwd-space-2)) 0;
+}
+.cw-hub .cw-rec .cw-card {
+  margin-top: 0.15rem;
+}
+.cw-hub .cw-rec-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-rec[data-state='revoked'] strong {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  text-decoration: line-through;
+}
+.cw-hub .cw-rec-meta {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-rec-reason {
+  margin-top: var(--cw-space-1, var(--cwd-space-1));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* The person page: the title and its buttons, a report in the timeline (no card: nothing was done by it), the revoke
+   form under a sanction in force, and the sanction form. Nothing here is coloured: the cards and the red Confirm button carry it. */
+.cw-hub .cw-personhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-rec-body {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+}
+.cw-hub .cw-rec--report {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cw-hub .cw-personhead .cw-screen-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-rec .cw-facts {
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-arow-who {
+  min-width: 0;
+  margin-right: var(--cw-space-2, var(--cwd-space-2));
+  overflow-wrap: anywhere;
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-revoke {
+  display: grid;
+  justify-items: start;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin-top: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-revoke-form {
+  justify-self: stretch;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-form-body {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-tick {
+  display: flex;
+  align-items: baseline;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+
+/* The transcript reads like a log: a box in the margin, the time, who, what. The reported line takes a red rail, the reported
+   person's own lines a neutral tint, and a line with blocked words shows a bar until it is shown. */
+.cw-hub .cw-transcript {
+  display: grid;
+  min-width: 0;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+  overflow: hidden;
+}
+.cw-hub .cw-tr-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-4, var(--cwd-space-4));
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  border-bottom: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-tr-count {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.cw-hub .cw-tr-picks {
+  flex: 1 1 10rem;
+  text-align: right;
+}
+.cw-hub .cw-tr-reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-transcript > .cw-notice,
+.cw-hub .cw-transcript > .cw-empty {
+  margin: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-lines {
+  min-width: 0;
+}
+.cw-hub .cw-line {
+  display: grid;
+  grid-template-columns: 1.5rem 4.75rem minmax(5rem, 9rem) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  border-left: var(--cw-wait-width, var(--cwd-wait-width)) solid transparent;
+}
+.cw-hub .cw-line + .cw-line {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-line[data-theirs='true'] {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-line[data-reported='true'] {
+  border-left-color: var(--cw-red, var(--cwd-red));
+  background: var(--cw-red-soft, var(--cwd-red-soft));
+}
+.cw-hub .cw-line-pick {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  min-height: 1.5rem;
+}
+.cw-hub .cw-line-pick input {
+  width: 1.0625rem;
+  height: 1.0625rem;
+  margin: 0;
+}
+.cw-hub .cw-line-time {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-family: var(--cw-font-mono, var(--cwd-font-mono));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-line-who {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-line-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-line[data-blocked='true'] .cw-line-text {
+  color: var(--cw-ink-faint, var(--cwd-ink-faint));
+  text-decoration: line-through;
+}
+.cw-hub .cw-line[data-blocked='true'] .cw-line-text:has(.cw-mask) {
+  text-decoration: none;
+}
+.cw-hub .cw-line-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  grid-column: 3 / -1;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+  margin-top: var(--cw-space-1, var(--cwd-space-1));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-mask {
+  display: inline-block;
+  padding: 0 0.7em;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: 999px;
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  line-height: 1.6;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* The decision bar. Docked at the bottom of the case pane; on a narrower screen it sticks to the bottom edge. */
+.cw-hub .cw-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex: none;
+  min-width: 0;
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  background: var(--cw-surface, var(--cwd-surface));
+  box-shadow: 0 -6px 18px -10px color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 35%, transparent);
+}
+.cw-hub .cw-dock-bar {
+  display: none;
+}
+.cw-hub .cw-dock-body {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  max-height: min(34vh, 21rem);
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-5, var(--cwd-space-5)) var(--cw-space-3, var(--cwd-space-3));
+  overflow-y: auto;
+}
+.cw-hub .cw-dock-title {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-form,
+.cw-hub .cw-readonly {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-form[hidden] {
+  display: none;
+}
+.cw-hub .cw-form fieldset.cw-readonly {
+  min-width: 0;
+}
+.cw-hub .cw-verdict-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-radio {
+  position: relative;
+  min-width: 0;
+  border-radius: calc(var(--cw-radius-s, var(--cwd-radius-s)) - 1px);
+}
+.cw-hub .cw-radio input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  clip-path: inset(50%);
+}
+.cw-hub .cw-radio label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+  min-height: calc(var(--cw-control-height, var(--cwd-control-height)) - 2px);
+  padding: 0 var(--cw-space-3, var(--cwd-space-3));
+  border-radius: inherit;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  text-align: center;
+  cursor: pointer;
+}
+.cw-hub .cw-radio label:hover {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-radio:has(input:checked) {
+  background: var(--cw-surface, var(--cwd-surface));
+  box-shadow:
+    inset 0 0 0 1.5px var(--cw-accent, var(--cwd-accent)),
+    0 1px 2px color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 14%, transparent);
+}
+.cw-hub .cw-radio:has(input:checked) label {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-radio input:focus-visible + label {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 1px;
+}
+
+/* The suggestion: a card for the ladder's next step, and the rule it is under. */
+.cw-hub .cw-suggest {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-left: var(--cw-wait-width, var(--cwd-wait-width)) solid var(--cw-accent, var(--cwd-accent));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-suggest-main {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-suggest-main .cw-card {
+  margin-top: 0.2rem;
+}
+.cw-hub .cw-suggest-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cw-hub .cw-suggest-main .cw-btn {
+  flex: none;
+}
+.cw-hub .cw-suggest-text .cw-hint {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cw-hub .cw-dock .cw-field > .cw-hint,
+.cw-hub .cw-dock .cw-field > .cw-counter {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.cw-hub .cw-suggest-label {
+  font-size: var(--cw-text-l, var(--cwd-text-l));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: var(--cw-leading-tight, var(--cwd-leading-tight));
+}
+.cw-hub .cw-suggest-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+@container cwmain (min-width: 36rem) {
+  .cw-hub .cw-suggest-rule {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .cw-hub .cw-suggest-rule .cw-field {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  }
+}
+.cw-hub .cw-suggest .cw-btn {
+  justify-self: start;
+}
+.cw-hub .cw-suggest-level {
+  min-width: 0;
+}
+.cw-hub .cw-actions {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-sumrow {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-sumrow-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-sumrow-buttons {
+  display: flex;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin-left: auto;
+}
+.cw-hub .cw-act-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-form .cw-action {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-action-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-picks ul {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: var(--cw-space-2, var(--cwd-space-2)) 0;
+}
+.cw-hub .cw-check {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-tr-reveal.cw-check {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+}
+.cw-hub .cw-check-time {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-family: var(--cw-font-mono, var(--cwd-font-mono));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-check-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-action-foot,
+.cw-hub .cw-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-add .cw-btn {
+  min-height: 1.75rem;
+  border-style: dashed;
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-chip {
+  max-width: 100%;
+  min-height: 1.75rem;
+  padding: 0 var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: 999px;
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink, var(--cwd-ink));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cw-hub .cw-chip:hover {
+  background: var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-queued {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-accent-soft, var(--cwd-accent-soft));
+}
+.cw-hub .cw-queued p {
+  flex: 1 1 14rem;
+}
+.cw-hub .cw-queued[data-readonly='true'] {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-queued:focus {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 2px;
+}
+.cw-hub .cw-problems {
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-red, var(--cwd-red));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-red-soft, var(--cwd-red-soft));
+  color: var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-problems ul {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin-top: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-problems .cw-linkbtn {
+  color: inherit;
+  text-align: left;
+}
+.cw-hub .cw-problems:focus,
+.cw-hub .cw-error:focus {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 2px;
+}
+.cw-hub .cw-form .cw-error {
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+}
+.cw-hub .cw-submit {
+  position: sticky;
+  bottom: calc(-1 * var(--cw-space-3, var(--cwd-space-3)));
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  margin-bottom: calc(-1 * var(--cw-space-3, var(--cwd-space-3)));
+  padding: var(--cw-space-2, var(--cwd-space-2)) 0 var(--cw-space-3, var(--cwd-space-3));
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-submit .cw-hint {
+  flex: 1 1 10rem;
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-submit-keys {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+.cw-hub .cw-btn--primary .cw-kbd {
+  border-color: color-mix(in srgb, var(--cw-accent-ink, var(--cwd-accent-ink)) 55%, transparent);
+  background: transparent;
+  color: var(--cw-accent-ink, var(--cwd-accent-ink));
+}
+.cw-hub .cw-result {
+  display: grid;
+  justify-items: start;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-left: var(--cw-wait-width, var(--cwd-wait-width)) solid var(--cw-accent, var(--cwd-accent));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-result:focus {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 2px;
+}
+.cw-hub .cw-result ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-decided {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-decided-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-decided-notes {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-decided-notes dt {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-decided-notes dd {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The pane beside the case */
+.cw-hub .cw-ctx-section {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding-bottom: var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-ctx-section + .cw-ctx-section {
+  padding-top: var(--cw-space-4, var(--cwd-space-4));
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-ctx-section h3 {
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+}
+.cw-hub .cw-ctx-section:last-child {
+  padding-bottom: 0;
+}
+.cw-hub .cw-blocked-list {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-blocked-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-blocked-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-reporters {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-reporter {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-reporter-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-reporter-name {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-meter {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--cw-border, var(--cwd-border));
+  -webkit-appearance: none;
+  appearance: none;
+  overflow: hidden;
+}
+.cw-hub .cw-meter::-webkit-meter-bar {
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-meter::-webkit-meter-optimum-value,
+.cw-hub .cw-meter::-webkit-meter-suboptimum-value,
+.cw-hub .cw-meter::-webkit-meter-even-less-good-value {
+  border-radius: 3px;
+  background: var(--cw-ink-faint, var(--cwd-ink-faint));
+}
+.cw-hub .cw-meter::-moz-meter-bar {
+  border-radius: 3px;
+  background: var(--cw-ink-faint, var(--cwd-ink-faint));
+}
+.cw-hub .cw-person {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: var(--cw-space-3, var(--cwd-space-3)) 0;
+}
+.cw-hub .cw-person + .cw-person {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-person:first-child {
+  padding-top: 0;
+}
+.cw-hub .cw-person:last-child {
+  padding-bottom: 0;
+}
+.cw-hub .cw-person-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-person-name {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-person-record {
+  overflow-wrap: anywhere;
+}
+
+/* A narrower case pane (beside the queue and the pane on its right): the transcript drops the fixed time and name columns. */
+@container cwmain (max-width: 34rem) {
+  .cw-hub .cw-line {
+    grid-template-columns: 1.5rem auto minmax(0, 1fr);
+  }
+  .cw-hub .cw-line-text,
+  .cw-hub .cw-line-meta {
+    grid-column: 2 / -1;
+  }
+  .cw-hub .cw-line-who {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+@container cwmain (min-width: 44rem) {
+  .cw-hub .cw-action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container cwmain (min-width: 36rem) {
+  .cw-hub .cw-qrow {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+}
+@container cwmain (max-width: 30rem) {
+  .cw-hub .cw-qrow-actions .cw-btn {
+    flex: 1 1 0;
+  }
+  .cw-hub .cw-casehead,
+  .cw-hub .cw-tabpanel {
+    padding-inline: var(--cw-space-3, var(--cwd-space-3));
+  }
+}
+
+/* A phone: the decision bar is a sheet at the bottom edge. Closed, it is one bar with a Decide button, so it never covers the
+   transcript; open, it holds the whole bar and scrolls inside itself. */
+@media (max-width: 51.1875rem) {
+  .cw-hub .cw-casepane {
+    display: block;
+    height: auto;
+  }
+  .cw-hub .cw-case-scroll {
+    overflow: visible;
+  }
+  .cw-hub .cw-casehead,
+  .cw-hub .cw-tabs,
+  .cw-hub .cw-tabpanel {
+    padding-inline: var(--cw-space-3, var(--cwd-space-3));
+  }
+  .cw-hub .cw-claim {
+    padding-inline: var(--cw-space-3, var(--cwd-space-3));
+  }
+  .cw-hub .cw-dock {
+    border-radius: var(--cw-radius-m, var(--cwd-radius-m)) var(--cw-radius-m, var(--cwd-radius-m)) 0 0;
+  }
+  .cw-hub .cw-dock-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cw-space-3, var(--cwd-space-3));
+    padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  }
+  .cw-hub .cw-dock[data-open='false'] .cw-dock-body {
+    display: none;
+  }
+  .cw-hub .cw-dock-body {
+    max-height: 70dvh;
+    padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+    border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  }
+  .cw-hub .cw-radio label {
+    padding: 0 var(--cw-space-1, var(--cwd-space-1));
+    font-size: var(--cw-text-s, var(--cwd-text-s));
+  }
+  .cw-hub .cw-radio .cw-kbd {
+    display: none;
+  }
+  .cw-hub .cw-submit .cw-btn {
+    flex: 1 1 10rem;
+  }
+  .cw-hub .cw-sumrow-buttons {
+    margin-left: 0;
+  }
+}
+
+/* A decision that is waiting or sent: the case is off the screen, and the bar is all that is left (the notice, Undo, the result). */
+.cw-hub .cw-dock[data-gone='true'] {
+  position: static;
+  border-top: 0;
+  box-shadow: none;
+}
+.cw-hub .cw-dock[data-gone='true'] .cw-dock-bar {
+  display: none;
+}
+.cw-hub .cw-dock[data-gone='true'] .cw-dock-body {
+  display: grid;
+  align-content: start;
+  max-height: none;
+  padding: var(--cw-space-5, var(--cwd-space-5));
+  border-top: 0;
+}
+.cw-hub .cw-gone-title {
+  font-size: var(--cw-text-l, var(--cwd-text-l));
+  letter-spacing: -0.01em;
+}
+.cw-hub .cw-gone-title:focus {
+  outline: none;
+}
+
+/* ---- Toasts ------------------------------------------------------------------------------------------------------ */
+/* The toasts stand over the queue (bottom left), never over the decision bar and its buttons, which are at the bottom of the case.
+   On a phone they hang from the top, under the header. */
+.cw-hub .cw-toasts {
+  position: fixed;
+  left: calc(var(--cw-nav-width, var(--cwd-nav-width)) + var(--cw-space-4, var(--cwd-space-4)));
+  bottom: calc(var(--cw-space-4, var(--cwd-space-4)) + env(safe-area-inset-bottom, 0px));
+  z-index: 20;
+  display: grid;
+  justify-items: start;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  width: max-content;
+  max-width: calc(var(--cw-queue-width, var(--cwd-queue-width)) - var(--cw-space-4, var(--cwd-space-4)));
+  pointer-events: none;
+}
+/* After the base rule, so it wins: same specificity, source order decides. */
+@media (max-width: 51.1875rem) {
+  .cw-hub .cw-toasts {
+    top: calc(3.5rem + env(safe-area-inset-top, 0px));
+    right: var(--cw-space-3, var(--cwd-space-3));
+    bottom: auto;
+    left: var(--cw-space-3, var(--cwd-space-3));
+    justify-items: center;
+    width: auto;
+    max-width: none;
+  }
+}
+.cw-hub .cw-toast {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-4, var(--cwd-space-4));
+  max-width: 100%;
+  padding: 0.65rem 0.9rem;
+  overflow: hidden;
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-ink, var(--cwd-ink));
+  color: var(--cw-surface, var(--cwd-surface));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 28%, transparent);
+  pointer-events: auto;
+}
+.cw-hub .cw-toast[data-tone='bad'] {
+  border-left: var(--cw-wait-width, var(--cwd-wait-width)) solid var(--cw-red, var(--cwd-red));
+}
+.cw-hub .cw-toast-text {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-toast-btn {
+  flex: none;
+  padding: 0.15rem 0.65rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid color-mix(in srgb, var(--cw-surface, var(--cwd-surface)) 45%, transparent);
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: transparent;
+  color: var(--cw-surface, var(--cwd-surface));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  cursor: pointer;
+}
+.cw-hub .cw-toast-close {
+  padding: 0 0.45rem;
+  border-color: transparent;
+}
+.cw-hub .cw-toast button:focus-visible {
+  outline-color: var(--cw-surface, var(--cwd-surface));
+}
+/* The Undo window: a bar that runs down over the 5 seconds the action is held. */
+.cw-hub .cw-toast-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: var(--cw-accent, var(--cwd-accent));
+  animation: cw-undo 5s linear forwards;
+}
+.cw-hub .cw-toast[data-paused='true'] .cw-toast-bar {
+  animation-play-state: paused;
+}
+@keyframes cw-undo {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0;
+  }
+}
+
+/* ---- Windows: the command bar and the shortcut sheet --------------------------------------------------------------- */
+.cw-hub .cw-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-4, var(--cwd-space-4));
+  background: color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 45%, transparent);
+}
+.cw-hub .cw-dialog {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  width: min(38rem, 100%);
+  max-height: 76vh;
+  padding: var(--cw-space-4, var(--cwd-space-4));
+  overflow: auto;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 35%, transparent);
+}
+.cw-hub .cw-dialog:focus {
+  outline: none;
+}
+.cw-hub .cw-cmdk {
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-cmdk-field {
+  display: flex;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding: 0 var(--cw-space-2, var(--cwd-space-2));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-cmdk-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 2.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-cmdk-field input:focus-visible {
+  outline: none;
+}
+.cw-hub .cw-cmdk-field:has(input:focus-visible) {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: -2px;
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+}
+.cw-hub .cw-cmdk-list {
+  display: grid;
+  gap: 1px;
+  max-height: 50vh;
+  overflow-y: auto;
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  padding-top: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-cmdk-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: 0.45rem var(--cw-space-3, var(--cwd-space-3));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  cursor: pointer;
+}
+.cw-hub .cw-cmdk-item[aria-selected='true'] {
+  background: var(--cw-accent-soft, var(--cwd-accent-soft));
+}
+.cw-hub .cw-cmdk-label {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-cmdk-hint,
+.cw-hub .cw-cmdk-kind {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-cmdk-none,
+.cw-hub .cw-cmdk-hint-line {
+  padding: 0 var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-1, var(--cwd-space-1));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-sheet-head h2 {
+  font-size: var(--cw-text-l, var(--cwd-text-l));
+}
+.cw-hub .cw-sheet-list {
+  display: grid;
+}
+.cw-hub .cw-sheet-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cw-space-4, var(--cwd-space-4));
+  padding: var(--cw-space-2, var(--cwd-space-2)) 0;
+}
+.cw-hub .cw-sheet-row + .cw-sheet-row {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-sheet-row dt {
+  flex: none;
+  order: 2;
+}
+.cw-hub .cw-sheet-row dd {
+  order: 1;
+}
+.cw-hub .cw-sheet-plus {
+  margin: 0 0.25rem;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+
+/* ---- Terms, Blocked, Rule gaps, Audit and the Guide ---------------------------------------------------------------------- */
+/* Middle-pane views. A wide table scrolls inside its own box (.cw-scroll) and each column has a floor, so a phone scrolls the table
+   and never the page; every word and handle may break anywhere. Nothing here uses a signal colour: they are neutral. */
+.cw-hub .cw-nowrap {
+  white-space: nowrap;
+}
+.cw-hub .cw-term-word,
+.cw-hub .cw-term-note,
+.cw-hub .cw-term-changed {
+  min-width: 8rem;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-term-note {
+  min-width: 11rem;
+}
+.cw-hub .cw-term-count {
+  text-align: right;
+  min-width: 3rem;
+}
+.cw-hub .cw-terms-table tr[aria-current='true'] {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-terms-group {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-terms-group h3,
+.cw-hub .cw-form-title {
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+}
+.cw-hub .cw-termform-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  align-items: start;
+}
+.cw-hub .cw-hits {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-hits-list {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  font-family: var(--cw-font-mono, var(--cwd-font-mono));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-hits-list li {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-audit-filter {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  align-items: start;
+}
+.cw-hub .cw-audit-filter .cw-action-foot {
+  grid-column: 1 / -1;
+}
+
+/* Rule gaps and the Community Rules: a list of short entries, divided by hairlines. */
+.cw-hub .cw-gaps,
+.cw-hub .cw-rules {
+  display: grid;
+}
+.cw-hub .cw-gap,
+.cw-hub .cw-rule {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-gap + .cw-gap,
+.cw-hub .cw-rule + .cw-rule {
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-gap-head,
+.cw-hub .cw-rule-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-gap-note,
+.cw-hub .cw-rule-text,
+.cw-hub .cw-rule-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-gap-note {
+  white-space: pre-wrap;
+}
+.cw-hub .cw-gap-form {
+  max-width: 28rem;
+}
+.cw-hub .cw-field .cw-field-label {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-term-confirm td {
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-ladder th[scope='row'] {
+  color: var(--cw-ink, var(--cwd-ink));
+  white-space: nowrap;
+}
+.cw-hub .cw-ladder-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+}
+
+/* The Steps and ladder settings: a stack of panels, the preview and the save bar. The ladder grid and the preview scroll inside their own
+   box (.cw-scroll), so the page never widens. The only colour is the referee card and the red of a refused field. */
+.cw-hub .cw-settings,
+.cw-hub .cw-settings-part,
+.cw-hub .cw-settings-body {
+  display: grid;
+  gap: var(--cw-space-4, var(--cwd-space-4));
+  min-width: 0;
+}
+.cw-hub .cw-settings-part {
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-settings-body {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-settings-all {
+  display: flex;
+  justify-content: flex-end;
+}
+.cw-hub .cw-lchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-lchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-height: 1.75rem;
+  padding: 0 var(--cw-space-1, var(--cwd-space-1)) 0 var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-lchip button {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: transparent;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  cursor: pointer;
+}
+.cw-hub .cw-lchip button:hover {
+  background: var(--cw-border, var(--cwd-border));
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-length,
+.cw-hub .cw-kl {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+}
+.cw-hub .cw-length-row,
+.cw-hub .cw-length-add,
+.cw-hub .cw-kl-kind,
+.cw-hub .cw-pair,
+.cw-hub .cw-row-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-length-row select,
+.cw-hub .cw-length-add select,
+.cw-hub .cw-kl-kind select {
+  width: auto;
+  max-width: 100%;
+}
+.cw-hub .cw-length-row input,
+.cw-hub .cw-length-add input {
+  width: 6rem;
+}
+.cw-hub .cw-pair {
+  align-items: start;
+}
+.cw-hub .cw-row-field {
+  align-items: start;
+}
+.cw-hub .cw-row-name {
+  min-width: 4.5rem;
+  padding-top: var(--cw-space-1, var(--cwd-space-1));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-grid td,
+.cw-hub .cw-grid th[scope='col'] {
+  min-width: 11rem;
+  vertical-align: top;
+}
+.cw-hub .cw-grid th[scope='row'] {
+  white-space: nowrap;
+}
+.cw-hub .cw-picklist {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-confirm {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-savebar {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-settings-nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The Reporting settings: the flow choices, one card per reason, and the "What players see" picture. Everything wraps inside its own box,
+   so nothing widens the page at a phone's width. Neutral colour only: the referee card and the red of a refused field are the signals. */
+.cw-hub .cw-flowopts {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-flowopt {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  cursor: pointer;
+}
+.cw-hub .cw-flowopt:has(input:checked) {
+  border-color: var(--cw-accent, var(--cwd-accent));
+  background: var(--cw-accent-soft, var(--cwd-accent-soft));
+}
+.cw-hub .cw-flowopt input {
+  flex: none;
+  margin-top: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-flowopt > span {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+}
+.cw-hub .cw-reasons {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-reason > [role='group'] {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-reason-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-reason-fields input {
+  width: 100%;
+  min-width: 0;
+}
+.cw-hub .cw-reason-flags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-reason-moves {
+  display: inline-flex;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin-left: auto;
+}
+.cw-hub .cw-reason-rules {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-mock {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+  max-width: 26rem;
+  padding: var(--cw-space-4, var(--cwd-space-4));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-mock p,
+.cw-hub .cw-mock ul {
+  margin: 0;
+}
+.cw-hub .cw-mock-tag {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-mock-title {
+  font-size: var(--cw-text-l, var(--cwd-text-l));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-mock-quote {
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border-left: 3px solid var(--cw-border-strong, var(--cwd-border-strong));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-hub .cw-mock-legend,
+.cw-hub .cw-mock-heading {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-mock-heading {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-mock-group ul {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-mock-group li {
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+}
+.cw-hub .cw-mock-btn {
+  display: inline-block;
+  margin: 0 var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-1, var(--cwd-space-1)) 0;
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+}
+.cw-hub .cw-mock-btn--primary {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-mock-after {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  padding-top: var(--cw-space-3, var(--cwd-space-3));
+  border-top: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border-strong, var(--cwd-border-strong));
+}
+.cw-hub .cw-mock-thanks {
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+/* The Simple card's rule field: the whole card until a rule is picked, so it is as wide as the card. */
+.cw-hub .cw-scard-rule {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-scard-rule select {
+  width: 100%;
+  min-width: 0;
+}
+
+/* The generated guide, drawn by the safe renderer: plain document typography. */
+.cw-hub .cw-doc {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-doc h3,
+.cw-hub .cw-doc h4,
+.cw-hub .cw-doc h5,
+.cw-hub .cw-doc h6 {
+  margin: var(--cw-space-2, var(--cwd-space-2)) 0 0;
+  line-height: var(--cw-leading-tight, var(--cwd-leading-tight));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-doc h3 {
+  font-size: var(--cw-text-l, var(--cwd-text-l));
+}
+.cw-hub .cw-doc h4 {
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+}
+.cw-hub .cw-doc h5,
+.cw-hub .cw-doc h6 {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-doc p,
+.cw-hub .cw-doc li {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-doc ul,
+.cw-hub .cw-doc ol {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: 0;
+  padding-left: var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-doc ul {
+  list-style: disc;
+}
+.cw-hub .cw-doc ol {
+  list-style: decimal;
+}
+.cw-hub .cw-doc th,
+.cw-hub .cw-doc td {
+  min-width: 7rem;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-doc code {
+  padding: 0 var(--cw-space-1, var(--cwd-space-1));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  font-family: var(--cw-font-mono, var(--cwd-font-mono));
+  font-size: 0.92em;
+}
+.cw-hub .cw-doc pre {
+  margin: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.cw-hub .cw-doc pre code {
+  padding: 0;
+  background: none;
+}
+
+/* ---- Simple mode ------------------------------------------------------------------------------------------------------ */
+/* One card per case. No rail: the menu is in the top bar, the queue is the list beside the card. Neutral throughout: the only
+   colour is the primary button (your next action), the reported line, the warning and the referee card, each as everywhere else. */
+.cw-hub .cw-body[data-mode='simple'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cw-hub .cw-body[data-mode='simple'][data-queue='true'] {
+  grid-template-columns: var(--cw-queue-width, var(--cwd-queue-width)) minmax(0, 1fr);
+}
+
+.cw-hub .cw-snav {
+  min-width: 0;
+}
+.cw-hub .cw-snav > ul {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+.cw-hub .cw-snav a,
+.cw-hub .cw-snav button {
+  display: inline-flex;
+  align-items: center;
+  min-height: calc(var(--cw-control-height, var(--cwd-control-height)) - 4px);
+  padding: 0 var(--cw-space-3, var(--cwd-space-3));
+  border: 0;
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: transparent;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  text-decoration: none;
+  cursor: pointer;
+}
+.cw-hub .cw-snav a:hover,
+.cw-hub .cw-snav button:hover {
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-snav a[aria-current='page'],
+.cw-hub .cw-snav button[data-current='true'] {
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink, var(--cwd-ink));
+}
+.cw-hub .cw-snav-more {
+  position: relative;
+}
+.cw-hub .cw-snav-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  display: grid;
+  min-width: 11rem;
+  padding: var(--cw-space-1, var(--cwd-space-1));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface, var(--cwd-surface));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 22%, transparent);
+}
+.cw-hub .cw-snav-menu a {
+  display: flex;
+  width: 100%;
+}
+
+.cw-hub .cw-scard {
+  display: grid;
+  gap: var(--cw-space-4, var(--cwd-space-4));
+  align-content: start;
+  min-width: 0;
+  max-width: 48rem;
+  padding: var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-5, var(--cwd-space-5)) var(--cw-space-5, var(--cwd-space-5));
+}
+.cw-hub .cw-scard-head {
+  display: grid;
+  gap: 0;
+}
+.cw-hub .cw-scard-head .cw-screen-title {
+  font-size: var(--cw-text-xl, var(--cwd-text-xl));
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-scard-sub {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-scard-said,
+.cw-hub .cw-scard-record {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-scard-said h3,
+.cw-hub .cw-scard-record h3 {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-scard-lines {
+  min-width: 0;
+}
+.cw-hub .cw-scard-lines .cw-lines {
+  margin: 0;
+  padding: 0;
+}
+.cw-hub .cw-scard-lines .cw-line-text {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-sline {
+  grid-template-columns: 6rem minmax(0, 1fr);
+}
+.cw-hub .cw-sline[data-who='true'] {
+  grid-template-columns: 6rem minmax(4rem, 9rem) minmax(0, 1fr);
+}
+.cw-hub .cw-sline .cw-line-time {
+  white-space: nowrap;
+}
+.cw-hub .cw-sline .cw-line-meta {
+  grid-column: 2 / -1;
+}
+.cw-hub .cw-scard-toggle {
+  justify-self: start;
+}
+.cw-hub .cw-scard-decision {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-scard-decision .cw-suggest-text .cw-hint {
+  display: block;
+  overflow: visible;
+}
+.cw-hub .cw-scard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-scard-actions .cw-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-height: calc(var(--cw-control-height, var(--cwd-control-height)) + 0.25rem);
+}
+.cw-hub .cw-scard-fine {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-scard-none {
+  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+}
+.cw-hub .cw-scard-back {
+  display: flex;
+}
+/* Something else opens the decision bar in the flow of the card, closed or not: it is not a sheet at the bottom edge. */
+.cw-hub .cw-scard .cw-dock[data-open] {
+  position: static;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  box-shadow: none;
+}
+.cw-hub .cw-scard .cw-dock[data-open] .cw-dock-bar {
+  display: none;
+}
+.cw-hub .cw-scard .cw-dock[data-open] .cw-dock-body {
+  display: grid;
+  max-height: none;
+  padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4)) var(--cw-space-4, var(--cwd-space-4));
+  overflow: visible;
+  border-top: 0;
+}
+.cw-hub .cw-simple-home {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+}
+@media (max-width: 51.1875rem) {
+  .cw-hub .cw-snav {
+    flex: 1 1 100%;
+  }
+  .cw-hub .cw-scard {
+    padding: var(--cw-space-3, var(--cwd-space-3)) 0 var(--cw-space-4, var(--cwd-space-4));
+  }
+  .cw-hub .cw-scard-actions .cw-btn {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
+}
+/* In a narrow card (a phone, or the queue and a pane beside it) a line is its time, who said it if the whole chat is open, and under
+   them the words at the full width, so the words are not squeezed into what is left of a row. */
+@container cwmain (max-width: 34rem) {
+  .cw-hub .cw-sline,
+  .cw-hub .cw-sline[data-who='true'] {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .cw-hub .cw-sline[data-who='true'] .cw-line-who {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .cw-hub .cw-sline .cw-line-text,
+  .cw-hub .cw-sline .cw-line-meta {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---- Pieces: the hub's parts placed in somebody else's page ---------------------------------------------------------------- */
+/* The provider's root when it is not the whole page: as tall as its content, clear so the page behind shows, toasts at the corner. */
+.cw-hub--embed {
+  display: block;
+  height: auto;
+  overflow: visible;
+  background: transparent;
+}
+.cw-hub--embed .cw-toasts {
+  left: var(--cw-space-4, var(--cwd-space-4));
+}
+/* A piece: a box with padding of its own, and the container that the width queries measure (in the shell that is `.cw-main`). It
+   reads no grid area of the shell. */
+.cw-hub .cw-piece {
+  display: block;
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  container-type: inline-size;
+  container-name: cwmain;
+}
+.cw-hub .cw-piece--denied {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+/* The queue and the workbench are boxes of their own, so they carry their own edge and no outer padding. */
+.cw-hub .cw-piece[data-cw-piece='CaseList'],
+.cw-hub .cw-piece[data-cw-piece='CaseWorkbench'] {
+  padding: 0;
+}
+.cw-hub .cw-piece .cw-queue {
+  max-height: min(36rem, 80dvh);
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  overflow: hidden;
+}
+.cw-hub .cw-piece .cw-case-link {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.cw-hub .cw-piece button.cw-case-link {
+  cursor: pointer;
+}
+/* The case beside its panel when there is room; stacked when there is not. The page scrolls, not the pane. */
+.cw-hub .cw-wb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-bg, var(--cwd-bg));
+}
+.cw-hub .cw-piece .cw-casepane {
+  display: block;
+  height: auto;
+}
+.cw-hub .cw-piece .cw-case-scroll {
+  overflow: visible;
+}
+@container cwmain (min-width: 52rem) {
+  .cw-hub .cw-wb {
+    grid-template-columns: minmax(0, 1fr) var(--cw-context-width, var(--cwd-context-width));
+  }
+  .cw-hub .cw-wb .cw-ctx {
+    border-top: 0;
+    border-left: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  }
+}
+@container cwmain (max-width: 30rem) {
+  .cw-hub .cw-piece .cw-scard,
+  .cw-hub .cw-piece .cw-screen {
+    padding-inline: 0;
+  }
+}
+
+/* ---- Motion, forced colours -------------------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  .cw-hub .cw-btn,
+  .cw-hub .cw-seg button,
+  .cw-hub .cw-rail a,
+  .cw-hub .cw-case,
+  .cw-hub .cw-take {
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      border-color 120ms ease,
+      filter 120ms ease;
+  }
+  .cw-hub .cw-toast {
+    animation: cw-rise 180ms ease-out;
+  }
+  .cw-hub .cw-skel-bar {
+    background: linear-gradient(90deg, var(--cw-border, var(--cwd-border)) 25%, var(--cw-surface-sunken, var(--cwd-surface-sunken)) 50%, var(--cw-border, var(--cwd-border)) 75%);
+    background-size: 200% 100%;
+    animation: cw-shimmer 1.4s ease-in-out infinite;
+  }
+  @keyframes cw-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  @keyframes cw-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+@media (forced-colors: active) {
+  .cw-hub .cw-tag,
+  .cw-hub .cw-cat,
+  .cw-hub .cw-kbd {
+    border-color: CanvasText;
+  }
+  .cw-hub .cw-case,
+  .cw-hub .cw-case[data-wait],
+  .cw-hub .cw-qrow,
+  .cw-hub .cw-qrow[data-wait] {
+    border-left-color: CanvasText;
+  }
+  .cw-hub .cw-case[data-selected='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .cw-hub .cw-line[data-reported='true'] {
+    border-left-color: Highlight;
+  }
+  .cw-hub .cw-radio:has(input:checked) {
+    outline: 2px solid Highlight;
+  }
+  .cw-hub .cw-seg button[aria-pressed='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .cw-hub .cw-rail a[aria-current='page'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .cw-hub .cw-cmdk-item[aria-selected='true'] {
+    outline: 2px solid Highlight;
+  }
+  .cw-hub .cw-avatar {
+    border: 1px solid CanvasText;
+  }
+}

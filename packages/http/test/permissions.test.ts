@@ -36,12 +36,17 @@ describe('PERMISSIONS defaults', () => {
       'sanctions.apply.ban_permanent': 'senior',
       'sanctions.revoke': 'moderator',
       'history.read': 'moderator',
+      'blocked.read': 'moderator',
       'gaps.read': 'moderator',
       'gaps.close': 'owner',
       'terms.read': 'moderator',
       'terms.write': 'moderator',
       'policy.read': 'moderator',
+      'policy.write': 'owner',
       'audit.read': 'senior',
+      'claims.override': 'senior',
+      'reasons.read': 'moderator',
+      'reasons.write': 'senior',
       settings: 'owner',
     });
   });

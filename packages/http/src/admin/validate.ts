@@ -16,6 +16,21 @@ export function bodyObject(req: KitRequest): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/** The JSON body as a plain object, or an empty one when the request has no body. Bad JSON, an array, a string or `null` are 400. */
+export function optionalBody(req: KitRequest): Record<string, unknown> {
+  const value = parseJson(req.rawBody);
+  if (value === undefined) return {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new ValidationError();
+  return value as Record<string, unknown>;
+}
+
+/** A body `takeOver`: absent is false; otherwise it must be a boolean, else 400. */
+export function bodyTakeOver(body: Record<string, unknown>): boolean {
+  if (!Object.hasOwn(body, 'takeOver')) return false;
+  if (typeof body.takeOver !== 'boolean') throw new ValidationError();
+  return body.takeOver;
+}
+
 /** True when the object has this key of its own (a JSON body has no `undefined`, so a present key has a value). */
 export const has = (o: Record<string, unknown>, key: string): boolean => Object.hasOwn(o, key);
 

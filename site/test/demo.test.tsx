@@ -1,49 +1,16 @@
-// The interactive demo: a chat room (left), a moderator console (right), a four-step tour and a "show me the code" drawer.
-// These tests run it against KitEngine, the real Chatwarden kit. They never touch the network.
+// The interactive demo: a chat room (left), the real moderator hub (right), a seven-step tour and a "show me the code" drawer.
+// These tests cover the game side and the frame around the hub; demoHub.test.tsx plays the loop through the hub and the player
+// components, demoTour.test.tsx the tour. They run against KitEngine, the real Chatwarden kit, and never touch the network.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Demo from '../src/demo/Demo';
 import { KitEngine } from '../src/demo/kitEngine';
-
-const RUDE = "uninstall the game, you're hopeless";
-
-function stubMatchMedia(stacked: boolean) {
-  window.matchMedia = ((q: string) => ({
-    matches: /max-width/.test(q) ? stacked : false,
-    media: q,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-  })) as unknown as typeof window.matchMedia;
-}
-
-async function setup(props: { scripted?: boolean; stacked?: boolean } = {}) {
-  stubMatchMedia(props.stacked ?? false);
-  const engine = new KitEngine();
-  const user = userEvent.setup();
-  const view = render(<Demo engine={engine} scripted={props.scripted ?? false} />);
-  await screen.findByText(RUDE);
-  return { engine, user, ...view };
-}
-
-const live = () => screen.getByTestId('demo-live');
-const tour = () => screen.queryByRole('region', { name: /guided tour/i });
-const stepText = () => tour()?.textContent ?? '';
-const composer = () => screen.getByLabelText(/chat message/i) as HTMLInputElement;
-const reportBtn = (re: RegExp) => screen.getByRole('button', { name: re });
+import { closeReport, composer, live, oneTapReport, reportBtn, RUDE, setup, stubMatchMedia } from './helpers/demoUi';
 
 async function sayBad(user: ReturnType<typeof userEvent.setup>) {
   await user.type(composer(), 'you absolute zorbak');
   await user.keyboard('{Enter}');
-}
-async function fileReport(user: ReturnType<typeof userEvent.setup>, category = /harassment/i, note = '') {
-  await user.click(reportBtn(/report bo's line: uninstall/i));
-  const dialog = screen.getByRole('dialog');
-  await user.click(within(dialog).getByRole('radio', { name: category }));
-  if (note) await user.type(within(dialog).getByLabelText(/note/i), note);
-  await user.click(within(dialog).getByRole('button', { name: /send report/i }));
 }
 
 beforeEach(() => stubMatchMedia(false));
@@ -58,6 +25,7 @@ describe('the room', () => {
     await setup();
     expect(screen.getByRole('heading', { name: 'The game' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Your moderator' })).toBeTruthy();
+    expect(document.querySelector('[data-pane="mod"] .cw-hub')).toBeTruthy(); // the real hub
     const seats = screen.getByRole('list', { name: /players in the lobby/i });
     expect(within(seats).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
       expect.stringContaining('You'),
@@ -152,8 +120,8 @@ describe('a refused line', () => {
   });
 });
 
-describe('the report dialog', () => {
-  it('has a report button on the other players’ lines and none on yours', async () => {
+describe('the report button', () => {
+  it('is on the other players’ lines and none on yours', async () => {
     const { user } = await setup();
     expect(reportBtn(/report bo's line: uninstall/i)).toBeTruthy();
     expect(reportBtn(/report ada's line: gg/i)).toBeTruthy();
@@ -162,368 +130,52 @@ describe('the report dialog', () => {
     await screen.findByText('mine');
     expect(screen.queryByRole('button', { name: /report you/i })).toBeNull();
   });
-  it('opens as a modal dialog with a category, an optional note, and focus inside', async () => {
+  it('opens player-react’s dialog, a modal with focus inside (the dialog itself is tested in demoHub.test.tsx)', async () => {
     const { user } = await setup();
     await user.click(reportBtn(/report bo's line: uninstall/i));
-    const dialog = screen.getByRole('dialog', { name: /report bo/i });
+    const dialog = await screen.findByRole('dialog');
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(within(dialog).getAllByRole('radio').map((r) => (r as HTMLInputElement).value)).toEqual([
-      'harassment',
-      'hate',
-      'cheating',
-      'spam',
-      'disruption',
-      'other',
-    ]);
-    expect(within(dialog).getByLabelText(/note/i)).toBeTruthy();
     expect(dialog.contains(document.activeElement)).toBe(true);
-    expect(within(dialog).getByText(RUDE)).toBeTruthy(); // you see which line you are reporting
-  });
-  it('asks for a category before sending, and stays open', async () => {
-    const { user, engine } = await setup();
-    await user.click(reportBtn(/report bo's line: uninstall/i));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    expect(screen.getByRole('alert').textContent).toMatch(/pick a category/i);
-    expect(screen.getByRole('dialog')).toBeTruthy();
-    expect((await engine.reports.list()).items).toHaveLength(0);
-  });
-  it('asks for a note when the category is "Something else"', async () => {
-    const { user, engine } = await setup();
-    await user.click(reportBtn(/report bo's line: uninstall/i));
-    await user.click(screen.getByRole('radio', { name: /something else/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    expect(screen.getByRole('alert').textContent).toMatch(/tell the moderator|add a note/i);
-    expect((await engine.reports.list()).items).toHaveLength(0);
-    await user.type(screen.getByLabelText(/note/i), 'they keep doing it');
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect((await engine.reports.list()).items).toHaveLength(1);
-  });
-  it('limits the note to 140 characters', async () => {
-    const { user } = await setup();
-    await user.click(reportBtn(/report bo's line: uninstall/i));
-    expect((screen.getByLabelText(/note/i) as HTMLTextAreaElement).maxLength).toBe(140);
-  });
-  it('cancel and Escape close it without filing, and focus goes back to the report button', async () => {
-    const { user, engine } = await setup();
-    const opener = reportBtn(/report bo's line: uninstall/i);
-    await user.click(opener);
-    await user.click(screen.getByRole('button', { name: /cancel/i }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(document.activeElement).toBe(opener);
-    await user.click(opener);
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(document.activeElement).toBe(opener);
-    expect((await engine.reports.list()).items).toHaveLength(0);
+    expect(dialog.closest('.cw-player')).toBeTruthy();
   });
   it('keeps Tab inside the dialog', async () => {
     const { user } = await setup();
     await user.click(reportBtn(/report bo's line: uninstall/i));
-    const dialog = screen.getByRole('dialog');
-    for (let i = 0; i < 14; i++) {
+    const dialog = await screen.findByRole('dialog');
+    for (let i = 0; i < 10; i++) {
       await user.tab();
       expect(dialog.contains(document.activeElement)).toBe(true);
     }
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 10; i++) {
       await user.tab({ shift: true });
       expect(dialog.contains(document.activeElement)).toBe(true);
     }
   });
-  it('files the report, closes, announces it, and puts one report in the moderator queue', async () => {
-    const { user } = await setup();
-    await fileReport(user, /harassment/i, 'kept going');
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(live().textContent).toMatch(/report filed against bo/i));
-    expect(screen.getByRole('button', { name: /reports, 1 open/i })).toBeTruthy();
-  });
-  it('says so when the same line is reported twice', async () => {
-    const { user } = await setup();
-    await fileReport(user);
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  it('while the dialog is open, the tour card, the toolbar, the panes and the pane switcher are inert', async () => {
+    const { user, container } = await setup({ stacked: true });
     await user.click(reportBtn(/report bo's line: uninstall/i));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/already reported/i));
-  });
-});
-
-describe('the moderator console', () => {
-  it('starts with an empty queue and an invitation to report', async () => {
-    await setup();
-    expect(screen.getByRole('button', { name: /reports, 0 open/i })).toBeTruthy();
-    expect(screen.getByText(/no open reports/i)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^warn$/i })).toBeNull();
-  });
-  it('shows the report: category, reporter, evidence with the reported line marked, and the ladder suggestion', async () => {
-    const { user } = await setup();
-    await fileReport(user, /harassment/i, 'kept going');
-    const detail = await screen.findByRole('region', { name: /report from you about bo/i });
-    expect(within(detail).getByText(/harassment/i)).toBeTruthy();
-    expect(within(detail).getByText(/kept going/)).toBeTruthy();
-    const evidence = within(detail).getByRole('list', { name: /evidence/i });
-    const items = within(evidence).getAllByRole('listitem');
-    expect(items.length).toBeLessThanOrEqual(6);
-    const reported = items.filter((li) => li.getAttribute('data-reported') === 'true');
-    expect(reported).toHaveLength(1);
-    expect(reported[0]?.textContent).toContain(RUDE);
-    const blocked = items.filter((li) => li.getAttribute('data-blocked') === 'true');
-    expect(blocked).toHaveLength(1);
-    expect(blocked[0]?.textContent).toMatch(/refused/i);
-    expect(within(detail).getByText(/suggested: warning/i)).toBeTruthy();
-    expect(within(detail).getByText(/standard profile: first aggressive message with a clean record gets a warning/i)).toBeTruthy(); // the kit's own sentence
-  });
-  it('offers Warn, Timeout 10m, Note and No action, and marks the suggested one', async () => {
-    const { user } = await setup();
-    await fileReport(user);
-    for (const name of ['Warn', 'Timeout 10m', 'Note', 'No action']) {
-      expect(await screen.findByRole('button', { name })).toBeTruthy();
-    }
-    expect(screen.getByRole('button', { name: 'Warn' }).getAttribute('data-suggested')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Timeout 10m' }).getAttribute('data-suggested')).toBeNull();
-  });
-  it('suggests no action for plain trash talk', async () => {
-    const { user } = await setup();
-    await user.click(reportBtn(/report bo's line: ez/i));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    expect(await screen.findByText(/suggested: no action/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'No action' }).getAttribute('data-suggested')).toBe('true');
-  });
-  it('lets the moderator pick the line to show the player, defaulting to the reported line', async () => {
-    const { user } = await setup();
-    await fileReport(user);
-    const group = await screen.findByRole('group', { name: /line to show the player/i });
-    const radios = within(group).getAllByRole('radio') as HTMLInputElement[];
-    expect(radios.length).toBe(4); // none + Bo's three lines (one of them blocked, shown to staff only)
-    expect(radios.find((r) => r.checked)?.closest('label')?.textContent).toContain(RUDE);
-    expect(within(group).getByLabelText(/don.t quote a line/i)).toBeTruthy();
-  });
-  it('switches between reports when there are several', async () => {
-    const { user } = await setup();
-    await fileReport(user);
-    await user.click(reportBtn(/report ada's line: ok that was close/i));
-    await user.click(screen.getByRole('radio', { name: /spam/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /reports, 2 open/i })).toBeTruthy());
-    const list = screen.getByRole('list', { name: /open reports/i });
-    expect(within(list).getAllByRole('button')).toHaveLength(2);
-  });
-});
-
-describe('decide, notice, acknowledge', () => {
-  async function toDecision(user: ReturnType<typeof userEvent.setup>) {
-    await fileReport(user);
-    await screen.findByRole('button', { name: 'Warn' });
-  }
-
-  it('Warn closes the report, announces it, and shows Bo a notice in a "player’s screen" frame', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    await user.click(screen.getByRole('button', { name: 'Warn' }));
-    await waitFor(() => expect(live().textContent).toMatch(/decision made.*warning.*bo/i));
-    const frame = await screen.findByRole('region', { name: /bo.s screen/i });
-    expect(within(frame).getByText(/what bo sees/i)).toBeTruthy();
-    expect(within(frame).getByText(/warning/i)).toBeTruthy();
-    expect(within(frame).getByText(/community rule 2/i)).toBeTruthy();
-    expect(within(frame).getByText(RUDE)).toBeTruthy();
-    expect(within(frame).getByRole('button', { name: /acknowledge/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /reports, 0 open/i })).toBeTruthy();
-    expect(screen.getByText(/no open reports/i)).toBeTruthy();
-    await waitFor(() => expect(live().textContent).toMatch(/notice|bo/i));
-  });
-  it('announces that the notice is shown', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    const seen: string[] = [];
-    const mo = new MutationObserver(() => seen.push(live().textContent ?? ''));
-    mo.observe(live(), { childList: true, characterData: true, subtree: true });
-    await user.click(screen.getByRole('button', { name: 'Warn' }));
-    await screen.findByRole('region', { name: /bo.s screen/i });
-    await waitFor(() => expect(seen.join('|')).toMatch(/notice shown on bo/i));
-    mo.disconnect();
-  });
-  it('quotes the chosen line with blocked words starred out; the word never reaches the player frame', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    const group = screen.getByRole('group', { name: /line to show the player/i });
-    await user.click(within(group).getByLabelText(/absolute zorbak/i));
-    await user.click(screen.getByRole('button', { name: 'Warn' }));
-    const frame = await screen.findByRole('region', { name: /bo.s screen/i });
-    expect(within(frame).getByText('you absolute ******')).toBeTruthy();
-    expect(frame.textContent).not.toMatch(/zorbak/i);
-  });
-  it('with no line chosen the notice quotes nothing', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    await user.click(screen.getByLabelText(/don.t quote a line/i));
-    await user.click(screen.getByRole('button', { name: 'Warn' }));
-    const frame = await screen.findByRole('region', { name: /bo.s screen/i });
-    expect(within(frame).queryByText(RUDE)).toBeNull();
-  });
-  it('the notice never shows the moderator’s private note or the reporter', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    const note = screen.getByLabelText(/private note/i) as HTMLInputElement;
-    await user.clear(note);
-    await user.type(note, 'secret staff words');
-    await user.click(screen.getByRole('button', { name: 'Warn' }));
-    const frame = await screen.findByRole('region', { name: /bo.s screen/i });
-    expect(frame.textContent).not.toMatch(/secret staff words/);
-    expect(frame.textContent).not.toMatch(/\bYou\b/);
-  });
-  it('Acknowledge clears the notice, announces it, and moves it to the record', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    await user.click(screen.getByRole('button', { name: 'Warn' }));
-    await user.click(await screen.findByRole('button', { name: /acknowledge/i }));
-    await waitFor(() => expect(screen.queryByRole('region', { name: /bo.s screen/i })).toBeNull());
-    await waitFor(() => expect(live().textContent).toMatch(/bo acknowledged/i));
-    await user.click(screen.getByRole('button', { name: /my record/i }));
-    const record = await screen.findByRole('list', { name: /bo.s record/i });
-    expect(within(record).getAllByRole('listitem')).toHaveLength(1);
-    expect(record.textContent).toMatch(/warning/i);
-    expect(record.textContent).toMatch(/community rule 2/i);
-  });
-  it('Timeout 10m shows a timeout notice with when it ends, and Bo sits out', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    await user.click(screen.getByRole('button', { name: 'Timeout 10m' }));
-    const frame = await screen.findByRole('region', { name: /bo.s screen/i });
-    expect(frame.textContent).toMatch(/chat timeout|timed out/i);
-    expect(frame.textContent).toMatch(/10 minutes/i);
-    const seats = screen.getByRole('list', { name: /players in the lobby/i });
-    await waitFor(() => expect(within(seats).getByText(/bo/i).closest('li')?.textContent).toMatch(/timed out/i));
-  });
-  it('Note tells the player nothing; No action closes the report quietly', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    await user.click(screen.getByRole('button', { name: 'Note' }));
-    await waitFor(() => expect(live().textContent).toMatch(/note/i));
-    expect(screen.queryByRole('region', { name: /bo.s screen/i })).toBeNull();
-    expect(screen.getByText(/no open reports/i)).toBeTruthy();
-    // a second report, dismissed
-    await user.click(reportBtn(/report ada's line: gg/i));
-    await user.click(screen.getByRole('radio', { name: /spam/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    await user.click(await screen.findByRole('button', { name: 'No action' }));
-    await waitFor(() => expect(live().textContent).toMatch(/no action/i));
-    expect(screen.queryByRole('region', { name: /ada.s screen/i })).toBeNull();
-  });
-  it('a second decision on the same report is impossible (the buttons go with the report)', async () => {
-    const { user } = await setup();
-    await toDecision(user);
-    await user.click(screen.getByRole('button', { name: 'Warn' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Warn' })).toBeNull());
-  });
-});
-
-describe('the guided tour', () => {
-  it('starts at step 1 of 4 with progress pips, Skip and Next, anchored to the composer', async () => {
-    await setup();
-    const t = tour()!;
-    expect(t).toBeTruthy();
-    expect(t.textContent).toMatch(/step 1 of 4/i);
-    expect(t.textContent).toMatch(/say something bad/i);
-    expect(t.querySelectorAll('[data-pip]')).toHaveLength(4);
-    expect(t.querySelectorAll('[data-pip="done"]')).toHaveLength(0);
-    expect(within(t).getByRole('button', { name: /skip tour/i })).toBeTruthy();
-    expect(within(t).getByRole('button', { name: /^next$/i })).toBeTruthy();
-    expect(composer().closest('form')?.hasAttribute('data-tour-target')).toBe(true);
-  });
-  it('Next moves on without doing the action, and the demo is never blocked', async () => {
-    const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    expect(stepText()).toMatch(/step 2 of 4/i);
-    expect(stepText()).toMatch(/report a line/i);
-    // still usable
-    await user.type(composer(), 'hello');
-    expect(composer().value).toBe('hello');
-  });
-  it('advances by itself: refusal, then report, then a decision, then the acknowledge', async () => {
-    const { user } = await setup();
-    await sayBad(user);
-    await waitFor(() => expect(stepText()).toMatch(/step 2 of 4/i));
-    await fileReport(user);
-    await waitFor(() => expect(stepText()).toMatch(/step 3 of 4/i));
-    await user.click(await screen.findByRole('button', { name: 'Warn' }));
-    await waitFor(() => expect(stepText()).toMatch(/step 4 of 4/i));
-    await user.click(await screen.findByRole('button', { name: /acknowledge/i }));
-    await waitFor(() => expect(stepText()).toMatch(/whole loop|you played both sides/i));
-    expect(tour()!.querySelectorAll('[data-pip="done"]')).toHaveLength(4);
-  });
-  it('points step 2 at the report button of one of Bo’s rude lines', async () => {
-    const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    const target = document.querySelector('[data-tour-target]') as HTMLElement;
-    expect(target.getAttribute('aria-label')).toMatch(/report bo's line: uninstall/i);
-  });
-  it('doing a later step first jumps ahead (report before saying anything bad)', async () => {
-    const { user } = await setup();
-    await fileReport(user);
-    await waitFor(() => expect(stepText()).toMatch(/step 3 of 4/i));
-  });
-  it('a decision that tells the player nothing sends you back to report another line, with a hint', async () => {
-    const { user } = await setup();
-    await sayBad(user);
-    await fileReport(user);
-    await user.click(await screen.findByRole('button', { name: 'Note' }));
-    await waitFor(() => expect(stepText()).toMatch(/step 2 of 4/i));
-    expect(stepText()).toMatch(/tells the player nothing|no notice/i);
-  });
-  it('Skip hides the tour; the demo keeps working, and the tour can be restarted', async () => {
-    const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /skip tour/i }));
-    expect(tour()).toBeNull();
-    expect(document.querySelector('[data-tour-target]')).toBeNull();
-    await sayBad(user);
-    await screen.findByText(/refused!/i);
-    await user.click(screen.getByRole('button', { name: /restart tour/i }));
-    expect(stepText()).toMatch(/step 1 of 4/i);
-  });
-  it('Escape in the tour card skips it', async () => {
-    const { user } = await setup();
-    within(tour()!).getByRole('button', { name: /^next$/i }).focus();
+    await screen.findByRole('dialog');
+    expect(container.querySelector('.demo-toolbar')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('.demo-panes')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('.pane-tabs')?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('.tour')?.hasAttribute('inert')).toBe(true);
     await user.keyboard('{Escape}');
-    expect(tour()).toBeNull();
+    await waitFor(() => expect(container.querySelector('.demo-panes')?.hasAttribute('inert')).toBe(false));
   });
-  it('announces each step change politely', async () => {
-    const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    await waitFor(() => expect(live().textContent).toMatch(/step 2 of 4.*report a line/i));
+  it('files nothing when it is cancelled', async () => {
+    const { user, engine } = await setup();
+    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect((await engine.kit()).reports.list({ status: 'open' }).items).toHaveLength(0);
   });
-});
-
-describe('Show me the code', () => {
-  it('toggles the real kit lines for the current step, and says where they come from', async () => {
-    const { user } = await setup();
-    const toggle = within(tour()!).getByRole('button', { name: /show me the code/i });
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByRole('region', { name: /kit code/i })).toBeNull();
-    await user.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    const drawer = screen.getByRole('region', { name: /kit code for step 1/i });
-    expect(drawer.textContent).toContain("cw.chat.accept('lobby', 'seat-1', 'hello everyone');");
-    expect(drawer.textContent).toMatch(/packages\/core\/README\.md/);
-    await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    expect(screen.getByRole('region', { name: /kit code for step 2/i }).textContent).toContain('cw.reports.submit(');
-    await user.click(toggle);
-    expect(screen.queryByRole('region', { name: /kit code/i })).toBeNull();
-  });
-  it('shows the cw.decide and player-view lines on steps 3 and 4', async () => {
-    const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /show me the code/i }));
-    await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    expect(screen.getByRole('region', { name: /kit code for step 3/i }).textContent).toContain('await cw.decide(');
-    await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    expect(screen.getByRole('region', { name: /kit code for step 4/i }).textContent).toContain('/api/notices');
-  });
-  it('is still available from the toolbar after the tour is skipped', async () => {
-    const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /skip tour/i }));
-    await user.click(screen.getByRole('button', { name: /show me the code/i }));
-    expect(screen.getByRole('region', { name: /kit code/i })).toBeTruthy();
+  it('files one report in the kit for the line, from You about Bo, and announces it', async () => {
+    const { user, engine } = await setup();
+    await oneTapReport(user);
+    const [one] = (await engine.kit()).reports.list({ status: 'open' }).items;
+    expect(one).toMatchObject({ reporterHandle: 'You', targetHandle: 'Bo' });
+    expect(one?.excerpt.map((l) => l.raw)).toContain(RUDE);
+    await waitFor(() => expect(live().textContent).toMatch(/report filed against bo/i));
+    await closeReport(user);
   });
 });
 
@@ -531,78 +183,45 @@ describe('reset', () => {
   it('clears the room, the queue, the notices and the tour, and reseeds the conversation', async () => {
     const { user, engine } = await setup();
     await sayBad(user);
-    await fileReport(user);
-    await user.click(await screen.findByRole('button', { name: 'Warn' }));
-    await screen.findByRole('region', { name: /bo.s screen/i });
+    await oneTapReport(user);
+    await closeReport(user);
     await user.click(screen.getByRole('button', { name: /reset demo/i }));
-    await waitFor(() => expect(screen.queryByRole('region', { name: /bo.s screen/i })).toBeNull());
     await waitFor(() => expect(screen.queryByText(/refused!/i)).toBeNull());
-    expect(screen.getByRole('button', { name: /reports, 0 open/i })).toBeTruthy();
-    expect(screen.getByText(/no open reports/i)).toBeTruthy();
-    expect(stepText()).toMatch(/step 1 of 4/i);
+    expect(screen.getByRole('region', { name: /guided tour/i }).textContent).toMatch(/step 1 of 7/i);
     expect(composer().value).toBe('');
     expect(await screen.findByText(RUDE)).toBeTruthy();
-    expect((await engine.reports.list()).items).toHaveLength(0);
+    expect((await engine.kit()).reports.list({ status: 'open' }).items).toHaveLength(0);
     expect(await engine.notices.pending('bo')).toEqual([]);
     expect(await engine.notices.record('bo')).toEqual([]);
     await waitFor(() => expect(live().textContent).toMatch(/demo reset/i));
   });
   it('brings back a skipped tour and closes the code drawer and any open dialog', async () => {
     const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /show me the code/i }));
-    await user.click(within(tour()!).getByRole('button', { name: /skip tour/i }));
+    const t = () => screen.getByRole('region', { name: /guided tour/i });
+    await user.click(within(t()).getByRole('button', { name: /show me the code/i }));
+    await user.click(within(t()).getByRole('button', { name: /skip tour/i }));
     await user.click(reportBtn(/report bo's line: uninstall/i));
-    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    await screen.findByRole('dialog');
+    await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', { name: /reset demo/i }));
-    expect(tour()).toBeTruthy();
+    expect(t()).toBeTruthy();
     expect(screen.queryByRole('region', { name: /kit code/i })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
   });
-  it('does not leave stale reports in the queue when pressed repeatedly', async () => {
+  it('does not leave a stale queue or a doubled lobby when pressed repeatedly', async () => {
     const { user } = await setup();
-    await fileReport(user);
+    await oneTapReport(user);
+    await closeReport(user);
     await user.click(screen.getByRole('button', { name: /reset demo/i }));
     await user.click(screen.getByRole('button', { name: /reset demo/i }));
     await screen.findByText(RUDE);
     expect(screen.getAllByText(RUDE)).toHaveLength(1);
-    expect(screen.getByText(/no open reports/i)).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('[data-pane="mod"]')?.textContent).toMatch(/nothing is waiting/i));
   });
 });
 
-describe('the whole tour by keyboard alone', () => {
-  it('can be finished without a pointer', async () => {
-    const { user } = await setup();
-    // Step 1: type in the composer, Enter.
-    composer().focus();
-    await user.keyboard('you absolute zorbak{Enter}');
-    await waitFor(() => expect(stepText()).toMatch(/step 2 of 4/i));
-    // Step 2: tab to Bo's report button (it shows on focus), Enter opens the dialog.
-    reportBtn(/report bo's line: uninstall/i).focus();
-    await user.keyboard('{Enter}');
-    const dialog = await screen.findByRole('dialog');
-    expect(dialog.contains(document.activeElement)).toBe(true);
-    expect((document.activeElement as HTMLInputElement).type).toBe('radio');
-    await user.keyboard(' '); // pick the focused category
-    await user.tab(); // out of the radio group, into the note
-    await user.tab(); // Cancel? no: Send report comes after Cancel, so find it by walking
-    for (let i = 0; i < 4 && !/send report/i.test(document.activeElement?.textContent ?? ''); i++) await user.tab();
-    expect(document.activeElement?.textContent).toMatch(/send report/i);
-    await user.keyboard('{Enter}');
-    await waitFor(() => expect(stepText()).toMatch(/step 3 of 4/i));
-    expect(document.activeElement?.tagName).not.toBe('BODY'); // focus went somewhere sensible, not lost
-    // Step 3: decide with the keyboard.
-    const warn = await screen.findByRole('button', { name: 'Warn' });
-    warn.focus();
-    await user.keyboard('{Enter}');
-    await waitFor(() => expect(stepText()).toMatch(/step 4 of 4/i));
-    // Step 4: acknowledge.
-    const ack = await screen.findByRole('button', { name: /acknowledge/i });
-    ack.focus();
-    await user.keyboard('{Enter}');
-    await waitFor(() => expect(stepText()).toMatch(/whole loop/i));
-    expect(live().textContent).toMatch(/bo acknowledged/i);
-  });
-  it('every button has a name a screen reader can read', async () => {
+describe('every control has a name', () => {
+  it('every button in the demo has a name a screen reader can read', async () => {
     await setup();
     const root = screen.getByRole('group', { name: /chatwarden interactive demo/i });
     for (const b of within(root).getAllByRole('button')) expect((b.getAttribute('aria-label') ?? b.textContent ?? '').trim().length).toBeGreaterThan(0);
@@ -711,7 +330,7 @@ describe('layout', () => {
     expect(container.querySelector('.demo')?.classList.contains('is-stacked')).toBe(false);
     expect(screen.queryByRole('group', { name: /switch pane/i })).toBeNull();
   });
-  it('stacks below the breakpoint, game first, with a sticky mini-tab to switch to the moderator', async () => {
+  it('stacks below 1152px (the hub wants about 720px beside the game), game first, with a sticky mini-tab to switch to the moderator', async () => {
     const { container, user } = await setup({ stacked: true });
     expect(container.querySelector('.demo')?.classList.contains('is-stacked')).toBe(true);
     const tabs = screen.getByRole('group', { name: /switch pane/i });
@@ -728,19 +347,12 @@ describe('layout', () => {
     expect(mod?.getAttribute('aria-pressed')).toBe('true');
     expect((panes[0] as HTMLElement).hidden).toBe(true);
     expect((panes[1] as HTMLElement).hidden).toBe(false);
+    expect(within(panes[1] as HTMLElement).getByRole('heading', { name: 'Moderation' })).toBeTruthy(); // the hub is there to use
   });
   it('the moderator tab carries the open-report count', async () => {
     const { user } = await setup({ stacked: true });
-    await fileReport(user);
+    await oneTapReport(user);
     const tabs = screen.getByRole('group', { name: /switch pane/i });
     await waitFor(() => expect(within(tabs).getAllByRole('button')[1]?.textContent).toMatch(/1/));
-  });
-  it('moves to the moderator pane by itself when the tour reaches the decision (and says so)', async () => {
-    const { user, container } = await setup({ stacked: true });
-    await sayBad(user);
-    await fileReport(user);
-    await waitFor(() => expect(stepText()).toMatch(/step 3 of 4/i));
-    await waitFor(() => expect((container.querySelectorAll('.demo-panes > section')[1] as HTMLElement).hidden).toBe(false));
-    expect(live().textContent).toMatch(/moderator/i);
   });
 });

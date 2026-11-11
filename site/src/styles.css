@@ -835,6 +835,14 @@ li {
 .card p {
   color: var(--muted);
 }
+.card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  font-weight: 700;
+  color: var(--warden-text);
+}
 /* HUD corner ticks: they grow when you point at a card. */
 .card::before,
 .card::after {
@@ -980,6 +988,38 @@ li {
 .steps-more code {
   font-size: 0.9em;
   color: var(--text);
+}
+/* After the three steps: the moderator hub, as the drop-in component and, beside or under it, the one-script-tag element. The
+   README's own lines stay verbatim, so a long one (the CDN address) wraps inside the block instead of being cut off. */
+.hub-step {
+  display: grid;
+  gap: 14px;
+  margin-top: 44px;
+  min-width: 0;
+}
+.hub-step > p,
+.hub-alt > p {
+  color: var(--muted);
+}
+.hub-step-code {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.hub-alt {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+@media (min-width: 1000px) {
+  .hub-step-code {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.hub-step pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .code {
   min-width: 0;
@@ -1206,6 +1246,15 @@ li {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
+}
+.open-npm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  grid-column: 1 / -1;
+}
+.open-npm a {
+  color: var(--warden-text);
 }
 
 /* ---------- FAQ ---------- */

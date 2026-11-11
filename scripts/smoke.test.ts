@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { installArgs, isInside, keepTemp, publishedPackages, PROJECTS, renderTemplate, tarballName, TEMP_PREFIX, timeoutFor } from './smoke.mjs';
+import { installArgs, isInside, keepTemp, packagesFor, publishedPackages, PROJECTS, renderTemplate, tarballName, TEMP_PREFIX, timeoutFor } from './smoke.mjs';
 
 describe('tarballName', () => {
   it('maps a scoped name the way npm pack names the file', () => {
@@ -48,6 +48,72 @@ describe('PROJECTS', () => {
   it('pins TypeScript 5.9 for ESM and 5.7 for CJS', () => {
     expect(PROJECTS.esm.typescript).toBe('5.9');
     expect(PROJECTS.cjs.typescript).toBe('5.7');
+  });
+});
+
+describe('the consumer projects', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const all = ['@chatwarden/core', '@chatwarden/discord', '@chatwarden/http', '@chatwarden/hub-element', '@chatwarden/hub-react', '@chatwarden/matcher', '@chatwarden/player-react', '@chatwarden/profanity', '@chatwarden/store-memory', '@chatwarden/store-sqlite'].map((name) => ({ name, version: '0.1.2', tarball: tarballName(name, '0.1.2') }));
+  it('are ESM, CommonJS, a headless one with no React, and a React 18 one', () => {
+    expect(Object.keys(PROJECTS)).toEqual(['esm', 'cjs', 'headless', 'react18']);
+  });
+  it('each has the files its template needs: package.json, tsconfig.json and its scenario', () => {
+    for (const [name, p] of Object.entries(PROJECTS) as Array<[string, { scenario: string }]>) {
+      for (const f of ['package.json', 'tsconfig.json']) expect(readdirSync(join(root, 'scripts', 'smoke', name)), name).toContain(f);
+      expect(readFileSync(join(root, 'scripts', 'smoke', p.scenario), 'utf8').length, p.scenario).toBeGreaterThan(100);
+    }
+  });
+  it('esm and cjs install all ten packages; headless installs only the kit packages hub-react needs, so React never arrives', () => {
+    expect(packagesFor('esm', all)).toHaveLength(10);
+    expect(packagesFor('cjs', all)).toHaveLength(10);
+    expect(packagesFor('headless', all).map((p: { name: string }) => p.name)).toEqual(['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react']);
+  });
+  it('a package the headless project asks for but was not packed is an error, not a quiet skip', () => {
+    expect(() => packagesFor('headless', all.filter((p) => p.name !== '@chatwarden/hub-react'))).toThrow(/hub-react/);
+  });
+  it('headless installs no react, no react-dom, no player-react and no hub-element (each would bring React in)', () => {
+    const args: string[] = installArgs('headless', packagesFor('headless', all).map((p: { tarball: string }) => `/t/${p.tarball}`));
+    const named = args.filter((a) => !a.startsWith('/t/') && !a.startsWith('-'));
+    expect(named).toEqual(['install', '@types/node@22', 'typescript@5.9']);
+    // The tarballs are the three kit packages (hub-react itself has "react" in its name, so look at the file names, not a pattern).
+    expect(args.filter((a) => a.startsWith('/t/')).map((a) => a.slice(3))).toEqual(['chatwarden-core-0.1.2.tgz', 'chatwarden-http-0.1.2.tgz', 'chatwarden-hub-react-0.1.2.tgz']);
+    expect(args).toEqual(expect.arrayContaining(['@types/node@22', 'typescript@5.9']));
+  });
+  it('esm and cjs also install the types that react-dom/server needs, because the scenario renders the hub on the server', () => {
+    for (const project of ['esm', 'cjs']) expect(installArgs(project, ['/t/a.tgz'])).toEqual(expect.arrayContaining(['@types/react@19', '@types/react-dom@19']));
+  });
+});
+
+describe('the React 18 consumer (the peer range says ^18.3.0 || ^19.0.0, so React 18.3 is installed and run for real)', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const all = ['@chatwarden/core', '@chatwarden/discord', '@chatwarden/http', '@chatwarden/hub-element', '@chatwarden/hub-react', '@chatwarden/matcher', '@chatwarden/player-react', '@chatwarden/profanity', '@chatwarden/store-memory', '@chatwarden/store-sqlite'].map((name) => ({ name, version: '0.1.2', tarball: tarballName(name, '0.1.2') }));
+  const scenario = readFileSync(join(root, 'scripts', 'smoke', 'react18.tsx'), 'utf8');
+  const react18Args = (): string[] => installArgs('react18', packagesFor('react18', all).map((p: { tarball: string }) => `/t/${p.tarball}`));
+
+  it('installs react and react-dom at 18.3 and the 18 types, beside only the packages that use React and what they need', () => {
+    expect(react18Args()).toEqual(expect.arrayContaining(['react@18.3', 'react-dom@18.3', '@types/react@18', '@types/react-dom@18']));
+    expect(packagesFor('react18', all).map((p: { name: string }) => p.name)).toEqual(['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/player-react']);
+  });
+  it('asks for no React 19 anywhere, and leaves hub-element out (it bundles its own React)', () => {
+    const named = react18Args().filter((a) => !a.startsWith('/t/') && !a.startsWith('-'));
+    expect(named.filter((a) => /react/.test(a)).every((a) => /@18(\.3)?$/.test(a))).toBe(true);
+    expect(react18Args().some((a) => a.includes('hub-element'))).toBe(false);
+  });
+  it('has its own project files and a .tsx scenario (it uses JSX, which the others do not)', () => {
+    for (const f of ['package.json', 'tsconfig.json']) expect(readdirSync(join(root, 'scripts', 'smoke', 'react18'))).toContain(f);
+    expect(PROJECTS.react18.scenario).toBe('react18.tsx');
+    expect(readFileSync(join(root, 'scripts', 'smoke', 'react18', 'tsconfig.json'), 'utf8')).toMatch(/"jsx": "react-jsx"/);
+  });
+  it('the scenario checks the installed React is 18.3, then renders <Hub> and the player components on the server and imports the headless entry', () => {
+    expect(scenario).toMatch(/versionOf\('react'\)/);
+    expect(scenario).toMatch(/versionOf\('react-dom'\)/);
+    expect(scenario.match(/startsWith\('18\.3'\)/g)).toHaveLength(2);
+    expect(scenario).toContain("from '@chatwarden/hub-react'");
+    expect(scenario).toContain("from '@chatwarden/hub-react/headless'");
+    expect(scenario).toContain("from '@chatwarden/player-react'");
+    expect(scenario).toContain('renderToString(');
+    for (const part of ['<Hub', '<NoticeQueue', '<MyRecord', '<RulesPage', '<ReportDialog', '<RestrictedChatLine']) expect(scenario, part).toContain(part);
+    expect(scenario).toContain('createHubController');
   });
 });
 
@@ -135,8 +201,33 @@ describe('the smoke scenario', () => {
     .filter((m) => m.private !== true)
     .map((m) => m.name);
 
+  const headless = readFileSync(join(root, 'scripts', 'smoke', 'headless.ts'), 'utf8');
   it('imports every published package, so a package left out of the smoke run is caught here', () => {
-    for (const name of published) expect(scenario, name).toContain(`from '${name}'`);
+    // The package itself or one of its subpaths (hub-element is imported as its /standalone script).
+    for (const name of published) expect(scenario.includes(`from '${name}'`) || scenario.includes(`from '${name}/`), name).toBe(true);
+  });
+  it('imports the UI entry points: hub-react, hub-react/headless, player-react and hub-element/standalone', () => {
+    for (const spec of ['@chatwarden/hub-react', '@chatwarden/hub-react/headless', '@chatwarden/player-react', '@chatwarden/hub-element/standalone']) {
+      expect(scenario, spec).toContain(`from '${spec}'`);
+    }
+  });
+  it('really runs them: a server render of the hub, a player client over the player routes, and the element in Node (no registry, no throw)', () => {
+    expect(scenario).toContain('renderToString(');
+    expect(scenario).toContain('createPlayerClient(');
+    expect(scenario).toContain('defineChatwardenHub()');
+  });
+  it('the headless project imports hub-react/headless and proves React is absent, by resolve and by import', () => {
+    expect(headless).toContain("from '@chatwarden/hub-react/headless'");
+    expect(headless).toContain("resolve('react')");
+    expect(headless).toContain('import(react)');
+    expect(headless).toContain("require('@chatwarden/hub-react/headless')");
+    // ...and says what the React entry does without React, so the limit is tested, not assumed.
+    expect(headless).toContain('import(reactEntry)');
+  });
+  it('imports and runs every published subpath, including @chatwarden/http/admin (GET /me)', () => {
+    for (const sub of ['@chatwarden/http/express', '@chatwarden/http/admin', '@chatwarden/matcher/fixtures']) expect(scenario, sub).toContain(`from '${sub}'`);
+    expect(scenario).toMatch(/adminRoutes\(cw,/);
+    expect(scenario).toContain("path: '/me'");
   });
   it('runs the scenario on the in-memory store as well as on SQLite', () => {
     expect(scenario).toContain("from '@chatwarden/store-memory'");

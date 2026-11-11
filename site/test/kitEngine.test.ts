@@ -1,20 +1,23 @@
-// KitEngine runs the REAL @chatwarden/core kit (with the matcher's synthetic pack and the in-memory store) behind the
+// KitEngine (here with the staff calls the tests add) runs the REAL @chatwarden/core kit (with the matcher's synthetic pack and the in-memory store) behind the
 // DemoEngine interface. Nothing here is faked: invented terms are refused by the matcher under Community Rule 1,
 // reports carry the real evidence buffer, a decision makes the kit's own PlayerNotice with the chosen line masked, and so on.
 // (Ported from the old FakeEngine suite; every assertion that changed because the real kit differs is listed in
 // .superpowers/sdd/2026-11-10-k8b-landing-site/task-3-report.md.)
 import { describe, expect, it } from 'vitest';
 import { SYNTHETIC_TERMS } from '../../packages/matcher/src/fixtures/syntheticPack';
-import { KitEngine } from '../src/demo/kitEngine';
-import type { DecisionInput, ReportCategory } from '../src/demo/engine';
+import { StaffEngine } from './helpers/staffEngine';
+import type { DecisionInput as KitDecisionInput, ReportCategory } from '@chatwarden/core';
+
+/** What the tests send: the engine adds the moderator's name and source. */
+type DecisionInput = Omit<KitDecisionInput, 'actor' | 'source'>;
 
 function make() {
   let t = Date.UTC(2026, 10, 10, 12, 0, 0);
   const clock = { now: () => t, advance: (ms: number) => (t += ms) };
-  return { engine: new KitEngine({ clock }), clock };
+  return { engine: new StaffEngine({ clock }), clock };
 }
 
-async function say(e: KitEngine, seat: string, text: string, clock?: { advance(ms: number): number }) {
+async function say(e: StaffEngine, seat: string, text: string, clock?: { advance(ms: number): number }) {
   const r = await e.chat.accept(seat, text);
   clock?.advance(1500);
   return r;
@@ -207,7 +210,7 @@ describe('reports', () => {
     expect(await engine.reports.submit({ reporterSeat: 'nobody', targetSeat: 'bo', category: 'spam' })).toEqual({ ok: false, refused: 'off' });
     const odd = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', category: 'nonsense' as ReportCategory });
     expect(odd.ok).toBe(true);
-    if (odd.ok) expect((await engine.reports.get(odd.reportId))?.category).toBe('other');
+    if (odd.ok) expect((await engine.staff.get(odd.reportId))?.category).toBe('other');
   });
   it("cannot report a line only its sender saw (a refused line is not in anyone else's view)", async () => {
     const { engine } = make();
@@ -219,7 +222,7 @@ describe('reports', () => {
   });
   it('carries the last lines as evidence, the reported line included, blocked lines marked', async () => {
     const { engine, lineId, reportId } = await filed();
-    const report = await engine.reports.get(reportId);
+    const report = await engine.staff.get(reportId);
     expect(report).not.toBeNull();
     const r = report!;
     expect(r.category).toBe('harassment');
@@ -242,7 +245,7 @@ describe('reports', () => {
     }
     const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: last, category: 'spam' });
     if (!res.ok) throw new Error('setup');
-    const report = await engine.reports.get(res.reportId);
+    const report = await engine.staff.get(res.reportId);
     expect(report!.excerpt).toHaveLength(20);
     expect(report!.excerpt.map((l) => l.lineId)).toContain(last);
   });
@@ -259,14 +262,14 @@ describe('reports', () => {
     }
     const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: last, category: 'spam' });
     if (!res.ok) throw new Error('setup');
-    const excerpt = (await engine.reports.get(res.reportId))!.excerpt;
+    const excerpt = (await engine.staff.get(res.reportId))!.excerpt;
     expect(excerpt).toHaveLength(100);
     expect(excerpt.map((l) => l.raw)).not.toContain('an old line');
     expect(excerpt.at(-1)?.raw).toBe('m119');
   });
   it("lists the target's own lines for the picker, and only theirs", async () => {
     const { engine, reportId } = await filed();
-    const report = (await engine.reports.get(reportId))!;
+    const report = (await engine.staff.get(reportId))!;
     const own = report.ownLineIds[report.targetPerson] ?? [];
     expect(own.length).toBe(2);
     for (const id of own) expect(report.excerpt.find((l) => l.lineId === id)?.handle).toBe('Bo');
@@ -280,15 +283,15 @@ describe('reports', () => {
     clock.advance(1000);
     const r2 = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'ada', lineId: b.deliver.lineId, category: 'spam' });
     if (!r1.ok || !r2.ok) throw new Error('setup');
-    const page = await engine.reports.list({ status: 'open' });
+    const page = await engine.staff.list({ status: 'open' });
     expect(page.items.map((r) => r.id)).toEqual([r2.reportId, r1.reportId]);
     expect(page.next).toBeNull();
-    await expect(engine.reports.get('nope')).resolves.toBeNull();
+    await expect(engine.staff.get('nope')).resolves.toBeNull();
   });
   it('never puts a subject id in a place meant for players (staff report carries it, notices never do)', async () => {
     const { engine, reportId } = await filed();
-    const report = (await engine.reports.get(reportId))!;
-    const decision = await engine.decide({
+    const report = (await engine.staff.get(reportId))!;
+    const decision = await engine.staff.decide({
       reportId,
       verdict: 'upheld',
       reason: 'insults',
@@ -302,69 +305,11 @@ describe('reports', () => {
   });
 });
 
-describe('suggest', () => {
-  it('suggests a warning for a first rude line, naming the rule', async () => {
-    const { engine, reportId } = await filed();
-    const s = (await engine.suggest(reportId))!;
-    expect(s.outcome).toBe('warning');
-    expect(s.label).toBe('Warning');
-    expect(s.rule).toBe(2);
-    expect(s.why).toMatch(/standard profile: first aggressive message/i); // the kit's own sentence
-  });
-  it('suggests no action for plain trash talk (not punished)', async () => {
-    const { engine, reportId } = await filed('harassment', "ez, you're trash lol");
-    const s = (await engine.suggest(reportId))!;
-    expect(s.outcome).toBe('none');
-    expect(s.label).toBe('No action');
-    expect(s.why).toMatch(/banter is not moderated/i);
-  });
-  it('suggests a timeout once a warning is already on the record (the ladder climbs)', async () => {
-    const first = await filed();
-    const r1 = (await first.engine.reports.get(first.reportId))!;
-    await first.engine.decide({
-      reportId: first.reportId,
-      verdict: 'upheld',
-      reason: 'first',
-      actions: [{ subject: r1.targetPerson, kind: 'warning', durationMs: null, rule: 2 }],
-    });
-    first.clock.advance(1000);
-    const again = await first.engine.chat.accept('bo', 'worthless team, honestly');
-    if (!('deliver' in again)) throw new Error('setup');
-    // the kit lets one person report another once per room, so the second report comes from Ada
-    const res = await first.engine.reports.submit({
-      reporterSeat: 'ada',
-      targetSeat: 'bo',
-      lineId: again.deliver.lineId,
-      category: 'harassment',
-    });
-    if (!res.ok) throw new Error('setup');
-    const s = (await first.engine.suggest(res.reportId))!;
-    // the real ladder: a warning on the record makes the next rude line "Restrict chat 24 hours"
-    expect(s.outcome).toEqual({ kind: 'chat', durationMs: 86_400_000 });
-    expect(s.label).toBe('Restrict chat 24 hours');
-    expect(s.rule).toBe(2);
-  });
-  it('maps the category to a rule (hate to 1, harassment to 2, spam to 4) and calls hate hostile', async () => {
-    const hate = await filed('hate', 'ez');
-    const sh = (await hate.engine.suggest(hate.reportId))!;
-    expect(sh.rule).toBe(1);
-    // Community Rule 1 is a severe rule: the kit acts at once, with its own length (7 days), not a demo number
-    expect(sh.outcome).toEqual({ kind: 'chat', durationMs: 7 * 86_400_000 });
-    expect(sh.label).toBe('Restrict chat 7 days');
-    const spam = await filed('spam', 'uninstall now, hopeless');
-    expect((await spam.engine.suggest(spam.reportId))!.rule).toBe(4);
-  });
-  it('is null for an unknown report', async () => {
-    const { engine } = make();
-    await expect(engine.suggest('nope')).resolves.toBeNull();
-  });
-});
-
 describe('decide, notices and ack', () => {
   async function warn() {
     const ctx = await filed();
-    const report = (await ctx.engine.reports.get(ctx.reportId))!;
-    const result = await ctx.engine.decide({
+    const report = (await ctx.engine.staff.get(ctx.reportId))!;
+    const result = await ctx.engine.staff.decide({
       reportId: ctx.reportId,
       verdict: 'upheld',
       reason: 'insults a teammate',
@@ -380,8 +325,8 @@ describe('decide, notices and ack', () => {
     expect(result.groups).toHaveLength(1);
     expect(result.groups[0]).toMatchObject({ kind: 'warning' });
     expect(result.groups[0]?.noticeId).toBeTruthy();
-    expect((await engine.reports.get(reportId))!.status).toBe('actioned');
-    expect((await engine.reports.list({ status: 'open' })).items).toHaveLength(0);
+    expect((await engine.staff.get(reportId))!.status).toBe('actioned');
+    expect((await engine.staff.list({ status: 'open' })).items).toHaveLength(0);
   });
   it('the player gets a warning notice: the rule, a ref code, their chosen line, and must acknowledge', async () => {
     const { engine } = await warn();
@@ -399,9 +344,9 @@ describe('decide, notices and ack', () => {
   });
   it('masks a blocked word in the chosen line (the player sees stars, never the word)', async () => {
     const ctx = await filed();
-    const report = (await ctx.engine.reports.get(ctx.reportId))!;
+    const report = (await ctx.engine.staff.get(ctx.reportId))!;
     const blockedId = report.excerpt.find((l) => l.blocked)!.lineId;
-    await ctx.engine.decide({
+    await ctx.engine.staff.decide({
       reportId: ctx.reportId,
       verdict: 'upheld',
       reason: 'x',
@@ -420,9 +365,9 @@ describe('decide, notices and ack', () => {
     if (!('deliver' in ok)) throw new Error('setup');
     const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: ok.deliver.lineId, category: 'harassment' });
     if (!res.ok) throw new Error('setup');
-    const report = (await engine.reports.get(res.reportId))!;
+    const report = (await engine.staff.get(res.reportId))!;
     const blocked = report.excerpt.find((l) => l.blocked)!;
-    await engine.decide({
+    await engine.staff.decide({
       reportId: res.reportId,
       verdict: 'upheld',
       reason: 'r',
@@ -435,8 +380,8 @@ describe('decide, notices and ack', () => {
   });
   it('a notice with no chosen line has an empty excerpt', async () => {
     const ctx = await filed();
-    const r = (await ctx.engine.reports.get(ctx.reportId))!;
-    await ctx.engine.decide({
+    const r = (await ctx.engine.staff.get(ctx.reportId))!;
+    await ctx.engine.staff.decide({
       reportId: ctx.reportId,
       verdict: 'upheld',
       reason: 'x',
@@ -446,8 +391,8 @@ describe('decide, notices and ack', () => {
   });
   it('a timeout makes a chat notice with an end time and restricts the seat until then', async () => {
     const ctx = await filed();
-    const r = (await ctx.engine.reports.get(ctx.reportId))!;
-    const res = await ctx.engine.decide({
+    const r = (await ctx.engine.staff.get(ctx.reportId))!;
+    const res = await ctx.engine.staff.decide({
       reportId: ctx.reportId,
       verdict: 'upheld',
       reason: 'x',
@@ -487,8 +432,8 @@ describe('decide, notices and ack', () => {
   });
   it('a note keeps the record for staff and tells the player nothing', async () => {
     const ctx = await filed();
-    const r = (await ctx.engine.reports.get(ctx.reportId))!;
-    const res = await ctx.engine.decide({
+    const r = (await ctx.engine.staff.get(ctx.reportId))!;
+    const res = await ctx.engine.staff.decide({
       reportId: ctx.reportId,
       verdict: 'noted',
       reason: 'watching',
@@ -498,34 +443,34 @@ describe('decide, notices and ack', () => {
     if (res.ok) expect(res.groups[0]?.noticeId).toBeNull();
     expect(await ctx.engine.notices.pending('bo')).toEqual([]);
     expect(await ctx.engine.notices.record('bo')).toEqual([]);
-    expect((await ctx.engine.reports.get(ctx.reportId))!.status).toBe('actioned');
+    expect((await ctx.engine.staff.get(ctx.reportId))!.status).toBe('actioned');
   });
   it('no action dismisses the report and tells nobody', async () => {
     const ctx = await filed();
-    const res = await ctx.engine.decide({ reportId: ctx.reportId, verdict: 'no_action', reason: 'fine', actions: [] });
+    const res = await ctx.engine.staff.decide({ reportId: ctx.reportId, verdict: 'no_action', reason: 'fine', actions: [] });
     expect(res).toEqual({ ok: true, groups: [], replay: false });
-    expect((await ctx.engine.reports.get(ctx.reportId))!.status).toBe('dismissed');
+    expect((await ctx.engine.staff.get(ctx.reportId))!.status).toBe('dismissed');
     expect(await ctx.engine.notices.pending('bo')).toEqual([]);
   });
   it('the same decision sent twice is a replay and applies nothing twice; a different one is already_decided', async () => {
     const ctx = await filed();
-    const r = (await ctx.engine.reports.get(ctx.reportId))!;
+    const r = (await ctx.engine.staff.get(ctx.reportId))!;
     const input: DecisionInput = {
       reportId: ctx.reportId,
       verdict: 'upheld',
       reason: 'x',
       actions: [{ subject: r.targetPerson, kind: 'warning', durationMs: null, rule: 2 }],
     };
-    const first = await ctx.engine.decide(input);
-    const second = await ctx.engine.decide(input);
+    const first = await ctx.engine.staff.decide(input);
+    const second = await ctx.engine.staff.decide(input);
     expect(first).toMatchObject({ ok: true, replay: false });
     expect(second).toMatchObject({ ok: true, replay: true });
     expect(await ctx.engine.notices.pending('bo')).toHaveLength(1);
-    expect(await ctx.engine.decide({ ...input, verdict: 'no_action', actions: [] })).toEqual({ ok: false, error: 'already_decided' });
+    expect(await ctx.engine.staff.decide({ ...input, verdict: 'no_action', actions: [] })).toEqual({ ok: false, error: 'already_decided' });
   });
   it('rejects malformed decisions as invalid and writes nothing', async () => {
     const ctx = await filed();
-    const r = (await ctx.engine.reports.get(ctx.reportId))!;
+    const r = (await ctx.engine.staff.get(ctx.reportId))!;
     const warning = { subject: r.targetPerson, kind: 'warning' as const, durationMs: null, rule: 2 };
     const bad: DecisionInput[] = [
       { reportId: ctx.reportId, verdict: 'upheld', reason: '', actions: [warning] }, // reason required
@@ -538,15 +483,15 @@ describe('decide, notices and ack', () => {
       { reportId: ctx.reportId, verdict: 'upheld', reason: 'x', actions: [{ ...warning, rule: 2, lineIds: ['not-a-line'] }] },
       { reportId: ctx.reportId, verdict: 'upheld', reason: 'x', actions: [{ ...warning, rule: 'uncovered' }] }, // needs a gap note
     ];
-    for (const input of bad) expect(await ctx.engine.decide(input), JSON.stringify(input)).toEqual({ ok: false, error: 'invalid' });
-    expect((await ctx.engine.reports.get(ctx.reportId))!.status).toBe('open');
+    for (const input of bad) expect(await ctx.engine.staff.decide(input), JSON.stringify(input)).toEqual({ ok: false, error: 'invalid' });
+    expect((await ctx.engine.staff.get(ctx.reportId))!.status).toBe('open');
     expect(await ctx.engine.notices.pending('bo')).toEqual([]);
   });
   it("refuses to quote someone else's line in the notice (foreign line)", async () => {
     const ctx = await filed();
-    const r = (await ctx.engine.reports.get(ctx.reportId))!;
+    const r = (await ctx.engine.staff.get(ctx.reportId))!;
     const adaLine = r.excerpt.find((l) => l.handle === 'Ada')!;
-    const res = await ctx.engine.decide({
+    const res = await ctx.engine.staff.decide({
       reportId: ctx.reportId,
       verdict: 'upheld',
       reason: 'x',
@@ -556,9 +501,9 @@ describe('decide, notices and ack', () => {
   });
   it('unknown report is not_found; an uncovered rule needs and accepts a gap note', async () => {
     const ctx = await filed('other');
-    expect(await ctx.engine.decide({ reportId: 'nope', verdict: 'no_action', reason: 'x', actions: [] })).toEqual({ ok: false, error: 'not_found' });
-    const r = (await ctx.engine.reports.get(ctx.reportId))!;
-    const res = await ctx.engine.decide({
+    expect(await ctx.engine.staff.decide({ reportId: 'nope', verdict: 'no_action', reason: 'x', actions: [] })).toEqual({ ok: false, error: 'not_found' });
+    const r = (await ctx.engine.staff.get(ctx.reportId))!;
+    const res = await ctx.engine.staff.decide({
       reportId: ctx.reportId,
       verdict: 'upheld',
       reason: 'x',
@@ -573,16 +518,16 @@ describe('decide, notices and ack', () => {
 describe('reset', () => {
   it('clears lines, reports, sanctions, notices and the rate counters', async () => {
     const ctx = await filed();
-    const r = (await ctx.engine.reports.get(ctx.reportId))!;
-    await ctx.engine.decide({
+    const r = (await ctx.engine.staff.get(ctx.reportId))!;
+    await ctx.engine.staff.decide({
       reportId: ctx.reportId,
       verdict: 'upheld',
       reason: 'x',
       actions: [{ subject: r.targetPerson, kind: 'chat', durationMs: 600_000, rule: 2 }],
     });
     await ctx.engine.reset();
-    expect((await ctx.engine.reports.list()).items).toEqual([]);
-    expect(await ctx.engine.reports.get(ctx.reportId)).toBeNull();
+    expect((await ctx.engine.staff.list()).items).toEqual([]);
+    expect(await ctx.engine.staff.get(ctx.reportId)).toBeNull();
     expect(await ctx.engine.notices.pending('bo')).toEqual([]);
     expect(await ctx.engine.notices.record('bo')).toEqual([]);
     expect((await ctx.engine.rooms.seats()).every((s) => s.restrictedUntil === null)).toBe(true);
@@ -592,7 +537,7 @@ describe('reset', () => {
     if (!('deliver' in line)) throw new Error('setup');
     const filedAgain = await ctx.engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: line.deliver.lineId, category: 'spam' });
     expect(filedAgain).toMatchObject({ ok: true, remaining: 9 });
-    if (filedAgain.ok) expect((await ctx.engine.reports.get(filedAgain.reportId))!.excerpt.map((l) => l.raw)).toEqual(['fresh start', 'one more']);
+    if (filedAgain.ok) expect((await ctx.engine.staff.get(filedAgain.reportId))!.excerpt.map((l) => l.raw)).toEqual(['fresh start', 'one more']);
   });
 });
 

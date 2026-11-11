@@ -1,10 +1,10 @@
 import { isValidAuditActor, safeWarn } from '@chatwarden/core';
-import type { AuditAction, AuditTarget, Chatwarden, Logger, Role } from '@chatwarden/core';
-import { guard, requireRole } from '../auth.js';
+import type { AuditAction, AuditDetail, AuditTarget, Chatwarden, Logger, Role } from '@chatwarden/core';
+import { guard, requireAuthz, requireRole } from '../auth.js';
 import type { Authenticate } from '../auth.js';
 import { withErrors } from '../errors.js';
 import { resolvePermissions } from '../permissions.js';
-import type { PermissionKey } from '../permissions.js';
+import type { PermissionKey, Permissions } from '../permissions.js';
 import type { RouteHandler } from '../router.js';
 import type { Authz, KitRequest, KitResponse, RouteParams } from '../types.js';
 
@@ -36,8 +36,9 @@ export interface AdminCall {
    *   nothing is shown that was not recorded.
    * - `'best-effort'` (for a write that has already committed): the failure is logged (`chatwarden.http_audit_failed`,
    *   no detail) and the answer stands.
+   * `detail` is for `policy.update` and `policy.reset` only: the sections changed and the reason.
    */
-  audit(action: AuditAction, target?: AuditTarget, mode?: 'required' | 'best-effort'): void;
+  audit(action: AuditAction, target?: AuditTarget, mode?: 'required' | 'best-effort', detail?: AuditDetail): void;
 }
 
 /** The shared parts of the staff API: build every admin route with `secure`, so none can skip auth or the audit. */
@@ -47,6 +48,13 @@ export interface AdminContext {
   readonly logger: Logger | undefined;
   /** Wrap a staff handler: authenticate, require `permission`, run it, and turn every throw into a fixed response. */
   secure(permission: PermissionKey, handler: (call: AdminCall) => KitResponse | Promise<KitResponse>): RouteHandler;
+  /**
+   * Like `secure`, for a route that needs no permission, only a signed-in caller (401 otherwise): `GET /me`. It gets no
+   * `audit` and no `need`, so it cannot write a row.
+   */
+  authenticated(handler: (call: { req: KitRequest; params: RouteParams; authz: Authz }) => KitResponse | Promise<KitResponse>): RouteHandler;
+  /** The effective minimum role for each permission: the defaults with the adopter's overrides applied (a frozen copy). */
+  readonly permissions: Permissions;
 }
 
 /** `authorize` returned an actor the audit trail cannot hold: a bug in the adopter's hook. Fixed message, never the value. */
@@ -64,6 +72,12 @@ export class AuditFailedError extends Error {
     this.name = 'AuditFailedError';
   }
 }
+
+/** Staff data is per caller: no shared cache may keep an answer, success or error. Applied to every staff route, here, once. */
+const noStore = (handler: RouteHandler): RouteHandler => async (req, params) => {
+  const res = await handler(req, params);
+  return { ...res, headers: { ...res.headers, 'cache-control': 'no-store' } };
+};
 
 export function createAdminContext(cw: Chatwarden, options: AdminOptions): AdminContext {
   const { logger } = options;
@@ -84,6 +98,16 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
   return {
     cw,
     logger,
+    permissions,
+    authenticated(handler) {
+      return noStore(
+        withErrors(async (req, params) => {
+          const authz = await authorize(req);
+          requireAuthz(authz);
+          return handler({ req, params, authz });
+        }, logger),
+      );
+    },
     secure(permission, handler) {
       const guarded = guard({ authenticate: authorize, permissions }, permission, (req, params, authz) =>
         handler({
@@ -91,7 +115,7 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
           params,
           authz,
           need: (p) => void requireRole(authz, p, permissions),
-          audit: (action, target, mode = 'required') => {
+          audit: (action, target, mode = 'required', detail) => {
             let written: boolean;
             try {
               written = cw.audit.record({
@@ -99,6 +123,7 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
                 role: authz.role,
                 action,
                 ...(target === undefined ? {} : { target }),
+                ...(detail === undefined ? {} : { detail }),
               });
             } catch {
               written = false;
@@ -109,7 +134,7 @@ export function createAdminContext(cw: Chatwarden, options: AdminOptions): Admin
           },
         }),
       );
-      return withErrors(guarded, logger);
+      return noStore(withErrors(guarded, logger));
     },
   };
 }

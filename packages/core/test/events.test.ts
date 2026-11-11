@@ -89,9 +89,9 @@ describe('events: report.created', () => {
     const res = await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a', category: 'harassment', note: SECRET_TEXT.note });
     if (!res.ok) throw new Error('expected ok');
     expect(events).toEqual([
-      { type: 'report.created', reportId: res.reportId, createdAt: NOW, category: 'harassment', roomTags: { mode: 'ranked', region: 'eu' } },
+      { type: 'report.created', reportId: res.reportId, createdAt: NOW, category: 'harassment', reportedReason: 'harassment', roomTags: { mode: 'ranked', region: 'eu' } },
     ]);
-    expect(Object.keys(events[0] ?? {}).sort()).toEqual(['category', 'createdAt', 'reportId', 'roomTags', 'type']);
+    expect(Object.keys(events[0] ?? {}).sort()).toEqual(['category', 'createdAt', 'reportId', 'reportedReason', 'roomTags', 'type']);
     // The report was readable from inside the listener: the event follows the commit.
     expect(seenInListener).toEqual([res.reportId]);
   });

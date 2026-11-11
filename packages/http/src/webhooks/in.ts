@@ -8,16 +8,16 @@ import {
   needForSanction,
   parseDecision,
   parseSanction,
-  sanctionFingerprint,
 } from '../admin/apply.js';
 import { asObject, bodyId, bodyObject, has } from '../admin/validate.js';
 import { requireRole } from '../auth.js';
-import { BODY_MAX_BYTES } from '../body.js';
+import { BODY_MAX_BYTES, utf8ByteLength } from '../body.js';
 import { HttpError, ValidationError, withErrors } from '../errors.js';
 import { resolvePermissions } from '../permissions.js';
 import type { PermissionKey } from '../permissions.js';
 import type { RouteTable } from '../router.js';
 import type { KitRequest, KitResponse } from '../types.js';
+import { sanctionFingerprint } from './fingerprint.js';
 import { checkSecret, ReplayCache, verify } from './sign.js';
 
 /** What the adopter gives the incoming webhook. */
@@ -60,7 +60,8 @@ function idempotencyKey(v: unknown): string {
  *
  * Send `x-chatwarden-timestamp` and `x-chatwarden-signature` as `webhooksOut` does (see `sign`) and a JSON body of
  * - `{ action: 'decide', input: { reportId, verdict, actions, reason, evidence? } }`: decide a report, exactly as
- *   `POST /reports/:id/decide`. A decision is idempotent in the core, so a repeat is a replay and applies nothing more.
+ *   `POST /reports/:id/decide`, except that it never checks a moderator's claim, and once it has decided (not on a replay) it
+ *   releases whoever held a claim on the reported person. A decision is idempotent in the core, so a repeat is a replay and applies nothing more.
  *   An `idempotencyKey` is optional for it (validated if present, and not used).
  * - `{ action: 'sanction', input: { subject, kind, durationMs, rule, reason?, gapNote?, includeIp?, idempotencyKey } }`:
  *   apply one sanction, exactly as `POST /sanctions`. `idempotencyKey` is REQUIRED: 1..64 characters of
@@ -118,9 +119,20 @@ export function webhookIn(cw: Chatwarden, options: WebhookInOptions): RouteTable
     const reportId = bodyId(input.reportId);
     const decision = parseDecision(input);
     needForDecision(decision.actions, may);
+    // The reported person, read before the decision (a claim is held on them). A webhook is a service, not a moderator: it
+    // is never held up by a claim and holds none, so a decision of the person's last open report releases whoever held the case (while other reports about them are open, the holder keeps it).
+    const person = cw.reports.get(reportId)?.targetPerson ?? null;
     const result = await applyDecision(cw, reportId, decision, actor);
     // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
     audit('report.decide', { type: 'report', ref: reportId });
+    if (person !== null && !result.replay) {
+      try {
+        const holder = cw.cases.holder(person);
+        if (holder !== null) cw.cases.releaseWhenDone(person, holder.by);
+      } catch {
+        safeWarn(logger, 'chatwarden.http_release_failed');
+      }
+    }
     return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups } };
   };
 
@@ -187,7 +199,7 @@ export function webhookIn(cw: Chatwarden, options: WebhookInOptions): RouteTable
       return { status: 500, body: { error: 'internal' } };
     }
     // Cheap size cap before any HMAC work (the byte cap the routes enforce).
-    if (raw.length * 3 > BODY_MAX_BYTES && Buffer.byteLength(raw, 'utf8') > BODY_MAX_BYTES) throw new HttpError('payload_too_large');
+    if (raw.length * 3 > BODY_MAX_BYTES && utf8ByteLength(raw) > BODY_MAX_BYTES) throw new HttpError('payload_too_large');
     // Verify BEFORE parsing. Every failure is the same 401.
     if (!verify(secret, req.headers, raw, clock.now(), replay)) throw new HttpError('unauthorized');
 

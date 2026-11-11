@@ -32,12 +32,32 @@ const errorTable = [...read('../src/errors.ts').matchAll(/^ {2}(\w+): \{ status:
 const MARKETING = /\b(blazing|seamless|powerful|robust|world-class|cutting-edge|revolutionary)\b/i;
 
 describe('packages/http/README.md', () => {
+  it('says GET /sanctions is an audited read (history.view, no target), not that it writes no row', () => {
+    const line = (start: string): string => http.split('\n').find((l) => l.startsWith(start)) ?? '';
+    const row = line('| `GET /sanctions');
+    expect(row).not.toMatch(/writes no audit row/);
+    expect(row).toMatch(/audits `history.view` with no target, once per successful read/);
+    expect(row).toMatch(/cannot be written, the read fails/);
+    expect(line('| `history.read`')).toMatch(/GET \/sanctions/);
+  });
+
   it('has the sections an adopter needs, setup first', () => {
     for (const heading of ['## Install', '## Set up', '## Auth', '## Permissions', '## Errors', '## Webhooks', '## Health probes', '## Security notes']) {
       expect(http, heading).toContain(heading);
     }
     expect(http.indexOf('## Set up')).toBeLessThan(http.indexOf('## Permissions'));
     expect(http.indexOf('## Set up')).toBeLessThan(http.indexOf('## Security notes'));
+  });
+
+  it('shows the browser-safe subpath with an import snippet, and says its matcher is matchRoute', () => {
+    const setup = section(http, 'Set up');
+    const at = setup.indexOf('### In a browser');
+    expect(at, 'an "In a browser" subsection').toBeGreaterThanOrEqual(0);
+    const part = setup.slice(at);
+    expect(part).toContain("import { adminRoutes, createRouter } from '@chatwarden/http/admin';");
+    expect(part).toContain('matchRoute');
+    expect(part).toContain('no-store');
+    expect(part).toContain('GET /me');
   });
 
   it('the setup shows the builders and the Express adapter', () => {

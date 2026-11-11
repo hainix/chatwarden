@@ -1,12 +1,21 @@
 import type {
   AuditListQuery,
   AuditRow,
+  ClaimAttempt,
+  ClaimMode,
+  ClaimRow,
   DecisionRow,
   MuteRow,
   NoticeRow,
+  OpenReportQuery,
+  PolicyLayer,
+  ReasonRow,
   ReportActivity,
   ReportListQuery,
   ReportRecord,
+  ReporterDecision,
+  ReporterTally,
+  SanctionListQuery,
   SanctionRow,
   Store,
   StoredReport,
@@ -82,11 +91,27 @@ export class MemoryStore implements Store {
   protected discordThreads = new Map<string, DiscordThreadRow>();
   /** Group id that owns each ref code: the O(1) collision check. */
   protected refOwners = new Map<string, string>();
+  /** Soft claims by person (one row each; an expired one is replaced or ignored, never swept). */
+  protected claims = new Map<SubjectId, ClaimRow>();
+  /** Saved reasons in the order they were added. */
+  protected reasons: ReasonRow[] = [];
+  /** The stored policy layer and its version, or null when none was ever saved. */
+  protected policy: { layer: PolicyLayer; version: number } | null = null;
+  /** The change token's counter (see `changeToken`). */
+  private changes = 0;
   /** Undo steps of the innermost open transaction, or null outside one. */
   private journal: Array<() => void> | null = null;
 
   private undoWith(step: () => void): void {
     this.journal?.push(step);
+  }
+
+  /** Move the change token; an undone transaction moves it back. */
+  private bump(): void {
+    this.changes += 1;
+    this.undoWith(() => {
+      this.changes -= 1;
+    });
   }
 
   schemaVersion(): number {
@@ -187,6 +212,7 @@ export class MemoryStore implements Store {
       this.sanctions.length -= rows.length;
       if (addedCode) this.refOwners.delete(first.refCode);
     });
+    this.bump();
     return true;
   }
 
@@ -206,6 +232,7 @@ export class MemoryStore implements Store {
         r.revokeReason = null;
       }
     });
+    if (touched.length > 0) this.bump();
     return touched.length;
   }
 
@@ -252,6 +279,27 @@ export class MemoryStore implements Store {
     };
   }
 
+  listSubjectSanctions(q: SanctionListQuery): SanctionRow[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    const wanted = q.subjects === undefined ? null : new Set(q.subjects);
+    return this.sanctions
+      .filter((r) => {
+        if (r.targetType !== 'subject') return false;
+        if (wanted !== null && !wanted.has(r.value)) return false;
+        if (q.source !== undefined && r.source !== q.source) return false;
+        if (q.activeAt !== undefined && !(r.revokedAt === null && (r.endsAt === null || r.endsAt > q.activeAt))) return false;
+        if (q.since !== undefined && r.startsAt < q.since && !(q.alsoPermanent === true && r.endsAt === null && r.revokedAt === null)) {
+          return false;
+        }
+        if (q.before === undefined) return true;
+        if (r.startsAt !== q.before) return r.startsAt < q.before;
+        return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
+      })
+      .sort((a, b) => b.startsAt - a.startsAt || compare(b.id, a.id))
+      .slice(0, limit)
+      .map((r) => ({ ...this.sanctionRow(r), revokedAt: r.revokedAt, revokedBy: r.revokedBy, revokeReason: r.revokeReason }));
+  }
+
   listGaps(): SanctionRow[] {
     // Newest first; insertion order breaks a tie, like SQLite's rowid.
     return this.sanctions
@@ -287,7 +335,106 @@ export class MemoryStore implements Store {
       row.gapClosedAt = null;
       this.auditRows.splice(this.auditRows.indexOf(entry), 1);
     });
+    this.bump();
     return true;
+  }
+
+  // Team workbench (synchronous, see the Store interface). Single-threaded, so each check-and-set below is atomic.
+
+  changeToken(): string {
+    return String(this.changes);
+  }
+
+  claimCase(person: SubjectId, by: string, now: number, until: number, mode: ClaimMode): ClaimAttempt {
+    const prior = this.claims.get(person);
+    const live = prior !== undefined && prior.until > now ? prior : undefined;
+    const mine = live !== undefined && live.by === by;
+    const wins = live === undefined || (mode === 'takeover') || (mine && mode === 'claim');
+    if (!wins) return { won: false, claim: { ...live! } };
+    const claim: ClaimRow = { person, by, since: mine ? live.since : now, until };
+    this.claims.set(person, claim);
+    this.undoWith(() => {
+      if (prior === undefined) this.claims.delete(person);
+      else this.claims.set(person, prior);
+    });
+    // A heartbeat keeps the owner; everything else (fresh, expired, taken over) changes it.
+    if (!mine) this.bump();
+    return { won: true, claim: { ...claim }, from: live !== undefined && !mine ? live.by : null };
+  }
+
+  releaseClaim(person: SubjectId, by: string, now: number): boolean {
+    const prior = this.claims.get(person);
+    if (prior === undefined || prior.by !== by) return false;
+    this.claims.delete(person);
+    this.undoWith(() => this.claims.set(person, prior));
+    if (prior.until <= now) return false;
+    this.bump();
+    return true;
+  }
+
+  loadClaims(persons: readonly SubjectId[], now: number): ClaimRow[] {
+    const out: ClaimRow[] = [];
+    for (const person of new Set(persons)) {
+      const c = this.claims.get(person);
+      if (c !== undefined && c.until > now) out.push({ ...c });
+    }
+    return out.sort((a, b) => compare(a.person, b.person));
+  }
+
+  listReasons(): ReasonRow[] {
+    return this.reasons.map((r) => ({ ...r }));
+  }
+
+  insertReason(row: ReasonRow): void {
+    if (this.reasons.some((r) => r.id === row.id)) throw new Error('UNIQUE constraint failed: kit_reasons.id');
+    this.reasons.push({ id: row.id, label: row.label, text: row.text, active: row.active });
+    this.undoWith(() => {
+      this.reasons.length -= 1;
+    });
+    this.bump();
+  }
+
+  updateReason(id: string, patch: { label?: string; text?: string }): boolean {
+    const r = this.reasons.find((x) => x.id === id);
+    if (r === undefined) return false;
+    const before = { label: r.label, text: r.text };
+    const label = patch.label ?? r.label;
+    const text = patch.text ?? r.text;
+    if (label === before.label && text === before.text) return true;
+    r.label = label;
+    r.text = text;
+    this.undoWith(() => Object.assign(r, before));
+    this.bump();
+    return true;
+  }
+
+  setReasonActive(id: string, active: boolean): boolean {
+    const r = this.reasons.find((x) => x.id === id);
+    if (r === undefined) return false;
+    if (r.active === active) return true;
+    r.active = active;
+    this.undoWith(() => {
+      r.active = !active;
+    });
+    this.bump();
+    return true;
+  }
+
+  // The editable profile's stored layer (synchronous, see the Store interface). Not a queue change: it does not move the token.
+
+  loadPolicyLayer(): { layer: PolicyLayer; version: number } | null {
+    return this.policy === null ? null : { layer: structuredClone(this.policy.layer), version: this.policy.version };
+  }
+
+  savePolicyLayer(layer: PolicyLayer, expectedVersion: number): number | null {
+    const current = this.policy?.version ?? 0;
+    if (expectedVersion !== current) return null;
+    const prior = this.policy;
+    this.policy = { layer: structuredClone(layer), version: current + 1 };
+    this.undoWith(() => {
+      this.policy = prior;
+    });
+    return current + 1;
   }
 
   // Staff audit trail (synchronous, see the Store interface).
@@ -451,6 +598,21 @@ export class MemoryStore implements Store {
       .map((r) => ({ ...r }));
   }
 
+  listStrikes(since: number, limit: number): StrikeRow[] {
+    const n = Math.min(500, Math.max(1, Math.floor(limit)));
+    return this.strikes
+      .filter((r) => r.at >= since)
+      .sort((a, b) => b.at - a.at || compare(b.id, a.id))
+      .slice(0, n)
+      .map((r) => ({ ...r }));
+  }
+
+  countStrikesByTerm(since: number): Array<{ termId: string; count: number }> {
+    const counts = new Map<string, number>();
+    for (const r of this.strikes) if (r.at >= since) counts.set(r.termId, (counts.get(r.termId) ?? 0) + 1);
+    return [...counts].sort((a, b) => compare(a[0], b[0])).map(([termId, count]) => ({ termId, count }));
+  }
+
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }> {
     const latest = new Map<SubjectId, number>();
     for (const r of this.sanctions) {
@@ -471,6 +633,8 @@ export class MemoryStore implements Store {
     if (this.reports.some((r) => r.id === row.id)) throw new Error('UNIQUE constraint failed: kit_reports.id');
     this.reports.push({
       ...structuredClone(row),
+      reportedReason: row.reportedReason ?? null,
+      detailAt: null,
       badFaith: false,
       actionedAt: null,
       actionedBy: null,
@@ -480,6 +644,7 @@ export class MemoryStore implements Store {
     this.undoWith(() => {
       this.reports.length -= 1;
     });
+    this.bump();
     return true;
   }
 
@@ -498,11 +663,49 @@ export class MemoryStore implements Store {
       .map((r) => structuredClone(r));
   }
 
+  listOpenReports(q: OpenReportQuery): ReportRecord[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    return this.reports
+      .filter((r) => {
+        if (r.status !== 'open') return false;
+        if (q.category !== undefined && r.category !== q.category) return false;
+        if (q.reason !== undefined && (r.reportedReason ?? null) !== q.reason) return false;
+        if (q.after === undefined) return true;
+        if (r.createdAt !== q.after) return r.createdAt > q.after;
+        return q.afterId !== undefined && compare(r.id, q.afterId) > 0;
+      })
+      .sort((a, b) => a.createdAt - b.createdAt || compare(a.id, b.id))
+      .slice(0, limit)
+      .map((r) => structuredClone(r));
+  }
+
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const wanted = new Set(subjects);
+    return this.reports
+      .filter((r) => r.status === 'open' && wanted.has(r.targetSubject))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, n)
+      .map((r) => structuredClone(r));
+  }
+
+  reporterTally(reporters: readonly SubjectId[]): ReporterTally {
+    const tally: ReporterTally = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
+    const wanted = new Set(reporters);
+    for (const r of this.reports) {
+      if (!wanted.has(r.reporterSubject)) continue;
+      tally[r.status] += 1;
+      if (r.badFaith) tally.badFaith += 1;
+    }
+    return tally;
+  }
+
   listReports(q: ReportListQuery): ReportRecord[] {
     const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
     return this.reports
       .filter((r) => {
         if (q.status !== undefined && r.status !== q.status) return false;
+        if (q.reason !== undefined && r.reportedReason !== q.reason) return false;
         if (q.before === undefined) return true;
         if (r.createdAt !== q.before) return r.createdAt < q.before;
         return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
@@ -510,6 +713,53 @@ export class MemoryStore implements Store {
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, limit)
       .map((r) => structuredClone(r));
+  }
+
+  loadReporterDecisions(reporters: readonly SubjectId[]): ReporterDecision[] {
+    const wanted = new Set(reporters);
+    const out: ReporterDecision[] = [];
+    // The newest 200 decided reports with a reason, newest first.
+    const decided = this.reports
+      .filter((r) => wanted.has(r.reporterSubject) && r.status !== 'open' && (r.reportedReason ?? null) !== null)
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, 200);
+    for (const r of decided) {
+      if (r.reportedReason == null || r.status === 'open') continue;
+      const groups = new Set<string>();
+      for (const d of this.decisions.values()) {
+        if (d.reportId !== r.id) continue;
+        // A row that cannot be read is a decision with no known actions, never a failure of the call.
+        let parsed: { groups?: unknown } | null;
+        try {
+          parsed = JSON.parse(d.resultJson) as { groups?: unknown } | null;
+        } catch {
+          parsed = null;
+        }
+        if (parsed !== null && Array.isArray(parsed.groups)) {
+          for (const g of parsed.groups as Array<{ groupId?: unknown } | null>) if (typeof g?.groupId === 'string') groups.add(g.groupId);
+        }
+      }
+      const actions: ReporterDecision['actions'] = [];
+      for (const s of this.sanctions) {
+        if (!groups.has(s.groupId) || s.targetType !== 'subject') continue;
+        actions.push({ subject: s.value, rule: s.rule !== null && /^[1-9][0-9]*$/.test(s.rule) ? Number(s.rule) : 'uncovered' });
+      }
+      out.push({ reportId: r.id, status: r.status, reason: r.reportedReason, target: r.targetSubject, actions });
+    }
+    return out;
+  }
+
+  addReportDetail(id: string, detail: { reportedReason: string | null; category: ReportRecord['category']; note: string | null; at: number }): boolean {
+    const r = this.reports.find((x) => x.id === id);
+    if (r === undefined || r.status !== 'open' || r.detailAt !== null) return false;
+    const before = { reportedReason: r.reportedReason, category: r.category, note: r.note, detailAt: r.detailAt };
+    r.reportedReason = detail.reportedReason;
+    r.category = detail.category;
+    r.note = detail.note;
+    r.detailAt = detail.at;
+    this.undoWith(() => Object.assign(r, before));
+    this.bump();
+    return true;
   }
 
   closeReport(
@@ -539,6 +789,7 @@ export class MemoryStore implements Store {
     r.modNote = note;
     r.badFaithEvidence = evidence;
     this.undoWith(() => Object.assign(r, before));
+    this.bump();
     return true;
   }
 

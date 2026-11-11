@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { BROWSER_SAFE, bareImports, checkFileList, checkManifest, exportTargets, nodeImports, undeclaredImports, nodeImportProblems } from './check-pack.mjs';
+import { BROWSER_SAFE, BUNDLED, bareImports, checkFileList, checkManifest, exportTargets, nodeImports, undeclaredImports, nodeImportProblems } from './check-pack.mjs';
 
 type Pkg = Record<string, unknown>;
 
@@ -88,6 +90,42 @@ describe('checkFileList', () => {
     const extra = ['src/latest.ts', 'dist/src/latest.js', 'dist/src/latest.js.map', 'dist/src/latest.d.ts', 'dist/src/latest.d.ts.map'];
     expect(check([...goodFiles(), ...extra])).toEqual([]);
   });
+  it('accepts a .tsx source next to its compiled files (a React package)', () => {
+    const extra = ['src/Hub.tsx', 'dist/src/Hub.js', 'dist/src/Hub.js.map', 'dist/src/Hub.d.ts', 'dist/src/Hub.d.ts.map'];
+    expect(check([...goodFiles(), ...extra])).toEqual([]);
+  });
+  it('still reports a compiled file with no source at all', () => {
+    const extra = ['dist/src/Hub.js', 'dist/src/Hub.js.map', 'dist/src/Hub.d.ts', 'dist/src/Hub.d.ts.map'];
+    expect(check([...goodFiles(), ...extra]).join('\n')).toContain('src/Hub.ts');
+  });
+  describe('stale build output (a dist file whose source was removed)', () => {
+    // tsc -b never deletes what an earlier build wrote: a component removed from src/ leaves its compiled files in the git-ignored
+    // dist/, and npm pack would ship them. hub-react nearly shipped dist/src/DecisionPanel.js this way.
+    const stale = (stem: string): string[] => [`dist/src/${stem}.js`, `dist/src/${stem}.js.map`, `dist/src/${stem}.d.ts`, `dist/src/${stem}.d.ts.map`];
+    it('names the stale DecisionPanel build of a React package, once, with the file it found', () => {
+      const problems = check([...goodFiles(), 'src/Hub.tsx', ...stale('Hub'), ...stale('DecisionPanel')]);
+      expect(problems).toEqual(['missing src/DecisionPanel.ts (next to dist/src/DecisionPanel.js): stale build output? Delete dist and rebuild']);
+    });
+    it.each(['.js', '.js.map', '.d.ts', '.d.ts.map'])('catches a lone %s with no source and no sibling', (ext) => {
+      const problems = check([...goodFiles(), `dist/src/Old${ext}`]);
+      expect(problems.join('\n')).toContain('missing src/Old.ts (next to dist/src/Old');
+    });
+    it('catches a stale file in a subfolder', () => {
+      const problems = check([...goodFiles(), 'src/pieces/Live.tsx', ...stale('pieces/Live'), ...stale('pieces/Gone')]);
+      expect(problems.filter((p) => p.includes('missing src/pieces/Gone.ts'))).toHaveLength(1);
+      expect(problems.join('\n')).not.toContain('Live');
+    });
+    it('is satisfied by a .ts or a .tsx source, and by nothing else', () => {
+      expect(check([...goodFiles(), 'src/A.ts', ...stale('A'), 'src/B.tsx', ...stale('B')])).toEqual([]);
+      expect(check([...goodFiles(), 'src/C.js', ...stale('C')]).join('\n')).toContain('missing src/C.ts');
+    });
+  });
+  it('requires a CSS export target to be in the tarball', () => {
+    const pkg = goodPkg();
+    (pkg.exports as Record<string, unknown>)['./styles.css'] = './src/styles.css';
+    expect(check(goodFiles(), pkg).join('\n')).toContain('src/styles.css');
+    expect(check([...goodFiles(), 'src/styles.css'], pkg)).toEqual([]);
+  });
   it('allows src/fixtures (shipped synthetic fixtures)', () => {
     const files = [
       ...goodFiles(),
@@ -131,6 +169,23 @@ describe('checkManifest', () => {
   it('accepts a good manifest', () => {
     expect(run(goodPkg())).toEqual([]);
   });
+  it('requires sideEffects false, or a list of stylesheets only (a package that ships a CSS file)', () => {
+    const pkg = goodPkg();
+    pkg.sideEffects = true;
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+    delete pkg.sideEffects;
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+    pkg.sideEffects = ['./src/styles.css'];
+    expect(run(pkg)).toEqual([]);
+    pkg.sideEffects = ['./src/styles.css', './src/other.css'];
+    expect(run(pkg)).toEqual([]);
+    pkg.sideEffects = ['./src/polyfill.js'];
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+    pkg.sideEffects = ['./src/styles.css', './dist/src/index.js'];
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+    pkg.sideEffects = [];
+    expect(run(pkg).join('\n')).toMatch(/sideEffects/);
+  });
   it('requires a prepack script that builds', () => {
     const pkg = goodPkg();
     pkg.scripts = {};
@@ -142,6 +197,19 @@ describe('checkManifest', () => {
     const pkg = goodPkg();
     pkg.files = ['dist/src'];
     expect(run(pkg).join('\n')).toMatch(/files/);
+  });
+  it('lets hub-react, and only hub-react, ship its font files after src', () => {
+    const hub = goodPkg();
+    hub.name = '@chatwarden/hub-react';
+    hub.homepage = 'https://github.com/hainix/chatwarden/tree/main/packages/hub-react#readme';
+    hub.repository = { type: 'git', url: 'git+https://github.com/hainix/chatwarden.git', directory: 'packages/hub-react' };
+    hub.files = ['dist/src', 'src', 'font.css', 'fonts', 'README.md', 'LICENSE'];
+    expect(run(hub, 'hub-react')).toEqual([]);
+    hub.files = ['dist/src', 'src', 'README.md', 'LICENSE'];
+    expect(run(hub, 'hub-react').join('\n')).toMatch(/files must be/);
+    const other = goodPkg();
+    other.files = ['dist/src', 'src', 'font.css', 'fonts', 'README.md', 'LICENSE'];
+    expect(run(other).join('\n')).toMatch(/files must be/);
   });
   it('requires sideEffects: false', () => {
     const pkg = goodPkg();
@@ -283,8 +351,8 @@ describe('nodeImports', () => {
 
 describe('nodeImportProblems (browser-safe packages)', () => {
   const file = (path: string, source: string) => ({ path, source });
-  it('names core and store-memory as the browser-safe packages', () => {
-    expect([...BROWSER_SAFE].sort()).toEqual(['@chatwarden/core', '@chatwarden/store-memory']);
+  it('names core, hub-element, hub-react, player-react and store-memory as the browser-safe packages', () => {
+    expect([...BROWSER_SAFE].sort()).toEqual(['@chatwarden/core', '@chatwarden/hub-element', '@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/store-memory']);
   });
   it('flags a node import in a browser-safe package, per file and module', () => {
     const out: string[] = nodeImportProblems({
@@ -308,5 +376,123 @@ describe('nodeImportProblems (browser-safe packages)', () => {
         files: [file('dist/src/a.d.ts', "import fs from 'node:fs';\n"), file('src/a.ts', "import fs from 'node:fs';\n")],
       }),
     ).toEqual([]);
+  });
+});
+
+describe('the hub-react manifest in the repo', () => {
+  const hub = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/hub-react/package.json', import.meta.url)), 'utf8')) as Pkg;
+  it('lists the headless entry among the files a tarball must hold (types and ESM, from dist)', () => {
+    const targets = exportTargets(hub) as string[];
+    expect(targets).toContain('dist/src/headless/index.js');
+    expect(targets).toContain('dist/src/headless/index.d.ts');
+  });
+  it('is browser-safe, which covers the headless entry too: no Node builtin in dist', () => {
+    expect([...BROWSER_SAFE]).toContain('@chatwarden/hub-react');
+  });
+});
+
+describe('a bundled package (hub-element ships dist/*.js, built by esbuild, and only types under dist/src)', () => {
+  const elementPkg = (): Pkg => ({
+    name: '@chatwarden/hub-element',
+    license: 'Apache-2.0',
+    sideEffects: ['./dist/hub-element.js'],
+    keywords: ['chatwarden', 'moderation', 'chat'],
+    homepage: 'https://github.com/hainix/chatwarden/tree/main/packages/hub-element#readme',
+    bugs: { url: 'https://github.com/hainix/chatwarden/issues' },
+    repository: { type: 'git', url: 'git+https://github.com/hainix/chatwarden.git', directory: 'packages/hub-element' },
+    scripts: { prepack: 'tsc -b && node build/build.mjs' },
+    files: ['dist/src', 'src', 'dist/hub-element.js', 'dist/index.js', 'dist/THIRD_PARTY_NOTICES.txt', 'README.md', 'LICENSE'],
+    main: './dist/index.js',
+    types: './dist/src/index.d.ts',
+    exports: {
+      '.': { types: './dist/src/index.d.ts', default: './dist/index.js' },
+      './standalone': { types: './dist/src/standalone.d.ts', default: './dist/hub-element.js' },
+    },
+  });
+  const elementFiles = (): string[] => [
+    'package.json',
+    'README.md',
+    'LICENSE',
+    'dist/hub-element.js',
+    'dist/index.js',
+    'dist/THIRD_PARTY_NOTICES.txt',
+    'dist/src/index.d.ts',
+    'dist/src/index.d.ts.map',
+    'dist/src/standalone.d.ts',
+    'dist/src/standalone.d.ts.map',
+    'src/index.ts',
+    'src/standalone.ts',
+  ];
+
+  it('a stale declaration file in dist/src (its source removed) fails too: dist/src is only declarations here', () => {
+    const files = [...elementFiles(), 'dist/src/gone.d.ts', 'dist/src/gone.d.ts.map'];
+    expect(checkFileList({ pkg: elementPkg(), files }).join('\n')).toContain('missing src/gone.ts (next to dist/src/gone.d.ts)');
+  });
+  it('is named as bundled, with its two scripts', () => {
+    expect(BUNDLED['hub-element'].scripts).toEqual(['dist/hub-element.js', 'dist/index.js']);
+  });
+  it('a good tarball passes, with no dist/src/**/*.js and no .js.map', () => {
+    expect(checkFileList({ pkg: elementPkg(), files: elementFiles() })).toEqual([]);
+    expect(checkManifest(elementPkg(), 'hub-element')).toEqual([]);
+  });
+  it('requires both scripts to be there', () => {
+    const files = elementFiles().filter((f) => f !== 'dist/hub-element.js');
+    expect(checkFileList({ pkg: elementPkg(), files }).join('\n')).toMatch(/missing dist\/hub-element\.js/);
+    const files2 = elementFiles().filter((f) => f !== 'dist/index.js');
+    expect(checkFileList({ pkg: elementPkg(), files: files2 }).join('\n')).toMatch(/missing dist\/index\.js/);
+  });
+  it('is named as bundled with a third-party notices file', () => {
+    expect(BUNDLED['hub-element'].notices).toBe('dist/THIRD_PARTY_NOTICES.txt');
+  });
+  it('requires the third-party notices file (it carries the licences of the code inside the bundles)', () => {
+    const files = elementFiles().filter((f) => f !== 'dist/THIRD_PARTY_NOTICES.txt');
+    expect(checkFileList({ pkg: elementPkg(), files }).join('\n')).toMatch(/missing dist\/THIRD_PARTY_NOTICES\.txt/);
+  });
+  it('requires files to list the notices file', () => {
+    const pkg = elementPkg();
+    pkg.files = ['dist/src', 'src', 'dist/hub-element.js', 'dist/index.js', 'README.md', 'LICENSE'];
+    expect(checkManifest(pkg, 'hub-element').join('\n')).toMatch(/files must be/);
+  });
+  it('refuses compiled JavaScript under dist/src (a second, unbundled copy that imports React)', () => {
+    const files = [...elementFiles(), 'dist/src/element.js'];
+    expect(checkFileList({ pkg: elementPkg(), files }).join('\n')).toMatch(/dist\/src\/element\.js would ship/);
+  });
+  it('still wants the declarations, their maps and the sources', () => {
+    expect(checkFileList({ pkg: elementPkg(), files: elementFiles().filter((f) => f !== 'dist/src/index.d.ts.map') }).join('\n')).toMatch(/missing dist\/src\/index\.d\.ts\.map/);
+    expect(checkFileList({ pkg: elementPkg(), files: elementFiles().filter((f) => f !== 'src/standalone.ts') }).join('\n')).toMatch(/missing src\/standalone\.ts/);
+    expect(checkFileList({ pkg: elementPkg(), files: elementFiles().filter((f) => !f.endsWith('.d.ts')) }).join('\n')).toMatch(/no dist\/src\/\*\*\/\*\.d\.ts/);
+  });
+  it('every export target must be in the tarball', () => {
+    expect(checkFileList({ pkg: elementPkg(), files: elementFiles().filter((f) => f !== 'dist/src/standalone.d.ts') }).join('\n')).toMatch(/export target is not in the tarball: dist\/src\/standalone\.d\.ts/);
+  });
+  it('sideEffects must list the registering script exactly (false would let a bundler drop the bare import)', () => {
+    const pkg = elementPkg();
+    pkg.sideEffects = false;
+    expect(checkManifest(pkg, 'hub-element').join(' ')).toMatch(/sideEffects/);
+    pkg.sideEffects = ['./dist/index.js'];
+    expect(checkManifest(pkg, 'hub-element').join('\n')).toMatch(/sideEffects/);
+    pkg.sideEffects = ['./dist/hub-element.js', './dist/index.js'];
+    expect(checkManifest(pkg, 'hub-element').join('\n')).toMatch(/sideEffects/);
+  });
+  it('the exception is for hub-element only: any other package still needs false or CSS', () => {
+    const other = goodPkg();
+    other.sideEffects = ['./dist/hub-element.js'];
+    expect(checkManifest(other).join('\n')).toMatch(/sideEffects/);
+  });
+  it('the files list is exact: the scripts come after src', () => {
+    const pkg = elementPkg();
+    pkg.files = ['dist/src', 'src', 'README.md', 'LICENSE'];
+    expect(checkManifest(pkg, 'hub-element').join('\n')).toMatch(/files must be/);
+  });
+  it('a bundle that imports something is flagged: it must be self-contained', () => {
+    const pkg = { ...elementPkg(), dependencies: {}, peerDependencies: { '@chatwarden/hub-react': '^0.1.1' } };
+    const ok = undeclaredImports({ pkg, files: [{ path: 'dist/hub-element.js', source: "const a = 1;\nexport { a };\n" }] });
+    expect(ok).toEqual([]);
+    const out: string[] = undeclaredImports({ pkg, files: [{ path: 'dist/hub-element.js', source: 'import { useState } from "react";\n' }] });
+    expect(out.join('\n')).toMatch(/dist\/hub-element\.js imports "react"/);
+  });
+  it('a bundle that imports a Node builtin is flagged (it is browser-safe)', () => {
+    const out: string[] = nodeImportProblems({ pkg: { name: '@chatwarden/hub-element' }, files: [{ path: 'dist/index.js', source: 'import fs from "node:fs";\n' }] });
+    expect(out.join('\n')).toMatch(/dist\/index\.js imports the Node builtin "node:fs"/);
   });
 });

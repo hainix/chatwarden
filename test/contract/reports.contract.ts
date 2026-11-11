@@ -41,6 +41,8 @@ export function reportsContract(name: string, make: () => Store): void {
         expect(s.insertReport(r)).toBe(true);
         expect(s.loadReport('r1')).toEqual({
           ...r,
+          reportedReason: null,
+          detailAt: null,
           status: 'open',
           badFaith: false,
           actionedAt: null,

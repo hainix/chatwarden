@@ -101,9 +101,15 @@ describe('Features', () => {
     ])
       expect(screen.getByRole('heading', { name: re })).toBeTruthy();
   });
-  it('is honest that the hub UI is coming while the HTTP APIs exist', () => {
-    render(<Features />);
-    expect(screen.getAllByText(/hub ui is coming/i).length).toBeGreaterThan(0);
+  it('no longer says the hub UI is coming: it says what ships, with an npm link', () => {
+    const { container } = render(<Features />);
+    expect(container.textContent ?? '').not.toMatch(/hub ui is coming|coming soon/i);
+    const card = screen.getByRole('heading', { name: /moderator hub/i }).closest('[data-card]') as HTMLElement;
+    expect(card.querySelector('.pill-soon')).toBeNull();
+    for (const re of [/team workbench/i, /simple mode/i, /editable steps/i, /drop-in/i, /headless/i, /<chatwarden-hub>/]) expect(card.textContent, String(re)).toMatch(re);
+    const link = within(card).getByRole('link', { name: /hub-react/i });
+    expect(link.getAttribute('href')).toBe('https://www.npmjs.com/package/@chatwarden/hub-react');
+    expect(link.getAttribute('rel')).toMatch(/noopener/);
   });
 });
 
@@ -118,6 +124,17 @@ describe('Steps', () => {
       screen.getAllByText((_, el) => el?.tagName === 'PRE' && !!el.textContent?.includes('npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher')).length,
     ).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /^copy /i }).length).toBeGreaterThanOrEqual(3);
+  });
+  it('then shows the moderator hub: the drop-in <Hub> and, as the alternative, the one-script-tag element, both copyable', () => {
+    const { container } = render(<Steps />);
+    expect(container.querySelectorAll('ol > li')).toHaveLength(3); // still three steps; the hub comes after them
+    const more = container.querySelector('[data-hub-step]') as HTMLElement;
+    expect(more).toBeTruthy();
+    expect(within(more).getByRole('heading', { level: 3 }).textContent).toMatch(/moderator hub/i);
+    expect(more.textContent).toContain('<Hub client={client} />');
+    expect(more.textContent).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
+    expect(within(more).getAllByRole('button', { name: /^copy /i })).toHaveLength(3);
+    expect(within(more).getByRole('link', { name: /player-react/i }).getAttribute('href')).toBe('https://github.com/hainix/chatwarden/tree/main/packages/player-react');
   });
   it('syntax-highlights code with local spans (no external highlighter)', () => {
     const { container } = render(<Steps />);
@@ -137,12 +154,12 @@ describe('Steps', () => {
   it('names each scrollable code block as a region (aria-label alone is not allowed on a bare pre)', () => {
     const { container } = render(<Steps />);
     const pres = [...container.querySelectorAll('pre')];
-    expect(pres).toHaveLength(3);
+    expect(pres).toHaveLength(6); // the three steps, then the hub's install line, its drop-in and its one-script-tag alternative
     for (const pre of pres) {
       expect(pre.getAttribute('role')).toBe('region');
       expect(pre.getAttribute('aria-label')).toBeTruthy();
     }
-    expect(screen.getAllByRole('region').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByRole('region').length).toBeGreaterThanOrEqual(6);
   });
 });
 
@@ -192,9 +209,18 @@ describe('OpenSource', () => {
     render(<OpenSource />);
     expect(screen.getAllByText(/apache-2\.0/i).length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: /github/i }).getAttribute('href')).toBe(GITHUB);
-    const npm = screen.getByRole('link', { name: /npm/i }).getAttribute('href') ?? '';
+    const npm = screen.getByRole('link', { name: /packages on npm/i }).getAttribute('href') ?? '';
     expect(new URL(npm).hostname).toBe('www.npmjs.com');
     expect(npm).toContain('@chatwarden');
+  });
+  it('links the hub, player and element packages on npm', () => {
+    render(<OpenSource />);
+    for (const name of ['hub-react', 'player-react', 'hub-element']) {
+      const link = screen.getByRole('link', { name: new RegExp(`@chatwarden/${name}`) });
+      expect(link.getAttribute('href')).toBe(`https://www.npmjs.com/package/@chatwarden/${name}`);
+      expect(link.getAttribute('rel')).toMatch(/noopener/);
+      expect(link.getAttribute('target')).toBe('_blank');
+    }
   });
   it('shows the provenance badge and the one true customer line', () => {
     render(<OpenSource />);

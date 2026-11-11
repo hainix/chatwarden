@@ -1,0 +1,95 @@
+{
+  "name": "@chatwarden/hub-element",
+  "version": "0.1.2",
+  "private": false,
+  "description": "The Chatwarden moderator hub as one custom element, <chatwarden-hub>, in a single self-contained script: drop it into plain HTML, Vue, Svelte or a server-rendered admin page.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "keywords": [
+    "chatwarden",
+    "moderation",
+    "chat",
+    "custom-element",
+    "web-component",
+    "moderator",
+    "hub"
+  ],
+  "homepage": "https://github.com/hainix/chatwarden/tree/main/packages/hub-element#readme",
+  "bugs": {
+    "url": "https://github.com/hainix/chatwarden/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hainix/chatwarden.git",
+    "directory": "packages/hub-element"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./standalone": {
+      "types": "./dist/src/standalone.d.ts",
+      "default": "./dist/hub-element.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "standalone": [
+        "dist/src/standalone.d.ts"
+      ]
+    }
+  },
+  "sideEffects": [
+    "./dist/hub-element.js"
+  ],
+  "files": [
+    "dist/src",
+    "src",
+    "dist/hub-element.js",
+    "dist/index.js",
+    "dist/THIRD_PARTY_NOTICES.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -b && node build/build.mjs",
+    "prepack": "tsc -b && node build/build.mjs",
+    "smoke:browser": "cd ../.. && vitest run --project hub-element packages/hub-element/test/browser.smoke.test.ts"
+  },
+  "peerDependencies": {
+    "@chatwarden/hub-react": "^0.1.2"
+  },
+  "peerDependenciesMeta": {
+    "@chatwarden/hub-react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@chatwarden/core": "0.1.2",
+    "@chatwarden/http": "0.1.2",
+    "@chatwarden/hub-react": "0.1.2",
+    "@chatwarden/matcher": "0.1.2",
+    "@chatwarden/store-memory": "0.1.2",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/user-event": "^14.6.9",
+    "@types/express": "^5.0.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "0.28.2",
+    "express": "^5.1.0",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.65.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "~5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

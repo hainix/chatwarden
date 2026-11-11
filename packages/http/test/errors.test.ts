@@ -3,11 +3,12 @@ import {
   AuditQueryError,
   ExcerptError,
   ProfileError,
+  ReasonError,
   ReportQueryError,
   RulesError,
   SanctionError,
 } from '@chatwarden/core';
-import { HttpError, NotFoundError, ValidationError, withErrors } from '@chatwarden/http';
+import { ClaimedError, HttpError, NotFoundError, ValidationError, withErrors } from '@chatwarden/http';
 import type { KitRequest, KitResponse } from '@chatwarden/http';
 
 const req: KitRequest = { method: 'GET', path: '/x', query: {}, headers: {}, body: undefined };
@@ -30,6 +31,10 @@ describe('withErrors: mapping', () => {
     ['ReportQueryError(before)', () => new ReportQueryError('before'), 400, 'invalid_query'],
     ['ReportQueryError(person)', () => new ReportQueryError('person'), 400, 'invalid_query'],
     ['HttpError(already_decided)', () => new HttpError('already_decided'), 409, 'already_decided'],
+    ['HttpError(claimed)', () => new HttpError('claimed'), 409, 'claimed'],
+    ['ReasonError(label)', () => new ReasonError('label'), 400, 'invalid_request'],
+    ['ReasonError(text)', () => new ReasonError('text'), 400, 'invalid_request'],
+    ['ReasonError(limit)', () => new ReasonError('limit'), 400, 'invalid_value'],
     ['AuditQueryError(before)', () => new AuditQueryError('before'), 400, 'invalid_query'],
     ['AuditQueryError(action)', () => new AuditQueryError('action'), 400, 'invalid_query'],
     ['AuditQueryError(actor)', () => new AuditQueryError('actor'), 400, 'invalid_query'],
@@ -81,6 +86,16 @@ describe('withErrors: mapping', () => {
     expect(JSON.stringify(q.res)).not.toContain('actor');
     const r = await run(new ReportQueryError('before'));
     expect(JSON.stringify(r.res)).not.toContain('before');
+  });
+
+  it('ClaimedError is 409 claimed and also names the holder and when the claim lapses, nothing else', async () => {
+    const { res, warn } = await run(new ClaimedError({ by: 'ann', until: 1_800_000_600_000 }));
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'claimed', message: 'Another moderator is handling this case.', by: 'ann', until: 1_800_000_600_000 });
+    expect(Object.keys(res.body as object)).toEqual(['error', 'message', 'by', 'until']);
+    expect(warn).not.toHaveBeenCalled();
+    // The plain HttpError for the same code carries no holder.
+    expect((await run(new HttpError('claimed'))).res.body).toEqual({ error: 'claimed', message: 'Another moderator is handling this case.' });
   });
 
   it('maps a subclass of a mapped class the same way', async () => {

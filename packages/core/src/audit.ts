@@ -1,4 +1,6 @@
 import { randomId } from './crypto.js';
+import { POLICY_SECTIONS } from './profile.js';
+import type { PolicySection } from './profile.js';
 import { safeWarn } from './log.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { Clock, Logger, Store } from './types.js';
@@ -26,11 +28,34 @@ export const AUDIT_ACTIONS = [
   'history.view',
   'suggest',
   'policy.view',
+  'blocked.view',
+  'case.takeover',
+  'reason.add',
+  'reason.update',
+  'reason.toggle',
+  'policy.update',
+  'policy.reset',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
-/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id or an exception id. */
-export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception'] as const;
+/**
+ * What a `policy.update` or `policy.reset` row says it did: the editable sections it changed, and the reason the owner gave.
+ * The reason is the one free text an audit row may carry (1 to {@link AUDIT_REASON_MAX} characters, trimmed); the sections are
+ * names from a closed list. No layer value is ever recorded.
+ */
+export interface AuditDetail {
+  sections: PolicySection[];
+  reason?: string;
+}
+
+/** The longest reason a policy audit row keeps. */
+export const AUDIT_REASON_MAX = 2000;
+
+/** The actions whose row carries an {@link AuditDetail}, and the only ones that may. */
+const DETAIL_ACTIONS: readonly string[] = ['policy.update', 'policy.reset'];
+
+/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id or a saved reason id. */
+export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason'] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
 export interface AuditTarget {
@@ -53,9 +78,14 @@ export interface AuditRecordInput {
   role: Role;
   action: AuditAction;
   target?: AuditTarget;
+  /** Required for `policy.update` and `policy.reset` (and refused for every other action). */
+  detail?: AuditDetail;
 }
 
-/** One entry as the store keeps and returns it. There is no field for chat text, a reason or a note. */
+/**
+ * One entry as the store keeps and returns it. There is no field for chat text or a note. The one free text is the `reason` inside
+ * the `detail` of a `policy.update` or `policy.reset` row (the owner's own reason for changing the settings).
+ */
 export interface AuditRow {
   id: string;
   /** Epoch ms. */
@@ -65,6 +95,8 @@ export interface AuditRow {
   role: Role | null;
   action: AuditAction;
   target: AuditTarget | null;
+  /** Only on a `policy.update` or `policy.reset` row. */
+  detail?: AuditDetail;
 }
 
 /** What {@link Store.listAudit} takes. */
@@ -86,6 +118,8 @@ export interface AuditItem {
   role: Role | null;
   action: AuditAction;
   target?: AuditTarget;
+  /** Only on a `policy.update` or `policy.reset` row. */
+  detail?: AuditDetail;
 }
 
 /** What `cw.audit.list` takes. `limit` is required. */
@@ -146,22 +180,50 @@ export function decodeAuditCursor(cursor: unknown): { at: number; id: string } {
   return { at, id: text.slice(sep + 1) };
 }
 
+/** The detail of a policy row, or null when it is not valid: sections from the closed list, an optional reason, nothing else. */
+function parseDetail(detail: unknown): AuditDetail | null {
+  if (typeof detail !== 'object' || detail === null || Array.isArray(detail)) return null;
+  const d = detail as Record<string, unknown>;
+  for (const k of Object.keys(d)) if (k !== 'sections' && k !== 'reason') return null;
+  const sections = d.sections;
+  if (!Array.isArray(sections)) return null;
+  const known: readonly string[] = POLICY_SECTIONS;
+  if (!sections.every((x) => typeof x === 'string' && known.includes(x))) return null;
+  const unique = [...new Set(sections as PolicySection[])];
+  if (d.reason === undefined) return { sections: unique };
+  if (typeof d.reason !== 'string') return null;
+  const reason = d.reason.trim();
+  if (reason === '' || reason.length > AUDIT_REASON_MAX) return null;
+  return { sections: unique, reason };
+}
+
 /** Parse the input of `record`; null when anything is off. Copies only the known fields. */
 function parse(input: unknown): AuditRecordInput | null {
   if (typeof input !== 'object' || input === null) return null;
-  const { actor, role, action, target } = input as Record<string, unknown>;
+  const { actor, role, action, target, detail } = input as Record<string, unknown>;
   if (typeof actor !== 'string' || !ACTOR_RE.test(actor)) return null;
   if (!isRole(role) || !isAction(action)) return null;
-  if (target === undefined) return { actor, role, action };
+  // A policy row must say what it changed; no other row may carry anything but ids.
+  let parsedDetail: AuditDetail | undefined;
+  if (DETAIL_ACTIONS.includes(action)) {
+    const d = parseDetail(detail);
+    if (d === null) return null;
+    parsedDetail = d;
+  } else if (detail !== undefined) {
+    return null;
+  }
+  const extra = parsedDetail === undefined ? {} : { detail: parsedDetail };
+  if (target === undefined) return { actor, role, action, ...extra };
   if (typeof target !== 'object' || target === null) return null;
   const { type, ref } = target as Record<string, unknown>;
   if (!isTargetType(type) || typeof ref !== 'string' || !REF_RE.test(ref)) return null;
-  return { actor, role, action, target: { type, ref } };
+  return { actor, role, action, target: { type, ref }, ...extra };
 }
 
 /**
  * The staff audit trail: who (actor and role) did what (a name from {@link AUDIT_ACTIONS}) to which id, and when.
- * It stores no chat text, reason, note or evidence: there is no field for any, and a target must look like an id.
+ * It stores no chat text, note or evidence: there is no field for any, and a target must look like an id. The one free text it
+ * keeps is the owner's `reason` in the `detail` of a `policy.update` or `policy.reset` row, next to the section names.
  */
 export class AuditService {
   private readonly store: Store;
@@ -192,6 +254,7 @@ export class AuditService {
         role: parsed.role,
         action: parsed.action,
         target: parsed.target ?? null,
+        ...(parsed.detail === undefined ? {} : { detail: parsed.detail }),
       });
       return true;
     } catch (err) {
@@ -232,6 +295,7 @@ export class AuditService {
           role: r.role,
           action: r.action,
           ...(r.target === null ? {} : { target: { type: r.target.type, ref: r.target.ref } }),
+          ...(r.detail === undefined ? {} : { detail: { sections: [...r.detail.sections], ...(r.detail.reason === undefined ? {} : { reason: r.detail.reason }) } }),
         }),
       ),
       next: rows.length === limit && last !== undefined ? encodeAuditCursor(last.at, last.id) : null,

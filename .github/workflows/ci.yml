@@ -51,14 +51,47 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
       - if: steps.pw-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-      - if: steps.pw-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
+        run: npx playwright install chromium
+      # System packages are best-effort: the runner image already has Chromium's libraries, and an apt mirror outage
+      # (2026-11-11) must not fail CI. A library that is really missing still fails the browser tests (CW_REQUIRE_BROWSER).
+      - run: npx playwright install-deps chromium || echo "::warning::playwright install-deps failed; using the runner image's libraries"
       - run: npm run test --workspace site
       - run: npm run build --workspace site
       # The build re-renders the OG image and icons. If they differ from the committed PNGs, fail: re-render locally
       # (`npm run og --workspace site`) and commit them.
       - run: git diff --exit-code -- site/public/*.png
+
+  # The hub element's browser smoke: a real Chromium loads the built script on a bare page. It is the only guard for what jsdom cannot
+  # compute (custom-property inheritance through a shadow root, real focus and keys, the CSP). Kept apart, like site, so a package
+  # change never waits on a browser download. CW_REQUIRE_BROWSER makes a missing browser a failure, not a skip.
+  element-browser:
+    name: Hub element (Chromium smoke)
+    runs-on: ubuntu-latest
+    env:
+      CW_REQUIRE_BROWSER: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The browser download is cached per Playwright version; the system packages (apt) are not part of the cache, so they are
+      # installed on a hit as well.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium
+      # System packages are best-effort: the runner image already has Chromium's libraries, and an apt mirror outage
+      # (2026-11-11) must not fail CI. A library that is really missing still fails the browser tests (CW_REQUIRE_BROWSER).
+      - run: npx playwright install-deps chromium || echo "::warning::playwright install-deps failed; using the runner image's libraries"
+      - run: npm run smoke:browser --workspace @chatwarden/hub-element
 
   smoke:
     name: Smoke (consumer install) Node ${{ matrix.node }}

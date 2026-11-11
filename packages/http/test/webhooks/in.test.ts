@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_SANCTION_DURATION_MS } from '@chatwarden/core';
 import type { Chatwarden, KitEvent, Logger, Role } from '@chatwarden/core';
 import { createRouter } from '../../src/router.js';
 import type { KitRequest, KitResponse } from '../../src/types.js';
-import { parseSanction, sanctionFingerprint } from '../../src/admin/apply.js';
+import { parseSanction } from '../../src/admin/apply.js';
+import { sanctionFingerprint } from '../../src/webhooks/fingerprint.js';
 import { webhookIn } from '../../src/webhooks/in.js';
 import type { WebhookInOptions } from '../../src/webhooks/in.js';
 import { ReplayCache, SIGNATURE_HEADER, TIMESTAMP_HEADER, sign } from '../../src/webhooks/sign.js';
@@ -265,6 +266,31 @@ describe('the signature gate', () => {
     const res = await s.post(`{"pad":"${'x'.repeat(70_000)}"}`);
     expect(res.status).toBe(413);
     expect(errorOf(res)).toBe('payload_too_large');
+  });
+
+  describe('the size cap needs no Buffer global (browser-safe byte count)', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    // `{"pad":"` and `"}` are 10 bytes, so a filler of 65527 bytes makes a body of exactly 65537 (the limit + 1).
+    const bodies: Array<[string, string]> = [
+      ['ASCII', 'x'.repeat(65_527)],
+      ['2-byte', 'é'.repeat(32_763) + 'x'], // 65526 + 1
+      ['3-byte', '€'.repeat(21_842) + 'x'], // 65526 + 1
+      ['astral', '\u{1F600}'.repeat(16_381) + 'xxx'], // 65524 + 3
+    ];
+
+    for (const [name, filler] of bodies) {
+      it(`${name}: exactly the limit + 1 byte is 413`, async () => {
+        const s = await setup();
+        const raw = `{"pad":"${filler}"}`;
+        expect(new TextEncoder().encode(raw).length).toBe(65_537);
+        const signed = s.req(raw); // signed with Buffer still there: signing is the sender's side
+        vi.stubGlobal('Buffer', undefined);
+        const res = await s.send(signed);
+        expect(res.status).toBe(413);
+        expect(errorOf(res)).toBe('payload_too_large');
+      });
+    }
   });
 
   it('an empty body with a valid signature is 400, not a crash', async () => {
@@ -1078,5 +1104,90 @@ describe('logging and a shared replay cache', () => {
     expect((await a.send(r)).status).toBe(200);
     expect((await a.send(r)).status).toBe(401);
     expect(replay.size).toBe(1);
+  });
+});
+
+describe('action: decide and a moderator claim', () => {
+  it('releases the claim on the reported person after the decision of their last open report (the service actor is not held up by it)', async () => {
+    const s = await setup();
+    const { reportId, target } = await s.filed();
+    expect(s.cw.cases.claim(target, 'ann').ok).toBe(true);
+    expect((await s.post(decideBody(reportId, target))).status).toBe(200);
+    expect(s.cw.cases.holder(target)).toBeNull();
+  });
+
+  it('one case per person: a decision of one of three open reports keeps the holder\'s claim, and only the last releases it', async () => {
+    const s = await setup();
+    const first = await s.w.file();
+    const second = await s.w.fileAgainst(first, 'second-reporter');
+    const third = await s.w.fileAgainst(first, 'third-reporter');
+    expect(s.cw.cases.claim(first.target, 'ann').ok).toBe(true);
+    const held = s.cw.cases.holder(first.target);
+    expect((await s.post(decideBody(first.id, first.target))).status).toBe(200);
+    expect(s.cw.cases.holder(first.target)).toEqual(held);
+    expect((await s.post(decideBody(second.id, first.target, { actions: [{ subject: first.target, kind: 'chat', durationMs: DAY, rule: 2 }] }))).status).toBe(200);
+    expect(s.cw.cases.holder(first.target)?.by).toBe('ann');
+    expect((await s.post(decideBody(third.id, first.target, { verdict: 'no_action', actions: [] }))).status).toBe(200);
+    expect(s.cw.cases.holder(first.target)).toBeNull();
+  });
+
+  it('whoever holds it (a senior who took it over) is treated the same: kept while reports remain', async () => {
+    const s = await setup();
+    const first = await s.w.file();
+    await s.w.fileAgainst(first, 'second-reporter');
+    s.cw.cases.claim(first.target, 'ann');
+    s.cw.cases.claim(first.target, 'sam', { takeOver: true });
+    await s.post(decideBody(first.id, first.target));
+    expect(s.cw.cases.holder(first.target)?.by).toBe('sam');
+  });
+
+  it('a replay of a kept decision changes nothing, and the change token moves on each decision', async () => {
+    const s = await setup();
+    const first = await s.w.file();
+    await s.w.fileAgainst(first, 'second-reporter');
+    s.cw.cases.claim(first.target, 'ann');
+    const before = s.cw.changes.token();
+    await s.post(decideBody(first.id, first.target));
+    const after = s.cw.changes.token();
+    expect(after).not.toBe(before);
+    const held = s.cw.cases.holder(first.target);
+    const again = await s.post(decideBody(first.id, first.target));
+    expect((again.body as { replay: boolean }).replay).toBe(true);
+    expect(s.cw.cases.holder(first.target)).toEqual(held);
+    expect(s.cw.changes.token()).toBe(after);
+  });
+
+  it('does not touch a claim on someone else', async () => {
+    const s = await setup();
+    const a = await s.filed();
+    const b = await s.filed();
+    s.cw.cases.claim(b.target, 'bea');
+    await s.post(decideBody(a.reportId, a.target));
+    expect(s.cw.cases.holder(b.target)?.by).toBe('bea');
+  });
+
+  it('a replay releases nothing: a claim taken since stays', async () => {
+    const s = await setup();
+    const { reportId, target } = await s.filed();
+    expect((await s.post(decideBody(reportId, target))).status).toBe(200);
+    // A second report on the same person is claimed; the first decision is sent again.
+    s.cw.rooms.seat('room-in-extra', 'a', { clientKey: 'key-target-aaaaaaaa-1', ip: '198.51.100.7' }, 'Tgt');
+    s.cw.rooms.seat('room-in-extra', 'b', { clientKey: 'key-reporter-extra-1', ip: '198.51.100.9' }, 'Rep');
+    s.cw.chat.accept('room-in-extra', 'a', 'another line');
+    const again = await s.cw.reports.submit({ roomId: 'room-in-extra', reporterSeat: 'b', targetSeat: 'a', category: 'harassment' });
+    expect(again.ok).toBe(true);
+    expect(s.cw.cases.claim(target, 'bea').ok).toBe(true);
+    const replay = await s.post(decideBody(reportId, target));
+    expect((replay.body as { replay: boolean }).replay).toBe(true);
+    expect(s.cw.cases.holder(target)?.by).toBe('bea');
+  });
+
+  it('a decision that is refused (already decided differently) releases nothing', async () => {
+    const s = await setup();
+    const { reportId, target } = await s.filed();
+    await s.post(decideBody(reportId, target));
+    s.cw.cases.claim(target, 'ann'); // no open case left: refused
+    expect(s.cw.cases.holder(target)).toBeNull();
+    expect(errorOf(await s.post(decideBody(reportId, target, { verdict: 'no_action', actions: [] })))).toBe('already_decided');
   });
 });

@@ -1,7 +1,7 @@
 # @chatwarden/store-memory
 
 The in-memory store for Chatwarden, the open-source chat moderation kit for games. It keeps everything the kit stores (people as
-hashed identifiers, reports, sanctions, strikes, mutes, notices, decisions, the audit trail) in plain JavaScript objects inside
+hashed identifiers, reports, sanctions, strikes, mutes, notices, decisions, the audit trail, moderators' claims and saved reasons) in plain JavaScript objects inside
 your process. Nothing is written to disk.
 
 **It is memory only. Everything is lost when the process restarts, exits or stops.** It is for tests, demos and single-process
@@ -82,6 +82,9 @@ How it behaves:
   rethrown. Calls nest: an inner failure the outer function catches undoes only the inner writes.
 - **Same behaviour as the SQLite store.** Both stores run one shared store contract suite (ordering, paging, uniqueness, rollback,
   what each purge deletes). Where they ever disagree, the SQLite store is the reference and this one is the bug.
+- **The editable profile.** It implements `loadPolicyLayer` and `savePolicyLayer`, so `cw.policy.save` works. The stored layer lives in
+  the heap with everything else: it is lost when the process ends, so a profile edited at runtime goes back to your code's profile
+  on restart. Use the SQLite store (or your own) for edits that must last.
 - **One process, one thread.** It is a set of objects in your heap. Two processes, or two workers, each get their own empty store.
 - **No size limit.** Memory grows with what you store until the retention purge runs or the process ends.
 

@@ -1,4 +1,4 @@
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 
 export type {
   Clock,
@@ -21,8 +21,16 @@ export type {
   ReportListQuery,
   ReportRecord,
   SanctionKind,
+  SanctionListQuery,
   SanctionRow,
   SanctionTargetType,
+  ReporterDecision,
+  ReporterTally,
+  ClaimAttempt,
+  ClaimMode,
+  ClaimRow,
+  OpenReportQuery,
+  ReasonRow,
   ConductLevel,
   Source,
   Store,
@@ -33,7 +41,20 @@ export type {
   StrikeRow,
   SubjectRecord,
 } from './types.js';
-export { CONDUCT_LEVELS } from './types.js';
+export { CLAIM_TTL_MS, CONDUCT_LEVELS } from './types.js';
+export {
+  CaseDesk,
+  CLAIM_BUSY_TRIES,
+  VIEWING_PER_ACTOR_MAX,
+  REASON_LABEL_MAX,
+  REASON_TEXT_MAX,
+  REASONS_MAX,
+  ReasonBook,
+  ReasonError,
+  ViewingPresence,
+  VIEWING_TTL_MS,
+} from './team.js';
+export type { CaseClaim, ClaimOutcome, NextCase } from './team.js';
 export { hashWho, makeHasher } from './hasher.js';
 export { maskSpans, type MaskSpan } from './mask.js';
 export { SubjectIndex } from './subjects.js';
@@ -79,7 +100,44 @@ export {
   SUSPEND_AFTER,
   SUSPEND_WINDOW_MS,
 } from './reports.js';
-export type { ReportCounts, ReportInput, ReportRefusal, ReportResult, ReportServiceDeps } from './reports.js';
+export { REPORT_DETAIL_WINDOW_MS } from './reports.js';
+export type {
+  ReportCounts,
+  ReportDetailInput,
+  ReportDetailRefusal,
+  ReportDetailResult,
+  ReportInput,
+  ReportRefusal,
+  ReportResult,
+  ReportServiceDeps,
+} from './reports.js';
+export {
+  canonicalReasonId,
+  DEFAULT_REPORT_FLOW,
+  DEFAULT_REPORT_REASONS,
+  DEFAULT_REPORT_THANKS,
+  defaultReporting,
+  findReason,
+  isReasonId,
+  legacyCategoryOf,
+  LEGACY_REASON_ALIASES,
+  MAX_REASON_RULES,
+  MAX_REPORT_REASONS,
+  OTHER_REASON_ID,
+  playerReporting,
+  reasonLabel,
+  reasonOfCategory,
+  REPORT_FLOWS,
+  suggestedRule,
+} from './reporting.js';
+export type {
+  PlayerReporting,
+  ReportFlow,
+  ReportingSettings,
+  ReportReason,
+  ReportReasonInput,
+  ResolvedReporting,
+} from './reporting.js';
 export {
   decodeReportCursor,
   encodeReportCursor,
@@ -91,8 +149,28 @@ export {
 } from './staffReports.js';
 export type { ReportPage, ReportQuery, StaffReport } from './staffReports.js';
 export {
+  BLOCKED_DAYS,
+  BLOCKED_MAX,
+  PERSON_SANCTIONS_MAX,
+  SANCTION_PAGE_DEFAULT,
+  SANCTION_PAGE_MAX,
+  SanctionQueryError,
+  isSanctionActive,
+  sanctionGroupView,
+} from './staffViews.js';
+export type {
+  BlockedDays,
+  BlockedItem,
+  PersonSanctionView,
+  ReporterRecord,
+  SanctionGroupView,
+  SanctionListInput,
+  SanctionPage,
+} from './staffViews.js';
+export {
   AUDIT_ACTIONS,
   AUDIT_PAGE_MAX,
+  AUDIT_REASON_MAX,
   AUDIT_TARGET_TYPES,
   AuditQueryError,
   isValidAuditActor,
@@ -101,6 +179,7 @@ export {
 export type {
   AuditAction,
   AuditItem,
+  AuditDetail,
   AuditListQuery,
   AuditPage,
   AuditQuery,
@@ -146,12 +225,13 @@ export {
   starterRules,
 } from './rules.js';
 export type { CommunityRule, RuleRef } from './rules.js';
-export { agentBrief, bindDocuments, codeOfConduct, moderatorGuide, policyJson } from './documents.js';
+export { GUIDE_SECTIONS, agentBrief, bindDocuments, codeOfConduct, moderatorGuide, policyJson } from './documents.js';
 export type {
   CodeOfConductOptions,
   DocumentFormat,
   DocumentPolicy,
   Documents,
+  GuideSection,
   ModeratorGuideOptions,
   PolicyJson,
 } from './documents.js';
@@ -159,6 +239,7 @@ export { LIMITS_DEFAULTS, resolveLimits } from './limits.js';
 export type { Limits, LimitsInput } from './limits.js';
 export {
   actionStep,
+  DEFAULT_AREA_RULES,
   DEFAULT_SEVERE_RULES,
   HISTORY_LOOKBACK_MS,
   historyOf,
@@ -179,23 +260,47 @@ export type {
   RevokeDeps,
 } from './decide.js';
 export {
+  applyPolicyLayer,
+  changedSections,
+  DEFAULT_DURATIONS,
   defineProfile,
+  layerSections,
   MAX_DURATION_MS,
+  MAX_DURATIONS,
+  MAX_GUIDELINE_OUTCOME,
+  MAX_RULE_LIST,
   MAX_WINDOW_DAYS,
+  POLICY_SECTIONS,
   PRESETS,
   ProfileError,
   resolveProfile,
   validateProfile,
 } from './profile.js';
+export { POLICY_REFRESH_MS, PREVIEW_SAMPLES } from './policy.js';
+export type {
+  PolicyPreview,
+  PolicySaveContext,
+  PolicySaveResult,
+  PolicyState,
+  PreviewOutcome,
+  PreviewSample,
+} from './policy.js';
 export type {
   DeepPartial,
   GuidelineCover,
   GuidelineTier,
   LevelDescription,
   ModerationProfile,
+  ModerationProfileBase,
   Outcome,
+  PolicyCell,
+  PolicyLadderRow,
+  PolicyLayer,
+  PolicySection,
   PresetName,
   ProfanityConfig,
+  ProfileInput,
   ProfileOverrides,
+  ResolvedProfile,
   RulesFlavour,
 } from './profile.js';

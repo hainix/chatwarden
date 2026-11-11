@@ -1,19 +1,19 @@
 // What only the REAL kit does, checked through KitEngine: the refusal comes from the matcher, the automatic strikes and
-// timeouts are the kit's, the ladder suggestion is the kit's, and the scripted players are written so they never trip any of it.
-import { REPORT_CATEGORIES as KIT_CATEGORIES } from '@chatwarden/core';
+// timeouts are the kit's, and the scripted players are written so they never trip any of it. (The ladder suggestion and the
+// decision are the hub's, over the staff routes: see demoHub.test.tsx and hubPane.test.ts.)
 import { LiveTerms } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { REPORT_CATEGORIES, LINE_MAX } from '../src/demo/engine';
-import type { ChatResult, ReportCategory } from '../src/demo/engine';
-import { conductLevel, DEMO_ACTOR, KitEngine } from '../src/demo/kitEngine';
+import { LINE_MAX } from '../src/demo/engine';
+import type { ChatResult } from '../src/demo/engine';
 import { LOOP, SEED } from '../src/demo/script';
+import { StaffEngine } from './helpers/staffEngine';
 
 const START = Date.UTC(2026, 10, 10, 12, 0, 0);
 function make() {
   let t = START;
   const clock = { now: () => t, advance: (ms: number) => (t += ms) };
-  return { engine: new KitEngine({ clock }), clock };
+  return { engine: new StaffEngine({ clock }), clock };
 }
 const refusal = (r: ChatResult) => ('refuse' in r ? r.refuse : null);
 
@@ -62,9 +62,6 @@ describe('the refusal comes from the matcher', () => {
     const { engine } = make();
     expect('deliver' in (await engine.chat.accept('you', 'quisel'))).toBe(true);
     expect(refusal(await engine.chat.accept('you', 'quissel'))).toMatchObject({ reason: 'blocked' });
-  });
-  it('the report categories the UI offers are the kit categories', () => {
-    expect([...REPORT_CATEGORIES]).toEqual([...KIT_CATEGORIES]);
   });
   it('the 200 character cap the composer shows is the kit default', async () => {
     const { engine } = make();
@@ -179,94 +176,7 @@ describe('the scripted players never trip the filter', () => {
   });
 });
 
-describe('the suggestion is the real ladder', () => {
-  async function report(engine: KitEngine, clock: { advance(ms: number): number }, opts: { seat?: string; text: string; category: ReportCategory; reporter?: string }) {
-    const line = await engine.chat.accept(opts.seat ?? 'bo', opts.text);
-    clock.advance(1_500);
-    if (!('deliver' in line)) throw new Error('setup');
-    const res = await engine.reports.submit({
-      reporterSeat: opts.reporter ?? 'you',
-      targetSeat: opts.seat ?? 'bo',
-      lineId: line.deliver.lineId,
-      category: opts.category,
-    });
-    if (!res.ok) throw new Error(`setup: ${res.refused}`);
-    return res.reportId;
-  }
-  async function warn(engine: KitEngine, reportId: string, rule = 2) {
-    const r = (await engine.reports.get(reportId))!;
-    const res = await engine.decide({ reportId, verdict: 'upheld', reason: 'x', actions: [{ subject: r.targetPerson, kind: 'warning', durationMs: null, rule }] });
-    expect(res.ok).toBe(true);
-  }
-
-  it('cheating on a rude line, first offence: a warning under Community Rule 5', async () => {
-    const { engine, clock } = make();
-    const id = await report(engine, clock, { text: "you're hopeless, uninstall", category: 'cheating' });
-    expect(await engine.suggest(id)).toMatchObject({ outcome: 'warning', label: 'Warning', rule: 5 });
-  });
-  it('disruption after a warning: the kit swaps the chat restriction for a ban from public rooms (area) under Rule 6', async () => {
-    const { engine, clock } = make();
-    await warn(engine, await report(engine, clock, { text: 'worthless team', category: 'harassment' }));
-    const id = await report(engine, clock, { seat: 'bo', text: 'garbage players, honestly', category: 'disruption', reporter: 'ada' });
-    const s = (await engine.suggest(id))!;
-    expect(s.rule).toBe(6);
-    expect(s.outcome).toEqual({ kind: 'area', durationMs: 86_400_000 });
-    expect(s.label).toBe('Ban from public rooms 24 hours');
-  });
-  it('an "other" report is under no rule yet: rule uncovered, and banter is still not acted on', async () => {
-    const { engine, clock } = make();
-    const id = await report(engine, clock, { text: 'ez', category: 'other' });
-    expect(await engine.suggest(id)).toMatchObject({ outcome: 'none', rule: 'uncovered' });
-  });
-  it('a refused line in the evidence reads as hostile: the kit acts at once', async () => {
-    const { engine, clock } = make();
-    await engine.chat.accept('bo', 'you zorbak');
-    clock.advance(1_500);
-    const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', category: 'harassment' });
-    if (!res.ok) throw new Error('setup');
-    const s = (await engine.suggest(res.reportId))!;
-    expect(s.outcome).toMatchObject({ kind: 'chat' });
-  });
-  it('the demo heuristic: rude words, hate, blocked lines, and the line that was reported (not the whole chat)', async () => {
-    const { engine, clock } = make();
-    await engine.chat.accept('bo', "you're hopeless");
-    clock.advance(1_500);
-    const calm = await engine.chat.accept('bo', 'gg');
-    if (!('deliver' in calm)) throw new Error('setup');
-    const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: calm.deliver.lineId, category: 'harassment' });
-    if (!res.ok) throw new Error('setup');
-    const r = (await engine.reports.get(res.reportId))!;
-    expect(conductLevel(r)).toBe('banter'); // Bo was rude earlier, but the reported line is "gg"
-    expect(conductLevel({ ...r, category: 'hate' })).toBe('hostile');
-    expect(conductLevel({ ...r, lineId: null })).toBe('rude'); // no line named: read the target's own lines
-    expect(conductLevel({ ...r, lineId: null, excerpt: r.excerpt.map((l) => ({ ...l, raw: 'fine' })) })).toBe('banter');
-    expect(conductLevel({ ...r, lineId: null, excerpt: r.excerpt.map((l) => ({ ...l, blocked: true })) })).toBe('hostile');
-  });
-});
-
-describe('decide goes to the kit as the demo moderator', () => {
-  it('sends the actor and the moderator source, and keeps the subject the staff report named', async () => {
-    const { engine, clock } = make();
-    const line = await engine.chat.accept('bo', "uninstall, you're hopeless");
-    clock.advance(1_500);
-    if (!('deliver' in line)) throw new Error('setup');
-    const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: line.deliver.lineId, category: 'harassment' });
-    if (!res.ok) throw new Error('setup');
-    const cw = await engine.kit();
-    const spy = vi.spyOn(cw, 'decide');
-    const report = (await engine.reports.get(res.reportId))!;
-    await engine.decide({ reportId: res.reportId, verdict: 'upheld', reason: 'r', actions: [{ subject: report.targetPerson, kind: 'warning', durationMs: null, rule: 2 }] });
-    expect(DEMO_ACTOR).toBe('demo-moderator');
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ actor: 'demo-moderator', source: 'moderator', reportId: res.reportId }));
-    // the subject is the kit's canonical id for Bo's seat
-    expect(report.targetPerson).toBe(cw.rooms.subjectAt('lobby', 'bo'));
-  });
-  it('a store failure rejects (the kit contract); the UI is what catches it', async () => {
-    const { engine } = make();
-    const cw = await engine.kit();
-    vi.spyOn(cw, 'decide').mockRejectedValue(new Error('store down'));
-    await expect(engine.decide({ reportId: 'x', verdict: 'no_action', reason: 'r', actions: [] })).rejects.toThrow('store down');
-  });
+describe('the kit’s settings the demo changes, and the ones it leaves alone', () => {
   it('the reporter gets no "action taken" notice (the demo sets reporterFeedback false), so only Bo has a screen', async () => {
     const { engine, clock } = make();
     const line = await engine.chat.accept('bo', "you're hopeless");
@@ -274,8 +184,8 @@ describe('decide goes to the kit as the demo moderator', () => {
     if (!('deliver' in line)) throw new Error('setup');
     const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: 'bo', lineId: line.deliver.lineId, category: 'harassment' });
     if (!res.ok) throw new Error('setup');
-    const report = (await engine.reports.get(res.reportId))!;
-    await engine.decide({ reportId: res.reportId, verdict: 'upheld', reason: 'r', actions: [{ subject: report.targetPerson, kind: 'warning', durationMs: null, rule: 2 }] });
+    const report = (await engine.staff.get(res.reportId))!;
+    await engine.staff.decide({ reportId: res.reportId, verdict: 'upheld', reason: 'r', actions: [{ subject: report.targetPerson, kind: 'warning', durationMs: null, rule: 2 }] });
     expect(await engine.notices.pending('you')).toEqual([]);
     expect(await engine.notices.pending('bo')).toHaveLength(1);
     expect((await engine.kit()).limits.reporterFeedback).toBe(false);

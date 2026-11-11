@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes the seven @chatwarden packages to npm, in dependency order, with provenance.
+# Publishes the ten @chatwarden packages to npm, in dependency order, with provenance.
 #   - Run it by hand (Actions tab -> Release -> Run workflow) for a dry run: everything except the upload. dry_run defaults to true.
 #   - A real publish runs on a tag only: push a tag v<version> (for example v0.1.0). A tag push is never a dry run.
 #   - Provenance needs a PUBLIC source repository. The owner makes hainix/chatwarden public first (see RELEASING.md); until
@@ -58,6 +58,25 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      # The hub element's Chromium smoke (CW_REQUIRE_BROWSER makes a missing browser a failure, not a skip).
+      # The browser download is cached per Playwright version; the system packages (apt) are not part of the cache, so they are
+      # installed on a hit as well.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium
+      # System packages are best-effort: the runner image already has Chromium's libraries, and an apt mirror outage
+      # (2026-11-11) must not fail CI. A library that is really missing still fails the browser tests (CW_REQUIRE_BROWSER).
+      - run: npx playwright install-deps chromium || echo "::warning::playwright install-deps failed; using the runner image's libraries"
+      - run: npm run smoke:browser --workspace @chatwarden/hub-element
+        env:
+          CW_REQUIRE_BROWSER: '1'
       - run: npm run check:pack
       - name: Smoke test (pack, install and run in fresh ESM and CommonJS projects)
         run: node scripts/smoke.mjs

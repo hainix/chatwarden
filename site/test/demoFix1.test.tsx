@@ -1,50 +1,19 @@
-// Fix round 1: focus handling, stacked pane switches, honest copy, robustness (double dispatch, reset races, throwing
-// engine), refusal announcements, the disclosure line and inert-ness behind the dialog.
+// Focus handling, stacked pane switches, honest copy, robustness (double dispatch, reset races, a throwing engine), refusal
+// announcements, the disclosure line and the modal dialogs. The moderator side is the real hub and the player side is player-react,
+// so what is checked here is how the demo behaves around them.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Demo from '../src/demo/Demo';
 import { KitEngine } from '../src/demo/kitEngine';
+import { closeReport, composer, live, modPane, noticeBtn, oneTapReport, openCase, pickRule, reportBtn, RUDE, sendHeldDecision, setup, stepText, stubMatchMedia, tour } from './helpers/demoUi';
 
-const RUDE = "uninstall the game, you're hopeless";
 const FRIENDLY = 'Something went wrong in the demo. Reset to try again.';
-
-function stubMatchMedia(stacked: boolean) {
-  window.matchMedia = ((q: string) => ({
-    matches: /max-width/.test(q) ? stacked : false,
-    media: q,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-  })) as unknown as typeof window.matchMedia;
-}
-
-async function setup(opts: { stacked?: boolean; engine?: KitEngine; scripted?: boolean } = {}) {
-  stubMatchMedia(opts.stacked ?? false);
-  const engine = opts.engine ?? new KitEngine();
-  const user = userEvent.setup();
-  const view = render(<Demo engine={engine} scripted={opts.scripted ?? false} />);
-  await screen.findByText(RUDE);
-  return { engine, user, ...view };
-}
-
-const live = () => screen.getByTestId('demo-live');
-const tour = () => screen.queryByRole('region', { name: /guided tour/i });
-const composer = () => screen.getByLabelText(/chat message/i) as HTMLInputElement;
 const active = () => document.activeElement as HTMLElement | null;
+const next = () => within(tour() as HTMLElement).getByRole('button', { name: /^next$/i });
 
 async function sayBad(user: ReturnType<typeof userEvent.setup>) {
   await user.type(composer(), 'you absolute zorbak');
-  await user.keyboard('{Enter}');
-}
-/** Reports Bo's rude line with the keyboard only. */
-async function reportByKeyboard(user: ReturnType<typeof userEvent.setup>) {
-  screen.getByRole('button', { name: /report bo's line: uninstall/i }).focus();
-  await user.keyboard('{Enter}');
-  await screen.findByRole('dialog');
-  await user.keyboard(' ');
-  screen.getByRole('button', { name: /send report/i }).focus();
   await user.keyboard('{Enter}');
 }
 
@@ -58,7 +27,7 @@ afterEach(() => {
 describe('focus when the tour card goes away', () => {
   it('Skip hands focus to "Restart tour", not to the page body', async () => {
     const { user } = await setup();
-    const skip = within(tour()!).getByRole('button', { name: /skip tour/i });
+    const skip = within(tour() as HTMLElement).getByRole('button', { name: /skip tour/i });
     skip.focus();
     await user.keyboard('{Enter}');
     expect(tour()).toBeNull();
@@ -66,28 +35,28 @@ describe('focus when the tour card goes away', () => {
   });
   it('Escape in the card does the same', async () => {
     const { user } = await setup();
-    within(tour()!).getByRole('button', { name: /^next$/i }).focus();
+    next().focus();
     await user.keyboard('{Escape}');
     expect(tour()).toBeNull();
     expect(active()).toBe(screen.getByRole('button', { name: /restart tour/i }));
   });
   it('Close on the finished card does the same', async () => {
     const { user } = await setup();
-    for (let i = 0; i < 4; i++) await user.click(within(tour()!).getByRole('button', { name: /^next$/i }));
-    await user.click(within(tour()!).getByRole('button', { name: /^close$/i }));
+    for (let i = 0; i < 7; i++) await user.click(next());
+    await user.click(within(tour() as HTMLElement).getByRole('button', { name: /^close$/i }));
     expect(tour()).toBeNull();
     expect(active()).toBe(screen.getByRole('button', { name: /restart tour/i }));
   });
   it('Restart tour removes the button that was pressed, so focus moves on to the new card (Next), not the body', async () => {
     const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /skip tour/i }));
+    await user.click(within(tour() as HTMLElement).getByRole('button', { name: /skip tour/i }));
     await user.click(screen.getByRole('button', { name: /restart tour/i }));
     expect(tour()).toBeTruthy();
-    expect(active()).toBe(within(tour()!).getByRole('button', { name: /^next$/i }));
+    expect(active()).toBe(next());
   });
   it('leaves focus alone when it is somewhere that still exists (a click on Reset keeps it on Reset)', async () => {
     const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /skip tour/i }));
+    await user.click(within(tour() as HTMLElement).getByRole('button', { name: /skip tour/i }));
     const reset = screen.getByRole('button', { name: /reset demo/i });
     await user.click(reset);
     expect(tour()).toBeTruthy();
@@ -96,36 +65,39 @@ describe('focus when the tour card goes away', () => {
 });
 
 describe('stacked layout: the pane switch keeps focus and says so', () => {
-  it('report then Moderator: focus lands on the moderator heading and the switch is announced', async () => {
+  it('report then Moderator: once the thank-you is closed, focus lands on the moderator heading and the switch is announced', async () => {
     const { user } = await setup({ stacked: true });
     await sayBad(user);
-    await reportByKeyboard(user);
-    await waitFor(() => expect(screen.getByRole('button', { name: /^moderator/i }).getAttribute('aria-pressed')).toBe('true'));
+    await oneTapReport(user);
+    // the pane switched while the dialog was up, so the player's dialog still has the focus
+    await waitFor(() => expect(screen.getByRole('button', { name: /^moderator/i, hidden: true }).getAttribute('aria-pressed')).toBe('true'));
+    await closeReport(user);
     const heading = screen.getByRole('heading', { name: 'Your moderator' });
     await waitFor(() => expect(active()).toBe(heading));
     expect(heading.getAttribute('tabindex')).toBe('-1');
     expect(live().textContent).toMatch(/showing the moderator view/i);
   });
-  it('Warn then Game: focus lands on the game heading and the switch is announced (step 4 too)', async () => {
+  it('the decision then Game: the switch is announced and Bo’s notice is on the game pane (step 5)', async () => {
     const { user } = await setup({ stacked: true });
-    await sayBad(user);
-    await reportByKeyboard(user);
-    const warn = await screen.findByRole('button', { name: 'Warn' });
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    const warn = within(card).getByRole('button', { name: /^send a warning/i });
     warn.focus();
     await user.keyboard('{Enter}');
-    const heading = screen.getByRole('heading', { name: 'The game' });
-    await waitFor(() => expect(active()).toBe(heading));
-    expect(screen.getByRole('button', { name: /^game$/i }).getAttribute('aria-pressed')).toBe('true');
+    await sendHeldDecision();
+    await waitFor(() => expect(screen.getByRole('button', { name: /^game$/i }).getAttribute('aria-pressed')).toBe('true'));
     expect(live().textContent).toMatch(/showing the game view/i);
-    expect(screen.getByRole('region', { name: /bo.s screen/i })).toBeTruthy();
+    await noticeBtn('Bo');
   });
   it('does not pull focus off the tour card when Next switches the pane', async () => {
     const { user } = await setup({ stacked: true });
-    const next = () => within(tour()!).getByRole('button', { name: /^next$/i });
+    await user.click(next()); // step 2: the moderator pane
     await user.click(next());
-    await user.click(next()); // step 3: the moderator pane
+    await user.click(next()); // step 4
     next().focus();
-    await user.keyboard('{Enter}'); // step 4: back to the game pane
+    await user.keyboard('{Enter}'); // step 5: back to the game pane
     expect(active()).toBe(next());
     expect(live().textContent).toMatch(/showing the game view/i);
   });
@@ -137,121 +109,120 @@ describe('stacked layout: the pane switch keeps focus and says so', () => {
     expect(within(group).getByRole('button', { name: /moderator/i }).getAttribute('aria-pressed')).toBe('true');
     expect(within(group).getByRole('button', { name: /game/i }).getAttribute('aria-pressed')).toBe('false');
   });
-  it('the moderator console views are aria-pressed buttons too', async () => {
+  it('the hub’s own Simple/Detailed switch is aria-pressed buttons, and the demo adds no tab widgets of its own', async () => {
     await setup();
-    const reports = screen.getByRole('button', { name: /reports, 0 open/i });
-    expect(reports.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: /my record/i }).getAttribute('aria-pressed')).toBe('false');
-    expect(document.querySelector('.demo [role="tab"]')).toBeNull();
-    expect(document.querySelector('.demo [role="tabpanel"]')).toBeNull();
+    const view = within(modPane()).getByRole('group', { name: 'View' });
+    expect(within(view).getByRole('button', { name: 'Simple' }).getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('.demo [role="tablist"]')).toBeNull();
   });
 });
 
 describe('honest copy', () => {
-  it('says "no IP, no account or subject id", never a bare "no ids"', async () => {
-    const { user } = await setup();
-    await user.click(screen.getByRole('button', { name: /^next$/i }));
-    await user.click(screen.getByRole('button', { name: /^next$/i }));
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    await user.click(await screen.findByRole('button', { name: 'Warn' }));
-    const frame = await screen.findByRole('region', { name: /bo.s screen/i });
-    expect(frame.textContent).toMatch(/no one else.s chat, no IP, no account or subject id/);
-    expect(frame.textContent).not.toMatch(/no ids/i);
-  });
-  it('the step 4 code blurb says the same', async () => {
+  it('the notice step’s code blurb says: no IP, no account or subject id, never a bare "no ids"', async () => {
     const { CODE_STEPS } = await import('../src/demo/codeSteps');
-    expect(CODE_STEPS[3]?.blurb).toMatch(/no IP|an IP/);
-    expect(CODE_STEPS[3]?.blurb).toMatch(/account or subject id/);
-    expect(CODE_STEPS[3]?.blurb).not.toMatch(/an id\b/);
+    const blurb = CODE_STEPS[4]?.blurb ?? '';
+    expect(blurb).toMatch(/an IP/);
+    expect(blurb).toMatch(/account or subject id/);
+    expect(blurb).not.toMatch(/no ids|an id\b/);
+    expect(blurb).toContain('cw.notices.pending');
+    expect(blurb).toMatch(/in process/);
+  });
+  it('the notice dialog keeps the kit’s promise: nothing of anyone else’s chat, no subject id', async () => {
+    const { user, engine } = await setup();
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
+    await sendHeldDecision();
+    await user.click(await noticeBtn('Bo'));
+    const dialog = await screen.findByRole('dialog');
+    const person = (await engine.kit()).reports.list({ status: 'actioned' }).items[0]?.targetPerson ?? 'none';
+    expect(dialog.textContent).not.toContain(person);
+    expect(dialog.textContent).not.toMatch(/demo-bo|demo-you|gg, that last clutch/);
   });
 });
 
 describe('double dispatch and reset races', () => {
-  it('two clicks on Warn in one task decide once (one announcement, one notice)', async () => {
-    const { engine } = await setup();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    const warn = await screen.findByRole('button', { name: 'Warn' });
+  it('two clicks on "Send a warning" in one task decide once (one notice, one announcement)', async () => {
+    const { engine, user } = await setup();
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    const warn = within(card).getByRole('button', { name: /^send a warning/i });
     await act(async () => {
       warn.click();
       warn.click();
     });
-    await screen.findByRole('region', { name: /bo.s screen/i });
+    await sendHeldDecision();
+    await noticeBtn('Bo');
     expect(await engine.notices.pending('bo')).toHaveLength(1);
-    const made = [...live().querySelectorAll('p')].filter((p) => /decision made/i.test(p.textContent ?? ''));
-    expect(made).toHaveLength(1);
+    expect([...live().querySelectorAll('p')].filter((p) => /decision taken/i.test(p.textContent ?? ''))).toHaveLength(1);
   });
-  it('a decision still in flight when Reset is pressed leaves nothing behind', async () => {
-    await setup();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    const warn = await screen.findByRole('button', { name: 'Warn' });
-    const reset = screen.getByRole('button', { name: /reset demo/i });
-    await act(async () => {
-      warn.click();
-      reset.click();
-    });
+  it('a decision still held when Reset is pressed leaves nothing behind', async () => {
+    const { user } = await setup();
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
+    await within(modPane()).findAllByRole('button', { name: 'Undo' });
+    await user.click(screen.getByRole('button', { name: /reset demo/i }));
     await waitFor(() => expect(live().textContent).toMatch(/demo reset/i));
-    await new Promise((r) => setTimeout(r, 40));
-    expect(live().textContent).not.toMatch(/decision made/i);
-    expect(screen.queryByRole('region', { name: /bo.s screen/i })).toBeNull();
-    expect(screen.getByText(/no open reports/i)).toBeTruthy();
-    // and the decide buttons work again afterwards
-    await user.click(await screen.findByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    expect((await screen.findByRole('button', { name: 'Warn' })).hasAttribute('disabled')).toBe(false);
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide')); // anything the old hub still holds goes out now
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(live().textContent).not.toMatch(/decision taken/i);
+    expect(screen.queryByRole('button', { name: /see what bo sees/i })).toBeNull();
+    expect(stepText()).toMatch(/step 1 of 7/i);
+    await waitFor(() => expect(modPane().textContent).toMatch(/nothing is waiting/i));
   });
   it('a report still in flight when Reset is pressed does not file into the new lobby', async () => {
-    const { engine } = await setup();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    const send = screen.getByRole('button', { name: /send report/i });
+    const { engine, user } = await setup();
+    await user.click(reportBtn(/report bo's line: uninstall/i));
+    const dialog = await screen.findByRole('dialog');
+    const send = within(dialog).getByRole('button', { name: 'Report' });
     const reset = screen.getByRole('button', { name: /reset demo/i });
     await act(async () => {
       fireEvent.click(send);
       fireEvent.click(reset);
     });
     await waitFor(() => expect(live().textContent).toMatch(/demo reset/i));
-    await new Promise((r) => setTimeout(r, 40));
+    await new Promise((r) => setTimeout(r, 60));
     expect(live().textContent).not.toMatch(/report filed/i);
-    expect((await engine.reports.list()).items).toHaveLength(0);
-    expect(screen.getByRole('button', { name: /reports, 0 open/i })).toBeTruthy();
+    expect((await engine.kit()).reports.list({ status: 'open' }).items).toHaveLength(0);
   });
 });
 
 describe('a failing engine never breaks the demo', () => {
-  it('a rejected report shows a plain message in the dialog and keeps it open', async () => {
+  it('a report that could not be sent keeps the dialog open with the player’s own message, and can be sent again', async () => {
     const { engine, user } = await setup();
-    vi.spyOn(engine.reports, 'submit').mockRejectedValue(new Error('store down'));
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(FRIENDLY));
-    expect(screen.getByRole('dialog')).toBeTruthy();
-    expect((screen.getByRole('button', { name: /send report/i }) as HTMLButtonElement).disabled).toBe(false);
+    const submit = vi.spyOn(engine.reports, 'submit').mockRejectedValueOnce(new Error('store down'));
+    await user.click(reportBtn(/report bo's line: uninstall/i));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Report' }));
+    await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toMatch(/your report was not sent/i));
+    expect(submit).toHaveBeenCalledTimes(1);
+    await user.click(within(dialog).getByRole('button', { name: 'Report' }));
+    await within(dialog).findByRole('heading', { name: 'Report sent' });
   });
-  it('a rejected decision shows the message, clears busy, and the buttons work again', async () => {
+  it('a decision the kit fails to take is the hub’s to report: nothing is announced and the tour waits', async () => {
     const { engine, user } = await setup();
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    const warn = await screen.findByRole('button', { name: 'Warn' });
-    const spy = vi.spyOn(engine, 'decide').mockRejectedValueOnce(new Error('store down'));
-    await user.click(warn);
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(FRIENDLY));
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect((screen.getByRole('button', { name: 'Warn' }) as HTMLButtonElement).disabled).toBe(false);
-    await user.click(screen.getByRole('button', { name: 'Warn' }));
-    await screen.findByRole('region', { name: /bo.s screen/i });
-    expect(screen.queryByRole('alert')?.textContent ?? '').not.toBe(FRIENDLY); // success clears it
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    const cw = await engine.kit();
+    vi.spyOn(cw, 'decide').mockRejectedValueOnce(new Error('store down'));
+    await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
+    await sendHeldDecision();
+    await new Promise((r) => setTimeout(r, 120));
+    expect(live().textContent).not.toMatch(/decision taken/i);
+    expect(screen.queryByRole('button', { name: /see what bo sees/i })).toBeNull();
+    expect(stepText()).toMatch(/step 4 of 7/i);
+    expect(screen.queryByText(FRIENDLY)).toBeNull(); // the hub says so itself; the demo is not broken
   });
   it('a rejected chat call keeps what you typed and says so', async () => {
     const { engine, user } = await setup();
@@ -261,17 +232,20 @@ describe('a failing engine never breaks the demo', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(FRIENDLY));
     expect(composer().value).toBe('hello there');
   });
-  it('a rejected acknowledge shows the message and keeps the notice', async () => {
+  it('a rejected acknowledge keeps the notice and says so, inline, in player-react’s words', async () => {
     const { engine, user } = await setup();
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
-    await user.click(await screen.findByRole('button', { name: 'Warn' }));
-    const ack = await screen.findByRole('button', { name: /acknowledge/i });
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
+    await sendHeldDecision();
+    await user.click(await noticeBtn('Bo'));
+    const dialog = await screen.findByRole('dialog');
     vi.spyOn(engine.notices, 'ack').mockRejectedValueOnce(new Error('boom'));
-    await user.click(ack);
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(FRIENDLY));
-    expect(screen.getByRole('region', { name: /bo.s screen/i })).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: /acknowledge/i }));
+    await waitFor(() => expect(within(dialog).getByRole('alert').textContent).toMatch(/still here|could not|try again/i));
+    expect(await engine.notices.pending('bo')).toHaveLength(1);
   });
   it('a failing first reset shows the message, does not hang the scripted players, and Reset recovers', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
@@ -296,12 +270,10 @@ describe('a failing engine never breaks the demo', () => {
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByText(RUDE)).toBeTruthy();
   });
-  it('a failing console read (reports.list) shows the message instead of an unhandled rejection', async () => {
+  it('a failing read of the seats shows the message instead of an unhandled rejection', async () => {
     const { engine, user } = await setup();
-    vi.spyOn(engine.reports, 'list').mockRejectedValue(new Error('bad cursor'));
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
-    await user.click(screen.getByRole('radio', { name: /harassment/i }));
-    await user.click(screen.getByRole('button', { name: /send report/i }));
+    vi.spyOn(engine.rooms, 'seats').mockRejectedValue(new Error('bad'));
+    await sayBad(user); // a blocked line refreshes the seats and the notices
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(FRIENDLY));
   });
 });
@@ -342,7 +314,7 @@ describe('every refusal is announced; the note clears when you edit', () => {
   });
 });
 
-describe('the disclosure and the modal', () => {
+describe('the disclosure and the modals', () => {
   it('the one honest line about what runs the demo sits above the panes: the real kit, a made-up word list, no stand-in', async () => {
     const { container } = await setup();
     const badge = container.querySelector('.demo-badge') as HTMLElement;
@@ -352,20 +324,25 @@ describe('the disclosure and the modal', () => {
     expect(badge.compareDocumentPosition(panes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector('.demo-note')).toBeNull();
   });
-  it('while the report dialog is open, the tour card, the toolbar, the panes and the pane switcher are inert', async () => {
+  it('while the player’s notice is open, the tour card, the toolbar, the panes and the pane switcher are inert too', async () => {
     const { user, container } = await setup({ stacked: true });
-    await user.click(screen.getByRole('button', { name: /report bo's line: uninstall/i }));
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
+    await sendHeldDecision();
+    await user.click(await noticeBtn('Bo'));
+    await screen.findByRole('dialog');
     for (const sel of ['.tour', '.pane-tabs', '.demo-toolbar', '.demo-panes']) {
       expect(container.querySelector(sel)?.hasAttribute('inert'), sel).toBe(true);
     }
-    await user.click(screen.getByRole('button', { name: /cancel/i }));
-    for (const sel of ['.tour', '.pane-tabs', '.demo-toolbar', '.demo-panes']) {
-      expect(container.querySelector(sel)?.hasAttribute('inert'), sel).toBe(false);
-    }
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /acknowledge/i }));
+    await waitFor(() => expect(container.querySelector('.demo-panes')?.hasAttribute('inert')).toBe(false));
   });
   it('aria-controls on Show me the code only points at the drawer while it exists', async () => {
     const { user } = await setup();
-    const toggle = within(tour()!).getByRole('button', { name: /show me the code/i });
+    const toggle = within(tour() as HTMLElement).getByRole('button', { name: /show me the code/i });
     expect(toggle.hasAttribute('aria-controls')).toBe(false);
     await user.click(toggle);
     expect(toggle.getAttribute('aria-controls')).toBe('demo-code');
@@ -375,7 +352,7 @@ describe('the disclosure and the modal', () => {
   });
   it('the toolbar toggle (tour skipped) follows the same rule', async () => {
     const { user } = await setup();
-    await user.click(within(tour()!).getByRole('button', { name: /skip tour/i }));
+    await user.click(within(tour() as HTMLElement).getByRole('button', { name: /skip tour/i }));
     const toggle = screen.getByRole('button', { name: /show me the code/i });
     expect(toggle.hasAttribute('aria-controls')).toBe(false);
     await user.click(toggle);

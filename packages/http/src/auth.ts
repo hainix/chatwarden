@@ -14,6 +14,11 @@ const isAuthz = (v: unknown): v is Authz => {
   return typeof a.actor === 'string' && a.actor.length > 0 && typeof a.role === 'string' && (ROLES as readonly string[]).includes(a.role);
 };
 
+/** Check that `authz` is a well-formed caller (no permission needed). A missing or malformed one fails closed: throws 401 `unauthorized`. */
+export function requireAuthz(authz: Authz | null | undefined): asserts authz is Authz {
+  if (!isAuthz(authz)) throw new HttpError('unauthorized');
+}
+
 /**
  * Check that `authz` may do `permission`. Returns it when so.
  * - no authz (or one that is malformed: fail closed) -> throws 401 `unauthorized`
@@ -25,7 +30,7 @@ export function requireRole(
   permission: PermissionKey,
   permissions: Permissions = PERMISSIONS,
 ): Authz {
-  if (!isAuthz(authz)) throw new HttpError('unauthorized');
+  requireAuthz(authz);
   const required = Object.hasOwn(permissions, permission) ? permissions[permission] : undefined;
   if (required === undefined || !roleAtLeast(authz.role, required)) throw new HttpError('forbidden');
   return authz;

@@ -21,13 +21,54 @@ export interface TermsEditor {
   setExceptionActive(id: string, active: boolean): void;
 }
 
+/**
+ * Who changed a term or exception and when, as far as the term source knows. Every field is optional: a source that keeps
+ * none of it (or a row the matcher read from a pack) reads as `null` in `GET /terms`.
+ */
+export interface TermMetadata {
+  note?: string | null;
+  addedBy?: string | null;
+  addedAt?: number | null;
+  updatedBy?: string | null;
+  updatedAt?: number | null;
+}
+
+/** A term row, with its metadata when the source has it. */
+export interface TermListRow extends TermMetadata {
+  id: string;
+  term: string;
+  language: string;
+  active: boolean;
+}
+
+/** An exception row, with its metadata when the source has it. */
+export interface ExceptionListRow extends TermMetadata {
+  id: string;
+  phrase: string;
+  language: string;
+  active: boolean;
+}
+
 /** The part of the matcher's `LiveTerms` the staff API uses. */
 export interface TermsAdmin {
   /** The rows the live matcher was built from. */
   readonly rows: {
-    readonly terms: readonly { id: string; term: string; language: string; active: boolean }[];
-    readonly exceptions: readonly { id: string; phrase: string; language: string; active: boolean }[];
+    readonly terms: readonly TermListRow[];
+    readonly exceptions: readonly ExceptionListRow[];
   };
+  /**
+   * The same rows with their metadata (note, who added or changed them, and when). `GET /terms` lists these when present
+   * and falls back to `rows` (metadata `null`) when not. `LiveTerms.records` is this.
+   */
+  records?(): {
+    readonly terms: readonly TermListRow[];
+    readonly exceptions: readonly ExceptionListRow[];
+  };
+  /**
+   * The live matcher's check of one chat line: the id of the term row that blocks it, or null. Pure: `POST /terms/test` is
+   * mounted only when this is present. `LiveTerms.match` is this.
+   */
+  match?(text: string): { termId: string } | null;
   /** The dry run: the lines this candidate would block. Writes nothing. */
   check(term: string, language: string, recentLines: readonly string[]): { ok: true; hits: string[] } | { ok: false; error: string };
   /** Run an edit atomically with the matcher reload. A refusal is `{ ok: false }`; the message is never passed on. */
@@ -64,8 +105,12 @@ const note = (v: unknown): string | null => {
 
 /**
  * The term and exception routes, built only when the adopter passes `terms` (staff only):
- * - `GET /terms`: the rows, `{ terms, exceptions }`, text included (`terms.read`). Writes no audit row.
+ * - `GET /terms`: the rows, `{ terms, exceptions, blocks30d }`, text and metadata included (`terms.read`). Each row also has
+ *   `note`, `addedBy`, `addedAt`, `updatedBy` and `updatedAt` (null when unknown), and `blocks30d` maps every listed term id to
+ *   the number of lines it blocked in the last 30 days. Writes no audit row.
  * - `POST /terms/check { term, language }`: the dry run, `{ hits }` (`terms.read`). Writes no audit row.
+ * - `POST /terms/test { text }`: would the live list block this chat line? `{ verdict: 'blocked' | 'clean' | 'too_long', termId }`
+ *   (`terms.read`). Side-effect free: no strike, audit row, rate charge or log. Mounted only when `terms.match` is present.
  * - `POST /terms { term, language, note? }`, `PATCH /terms/:id { term?, language?, note? }`, `POST /terms/:id/active { active }`
  *   (`terms.write`; audit `term.add`, `term.update`, `term.toggle`, each with the row id)
  * - `POST /exceptions { phrase, language, note? }`, `PATCH /exceptions/:id`, `POST /exceptions/:id/active`: the same for
@@ -86,14 +131,28 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
   // A stored id the `:id~ref` pattern would 404 can be listed but never edited: say so once, by count only.
   const unroutable = [...terms.rows.terms, ...terms.rows.exceptions].filter((r) => !REF_PARAM_RE.test(r.id)).length;
   if (unroutable > 0) safeWarn(ctx.logger, 'chatwarden.http_unroutable_term_ids', { count: unroutable });
+  const { cw } = ctx;
   const table: RouteTable = {
     'GET /terms': ctx.secure('terms.read', () => {
-      const { rows } = terms;
+      const rows = terms.records?.() ?? terms.rows;
+      const meta = (r: TermMetadata) => ({
+        note: r.note ?? null,
+        addedBy: r.addedBy ?? null,
+        addedAt: r.addedAt ?? null,
+        updatedBy: r.updatedBy ?? null,
+        updatedAt: r.updatedAt ?? null,
+      });
+      // Every listed term gets a count (zero when it blocked nothing); strikes of a term that is no longer listed are left out.
+      const counts = cw.blocked.countsByTerm({ days: 30 });
+      // No prototype, so a term id of `__proto__` is kept as a key like any other.
+      const blocks30d: Record<string, number> = Object.create(null) as Record<string, number>;
+      for (const t of rows.terms) blocks30d[t.id] = counts[t.id] ?? 0;
       return {
         status: 200,
         body: {
-          terms: rows.terms.map((t) => ({ id: t.id, term: t.term, language: t.language, active: t.active })),
-          exceptions: rows.exceptions.map((e) => ({ id: e.id, phrase: e.phrase, language: e.language, active: e.active })),
+          terms: rows.terms.map((t) => ({ id: t.id, term: t.term, language: t.language, active: t.active, ...meta(t) })),
+          exceptions: rows.exceptions.map((e) => ({ id: e.id, phrase: e.phrase, language: e.language, active: e.active, ...meta(e) })),
+          blocks30d,
         },
       };
     }),
@@ -105,6 +164,19 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
       return { status: 200, body: { hits: result.hits } };
     }),
   };
+
+  const { match } = terms;
+  if (typeof match === 'function') {
+    table['POST /terms/test'] = ctx.secure('terms.read', (c) => {
+      const body = bodyObject(c.req);
+      if (typeof body.text !== 'string') throw new ValidationError();
+      // The chat path's own measure and limit (after trimming), so the tester agrees with what a player can send. A long line
+      // is never handed to the matcher.
+      if (body.text.trim().length > cw.limits.chatMaxLength) return { status: 200, body: { verdict: 'too_long', termId: null } };
+      const hit = match.call(terms, body.text.trim());
+      return { status: 200, body: { verdict: hit === null ? 'clean' : 'blocked', termId: hit === null ? null : hit.termId } };
+    });
+  }
 
   const exists = (kind: Kind, id: string): boolean =>
     (kind === 'term' ? terms.rows.terms : terms.rows.exceptions).some((r) => r.id === id);

@@ -11,12 +11,15 @@
     "build": "npm run build:kit && node scripts/assets.mjs && tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "build:kit": "tsc -b ../packages/core ../packages/matcher ../packages/store-memory",
+    "build:kit": "tsc -b ../packages/core ../packages/http ../packages/matcher ../packages/store-memory ../packages/hub-react ../packages/player-react",
     "pretest": "npm run build:kit"
   },
   "dependencies": {
     "@chatwarden/core": "*",
+    "@chatwarden/http": "*",
+    "@chatwarden/hub-react": "*",
     "@chatwarden/matcher": "*",
+    "@chatwarden/player-react": "*",
     "@chatwarden/store-memory": "*"
   },
   "devDependencies": {
@@ -28,7 +31,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
-    "jsdom": "^31.0.0",
+    "jsdom": "^29.1.1",
     "obscenity": "^0.4.6",
     "playwright": "^1.65.0",
     "react": "^19.3.1",

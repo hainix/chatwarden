@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map, migration 15 is soft claims on a person's case and saved decision reasons, migration 16 is the editable profile's stored layer and the audit trail's detail column, migration 17 is the reason a reporter gave and the time of their one follow-up. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -357,6 +357,62 @@ CREATE TABLE kit_discord_threads (
   label      TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+`,
+  },
+  {
+    version: 15,
+    // The team workbench (K4): a soft claim per person (`person` is the canonical subject id the staff refs show, so a
+    // merge is resolved in code and there is no foreign key) and the saved decision reasons. A claim is live while
+    // `until` is in the future; an expired row is replaced by the next claim, never swept or purged by retention: like
+    // kit_discord_threads, a future subject erasure must clear it. `claimed_by` is a staff actor.
+    // Nothing here holds chat text, and it is staff-only. The change token needs no table: it is a counter in kit_meta
+    // that the write methods move.
+    sql: `
+CREATE TABLE kit_claims (
+  person     TEXT PRIMARY KEY,
+  claimed_by TEXT NOT NULL,
+  since      INTEGER NOT NULL,
+  until      INTEGER NOT NULL
+);
+CREATE TABLE kit_reasons (
+  id     TEXT PRIMARY KEY,
+  label  TEXT NOT NULL,
+  text   TEXT NOT NULL,
+  active INTEGER NOT NULL CHECK (active IN (0, 1))
+);
+`,
+  },
+  {
+    version: 16,
+    // The editable moderation profile (K4 Task 7f). `kit_policy_layer` holds at most one row: the owner's stored edits as JSON
+    // (`layer_json`, a validated PolicyLayer: durations, ladder, first offences, repeat rule, rule lists, guideline outcome
+    // texts; never chat text) and its `version`, which the conditional write in `savePolicyLayer` compares and bumps. No row means
+    // version 0 and no layer. `kit_audit` gains `detail_json`: NULL on every existing row and on every row but a policy.update /
+    // policy.reset one, where it holds the sections changed and the owner's reason. Existing rows and tables are untouched.
+    sql: `
+CREATE TABLE kit_policy_layer (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  layer_json TEXT NOT NULL,
+  version    INTEGER NOT NULL CHECK (version >= 1)
+);
+ALTER TABLE kit_audit ADD COLUMN detail_json TEXT;
+`,
+  },
+  {
+    version: 17,
+    // The reporting settings (K4 Task 7h). `reported_reason` is the reason id the reporter gave (a hint: the case is settled by the
+    // decision), NULL when they gave none; `detail_at` is when the reporter added their one follow-up, NULL until then. Both are
+    // nullable columns added in place (no table rebuild), and `category` (NOT NULL) is kept and still written, so every reader of it keeps working.
+    // The backfill is one UPDATE inside the same savepoint, so it touches every existing row once (fine at kit scale). Rows filed before this migration carry their old category as their reason: the six 0.1.1 categories are reason ids, with
+    // `disruption` read as `griefing`; a category that is none of the six (a hand edit) stays NULL rather than being guessed. The
+    // runner wraps this in one savepoint with the version bump, so a failure leaves version 16 and no column.
+    sql: `
+ALTER TABLE kit_reports ADD COLUMN reported_reason TEXT;
+ALTER TABLE kit_reports ADD COLUMN detail_at INTEGER;
+UPDATE kit_reports
+  SET reported_reason = CASE category WHEN 'disruption' THEN 'griefing' ELSE category END
+  WHERE category IN ('harassment', 'hate', 'cheating', 'spam', 'disruption', 'other');
+CREATE INDEX kit_reports_by_reason ON kit_reports (reported_reason, created_at);
 `,
   },
 ];

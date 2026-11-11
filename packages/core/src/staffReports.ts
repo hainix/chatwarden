@@ -1,4 +1,6 @@
 import { ownLineIdsByPerson } from './notices.js';
+import { canonicalReasonId, isReasonId, reasonOfCategory } from './reporting.js';
+import type { ReportReason } from './reporting.js';
 import type { SubjectIndex } from './subjects.js';
 import type { ReportRecord, Store, SubjectId } from './types.js';
 
@@ -10,18 +12,21 @@ export const REPORT_PAGE_MAX = 200;
 const STATUSES: ReadonlyArray<ReportRecord['status']> = ['open', 'actioned', 'dismissed'];
 
 /**
- * A report query that cannot be answered: an unknown `status`, a `before` cursor that is not one we issued, or a `person`
- * that is not a subject id (or one combined with a `status` / `before`, which a person query does not take).
+ * A report query that cannot be answered: an unknown `status`, a `before` cursor that is not one we issued, a `reason` that is
+ * not a well-formed id, or a `person` that is not a subject id (or one combined with a `status` / `before` / `reason`, which a
+ * person query does not take).
  */
 export class ReportQueryError extends Error {
-  readonly field: 'status' | 'before' | 'person';
-  constructor(field: 'status' | 'before' | 'person') {
+  readonly field: 'status' | 'before' | 'person' | 'reason';
+  constructor(field: 'status' | 'before' | 'person' | 'reason') {
     super(
       field === 'status'
         ? 'reports.list: unknown status'
         : field === 'person'
           ? 'reports.list: invalid person'
-          : 'reports.list: invalid cursor',
+          : field === 'reason'
+            ? 'reports.list: invalid reason'
+            : 'reports.list: invalid cursor',
     );
     this.name = 'ReportQueryError';
     this.field = field;
@@ -44,6 +49,10 @@ export class ReportQueryError extends Error {
  * Carries subject ids: staff channels only, never send to a player.
  */
 export interface StaffReport extends ReportRecord {
+  /** When the reporter added their one follow-up, or null. Always present here. */
+  detailAt: number | null;
+  /** The reason the reporter gave (an id from the profile's reasons, an old category read as its new id), or null when they gave none. A hint, never the truth. */
+  reportedReason: string | null;
   targetPerson: SubjectId;
   reporterPerson: SubjectId;
   ownLineIds: Record<SubjectId, string[]>;
@@ -63,6 +72,12 @@ export interface ReportQuery {
    * (`ReportQueryError`).
    */
   person?: SubjectId;
+  /**
+   * Only reports whose reported reason is this id (the old `disruption` finds `griefing`), or, with `null`, only those with no
+   * reason given. An id that is no reason any more still finds its old reports. A malformed id is `ReportQueryError`; a person
+   * query does not take it.
+   */
+  reason?: string | null;
 }
 
 /**
@@ -114,8 +129,12 @@ const clampLimit = (limit: unknown): number => {
 
 /** A stored record as the staff queue shows it (see {@link StaffReport}). Copies; the record is not touched. */
 export function staffReport(record: ReportRecord, subjects: SubjectIndex): StaffReport {
+  // A record from a store that predates `reportedReason` has none at all (not even null): its category is the reason it was filed under.
+  const stored = (record as { reportedReason?: string | null }).reportedReason;
   return {
     ...structuredClone(record),
+    reportedReason: stored === undefined ? reasonOfCategory(record.category) : stored,
+    detailAt: record.detailAt ?? null,
     people: record.people.map((p) => subjects.canonical(p)),
     targetPerson: subjects.canonical(record.targetSubject),
     reporterPerson: subjects.canonical(record.reporterSubject),
@@ -124,25 +143,32 @@ export function staffReport(record: ReportRecord, subjects: SubjectIndex): Staff
 }
 
 /** One page of the staff queue. Throws {@link ReportQueryError} for an unknown status or a bad cursor. */
-export function listStaffReports(store: Store, subjects: SubjectIndex, q: ReportQuery = {}): ReportPage {
+export function listStaffReports(store: Store, subjects: SubjectIndex, q: ReportQuery = {}, reasons: readonly ReportReason[] = []): ReportPage {
   if (q.person !== undefined) {
     if (typeof q.person !== 'string' || q.person === '') throw new ReportQueryError('person');
     if (q.status !== undefined) throw new ReportQueryError('status');
+    if (q.reason !== undefined) throw new ReportQueryError('reason');
     if (q.before !== undefined && q.before !== null) throw new ReportQueryError('before');
     const rows = store.listReportsByPerson(subjects.aliasesOf(q.person), clampLimit(q.limit));
     return { items: rows.map((r) => staffReport(r, subjects)), next: null };
   }
   if (q.status !== undefined && !STATUSES.includes(q.status)) throw new ReportQueryError('status');
+  if (q.reason !== undefined && q.reason !== null && !isReasonId(q.reason)) throw new ReportQueryError('reason');
   const cursor = q.before === undefined || q.before === null ? null : decodeReportCursor(q.before);
   const limit = clampLimit(q.limit);
+  const reason = q.reason === undefined || q.reason === null ? q.reason : canonicalReasonId(reasons, q.reason);
   const rows = store.listReports({
     ...(q.status === undefined ? {} : { status: q.status }),
     ...(cursor === null ? {} : { before: cursor.createdAt, beforeId: cursor.id }),
+    ...(reason === undefined ? {} : { reason }),
     limit,
   });
   const last = rows[rows.length - 1];
+  // The cursor and "is there more" follow the rows the store gave; the filter is applied again to what it returned, so a store
+  // that does not know `reason` still cannot show the wrong reports.
+  const items = rows.map((r) => staffReport(r, subjects));
   return {
-    items: rows.map((r) => staffReport(r, subjects)),
+    items: reason === undefined ? items : items.filter((r) => r.reportedReason === reason),
     next: rows.length === limit && last !== undefined ? encodeReportCursor(last.createdAt, last.id) : null,
   };
 }

@@ -1,5 +1,5 @@
 import { ExternalIcon, GitHubIcon, PadIcon, ShieldCheckIcon } from '../components/Icons';
-import { NPM_URL, REPO_URL } from '../content';
+import { NPM_PACKAGES, NPM_URL, REPO_URL } from '../content';
 
 export function OpenSource() {
   return (
@@ -30,6 +30,15 @@ export function OpenSource() {
               Packages on npm <ExternalIcon />
             </a>
           </div>
+          <ul className="open-npm" aria-label="The UI packages on npm">
+            {NPM_PACKAGES.map((p) => (
+              <li key={p.name}>
+                <a href={p.href} target="_blank" rel="noopener noreferrer">
+                  <code>{p.name}</code>
+                </a>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
     </section>

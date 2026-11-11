@@ -158,6 +158,14 @@ describe('llms.txt', () => {
       expect(pkg.private).not.toBe(true);
     }
   });
+  it('lists the hub, player and element packages, with a README link and an npm link each', () => {
+    const u = urls();
+    for (const p of ['hub-react', 'player-react', 'hub-element']) {
+      expect(u, p).toContain(`https://github.com/hainix/chatwarden/blob/main/packages/${p}/README.md`);
+      expect(u, p).toContain(`https://www.npmjs.com/package/@chatwarden/${p}`);
+    }
+    expect(txt()).toMatch(/<chatwarden-hub>/);
+  });
   it('is honest: pre-release, and no promises the site would not make', () => {
     expect(txt()).toMatch(/pre-release/i);
     expect(txt()).not.toMatch(/guarantee|enterprise|used by thousands/i);

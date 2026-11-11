@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { validateSanctionInput } from '@chatwarden/core';
 import type { Chatwarden, DecisionAction, DecisionInput, SanctionInput, SanctionKind, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
@@ -36,6 +35,36 @@ export function parseDecision(body: Record<string, unknown>): ParsedDecision {
   const reason = bodyText(body.reason);
   const evidence = has(body, 'evidence') ? bodyText(body.evidence) : undefined;
   return { verdict: verdict as DecisionInput['verdict'], actions, reason, ...(evidence === undefined ? {} : { evidence }) };
+}
+
+/**
+ * The lengths the profile itself names: every ladder cell, and the first-offense and repeat outcomes. A moderator who accepts
+ * the suggestion must be able to apply it, so these are always allowed, whether or not they are in `durations`.
+ */
+function ownLengths(profile: Chatwarden['profile']): Set<number> {
+  const own = new Set<number>();
+  for (const row of profile.ladder) {
+    for (const cell of [row.lowMedium, row.high]) if (cell.durationMs !== null) own.add(cell.durationMs);
+  }
+  for (const o of [...Object.values(profile.firstOffense), profile.repeat.outcome]) {
+    if (typeof o === 'object' && o.durationMs !== null) own.add(o.durationMs);
+  }
+  return own;
+}
+
+/**
+ * With `customDuration` off, a restriction or ban may only be for a length the profile offers (`durations`), the profile's own
+ * lengths (the ladder, the first offences, the repeat rule), or permanent. Anything else is 400 `duration_not_offered`. With it on
+ * (the default) any valid length passes, as before. The profile is read live, once, so a saved change applies to the next
+ * request. Warnings and notes have no length (the facade refuses one that has). The staff routes call this after authorizing.
+ */
+export function checkDurationsOffered(cw: Chatwarden, actions: readonly DecisionAction[]): void {
+  const profile = cw.profile;
+  if (profile.customDuration) return;
+  const lengths = actions.filter((a) => a.durationMs !== null && a.kind !== 'warning' && a.kind !== 'note');
+  if (lengths.length === 0) return;
+  const offered = new Set<number>([...profile.durations, ...ownLengths(profile)]);
+  if (lengths.some((a) => !offered.has(a.durationMs as number))) throw new HttpError('duration_not_offered');
 }
 
 /** What a decision DOES needs the right to do it: `need` throws 403. Call it before anything is read or written. */
@@ -143,26 +172,4 @@ export async function applySanction(
   checkSanction(cw, sanction, actor);
   const done = await cw.sanctions.apply(sanctionInput(sanction, actor));
   return { groupId: done.groupId, refCode: done.refCode };
-}
-
-/**
- * A fingerprint of a validated sanction: the SHA-256 (hex) of its fields in a fixed order, defaults filled in, so the same
- * request written with another key order or spacing gives the same value and any change to it gives another. The webhook
- * stores it with an idempotency key to refuse the key being reused for a different request. A hash: it holds no text.
- */
-export function sanctionFingerprint(sanction: ParsedSanction): string {
-  const { action, reason } = sanction;
-  // `subject` is fingerprinted exactly as sent, on purpose (strict): a differently spelled subject is another request.
-  // The gap note is fingerprinted TRIMMED, because the core trims it before it is stored: two spellings that store the
-  // same note are the same request.
-  const canonical = JSON.stringify([
-    action.subject,
-    action.kind,
-    action.durationMs,
-    action.rule,
-    action.includeIp ?? false,
-    action.gapNote?.trim() ?? null,
-    reason,
-  ]);
-  return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }

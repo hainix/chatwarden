@@ -1,23 +1,63 @@
-import { NotFoundError, ValidationError } from '../errors.js';
+import { SANCTION_SOURCES } from '@chatwarden/core';
+import type { Source } from '@chatwarden/core';
+import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
-import { applySanction, needForSanction, parseSanction } from './apply.js';
+import { applySanction, checkDurationsOffered, needForSanction, parseSanction } from './apply.js';
+import { gateCase } from './claims.js';
+import { latestHandle } from './handles.js';
 import type { AdminContext } from './context.js';
-import { bodyObject, bodyText } from './validate.js';
+import { bodyObject, bodyTakeOver, bodyText, queryLimit } from './validate.js';
 
 /**
- * Sanctions outside a report (staff only, each audited after it succeeds):
- * - `POST /sanctions { subject, kind, durationMs, rule, gapNote?, includeIp?, reason? }`: apply one (`sanctions.apply`, and
- *   `sanctions.apply.ban_permanent` for a ban with `durationMs: null`). The actor is the authz actor and the source is
- *   always `moderator`. Audits `sanction.apply` with the group id.
+ * Sanctions outside a report (staff only; every route is audited after it succeeds, the list as a read):
+ * - `GET /sanctions?cursor&limit&source`: every person's sanctions, newest first, `{ items, next }` (`history.read`). Each
+ *   item is the group's `SanctionGroupView` plus `person`, the canonical subject (a staff ref), and `handle`, the reported
+ *   person's handle on the latest report filed against them (null when there is none, or it recorded no handle). Built from the subject row
+ *   only: never an IP row, hash or stored value. `limit` 1..200 (default 50, clamped), `cursor` is the previous `next`,
+ *   `source` one of the sanction sources. A bad cursor, limit or source is 400 `invalid_query`. Audits `history.view` with no target, once
+ *   per successful read, as the other list reads are (the same data per person is `GET /people/:ref/history`, which audits it with the
+ *   person as target): a bulk read of every person's record leaves a trace. The audit row is required: if it cannot be written, the
+ *   read fails (500) and returns nothing. A refused read (400, 403) writes no row.
+ * - `POST /sanctions { subject, kind, durationMs, rule, gapNote?, includeIp?, reason?, takeOver? }`: apply one (`sanctions.apply`,
+ *   and `sanctions.apply.ban_permanent` for a ban with `durationMs: null`). The actor is the authz actor and the source is
+ *   always `moderator`. Audits `sanction.apply` with the group id. Another moderator's live claim on the person is 409
+ *   `claimed` unless `takeOver: true` and the caller holds `claims.override` (audited as `case.takeover`, first); the claim then
+ *   stays with the caller. Revoking is never held up by a claim.
  * - `POST /sanctions/:groupId/revoke { reason }`: revoke the whole group (`sanctions.revoke`). Audits `sanction.revoke`.
  * `durationMs` is required: a whole number of milliseconds up to the 365 day cap, or an explicit `null` (permanent).
  */
 export function sanctionRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
   return {
+    'GET /sanctions': ctx.secure('history.read', (c) => {
+      const { cursor, source } = c.req.query;
+      const limit = queryLimit(c.req.query.limit);
+      // Checked here as well as in the core, so a source is a 400 whatever the facade does with an odd value.
+      if (source !== undefined && !(SANCTION_SOURCES as readonly string[]).includes(source)) throw new HttpError('invalid_query');
+      // The facade checks the cursor (SanctionQueryError -> 400) and clamps the limit.
+      const page = cw.sanctions.list({
+        ...(cursor === undefined ? {} : { cursor }),
+        ...(limit === undefined ? {} : { limit }),
+        ...(source === undefined ? {} : { source: source as Source }),
+      });
+      // The name to show beside a person's tag: the handle on the latest report filed against them, one read per person on the page.
+      const handles = new Map<string, string | null>();
+      for (const { person } of page.items) {
+        if (handles.has(person)) continue;
+        handles.set(person, latestHandle(cw, person));
+      }
+      const items = page.items.map((i) => ({ ...i, handle: handles.get(i.person) ?? null }));
+      c.audit('history.view');
+      return { status: 200, body: { items, next: page.next } };
+    }),
+
     'POST /sanctions': ctx.secure('sanctions.apply', async (c) => {
-      const sanction = parseSanction(bodyObject(c.req));
+      const body = bodyObject(c.req);
+      const sanction = parseSanction(body);
+      const takeOver = bodyTakeOver(body);
       needForSanction(sanction.action, c.need);
+      checkDurationsOffered(cw, [sanction.action]);
+      gateCase(ctx, c, sanction.action.subject, takeOver);
       // The actor is never from the body: the caller is who the auth hook says, and an admin route is always a moderator's.
       const done = await applySanction(cw, sanction, c.authz.actor);
       // The sanction is live: an audit failure is logged, never turned into an error.

@@ -19,7 +19,16 @@ export type StaffRef = SubjectId;
  */
 export type KitEvent =
   /** A report was stored. `roomTags` are the adopter's own room tags at the time, not player text. */
-  | { type: 'report.created'; reportId: string; createdAt: number; category: ReportCategory; roomTags: Readonly<Record<string, string>> }
+  | {
+      type: 'report.created';
+      reportId: string;
+      createdAt: number;
+      /** The 0.1.1 category the report is kept under (derived from the reason; `'other'` when none). */
+      category: ReportCategory;
+      /** The reason id the reporter gave, or null when they gave none. A hint, never the truth. Never the note. Always set by the kit from 0.1.2; optional in the type so an event built by 0.1.1 code still type-checks. */
+      reportedReason?: string | null;
+      roomTags: Readonly<Record<string, string>>;
+    }
   /** A decision closed a report. Emitted once per decision, never for a replay. */
   | { type: 'report.closed'; reportId: string; verdict: 'upheld' | 'noted' | 'no_action' | 'bad_faith'; at: number }
   /**

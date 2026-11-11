@@ -50,6 +50,32 @@ describe('GET /policy', () => {
     expect([bad.status, errorOf(bad)]).toEqual([400, 'invalid_query']);
   });
 
+  it('?omit leaves the named sections out of the moderator guide only, and the default is the whole guide', async () => {
+    const { call, cw } = await world();
+    const guide = async (omit?: string) =>
+      ((await call('GET', '/policy', omit === undefined ? {} : { query: { omit } })).body as { documents: { moderatorGuide: string; codeOfConduct: string }; rules: unknown[] }).documents.moderatorGuide;
+    expect(await guide()).toBe(cw.documents.moderatorGuide({ format: 'markdown' }));
+    expect(await guide('rules')).toBe(cw.documents.moderatorGuide({ format: 'markdown', omitSections: ['rules'] }));
+    expect(await guide('ladder')).toBe(cw.documents.moderatorGuide({ format: 'markdown', omitSections: ['ladder'] }));
+    expect(await guide('rules,ladder')).toBe(cw.documents.moderatorGuide({ format: 'markdown', omitSections: ['rules', 'ladder'] }));
+    expect(await guide('ladder,rules')).toBe(await guide('rules,ladder'));
+    expect(await guide('')).toBe(await guide());
+    expect(await guide('rules,ladder')).not.toContain('## Community Rules');
+    // The data is still all there: only the generated document changes.
+    const res = (await call('GET', '/policy', { query: { omit: 'rules,ladder' } })).body as { rules: unknown[]; profile: { ladder: unknown[] } };
+    expect(res.rules).toHaveLength(cw.rules.all().length);
+    expect(res.profile.ladder).toHaveLength(cw.profile.ladder.length);
+  });
+
+  it('?omit with a section it does not know is 400 invalid_query and writes no audit row', async () => {
+    const { call, routeAudit } = await world();
+    for (const bad of ['levels', 'rules,levels', 'rules;ladder', ' rules', 'Rules']) {
+      const res = await call('GET', '/policy', { query: { omit: bad } });
+      expect([res.status, errorOf(res)], bad).toEqual([400, 'invalid_query']);
+    }
+    expect(routeAudit()).toEqual([]);
+  });
+
   it('a custom profile and rules are what is shown', async () => {
     const { call, cw } = await world();
     const res = await call('GET', '/policy');

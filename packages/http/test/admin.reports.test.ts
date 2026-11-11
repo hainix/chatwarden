@@ -147,7 +147,7 @@ describe('GET /reports', () => {
     const res = await call('GET', '/reports');
     const item = (res.body as { items: Array<Record<string, unknown>> }).items[0] as Record<string, unknown>;
     expect(Object.keys(item).sort()).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'createdAt', 'id', 'reporterPerson', 'roomId', 'status', 'tags', 'targetPerson'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
     expect(item).toMatchObject({ id: r.id, category: 'harassment', status: 'open', roomId: r.room, targetPerson: r.target, reporterPerson: r.reporter, badFaith: false, actionedAt: null, actionedBy: null });
     // Keys are the same on a decided report, and the decision shows through status / badFaith / actioned*.
@@ -157,7 +157,7 @@ describe('GET /reports', () => {
     expect(after).toMatchObject({ status: 'actioned', actionedBy: 'ann', actionedAt: expect.any(Number) });
   });
 
-  it('the list never carries the excerpt, a planted chat line, handles, notes or evidence (in any key, at any depth)', async () => {
+  it('the list never carries the excerpt, a planted chat line, notes or evidence (in any key, at any depth); the only handles are the reported and the reporting person, each in its own field', async () => {
     const { cw, call, file } = await world();
     const room = 'room-plant';
     cw.rooms.seat(room, 'p1', { clientKey: `${KEY_REPORTER}-x`, ip: IP_REPORTER }, 'RepHandle');
@@ -173,9 +173,16 @@ describe('GET /reports', () => {
     await file();
     const listed = (await call('GET', '/reports')).body;
     const text = JSON.stringify(listed);
-    for (const needle of [PLANTED, 'planted-reporter-note-8842', 'planted-mod-note-5530', 'RepHandle', 'TgtHandle']) expect(text).not.toContain(needle);
+    for (const needle of [PLANTED, 'planted-reporter-note-8842', 'planted-mod-note-5530']) expect(text).not.toContain(needle);
+    // The two handles are what the queue shows so a row can carry a name: each is in its own field and nowhere else.
+    expect(text.split('TgtHandle')).toHaveLength(2);
+    expect(text.split('RepHandle')).toHaveLength(2);
+    expect((listed as { items: Array<{ id: string; reporterHandle: string | null }> }).items.find((i) => i.id === res.reportId)?.reporterHandle).toBe('RepHandle');
+    expect((listed as { items: Array<{ id: string; targetHandle: string | null }> }).items.find((i) => i.id === res.reportId)?.targetHandle).toBe('TgtHandle');
     const keys = keysDeep(listed);
-    for (const k of ['excerpt', 'note', 'modNote', 'badFaithEvidence', 'reporterHandle', 'targetHandle', 'people', 'ownLineIds', 'lineId', 'reporterSubject', 'targetSubject', 'reporterSeat', 'targetSeat']) {
+    expect(keys.has('targetHandle')).toBe(true);
+    expect(keys.has('reporterHandle')).toBe(true);
+    for (const k of ['excerpt', 'note', 'modNote', 'badFaithEvidence', 'people', 'ownLineIds', 'lineId', 'reporterSubject', 'targetSubject', 'reporterSeat', 'targetSeat']) {
       expect(keys.has(k), k).toBe(false);
     }
     // The audited single-report route still carries the evidence.
@@ -823,7 +830,13 @@ describe('GET /people/:ref/history', () => {
     const { call, audit } = await world();
     const res = await call('GET', '/people/s_nobody/history');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ history: [], reports: [] });
+    expect(res.body).toEqual({
+      history: [],
+      reports: [],
+      sanctions: [],
+      asReporter: { reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 },
+      handle: null,
+    });
     expect(audit().map((a) => a.action)).toEqual(['history.view']);
   });
 

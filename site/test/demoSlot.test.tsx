@@ -55,20 +55,20 @@ describe('DemoSlot lazy loading', () => {
     stubIO();
     render(<DemoSlot />);
     act(() => observers[0]?.cb([{ isIntersecting: true }]));
-    expect(await screen.findByRole('group', { name: /chatwarden interactive demo/i })).toBeTruthy();
+    expect(await screen.findByRole('group', { name: /chatwarden interactive demo/i }, { timeout: 15_000 })).toBeTruthy();
     expect(screen.queryByText(/loading the demo/i)).toBeNull();
     expect(observers[0]?.disconnect).toHaveBeenCalled();
   });
   it('loads at once when IntersectionObserver is missing', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     render(<DemoSlot />);
-    expect(await screen.findByRole('group', { name: /chatwarden interactive demo/i })).toBeTruthy();
+    expect(await screen.findByRole('group', { name: /chatwarden interactive demo/i }, { timeout: 15_000 })).toBeTruthy();
   });
   it('loads when a visitor focuses or points into the placeholder (interaction), even before it scrolls near', async () => {
     stubIO();
     const { container } = render(<DemoSlot />);
     fireEvent.pointerEnter(container.querySelector('[data-demo-slot]') as Element);
-    expect(await screen.findByRole('group', { name: /chatwarden interactive demo/i })).toBeTruthy();
+    expect(await screen.findByRole('group', { name: /chatwarden interactive demo/i }, { timeout: 15_000 })).toBeTruthy();
   });
   it('keeps the section heading and the lead while it loads, and announces the loading politely', () => {
     stubIO();

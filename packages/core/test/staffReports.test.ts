@@ -51,6 +51,8 @@ const record = (over: Partial<ReportRecord> = {}): ReportRecord => ({
   targetSeat: 'p2',
   targetHandle: 'Tgt',
   category: 'harassment',
+  reportedReason: null,
+  detailAt: null,
   note: null,
   lineId: null,
   excerpt: [],

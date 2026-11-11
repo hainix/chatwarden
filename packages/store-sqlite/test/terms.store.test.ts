@@ -59,11 +59,11 @@ describe('migration 2: terms and audit', () => {
     v2.close();
   });
 
-  it('kit_audit has the generic columns, then the role migration 12 added', () => {
+  it('kit_audit has the generic columns, then the role migration 12 and the detail migration 16 added', () => {
     const db = new DatabaseSync(':memory:');
     openStore({ db });
     const cols = db.prepare('PRAGMA table_info(kit_audit)').all().map((c) => String(c.name));
-    expect(cols).toEqual(['id', 'at', 'actor', 'action', 'subject_type', 'subject_ref', 'before_json', 'after_json', 'role']);
+    expect(cols).toEqual(['id', 'at', 'actor', 'action', 'subject_type', 'subject_ref', 'before_json', 'after_json', 'role', 'detail_json']);
     db.close();
   });
 

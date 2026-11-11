@@ -2,18 +2,28 @@ import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, ROLES } from '@chatwarden/core';
 import type {
+  AuditDetail,
   AuditListQuery,
   AuditRow,
   AuditTargetType,
+  ClaimAttempt,
+  ClaimMode,
+  ClaimRow,
   DecisionRow,
   MuteRow,
   NoticeKind,
   NoticeRow,
+  OpenReportQuery,
+  PolicyLayer,
+  ReasonRow,
   ReportActivity,
   ReportCategory,
   ReportListQuery,
   ReportRecord,
+  ReporterDecision,
+  ReporterTally,
   SanctionKind,
+  SanctionListQuery,
   SanctionRow,
   Source,
   Store,
@@ -67,7 +77,22 @@ function auditFromRow(r: Record<string, unknown>): AuditRow {
     role: ROLES.find((x) => x === role) ?? null,
     action: String(r.action) as AuditRow['action'],
     target: ref !== '' && (AUDIT_TARGET_TYPES as readonly string[]).includes(type) ? { type: type as AuditTargetType, ref } : null,
+    // Only a policy row has one; every other row (the legacy term-editor rows included) has NULL here.
+    ...detailFromJson(r.detail_json),
   };
+}
+
+/** The detail of a policy audit row, or nothing when the column is empty or does not hold one: one damaged row never breaks a page. */
+function detailFromJson(json: unknown): { detail?: AuditDetail } {
+  if (json === null || json === undefined) return {};
+  try {
+    const d = JSON.parse(String(json)) as { sections?: unknown; reason?: unknown } | null;
+    if (typeof d !== 'object' || d === null || !Array.isArray(d.sections)) return {};
+    if (d.reason !== undefined && typeof d.reason !== 'string') return {};
+    return { detail: d as AuditDetail };
+  } catch {
+    return {};
+  }
 }
 
 /** The columns of a `SanctionRow`; `toSanctionRow` reads them by name. */
@@ -84,6 +109,8 @@ function reportFromRow(r: Record<string, unknown>): ReportRecord {
     targetSeat: String(r.target_seat),
     targetHandle: String(r.target_handle),
     category: String(r.category) as ReportCategory,
+    reportedReason: r.reported_reason === null || r.reported_reason === undefined ? null : String(r.reported_reason),
+    detailAt: r.detail_at === null || r.detail_at === undefined ? null : Number(r.detail_at),
     note: r.note === null ? null : String(r.note),
     lineId: r.line_id === null ? null : String(r.line_id),
     excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
@@ -123,6 +150,26 @@ function toSanctionRow(r: Record<string, unknown>): SanctionRow {
     ...(r.revoked_at === undefined ? {} : { revokedAt: r.revoked_at === null ? null : Number(r.revoked_at) }),
   };
 }
+
+/** A subject-row listing row: `toSanctionRow` plus the three revoke columns, always present. */
+function toListedSanctionRow(r: Record<string, unknown>): SanctionRow {
+  return {
+    ...toSanctionRow(r),
+    revokedAt: r.revoked_at === null ? null : Number(r.revoked_at),
+    revokedBy: r.revoked_by === null ? null : String(r.revoked_by),
+    revokeReason: r.revoke_reason === null ? null : String(r.revoke_reason),
+  };
+}
+
+function toClaimRow(r: Record<string, unknown>): ClaimRow {
+  return { person: String(r.person), by: String(r.claimed_by), since: Number(r.since), until: Number(r.until) };
+}
+
+/** The kit_meta key of the change token's counter. */
+const CHANGE_TOKEN_KEY = 'change_token';
+
+/** How many people one `loadClaims` statement names at most (well under any SQLite parameter limit). */
+const CLAIM_BATCH = 500;
 
 let savepointSeq = 0;
 
@@ -173,6 +220,19 @@ export class SqliteStore implements Store, TermStore {
     if (this.closed) return;
     this.closed = true;
     if (this.ownsDb) this.db.close();
+  }
+
+  /**
+   * Move the change token (one statement, atomic across processes on the same file). Always called inside the
+   * transaction of the write it announces, so an undone write undoes the move.
+   */
+  private bump(): void {
+    this.db
+      .prepare(
+        `INSERT INTO kit_meta (key, value) VALUES (?, '1')
+         ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1`,
+      )
+      .run(CHANGE_TOKEN_KEY);
   }
 
   // --- Domain methods (async) are added below by later tasks. ---
@@ -254,6 +314,7 @@ export class SqliteStore implements Store, TermStore {
           r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus, r.roomId,
         );
       }
+      this.bump();
       return true;
     });
   }
@@ -265,6 +326,7 @@ export class SqliteStore implements Store, TermStore {
           'UPDATE kit_sanctions SET revoked_by = ?, revoked_at = ?, revoke_reason = ? WHERE group_id = ? AND revoked_at IS NULL',
         )
         .run(actor, at, reason, groupId);
+      if (Number(res.changes) > 0) this.bump();
       return Number(res.changes);
     });
   }
@@ -309,6 +371,46 @@ export class SqliteStore implements Store, TermStore {
     );
   }
 
+  listSubjectSanctions(q: SanctionListQuery): SanctionRow[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    if (q.subjects !== undefined && q.subjects.length === 0) return [];
+    const where: string[] = ["target_type = 'subject'"];
+    const args: Array<string | number> = [];
+    if (q.subjects !== undefined) {
+      where.push(`target_value IN (${q.subjects.map(() => '?').join(', ')})`);
+      args.push(...q.subjects);
+    }
+    if (q.source !== undefined) {
+      where.push('source = ?');
+      args.push(q.source);
+    }
+    if (q.activeAt !== undefined) {
+      where.push('(revoked_at IS NULL AND (ends_at IS NULL OR ends_at > ?))');
+      args.push(q.activeAt);
+    }
+    if (q.since !== undefined) {
+      if (q.alsoPermanent === true) {
+        where.push('(starts_at >= ? OR (ends_at IS NULL AND revoked_at IS NULL))');
+      } else {
+        where.push('starts_at >= ?');
+      }
+      args.push(q.since);
+    }
+    if (q.before !== undefined) {
+      if (q.beforeId === undefined) {
+        where.push('starts_at < ?');
+        args.push(q.before);
+      } else {
+        where.push('(starts_at <= ? AND (starts_at < ? OR id < ?))');
+        args.push(q.before, q.before, q.beforeId);
+      }
+    }
+    const sql =
+      `SELECT ${SANCTION_COLUMNS}, revoked_at, revoked_by, revoke_reason FROM kit_sanctions WHERE ${where.join(' AND ')} ` +
+      'ORDER BY starts_at DESC, id DESC LIMIT ?';
+    return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(toListedSanctionRow));
+  }
+
   listGaps(): SanctionRow[] {
     return this.transaction(() =>
       this.db
@@ -330,6 +432,7 @@ export class SqliteStore implements Store, TermStore {
         )
         .run(status, ref, groupId);
       if (Number(res.changes) === 0) return false;
+      this.bump();
       // Who closed it and when go to the audit trail, in the same transaction. The sanction group id names no person.
       this.db
         .prepare(
@@ -344,16 +447,168 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  // Team workbench. SYNCHRONOUS on purpose (see the Store interface); they run inside `transaction`.
+
+  changeToken(): string {
+    const r = this.transaction(() => this.db.prepare('SELECT value FROM kit_meta WHERE key = ?').get(CHANGE_TOKEN_KEY));
+    return r === undefined ? '0' : String(r.value);
+  }
+
+  claimCase(person: SubjectId, by: string, now: number, until: number, mode: ClaimMode): ClaimAttempt {
+    return this.transaction((): ClaimAttempt => {
+      const prior = this.db.prepare('SELECT claimed_by, since, until FROM kit_claims WHERE person = ?').get(person);
+      const live = prior !== undefined && Number(prior.until) > now ? prior : undefined;
+      const mine = live !== undefined && String(live.claimed_by) === by;
+      // The one conditional write: it takes the case only when it is free or expired, or the caller holds it (not for
+      // 'free'), or the caller is taking over. Whoever runs this statement first wins; the other's WHERE is then false.
+      const won = this.db
+        .prepare(
+          `INSERT INTO kit_claims (person, claimed_by, since, until) VALUES (?, ?, ?, ?)
+           ON CONFLICT (person) DO UPDATE SET
+             claimed_by = excluded.claimed_by,
+             since = CASE WHEN kit_claims.claimed_by = excluded.claimed_by AND kit_claims.until > ? THEN kit_claims.since ELSE excluded.since END,
+             until = excluded.until
+           WHERE kit_claims.until <= ? OR (kit_claims.claimed_by = excluded.claimed_by AND ? = 1) OR ? = 1
+           RETURNING person, claimed_by, since, until`,
+        )
+        .get(person, by, now, until, now, now, mode === 'free' ? 0 : 1, mode === 'takeover' ? 1 : 0);
+      if (won === undefined) {
+        const holder = this.db.prepare('SELECT person, claimed_by, since, until FROM kit_claims WHERE person = ?').get(person);
+        if (holder === undefined) throw new Error('claimCase: the claim vanished');
+        return { won: false, claim: toClaimRow(holder) };
+      }
+      // A heartbeat keeps the owner; everything else (fresh, expired, taken over) changes it.
+      if (!mine) this.bump();
+      return { won: true, claim: toClaimRow(won), from: live !== undefined && !mine ? String(live.claimed_by) : null };
+    });
+  }
+
+  releaseClaim(person: SubjectId, by: string, now: number): boolean {
+    return this.transaction(() => {
+      const gone = this.db.prepare('DELETE FROM kit_claims WHERE person = ? AND claimed_by = ? RETURNING until').get(person, by);
+      if (gone === undefined || Number(gone.until) <= now) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  loadClaims(persons: readonly SubjectId[], now: number): ClaimRow[] {
+    const unique = [...new Set(persons)];
+    if (unique.length === 0) return [];
+    return this.transaction(() => {
+      const out: ClaimRow[] = [];
+      for (let i = 0; i < unique.length; i += CLAIM_BATCH) {
+        const batch = unique.slice(i, i + CLAIM_BATCH);
+        const rows = this.db
+          .prepare(
+            `SELECT person, claimed_by, since, until FROM kit_claims
+             WHERE until > ? AND person IN (${batch.map(() => '?').join(', ')})`,
+          )
+          .all(now, ...batch);
+        out.push(...rows.map(toClaimRow));
+      }
+      return out.sort((a, b) => (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+    });
+  }
+
+  listReasons(): ReasonRow[] {
+    return this.transaction(() =>
+      this.db
+        .prepare('SELECT id, label, text, active FROM kit_reasons ORDER BY rowid')
+        .all()
+        .map((r) => ({ id: String(r.id), label: String(r.label), text: String(r.text), active: Number(r.active) === 1 })),
+    );
+  }
+
+  insertReason(row: ReasonRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare('INSERT INTO kit_reasons (id, label, text, active) VALUES (?, ?, ?, ?)')
+        .run(row.id, row.label, row.text, row.active ? 1 : 0);
+      this.bump();
+    });
+  }
+
+  updateReason(id: string, patch: { label?: string; text?: string }): boolean {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT label, text FROM kit_reasons WHERE id = ?').get(id);
+      if (r === undefined) return false;
+      const label = patch.label ?? String(r.label);
+      const text = patch.text ?? String(r.text);
+      if (label === String(r.label) && text === String(r.text)) return true;
+      this.db.prepare('UPDATE kit_reasons SET label = ?, text = ? WHERE id = ?').run(label, text, id);
+      this.bump();
+      return true;
+    });
+  }
+
+  setReasonActive(id: string, active: boolean): boolean {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT active FROM kit_reasons WHERE id = ?').get(id);
+      if (r === undefined) return false;
+      if ((Number(r.active) === 1) === active) return true;
+      this.db.prepare('UPDATE kit_reasons SET active = ? WHERE id = ?').run(active ? 1 : 0, id);
+      this.bump();
+      return true;
+    });
+  }
+
+  // The editable profile's stored layer (K4 Task 7f). SYNCHRONOUS on purpose. One row, `id = 1`; no row is version 0.
+
+  loadPolicyLayer(): { layer: PolicyLayer; version: number } | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT layer_json, version FROM kit_policy_layer WHERE id = 1').get();
+      if (r === undefined) return null;
+      // A row whose text is not JSON still has its version, so a save can replace it. Its layer is null: the kit reports that as
+      // `layerError` and keeps the base profile, instead of failing to start.
+      let layer: PolicyLayer | null;
+      try {
+        layer = JSON.parse(String(r.layer_json)) as PolicyLayer;
+      } catch {
+        layer = null;
+      }
+      return { layer: layer as PolicyLayer, version: Number(r.version) };
+    });
+  }
+
+  savePolicyLayer(layer: PolicyLayer, expectedVersion: number): number | null {
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) return null;
+    const json = JSON.stringify(layer);
+    // ONE conditional write, and nothing is read first: the statement itself takes the write lock (so another process's lock is
+    // waited out by the connection's busy timeout, never a read-then-write upgrade that fails at once), and its condition is the
+    // version check. Of two callers with the same expected version, whoever runs it first wins and the other's condition is false.
+    return this.transaction(() => {
+      const won =
+        expectedVersion === 0
+          ? this.db
+              .prepare('INSERT INTO kit_policy_layer (id, layer_json, version) VALUES (1, ?, 1) ON CONFLICT (id) DO NOTHING RETURNING version')
+              .get(json)
+          : this.db
+              .prepare('UPDATE kit_policy_layer SET layer_json = ?, version = version + 1 WHERE id = 1 AND version = ? RETURNING version')
+              .get(json, expectedVersion);
+      return won === undefined ? null : Number(won.version);
+    });
+  }
+
   // Staff audit trail. SYNCHRONOUS on purpose. The json columns (before_json / after_json) are never selected: the
   // rows the term editor wrote may hold term text there.
 
   insertAudit(row: AuditRow): void {
     this.db
       .prepare(
-        `INSERT INTO kit_audit (id, at, actor, role, action, subject_type, subject_ref, before_json, after_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+        `INSERT INTO kit_audit (id, at, actor, role, action, subject_type, subject_ref, before_json, after_json, detail_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`,
       )
-      .run(row.id, row.at, row.actor, row.role, row.action, row.target?.type ?? '', row.target?.ref ?? '');
+      .run(
+        row.id,
+        row.at,
+        row.actor,
+        row.role,
+        row.action,
+        row.target?.type ?? '',
+        row.target?.ref ?? '',
+        row.detail === undefined ? null : JSON.stringify(row.detail),
+      );
   }
 
   listAudit(q: AuditListQuery): AuditRow[] {
@@ -380,7 +635,7 @@ export class SqliteStore implements Store, TermStore {
       }
     }
     const sql =
-      `SELECT id, at, actor, role, (${AUDIT_ACTION_SQL}) AS action, subject_type, subject_ref FROM kit_audit` +
+      `SELECT id, at, actor, role, (${AUDIT_ACTION_SQL}) AS action, subject_type, subject_ref, detail_json FROM kit_audit` +
       `${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(auditFromRow));
   }
@@ -525,6 +780,34 @@ export class SqliteStore implements Store, TermStore {
     );
   }
 
+  listStrikes(since: number, limit: number): StrikeRow[] {
+    const n = Math.min(500, Math.max(1, Math.floor(limit)));
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          'SELECT id, at, subject_id, room_id, term_id, raw_line FROM kit_strikes WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?',
+        )
+        .all(since, n)
+        .map((r) => ({
+          id: String(r.id),
+          at: Number(r.at),
+          subject: String(r.subject_id),
+          roomId: String(r.room_id),
+          termId: String(r.term_id),
+          rawLine: String(r.raw_line),
+        })),
+    );
+  }
+
+  countStrikesByTerm(since: number): Array<{ termId: string; count: number }> {
+    return this.transaction(() =>
+      this.db
+        .prepare('SELECT term_id, COUNT(*) AS n FROM kit_strikes WHERE at >= ? GROUP BY term_id ORDER BY term_id')
+        .all(since)
+        .map((r) => ({ termId: String(r.term_id), count: Number(r.n) })),
+    );
+  }
+
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }> {
     return this.transaction(() =>
       this.db
@@ -548,16 +831,18 @@ export class SqliteStore implements Store, TermStore {
         .prepare(
           `INSERT INTO kit_reports
              (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
-              target_seat, target_handle, category, note, line_id, excerpt_json, people_json, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING`,
         )
         .run(
           r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle,
-          r.targetSubject, r.targetSeat, r.targetHandle, r.category, r.note, r.lineId, JSON.stringify(r.excerpt),
+          r.targetSubject, r.targetSeat, r.targetHandle, r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt),
           JSON.stringify(r.people), r.status,
         );
-      return Number(res.changes) > 0;
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
     });
   }
 
@@ -576,6 +861,54 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
   }
 
+  listOpenReports(q: OpenReportQuery): ReportRecord[] {
+    const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
+    const where: string[] = ["status = 'open'"];
+    const args: Array<string | number> = [];
+    if (q.category !== undefined) {
+      where.push('category = ?');
+      args.push(q.category);
+    }
+    if (q.reason === null) where.push('reported_reason IS NULL');
+    else if (q.reason !== undefined) {
+      where.push('reported_reason = ?');
+      args.push(q.reason);
+    }
+    if (q.after !== undefined) {
+      if (q.afterId === undefined) {
+        where.push('created_at > ?');
+        args.push(q.after);
+      } else {
+        where.push('(created_at >= ? AND (created_at > ? OR id > ?))');
+        args.push(q.after, q.after, q.afterId);
+      }
+    }
+    const sql = `SELECT * FROM kit_reports WHERE ${where.join(' AND ')} ORDER BY created_at, id LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
+  }
+
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
+    if (subjects.length === 0) return [];
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const marks = subjects.map(() => '?').join(', ');
+    const sql = `SELECT * FROM kit_reports WHERE status = 'open' AND target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+  }
+
+  reporterTally(reporters: readonly SubjectId[]): ReporterTally {
+    const tally: ReporterTally = { open: 0, actioned: 0, dismissed: 0, badFaith: 0 };
+    if (reporters.length === 0) return tally;
+    const marks = reporters.map(() => '?').join(', ');
+    const sql = `SELECT status, bad_faith, COUNT(*) AS n FROM kit_reports WHERE reporter_subject IN (${marks}) GROUP BY status, bad_faith`;
+    for (const r of this.transaction(() => this.db.prepare(sql).all(...reporters))) {
+      const n = Number(r.n);
+      const status = String(r.status);
+      if (status === 'open' || status === 'actioned' || status === 'dismissed') tally[status] += n;
+      if (Number(r.bad_faith) === 1) tally.badFaith += n;
+    }
+    return tally;
+  }
+
   listReports(q: ReportListQuery): ReportRecord[] {
     const limit = Math.min(200, Math.max(1, Math.floor(q.limit)));
     const where: string[] = [];
@@ -583,6 +916,14 @@ export class SqliteStore implements Store, TermStore {
     if (q.status !== undefined) {
       where.push('status = ?');
       args.push(q.status);
+    }
+    if (q.reason !== undefined) {
+      if (q.reason === null) {
+        where.push('reported_reason IS NULL');
+      } else {
+        where.push('reported_reason = ?');
+        args.push(q.reason);
+      }
     }
     if (q.before !== undefined) {
       if (q.beforeId === undefined) {
@@ -597,6 +938,91 @@ export class SqliteStore implements Store, TermStore {
     }
     const sql = `SELECT * FROM kit_reports${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
+  }
+
+  loadReporterDecisions(reporters: readonly SubjectId[]): ReporterDecision[] {
+    if (reporters.length === 0) return [];
+    // SQLite caps the variables of one statement, so a long list is asked for in chunks.
+    const CHUNK = 500;
+    return this.transaction(() => {
+      // The newest 200 decided reports with a reason: a person's accuracy needs no more, and the work stays bounded.
+      const reports: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < reporters.length; i += CHUNK) {
+        const part = reporters.slice(i, i + CHUNK);
+        const marks = part.map(() => '?').join(', ');
+        reports.push(
+          ...this.db
+            .prepare(
+              `SELECT id, status, reported_reason, target_subject, created_at FROM kit_reports
+               WHERE reporter_subject IN (${marks}) AND status != 'open' AND reported_reason IS NOT NULL
+               ORDER BY created_at DESC, id DESC LIMIT 200`,
+            )
+            .all(...part),
+        );
+      }
+      reports.sort((x, y) => Number(y.created_at) - Number(x.created_at) || String(y.id).localeCompare(String(x.id)));
+      reports.length = Math.min(reports.length, 200);
+      if (reports.length === 0) return [];
+
+      // One query for the decisions of those reports, one (per chunk) for the sanction rows of their groups.
+      const decisions = this.db
+        .prepare(`SELECT report_id, result_json FROM kit_decisions WHERE report_id IN (${reports.map(() => '?').join(', ')})`)
+        .all(...reports.map((r) => String(r.id)));
+      const groupsOf = new Map<string, string[]>();
+      for (const d of decisions) {
+        // A row that cannot be read is a decision with no known actions, never a failure of the call.
+        let parsed: { groups?: unknown } | null;
+        try {
+          parsed = JSON.parse(String(d.result_json)) as { groups?: unknown } | null;
+        } catch {
+          parsed = null;
+        }
+        const list = groupsOf.get(String(d.report_id)) ?? [];
+        if (parsed !== null && Array.isArray(parsed.groups)) {
+          for (const g of parsed.groups as Array<{ groupId?: unknown } | null>) if (typeof g?.groupId === 'string') list.push(g.groupId);
+        }
+        groupsOf.set(String(d.report_id), list);
+      }
+      const allGroups = [...new Set([...groupsOf.values()].flat())];
+      const rows = new Map<string, Array<{ subject: SubjectId; rule: ReporterDecision['actions'][number]['rule'] }>>();
+      for (let i = 0; i < allGroups.length; i += CHUNK) {
+        const part = allGroups.slice(i, i + CHUNK);
+        const found = this.db
+          .prepare(
+            `SELECT group_id, target_value, rule FROM kit_sanctions
+             WHERE target_type = 'subject' AND group_id IN (${part.map(() => '?').join(', ')}) ORDER BY rowid`,
+          )
+          .all(...part);
+        for (const s of found) {
+          const rule = s.rule === null ? null : String(s.rule);
+          const list = rows.get(String(s.group_id)) ?? [];
+          list.push({ subject: String(s.target_value), rule: rule !== null && /^[1-9][0-9]*$/.test(rule) ? Number(rule) : 'uncovered' });
+          rows.set(String(s.group_id), list);
+        }
+      }
+      return reports.map((r) => ({
+        reportId: String(r.id),
+        status: String(r.status) as 'actioned' | 'dismissed',
+        reason: String(r.reported_reason),
+        target: String(r.target_subject),
+        actions: (groupsOf.get(String(r.id)) ?? []).flatMap((g) => rows.get(g) ?? []),
+      }));
+    });
+  }
+
+  addReportDetail(id: string, detail: { reportedReason: string | null; category: ReportCategory; note: string | null; at: number }): boolean {
+    return this.transaction(() => {
+      // One conditional statement: only an open report with no follow-up yet. The target, excerpt and line are not in it.
+      const res = this.db
+        .prepare(
+          `UPDATE kit_reports SET reported_reason = ?, category = ?, note = ?, detail_at = ?
+           WHERE id = ? AND status = 'open' AND detail_at IS NULL`,
+        )
+        .run(detail.reportedReason, detail.category, detail.note, detail.at, id);
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
+    });
   }
 
   closeReport(
@@ -617,7 +1043,9 @@ export class SqliteStore implements Store, TermStore {
            WHERE id = ? AND status = 'open'`,
         )
         .run(status, badFaith ? 1 : 0, at, actor, note, evidence, id);
-      return Number(res.changes) > 0;
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
     });
   }
 

@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CEILINGS_INTRO, CEILINGS_TITLE, FAQ, FEATURES, HERO_CHAT, INSTALL_KIT, LEVELS, STEPS, WORKS_WITH } from '../src/content';
+import { CEILINGS_INTRO, CEILINGS_TITLE, FAQ, FEATURES, HERO_CHAT, HUB_STEP, INSTALL_KIT, LEVELS, NPM_PACKAGES, STEPS, WORKS_WITH } from '../src/content';
 
 const repo = join(__dirname, '..', '..');
 const readmes = [
@@ -68,5 +68,61 @@ describe('content is grounded in the READMEs', () => {
     expect(JSON.stringify(FAQ)).toMatch(/free and open source under Apache-2\.0, with no paid tier/i);
     expect(JSON.stringify(FAQ)).not.toMatch(/forever/i);
     expect(JSON.stringify(FAQ)).toMatch(/no SLA/);
+  });
+});
+
+describe('the hub and player packages on the page', () => {
+  const normal = (t: string) => t.split('\n').map((l) => l.trimEnd()).join('\n');
+  const readmeOf = (pkg: string) => normal(readFileSync(join(repo, 'packages', pkg, 'README.md'), 'utf8').replace(/\r\n/g, '\n'));
+
+  it('the hub card no longer says the UI is coming, and says what ships', () => {
+    const hub = FEATURES.find((f) => f.id === 'hub');
+    expect(hub).toBeDefined();
+    expect(hub?.tag).toBeUndefined();
+    expect(JSON.stringify(FEATURES)).not.toMatch(/hub ui is coming/i);
+    const body = `${hub?.title} ${hub?.body}`;
+    for (const re of [/team workbench/i, /simple mode/i, /editable steps/i, /reporting/i, /drop-in/i, /pieces/i, /hooks/i, /headless/i, /<chatwarden-hub>/]) {
+      expect(body, String(re)).toMatch(re);
+    }
+    expect(hub?.link?.href).toBe('https://www.npmjs.com/package/@chatwarden/hub-react');
+  });
+
+  it('counts the ways to adopt the way hub-react’s README does: four (drop-in, pieces, hooks and headless, one script tag)', () => {
+    const body = FEATURES.find((f) => f.id === 'hub')?.body ?? '';
+    expect(body).toContain('Four ways to adopt it: a drop-in, pieces, hooks and headless, or one script tag (<chatwarden-hub>).');
+    expect(body).not.toMatch(/three ways/i);
+    const readme = readmeOf('hub-react');
+    expect(readme).toContain('## Four ways to adopt');
+    for (const h of ['### 1. Drop in', '### 2. Pieces', '### 3. Headless hooks', '### 4. One script tag']) expect(readme).toContain(h);
+  });
+
+  it('the hub step starts with the README’s install line, a contiguous block of the hub-react README', () => {
+    expect(HUB_STEP.install.code).toBe('npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom');
+    expect(readmeOf('hub-react')).toContain(normal(HUB_STEP.install.code));
+  });
+
+  it('the hub step shows the drop-in <Hub> and, as the alternative, the one-script-tag element, each a contiguous README block', () => {
+    expect(HUB_STEP.dropIn.code).toContain('<Hub client={client} />');
+    expect(HUB_STEP.element.code).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
+    expect(readmeOf('hub-react')).toContain(normal(HUB_STEP.dropIn.code));
+    expect(readmeOf('hub-element')).toContain(normal(HUB_STEP.element.code));
+  });
+
+  it('every non-blank line of the hub step is a verbatim README line (and the check can fail: a changed line is caught)', () => {
+    const all = new Set([readmeOf('hub-react'), readmeOf('hub-element')].flatMap((t) => t.split('\n')));
+    const lines = [HUB_STEP.install.code, HUB_STEP.dropIn.code, HUB_STEP.element.code].flatMap((c) => c.split('\n')).filter((l) => l.trim() !== '');
+    expect(lines.length).toBeGreaterThanOrEqual(6);
+    expect(lines.filter((l) => !all.has(l.trimEnd()))).toEqual([]);
+    expect(all.has('export const ModeratorPage = () => <Hub client={client} />; // changed')).toBe(false);
+  });
+
+  it('names the three packages with their npm links, all real non-private packages of this repo', () => {
+    expect(NPM_PACKAGES.map((p) => p.name)).toEqual(['@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/hub-element']);
+    for (const p of NPM_PACKAGES) {
+      expect(p.href).toBe(`https://www.npmjs.com/package/${p.name}`);
+      const pkg = JSON.parse(readFileSync(join(repo, 'packages', p.name.split('/')[1] as string, 'package.json'), 'utf8')) as { name: string; private?: boolean };
+      expect(pkg.name).toBe(p.name);
+      expect(pkg.private).not.toBe(true);
+    }
   });
 });

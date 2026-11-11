@@ -1,6 +1,6 @@
 ---
 status: approved
-updated: 2026-11-09
+updated: 2026-11-10
 phases:
   - name: "K0: repos, licences, CI, framing"
     status: open
@@ -11,7 +11,7 @@ phases:
   - name: "K3: AI read (optional) + Discord feed (11-09 spec A)"
     status: open
   - name: "K4: React UI: moderator hub + player components"
-    status: open
+    status: done
   - name: "K4b: init CLI, service mode (Docker/HTTP for stacks that aren't Node), agent docs, Claude Code plugin, agent eval"
     status: open
   - name: "K5: Coop adapter (review in Coop's console) + AI read as a Coop signal"

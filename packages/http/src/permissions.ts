@@ -9,12 +9,17 @@ export const PERMISSION_KEYS = [
   'sanctions.apply.ban_permanent',
   'sanctions.revoke',
   'history.read',
+  'blocked.read',
   'gaps.read',
   'gaps.close',
   'terms.read',
   'terms.write',
   'policy.read',
+  'policy.write',
   'audit.read',
+  'claims.override',
+  'reasons.read',
+  'reasons.write',
   'settings',
 ] as const;
 
@@ -23,7 +28,10 @@ export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 /** The role each permission needs, as a whole map. */
 export type Permissions = Readonly<Record<PermissionKey, Role>>;
 
-/** The minimum role for each action. `terms.write` is `moderator` on purpose (the Moxgate decision). */
+/**
+ * The minimum role for each action. `terms.write` is `moderator` on purpose (the Moxgate decision). `policy.write` (edit the
+ * moderation profile: the lengths offered, the ladder, the repeat rule) is `owner`: it changes what every moderator is suggested.
+ */
 export const PERMISSIONS: Permissions = Object.freeze({
   'reports.read': 'moderator',
   'reports.decide': 'moderator',
@@ -31,12 +39,17 @@ export const PERMISSIONS: Permissions = Object.freeze({
   'sanctions.apply.ban_permanent': 'senior',
   'sanctions.revoke': 'moderator',
   'history.read': 'moderator',
+  'blocked.read': 'moderator',
   'gaps.read': 'moderator',
   'gaps.close': 'owner',
   'terms.read': 'moderator',
   'terms.write': 'moderator',
   'policy.read': 'moderator',
+  'policy.write': 'owner',
   'audit.read': 'senior',
+  'claims.override': 'senior',
+  'reasons.read': 'moderator',
+  'reasons.write': 'senior',
   settings: 'owner',
 });
 

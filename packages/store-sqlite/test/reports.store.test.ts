@@ -72,6 +72,8 @@ describe('migration 6: kit_reports', () => {
       'id', 'created_at', 'room_id', 'tags_json', 'reporter_subject', 'reporter_seat', 'reporter_handle',
       'target_subject', 'target_seat', 'target_handle', 'category', 'note', 'line_id', 'excerpt_json',
       'people_json', 'status', 'bad_faith', 'actioned_at', 'actioned_by', 'mod_note', 'bad_faith_evidence',
+      // Migration 17: the reason the reporter gave and the time of their one follow-up.
+      'reported_reason', 'detail_at',
     ]);
     const by = (n: string) => info.find((c) => c.name === n);
     expect(by('status')?.dflt_value).toBe("'open'");

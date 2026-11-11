@@ -12,6 +12,13 @@ export type OpenOptions = ({ path: string } | { db: DatabaseSync }) & {
 
 const VERSION_KEY = 'schema_version';
 
+/**
+ * How long a statement waits for another connection's lock before SQLite gives up with "database is locked": 5 seconds. Set
+ * only when the connection has no timeout of its own (a host that chose one keeps it), so two server processes on one file
+ * queue behind each other's short writes instead of failing at once.
+ */
+const BUSY_TIMEOUT_MS = 5000;
+
 function checkMigrations(migrations: readonly Migration[]): void {
   let prev = 0;
   for (const m of migrations) {
@@ -44,6 +51,7 @@ export function openStore(opts: OpenOptions): SqliteStore {
   try {
     db.exec('PRAGMA foreign_keys = ON');
     if (ownsDb) db.exec('PRAGMA journal_mode = WAL');
+    if (Number(db.prepare('PRAGMA busy_timeout').get()?.timeout ?? 0) === 0) db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
 
     db.exec('CREATE TABLE IF NOT EXISTS kit_meta (key TEXT PRIMARY KEY, value TEXT)');
     const latest = migrations.at(-1)?.version ?? 0;

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { DiscordIcon, EvidenceIcon, EyeShieldIcon, HubIcon, LadderIcon, NoticeIcon } from '../components/Icons';
+import { DiscordIcon, EvidenceIcon, ExternalIcon, EyeShieldIcon, HubIcon, LadderIcon, NoticeIcon } from '../components/Icons';
 import { FEATURES } from '../content';
 
 const ICONS: Record<string, ReactNode> = {
@@ -26,6 +26,11 @@ export function Features() {
               <h3>{f.title}</h3>
               <p>{f.body}</p>
               {f.tag && <span className="pill pill-soon">{f.tag}</span>}
+              {f.link && (
+                <a className="card-link" href={f.link.href} target="_blank" rel="noopener noreferrer">
+                  {f.link.label} <ExternalIcon />
+                </a>
+              )}
             </li>
           ))}
         </ul>

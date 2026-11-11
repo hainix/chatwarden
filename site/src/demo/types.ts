@@ -1,4 +1,4 @@
-import type { PlayerNotice, RefuseReason } from './engine';
+import type { RefuseReason } from './engine';
 
 /** One line in the lobby chat as the visitor sees it. */
 export interface FeedItem {
@@ -13,4 +13,3 @@ export interface FeedItem {
   rude?: boolean;
 }
 
-export type PendingBySeat = Record<string, PlayerNotice[]>;

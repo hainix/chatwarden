@@ -56,9 +56,12 @@ describe('CI site job', () => {
     expect(siteJob).toMatch(/key:\s*[^\n]*playwright[^\n]*\$\{\{\s*steps\.[\w-]+\.outputs\.version\s*\}\}/);
     expect(siteJob).toMatch(/playwright\/package\.json/);
   });
-  it('installs browsers and system packages on a miss, and only the system packages on a hit', () => {
-    expect(siteJob).toMatch(/playwright install --with-deps chromium/);
-    expect(siteJob).toMatch(/playwright install-deps chromium/);
+  // The system packages come from apt, whose mirrors were unreachable from the runners on 2026-11-11 and failed every browser job.
+  // The runner image already carries Chromium's libraries, so apt is best-effort; a truly missing library still fails the tests.
+  it('installs the browser on a miss, and the system packages best-effort (an apt outage must not fail CI)', () => {
+    expect(siteJob).toMatch(/run: npx playwright install chromium\r?\n/);
+    expect(siteJob).not.toMatch(/install --with-deps/);
+    expect(siteJob).toMatch(/run: npx playwright install-deps chromium \|\| echo "::warning::/);
     expect(siteJob).toMatch(/cache-hit/);
   });
   it('fails if the committed PNGs drift from a fresh render, after the build', () => {

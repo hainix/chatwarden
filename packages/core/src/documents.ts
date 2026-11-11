@@ -1,7 +1,7 @@
-import { DEFAULT_SEVERE_RULES, lengthLabel, outcomeLabel } from './ladder.js';
+import { DEFAULT_AREA_RULES, DEFAULT_SEVERE_RULES, lengthLabel, outcomeLabel } from './ladder.js';
 import type { LadderCell } from './ladder.js';
-import { validateProfile } from './profile.js';
-import type { GuidelineCover, GuidelineTier, ModerationProfile, Outcome } from './profile.js';
+import { validateProfile, withDurationDefaults } from './profile.js';
+import type { GuidelineCover, GuidelineTier, ModerationProfile, Outcome, ResolvedProfile } from './profile.js';
 import type { CommunityRule, CommunityRules } from './rules.js';
 import { CONDUCT_LEVELS } from './types.js';
 import type { ConductLevel } from './types.js';
@@ -34,15 +34,26 @@ export interface CodeOfConductOptions {
   contactUrl?: string;
 }
 
+/**
+ * The sections of the moderator guide a caller may leave out: `rules` (the Community Rules list) and `ladder` (the escalation
+ * ladder: its heading, the step note, the table and the notes on area and severe rules). The moderator hub draws both from data
+ * and asks for the rest of the guide.
+ */
+export const GUIDE_SECTIONS = ['rules', 'ladder'] as const;
+export type GuideSection = (typeof GUIDE_SECTIONS)[number];
+
 /** Options for {@link moderatorGuide}. */
 export interface ModeratorGuideOptions {
   format: DocumentFormat;
+  /** Sections to leave out. Default none: the whole guide. The rest keeps its order. */
+  omitSections?: readonly GuideSection[];
 }
 
 /** The policy as data, for tools that import it. */
 export interface PolicyJson {
   version: 1;
-  profile: ModerationProfile;
+  /** With `durations` and `customDuration` filled in, so a profile written for 0.1.1 reads back with the two new keys. */
+  profile: ResolvedProfile;
   /** Every rule, retired ones included, in number order. */
   rules: CommunityRule[];
 }
@@ -207,6 +218,14 @@ function render(blocks: readonly Block[], format: DocumentFormat): string {
 // ---------------------------------------------------------------------------------------------------------------
 // Checks
 
+function checkSections(sections: unknown): ReadonlySet<GuideSection> {
+  if (sections === undefined) return new Set();
+  if (!Array.isArray(sections) || !sections.every((x) => typeof x === 'string' && (GUIDE_SECTIONS as readonly string[]).includes(x))) {
+    throw new RangeError(`omitSections must be a list of: ${GUIDE_SECTIONS.join(', ')}`);
+  }
+  return new Set(sections as GuideSection[]);
+}
+
 function checkFormat(format: unknown): DocumentFormat {
   if (typeof format !== 'string' || !FORMATS.includes(format)) {
     throw new RangeError("A document format must be 'markdown', 'html' or 'text'");
@@ -214,15 +233,21 @@ function checkFormat(format: unknown): DocumentFormat {
   return format as DocumentFormat;
 }
 
-/** The policy must be one the kit could enforce: the profile is validated (a `ProfileError` names the field). */
-function checkPolicy(policy: DocumentPolicy): void {
+/**
+ * The policy must be one the kit could enforce: the profile is validated (a `ProfileError` names the field). Returns the snapshot
+ * the document is built from: the profile read ONCE (it may be a live getter) with `durations` and `customDuration` filled in
+ * for a profile written before they existed, and the rules.
+ */
+function checkPolicy(policy: DocumentPolicy): { profile: ResolvedProfile; rules: CommunityRules } {
   const p: unknown = policy;
   if (typeof p !== 'object' || p === null) throw new TypeError('A document policy needs a profile and rules');
   const rules = (p as { rules?: unknown }).rules;
   if (typeof rules !== 'object' || rules === null || typeof (rules as { active?: unknown }).active !== 'function') {
     throw new TypeError('A document policy needs a profile and rules');
   }
-  validateProfile((p as { profile?: unknown }).profile);
+  const profile = (p as { profile?: unknown }).profile;
+  validateProfile(profile);
+  return { profile: withDurationDefaults(profile), rules: rules as CommunityRules };
 }
 
 /**
@@ -325,8 +350,6 @@ function ruleLabels(rules: CommunityRules, numbers: readonly number[] | undefine
 const RECORD_STEPS =
   '0 is notes only, 1 is a warning, 2 is a chat or area restriction under 7 days (or two warnings), 3 is a restriction of 7 days or more or a ban under 7 days, 4 is a ban of 7 to 29 days, 5 is a ban of 30 days or more or anything permanent';
 
-const DEFAULT_AREA_RULES: readonly number[] = [5, 6];
-
 function areaRuleList(policy: DocumentPolicy): Array<{ number: number; title: string }> {
   return ruleLabels(policy.rules, policy.profile.areaRules ?? DEFAULT_AREA_RULES);
 }
@@ -427,12 +450,12 @@ function swearingForPlayer(profile: ModerationProfile): string {
  * name and `ProfileError` for an invalid profile.
  */
 export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOptions): string {
-  checkPolicy(policy);
+  const snapshot = checkPolicy(policy);
   const format = checkFormat(options.format);
   const gameName = typeof options.gameName === 'string' ? clean(options.gameName) : '';
   if (gameName === '') throw new RangeError('A code of conduct needs a game name');
   const href = safeLink(options.contactUrl);
-  const { profile, rules } = policy;
+  const { profile, rules } = snapshot;
   const firstRule = rules.active()[0];
   const example = firstRule === undefined ? '' : ` (for example, CR ${firstRule.number})`;
 
@@ -446,8 +469,8 @@ export function codeOfConduct(policy: DocumentPolicy, options: CodeOfConductOpti
   ];
   for (const tier of profile.guidelines) blocks.push(...playerTierBlocks(profile, tier));
 
-  const area = areaRuleList(policy);
-  const severe = severeRuleList(policy);
+  const area = areaRuleList(snapshot);
+  const severe = severeRuleList(snapshot);
   if (area.length > 0 || severe.length > 0) blocks.push({ k: 'h', level: 3, text: 'Some rules work differently' });
   if (area.length > 0) {
     const names = area.map((r) => `CR ${r.number} (${r.title})`).join(' or ');
@@ -518,9 +541,10 @@ function aiForModerators(profile: ModerationProfile): string {
  * Retired rules are omitted. Throws `RangeError` for an unknown format and `ProfileError` for an invalid profile.
  */
 export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOptions): string {
-  checkPolicy(policy);
+  const snapshot = checkPolicy(policy);
   const format = checkFormat(options.format);
-  const { profile, rules } = policy;
+  const omit = checkSections(options.omitSections);
+  const { profile, rules } = snapshot;
 
   const blocks: Block[] = [
     { k: 'h', level: 1, text: `Moderator guide: ${profile.name}` },
@@ -529,8 +553,7 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
       k: 'p',
       text: 'This guide is generated from the moderation profile and the Community Rules in force, so it matches what the kit enforces. It is for the moderation team: do not publish it.',
     },
-    { k: 'h', level: 2, text: 'Community Rules' },
-    { k: 'ul', items: ruleItems(rules) },
+    ...(omit.has('rules') ? [] : ([{ k: 'h', level: 2, text: 'Community Rules' }, { k: 'ul', items: ruleItems(rules) }] as Block[])),
     { k: 'h', level: 2, text: 'Conduct levels' },
     {
       k: 'table',
@@ -562,27 +585,31 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
       k: 'p',
       text: 'Repeated applies while the person has no warning or restriction on record; once they do, the ladder below applies. At least one earlier note is always needed. Revoked notes, and notes older than the window, do not count. An escalation is never milder than the first-offense outcome.',
     },
-    { k: 'h', level: 2, text: 'Escalation ladder' },
-    {
-      k: 'p',
-      text: `A person's step is the heaviest action on their record in the last 90 days. Step ${RECORD_STEPS}.`,
-    },
-    {
-      k: 'table',
-      head: ['Step', 'Low / medium (banter, rude)', 'High (hostile with a record, severe)'],
-      rows: profile.ladder.map((row) => [String(row.step), clean(row.lowMedium.label), clean(row.high.label)]),
-    },
   );
-  const area = areaRuleList(policy);
-  if (area.length > 0) {
-    blocks.push({
-      k: 'p',
-      text: `Rules that turn a chat restriction into a ban from public rooms and matchmaking at the same length: ${area.map((r) => `CR ${r.number}. ${r.title}`).join('; ')}.`,
-    });
-  }
-  const severe = severeRuleList(policy);
-  if (severe.length > 0) {
-    blocks.push({ k: 'p', text: `Rules that always read the High column: ${severe.map((r) => `CR ${r.number}. ${r.title}`).join('; ')}.` });
+  if (!omit.has('ladder')) {
+    blocks.push(
+      { k: 'h', level: 2, text: 'Escalation ladder' },
+      {
+        k: 'p',
+        text: `A person's step is the heaviest action on their record in the last 90 days. Step ${RECORD_STEPS}.`,
+      },
+      {
+        k: 'table',
+        head: ['Step', 'Low / medium (banter, rude)', 'High (hostile with a record, severe)'],
+        rows: profile.ladder.map((row) => [String(row.step), clean(row.lowMedium.label), clean(row.high.label)]),
+      },
+    );
+    const area = areaRuleList(snapshot);
+    if (area.length > 0) {
+      blocks.push({
+        k: 'p',
+        text: `Rules that turn a chat restriction into a ban from public rooms and matchmaking at the same length: ${area.map((r) => `CR ${r.number}. ${r.title}`).join('; ')}.`,
+      });
+    }
+    const severe = severeRuleList(snapshot);
+    if (severe.length > 0) {
+      blocks.push({ k: 'p', text: `Rules that always read the High column: ${severe.map((r) => `CR ${r.number}. ${r.title}`).join('; ')}.` });
+    }
   }
 
   blocks.push(
@@ -624,8 +651,8 @@ export function moderatorGuide(policy: DocumentPolicy, options: ModeratorGuideOp
  * team-written value cannot add a line of policy. Retired rules are omitted.
  */
 export function agentBrief(policy: DocumentPolicy): string {
-  checkPolicy(policy);
-  const { profile, rules } = policy;
+  const snapshot = checkPolicy(policy);
+  const { profile, rules } = snapshot;
   const lines: string[] = [
     `Moderation policy for ${clean(profile.name)} (generated by Chatwarden)`,
     `Summary: ${clean(profile.summary)}`,
@@ -648,11 +675,11 @@ export function agentBrief(policy: DocumentPolicy): string {
     'Escalation after the first offense. Step = heaviest action on the record in the last 90 days. Low = banter and rude; high = hostile once the record has a warning or restriction, and severe:',
     ...profile.ladder.map((row) => `- step ${row.step}: low ${clean(row.lowMedium.label)} | high ${clean(row.high.label)}`),
   ];
-  const area = areaRuleList(policy);
+  const area = areaRuleList(snapshot);
   if (area.length > 0) {
     lines.push(`A chat restriction becomes a ban from public rooms and matchmaking (same length) for: ${area.map((r) => `CR ${r.number}`).join(', ')}.`);
   }
-  const severe = severeRuleList(policy);
+  const severe = severeRuleList(snapshot);
   if (severe.length > 0) lines.push(`Always read the high column for: ${severe.map((r) => `CR ${r.number}`).join(', ')}.`);
   lines.push(
     'Guidelines:',
@@ -677,8 +704,8 @@ export function agentBrief(policy: DocumentPolicy): string {
  * into `defineProfile` and `defineRules`. Throws `ProfileError` for an invalid profile.
  */
 export function policyJson(policy: DocumentPolicy): PolicyJson {
-  checkPolicy(policy);
-  return { version: 1, profile: structuredClone(policy.profile), rules: policy.rules.all() };
+  const snapshot = checkPolicy(policy);
+  return { version: 1, profile: structuredClone(snapshot.profile), rules: snapshot.rules.all() };
 }
 
 /** The four documents bound to one policy, as `cw.documents` exposes them. */

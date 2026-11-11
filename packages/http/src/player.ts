@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { errorClass, safeWarn } from '@chatwarden/core';
+import { errorClass, playerReporting, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, DocumentFormat, Logger, RawWho } from '@chatwarden/core';
 import { bodyObject } from './admin/validate.js';
 import { DEFAULT_GAME_NAME } from './admin/policy.js';
@@ -106,7 +106,9 @@ const known = (v: unknown): v is string => typeof v === 'string' && v !== '';
  * - `POST /notices/:id/ack` -> `{ ok }`. `ok: false` (still 200) for a notice that is not the caller's, an unknown id,
  *   or an unknown caller, so ids cannot be probed.
  * - `GET /record` -> `{ record }`: the caller's sanction notices that still apply.
- * - `GET /rules` -> `{ summary, rules }`: active rules as `{ number, title, text }`.
+ * - `GET /rules` -> `{ summary, rules, reporting }`: active rules as `{ number, title, text }`, and `reporting`: `{ flow, reasons, thanks }`,
+ *   what the report screen shows: the flow (`one_tap`, `reason_first` or `reason_required`), the ENABLED reasons in order as
+ *   `{ id, label, hint, group, asksNote }` (no rule mapping, no staff field) and the thank-you copy. Public, and live.
  * - `GET /code-of-conduct?format=html|markdown|text` (default markdown; anything else 400). The string body goes out
  *   with the `content-type` given here. HTML is a full document with a CSP of `default-src 'none'; style-src
  *   'unsafe-inline'`; every format has `x-content-type-options: nosniff`.
@@ -178,6 +180,8 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
         summary: cw.summary,
         // The public shape: number, title, text. (`retired` is dropped: only active rules are listed.)
         rules: cw.rules.active().map((r) => ({ number: r.number, title: r.title, text: r.text })),
+        // What the report screen needs; `playerReporting` copies each field by name, so nothing of the staff side can leak in.
+        reporting: playerReporting(cw.profile.reporting),
       },
     })),
 

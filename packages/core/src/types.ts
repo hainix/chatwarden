@@ -2,6 +2,8 @@
 // their own sections below.
 
 import type { AuditListQuery, AuditRow } from './audit.js';
+import type { PolicyLayer } from './profile.js';
+import type { RuleRef } from './rules.js';
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -173,6 +175,60 @@ export interface SanctionRow {
    * other load leaves the property off.
    */
   revokedAt?: number | null;
+  /**
+   * Who revoked the group and why. Set only by `listSubjectSanctions` (null while unrevoked, and on a row revoked
+   * before the actor was kept); every other load leaves the properties off.
+   */
+  revokedBy?: string | null;
+  revokeReason?: string | null;
+}
+
+/**
+ * What {@link Store.listSubjectSanctions} takes: the SUBJECT rows of sanction groups, newest first. Never an IP row.
+ */
+export interface SanctionListQuery {
+  /** Only rows whose stored target is one of these subject ids (a person's canonical id and its aliases). Absent: everyone; empty: nobody. */
+  subjects?: readonly SubjectId[];
+  /** Only rows from this source. */
+  source?: Source;
+  /** Only rows with `startsAt >= since`. */
+  since?: number;
+  /**
+   * Only rows in force at this instant, of any age: not revoked, and with no end or an end strictly after it. Combines
+   * (AND) with the other filters.
+   */
+  activeAt?: number;
+  /**
+   * With `since`: also the rows older than `since` that are permanent (`endsAt` null) and not revoked. Ignored without
+   * `since`.
+   */
+  alsoPermanent?: boolean;
+  /** Keyset cursor: only rows older than this (`startsAt` below it, or equal with an id below `beforeId`). `beforeId` without `before` is ignored. */
+  before?: number;
+  beforeId?: string;
+  /** Clamped to 1..200 (a fraction is floored). */
+  limit: number;
+}
+
+/** What {@link Store.reporterTally} counts over the reports a person filed. `badFaith` is the number marked bad faith. */
+export interface ReporterTally {
+  open: number;
+  actioned: number;
+  dismissed: number;
+  badFaith: number;
+}
+
+/**
+ * One decided report a person filed that carried a reason, with what its decision did: for the reporter's accuracy. `reason` is
+ * the report's stored `reportedReason`; `target` the reported subject as stored; `actions` one entry per sanction group the
+ * decision wrote (its subject row: who, and the rule cited, `'uncovered'` included). A dismissal with no actions has an empty list.
+ */
+export interface ReporterDecision {
+  reportId: string;
+  status: 'actioned' | 'dismissed';
+  reason: string;
+  target: SubjectId;
+  actions: Array<{ subject: SubjectId; rule: RuleRef }>;
 }
 
 /**
@@ -247,7 +303,11 @@ export interface DiscordThreadRow {
   createdAt: number;
 }
 
-/** What a player may report another for. */
+/**
+ * What a player could report another for in 0.1.1. A report's `category` is still one of these (derived from its reason, so
+ * code that reads `category` keeps working), but the reason a player picks is now `reportedReason`, an id from the profile's
+ * reporting reasons. `ReportInput.category` stays accepted as an alias of `reason`.
+ */
 export type ReportCategory = 'harassment' | 'hate' | 'cheating' | 'spam' | 'disruption' | 'other';
 
 /**
@@ -287,7 +347,14 @@ export interface StoredReport {
   targetSubject: SubjectId;
   targetSeat: string;
   targetHandle: string;
+  /** The 0.1.1 category this report is kept under, derived from `reportedReason` (`'other'` when none). Prefer `reportedReason`. */
   category: ReportCategory;
+  /**
+   * The reason the reporter gave: an id from the profile's reporting reasons, or null when they gave none. A HINT, never the
+   * truth: the case is settled by the moderator's decision. Optional on a row a store is given (missing reads as null); a
+   * store returns it on every record.
+   */
+  reportedReason?: string | null;
   note: string | null;
   lineId: string | null;
   excerpt: ReportExcerptLine[];
@@ -301,7 +368,18 @@ export interface StoredReport {
  * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
  * Private: moderator tools only.
  */
-export interface ReportRecord extends Omit<StoredReport, 'status'> {
+export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason'> {
+  /**
+   * The reason the reporter gave (a reason id), or null. Rows stored before 0.1.2 carry their old category here (`disruption` as
+   * `griefing`). Every first-party store returns it; it is optional here so a custom store's 0.1.1-shaped record still type-checks (a
+   * missing one reads as the old category, see `StaffReport`, where it is always present).
+   */
+  reportedReason?: string | null;
+  /**
+   * When the reporter added their one follow-up (`cw.reports.addDetail`), epoch ms, or null. At most one per report, and only
+   * while the report is open.
+   */
+  detailAt?: number | null;
   status: 'open' | 'actioned' | 'dismissed';
   badFaith: boolean;
   actionedAt: number | null;
@@ -320,7 +398,62 @@ export interface ReportListQuery {
   /** Epoch ms; only reports created before this (exclusive), or at it with an id below `beforeId`. */
   before?: number;
   beforeId?: string;
+  /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. */
+  reason?: string | null;
   limit: number;
+}
+
+/** What {@link Store.listOpenReports} takes: the take-next scan, oldest first. */
+export interface OpenReportQuery {
+  /** Only reports of this category. */
+  category?: ReportCategory;
+  /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. A store must apply it. */
+  reason?: string | null;
+  /** Keyset cursor: only reports newer than this (`createdAt` above it, or equal with an id above `afterId`). `afterId` without `after` is ignored. */
+  after?: number;
+  afterId?: string;
+  /** Clamped to 1..200 (a fraction is floored). */
+  limit: number;
+}
+
+// ---------------------------------------------------------------------------
+// Team workbench (storage shapes): soft claims and saved reasons
+// ---------------------------------------------------------------------------
+
+/** How long a claim lasts after the last claim or heartbeat: 10 minutes. */
+export const CLAIM_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * A soft claim on a person's case: `by` (a staff actor) is handling it from `since` until `until` (epoch ms). It is live
+ * strictly before `until`; an expired claim reads as absent. Staff only: `person` is a subject id.
+ */
+export interface ClaimRow {
+  person: SubjectId;
+  by: string;
+  since: number;
+  until: number;
+}
+
+/**
+ * How {@link Store.claimCase} treats a claim that someone else holds:
+ * - `claim`: wins when the case is free or the caller already holds it (a heartbeat).
+ * - `free`: wins only when nobody holds a live claim, the caller included (take next uses it to skip what it holds).
+ * - `takeover`: wins always (a senior moving a claim to themselves).
+ */
+export type ClaimMode = 'claim' | 'free' | 'takeover';
+
+/**
+ * What {@link Store.claimCase} answers. A win carries the claim now in force and `from`, the other actor whose LIVE claim
+ * this one replaced (null for a fresh claim, a heartbeat or an expired claim). A loss carries the live claim that stands.
+ */
+export type ClaimAttempt = { won: true; claim: ClaimRow; from: string | null } | { won: false; claim: ClaimRow };
+
+/** A saved decision reason: a short label for the picker and the text it fills in. */
+export interface ReasonRow {
+  id: string;
+  label: string;
+  text: string;
+  active: boolean;
 }
 
 /**
@@ -472,6 +605,13 @@ export interface Store {
    */
   loadSubjectActions(since: number): SanctionRow[];
 
+  /**
+   * The SUBJECT rows of sanction groups (never an IP row), newest first (`startsAt` descending, then `id` descending, so a
+   * tie is stable), revoked and ended ones included. Every row carries `revokedAt`, `revokedBy` and `revokeReason` (all
+   * null while unrevoked). See {@link SanctionListQuery}.
+   */
+  listSubjectSanctions(q: SanctionListQuery): SanctionRow[];
+
   /** Every subject row that carries a rule-gap note (any status, revoked or not), newest `startsAt` first. */
   listGaps(): SanctionRow[];
 
@@ -516,6 +656,15 @@ export interface Store {
    */
   loadAutoChatStarts(): Array<{ subject: SubjectId; startsAt: number }>;
 
+  /**
+   * Strikes at or after `since` (epoch ms), newest first (`at` descending, then `id` descending), at most `limit`
+   * (clamped to 1..500). The staff "blocked messages" view.
+   */
+  listStrikes(since: number, limit: number): StrikeRow[];
+
+  /** For each term id, how many strikes at or after `since` it earned (terms with none are absent). Order is unspecified. */
+  countStrikesByTerm(since: number): Array<{ termId: string; count: number }>;
+
   // Reports. SYNCHRONOUS on purpose (like sanctions): `ReportService.submit` runs these inside `transaction`.
   // Subject ids come back exactly as stored (canonical at write time, possibly merged since); the service folds
   // aliases. The table also carries `status`, `bad_faith` and `actioned_at` for K2's moderator tools.
@@ -532,7 +681,7 @@ export interface Store {
 
   /**
    * Reports newest first (`created_at` descending, then `id` descending, so a tie is stable), whole records. `status`
-   * filters; `before` keeps only reports older than that instant (exclusive), and with `beforeId` also the ones filed
+   * filters; `reason` filters on `reportedReason` (an id, or null for none; a store must apply it, so paging stays right); `before` keeps only reports older than that instant (exclusive), and with `beforeId` also the ones filed
    * AT that instant whose id sorts below it (keyset paging: pass the last row's `createdAt` and `id`). `beforeId`
    * without `before` is ignored. `limit` is clamped to 1..200 (a fraction is floored).
    */
@@ -544,6 +693,46 @@ export interface Store {
    * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
    */
   listReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+
+  /**
+   * Reports that are still `open`, OLDEST first (`createdAt` ascending, then `id` ascending, so a tie is stable), whole
+   * records. `category` filters; `after` keeps only reports newer than that instant (exclusive), and with `afterId` also
+   * the ones filed AT that instant whose id sorts above it (keyset paging: pass the last row's `createdAt` and `id`).
+   * `limit` is clamped to 1..200 (a fraction is floored). The scan behind "take next".
+   */
+  listOpenReports(q: OpenReportQuery): ReportRecord[];
+
+  /**
+   * The OPEN reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id
+   * and every alias merged into it), newest first (`createdAt` descending, then `id` descending), whole records. `limit` is
+   * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
+   */
+  listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+
+  /**
+   * How the reports FILED BY any of the given subjects stand (`reporterSubject` as stored: pass the person's canonical id
+   * and every alias merged into it): how many are still open, actioned or dismissed, and how many carry the bad-faith
+   * mark. An empty list counts nothing.
+   */
+  reporterTally(reporters: readonly SubjectId[]): ReporterTally;
+
+  /**
+   * OPTIONAL. The DECIDED reports (`actioned` or `dismissed`) filed by any of the given subjects (`reporterSubject` as stored)
+   * that carry a `reportedReason`, each with the sanction groups its decision wrote (the group's subject row: the person and
+   * the rule it cited). The reporter-accuracy read behind `reasonMatched` / `reasonDecided`. A store that leaves it out
+   * reports 0 and 0. An empty list matches nothing; open reports and reports with no reason are never returned. At most the newest
+   * 200 (newest first). A decision row that cannot be read is a decision with no actions, never an error.
+   */
+  loadReporterDecisions?(reporters: readonly SubjectId[]): ReporterDecision[];
+
+  /**
+   * OPTIONAL. Attach the reporter's one follow-up to an `open` report that has none yet: set `reportedReason` and `note` (the
+   * FINAL values; the caller has merged them with what the report had) and `detailAt`, atomically. Returns true when this call
+   * did it, false (nothing changed) for an unknown report, one that is no longer `open`, or one that already has a follow-up.
+   * Never touches the target, the excerpt or the line. A store that leaves it out cannot take a follow-up: `addDetail` answers
+   * `off`. `category` is the 0.1.1 category to keep beside the reason.
+   */
+  addReportDetail?(id: string, detail: { reportedReason: string | null; category: ReportCategory; note: string | null; at: number }): boolean;
 
   /**
    * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`,
@@ -581,10 +770,74 @@ export interface Store {
    */
   loadAutoChatGroups(since: number): Array<{ subject: SubjectId; groupId: string }>;
 
+  // Team workbench (K4 Task 4b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
+
+  /**
+   * The change token: an opaque string that is different after every change a moderator's queue shows, and the same
+   * otherwise. It persists with the store (a restart does not rewind it) and is shared by every process on the same
+   * database. An adapter must move it INSIDE the same transaction as the write, so an undone write leaves it as it was,
+   * on exactly these events: `insertReport` (true), `closeReport` (true), `insertSanctionGroup` (true),
+   * `revokeSanctionGroup` (more than 0), `closeGap` (true), `claimCase` (a win that changes the owner of the case, so a
+   * heartbeat does not), `releaseClaim` (true), `insertReason`, and `updateReason` / `setReasonActive` when a value changes.
+   * Nothing else moves it, and reading it never does.
+   */
+  changeToken(): string;
+
+  /**
+   * Claim a person's case for `by` at `now`, the claim ending at `until`, as ONE atomic conditional write: of two callers
+   * racing for the same free case, exactly one wins, even from two processes on one database. See {@link ClaimMode} and
+   * {@link ClaimAttempt}. A claim is live strictly before its `until`; an expired one is replaced as if absent. `since` is
+   * kept across a heartbeat and set to `now` otherwise. The token moves when the owner of the case changes.
+   */
+  claimCase(person: SubjectId, by: string, now: number, until: number, mode: ClaimMode): ClaimAttempt;
+
+  /**
+   * Release `by`'s claim on the person. True only when it removed a LIVE claim held by `by`; someone else's claim, no claim
+   * and an expired claim (already absent) answer false and the first two are left alone.
+   */
+  releaseClaim(person: SubjectId, by: string, now: number): boolean;
+
+  /** The claims in force at `now` (not expired) among these people, ordered by person. An empty list matches nobody. */
+  loadClaims(persons: readonly SubjectId[], now: number): ClaimRow[];
+
+  /** Every saved reason (active or not), in the order they were added. */
+  listReasons(): ReasonRow[];
+
+  /** Add a reason. A duplicate `id` throws and writes nothing. */
+  insertReason(row: ReasonRow): void;
+
+  /** Change a reason's label and/or text. False for an unknown id; true otherwise (also when nothing differs). */
+  updateReason(id: string, patch: { label?: string; text?: string }): boolean;
+
+  /** Switch a reason on or off. False for an unknown id; true otherwise (also when it already was so). */
+  setReasonActive(id: string, active: boolean): boolean;
+
+  // The editable moderation profile (K4 Task 7f). OPTIONAL: a store without both methods still works, and `cw.policy.save`
+  // then answers `unsupported` while the profile stays code-only. SYNCHRONOUS on purpose (like sanctions).
+
+  /**
+   * The stored policy layer and its version, or null when none was ever saved (version 0). `layer` is whatever was saved,
+   * unvalidated: the kit checks it against the profile and ignores one it cannot use. A row that cannot be read at all (its text is
+   * not JSON) still answers its version, with a `layer` of null, which the kit reports as unusable. Returns a copy.
+   */
+  loadPolicyLayer?(): { layer: PolicyLayer; version: number } | null;
+
+  /**
+   * Replace the stored layer with `layer` IF the stored version is still `expectedVersion` (0 when none is stored), as ONE
+   * atomic conditional write: of two callers (two processes on one database included) that pass the same version, exactly
+   * one wins. Returns the new version (`expectedVersion + 1`), or null on a version conflict, which writes nothing. Runs
+   * inside `transaction`, so an undone transaction undoes it. It does not move the change token.
+   */
+  savePolicyLayer?(layer: PolicyLayer, expectedVersion: number): number | null;
+
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).
 
-  /** Insert one audit entry. A duplicate id throws (nothing is written). Both json columns are written NULL. */
+  /**
+   * Insert one audit entry. A duplicate id throws (nothing is written). Both json columns are written NULL. A policy row
+   * (`policy.update`, `policy.reset`) also carries `detail` (the sections changed and the owner's reason): a store MUST keep it
+   * and return it from `listAudit`, or the trail silently loses what changed and why. A row without one has no `detail` key.
+   */
   insertAudit(row: AuditRow): void;
 
   /**

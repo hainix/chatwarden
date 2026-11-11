@@ -22,6 +22,10 @@
 //              POST /admin/reports/:id/decide  { verdict, reason, actions: [{ subject, kind, durationMs, rule, lineIds?, gapNote? }] }
 //                                              `subject` comes from the report detail; the answer carries ref codes only
 //              Also the gap, sanction, term, policy and audit routes (the live term list is passed as `terms`).
+//   /mod       the moderator hub: one page with `<chatwarden-hub base-url="/admin">` and one script tag (/mod/hub-element.js,
+//              the file `@chatwarden/hub-element` ships). Behind the same authorize as /admin: the `x-admin-token` header, or the
+//              session cookie that POST /mod/login sets from a sign-in form (a browser cannot send a header on a page load).
+//              Off (404) without an admin token, like /admin.
 //   /api/*     the player API (`playerRoutes`): GET /api/notices, POST /api/notices/:id/ack, GET /api/record,
 //              GET /api/rules, GET /api/code-of-conduct?format=html|markdown|text, POST /api/names/check.
 //              DEMO ONLY identity: the `x-chatwarden-key` header, or `?key=` (a key in a URL is unsafe, see the README).
@@ -34,7 +38,9 @@
 // query parameter on the socket and in the report body to keep this demo short; no frame or response ever
 // carries it, a subject id or a hash back to a player.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage } from 'node:http';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -130,6 +136,89 @@ function sameToken(given: unknown, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/** The cookie the demo's sign-in form sets. DEMO ONLY: it holds the shared admin token. A real app has its own session cookie. */
+const STAFF_COOKIE = 'tiny_chat_staff';
+
+/** The value of cookie `name` in a `Cookie` header, or undefined when it is absent or cannot be decoded. */
+function cookieValue(header: unknown, name: string): string | undefined {
+  if (typeof header !== 'string') return undefined;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1 || part.slice(0, eq).trim() !== name) continue;
+    try {
+      return decodeURIComponent(part.slice(eq + 1).trim());
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/** A style-src value that allows exactly one inline stylesheet, by its hash: no `'unsafe-inline'`. */
+const styleHash = (css: string): string => `'sha256-${createHash('sha256').update(css).digest('base64')}'`;
+
+const HUB_PAGE_CSS = 'body{margin:0}';
+const SIGN_IN_CSS =
+  'body{font:16px/1.5 system-ui,sans-serif;max-width:24rem;margin:4rem auto;padding:0 1rem}input,button{font:inherit;padding:.4rem .6rem;margin:.25rem 0}input{width:100%;box-sizing:border-box}';
+
+/** The moderator hub page: the element and one script tag. `base-url` is where the staff routes are mounted. */
+const HUB_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tiny-chat moderation</title>
+<style>${HUB_PAGE_CSS}</style>
+</head>
+<body>
+<script type="module" src="/mod/hub-element.js"></script>
+<chatwarden-hub base-url="/admin"></chatwarden-hub>
+</body>
+</html>
+`;
+
+/** The sign-in form (a plain post to /mod/login). `notice` is fixed text from this file, never anything the visitor sent. */
+const signInPage = (notice: string): string => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tiny-chat moderation: sign in</title>
+<style>${SIGN_IN_CSS}</style>
+</head>
+<body>
+<h1>Moderation</h1>
+<p>DEMO ONLY: sign in with the admin token (TINY_CHAT_ADMIN_TOKEN).${notice === '' ? '' : ` ${notice}`}</p>
+<form method="post" action="/mod/login">
+<label for="token">Admin token</label>
+<input id="token" name="token" type="password" autocomplete="off" required>
+<button type="submit">Sign in</button>
+</form>
+</body>
+</html>
+`;
+
+const HUB_PAGE_CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "connect-src 'self'",
+  "img-src 'self' data:",
+  `style-src ${styleHash(HUB_PAGE_CSS)}`,
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+const SIGN_IN_CSP = ["default-src 'none'", `style-src ${styleHash(SIGN_IN_CSS)}`, "form-action 'self'", "base-uri 'none'", "frame-ancestors 'none'"].join('; ');
+
+/** Where the `@chatwarden/hub-element` script is, or null when the package has not been built (`npm run build`). */
+function hubScriptPath(): string | null {
+  try {
+    return createRequire(import.meta.url).resolve('@chatwarden/hub-element/standalone');
+  } catch {
+    return null;
+  }
+}
+
 export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat> {
   const secret = resolveSecret(opts.secret);
   // An empty token (option or environment variable) is no token: the route stays off rather than open to an empty header.
@@ -222,13 +311,59 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   // own session. The role is `owner` and the actor a fixed `demo-admin`. Switched off (404) without a token.
   if (adminToken === undefined) {
     app.use('/admin', (_req, res) => void res.status(404).json({ ok: false, refused: 'off' }));
+    app.use('/mod', (_req, res) => void res.status(404).json({ ok: false, refused: 'off' }));
   } else {
     const token = adminToken;
+    // The one staff authorize, for /admin and /mod alike. A header, if the caller sent one, is the credential (a wrong header is
+    // not rescued by a cookie); otherwise the sign-in cookie is.
+    const staffFrom = (headers: Readonly<Record<string, string | string[] | undefined>>): { actor: string; role: 'owner' } | null => {
+      const given = headers['x-admin-token'] ?? cookieValue(headers.cookie, STAFF_COOKIE);
+      return sameToken(given, token) ? { actor: 'demo-admin', role: 'owner' } : null;
+    };
+
+    // The moderator hub. The page and the script are static (they hold no data), but they sit behind the same authorize as the
+    // staff API they call, and a visitor who is not signed in gets the sign-in form.
+    const html = (res: Response, status: number, csp: string, body: string): void => {
+      res.status(status).type('html').set({ 'cache-control': 'no-store', 'content-security-policy': csp, 'x-content-type-options': 'nosniff' }).send(body);
+    };
+    app.get('/mod', (req, res) => {
+      if (staffFrom(req.headers) === null) html(res, 401, SIGN_IN_CSP, signInPage(''));
+      else html(res, 200, HUB_PAGE_CSP, HUB_PAGE);
+    });
+    app.get('/mod/hub-element.js', async (req, res, next) => {
+      if (staffFrom(req.headers) === null) {
+        res.status(401).set('cache-control', 'no-store').type('text').send('Sign in at /mod first.');
+        return;
+      }
+      const file = hubScriptPath();
+      if (file === null) {
+        res.status(503).type('text').send('@chatwarden/hub-element is not built: run npm run build.');
+        return;
+      }
+      try {
+        res.status(200).set({ 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }).type('text/javascript; charset=utf-8').send(await readFile(file));
+      } catch (err) {
+        next(err);
+      }
+    });
+    app.post('/mod/login', express.urlencoded({ extended: false, limit: '2kb' }), (req, res) => {
+      const given = (req.body as { token?: unknown } | undefined)?.token;
+      if (!sameToken(given, token)) {
+        html(res, 401, SIGN_IN_CSP, signInPage('That token was not accepted.'));
+        return;
+      }
+      // HttpOnly: the page's scripts cannot read it. SameSite=Strict: another site cannot make the browser send it, which is what
+      // keeps a cookie-signed staff API from being driven cross-site. Secure whenever the request came over TLS.
+      res.append('set-cookie', `${STAFF_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/${req.secure ? '; Secure' : ''}`);
+      res.set('cache-control', 'no-store').redirect(303, '/mod');
+    });
+    app.use('/mod', (_req, res) => void res.status(404).json({ error: 'not_found' }));
+
     app.use(
       '/admin',
       toExpress(
         adminRoutes(chatwarden, {
-          authorize: (req: KitRequest) => (sameToken(req.headers['x-admin-token'], token) ? { actor: 'demo-admin', role: 'owner' } : null),
+          authorize: (req: KitRequest) => staffFrom(req.headers),
           gameName: GAME_NAME,
           // The live term list: it adds the staff term and exception routes (`/admin/terms`, `/admin/terms/check`, ...).
           terms,

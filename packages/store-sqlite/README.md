@@ -89,10 +89,24 @@ How it behaves:
   of it or a query on it to a player, and keep the file readable by the app's user only (`chmod 600`).
 - **What is never logged.** The store itself logs nothing. Errors it throws are SQLite's own and may name a table or column but
   never a value; the kit logs only an event name and the error class.
+- **The editable profile.** Migration 16 adds `kit_policy_layer` (at most one row: the owner's stored edits to the moderation
+  profile as JSON, and a version) and a nullable `detail_json` column on `kit_audit` (the sections changed and the reason of a
+  `policy.update` or `policy.reset` row; NULL on every other row). A save is one conditional `INSERT` or `UPDATE` on the version, so
+  two server processes on one file never both win; the loser gets a version conflict. An existing database upgrades in place and
+  keeps every row. Nothing here holds chat.
+- **Claims and saved reasons.** Migration 15 adds `kit_claims` (a soft claim per person: the staff actor holding the case and when it
+  lapses) and `kit_reasons` (the moderators' saved decision reasons). A claim is taken with one conditional statement, so two
+  server processes on the same file never both win a case. If a second process commits between the kit's read and its write,
+  SQLite refuses the write (`database is locked`); the kit retries that claim up to 3 times with a fresh read, so the loser
+  gets the normal "claimed" answer. The store sets a 5 second `busy_timeout` on a connection that has none (yours is kept if
+  you set one), so short writes from two processes queue instead of failing. The queue's change token is a counter row in `kit_meta` that every
+  report, decision, sanction, gap, claim-owner and reason change moves in the same transaction. Nothing here holds chat; the
+  claim table holds subject ids and staff actors, so it is staff-only like the rest. Expired claim rows are replaced by the
+  next claim and are not purged (see below).
 - **What retention does not purge.** `cw.purge()` and the built-in timer delete old reports, sanctions, strikes, mutes, notices,
-  audit rows and webhook keys. The subject tables (`kit_subjects`, `kit_subject_ids`) and the Discord thread map
-  (`kit_discord_threads`) are not purged, because the ladder and a returning player's record depend on knowing who is who. They
-  hold hashes and ids, not chat. If your privacy policy needs a person erased, that is a separate step you run on the database.
+  audit rows and webhook keys. The subject tables (`kit_subjects`, `kit_subject_ids`), the Discord thread map
+  (`kit_discord_threads`) and the claim table (`kit_claims`, one row per person ever claimed) are not purged, because the ladder and a returning player's record depend on knowing who is who. They
+  hold hashes and ids, not chat. If your privacy policy needs a person erased, that is a separate step you run on the database, and it must clear `kit_claims` too.
 - **Encryption at rest is yours.** SQLite does not encrypt the file. Put it on an encrypted disk if the hashes and the moderators'
   excerpts need that.
 

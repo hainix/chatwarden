@@ -1,44 +1,34 @@
 // N1 from the Task 2 re-review: two announcements in one tick must keep distinct keys, and Reset must clear the live region.
 // N2: after an automatic pane switch the focused heading is brought into view.
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import Demo from '../src/demo/Demo';
-import { KitEngine } from '../src/demo/kitEngine';
-
-function stubMatchMedia(stacked: boolean, reduced = false) {
-  window.matchMedia = ((q: string) => ({
-    matches: /reduced-motion/.test(q) ? reduced : /max-width/.test(q) ? stacked : false,
-    media: q,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-  })) as unknown as typeof window.matchMedia;
-}
+import { live, setup as baseSetup, stubMatchMedia as stub } from './helpers/demoUi';
 
 async function setup(opts: { stacked?: boolean; reduced?: boolean } = {}) {
-  stubMatchMedia(opts.stacked ?? true, opts.reduced ?? false);
-  const user = userEvent.setup();
-  render(<Demo engine={new KitEngine()} scripted={false} />);
-  await screen.findByText("uninstall the game, you're hopeless");
-  return { user };
+  stub(opts.stacked ?? true, opts.reduced ?? false);
+  const base = await baseSetup({ stacked: opts.stacked ?? true, reduced: opts.reduced ?? false });
+  return { user: base.user };
 }
 
-const live = () => screen.getByTestId('demo-live');
 const lines = () => [...live().querySelectorAll('p')].map((p) => p.textContent ?? '');
-/** Reports Bo's rude line with the keyboard only; on a phone the tour then moves to the moderator pane and moves focus. */
+/**
+ * Reports Bo's rude line with the keyboard only and closes the thank-you; on a phone the tour then moves to the moderator pane
+ * and focus lands on its heading.
+ */
 async function reportByKeyboard(user: ReturnType<typeof userEvent.setup>) {
   screen.getByRole('button', { name: /report bo's line: uninstall/i }).focus();
   await user.keyboard('{Enter}');
-  await screen.findByRole('dialog');
-  await user.keyboard(' ');
-  screen.getByRole('button', { name: /send report/i }).focus();
+  const dialog = await screen.findByRole('dialog');
+  within(dialog).getByRole('button', { name: 'Report' }).focus();
+  await user.keyboard('{Enter}');
+  await within(dialog).findByRole('heading', { name: 'Report sent' });
+  within(dialog).getByRole('button', { name: 'Close' }).focus();
   await user.keyboard('{Enter}');
 }
 const tourNext = () => within(screen.getByRole('region', { name: /guided tour/i })).getByRole('button', { name: /^next$/i });
 
-beforeEach(() => stubMatchMedia(true));
+beforeEach(() => stub(true));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -48,11 +38,10 @@ describe('live region announcements (stacked layout)', () => {
   it('keeps both announcements of one tick, each once, with no duplicate-key warning', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { user } = await setup();
-    await user.click(tourNext()); // step 2
-    await user.click(tourNext()); // step 3: "Tour step 3" and "Showing the moderator view" in the same tick
+    await user.click(tourNext()); // step 2: "Tour step 2" and "Showing the moderator view" in the same tick
     await waitFor(() => expect(lines().some((l) => /moderator view/i.test(l))).toBe(true));
     const got = lines();
-    expect(got.filter((l) => /^Tour step 3 of 4/.test(l))).toHaveLength(1);
+    expect(got.filter((l) => /^Tour step 2 of 7/.test(l))).toHaveLength(1);
     expect(got.filter((l) => /moderator view/i.test(l))).toHaveLength(1);
     expect(new Set(got).size).toBe(got.length);
     const keyWarnings = err.mock.calls.filter((c) => /same key|unique "key"/i.test(String(c[0]) + String(c[1] ?? '')));
@@ -61,7 +50,7 @@ describe('live region announcements (stacked layout)', () => {
 
   it('keeps the last announcements distinct through a whole tour', async () => {
     const { user } = await setup();
-    for (let i = 0; i < 4; i++) await user.click(tourNext());
+    for (let i = 0; i < 7; i++) await user.click(tourNext());
     const got = lines();
     expect(got.length).toBeLessThanOrEqual(4);
     expect(new Set(got).size).toBe(got.length);
@@ -84,7 +73,7 @@ describe('live region announcements (stacked layout)', () => {
     for (let i = 0; i < 3; i++) await user.click(tourNext());
     const got = lines();
     expect(new Set(got).size).toBe(got.length);
-    expect(got.filter((l) => /^Tour step 3 of 4/.test(l))).toHaveLength(1);
+    expect(got.filter((l) => /^Tour step 3 of 7/.test(l))).toHaveLength(1);
   });
 });
 
@@ -132,7 +121,7 @@ describe('after an automatic pane switch the focused heading is brought into vie
     await reportByKeyboard(user);
     await waitFor(() => expect(document.activeElement?.id).toBe('pane-mod-title'));
     const first = calls.length;
-    (screen.getByRole('button', { name: /my record/i }) as HTMLElement).focus();
+    within(document.querySelector('[data-pane="mod"]') as HTMLElement).getByRole('button', { name: 'Detailed' }).focus();
     await new Promise((r) => setTimeout(r, 900));
     expect(calls.length).toBe(first);
   });

@@ -1,10 +1,10 @@
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 export { ROLES } from '@chatwarden/core';
 export type { Role } from '@chatwarden/core';
 export type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';
 export { compileRoutes as matchRoute, createRouter } from './router.js';
 export type { CompiledRoutes, RouteHandler, RouteTable } from './router.js';
-export { errorResponse, HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
+export { ClaimedError, errorResponse, HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
 export type { ErrorCode } from './errors.js';
 export { BODY_MAX_BYTES, parseJson } from './body.js';
 export { guard, requireRole } from './auth.js';
@@ -18,10 +18,13 @@ export {
   BadActorError,
   createAdminContext,
   DEFAULT_GAME_NAME,
+  blockedRoutes,
   gapRoutes,
+  meRoutes,
   policyRoutes,
   reportRoutes,
   sanctionRoutes,
+  teamRoutes,
   termRoutes,
 } from './admin/index.js';
 export type {
@@ -29,8 +32,12 @@ export type {
   AdminContext,
   AdminOptions,
   AdminRoutesOptions,
+  ExceptionListRow,
+  Me,
   PolicyOptions,
   ReportSummary,
+  TermListRow,
+  TermMetadata,
   TermsAdmin,
   TermsEditor,
 } from './admin/index.js';

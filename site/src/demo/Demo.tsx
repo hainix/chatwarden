@@ -1,23 +1,29 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { playerReporting } from '@chatwarden/core';
+import { NoticeQueue, createPlayerClient, ReportDialog } from '@chatwarden/player-react';
+import type { PlayerClient, PlayerReporting, ReportFollowUp, ReportDraft, ReportResult } from '@chatwarden/player-react';
+import '@chatwarden/player-react/styles.css';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ReplayIcon } from '../components/Icons';
 import './demo.css';
 import { CodeDrawer } from './CodeDrawer';
 import { CODE_STEPS } from './codeSteps';
 import { LINE_MAX } from './engine';
-import type { DemoEngine, PlayerNotice, SeatState, StaffReport, Suggestion } from './engine';
+import type { DemoEngine, DemoSeat, DemoWorld, SeatState } from './engine';
 import { KitEngine } from './kitEngine';
 import { GamePane, endTime } from './GamePane';
+import { detailedSwitch, moreMenu, newCasesPill, queueLink, rulePicker, settingsLink, stepsAndLadder, suggestedStep, undoButton } from './hubTarget';
+import { ModeratorPane } from './HubPane';
+import type { StaffEvent } from './HubPane';
 import { PauseIcon, PlayIcon, CodeIcon } from './icons';
-import { ModPane } from './ModPane';
-import type { DecideKind } from './ModPane';
-import { durationWords, quietNote, refusalMessage, reportRefusalMessage, timeoutMs } from './notice';
-import { ReportDialog } from './ReportDialog';
-import { LOOP, NO_NOTICE_HINT, NO_REPORT_HINT, SEED, TOUR_STEPS } from './script';
+import { quietNote, refusalMessage } from './notice';
+import { seatTransport } from './playerTransport';
+import { NO_NOTICE_HINT, NO_REPORT_HINT, LOOP, SEED, TOUR_STEPS } from './script';
 import type { ScriptLine } from './script';
 import { TourCard } from './TourCard';
 import type { TourPos } from './TourCard';
-import type { FeedItem, PendingBySeat } from './types';
+import type { FeedItem } from './types';
 import { useMediaQuery } from './useMediaQuery';
+import { useSiteTheme } from './useSiteTheme';
 
 export interface DemoProps {
   /** The engine behind the demo. Defaults to the real kit, running in the browser. */
@@ -26,16 +32,31 @@ export interface DemoProps {
   scripted?: boolean;
 }
 
-const STACK_QUERY = '(max-width: 899px)';
+/**
+ * One pane at a time up to here, side by side from 1152px. The hub is a workbench with a queue beside the case, and wants about
+ * 720px: below 1152px the page cannot give it that next to the game, so the visitor switches between the two panes (and the tour
+ * switches for them). demo.css has the matching `min-width: 1152px`.
+ */
+const STACK_QUERY = '(max-width: 1151px)';
+/** A phone: the tour is a compact bar at the bottom of the window instead of a card beside the control. */
+const PHONE_QUERY = '(max-width: 599px)';
 const FEED_MAX = 60;
 const TOTAL = TOUR_STEPS.length;
 /** The scripted players, for the one sentence that says why a timed out player has gone quiet. */
 const PRONOUN: Record<string, 'he' | 'she'> = { ada: 'she', bo: 'he' };
 const FRIENDLY = 'Something went wrong in the demo. Reset to try again.';
 
+/** The tour steps, by position. A step is "done" when the thing it asks for happens, or when Next is pressed. */
+const STEP = { report: 0, queue: 1, open: 2, apply: 3, notice: 4, detailed: 5, ladder: 6 } as const;
+/** The steps that are about the hub: on a phone the tour shows the moderator pane for these, and the game pane for the others. */
+const HUB_STEPS: readonly number[] = [STEP.queue, STEP.open, STEP.apply, STEP.detailed, STEP.ladder];
+
+/** The hub remembers the moderator's Simple/Detailed choice here (its README documents the key); a Reset puts it back to Simple. */
+const HUB_MODE_KEY = 'chatwarden.hub.mode';
+
 interface TourState {
   on: boolean;
-  /** 0 to 3 for the four steps, 4 when finished. */
+  /** 0 to TOTAL - 1 for the steps, TOTAL when finished. */
   step: number;
   hint: string | null;
 }
@@ -46,21 +67,49 @@ interface Say {
 }
 
 /** Where the tour tooltip for a step points. Falls back to something visible when the target's pane is hidden. */
-function findTarget(root: HTMLElement, step: number, paneHidden: { game: boolean; mod: boolean }): HTMLElement | null {
+function findTarget(root: HTMLElement, step: number): HTMLElement | null {
   const visible = (el: HTMLElement | null) => (el !== null && el.closest('[hidden]') === null ? el : null);
   const q = (name: string) => visible(root.querySelector<HTMLElement>(`[data-tour="${name}"]`));
+  const hub = root.querySelector<HTMLElement>('[data-pane="mod"] .cw-hub');
+  const inHub = (find: (hub: HTMLElement) => HTMLElement | null) => (hub === null ? null : visible(find(hub)));
   switch (step) {
-    case 0:
-      return q('composer') ?? q('tab-game');
-    case 1:
+    case STEP.report:
       return q('report') ?? q('composer') ?? q('tab-game');
-    case 2:
-      return q('decide') ?? q('queue-tab') ?? q('tab-mod');
-    case 3:
-      return q('ack') ?? q('seats') ?? (paneHidden.game ? q('tab-game') : null);
+    case STEP.queue:
+    case STEP.open:
+      return inHub(newCasesPill) ?? inHub(queueLink) ?? q('tab-mod');
+    case STEP.apply:
+      return inHub(undoButton) ?? inHub(suggestedStep) ?? inHub(rulePicker) ?? inHub(newCasesPill) ?? inHub(queueLink) ?? q('tab-mod');
+    case STEP.notice:
+      return q('notice') ?? q('seats') ?? q('tab-game');
+    case STEP.detailed:
+      return inHub(detailedSwitch) ?? q('tab-mod');
+    case STEP.ladder:
+      return inHub(stepsAndLadder) ?? inHub(moreMenu) ?? inHub(settingsLink) ?? q('tab-mod');
     default:
-      return q('queue-tab') ?? q('reset');
+      return q('reset');
   }
+}
+
+/**
+ * Asks the hub to read the queue now. The hub polls the kit every five seconds, and also the moment the page becomes visible again:
+ * it listens for the browser's `visibilitychange`, so a synthetic one makes its poll run at once and a report shows in the queue
+ * without the wait. But the hub reads the same event as "the page is going away" when the tab is hidden, and then sends any decision
+ * held for Undo on the spot (hub-react `src/headless/toasts.ts`: `if (!page.visible()) flush()`). So the nudge does nothing unless the
+ * tab is visible: a hidden tab keeps the visitor's five seconds. (The hub's `<Hub>` takes no handle for a refresh, so the event is the
+ * only way in; it also reaches any other listener on the page, which is why it is sent from one place.)
+ */
+function nudgeHub(): void {
+  if (document.visibilityState !== 'visible') return;
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+/** What kind of control the tour is pointing at, for scrolling once per kind: a menu button, a link, a picker, a step button. */
+function targetKind(el: HTMLElement): string {
+  const name = (el.getAttribute('aria-label') ?? el.textContent ?? '').trim();
+  if (el.tagName === 'BUTTON' && /^\d+ new cases?$/.test(name)) return 'pill';
+  if (el.tagName === 'BUTTON' && name === 'Undo') return 'undo';
+  return el.tagName.toLowerCase();
 }
 
 // What hands the page back to the person after an automatic pane switch (see the settle re-scroll).
@@ -70,32 +119,41 @@ const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', ' ', 
 export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const [engine] = useState<DemoEngine>(() => given ?? new KitEngine());
   const stacked = useMediaQuery(STACK_QUERY);
+  const compact = useMediaQuery(PHONE_QUERY);
+  const theme = useSiteTheme();
 
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [seats, setSeats] = useState<SeatState[]>([]);
-  const [reports, setReports] = useState<StaffReport[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
-  const [pending, setPending] = useState<PendingBySeat>({});
-  const [record, setRecord] = useState<PlayerNotice[]>([]);
-  const [recordSeat, setRecordSeat] = useState('bo');
-  const [modTab, setModTab] = useState<'reports' | 'record'>('reports');
+  const [world, setWorld] = useState<DemoWorld | null>(null);
+  /** Changes with every kit: the hub and the player's notice lists are made again for it. */
+  const [kitNo, setKitNo] = useState(0);
+  const [openReports, setOpenReports] = useState(0);
+  const [filed, setFiled] = useState(false);
+  const [waiting, setWaiting] = useState<Record<string, number>>({});
+  /** Asks the players' notice lists to read again. */
+  const [noticeKey, setNoticeKey] = useState(0);
+  const [viewing, setViewing] = useState<string | null>(null);
   const [paneTab, setPaneTab] = useState<'game' | 'mod'>('game');
   const [says, setSays] = useState<Say[]>([]);
   const [paused, setPaused] = useState(false);
   const [tour, setTour] = useState<TourState>({ on: true, step: 0, hint: null });
   const [codeOpen, setCodeOpen] = useState(false);
   const [codeStep, setCodeStep] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<{ item: FeedItem; opener: HTMLElement } | null>(null);
+  const [report, setReport] = useState<{ item: FeedItem; opener: HTMLElement; reporting: PlayerReporting } | null>(null);
   const [draft, setDraft] = useState('');
   const [composerNote, setComposerNote] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   // How long each scripted player was timed out for (the real length of the decision), so the seats can say why one went quiet.
   const [quiet, setQuiet] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [focusPane, setFocusPane] = useState<'game' | 'mod' | null>(null);
   const [ready, setReady] = useState(false);
   const [pos, setPos] = useState<TourPos | null>(null);
+  /** The tour is pointing at the hub's rule picker: say that the case needs a rule first. */
+  const [needsRule, setNeedsRule] = useState(false);
+  /** The visitor has worked in the demo (and not elsewhere on the page since): then the hub's keys answer with nothing focused. */
+  const [active, setActive] = useState(false);
+  /** Bumped when the hub's markup changes, so the tour looks for its target again. */
+  const [hubTick, setHubTick] = useState(0);
 
   const root = useRef<HTMLDivElement>(null);
   const tourEl = useRef<HTMLElement>(null);
@@ -103,17 +161,18 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const logRef = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
   const restartRef = useRef<HTMLButtonElement>(null);
-  const deciding = useRef<number | null>(null);
   const paneNow = useRef<'game' | 'mod'>('game');
   const prevOn = useRef(true);
   const gen = useRef(0);
   const sayId = useRef(0);
   const settle = useRef<number | undefined>(undefined);
   const stopSettle = useRef<() => void>(() => {});
-  const decideSeq = useRef(0);
   const loopAt = useRef(0);
+  /** What the tour last scrolled to (the step and the kind of control), so a redraw that matches another control of the same kind does not scroll again. */
+  const scrolledTo = useRef<string | null>(null);
   const live = useRef({ paused, ready, dialog: false });
-  live.current = { paused, ready, dialog: dialog !== null };
+  const modalOpen = report !== null || (viewing !== null && (waiting[viewing] ?? 0) > 0);
+  live.current = { paused, ready, dialog: modalOpen };
   paneNow.current = paneTab;
 
   const announce = useCallback((text: string) => {
@@ -123,55 +182,30 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   }, []);
 
   // ---------- reading the engine ----------
-  const refresh = useCallback(async () => {
+  /** Reads the seats, how many reports are open and which players have a notice waiting. Returns the waiting counts. */
+  const refresh = useCallback(async (): Promise<Record<string, number> | null> => {
     const g = gen.current;
     try {
-      const [page, seatStates] = await Promise.all([engine.reports.list({ status: 'open' }), engine.rooms.seats()]);
-      const entries = await Promise.all(engine.seats.map(async (s) => [s.id, await engine.notices.pending(s.id)] as const));
-      if (!alive.current || g !== gen.current) return;
-      setReports(page.items);
+      const [{ cw }, seatStates] = await Promise.all([engine.world(), engine.rooms.seats()]);
+      const entries = await Promise.all(engine.seats.map(async (s) => [s.id, (await engine.notices.pending(s.id)).length] as const));
+      if (!alive.current || g !== gen.current) return null;
+      const counts = Object.fromEntries(entries);
       setSeats(seatStates);
-      setPending(Object.fromEntries(entries));
-      setSelectedId((cur) => (page.items.some((r) => r.id === cur) ? cur : (page.items[0]?.id ?? null)));
+      setOpenReports(cw.reports.list({ status: 'open' }).items.length);
+      setWaiting(counts);
+      setNoticeKey((k) => k + 1);
+      return counts;
     } catch {
       if (alive.current && g === gen.current) setError(FRIENDLY);
+      return null;
     }
   }, [engine]);
 
-  useEffect(() => {
-    if (selectedId === null) {
-      setSuggestion(null);
-      return;
-    }
-    let stale = false;
-    engine
-      .suggest(selectedId)
-      .then((s) => {
-        if (!stale) setSuggestion(s);
-      })
-      .catch(() => {
-        if (!stale) setError(FRIENDLY);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [engine, selectedId, reports]);
-
-  useEffect(() => {
-    if (modTab !== 'record') return;
-    let stale = false;
-    engine.notices
-      .record(recordSeat)
-      .then((r) => {
-        if (!stale) setRecord(r);
-      })
-      .catch(() => {
-        if (!stale) setError(FRIENDLY);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [engine, modTab, recordSeat, pending, reports]);
+  // The player's side: one client per seat, over the small local transport that asks the kit directly.
+  const clients = useMemo<Record<string, PlayerClient>>(
+    () => Object.fromEntries(engine.seats.map((s) => [s.id, createPlayerClient({ transport: seatTransport(engine, s.id) })])),
+    [engine],
+  );
 
   // ---------- the room ----------
   /** Runs one line through the engine and shows it if the visitor would see it. Returns what the engine said. */
@@ -201,12 +235,17 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     try {
       await engine.reset();
       if (!alive.current || g !== gen.current) return;
+      const next = await engine.world();
+      if (!alive.current || g !== gen.current) return;
       setFeed([]);
-      setReports([]);
       setSeats([]);
-      setPending({});
-      setRecord([]);
-      setSelectedId(null);
+      setOpenReports(0);
+      setFiled(false);
+      setWaiting({});
+      setViewing(null);
+      setReport(null);
+      setKitNo((n) => n + 1);
+      setWorld(next);
       loopAt.current = 0;
       for (const line of SEED) {
         if (!alive.current || g !== gen.current) return;
@@ -274,16 +313,57 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     if (el !== null) el.scrollTop = el.scrollHeight;
   }, [feed]);
 
+  // The hub's keys answer with nothing focused only while the visitor is working in the demo: a press inside it turns that on, a
+  // press in the chat box or anywhere else on the page turns it off (leaving the box with nothing focused does not turn it back on). (With focus inside the hub its keys always work; with focus in the chat box or a
+  // dialog they never do.)
+  useEffect(() => {
+    const on = (e: Event) => {
+      const t = e.target;
+      // On while the visitor works in the demo, off once they are in the chat box (or its quick lines) or anywhere else on the page.
+      setActive(t instanceof Element && root.current?.contains(t) === true && t.closest('.composer') === null);
+    };
+    document.addEventListener('pointerdown', on, true);
+    document.addEventListener('focusin', on, true);
+    return () => {
+      document.removeEventListener('pointerdown', on, true);
+      document.removeEventListener('focusin', on, true);
+    };
+  }, []);
+
+  // The hub draws and redraws on its own (a toast, a menu, a card): when its markup changes, the tour looks for its target again.
+  useEffect(() => {
+    const pane = root.current?.querySelector('[data-pane="mod"]');
+    if (!pane || typeof MutationObserver !== 'function') return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new MutationObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setHubTick((n) => n + 1), 40);
+    });
+    observer.observe(pane, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, []);
+
   // ---------- the tour ----------
   const tourEvent = useCallback((index: number) => {
     setTour((t) => (t.on && t.step <= index ? { ...t, step: index + 1, hint: null } : t));
   }, []);
 
   const tourLineId = (() => {
-    if (!tour.on || tour.step !== 1) return null;
+    if (!tour.on || tour.step !== STEP.report) return null;
     const others = feed.filter((f) => !f.you);
     return ([...others].reverse().find((f) => f.seat === 'bo' && f.rude) ?? [...others].reverse().find((f) => f.seat === 'bo') ?? others[others.length - 1])?.id ?? null;
   })();
+
+  // Step 2 is done when the case is in the hub's list: a case that arrives waits behind the "1 new case" pill, and pressing it is
+  // what puts the case's link in the queue. (The hub has no event for that, so the tour looks at the queue as it changes.)
+  useEffect(() => {
+    if (!tour.on || tour.step !== STEP.queue) return;
+    const hub = root.current?.querySelector<HTMLElement>('[data-pane="mod"] .cw-hub');
+    if (hub && queueLink(hub) !== null) tourEvent(STEP.queue);
+  }, [tour.on, tour.step, hubTick, tourEvent]);
 
   const prevStep = useRef(0);
   useEffect(() => {
@@ -295,7 +375,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     setCodeStep(null);
     if (stacked) {
       // One pane at a time on a phone: the tour moves you to the pane the step is about, and says so.
-      const want = tour.step === 2 ? 'mod' : 'game';
+      const want = HUB_STEPS.includes(tour.step) ? 'mod' : 'game';
       if (paneNow.current !== want) {
         setPaneTab(want);
         setFocusPane(want);
@@ -342,6 +422,14 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     setFocusPane(null);
   }, [focusPane, paneTab]);
 
+  // A dialog that closes hands focus back to the button that opened it. On a phone that button may now be in the hidden pane (the
+  // tour moved on while the dialog was open): then focus lands on the pane that is showing.
+  const hadModal = useRef(false);
+  useEffect(() => {
+    if (hadModal.current && !modalOpen && stacked) setFocusPane(paneNow.current);
+    hadModal.current = modalOpen;
+  }, [modalOpen, stacked]);
+
   // When the tour card goes away (Skip, Escape, Close) its button had focus: hand focus to a stable control instead of the body.
   useEffect(() => {
     const a = document.activeElement;
@@ -352,18 +440,35 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     prevOn.current = tour.on;
   }, [tour.on]);
 
-  // Put a ring on the control the step is about, and the tooltip next to it.
+  // Put a ring on the control the step is about, and the tooltip next to it. It runs after every render, and the hub's markup changing
+  // (hubTick) renders again, so a control that appears later (the Undo bar, an opened menu) gets its ring.
   useLayoutEffect(() => {
     const host = root.current;
     if (host === null) return;
     const marked = host.querySelectorAll('[data-tour-target]');
-    const target = tour.on ? findTarget(host, tour.step, { game: stacked && paneTab !== 'game', mod: stacked && paneTab !== 'mod' }) : null;
+    const target = tour.on ? findTarget(host, tour.step) : null;
     for (const el of marked) if (el !== target) el.removeAttribute('data-tour-target');
+    const wantRule = tour.on && tour.step === STEP.apply && target !== null && target.tagName === 'SELECT';
+    setNeedsRule((v) => (v === wantRule ? v : wantRule));
     if (target === null) {
       setPos((p) => (p === null ? p : null));
       return;
     }
     target.setAttribute('data-tour-target', 'true');
+    if (compact) {
+      // The bar is fixed to the bottom of the window: bring the control the step is about into view above it (scroll-margin in
+      // demo.css keeps it clear of the header, the pane switcher and the bar). Once per step and kind of control (the pill, the link,
+      // the rule picker, the suggested step, Undo): a poll that reorders the queue makes another link match, and must not pull the page
+      // while the visitor scrolls.
+      const key = `${tour.step}:${targetKind(target)}`;
+      if (scrolledTo.current !== key) {
+        scrolledTo.current = key;
+        target.scrollIntoView?.({ block: 'nearest', behavior: 'instant' });
+      }
+      setPos((p) => (p === null ? p : null));
+      return;
+    }
+    scrolledTo.current = null;
     const card = tourEl.current;
     if (card === null) return;
     const c = host.getBoundingClientRect();
@@ -396,9 +501,15 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       top = clamp(cy - 28, 8, floor - h - 8);
     } else {
       // Under a chat line's report button, sit below the whole line so its text stays readable.
-      const anchor = target.closest('.msg, .pframe');
+      const anchor = target.closest('.msg, .notice-bar');
       const a = anchor?.getBoundingClientRect() ?? t;
-      const below = !anchor?.classList.contains('pframe') && (c.bottom - a.bottom >= h + gap + 8 || c.bottom - a.bottom >= a.top - c.top);
+      // A hub control sits among its sibling buttons (the suggested step has "No action needed" and "Send a warning" right under it),
+      // so the card goes ABOVE it, over the reading, and only below when there is no room above.
+      const inHub = target.closest('[data-pane="mod"]') !== null;
+      const roomAbove = a.top - c.top >= h + gap + 8;
+      const below = inHub
+        ? !roomAbove
+        : !anchor?.classList.contains('notice-bar') && (c.bottom - a.bottom >= h + gap + 8 || c.bottom - a.bottom >= a.top - c.top);
       placement = below ? 'below' : 'above';
       top = clamp(below ? a.bottom - c.top + gap : a.top - c.top - h - gap, 8, c.height - h - 8);
       left = clamp(cx - w / 2, 8, c.width - w - 8);
@@ -416,7 +527,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     if (host === null) return;
     const again = () => setPos((p) => (p === null ? p : { ...p }));
     window.addEventListener('resize', again);
-    host.addEventListener('scroll', again, true); // the chat and the console scroll inside their panes
+    host.addEventListener('scroll', again, true); // the chat and the hub scroll inside their panes
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(again) : null;
     ro?.observe(host);
     return () => {
@@ -427,8 +538,8 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   }, []);
 
   // ---------- actions ----------
-  // Every engine call below can reject (the real kit's decide does on a store failure). Each action takes the generation
-  // it started in and drops its result if a Reset happened meanwhile, so nothing stale survives a Reset.
+  // Every engine call below can reject. Each action takes the generation it started in and drops its result if a Reset happened
+  // meanwhile, so nothing stale survives a Reset.
   async function send(text: string) {
     const line = text.trim();
     if (line === '') return;
@@ -455,7 +566,6 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       setFeed((f) => [...f.slice(-(FEED_MAX - 1)), { id: `refused-${Date.now()}-${f.length}`, seat: 'you', name: 'You', text: line, you: true, refused: { reason: 'blocked', rule } }]);
       setDraft('');
       announce(`Blocked: ${engine.rules.label(rule).split(':')[0]}. Only you see this.`);
-      tourEvent(0);
       inputRef.current?.focus();
       // A blocked line is a strike, and the third inside an hour earns the real automatic timeout: read the seats and the
       // notices back so the visitor sees it (and its end time) as soon as it happens.
@@ -470,113 +580,84 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     if (why.reason === 'restricted') await refresh();
   }
 
-  function openReport(item: FeedItem, opener: HTMLElement) {
-    setDialog({ item, opener });
-  }
-
-  async function submitReport(input: { category: StaffReport['category']; note: string }): Promise<string | null> {
-    const d = dialog;
-    if (d === null) return null;
+  /** The report dialog opens on the kit's reporting settings as they are now (one tap unless the owner changed them in the hub). */
+  async function openReport(item: FeedItem, opener: HTMLElement) {
     const g = gen.current;
-    setError(null);
-    let res: Awaited<ReturnType<DemoEngine['reports']['submit']>>;
+    let reporting: PlayerReporting;
     try {
-      res = await engine.reports.submit({
-        reporterSeat: 'you',
-        targetSeat: d.item.seat,
-        lineId: d.item.id,
-        category: input.category,
-        note: input.note,
-      });
-    } catch {
-      return alive.current && g === gen.current ? FRIENDLY : null;
-    }
-    if (!alive.current || g !== gen.current) return null;
-    if (!res.ok) {
-      return reportRefusalMessage(res.refused, d.item.name);
-    }
-    setDialog(null);
-    await refresh();
-    if (!alive.current || g !== gen.current) return null;
-    setSelectedId(res.reportId);
-    setModTab('reports');
-    announce(`Report filed against ${d.item.name}.`);
-    tourEvent(1);
-    return null;
-  }
-
-  async function decide(kind: DecideKind, quoteId: string | null, reason: string) {
-    const report = reports.find((r) => r.id === selectedId);
-    if (report === undefined || deciding.current !== null) return;
-    // A ref, not state: two clicks dispatched in one task must not both get through.
-    const token = ++decideSeq.current;
-    deciding.current = token;
-    const g = gen.current;
-    setBusy(true);
-    setError(null);
-    try {
-      const rule = suggestion?.rule ?? 2;
-      // The Timeout button is as long as the kit suggested when that was a chat timeout, else ten minutes.
-      const length = timeoutMs(suggestion);
-      const base = { subject: report.targetPerson, rule, ...(rule === 'uncovered' ? { gapNote: 'Behaviour the rules do not cover yet.' } : {}) };
-      const lineIds = quoteId === null ? [] : [quoteId];
-      const input =
-        kind === 'warning'
-          ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'warning' as const, durationMs: null, lineIds }] }
-          : kind === 'timeout'
-            ? { verdict: 'upheld' as const, actions: [{ ...base, kind: 'chat' as const, durationMs: length, lineIds }] }
-            : kind === 'note'
-              ? { verdict: 'noted' as const, actions: [{ ...base, kind: 'note' as const, durationMs: null }] }
-              : { verdict: 'no_action' as const, actions: [] };
-      const res = await engine.decide({ reportId: report.id, reason: reason.trim() || `Report: ${report.category}`, ...input });
-      if (!alive.current || g !== gen.current) return;
-      if (!res.ok) {
-        announce('That decision could not be applied.');
-        await refresh();
-        return;
-      }
-      const who = report.targetHandle;
-      const noticed = res.groups.some((x) => x.noticeId !== null);
-      const what = { warning: 'warning', timeout: `timeout, ${durationWords(length)}`, note: 'note recorded', none: 'no action' }[kind];
-      // A long timeout leaves a scripted player silent: say why, and how to replay, in the announcement and under the seats.
-      const target = engine.seats.find((s) => s.name === who);
-      const quietLine = kind === 'timeout' && target !== undefined ? quietNote(who, length, PRONOUN[target.id] ?? 'he') : null;
-      if (quietLine !== null && target !== undefined) setQuiet((q) => ({ ...q, [target.id]: length }));
-      announce(
-        kind === 'none'
-          ? 'Decision made: no action. The report is closed.'
-          : `Decision made: ${what} for ${who}. ${noticed ? `Notice shown on ${who}'s screen.` : 'The player is told nothing.'}${quietLine !== null ? ` ${quietLine}` : ''}`,
-      );
-      await refresh();
-      if (!alive.current || g !== gen.current) return;
-      if (noticed) {
-        tourEvent(2);
-      } else {
-        const left = reports.filter((r) => r.id !== report.id).length;
-        setTour((t) => (t.on && t.step === 2 && left === 0 ? { ...t, step: 1, hint: NO_NOTICE_HINT } : t));
-      }
+      reporting = playerReporting((await engine.world()).cw.profile.reporting);
     } catch {
       if (alive.current && g === gen.current) setError(FRIENDLY);
-    } finally {
-      if (deciding.current === token) deciding.current = null;
-      if (alive.current && g === gen.current) setBusy(false);
+      return;
+    }
+    if (!alive.current || g !== gen.current) return;
+    setReport({ item, opener, reporting });
+  }
+
+  async function submitReport(draftReport: ReportDraft): Promise<ReportResult> {
+    const d = report;
+    if (d === null) return { ok: false, refused: 'off' };
+    const g = gen.current;
+    setError(null);
+    // A rejection (the kit could not be reached) goes to the dialog, which keeps what was typed and offers to send again.
+    const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: d.item.seat, lineId: d.item.id, ...draftReport });
+    if (res.ok && alive.current && g === gen.current) {
+      setFiled(true);
+      nudgeHub();
+      await refresh();
+      if (!alive.current || g !== gen.current) return res;
+      announce(`Report filed against ${d.item.name}.`);
+      tourEvent(STEP.report);
+    }
+    return res;
+  }
+
+  async function addDetail(reportId: string, detail: ReportFollowUp) {
+    const res = await engine.reports.addDetail(reportId, 'you', detail);
+    if (res.ok) nudgeHub(); // the hub reads the reason now, not in a few seconds
+    return res;
+  }
+
+  /** What the hub tells the page: a case was opened, a decision was taken. */
+  async function onStaffEvent(event: StaffEvent) {
+    const g = gen.current;
+    if (event.kind === 'case-opened') {
+      tourEvent(STEP.open);
+      return;
+    }
+    const counts = await refresh();
+    if (counts === null || !alive.current || g !== gen.current) return;
+    const who = engine.seats.filter((s) => (counts[s.id] ?? 0) > 0);
+    // A timeout leaves a scripted player silent: say why, and how to replay, in the announcement and under the seats.
+    const timed = await engine.rooms.seats();
+    if (!alive.current || g !== gen.current) return;
+    for (const s of timed) {
+      const until = s.restrictedUntil;
+      if (until !== null && !s.you) setQuiet((q) => (q[s.id] === undefined ? { ...q, [s.id]: until - Date.now() } : q));
+    }
+    const quietLines = timed.flatMap((s) => (s.restrictedUntil !== null && !s.you ? [quietNote(s.name, s.restrictedUntil - Date.now(), PRONOUN[s.id] ?? 'he')] : [])).filter((n) => n !== null);
+    announce(
+      who.length > 0
+        ? `Decision taken. ${who.map((s) => `${s.you ? 'You have' : `${s.name} has`} a notice waiting.`).join(' ')}${quietLines.length > 0 ? ` ${quietLines[0]}` : ''}`
+        : 'Decision taken. The player is told nothing.',
+    );
+    if (who.length > 0) {
+      tourEvent(STEP.apply);
+    } else {
+      setTour((t) => (t.on && t.step === STEP.apply ? { ...t, step: STEP.report, hint: NO_NOTICE_HINT } : t));
     }
   }
 
-  async function ack(seat: string, notice: PlayerNotice) {
+  function showNotices(seat: DemoSeat) {
+    setViewing(seat.id);
+  }
+
+  function acknowledged(seat: DemoSeat) {
     const g = gen.current;
-    const name = engine.seats.find((s) => s.id === seat)?.name ?? seat;
-    setError(null);
-    try {
-      await engine.notices.ack(seat, notice.id);
-      if (!alive.current || g !== gen.current) return;
-      announce(`${name} acknowledged the notice.`);
-      await refresh();
-      if (!alive.current || g !== gen.current) return;
-      tourEvent(3);
-    } catch {
-      if (alive.current && g === gen.current) setError(FRIENDLY);
-    }
+    announce(`${seat.name === 'You' ? 'You' : seat.name} acknowledged the notice.`);
+    void refresh().then(() => {
+      if (alive.current && g === gen.current) tourEvent(STEP.notice);
+    });
   }
 
   async function reset() {
@@ -586,16 +667,20 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     prevOn.current = true;
     setCodeOpen(false);
     setCodeStep(null);
-    setDialog(null);
+    setReport(null);
+    setViewing(null);
     setDraft('');
     setComposerNote(null);
     setError(null);
-    setModTab('reports');
     setPaneTab('game');
-    deciding.current = null;
-    setBusy(false);
     setQuiet({});
     setSays([]);
+    setWorld(null);
+    try {
+      localStorage.removeItem(HUB_MODE_KEY); // the new hub opens in Simple again, whatever the visitor chose last
+    } catch {
+      // storage blocked: the hub keeps no choice then either
+    }
     await boot();
     if (alive.current) announce('Demo reset. The lobby is back to the start.');
   }
@@ -606,14 +691,15 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
 
   // ---------- render ----------
   const stepIndex = Math.min(tour.step, TOTAL - 1);
-  const noReports = reports.length === 0;
+  const noCase = !filed && (HUB_STEPS.includes(tour.step) && tour.step !== STEP.detailed && tour.step !== STEP.ladder);
   const cardTitle = tour.step >= TOTAL ? 'That’s the whole loop' : (TOUR_STEPS[tour.step]?.title ?? '');
   const cardBody =
     tour.step >= TOTAL
-      ? 'Chat, refuse, report, decide, notify. Play again from the top, or read the code behind each step.'
-      : tour.step === 2 && noReports
+      ? 'Chat, report, decide, notify. Play again from the top, or read the code behind each step.'
+      : noCase
         ? NO_REPORT_HINT
         : (TOUR_STEPS[tour.step]?.body ?? '');
+  const cardHint = tour.hint ?? (needsRule ? 'This report named no reason, so pick which rule it breaks first.' : null);
   // While a scripted player is still timed out for a long time, the line under the seats says why they are quiet.
   const seatsNote =
     engine.seats
@@ -621,6 +707,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       .find((n) => n !== null) ?? null;
   const gameHidden = stacked && paneTab !== 'game';
   const modHidden = stacked && paneTab !== 'mod';
+  const backToGame = () => document.getElementById('pane-game-title');
 
   return (
     <div
@@ -629,7 +716,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
       role="group"
       aria-label="Chatwarden interactive demo"
     >
-      <div className="demo-toolbar" inert={dialog !== null}>
+      <div className="demo-toolbar" inert={modalOpen}>
         <div className="demo-tools">
           <button type="button" className="tool" data-tour="reset" onClick={() => void reset()}>
             <ReplayIcon />
@@ -676,47 +763,30 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
         </p>
       )}
 
-      {tour.on && (
-        <TourCard
-          ref={tourEl}
-          step={tour.step}
-          total={TOTAL}
-          title={cardTitle}
-          body={cardBody}
-          hint={tour.hint}
-          codeOpen={codeOpen}
-          inert={dialog !== null}
-          pos={pos}
-          onNext={() => setTour((t) => ({ ...t, step: Math.min(t.step + 1, TOTAL), hint: null }))}
-          onSkip={() => setTour((t) => ({ ...t, on: false }))}
-          onToggleCode={toggleCode}
-          onPlayAgain={() => void reset()}
-        />
-      )}
 
       {stacked && (
-        <div className="pane-tabs" role="group" aria-label="Switch pane" inert={dialog !== null}>
+        <div className="pane-tabs" role="group" aria-label="Switch pane" inert={modalOpen}>
           <button type="button" aria-pressed={paneTab === 'game'} data-tour="tab-game" onClick={() => setPaneTab('game')}>
             Game
           </button>
           <button type="button" aria-pressed={paneTab === 'mod'} data-tour="tab-mod" onClick={() => setPaneTab('mod')}>
             Moderator
-            {reports.length > 0 && (
-              <span className="badge" aria-label={`${reports.length} open`}>
-                {reports.length}
+            {openReports > 0 && (
+              <span className="badge" aria-label={`${openReports} open`}>
+                {openReports}
               </span>
             )}
           </button>
         </div>
       )}
 
-      <div className="demo-panes" inert={dialog !== null}>
+      <div className="demo-panes" inert={modalOpen}>
         <GamePane
           hidden={gameHidden}
           feed={feed}
           seats={seats}
           allSeats={engine.seats}
-          pending={pending}
+          waiting={waiting}
           draft={draft}
           setDraft={(v) => {
             setDraft(v);
@@ -730,27 +800,34 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
             setDraft('you zorbak');
             inputRef.current?.focus();
           }}
-          onReport={openReport}
-          onAck={(seat, n) => void ack(seat, n)}
+          onReport={(item, opener) => void openReport(item, opener)}
+          onShowNotices={showNotices}
           inputRef={inputRef}
           logRef={logRef}
         />
-        <ModPane
-          hidden={modHidden}
-          tab={modTab}
-          setTab={setModTab}
-          reports={reports}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          suggestion={suggestion}
-          busy={busy}
-          onDecide={(k, q, r) => void decide(k, q, r)}
-          seats={engine.seats}
-          recordSeat={recordSeat}
-          setRecordSeat={setRecordSeat}
-          record={record}
-        />
+        <ModeratorPane world={world} hidden={modHidden} theme={theme} active={active} onEvent={(e) => void onStaffEvent(e)} />
       </div>
+
+      {/* After the panes: on a phone the card is a bar that sticks to the bottom of the window while the demo is in view. */}
+      {tour.on && (
+        <TourCard
+          ref={tourEl}
+          step={tour.step}
+          total={TOTAL}
+          optional={TOUR_STEPS[tour.step]?.optional === true}
+          title={cardTitle}
+          body={cardBody}
+          hint={cardHint}
+          codeOpen={codeOpen}
+          inert={modalOpen}
+          pos={pos}
+          compact={compact}
+          onNext={() => setTour((t) => ({ ...t, step: Math.min(t.step + 1, TOTAL), hint: null }))}
+          onSkip={() => setTour((t) => ({ ...t, on: false }))}
+          onToggleCode={toggleCode}
+          onPlayAgain={() => void reset()}
+        />
+      )}
 
       {codeOpen && <CodeDrawer step={codeStep ?? Math.min(tour.on ? stepIndex : 0, CODE_STEPS.length - 1)} onPick={setCodeStep} />}
 
@@ -760,13 +837,34 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
         ))}
       </div>
 
-      {dialog && (
+      {/* The players' notices: one list per seat, held until the visitor asks to see it (canShow), then player-react's own dialog. */}
+      {engine.seats.map((s) => (
+        <NoticeQueue
+          key={`${kitNo}-${s.id}`}
+          client={clients[s.id] as PlayerClient}
+          canShow={viewing === s.id}
+          refreshKey={noticeKey}
+          theme={theme}
+          container={typeof document === 'undefined' ? null : document.body}
+          returnFocusTo={backToGame}
+          onAcknowledged={() => acknowledged(s)}
+          onPendingChange={(n) => {
+            if (n === 0) setViewing((v) => (v === s.id ? null : v));
+          }}
+        />
+      ))}
+
+      {report && (
         <ReportDialog
-          handle={dialog.item.name}
-          text={dialog.item.text}
-          returnFocus={dialog.opener}
-          onClose={() => setDialog(null)}
+          line={report.item.text}
+          targetName={report.item.name}
+          reporting={report.reporting}
+          theme={theme}
+          container={document.body}
+          returnFocusTo={backToGame}
+          onClose={() => setReport(null)}
           onSubmit={submitReport}
+          onAddDetail={addDetail}
         />
       )}
     </div>
