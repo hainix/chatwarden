@@ -2,7 +2,7 @@ import { CATEGORY_TO_RULE } from '@chatwarden/core';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { TransportRequest } from '../src/transport.js';
-import { renderHub, hubRoot } from './render.js';
+import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld, RichLine, WorldOptions } from './world.js';
 
@@ -133,7 +133,7 @@ describe('what a click sends', () => {
 });
 
 describe('key 3', () => {
-  const press = (key: string, target: Element = hubRoot()) => fireEvent.keyDown(target, { key });
+  const press = (key: string, target: Element = document.body) => fireEvent.keyDown(target, { key });
 
   it('sends the warning, as the button does', async () => {
     const { w } = await card();
@@ -156,8 +156,8 @@ describe('key 3', () => {
 
   it('not when Something else is open, nor with a modifier', async () => {
     const { w, user } = await card();
-    fireEvent.keyDown(hubRoot(), { key: '3', ctrlKey: true });
-    fireEvent.keyDown(hubRoot(), { key: '3', metaKey: true });
+    fireEvent.keyDown(document.body, { key: '3', ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: '3', metaKey: true });
     await user.click(within(decision()).getByRole('button', { name: /^Something else/ }));
     press('3');
     await pageHides();

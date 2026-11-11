@@ -50,6 +50,7 @@ one `console.warn` that names the attribute.
 | `locale` | a language tag such as `en` or `pt-BR` | `en` | The language of dates, times and numbers. The words stay English unless you give a `t` function. |
 | `game-name` | text | none | Your game's name, shown beside the product name in the top bar. |
 | `shortcuts` | `true`, `false` | `true` | `shortcuts="false"` turns every keyboard shortcut off, for a page that has its own. |
+| `primary` | present, `true`, `false` | off | Which element answers keys when nothing on the page has focus, if there are several (see "Keyboard shortcuts"). |
 | `router` | `hash`, `memory` | `hash` | `hash` keeps the hub's place in the page's URL hash, so the back button and a bookmark work. `memory` keeps it inside the element and never touches the URL. |
 
 Calls go with `credentials: 'same-origin'`: cookies are sent to the page's own origin only, so a `base-url` on another origin carries no
@@ -149,11 +150,14 @@ Sans, load `@chatwarden/hub-react/font.css` in your page (the page's own CSS) an
 ## Keyboard shortcuts
 
 The hub's shortcuts (J and K to move between cases, N to take the next, `?` for help, Ctrl or Cmd+K for the command bar) work while
-focus is inside the element, and never while focus is elsewhere on your page. Typing in one of the hub's fields never triggers one.
-Click the hub, or Tab into it, before the first key.
+focus is inside the element, and never while focus is on a control of your own. Typing in one of the hub's fields never triggers one.
+
+With nothing focused (a page that has just loaded), the element that is the page's hub answers: the only one with shortcuts on, or,
+with several, the one with the `primary` attribute. With several and none marked, none does until focus is in one of them. Escape is
+only ever the hub's own, when focus is inside it.
 
 Each hub hears only its own keys. With several hubs on one page, a key pressed in one reaches that hub and no other, and
-`shortcuts="false"` turns the keys off for one hub without touching the rest. A `<chatwarden-hub>` inside another shadow root (your own
+`shortcuts="false"` turns the keys off for one hub without touching the rest (it is not counted when the page's hub is chosen). A `<chatwarden-hub>` inside another shadow root (your own
 web component's) works the same way: its focus, its keys and the focus return after a window closes are read from the element's own
 shadow root, not from your component's.
 

@@ -293,7 +293,7 @@ describe('a bare page with a script tag and the element', () => {
     await p.context().close();
   });
 
-  it('J and K move between cases when focus is inside the hub, and nothing happens while the page has focus', async (ctx) => {
+  it('J and K move between cases when focus is inside the hub; with nothing focused the only hub answers; with focus on a control of the page, nothing happens', async (ctx) => {
     needsBrowser(ctx);
     const { page: p } = await open('/detailed');
     await p.locator('chatwarden-hub .cw-queue .cw-case-link').first().waitFor();
@@ -308,15 +308,27 @@ describe('a bare page with a script tag and the element', () => {
     expect(await active()).toBe(links[0]);
     await p.keyboard.press('j');
     expect(await active()).toBe(links[1]);
-    // Focus goes to the page: the same keys do nothing to the hub.
+    // Nothing focused (as after load): the only hub on the page answers.
     await p.evaluate(() => {
       (document.activeElement as HTMLElement | null)?.blur();
       document.body.focus();
     });
     await p.keyboard.press('j');
+    expect(await active()).toBe(links[0]);
+    // Focus on a control of the page's own: the same keys do nothing to the hub.
+    await p.evaluate(() => {
+      const mine = document.body.appendChild(document.createElement('button'));
+      mine.id = 'mine';
+      mine.focus();
+    });
+    await p.keyboard.press('j');
     await p.keyboard.press('?');
     expect(await active()).toBeNull();
     expect(await p.getByRole('dialog').count()).toBe(0);
+    // Escape with nothing focused is not the hub's.
+    await p.evaluate(() => (document.getElementById('mine') as HTMLElement).blur());
+    await p.keyboard.press('Escape');
+    expect(await active()).toBeNull();
     await p.context().close();
   });
 
@@ -387,6 +399,27 @@ describe('keys are scoped to each hub', () => {
     await p.context().close();
   });
 
+  it('two hubs with nothing focused: neither answers, until one is primary', async (ctx) => {
+    needsBrowser(ctx);
+    const { page: p, problems } = await open('/two');
+    await p.locator('chatwarden-hub >> nth=1 >> .cw-queue .cw-case-link').first().waitFor();
+    await p.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await p.keyboard.press('?');
+    await p.keyboard.press('j');
+    await p.waitForTimeout(100);
+    expect(await dialogsIn(p, 0)).toBe(0);
+    expect(await dialogsIn(p, 1)).toBe(0);
+    expect(await active(p, 0)).toBeNull();
+    expect(await active(p, 1)).toBeNull();
+    await p.evaluate(() => document.querySelectorAll('chatwarden-hub')[1]?.setAttribute('primary', ''));
+    await p.waitForTimeout(100);
+    await p.keyboard.press('?');
+    await p.locator('chatwarden-hub >> nth=1 >> role=dialog').waitFor();
+    expect(await dialogsIn(p, 0)).toBe(0);
+    expect(problems).toEqual([]);
+    await p.context().close();
+  });
+
   it('a hub with shortcuts="false" beside one with them on: the quiet one is quiet', async (ctx) => {
     needsBrowser(ctx);
     const { page: p } = await open('/two-quiet');
@@ -428,6 +461,10 @@ describe('keys are scoped to each hub', () => {
     await p.keyboard.press('?');
     await p.waitForTimeout(100);
     expect(await p.getByRole('dialog').count()).toBe(0);
+    // And with nothing focused, the only hub on the page answers, shadow root or not.
+    await p.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await p.keyboard.press('j');
+    expect(await inner()).toBe(links[0]);
     expect(problems).toEqual([]);
     await p.context().close();
   });

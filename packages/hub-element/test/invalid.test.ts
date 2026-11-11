@@ -22,6 +22,7 @@ describe('readConfig: the defaults', () => {
       locale: 'en',
       gameName: undefined,
       shortcuts: true,
+      primary: false,
       router: 'hash',
     });
     expect(warnings).toEqual([]);
@@ -33,7 +34,7 @@ describe('readConfig: the defaults', () => {
       attrs({ 'base-url': 'https://ops.example/mod/', mode: 'detailed', theme: 'dark', locale: 'pt-BR', 'game-name': 'Dragon Duel', shortcuts: 'false', router: 'memory' }),
       (m) => warnings.push(m),
     );
-    expect(config).toEqual({ baseUrl: 'https://ops.example/mod/', mode: 'detailed', theme: 'dark', locale: 'pt-BR', gameName: 'Dragon Duel', shortcuts: false, router: 'memory' });
+    expect(config).toEqual({ baseUrl: 'https://ops.example/mod/', mode: 'detailed', theme: 'dark', locale: 'pt-BR', gameName: 'Dragon Duel', shortcuts: false, primary: false, router: 'memory' });
     expect(warnings).toEqual([]);
   });
 
@@ -55,6 +56,7 @@ describe('readConfig: invalid values', () => {
     ['theme', 'neon', (c: ReturnType<typeof readConfig>) => c.theme, 'auto'],
     ['router', 'url', (c: ReturnType<typeof readConfig>) => c.router, 'hash'],
     ['shortcuts', 'maybe', (c: ReturnType<typeof readConfig>) => c.shortcuts, true],
+    ['primary', 'maybe', (c: ReturnType<typeof readConfig>) => c.primary, false],
     ['locale', 'not a locale!!', (c: ReturnType<typeof readConfig>) => c.locale, 'en'],
     ['base-url', '   ', (c: ReturnType<typeof readConfig>) => c.baseUrl, '/admin'],
   ])('%s="%s" falls back to the default with one warning that names it', (name, value, pick, fallback) => {

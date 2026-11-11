@@ -42,6 +42,6 @@ describe('defineChatwardenHub', () => {
   });
 
   it('observes exactly the documented attributes', () => {
-    expect([...ChatwardenHubElement.observedAttributes].sort()).toEqual(['base-url', 'game-name', 'locale', 'mode', 'router', 'shortcuts', 'theme']);
+    expect([...ChatwardenHubElement.observedAttributes].sort()).toEqual(['base-url', 'game-name', 'locale', 'mode', 'primary', 'router', 'shortcuts', 'theme']);
   });
 });

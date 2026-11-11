@@ -128,7 +128,8 @@ Every piece takes `className` for its root element. A role without the permissio
 and nothing is asked of the server.
 
 `HubProvider` takes exactly one of `client` or `controller`, then `mode`, `t`, `locale`, `now`, `theme` and `shortcuts` (the same as on
-`<Hub>`), `className`, and `bare`.
+`<Hub>`), `primary` (accepted so one set of options serves both; it does nothing on a provider, whose pieces answer only while focus is
+inside them), `className`, and `bare`.
 
 - **`client`**: the provider makes the controller (the live queue, claims, the Undo hold and the toasts) and disposes it when it unmounts. A
   new client makes a new controller.
@@ -241,6 +242,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 | `className` | `string` | Extra class names for the root element, handy for theming. |
 | `gameName` | `string` | Your game's name, shown beside the product name in the top bar. Default: none. |
 | `shortcuts` | `boolean` | Set `false` to turn every keyboard shortcut off (J, K, N, ?, Ctrl or Cmd+K, Escape), for a page that has its own. Default `true`. |
+| `primary` | `boolean` | Which hub answers keys when nothing on the page has focus, as after load. The only hub with shortcuts on always does; with several, only the one marked `primary`; with none marked, none. A hub always answers keys pressed while focus is inside it. Default `false`. |
 | `mode` | `'simple' \| 'detailed'` | Fixes the view and hides the Simple/Detailed switch. Left out, each moderator's last choice is kept in their browser (`localStorage`, key `chatwarden.hub.mode`), and a browser that cannot keep it gets `simple`. |
 
 ### Simple mode
@@ -313,9 +315,10 @@ move no change token, so a row's viewers refresh whenever the queue does and you
 
 **Keyboard.** Shortcuts never fire while you are typing in a field, a select or an editable region, or with Ctrl, Cmd or Alt held
 (except Ctrl or Cmd+K), and `shortcuts={false}` turns them all off. The hub listens on its own root element, not on the page: it
-answers a key only while keyboard focus is inside it (a click on its empty space puts focus on the root, so that counts). Two hubs on
-one page each answer only their own keys, a key pressed in your own controls is never taken, and the same holds in a shadow root. Move
-focus into the hub (Tab to it, or click it) before the first key.
+answers a key pressed while keyboard focus is inside it (a click on its empty space puts focus on the root, so that counts). Two hubs on
+one page each answer only their own keys, a key pressed in your own controls is never taken, and the same holds in a shadow root.
+With nothing focused (a page that has just loaded), the page's hub answers: the only hub with shortcuts on, or, among several, the one
+with `primary`; among several and none marked, none does. Escape is only ever the hub's own, when focus is inside it.
 
 | Key | What it does |
 | --- | --- |

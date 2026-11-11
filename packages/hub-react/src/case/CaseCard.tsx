@@ -12,7 +12,7 @@ import { personTag, relativeTime } from '../format.js';
 import { useHubData } from '../hooks.js';
 import { decideErrorText, outcomeLabel } from '../labels.js';
 import { useKeyListener } from '../keyScope.js';
-import { isTypingTarget, modalIn, rootOf } from '../dom.js';
+import { isTypingTarget, modalIn } from '../dom.js';
 import { needsSenior, noActionForm, oneClickOf, ownLinesOf, recordLine, reporterDecided, reporterWarrants, stepLabel } from '../simple.js';
 import type { OneClick } from '../simple.js';
 import { UNDO_MS } from '../toasts.js';
@@ -256,10 +256,10 @@ export function CaseCard() {
   // typing, under a window, or when the adopter turned shortcuts off. (With Something else open the decision bar's own keys apply.)
   useEffect(() => {
     if (!shortcuts) return;
-    const onKeyDown = (e: KeyboardEvent): void => {
+    const onKeyDown = (e: KeyboardEvent, hub: HTMLElement): void => {
       const s = latest.current;
       if (e.defaultPrevented || e.isComposing || !s.usable) return;
-      if (modalIn(rootOf(e.target as Node)) !== null) return;
+      if (modalIn(hub) !== null) return;
       if (e.key === 'Enter' && e.ctrlKey !== e.metaKey && !e.altKey && !e.shiftKey) {
         if (s.one === null) return;
         e.preventDefault();

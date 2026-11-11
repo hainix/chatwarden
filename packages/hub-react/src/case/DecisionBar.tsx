@@ -158,9 +158,9 @@ export function DecisionBar() {
   // Ctrl+Enter, which is made for the reason box), under a window, or when the adopter turned shortcuts off.
   useEffect(() => {
     if (!shortcuts) return;
-    const onKeyDown = (e: KeyboardEvent): void => {
+    const onKeyDown = (e: KeyboardEvent, hub: HTMLElement): void => {
       if (e.defaultPrevented || e.isComposing || !stateRef.current.editable) return;
-      if (modalIn(rootOf(e.target as Node)) !== null) return;
+      if (modalIn(hub) !== null) return;
       if (e.key === 'Enter' && (e.ctrlKey !== e.metaKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         decideRef.current(true);

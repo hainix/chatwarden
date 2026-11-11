@@ -3,7 +3,7 @@ import { CaseProvider } from './case/CaseContext.js';
 import { CaseSession, useCaseActions } from './cases.js';
 import type { CommandTarget } from './commands.js';
 import { useHub } from './context.js';
-import { activeIn, rootOf } from './dom.js';
+import { activeOf } from './dom.js';
 import type { HubClient } from './client.js';
 import type { HubHost } from './headless/controller.js';
 import type { HubT } from './i18n.js';
@@ -48,6 +48,12 @@ export interface HubProps {
   /** Set `false` to turn every keyboard shortcut off (J, K, N, ?, Ctrl or Cmd+K, Escape), for a page that has its own. Default `true`. */
   shortcuts?: boolean;
   /**
+   * Which hub answers a key when nothing on the page has focus (as after load). The only hub with shortcuts on always does; with
+   * several on a page, only the one marked `primary` does, and with none marked, none does. A hub always answers the keys pressed
+   * while focus is inside it, primary or not. Default `false`.
+   */
+  primary?: boolean;
+  /**
    * `simple` is one card per case with the suggestion one click away (for a team of one or two); `detailed` is the full workbench.
    * Set it to fix the mode and hide the Simple/Detailed switch. Left out, each moderator's last choice is kept in their browser,
    * and a browser that cannot keep it (or has none) gets `simple`.
@@ -63,7 +69,7 @@ const noopSubscribe = (): (() => void) => () => undefined;
  * an open case) who is handling it. Pass a `client`; everything else has a default. To put single parts of it in your own page,
  * use `HubProvider` and the pieces instead.
  */
-export function Hub({ client, t, locale = 'en', router: routerProp, theme, onNavigate, now, className, gameName, shortcuts = true, mode }: HubProps) {
+export function Hub({ client, t, locale = 'en', router: routerProp, theme, onNavigate, now, className, gameName, shortcuts = true, primary = false, mode }: HubProps) {
   const fallbackRouter = useMemo(() => (typeof window === 'undefined' ? memoryRouter('/') : hashRouter()), []);
   const router = routerProp ?? fallbackRouter;
   const subscribe = useCallback((listener: () => void) => router.subscribe?.(listener) ?? noopSubscribe(), [router]);
@@ -95,7 +101,7 @@ export function Hub({ client, t, locale = 'en', router: routerProp, theme, onNav
   );
 
   return (
-    <HubRoot client={client} controller={undefined} t={t} locale={locale} now={now} theme={theme} className={className} shortcuts={shortcuts} mode={mode} shell={shell}>
+    <HubRoot client={client} controller={undefined} t={t} locale={locale} now={now} theme={theme} className={className} shortcuts={shortcuts} primary={primary} mode={mode} shell={shell}>
       <Shell route={route} gameName={gameName} shortcuts={shortcuts} />
     </HubRoot>
   );
@@ -222,7 +228,7 @@ function CommandWindow({ shortcuts, onClose, open }: { shortcuts: boolean; onClo
   return <CommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} />;
 }
 
-/** The hub's one key listener, on the hub's own root: it hears a key only while focus is inside this hub. See `shortcutFor` for what each key means and when it stays quiet. */
+/** The hub's one key listener, on the hub's own root: it hears a key pressed while focus is inside this hub (or, with nothing focused on the page, the one the page gives it: see `registerHub`). See `shortcutFor` for what each key means and when it stays quiet. */
 function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivElement | null }; dialogOpen: boolean; open: (d: Dialogs) => void }) {
   const { can } = useHub();
   const actions = useCaseActions();
@@ -253,7 +259,7 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
         if (list.length === 0) return;
         e.preventDefault();
         // The focus of the root the hub is in: inside a shadow root, the page's `activeElement` is only the host.
-        const active = bodyRef.current === null ? null : activeIn(rootOf(bodyRef.current));
+        const active = activeOf(bodyRef.current);
         let at = list.findIndex((r) => r === active);
         if (at < 0) at = list.findIndex((r) => r.getAttribute('aria-current') === 'true');
         const to = at < 0 ? (action === 'next' ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, at + (action === 'next' ? 1 : -1)));
@@ -262,7 +268,7 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
         // Escape with no window open: back to the queue, on the open case's row or the first one.
         const list = rows();
         const target = list.find((r) => r.getAttribute('aria-current') === 'true') ?? list[0];
-        if (target !== undefined && (bodyRef.current === null ? null : activeIn(rootOf(bodyRef.current))) !== target) {
+        if (target !== undefined && activeOf(bodyRef.current) !== target) {
           e.preventDefault();
           target.focus();
         }

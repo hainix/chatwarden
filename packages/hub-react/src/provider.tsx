@@ -9,6 +9,7 @@ import { createHubController } from './headless/controller.js';
 import type { HubController, HubHost } from './headless/controller.js';
 import { useHubData } from './hooks.js';
 import { createT, en } from './i18n.js';
+import { registerHub } from './dom.js';
 import { KeyScope, useKeyBus } from './keyScope.js';
 import { LeaveGuardContext } from './leaveGuard.js';
 import type { LeaveGuard } from './leaveGuard.js';
@@ -40,6 +41,11 @@ export interface HubProviderOptions {
   theme?: 'light' | 'dark' | 'auto';
   /** Set `false` to turn every keyboard shortcut off (a piece's keys, such as 1 and 2 on a case card), for a page that has its own. Default `true`. */
   shortcuts?: boolean;
+  /**
+   * Which hub answers keys when nothing on the page has focus. Only `<Hub>`'s shell has such keys, so this does nothing on a provider
+   * that places pieces (a piece answers only while focus is inside it); it is here so one set of options serves both. Default `false`.
+   */
+  primary?: boolean;
   /**
    * Draw no wrapper. By default the provider puts its children in the `.cw-hub` theme root, so the pieces are styled where they sit.
    * With `bare`, you place the root: an element with the classes `cw-hub cw-hub--embed` (and, to force a theme, `data-cw-theme`).
@@ -134,7 +140,7 @@ export interface HubRootProps extends HubProviderOptions {
 }
 
 /** The provider and the hub's shell are one component: this. The shell passes its router and host; a provider placing pieces passes none. */
-export function HubRoot({ client: clientProp, controller: given, mode: modeProp, t: tProp, locale = 'en', now, theme, shortcuts = true, bare = false, className, shell, children }: HubRootProps) {
+export function HubRoot({ client: clientProp, controller: given, mode: modeProp, t: tProp, locale = 'en', now, theme, shortcuts = true, primary = false, bare = false, className, shell, children }: HubRootProps) {
   const client = given?.client ?? (clientProp as HubClient);
   const mode = useModeState(modeProp);
   const t = useMemo(() => tProp ?? createT(en, locale), [tProp, locale]);
@@ -148,7 +154,15 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
   tRef.current = t;
   const guard = useRef<LeaveGuard | null>(null);
   // The hub's own root element hears the keys pressed inside it, in the shell (see keyScope.ts).
-  const keys = useKeyBus();
+  const root = useRef<HTMLDivElement>(null);
+  const keys = useKeyBus(root);
+  const inShell = shell !== undefined;
+  // A shell with shortcuts on tells the page it exists, for the keys pressed with nothing focused (see `registerHub` in dom.ts).
+  useEffect(() => {
+    const element = root.current;
+    if (!inShell || !shortcuts || element === null) return;
+    return registerHub(element, { dispatch: keys.bus.dispatch, primary });
+  }, [inShell, shortcuts, primary, keys]);
   const hostRef = useRef(shell?.host);
   hostRef.current = shell?.host;
 
@@ -221,10 +235,10 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
 
   if (bare) return <>{content}</>;
   // In the shell the root takes focus when a press lands on its empty space (tabIndex -1), so the keys keep working after a click
-  // anywhere in the hub: a hub answers keys only while focus is inside it.
-  const inShell = shell !== undefined;
+  // anywhere in the hub, and a closing window has somewhere in the hub to put focus.
   return (
     <div
+      ref={root}
       className={cx('cw-hub', !inShell && 'cw-hub--embed', className)}
       {...(inShell ? { tabIndex: -1, onKeyDown: keys.onKeyDown } : {})}
       {...(theme === 'light' || theme === 'dark' ? { 'data-cw-theme': theme } : {})}

@@ -208,3 +208,100 @@ describe("an element inside another component's shadow root", () => {
     expect(el.shadowRoot?.activeElement).toBe(skip(el));
   });
 });
+
+describe('keys with nothing focused (the page after load)', () => {
+  // (Through any shadow root: the page's own activeElement is only a host.)
+  const blur = (): void => {
+    let el = document.activeElement;
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+    (el as HTMLElement | null)?.blur();
+  };
+
+  it('the only element on the page answers', async () => {
+    const w = await filed();
+    const el = mount(detailed, { client: w.client });
+    await ready(el);
+    blur();
+    const user = userEvent.setup();
+    await user.keyboard('j');
+    expect(name(el.shadowRoot?.activeElement)).toBe('Alpha');
+    blur();
+    await user.keyboard('?');
+    await inside(el).findByRole('dialog', { name: 'Keyboard shortcuts' });
+  });
+
+  it('Escape with nothing focused does nothing', async () => {
+    const w = await filed();
+    const el = mount(detailed, { client: w.client });
+    await ready(el);
+    blur();
+    await userEvent.setup().keyboard('{Escape}');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(el.shadowRoot?.activeElement).toBeNull();
+  });
+
+  it('two elements: neither answers, unless one has the primary attribute, and then only that one does', async () => {
+    const w = await filed();
+    const a = mount(detailed, { client: w.client });
+    const b = mount(detailed, { client: w.client });
+    await ready(a);
+    await ready(b);
+    blur();
+    const user = userEvent.setup();
+    await user.keyboard('?j');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(dialogs(a) + dialogs(b)).toBe(0);
+    b.setAttribute('primary', '');
+    await new Promise((r) => setTimeout(r, 50));
+    blur();
+    await user.keyboard('?');
+    await inside(b).findByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(dialogs(a)).toBe(0);
+  });
+
+  it('an element with shortcuts="false" is not counted: the other one is the only one', async () => {
+    const w = await filed();
+    const quiet = mount({ ...detailed, shortcuts: 'false' }, { client: w.client });
+    const loud = mount(detailed, { client: w.client });
+    await ready(quiet);
+    await ready(loud);
+    blur();
+    await userEvent.setup().keyboard('?');
+    await inside(loud).findByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(dialogs(quiet)).toBe(0);
+  });
+
+  it('an element in another component\'s shadow root answers when it is the only one, and not when focus is in that component', async () => {
+    const w = await filed();
+    defineChatwardenHub();
+    const host = document.body.appendChild(document.createElement('div'));
+    const adopter = host.attachShadow({ mode: 'open' });
+    const mine = adopter.appendChild(document.createElement('button'));
+    const el = document.createElement('chatwarden-hub') as ChatwardenHubElement;
+    for (const [k, v] of Object.entries(detailed)) el.setAttribute(k, v);
+    el.client = w.client;
+    adopter.append(el);
+    await ready(el);
+    const user = userEvent.setup();
+    mine.focus();
+    await user.keyboard('?');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(dialogs(el)).toBe(0);
+    mine.blur();
+    await user.keyboard('?');
+    await inside(el).findByRole('dialog', { name: 'Keyboard shortcuts' });
+  });
+
+  it('removing an element takes it out of the count', async () => {
+    const w = await filed();
+    const a = mount(detailed, { client: w.client });
+    const b = mount(detailed, { client: w.client });
+    await ready(a);
+    await ready(b);
+    b.remove();
+    await new Promise((r) => setTimeout(r, 30));
+    blur();
+    await userEvent.setup().keyboard('?');
+    await inside(a).findByRole('dialog', { name: 'Keyboard shortcuts' });
+  });
+});

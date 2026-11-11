@@ -66,6 +66,9 @@ describe('bundle size', () => {
     // bar, context pane, phone sheet) takes it to 12. The last five screens (Terms, Blocked, Rule gaps, Audit and the Guide: their
     // tables, forms, the dry-run list and the guide's document typography) take it to 14 (76 KB raw, see static.test.ts).
     // And 15 KB at 7d: raised at 7d for the Steps and ladder settings screen (owner-approved feature, 2026-11-10).
-    expect(gzip).toBeLessThan(15 * 1024);
+    // And 18 KB at 7j: every one of the 960 token reads now carries its private default, `var(--cw-x, var(--cwd-x))`, which is what lets a
+    // page theme the hub from any element above it (owner-approved, 2026-11-10): +20 KB raw, about +1 KB gzipped. The fallbacks are not
+    // folded away at build time: that is the transform this task removed from the element.
+    expect(gzip).toBeLessThan(18 * 1024);
   });
 });

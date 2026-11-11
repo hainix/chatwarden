@@ -164,3 +164,23 @@ describe('a hub in a shadow root beside a hub in the page', () => {
     expect(inShadow.q.queryByRole('dialog')).toBeNull();
   });
 });
+
+describe('an open window holds the keys of its own hub only', () => {
+  it("a command bar open in one hub does not stop the other hub's 2 key from deciding", async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const f = await w.fileRich({ lines: [{ who: 'reporter', text: 'hello' }, { who: 'target', text: 'a line from the target' }], target: 'Alpha' });
+    const user = userEvent.setup();
+    const make = () =>
+      render(<Hub client={w.client} router={memoryRouter(`/reports/${f.id}`)} now={w.now} mode="simple" />, { container: document.body.appendChild(document.createElement('div')) });
+    const a = make();
+    const b = make();
+    for (const v of [a, b]) await within(v.container).findByRole('button', { name: /^No action needed/ });
+    a.container.querySelector<HTMLElement>('.cw-skip')?.focus();
+    await user.keyboard('{Control>}k{/Control}');
+    await within(a.container).findByRole('dialog', { name: 'Command bar' });
+    b.container.querySelector<HTMLElement>('.cw-skip')?.focus();
+    await user.keyboard('2');
+    await within(b.container).findByText('Decision queued.');
+    expect(within(a.container).queryByText('Decision queued.')).toBeNull();
+  });
+});

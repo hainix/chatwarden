@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { renderHub, hubRoot } from './render.js';
+import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
 
@@ -84,7 +84,7 @@ describe('J and K move through the queue', () => {
     const { user } = renderHub(w);
     await ready();
     await user.keyboard('jk');
-    expect(hubRoot()).toHaveFocus();
+    expect(document.body).toHaveFocus();
   });
 
   it('works across the filter: only the rows shown are visited', async () => {
@@ -93,8 +93,7 @@ describe('J and K move through the queue', () => {
     const { user } = renderHub(w);
     await ready();
     await user.click(within(pane()).getByRole('button', { name: 'Unclaimed' }));
-    // Focus back on the hub's own space (a click on a pill leaves it on the pill).
-    hubRoot().focus();
+    (document.activeElement as HTMLElement).blur();
     await user.keyboard('jj');
     expect(focusedName()).toBe('Charlie');
   });
@@ -116,7 +115,7 @@ describe('N takes the next case', () => {
     const { w } = await world();
     renderHub(w);
     await ready();
-    for (let i = 0; i < 6; i += 1) fireEvent.keyDown(hubRoot(), { key: 'n', repeat: i > 0 });
+    for (let i = 0; i < 6; i += 1) fireEvent.keyDown(document.body, { key: 'n', repeat: i > 0 });
     await waitFor(() => expect(nextCalls(w)).toBe(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(nextCalls(w)).toBe(1);
@@ -231,7 +230,9 @@ describe('Escape with no window open goes back to the queue', () => {
     const { user } = renderHub(w, { path: `/reports/${filed[1]!.id}` });
     await ready();
     await screen.findByRole('heading', { level: 2, name: /Insults or harassment report against Bravo/ });
-    hubRoot().focus();
+    // Escape is only ever the hub's own: with focus on the page body it does nothing (see keys-after-load.test.tsx), so focus is inside.
+    (document.activeElement as HTMLElement | null)?.blur();
+    (document.querySelector('.cw-hub') as HTMLElement).focus();
     await user.keyboard('{Escape}');
     expect(focusedName()).toBe('Bravo');
   });
@@ -321,7 +322,7 @@ describe('combinations the browser owns are left alone', () => {
     expect(nextCalls(w)).toBe(0);
     expect(sheet()).toBeNull();
     expect(bar()).toBeNull();
-    expect(hubRoot()).toHaveFocus();
+    expect(document.body).toHaveFocus();
   });
 });
 
@@ -331,8 +332,7 @@ describe('shortcuts={false} turns them all off', () => {
     const { user } = renderHub(w, { shortcuts: false, path: `/reports/${filed[0]!.id}` });
     await ready();
     await screen.findByRole('heading', { level: 2, name: /Insults or harassment report against Alpha/ });
-    // Focus is inside the hub, so these keys would reach it; it has them off.
-    hubRoot().focus();
+    (document.activeElement as HTMLElement | null)?.blur();
     const before = document.activeElement;
     await user.keyboard('jkn?');
     await user.keyboard('{Control>}k{/Control}');

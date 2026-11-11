@@ -1,10 +1,10 @@
 import { waitFor } from '@testing-library/dom';
 import { userEvent } from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { goTo, hubShown, inside, mount } from './helpers.js';
 import { hubWorld } from './world.js';
 
-// The attributes: base-url, mode, theme, locale, game-name, shortcuts and router. Each one is read when the hub draws and again
+// The attributes: base-url, mode, theme, locale, game-name, shortcuts, primary and router. Each one is read when the hub draws and again
 // whenever it changes.
 
 const body = (el: Element) => el.shadowRoot?.querySelector('.cw-body');
@@ -162,5 +162,67 @@ describe('router', () => {
     await waitFor(() => expect(inside(el).queryByRole('heading', { name: /Blocked/ })).toBeNull());
     el.setAttribute('router', 'hash');
     await inside(el).findByRole('heading', { name: /Blocked/ }, { timeout: 5000 });
+  });
+});
+
+describe('primary', () => {
+  // (Through any shadow root: the page's own activeElement is only a host.)
+  const blur = (): void => {
+    let el = document.activeElement;
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;
+    (el as HTMLElement | null)?.blur();
+  };
+
+  async function twoWithKeys(first: Record<string, string>, second: Record<string, string>) {
+    const w = await hubWorld();
+    const a = mount(first, { client: w.client });
+    const b = mount(second, { client: w.client });
+    await hubShown(a);
+    await hubShown(b);
+    blur();
+    return { a, b };
+  }
+  const sheets = (el: Element): number => el.shadowRoot?.querySelectorAll('[role="dialog"]').length ?? 0;
+
+  it('the bare attribute and "true" make an element the one that answers keys with nothing focused', async () => {
+    for (const value of ['', 'true']) {
+      const { a, b } = await twoWithKeys({ router: 'memory' }, { router: 'memory', primary: value });
+      await userEvent.setup().keyboard('?');
+      await inside(b).findByRole('dialog', { name: 'Keyboard shortcuts' });
+      expect(sheets(a)).toBe(0);
+      document.body.replaceChildren();
+    }
+  });
+
+  it('"false" and no attribute are the same: not primary', async () => {
+    const { a, b } = await twoWithKeys({ router: 'memory', primary: 'false' }, { router: 'memory' });
+    await userEvent.setup().keyboard('?');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sheets(a) + sheets(b)).toBe(0);
+  });
+
+  it('a change is picked up: adding it, then removing it, moves the answer and takes it away', async () => {
+    const { a, b } = await twoWithKeys({ router: 'memory' }, { router: 'memory' });
+    const user = userEvent.setup();
+    a.setAttribute('primary', '');
+    await new Promise((r) => setTimeout(r, 50));
+    await user.keyboard('?');
+    await inside(a).findByRole('dialog', { name: 'Keyboard shortcuts' });
+    await user.keyboard('{Escape}');
+    a.removeAttribute('primary');
+    await new Promise((r) => setTimeout(r, 50));
+    blur();
+    await user.keyboard('?');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sheets(a) + sheets(b)).toBe(0);
+  });
+
+  it('a value that is not true or false warns once and counts as not primary', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const w = await hubWorld();
+    const el = mount({ router: 'memory', primary: 'maybe' }, { client: w.client });
+    await hubShown(el);
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('primary="maybe"'))).toHaveLength(1);
+    warn.mockRestore();
   });
 });

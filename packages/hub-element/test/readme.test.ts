@@ -204,6 +204,18 @@ describe('what the README says about the limits (fix round 1)', () => {
     expect(keys).not.toMatch(/give only one hub shortcuts/);
   });
 
+  it('keyboard shortcuts: with nothing focused the only hub answers, or the primary one; Escape stays with the hub', () => {
+    const keys = flat(section('Keyboard shortcuts'));
+    expect(keys).toMatch(/With nothing focused \(a page that has just loaded\)/);
+    expect(keys).toMatch(/the only one with shortcuts on, or, with several, the one with the `primary` attribute/);
+    expect(keys).toMatch(/With several and none marked, none does/);
+    expect(keys).toMatch(/Escape is only ever the hub's own, when focus is inside it/);
+    expect(keys).not.toMatch(/Click the hub|Tab into it|before the first key/);
+    const row = tableRows(section('Attributes')).find((r) => (r[0] ?? '').includes('primary'));
+    expect(row).toBeDefined();
+    expect(row?.join(' ')).toMatch(/Keyboard shortcuts/);
+  });
+
   it('router: hash hubs share the URL hash, so give all but one router="memory"', () => {
     const attributes = flat(section('Attributes'));
     expect(attributes).toMatch(/hubs on `router="hash"` share the page's one URL hash/);

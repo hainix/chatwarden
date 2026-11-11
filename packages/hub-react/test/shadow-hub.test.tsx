@@ -348,12 +348,12 @@ describe('focus put on a field by id, in a shadow root', () => {
     await s.q.findByRole('list', { name: 'Reasons' });
     await s.user.click(s.q.getByRole('button', { name: 'Reset reporting' }));
     const confirm = s.q.getByRole('group', { name: 'Reset reporting?' });
-    // (user-event prepares elements on the document's focus events, which a shadow root hides, so it cannot make React see a typed value here.)
+    // (Seen with this controlled textarea only: user-event's typed text reached the DOM but React's onChange did not run, and the field
+    // cleared on the next render. The tests above that type into the command bar read the DOM value, which would not show it.)
     fireEvent.change(within(confirm).getByRole('textbox', { name: /Why are you resetting this/ }), { target: { value: 'Back to the default' } });
     await s.user.click(within(confirm).getByRole('button', { name: 'Reset' }));
     await s.q.findByText('Reset the reporting settings.');
-    await waitFor(() => expect(focusedIn(s.shadow)).not.toBeNull());
-    expect(s.container.contains(focusedIn(s.shadow))).toBe(true);
+    await waitFor(() => expect(focusedIn(s.shadow)).toBe(s.q.getByRole('button', { name: 'Reset reporting' })));
   });
 });
 

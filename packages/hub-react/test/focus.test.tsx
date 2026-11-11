@@ -13,7 +13,7 @@ async function queue(w: HubWorld, people: number, each: number) {
 describe('focus and announcements when the screen changes', () => {
   it('does not take focus on the first load', async () => {
     const w = await hubWorld();
-    renderHub(w, { focus: false });
+    renderHub(w);
     await screen.findByRole('heading', { level: 2, name: 'Overview' });
     expect(document.body).toHaveFocus();
   });

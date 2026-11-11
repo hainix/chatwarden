@@ -14,6 +14,8 @@ export interface HubElementConfig {
   locale: string;
   gameName: string | undefined;
   shortcuts: boolean;
+  /** The hub that answers keys when nothing on the page has focus, when there are several (see the README). */
+  primary: boolean;
   /** `hash` keeps the place in the page's URL hash; `memory` keeps it inside the element. */
   router: 'hash' | 'memory';
 }
@@ -25,6 +27,7 @@ export const DEFAULTS: HubElementConfig = {
   locale: 'en',
   gameName: undefined,
   shortcuts: true,
+  primary: false,
   router: 'hash',
 };
 
@@ -33,7 +36,7 @@ const THEMES = ['auto', 'light', 'dark'] as const;
 const ROUTERS = ['hash', 'memory'] as const;
 
 /** The attribute names the element observes. */
-export const ATTRIBUTES = ['base-url', 'mode', 'theme', 'locale', 'game-name', 'shortcuts', 'router'] as const;
+export const ATTRIBUTES = ['base-url', 'mode', 'theme', 'locale', 'game-name', 'shortcuts', 'primary', 'router'] as const;
 
 const oneOf = <T extends string>(allowed: readonly T[], value: string): T | undefined => allowed.find((a) => a === value.trim().toLowerCase());
 
@@ -91,6 +94,15 @@ export function readConfig(get: (name: string) => string | null, warn: (message:
     else if (value !== 'true') bad('shortcuts', shortcutsRaw, '"true" or "false"');
   }
 
+  // A boolean attribute: present (or "true") is on, "false" or absent is off, anything else warns and is off.
+  let primary = DEFAULTS.primary;
+  const primaryRaw = get('primary');
+  if (primaryRaw !== null) {
+    const value = primaryRaw.trim().toLowerCase();
+    if (value === '' || value === 'true') primary = true;
+    else if (value !== 'false') bad('primary', primaryRaw, '"true" or "false"');
+  }
+
   return {
     baseUrl,
     mode,
@@ -98,6 +110,7 @@ export function readConfig(get: (name: string) => string | null, warn: (message:
     locale,
     gameName: text('game-name')?.trim(),
     shortcuts,
+    primary,
     router: choice('router', ROUTERS, DEFAULTS.router),
   };
 }

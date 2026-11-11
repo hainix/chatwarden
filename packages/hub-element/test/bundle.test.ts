@@ -92,3 +92,39 @@ describe('the built scripts', () => {
     goTo('/');
   });
 });
+
+describe('two copies of the script on one page', () => {
+  it('share one list of hubs: with nothing focused, two elements from two copies answer nobody, unless one is primary', async () => {
+    const first = (await load(standalonePath)) as typeof import('../src/index.js');
+    const second = (await load(secondPath)) as typeof import('../src/index.js');
+    const secondTag = second.defineChatwardenHub('cw-from-second-copy');
+    expect(secondTag).not.toBe(first.ChatwardenHubElement);
+    const w = await hubWorld();
+    await w.fileRich({ target: 'Mallory', reporter: 'Rae', room: 'one' });
+    const make = (tag: string) => {
+      const el = document.createElement(tag) as HTMLElement & { client: unknown };
+      el.client = w.client;
+      el.setAttribute('mode', 'detailed');
+      el.setAttribute('router', 'memory');
+      document.body.append(el);
+      return el;
+    };
+    const a = make('chatwarden-hub');
+    const b = make('cw-from-second-copy');
+    for (const el of [a, b]) await waitFor(() => expect(el.shadowRoot?.querySelectorAll('.cw-queue .cw-case-link').length).toBe(1), { timeout: 8000 });
+    (document.activeElement as HTMLElement | null)?.blur();
+    const user = userEvent.setup();
+    // Module state in each copy would make each copy's hub think it is the only one, and both would open a sheet.
+    await user.keyboard('?');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(a.shadowRoot?.querySelectorAll('[role="dialog"]').length).toBe(0);
+    expect(b.shadowRoot?.querySelectorAll('[role="dialog"]').length).toBe(0);
+    b.setAttribute('primary', '');
+    await new Promise((r) => setTimeout(r, 50));
+    await user.keyboard('?');
+    await inside(b).findByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(a.shadowRoot?.querySelectorAll('[role="dialog"]').length).toBe(0);
+    a.remove();
+    b.remove();
+  });
+});

@@ -198,8 +198,14 @@ describe('the README says how to theme from above, and which keys the hub hears'
     expect(readme).toContain('var(--cw-x, var(--cwd-x))');
   });
 
-  it('says a hub answers keys only while focus is inside it, and that two hubs do not share them', () => {
-    expect(readme).toContain('answers a key only while keyboard focus is inside it');
+  it('says what a hub hears: keys while focus is inside it, and with nothing focused the only hub or the primary one', () => {
+    expect(readme).toContain('answers a key pressed while keyboard focus is inside it');
     expect(readme).toContain('Two hubs on one page each answer only their own keys');
+    expect(readme).toContain('With nothing focused');
+    expect(readme).toContain('the one with `primary`');
+    expect(readme).toContain("Escape is only ever the hub's own");
+    expect(readme).toContain('`primary`');
+    expect(readme).not.toContain('Move focus into the hub');
+    expect(readme).not.toContain('before the first key');
   });
 });

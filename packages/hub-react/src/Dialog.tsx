@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode, RefObject } from 'react';
-import { activeIn, rootOf } from './dom.js';
+import { activeOf } from './dom.js';
 
 // A modal window: it takes focus when it opens, keeps Tab inside, closes on Escape or a click outside, and hands focus back to
 // what had it. The command bar and the shortcut sheet are built on it.
@@ -26,20 +26,25 @@ export function Dialog({
 
   useEffect(() => {
     // What had focus in the hub's own root (inside a shadow root the page only sees the host).
-    const had = box.current === null ? null : activeIn(rootOf(box.current));
+    const had = activeOf(box.current);
     const before = had instanceof HTMLElement ? had : null;
+    // The hub's root, to fall back on (the shell's root takes focus; an embedded root does not, and then this does nothing).
+    const hubRoot = box.current?.closest<HTMLElement>('.cw-hub') ?? null;
     const first = initialFocus?.current ?? box.current?.querySelector<HTMLElement>(FOCUSABLE) ?? box.current;
     first?.focus();
     return () => {
-      // Give focus back, unless what had it is gone (the page moved on while the window was open).
-      if (before !== null && before.isConnected) before.focus();
+      // Give focus back. If what had it is gone (the page moved on while the window was open), or nothing in the hub had it (the
+      // window was opened from the page body), it goes to the hub's root: left on the body, the hub's keys would be dead until a click.
+      if (before !== null && before.isConnected && before !== before.ownerDocument.body) before.focus();
+      else hubRoot?.focus();
     };
     // Once, when the window opens.
   }, []);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (e.key === 'Escape') {
-      // preventDefault tells the hub's page-wide shortcuts that this key has been handled.
+      // preventDefault says the key is handled; stopPropagation keeps it from the hub's root, whose own Escape (back to the queue)
+      // must not also run (a React stop means the hub's key bus never sees this key; see keyScope.ts).
       e.preventDefault();
       e.stopPropagation();
       onClose();
@@ -53,7 +58,7 @@ export function Dialog({
     }
     const first = items[0] as HTMLElement;
     const last = items[items.length - 1] as HTMLElement;
-    const active = box.current === null ? null : activeIn(rootOf(box.current));
+    const active = activeOf(box.current);
     if (e.shiftKey && (active === first || active === box.current)) {
       e.preventDefault();
       last.focus();

@@ -55,7 +55,7 @@ let instances = 0;
 
 /**
  * `<chatwarden-hub>`: the Chatwarden moderator hub, drawn in a shadow root. Attributes: `base-url`, `mode`, `theme`, `locale`,
- * `game-name`, `shortcuts`, `router`. Properties for what an attribute cannot hold: `client` and `t`. Events: `cw-navigate` and
+ * `game-name`, `shortcuts`, `primary`, `router`. Properties for what an attribute cannot hold: `client` and `t`. Events: `cw-navigate` and
  * `cw-decided`. It draws when it is connected and tears down (sending any decision held for Undo) when it is removed; moving it in
  * the DOM keeps it as it is.
  */
@@ -169,6 +169,7 @@ export class ChatwardenHubElement extends Base {
         mode: config.mode,
         gameName: config.gameName,
         shortcuts: config.shortcuts,
+        primary: config.primary,
         onNavigate: this.#onNavigate,
       }),
     );

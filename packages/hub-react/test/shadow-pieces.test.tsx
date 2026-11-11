@@ -69,16 +69,36 @@ describe('CaseCard in a shadow root', () => {
     expect(decides(w)).toHaveLength(0);
   });
 
-  it('a modal window anywhere in the same shadow root holds the keys', async () => {
-    const { w, s, region } = await card();
+  const modal = (): HTMLElement => {
     const dialog = document.createElement('div');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
+    return dialog;
+  };
+
+  it('a modal window inside the piece holds its keys', async () => {
+    const { w, s, region } = await card();
+    const dialog = modal();
+    (region.closest('.cw-piece') as HTMLElement).append(dialog);
+    within(region).getByRole('button', { name: /^No action needed/ }).focus();
+    await s.user.keyboard('2');
+    pageHides();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(decides(w)).toHaveLength(0);
+    dialog.remove();
+    await s.user.keyboard('2');
+    pageHides();
+    await waitFor(() => expect(decides(w)).toHaveLength(1));
+  });
+
+  it("a modal window beside the piece in the same shadow root is somebody else's and does not hold them", async () => {
+    const { w, s, region } = await card();
+    const dialog = modal();
     s.shadow.append(dialog);
     within(region).getByRole('button', { name: /^No action needed/ }).focus();
     await s.user.keyboard('2');
     pageHides();
-    expect(decides(w)).toHaveLength(0);
+    await waitFor(() => expect(decides(w)).toHaveLength(1));
     dialog.remove();
   });
 });

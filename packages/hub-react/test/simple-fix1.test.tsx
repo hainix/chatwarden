@@ -4,7 +4,7 @@ import { outcomeChoice } from '../src/decision.js';
 import { createT, en } from '../src/i18n.js';
 import { stepLabel } from '../src/simple.js';
 import type { TransportRequest } from '../src/transport.js';
-import { renderHub, hubRoot } from './render.js';
+import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld, RichLine } from './world.js';
 
@@ -96,8 +96,8 @@ describe('a newer report re-reads the case, so one click never sends an older su
     const stale = primaries()[0]!;
     expect(stale).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(stale);
-    fireEvent.keyDown(hubRoot(), { key: '1' });
-    fireEvent.keyDown(hubRoot(), { key: 'Enter', ctrlKey: true });
+    fireEvent.keyDown(document, { key: '1' });
+    fireEvent.keyDown(document, { key: 'Enter', ctrlKey: true });
     await pageHides();
     expect(decides(w)).toHaveLength(0);
     expect(screen.queryByText('Decision queued.')).toBeNull();

@@ -53,7 +53,7 @@ export function Piece({
   const hub = useHub();
   const runtime = useRuntime();
   const root = useRef<HTMLDivElement>(null);
-  const keys = useKeyBus();
+  const keys = useKeyBus(root);
   const latest = useRef<PieceNav>(links);
   latest.current = links;
   useEffect(() => runtime.addNav(latest), [runtime]);
