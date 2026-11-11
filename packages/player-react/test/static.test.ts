@@ -463,10 +463,11 @@ describe('the README documents the token contract', () => {
     for (const token of ['--cw-surface', '--cw-accent', '--cw-radius']) expect(flat).toContain(token);
   });
 
-  it('says React 18.3 is declared but the tests run on React 19', () => {
+  it('says React 18.3 is declared, what is checked on it, and that the interactive tests run on React 19', () => {
     const flat = readme.replace(/\s+/g, ' ');
     expect(flat).toMatch(/18\.3/);
-    expect(flat).toMatch(/tested (only )?(on|against|with) React 19/i);
+    expect(flat).toMatch(/the unit and interaction tests run on React 19/i);
+    expect(flat).toMatch(/consumer smoke test[^.]*React 18\.3[^.]*on the server/i);
   });
 
   it('describes the light fallback', () => {

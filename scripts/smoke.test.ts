@@ -54,8 +54,8 @@ describe('PROJECTS', () => {
 describe('the consumer projects', () => {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const all = ['@chatwarden/core', '@chatwarden/discord', '@chatwarden/http', '@chatwarden/hub-element', '@chatwarden/hub-react', '@chatwarden/matcher', '@chatwarden/player-react', '@chatwarden/profanity', '@chatwarden/store-memory', '@chatwarden/store-sqlite'].map((name) => ({ name, version: '0.1.2', tarball: tarballName(name, '0.1.2') }));
-  it('are ESM, CommonJS and a headless one with no React', () => {
-    expect(Object.keys(PROJECTS)).toEqual(['esm', 'cjs', 'headless']);
+  it('are ESM, CommonJS, a headless one with no React, and a React 18 one', () => {
+    expect(Object.keys(PROJECTS)).toEqual(['esm', 'cjs', 'headless', 'react18']);
   });
   it('each has the files its template needs: package.json, tsconfig.json and its scenario', () => {
     for (const [name, p] of Object.entries(PROJECTS) as Array<[string, { scenario: string }]>) {
@@ -81,6 +81,39 @@ describe('the consumer projects', () => {
   });
   it('esm and cjs also install the types that react-dom/server needs, because the scenario renders the hub on the server', () => {
     for (const project of ['esm', 'cjs']) expect(installArgs(project, ['/t/a.tgz'])).toEqual(expect.arrayContaining(['@types/react@19', '@types/react-dom@19']));
+  });
+});
+
+describe('the React 18 consumer (the peer range says ^18.3.0 || ^19.0.0, so React 18.3 is installed and run for real)', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const all = ['@chatwarden/core', '@chatwarden/discord', '@chatwarden/http', '@chatwarden/hub-element', '@chatwarden/hub-react', '@chatwarden/matcher', '@chatwarden/player-react', '@chatwarden/profanity', '@chatwarden/store-memory', '@chatwarden/store-sqlite'].map((name) => ({ name, version: '0.1.2', tarball: tarballName(name, '0.1.2') }));
+  const scenario = readFileSync(join(root, 'scripts', 'smoke', 'react18.tsx'), 'utf8');
+  const react18Args = (): string[] => installArgs('react18', packagesFor('react18', all).map((p: { tarball: string }) => `/t/${p.tarball}`));
+
+  it('installs react and react-dom at 18.3 and the 18 types, beside only the packages that use React and what they need', () => {
+    expect(react18Args()).toEqual(expect.arrayContaining(['react@18.3', 'react-dom@18.3', '@types/react@18', '@types/react-dom@18']));
+    expect(packagesFor('react18', all).map((p: { name: string }) => p.name)).toEqual(['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/player-react']);
+  });
+  it('asks for no React 19 anywhere, and leaves hub-element out (it bundles its own React)', () => {
+    const named = react18Args().filter((a) => !a.startsWith('/t/') && !a.startsWith('-'));
+    expect(named.filter((a) => /react/.test(a)).every((a) => /@18(\.3)?$/.test(a))).toBe(true);
+    expect(react18Args().some((a) => a.includes('hub-element'))).toBe(false);
+  });
+  it('has its own project files and a .tsx scenario (it uses JSX, which the others do not)', () => {
+    for (const f of ['package.json', 'tsconfig.json']) expect(readdirSync(join(root, 'scripts', 'smoke', 'react18'))).toContain(f);
+    expect(PROJECTS.react18.scenario).toBe('react18.tsx');
+    expect(readFileSync(join(root, 'scripts', 'smoke', 'react18', 'tsconfig.json'), 'utf8')).toMatch(/"jsx": "react-jsx"/);
+  });
+  it('the scenario checks the installed React is 18.3, then renders <Hub> and the player components on the server and imports the headless entry', () => {
+    expect(scenario).toMatch(/versionOf\('react'\)/);
+    expect(scenario).toMatch(/versionOf\('react-dom'\)/);
+    expect(scenario.match(/startsWith\('18\.3'\)/g)).toHaveLength(2);
+    expect(scenario).toContain("from '@chatwarden/hub-react'");
+    expect(scenario).toContain("from '@chatwarden/hub-react/headless'");
+    expect(scenario).toContain("from '@chatwarden/player-react'");
+    expect(scenario).toContain('renderToString(');
+    for (const part of ['<Hub', '<NoticeQueue', '<MyRecord', '<RulesPage', '<ReportDialog', '<RestrictedChatLine']) expect(scenario, part).toContain(part);
+    expect(scenario).toContain('createHubController');
   });
 });
 
