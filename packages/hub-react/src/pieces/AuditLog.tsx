@@ -1,4 +1,4 @@
-import { Audit } from '../screens/Audit.js';
+import { LazyAudit } from '../screens/lazy.js';
 import { Piece } from './Piece.js';
 import type { PieceProps } from './Piece.js';
 
@@ -25,7 +25,7 @@ export interface AuditLogProps extends PieceProps {
 export function AuditLog({ className, onOpenPerson, onOpenReport }: AuditLogProps) {
   return (
     <Piece name="AuditLog" need="audit.read" className={className} links={{ onOpenPerson, onOpenReport }}>
-      <Audit />
+      <LazyAudit />
     </Piece>
   );
 }

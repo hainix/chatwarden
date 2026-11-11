@@ -1,4 +1,4 @@
-import { Guide as GuideScreen } from '../screens/Guide.js';
+import { LazyGuide } from '../screens/lazy.js';
 import { Piece } from './Piece.js';
 import type { PieceProps } from './Piece.js';
 
@@ -20,7 +20,7 @@ export type GuideProps = PieceProps;
 export function Guide({ className }: GuideProps) {
   return (
     <Piece name="Guide" need="policy.read" className={className}>
-      <GuideScreen />
+      <LazyGuide />
     </Piece>
   );
 }

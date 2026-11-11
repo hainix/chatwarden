@@ -7,6 +7,7 @@ import '@chatwarden/hub-react/styles.css';
 import { createHubClient, Hub, memoryRouter, routerTransport } from '@chatwarden/hub-react';
 import { adminRoutes, createRouter } from '@chatwarden/http/admin';
 import type { KitRequest, KitResponse } from '@chatwarden/http/admin';
+import type { HubController } from '@chatwarden/hub-react/headless';
 import { useEffect, useMemo, useRef } from 'react';
 import type { Theme } from '../lib/theme';
 import type { DemoWorld } from './engine';
@@ -42,13 +43,15 @@ interface Props {
    */
   active: boolean;
   onEvent: (event: StaffEvent) => void;
+  /** The hub's controller, once it exists and again for each new hub (a Reset): the page's way to ask it to read its queue now. */
+  onController?: (controller: HubController) => void;
 }
 
 /**
  * The hub in the demo's moderator pane: Simple mode (the hub's default, with its Simple/Detailed switch showing), on a router of
  * its own that never touches the page's address. The client and the router are made once per kit: a Reset makes a new kit, so a new hub.
  */
-export function HubPane({ world, theme, active, onEvent }: Props) {
+export function HubPane({ world, theme, active, onEvent, onController }: Props) {
   // The listener changes on every render; the handler keeps calling the latest one.
   const latest = useRef(onEvent);
   useEffect(() => {
@@ -73,7 +76,7 @@ export function HubPane({ world, theme, active, onEvent }: Props) {
   // `primary`: this hub answers keys when nothing has focus (as after a click on its empty space or on the demo's). `shortcuts`
   // follows the visitor: off when they are elsewhere on the page. The hub never answers a key typed in the chat box or a dialog,
   // whatever these say: it answers only while focus is inside it, or nothing is focused.
-  return <Hub client={client} router={router} theme={theme} primary shortcuts={active} gameName="Lobby" className="demo-hub" />;
+  return <Hub client={client} router={router} theme={theme} primary shortcuts={active} gameName="Lobby" className="demo-hub" onController={onController} />;
 }
 
 interface PaneProps extends Omit<Props, 'world'> {
@@ -84,7 +87,7 @@ interface PaneProps extends Omit<Props, 'world'> {
 }
 
 /** The moderator pane: a heading, and the hub (or a line saying it is on its way). */
-export function ModeratorPane({ world, hidden, theme, active, onEvent }: PaneProps) {
+export function ModeratorPane({ world, hidden, theme, active, onEvent, onController }: PaneProps) {
   return (
     <section className="pane pane-mod" data-pane="mod" aria-labelledby="pane-mod-title" hidden={hidden}>
       <header className="pane-head">
@@ -99,7 +102,7 @@ export function ModeratorPane({ world, hidden, theme, active, onEvent }: PanePro
             Opening the moderator hub…
           </p>
         ) : (
-          <HubPane world={world} theme={theme} active={active} onEvent={onEvent} />
+          <HubPane world={world} theme={theme} active={active} onEvent={onEvent} onController={onController} />
         )}
       </div>
     </section>

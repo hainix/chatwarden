@@ -867,6 +867,7 @@ export const en = {
   'hub.settings.ladder.title': 'Steps and ladder',
   'hub.settings.ladder.intro': 'These settings decide what the hub suggests and which lengths moderators can pick. A change applies at once to new decisions. Steps already given are not changed.',
   'hub.state.what.settings': 'the steps and ladder',
+  'hub.state.what.reportingSettings': 'the reporting settings',
   'hub.settings.readOnly': 'You can see these settings. Changing them needs permission to edit settings.',
   'hub.settings.unsupported': 'This setup cannot save settings, so the steps and ladder stay as they are.',
   'hub.settings.layerError': 'The saved settings could not be used, so the default settings are in force. Reset the steps and ladder to clear them.',

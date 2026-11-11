@@ -129,6 +129,8 @@ function useControllerOf(given: HubController | undefined, client: HubClient, ma
 export interface HubRootProps extends HubProviderOptions {
   /** `<Hub>`'s `primary` (not a provider option: pieces answer keys only while focus is inside them). */
   primary?: boolean;
+  /** `<Hub>`'s `onController`: told the controller once it exists, and again if it is replaced. */
+  onController?: ((controller: HubController) => void) | undefined;
   client: HubClient | undefined;
   controller: HubController | undefined;
   children?: ReactNode;
@@ -137,7 +139,7 @@ export interface HubRootProps extends HubProviderOptions {
 }
 
 /** The provider and the hub's shell are one component: this. The shell passes its router and host; a provider placing pieces passes none. */
-export function HubRoot({ client: clientProp, controller: given, mode: modeProp, t: tProp, locale = 'en', now, theme, shortcuts = true, primary = false, bare = false, className, shell, children }: HubRootProps) {
+export function HubRoot({ client: clientProp, controller: given, mode: modeProp, t: tProp, locale = 'en', now, theme, shortcuts = true, primary = false, bare = false, className, shell, onController, children }: HubRootProps) {
   const client = given?.client ?? (clientProp as HubClient);
   const mode = useModeState(modeProp);
   const t = useMemo(() => tProp ?? createT(en, locale), [tProp, locale]);
@@ -171,6 +173,14 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
     bindRuntime(made, runtime);
     return made;
   });
+
+  // The page is told the controller once it exists, and again if it is replaced (a new client, or StrictMode's second mount). A
+  // controller that has been disposed is never handed out. The latest callback is the one called; a new callback is not a new call.
+  const onControllerRef = useRef(onController);
+  onControllerRef.current = onController;
+  useEffect(() => {
+    if (!controller.disposed) onControllerRef.current?.(controller);
+  }, [controller]);
 
   // Who is signed in: asked once per client, unless a controller of the adopter's already knows.
   const known = given?.me.getSnapshot() ?? null;

@@ -5,7 +5,7 @@ import type { CommandTarget } from './commands.js';
 import { useHub } from './context.js';
 import { activeOf } from './dom.js';
 import type { HubClient } from './client.js';
-import type { HubHost } from './headless/controller.js';
+import type { HubController, HubHost } from './headless/controller.js';
 import type { HubT } from './i18n.js';
 import { useKeyListener } from './keyScope.js';
 import { useOptionalQueue } from './liveQueue.js';
@@ -16,6 +16,7 @@ import { HubRoot } from './provider.js';
 import { buildPath, hashRouter, memoryRouter, parseRoute } from './router.js';
 import type { HubRouter, Route } from './router.js';
 import { screenFor } from './screens/index.js';
+import { ScreenShown } from './screens/lazy.js';
 import { ConnectionBanner } from './shell/Banner.js';
 import { CasePanel } from './shell/CasePanel.js';
 import { CommandBar } from './shell/CommandBar.js';
@@ -59,6 +60,13 @@ export interface HubProps {
    * and a browser that cannot keep it (or has none) gets `simple`.
    */
   mode?: HubMode;
+  /**
+   * Called with the hub's controller once it exists, and again if it is replaced (a new `client`). Keep it and call
+   * `controller.refresh()` to have the hub read its queue now, when your page knows something just changed. The controller is the hub's own:
+   * do not `dispose()` it. It is the same headless controller as `@chatwarden/hub-react/headless`, and `refresh` only reads.
+   * @experimental
+   */
+  onController?: (controller: HubController) => void;
 }
 
 const noopSubscribe = (): (() => void) => () => undefined;
@@ -69,7 +77,7 @@ const noopSubscribe = (): (() => void) => () => undefined;
  * an open case) who is handling it. Pass a `client`; everything else has a default. To put single parts of it in your own page,
  * use `HubProvider` and the pieces instead.
  */
-export function Hub({ client, t, locale = 'en', router: routerProp, theme, onNavigate, now, className, gameName, shortcuts = true, primary = false, mode }: HubProps) {
+export function Hub({ client, t, locale = 'en', router: routerProp, theme, onNavigate, now, className, gameName, shortcuts = true, primary = false, mode, onController }: HubProps) {
   const fallbackRouter = useMemo(() => (typeof window === 'undefined' ? memoryRouter('/') : hashRouter()), []);
   const router = routerProp ?? fallbackRouter;
   const subscribe = useCallback((listener: () => void) => router.subscribe?.(listener) ?? noopSubscribe(), [router]);
@@ -101,7 +109,7 @@ export function Hub({ client, t, locale = 'en', router: routerProp, theme, onNav
   );
 
   return (
-    <HubRoot client={client} controller={undefined} t={t} locale={locale} now={now} theme={theme} className={className} shortcuts={shortcuts} primary={primary} mode={mode} shell={shell}>
+    <HubRoot client={client} controller={undefined} t={t} locale={locale} now={now} theme={theme} className={className} shortcuts={shortcuts} primary={primary} mode={mode} shell={shell} onController={onController}>
       <Shell route={route} gameName={gameName} shortcuts={shortcuts} />
     </HubRoot>
   );
@@ -139,16 +147,27 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
   // mounted, so the control the person just used keeps keyboard focus.
   const screenKey = screenKeyOf(route);
   const shownBefore = useRef<string | null>(null);
+  // The person moved to a screen and its heading has not yet had the focus: a screen that loads on demand arrives after the move.
+  const focusPending = useRef(false);
+  const focusHeading = useCallback((): void => {
+    const heading = mainRef.current?.querySelector<HTMLElement>('.cw-screen-title');
+    if (heading === null || heading === undefined) return;
+    focusPending.current = false;
+    heading.focus();
+    setAnnouncement(heading.textContent ?? '');
+  }, []);
   useEffect(() => {
     const previous = shownBefore.current;
     shownBefore.current = screenKey;
     // Not on the first screen: the person has not moved anywhere yet.
     if (previous === null || previous === screenKey) return;
-    const heading = mainRef.current?.querySelector<HTMLElement>('.cw-screen-title');
-    if (heading === null || heading === undefined) return;
-    heading.focus();
-    setAnnouncement(heading.textContent ?? '');
-  }, [screenKey]);
+    focusPending.current = true;
+    focusHeading();
+  }, [screenKey, focusHeading]);
+  // A lazy screen has come in: if the person moved here and the heading was not there yet, it takes the focus now.
+  const onScreenShown = useCallback((): void => {
+    if (focusPending.current) focusHeading();
+  }, [focusHeading]);
 
   const needed = permissionFor(route);
   const allowed = needed === null || can(needed);
@@ -162,7 +181,7 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
         {route.name === 'notFound' ? (
           <NotFound />
         ) : allowed ? (
-          screenFor(route, simple)
+          <ScreenShown.Provider value={onScreenShown}>{screenFor(route, simple)}</ScreenShown.Provider>
         ) : (
           <div className="cw-screen">
             <div className="cw-empty">

@@ -96,6 +96,11 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   reload: () => Promise<QueueGroup[]>;
   /** Ask now, instead of waiting for the next poll (the banner's "Try now"). */
   retryNow: () => void;
+  /**
+   * Poll the change token now, as a normal poll would (and read the queue when it moved). Only reads: it sends nothing that writes.
+   * Does nothing while the queue is not running, after `dispose`, while the browser is offline, or once the session has ended.
+   */
+  refresh: () => void;
   /** The server told us a claim (or that there is none); show it at once rather than at the next poll. */
   patchClaim: (person: string, claim: Claim | null) => void;
   patchViewing: (person: string, viewers: string[]) => void;
@@ -389,6 +394,10 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     },
     retryNow() {
       failures = 0;
+      run?.kick();
+    },
+    refresh() {
+      if (disposed || authStopped || !page.online()) return;
       run?.kick();
     },
     patchClaim: (person, claim) => patch(person, (g) => ({ ...g, claim })),

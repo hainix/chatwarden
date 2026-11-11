@@ -403,7 +403,8 @@ describe('reset', () => {
 
 describe('the page nudges the hub to read the queue without flushing a decision held for Undo', () => {
   // The hub sends a held decision at once when the page hides (`visibilitychange` with the tab hidden): its Undo window is the visitor's.
-  // The nudge that shows a new report in the queue is a synthetic `visibilitychange`, so it must do nothing on a hidden tab.
+  // The nudge that shows a new report in the queue is the hub's own `controller.refresh()` (handed over by `<Hub onController>`): it reads
+  // the queue and nothing else, so it is safe on a hidden tab too, and the page sends no synthetic event at all.
   const setVisibility = (state: 'visible' | 'hidden') => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
   afterEach(() => {
     delete (document as unknown as { visibilityState?: string }).visibilityState;
@@ -458,5 +459,46 @@ describe('the page nudges the hub to read the queue without flushing a decision 
     await oneTapReport(user);
     await closeReport(user);
     await within(modPane()).findByRole('button', { name: /new case/i }, { timeout: 2000 });
+  });
+
+  it.each(['visible', 'hidden'] as const)('filing a report sends no synthetic visibilitychange (tab %s): the hub is asked through its handle', async (state) => {
+    const { user } = await setup();
+    setVisibility(state);
+    const heard = vi.fn();
+    document.addEventListener('visibilitychange', heard);
+    try {
+      await oneTapReport(user);
+      await closeReport(user);
+      await within(modPane()).findByRole('button', { name: /new case/i }, { timeout: 2000 });
+      expect(heard).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('visibilitychange', heard);
+    }
+  });
+
+  it('on a hidden tab the report still reaches the queue at once (a refresh only reads, so it is safe there)', async () => {
+    const { user } = await setup();
+    setVisibility('hidden');
+    await oneTapReport(user);
+    await closeReport(user);
+    // The hidden tab's own poll is 30 s away: only the handle can have brought it in this fast.
+    await within(modPane()).findByRole('button', { name: /new case/i }, { timeout: 2000 });
+  });
+
+  it('a reason added to a report reaches the queue at once too (the handle again, no event)', async () => {
+    const { user } = await setup();
+    setVisibility('visible');
+    const heard = vi.fn();
+    document.addEventListener('visibilitychange', heard);
+    try {
+      const dialog = await oneTapReport(user);
+      await user.click(within(dialog).getByRole('button', { name: 'Add a reason' }));
+      await user.click(within(dialog).getAllByRole('radio')[0] as HTMLElement);
+      await user.click(within(dialog).getByRole('button', { name: /add to my report/i }));
+      await within(dialog).findByText(/added\. thanks/i);
+      expect(heard).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('visibilitychange', heard);
+    }
   });
 });

@@ -1,18 +1,13 @@
 import type { ReactNode } from 'react';
 import { CaseCard } from '../case/CaseCard.js';
 import type { Route } from '../router.js';
-import { Actions } from './Actions.js';
-import { Audit } from './Audit.js';
-import { Blocked } from './Blocked.js';
-import { Gaps } from './Gaps.js';
-import { Guide } from './Guide.js';
 import { Overview } from './Overview.js';
 import { Person } from './Person.js';
 import { Report } from './Report.js';
 import { Reports } from './Reports.js';
 import { Settings } from './Settings.js';
 import { SimpleHome } from './SimpleHome.js';
-import { Terms } from './Terms.js';
+import { LazyActions, LazyAudit, LazyBlocked, LazyGaps, LazyGuide, LazyTerms } from './lazy.js';
 
 /**
  * The screen for a route that the role may open. In Simple mode the landing is the calm Cases screen and a case is the one card;
@@ -29,17 +24,17 @@ export function screenFor(route: Route, simple = false): ReactNode {
     case 'person':
       return <Person person={route.ref} />;
     case 'actions':
-      return <Actions />;
+      return <LazyActions />;
     case 'terms':
-      return <Terms />;
+      return <LazyTerms />;
     case 'blocked':
-      return <Blocked />;
+      return <LazyBlocked />;
     case 'gaps':
-      return <Gaps />;
+      return <LazyGaps />;
     case 'audit':
-      return <Audit />;
+      return <LazyAudit />;
     case 'guide':
-      return <Guide />;
+      return <LazyGuide />;
     case 'settings':
       return <Settings section={route.section} />;
     case 'notFound':
