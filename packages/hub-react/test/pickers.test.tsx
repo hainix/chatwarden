@@ -121,6 +121,47 @@ describe('the decision bar: Something else', () => {
   });
 });
 
+describe('a profile that offers no lengths', () => {
+  async function bare(layer: object) {
+    const w = await hubWorld({ role: 'senior' });
+    seed(w, layer);
+    const f = await w.file({ target: 'Mallory' });
+    const r = renderHub(w, { path: `/people/${f.person}` });
+    await screen.findByRole('region', { name: 'Timeline' });
+    await r.user.click(await screen.findByRole('button', { name: 'Sanction' }));
+    await screen.findByRole('region', { name: 'Sanction Mallory' });
+    await waitFor(() => expect((screen.getByLabelText('Community Rule') as HTMLSelectElement).options.length).toBeGreaterThan(2));
+    return { w, f, ...r };
+  }
+
+  it('custom is the default when it is allowed: it needs a typed number, so nothing is sent by accident', async () => {
+    const { w, user } = await bare({ durations: [], customDuration: true });
+    await user.selectOptions(screen.getByLabelText('What happens'), 'ban');
+    expect(screen.getByLabelText('How long')).toHaveDisplayValue('Custom length');
+    await user.selectOptions(screen.getByLabelText('Community Rule'), '2');
+    await user.type(screen.getByLabelText('Reason'), 'x');
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getByText('Enter a length, such as 6 and hours.')).toBeInTheDocument();
+    expect(sanctions(w)).toHaveLength(0);
+  });
+
+  it('with custom off too the length is unset, says "Choose a length", and is never a permanent ban', async () => {
+    const { w, user } = await bare({ durations: [], customDuration: false });
+    await user.selectOptions(screen.getByLabelText('What happens'), 'ban');
+    expect(screen.getByLabelText('How long')).toHaveDisplayValue('Choose a length');
+    await user.selectOptions(screen.getByLabelText('Community Rule'), '2');
+    await user.type(screen.getByLabelText('Reason'), 'x');
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getByText('Choose a length.')).toBeInTheDocument();
+    expect(sanctions(w)).toHaveLength(0);
+    // Permanent is there to pick, on purpose.
+    await user.selectOptions(screen.getByLabelText('How long'), 'Permanent');
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(sanctions(w)).toHaveLength(1));
+    expect(sanctions(w)[0]?.body).toMatchObject({ kind: 'ban', durationMs: null });
+  });
+});
+
 describe('the Sanction form on the person page', () => {
   async function page(options: WorldOptions = {}, layer?: object) {
     const w = await hubWorld({ role: 'senior', ...options });

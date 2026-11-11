@@ -58,6 +58,7 @@ export function LengthField({ id, label, visible = false, numberLabel, unitLabel
           value={value.value}
           onChange={(e) => onChange({ ...value, value: e.target.value })}
         >
+          {value.value === '' && <option value="">{t('hub.length.choose')}</option>}
           {[...listed, ...extra].sort((a, b) => a.ms - b.ms).map((o) => (
             <option key={o.value} value={o.value}>
               {lengthPhrase(t, locale, o.ms)}

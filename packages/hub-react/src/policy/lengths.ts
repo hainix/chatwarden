@@ -28,7 +28,7 @@ const DAY = 86_400_000;
 
 /**
  * The value to hold in a length field so it is on the menu: what it already holds when that is offered, else the length nearest to a
- * day (a form starts on 24 hours, which a profile may not list), else permanent or custom, whichever is offered.
+ * day (a form starts on 24 hours, which a profile may not list), else a custom length (it needs a number), else nothing (`''`).
  */
 export function snapLength(value: string, menu: LengthMenu): string {
   if (value === 'permanent') {
@@ -41,6 +41,7 @@ export function snapLength(value: string, menu: LengthMenu): string {
   }
   const near = nearestLength(menu.durations, DAY);
   if (near !== null) return lengthValue(near);
-  if (menu.permanent) return 'permanent';
-  return menu.custom ? 'custom' : value;
+  // Nothing listed: never default to permanent (a destructive length nobody chose). A custom length needs a typed number, so it blocks
+  // the send; with no custom either, the field is left unset and says so.
+  return menu.custom ? 'custom' : '';
 }

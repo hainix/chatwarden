@@ -165,6 +165,7 @@ describe('@chatwarden/hub-react', () => {
         "ReportStatus",
         "ReportSummary",
         "ReporterRecord",
+        "ResetResult",
         "Role",
         "Route",
         "RouterTransportOptions",

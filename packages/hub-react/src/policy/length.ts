@@ -45,6 +45,7 @@ export interface LengthDraft {
 
 /** What a length field says: milliseconds (null for permanent), or why it says nothing yet. Never reads a bad value as permanent. */
 export function resolveLength(l: LengthDraft): { ok: true; ms: number | null } | { ok: false; problem: Problem } {
+  if (l.value === '') return fail('hub.length.error.choose');
   if (l.value === 'permanent') return { ok: true, ms: null };
   if (l.value === 'custom') return parseAmount(l.amount, l.unit);
   const old = OLD_KEYS[l.value];

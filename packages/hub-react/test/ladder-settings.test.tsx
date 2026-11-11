@@ -1,7 +1,11 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { describe, expect, it, vi } from 'vitest';
 import type { PolicyLadderRow } from '@chatwarden/core';
+import { Hub } from '../src/Hub.js';
+import { memoryRouter } from '../src/router.js';
 import type { TransportRequest } from '../src/transport.js';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
@@ -103,7 +107,7 @@ describe('who can open and change it', () => {
   it('a moderator reads it: every control is off, no Save, no Reset, one plain sentence', async () => {
     const w = await hubWorld({ role: 'moderator' });
     await open(w);
-    expect(screen.getByText('You can look at these settings. Only an owner can change them.')).toBeInTheDocument();
+    expect(screen.getByText('You can see these settings. Changing them needs permission to edit settings.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Reset/ })).toBeNull();
     for (const c of [screen.getByLabelText('Add a length'), screen.getByLabelText('Step 1, lighter: what happens'), screen.getByLabelText('Notes'), within(areaGroup()).getByRole('checkbox', { name: 'Rule 5: No cheating or exploiting' })]) {
@@ -126,7 +130,7 @@ describe('who can open and change it', () => {
     (store as unknown as Record<string, unknown>).loadPolicyLayer = undefined;
     const w = await owner({ store });
     await open(w);
-    expect(screen.getByText('This store cannot save settings, so the steps and ladder stay as set in code.')).toBeInTheDocument();
+    expect(screen.getByText('This setup cannot save settings, so the steps and ladder stay as they are.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
     expect(screen.getByLabelText('Add a length')).toBeDisabled();
   });
@@ -138,7 +142,7 @@ describe('who can open and change it', () => {
     store.savePolicyLayer?.({ profanity: { mode: 'refuse' } } as never, 0);
     w.cw.policy.refresh();
     const { user } = await open(w);
-    expect(screen.getByText('The saved settings could not be used, so the settings from code are in force. Reset everything to clear them.')).toBeInTheDocument();
+    expect(screen.getByText('The saved settings could not be used, so the default settings are in force. Reset everything to clear them.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Reset everything' }));
     await user.type(screen.getByRole('textbox', { name: /Why are you resetting this/ }), 'Clear the bad layer');
     await user.click(within(screen.getByRole('group', { name: 'Reset everything?' })).getByRole('button', { name: 'Reset' }));
@@ -310,7 +314,7 @@ describe('First offence', () => {
     await user.selectOptions(screen.getByLabelText('Severe: what happens'), 'No action');
     await save(user);
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('That setting was not accepted.');
+    expect(alert).toHaveTextContent("That setting isn't allowed.");
     await waitFor(() => expect(screen.getByLabelText('Severe: what happens')).toHaveFocus());
     expect(screen.getByLabelText('Severe: what happens')).toHaveAttribute('aria-invalid', 'true');
     // Nothing was saved, the edit is kept, and the screen did not read the settings again.
@@ -699,6 +703,124 @@ describe('Reset', () => {
     await screen.findByText('Reset the lengths.');
     expect(screen.getByLabelText('Rude: what happens')).toHaveValue('note');
     expect(within(screen.getByRole('list', { name: 'Lengths offered' })).getAllByRole('listitem')).toHaveLength(7);
+  });
+});
+
+
+describe('fix round 1', () => {
+  const kitWords = /\bkit\b|your code|set in code|from code/i;
+
+  it('says nothing about the kit or the code to a moderator: the refusal, the reset question and the notices', async () => {
+    const w = await owner();
+    w.cw.policy.save({ durations: [H] }, { version: 0, actor: 'x', reason: 'seed' });
+    const { user, container } = await open(w);
+    await user.selectOptions(screen.getByLabelText('Severe: what happens'), 'No action');
+    await save(user);
+    await screen.findByText("That setting isn't allowed.");
+    expect(screen.getByText("This setting isn't allowed.")).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reset lengths' }));
+    expect(screen.getByText(/puts the setting back to the default/)).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(kitWords);
+  });
+
+  it('a 400 that names no field keeps the reason form open and says so without pointing at a marked setting', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(screen.getByRole('checkbox', { name: 'Let moderators type their own length' }));
+    w.intercept.fn = (req) =>
+      req.method === 'PUT' ? { status: 400, body: { error: 'invalid_profile', message: 'x', path: 'layer.profanity' } } : undefined;
+    await save(user);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("These settings aren't allowed.");
+    expect(alert).not.toHaveTextContent(/marked/);
+    expect(screen.getByRole('textbox', { name: /Why are you changing this/ })).toHaveValue('Lighter steps, asked for by the team');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
+  });
+
+  it('Reset everything says that unsaved edits are lost too, only when there are some', async () => {
+    const w = await owner();
+    w.cw.policy.save({ durations: [H] }, { version: 0, actor: 'x', reason: 'seed' });
+    const { user } = await open(w);
+    await user.click(screen.getByRole('button', { name: 'Reset everything' }));
+    expect(screen.queryByText(/unsaved changes will be lost/i)).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Keep my settings' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Let moderators type their own length' }));
+    await user.click(screen.getByRole('button', { name: 'Reset everything' }));
+    expect(screen.getByText(/Your unsaved changes will be lost too./)).toBeInTheDocument();
+  });
+
+  it('a reset of two sections whose second call fails still refreshes: the first section is back, the version is current, the next save is not a conflict', async () => {
+    const w = await owner();
+    w.cw.policy.save({ durations: [H], customDuration: false }, { version: 0, actor: 'x', reason: 'seed' });
+    const { user } = await open(w);
+    expect(within(screen.getByRole('list', { name: 'Lengths offered' })).getAllByRole('listitem')).toHaveLength(1);
+    const policyReads = () => requests(w, 'GET', '/policy').length;
+    // A kit that answers a reset without the new state (so the screen reads it), and a read that is slow: the failure of the second call is
+    // known before the new state arrives.
+    w.intercept.fn = async (req) => {
+      if (req.method === 'GET' && req.path === '/policy/profile') await new Promise((r) => setTimeout(r, 80));
+      if (req.method !== 'DELETE') return undefined;
+      if (req.query?.section === 'customDuration') return { status: 500, body: { error: 'internal', message: 'x' } };
+      const done = await w.direct.resetPolicyProfile({ section: req.query?.section as 'durations', reason: (req.body as { reason: string }).reason });
+      return { status: 200, body: { ok: true, version: done.version, changed: done.changed } };
+    };
+    await user.click(screen.getByRole('button', { name: 'Reset lengths' }));
+    await user.type(screen.getByRole('textbox', { name: /Why are you resetting this/ }), 'Back to the default');
+    await user.click(within(screen.getByRole('group', { name: 'Reset lengths?' })).getByRole('button', { name: 'Reset' }));
+    expect(await within(screen.getByRole('group', { name: 'Reset lengths?' })).findByRole('alert')).toBeInTheDocument();
+    // The first call went through: the lengths are back to the default on the server and in the draft, and the version moved.
+    expect(w.cw.profile.durations).toHaveLength(7);
+    expect(w.cw.profile.customDuration).toBe(false);
+    await waitFor(() => expect(within(screen.getByRole('list', { name: 'Lengths offered' })).getAllByRole('listitem')).toHaveLength(7));
+    // The remembered policy was dropped: the next read of it asks the server again.
+    const before = policyReads();
+    await w.client.policy();
+    expect(policyReads()).toBe(before + 1);
+    w.intercept.fn = null;
+    await user.click(screen.getByRole('button', { name: 'Keep my settings' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Let moderators type their own length' }));
+    await save(user, 'Second try');
+    await screen.findByText('Saved the steps and ladder.');
+    expect(screen.queryByText('Someone else changed these settings.')).toBeNull();
+    const put = requests(w, 'PUT', '/policy/profile').at(-1)?.body as { version: number };
+    expect(put.version).toBe(2);
+    expect(w.cw.profile.customDuration).toBe(true);
+  });
+
+  it('a failed Reload does not leave the screen waiting to throw the draft away on the next state', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(screen.getByRole('checkbox', { name: 'Let moderators type their own length' }));
+    await w.clientFor('bea@example.test', 'owner').savePolicyProfile({ layer: { durations: [H] }, version: 0, reason: 'Bea' });
+    await save(user);
+    const alert = await screen.findByRole('alert');
+    // The Reload read fails: the edits are kept.
+    w.intercept.fn = (req) => (req.method === 'GET' && req.path === '/policy/profile' ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
+    await user.click(within(alert).getByRole('button', { name: 'Reload' }));
+    await waitFor(() => expect(gets(w)).toBe(2));
+    w.intercept.fn = null;
+    // A later read that works (the Try again of the error) is not a Reload: the edit stays.
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(gets(w)).toBe(3));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(screen.getByRole('checkbox', { name: 'Let moderators type their own length' })).not.toBeChecked();
+  });
+});
+
+describe('fix round 1: the preview under StrictMode and on open', () => {
+  it('the first preview is asked for at once, even when effects run twice', async () => {
+    const w = await owner();
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Hub client={w.client} router={memoryRouter('/settings/ladder')} now={w.now} mode="detailed" />
+      </StrictMode>,
+    );
+    await screen.findByRole('list', { name: 'Lengths offered' });
+    const started = Date.now();
+    await screen.findByRole('region', { name: 'Preview of suggestions' }, { timeout: 3000 });
+    expect(Date.now() - started).toBeLessThan(350);
+    expect(user).toBeDefined();
   });
 });
 

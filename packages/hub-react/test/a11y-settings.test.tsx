@@ -49,7 +49,7 @@ describe.each(['light', 'dark'] as const)('axe on steps and ladder, %s theme', (
     expect(await violations(container)).toEqual([]);
     await user.type(screen.getByRole('textbox', { name: /Why are you changing this/ }), 'x');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
-    await screen.findByText('That setting was not accepted.');
+    await screen.findByText("That setting isn't allowed.");
     expect(await violations(container)).toEqual([]);
     await user.selectOptions(screen.getByLabelText('Severe: what happens'), 'Chat restriction');
     await user.click(screen.getByRole('checkbox', { name: 'Let moderators type their own length' }));

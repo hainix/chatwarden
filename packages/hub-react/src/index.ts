@@ -33,7 +33,7 @@ export type { RecentActionsProps } from './pieces/RecentActions.js';
 export { useBlocked, useCase, useCases, useClaim, useDecide, useMe, usePerson, useTerms } from './embedHooks.js';
 export type { HubRead, UseCase, UseCaseOptions, UseCases, UseClaim, UseDecide, UseMe } from './embedHooks.js';
 export { usePolicy } from './policyHooks.js';
-export type { UsePolicy } from './policyHooks.js';
+export type { ResetResult, UsePolicy } from './policyHooks.js';
 
 export { createHubClient, fetchAll, HubError, toHubError } from './client.js';
 export type { HubClient } from './client.js';

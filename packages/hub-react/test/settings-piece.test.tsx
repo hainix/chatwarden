@@ -1,9 +1,11 @@
 import { StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { act, renderHook, screen, waitFor } from '@testing-library/react';
+import { MemoryStore } from '@chatwarden/store-memory';
 import { describe, expect, it } from 'vitest';
 import { LadderSettings } from '../src/pieces/LadderSettings.js';
 import { usePolicy } from '../src/policyHooks.js';
+import { useHub } from '../src/context.js';
 import { HubProvider } from '../src/provider.js';
 import { renderPieces } from './pieces-kit.js';
 import { hubWorld } from './world.js';
@@ -148,6 +150,74 @@ describe('usePolicy', () => {
       await result.current?.reset('durations', 'back');
     });
     await waitFor(() => expect(result.current?.data?.effective.durations).toHaveLength(7));
+  });
+
+  it('a role that may not write gets not_allowed from save and reset, and nothing is sent', async () => {
+    const w = await hubWorld({ role: 'moderator' });
+    const { result } = await hook(w, usePolicy);
+    await waitFor(() => expect(result.current?.data).toBeDefined());
+    let a: Awaited<ReturnType<NonNullable<typeof result.current>['save']>> | undefined;
+    let b: Awaited<ReturnType<NonNullable<typeof result.current>['reset']>> | undefined;
+    await act(async () => {
+      a = await result.current?.save({ durations: [H] }, 'x');
+      b = await result.current?.reset(undefined, 'x');
+    });
+    for (const r of [a, b]) {
+      expect(r?.ok).toBe(false);
+      if (r?.ok === false) expect(r.error.code).toBe('not_allowed');
+    }
+    expect(w.sent.filter((r) => r.method === 'PUT' || r.method === 'DELETE')).toHaveLength(0);
+  });
+
+  it('a store that cannot save is not_allowed as well', async () => {
+    const store = new MemoryStore();
+    (store as unknown as Record<string, unknown>).savePolicyLayer = undefined;
+    (store as unknown as Record<string, unknown>).loadPolicyLayer = undefined;
+    const w = await hubWorld({ role: 'owner', store });
+    const { result } = await hook(w, usePolicy);
+    await waitFor(() => expect(result.current?.data).toBeDefined());
+    let a: Awaited<ReturnType<NonNullable<typeof result.current>['save']>> | undefined;
+    await act(async () => {
+      a = await result.current?.save({ durations: [H] }, 'x');
+    });
+    expect(a?.ok).toBe(false);
+    expect(w.sent.filter((r) => r.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('a reset of two sections that fails on the second still hands over fresh state, drops the policy cache, and says it was partial', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    w.cw.policy.save({ durations: [H], customDuration: false }, { version: 0, actor: 'x', reason: 'seed' });
+    const { result } = await hook(w, () => ({ policy: usePolicy(), hub: useHub() }));
+    await waitFor(() => expect(result.current?.policy.data?.version).toBe(1));
+    w.intercept.fn = (req) => (req.method === 'DELETE' && req.query?.section === 'customDuration' ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
+    const reads = () => w.sent.filter((r) => r.method === 'GET' && r.path === '/policy').length;
+    await act(async () => void (await result.current?.hub.session.policy()));
+    const before = reads();
+    let out: Awaited<ReturnType<NonNullable<typeof result.current>['policy']['reset']>> | undefined;
+    await act(async () => {
+      out = await result.current?.policy.reset(['durations', 'customDuration'], 'Back');
+    });
+    expect(out?.ok).toBe(false);
+    if (out?.ok === false) expect(out.partial).toBe(true);
+    await waitFor(() => expect(result.current?.policy.data?.version).toBe(2));
+    expect(result.current?.policy.data?.effective.durations).toHaveLength(7);
+    await act(async () => void (await result.current?.hub.session.policy()));
+    expect(reads()).toBe(before + 1);
+  });
+
+  it('a reset whose first call fails is not partial', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    w.cw.policy.save({ durations: [H] }, { version: 0, actor: 'x', reason: 'seed' });
+    const { result } = await hook(w, usePolicy);
+    await waitFor(() => expect(result.current?.data?.version).toBe(1));
+    w.intercept.fn = (req) => (req.method === 'DELETE' ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
+    let out: Awaited<ReturnType<NonNullable<typeof result.current>['reset']>> | undefined;
+    await act(async () => {
+      out = await result.current?.reset(['durations', 'customDuration'], 'Back');
+    });
+    expect(out?.ok).toBe(false);
+    if (out?.ok === false) expect(out.partial).toBeUndefined();
+    expect(result.current?.data?.version).toBe(1);
   });
 
   it('works under StrictMode: one read, not two', async () => {
