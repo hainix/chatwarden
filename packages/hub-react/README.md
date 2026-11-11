@@ -312,7 +312,10 @@ hub stops asking, says "You are signed out" (or "Your role cannot do this") in t
 move no change token, so a row's viewers refresh whenever the queue does and your own open case's viewers refresh every 20 seconds.
 
 **Keyboard.** Shortcuts never fire while you are typing in a field, a select or an editable region, or with Ctrl, Cmd or Alt held
-(except Ctrl or Cmd+K), and `shortcuts={false}` turns them all off.
+(except Ctrl or Cmd+K), and `shortcuts={false}` turns them all off. The hub listens on its own root element, not on the page: it
+answers a key only while keyboard focus is inside it (a click on its empty space puts focus on the root, so that counts). Two hubs on
+one page each answer only their own keys, a key pressed in your own controls is never taken, and the same holds in a shadow root. Move
+focus into the hub (Tab to it, or click it) before the first key.
 
 | Key | What it does |
 | --- | --- |
@@ -483,8 +486,11 @@ radius, font and space is a `--cw-*` custom property, with a light and a dark va
 
 - **Light and dark.** By default the hub follows the visitor's `prefers-color-scheme`. The `theme` prop (or `data-cw-theme="light"`
   or `"dark"` on `.cw-hub` or any ancestor) forces one.
-- **Re-theme it.** Set tokens on `.cw-hub`, or on the `className` you pass. The defaults sit at zero specificity (`:where(.cw-hub)`),
-  so any rule of yours wins whatever its order.
+- **Re-theme it.** Set a token on any element above the hub (`body`, a wrapper, the `<chatwarden-hub>` element), on `.cw-hub`, or on
+  the `className` you pass: `body { --cw-accent: #7a2e8a }` themes a `<Hub>`, every piece and the element alike. The stylesheet never
+  declares a public `--cw-*` name on `.cw-hub` (that would hide what you set above it): its defaults sit under private `--cwd-*` names
+  at zero specificity (`:where(.cw-hub)`), and every rule reads `var(--cw-x, var(--cwd-x))`, your value if there is one, ours if not.
+  Set `--cw-*` names only; the `--cwd-*` ones are not part of the contract.
 - **Strict CSP.** The stylesheet is a file. The hub injects no `<style>`, sets no inline `style` and uses no
   `dangerouslySetInnerHTML`.
 - **Browsers.** The colours use `light-dark()` (Chrome 123, Firefox 120, Safari 17.5, all 2024), and the line-height unit `lh`.

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { actorName } from '../claims.js';
 import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
+import { byId, isTypingTarget, modalIn, rootOf } from '../dom.js';
 import { isWaiting, useDecisions } from '../decisions.js';
 import { EVIDENCE_MAX, MAX_ACTIONS, REASON_MAX, resolveDraft, toInput } from '../decision.js';
 import type { Problem, UiVerdict } from '../decision.js';
@@ -10,7 +11,7 @@ import { excerptLines, personName } from '../excerpt.js';
 import { useHubData } from '../hooks.js';
 import { useKeyListener } from '../keyScope.js';
 import { decideErrorText } from '../labels.js';
-import { modKey, keyLabel, isTypingTarget } from '../shortcuts.js';
+import { modKey, keyLabel } from '../shortcuts.js';
 import type { Reason, ReportDetail } from '../types.js';
 import { ErrorBlock, Kbd, Notice, Skeleton } from '../ui.js';
 import { ActionCard, Field } from './ActionEditor.js';
@@ -68,6 +69,9 @@ export function DecisionBar() {
   const [sheet, setSheet] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
   const summary = useRef<HTMLDivElement>(null);
+  const dock = useRef<HTMLElement>(null);
+  // A field of this bar, looked up in the root the bar is in (the page's document or a shadow root).
+  const field = (id: string): HTMLElement | null => (dock.current === null ? null : byId(rootOf(dock.current), id));
   const heldRef = useRef<HTMLDivElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   const failedRef = useRef<HTMLDivElement>(null);
@@ -98,7 +102,7 @@ export function DecisionBar() {
 
   useEffect(() => {
     if (focusId === null) return;
-    document.getElementById(focusId)?.focus();
+    field(focusId)?.focus();
     setFocusId(null);
   }, [focusId]);
   useEffect(() => {
@@ -156,20 +160,20 @@ export function DecisionBar() {
     if (!shortcuts) return;
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.defaultPrevented || e.isComposing || !stateRef.current.editable) return;
-      if (document.querySelector('[role="dialog"][aria-modal="true"]') !== null) return;
+      if (modalIn(rootOf(e.target as Node)) !== null) return;
       if (e.key === 'Enter' && (e.ctrlKey !== e.metaKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         decideRef.current(true);
         return;
       }
-      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e)) return;
       const hit = VERDICTS.find((v) => v.key === e.key);
       if (hit !== undefined) {
         e.preventDefault();
         stateRef.current.setVerdict(hit.verdict);
       }
     };
-    // In the shell this listens on the page; in a piece, on the piece's own root (see `keyScope.ts`).
+    // Heard on the hub's root in the shell, and on the piece's own root in a piece (see `keyScope.ts`).
     return listen(onKeyDown);
   }, [shortcuts]);
 
@@ -196,10 +200,10 @@ export function DecisionBar() {
   const atLimit = form.actions.length >= MAX_ACTIONS;
   // A problem on an action that is shown in short opens the editor, where the field is.
   const goTo = (id: string): void => {
-    if (document.getElementById(id) === null) {
+    if (field(id) === null) {
       setEditing(true);
       setFocusId(id);
-    } else document.getElementById(id)?.focus();
+    } else field(id)?.focus();
   };
   const problemsOf = (uid: string): { rule?: Problem } | undefined => shown.actions[uid];
 
@@ -503,6 +507,7 @@ export function DecisionBar() {
 
   return (
     <section
+      ref={dock}
       className="cw-dock"
       aria-label={t('hub.decide.title')}
       data-open={sheet ? 'true' : 'false'}

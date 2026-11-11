@@ -1,3 +1,4 @@
+import { isTypingTarget } from './dom.js';
 import type { HubT, HubText } from './i18n.js';
 
 // The keyboard shortcuts, as a pure decision: given a key event, which action (if any) it asks for. The hub's one listener
@@ -14,16 +15,10 @@ export interface KeyLike {
   shiftKey: boolean;
   repeat: boolean;
   target: EventTarget | null;
+  /** Where the event began; read before `target`, which a listener outside a shadow root sees as the host. */
+  composedPath?: () => EventTarget[];
   isComposing?: boolean;
   defaultPrevented?: boolean;
-}
-
-// Anything a person types into, or edits in place.
-const TYPING = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="searchbox"]';
-
-/** Whether a key pressed on this element is text, not a command: a field, a menu, an editable region, or inside one. */
-export function isTypingTarget(target: EventTarget | null): boolean {
-  return typeof Element !== 'undefined' && target instanceof Element && target.closest(TYPING) !== null;
 }
 
 /**
@@ -32,7 +27,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
  * browser or the system and is left alone. `N` does not repeat, so holding it cannot take case after case.
  */
 export function shortcutFor(e: KeyLike): ShortcutAction | null {
-  if (e.defaultPrevented === true || e.isComposing === true || isTypingTarget(e.target)) return null;
+  if (e.defaultPrevented === true || e.isComposing === true || isTypingTarget(e)) return null;
   if (e.ctrlKey || e.metaKey || e.altKey) {
     const onlyCtrlOrCmd = (e.ctrlKey !== e.metaKey) && !e.altKey && !e.shiftKey;
     return e.key.toLowerCase() === 'k' && onlyCtrlOrCmd ? 'command' : null;

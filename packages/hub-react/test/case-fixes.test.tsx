@@ -6,7 +6,7 @@ import { isWaiting } from '../src/decisions.js';
 import type { DecisionEntry } from '../src/decisions.js';
 import { Hub } from '../src/Hub.js';
 import { memoryRouter } from '../src/router.js';
-import { renderHub } from './render.js';
+import { renderHub, hubRoot } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld, RichLine } from './world.js';
 import type { TransportRequest } from '../src/transport.js';
@@ -211,6 +211,8 @@ describe('Important 2: Fair brings the suggestion back under React StrictMode to
       for (const r of records) for (const n of r.addedNodes) if ((n.textContent ?? '') !== '') told.push(n.textContent ?? '');
     });
     watch.observe(region, { childList: true });
+    // A press in the hub's empty space: the keys are heard only while focus is inside the hub.
+    hubRoot().focus();
     await user.keyboard('2');
     expect(within(panel()).queryByRole('group', { name: 'The ladder suggests' })).toBeNull();
     expect(region).toHaveTextContent(/^Removed 1 action on the reported person\. A report that is not fair cannot act on them\.$/);
@@ -234,7 +236,7 @@ describe('Important 2: Fair brings the suggestion back under React StrictMode to
     const f = await w.fileRich({ lines: TALK });
     await open(w, f.id);
     act(() => {
-      for (const key of ['2', '1', '3', '1']) fireEvent.keyDown(document.body, { key });
+      for (const key of ['2', '1', '3', '1']) fireEvent.keyDown(hubRoot(), { key });
     });
     expect(within(panel()).getByRole('radio', { name: 'Fair' })).toBeChecked();
     expect(within(panel()).getAllByRole('group', { name: 'The ladder suggests' })).toHaveLength(1);

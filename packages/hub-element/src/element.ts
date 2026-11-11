@@ -6,7 +6,6 @@ import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { ATTRIBUTES, readConfig } from './config.js';
 import type { HubElementConfig } from './config.js';
-import { registerShadowRoot } from './shadowDocument.js';
 
 /** What `cw-navigate` carries: the route the hub is on now, and its path (`/reports/abc`). */
 export interface CwNavigateDetail {
@@ -69,7 +68,6 @@ export class ChatwardenHubElement extends Base {
   #t: HubT | null = null;
   #root: Root | null = null;
   #container: HTMLDivElement | null = null;
-  #unregister: (() => void) | null = null;
   // Each connect or disconnect makes a new number: an unmount waits a microtask and only runs if nothing connected since.
   #generation = 0;
   #renderQueued = false;
@@ -117,7 +115,6 @@ export class ChatwardenHubElement extends Base {
     if (this.#root !== null) return;
     const shadow = this.shadowRoot as ShadowRoot;
     if (shadow.querySelector('style') === null && !hasAdopted(shadow)) adoptStyles(shadow);
-    this.#unregister = registerShadowRoot(shadow);
     const container = document.createElement('div');
     shadow.append(container);
     this.#container = container;
@@ -142,8 +139,6 @@ export class ChatwardenHubElement extends Base {
     this.#root = null;
     this.#container?.remove();
     this.#container = null;
-    this.#unregister?.();
-    this.#unregister = null;
   }
 
   #queueRender(): void {

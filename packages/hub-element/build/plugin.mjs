@@ -1,32 +1,39 @@
-// The build transforms as plugins: one for esbuild (the script) and one for Vite (the tests), both calling the same functions.
+// The one thing the build does to hub-react on the way in: its stylesheet becomes a string module (`cw-hub-element:css`), one for
+// esbuild (the script) and one for Vite (the tests), both from the same function. hub-react's sources and styles are used as they
+// are: they find nodes through their own root and read every --cw-* token with its own default, so nothing is rewritten.
 import { readFileSync } from 'node:fs';
-import { elementCss, hubCssPath, injectShadowDocument, shadowDocumentPath } from './transform.mjs';
+import { resolve } from 'node:path';
 
 export const CSS_MODULE = 'cw-hub-element:css';
 const RESOLVED_CSS = '\0cw-hub-element:css';
 
-const cssModuleSource = () => `export default ${JSON.stringify(elementCss(readFileSync(hubCssPath, 'utf8')))};\n`;
+export const hubCssPath = resolve(import.meta.dirname, '..', '..', 'hub-react', 'src', 'styles.css');
 
-/** esbuild: the hub CSS as a string module, and hub-react's `document` swapped for the shadow-aware one. */
+// The element itself is a block, and `hidden` hides it. Everything else is hub-react's stylesheet, untouched.
+const HOST_RULES = ':host {\n  display: block;\n}\n:host([hidden]) {\n  display: none;\n}\n';
+
+/**
+ * The stylesheet in the shadow root: the host rules, then hub-react's own styles.css verbatim.
+ * @returns {string}
+ */
+export function elementStylesheet() {
+  return HOST_RULES + readFileSync(hubCssPath, 'utf8');
+}
+
+const cssModuleSource = () => `export default ${JSON.stringify(elementStylesheet())};\n`;
+
+/** esbuild: the hub CSS as a string module. */
 export function esbuildPlugin() {
   return {
     name: 'hub-element',
     setup(build) {
       build.onResolve({ filter: /^cw-hub-element:css$/ }, () => ({ path: CSS_MODULE, namespace: 'cw-hub-element' }));
       build.onLoad({ filter: /.*/, namespace: 'cw-hub-element' }, () => ({ contents: cssModuleSource(), loader: 'js' }));
-      // The filter is loose on purpose (a path separator is a different character on each OS); injectShadowDocument decides.
-      build.onLoad({ filter: /hub-react.*\.[cm]?[jt]sx?$/ }, (args) => {
-        const code = readFileSync(args.path, 'utf8');
-        const out = injectShadowDocument(code, args.path);
-        if (out === null) return null;
-        const ext = args.path.slice(args.path.lastIndexOf('.') + 1);
-        return { contents: out, loader: ext === 'tsx' ? 'tsx' : ext === 'ts' ? 'ts' : ext === 'jsx' ? 'jsx' : 'js' };
-      });
     },
   };
 }
 
-/** Vite (Vitest): the same two transforms. */
+/** Vite (Vitest): the same module. */
 export function hubElementPlugin() {
   return {
     name: 'hub-element',
@@ -37,11 +44,5 @@ export function hubElementPlugin() {
     load(id) {
       return id === RESOLVED_CSS ? cssModuleSource() : null;
     },
-    transform(code, id) {
-      const out = injectShadowDocument(code, id.split('?')[0]);
-      return out === null ? null : { code: out, map: null };
-    },
   };
 }
-
-export { shadowDocumentPath };

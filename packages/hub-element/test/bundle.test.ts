@@ -8,7 +8,7 @@ import { goTo, inside } from './helpers.js';
 import { hubWorld } from './world.js';
 
 // The BUILT scripts, not the sources: written out as the package ships them and imported as a page would. This is what proves the
-// bundle works end to end (React inside it, the CSS inlined, hub-react's `document` swapped for the shadow-aware one).
+// bundle works end to end (React inside it, the CSS inlined, the keys scoped to the element's own shadow root).
 
 // Built under node_modules, where Vitest leaves a file to Node's own `import()` (as a page would load it) and does not transform it.
 const load = (file: string): Promise<unknown> => import(/* @vite-ignore */ file.split(sep).join('/'));
@@ -67,7 +67,7 @@ describe('the built scripts', () => {
     expect(document.querySelector('.cw-hub')).toBeNull();
   });
 
-  it('its keys work from inside the shadow root and stay quiet outside (the swapped document is in the bundle)', async () => {
+  it('its keys work from inside the shadow root and stay quiet outside', async () => {
     await load(standalonePath);
     const w = await hubWorld();
     await w.fileRich({ target: 'Mallory', reporter: 'Rae', room: 'one' });

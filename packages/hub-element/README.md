@@ -150,14 +150,12 @@ Sans, load `@chatwarden/hub-react/font.css` in your page (the page's own CSS) an
 
 The hub's shortcuts (J and K to move between cases, N to take the next, `?` for help, Ctrl or Cmd+K for the command bar) work while
 focus is inside the element, and never while focus is elsewhere on your page. Typing in one of the hub's fields never triggers one.
+Click the hub, or Tab into it, before the first key.
 
-Known limits, until a later release scopes each hub's keys to itself:
-
-- Several hubs on one page share their shortcuts: a key pressed in any of them reaches the first hub that
-  has shortcuts on, and `shortcuts="false"` on a hub does not stop another hub's shortcuts from answering a key pressed in it. Use one hub
-  per page, or give only one hub shortcuts and put `router="memory"` on all but one (see "Attributes").
-- A `<chatwarden-hub>` inside another shadow root (your own web component's) is not supported yet for focus and keys: J and K and the
-  focus return after a window closes read the outer host as the focused element. Everything else works there.
+Each hub hears only its own keys. With several hubs on one page, a key pressed in one reaches that hub and no other, and
+`shortcuts="false"` turns the keys off for one hub without touching the rest. A `<chatwarden-hub>` inside another shadow root (your own
+web component's) works the same way: its focus, its keys and the focus return after a window closes are read from the element's own
+shadow root, not from your component's.
 
 ## Content Security Policy
 

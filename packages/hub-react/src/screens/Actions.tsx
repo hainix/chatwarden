@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useHub } from '../context.js';
+import { hasFocus } from '../dom.js';
 import { usePagedList } from '../hooks.js';
 import { errorText } from '../labels.js';
 import type { SanctionSource } from '../types.js';
@@ -27,7 +28,7 @@ export function Actions() {
 
   const loadMore = async (): Promise<void> => {
     if (pager.loadingMore) return;
-    const hadFocus = document.activeElement === moreRef.current;
+    const hadFocus = hasFocus(moreRef.current);
     setAnnouncement('');
     const added = await pager.loadMore();
     if (added > 0) setAnnouncement(t('hub.actions.loadedMore', { count: added }));

@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CaseCard } from '../src/pieces/CaseCard.js';
@@ -8,11 +6,12 @@ import { CaseWorkbench } from '../src/pieces/CaseWorkbench.js';
 import { RecentActions } from '../src/pieces/RecentActions.js';
 import { hubWorld } from './world.js';
 import { renderPieces } from './pieces-kit.js';
+import { rulesCss } from './css.js';
 
 // A piece placed in somebody else's page. jsdom has no layout, so this checks what the stylesheet says and the structure the
 // pieces render; the pixels are checked in a real browser (see the report's screenshots).
 
-const css = readFileSync(join(process.cwd(), 'packages', 'hub-react', 'src', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const css = rulesCss();
 
 /** The declarations of the first rule whose selector list contains `selector` exactly. */
 function rule(selector: string): string {

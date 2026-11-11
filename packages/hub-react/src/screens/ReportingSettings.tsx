@@ -1,6 +1,7 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useHub } from '../context.js';
+import { byId, rootOf } from '../dom.js';
 import { useHubData } from '../hooks.js';
 import { FlowPanel, PlayersSee, ReasonsPanel, ThanksPanel } from '../policy/ReportingPanels.js';
 import { ResetConfirm } from '../policy/ResetConfirm.js';
@@ -113,7 +114,10 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
     policy.reload();
   };
 
-  const resetFocus = (): void => queueMicrotask(() => document.getElementById(`${base}-reset`)?.focus());
+  const resetFocus = (): void =>
+    queueMicrotask(() => {
+      if (root.current !== null) byId(rootOf(root.current), `${base}-reset`)?.focus();
+    });
   const reset = useResetFlow({
     policy,
     state,

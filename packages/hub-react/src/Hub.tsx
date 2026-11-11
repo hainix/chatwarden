@@ -3,9 +3,11 @@ import { CaseProvider } from './case/CaseContext.js';
 import { CaseSession, useCaseActions } from './cases.js';
 import type { CommandTarget } from './commands.js';
 import { useHub } from './context.js';
+import { activeIn, rootOf } from './dom.js';
 import type { HubClient } from './client.js';
 import type { HubHost } from './headless/controller.js';
 import type { HubT } from './i18n.js';
+import { useKeyListener } from './keyScope.js';
 import { useOptionalQueue } from './liveQueue.js';
 import { useMode } from './mode.js';
 import type { HubMode } from './mode.js';
@@ -220,10 +222,11 @@ function CommandWindow({ shortcuts, onClose, open }: { shortcuts: boolean; onClo
   return <CommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} />;
 }
 
-/** The one page-wide key listener. See `shortcutFor` for what each key means and when it stays quiet. */
+/** The hub's one key listener, on the hub's own root: it hears a key only while focus is inside this hub. See `shortcutFor` for what each key means and when it stays quiet. */
 function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivElement | null }; dialogOpen: boolean; open: (d: Dialogs) => void }) {
   const { can } = useHub();
   const actions = useCaseActions();
+  const listen = useKeyListener();
   const latest = useRef({ dialogOpen, canTake: can('reports.decide'), actions });
   latest.current = { dialogOpen, canTake: can('reports.decide'), actions };
 
@@ -249,7 +252,8 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
         const list = rows();
         if (list.length === 0) return;
         e.preventDefault();
-        const active = document.activeElement;
+        // The focus of the root the hub is in: inside a shadow root, the page's `activeElement` is only the host.
+        const active = bodyRef.current === null ? null : activeIn(rootOf(bodyRef.current));
         let at = list.findIndex((r) => r === active);
         if (at < 0) at = list.findIndex((r) => r.getAttribute('aria-current') === 'true');
         const to = at < 0 ? (action === 'next' ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, at + (action === 'next' ? 1 : -1)));
@@ -258,14 +262,13 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
         // Escape with no window open: back to the queue, on the open case's row or the first one.
         const list = rows();
         const target = list.find((r) => r.getAttribute('aria-current') === 'true') ?? list[0];
-        if (target !== undefined && document.activeElement !== target) {
+        if (target !== undefined && (bodyRef.current === null ? null : activeIn(rootOf(bodyRef.current))) !== target) {
           e.preventDefault();
           target.focus();
         }
       }
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    return listen(onKeyDown);
   }, [bodyRef, open]);
 
   return null;

@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Field, RuleOptions } from '../case/ActionEditor.js';
 import { actorName } from '../claims.js';
 import { useHub } from '../context.js';
+import { byId, rootOf } from '../dom.js';
 import { GAP_NOTE_MAX, REASON_MAX, hasLength } from '../decision.js';
 import { useHubAction, useHubData } from '../hooks.js';
 import { choiceLabel, errorText, kindLabel } from '../labels.js';
@@ -53,6 +54,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   // The first field takes focus when the form opens: the kind of a sanction, the note itself for a note.
   const whatRef = useRef<HTMLSelectElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
     (mode === 'note' ? noteRef : whatRef).current?.focus();
   }, [mode]);
@@ -71,7 +73,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
     if (problems.count > 0) {
       // Focus the first field with a problem, in the order they are on the page.
       const order = [problems.kind && 'what', problems.length && 'length-number', problems.rule && 'rule', problems.gapNote && 'gap', problems.reason && 'reason'].filter(Boolean) as string[];
-      document.getElementById(id(order[0] ?? 'what'))?.focus();
+      if (formRef.current !== null) byId(rootOf(formRef.current), id(order[0] ?? 'what'))?.focus();
       return;
     }
     sending.current = true;
@@ -105,6 +107,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   return (
     <Panel title={t(mode === 'note' ? 'hub.person.form.noteTitle' : 'hub.person.form.sanctionTitle', { name })}>
       <form
+        ref={formRef}
         className="cw-form cw-panel-pad"
         noValidate
         onSubmit={(e) => {

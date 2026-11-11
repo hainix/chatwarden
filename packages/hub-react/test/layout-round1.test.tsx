@@ -1,11 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { rulesCss } from './css.js';
 
 // Fix round 1, the stylesheet: every radius and space in the new screens' block is a --cw-* token, and the pieces the fixes added
 // (the field label of a hidden word, the confirm row) are styled and neutral.
 
-const css = readFileSync(join(process.cwd(), 'packages', 'hub-react', 'src', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const css = rulesCss();
 const start = css.indexOf('.cw-hub .cw-nowrap {');
 const end = css.indexOf('@media (prefers-reduced-motion');
 const block = css.slice(start, end);

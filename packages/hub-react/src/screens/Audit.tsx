@@ -2,6 +2,7 @@ import { policyAuditKey } from '../auditLabel.js';
 import { AUDIT_ACTIONS } from '@chatwarden/core';
 import { useId, useRef, useState } from 'react';
 import { useHub } from '../context.js';
+import { hasFocus } from '../dom.js';
 import type { HubT, HubText } from '../i18n.js';
 import { personTag } from '../format.js';
 import { usePagedList } from '../hooks.js';
@@ -123,7 +124,7 @@ export function Audit() {
 
   const loadMore = async (): Promise<void> => {
     if (pager.loadingMore) return;
-    const hadFocus = document.activeElement === moreRef.current;
+    const hadFocus = hasFocus(moreRef.current);
     setAnnouncement('');
     const added = await pager.loadMore();
     if (added > 0) setAnnouncement(t('hub.audit.loadedMore', { count: added }));

@@ -116,20 +116,19 @@ describe('with constructable stylesheets', () => {
 });
 
 describe('the hub CSS in the shadow root', () => {
-  it('keeps the token defaults on :host under private names, and reads each as the page\'s --cw-* value first, so what the page sets on the element or above it wins', async () => {
+  it("is hub-react's own stylesheet: the token defaults stay private under .cw-hub and every read has its default, with nothing rewritten", async () => {
     removeConstructableSheets();
     const w = await hubWorld();
     const el = mount({}, { client: w.client });
     await hubShown(el);
     const css = el.shadowRoot?.querySelector('style')?.textContent ?? '';
-    const hostBlock = [...css.matchAll(/:host\s*\{([^}]*)\}/g)].map((m) => m[1]).join('\n');
+    expect(css).toContain(':where(.cw-hub) {');
     for (const token of ['bg', 'surface', 'ink', 'accent', 'font', 'radius-m', 'hub-height']) {
-      expect(hostBlock, token).toContain(`--cwd-${token}:`);
-      // The stylesheet never declares the public name: a declaration on the host would hide what the page set above it.
-      expect(hostBlock, token).not.toContain(`--cw-${token}:`);
+      expect(css, token).toContain(`--cwd-${token}:`);
       expect(css, token).toContain(`var(--cw-${token}, var(--cwd-${token}))`);
     }
-    expect(/\.cw-hub\s*\{[^}]*--cw-bg:/.test(css)).toBe(false);
+    // No public name is declared by the sheet, on the root or the host: a declaration would hide what the page sets above the hub.
+    expect(css).not.toMatch(/--cw-[a-z0-9-]+\s*:/);
   });
 
   it('makes the host a block, hidden when it is hidden', async () => {

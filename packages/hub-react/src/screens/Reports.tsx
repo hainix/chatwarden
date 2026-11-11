@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHub } from '../context.js';
+import { hasFocus } from '../dom.js';
 import { usePagedList } from '../hooks.js';
 import { errorText } from '../labels.js';
 import { groupQueue } from '../queue.js';
@@ -41,7 +42,7 @@ export function Reports({ status }: { status: QueueStatus }) {
 
   const loadMore = async (): Promise<void> => {
     if (pager.loadingMore) return;
-    hadFocus.current = document.activeElement === moreRef.current;
+    hadFocus.current = hasFocus(moreRef.current);
     setAnnouncement('');
     const added = await pager.loadMore();
     if (added > 0) setAnnouncement(t('hub.reports.loadedMore', { count: added }));

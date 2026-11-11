@@ -90,12 +90,17 @@ describe('the tables', () => {
     expect(tableRows(section('Events')).map((r) => (r[0] ?? '').replaceAll('`', '')).sort()).toEqual(['cw-decided', 'cw-navigate']);
   });
 
-  it('every --cw- custom property the theming section names is declared in hub-react\'s stylesheet', () => {
+  it('every --cw- custom property the theming section names has its default in hub-react\'s stylesheet and is read with it', () => {
     const named = [...new Set([...section('Theming').matchAll(/`(--cw-[a-z0-9-]+)`/g)].map((m) => m[1] as string))];
     expect(named.length).toBeGreaterThan(15);
-    for (const name of named) expect(css, name).toMatch(new RegExp(`^\\s*${name}:`, 'm'));
+    // The sheet declares each default privately (--cwd-x) and reads it as var(--cw-x, var(--cwd-x)), so the page's value wins.
+    for (const name of named) {
+      const privateName = `--cwd-${name.slice('--cw-'.length)}`;
+      expect(css, name).toMatch(new RegExp(`^\\s*${privateName}:`, 'm'));
+      expect(css, name).toContain(`var(${name}, var(${privateName}))`);
+    }
     // The spacing range the table names ends at --cw-space-6.
-    expect(css).toMatch(/--cw-space-6:/);
+    expect(css).toMatch(/--cwd-space-6:/);
   });
 
   it('the CSS example is a rule on the element with --cw- values', () => {
@@ -189,26 +194,27 @@ describe('the README is plain', () => {
 describe('what the README says about the limits (fix round 1)', () => {
   const flat = (text: string): string => text.replace(/\s+/g, ' ');
 
-  it('keyboard shortcuts: several hubs share the keys today, the way out is memory routers and one hub with shortcuts', () => {
+  it('keyboard shortcuts: each hub hears only its own keys, and shortcuts="false" is per hub', () => {
     const keys = flat(section('Keyboard shortcuts'));
-    expect(keys).toMatch(/several hubs on one page share their shortcuts/i);
-    expect(keys).toMatch(/a key pressed in any of them reaches the first hub that has shortcuts on/);
-    expect(keys).toMatch(/`shortcuts="false"` on a hub does not stop another hub's shortcuts from answering a key pressed in it/);
-    expect(keys).toMatch(/later release/);
-    // The old, wrong advice is gone.
-    expect(keys).not.toMatch(/give only one of them the shortcuts and set `shortcuts="false"` on the rest/);
+    expect(keys).toMatch(/Each hub hears only its own keys/);
+    expect(keys).toMatch(/a key pressed in one reaches that hub and no other/);
+    expect(keys).toMatch(/`shortcuts="false"` turns the keys off for one hub without touching the rest/);
+    // The limits and the workarounds of the build-time shim are gone.
+    expect(keys).not.toMatch(/share their shortcuts|later release|first hub that has shortcuts on|not supported yet/i);
+    expect(keys).not.toMatch(/give only one hub shortcuts/);
   });
 
   it('router: hash hubs share the URL hash, so give all but one router="memory"', () => {
     const attributes = flat(section('Attributes'));
     expect(attributes).toMatch(/hubs on `router="hash"` share the page's one URL hash/);
     expect(attributes).toMatch(/`router="memory"` on all but one/);
-    expect(flat(section('Keyboard shortcuts'))).toMatch(/`router="memory"` on all but one/);
   });
 
-  it('keyboard shortcuts: a hub inside another shadow root is not supported yet', () => {
-    expect(flat(section('Keyboard shortcuts'))).toMatch(/inside another shadow root/);
-    expect(flat(section('Keyboard shortcuts'))).toMatch(/focus and keys/);
+  it('keyboard shortcuts: a hub inside another shadow root works, reading its own shadow root', () => {
+    const keys = flat(section('Keyboard shortcuts'));
+    expect(keys).toMatch(/inside another shadow root/);
+    expect(keys).toMatch(/works the same way/);
+    expect(keys).toMatch(/read from the element's own shadow root/);
   });
 
   it('cross-origin: base-url sends cookies to the same origin only, and points to the client property with credentials include; base-url is trusted', () => {

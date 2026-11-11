@@ -22,6 +22,8 @@ const code = files.filter((f) => /\.tsx?$/.test(f));
 const appCode = code.filter((f) => !f.endsWith('i18n.ts'));
 const read = (f: string): string => readFileSync(f, 'utf8');
 const rel = (f: string): string => f.slice(pkg.length).replaceAll('\\', '/');
+/** The public name of a private default: `--cwd-bg` is what `--cw-bg` falls back to. */
+const pub = (privateName: string): string => `--cw-${privateName.slice('--cwd-'.length)}`;
 
 describe('no words outside the catalog', () => {
   // Attributes whose string value a person reads or hears.
@@ -118,7 +120,7 @@ describe('the stylesheet is a complete token contract', () => {
   const fallback = css.slice(fbStart, fbEnd);
   // Everything after the tokens, without the fallback block (which holds plain colours on purpose).
   const rest = fbStart === -1 ? css.slice(end) : css.slice(end, fbStart) + css.slice(fbEnd);
-  const defined = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1] as string);
+  const defined = [...tokenBlock.matchAll(/^\s*(--cwd-[a-z0-9-]+):/gm)].map((m) => pub(m[1] as string));
   const used = [...new Set([...rest.matchAll(/var\((--cw-[a-z0-9-]+)/g)].map((m) => m[1] as string))];
 
   it('has a token block with a good number of tokens, each defined once', () => {
@@ -137,7 +139,7 @@ describe('the stylesheet is a complete token contract', () => {
   });
 
   it('gives every colour a light and a dark value', () => {
-    const colours = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*(.+);$/gm)].filter(([, , v]) => /#[0-9a-f]{3,8}\b/i.test(v as string));
+    const colours = [...tokenBlock.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*(.+);$/gm)].filter(([, , v]) => /#[0-9a-f]{3,8}\b/i.test(v as string));
     expect(colours.length).toBe(COLOUR_TOKENS.length);
     for (const [, name, value] of colours) expect(value, name).toMatch(/^light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\)$/i);
   });
@@ -183,11 +185,11 @@ describe('the stylesheet is a complete token contract', () => {
     expect(fbEnd).toBeGreaterThan(fbStart);
     expect(fallback).toMatch(/@supports not \(color: light-dark\(#000, #fff\)\)/);
     expect(fallback).toMatch(/:where\(\.cw-hub\)\s*\{/);
-    const colours = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), #[0-9a-f]{6}\);$/gim)];
+    const colours = [...tokenBlock.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), #[0-9a-f]{6}\);$/gim)];
     expect(colours.length).toBe(COLOUR_TOKENS.length);
     for (const [, name, light] of colours) expect(fallback, name).toContain(`${name}: ${light};`);
-    const inFallback = [...fallback.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1]);
-    expect(inFallback.sort()).toEqual(colours.map((c) => c[1]).sort());
+    const inFallback = [...fallback.matchAll(/^\s*(--cwd-[a-z0-9-]+):/gm)].map((m) => pub(m[1] as string));
+    expect(inFallback.sort()).toEqual(colours.map((c) => pub(c[1] as string)).sort());
   });
 
   it('draws the focus ring inside the status filter and the rail, where their boxes clip an outside ring', () => {
@@ -218,8 +220,11 @@ describe('the stylesheet is a complete token contract', () => {
   // table, scroll box, form, panel, tag and mask classes; what is new is only what none of those could draw.
   // The embedded pieces (the provider's root, the piece box, the queue and the workbench outside the shell) took it to 76.7 KB; it is
   // now 84 KB raw, 15 KB gzipped: raised at 7d for the Steps and ladder settings screen (owner-approved feature, 2026-11-10).
-  it('is under 84 KB raw (the size test holds it to 15 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(84 * 1024);
+  // 7j: 106 KB raw. Every one of the 960 token reads now carries its private default, `var(--cw-x, var(--cwd-x))`, which is what lets a
+  // page theme the hub from any element above it (+20 KB of repeated text; gzip takes it back to +0.8 KB, so the size test's 15 KB
+  // gzipped budget is unchanged).
+  it('is under 106 KB raw (the size test holds it to 15 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(106 * 1024);
   });
 });
 
@@ -250,7 +255,7 @@ const COLOUR_TOKENS = [
 describe('design v2: the palette', () => {
   const css = read(join(src, 'styles.css'));
   const block = css.slice(css.indexOf('/* ---- Tokens'), css.indexOf('/* ---- End of tokens'));
-  const pairs = [...block.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\);$/gim)];
+  const pairs = [...block.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\);$/gim)].map((m) => [m[0], pub(m[1] as string), m[2], m[3]] as const);
   const theme = (which: 'light' | 'dark'): Record<string, string> =>
     Object.fromEntries(pairs.map((m) => [m[1] as string, (which === 'light' ? m[2] : m[3]) as string]));
 
@@ -456,7 +461,7 @@ describe('design v2: the optional font', () => {
 
   it('the stylesheet names Instrument Sans first and falls back to the system UI font, so it applies once font.css is loaded', () => {
     const css = read(join(src, 'styles.css'));
-    const stack = /--cw-font:\s*([^;]+);/.exec(css)?.[1] ?? '';
+    const stack = /--cwd-font:\s*([^;]+);/.exec(css)?.[1] ?? '';
     expect(stack.startsWith("'Instrument Sans', ")).toBe(true);
     expect(stack).toMatch(/system-ui/);
   });
@@ -496,7 +501,7 @@ describe('the README documents the token contract', () => {
   const readme = readFileSync(join(pkg, 'README.md'), 'utf8');
   const css = read(join(src, 'styles.css'));
   const block = css.slice(css.indexOf('/* ---- Tokens'), css.indexOf('/* ---- End of tokens'));
-  const defined = [...block.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1] as string);
+  const defined = [...block.matchAll(/^\s*(--cwd-[a-z0-9-]+):/gm)].map((m) => pub(m[1] as string));
   const theming = readme.slice(readme.indexOf('\n## Theming\n'), readme.indexOf('\n## Security notes\n'));
 
   it('lists every token under Theming, and no token the stylesheet lacks', () => {
@@ -522,8 +527,8 @@ describe('the README documents the token contract', () => {
   });
 
   it('states each colour token default as written in the stylesheet', () => {
-    for (const m of block.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]+), (#[0-9a-f]+)\);$/gim)) {
-      expect(theming, m[1]).toContain(`| \`${m[1]}\` | \`${m[2]}\`, \`${m[3]}\` |`);
+    for (const m of block.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]+), (#[0-9a-f]+)\);$/gim)) {
+      expect(theming, m[1]).toContain(`| \`${pub(m[1] as string)}\` | \`${m[2]}\`, \`${m[3]}\` |`);
     }
   });
 });
@@ -549,5 +554,62 @@ describe('fix round 1: hygiene', () => {
     const bases = [...new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
     const dead = bases.filter((k) => !literals.has(k) && !prefixes.some((p) => k.startsWith(p)));
     expect(dead).toEqual([]);
+  });
+});
+
+describe('the page is reached only through dom.ts', () => {
+  // `document` is the page, which is the wrong place to look when the hub is drawn inside a shadow root: `document.activeElement` is
+  // the host, `document.getElementById` finds nothing, and a key listener on `document` hears every hub on the page. Everything that
+  // looks a node up, reads focus or listens goes through `dom.ts`, from the node it has. `headless/env.ts` is the page-hide and
+  // visibility source: those really are the page's, and they belong on `document` and `window`.
+  const ALLOWED = new Set(['src/dom.ts', 'src/headless/env.ts']);
+  // Identifiers and members that only dom.ts may use.
+  const ROOT_ONLY = new Set(['activeElement', 'getElementById']);
+
+  function uses(file: string): string[] {
+    const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.ES2023, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const found: string[] = [];
+    const where = (n: ts.Node): string => `line ${source.getLineAndCharacterOfPosition(n.getStart()).line + 1}: ${n.parent.getText().split('\n')[0]?.slice(0, 80)}`;
+    const visit = (node: ts.Node): void => {
+      // The global `document`, however it is reached: `document`, `window.document`, `globalThis.document`, `typeof document`.
+      if (ts.isIdentifier(node) && node.text === 'document') {
+        const p = node.parent;
+        const isMemberName = ts.isPropertyAccessExpression(p) && p.name === node;
+        const isViaGlobal = isMemberName && ts.isIdentifier(p.expression) && (p.expression.text === 'window' || p.expression.text === 'globalThis' || p.expression.text === 'self');
+        const isDeclared = (ts.isVariableDeclaration(p) || ts.isParameter(p) || ts.isPropertySignature(p) || ts.isPropertyAssignment(p)) && p.name === node;
+        if ((!isMemberName && !isDeclared) || isViaGlobal) found.push(where(node));
+      }
+      if (ts.isPropertyAccessExpression(node) && ROOT_ONLY.has(node.name.text)) found.push(where(node.name));
+      if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression) && ROOT_ONLY.has(node.argumentExpression.text)) found.push(where(node));
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return found;
+  }
+
+  it('no source file but dom.ts and headless/env.ts uses `document`, `.activeElement` or `.getElementById`', () => {
+    const bad = code.filter((f) => !ALLOWED.has(rel(f))).flatMap((f) => uses(f).map((u) => `${rel(f)} ${u}`));
+    expect(bad).toEqual([]);
+  });
+
+  it('the allow-list is exactly those two files, and each really does use the page', () => {
+    expect([...ALLOWED].sort()).toEqual(['src/dom.ts', 'src/headless/env.ts']);
+    for (const f of ALLOWED) expect(uses(join(pkg, f)).length, f).toBeGreaterThan(0);
+  });
+
+  it('the checker sees what it should: a handful of ways to reach the page are all caught', () => {
+    const cases = ['document.body', 'window.document.body', 'globalThis.document', 'typeof document', 'el.ownerDocument.activeElement', "root['getElementById']('x')", 'const d = document;'];
+    for (const text of cases) {
+      const source = ts.createSourceFile('x.ts', text, ts.ScriptTarget.ES2023, true);
+      let n = 0;
+      const visit = (node: ts.Node): void => {
+        if (ts.isIdentifier(node) && node.text === 'document' && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) n += 1;
+        if (ts.isPropertyAccessExpression(node) && (ROOT_ONLY.has(node.name.text) || (node.name.text === 'document' && ts.isIdentifier(node.expression) && node.expression.text !== 'el'))) n += 1;
+        if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression) && ROOT_ONLY.has(node.argumentExpression.text)) n += 1;
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+      expect(n, text).toBeGreaterThan(0);
+    }
   });
 });

@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { CATEGORY_TO_RULE } from '@chatwarden/core';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import axe from 'axe-core';
@@ -9,6 +7,7 @@ import type { TransportRequest } from '../src/transport.js';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld, RichLine } from './world.js';
+import { rulesCss } from './css.js';
 
 // The shell around the Simple card: the menu (Cases, Words, Blocked, More), the queue beside the card, the keys, what a case
 // costs in audited reads, and the card's accessibility and layout.
@@ -541,7 +540,7 @@ describe('accessibility', () => {
 });
 
 describe('the stylesheet lays the card out for a phone as well as a desktop', () => {
-  const css = readFileSync(join(process.cwd(), 'packages', 'hub-react', 'src', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const css = rulesCss();
   const rule = (selector: string): string => {
     const at = css.indexOf(`\n${selector} {`);
     if (at < 0) return '';

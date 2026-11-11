@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode, RefObject } from 'react';
+import { activeIn, rootOf } from './dom.js';
 
 // A modal window: it takes focus when it opens, keeps Tab inside, closes on Escape or a click outside, and hands focus back to
 // what had it. The command bar and the shortcut sheet are built on it.
@@ -24,7 +25,9 @@ export function Dialog({
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // What had focus in the hub's own root (inside a shadow root the page only sees the host).
+    const had = box.current === null ? null : activeIn(rootOf(box.current));
+    const before = had instanceof HTMLElement ? had : null;
     const first = initialFocus?.current ?? box.current?.querySelector<HTMLElement>(FOCUSABLE) ?? box.current;
     first?.focus();
     return () => {
@@ -50,7 +53,7 @@ export function Dialog({
     }
     const first = items[0] as HTMLElement;
     const last = items[items.length - 1] as HTMLElement;
-    const active = document.activeElement;
+    const active = box.current === null ? null : activeIn(rootOf(box.current));
     if (e.shiftKey && (active === first || active === box.current)) {
       e.preventDefault();
       last.focus();

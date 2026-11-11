@@ -88,8 +88,8 @@ export default defineConfig({
         },
       },
       {
-        // The element bundles hub-react: its tests run against hub-react's source, through the same two build transforms the script
-        // is built with (the hub CSS as a string, and the shadow-aware `document`).
+        // The element bundles hub-react: its tests run against hub-react's source, with the same build plugin the script is built with
+        // (it supplies the hub CSS as a string; hub-react's own sources are used as they are).
         extends: true,
         plugins: [hubElementPlugin()],
         resolve: {

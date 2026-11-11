@@ -76,11 +76,11 @@ describe('locale', () => {
     goTo(`/reports/${f.id}`);
     const el = mount({ mode: 'simple' }, { client: w.client });
     const q = inside(el);
-    await q.findByText(/Reported for harassment by Saffron, 2 days ago\./, {}, { timeout: 5000 });
+    await q.findByText(/Reported as Insults or harassment by Saffron, 2 days ago\./, {}, { timeout: 5000 });
     el.setAttribute('locale', 'de');
     // The words stay English (the catalog is English); the time is formed by Intl in the new locale.
-    await waitFor(() => expect(q.queryByText(/Reported for harassment by Saffron, 2 days ago\./)).toBeNull());
-    expect(q.getByText(/Reported for harassment by Saffron, vorgestern\./)).toBeTruthy();
+    await waitFor(() => expect(q.queryByText(/Reported as Insults or harassment by Saffron, 2 days ago\./)).toBeNull());
+    expect(q.getByText(/Reported as Insults or harassment by Saffron, vorgestern\./)).toBeTruthy();
   });
 });
 

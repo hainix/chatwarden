@@ -8,7 +8,7 @@ import { decideErrorText } from '../src/labels.js';
 import { modKey } from '../src/shortcuts.js';
 import { ToastProvider, useToasts } from '../src/toasts.js';
 import type { Toasts } from '../src/toasts.js';
-import { renderHub } from './render.js';
+import { renderHub, hubRoot } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
 
@@ -378,7 +378,7 @@ describe('6: one Take next guard for the whole hub', () => {
     await started(w);
     fireEvent.click(within(pane()).getByRole('button', { name: /Take next case/ }));
     await tick(0);
-    fireEvent.keyDown(document.body, { key: 'n' });
+    fireEvent.keyDown(hubRoot(), { key: 'n' });
     await tick(0);
     fireEvent.click(screen.getByRole('button', { name: /Search or jump to/ }));
     await tick(0);
@@ -503,7 +503,7 @@ describe('12: the shortcut cap matches the keyboard', () => {
     const button = screen.getByRole('button', { name: /Search or jump to/ });
     expect(button).toHaveTextContent('⌘');
     expect(button).not.toHaveTextContent('Ctrl');
-    fireEvent.keyDown(document.body, { key: '?' });
+    fireEvent.keyDown(hubRoot(), { key: '?' });
     const sheet = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
     expect(within(sheet).getByText('⌘')).toBeInTheDocument();
     expect(within(sheet).queryByText('Ctrl')).not.toBeInTheDocument();

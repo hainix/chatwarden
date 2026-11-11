@@ -1,15 +1,14 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
+import { rulesCss } from './css.js';
 
 // The panes, as the page lays them out. jsdom has no layout, so this checks the structure the stylesheet lays out (the classes
 // and data attributes, and the order of the panes) and the breakpoints written in the stylesheet itself. A real browser checks
 // the pixels: three panes from 75rem (1200px), two from 51.25rem (820px), stacked below, no sideways scroll down to 360px.
 
-const css = readFileSync(join(process.cwd(), 'packages', 'hub-react', 'src', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const css = rulesCss();
 
 /** The bodies of every `@media (query) { ... }` block, matching braces, one after the other. */
 function media(query: string): string {

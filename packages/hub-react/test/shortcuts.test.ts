@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { SHORTCUTS, isTypingTarget, shortcutFor } from '../src/shortcuts.js';
+import { isTypingTarget } from '../src/dom.js';
+import { SHORTCUTS, shortcutFor } from '../src/shortcuts.js';
 import type { KeyLike } from '../src/shortcuts.js';
 import { en } from '../src/i18n.js';
 
@@ -89,7 +90,7 @@ describe('shortcutFor: never while typing', () => {
   it.each(typing)('is silent in %s, for every key', (html) => {
     const host = el(html);
     const target = host.querySelector('#inner') ?? host;
-    expect(isTypingTarget(target)).toBe(true);
+    expect(isTypingTarget({ target })).toBe(true);
     for (const k of ['j', 'k', 'n', '?', 'Escape']) expect(shortcutFor(key(k, { target })), k).toBeNull();
     expect(shortcutFor(key('k', { target, ctrlKey: true }))).toBeNull();
   });
@@ -97,7 +98,7 @@ describe('shortcutFor: never while typing', () => {
   it('speaks on a button, a link, a list row and the page', () => {
     for (const html of ['<button>x</button>', '<a href="#/">x</a>', '<li tabindex="0">x</li>', '<div contenteditable="false">x</div>']) {
       const target = el(html);
-      expect(isTypingTarget(target), html).toBe(false);
+      expect(isTypingTarget({ target }), html).toBe(false);
       expect(shortcutFor(key('j', { target })), html).toBe('next');
     }
     expect(shortcutFor(key('j', { target: document.body }))).toBe('next');
@@ -107,6 +108,31 @@ describe('shortcutFor: never while typing', () => {
   it('is silent while an input method is composing, and when something already handled the key', () => {
     expect(shortcutFor(key('j', { isComposing: true }))).toBeNull();
     expect(shortcutFor(key('j', { defaultPrevented: true }))).toBeNull();
+  });
+});
+
+describe('shortcutFor: an event that began inside a shadow root', () => {
+  // A listener outside the shadow root sees `target` as the host; the path still starts where the key was pressed.
+  function inShadow(html: string) {
+    const host = el('<div></div>');
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = html;
+    return { host, origin: shadow.firstElementChild as HTMLElement };
+  }
+
+  it('is silent when the key began in a field, whatever target says', () => {
+    const { host, origin } = inShadow('<input>');
+    for (const k of ['j', 'k', 'n', '?', 'Escape']) expect(shortcutFor(key(k, { target: host, composedPath: () => [origin, host] })), k).toBeNull();
+  });
+
+  it('speaks when the key began on a button, even though the host is not one', () => {
+    const { host, origin } = inShadow('<button>x</button>');
+    expect(shortcutFor(key('j', { target: host, composedPath: () => [origin, host] }))).toBe('next');
+  });
+
+  it('falls back to target when there is no path', () => {
+    const { origin } = inShadow('<textarea></textarea>');
+    expect(shortcutFor(key('j', { target: origin }))).toBeNull();
   });
 });
 

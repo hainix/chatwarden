@@ -1,6 +1,7 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useHub } from '../context.js';
+import { byId, rootOf } from '../dom.js';
 import { useHubData } from '../hooks.js';
 import { FirstPanel, GuidelinesPanel, LadderPanel, LengthsPanel, RepeatPanel, RulesPanel } from '../policy/panels.js';
 import type { Problems } from '../policy/panels.js';
@@ -113,7 +114,10 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
     policy.reload();
   };
 
-  const resetFocus = (key: ResetKey): void => queueMicrotask(() => document.getElementById(`${base}-reset-${key}`)?.focus());
+  const resetFocus = (key: ResetKey): void =>
+    queueMicrotask(() => {
+      if (root.current !== null) byId(rootOf(root.current), `${base}-reset-${key}`)?.focus();
+    });
   const reset = useResetFlow({
     policy,
     state,

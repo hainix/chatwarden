@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { HubContext, useHub } from '../context.js';
-import { KeyScope } from '../keyScope.js';
+import { KeyScope, useKeyBus } from '../keyScope.js';
 import { PieceNavContext, useRuntime } from '../pieceRuntime.js';
 import type { PieceNav } from '../pieceRuntime.js';
 import type { Route } from '../router.js';
@@ -53,6 +53,7 @@ export function Piece({
   const hub = useHub();
   const runtime = useRuntime();
   const root = useRef<HTMLDivElement>(null);
+  const keys = useKeyBus();
   const latest = useRef<PieceNav>(links);
   latest.current = links;
   useEffect(() => runtime.addNav(latest), [runtime]);
@@ -92,8 +93,8 @@ export function Piece({
     );
   }
   return (
-    <div ref={root} className={cx('cw-piece', className)} data-cw-piece={name} {...(onEnter === undefined ? {} : { onFocus: onEnter })}>
-      <KeyScope.Provider value={root}>
+    <div ref={root} className={cx('cw-piece', className)} data-cw-piece={name} onKeyDown={keys.onKeyDown} {...(onEnter === undefined ? {} : { onFocus: onEnter })}>
+      <KeyScope.Provider value={keys.bus}>
         <HubContext.Provider value={value}>
           <PieceNavContext.Provider value={latest}>{children}</PieceNavContext.Provider>
         </HubContext.Provider>

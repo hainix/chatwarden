@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FocusEvent, KeyboardEvent } from 'react';
 import { useHub } from '../context.js';
+import { onPage } from '../dom.js';
 import type { HubText } from '../i18n.js';
 import type { Route } from '../router.js';
 import type { PermissionKey } from '../types.js';
@@ -67,11 +68,12 @@ export function SimpleNav({ route }: { route: Route }) {
   useEffect(() => setOpen(false), [route]);
   useEffect(() => {
     if (!open) return;
+    // Where the press began, not `e.target`: for anything inside a shadow root the page sees the host.
     const away = (e: Event): void => {
-      if (e.target instanceof Node && !wrap.current?.contains(e.target)) setOpen(false);
+      const origin = e.composedPath()[0] ?? e.target;
+      if (origin instanceof Node && !wrap.current?.contains(origin)) setOpen(false);
     };
-    document.addEventListener('pointerdown', away);
-    return () => document.removeEventListener('pointerdown', away);
+    return onPage('pointerdown', away);
   }, [open]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLLIElement>): void => {

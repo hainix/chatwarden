@@ -26,6 +26,28 @@ const SHOTS = process.env.CW_SHOTS_DIR ?? join(tmpdir(), 'cw-hub-element-shots')
 const page = (extra = '', element = '<chatwarden-hub base-url="/admin"></chatwarden-hub>', margin = true) =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Moderation</title>${margin ? '<style>body { margin: 0 }</style>' : ''}${extra}</head><body><script type="module" src="/hub-element.js"></script>${element}</body></html>`;
 
+/** The colour tokens as hub-react's stylesheet declared them before the defaults were made private: light, dark. */
+const COLOURS_BEFORE: Record<string, [string, string]> = {
+  '--cw-bg': ['#f4f5f8', '#0e131c'],
+  '--cw-surface': ['#ffffff', '#151c28'],
+  '--cw-surface-sunken': ['#eef0f4', '#111722'],
+  '--cw-border': ['#e0e3ea', '#242d3c'],
+  '--cw-border-strong': ['#7a8397', '#6b7893'],
+  '--cw-ink': ['#151b27', '#e8ebf1'],
+  '--cw-ink-muted': ['#4f5a6e', '#9ba4b6'],
+  '--cw-ink-faint': ['#5b657a', '#8f98ad'],
+  '--cw-accent': ['#2950d3', '#7d9bff'],
+  '--cw-accent-ink': ['#ffffff', '#0e131c'],
+  '--cw-accent-soft': ['#e7ecfb', '#1d2847'],
+  '--cw-red': ['#c42f3b', '#ff6b74'],
+  '--cw-red-soft': ['#fbe4e6', '#3a1a1f'],
+  '--cw-yellow': ['#e5ad00', '#f2c84b'],
+  '--cw-yellow-soft': ['#fdf3d3', '#33290d'],
+  '--cw-yellow-ink': ['#6b4a00', '#f2d37a'],
+  '--cw-live': ['#17804f', '#4cc38a'],
+  '--cw-shadow-ink': ['#151b27', '#000000'],
+};
+
 let browser: Browser | null = null;
 let server: Server;
 let origin = '';
@@ -38,6 +60,7 @@ beforeAll(async () => {
   dir = mkdtempSync(join(process.cwd(), 'node_modules', '.cache', 'cw-hub-element-smoke-'));
   execFileSync(process.execPath, [join(process.cwd(), 'packages', 'hub-element', 'build', 'build.mjs'), '--out', dir], { stdio: 'pipe' });
   const script = readFileSync(join(dir, 'hub-element.js'));
+  const hubCss = readFileSync(join(process.cwd(), 'packages', 'hub-react', 'src', 'styles.css'), 'utf8');
 
   world = await hubWorld({ role: 'owner', gameName: 'Dragon Duel' });
   // Real reports, filed a little before the browser's own clock (the element reads the real time).
@@ -57,6 +80,30 @@ beforeAll(async () => {
   app.get('/hostile', (_req, res) =>
     res.type('html').send(page('<style>button, a, div, h1, h2 { color: red !important; background: lime !important; font: 40px serif !important; }</style>', '<button id="page-button">page button</button><chatwarden-hub base-url="/admin"></chatwarden-hub>')),
   );
+  // Two hubs side by side (memory routers: they would share the one URL hash otherwise), one with its shortcuts off, and one inside
+  // another component's shadow root.
+  const two = '<chatwarden-hub base-url="/admin" mode="detailed" router="memory"></chatwarden-hub><chatwarden-hub base-url="/admin" mode="detailed" router="memory"></chatwarden-hub>';
+  app.get('/two', (_req, res) => res.type('html').send(page('', two)));
+  app.get('/two-quiet', (_req, res) =>
+    res.type('html').send(page('', '<chatwarden-hub base-url="/admin" mode="detailed" router="memory" shortcuts="false"></chatwarden-hub><chatwarden-hub base-url="/admin" mode="detailed" router="memory"></chatwarden-hub>')),
+  );
+  app.get('/nested', (_req, res) =>
+    res.type('html').send(
+      page(
+        '',
+        `<div id="holder"></div><script type="module">const root = document.getElementById('holder').attachShadow({ mode: 'open' }); root.innerHTML = '<button id="mine">my own control</button><chatwarden-hub base-url="/admin" mode="detailed" router="memory"></chatwarden-hub>';</script>`,
+      ),
+    ),
+  );
+  // hub-react's stylesheet on its own, in a plain page: a wrapper (#wrap, optionally with attributes), the hub root and a button.
+  app.get('/hub.css', (_req, res) => res.type('text/css').send(hubCss));
+  app.get('/plain', (req, res) => {
+    const css = typeof req.query.css === 'string' ? req.query.css : '';
+    const attrs = typeof req.query.attrs === 'string' ? req.query.attrs : '';
+    res.type('html').send(
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Plain</title><link rel="stylesheet" href="/hub.css"><style>body { margin: 0 } ${css}</style></head><body><div id="wrap" ${attrs}><div id="hub" class="cw-hub"><button type="button" class="cw-btn cw-btn--primary">Go</button></div></div></body></html>`,
+    );
+  });
   // No style-src and a default-src of 'none': an inline <style> or style attribute would be blocked. Constructable stylesheets are not.
   app.get('/strict', (_req, res) => res.type('html').set('content-security-policy', "default-src 'none'; script-src 'self'; connect-src 'self'").send(page('', undefined, false)));
   server = await new Promise<Server>((resolve) => {
@@ -98,7 +145,7 @@ async function open(path: string, options: { width?: number; height?: number; co
   p.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
   p.on('requestfailed', (r) => problems.push(`requestfailed: ${r.url()} ${r.failure()?.errorText ?? ''}`));
   await p.goto(`${origin}${path}`);
-  await p.locator('chatwarden-hub .cw-body').waitFor({ timeout: 15_000 });
+  await p.locator('chatwarden-hub .cw-body').first().waitFor({ timeout: 15_000 });
   return { page: p, problems };
 }
 
@@ -303,6 +350,177 @@ describe('a bare page with a script tag and the element', () => {
     }
     console.log(`screenshots written to ${SHOTS}`);
   }, 120_000);
+});
+
+// Keys belong to the hub that has focus, and a hub inside another component's shadow root works: the real browser's focus and
+// composed events, which jsdom only approximates.
+describe('keys are scoped to each hub', () => {
+  const active = (p: Page, index: number) =>
+    p.evaluate((i) => {
+      const hub = document.querySelectorAll('chatwarden-hub')[i];
+      return hub?.shadowRoot?.activeElement?.getAttribute('href') ?? null;
+    }, index);
+  const dialogsIn = (p: Page, index: number) =>
+    p.evaluate((i) => document.querySelectorAll('chatwarden-hub')[i]?.shadowRoot?.querySelectorAll('[role="dialog"]').length ?? 0, index);
+
+  it('two hubs on a page: J and ? in one reach that one only', async (ctx) => {
+    needsBrowser(ctx);
+    const { page: p, problems } = await open('/two');
+    await p.locator('chatwarden-hub >> nth=1 >> .cw-queue .cw-case-link').first().waitFor();
+    const first = p.locator('chatwarden-hub >> nth=0 >> .cw-queue .cw-case-link');
+    const second = p.locator('chatwarden-hub >> nth=1 >> .cw-queue .cw-case-link');
+    await first.first().focus();
+    await p.keyboard.press('j');
+    expect(await active(p, 0)).toBe(await first.nth(1).getAttribute('href'));
+    expect(await active(p, 1)).toBeNull();
+    await second.first().focus();
+    await p.keyboard.press('?');
+    await p.locator('chatwarden-hub >> nth=1 >> role=dialog').waitFor();
+    expect(await dialogsIn(p, 1)).toBe(1);
+    expect(await dialogsIn(p, 0)).toBe(0);
+    await p.keyboard.press('Escape');
+    await first.first().focus();
+    await p.keyboard.press('Control+k');
+    await p.locator('chatwarden-hub >> nth=0 >> role=dialog').waitFor();
+    expect(await dialogsIn(p, 1)).toBe(0);
+    expect(problems).toEqual([]);
+    await p.context().close();
+  });
+
+  it('a hub with shortcuts="false" beside one with them on: the quiet one is quiet', async (ctx) => {
+    needsBrowser(ctx);
+    const { page: p } = await open('/two-quiet');
+    await p.locator('chatwarden-hub >> nth=1 >> .cw-queue .cw-case-link').first().waitFor();
+    await p.locator('chatwarden-hub >> nth=0 >> .cw-skip').focus();
+    await p.keyboard.press('?');
+    await p.keyboard.press('Control+k');
+    await p.waitForTimeout(100);
+    expect(await dialogsIn(p, 0)).toBe(0);
+    expect(await dialogsIn(p, 1)).toBe(0);
+    await p.context().close();
+  });
+
+  it('a hub inside another component\'s shadow root: J, K, the sheet and the focus return use the hub\'s own focus', async (ctx) => {
+    needsBrowser(ctx);
+    const { page: p, problems } = await open('/nested');
+    const rows = p.locator('chatwarden-hub .cw-queue .cw-case-link');
+    await rows.first().waitFor();
+    const links = await rows.evaluateAll((els) => els.map((e) => e.getAttribute('href')));
+    expect(links.length).toBeGreaterThanOrEqual(2);
+    const inner = () =>
+      p.evaluate(() => {
+        const outer = document.getElementById('holder')?.shadowRoot;
+        return outer?.querySelector('chatwarden-hub')?.shadowRoot?.activeElement?.getAttribute('href') ?? null;
+      });
+    await rows.first().focus();
+    await p.keyboard.press('j');
+    expect(await inner()).toBe(links[1]);
+    await p.keyboard.press('k');
+    expect(await inner()).toBe(links[0]);
+    await p.keyboard.press('?');
+    const sheet = p.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    await sheet.waitFor();
+    await p.keyboard.press('Escape');
+    await sheet.waitFor({ state: 'detached' });
+    expect(await inner()).toBe(links[0]);
+    // The outer component's own control hears nothing.
+    await p.locator('#mine').focus();
+    await p.keyboard.press('?');
+    await p.waitForTimeout(100);
+    expect(await p.getByRole('dialog').count()).toBe(0);
+    expect(problems).toEqual([]);
+    await p.context().close();
+  });
+});
+
+// hub-react's own stylesheet in a plain page (no element, no shadow root): a token set on any ancestor themes the hub, and with
+// nothing set every token has the value it had before the defaults were made private. Computed by Chromium, which jsdom cannot do.
+describe('hub-react\'s stylesheet is themable from any ancestor', () => {
+  const rgb = (hex: string): string => {
+    const n = Number.parseInt(hex.slice(1), 16);
+    return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+  };
+
+  async function plain(colorScheme: 'light' | 'dark', css = '', attrs = ''): Promise<Page> {
+    const context = await (browser as Browser).newContext({ viewport: { width: 800, height: 600 }, colorScheme });
+    const p = await context.newPage();
+    await p.goto(`${origin}/plain?${new URLSearchParams({ css, attrs }).toString()}`);
+    await p.locator('#hub').waitFor();
+    return p;
+  }
+  const look = (p: Page) =>
+    p.evaluate(() => {
+      const hub = document.getElementById('hub') as HTMLElement;
+      const primary = hub.querySelector('.cw-btn--primary') as HTMLElement;
+      return { bg: getComputedStyle(hub).backgroundColor, ink: getComputedStyle(hub).color, fill: getComputedStyle(primary).backgroundColor, onFill: getComputedStyle(primary).color, radius: getComputedStyle(primary).borderTopLeftRadius };
+    });
+
+  it.each([
+    ['light', 'rgb(244, 245, 248)', 'rgb(21, 27, 39)', 'rgb(41, 80, 211)', 'rgb(255, 255, 255)'],
+    ['dark', 'rgb(14, 19, 28)', 'rgb(232, 235, 241)', 'rgb(125, 155, 255)', 'rgb(14, 19, 28)'],
+  ] as const)('with nothing set, the %s scheme looks as it did before', async (scheme, bg, ink, fill, onFill) => {
+    const p = await plain(scheme);
+    expect(await look(p)).toMatchObject({ bg, ink, fill, onFill });
+    await p.context().close();
+  });
+
+  it.each(['light', 'dark'] as const)('a value on body themes the hub in the %s scheme, and the rest keep their defaults', async (scheme) => {
+    const p = await plain(scheme, 'body { --cw-bg: rgb(1, 2, 3); --cw-accent: rgb(4, 5, 6); --cw-radius-m: 3px }');
+    const seen = await look(p);
+    expect(seen.bg).toBe('rgb(1, 2, 3)');
+    expect(seen.fill).toBe('rgb(4, 5, 6)');
+    expect(seen.ink).toBe(scheme === 'light' ? 'rgb(21, 27, 39)' : 'rgb(232, 235, 241)');
+    await p.context().close();
+  });
+
+  it.each(['light', 'dark'] as const)('a value on a wrapper, and one on the hub itself, win too (%s)', async (scheme) => {
+    const wrapper = await plain(scheme, '#wrap { --cw-surface: rgb(7, 8, 9); --cw-ink: rgb(10, 11, 12) }');
+    expect((await look(wrapper)).ink).toBe('rgb(10, 11, 12)');
+    await wrapper.context().close();
+    const own = await plain(scheme, '#hub { --cw-ink: rgb(13, 14, 15) }');
+    expect((await look(own)).ink).toBe('rgb(13, 14, 15)');
+    await own.context().close();
+  });
+
+  it.each([
+    ['dark', 'light', 'rgb(14, 19, 28)'],
+    ['light', 'dark', 'rgb(244, 245, 248)'],
+  ] as const)('%s forced on an ancestor beats a %s visitor', async (forced, visitor, bg) => {
+    const p = await plain(visitor, '', `data-cw-theme="${forced}"`);
+    expect((await look(p)).bg).toBe(bg);
+    await p.context().close();
+  });
+
+  it('a body value and a forced theme together: the page\'s colour, in the forced scheme\'s other colours', async () => {
+    const p = await plain('light', 'body { --cw-bg: rgb(1, 2, 3) }', 'data-cw-theme="dark"');
+    const seen = await look(p);
+    expect(seen.bg).toBe('rgb(1, 2, 3)');
+    expect(seen.ink).toBe('rgb(232, 235, 241)');
+    await p.context().close();
+  });
+
+  it.each(['light', 'dark'] as const)('every colour token resolves to the value it had before, with nothing set (%s)', async (scheme) => {
+    const p = await plain(scheme);
+    const names = Object.keys(COLOURS_BEFORE);
+    expect(names).toHaveLength(18);
+    const seen = await p.evaluate((list) => {
+      const hub = document.getElementById('hub') as HTMLElement;
+      const probe = document.createElement('i');
+      hub.append(probe);
+      const out: Record<string, string> = {};
+      for (const name of list) {
+        probe.style.color = 'transparent';
+        probe.style.color = `var(${name}, var(--cwd-${name.slice(5)}))`;
+        out[name] = getComputedStyle(probe).color;
+      }
+      return out;
+    }, names);
+    for (const name of names) {
+      const [light, dark] = COLOURS_BEFORE[name] as [string, string];
+      expect(seen[name], `${name} (${scheme})`).toBe(rgb(scheme === 'light' ? light : dark));
+    }
+    await p.context().close();
+  });
 });
 
 describe('the smoke fixtures', () => {

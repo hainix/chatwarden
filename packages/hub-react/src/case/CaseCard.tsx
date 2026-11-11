@@ -12,7 +12,7 @@ import { personTag, relativeTime } from '../format.js';
 import { useHubData } from '../hooks.js';
 import { decideErrorText, outcomeLabel } from '../labels.js';
 import { useKeyListener } from '../keyScope.js';
-import { isTypingTarget } from '../shortcuts.js';
+import { isTypingTarget, modalIn, rootOf } from '../dom.js';
 import { needsSenior, noActionForm, oneClickOf, ownLinesOf, recordLine, reporterDecided, reporterWarrants, stepLabel } from '../simple.js';
 import type { OneClick } from '../simple.js';
 import { UNDO_MS } from '../toasts.js';
@@ -259,7 +259,7 @@ export function CaseCard() {
     const onKeyDown = (e: KeyboardEvent): void => {
       const s = latest.current;
       if (e.defaultPrevented || e.isComposing || !s.usable) return;
-      if (document.querySelector('[role="dialog"][aria-modal="true"]') !== null) return;
+      if (modalIn(rootOf(e.target as Node)) !== null) return;
       if (e.key === 'Enter' && e.ctrlKey !== e.metaKey && !e.altKey && !e.shiftKey) {
         if (s.one === null) return;
         e.preventDefault();
@@ -267,8 +267,9 @@ export function CaseCard() {
         return;
       }
       // The rule field is a select: a digit cannot type into it, so 1, 2 and 3 keep working while it has focus (after picking a rule by keyboard).
-      const onRuleField = e.target instanceof Element && e.target.closest('.cw-scard-rule') !== null;
-      if (e.ctrlKey || e.metaKey || e.altKey || (isTypingTarget(e.target) && !onRuleField)) return;
+      const origin = e.composedPath()[0] ?? e.target;
+      const onRuleField = origin instanceof Element && origin.closest('.cw-scard-rule') !== null;
+      if (e.ctrlKey || e.metaKey || e.altKey || (isTypingTarget(e) && !onRuleField)) return;
       if (e.key === '1' && s.one !== null) {
         e.preventDefault();
         s.sendPrimary(false);
@@ -280,7 +281,7 @@ export function CaseCard() {
         s.sendQuick();
       }
     };
-    // In the shell this listens on the page; in a piece, on the piece's own root (see `keyScope.ts`).
+    // Heard on the hub's root in the shell, and on the piece's own root in a piece (see `keyScope.ts`).
     return listen(onKeyDown);
   }, [shortcuts]);
 

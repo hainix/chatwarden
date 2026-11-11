@@ -9,6 +9,7 @@ import { createHubController } from './headless/controller.js';
 import type { HubController, HubHost } from './headless/controller.js';
 import { useHubData } from './hooks.js';
 import { createT, en } from './i18n.js';
+import { KeyScope, useKeyBus } from './keyScope.js';
 import { LeaveGuardContext } from './leaveGuard.js';
 import type { LeaveGuard } from './leaveGuard.js';
 import type { HubT } from './i18n.js';
@@ -146,6 +147,8 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
   const tRef = useRef(t);
   tRef.current = t;
   const guard = useRef<LeaveGuard | null>(null);
+  // The hub's own root element hears the keys pressed inside it, in the shell (see keyScope.ts).
+  const keys = useKeyBus();
   const hostRef = useRef(shell?.host);
   hostRef.current = shell?.host;
 
@@ -217,9 +220,16 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
   }
 
   if (bare) return <>{content}</>;
+  // In the shell the root takes focus when a press lands on its empty space (tabIndex -1), so the keys keep working after a click
+  // anywhere in the hub: a hub answers keys only while focus is inside it.
+  const inShell = shell !== undefined;
   return (
-    <div className={cx('cw-hub', shell === undefined && 'cw-hub--embed', className)} {...(theme === 'light' || theme === 'dark' ? { 'data-cw-theme': theme } : {})}>
-      {content}
+    <div
+      className={cx('cw-hub', !inShell && 'cw-hub--embed', className)}
+      {...(inShell ? { tabIndex: -1, onKeyDown: keys.onKeyDown } : {})}
+      {...(theme === 'light' || theme === 'dark' ? { 'data-cw-theme': theme } : {})}
+    >
+      {inShell ? <KeyScope.Provider value={keys.bus}>{content}</KeyScope.Provider> : content}
     </div>
   );
 }
