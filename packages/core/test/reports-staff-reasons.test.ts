@@ -116,7 +116,7 @@ describe('reporterRecord: reasonMatched and reasonDecided', () => {
     void open;
   });
 
-  it('any of several rules matches; uncovered and a reason with no rules never do', async () => {
+  it('any of several rules matches; uncovered never does; a reason with no rules cannot be judged and is left out', async () => {
     const w = await world({
       overrides: { reporting: { reasons: [{ id: 'abuse', label: 'Abuse', rules: [3, 4] }, { id: 'vague', label: 'Vague', rules: [] }, { id: 'other', label: 'Else' }] } },
     });
@@ -128,7 +128,27 @@ describe('reporterRecord: reasonMatched and reasonDecided', () => {
     await decide(w, b, 'upheld', 4);
     await decide(w, c, 'upheld', 'uncovered');
     await decide(w, d, 'upheld', 2);
-    expect(record(w, a)).toMatchObject({ reasonMatched: 2, reasonDecided: 4 });
+    expect(record(w, a)).toMatchObject({ reasonMatched: 2, reasonDecided: 3 });
+  });
+
+  it('other (no rules by default) and a legacy other report are left out: an honest "something else" is never inaccurate', async () => {
+    const w = await world();
+    const a = await w.file({ reason: 'other' });
+    const b = await w.file({ category: 'bogus' });
+    const c = await w.file({ reason: 'hate' });
+    await decide(w, a, 'upheld', 2);
+    await decide(w, b, 'upheld', 2);
+    await decide(w, c, 'upheld', 1);
+    expect(record(w, a)).toMatchObject({ reasonMatched: 1, reasonDecided: 1, actioned: 3 });
+  });
+
+  it('other with rules the studio gave it is judged like any reason', async () => {
+    const w = await world();
+    const reasons = w.cw.profile.reporting.reasons.map((r) => (r.id === 'other' ? { ...r, rules: [8] } : { ...r }));
+    w.cw.policy.save({ reporting: { reasons } }, { version: 0, ...OWNER });
+    const a = await w.file({ reason: 'other' });
+    await decide(w, a, 'upheld', 8);
+    expect(record(w, a)).toMatchObject({ reasonMatched: 1, reasonDecided: 1 });
   });
 
   it('the old disruption id counts as griefing (rule 6)', async () => {

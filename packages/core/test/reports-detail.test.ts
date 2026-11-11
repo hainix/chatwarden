@@ -104,6 +104,24 @@ describe('a follow-up that works', () => {
   });
 });
 
+describe('a store that returns 0.1.1-shaped records (no reportedReason, no detailAt)', () => {
+  it('still takes the follow-up: a missing detailAt is "none yet", a missing reason keeps the category-derived one', async () => {
+    class Legacy extends MemoryStore {
+      override loadReport(id: string) {
+        const r = super.loadReport(id);
+        if (r === null) return null;
+        const { reportedReason: _a, detailAt: _b, ...rest } = r;
+        void [_a, _b];
+        return rest;
+      }
+    }
+    const w = await world({}, new Legacy());
+    const f = await w.file({ reason: 'hate' });
+    expect(await w.cw.reports.addDetail(f.id, 'p1', { note: 'more words' })).toEqual({ ok: true });
+    expect(row(w, f.id)).toMatchObject({ note: 'more words', detailAt: w.clock.t });
+  });
+});
+
 describe('once only', () => {
   it('a second follow-up is already_added and changes nothing', async () => {
     const { w, f } = await oneTap();

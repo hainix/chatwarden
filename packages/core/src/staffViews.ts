@@ -217,8 +217,8 @@ export function listSanctionGroups(store: Store, subjects: SubjectIndex, q: Sanc
  *
  * `reasonDecided` counts the decided (actioned or dismissed) reports they filed that named a reason, and `reasonMatched` how many
  * of those the decision bore out: the decision cited, against the reported person, a rule in that reason's `rules`. A dismissal
- * never matches. A reason no longer in the profile's list cannot be judged and is left out of both; a switched-off one still
- * counts. It is read against the reasons in force now, so editing a reason's rules changes the count. A reporter's reason is a
+ * never matches. A reason no longer in the profile's list, or one that maps to no rule (`other` by default), cannot be judged and is
+ * left out of both; a switched-off one still counts. Read from the newest 200 decided reports. It is read against the reasons in force now, so editing a reason's rules changes the count. A reporter's reason is a
  * hint, so this is a signal for moderators and nothing more: it is never used to refuse a report.
  */
 export interface ReporterRecord {
@@ -247,7 +247,8 @@ export function reporterRecord(
   let reasonMatched = 0;
   for (const d of store.loadReporterDecisions?.(aliases) ?? []) {
     const reason = findReason(reasons, d.reason);
-    if (reason === undefined) continue;
+    // A reason that is gone, or one with no rules (`other`, say), cannot be judged: it is left out of both counts.
+    if (reason === undefined || reason.rules.length === 0) continue;
     reasonDecided++;
     const target = subjects.canonical(d.target);
     if (d.actions.some((a) => typeof a.rule === 'number' && subjects.canonical(a.subject) === target && reason.rules.includes(a.rule))) {

@@ -402,8 +402,8 @@ ALTER TABLE kit_audit ADD COLUMN detail_json TEXT;
     version: 17,
     // The reporting settings (K4 Task 7h). `reported_reason` is the reason id the reporter gave (a hint: the case is settled by the
     // decision), NULL when they gave none; `detail_at` is when the reporter added their one follow-up, NULL until then. Both are
-    // nullable columns added in place, and `category` (NOT NULL) is kept and still written, so every reader of it keeps working.
-    // Rows filed before this migration carry their old category as their reason: the six 0.1.1 categories are reason ids, with
+    // nullable columns added in place (no table rebuild), and `category` (NOT NULL) is kept and still written, so every reader of it keeps working.
+    // The backfill is one UPDATE inside the same savepoint, so it touches every existing row once (fine at kit scale). Rows filed before this migration carry their old category as their reason: the six 0.1.1 categories are reason ids, with
     // `disruption` read as `griefing`; a category that is none of the six (a hand edit) stays NULL rather than being guessed. The
     // runner wraps this in one savepoint with the version bump, so a failure leaves version 16 and no column.
     sql: `

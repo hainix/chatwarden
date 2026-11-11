@@ -717,13 +717,26 @@ export class MemoryStore implements Store {
   loadReporterDecisions(reporters: readonly SubjectId[]): ReporterDecision[] {
     const wanted = new Set(reporters);
     const out: ReporterDecision[] = [];
-    for (const r of this.reports) {
-      if (!wanted.has(r.reporterSubject) || r.status === 'open' || r.reportedReason === null) continue;
+    // The newest 200 decided reports with a reason, newest first.
+    const decided = this.reports
+      .filter((r) => wanted.has(r.reporterSubject) && r.status !== 'open' && (r.reportedReason ?? null) !== null)
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, 200);
+    for (const r of decided) {
+      if (r.reportedReason == null || r.status === 'open') continue;
       const groups = new Set<string>();
       for (const d of this.decisions.values()) {
         if (d.reportId !== r.id) continue;
-        const parsed = JSON.parse(d.resultJson) as { groups?: Array<{ groupId?: unknown }> };
-        for (const g of parsed.groups ?? []) if (typeof g.groupId === 'string') groups.add(g.groupId);
+        // A row that cannot be read is a decision with no known actions, never a failure of the call.
+        let parsed: { groups?: unknown } | null;
+        try {
+          parsed = JSON.parse(d.resultJson) as { groups?: unknown } | null;
+        } catch {
+          parsed = null;
+        }
+        if (parsed !== null && Array.isArray(parsed.groups)) {
+          for (const g of parsed.groups as Array<{ groupId?: unknown } | null>) if (typeof g?.groupId === 'string') groups.add(g.groupId);
+        }
       }
       const actions: ReporterDecision['actions'] = [];
       for (const s of this.sanctions) {

@@ -255,19 +255,22 @@ const res = await cw.reports.addDetail(reportId, 'seat-1', { reason: 'cheating',
 - **`addDetail(reportId, reporterSeat, { reason?, note? })`** attaches the follow-up to the report. Only the reporter can add it: `reporterSeat` must be
   the seat the report was filed from and must still hold the reporter in that room. It works once, within ten minutes of the report (exactly ten is
   in time), and only while the report is open. It never changes the target or the excerpt. A reason given replaces the reported reason; a note replaces the
-  note; one left out keeps what was there. Refusals: `off` (the kit is off, or your store has no `addReportDetail`), `not_found`, `not_reporter`,
+  note; one left out keeps what was there. Refusals: `off` (the kit is off, your store does not support follow-ups because it has no `addReportDetail`, or the store failed), `not_found`, `not_reporter`,
   `too_late`, `already_added`, `reason_unknown`. A call that gives neither a reason nor a note answers `ok: true` and does not use up the one allowed.
 - **The kit has no player report route.** You call `cw.reports.submit` from your own route, and you do the same for `addDetail`: take the reporter's
   seat from your own session (never from the request body) and the report id from what `submit` answered, and pass the player's choice through. The
   player route `GET /rules` in `@chatwarden/http` hands the report screen its flow, enabled reasons and thank-you.
 - **Reporter accuracy.** `cw.reports.reporterRecord(person)` adds `reasonDecided` (decided reports they filed that named a reason) and `reasonMatched` (those
   where the decision cited, against the reported person, a rule in the reason's `rules`). A dismissal never matches. A reason that is no longer in the
-  list cannot be judged and is left out; a switched-off one still counts. It is read against the reasons in force now. It is a signal for moderators
+  list, and one that maps to no rule (`other` by default, so an honest "Something else" is never counted as inaccurate), cannot be judged and are left out; a
+  switched-off one still counts. It reads the newest 200 decided reports. It is read against the reasons in force now. It is a signal for moderators
   and is never used to refuse a report.
 - **From 0.1.1.** `ReportInput.category` is still accepted as an alias of `reason` (the six old ids are valid reasons, `disruption` reads as `griefing`),
-  and `reason` wins when both are given. A report's stored `category` is still one of the six old ids, derived from its reason (`'other'` when none), so
-  code that reads it keeps working; `ReportCategory` is unchanged. One thing changed: a `category` that is none of the valid reasons used to be stored as
-  `'other'` and is now refused `reason_unknown`. Reports stored before 0.1.2 read their old category as their `reportedReason`.
+  and `reason` wins when both are given; a blank `reason` falls back to `category`. A report's stored `category` is still one of the six old ids, derived from its reason (`'other'` when none), so
+  code that reads it keeps working; `ReportCategory` is unchanged. The alias keeps its 0.1.1 leniency: a `category` that is not an enabled reason (unknown, not text, or switched off) is taken and stored as
+  `'other'`, as before. Only the new `reason` field is refused (`reason_unknown`). Reports stored before 0.1.2 read their old category as their `reportedReason`.
+  **Upgrading:** `ReportRefusal` has two new members (`reason_required`, `reason_unknown`), `addDetail` has its own result type, and `layerError` gains a required
+  `kind`; an exhaustive `Record<ReportRefusal, ...>` or a `switch` with a `never` check over them needs the new cases to compile.
 - **Your own store.** `addReportDetail` and `loadReporterDecisions` are optional on `Store`. Without the first, `addDetail` answers `off`; without the
   second, the accuracy counts are 0. `insertReport` must keep `reportedReason`, and `listReports` must apply the `reason` filter (`null` means none).
 

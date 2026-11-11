@@ -5,6 +5,7 @@ import type {
   ModerationProfile,
   ReportCategory,
   ReportInput,
+  ReportRecord,
   ReportRefusal,
   ReportResult,
   ReporterRecord,
@@ -68,6 +69,25 @@ describe('types written against 0.1.1 still compile', () => {
     const legacy: Omit<Store, 'addReportDetail' | 'loadReporterDecisions'> = new MemoryStore();
     const asStore: Store = legacy;
     expect(asStore).toBeDefined();
+  });
+
+  it('a custom Store whose loadReport returns a 0.1.1-shaped record (no reportedReason, no detailAt) still compiles and reads', async () => {
+    // Written for 0.1.1: a ReportRecord literal with none of the new fields.
+    const old: ReportRecord = {
+      id: 'old', createdAt: 1, roomId: 'x', tags: {}, reporterSubject: 's_a', reporterSeat: 'p1', reporterHandle: 'A', targetSubject: 's_b', targetSeat: 'p2',
+      targetHandle: 'B', category: 'disruption', note: null, lineId: null, excerpt: [], people: [], status: 'open',
+      badFaith: false, actionedAt: null, actionedBy: null, modNote: null, badFaithEvidence: null,
+    };
+    class LegacyStore extends MemoryStore {
+      override loadReport(): ReportRecord | null {
+        return old;
+      }
+    }
+    const cw = await createChatwarden({ store: new LegacyStore(), secret: 'compat', platform: { identify: () => ({}) }, retention: false });
+    // The staff view fills the new fields in: the category is the reason, and a StaffReport has them (required).
+    const staff: StaffReport | null = cw.reports.get('old');
+    expect(staff?.reportedReason).toBe('griefing');
+    expect(staff?.detailAt).toBeNull();
   });
 
   it('a ReportResult is still handled with ok and refused; the old six refusals are still in ReportRefusal', () => {

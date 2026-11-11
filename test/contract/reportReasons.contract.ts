@@ -266,6 +266,39 @@ export function reportReasonsContract(name: string, make: () => Store): void {
         const got = reasons(s).loadReporterDecisions(['s_rep']);
         expect(got.find((d) => d.reportId === second.id)?.actions).toEqual([{ subject: 's_tgt', rule: 4 }]);
       });
+      it('a decision row that cannot be read never fails the call: that report lists with no actions, the others are whole', () => {
+        const s = make();
+        const bad = filed({ reportedReason: 'hate' });
+        s.insertReport(bad);
+        s.closeReport(bad.id, 'actioned', false, 'mod', NOW + 100, 'done');
+        s.insertDecision('key-bad', bad.id, NOW + 100, '{not json');
+        const good = decide(s, { reportedReason: 'spam' }, 'actioned', [{ id: 'ge1', rule: '4' }]);
+        const odd = filed({ reportedReason: 'afk' });
+        s.insertReport(odd);
+        s.closeReport(odd.id, 'actioned', false, 'mod', NOW + 100, 'done');
+        s.insertDecision('key-odd', odd.id, NOW + 100, JSON.stringify({ groups: 'nope' }));
+        const got = reasons(s).loadReporterDecisions(['s_rep']);
+        expect(got).toHaveLength(3);
+        expect(got.find((d) => d.reportId === bad.id)?.actions).toEqual([]);
+        expect(got.find((d) => d.reportId === odd.id)?.actions).toEqual([]);
+        expect(got.find((d) => d.reportId === good.id)?.actions).toEqual([{ subject: 's_tgt', rule: 4 }]);
+      });
+
+      it('returns the newest 200 decided reports, newest first', () => {
+        const s = make();
+        for (let i = 0; i < 205; i++) {
+          const r = filed({ reportedReason: 'hate', createdAt: NOW + 1000 + i });
+          s.insertReport(r);
+          s.closeReport(r.id, 'dismissed', false, 'mod', NOW + 5000, 'done');
+        }
+        const got = reasons(s).loadReporterDecisions(['s_rep']);
+        expect(got).toHaveLength(200);
+        const created = got.map((d) => Number(d.reportId.slice(1)));
+        expect([...created].sort((a, b) => b - a)).toEqual(created);
+        // The five oldest are the ones left out.
+        expect(Math.min(...created)).toBe(Math.max(...created) - 199);
+      });
+
       it('handles many reporters at once (more than any SQL variable limit would allow in one list)', () => {
         const s = make();
         decide(s, { reportedReason: 'hate', reporterSubject: 's_find' }, 'dismissed', []);

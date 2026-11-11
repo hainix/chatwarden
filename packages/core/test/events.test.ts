@@ -100,9 +100,9 @@ describe('events: report.created', () => {
     const { cw, events } = await setup();
     cw.rooms.seat(R, 'a', alice, 'Alice');
     cw.rooms.seat(R, 'b', bob, 'Bob');
-    // A report with no reason is stored under 'other', with no reported reason; the event says what was stored.
-    await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a' });
-    expect(events).toEqual([expect.objectContaining({ type: 'report.created', category: 'other', reportedReason: null, roomTags: {} })]);
+    // An unknown category is stored as 'other'; the event says what was stored.
+    await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a', category: 'bogus' as never });
+    expect(events).toEqual([expect.objectContaining({ type: 'report.created', category: 'other', roomTags: {} })]);
   });
 
   it('does not alias the room tags: a listener changing them changes nothing else', async () => {

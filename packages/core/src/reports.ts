@@ -2,7 +2,7 @@ import { randomId } from './crypto.js';
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
 import type { Limits } from './limits.js';
 import { safeWarn } from './log.js';
-import { defaultReporting, findReason, legacyCategoryOf } from './reporting.js';
+import { defaultReporting, findReason, legacyCategoryOf, OTHER_REASON_ID } from './reporting.js';
 import type { ResolvedReporting } from './reporting.js';
 import type { SubjectIndex } from './subjects.js';
 import type {
@@ -82,7 +82,10 @@ export interface ReportInput {
    * and never decides the case.
    */
   reason?: string | null;
-  /** The 0.1.1 name for `reason`, still accepted as an alias (the six old ids are valid; `disruption` reads as `griefing`). `reason` wins when both are given. */
+  /**
+   * The 0.1.1 name for `reason`, still accepted as an alias (the six old ids are valid; `disruption` reads as `griefing`) and still
+   * lenient: an unknown, non-text or switched-off id is taken as `other`. `reason` wins when both are given; a blank `reason` falls back to this.
+   */
   category?: string | null;
   note?: string;
   lineId?: string;
@@ -213,8 +216,9 @@ export class ReportService {
    * - `off`: moderation is disabled, the reporter's seat has no occupant or no subject (nothing to count or
    *   dedupe their reports by), or the store failed (logged by event and error class only).
    * - `reason_required`: the flow is `reason_required` and the report names no reason (see {@link ReportInput.reason}).
-   * - `reason_unknown`: the reason (or the `category` alias) is not an enabled reason, in every flow. A refused reason uses up
-   *   nothing: it never counts toward the daily allowance.
+   * - `reason_unknown`: `reason` is not an enabled reason, in every flow. A refused reason uses up nothing: it never counts toward
+   *   the daily allowance. The 0.1.1 `category` alias is not refused for this: an id that is not an enabled reason (or not text) is
+   *   taken as `other`, as it was in 0.1.1. A blank `reason` falls back to `category`.
    * - `not_player`: the target seat has no occupant, or the occupant (or the line's author) has no subject.
    * - `self`: reporter and target are the same canonical subject.
    * - `suspended`: three or more of the reporter's reports were dismissed as bad faith within 30 days.
@@ -271,13 +275,18 @@ export class ReportService {
    */
   private readReason(input: { reason?: unknown; category?: unknown }): { id: string | null } | 'required' | 'unknown' {
     const reporting = this.reporting();
-    const raw = input.reason !== undefined && input.reason !== null ? input.reason : input.category;
-    if (raw === undefined || raw === null) return reporting.flow === 'reason_required' ? 'required' : { id: null };
-    if (typeof raw !== 'string') return 'unknown';
-    const text = raw.trim();
-    if (text === '') return reporting.flow === 'reason_required' ? 'required' : { id: null };
-    const found = findReason(reporting.reasons, text);
-    return found !== undefined && found.enabled ? { id: found.id } : 'unknown';
+    const none = reporting.flow === 'reason_required' ? 'required' : { id: null };
+    const blank = (v: unknown): boolean => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+    if (!blank(input.reason)) {
+      // The new field is strict: anything that is not an enabled reason is refused.
+      if (typeof input.reason !== 'string') return 'unknown';
+      const found = findReason(reporting.reasons, input.reason.trim());
+      return found !== undefined && found.enabled ? { id: found.id } : 'unknown';
+    }
+    if (blank(input.category)) return none;
+    // The 0.1.1 alias keeps its 0.1.1 behaviour: an id that is not an enabled reason (or not text at all) is taken as `other`.
+    const found = typeof input.category === 'string' ? findReason(reporting.reasons, input.category.trim()) : undefined;
+    return found !== undefined && found.enabled ? { id: found.id } : { id: OTHER_REASON_ID };
   }
 
   private runDetail(reportId: string, reporterSeat: string, detail: ReportDetailInput | null | undefined): ReportDetailResult {
@@ -294,7 +303,7 @@ export class ReportService {
     }
     const now = this.clock.now();
     if (report.status !== 'open' || now - report.createdAt > REPORT_DETAIL_WINDOW_MS) return { ok: false, refused: 'too_late' };
-    if (report.detailAt !== null) return { ok: false, refused: 'already_added' };
+    if ((report.detailAt ?? null) !== null) return { ok: false, refused: 'already_added' };
 
     const d: ReportDetailInput = typeof detail === 'object' && detail !== null ? detail : {};
     const picked = this.readReason({ reason: d.reason });
@@ -304,7 +313,7 @@ export class ReportService {
     const note = cleanNote(d.note);
     if (reason === null && note === null) return { ok: true };
 
-    const finalReason = reason ?? report.reportedReason;
+    const finalReason = reason ?? report.reportedReason ?? null;
     const written = store.transaction(() =>
       store.addReportDetail?.(report.id, {
         reportedReason: finalReason,

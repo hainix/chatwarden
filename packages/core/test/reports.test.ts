@@ -182,21 +182,14 @@ describe('report: stored row', () => {
     }
     expect(t.store.rawReports().map((r) => r.category)).toEqual(['harassment', 'hate', 'cheating', 'spam', 'disruption', 'other']);
 
-    // An unknown or non-string category is no longer stored as 'other': it is refused (the alias of an unknown reason). No category at all is a
-    // report with no reason, stored under 'other' with no reported reason.
     const u = setup();
     u.table();
-    const bad: unknown[] = ['bogus', 7, 'HATE'];
+    const bad: unknown[] = ['bogus', 7, undefined, null, 'HATE'];
     for (const [i, c] of bad.entries()) {
       u.sit('p2', who(`target-${i}`));
-      expect(await u.submit({ category: c as never })).toEqual({ ok: false, refused: 'reason_unknown' });
-    }
-    expect(u.store.rawReports()).toHaveLength(0);
-    for (const [i, c] of ([undefined, null] as unknown[]).entries()) {
-      u.sit('p2', who(`none-${i}`));
       await u.submit({ category: c as never });
     }
-    expect(u.store.rawReports().map((r) => [r.category, r.reportedReason])).toEqual([['other', null], ['other', null]]);
+    expect(u.store.rawReports().map((r) => r.category)).toEqual(['other', 'other', 'other', 'other', 'other']);
   });
 
   it('a missing, blank or non-string note is stored as null; a note is trimmed', async () => {

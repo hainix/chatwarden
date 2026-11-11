@@ -49,6 +49,8 @@ export class ReportQueryError extends Error {
  * Carries subject ids: staff channels only, never send to a player.
  */
 export interface StaffReport extends ReportRecord {
+  /** When the reporter added their one follow-up, or null. Always present here. */
+  detailAt: number | null;
   /** The reason the reporter gave (an id from the profile's reasons, an old category read as its new id), or null when they gave none. A hint, never the truth. */
   reportedReason: string | null;
   targetPerson: SubjectId;

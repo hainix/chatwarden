@@ -234,6 +234,18 @@ describe('the reporter record: reasonMatched and reasonDecided on GET /people/:r
     expect(Object.keys(asReporter).sort()).toEqual(['actioned', 'badFaith', 'dismissed', 'open', 'reasonDecided', 'reasonMatched', 'reports', 'suspendedUntil']);
   });
 
+  it('a corrupted decision row never fails the history route: the report counts as decided, unmatched', async () => {
+    const w = await world();
+    const a = await fileWith(w, { reason: 'hate' }, 'rep-corrupt');
+    const b = await fileWith(w, { reason: 'spam' }, 'rep-corrupt');
+    await decide(w, a, 1);
+    await decide(w, b, 4);
+    w.db.prepare('UPDATE kit_decisions SET result_json = ? WHERE report_id = ?').run('{not json', a.id);
+    const res = await w.call('GET', `/people/${a.reporter}/history`);
+    expect(res.status).toBe(200);
+    expect((res.body as { asReporter: Record<string, unknown> }).asReporter).toMatchObject({ reasonDecided: 2, reasonMatched: 1 });
+  });
+
   it('writes no extra audit rows: the history view is the only row', async () => {
     const w = await world();
     const a = await fileWith(w, { reason: 'hate' });

@@ -195,12 +195,40 @@ describe('the 0.1.1 `category` input', () => {
     expect(rawOf(w).reportedReason).toBe('cheating');
   });
 
-  it('an unknown category is refused like an unknown reason (it used to be stored as other)', async () => {
-    const w = await world();
-    for (const category of ['bogus', 'HATE', 7, {}]) {
-      const t = w.table();
-      expect(await w.submit(t.room, { category: category as never })).toEqual({ ok: false, refused: 'reason_unknown' });
+  it('keeps its 0.1.1 behaviour: an unknown or non-text category is taken and stored as other, in every flow', async () => {
+    for (const flow of ['one_tap', 'reason_first', 'reason_required'] as const) {
+      const w = await world({ overrides: { reporting: { flow } } });
+      for (const category of ['bogus', 'HATE', 7, {}, ['hate'], true]) {
+        const t = w.table();
+        expect(await w.submit(t.room, { category: category as never }), `${flow} ${String(category)}`).toMatchObject({ ok: true });
+      }
+      const rows = (w.store as MemoryStore).rawReports();
+      expect(rows).toHaveLength(6);
+      for (const r of rows) expect([r.category, r.reportedReason]).toEqual(['other', 'other']);
     }
+  });
+
+  it('only the new reason field is refused: reason bogus is reason_unknown, and reason wins over category', async () => {
+    const w = await world();
+    const a = w.table();
+    expect(await w.submit(a.room, { reason: 'bogus' })).toEqual({ ok: false, refused: 'reason_unknown' });
+    const b = w.table();
+    expect(await w.submit(b.room, { reason: 'bogus', category: 'hate' })).toEqual({ ok: false, refused: 'reason_unknown' });
+    const c = w.table();
+    expect(await w.submit(c.room, { reason: 'cheating', category: 'bogus' })).toMatchObject({ ok: true });
+    expect(rawOf(w).reportedReason).toBe('cheating');
+  });
+
+  it('a blank reason falls back to the category (a blank category is still no reason)', async () => {
+    const w = await world();
+    for (const reason of ['', '   ', null, undefined]) {
+      const t = w.table();
+      expect(await w.submit(t.room, { reason, category: 'hate' } as never)).toMatchObject({ ok: true });
+    }
+    expect((w.store as MemoryStore).rawReports().map((r) => r.reportedReason)).toEqual(['hate', 'hate', 'hate', 'hate']);
+    const blank = await world({ overrides: { reporting: { flow: 'reason_required' } } });
+    const t = blank.table();
+    expect(await blank.submit(t.room, { reason: '', category: '  ' } as never)).toEqual({ ok: false, refused: 'reason_required' });
   });
 
   it('a missing category with no reason is a report with no reason', async () => {
@@ -210,10 +238,14 @@ describe('the 0.1.1 `category` input', () => {
     expect(rawOf(w).reportedReason).toBeNull();
   });
 
-  it('an old id the studio switched off or left out is refused, an old id they redefined is theirs', async () => {
+  it('an old id the studio switched off or left out becomes other (as in 0.1.1), an old id they redefined is theirs', async () => {
     const off = await world({ overrides: { reporting: { reasons: [{ id: 'griefing', label: 'Griefing', enabled: false }, { id: 'other', label: 'Else' }] } } });
     const a = off.table();
-    expect(await off.submit(a.room, { category: 'disruption' })).toEqual({ ok: false, refused: 'reason_unknown' });
+    expect(await off.submit(a.room, { category: 'disruption' })).toMatchObject({ ok: true });
+    expect([rawOf(off).category, rawOf(off).reportedReason]).toEqual(['other', 'other']);
+    // The same through the new field is a refusal.
+    const b0 = off.table();
+    expect(await off.submit(b0.room, { reason: 'disruption' })).toEqual({ ok: false, refused: 'reason_unknown' });
     const own = await world({ overrides: { reporting: { reasons: [{ id: 'disruption', label: 'Disruption' }, { id: 'other', label: 'Else' }] } } });
     const b = own.table();
     expect(await own.submit(b.room, { category: 'disruption' })).toMatchObject({ ok: true });

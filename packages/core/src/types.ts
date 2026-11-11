@@ -369,13 +369,17 @@ export interface StoredReport {
  * Private: moderator tools only.
  */
 export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason'> {
-  /** The reason the reporter gave (a reason id), or null. Rows stored before 0.1.2 carry their old category here (`disruption` as `griefing`). */
-  reportedReason: string | null;
+  /**
+   * The reason the reporter gave (a reason id), or null. Rows stored before 0.1.2 carry their old category here (`disruption` as
+   * `griefing`). Every first-party store returns it; it is optional here so a custom store's 0.1.1-shaped record still type-checks (a
+   * missing one reads as the old category, see `StaffReport`, where it is always present).
+   */
+  reportedReason?: string | null;
   /**
    * When the reporter added their one follow-up (`cw.reports.addDetail`), epoch ms, or null. At most one per report, and only
    * while the report is open.
    */
-  detailAt: number | null;
+  detailAt?: number | null;
   status: 'open' | 'actioned' | 'dismissed';
   badFaith: boolean;
   actionedAt: number | null;
@@ -714,7 +718,8 @@ export interface Store {
    * OPTIONAL. The DECIDED reports (`actioned` or `dismissed`) filed by any of the given subjects (`reporterSubject` as stored)
    * that carry a `reportedReason`, each with the sanction groups its decision wrote (the group's subject row: the person and
    * the rule it cited). The reporter-accuracy read behind `reasonMatched` / `reasonDecided`. A store that leaves it out
-   * reports 0 and 0. An empty list matches nothing; open reports and reports with no reason are never returned.
+   * reports 0 and 0. An empty list matches nothing; open reports and reports with no reason are never returned. At most the newest
+   * 200 (newest first). A decision row that cannot be read is a decision with no actions, never an error.
    */
   loadReporterDecisions?(reporters: readonly SubjectId[]): ReporterDecision[];
 

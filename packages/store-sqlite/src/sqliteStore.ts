@@ -940,44 +940,68 @@ export class SqliteStore implements Store, TermStore {
     // SQLite caps the variables of one statement, so a long list is asked for in chunks.
     const CHUNK = 500;
     return this.transaction(() => {
-      const out: ReporterDecision[] = [];
+      // The newest 200 decided reports with a reason: a person's accuracy needs no more, and the work stays bounded.
+      const reports: Array<Record<string, unknown>> = [];
       for (let i = 0; i < reporters.length; i += CHUNK) {
         const part = reporters.slice(i, i + CHUNK);
         const marks = part.map(() => '?').join(', ');
-        const reports = this.db
+        reports.push(
+          ...this.db
+            .prepare(
+              `SELECT id, status, reported_reason, target_subject, created_at FROM kit_reports
+               WHERE reporter_subject IN (${marks}) AND status != 'open' AND reported_reason IS NOT NULL
+               ORDER BY created_at DESC, id DESC LIMIT 200`,
+            )
+            .all(...part),
+        );
+      }
+      reports.sort((x, y) => Number(y.created_at) - Number(x.created_at) || String(y.id).localeCompare(String(x.id)));
+      reports.length = Math.min(reports.length, 200);
+      if (reports.length === 0) return [];
+
+      // One query for the decisions of those reports, one (per chunk) for the sanction rows of their groups.
+      const decisions = this.db
+        .prepare(`SELECT report_id, result_json FROM kit_decisions WHERE report_id IN (${reports.map(() => '?').join(', ')})`)
+        .all(...reports.map((r) => String(r.id)));
+      const groupsOf = new Map<string, string[]>();
+      for (const d of decisions) {
+        // A row that cannot be read is a decision with no known actions, never a failure of the call.
+        let parsed: { groups?: unknown } | null;
+        try {
+          parsed = JSON.parse(String(d.result_json)) as { groups?: unknown } | null;
+        } catch {
+          parsed = null;
+        }
+        const list = groupsOf.get(String(d.report_id)) ?? [];
+        if (parsed !== null && Array.isArray(parsed.groups)) {
+          for (const g of parsed.groups as Array<{ groupId?: unknown } | null>) if (typeof g?.groupId === 'string') list.push(g.groupId);
+        }
+        groupsOf.set(String(d.report_id), list);
+      }
+      const allGroups = [...new Set([...groupsOf.values()].flat())];
+      const rows = new Map<string, Array<{ subject: SubjectId; rule: ReporterDecision['actions'][number]['rule'] }>>();
+      for (let i = 0; i < allGroups.length; i += CHUNK) {
+        const part = allGroups.slice(i, i + CHUNK);
+        const found = this.db
           .prepare(
-            `SELECT id, status, reported_reason, target_subject FROM kit_reports
-             WHERE reporter_subject IN (${marks}) AND status != 'open' AND reported_reason IS NOT NULL
-             ORDER BY created_at, id`,
+            `SELECT group_id, target_value, rule FROM kit_sanctions
+             WHERE target_type = 'subject' AND group_id IN (${part.map(() => '?').join(', ')}) ORDER BY rowid`,
           )
           .all(...part);
-        for (const r of reports) {
-          const groups: string[] = [];
-          const decision = this.db.prepare('SELECT result_json FROM kit_decisions WHERE report_id = ?').all(String(r.id));
-          for (const d of decision) {
-            const parsed = JSON.parse(String(d.result_json)) as { groups?: Array<{ groupId?: unknown }> };
-            for (const g of parsed.groups ?? []) if (typeof g.groupId === 'string') groups.push(g.groupId);
-          }
-          const actions: ReporterDecision['actions'] = [];
-          for (const groupId of groups) {
-            const rows = this.db
-              .prepare("SELECT target_value, rule FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' ORDER BY rowid")
-              .all(groupId);
-            for (const s of rows) {
-              const rule = s.rule === null ? null : String(s.rule);
-              actions.push({ subject: String(s.target_value), rule: rule !== null && /^[1-9][0-9]*$/.test(rule) ? Number(rule) : 'uncovered' });
-            }
-          }
-          out.push({
-            reportId: String(r.id),
-            status: String(r.status) as 'actioned' | 'dismissed',
-            reason: String(r.reported_reason),
-            target: String(r.target_subject),
-            actions,
-          });
+        for (const s of found) {
+          const rule = s.rule === null ? null : String(s.rule);
+          const list = rows.get(String(s.group_id)) ?? [];
+          list.push({ subject: String(s.target_value), rule: rule !== null && /^[1-9][0-9]*$/.test(rule) ? Number(rule) : 'uncovered' });
+          rows.set(String(s.group_id), list);
         }
       }
-      return out;
+      return reports.map((r) => ({
+        reportId: String(r.id),
+        status: String(r.status) as 'actioned' | 'dismissed',
+        reason: String(r.reported_reason),
+        target: String(r.target_subject),
+        actions: (groupsOf.get(String(r.id)) ?? []).flatMap((g) => rows.get(g) ?? []),
+      }));
     });
   }
 
