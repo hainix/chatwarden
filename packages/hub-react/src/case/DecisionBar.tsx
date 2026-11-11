@@ -105,22 +105,25 @@ export function DecisionBar() {
       summary.current?.focus();
     }
   }, [failedTries]);
+  // Focus moves in a microtask, not inside the effect: the decision store can change from a page event or a timer, and that
+  // commit runs its effects at once. Moving focus there would dispatch focus events (and whatever wraps them) in the middle of the
+  // commit; a microtask lands in the same place a moment later.
   useEffect(() => {
-    if (status === 'held') heldRef.current?.focus();
+    if (status === 'held') queueMicrotask(() => heldRef.current?.focus());
     else if (status === 'done' && entry?.state.status === 'done') {
       draft.announce(entry.state.replay ? t('hub.decide.result.replay') : t('hub.decide.result.done'));
-      resultRef.current?.focus();
+      queueMicrotask(() => resultRef.current?.focus());
     } else if (status === 'failed') {
       // On a phone the sheet was closed when the decision was queued: open it, or the error and Try again are out of sight.
       setSheet(true);
-      failedRef.current?.focus();
+      queueMicrotask(() => failedRef.current?.focus());
     } else if (status === 'undone') {
       // Undone: the case is back and the sheet with it, with focus on the button that sends it again.
       setSheet(true);
       setFocusId(submitId);
     } else if (status === 'conflict') {
       draft.announce(t('hub.decide.already'));
-      conflictRef.current?.focus();
+      queueMicrotask(() => conflictRef.current?.focus());
       detail.reload();
     }
     if (status === 'held' || status === 'done') setSheet(false);

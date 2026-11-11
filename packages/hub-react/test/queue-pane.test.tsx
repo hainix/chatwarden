@@ -35,10 +35,20 @@ describe('the queue pane: the rows', () => {
   it('is a region named Open cases beside the screen, with a skeleton while it loads and a summary after', async () => {
     const w = await hubWorld();
     await people(w, ['Alpha', 'Bravo'], 2);
+    // The queue read is held open until the skeleton has been looked at, so the test does not race the in-memory server.
+    let answer: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    w.intercept.fn = async (req) => {
+      if (req.method === 'GET' && req.path === '/reports') await held;
+      return undefined;
+    };
     renderHub(w);
     const region = await screen.findByRole('region', { name: 'Open cases' });
     expect(within(region).getByText('Loading the queue')).toBeInTheDocument();
     expect(region.querySelectorAll('.cw-case--skeleton').length).toBeGreaterThan(0);
+    answer();
     await ready();
     expect(within(region).getByText('2 people and 4 reports')).toBeInTheDocument();
     expect(region.querySelectorAll('.cw-case--skeleton')).toHaveLength(0);

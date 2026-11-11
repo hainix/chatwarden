@@ -236,9 +236,10 @@ export function CaseCard() {
   }, [shortcuts]);
 
   // Undone: the card is back, with keyboard focus on the button that sent it. Failed: on the message.
+  // (In a microtask: the decision store can change from a page event or a timer, and that commit runs its effects at once.)
   useEffect(() => {
-    if (status === 'undone') (lastUsed.current === 'primary' ? (primaryRef.current ?? noActionRef.current) : noActionRef.current)?.focus();
-    else if (status === 'failed') failedRef.current?.focus();
+    if (status === 'undone') queueMicrotask(() => (lastUsed.current === 'primary' ? (primaryRef.current ?? noActionRef.current) : noActionRef.current)?.focus());
+    else if (status === 'failed') queueMicrotask(() => failedRef.current?.focus());
   }, [status]);
 
   // Something else opens the bar in place, with focus on its first control.

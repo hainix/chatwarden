@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useSyncExternalStore } from 'react';
 import type { HubController } from './headless/controller.js';
 import type { Store } from './headless/store.js';
 
@@ -20,18 +20,10 @@ export function useOptionalController(): HubController | null {
 }
 
 /**
- * A store's current value, kept fresh the way `useState` would be: each change is a batched update, rendered after the code that
- * made it has finished. `useSyncExternalStore` is the usual bridge, but it renders in a synchronous lane, a task ahead of where
- * these screens have always drawn: a skeleton is drawn before the first answer, not instead of it, and a held decision sent from a
- * `pagehide` handler would render inside the event. Every screen and test was written around the batched timing, so this keeps it.
- * It reads the store at render, so what it returns is never older than the store.
+ * A store's current value, kept fresh with `useSyncExternalStore`: every change renders at once, no update is missed between the
+ * render and the subscription, and a render under a transition or Suspense never shows two readers two different snapshots.
+ * A snapshot is the same object until something changes (the stores promise that), so an unchanged store renders nothing.
  */
 export function useStore<T>(store: Store<T>): T {
-  const [, setValue] = useState(() => store.getSnapshot());
-  useEffect(() => {
-    setValue(store.getSnapshot());
-    return store.subscribe(() => setValue(store.getSnapshot()));
-  }, [store]);
-  // The state only schedules the render; what the render reads is the store, so a different store is never shown late.
-  return store.getSnapshot();
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 }

@@ -612,6 +612,8 @@ describe('saved reasons', () => {
     const f = await w.fileRich({ lines: TALK });
     await open(w, f.id);
     expect(within(panel()).queryByRole('group', { name: 'Saved reasons' })).toBeNull();
+    // The first hub goes before the second comes, so the page holds one Decision region at a time.
+    cleanup();
     const w2 = await hubWorld({ permissions: { 'reasons.read': 'owner' } });
     const g = await w2.fileRich({ lines: TALK });
     await open(w2, g.id);
