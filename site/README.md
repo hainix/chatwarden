@@ -41,7 +41,7 @@ The demo is the real thing, not a drawing of it:
   follows those). Its keys answer only while the visitor is working in the demo (`shortcuts` follows the visitor, `primary` is set),
   and never while they type in the chat box or a dialog.
 - The report dialog and the notice dialog are `@chatwarden/player-react`'s `ReportDialog` (on the kit's own reporting settings:
-  one tap by default; the follow-up calls `cw.reports.addDetail`) and `NoticeQueue`. The kit has no player report route and the
+  one step: an optional reason and note inline, then Report) and `NoticeQueue`. The kit has no player report route and the
   player routes do not run in a browser, so `src/demo/playerTransport.ts` is a small local transport that answers the same calls
   from the kit directly, for one seat.
 - The tour (seven steps, the last two optional) points at hub controls by role and accessible name (`src/demo/hubTarget.ts`):

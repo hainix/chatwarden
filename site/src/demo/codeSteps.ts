@@ -21,7 +21,8 @@ export const CODE_STEPS: readonly CodeStep[] = [
     file: 'report.ts',
     lang: 'ts',
     source: 'packages/player-react/README.md',
-    code: `// \`roomId\` and the seats come from your session, never from the client.
+    code: `// \`cw\` is your createChatwarden(...) instance. Call this behind your own route, for example POST /report: \`roomId\` and the seats come
+// from your session, never from the client. The draft is the kit's own \`reason\` and \`note\`, so it spreads straight in.
 export function takeReport(roomId: string, mySeat: string, theirSeat: string, draft: ReportDraft): Promise<ReportResult> {
   return cw.reports.submit({ roomId, reporterSeat: mySeat, targetSeat: theirSeat, ...draft });
 }`,

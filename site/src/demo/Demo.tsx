@@ -1,6 +1,6 @@
 import { playerReporting } from '@chatwarden/core';
 import { NoticeQueue, createPlayerClient, ReportDialog } from '@chatwarden/player-react';
-import type { PlayerClient, PlayerReporting, ReportFollowUp, ReportDraft, ReportResult } from '@chatwarden/player-react';
+import type { PlayerClient, PlayerReporting, ReportDraft, ReportResult } from '@chatwarden/player-react';
 import '@chatwarden/player-react/styles.css';
 import type { HubController } from '@chatwarden/hub-react/headless';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -610,12 +610,6 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     return res;
   }
 
-  async function addDetail(reportId: string, detail: ReportFollowUp) {
-    const res = await engine.reports.addDetail(reportId, 'you', detail);
-    if (res.ok) nudgeHub(); // the hub reads the reason now, not in a few seconds
-    return res;
-  }
-
   /** What the hub tells the page: a case was opened, a decision was taken. */
   async function onStaffEvent(event: StaffEvent) {
     const g = gen.current;
@@ -862,7 +856,6 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
           returnFocusTo={backToGame}
           onClose={() => setReport(null)}
           onSubmit={submitReport}
-          onAddDetail={addDetail}
         />
       )}
     </div>

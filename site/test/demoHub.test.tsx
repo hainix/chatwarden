@@ -3,7 +3,7 @@
 // the case in the hub, the decision (with its Undo), and the notice the player acknowledges.
 import { cleanup, fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { caseLink, closeReport, composer, gamePane, hubRoot, live, modPane, noticeBtn, oneTapReport, openCase, pickRule, reportBtn, RUDE, screen, sendHeldDecision, setup, stubMatchMedia, waitFor, within } from './helpers/demoUi';
+import { caseLink, closeReport, composer, gamePane, hubRoot, live, modPane, noticeBtn, oneTapReport, openCase, pickRule, reasonedReport, reportBtn, RUDE, screen, sendHeldDecision, setup, stubMatchMedia, waitFor, within } from './helpers/demoUi';
 
 beforeEach(() => stubMatchMedia(false));
 afterEach(() => {
@@ -322,37 +322,73 @@ describe('the report dialog is player-react’s, on the kit’s own reporting se
     expect((await engine.kit()).reports.list({ status: 'open' }).items).toHaveLength(0);
   });
 
-  it('after the report, the optional "Add a reason" step adds a reason to the same report (onAddDetail -> cw.reports.addDetail)', async () => {
+  it('the dialog is one step: choose a reason in the "Why?" select, press Report, and the one report carries the reason (no follow-up, addDetail is never called)', async () => {
     const { user, engine } = await setup();
-    const dialog = await oneTapReport(user);
-    expect(within(dialog).getByRole('status').textContent).toMatch(/thank/i);
     const add = vi.spyOn(engine.reports, 'addDetail');
-    await user.click(within(dialog).getByRole('button', { name: 'Add a reason' }));
-    const reasons = within(dialog).getAllByRole('radio');
-    expect(reasons.length).toBeGreaterThan(2);
-    await user.click(reasons[0] as HTMLElement);
-    await user.click(within(dialog).getByRole('button', { name: /add to my report/i }));
-    await within(dialog).findByText(/added\. thanks/i);
-    expect(add).toHaveBeenCalledTimes(1);
-    expect(add.mock.calls[0]?.[1]).toBe('you');
+    const submit = vi.spyOn(engine.reports, 'submit');
+    await user.click(reportBtn(/report bo's line: uninstall/i));
+    const open = await screen.findByRole('dialog', { name: /report this message/i });
+    const select = within(open).getByRole('combobox', { name: /^why\?/i }) as HTMLSelectElement;
+    expect([...select.querySelectorAll('option')].filter((o) => o.value !== '').length).toBeGreaterThan(2);
+    expect(within(open).queryByRole('button', { name: 'Add a reason' })).toBeNull();
+    await user.selectOptions(select, [...select.querySelectorAll('option')].find((o) => o.value !== '')!.value);
+    await user.click(within(open).getByRole('button', { name: 'Report' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByRole('heading', { name: 'Report sent' });
+    expect(within(dialog).getByRole('status').textContent).toMatch(/thank/i);
+    // Only Close is left: no "Add a reason", no radios, no select.
+    expect(within(dialog).queryByRole('button', { name: 'Add a reason' })).toBeNull();
+    expect(within(dialog).queryAllByRole('radio')).toHaveLength(0);
+    expect(within(dialog).queryByRole('combobox')).toBeNull();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0]?.[0].reason).toBeTruthy();
+    expect(add).not.toHaveBeenCalled();
     const report = (await engine.kit()).reports.list({ status: 'open' }).items[0];
-    expect(report?.reportedReason).toBeTruthy();
+    expect(report?.reportedReason).toBe(submit.mock.calls[0]?.[0].reason);
     await closeReport(user);
     // the hub shows the reason now
     const link = await caseLink(user);
     await waitFor(() => expect(link.textContent).not.toMatch(/no reason given/i));
   });
 
-  it('follows the studio’s settings live: switch to "pick a reason first" in the kit and the dialog lists the reasons', async () => {
+  it('with no reason chosen, one Report press files it (the select is optional by default)', async () => {
+    const { user, engine } = await setup();
+    const submit = vi.spyOn(engine.reports, 'submit');
+    await oneTapReport(user);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0]?.[0].reason).toBeUndefined();
+    expect((await engine.kit()).reports.list({ status: 'open' }).items).toHaveLength(1);
+  });
+
+  it('follows the studio’s settings live: switch to "pick a reason first" in the kit and the dialog is still one step, with the same select', async () => {
     const { user, engine } = await setup();
     const cw = await engine.kit();
     const saved = cw.policy.save({ reporting: { flow: 'reason_first' } }, { version: cw.policy.get().version, actor: 'demo-mod', reason: 'test' });
     expect(saved.ok).toBe(true);
     await user.click(reportBtn(/report bo's line: uninstall/i));
-    const dialog = await screen.findByRole('dialog', { name: /report bo/i });
-    expect(within(dialog).getAllByRole('radio').length).toBeGreaterThan(2);
-    expect(within(dialog).getByRole('button', { name: /skip and report/i })).toBeTruthy();
-    expect(within(dialog).queryByRole('button', { name: 'Report' })).toBeNull();
+    const dialog = await screen.findByRole('dialog', { name: /report this message/i });
+    expect(within(dialog).getAllByRole('combobox')).toHaveLength(1);
+    expect(within(dialog).queryAllByRole('radio')).toHaveLength(0);
+    expect(within(dialog).queryByRole('button', { name: /skip and report/i })).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Report' })).toBeTruthy();
+  });
+
+  it('follows the studio’s settings live: "a reason is required" marks the select, and Report without one files nothing', async () => {
+    const { user, engine } = await setup();
+    const cw = await engine.kit();
+    const saved = cw.policy.save({ reporting: { flow: 'reason_required' } }, { version: cw.policy.get().version, actor: 'demo-mod', reason: 'test' });
+    expect(saved.ok).toBe(true);
+    await user.click(reportBtn(/report bo's line: uninstall/i));
+    const dialog = await screen.findByRole('dialog', { name: /report this message/i });
+    const select = within(dialog).getByRole('combobox', { name: 'Why?' });
+    expect((select as HTMLSelectElement).required).toBe(true);
+    await user.click(within(dialog).getByRole('button', { name: 'Report' }));
+    expect(within(dialog).getByRole('alert').textContent).toMatch(/choose a reason/i);
+    expect(cw.reports.list({ status: 'open' }).items).toHaveLength(0);
+    await user.selectOptions(select, [...(select as HTMLSelectElement).querySelectorAll('option')].find((o) => o.value !== '')!.value);
+    await user.click(within(dialog).getByRole('button', { name: 'Report' }));
+    await within(dialog).findByRole('heading', { name: 'Report sent' });
+    expect(cw.reports.list({ status: 'open' }).items).toHaveLength(1);
   });
 
   it('a refusal is a result, in the player’s words: reporting the same player twice', async () => {
@@ -433,15 +469,12 @@ describe('the page nudges the hub to read the queue without flushing a decision 
     await stillHeld(engine);
   });
 
-  it.each(['visible', 'hidden'] as const)('a reason added to a report while a decision is held (tab %s): still held', async (state) => {
+  it.each(['visible', 'hidden'] as const)('a report with a reason, filed while a decision is held (tab %s): still held', async (state) => {
     const { user, engine } = await setup();
     await holdAWarning(user, engine);
-    const dialog = await oneTapReport(user, /report ada's line: ok that was close/i);
     setVisibility(state);
-    await user.click(within(dialog).getByRole('button', { name: 'Add a reason' }));
-    await user.click(within(dialog).getAllByRole('radio')[0] as HTMLElement);
-    await user.click(within(dialog).getByRole('button', { name: /add to my report/i }));
-    await within(dialog).findByText(/added\. thanks/i);
+    const { dialog } = await reasonedReport(user, /report ada's line: ok that was close/i);
+    expect(within(dialog).getByRole('heading', { name: 'Report sent' })).toBeTruthy();
     await stillHeld(engine);
   });
 

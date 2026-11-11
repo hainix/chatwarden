@@ -48,7 +48,7 @@ export interface TourStep {
 export const TOUR_STEPS: readonly TourStep[] = [
   {
     title: 'Report a message',
-    body: 'Bo is being rude. Press Report on one of Bo’s lines, then Report again. One tap files it, and the thank-you can wait.',
+    body: 'Bo is being rude. Press Report on one of Bo’s lines. The dialog is one step: pick a reason if you like, then press Report once. The thank-you can wait.',
   },
   {
     title: 'The case appears in the hub',
