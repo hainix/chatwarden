@@ -128,3 +128,33 @@ describe('the English catalog', () => {
     }
   });
 });
+
+// A patch release removes nothing from the exported catalogue (`en` and `HubText`). The reporting settings preview now draws the
+// one-step dialog, so six of its words went unused: they stay, with their 0.1.2 English, marked @deprecated in src/i18n.ts
+// (test/static.test.ts checks the mark), and go in a later minor.
+describe('the hub catalogue keeps its 0.1.2 preview words', () => {
+  const DEPRECATED_SINCE_013: Record<string, string> = {
+    'hub.reporting.preview.addReason': 'Add a reason',
+    'hub.reporting.preview.addReason.hint': 'Optional. They can add a reason and a note to the same report.',
+    'hub.reporting.preview.pick.title': 'Report a player',
+    'hub.reporting.preview.legend': 'What happened?',
+    'hub.reporting.preview.send': 'Send report',
+    'hub.reporting.preview.skip': 'Skip and report',
+  };
+  it('has each of the six, with its old English', () => {
+    for (const [key, words] of Object.entries(DEPRECATED_SINCE_013)) expect(text(key), key).toBe(words);
+  });
+  it('still accepts them as HubText', () => {
+    const named: HubText[] = ['hub.reporting.preview.addReason', 'hub.reporting.preview.skip', 'hub.reporting.preview.send'];
+    expect(createT(en, 'en')(named[1] as HubText)).toBe('Skip and report');
+  });
+  it('has the words of the one-step picture', () => {
+    expect(text('hub.reporting.preview.why')).toBe('Why? (optional)');
+    expect(text('hub.reporting.preview.whyRequired')).toBe('Why?');
+    expect(text('hub.reporting.preview.choose')).toBe('Choose a reason (optional)');
+    expect(text('hub.reporting.preview.chooseRequired')).toBe('Choose a reason');
+    expect(text('hub.reporting.preview.addNote')).toBe('Add a note');
+    expect(text('hub.reporting.preview.cancel')).toBe('Cancel');
+    expect(text('hub.reporting.preview.sent')).toBe('Report sent');
+  });
+});

@@ -132,7 +132,8 @@ export interface HubController {
    * token moved): it adds no audit entry beyond what a normal poll does, and it changes no permission. It does nothing while the queue is
    * not running (before `start()`, a role that cannot read reports, after `dispose()`), while the browser is offline, or once the staff
    * session has ended. At most one read a second: a call made while a read is on its way is ignored, and one made within a second of the
-   * last is held and sent once when the second is up. Do not call it in a loop: it is for "something just changed", the queue polls by itself.
+   * last is held and sent once when the second is up. A call while a read is in flight is ignored; a change made just after that read
+   * started shows at the next poll. Do not call it in a loop: it is for "something just changed", the queue polls by itself.
    * @experimental
    */
   refresh(): void;

@@ -995,11 +995,11 @@ export const en = {
   'hub.reporting.flow.title': 'How players report',
   'hub.reporting.flow.hint': 'A reason is only a hint. Moderators decide what a report really is.',
   'hub.reporting.flow.one_tap': 'One tap',
-  'hub.reporting.flow.one_tap.line': 'Players tap Report on a message and it is sent at once. They can add a reason afterwards if they want.',
+  'hub.reporting.flow.one_tap.line': 'Players press Report on a message, then Report in the window. Saying why is optional.',
   'hub.reporting.flow.reason_first': 'Pick a reason first',
-  'hub.reporting.flow.reason_first.line': 'Players choose a reason, or skip it, then send the report.',
+  'hub.reporting.flow.reason_first.line': 'Players are asked "Why?" in the same window. Saying why is still optional.',
   'hub.reporting.flow.reason_required': 'Reason required',
-  'hub.reporting.flow.reason_required.line': 'Players must choose a reason before they can send the report.',
+  'hub.reporting.flow.reason_required.line': 'Players must choose a reason in the window before Report sends.',
   'hub.reporting.reasons.title': 'Reasons',
   'hub.reporting.reasons.hint': 'What players can say a report is about. They see the reasons that are switched on, under their group names.',
   'hub.reporting.reasons.list': 'Reasons',
@@ -1035,11 +1035,24 @@ export const en = {
   'hub.reporting.preview.line': 'An example message from another player',
   'hub.reporting.preview.report': 'Report',
   'hub.reporting.preview.after': 'After they report, they read',
+  'hub.reporting.preview.why': 'Why? (optional)',
+  'hub.reporting.preview.whyRequired': 'Why?',
+  'hub.reporting.preview.choose': 'Choose a reason (optional)',
+  'hub.reporting.preview.chooseRequired': 'Choose a reason',
+  'hub.reporting.preview.addNote': 'Add a note',
+  'hub.reporting.preview.cancel': 'Cancel',
+  'hub.reporting.preview.sent': 'Report sent',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'hub.reporting.preview.addReason': 'Add a reason',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'hub.reporting.preview.addReason.hint': 'Optional. They can add a reason and a note to the same report.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'hub.reporting.preview.pick.title': 'Report a player',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'hub.reporting.preview.legend': 'What happened?',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'hub.reporting.preview.send': 'Send report',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'hub.reporting.preview.skip': 'Skip and report',
   'hub.reason.reportedAs': 'Reported as {reason}',
   'hub.reason.none': 'No reason given',
