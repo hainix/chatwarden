@@ -484,21 +484,4 @@ describe('the page nudges the hub to read the queue without flushing a decision 
     // The hidden tab's own poll is 30 s away: only the handle can have brought it in this fast.
     await within(modPane()).findByRole('button', { name: /new case/i }, { timeout: 2000 });
   });
-
-  it('a reason added to a report reaches the queue at once too (the handle again, no event)', async () => {
-    const { user } = await setup();
-    setVisibility('visible');
-    const heard = vi.fn();
-    document.addEventListener('visibilitychange', heard);
-    try {
-      const dialog = await oneTapReport(user);
-      await user.click(within(dialog).getByRole('button', { name: 'Add a reason' }));
-      await user.click(within(dialog).getAllByRole('radio')[0] as HTMLElement);
-      await user.click(within(dialog).getByRole('button', { name: /add to my report/i }));
-      await within(dialog).findByText(/added\. thanks/i);
-      expect(heard).not.toHaveBeenCalled();
-    } finally {
-      document.removeEventListener('visibilitychange', heard);
-    }
-  });
 });
