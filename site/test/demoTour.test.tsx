@@ -448,6 +448,25 @@ describe('on a phone (under 600px) the tour is a compact bar', () => {
       await waitFor(() => expect(calls.some((c) => /^Restrict chat/.test(c.el.textContent ?? ''))).toBe(true));
     });
 
+    it('does not scroll again when the hub redraws and a different control of the same kind matches (a queue that reorders)', async () => {
+      const calls = spyScroll();
+      const { user } = await setup({ compact: true });
+      await oneTapReport(user);
+      await closeReport(user);
+      await user.click(await within(modPane()).findByRole('button', { name: /new case/i }));
+      await waitFor(() => expect(target()?.tagName).toBe('A'));
+      await waitFor(() => expect(calls.some((c) => c.el === target())).toBe(true));
+      const before = calls.length;
+      // a case that sorts ahead of Bo: the first link in the queue is now another element
+      const first = target() as HTMLElement;
+      const other = first.cloneNode(true) as HTMLElement;
+      other.setAttribute('href', '#/reports/other');
+      first.parentElement?.insertBefore(other, first);
+      await waitFor(() => expect(target()).toBe(other));
+      await new Promise((r) => setTimeout(r, 150));
+      expect(calls.length).toBe(before);
+    });
+
     it('does not scroll on a wider screen, where the card floats beside the control', async () => {
       const calls = spyScroll();
       const { user } = await setup({ stacked: true });

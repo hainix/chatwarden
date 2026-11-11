@@ -400,3 +400,63 @@ describe('reset', () => {
     await waitFor(() => expect(within(hubRoot()).getByRole('button', { name: 'Simple' }).getAttribute('aria-pressed')).toBe('true'));
   });
 });
+
+describe('the page nudges the hub to read the queue without flushing a decision held for Undo', () => {
+  // The hub sends a held decision at once when the page hides (`visibilitychange` with the tab hidden): its Undo window is the visitor's.
+  // The nudge that shows a new report in the queue is a synthetic `visibilitychange`, so it must do nothing on a hidden tab.
+  const setVisibility = (state: 'visible' | 'hidden') => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  afterEach(() => {
+    delete (document as unknown as { visibilityState?: string }).visibilityState;
+  });
+
+  async function holdAWarning(user: Parameters<typeof oneTapReport>[0], engine: Awaited<ReturnType<typeof setup>>['engine']) {
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
+    await within(modPane()).findAllByRole('button', { name: 'Undo' });
+    expect(await engine.notices.pending('bo')).toEqual([]);
+  }
+  const stillHeld = async (engine: Awaited<ReturnType<typeof setup>>['engine']) => {
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await engine.notices.pending('bo')).toEqual([]);
+    expect(within(modPane()).getAllByRole('button', { name: 'Undo' }).length).toBeGreaterThan(0);
+  };
+
+  it.each(['visible', 'hidden'] as const)('a report filed while a decision is held (tab %s): still held', async (state) => {
+    const { user, engine } = await setup();
+    await holdAWarning(user, engine);
+    setVisibility(state);
+    await oneTapReport(user, /report ada's line: ok that was close/i);
+    await stillHeld(engine);
+  });
+
+  it.each(['visible', 'hidden'] as const)('a reason added to a report while a decision is held (tab %s): still held', async (state) => {
+    const { user, engine } = await setup();
+    await holdAWarning(user, engine);
+    const dialog = await oneTapReport(user, /report ada's line: ok that was close/i);
+    setVisibility(state);
+    await user.click(within(dialog).getByRole('button', { name: 'Add a reason' }));
+    await user.click(within(dialog).getAllByRole('radio')[0] as HTMLElement);
+    await user.click(within(dialog).getByRole('button', { name: /add to my report/i }));
+    await within(dialog).findByText(/added\. thanks/i);
+    await stillHeld(engine);
+  });
+
+  it('control: a real hide of the page (the event with the tab hidden) does send it at once', async () => {
+    const { user, engine } = await setup();
+    await holdAWarning(user, engine);
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await waitFor(async () => expect((await engine.notices.pending('bo')).length).toBe(1));
+  });
+
+  it('on a visible tab the nudge still shows a new report in the queue at once (that is what it is for)', async () => {
+    const { user } = await setup();
+    setVisibility('visible');
+    await oneTapReport(user);
+    await closeReport(user);
+    await within(modPane()).findByRole('button', { name: /new case/i }, { timeout: 2000 });
+  });
+});

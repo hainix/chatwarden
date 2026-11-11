@@ -56,6 +56,36 @@ describe('the hub keeps its own heading styles under a host page that styles hea
     }
   });
 
+  it.each([true, false])('an adopter can still override on purpose: `.my-theme .cw-hub h2` (0,2,1) wins in either sheet order (adopter sheet last: %s)', (adopterLast) => {
+    const hub = document.createElement('style');
+    hub.textContent = hubCss;
+    const mine = document.createElement('style');
+    mine.textContent = '.my-theme .cw-hub h2 { text-transform: uppercase; letter-spacing: 0.1em; }';
+    for (const s of adopterLast ? [hub, mine] : [mine, hub]) document.head.append(s);
+    const wrap = document.createElement('div');
+    wrap.className = 'my-theme';
+    wrap.innerHTML = '<div class="cw-hub"><h2>Two</h2></div>';
+    document.body.append(wrap);
+    mounted.push(hub, mine, wrap);
+    const cs = getComputedStyle(wrap.querySelector('h2') as HTMLElement);
+    expect(cs.textTransform).toBe('uppercase');
+    expect(cs.letterSpacing).not.toBe('normal');
+  });
+
+  it('a bare `.my-hub h2` ties the hub’s rule at (0,1,1), so sheet order decides: the adopter who wants it last wins, as the README says', () => {
+    const hub = document.createElement('style');
+    hub.textContent = hubCss;
+    const mine = document.createElement('style');
+    mine.textContent = '.my-hub h2 { text-transform: uppercase; }';
+    document.head.append(hub, mine);
+    const root = document.createElement('div');
+    root.className = 'cw-hub my-hub';
+    root.innerHTML = '<h2>Two</h2>';
+    document.body.append(root);
+    mounted.push(hub, mine, root);
+    expect(getComputedStyle(root.querySelector('h2') as HTMLElement).textTransform).toBe('uppercase');
+  });
+
   it('control: without the hub stylesheet the host rule does apply (so the test can see a leak)', () => {
     const host = document.createElement('style');
     host.textContent = HOST;

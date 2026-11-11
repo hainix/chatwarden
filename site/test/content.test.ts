@@ -87,6 +87,18 @@ describe('the hub and player packages on the page', () => {
     expect(hub?.link?.href).toBe('https://www.npmjs.com/package/@chatwarden/hub-react');
   });
 
+  it('counts the ways to adopt the way hub-react’s README does: three (drop-in, pieces, hooks and headless)', () => {
+    const body = FEATURES.find((f) => f.id === 'hub')?.body ?? '';
+    expect(body).toContain('as a drop-in, as pieces, or as hooks and headless');
+    expect(body).not.toMatch(/four ways/i);
+    expect(readmeOf('hub-react')).toContain('## Three ways to adopt');
+  });
+
+  it('the hub step starts with the README’s install line, a contiguous block of the hub-react README', () => {
+    expect(HUB_STEP.install.code).toBe('npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom');
+    expect(readmeOf('hub-react')).toContain(normal(HUB_STEP.install.code));
+  });
+
   it('the hub step shows the drop-in <Hub> and, as the alternative, the one-script-tag element, each a contiguous README block', () => {
     expect(HUB_STEP.dropIn.code).toContain('<Hub client={client} />');
     expect(HUB_STEP.element.code).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
@@ -96,7 +108,7 @@ describe('the hub and player packages on the page', () => {
 
   it('every non-blank line of the hub step is a verbatim README line (and the check can fail: a changed line is caught)', () => {
     const all = new Set([readmeOf('hub-react'), readmeOf('hub-element')].flatMap((t) => t.split('\n')));
-    const lines = [HUB_STEP.dropIn.code, HUB_STEP.element.code].flatMap((c) => c.split('\n')).filter((l) => l.trim() !== '');
+    const lines = [HUB_STEP.install.code, HUB_STEP.dropIn.code, HUB_STEP.element.code].flatMap((c) => c.split('\n')).filter((l) => l.trim() !== '');
     expect(lines.length).toBeGreaterThanOrEqual(6);
     expect(lines.filter((l) => !all.has(l.trimEnd()))).toEqual([]);
     expect(all.has('export const ModeratorPage = () => <Hub client={client} />; // changed')).toBe(false);

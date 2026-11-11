@@ -133,7 +133,7 @@ describe('Steps', () => {
     expect(within(more).getByRole('heading', { level: 3 }).textContent).toMatch(/moderator hub/i);
     expect(more.textContent).toContain('<Hub client={client} />');
     expect(more.textContent).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
-    expect(within(more).getAllByRole('button', { name: /^copy /i })).toHaveLength(2);
+    expect(within(more).getAllByRole('button', { name: /^copy /i })).toHaveLength(3);
     expect(within(more).getByRole('link', { name: /player-react/i }).getAttribute('href')).toBe('https://github.com/hainix/chatwarden/tree/main/packages/player-react');
   });
   it('syntax-highlights code with local spans (no external highlighter)', () => {
@@ -154,12 +154,12 @@ describe('Steps', () => {
   it('names each scrollable code block as a region (aria-label alone is not allowed on a bare pre)', () => {
     const { container } = render(<Steps />);
     const pres = [...container.querySelectorAll('pre')];
-    expect(pres).toHaveLength(5); // the three steps, then the hub's drop-in and its one-script-tag alternative
+    expect(pres).toHaveLength(6); // the three steps, then the hub's install line, its drop-in and its one-script-tag alternative
     for (const pre of pres) {
       expect(pre.getAttribute('role')).toBe('region');
       expect(pre.getAttribute('aria-label')).toBeTruthy();
     }
-    expect(screen.getAllByRole('region').length).toBeGreaterThanOrEqual(5);
+    expect(screen.getAllByRole('region').length).toBeGreaterThanOrEqual(6);
   });
 });
 

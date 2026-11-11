@@ -161,6 +161,8 @@ describe('built dist', () => {
   const DEMO_JS_GZ = 190 * 1024;
   const DEMO_CSS_GZ = 16 * 1024;
 
+  const STAFF_AND_CLIENT_MARKERS = ['GET /changes', 'POST /cases/next', 'POST /reports/:id/decide', 'GET /policy/profile', 'POST /terms/check', '/cases/:ref/claim', 'HubError', 'createHubClient'];
+
   const gzipSize = async (file: string) => (await import('node:zlib')).gzipSync(readFileSync(file)).length;
 
   it('ships the favicon and keeps the first load small: JS under 82 KB gzip, CSS under 7 KB gzip', async () => {
@@ -180,7 +182,16 @@ describe('built dist', () => {
     for (const f of js) {
       const text = readFileSync(f, 'utf8');
       expect(text, relative(dist, f)).not.toMatch(/chatwarden\.hub\.mode|cw-hub|cw-player|\/reports\/:id|LADDER_TABLE/);
+      // markers only the staff routes (`@chatwarden/http/admin`) and the hub client carry, so a leak of the same size is still caught
+      for (const marker of STAFF_AND_CLIENT_MARKERS) expect(text, `${relative(dist, f)} has ${marker}`).not.toContain(marker);
     }
+  });
+
+  it('the staff-route and hub-client markers are real: every one is in the demo chunk (so the first-load check above can fail)', () => {
+    const demo = files.filter((f) => /Demo-[\w-]+\.js$/.test(f));
+    expect(demo).toHaveLength(1);
+    const text = texts.get(demo[0] as string) ?? '';
+    for (const marker of STAFF_AND_CLIENT_MARKERS) expect(text, marker).toContain(marker);
   });
 
   it('code-splits the demo: its own JS and CSS, not named by index.html, within the demo budget', async () => {

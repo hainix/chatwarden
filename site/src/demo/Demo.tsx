@@ -91,6 +91,27 @@ function findTarget(root: HTMLElement, step: number): HTMLElement | null {
   }
 }
 
+/**
+ * Asks the hub to read the queue now. The hub polls the kit every five seconds, and also the moment the page becomes visible again:
+ * it listens for the browser's `visibilitychange`, so a synthetic one makes its poll run at once and a report shows in the queue
+ * without the wait. But the hub reads the same event as "the page is going away" when the tab is hidden, and then sends any decision
+ * held for Undo on the spot (hub-react `src/headless/toasts.ts`: `if (!page.visible()) flush()`). So the nudge does nothing unless the
+ * tab is visible: a hidden tab keeps the visitor's five seconds. (The hub's `<Hub>` takes no handle for a refresh, so the event is the
+ * only way in; it also reaches any other listener on the page, which is why it is sent from one place.)
+ */
+function nudgeHub(): void {
+  if (document.visibilityState !== 'visible') return;
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+/** What kind of control the tour is pointing at, for scrolling once per kind: a menu button, a link, a picker, a step button. */
+function targetKind(el: HTMLElement): string {
+  const name = (el.getAttribute('aria-label') ?? el.textContent ?? '').trim();
+  if (el.tagName === 'BUTTON' && /^\d+ new cases?$/.test(name)) return 'pill';
+  if (el.tagName === 'BUTTON' && name === 'Undo') return 'undo';
+  return el.tagName.toLowerCase();
+}
+
 // What hands the page back to the person after an automatic pane switch (see the settle re-scroll).
 const SETTLE_CANCEL = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar', 'Home', 'End']);
@@ -147,8 +168,8 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const settle = useRef<number | undefined>(undefined);
   const stopSettle = useRef<() => void>(() => {});
   const loopAt = useRef(0);
-  /** The control the tour last scrolled to, so a redraw of the same control does not scroll again. */
-  const scrolledTo = useRef<HTMLElement | null>(null);
+  /** What the tour last scrolled to (the step and the kind of control), so a redraw that matches another control of the same kind does not scroll again. */
+  const scrolledTo = useRef<string | null>(null);
   const live = useRef({ paused, ready, dialog: false });
   const modalOpen = report !== null || (viewing !== null && (waiting[viewing] ?? 0) > 0);
   live.current = { paused, ready, dialog: modalOpen };
@@ -430,16 +451,18 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     const wantRule = tour.on && tour.step === STEP.apply && target !== null && target.tagName === 'SELECT';
     setNeedsRule((v) => (v === wantRule ? v : wantRule));
     if (target === null) {
-      scrolledTo.current = null;
       setPos((p) => (p === null ? p : null));
       return;
     }
     target.setAttribute('data-tour-target', 'true');
     if (compact) {
       // The bar is fixed to the bottom of the window: bring the control the step is about into view above it (scroll-margin in
-      // demo.css keeps it clear of the header, the pane switcher and the bar). Once per control: a redraw does not scroll again.
-      if (scrolledTo.current !== target) {
-        scrolledTo.current = target;
+      // demo.css keeps it clear of the header, the pane switcher and the bar). Once per step and kind of control (the pill, the link,
+      // the rule picker, the suggested step, Undo): a poll that reorders the queue makes another link match, and must not pull the page
+      // while the visitor scrolls.
+      const key = `${tour.step}:${targetKind(target)}`;
+      if (scrolledTo.current !== key) {
+        scrolledTo.current = key;
         target.scrollIntoView?.({ block: 'nearest', behavior: 'instant' });
       }
       setPos((p) => (p === null ? p : null));
@@ -580,9 +603,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     const res = await engine.reports.submit({ reporterSeat: 'you', targetSeat: d.item.seat, lineId: d.item.id, ...draftReport });
     if (res.ok && alive.current && g === gen.current) {
       setFiled(true);
-      // The hub asks the kit what changed every five seconds. Its poll also runs the moment the page becomes visible again, which
-      // is the browser's own event, so the case is on its way to the queue now rather than in a few seconds.
-      document.dispatchEvent(new Event('visibilitychange'));
+      nudgeHub();
       await refresh();
       if (!alive.current || g !== gen.current) return res;
       announce(`Report filed against ${d.item.name}.`);
@@ -593,7 +614,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
 
   async function addDetail(reportId: string, detail: ReportDetail) {
     const res = await engine.reports.addDetail(reportId, 'you', detail);
-    if (res.ok) document.dispatchEvent(new Event('visibilitychange')); // the hub reads the reason now, not in a few seconds
+    if (res.ok) nudgeHub(); // the hub reads the reason now, not in a few seconds
     return res;
   }
 

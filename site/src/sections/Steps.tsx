@@ -32,6 +32,7 @@ export function Steps() {
             </a>
             .
           </p>
+          <CodeBlock code={HUB_STEP.install.code} lang={HUB_STEP.install.lang} title={HUB_STEP.install.file} copyLabel={HUB_STEP.install.copyLabel} />
           <div className="hub-step-code">
             <CodeBlock code={HUB_STEP.dropIn.code} lang={HUB_STEP.dropIn.lang} title={HUB_STEP.dropIn.file} copyLabel={HUB_STEP.dropIn.copyLabel} />
             <div className="hub-alt">

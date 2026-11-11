@@ -104,7 +104,7 @@ so they work on both backgrounds.
 
 No customer logos (only the true "Built for Moxgate, now being adopted"; flip it to "Used by Moxgate" once Moxgate is deployed on the kit), no invented numbers, install commands and code come from the READMEs
 (`test/content.test.ts`), AI levels 1 to 4 are marked coming soon, the moderator hub card says what ships (the team workbench, Simple
-mode, editable steps and reporting, four ways to adopt and `<chatwarden-hub>`), and "free forever, no SLA" is stated plainly. Demo words are the invented
+mode, editable steps and reporting, three ways to adopt (a drop-in, pieces, hooks and headless) and `<chatwarden-hub>`), and "free forever, no SLA" is stated plainly. Demo words are the invented
 terms from `@chatwarden/matcher/fixtures` only.
 
 ## The interactive demo (`src/demo/`, its own chunk)

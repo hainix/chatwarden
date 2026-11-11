@@ -15,7 +15,7 @@ npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-
 ```
 
 `react` and `react-dom` (18.3 or 19) are peer dependencies, so your app has one copy of React (they are optional only if you import just
-`@chatwarden/hub-react/headless`; see "Three ways to adopt"). The hub uses only APIs that exist in
+`@chatwarden/hub-react/headless`; see "Four ways to adopt"). The hub uses only APIs that exist in
 18.3 (`useSyncExternalStore`, `useId`), but it is tested only on React 19 so far. `@chatwarden/core` and
 `@chatwarden/http` are peers too: the hub imports types from both and one value from core (`LADDER_TABLE`, so the decision menu
 and the suggestion cannot drift apart), and its own type declarations name them. Node 22.13 or newer
@@ -69,9 +69,96 @@ const handle = createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-m
 export const client = createHubClient(routerTransport(handle));
 ```
 
-## Three ways to adopt
+## Put it on your server
 
-Start with the first. Each later one is optional and builds on the one above it, so nothing you wrote for an earlier way is thrown away.
+The hub is a page and the kit's staff API. The simplest way to run it is to **serve the built page and the staff API under one
+origin**: the page's calls then go to the same host, cookies and sessions work as they do for the rest of your admin pages, and there is
+no CORS to set up.
+
+With Express, mount the staff routes with the adapter from `@chatwarden/http`, then the folder your bundler wrote for the page that renders
+`<Hub>`:
+
+```ts
+import express from 'express';
+import { adminRoutes } from '@chatwarden/http';
+import { toExpress } from '@chatwarden/http/express';
+
+// `cw` is your createChatwarden(...) instance; `yourModeratorLogin` is your own sign-in check (see "Signing moderators in").
+const app = express();
+// The kit's routes read the raw body themselves: mount them before any body parser.
+app.use('/admin', toExpress(adminRoutes(cw, { authorize: yourModeratorLogin }), { fallthrough: false }));
+app.use('/mod', express.static('dist/mod')); // the built page: an index.html and the script and stylesheet it loads
+app.listen(3000);
+```
+
+The page itself is a few lines (Vite, webpack or any bundler; the stylesheet is imported once):
+
+```ts
+import { createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { createHubClient, fetchTransport, Hub } from '@chatwarden/hub-react';
+// Import '@chatwarden/hub-react/styles.css' once at the top of your entry file (your bundler handles it).
+
+declare const rootElement: Parameters<typeof createRoot>[0]; // document.getElementById('root') in a page
+
+const client = createHubClient(fetchTransport({ baseUrl: '/admin' }));
+createRoot(rootElement).render(createElement(Hub, { client }));
+```
+
+Any other server works the same way, because the staff API is plain HTTP (`createRouter(adminRoutes(...))` gives you a function from a
+request to a response for any framework; see `@chatwarden/http`): answer `/admin/*` from the router and the built files from `/mod`.
+If you have no React build at all, `@chatwarden/hub-element` serves the same hub as one script tag (way 4 below), and the `tiny-chat`
+example in this repository does exactly that, behind its own sign-in.
+
+**Another origin** needs three more things: the staff API answers CORS for the page's origin, with credentials; the transport sends
+cookies (`credentials: 'include'`); and any header you rely on is allowed. Keep the staff API on the same origin where you can.
+
+## Signing moderators in
+
+The hub has no login screen. Who may use it is decided on the server, by the `authorize` function you give `adminRoutes`: it reads the
+request and answers `{ actor, role }` for a signed-in moderator or `null` for nobody (a 401), and the kit checks the role's permissions
+on every route (a 403). The hub asks `GET /me` first and shows only what that role can do. Two ways to carry the credential:
+
+- **Cookies.** On the same origin the browser sends the page's cookies with every call (`credentials: 'same-origin'` is the default), so
+  whatever signs your moderators in to the rest of your admin pages signs them in here. `authorize` reads the session from `req.headers.cookie`.
+- **A header.** `fetchTransport({ baseUrl, headers })` adds the headers to every call: a CSRF token, an API key your proxy checks, or a
+  bearer token. The headers are fixed when the transport is made. For a token that rotates, make the headers fresh on each call:
+
+```ts
+import { createHubClient, fetchTransport } from '@chatwarden/hub-react';
+import type { Transport } from '@chatwarden/hub-react';
+
+declare function currentToken(): string;
+
+// A new fetchTransport per call, so the Authorization header is always the current token.
+const rotating: Transport = (req) => fetchTransport({ baseUrl: '/admin', headers: { authorization: `Bearer ${currentToken()}` } })(req);
+
+export const client = createHubClient(rotating);
+```
+
+Cookie sign-in needs the usual care for a cookie-authenticated API: set the cookie `SameSite=Strict` or `Lax` (or require a CSRF header
+from the transport), and keep staff answers out of shared caches (the kit sends `cache-control: no-store`). `authorize` must not trust
+the page: the hub hides what a role cannot use, but only the server refuses it.
+
+## Content Security Policy
+
+The hub needs no `'unsafe-inline'` and no `'unsafe-eval'`. It injects no `<style>`, sets no inline `style` attribute, uses no
+`dangerouslySetInnerHTML` and loads no third-party resource. Allow:
+
+- `script-src`: where your bundle is served from (`'self'`).
+- `style-src`: where `styles.css` is served from (`'self'`, or a hash if you inline it yourself). Add the origin of `font.css` and its font
+  files to `style-src` and `font-src` only if you use the optional self-hosted font.
+- `connect-src`: the origin of the staff API (`'self'` when it is under the same origin, as above).
+
+```text
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'
+```
+
+(Add `img-src 'self' data:` if your own page needs images.) `@chatwarden/hub-element` has its own notes: its CSS is inside the script and adopted as a constructable stylesheet.
+
+## Four ways to adopt
+
+Start with the first. Each later one is optional and builds on the one above it, so nothing you wrote for an earlier way is thrown away. The fourth is for a page with no React build at all.
 
 ### 1. Drop in `<Hub>`
 
@@ -212,6 +299,20 @@ or plain code. Below all of it, the HTTP routes and `createHubClient` are the co
 
 `react` and `react-dom` are optional peer dependencies of this package for one reason only: the `/headless` entry needs no React. `<Hub>`,
 `HubProvider`, the pieces and the hooks do need React at runtime (18.3 or 19), so a project that imports any of them installs both.
+
+### 4. One script tag: the custom element
+
+No React build, no framework: `@chatwarden/hub-element` is the same hub as `<chatwarden-hub>`, in one self-contained script with React inside.
+It is the way for a plain HTML page, Vue, Svelte or a server-rendered admin page, and it reads the page's cookies like `<Hub>` does.
+
+```html
+<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.1/dist/hub-element.js"></script>
+<chatwarden-hub base-url="/admin"></chatwarden-hub>
+```
+
+Its attributes (`mode`, `theme`, `locale`, `game-name`, `shortcuts`, `primary`, `router`), the `client` and `t` properties, the `cw-navigate`
+and `cw-decided` events and its Content Security Policy are in the [hub-element README](https://github.com/hainix/chatwarden/tree/main/packages/hub-element).
+`primary` there is the same idea as `<Hub primary>`.
 
 ### Experimental until 0.2
 
@@ -493,6 +594,9 @@ radius, font and space is a `--cw-*` custom property, with a light and a dark va
   declares a public `--cw-*` name on `.cw-hub` (that would hide what you set above it): its defaults sit under private `--cwd-*` names
   at zero specificity (`:where(.cw-hub)`), and every rule reads `var(--cw-x, var(--cwd-x))`, your value if there is one, ours if not.
   Set `--cw-*` names only; the `--cwd-*` ones are not part of the contract.
+- **A host page's headings.** Under `.cw-hub`, `h1` to `h6` set their own font (`--cw-font`), `text-transform: none`, `letter-spacing:
+  normal` and weight, at (0,1,1), so a site that styles its own `h1`/`h2` (a display font, capitals) does not restyle the hub. To change
+  them on purpose, use a more specific selector (`.my-theme .cw-hub h2`), a rule in a sheet that loads after this one, or the tokens.
 - **Strict CSP.** The stylesheet is a file. The hub injects no `<style>`, sets no inline `style` and uses no
   `dangerouslySetInnerHTML`.
 - **Browsers.** The colours use `light-dark()` (Chrome 123, Firefox 120, Safari 17.5, all 2024), and the line-height unit `lh`.

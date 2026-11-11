@@ -174,8 +174,10 @@
   font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
 }
 /* A host page that styles its own headings (a display font, capitals, wide spacing on h1 and h2) must not restyle the hub. These set the
-   hub's font, case, spacing and weight themselves, at (0,1,1): above a host's element selector whichever sheet comes last, below a class
-   the adopter writes (`.my-hub h2`) or a rule of the hub's own that sets a heading's spacing. */
+   hub's font, case, spacing and weight themselves, at (0,1,1): above a host's element selector whichever sheet comes last. To change
+   them on purpose, write a selector above that (`.my-theme .cw-hub h2`, (0,2,1)), or `.my-hub h2` in a sheet that loads after this one
+   (a tie at (0,1,1), decided by order), or set the font token (`--cw-font`). A rule of the hub's own that sets a heading's spacing is
+   a class, so it is above this too. */
 .cw-hub :is(h1, h2, h3, h4, h5, h6) {
   font-family: var(--cw-font, var(--cwd-font));
   text-transform: none;

@@ -422,7 +422,7 @@ describe('layout on the built page', () => {
           .filter((m) => m.scroll > m.client + 1),
       );
       expect(clipped).toEqual([]);
-      expect(await page.evaluate(() => document.querySelectorAll('#add-it pre').length)).toBe(5);
+      expect(await page.evaluate(() => document.querySelectorAll('#add-it pre').length)).toBe(6);
       await ctx.close();
     });
   }

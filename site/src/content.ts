@@ -75,7 +75,7 @@ export const FEATURES: Feature[] = [
   {
     id: 'hub',
     title: 'Moderator hub and player screens',
-    body: 'A team workbench for moderators, with a Simple mode of one card per case. Editable steps and reporting: set the timeout lengths, the ladder and how players report (one tap by default). Adopt it four ways: drop-in, pieces, hooks or headless. Or one script tag: <chatwarden-hub>.',
+    body: 'A team workbench for moderators, with a Simple mode of one card per case. Editable steps and reporting: set the timeout lengths, the ladder and how players report (one tap by default). Adopt it as a drop-in, as pieces, or as hooks and headless. Or with one script tag: <chatwarden-hub>.',
     link: { label: '@chatwarden/hub-react on npm', href: `${NPM_PACKAGE_URL}/hub-react` },
   },
   {
@@ -179,12 +179,18 @@ export interface HubSnippet {
 
 /**
  * After the three steps: put the moderator hub in the page. Both snippets are blocks copied verbatim from a package README
- * (test/content.test.ts checks them): the drop-in `<Hub>` from the hub-react README, and, as the alternative, the one-script-tag
+ * (test/content.test.ts checks them): the install line and the drop-in `<Hub>` from the hub-react README, and, as the alternative, the one-script-tag
  * element from the hub-element README.
  */
-export const HUB_STEP: { title: string; body: string; dropIn: HubSnippet; element: HubSnippet } = {
+export const HUB_STEP: { title: string; body: string; install: HubSnippet; dropIn: HubSnippet; element: HubSnippet } = {
   title: 'Then add the moderator hub',
   body: 'Mount the staff routes, and the hub is one line in a React page.',
+  install: {
+    lang: 'text',
+    file: 'terminal',
+    copyLabel: 'Copy the hub install command',
+    code: 'npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom',
+  },
   dropIn: {
     lang: 'ts',
     file: 'ModeratorPage.tsx',

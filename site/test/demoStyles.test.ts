@@ -91,7 +91,7 @@ describe('demo.css', () => {
     expect(bodies('.notice-btn[data-tour-target]').join(';')).toMatch(/border-radius/);
   });
   it('the demo carries no style for the hand-built console, dialog or player frame any more', () => {
-    expect(css).not.toMatch(/\.(pframe|decide-bar|dialog-backdrop|mod-body|evidence|cat-chip)(?![\w-])/);
+    expect(css).not.toMatch(/\.(pframe|decide-bar|dialog-backdrop|mod-body|evidence|cat-chip|suggest-hint)(?![\w-])/);
   });
   it('the sticky pane switcher clears the 64px sticky site header', () => {
     expect(Number(/top:\s*(\d+)px/.exec(bodies('.pane-tabs').join(';'))?.[1])).toBeGreaterThanOrEqual(64);
