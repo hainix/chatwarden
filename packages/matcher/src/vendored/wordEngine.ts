@@ -1,3 +1,6 @@
+/*! obscenity (c) 2025 Joseph Liu, MIT; see src/vendored/THIRD-PARTY-NOTICES */
+// Last verified against obscenity 0.4.6: wordEngine.test.ts fails ("re-run the parity review") if the installed version differs.
+//
 // The matching engine `buildMatcher` runs on: obscenity's English-preset reading of text, plus its whole-word RegExp matching,
 // cut down to what the matcher calls. Copied from obscenity 0.4.6 (MIT, see ./THIRD-PARTY-NOTICES) instead of imported, for one
 // reason: obscenity's root module also loads `preset/english`, its ready-made English word list (real slurs), and a bundler cannot
@@ -55,8 +58,10 @@ const LEET = new Map<string, string>([
 const CONFUSABLE_TO_LETTER = remapTable(confusables);
 const LEET_TO_LETTER = remapTable(LEET);
 
-/** Letters whose run is cut to two (every other character: to one), the thresholds of the English preset. */
-const KEEP_TWO = new Set([...'beolsg'].map((c) => c.codePointAt(0)!));
+/** Letters whose run is cut to two (every other character: to one), the thresholds of the English preset. The one copy: the
+ *  matcher's term side (`collapseLikePreset` in ../normalise.ts) reads it too, so the two sides cannot drift. */
+export const KEEP_TWO: ReadonlySet<string> = new Set([...'beolsg']);
+const KEEP_TWO_CODE_POINTS = new Set([...KEEP_TWO].map((c) => c.codePointAt(0)!));
 
 /** The chain, one code point at a time. Returns the transformed code point, or undefined when the character is dropped. */
 class Chain {
@@ -69,7 +74,7 @@ class Chain {
     if (c >= 65 && c <= 90) c ^= 0x20; // ASCII uppercase -> lowercase
     // Collapse duplicates: threshold 1, or 2 for the kept-two letters.
     if (c === this.lastChar) return this.remaining-- > 0 ? c : undefined;
-    const threshold = KEEP_TWO.has(c) ? 2 : 1;
+    const threshold = KEEP_TWO_CODE_POINTS.has(c) ? 2 : 1;
     this.remaining = threshold - 1;
     this.lastChar = c;
     return c;
@@ -114,7 +119,9 @@ function compareHits(a: EngineHit, b: EngineHit): number {
   return a.termId === b.termId ? 0 : a.termId < b.termId ? -1 : 1;
 }
 
-/** Compiles whole-word terms (each already in the preset's collapsed form). The term at position `i` gets `termId` `i`. */
+/** Compiles whole-word terms (each already in the preset's collapsed form). The term at position `i` gets `termId` `i`.
+ *  Takes `[a-z]` words only, the form `normaliseTerm` (matcher.ts) guarantees: every character is read as a literal, where
+ *  obscenity's pattern parser would have read `? [ ] \ |` as syntax. Do not call it with anything else. */
 export function compileWords(words: readonly string[]): { getAllMatches(input: string): EngineHit[] } {
   const terms = words.map((word, termId) => {
     if (word.length === 0) throw new Error(`Pattern with ID ${termId} potentially matches empty string; this is unsupported.`);

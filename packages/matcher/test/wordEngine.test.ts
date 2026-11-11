@@ -5,9 +5,13 @@
 // thing. Tests are not bundled for browsers, so they may import obscenity (and its preset) as the reference.
 //
 // Only synthetic words and harmless text: no real term anywhere.
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { DataSet, RegExpMatcher, englishRecommendedBlacklistMatcherTransformers, englishRecommendedTransformers, parseRawPattern } from 'obscenity';
 import { describe, expect, it } from 'vitest';
-import { compileWords, transformLikePreset } from '../src/vendored/wordEngine.js';
+import { collapseLikePreset } from '../src/normalise.js';
+import { KEEP_TWO, compileWords, transformLikePreset } from '../src/vendored/wordEngine.js';
 
 /** The reference: obscenity's own transformer objects, applied one code point at a time (stateful ones from their factory),
  *  exactly as its matcher does. */
@@ -32,7 +36,7 @@ function referenceMatcher(words: readonly string[]) {
   return new RegExpMatcher({ blacklistedTerms: dataset.build().blacklistedTerms, ...englishRecommendedTransformers });
 }
 
-const WORDS = ['zorbak', 'glarn', 'vlemmo', 'drakkuun', 'fenrisk', 'bloop', 'tass'];
+const WORDS = ['zorbak', 'glarn', 'vlemo', 'drakun', 'fenrisk', 'bloop', 'tass'];
 
 // leet, look-alike letters, repeats, spacing, case, Unicode. All harmless; the synthetic WORDS above are what the cases hide.
 const TRICKY: [string, string][] = [
@@ -70,20 +74,43 @@ const TRICKY: [string, string][] = [
   ['regexp specials around', '(zorbak) [glarn] {tass} zorbak? zorbak* zorbak+ ^zorbak$ zorbak\\ zorbak|'],
 ];
 
+describe('the copy is pinned to the obscenity version it was verified against', () => {
+  it('is obscenity 0.4.6 (otherwise: re-run the parity review)', () => {
+    const entry = createRequire(import.meta.url).resolve('obscenity');
+    const pkg = JSON.parse(readFileSync(join(dirname(entry), '..', 'package.json'), 'utf8')) as { version: string };
+    expect(pkg.version, 'obscenity changed: re-run the parity review of src/vendored/wordEngine.ts, then update this version and the header note').toBe('0.4.6');
+  });
+});
+
+describe('one copy of the repeated-letter thresholds', () => {
+  it('KEEP_TWO is exactly b e o l s g', () => {
+    expect([...KEEP_TWO].sort().join('')).toBe('beglos');
+  });
+
+  it('collapseLikePreset (term side) and transformLikePreset (text side) cut every letter the same way', () => {
+    for (const letter of 'abcdefghijklmnopqrstuvwxyz') {
+      for (let n = 1; n <= 5; n++) {
+        const word = `x${letter.repeat(n)}x`; // x is not a keep-two letter and does not run into the letter under test
+        expect(collapseLikePreset(word), word).toBe(transformLikePreset(word).text);
+      }
+    }
+  });
+});
+
 describe("transformLikePreset: the same transformed text as obscenity's English preset", () => {
   it.each(TRICKY)('%s', (_name, text) => {
     expect(transformLikePreset(text).text).toBe(referenceTransform(text));
   });
 
-  it('agrees on every single code point of the first three Unicode planes (so no table entry was lost or changed in the copy)', () => {
+  it('agrees on every single code point up to U+10FFFF (so no table entry was lost or changed in the copy)', () => {
     const bad: string[] = [];
-    for (let cp = 0; cp < 0x30000; cp++) {
+    for (let cp = 0; cp <= 0x10ffff; cp++) {
       if (cp >= 0xd800 && cp <= 0xdfff) continue; // lone surrogates: covered by name above
       const ch = String.fromCodePoint(cp);
       if (transformLikePreset(ch).text !== referenceTransform(ch)) bad.push(cp.toString(16));
     }
     expect(bad).toEqual([]);
-  });
+  }, 120_000);
 
   it('agrees on every pair of letters and marks that the collapse step could treat as a run', () => {
     const chars = [...'abcdeglostz0123456789@!|$(/ -_AEGLOSZ'];

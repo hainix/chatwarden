@@ -45,7 +45,7 @@ export class MatcherBuildError extends Error {
 const MIN_TERM_LENGTH = 3;
 
 /** Lowercase, strip accents, collapse like the preset, and require plain letters only: anything else
- *  would be read by obscenity as pattern syntax ([ ] ? | \) or could never match a whole word. The
+ *  could never match a whole word, and the engine (./vendored/wordEngine.ts) reads only `[a-z]` words. The
  *  minimum length applies to the COLLAPSED form, because that is what gets matched: a term of one repeated
  *  letter collapses to a single letter and would otherwise block every standalone occurrence of it. */
 function normaliseTerm(row: TermRow): string {

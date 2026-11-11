@@ -1,6 +1,7 @@
+/*! obscenity (c) 2025 Joseph Liu, MIT; see src/vendored/THIRD-PARTY-NOTICES */
 // Look-alike characters and the plain letter each one stands for, used by the matcher's evasion handling. Copied from
 // obscenity 0.4.6 (transformer/resolve-confusables/confusables.js), which took it from the "confusables" library. Written with
-// \u{...} escapes so no editor or tool can normalise a character away. See ./LICENSE for the notices.
+// \u{...} escapes so no editor or tool can normalise a character away. See ./THIRD-PARTY-NOTICES for the notices.
 //
 // 63 entries, each (letter, string of look-alikes), in the source's order. When two entries list the same look-alike the
 // LAST one wins, so the order is part of the data.
