@@ -119,8 +119,8 @@ describe('validating durations and customDuration', () => {
 });
 
 describe('the layer: what may be edited', () => {
-  it('has exactly the eight editable sections', () => {
-    expect([...POLICY_SECTIONS]).toEqual(['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines']);
+  it('has exactly the nine editable sections', () => {
+    expect([...POLICY_SECTIONS]).toEqual(['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting']);
   });
 
   it('an empty layer changes nothing but is a fresh frozen copy', () => {

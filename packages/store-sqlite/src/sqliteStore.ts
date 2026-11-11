@@ -20,6 +20,7 @@ import type {
   ReportCategory,
   ReportListQuery,
   ReportRecord,
+  ReporterDecision,
   ReporterTally,
   SanctionKind,
   SanctionListQuery,
@@ -108,6 +109,8 @@ function reportFromRow(r: Record<string, unknown>): ReportRecord {
     targetSeat: String(r.target_seat),
     targetHandle: String(r.target_handle),
     category: String(r.category) as ReportCategory,
+    reportedReason: r.reported_reason === null || r.reported_reason === undefined ? null : String(r.reported_reason),
+    detailAt: r.detail_at === null || r.detail_at === undefined ? null : Number(r.detail_at),
     note: r.note === null ? null : String(r.note),
     lineId: r.line_id === null ? null : String(r.line_id),
     excerpt: JSON.parse(String(r.excerpt_json)) as ReportRecord['excerpt'],
@@ -828,13 +831,13 @@ export class SqliteStore implements Store, TermStore {
         .prepare(
           `INSERT INTO kit_reports
              (id, created_at, room_id, tags_json, reporter_subject, reporter_seat, reporter_handle, target_subject,
-              target_seat, target_handle, category, note, line_id, excerpt_json, people_json, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              target_seat, target_handle, category, reported_reason, note, line_id, excerpt_json, people_json, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (reporter_subject, target_subject, room_id) DO NOTHING`,
         )
         .run(
           r.id, r.createdAt, r.roomId, JSON.stringify(r.tags), r.reporterSubject, r.reporterSeat, r.reporterHandle,
-          r.targetSubject, r.targetSeat, r.targetHandle, r.category, r.note, r.lineId, JSON.stringify(r.excerpt),
+          r.targetSubject, r.targetSeat, r.targetHandle, r.category, r.reportedReason ?? null, r.note, r.lineId, JSON.stringify(r.excerpt),
           JSON.stringify(r.people), r.status,
         );
       if (Number(res.changes) === 0) return false;
@@ -909,6 +912,14 @@ export class SqliteStore implements Store, TermStore {
       where.push('status = ?');
       args.push(q.status);
     }
+    if (q.reason !== undefined) {
+      if (q.reason === null) {
+        where.push('reported_reason IS NULL');
+      } else {
+        where.push('reported_reason = ?');
+        args.push(q.reason);
+      }
+    }
     if (q.before !== undefined) {
       if (q.beforeId === undefined) {
         where.push('created_at < ?');
@@ -922,6 +933,67 @@ export class SqliteStore implements Store, TermStore {
     }
     const sql = `SELECT * FROM kit_reports${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(reportFromRow));
+  }
+
+  loadReporterDecisions(reporters: readonly SubjectId[]): ReporterDecision[] {
+    if (reporters.length === 0) return [];
+    // SQLite caps the variables of one statement, so a long list is asked for in chunks.
+    const CHUNK = 500;
+    return this.transaction(() => {
+      const out: ReporterDecision[] = [];
+      for (let i = 0; i < reporters.length; i += CHUNK) {
+        const part = reporters.slice(i, i + CHUNK);
+        const marks = part.map(() => '?').join(', ');
+        const reports = this.db
+          .prepare(
+            `SELECT id, status, reported_reason, target_subject FROM kit_reports
+             WHERE reporter_subject IN (${marks}) AND status != 'open' AND reported_reason IS NOT NULL
+             ORDER BY created_at, id`,
+          )
+          .all(...part);
+        for (const r of reports) {
+          const groups: string[] = [];
+          const decision = this.db.prepare('SELECT result_json FROM kit_decisions WHERE report_id = ?').all(String(r.id));
+          for (const d of decision) {
+            const parsed = JSON.parse(String(d.result_json)) as { groups?: Array<{ groupId?: unknown }> };
+            for (const g of parsed.groups ?? []) if (typeof g.groupId === 'string') groups.push(g.groupId);
+          }
+          const actions: ReporterDecision['actions'] = [];
+          for (const groupId of groups) {
+            const rows = this.db
+              .prepare("SELECT target_value, rule FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' ORDER BY rowid")
+              .all(groupId);
+            for (const s of rows) {
+              const rule = s.rule === null ? null : String(s.rule);
+              actions.push({ subject: String(s.target_value), rule: rule !== null && /^[1-9][0-9]*$/.test(rule) ? Number(rule) : 'uncovered' });
+            }
+          }
+          out.push({
+            reportId: String(r.id),
+            status: String(r.status) as 'actioned' | 'dismissed',
+            reason: String(r.reported_reason),
+            target: String(r.target_subject),
+            actions,
+          });
+        }
+      }
+      return out;
+    });
+  }
+
+  addReportDetail(id: string, detail: { reportedReason: string | null; category: ReportCategory; note: string | null; at: number }): boolean {
+    return this.transaction(() => {
+      // One conditional statement: only an open report with no follow-up yet. The target, excerpt and line are not in it.
+      const res = this.db
+        .prepare(
+          `UPDATE kit_reports SET reported_reason = ?, category = ?, note = ?, detail_at = ?
+           WHERE id = ? AND status = 'open' AND detail_at IS NULL`,
+        )
+        .run(detail.reportedReason, detail.category, detail.note, detail.at, id);
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
+    });
   }
 
   closeReport(

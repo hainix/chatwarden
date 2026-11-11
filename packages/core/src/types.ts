@@ -3,6 +3,7 @@
 
 import type { AuditListQuery, AuditRow } from './audit.js';
 import type { PolicyLayer } from './profile.js';
+import type { RuleRef } from './rules.js';
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -218,6 +219,19 @@ export interface ReporterTally {
 }
 
 /**
+ * One decided report a person filed that carried a reason, with what its decision did: for the reporter's accuracy. `reason` is
+ * the report's stored `reportedReason`; `target` the reported subject as stored; `actions` one entry per sanction group the
+ * decision wrote (its subject row: who, and the rule cited, `'uncovered'` included). A dismissal with no actions has an empty list.
+ */
+export interface ReporterDecision {
+  reportId: string;
+  status: 'actioned' | 'dismissed';
+  reason: string;
+  target: SubjectId;
+  actions: Array<{ subject: SubjectId; rule: RuleRef }>;
+}
+
+/**
  * How serious a piece of behaviour is, as the AI read (K3) or a moderator rates it. The shared vocabulary of every
  * report, in order from mildest to worst:
  * - `banter`: trash talk, salt, profanity not aimed at a person.
@@ -289,7 +303,11 @@ export interface DiscordThreadRow {
   createdAt: number;
 }
 
-/** What a player may report another for. */
+/**
+ * What a player could report another for in 0.1.1. A report's `category` is still one of these (derived from its reason, so
+ * code that reads `category` keeps working), but the reason a player picks is now `reportedReason`, an id from the profile's
+ * reporting reasons. `ReportInput.category` stays accepted as an alias of `reason`.
+ */
 export type ReportCategory = 'harassment' | 'hate' | 'cheating' | 'spam' | 'disruption' | 'other';
 
 /**
@@ -329,7 +347,14 @@ export interface StoredReport {
   targetSubject: SubjectId;
   targetSeat: string;
   targetHandle: string;
+  /** The 0.1.1 category this report is kept under, derived from `reportedReason` (`'other'` when none). Prefer `reportedReason`. */
   category: ReportCategory;
+  /**
+   * The reason the reporter gave: an id from the profile's reporting reasons, or null when they gave none. A HINT, never the
+   * truth: the case is settled by the moderator's decision. Optional on a row a store is given (missing reads as null); a
+   * store returns it on every record.
+   */
+  reportedReason?: string | null;
   note: string | null;
   lineId: string | null;
   excerpt: ReportExcerptLine[];
@@ -343,7 +368,14 @@ export interface StoredReport {
  * until then. `badFaith` marks a dismissal as the reporter's bad faith (it counts toward their suspension).
  * Private: moderator tools only.
  */
-export interface ReportRecord extends Omit<StoredReport, 'status'> {
+export interface ReportRecord extends Omit<StoredReport, 'status' | 'reportedReason'> {
+  /** The reason the reporter gave (a reason id), or null. Rows stored before 0.1.2 carry their old category here (`disruption` as `griefing`). */
+  reportedReason: string | null;
+  /**
+   * When the reporter added their one follow-up (`cw.reports.addDetail`), epoch ms, or null. At most one per report, and only
+   * while the report is open.
+   */
+  detailAt: number | null;
   status: 'open' | 'actioned' | 'dismissed';
   badFaith: boolean;
   actionedAt: number | null;
@@ -362,6 +394,8 @@ export interface ReportListQuery {
   /** Epoch ms; only reports created before this (exclusive), or at it with an id below `beforeId`. */
   before?: number;
   beforeId?: string;
+  /** Only reports whose `reportedReason` is this id; null keeps only those with none. Omit for all. */
+  reason?: string | null;
   limit: number;
 }
 
@@ -641,7 +675,7 @@ export interface Store {
 
   /**
    * Reports newest first (`created_at` descending, then `id` descending, so a tie is stable), whole records. `status`
-   * filters; `before` keeps only reports older than that instant (exclusive), and with `beforeId` also the ones filed
+   * filters; `reason` filters on `reportedReason` (an id, or null for none; a store must apply it, so paging stays right); `before` keeps only reports older than that instant (exclusive), and with `beforeId` also the ones filed
    * AT that instant whose id sorts below it (keyset paging: pass the last row's `createdAt` and `id`). `beforeId`
    * without `before` is ignored. `limit` is clamped to 1..200 (a fraction is floored).
    */
@@ -675,6 +709,23 @@ export interface Store {
    * mark. An empty list counts nothing.
    */
   reporterTally(reporters: readonly SubjectId[]): ReporterTally;
+
+  /**
+   * OPTIONAL. The DECIDED reports (`actioned` or `dismissed`) filed by any of the given subjects (`reporterSubject` as stored)
+   * that carry a `reportedReason`, each with the sanction groups its decision wrote (the group's subject row: the person and
+   * the rule it cited). The reporter-accuracy read behind `reasonMatched` / `reasonDecided`. A store that leaves it out
+   * reports 0 and 0. An empty list matches nothing; open reports and reports with no reason are never returned.
+   */
+  loadReporterDecisions?(reporters: readonly SubjectId[]): ReporterDecision[];
+
+  /**
+   * OPTIONAL. Attach the reporter's one follow-up to an `open` report that has none yet: set `reportedReason` and `note` (the
+   * FINAL values; the caller has merged them with what the report had) and `detailAt`, atomically. Returns true when this call
+   * did it, false (nothing changed) for an unknown report, one that is no longer `open`, or one that already has a follow-up.
+   * Never touches the target, the excerpt or the line. A store that leaves it out cannot take a follow-up: `addDetail` answers
+   * `off`. `category` is the 0.1.1 category to keep beside the reason.
+   */
+  addReportDetail?(id: string, detail: { reportedReason: string | null; category: ReportCategory; note: string | null; at: number }): boolean;
 
   /**
    * Close a report that is still `open`: set its status, bad-faith mark, `actionedAt`, `actionedBy` and `modNote`,

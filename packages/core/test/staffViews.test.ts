@@ -493,8 +493,8 @@ describe('cw.reports.reporterRecord', () => {
 
   it('is all zeros and not suspended for a person who never reported', async () => {
     const { cw, person } = await setup();
-    expect(cw.reports.reporterRecord(person())).toEqual({ reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null });
-    expect(cw.reports.reporterRecord('never-seen')).toEqual({ reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null });
+    expect(cw.reports.reporterRecord(person())).toEqual({ reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 });
+    expect(cw.reports.reporterRecord('never-seen')).toEqual({ reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 });
   });
 
   it('counts open, actioned, dismissed and bad faith; reports is the total', async () => {
@@ -505,7 +505,7 @@ describe('cw.reports.reporterRecord', () => {
     file(store, rep({ id: 'c', reporterSubject: r }), { status: 'dismissed', badFaith: false, at: NOW });
     file(store, rep({ id: 'd', reporterSubject: r }), { status: 'dismissed', badFaith: true, at: NOW - DAY });
     file(store, rep({ id: 'e', reporterSubject: 'someone-else' }));
-    expect(cw.reports.reporterRecord(r)).toEqual({ reports: 4, open: 1, actioned: 1, dismissed: 2, badFaith: 1, suspendedUntil: null });
+    expect(cw.reports.reporterRecord(r)).toEqual({ reports: 4, open: 1, actioned: 1, dismissed: 2, badFaith: 1, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 });
   });
 
   it('reports filed against the person do not count as theirs (control)', async () => {

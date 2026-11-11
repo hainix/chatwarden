@@ -34,11 +34,11 @@ const filePath = (): string => {
 };
 
 describe('migration 16: the policy layer and the audit detail', () => {
-  it('is the latest migration, version 16, and creates the layer table and the detail column', () => {
-    expect(MIGRATIONS.at(-1)?.version).toBe(16);
+  it('is migration 16, and creates the layer table and the detail column', () => {
+    expect(MIGRATIONS.some((m) => m.version === 16)).toBe(true);
     const db = memDb();
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(16);
+    expect(store.schemaVersion()).toBeGreaterThanOrEqual(16);
     const cols = db.prepare('PRAGMA table_info(kit_policy_layer)').all().map((c) => String(c.name));
     expect(cols).toEqual(['id', 'layer_json', 'version']);
     const audit = db.prepare('PRAGMA table_info(kit_audit)').all();
@@ -60,7 +60,7 @@ describe('migration 16: the policy layer and the audit detail', () => {
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'kit_policy_layer'").all()).toHaveLength(0);
 
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(16);
+    expect(store.schemaVersion()).toBeGreaterThanOrEqual(16);
     expect(store.listAudit({ limit: 5 })).toEqual([
       { id: 'old1', at: NOW, actor: 'ann', role: 'senior', action: 'report.view', target: { type: 'report', ref: 'r1' } },
     ]);
@@ -77,7 +77,7 @@ describe('migration 16: the policy layer and the audit detail', () => {
     a.savePolicyLayer({ customDuration: false }, 0);
     a.close();
     const b = openStore({ path });
-    expect(b.schemaVersion()).toBe(16);
+    expect(b.schemaVersion()).toBeGreaterThanOrEqual(16);
     expect(b.loadPolicyLayer()).toEqual({ layer: { customDuration: false }, version: 1 });
     b.close();
   });
@@ -199,7 +199,7 @@ describe('corrupted rows never stop the kit', () => {
       logger: { warn: (event) => void logged.push(event) },
       retention: false,
     });
-    expect(cw.policy.get().layerError).toEqual({ path: 'layer' });
+    expect(cw.policy.get().layerError).toEqual({ path: 'layer', kind: 'unreadable' });
     expect(cw.policy.get().layer).toEqual({});
     expect(cw.profile.durations.length).toBe(7);
     expect(logged.filter((e) => e === 'chatwarden.policy_layer_invalid')).toHaveLength(1);

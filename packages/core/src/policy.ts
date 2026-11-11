@@ -3,6 +3,8 @@ import { suggest } from './ladder.js';
 import type { ActionRecord } from './ladder.js';
 import { applyPolicyLayer, changedSections, frozenCopy, layerSections, POLICY_SECTIONS, ProfileError } from './profile.js';
 import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
+import { playerReporting } from './reporting.js';
+import type { PlayerReporting } from './reporting.js';
 import type { RuleRef } from './rules.js';
 import { errorClass, safeWarn } from './log.js';
 import { retryBusy } from './team.js';
@@ -32,8 +34,13 @@ export interface PolicyState {
   version: number;
   /** True when the store has the policy methods, so `save` and `reset` can work. */
   canSave: boolean;
-  /** Present when the stored layer could not be used (a newer kit's field, a hand edit): it is ignored and `effective` is `base`. */
-  layerError?: { path: string };
+  /**
+   * Present when the stored layer could not be used: it is ignored and `effective` is `base`. `path` names the field (`layer`
+   * itself for one that is not an object). `kind` is `'unreadable'` when the stored text could not be read at all (corrupted, not
+   * JSON, not an object): the owner's edits are gone until they save again; `'invalid'` when it was read but a setting is not
+   * valid (a newer kit's field, a hand edit). Either way a save or a full `reset()` repairs it.
+   */
+  layerError?: { path: string; kind: 'unreadable' | 'invalid' };
 }
 
 /** What {@link PolicyService.save} and {@link PolicyService.reset} answer. */
@@ -63,7 +70,7 @@ export interface PreviewOutcome {
 
 /** What {@link PolicyService.preview} answers: for each sample and each conduct level, what would be suggested. */
 export type PolicyPreview =
-  | { ok: true; samples: Record<PreviewSample, Record<ConductLevel, PreviewOutcome>> }
+  | { ok: true; samples: Record<PreviewSample, Record<ConductLevel, PreviewOutcome>>; /** What players would read of the candidate's reporting settings (the enabled reasons, the flow and the thank-you). */ reporting: PlayerReporting }
   | { ok: false; error: 'invalid'; path: string };
 
 const HOUR_MS = 3_600_000;
@@ -84,7 +91,7 @@ export class PolicyService {
   private readonly clock: Clock;
   private readonly logger: Logger | undefined;
   private readonly base: ResolvedProfile;
-  private state: { effective: ResolvedProfile; layer: PolicyLayer; version: number; layerError?: { path: string } };
+  private state: { effective: ResolvedProfile; layer: PolicyLayer; version: number; layerError?: PolicyState['layerError'] };
   /** When the store was last looked at (epoch ms), or null before the first read. */
   private lastCheck: number | null = null;
 
@@ -119,7 +126,8 @@ export class PolicyService {
       if (!(err instanceof ProfileError)) throw err;
       // What `get()` shows is always an object: an unreadable layer reads as empty, with the error beside it.
       const shown = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? layer : frozenCopy({});
-      this.state = { effective: this.base, layer: shown, version, layerError: { path: err.path } };
+      const kind = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? 'invalid' : 'unreadable';
+      this.state = { effective: this.base, layer: shown, version, layerError: { path: err.path, kind } };
       // Once per version: `adopt` runs only when the stored version changed (or at start-up), never on a plain re-read.
       safeWarn(this.logger, 'chatwarden.policy_layer_invalid', { version, path: err.path });
     }
@@ -275,6 +283,6 @@ export class PolicyService {
       }
       samples[sample] = levels;
     }
-    return { ok: true, samples };
+    return { ok: true, samples, reporting: playerReporting(candidate.reporting) };
   }
 }

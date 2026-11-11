@@ -12,6 +12,7 @@ import {
   type ProfileOverrides,
 } from '../src/profile.js';
 import { HISTORY_LOOKBACK_MS, LADDER_TABLE } from '../src/ladder.js';
+import { defaultReporting } from '../src/reporting.js';
 import { CONDUCT_LEVELS } from '../src/types.js';
 import type { ConductLevel } from '../src/types.js';
 
@@ -484,7 +485,8 @@ describe('defineProfile', () => {
 
   it('round-trips a custom profile', () => {
     const d = defineProfile(custom);
-    expect(d).toEqual(custom);
+    // A profile with no reporting section gets the default reporting settings.
+    expect(d).toEqual({ ...custom, reporting: defaultReporting() });
     expect(d.id).toBe('mygame');
     expect(resolveProfile(d, { name: 'Renamed' }).name).toBe('Renamed');
     expect(resolveProfile(d)).toEqual(d);

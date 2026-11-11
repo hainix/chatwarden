@@ -595,7 +595,7 @@ describe('a stored layer this kit cannot use', () => {
     clock.t += REFRESH;
     expect(cw.profile).toEqual(PRESETS.standard);
     const state = cw.policy.get();
-    expect(state.layerError).toEqual({ path: 'layer.profanity' });
+    expect(state.layerError).toEqual({ path: 'layer.profanity', kind: 'invalid' });
     expect(state.version).toBe(1);
     expect(state.layer).toEqual(POISON);
     expect(state.effective).toEqual(PRESETS.standard);
@@ -612,7 +612,7 @@ describe('a stored layer this kit cannot use', () => {
     store.savePolicyLayer({ durations: [3, 2] }, 0);
     const { cw, logged } = await setup({}, store);
     expect(cw.profile).toEqual(PRESETS.standard);
-    expect(cw.policy.get().layerError).toEqual({ path: 'layer.durations' });
+    expect(cw.policy.get().layerError).toEqual({ path: 'layer.durations', kind: 'invalid' });
     expect(logged.filter(([e]) => e === 'chatwarden.policy_layer_invalid')).toHaveLength(1);
   });
 
@@ -620,7 +620,7 @@ describe('a stored layer this kit cannot use', () => {
     const store = new MemoryStore();
     store.savePolicyLayer({ slowMode: { seconds: 5 } } as unknown as PolicyLayer, 0);
     const { cw } = await setup({}, store);
-    expect(cw.policy.get().layerError).toEqual({ path: 'layer.slowMode' });
+    expect(cw.policy.get().layerError).toEqual({ path: 'layer.slowMode', kind: 'invalid' });
   });
 
   it('a saved fix clears the error, here and in the other process', async () => {
@@ -650,7 +650,7 @@ describe('a stored layer this kit cannot use', () => {
     const store = new MemoryStore();
     store.savePolicyLayer('nope' as unknown as PolicyLayer, 0);
     const { cw } = await setup({}, store);
-    expect(cw.policy.get().layerError).toEqual({ path: 'layer' });
+    expect(cw.policy.get().layerError).toEqual({ path: 'layer', kind: 'unreadable' });
     expect(cw.profile).toEqual(PRESETS.standard);
   });
 });
@@ -761,7 +761,7 @@ describe('a stored layer that is null (a corrupted row)', () => {
     const { cw, logged } = await setup({}, store);
     expect(cw.profile).toEqual(PRESETS.standard);
     const state = cw.policy.get();
-    expect(state.layerError).toEqual({ path: 'layer' });
+    expect(state.layerError).toEqual({ path: 'layer', kind: 'unreadable' });
     expect(state.layer).toEqual({});
     expect(state.version).toBe(1);
     expect(logged.filter(([e]) => e === 'chatwarden.policy_layer_invalid')).toHaveLength(1);

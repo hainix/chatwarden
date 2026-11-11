@@ -1,6 +1,8 @@
 import { HISTORY_LOOKBACK_MS } from './ladder.js';
 import type { Limits } from './limits.js';
 import { reporterSuspendedUntil } from './reports.js';
+import { findReason } from './reporting.js';
+import type { ReportReason } from './reporting.js';
 import { parseRuleRef } from './rules.js';
 import type { RuleRef } from './rules.js';
 import { SANCTION_SOURCES } from './sanctions.js';
@@ -212,6 +214,12 @@ export function listSanctionGroups(store: Store, subjects: SubjectIndex, q: Sanc
  * how many of the dismissals carry the bad-faith mark (all that are still stored), and `suspendedUntil` the epoch ms their
  * reporting suspension ends, or null when they are not suspended. Suspension is the intake rule: `suspendAfter` bad-faith
  * dismissals inside `suspendWindowMs`. Counts folded over every alias of the person. Staff only.
+ *
+ * `reasonDecided` counts the decided (actioned or dismissed) reports they filed that named a reason, and `reasonMatched` how many
+ * of those the decision bore out: the decision cited, against the reported person, a rule in that reason's `rules`. A dismissal
+ * never matches. A reason no longer in the profile's list cannot be judged and is left out of both; a switched-off one still
+ * counts. It is read against the reasons in force now, so editing a reason's rules changes the count. A reporter's reason is a
+ * hint, so this is a signal for moderators and nothing more: it is never used to refuse a report.
  */
 export interface ReporterRecord {
   reports: number;
@@ -220,6 +228,8 @@ export interface ReporterRecord {
   dismissed: number;
   badFaith: number;
   suspendedUntil: number | null;
+  reasonMatched: number;
+  reasonDecided: number;
 }
 
 export function reporterRecord(
@@ -228,9 +238,22 @@ export function reporterRecord(
   limits: Limits['reports'],
   person: SubjectId,
   now: number,
+  reasons: readonly ReportReason[] = [],
 ): ReporterRecord {
   const root = subjects.canonical(person);
-  const tally = store.reporterTally(subjects.aliasesOf(root));
+  const aliases = subjects.aliasesOf(root);
+  const tally = store.reporterTally(aliases);
+  let reasonDecided = 0;
+  let reasonMatched = 0;
+  for (const d of store.loadReporterDecisions?.(aliases) ?? []) {
+    const reason = findReason(reasons, d.reason);
+    if (reason === undefined) continue;
+    reasonDecided++;
+    const target = subjects.canonical(d.target);
+    if (d.actions.some((a) => typeof a.rule === 'number' && subjects.canonical(a.subject) === target && reason.rules.includes(a.rule))) {
+      reasonMatched++;
+    }
+  }
   const marks: number[] = [];
   for (const m of store.loadBadFaithMarks(now - limits.suspendWindowMs)) {
     if (subjects.canonical(m.reporter) === root) marks.push(m.actionedAt);
@@ -242,6 +265,8 @@ export function reporterRecord(
     dismissed: tally.dismissed,
     badFaith: tally.badFaith,
     suspendedUntil: reporterSuspendedUntil(marks, limits),
+    reasonMatched,
+    reasonDecided,
   };
 }
 

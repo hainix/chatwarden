@@ -13,6 +13,7 @@ import type {
   ReportActivity,
   ReportListQuery,
   ReportRecord,
+  ReporterDecision,
   ReporterTally,
   SanctionListQuery,
   SanctionRow,
@@ -632,6 +633,8 @@ export class MemoryStore implements Store {
     if (this.reports.some((r) => r.id === row.id)) throw new Error('UNIQUE constraint failed: kit_reports.id');
     this.reports.push({
       ...structuredClone(row),
+      reportedReason: row.reportedReason ?? null,
+      detailAt: null,
       badFaith: false,
       actionedAt: null,
       actionedBy: null,
@@ -701,6 +704,7 @@ export class MemoryStore implements Store {
     return this.reports
       .filter((r) => {
         if (q.status !== undefined && r.status !== q.status) return false;
+        if (q.reason !== undefined && r.reportedReason !== q.reason) return false;
         if (q.before === undefined) return true;
         if (r.createdAt !== q.before) return r.createdAt < q.before;
         return q.beforeId !== undefined && compare(r.id, q.beforeId) < 0;
@@ -708,6 +712,40 @@ export class MemoryStore implements Store {
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, limit)
       .map((r) => structuredClone(r));
+  }
+
+  loadReporterDecisions(reporters: readonly SubjectId[]): ReporterDecision[] {
+    const wanted = new Set(reporters);
+    const out: ReporterDecision[] = [];
+    for (const r of this.reports) {
+      if (!wanted.has(r.reporterSubject) || r.status === 'open' || r.reportedReason === null) continue;
+      const groups = new Set<string>();
+      for (const d of this.decisions.values()) {
+        if (d.reportId !== r.id) continue;
+        const parsed = JSON.parse(d.resultJson) as { groups?: Array<{ groupId?: unknown }> };
+        for (const g of parsed.groups ?? []) if (typeof g.groupId === 'string') groups.add(g.groupId);
+      }
+      const actions: ReporterDecision['actions'] = [];
+      for (const s of this.sanctions) {
+        if (!groups.has(s.groupId) || s.targetType !== 'subject') continue;
+        actions.push({ subject: s.value, rule: s.rule !== null && /^[1-9][0-9]*$/.test(s.rule) ? Number(s.rule) : 'uncovered' });
+      }
+      out.push({ reportId: r.id, status: r.status, reason: r.reportedReason, target: r.targetSubject, actions });
+    }
+    return out;
+  }
+
+  addReportDetail(id: string, detail: { reportedReason: string | null; category: ReportRecord['category']; note: string | null; at: number }): boolean {
+    const r = this.reports.find((x) => x.id === id);
+    if (r === undefined || r.status !== 'open' || r.detailAt !== null) return false;
+    const before = { reportedReason: r.reportedReason, category: r.category, note: r.note, detailAt: r.detailAt };
+    r.reportedReason = detail.reportedReason;
+    r.category = detail.category;
+    r.note = detail.note;
+    r.detailAt = detail.at;
+    this.undoWith(() => Object.assign(r, before));
+    this.bump();
+    return true;
   }
 
   closeReport(

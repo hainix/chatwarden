@@ -24,6 +24,7 @@ export type {
   SanctionListQuery,
   SanctionRow,
   SanctionTargetType,
+  ReporterDecision,
   ReporterTally,
   ClaimAttempt,
   ClaimMode,
@@ -99,7 +100,44 @@ export {
   SUSPEND_AFTER,
   SUSPEND_WINDOW_MS,
 } from './reports.js';
-export type { ReportCounts, ReportInput, ReportRefusal, ReportResult, ReportServiceDeps } from './reports.js';
+export { REPORT_DETAIL_WINDOW_MS } from './reports.js';
+export type {
+  ReportCounts,
+  ReportDetailInput,
+  ReportDetailRefusal,
+  ReportDetailResult,
+  ReportInput,
+  ReportRefusal,
+  ReportResult,
+  ReportServiceDeps,
+} from './reports.js';
+export {
+  canonicalReasonId,
+  DEFAULT_REPORT_FLOW,
+  DEFAULT_REPORT_REASONS,
+  DEFAULT_REPORT_THANKS,
+  defaultReporting,
+  findReason,
+  isReasonId,
+  legacyCategoryOf,
+  LEGACY_REASON_ALIASES,
+  MAX_REASON_RULES,
+  MAX_REPORT_REASONS,
+  OTHER_REASON_ID,
+  playerReporting,
+  reasonLabel,
+  reasonOfCategory,
+  REPORT_FLOWS,
+  suggestedRule,
+} from './reporting.js';
+export type {
+  PlayerReporting,
+  ReportFlow,
+  ReportingSettings,
+  ReportReason,
+  ReportReasonInput,
+  ResolvedReporting,
+} from './reporting.js';
 export {
   decodeReportCursor,
   encodeReportCursor,

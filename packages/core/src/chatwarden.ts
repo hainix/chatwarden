@@ -25,7 +25,7 @@ import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
-import type { ReportCounts, ReportInput, ReportResult } from './reports.js';
+import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, ReportResult } from './reports.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
@@ -247,12 +247,27 @@ export interface Chatwarden {
     mutedSeats(roomId: string, viewerSeat: string): string[];
   };
   reports: {
+    /**
+     * File a report. `input.reason` (or the 0.1.1 alias `category`) is optional: with the default `one_tap` flow a report with
+     * no reason is taken; with `reason_required` it is refused `reason_required`; an unknown or switched-off reason is
+     * `reason_unknown` in every flow. The reason is stored as `reportedReason`: a hint for the moderator, never the truth.
+     * See {@link ReportInput} and {@link ReportRefusal}. The kit has no player report route: your game's own route calls this.
+     */
     submit(input: ReportInput): Promise<ReportResult>;
+    /**
+     * The reporter's one optional follow-up after a report: `{ reason?, note? }` attached to the same report. Only the original
+     * reporter (the same seat, still in the report's room), once, within ten minutes, and while the report is open; it never
+     * changes the target or the excerpt. Refusals: `off`, `not_found`, `not_reporter`, `too_late`, `already_added`,
+     * `reason_unknown`. Never rejects. The kit has no player report route: expose this from your own, the way you expose
+     * `submit`, with the seat taken from your own session and never from the request body.
+     */
+    addDetail(reportId: string, reporterSeat: string, detail: ReportDetailInput): Promise<ReportDetailResult>;
     /**
      * The staff report queue, newest first (ties broken by id), one page at a time. Filter with `status`; pass the
      * previous page's `next` as `before` for the next page; `limit` defaults to 50 and is clamped to 1..200. Each item
      * is a {@link StaffReport}: the whole record plus the canonical staff refs and the own line ids of every person.
-     * Throws `ReportQueryError` for an unknown status or a cursor that is not one of ours, and the store's own error
+     * `reason` keeps only the reports filed under that reported reason (`null`: none given). Throws `ReportQueryError` for an
+     * unknown status, a malformed reason or a cursor that is not one of ours, and the store's own error
      * if it fails, so a route handler should catch both.
      * Carries subject ids: staff channels only, never send to a player.
      */
@@ -264,7 +279,8 @@ export interface Chatwarden {
     get(id: string): StaffReport | null;
     /**
      * How the reports this person FILED stand (total, open, actioned, dismissed, bad faith) and when their reporting
-     * suspension ends (null if none), under the same rule intake uses. Folds in the person's merged aliases. Staff only:
+     * suspension ends (null if none), under the same rule intake uses, and how often their reported reason was borne out
+     * (`reasonMatched` of `reasonDecided`). Folds in the person's merged aliases. Staff only:
      * never send to a player (a player is not told who reported or how often).
      */
     reporterRecord(subject: SubjectId): ReporterRecord;
@@ -678,6 +694,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     store,
     clock,
     enabled,
+    reporting: () => policy.profileNow().reporting,
     onReport: opts.onReport,
     logger,
     limits: limits.reports,
@@ -725,6 +742,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         reportId: stored.id,
         createdAt: stored.createdAt,
         category: stored.category,
+        reportedReason: stored.reportedReason,
         roomTags: { ...stored.tags },
       });
     } catch (err) {
@@ -805,12 +823,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         if (res.ok) announceReport(res.reportId);
         return res;
       },
-      list: (q) => listStaffReports(store, subjects, q),
+      addDetail: (reportId, reporterSeat, detail) => reports.addDetail(reportId, reporterSeat, detail),
+      list: (q) => listStaffReports(store, subjects, q, policy.profileNow().reporting.reasons),
       get: (id) => {
         const record = typeof id === 'string' ? store.loadReport(id) : null;
         return record === null ? null : staffReport(record, subjects);
       },
-      reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now()),
+      reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
     },
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),

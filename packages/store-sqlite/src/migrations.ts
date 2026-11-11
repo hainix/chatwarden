@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map, migration 15 is soft claims on a person's case and saved decision reasons, migration 16 is the editable profile's stored layer and the audit trail's detail column. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map, migration 15 is soft claims on a person's case and saved decision reasons, migration 16 is the editable profile's stored layer and the audit trail's detail column, migration 17 is the reason a reporter gave and the time of their one follow-up. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -396,6 +396,23 @@ CREATE TABLE kit_policy_layer (
   version    INTEGER NOT NULL CHECK (version >= 1)
 );
 ALTER TABLE kit_audit ADD COLUMN detail_json TEXT;
+`,
+  },
+  {
+    version: 17,
+    // The reporting settings (K4 Task 7h). `reported_reason` is the reason id the reporter gave (a hint: the case is settled by the
+    // decision), NULL when they gave none; `detail_at` is when the reporter added their one follow-up, NULL until then. Both are
+    // nullable columns added in place, and `category` (NOT NULL) is kept and still written, so every reader of it keeps working.
+    // Rows filed before this migration carry their old category as their reason: the six 0.1.1 categories are reason ids, with
+    // `disruption` read as `griefing`; a category that is none of the six (a hand edit) stays NULL rather than being guessed. The
+    // runner wraps this in one savepoint with the version bump, so a failure leaves version 16 and no column.
+    sql: `
+ALTER TABLE kit_reports ADD COLUMN reported_reason TEXT;
+ALTER TABLE kit_reports ADD COLUMN detail_at INTEGER;
+UPDATE kit_reports
+  SET reported_reason = CASE category WHEN 'disruption' THEN 'griefing' ELSE category END
+  WHERE category IN ('harassment', 'hate', 'cheating', 'spam', 'disruption', 'other');
+CREATE INDEX kit_reports_by_reason ON kit_reports (reported_reason, created_at);
 `,
   },
 ];

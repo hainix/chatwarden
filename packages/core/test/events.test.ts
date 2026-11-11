@@ -89,9 +89,9 @@ describe('events: report.created', () => {
     const res = await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a', category: 'harassment', note: SECRET_TEXT.note });
     if (!res.ok) throw new Error('expected ok');
     expect(events).toEqual([
-      { type: 'report.created', reportId: res.reportId, createdAt: NOW, category: 'harassment', roomTags: { mode: 'ranked', region: 'eu' } },
+      { type: 'report.created', reportId: res.reportId, createdAt: NOW, category: 'harassment', reportedReason: 'harassment', roomTags: { mode: 'ranked', region: 'eu' } },
     ]);
-    expect(Object.keys(events[0] ?? {}).sort()).toEqual(['category', 'createdAt', 'reportId', 'roomTags', 'type']);
+    expect(Object.keys(events[0] ?? {}).sort()).toEqual(['category', 'createdAt', 'reportId', 'reportedReason', 'roomTags', 'type']);
     // The report was readable from inside the listener: the event follows the commit.
     expect(seenInListener).toEqual([res.reportId]);
   });
@@ -100,9 +100,9 @@ describe('events: report.created', () => {
     const { cw, events } = await setup();
     cw.rooms.seat(R, 'a', alice, 'Alice');
     cw.rooms.seat(R, 'b', bob, 'Bob');
-    // An unknown category is stored as 'other'; the event says what was stored.
-    await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a', category: 'bogus' as never });
-    expect(events).toEqual([expect.objectContaining({ type: 'report.created', category: 'other', roomTags: {} })]);
+    // A report with no reason is stored under 'other', with no reported reason; the event says what was stored.
+    await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a' });
+    expect(events).toEqual([expect.objectContaining({ type: 'report.created', category: 'other', reportedReason: null, roomTags: {} })]);
   });
 
   it('does not alias the room tags: a listener changing them changes nothing else', async () => {
