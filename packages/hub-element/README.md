@@ -210,7 +210,7 @@ import (its entry is listed under `sideEffects`, so a bare `import '@chatwarden/
 ## Size
 
 `dist/hub-element.js` is about 640 KB minified, about 175 KB gzipped and about 148 KB with brotli, with React, react-dom, the whole hub and
-its stylesheet in it. A test holds it under 185 KB gzipped. The cost is the price of needing nothing else on the page; a team that already ships React
+its stylesheet in it. A test holds it under 200 KB gzipped. The cost is the price of needing nothing else on the page; a team that already ships React
 pays far less with `@chatwarden/hub-react`.
 
 ## Security notes

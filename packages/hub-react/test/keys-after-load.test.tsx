@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Hub } from '../src/Hub.js';
 import type { HubProps } from '../src/Hub.js';
+import type { HubProviderProps } from '../src/provider.js';
 import { memoryRouter } from '../src/router.js';
 import { hubInShadow, removeShadowHosts, shadowRootIn } from './shadow.js';
 import { hubWorld } from './world.js';
@@ -264,6 +265,18 @@ describe('a hub in a shadow root, with focus on the body', () => {
     blur();
     await s.user.keyboard('j');
     expect(s.shadow.activeElement).toBe(rows(s.container)[0]);
+  });
+});
+
+describe('primary belongs to the hub alone', () => {
+  it('HubProvider does not take it (a piece answers keys only while focus is inside it)', () => {
+    // The type is the test: tsc fails this file if HubProvider ever grows the prop.
+    const props: HubProviderProps = {
+      client: undefined as never,
+      // @ts-expect-error `primary` is a prop of <Hub> and of the element, not of the provider
+      primary: true,
+    };
+    expect(props).toBeDefined();
   });
 });
 

@@ -42,11 +42,6 @@ export interface HubProviderOptions {
   /** Set `false` to turn every keyboard shortcut off (a piece's keys, such as 1 and 2 on a case card), for a page that has its own. Default `true`. */
   shortcuts?: boolean;
   /**
-   * Which hub answers keys when nothing on the page has focus. Only `<Hub>`'s shell has such keys, so this does nothing on a provider
-   * that places pieces (a piece answers only while focus is inside it); it is here so one set of options serves both. Default `false`.
-   */
-  primary?: boolean;
-  /**
    * Draw no wrapper. By default the provider puts its children in the `.cw-hub` theme root, so the pieces are styled where they sit.
    * With `bare`, you place the root: an element with the classes `cw-hub cw-hub--embed` (and, to force a theme, `data-cw-theme`).
    */
@@ -132,6 +127,8 @@ function useControllerOf(given: HubController | undefined, client: HubClient, ma
 
 /** What the provider (and the hub's shell, which is made of it) is given besides the public props. */
 export interface HubRootProps extends HubProviderOptions {
+  /** `<Hub>`'s `primary` (not a provider option: pieces answer keys only while focus is inside them). */
+  primary?: boolean;
   client: HubClient | undefined;
   controller: HubController | undefined;
   children?: ReactNode;

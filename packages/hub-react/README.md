@@ -128,8 +128,7 @@ Every piece takes `className` for its root element. A role without the permissio
 and nothing is asked of the server.
 
 `HubProvider` takes exactly one of `client` or `controller`, then `mode`, `t`, `locale`, `now`, `theme` and `shortcuts` (the same as on
-`<Hub>`), `primary` (accepted so one set of options serves both; it does nothing on a provider, whose pieces answer only while focus is
-inside them), `className`, and `bare`.
+`<Hub>`), `className`, and `bare`. (`primary` is `<Hub>`'s alone: a piece answers keys only while focus is inside it.)
 
 - **`client`**: the provider makes the controller (the live queue, claims, the Undo hold and the toasts) and disposes it when it unmounts. A
   new client makes a new controller.

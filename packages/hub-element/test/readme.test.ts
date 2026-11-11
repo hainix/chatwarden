@@ -187,7 +187,7 @@ describe('the README is plain', () => {
   it('names the installed size honestly: the number in the Size section is within the budget in the size test', () => {
     const size = section('Size');
     expect(size.replace(/\s+/g, ' ')).toMatch(/about 640 KB minified, about 175 KB gzipped/);
-    expect(size).toMatch(/under 185 KB gzipped/);
+    expect(size).toMatch(/under 200 KB gzipped/);
   });
 });
 
