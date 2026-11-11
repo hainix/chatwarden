@@ -20,10 +20,37 @@ npm run test --workspace site
 ```
 
 The tests cover the copy (every code line is a verbatim README line), the built page (no third-party host, no tracker, the
-meta and OG tags, the 1200x630 OG image, `llms.txt` links that resolve to real repo paths, the `_headers` rules), the demo, and
-a real-browser pass that loads the built page under the actual Content-Security-Policy and asserts zero violations, runs axe
-(no serious or critical issues, both themes, phone and desktop) and checks the layout at several widths. A global setup builds
-the kit packages the demo imports (`tsc -b` on core, matcher and store-memory, a no-op when up to date) and then `dist/`, once, before the files run.
+meta and OG tags, the 1200x630 OG image, `llms.txt` links that resolve to real repo paths, the `_headers` rules, the first-load and
+demo-chunk budgets), the demo (the real hub and player components, the tour), and a real-browser pass that loads the built page
+under the actual Content-Security-Policy and asserts zero violations (the hub's and the player's CSS included), runs axe (no
+serious or critical issues, both themes, at 360, 768 and 1440 wide, with the hub showing a case, a dialog open, Steps and ladder
+and the Detailed workbench) and checks the layout at several widths. A global setup builds the kit packages the demo imports
+(`tsc -b` on core, http, matcher, store-memory, hub-react and player-react, a no-op when up to date) and then `dist/`, once,
+before the files run (`CW_SITE_SKIP_BUILD=1` skips the site build for a file that reads no `dist/`).
+
+## The demo
+
+The demo is the real thing, not a drawing of it:
+
+- The game pane is a small chat lobby (`src/demo/GamePane.tsx`) over `KitEngine`, which runs `@chatwarden/core` with the matcher's
+  invented-words pack and the in-memory store, in the visitor's tab.
+- The moderator pane is `@chatwarden/hub-react`'s `<Hub>` in Simple mode (its default, with the Simple/Detailed switch showing),
+  over the kit's real staff routes (`adminRoutes` from `@chatwarden/http/admin`), called in the page through `routerTransport` on a
+  `memoryRouter`: no network, and the hub cannot tell. It is signed in as a made-up owner (`demo-mod`), so every screen opens,
+  Steps and ladder included. `src/demo/HubPane.tsx` also tells the page when a case was opened and a decision taken (the tour
+  follows those). Its keys answer only while the visitor is working in the demo (`shortcuts` follows the visitor, `primary` is set),
+  and never while they type in the chat box or a dialog.
+- The report dialog and the notice dialog are `@chatwarden/player-react`'s `ReportDialog` (on the kit's own reporting settings:
+  one tap by default; the follow-up calls `cw.reports.addDetail`) and `NoticeQueue`. The kit has no player report route and the
+  player routes do not run in a browser, so `src/demo/playerTransport.ts` is a small local transport that answers the same calls
+  from the kit directly, for one seat.
+- The tour (seven steps, the last two optional) points at hub controls by role and accessible name (`src/demo/hubTarget.ts`):
+  hub-react has no tour-hook option and the page does not change it.
+- Layout: side by side from 1152px (the game is the narrow column; the hub gets about 720px), one pane at a time below that, with a
+  switch (and the tour moves for the visitor). The hub switches to three panes from a 1200px window; `demo.css` keeps it stacked
+  inside its pane. The hub's font file (`font.css`) is not loaded: the site keeps its own two fonts.
+- It is a separate chunk that loads when the section nears the viewport (200px ahead) or a visitor points at it, so the hub, the
+  staff routes, the player components and their CSS are not in the first load.
 
 ## Build and preview
 
@@ -43,7 +70,9 @@ What ships, and how it is served:
   unhashed files keep the Pages default (revalidate on every load).
 - The theme bootstrap is `public/theme-init.js`, a file, because the CSP forbids inline scripts.
 - Measured on the production build: initial JS about 80 KB gzip, initial CSS about 6 KB gzip; the demo loads lazily
-  (about 68 KB JS and 5 KB CSS gzip: the JS is the real Chatwarden kit, running in the visitor's browser). Lighthouse on mobile: 100 for performance, accessibility, best practices and SEO.
+  (about 178 KB JS and 15 KB CSS gzip: the JS is the real Chatwarden kit, the real hub, the staff routes it runs over and the
+  player components, all running in the visitor's browser). Both budgets are in `test/dist.test.ts`, with their reasons.
+  Lighthouse on mobile, before the real hub went in: 100 for performance, accessibility, best practices and SEO (measured again at the next deploy).
 
 ## Deploy (Cloudflare Pages)
 
@@ -110,6 +139,7 @@ PNGs from the CI artifact), commit them, or relax the guard to a size check.
 ## Changing the content
 
 - Words live in `src/content.ts`. Code samples and install commands must stay verbatim lines of a package README; the tests
-  fail if they drift.
+  fail if they drift. That includes "Then add the moderator hub" (the drop-in `<Hub>` from the hub-react README and the one-script-tag
+  `<chatwarden-hub>` from the hub-element README) and "Show me the code" in the demo.
 - If you add a package, add its README and npm link to `public/llms.txt`.
 - The only demo words are the invented ones from `@chatwarden/matcher/fixtures`. Never put a real slur anywhere in the site.

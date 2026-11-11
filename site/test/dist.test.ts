@@ -23,6 +23,9 @@ const INERT_URLS = [
   /^https?:\/\/www\.w3\.org\/((XML\/)?\d{4}\/)[a-z0-9/]+$/i, // XML, SVG, MathML and XLink namespaces (never fetched)
   /^https?:\/\/www\.sitemaps\.org\/schemas\/sitemap\/[\d.]+$/i, // the sitemap XML namespace (never fetched)
   /^https:\/\/react\.dev\/errors\b/i, // the text of React's production error messages (never fetched)
+  // The one-script-tag sample from the hub-element README, shown as TEXT in "Then add the moderator hub" (a code block, never a
+  // <script>). test/browser.test.ts proves the page requests nothing from this host; only this exact address is let through.
+  /^https:\/\/cdn\.jsdelivr\.net\/npm\/@chatwarden\/hub-element@\d+(?:\.\d+)*\/dist\/hub-element\.js$/,
 ];
 
 // A quoted string of 3+ characters on one line. A backtick string only counts when it looks like prose (no code
@@ -140,29 +143,71 @@ describe('built dist', () => {
     expect(js).toMatch(/zorbak/i);
   });
 
-  it('ships the favicon and keeps the initial JS small (under 120 KB gzip)', async () => {
-    const { gzipSync } = await import('node:zlib');
+  // ---- Budgets (gzip). The page's first load, and the demo chunk that only loads when the demo section nears the viewport. ----
+  //
+  // First load (index.html + its JS + its CSS), measured on the production build:
+  //   before the real hub (BASE f89abd0):  JS 79.3 KB, CSS 5.9 KB
+  //   now:                                 JS 80.0 KB, CSS 6.0 KB
+  // The +0.6 KB JS and +0.1 KB CSS are the page's own new words (the hub card, "Then add the moderator hub" with its two README
+  // snippets, the npm links); the hub, the player components and their styles are NOT in it. Budgets leave about 2 KB of room for
+  // copy edits, so a dependency that creeps into the first load fails here. (The old ceiling for JS alone was 120 KB.)
+  const FIRST_LOAD_JS_GZ = 82 * 1024;
+  const FIRST_LOAD_CSS_GZ = 7 * 1024;
+  // The demo chunk: the real kit (core, the matcher with its synthetic pack, the in-memory store) AND now the real hub
+  // (@chatwarden/hub-react), the staff routes it runs over (@chatwarden/http/admin) and the player components
+  // (@chatwarden/player-react), with their stylesheets. Measured: JS 177.5 KB (600 KB raw), CSS 14.8 KB (105 KB raw); it was JS 77.6
+  // KB and CSS 5.0 KB with the hand-built console. The hub alone is most of the growth (its own README budgets it at about 140 KB
+  // gzip with React). React itself stays in the first-load chunk, shared. Budgets leave about 7% room.
+  const DEMO_JS_GZ = 190 * 1024;
+  const DEMO_CSS_GZ = 16 * 1024;
+
+  const gzipSize = async (file: string) => (await import('node:zlib')).gzipSync(readFileSync(file)).length;
+
+  it('ships the favicon and keeps the first load small: JS under 82 KB gzip, CSS under 7 KB gzip', async () => {
     expect(existsSync(join(dist, 'favicon.svg'))).toBe(true);
     const html = texts.get(join(dist, 'index.html')) ?? '';
-    // What the page loads up front: every script (and preload) index.html names. The lazy demo chunk is not among them.
-    const initial = [...html.matchAll(/<(?:script|link)[^>]+(?:src|href)="(\/assets\/[^"]+\.js)"/g)].map((m) => join(dist, (m[1] as string).slice(1)));
-    expect(initial.length).toBeGreaterThan(0);
-    const gz = initial.reduce((n, f) => n + gzipSync(readFileSync(f)).length, 0);
-    expect(gz).toBeLessThan(120 * 1024);
+    // What the page loads up front: every script, preload and stylesheet index.html names. The lazy demo chunk is not among them.
+    const refs = [...html.matchAll(/<(?:script|link)[^>]+(?:src|href)="(\/assets\/[^"]+\.(?:js|css))"/g)].map((m) => join(dist, (m[1] as string).slice(1)));
+    const js = refs.filter((f) => f.endsWith('.js'));
+    const css = refs.filter((f) => f.endsWith('.css'));
+    expect(js.length).toBeGreaterThan(0);
+    expect(css.length).toBeGreaterThan(0);
+    const jsGz = (await Promise.all(js.map(gzipSize))).reduce((n, v) => n + v, 0);
+    const cssGz = (await Promise.all(css.map(gzipSize))).reduce((n, v) => n + v, 0);
+    expect(jsGz, `first-load JS is ${(jsGz / 1024).toFixed(1)} KB gzip`).toBeLessThan(FIRST_LOAD_JS_GZ);
+    expect(cssGz, `first-load CSS is ${(cssGz / 1024).toFixed(1)} KB gzip`).toBeLessThan(FIRST_LOAD_CSS_GZ);
+    // and none of the hub, the player components or the staff routes is in it
+    for (const f of js) {
+      const text = readFileSync(f, 'utf8');
+      expect(text, relative(dist, f)).not.toMatch(/chatwarden\.hub\.mode|cw-hub|cw-player|\/reports\/:id|LADDER_TABLE/);
+    }
   });
 
-  it('code-splits the demo: its own chunk, not named by index.html, and the page weight stays small', async () => {
-    const { gzipSync } = await import('node:zlib');
+  it('code-splits the demo: its own JS and CSS, not named by index.html, within the demo budget', async () => {
     const html = texts.get(join(dist, 'index.html')) ?? '';
     const demo = files.filter((f) => /Demo-[\w-]+\.js$/.test(f));
+    const demoCss = files.filter((f) => /Demo-[\w-]+\.css$/.test(f));
     expect(demo).toHaveLength(1);
-    expect(html).not.toContain(relative(dist, demo[0] as string).split(sep).join('/'));
-    // The demo chunk now carries the real kit (core, the matcher with its synthetic pack, the in-memory store): it has its own
-    // budget, and is only ever fetched when the demo wakes. The page itself stays under 120 KB gzip up front.
-    const demoGz = gzipSync(readFileSync(demo[0] as string)).length;
-    expect(demoGz).toBeLessThan(85 * 1024); // 67.8 KB when measured: a new dependency or the word list creeping back shows up here
+    expect(demoCss).toHaveLength(1);
+    for (const f of [...demo, ...demoCss]) expect(html).not.toContain(relative(dist, f).split(sep).join('/'));
+    const jsGz = await gzipSize(demo[0] as string);
+    const cssGz = await gzipSize(demoCss[0] as string);
+    expect(jsGz, `demo JS is ${(jsGz / 1024).toFixed(1)} KB gzip`).toBeLessThan(DEMO_JS_GZ);
+    expect(cssGz, `demo CSS is ${(cssGz / 1024).toFixed(1)} KB gzip`).toBeLessThan(DEMO_CSS_GZ);
+    // the hub and the player are in the demo chunk, with their stylesheets
+    expect(texts.get(demo[0] as string) ?? '').toMatch(/chatwarden\.hub\.mode/);
+    const css = texts.get(demoCss[0] as string) ?? '';
+    expect(css).toContain('.cw-hub');
+    expect(css).toContain('.cw-player');
     const initialCss = texts.get(files.find((f) => /index-[\w-]+\.css$/.test(f)) ?? '') ?? '';
     expect(initialCss).not.toContain('.tour'); // the demo's styles ship with the demo chunk
+    expect(initialCss).not.toContain('.cw-hub');
+  });
+
+  it('no font of the hub ships: the site keeps its own two fonts (hub-react font.css is not loaded)', () => {
+    const woff = files.filter((f) => f.endsWith('.woff2')).map((f) => f.toLowerCase());
+    expect(woff.some((f) => f.includes('instrument'))).toBe(false);
+    expect(woff).toHaveLength(2);
   });
 
   it('the demo chunk is the real kit and runs in a browser: no node: import, no eval, no wasm, no network call', () => {

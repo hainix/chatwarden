@@ -103,27 +103,36 @@ so they work on both backgrounds.
 ## Honesty rules the copy keeps
 
 No customer logos (only the true "Built for Moxgate, now being adopted"; flip it to "Used by Moxgate" once Moxgate is deployed on the kit), no invented numbers, install commands and code come from the READMEs
-(`test/content.test.ts`), AI levels 1 to 4 are marked coming soon, the hub UI is marked coming while the HTTP admin API
-and Discord feed are described as shipping, and "free forever, no SLA" is stated plainly. Demo words are the invented
+(`test/content.test.ts`), AI levels 1 to 4 are marked coming soon, the moderator hub card says what ships (the team workbench, Simple
+mode, editable steps and reporting, four ways to adopt and `<chatwarden-hub>`), and "free forever, no SLA" is stated plainly. Demo words are the invented
 terms from `@chatwarden/matcher/fixtures` only.
 
 ## The interactive demo (`src/demo/`, its own chunk)
 
-Two dark "screens" side by side: the game (a lobby with You, Ada and Bo, a composer, a report button on every other
-player's line, and a "player's screen" frame that slides in with the notice) and the moderator console (a report queue badge,
-evidence with the reported line marked, the ladder suggestion, a "line to show the player" picker and the four decisions in
-a sticky bar). The REFUSED! stamp is the hero's, reused. The tour tooltip is a gold quest bubble with progress pips, so it
+Two "screens" side by side: the game (a lobby with You, Ada and Bo, a composer, a report button on every other player's line, and a
+button per player who has a notice waiting) and the moderator pane, which is the REAL hub (`@chatwarden/hub-react`, Simple mode),
+drawn in the page theme. The REFUSED! stamp is the hero's, reused. The tour tooltip is a gold quest bubble with progress pips, so it
 never reads as part of a screen; it points at the control with a static gold ring (a soft ripple only when motion is allowed).
 
-- It talks to the kit through `DemoEngine` (`engine.ts`), shaped like `@chatwarden/core` (`chat.accept`, `reports.submit`,
-  `decide`, `notices.*`, `suggest`). `kitEngine.ts` binds the REAL kit behind it (core, the in-memory store, the matcher with
-  its synthetic pack), one fixed room `lobby` and three seats. Every verdict is the kit's: the matcher refuses, the limits are
-  its defaults (3 lines per 5 s, 3 blocked lines an hour earn an automatic 30 minute timeout), the suggestion is its ladder.
-  The only demo-side judgement is `conductLevel` (a rude-word heuristic, labelled as such). The kit is in the lazy demo chunk
-  only. `vite.config.ts` cuts obscenity's unused English word list out of the bundle (the site ships invented words only).
+- The game side talks to the kit through `DemoEngine` (`engine.ts`), shaped like `@chatwarden/core` (`chat.accept`,
+  `reports.submit`, `reports.addDetail`, `notices.*`). `kitEngine.ts` binds the REAL kit behind it (core, the in-memory store, the
+  matcher with its synthetic pack), one fixed room `lobby` and three seats. Every verdict is the kit's: the matcher refuses, the
+  limits are its defaults (3 lines per 5 s, 3 blocked lines an hour earn an automatic 30 minute timeout). There is no demo-side
+  judgement any more: the suggestion is the ladder the hub asks the kit for. The kit is in the lazy demo chunk only. `vite.config.ts`
+  cuts obscenity's unused English word list out of the bundle (the site ships invented words only).
+- The moderator side (`HubPane.tsx`): `<Hub>` over `adminRoutes(cw, ...)` through `routerTransport` and a `memoryRouter`, signed in
+  as a made-up owner; hub-react's own stylesheet (not its font file). Its keys answer only while the visitor works in the demo.
+- The player side: player-react's `ReportDialog` (the kit's own reporting settings, one tap by default) and `NoticeQueue`, through
+  `playerTransport.ts`, a small local transport that answers `GET /notices`, `POST /notices/:id/ack` and `GET /record` from the kit
+  for one seat (the kit has no player report route, and the player routes do not run in a browser). The notice opens only when the
+  visitor presses "See what Bo sees": it never interrupts the hub.
+- The tour has seven steps (report, the case in the queue, open it in Simple, apply the suggestion, the player's notice, then two
+  optional: the Detailed switch and Steps and ladder). It points at hub controls by role and accessible name (`hubTarget.ts`).
 - "Show me the code" shows lines copied verbatim from the READMEs (`test/demoCode.test.ts` checks every line).
-- Phones (under 900px): one pane at a time, a sticky Game / Moderator switcher below the site header, the tour moves to the
-  moderator pane by itself for step 3, and the decide bar sticks to the bottom of the screen.
+- Layout: side by side from 1152px (the game is the narrow column, the hub gets about 720px); below that one pane at a time, a
+  sticky Game / Moderator switcher below the site header, and the tour moves to the pane a step is about. The hub stacks itself under
+  820px; from 1200px `demo.css` keeps its case and record stacked inside the pane instead of three panes.
 - Scripted players say a line every 4 to 6 seconds; they wait while the tab is hidden, while you type, while the report
   dialog is open and while paused. Nothing is stored: a reload is a fresh lobby.
-- Lazy: `DemoSlot` loads the chunk when the section is within 600px of the viewport (or on pointer or focus).
+- Lazy: `DemoSlot` loads the chunk when the section is within 200px of the viewport (or on pointer or focus). It is the heavy chunk now
+  (the hub and the player components: about 178 KB JS and 15 KB CSS gzip), so a phone's first screen does not fetch it.
