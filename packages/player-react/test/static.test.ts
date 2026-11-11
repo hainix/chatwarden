@@ -369,7 +369,7 @@ describe('the palette', () => {
   });
 
   it('the accent is only a next action, a link, a choice or a focus', () => {
-    const allowed = [/:focus-visible$/, /cw-btn--primary(:hover)?$/, /cw-link$/, /cw-linkbtn$/, /cw-choice:has\(input:checked\)$/, /input\[type='radio'\]$/];
+    const allowed = [/:focus-visible$/, /cw-btn--primary(:hover)?$/, /cw-link$/, /cw-linkbtn$/, /select:has\(option:checked:not\(\[value=''\]\)\)$/];
     for (const token of ['--cw-accent', '--cw-accent-soft', '--cw-accent-ink']) {
       const bad = rulesUsing(token).filter((sel) => !allowed.some((re) => re.test(sel)));
       expect(bad, token).toEqual([]);

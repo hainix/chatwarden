@@ -1,13 +1,11 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { REPORT_DETAIL_WINDOW_MS } from '@chatwarden/core';
-import type { ProfileOverrides, ReportDetailResult, ReportResult } from '@chatwarden/core';
+import type { ProfileOverrides, ReportResult } from '@chatwarden/core';
 import { ReportDialog } from '../src/ReportDialog.js';
 import type { ReportDialogProps, ReportDraft } from '../src/ReportDialog.js';
-import { PlayerError } from '../src/client.js';
 import { createT, en } from '../src/i18n.js';
 import { FIXED, findStatus, renderUi } from './render.js';
-import { ALICE, BOB, MINUTE, playerWorld } from './world.js';
+import { ALICE, BOB, playerWorld } from './world.js';
 import type { PlayerWorld } from './world.js';
 
 // The configurable report dialog: the three flows, rendered from the `reporting` payload of the real GET /rules, sent through the real
@@ -95,7 +93,7 @@ describe('GET /rules gives the dialog its reporting payload', () => {
 });
 
 describe('one_tap: the default', () => {
-  it('opens as one step: a question, the line in quotes (as text), a Report button and nothing else to fill in', async () => {
+  it('opens as one step: a question, the line in quotes (as text), the optional reason, a Report button, and one door to a note', async () => {
     const { dialog } = await setup();
     renderUi(<ReportDialog {...await dialog({ line: '<b>you play like a snerp</b>' })} />);
     const d = screen.getByRole('dialog');
@@ -105,7 +103,9 @@ describe('one_tap: the default', () => {
     expect(quote).toHaveTextContent('“<b>you play like a snerp</b>”');
     expect(quote?.querySelector('b')).toBeNull();
     expect(within(d).queryAllByRole('radio')).toHaveLength(0);
+    expect(within(d).getByRole('combobox', { name: 'Why? (optional)' })).toBeInTheDocument();
     expect(within(d).queryByRole('textbox')).toBeNull();
+    expect(within(d).getByRole('button', { name: 'Add a note' })).toBeInTheDocument();
     expect(within(d).getByRole('button', { name: 'Report' })).toHaveClass('cw-btn--primary');
     expect(within(d).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
@@ -204,350 +204,145 @@ describe('one_tap: the default', () => {
   });
 });
 
-describe('one_tap: the optional reason afterwards', () => {
-  async function sent(reporting?: Reporting, more: Partial<ReportDialogProps> = {}) {
-    const s = await setup(reporting);
-    const ui = renderUi(<ReportDialog {...await s.dialog(more)} />);
-    await ui.user.click(btn('Report'));
-    await findStatus();
-    return { ...s, ...ui };
-  }
+describe('one_tap: the reason is part of the one step (real kit)', () => {
+  const select = () => screen.getByRole('combobox', { name: 'Why? (optional)' });
 
-  it('offers "Add a reason", closed, beside Close; opening it shows the reasons by group and a note', async () => {
-    const { user } = await sent();
-    const toggle = btn('Add a reason');
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryAllByRole('radio')).toHaveLength(0);
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    const radios = screen.getAllByRole('radio');
-    expect(radios).toHaveLength(10);
-    expect(radios.at(-1)).toHaveAccessibleName('Something else');
-    expect(screen.getByRole('group', { name: 'Chat' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Gameplay' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Add a note (optional)')).toBeInstanceOf(HTMLTextAreaElement);
-    expect(btn('Add to my report')).toBeInTheDocument();
+  it('offers the studio reasons in a select, Chat and Gameplay as groups, "Something else" last, and nothing after the report but Close', async () => {
+    const { dialog } = await setup();
+    const { user } = renderUi(<ReportDialog {...await dialog({ line: 'a line' })} />);
+    const options = [...select().querySelectorAll('option')];
+    expect(options).toHaveLength(11);
+    expect(options[0]).toHaveTextContent('Choose a reason (optional)');
+    expect(options.at(-1)).toHaveTextContent('Something else');
+    expect([...select().querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['Chat', 'Gameplay']);
+    await user.click(btn('Report'));
+    await findStatus();
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Close']);
+  });
+
+  it('a reason goes in the same report: the kit keeps one report with that reported reason, and onAddDetail is never called', async () => {
+    const { w, dialog, addDetail, submit } = await setup();
+    const { user } = renderUi(<ReportDialog {...await dialog()} />);
+    await user.selectOptions(select(), 'cheating');
+    await user.click(btn('Report'));
+    await findStatus();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0]?.[0]).toEqual({ reason: 'cheating' });
+    expect(w.cw.reports.get(oneReport(w).id)?.reportedReason).toBe('cheating');
+    expect(addDetail).not.toHaveBeenCalled();
+  });
+
+  it('a reason and a note go together (trimmed) behind "Add a note"', async () => {
+    const { w, dialog, submit } = await setup();
+    const { user } = renderUi(<ReportDialog {...await dialog()} />);
+    await user.selectOptions(select(), 'spam');
+    await user.click(btn('Add a note'));
+    await user.type(screen.getByRole('textbox', { name: 'Note (optional)' }), '  same link three times  ');
+    await user.click(btn('Report'));
+    await findStatus();
+    expect(submit.mock.calls[0]?.[0]).toEqual({ reason: 'spam', note: 'same link three times' });
+    expect(w.cw.reports.get(oneReport(w).id)?.reportedReason).toBe('spam');
+  });
+
+  it('every reason the studio lists can be chosen and is sent as its id', async () => {
+    const { dialog } = await setup();
+    const ids = ((await dialog()).reporting?.reasons ?? []).map((r) => r.id);
+    expect(ids).toHaveLength(10);
+    for (const id of ids) {
+      const submit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve({ ok: true, reportId: 'r', remaining: 1 }));
+      const view = renderUi(<ReportDialog {...await dialog({ onSubmit: submit })} />);
+      await view.user.selectOptions(select(), id);
+      await view.user.click(btn('Report'));
+      await findStatus();
+      expect(submit.mock.calls[0]?.[0]).toMatchObject({ reason: id });
+      view.unmount();
+    }
+  });
+
+  it('with every reason switched off but "other" kept, the select offers just that', async () => {
+    const s = await setup({ reasons: [{ id: 'a', label: 'A', enabled: false }, { id: 'other', label: 'Something else' }] });
+    renderUi(<ReportDialog {...await s.dialog()} />);
+    expect([...select().querySelectorAll('option')].map((o) => o.getAttribute('value'))).toEqual(['', 'other']);
+  });
+
+  it('a reason the studio removed while the dialog was open: the kit says it is unknown, nothing is filed', async () => {
+    const s = await setup();
+    const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
+    expect(s.w.cw.policy.save({ reporting: { reasons: [{ id: 'harassment', label: 'Insults' }, { id: 'other', label: 'Something else' }] } }, { version: 0, actor: 'owner_ann', reason: 'shorter' }).ok).toBe(true);
+    await user.selectOptions(select(), 'cheating');
+    await user.click(btn('Report'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('That reason is not available any more. Close this and report again.');
+    expect(s.w.cw.reports.list().items).toHaveLength(0);
     expect(btn('Close')).toBeInTheDocument();
   });
 
-  it('a reason attaches to the same report: the kit keeps one report and its reported reason changes', async () => {
-    const { user, w, addDetail } = await sent();
-    const id = oneReport(w).id;
-    await user.click(btn('Add a reason'));
-    await user.click(screen.getByRole('radio', { name: 'Cheating' }));
-    await user.click(btn('Add to my report'));
-    expect(await screen.findByText('Added. Thanks.')).toBeInTheDocument();
-    expect(addDetail).toHaveBeenCalledWith(id, { reason: 'cheating' });
-    expect(w.cw.reports.list().items).toHaveLength(1);
-    expect(w.cw.reports.get(id)?.reportedReason).toBe('cheating');
-    expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
-    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+  it('a dropped connection keeps the chosen reason and the note, and the next press sends them', async () => {
+    const s = await setup();
+    s.submit.mockImplementationOnce(() => Promise.reject(new TypeError('fetch failed')));
+    const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
+    await user.selectOptions(select(), 'other');
+    await user.type(screen.getByRole('textbox'), 'kept');
+    await user.click(btn('Report'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your report was not sent.');
+    expect(select()).toHaveValue('other');
+    expect(screen.getByRole('textbox')).toHaveValue('kept');
+    await user.click(btn('Report'));
+    await findStatus();
+    expect(s.submit.mock.calls[1]?.[0]).toEqual({ reason: 'other', note: 'kept' });
   });
 
-  it('a reason and a note go together (trimmed), and a note alone is fine', async () => {
-    const a = await sent();
-    await a.user.click(btn('Add a reason'));
-    await a.user.click(screen.getByRole('radio', { name: 'Something else' }));
-    await a.user.type(screen.getByLabelText('Add a note (optional)'), '  they spammed my name  ');
-    await a.user.click(btn('Add to my report'));
-    await screen.findByText('Added. Thanks.');
-    expect(a.addDetail.mock.calls[0]?.[1]).toEqual({ reason: 'other', note: 'they spammed my name' });
-    expect(a.w.cw.reports.get(oneReport(a.w).id)?.note).toBe('they spammed my name');
-    a.unmount();
-
-    const b = await sent();
-    await b.user.click(btn('Add a reason'));
-    await b.user.type(screen.getByLabelText('Add a note (optional)'), 'just a note');
-    await b.user.click(btn('Add to my report'));
-    await screen.findByText('Added. Thanks.');
-    expect(b.addDetail.mock.calls[0]?.[1]).toEqual({ note: 'just a note' });
-    expect(b.w.cw.reports.get(oneReport(b.w).id)?.reportedReason).toBeNull();
+  it('two presses in one tick send one report with the reason', async () => {
+    const s = await setup();
+    const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
+    await user.selectOptions(select(), 'afk');
+    const b = btn('Report');
+    act(() => {
+      b.click();
+      b.click();
+    });
+    await findStatus();
+    expect(s.submit).toHaveBeenCalledTimes(1);
+    expect(s.submit.mock.calls[0]?.[0]).toEqual({ reason: 'afk' });
   });
 
-  it('adding nothing asks for a reason or a note and sends nothing', async () => {
-    const { user, addDetail } = await sent();
-    await user.click(btn('Add a reason'));
-    await user.click(btn('Add to my report'));
-    expect(addDetail).not.toHaveBeenCalled();
-    expect(screen.getByText('Choose a reason or write a note.')).toHaveAttribute('role', 'alert');
-    await user.click(screen.getByRole('radio', { name: 'Spam or ads' }));
-    expect(screen.queryByText('Choose a reason or write a note.')).toBeNull();
-  });
-
-  it('the toggle closes the panel again and keeps nothing sent', async () => {
-    const { user, addDetail } = await sent();
-    await user.click(btn('Add a reason'));
-    await user.click(btn('Add a reason'));
-    expect(screen.queryAllByRole('radio')).toHaveLength(0);
-    expect(addDetail).not.toHaveBeenCalled();
-  });
-
-  it('closing at any point is fine: the report was filed when the button was pressed', async () => {
+  it('Escape closes it with a note open, before anything is sent', async () => {
     const onClose = vi.fn();
-    const { user, w } = await sent(undefined, { onClose });
-    await user.click(btn('Add a reason'));
-    await user.click(screen.getByRole('radio', { name: 'Hate' }));
-    await user.click(btn('Close'));
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(w.cw.reports.list().items).toHaveLength(1);
-    expect(w.cw.reports.get(oneReport(w).id)?.reportedReason).toBeNull();
-  });
-
-  it('Escape closes it with the panel open too', async () => {
-    const onClose = vi.fn();
-    const { user } = await sent(undefined, { onClose });
-    await user.click(btn('Add a reason'));
+    const s = await setup();
+    const { user } = renderUi(<ReportDialog {...await s.dialog({ onClose })} />);
+    await user.click(btn('Add a note'));
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
+    expect(s.submit).not.toHaveBeenCalled();
   });
 
-  it('without onAddDetail there is no "Add a reason" (the host has not wired the follow-up)', async () => {
-    const s = await setup();
-    const props = await s.dialog();
-    const { onAddDetail: _unused, ...rest } = props;
-    void _unused;
-    const { user } = renderUi(<ReportDialog {...rest} />);
-    await user.click(btn('Report'));
-    await findStatus();
-    expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
-    expect(btn('Close')).toBeInTheDocument();
-  });
-
-  it('a result with no report id cannot take a follow-up, so it is not offered', async () => {
-    const { dialog, submit } = await setup();
-    submit.mockImplementationOnce(() => Promise.resolve({ ok: true, remaining: 4 } as unknown as ReportResult));
+  it('the page never holds the report id or the room', async () => {
+    const { w, dialog } = await setup();
     const { user } = renderUi(<ReportDialog {...await dialog()} />);
+    await user.selectOptions(select(), 'hate');
     await user.click(btn('Report'));
     await findStatus();
-    expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
-  });
-
-  it('with every reason switched off but "other" kept, the follow-up still offers it', async () => {
-    const s = await setup({ reasons: [{ id: 'a', label: 'A', enabled: false }, { id: 'other', label: 'Something else' }] });
-    const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(btn('Report'));
-    await findStatus();
-    await user.click(btn('Add a reason'));
-    expect(screen.getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['other']);
-  });
-
-  it('a payload with no reasons at all offers no follow-up', async () => {
-    const s = await setup();
-    const { user } = renderUi(<ReportDialog {...await s.dialog({ reporting: { flow: 'one_tap', thanks: 'Thanks.', reasons: [] } })} />);
-    await user.click(btn('Report'));
-    await findStatus();
-    expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
-  });
-
-  describe('the follow-up window and its refusals, from the real kit', () => {
-    it('in time: nine minutes later is still fine', async () => {
-      const { user, w } = await sent();
-      w.clock.t += 9 * MINUTE;
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByText('Added. Thanks.')).toBeInTheDocument();
-      expect(w.cw.reports.get(oneReport(w).id)?.reportedReason).toBe('hate');
-    });
-
-    it('exactly at the window is still fine and one millisecond later is too late', async () => {
-      const a = await sent();
-      a.w.clock.t += REPORT_DETAIL_WINDOW_MS;
-      await a.user.click(btn('Add a reason'));
-      await a.user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await a.user.click(btn('Add to my report'));
-      expect(await screen.findByText('Added. Thanks.')).toBeInTheDocument();
-      a.unmount();
-
-      const b = await sent();
-      b.w.clock.t += REPORT_DETAIL_WINDOW_MS + 1;
-      await b.user.click(btn('Add a reason'));
-      await b.user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await b.user.click(btn('Add to my report'));
-      expect(await screen.findByRole('alert')).toHaveTextContent('It is too late to add to this report. We still have the report.');
-    });
-
-    it('a second time: the kit says it was already added, in plain words, and the panel is gone', async () => {
-      const { user, w, addDetail } = await sent();
-      // The first follow-up arrives some other way (a second window, a retry that the page never saw answered).
-      const id = oneReport(w).id;
-      await w.cw.reports.addDetail(id, ALICE.seat, { reason: 'spam' });
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByRole('alert')).toHaveTextContent('You already added to this report.');
-      expect(addDetail).toHaveBeenCalledTimes(1);
-      expect(screen.queryAllByRole('radio')).toHaveLength(0);
-      expect(w.cw.reports.get(id)?.reportedReason).toBe('spam');
-      expect(btn('Close')).toBeInTheDocument();
-    });
-
-    it('not the reporter: the kit refuses and the message says only the reporter can add', async () => {
-      const { user, addDetail, w } = await sent();
-      addDetail.mockImplementationOnce((id, detail) => w.cw.reports.addDetail(id, BOB.seat, detail));
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByRole('alert')).toHaveTextContent('Only the player who sent a report can add to it.');
-      expect(w.cw.reports.get(oneReport(w).id)?.reportedReason).toBeNull();
-    });
-
-    it('a reason the studio removed while the dialog was open: the kit says it is unknown, the report stays', async () => {
-      const { user, w } = await sent();
-      const layer = { reporting: { reasons: [{ id: 'harassment', label: 'Harassment' }, { id: 'other', label: 'Something else' }] } };
-      expect(w.cw.policy.save(layer, { version: 0, actor: 'owner_ann', reason: 'shorter list' }).ok).toBe(true);
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Cheating' }));
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByRole('alert')).toHaveTextContent('That reason is not available any more. Your report is still with us.');
-      expect(w.cw.reports.list().items).toHaveLength(1);
-    });
-
-    it('a report that was already decided is too late', async () => {
-      const { user, w } = await sent();
-      const id = oneReport(w).id;
-      const subject = w.cw.rooms.subjectAt(ROOM, BOB.seat);
-      if (subject === null) throw new Error('no subject');
-      const decided = await w.cw.decide({ reportId: id, verdict: 'upheld', actor: 'ann@example.test', reason: 'checked', actions: [{ subject, kind: 'warning', durationMs: null, rule: 1, lineIds: [] }] });
-      expect(decided.ok).toBe(true);
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByRole('alert')).toHaveTextContent('It is too late to add to this report. We still have the report.');
-    });
-  });
-
-  describe('every follow-up refusal has its own plain message', () => {
-    const MESSAGES: Record<Exclude<Extract<ReportDetailResult, { ok: false }>['refused'], never>, string> = {
-      off: 'Adding to a report is not available right now.',
-      not_found: 'We cannot find that report any more.',
-      not_reporter: 'Only the player who sent a report can add to it.',
-      too_late: 'It is too late to add to this report. We still have the report.',
-      already_added: 'You already added to this report.',
-      reason_unknown: 'That reason is not available any more. Your report is still with us.',
-    };
-
-    it('covers the six refusals, no two alike', () => {
-      expect(Object.keys(MESSAGES).sort()).toEqual(['already_added', 'not_found', 'not_reporter', 'off', 'reason_unknown', 'too_late']);
-      expect(new Set(Object.values(MESSAGES)).size).toBe(6);
-    });
-
-    it.each(Object.entries(MESSAGES) as Array<[keyof typeof MESSAGES, string]>)('%s', async (refused, text) => {
-      const { user, addDetail } = await sent();
-      addDetail.mockImplementationOnce(() => Promise.resolve({ ok: false, refused }));
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      const alert = await screen.findByRole('alert');
-      expect(alert).toHaveTextContent(text);
-      expect(screen.queryByText('Added. Thanks.')).toBeNull();
-      expect(screen.getByRole('status')).toHaveTextContent('Thanks');
-    });
-
-    it('a refusal a newer kit adds still gets a plain message', async () => {
-      const { user, addDetail } = await sent();
-      addDetail.mockImplementationOnce(() => Promise.resolve({ ok: false, refused: 'future' } as unknown as ReportDetailResult));
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      const alert = await screen.findByRole('alert');
-      expect(alert).toHaveTextContent('We could not add that.');
-      expect(alert.textContent).not.toMatch(/player\./);
-    });
-
-    it('a result that is not an object is not a success', async () => {
-      const { user, addDetail } = await sent();
-      addDetail.mockImplementationOnce(() => Promise.resolve(undefined as unknown as ReportDetailResult));
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByRole('alert')).toHaveTextContent('We could not add that.');
-      expect(screen.queryByText('Added. Thanks.')).toBeNull();
-    });
-  });
-
-  describe('when the follow-up cannot be sent', () => {
-    it('a dropped connection keeps the panel and what was chosen, and the next press sends', async () => {
-      const { user, addDetail } = await sent();
-      addDetail.mockImplementationOnce(() => Promise.reject(new TypeError('fetch failed')));
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByRole('alert')).toHaveTextContent('We could not add that. Could not reach the server. Check your connection and try again.');
-      expect(screen.getByRole('radio', { name: 'Hate' })).toBeChecked();
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByText('Added. Thanks.')).toBeInTheDocument();
-      expect(addDetail).toHaveBeenCalledTimes(2);
-    });
-
-    it.each([
-      [401, 'You are signed out. Sign in again, then try again.'],
-      [429, 'Too many requests. Try again in a moment.'],
-      [500, 'The server had a problem. Try again in a moment.'],
-    ])('a PlayerError %i says why and never shows the server text', async (status, text) => {
-      const { user, addDetail } = await sent();
-      addDetail.mockImplementationOnce(() => Promise.reject(new PlayerError({ status, code: 'x', message: 'SECRET server text' })));
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      expect(await screen.findByRole('alert')).toHaveTextContent(`We could not add that. ${text}`);
-      expect(document.body.innerHTML).not.toContain('SECRET');
-    });
-
-    it('two presses in one tick send one follow-up', async () => {
-      const { user, addDetail } = await sent();
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      const b = btn('Add to my report');
-      act(() => {
-        b.click();
-        b.click();
-      });
-      await screen.findByText('Added. Thanks.');
-      expect(addDetail).toHaveBeenCalledTimes(1);
-    });
-
-    it('Escape while the follow-up is on its way does not close it', async () => {
-      const onClose = vi.fn();
-      const { user, addDetail } = await sent(undefined, { onClose });
-      let release: (r: ReportDetailResult) => void = () => undefined;
-      addDetail.mockImplementationOnce(() => new Promise<ReportDetailResult>((resolve) => (release = resolve)));
-      await user.click(btn('Add a reason'));
-      await user.click(screen.getByRole('radio', { name: 'Hate' }));
-      await user.click(btn('Add to my report'));
-      await user.keyboard('{Escape}');
-      expect(onClose).not.toHaveBeenCalled();
-      await act(async () => release({ ok: true }));
-    });
-  });
-
-  it('the page never holds the report id the follow-up uses', async () => {
-    const { user, w } = await sent();
-    await user.click(btn('Add a reason'));
-    const id = oneReport(w).id;
-    expect(document.body.innerHTML).not.toContain(id);
+    expect(document.body.innerHTML).not.toContain(oneReport(w).id);
     expect(document.body.innerHTML).not.toContain(ROOM);
   });
 });
 
 describe('reason_first', () => {
   const FIRST: Reporting = { flow: 'reason_first' };
+  const select = () => screen.getByRole('combobox', { name: 'Why? (optional)' });
 
-  it('shows the reasons in groups (a fieldset each), one radio group, with "Something else" last', async () => {
+  it('is the same single dialog as one_tap: the select with its groups, "Something else" last, Report and Cancel', async () => {
     const s = await setup(FIRST);
     renderUi(<ReportDialog {...await s.dialog({ targetName: 'Bob' })} />);
     const d = screen.getByRole('dialog');
-    expect(d).toHaveAccessibleName('Report Bob');
-    const outer = within(d).getByRole('radiogroup', { name: 'What happened?' });
-    const chat = within(outer).getByRole('group', { name: 'Chat' });
-    const play = within(outer).getByRole('group', { name: 'Gameplay' });
-    expect(within(chat).getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info']);
-    expect(within(play).getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['cheating', 'griefing', 'afk']);
-    const all = screen.getAllByRole('radio');
-    expect(all).toHaveLength(10);
-    expect(new Set(all.map((r) => (r as HTMLInputElement).name)).size).toBe(1);
-    expect(all.at(-1)).toHaveAccessibleName('Something else');
-    expect(within(d).queryByRole('button', { name: 'Report' })).toBeNull();
+    expect(d).toHaveAccessibleName('Report Bob?');
+    const group = (label: string) => [...select().querySelectorAll<HTMLOptGroupElement>('optgroup')].find((g) => g.label === label) as HTMLOptGroupElement;
+    expect([...group('Chat').querySelectorAll('option')].map((o) => o.value)).toEqual(['harassment', 'hate', 'sexual', 'threat', 'spam', 'personal_info']);
+    expect([...group('Gameplay').querySelectorAll('option')].map((o) => o.value)).toEqual(['cheating', 'griefing', 'afk']);
+    expect(select().lastElementChild).toHaveTextContent('Something else');
+    expect(within(d).queryAllByRole('radio')).toHaveLength(0);
+    expect(within(d).queryByRole('button', { name: 'Skip and report' })).toBeNull();
+    expect(within(d).queryByRole('button', { name: 'Send report' })).toBeNull();
+    expect(btn('Report')).toBeInTheDocument();
   });
 
   it('puts "Something else" last even when the studio lists it first, and a group appears where its first reason is', async () => {
@@ -561,18 +356,20 @@ describe('reason_first', () => {
       ],
     });
     renderUi(<ReportDialog {...await s.dialog()} />);
-    expect(screen.getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['a', 'c', 'b', 'other']);
-    expect(within(screen.getByRole('group', { name: 'Zed' })).getAllByRole('radio')).toHaveLength(2);
+    expect([...select().querySelectorAll('option')].map((o) => o.value)).toEqual(['', 'a', 'c', 'b', 'other']);
+    expect(within(select()).getByRole('group', { name: 'Zed' })).toBeInTheDocument();
+    expect(select().querySelector('optgroup')?.querySelectorAll('option')).toHaveLength(2);
   });
 
-  it('shows a reason hint as its description, and the label alone as its name', async () => {
+  it('shows a reason hint under the select as its description, and the option is the label alone', async () => {
     const s = await setup(FIRST);
-    renderUi(<ReportDialog {...await s.dialog()} />);
-    const radio = screen.getByRole('radio', { name: 'Insults or harassment' });
-    expect(radio).toHaveAccessibleDescription('Insults, put-downs or picking on someone');
+    const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
+    expect(screen.getByRole('option', { name: 'Insults or harassment' })).toBeInTheDocument();
+    await user.selectOptions(select(), 'harassment');
+    expect(select()).toHaveAccessibleDescription('Insults, put-downs or picking on someone');
   });
 
-  it('a radio group is one Tab stop, like the old picker', async () => {
+  it('the select is the first Tab stop, and Tab stays inside the dialog', async () => {
     const s = await setup(FIRST);
     const { user } = renderUi(
       <>
@@ -581,49 +378,38 @@ describe('reason_first', () => {
       </>,
     );
     await user.tab();
-    expect(screen.getAllByRole('radio')[0]).toHaveFocus();
+    expect(select()).toHaveFocus();
     await user.tab();
-    expect(document.activeElement).not.toBeInstanceOf(HTMLInputElement);
     expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
-    // Shift+Tab from the first control goes to the last, not out.
     await user.tab({ shift: true });
     await user.tab({ shift: true });
     expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
   });
 
-  it('arrow keys move through the radios across the groups', async () => {
-    const s = await setup(FIRST);
-    const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.tab();
-    await user.keyboard('{ArrowDown}'.repeat(6));
-    expect(screen.getByRole('radio', { name: 'Cheating' })).toHaveFocus();
-    expect(screen.getByRole('radio', { name: 'Cheating' })).toBeChecked();
-  });
-
-  it('asks for a note only when the reason asks (here: Something else)', async () => {
+  it('asks for a note only when the reason asks (here: Something else), and keeps it open after', async () => {
     const s = await setup(FIRST);
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
     expect(screen.queryByRole('textbox')).toBeNull();
-    await user.click(screen.getByRole('radio', { name: 'Hate' }));
+    await user.selectOptions(select(), 'hate');
     expect(screen.queryByRole('textbox')).toBeNull();
-    await user.click(screen.getByRole('radio', { name: 'Something else' }));
-    expect(screen.getByLabelText('Add a note (optional)')).toBeInstanceOf(HTMLTextAreaElement);
-    await user.click(screen.getByRole('radio', { name: 'Cheating' }));
-    expect(screen.queryByRole('textbox')).toBeNull();
+    await user.selectOptions(select(), 'other');
+    expect(screen.getByLabelText('Note (optional)')).toBeInstanceOf(HTMLTextAreaElement);
+    await user.selectOptions(select(), 'cheating');
+    expect(screen.getByLabelText('Note (optional)')).toBeInTheDocument();
   });
 
   it('a studio reason can ask for a note too', async () => {
     const s = await setup({ flow: 'reason_first', reasons: [{ id: 'cheating', label: 'Cheating', asksNote: true }, { id: 'other', label: 'Else' }] });
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(screen.getByRole('radio', { name: 'Cheating' }));
-    expect(screen.getByLabelText('Add a note (optional)')).toBeInTheDocument();
+    await user.selectOptions(select(), 'cheating');
+    expect(screen.getByLabelText('Note (optional)')).toBeInTheDocument();
   });
 
   it('sends the chosen reason id, which the kit keeps as the reported reason', async () => {
     const s = await setup(FIRST);
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(screen.getByRole('radio', { name: 'Hate' }));
-    await user.click(btn('Send report'));
+    await user.selectOptions(select(), 'hate');
+    await user.click(btn('Report'));
     expect(await findStatus()).toHaveTextContent("Thanks for the report. We'll look into it.");
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ reason: 'hate' });
     expect(s.w.cw.reports.get(oneReport(s.w).id)?.reportedReason).toBe('hate');
@@ -632,86 +418,76 @@ describe('reason_first', () => {
   it('sends a reason and a trimmed note', async () => {
     const s = await setup(FIRST);
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(screen.getByRole('radio', { name: 'Something else' }));
-    await user.type(screen.getByLabelText('Add a note (optional)'), '  odd thing  ');
-    await user.click(btn('Send report'));
+    await user.selectOptions(select(), 'other');
+    await user.type(screen.getByLabelText('Note (optional)'), '  odd thing  ');
+    await user.click(btn('Report'));
     await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ reason: 'other', note: 'odd thing' });
   });
 
-  it('a reason is optional: "Skip and report" files it with no reason', async () => {
+  it('a reason is optional: Report with nothing chosen files it with no reason', async () => {
     const s = await setup(FIRST);
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(btn('Skip and report'));
+    await user.click(btn('Report'));
     await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({});
     expect(s.w.cw.reports.get(oneReport(s.w).id)?.reportedReason).toBeNull();
   });
 
-  it('"Send report" with nothing chosen says what to do and sends nothing; picking clears it', async () => {
+  it('a note the player wrote without a reason is sent alone', async () => {
     const s = await setup(FIRST);
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(btn('Send report'));
-    expect(s.submit).not.toHaveBeenCalled();
-    expect(screen.getByText('Choose what happened, or skip.')).toHaveAttribute('role', 'alert');
-    expect(screen.getByRole('radiogroup')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getAllByRole('radio')[0]).toHaveFocus();
-    await user.click(screen.getByRole('radio', { name: 'Spam or ads' }));
-    expect(screen.queryByText('Choose what happened, or skip.')).toBeNull();
-  });
-
-  it('"Skip and report" keeps a note the player already wrote, and sends no reason', async () => {
-    const s = await setup(FIRST);
-    const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(screen.getByRole('radio', { name: 'Something else' }));
-    await user.type(screen.getByLabelText('Add a note (optional)'), 'wrote this');
-    await user.click(btn('Skip and report'));
+    await user.click(btn('Add a note'));
+    await user.type(screen.getByLabelText('Note (optional)'), 'wrote this');
+    await user.click(btn('Report'));
     await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ note: 'wrote this' });
   });
 
-  it('there is no "Add a reason" after: the reason step came first', async () => {
+  it('there is no "Add a reason" after', async () => {
     const s = await setup(FIRST);
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(screen.getByRole('radio', { name: 'Hate' }));
-    await user.click(btn('Send report'));
+    await user.selectOptions(select(), 'hate');
+    await user.click(btn('Report'));
     await findStatus();
     expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
   });
 
-  it('while sending, both buttons are busy and a second press sends nothing more', async () => {
+  it('while sending, Report is busy and a second press sends nothing more', async () => {
     const s = await setup(FIRST);
     let release: (r: ReportResult) => void = () => undefined;
     s.submit.mockImplementationOnce(() => new Promise<ReportResult>((resolve) => (release = resolve)));
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(btn('Skip and report'));
-    await user.click(btn('Skip and report'));
-    await user.click(btn('Send report'));
+    await user.click(btn('Report'));
+    await user.click(btn('Report'));
     expect(s.submit).toHaveBeenCalledTimes(1);
-    expect(btn('Skip and report')).toHaveAttribute('aria-busy', 'true');
+    expect(btn('Report')).toHaveAttribute('aria-busy', 'true');
     await act(async () => release({ ok: true, reportId: 'r', remaining: 3 }));
   });
 });
 
 describe('reason_required', () => {
   const REQUIRED: Reporting = { flow: 'reason_required' };
+  const select = () => screen.getByRole('combobox', { name: 'Why?' });
 
-  it('is the same screen without a way to skip', async () => {
+  it('is the same dialog with a required "Why?" select and no way to skip', async () => {
     const s = await setup(REQUIRED);
     renderUi(<ReportDialog {...await s.dialog()} />);
-    expect(screen.getAllByRole('radio')).toHaveLength(10);
+    expect(select()).toBeRequired();
+    expect(select().querySelectorAll('option')).toHaveLength(11);
     expect(screen.queryByRole('button', { name: 'Skip and report' })).toBeNull();
-    expect(btn('Send report')).toBeInTheDocument();
+    expect(btn('Report')).toBeInTheDocument();
   });
 
   it('asks for a reason when none is chosen, in its own words, and sends nothing', async () => {
     const s = await setup(REQUIRED);
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(btn('Send report'));
+    await user.click(btn('Report'));
     expect(s.submit).not.toHaveBeenCalled();
     expect(screen.getByText('Choose a reason.')).toHaveAttribute('role', 'alert');
-    await user.click(screen.getByRole('radio', { name: 'Threats' }));
-    await user.click(btn('Send report'));
+    expect(select()).toHaveFocus();
+    await user.selectOptions(select(), 'threat');
+    await user.click(btn('Report'));
     await findStatus();
     expect(s.submit.mock.calls[0]?.[0]).toEqual({ reason: 'threat' });
   });
@@ -731,8 +507,8 @@ describe('reason_required', () => {
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
     const reasons = [{ id: 'harassment', label: 'Insults or harassment' }, { id: 'other', label: 'Something else' }];
     expect(s.w.cw.policy.save({ reporting: { flow: 'reason_required', reasons } }, { version: 0, actor: 'owner_ann', reason: 'shorter' }).ok).toBe(true);
-    await user.click(screen.getByRole('radio', { name: 'Cheating' }));
-    await user.click(btn('Send report'));
+    await user.selectOptions(select(), 'cheating');
+    await user.click(btn('Report'));
     expect(await screen.findByRole('alert')).toHaveTextContent('That reason is not available any more. Close this and report again.');
     expect(s.w.cw.reports.list().items).toHaveLength(0);
   });
@@ -747,7 +523,9 @@ describe('with no reporting payload the dialog is one tap with the default words
     renderUi(<ReportDialog {...await s.dialog(none)} />);
     expect(screen.getByRole('dialog')).toHaveAccessibleName('Report this player?');
     expect(screen.queryAllByRole('radio')).toHaveLength(0);
-    expect(screen.queryByLabelText('Add a note (optional)')).toBeNull();
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.queryByLabelText('Note (optional)')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add a note' })).toBeNull();
     expect(btn('Report')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send report' })).toBeNull();
   });
@@ -785,13 +563,13 @@ describe('with no reporting payload the dialog is one tap with the default words
     const s = await setup();
     const withOld = await s.dialog({ ...none, ...({ categories: ['spam'] } as object) });
     renderUi(<ReportDialog {...withOld} />);
-    expect(screen.queryAllByRole('radio')).toHaveLength(0);
+    expect(screen.queryByRole('combobox')).toBeNull();
   });
 
   it('when the studio payload is given it is used as it is', async () => {
     const s = await setup({ flow: 'reason_first' });
     renderUi(<ReportDialog {...await s.dialog()} />);
-    expect(screen.getAllByRole('radio')).toHaveLength(10);
+    expect(screen.getByRole('combobox').querySelectorAll('option')).toHaveLength(11);
   });
 });
 
@@ -810,7 +588,7 @@ describe('a payload the dialog cannot trust', () => {
     for (const flow of ['reason_first', 'reason_required']) {
       const { unmount } = renderUi(<ReportDialog {...await s.dialog(bad({ flow, thanks: 'T', reasons: [] }))} />);
       expect(btn('Report')).toBeInTheDocument();
-      expect(screen.queryAllByRole('radio')).toHaveLength(0);
+      expect(screen.queryByRole('combobox')).toBeNull();
       unmount();
     }
   });
@@ -826,8 +604,9 @@ describe('a payload the dialog cannot trust', () => {
     const { container, user } = renderUi(<ReportDialog {...await s.dialog({ ...bad(reporting), onSubmit })} />);
     expect(container.querySelector('i, b, script, img')).toBeNull();
     expect(screen.getByRole('group', { name: '<b>Group</b>' })).toBeInTheDocument();
-    await user.click(screen.getByRole('radio', { name: '<i>Bold</i> label' }));
-    await user.click(btn('Send report'));
+    await user.selectOptions(screen.getByRole('combobox'), 'a');
+    expect(screen.getByRole('option', { name: '<i>Bold</i> label' })).toBeInTheDocument();
+    await user.click(btn('Report'));
     expect(await findStatus()).toHaveTextContent('<img src=x onerror=alert(1)> thanks');
     expect(container.querySelector('img')).toBeNull();
   });
@@ -854,7 +633,7 @@ describe('the studio edits settings and the dialog changes (real routes, real ki
     expect(r.ok).toBe(true);
   };
 
-  it('one tap, then pick a reason first, then require one: the same dialog props from GET /rules follow each edit', async () => {
+  it('one tap, then reason first, then reason required: the same dialog props from GET /rules follow each edit (the select turns required)', async () => {
     const s = await setup();
     const a = renderUi(<ReportDialog {...await s.dialog()} />);
     expect(btn('Report')).toBeInTheDocument();
@@ -862,13 +641,15 @@ describe('the studio edits settings and the dialog changes (real routes, real ki
 
     save(s.w, { flow: 'reason_first' }, 0);
     const b = renderUi(<ReportDialog {...await s.dialog()} />);
-    expect(btn('Skip and report')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Why? (optional)' })).not.toBeRequired();
+    expect(btn('Report')).toBeInTheDocument();
     b.unmount();
 
     save(s.w, { flow: 'reason_required' }, 1);
     renderUi(<ReportDialog {...await s.dialog()} />);
-    expect(screen.queryByRole('button', { name: 'Skip and report' })).toBeNull();
-    expect(btn('Send report')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Why? (optional)' })).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Why?' })).toBeRequired();
+    expect(btn('Report')).toBeInTheDocument();
   });
 
   it('a renamed reason, a new group, a hint, a switched-off reason and new thank-you words all show', async () => {
@@ -888,11 +669,12 @@ describe('the studio edits settings and the dialog changes (real routes, real ki
       0,
     );
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    expect(screen.getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['lag_switch', 'cheating', 'other']);
-    expect(within(screen.getByRole('group', { name: 'Cheating and tricks' })).getAllByRole('radio')).toHaveLength(2);
-    expect(screen.getByRole('radio', { name: 'Lag switching' })).toHaveAccessibleDescription('Cutting their own connection');
-    await user.click(screen.getByRole('radio', { name: 'Lag switching' }));
-    await user.click(btn('Send report'));
+    const select = screen.getByRole('combobox');
+    expect([...select.querySelectorAll('option')].map((o) => o.getAttribute('value'))).toEqual(['', 'lag_switch', 'cheating', 'other']);
+    expect(within(screen.getByRole('group', { name: 'Cheating and tricks' })).getAllByRole('option')).toHaveLength(2);
+    await user.selectOptions(select, 'lag_switch');
+    expect(select).toHaveAccessibleDescription('Cutting their own connection');
+    await user.click(btn('Report'));
     expect(await findStatus()).toHaveTextContent('We have it. Thank you.');
     expect(s.w.cw.reports.get(oneReport(s.w).id)?.reportedReason).toBe('lag_switch');
   });
@@ -900,8 +682,8 @@ describe('the studio edits settings and the dialog changes (real routes, real ki
   it('an old adopter whose server sends the six categories still files them through the new dialog as reasons', async () => {
     const s = await setup({ flow: 'reason_first' });
     const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(screen.getByRole('radio', { name: 'Throwing or griefing' }));
-    await user.click(btn('Send report'));
+    await user.selectOptions(screen.getByRole('combobox'), 'griefing');
+    await user.click(btn('Report'));
     await findStatus();
     const report = s.w.cw.reports.get(oneReport(s.w).id);
     expect(report?.reportedReason).toBe('griefing');
@@ -911,19 +693,20 @@ describe('the studio edits settings and the dialog changes (real routes, real ki
 
 describe('words', () => {
   it('every word of the new screens is a key in the catalog, so a translation can replace it', async () => {
-    const t = createT({ ...en, 'player.report.oneTap.send': 'Melden', 'player.report.addReason': 'Grund nennen', 'player.report.thanks': 'Danke' }, 'de');
+    const t = createT({ ...en, 'player.report.oneTap.send': 'Melden', 'player.report.addNote': 'Notiz', 'player.report.why': 'Warum?', 'player.report.thanks': 'Danke' }, 'de');
     const s = await setup();
     const { user } = renderUi(<ReportDialog {...await s.dialog({ t, locale: 'de', reporting: { flow: 'one_tap', thanks: '', reasons: [{ id: 'other', label: 'Anderes', hint: '', group: '', asksNote: true }] } })} />);
     await user.click(btn('Melden'));
     expect(await findStatus()).toHaveTextContent('Danke');
-    expect(btn('Grund nennen')).toBeInTheDocument();
   });
 
-  it('waits for the follow-up button to come back to rest after a send', async () => {
+  it('the words of the form are catalog keys too: the select label, its placeholder and the note door', async () => {
+    const t = createT({ ...en, 'player.report.addNote': 'Notiz', 'player.report.why': 'Warum?', 'player.report.choose': 'Grund waehlen', 'player.report.note': 'Notiz (optional)' }, 'de');
     const s = await setup();
-    const { user } = renderUi(<ReportDialog {...await s.dialog()} />);
-    await user.click(btn('Report'));
-    await findStatus();
-    await waitFor(() => expect(btn('Add a reason')).not.toHaveAttribute('aria-busy'));
+    const { user } = renderUi(<ReportDialog {...await s.dialog({ t, locale: 'de' })} />);
+    expect(screen.getByRole('combobox', { name: 'Warum?' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Grund waehlen' })).toBeInTheDocument();
+    await user.click(btn('Notiz'));
+    expect(screen.getByRole('textbox', { name: 'Notiz (optional)' })).toBeInTheDocument();
   });
 });

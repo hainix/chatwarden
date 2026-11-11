@@ -1,22 +1,18 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import type { PlayerReporting, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';
+import type { PlayerReporting, ReportDetailResult, ReportRefusal, ReportResult } from '@chatwarden/core';
 import { NOTE_MAX } from './constants.js';
 import { PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
-import { DETAIL_REFUSED_TEXT, FollowUp } from './FollowUp.js';
-import type { FollowUpOutcome, ReportFollowUp } from './FollowUp.js';
-import { Picker } from './Picker.js';
 import type { PlayerText } from './i18n.js';
 import { groupReasons, readReporting } from './reporting.js';
-import type { ReasonItem } from './reporting.js';
 import { errorText, Portal, Root, useUi } from './ui.js';
 import type { DialogHostProps, PlayerUiProps } from './ui.js';
 
 /**
  * What the player filled in. Your server adds the room and the seats and calls `cw.reports.submit({ ...draft, roomId, reporterSeat,
- * targetSeat })`. The dialog sends `reason` (an id from the studio's `reporting` list, or nothing, as in one tap). A reason is only a
- * hint: the moderators decide what a report really is.
+ * targetSeat })`. The dialog sends `reason` (an id from the studio's `reporting` list, or nothing) and `note` in the one report. A
+ * reason is only a hint: the moderators decide what a report really is.
  */
 export interface ReportDraft {
   /** The reason the player chose: an id from `reporting.reasons`. Left out when none was chosen. */
@@ -25,7 +21,14 @@ export interface ReportDraft {
   note?: string;
 }
 
-export type { ReportFollowUp } from './FollowUp.js';
+/**
+ * A reason and a note added to a report after it was filed (`cw.reports.addDetail`). The dialog no longer has a follow-up step (the
+ * reason and the note go in the one report), so this is only the shape a follow-up of your own may take.
+ */
+export interface ReportFollowUp {
+  reason?: string;
+  note?: string;
+}
 
 export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
   /**
@@ -34,16 +37,16 @@ export interface ReportDialogProps extends PlayerUiProps, DialogHostProps {
    */
   onSubmit: (draft: ReportDraft) => Promise<ReportResult>;
   /**
-   * The optional follow-up after a one-tap report: your server calls `cw.reports.addDetail(reportId, reporterSeat, detail)` (the seat
-   * from its own session, never from the page) and returns its `ReportDetailResult`. Without it the "Add a reason" step is not shown.
+   * @deprecated The dialog is one step now: the reason and the note go in the single `onSubmit`, so this is accepted but never
+   * called. Remove it. (`cw.reports.addDetail` is still there for a follow-up of your own.)
    */
   onAddDetail?: (reportId: string, detail: ReportFollowUp) => Promise<ReportDetailResult>;
   /** Called on Escape, Cancel and Close. Unmount the dialog in answer. */
   onClose: () => void;
   /**
-   * How reporting works here: `(await createPlayerClient.rules()).reporting`, the `reporting` part of `GET /rules`. It sets the flow
-   * (one tap, pick a reason first, reason required), the reasons (grouped, with hints) and the thank-you. Without it the dialog is
-   * one tap with the dialog's own words, the same as when `GET /rules` cannot be loaded.
+   * How reporting works here: `(await createPlayerClient.rules()).reporting`, the `reporting` part of `GET /rules`. It gives the
+   * reasons (grouped, with hints), whether a reason is required, and the thank-you. Without it the dialog has no reasons to offer:
+   * one press files the report, with the dialog's own words, the same as when `GET /rules` cannot be loaded.
    */
   reporting?: PlayerReporting;
   /** Who is being reported, as the player knows them (a handle). Shown as text in the heading. */
@@ -79,78 +82,63 @@ const quoted = (line: string | undefined): string => {
   return plain.length > LINE_MAX ? `${plain.slice(0, LINE_MAX).trimEnd()}…` : plain;
 };
 
-/** The screen to draw: the flow, the reasons as the dialog will list them, and the thank-you. */
-interface Screen {
-  flow: ReportFlow;
-  reasons: ReasonItem[];
-  thanks: string;
-}
-
 /**
- * A dialog for reporting a message or a player. How it works is the studio's setting (`reporting`, from `GET /rules`):
- * - `one_tap` (the default): one step, "Report this message?" and a Report button. The report is filed at once and the thank-you
- *   shown; an optional "Add a reason" step then attaches a reason and a note to the same report (`onAddDetail`).
- * - `reason_first`: the reasons in groups, then an optional note; a reason can be skipped.
- * - `reason_required`: the same without the skip.
- * The reason is only a hint for the moderators. Every refusal the kit can give has its own plain message. Render it when the player
- * chooses to report, and unmount it in `onClose`.
+ * A dialog for reporting a message or a player, in one step: "Report this message?", the quoted line, an optional "Why?" (one
+ * select, the reasons in groups) and a Report button. A note is behind "Add a note", or shown when the chosen reason asks for one.
+ * Report sends the reason and the note together (`onSubmit`); the dialog then says "Report sent" and the thank-you. The studio's
+ * `reporting` setting decides whether the reason is required (`reason_required`: the select is required, and Report without a
+ * reason asks for one and sends nothing), what the reasons are, and the thank-you. The reason is only a hint for the moderators.
+ * Every refusal the kit can give has its own plain message. Render it when the player chooses to report, and unmount it in `onClose`.
  */
 export function ReportDialog(props: ReportDialogProps) {
-  const { onSubmit, onAddDetail, onClose, targetName, line, theme, className, container, returnFocusTo } = props;
+  const { onSubmit, onClose, targetName, line, theme, className, container, returnFocusTo } = props;
   const ui = useUi(props);
   const { t } = ui;
   const heading = useRef<HTMLHeadingElement>(null);
-  const picker = useRef<HTMLFieldSetElement>(null);
-  // One thing on its way at a time, report or follow-up: a second click, or a second Enter, does nothing.
+  const select = useRef<HTMLSelectElement>(null);
+  const noteField = useRef<HTMLTextAreaElement>(null);
+  // One report on its way at a time: a second click, or a second Enter, does nothing.
   const sending = useRef(false);
   const titleId = useId();
-  const groupName = useId();
+  const reasonId = useId();
   const noteId = useId();
-  const hintId = useId();
+  const noteHintId = useId();
+  const reasonHintId = useId();
   const missingId = useId();
-  const [reason, setReason] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
+  // The note is shown once it was asked for (the "Add a note" button, or a reason that asks for one) and then stays.
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [focusNote, setFocusNote] = useState(false);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<PlayerError | null>(null);
   const [result, setResult] = useState<ReportResult | null>(null);
-  // How the follow-up after a one-tap report ended, and whether its time is up (the kit takes one until `detailUntil`).
-  const [dDone, setDDone] = useState<FollowUpOutcome | null>(null);
-  const [expired, setExpired] = useState(false);
 
-  const screen: Screen = (() => {
-    // No `reporting` (or something that is not the payload): one tap with the dialog's own words, as when `GET /rules` cannot be loaded.
-    const read = readReporting(props.reporting) ?? { flow: 'one_tap' as const, reasons: [], thanks: '' };
-    // A flow that asks for a reason has nothing to ask with when the list is empty: it is one tap.
-    return { flow: read.reasons.length === 0 ? 'one_tap' : read.flow, reasons: read.reasons, thanks: read.thanks.trim() };
-  })();
-  const { flow } = screen;
-  const groups = groupReasons(screen.reasons);
-  const chosen = screen.reasons.find((r) => r.id === reason);
-  // The note: when the chosen reason asks for it.
-  const showNote = chosen?.asksNote === true;
+  // No `reporting` (or something that is not the payload): no reasons to offer, as when `GET /rules` cannot be loaded.
+  const read = readReporting(props.reporting) ?? { flow: 'one_tap' as const, reasons: [], thanks: '' };
+  const thanks = read.thanks.trim();
+  const hasReasons = read.reasons.length > 0;
+  // A flow that asks for a reason has nothing to ask with when the list is empty.
+  const required = hasReasons && read.flow === 'reason_required';
+  const groups = groupReasons(read.reasons);
+  const named = groups.filter((g) => g.name !== '');
+  const bare = groups.filter((g) => g.name === '').flatMap((g) => g.items);
+  const chosen = read.reasons.find((r) => r.id === reason);
+  const hint = chosen !== undefined && chosen.hint !== '' ? chosen.hint : null;
+  const noteShown = hasReasons && noteOpen;
 
   // The form is gone once there is an answer: focus goes back to the heading, so the answer is read and focus is not lost.
   useEffect(() => {
     if (result !== null) heading.current?.focus();
   }, [result]);
+  // "Add a note" is replaced by the field: focus follows it.
   useEffect(() => {
-    if (dDone !== null) heading.current?.focus();
-  }, [dDone]);
-  // The follow-up stops being offered when the kit would no longer take it.
-  const until = result?.ok === true && typeof result.detailUntil === 'number' && Number.isFinite(result.detailUntil) ? result.detailUntil : null;
-  useEffect(() => {
-    if (until === null) return undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    // Looks at the clock again when the time comes, so a clock that has not moved does not end the offer early.
-    const check = (): void => {
-      const left = until - ui.now();
-      if (left < 0) setExpired(true);
-      else timer = setTimeout(check, Math.min(Math.max(left + 1, 50), 2_000_000_000));
-    };
-    check();
-    return () => clearTimeout(timer);
-  }, [until]);
+    if (focusNote) {
+      noteField.current?.focus();
+      setFocusNote(false);
+    }
+  }, [focusNote]);
 
   const send = async (draft: ReportDraft): Promise<void> => {
     sending.current = true;
@@ -170,24 +158,19 @@ export function ReportDialog(props: ReportDialogProps) {
   const submit = (e: FormEvent): void => {
     e.preventDefault();
     if (sending.current) return;
-    if (flow !== 'one_tap' && reason === null) {
+    if (required && reason === '') {
       setMissing(true);
-      picker.current?.querySelector<HTMLElement>('input')?.focus();
+      select.current?.focus();
       return;
     }
-    const draft: ReportDraft = flow === 'one_tap' ? {} : { reason: reason as string };
-    if (showNote && trimmed !== '') draft.note = trimmed;
+    const draft: ReportDraft = {};
+    if (reason !== '') draft.reason = reason;
+    if (noteShown && trimmed !== '') draft.note = trimmed;
     void send(draft);
   };
-  const skip = (): void => {
-    if (sending.current) return;
-    void send(showNote && trimmed !== '' ? { note: trimmed } : {});
-  };
 
-  const reportId = result?.ok === true && typeof result.reportId === 'string' && result.reportId !== '' ? result.reportId : null;
   const quote = quoted(line);
-  const oneTapTitle = quote !== '' ? t('player.report.titleOneTap') : targetName === undefined ? t('player.report.titleOneTapPlayer') : t('player.report.titleOneTapNamed', { name: targetName });
-  const title = flow === 'one_tap' ? oneTapTitle : targetName === undefined ? t('player.report.title') : t('player.report.titleNamed', { name: targetName });
+  const title = quote !== '' ? t('player.report.titleOneTap') : targetName === undefined ? t('player.report.titleOneTapPlayer') : t('player.report.titleOneTapNamed', { name: targetName });
   const taken = result?.ok === true;
   const refusal = result !== null && !taken ? result : null;
   // After an answer the heading says what happened (a question would be stale), and focus is on it.
@@ -197,11 +180,12 @@ export function ReportDialog(props: ReportDialogProps) {
     const refused = (r as { refused?: unknown }).refused;
     return typeof refused === 'string' && Object.hasOwn(REFUSED_TEXT, refused) ? REFUSED_TEXT[refused as ReportRefusal] : 'player.report.refused.unknown';
   };
-  const detailRefusedKey = (refused: string): PlayerText => (Object.hasOwn(DETAIL_REFUSED_TEXT, refused) ? (DETAIL_REFUSED_TEXT[refused] as PlayerText) : 'player.report.detail.failed');
-  const detailUntil = taken && typeof result.detailUntil === 'number' && Number.isFinite(result.detailUntil) ? result.detailUntil : null;
-  const timeUp = expired || (detailUntil !== null && ui.now() > detailUntil);
-  const canFollow = taken && flow === 'one_tap' && reportId !== null && onAddDetail !== undefined && screen.reasons.length > 0 && !timeUp;
-  const needText: PlayerText = flow === 'reason_first' ? 'player.report.needReasonOrSkip' : 'player.report.needReason';
+  const option = (r: { id: string; label: string }) => (
+    <option key={r.id} value={r.id}>
+      {r.label}
+    </option>
+  );
+  const describedBy = [hint === null ? '' : reasonHintId, missing ? missingId : ''].filter((id) => id !== '').join(' ');
 
   return (
     <Portal container={container}>
@@ -210,50 +194,81 @@ export function ReportDialog(props: ReportDialogProps) {
         <h2 id={titleId} ref={heading} className="cw-title" tabIndex={-1}>
           {shownTitle}
         </h2>
-        {/* Always there, so what is written into it is announced: the thank-you, and "Added. Thanks.". */}
+        {/* Always there, so what is written into it is announced: the thank-you. */}
         <div role="status" className="cw-live">
           {taken && (
             <p className="cw-result">
-              {screen.thanks === '' ? t('player.report.thanks') : screen.thanks}
+              {thanks === '' ? t('player.report.thanks') : thanks}
               {remaining !== null && ` ${t('player.report.remaining', { count: remaining })}`}
             </p>
           )}
-          {dDone?.ok === true && <p className="cw-result">{t('player.report.detail.added')}</p>}
         </div>
         {result === null ? (
           <form onSubmit={submit} noValidate>
-            <p className="cw-body">{flow === 'one_tap' ? t('player.report.oneTap.intro') : t('player.report.intro')}</p>
+            <p className="cw-body">{required ? t('player.report.intro') : t('player.report.oneTap.intro')}</p>
             {quote !== '' && <blockquote className="cw-quote">{t('player.report.quote', { line: quote })}</blockquote>}
-            {flow !== 'one_tap' && (
-              <Picker
-                groups={groups}
-                name={groupName}
-                value={reason}
-                legend={t('player.report.legend')}
-                invalid={missing}
-                describedBy={missingId}
-                fieldset={picker}
-                onChange={(id) => {
-                  setReason(id);
-                  setMissing(false);
-                }}
-              />
+            {hasReasons && (
+              <div className="cw-field">
+                <label className="cw-label" htmlFor={reasonId}>
+                  {required ? t('player.report.whyRequired') : t('player.report.why')}
+                </label>
+                <select
+                  id={reasonId}
+                  ref={select}
+                  className="cw-select"
+                  value={reason}
+                  required={required}
+                  aria-invalid={missing || undefined}
+                  aria-describedby={describedBy === '' ? undefined : describedBy}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setReason(id);
+                    setMissing(false);
+                    if (read.reasons.find((r) => r.id === id)?.asksNote === true) setNoteOpen(true);
+                  }}
+                >
+                  <option value="">{required ? t('player.report.chooseRequired') : t('player.report.choose')}</option>
+                  {named.map((g) => (
+                    <optgroup key={g.name} label={g.name}>
+                      {g.items.map(option)}
+                    </optgroup>
+                  ))}
+                  {bare.map(option)}
+                </select>
+                {hint !== null && (
+                  <p id={reasonHintId} className="cw-hint">
+                    {hint}
+                  </p>
+                )}
+                {missing && (
+                  <p id={missingId} className="cw-field-error" role="alert">
+                    {t('player.report.needReason')}
+                  </p>
+                )}
+              </div>
             )}
-            {missing && (
-              <p id={missingId} className="cw-field-error" role="alert">
-                {t(needText)}
-              </p>
-            )}
-            {showNote && (
-              <>
+            {noteShown && (
+              <div className="cw-field">
                 <label className="cw-label" htmlFor={noteId}>
                   {t('player.report.note')}
                 </label>
-                <textarea id={noteId} className="cw-textarea" rows={4} maxLength={NOTE_MAX} value={note} aria-describedby={hintId} onChange={(e) => setNote(e.target.value)} />
-                <p id={hintId} className="cw-hint">
+                <textarea id={noteId} ref={noteField} className="cw-textarea" rows={3} maxLength={NOTE_MAX} value={note} aria-describedby={noteHintId} onChange={(e) => setNote(e.target.value)} />
+                <p id={noteHintId} className="cw-hint">
                   {t('player.report.noteHint', { max: NOTE_MAX })}
                 </p>
-              </>
+              </div>
+            )}
+            {hasReasons && !noteShown && (
+              <button
+                type="button"
+                className="cw-linkbtn"
+                onClick={() => {
+                  setNoteOpen(true);
+                  setFocusNote(true);
+                }}
+              >
+                {t('player.report.addNote')}
+              </button>
             )}
             {failure !== null && (
               <p className="cw-error" role="alert">
@@ -262,13 +277,8 @@ export function ReportDialog(props: ReportDialogProps) {
             )}
             <div className="cw-actions">
               <button type="submit" className="cw-btn cw-btn--primary" aria-disabled={busy || undefined} aria-busy={busy || undefined}>
-                {flow === 'one_tap' ? t('player.report.oneTap.send') : t('player.report.send')}
+                {t('player.report.oneTap.send')}
               </button>
-              {flow === 'reason_first' && (
-                <button type="button" className="cw-btn" aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={skip}>
-                  {t('player.report.skip')}
-                </button>
-              )}
               {/* Closing while a report is on its way would lose the answer: busy, like Escape. */}
               <button type="button" className="cw-btn" aria-disabled={busy || undefined} onClick={() => !sending.current && onClose()}>
                 {t('player.report.cancel')}
@@ -280,14 +290,6 @@ export function ReportDialog(props: ReportDialogProps) {
             {!taken && (
               <p className="cw-error" role="alert">
                 {t(refusedKey(refusal))}
-              </p>
-            )}
-            {canFollow && dDone === null && (
-              <FollowUp t={t} groups={groups} reportId={reportId} onAddDetail={onAddDetail} sending={sending} busy={busy} onBusy={setBusy} onDone={setDDone} />
-            )}
-            {dDone !== null && !dDone.ok && (
-              <p className="cw-error" role="alert">
-                {t(detailRefusedKey(dDone.refused))}
               </p>
             )}
             <div className="cw-actions">

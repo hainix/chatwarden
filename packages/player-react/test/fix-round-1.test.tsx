@@ -73,29 +73,29 @@ describe('the focus trap holds (ReportDialog)', () => {
   const ok = () => Promise.resolve<ReportResult>({ ok: true, reportId: 'r', remaining: 9 });
   const rd = (more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit: ok, onClose: () => undefined, ...FIXED, reporting: SIX_REASONS, ...more });
 
-  it('after choosing Spam, Shift+Tab from it goes to the last control, not out of the dialog', async () => {
+  it('after choosing Spam, Shift+Tab from the select goes to the last control, not out of the dialog', async () => {
     const { user } = renderUi(
       <>
         <button type="button">Game menu</button>
         <ReportDialog {...rd()} />
       </>,
     );
-    await user.click(screen.getByRole('radio', { name: 'Spam' }));
-    expect(screen.getByRole('radio', { name: 'Spam' })).toHaveFocus();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Why?' }), 'Spam');
+    expect(screen.getByRole('combobox', { name: 'Why?' })).toHaveFocus();
     await user.tab({ shift: true });
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
-    // And forward from Cancel comes back to the checked radio, the one stop the group has.
+    // And forward from Cancel comes back to the select, the first stop.
     await user.tab();
-    expect(screen.getByRole('radio', { name: 'Spam' })).toHaveFocus();
+    expect(screen.getByRole('combobox', { name: 'Why?' })).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Game menu' })).not.toHaveFocus();
   });
 
-  it('with nothing chosen the first radio is the one stop of the group', async () => {
+  it('with nothing chosen the select is the first stop', async () => {
     const { user } = renderUi(<ReportDialog {...rd()} />);
     await user.tab({ shift: true });
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
     await user.tab();
-    expect(screen.getAllByRole('radio')[0]).toHaveFocus();
+    expect(screen.getByRole('combobox', { name: 'Why?' })).toHaveFocus();
   });
 
   it('a click on the backdrop keeps focus in the dialog, and an outside element focused by script comes back', async () => {
@@ -358,7 +358,7 @@ describe('returnFocusTo and container', () => {
     const d = screen.getByRole('dialog');
     expect(host).toContainElement(d);
     expect(container).not.toContainElement(d);
-    expect(screen.getByRole('heading', { name: 'Report a player' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: 'Report this player?' })).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
     host.remove();
@@ -368,14 +368,14 @@ describe('returnFocusTo and container', () => {
 describe('ReportDialog: small fixes', () => {
   const ok = () => Promise.resolve<ReportResult>({ ok: true, reportId: 'r', remaining: 9 });
   const rd = (more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit: ok, onClose: () => undefined, ...FIXED, reporting: SIX_REASONS, ...more });
-  const pick = (user: ReturnType<typeof renderUi>['user'], name: string) => user.click(screen.getByRole('radio', { name }));
+  const pick = (user: ReturnType<typeof renderUi>['user'], name: string) => user.selectOptions(screen.getByRole('combobox', { name: 'Why?' }), name);
 
   it('Cancel does nothing while a report is on its way, and says it is busy', async () => {
     const onClose = vi.fn();
     let release: (r: ReportResult) => void = () => undefined;
     const { user } = renderUi(<ReportDialog {...rd({ onClose, onSubmit: () => new Promise<ReportResult>((resolve) => (release = resolve)) })} />);
     await pick(user, 'Spam');
-    await user.click(screen.getByRole('button', { name: 'Send report' }));
+    await user.click(screen.getByRole('button', { name: 'Report' }));
     const cancel = screen.getByRole('button', { name: 'Cancel' });
     expect(cancel).toHaveAttribute('aria-disabled', 'true');
     await user.click(cancel);
@@ -388,7 +388,7 @@ describe('ReportDialog: small fixes', () => {
     const onClose = vi.fn();
     const { user } = renderUi(<ReportDialog {...rd({ onClose, onSubmit: () => Promise.reject(new TypeError('x')) })} />);
     await pick(user, 'Spam');
-    await user.click(screen.getByRole('button', { name: 'Send report' }));
+    await user.click(screen.getByRole('button', { name: 'Report' }));
     await screen.findByRole('alert');
     const cancel = screen.getByRole('button', { name: 'Cancel' });
     expect(cancel).not.toHaveAttribute('aria-disabled');
@@ -405,7 +405,7 @@ describe('ReportDialog: small fixes', () => {
   ])('an onSubmit that resolves %s shows the generic error, never a crash or a thanks', async (_name, value) => {
     const { user } = renderUi(<ReportDialog {...rd({ onSubmit: () => Promise.resolve(value as unknown as ReportResult) })} />);
     await pick(user, 'Spam');
-    await user.click(screen.getByRole('button', { name: 'Send report' }));
+    await user.click(screen.getByRole('button', { name: 'Report' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('We could not take that report.');
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });

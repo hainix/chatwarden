@@ -13,8 +13,10 @@ import type { PlayerWorld } from './world.js';
 const props = (onSubmit: ReportDialogProps['onSubmit'], more: Partial<ReportDialogProps> = {}): ReportDialogProps => ({ onSubmit, onClose: () => undefined, ...FIXED, reporting: SIX_REASONS, ...more });
 const ok = (remaining: number): ReportResult => ({ ok: true, reportId: 'r1', remaining });
 const refused = (refused: ReportRefusal, remaining?: number): ReportResult => (remaining === undefined ? { ok: false, refused } : { ok: false, refused, remaining });
-const pick = async (user: ReturnType<typeof renderUi>['user'], name: string) => user.click(screen.getByRole('radio', { name }));
-const send = (user: ReturnType<typeof renderUi>['user']) => user.click(screen.getByRole('button', { name: 'Send report' }));
+// SIX_REASONS is the reason_required flow: the select is "Why?" and every reason asks for a note.
+const why = () => screen.getByRole('combobox', { name: 'Why?' });
+const pick = async (user: ReturnType<typeof renderUi>['user'], name: string) => user.selectOptions(why(), name);
+const send = (user: ReturnType<typeof renderUi>['user']) => user.click(screen.getByRole('button', { name: 'Report' }));
 
 /** The game server's side of a report: the real kit, with `who` reporting `target` in a room both sit in. */
 function realSubmit(w: PlayerWorld, o: { roomId?: string; reporter?: typeof ALICE; target?: typeof BOB; reporterSeat?: string; targetSeat?: string } = {}) {
@@ -35,38 +37,38 @@ function realSubmit(w: PlayerWorld, o: { roomId?: string; reporter?: typeof ALIC
 }
 
 describe('the form', () => {
-  it('is a labelled modal dialog with a heading, a reason picker and a note once a reason is chosen', async () => {
+  it('is a labelled modal dialog with a heading, one reason select and a note once a reason is chosen', async () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)))} />);
     const d = screen.getByRole('dialog');
     expect(d).toHaveAttribute('aria-modal', 'true');
-    expect(d).toHaveAccessibleName('Report a player');
-    expect(within(d).getByRole('heading', { level: 2, name: 'Report a player' })).toBeInTheDocument();
-    const group = within(d).getByRole('radiogroup', { name: 'What happened?' });
-    expect(within(group).getAllByRole('radio').map((r) => (r as HTMLInputElement).value)).toEqual([...REPORT_CATEGORIES]);
-    expect(within(group).getAllByRole('radio')).toHaveLength(6);
-    expect(within(d).queryByLabelText('Add a note (optional)')).toBeNull();
-    await user.click(within(group).getAllByRole('radio')[0] as HTMLElement);
-    expect(within(d).getByLabelText('Add a note (optional)')).toBeInstanceOf(HTMLTextAreaElement);
-    expect(within(d).getByRole('button', { name: 'Send report' })).toBeInTheDocument();
+    expect(d).toHaveAccessibleName('Report this player?');
+    expect(within(d).getByRole('heading', { level: 2, name: 'Report this player?' })).toBeInTheDocument();
+    const select = within(d).getByRole('combobox', { name: 'Why?' });
+    expect([...select.querySelectorAll('option')].filter((o) => o.value !== '').map((o) => o.value)).toEqual([...REPORT_CATEGORIES]);
+    expect(within(d).queryAllByRole('radio')).toHaveLength(0);
+    expect(within(d).queryByLabelText('Note (optional)')).toBeNull();
+    await user.selectOptions(select, 'harassment');
+    expect(within(d).getByLabelText('Note (optional)')).toBeInstanceOf(HTMLTextAreaElement);
+    expect(within(d).getByRole('button', { name: 'Report' })).toBeInTheDocument();
     expect(within(d).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
   it('names each category in plain words', () => {
     renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)))} />);
-    const labels = screen.getAllByRole('radio').map((r) => (r as HTMLInputElement).labels?.[0]?.textContent);
+    const labels = [...why().querySelectorAll('option')].filter((o) => o.value !== '').map((o) => o.textContent);
     expect(labels).toEqual(['Harassment', 'Hateful language', 'Cheating', 'Spam', 'Disrupting the game', 'Something else']);
   });
 
   it('names the player when it is given one, as text', () => {
     renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)), { targetName: '<b>Cara</b>' })} />);
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('Report <b>Cara</b>');
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Report <b>Cara</b>?');
     expect(screen.getByRole('dialog').querySelector('b')).toBeNull();
   });
 
   it('tells the player what the note is for and its limit, and caps the note at the kit limit', async () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)))} />);
-    await user.click(screen.getAllByRole('radio')[0] as HTMLElement);
-    const note = screen.getByLabelText('Add a note (optional)');
+    await user.selectOptions(why(), 'harassment');
+    const note = screen.getByLabelText('Note (optional)');
     expect(note).toHaveAttribute('maxlength', String(REPORT_NOTE_MAX));
     expect(note).toHaveAccessibleDescription(`A moderator will read this. Up to ${REPORT_NOTE_MAX} characters. Do not include passwords or personal details.`);
   });
@@ -78,25 +80,25 @@ describe('the form', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     const error = screen.getByText('Choose a reason.');
     expect(error).toHaveAttribute('role', 'alert');
-    expect(screen.getByRole('radiogroup', { name: 'What happened?' })).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByRole('radiogroup')).toHaveAccessibleDescription(/Choose a reason./);
+    expect(why()).toHaveAttribute('aria-invalid', 'true');
+    expect(why()).toHaveAccessibleDescription(/Choose a reason./);
     // Picking one clears the message.
     await pick(user, 'Spam');
     expect(screen.queryByText('Choose a reason.')).toBeNull();
-    expect(screen.getByRole('radiogroup')).not.toHaveAttribute('aria-invalid');
+    expect(why()).not.toHaveAttribute('aria-invalid');
   });
 
-  it('moves focus to the picker when it is missing, so the player can fix it with the keyboard', async () => {
+  it('moves focus to the select when the reason is missing, so the player can fix it with the keyboard', async () => {
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)))} />);
     await send(user);
-    expect(screen.getAllByRole('radio')[0]).toHaveFocus();
+    expect(why()).toHaveFocus();
   });
 
   it('sends the chosen reason, and the note trimmed', async () => {
     const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok(9)));
     const { user } = renderUi(<ReportDialog {...props(onSubmit)} />);
     await pick(user, 'Cheating');
-    await user.type(screen.getByLabelText('Add a note (optional)'), '   they used a snerp hack  ');
+    await user.type(screen.getByLabelText('Note (optional)'), '   they used a snerp hack  ');
     await send(user);
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0]?.[0]).toEqual({ reason: 'cheating', note: 'they used a snerp hack' });
@@ -106,16 +108,16 @@ describe('the form', () => {
     const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok(9)));
     const { user } = renderUi(<ReportDialog {...props(onSubmit)} />);
     await pick(user, 'Spam');
-    if (blank !== '') fireEvent.change(screen.getByLabelText('Add a note (optional)'), { target: { value: blank } });
+    if (blank !== '') fireEvent.change(screen.getByLabelText('Note (optional)'), { target: { value: blank } });
     await send(user);
     expect(onSubmit.mock.calls[0]?.[0]).toEqual({ reason: 'spam' });
   });
 
-  it('sends each reason id as the picker has it', async () => {
-    for (const [i, category] of REPORT_CATEGORIES.entries()) {
+  it('sends each reason id as the select has it', async () => {
+    for (const category of REPORT_CATEGORIES) {
       const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok(9)));
       const { user, unmount } = renderUi(<ReportDialog {...props(onSubmit)} />);
-      await user.click(screen.getAllByRole('radio')[i] as HTMLElement);
+      await user.selectOptions(why(), category);
       await send(user);
       expect(onSubmit.mock.calls[0]?.[0]).toEqual({ reason: category });
       unmount();
@@ -130,9 +132,9 @@ describe('a report that is taken', () => {
     await pick(user, 'Harassment');
     await send(user);
     expect(await findStatus()).toHaveTextContent('Thanks. We got your report. You can send 9 more reports today.');
-    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Send report' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Report' })).toBeNull();
     expect(w.cw.reports.list().items).toHaveLength(1);
   });
 
@@ -199,7 +201,7 @@ describe('every refusal has its own plain message', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(text);
     // A refusal is final: the form is gone, with a way to close, and nothing says "Thanks".
-    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: "Couldn't send the report" })).toHaveFocus();
@@ -283,13 +285,13 @@ describe('when sending fails', () => {
     const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => (fail ? Promise.reject(new TypeError('fetch failed')) : Promise.resolve(ok(9))));
     const { user } = renderUi(<ReportDialog {...props(onSubmit)} />);
     await pick(user, 'Hateful language');
-    await user.type(screen.getByLabelText('Add a note (optional)'), 'what they said');
+    await user.type(screen.getByLabelText('Note (optional)'), 'what they said');
     await send(user);
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Your report was not sent. Could not reach the server. Check your connection and try again.');
-    expect(screen.getByRole('radio', { name: 'Hateful language' })).toBeChecked();
-    expect(screen.getByLabelText('Add a note (optional)')).toHaveValue('what they said');
-    expect(screen.getByRole('button', { name: 'Send report' })).not.toHaveAttribute('aria-busy');
+    expect(why()).toHaveValue('hate');
+    expect(screen.getByLabelText('Note (optional)')).toHaveValue('what they said');
+    expect(screen.getByRole('button', { name: 'Report' })).not.toHaveAttribute('aria-busy');
     fail = false;
     await send(user);
     expect(await findStatus()).toHaveTextContent('Thanks.');
@@ -309,7 +311,7 @@ describe('when sending fails', () => {
     await send(user);
     expect(await screen.findByRole('alert')).toHaveTextContent(`Your report was not sent. ${text}`);
     expect(document.body.innerHTML).not.toContain('SECRET');
-    expect(screen.getByRole('radio', { name: 'Spam' })).toBeChecked();
+    expect(why()).toHaveValue('spam');
   });
 
   it('a synchronous throw from onSubmit is handled the same way', async () => {
@@ -328,7 +330,7 @@ describe('double submit', () => {
     const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => Promise.resolve(ok(9)));
     const { user } = renderUi(<ReportDialog {...props(onSubmit)} />);
     await pick(user, 'Spam');
-    const button = screen.getByRole('button', { name: 'Send report' });
+    const button = screen.getByRole('button', { name: 'Report' });
     act(() => {
       button.click();
       button.click();
@@ -343,7 +345,7 @@ describe('double submit', () => {
     const onSubmit = vi.fn<ReportDialogProps['onSubmit']>(() => new Promise<ReportResult>((resolve) => (release = resolve)));
     const { user } = renderUi(<ReportDialog {...props(onSubmit)} />);
     await pick(user, 'Spam');
-    const button = screen.getByRole('button', { name: 'Send report' });
+    const button = screen.getByRole('button', { name: 'Report' });
     await user.click(button);
     await user.click(button);
     await user.keyboard('{Enter}');
@@ -371,7 +373,7 @@ describe('double submit', () => {
     await pick(user, 'Spam');
     await send(user);
     await screen.findByRole('alert');
-    expect(screen.queryByRole('button', { name: 'Send report' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Report' })).toBeNull();
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
@@ -407,27 +409,26 @@ describe('focus and closing', () => {
     await user.click(opener);
     expect(opener).toHaveFocus();
     rerender(<Page {...base} open />);
-    const heading = screen.getByRole('heading', { name: 'Report a player' });
+    const heading = screen.getByRole('heading', { name: 'Report this player?' });
     expect(heading).toHaveFocus();
     expect(heading).toHaveAttribute('tabindex', '-1');
     rerender(<Page {...base} open={false} />);
     expect(opener).toHaveFocus();
   });
 
-  it('keeps Tab inside: forward from Cancel wraps to the first radio, Shift+Tab from the heading to Cancel', async () => {
+  it('keeps Tab inside: forward from Cancel wraps to the select, Shift+Tab from the heading to Cancel', async () => {
     const { user } = renderUi(
       <>
         <button type="button">Report player</button>
         <ReportDialog {...props(() => Promise.resolve(ok(9)))} />
       </>,
     );
-    const radios = screen.getAllByRole('radio');
     const cancel = screen.getByRole('button', { name: 'Cancel' });
     // The heading has focus; Shift+Tab goes to the last control, not out of the dialog.
     await user.tab({ shift: true });
     expect(cancel).toHaveFocus();
     await user.tab();
-    expect(radios[0]).toHaveFocus();
+    expect(why()).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Report player' })).not.toHaveFocus();
   });
 
@@ -461,7 +462,7 @@ describe('focus and closing', () => {
 
 describe('words and theme', () => {
   it('takes every word from t, and its theme and className from props', async () => {
-    const t = createT({ ...en, 'player.report.title': 'Spieler melden', 'player.report.send': 'Melden' }, 'de');
+    const t = createT({ ...en, 'player.report.titleOneTapPlayer': 'Spieler melden', 'player.report.oneTap.send': 'Melden' }, 'de');
     const { container } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(9)), { t, locale: 'de', theme: 'dark', className: 'q' })} />);
     expect(screen.getByRole('heading', { name: 'Spieler melden' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Melden' })).toBeInTheDocument();

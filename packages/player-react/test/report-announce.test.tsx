@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PlayerReporting, ReportDetailResult, ReportResult } from '@chatwarden/core';
 import { ReportDialog } from '../src/ReportDialog.js';
@@ -8,7 +8,7 @@ import { ALICE, BOB, MINUTE, playerWorld } from './world.js';
 import { REPORT_DETAIL_WINDOW_MS } from '@chatwarden/core';
 
 // After a send the player must hear what happened: the heading says it (a question would be stale), and the thank-you is written into a
-// status region that was already there. The follow-up is offered only while the kit would take it (`detailUntil`).
+// status region that was already there. There is no follow-up step any more, whatever window the kit sends.
 
 const ONE_TAP: PlayerReporting = { flow: 'one_tap', thanks: 'Got it. A moderator will look.', reasons: [{ id: 'other', label: 'Something else', hint: '', group: '', asksNote: true }, { id: 'hate', label: 'Hate', hint: '', group: '', asksNote: false }] };
 const ok = (more: Partial<Extract<ReportResult, { ok: true }>> = {}): ReportResult => ({ ok: true, reportId: 'r1', remaining: 5, ...more });
@@ -39,8 +39,8 @@ describe('the heading says what happened', () => {
   it.each(['reason_first', 'reason_required'] as const)('%s: the same words after sending', async (flow) => {
     const reporting: PlayerReporting = { ...ONE_TAP, flow };
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok()), { reporting })} />);
-    await user.click(screen.getByRole('radio', { name: 'Hate' }));
-    await user.click(press('Send report'));
+    await user.selectOptions(screen.getByRole('combobox'), 'hate');
+    await user.click(press('Report'));
     await screen.findByText(/Got it. A moderator will look./);
     expect(screen.getByRole('heading', { level: 2, name: 'Report sent' })).toHaveFocus();
   });
@@ -79,95 +79,57 @@ describe('the thank-you is written into a status region that was already there',
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });
 
-  it('"Added. Thanks." goes into the same region, after the thank-you', async () => {
+  it('the region holds the thank-you only: there is no follow-up line after it', async () => {
     const onAddDetail = vi.fn<NonNullable<ReportDialogProps['onAddDetail']>>(() => Promise.resolve<ReportDetailResult>({ ok: true }));
     const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok()), { onAddDetail })} />);
     const region = screen.getByRole('status');
     await user.click(press('Report'));
     await screen.findByText(/Got it. A moderator will look./);
-    await user.click(press('Add a reason'));
-    await user.click(screen.getByRole('radio', { name: 'Hate' }));
-    await user.click(press('Add to my report'));
-    await screen.findByText('Added. Thanks.');
     expect(screen.getByRole('status')).toBe(region);
-    expect(within(region).getByText('Added. Thanks.')).toBeInTheDocument();
+    expect(within(region).getAllByText(/./)).toHaveLength(1);
+    expect(screen.queryByText('Added. Thanks.')).toBeNull();
     expect(screen.getAllByRole('status')).toHaveLength(1);
     expect(screen.getByRole('heading', { level: 2, name: 'Report sent' })).toHaveFocus();
+    expect(onAddDetail).not.toHaveBeenCalled();
   });
 });
 
-describe('the follow-up is offered only while the kit would take it', () => {
+describe('a detail window from the kit never brings a follow-up step back (the dialog is one step)', () => {
   const at = 1_800_000_000_000;
   const withClock = (clock: { t: number }, more: Partial<ReportDialogProps> = {}) => ({ now: () => clock.t, ...more });
+  const onAddDetail = () => Promise.resolve<ReportDetailResult>({ ok: true });
 
-  it('without detailUntil (an older kit) it is offered as before', async () => {
-    const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok()), { onAddDetail: () => Promise.resolve({ ok: true }) })} />);
-    await user.click(press('Report'));
-    expect(await screen.findByRole('button', { name: 'Add a reason' })).toBeInTheDocument();
-  });
-
-  it('with detailUntil in the future it is offered, and says for how long', async () => {
+  it.each([
+    ['no detailUntil (an older kit)', {}],
+    ['detailUntil in the future', { detailUntil: at + 10 * MINUTE }],
+    ['detailUntil exactly now', { detailUntil: at }],
+    ['detailUntil already past', { detailUntil: at - 1 }],
+  ])('%s: Close is all there is after the thank-you', async (_name, more) => {
     const clock = { t: at };
-    const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok({ detailUntil: at + 10 * MINUTE })), withClock(clock, { onAddDetail: () => Promise.resolve({ ok: true }) }))} />);
-    await user.click(press('Report'));
-    await user.click(await screen.findByRole('button', { name: 'Add a reason' }));
-    expect(screen.getByText('This helps, but the moderators decide what it really is. You can add this for a few minutes after you report.')).toBeInTheDocument();
-  });
-
-  it('with detailUntil already past it is not offered at all', async () => {
-    const clock = { t: at };
-    const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok({ detailUntil: at - 1 })), withClock(clock, { onAddDetail: () => Promise.resolve({ ok: true }) }))} />);
+    const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok(more)), withClock(clock, { onAddDetail }))} />);
     await user.click(press('Report'));
     await screen.findByText(/Got it. A moderator will look./);
-    expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
-  });
-
-  it('it goes away when the time comes, with the panel open and what was typed dropped, and the report stays filed', async () => {
-    const clock = { t: at };
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const onAddDetail = vi.fn(() => Promise.resolve<ReportDetailResult>({ ok: true }));
-    const view = renderUi(<ReportDialog {...props(() => Promise.resolve(ok({ detailUntil: at + 1000 })), withClock(clock, { onAddDetail }))} />);
-    await act(async () => press('Report').click());
-    await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
-    await act(async () => press('Add a reason').click());
-    expect(screen.getAllByRole('radio').length).toBeGreaterThan(0);
-    clock.t = at + 1001;
-    await act(async () => void (await vi.advanceTimersByTimeAsync(1001)));
-    expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /reason/i })).toBeNull();
     expect(screen.queryAllByRole('radio')).toHaveLength(0);
-    expect(screen.getByRole('status')).toHaveTextContent('Got it. A moderator will look.');
-    expect(onAddDetail).not.toHaveBeenCalled();
-    view.unmount();
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Close']);
   });
 
-  it('exactly at detailUntil it is still offered (the kit takes it)', async () => {
-    const clock = { t: at + 5 };
-    const { user } = renderUi(<ReportDialog {...props(() => Promise.resolve(ok({ detailUntil: at + 5 })), withClock(clock, { onAddDetail: () => Promise.resolve({ ok: true }) }))} />);
-    await user.click(press('Report'));
-    expect(await screen.findByRole('button', { name: 'Add a reason' })).toBeInTheDocument();
-  });
-
-  it('from the real kit: detailUntil is the filing time plus the window, and the dialog uses it', async () => {
+  it('from the real kit: it still sends detailUntil (the filing time plus the window), and the dialog offers nothing more', async () => {
     const w = await playerWorld();
     w.cw.rooms.seat('rr', ALICE.seat, { clientKey: ALICE.key }, ALICE.handle);
     w.cw.rooms.seat('rr', BOB.seat, { clientKey: BOB.key }, BOB.handle);
     w.cw.chat.accept('rr', BOB.seat, 'a line');
     const filedAt = w.clock.t;
     const reporting = (await w.client.rules()).reporting as PlayerReporting;
-    const submit = (): Promise<ReportResult> => w.cw.reports.submit({ roomId: 'rr', reporterSeat: ALICE.seat, targetSeat: BOB.seat });
-    const probe = await submit();
+    const probe = await w.cw.reports.submit({ roomId: 'rr', reporterSeat: ALICE.seat, targetSeat: BOB.seat });
     expect(probe.ok && probe.detailUntil).toBe(filedAt + REPORT_DETAIL_WINDOW_MS);
-    // A second dialog, whose page clock is already past the window when the answer comes back.
     w.cw.rooms.seat('rr2', ALICE.seat, { clientKey: ALICE.key }, ALICE.handle);
     w.cw.rooms.seat('rr2', BOB.seat, { clientKey: BOB.key }, BOB.handle);
-    const late = { t: filedAt + REPORT_DETAIL_WINDOW_MS + 1 };
     const { user } = renderUi(
-      <ReportDialog
-        {...props(() => w.cw.reports.submit({ roomId: 'rr2', reporterSeat: ALICE.seat, targetSeat: BOB.seat }), { reporting, ...withClock(late, { onAddDetail: () => Promise.resolve({ ok: true }) }) })}
-      />,
+      <ReportDialog {...props(() => w.cw.reports.submit({ roomId: 'rr2', reporterSeat: ALICE.seat, targetSeat: BOB.seat }), { reporting, ...withClock({ t: filedAt }, { onAddDetail }) })} />,
     );
     await user.click(press('Report'));
     await screen.findByText(/./, { selector: '[role="status"] p' });
-    expect(screen.queryByRole('button', { name: 'Add a reason' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /reason/i })).toBeNull();
   });
 });
