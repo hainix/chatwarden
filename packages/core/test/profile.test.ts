@@ -473,6 +473,8 @@ describe('defineProfile', () => {
     aiContext: 'Be gentle with banter. Act only on clear threats.',
     aiAutoAct: [],
     rules: 'standard',
+    durations: [HOUR, DAY],
+    customDuration: false,
     levels: PRESETS.standard.levels,
     guidelines: [
       { title: 'All good', description: 'd', examples: ['ez'], covers: ['banter'], outcome: 'No action.' },

@@ -33,14 +33,14 @@ const openAt = (path: string): SqliteStore => {
 };
 
 describe('migration 15', () => {
-  it('is the latest migration, adds kit_claims and kit_reasons, and nothing named in the token', () => {
-    expect(MIGRATIONS.at(-1)?.version).toBe(15);
+  it('is migration 15 (a later one may follow), adds kit_claims and kit_reasons, and nothing named in the token', () => {
+    expect(MIGRATIONS[14]?.version).toBe(15);
     const db = new DatabaseSync(':memory:');
     openStore({ db });
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'kit_%' ORDER BY name").all().map((r) => String(r.name));
     expect(tables).toContain('kit_claims');
     expect(tables).toContain('kit_reasons');
-    expect(db.prepare("SELECT value FROM kit_meta WHERE key='schema_version'").get()?.value).toBe('15');
+    expect(db.prepare("SELECT value FROM kit_meta WHERE key='schema_version'").get()?.value).toBe(String(MIGRATIONS.at(-1)?.version));
     // The token has no row until the first change: it reads as 0.
     expect(db.prepare("SELECT 1 AS one FROM kit_meta WHERE key='change_token'").get()).toBeUndefined();
   });
@@ -56,7 +56,7 @@ describe('migration 15', () => {
     old.close();
 
     const s = openAt(path);
-    expect(s.schemaVersion()).toBe(15);
+    expect(s.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(s.loadReport('old-report')).toMatchObject({ id: 'old-report', status: 'open' });
     expect(s.listOpenReports({ limit: 5 }).map((r) => r.id)).toEqual(['old-report']);
     expect(s.listReasons()).toEqual([]);

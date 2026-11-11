@@ -8,6 +8,7 @@ import type {
   MuteRow,
   NoticeRow,
   OpenReportQuery,
+  PolicyLayer,
   ReasonRow,
   ReportActivity,
   ReportListQuery,
@@ -93,6 +94,8 @@ export class MemoryStore implements Store {
   protected claims = new Map<SubjectId, ClaimRow>();
   /** Saved reasons in the order they were added. */
   protected reasons: ReasonRow[] = [];
+  /** The stored policy layer and its version, or null when none was ever saved. */
+  protected policy: { layer: PolicyLayer; version: number } | null = null;
   /** The change token's counter (see `changeToken`). */
   private changes = 0;
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -414,6 +417,23 @@ export class MemoryStore implements Store {
     });
     this.bump();
     return true;
+  }
+
+  // The editable profile's stored layer (synchronous, see the Store interface). Not a queue change: it does not move the token.
+
+  loadPolicyLayer(): { layer: PolicyLayer; version: number } | null {
+    return this.policy === null ? null : { layer: structuredClone(this.policy.layer), version: this.policy.version };
+  }
+
+  savePolicyLayer(layer: PolicyLayer, expectedVersion: number): number | null {
+    const current = this.policy?.version ?? 0;
+    if (expectedVersion !== current) return null;
+    const prior = this.policy;
+    this.policy = { layer: structuredClone(layer), version: current + 1 };
+    this.undoWith(() => {
+      this.policy = prior;
+    });
+    return current + 1;
   }
 
   // Staff audit trail (synchronous, see the Store interface).

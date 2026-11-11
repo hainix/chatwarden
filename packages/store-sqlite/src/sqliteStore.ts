@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, ROLES } from '@chatwarden/core';
 import type {
+  AuditDetail,
   AuditListQuery,
   AuditRow,
   AuditTargetType,
@@ -13,6 +14,7 @@ import type {
   NoticeKind,
   NoticeRow,
   OpenReportQuery,
+  PolicyLayer,
   ReasonRow,
   ReportActivity,
   ReportCategory,
@@ -74,6 +76,8 @@ function auditFromRow(r: Record<string, unknown>): AuditRow {
     role: ROLES.find((x) => x === role) ?? null,
     action: String(r.action) as AuditRow['action'],
     target: ref !== '' && (AUDIT_TARGET_TYPES as readonly string[]).includes(type) ? { type: type as AuditTargetType, ref } : null,
+    // Only a policy row has one; every other row (the legacy term-editor rows included) has NULL here.
+    ...(r.detail_json === null || r.detail_json === undefined ? {} : { detail: JSON.parse(String(r.detail_json)) as AuditDetail }),
   };
 }
 
@@ -533,16 +537,53 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
+  // The editable profile's stored layer (K4 Task 7f). SYNCHRONOUS on purpose. One row, `id = 1`; no row is version 0.
+
+  loadPolicyLayer(): { layer: PolicyLayer; version: number } | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT layer_json, version FROM kit_policy_layer WHERE id = 1').get();
+      return r === undefined ? null : { layer: JSON.parse(String(r.layer_json)) as PolicyLayer, version: Number(r.version) };
+    });
+  }
+
+  savePolicyLayer(layer: PolicyLayer, expectedVersion: number): number | null {
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) return null;
+    const json = JSON.stringify(layer);
+    // ONE conditional write, and nothing is read first: the statement itself takes the write lock (so another process's lock is
+    // waited out by the connection's busy timeout, never a read-then-write upgrade that fails at once), and its condition is the
+    // version check. Of two callers with the same expected version, whoever runs it first wins and the other's condition is false.
+    return this.transaction(() => {
+      const won =
+        expectedVersion === 0
+          ? this.db
+              .prepare('INSERT INTO kit_policy_layer (id, layer_json, version) VALUES (1, ?, 1) ON CONFLICT (id) DO NOTHING RETURNING version')
+              .get(json)
+          : this.db
+              .prepare('UPDATE kit_policy_layer SET layer_json = ?, version = version + 1 WHERE id = 1 AND version = ? RETURNING version')
+              .get(json, expectedVersion);
+      return won === undefined ? null : Number(won.version);
+    });
+  }
+
   // Staff audit trail. SYNCHRONOUS on purpose. The json columns (before_json / after_json) are never selected: the
   // rows the term editor wrote may hold term text there.
 
   insertAudit(row: AuditRow): void {
     this.db
       .prepare(
-        `INSERT INTO kit_audit (id, at, actor, role, action, subject_type, subject_ref, before_json, after_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+        `INSERT INTO kit_audit (id, at, actor, role, action, subject_type, subject_ref, before_json, after_json, detail_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`,
       )
-      .run(row.id, row.at, row.actor, row.role, row.action, row.target?.type ?? '', row.target?.ref ?? '');
+      .run(
+        row.id,
+        row.at,
+        row.actor,
+        row.role,
+        row.action,
+        row.target?.type ?? '',
+        row.target?.ref ?? '',
+        row.detail === undefined ? null : JSON.stringify(row.detail),
+      );
   }
 
   listAudit(q: AuditListQuery): AuditRow[] {
@@ -569,7 +610,7 @@ export class SqliteStore implements Store, TermStore {
       }
     }
     const sql =
-      `SELECT id, at, actor, role, (${AUDIT_ACTION_SQL}) AS action, subject_type, subject_ref FROM kit_audit` +
+      `SELECT id, at, actor, role, (${AUDIT_ACTION_SQL}) AS action, subject_type, subject_ref, detail_json FROM kit_audit` +
       `${where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`} ORDER BY at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(auditFromRow));
   }

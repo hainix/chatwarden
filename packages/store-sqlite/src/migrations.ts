@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map, migration 15 is soft claims on a person's case and saved decision reasons. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map, migration 15 is soft claims on a person's case and saved decision reasons, migration 16 is the editable profile's stored layer and the audit trail's detail column. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -380,6 +380,22 @@ CREATE TABLE kit_reasons (
   text   TEXT NOT NULL,
   active INTEGER NOT NULL CHECK (active IN (0, 1))
 );
+`,
+  },
+  {
+    version: 16,
+    // The editable moderation profile (K4 Task 7f). `kit_policy_layer` holds at most one row: the owner's stored edits as JSON
+    // (`layer_json`, a validated PolicyLayer: durations, ladder, first offences, repeat rule, rule lists, guideline outcome
+    // texts; never chat text) and its `version`, which the conditional write in `savePolicyLayer` compares and bumps. No row means
+    // version 0 and no layer. `kit_audit` gains `detail_json`: NULL on every existing row and on every row but a policy.update /
+    // policy.reset one, where it holds the sections changed and the owner's reason. Existing rows and tables are untouched.
+    sql: `
+CREATE TABLE kit_policy_layer (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  layer_json TEXT NOT NULL,
+  version    INTEGER NOT NULL CHECK (version >= 1)
+);
+ALTER TABLE kit_audit ADD COLUMN detail_json TEXT;
 `,
   },
 ];

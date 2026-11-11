@@ -2,6 +2,7 @@
 // their own sections below.
 
 import type { AuditListQuery, AuditRow } from './audit.js';
+import type { PolicyLayer } from './profile.js';
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -752,6 +753,23 @@ export interface Store {
 
   /** Switch a reason on or off. False for an unknown id; true otherwise (also when it already was so). */
   setReasonActive(id: string, active: boolean): boolean;
+
+  // The editable moderation profile (K4 Task 7f). OPTIONAL: a store without both methods still works, and `cw.policy.save`
+  // then answers `unsupported` while the profile stays code-only. SYNCHRONOUS on purpose (like sanctions).
+
+  /**
+   * The stored policy layer and its version, or null when none was ever saved (version 0). `layer` is whatever was saved,
+   * unvalidated: the kit checks it against the profile and ignores one it cannot use. Returns a copy.
+   */
+  loadPolicyLayer?(): { layer: PolicyLayer; version: number } | null;
+
+  /**
+   * Replace the stored layer with `layer` IF the stored version is still `expectedVersion` (0 when none is stored), as ONE
+   * atomic conditional write: of two callers (two processes on one database included) that pass the same version, exactly
+   * one wins. Returns the new version (`expectedVersion + 1`), or null on a version conflict, which writes nothing. Runs
+   * inside `transaction`, so an undone transaction undoes it. It does not move the change token.
+   */
+  savePolicyLayer?(layer: PolicyLayer, expectedVersion: number): number | null;
 
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).

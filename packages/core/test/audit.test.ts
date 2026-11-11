@@ -48,6 +48,8 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'reason.add',
       'reason.update',
       'reason.toggle',
+      'policy.update',
+      'policy.reset',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -82,7 +84,11 @@ describe('cw.audit.record and list', () => {
 
   it('accepts every action, every role and every target type', async () => {
     const { cw } = await setup();
-    for (const action of AUDIT_ACTIONS) expect(rec(cw, { action })).toBe(true);
+    for (const action of AUDIT_ACTIONS) {
+      // A policy row must say what it changed (see audit-policy.test.ts); every other row carries ids only.
+      const detail = action === 'policy.update' || action === 'policy.reset' ? { detail: { sections: [] } } : {};
+      expect(rec(cw, { action, ...detail })).toBe(true);
+    }
     for (const role of ROLES) expect(rec(cw, { role })).toBe(true);
     for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason']) {
       expect(rec(cw, { target: { type, ref: 'x1' } })).toBe(true);

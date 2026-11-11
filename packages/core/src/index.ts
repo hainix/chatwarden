@@ -132,6 +132,7 @@ export type {
 export {
   AUDIT_ACTIONS,
   AUDIT_PAGE_MAX,
+  AUDIT_REASON_MAX,
   AUDIT_TARGET_TYPES,
   AuditQueryError,
   isValidAuditActor,
@@ -140,6 +141,7 @@ export {
 export type {
   AuditAction,
   AuditItem,
+  AuditDetail,
   AuditListQuery,
   AuditPage,
   AuditQuery,
@@ -220,14 +222,30 @@ export type {
   RevokeDeps,
 } from './decide.js';
 export {
+  applyPolicyLayer,
+  changedSections,
+  DEFAULT_DURATIONS,
   defineProfile,
+  layerSections,
   MAX_DURATION_MS,
+  MAX_DURATIONS,
+  MAX_GUIDELINE_OUTCOME,
   MAX_WINDOW_DAYS,
+  POLICY_SECTIONS,
   PRESETS,
   ProfileError,
   resolveProfile,
   validateProfile,
 } from './profile.js';
+export { POLICY_REFRESH_MS, PREVIEW_SAMPLES } from './policy.js';
+export type {
+  PolicyPreview,
+  PolicySaveContext,
+  PolicySaveResult,
+  PolicyState,
+  PreviewOutcome,
+  PreviewSample,
+} from './policy.js';
 export type {
   DeepPartial,
   GuidelineCover,
@@ -235,8 +253,13 @@ export type {
   LevelDescription,
   ModerationProfile,
   Outcome,
+  PolicyCell,
+  PolicyLadderRow,
+  PolicyLayer,
+  PolicySection,
   PresetName,
   ProfanityConfig,
+  ProfileInput,
   ProfileOverrides,
   RulesFlavour,
 } from './profile.js';

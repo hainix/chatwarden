@@ -1,6 +1,6 @@
-import { HISTORY_LOOKBACK_MS, LADDER_TABLE } from './ladder.js';
+import { HISTORY_LOOKBACK_MS, LADDER_TABLE, outcomeLabel } from './ladder.js';
 import { MAX_SANCTION_DURATION_MS } from './sanctions.js';
-import type { LadderRow } from './ladder.js';
+import type { LadderRow, LadderStep } from './ladder.js';
 import { CONDUCT_LEVELS } from './types.js';
 import type { ConductLevel } from './types.js';
 
@@ -95,6 +95,16 @@ export interface ModerationProfile {
    * missing, `[1]`. Whole numbers from 1; duplicates are removed; `[]` turns it off.
    */
   severeRules?: number[];
+  /**
+   * The lengths a moderator is offered, in milliseconds: sorted from the shortest, no repeats, each from 1 up to 365
+   * days (at most {@link MAX_DURATIONS} of them). Permanent is always offered, subject to permission, and is never listed.
+   * Default {@link DEFAULT_DURATIONS}: 1 hour, 6 hours, 12 hours, 24 hours, 3 days, 7 days and 30 days. Only the offered
+   * list: a decision or a sanction may still name any valid length when `customDuration` is true, and the ladder's own
+   * lengths are always allowed.
+   */
+  durations: number[];
+  /** May a moderator type a length of their own? Default true. When false, only `durations`, permanent and the profile's own lengths are accepted. */
+  customDuration: boolean;
   /** What each conduct level means here, with examples. */
   levels: Record<ConductLevel, LevelDescription>;
   /**
@@ -105,6 +115,12 @@ export interface ModerationProfile {
    */
   guidelines: GuidelineTier[];
 }
+
+/**
+ * A profile as an adopter writes it: {@link ModerationProfile} where `durations` and `customDuration` may be left out
+ * (a profile written for 0.1.1 has neither), and are then filled with their defaults.
+ */
+export type ProfileInput = Omit<ModerationProfile, 'durations' | 'customDuration'> & Partial<Pick<ModerationProfile, 'durations' | 'customDuration'>>;
 
 /** Like `Partial`, all the way down. Arrays are replaced, not merged; `null` is a value. */
 export type DeepPartial<T> = T extends readonly unknown[]
@@ -119,10 +135,13 @@ export type ProfileOverrides = DeepPartial<ModerationProfile>;
 /** A profile that fails validation. `path` names the field (`'profile.firstOffense.banter'`); the message never echoes a value. */
 export class ProfileError extends Error {
   readonly path: string;
+  /** The rule that was broken, without the path. Never a value. */
+  readonly reason: string;
   constructor(path: string, reason: string) {
     super(`${path} ${reason}`);
     this.name = 'ProfileError';
     this.path = path;
+    this.reason = reason;
   }
 }
 
@@ -142,6 +161,8 @@ const TOP_KEYS = [
   'rules',
   'areaRules',
   'severeRules',
+  'durations',
+  'customDuration',
   'levels',
   'guidelines',
 ] as const;
@@ -172,6 +193,12 @@ const MAX_DEPTH = 24;
 export const MAX_DURATION_MS = MAX_SANCTION_DURATION_MS;
 /** The longest `repeat.windowDays`: the history lookback (90 days), since the record reaches back no further. */
 export const MAX_WINDOW_DAYS = HISTORY_LOOKBACK_MS / DAY;
+
+/** The most lengths `durations` may list: a picker with more than this is not a picker. */
+export const MAX_DURATIONS = 50;
+
+/** The lengths offered when a profile does not say: 1 hour, 6 hours, 12 hours, 24 hours, 3 days, 7 days and 30 days. */
+export const DEFAULT_DURATIONS: readonly number[] = Object.freeze([HOUR, 6 * HOUR, 12 * HOUR, DAY, 3 * DAY, 7 * DAY, 30 * DAY]);
 
 function fail(path: string, reason: string): never {
   throw new ProfileError(path, reason);
@@ -244,6 +271,19 @@ function outcome(v: unknown, path: string): void {
   const o = obj(v, path, OUTCOME_KEYS);
   oneOf(o['kind'], `${path}.kind`, OUTCOME_KINDS, "must be 'chat', 'area' or 'ban'");
   duration(o['durationMs'], `${path}.durationMs`);
+}
+
+function validateDurations(v: unknown, path: string): void {
+  if (!Array.isArray(v)) return fail(path, 'must be a list of lengths');
+  if (v.length > MAX_DURATIONS) fail(path, `must list at most ${MAX_DURATIONS} lengths`);
+  v.forEach((item: unknown, i) => {
+    if (!positiveInt(item) || item > MAX_DURATION_MS) {
+      fail(`${path}[${i}]`, 'must be a whole number of milliseconds above 0 and at most 365 days');
+    }
+  });
+  for (let i = 1; i < v.length; i += 1) {
+    if ((v[i] as number) <= (v[i - 1] as number)) fail(path, 'must be sorted from the shortest, with no repeats');
+  }
 }
 
 function validateLadder(v: unknown, path: string): void {
@@ -328,6 +368,9 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
 
   validateLadder(p['ladder'], 'profile.ladder');
 
+  validateDurations(p['durations'], 'profile.durations');
+  if (typeof p['customDuration'] !== 'boolean') fail('profile.customDuration', 'must be true or false');
+
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
   oneOf(prof['style'], 'profile.profanity.style', PROFANITY_STYLES, "must be 'full', 'keepFirst' or 'grawlix'");
@@ -405,9 +448,17 @@ function dedupeRuleLists(copy: unknown): void {
   }
 }
 
+/** A profile written before `durations` and `customDuration` existed gets their defaults. */
+function fillDurationDefaults(copy: unknown): void {
+  if (!isPlain(copy)) return;
+  if (!Object.hasOwn(copy, 'durations')) setOwn(copy, 'durations', [...DEFAULT_DURATIONS]);
+  if (!Object.hasOwn(copy, 'customDuration')) setOwn(copy, 'customDuration', true);
+}
+
 /** Copy, validate and freeze. Nothing returned shares structure with the input. */
 function finalize(value: unknown): ModerationProfile {
   const copy = clone(value);
+  fillDurationDefaults(copy);
   dedupeRuleLists(copy);
   validateProfile(copy);
   return deepFreeze(copy);
@@ -486,6 +537,8 @@ const RELAXED: ModerationProfile = {
   rules: 'relaxed',
   areaRules: [5, 6],
   severeRules: [1],
+  durations: [...DEFAULT_DURATIONS],
+  customDuration: true,
   levels: LEVELS,
   guidelines: [
     {
@@ -553,6 +606,8 @@ const STANDARD: ModerationProfile = {
   rules: 'standard',
   areaRules: [5, 6],
   severeRules: [1],
+  durations: [...DEFAULT_DURATIONS],
+  customDuration: true,
   levels: LEVELS,
   guidelines: [
     {
@@ -628,6 +683,8 @@ const STRICT: ModerationProfile = {
   rules: 'strict',
   areaRules: [5, 6],
   severeRules: [1],
+  durations: [...DEFAULT_DURATIONS],
+  customDuration: true,
   levels: STRICT_LEVELS,
   guidelines: [
     {
@@ -695,10 +752,10 @@ export type PresetName = keyof typeof PRESETS;
  * Throws {@link ProfileError} for an unknown preset name, an unknown key at any depth, or any invalid value.
  */
 export function resolveProfile(
-  preset: ModerationProfile | PresetName,
+  preset: ProfileInput | PresetName,
   overrides: ProfileOverrides = {},
 ): ModerationProfile {
-  let base: ModerationProfile;
+  let base: ProfileInput;
   if (typeof preset === 'string') {
     if (!Object.hasOwn(PRESETS, preset)) return fail('preset', "must be 'relaxed', 'standard', 'strict' or a profile");
     base = PRESETS[preset];
@@ -709,9 +766,159 @@ export function resolveProfile(
 }
 
 /**
- * Validate a complete custom profile. Nothing is merged. Returns a deep-frozen copy, so editing the object you
- * passed afterwards cannot change a profile that was already checked. Throws {@link ProfileError}.
+ * Validate a complete custom profile. Nothing is merged (a profile that leaves out `durations` or `customDuration` gets
+ * their defaults). Returns a deep-frozen copy, so editing the object you passed afterwards cannot change a profile that
+ * was already checked. Throws {@link ProfileError}.
  */
-export function defineProfile(p: ModerationProfile): ModerationProfile {
+export function defineProfile(p: ProfileInput): ModerationProfile {
   return finalize(p);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The policy layer: what a moderator may edit at runtime
+
+/**
+ * The parts of a profile the hub may edit, and the order they are listed in. Everything else (identity, the written
+ * levels, the AI context, profanity handling) stays in code: changing profanity means rebuilding the filter.
+ */
+export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines'] as const;
+export type PolicySection = (typeof POLICY_SECTIONS)[number];
+
+/** One ladder cell as the editor sends it: the label may be left out and is then generated ("Restrict chat 6 hours"). */
+export interface PolicyCell {
+  kind: 'chat' | 'area' | 'ban' | 'warning';
+  durationMs: number | null;
+  label?: string;
+}
+
+/** One ladder row as the editor sends it. */
+export interface PolicyLadderRow {
+  step: LadderStep;
+  lowMedium: PolicyCell;
+  high: PolicyCell;
+}
+
+/**
+ * The stored edits: a deep-partial of the editable sections. An object section merges key by key onto the profile
+ * (`firstOffense`, `repeat`); a list replaces the profile's list whole (`durations`, `ladder` as all 6 rows, `areaRules`,
+ * `severeRules`). `guidelines` is positional: entry `i` holds the new `outcome` text of the profile's guideline tier `i`,
+ * and `null` leaves that tier as it is. A layer that touches anything else is refused.
+ */
+export interface PolicyLayer {
+  durations?: number[];
+  customDuration?: boolean;
+  ladder?: PolicyLadderRow[];
+  firstOffense?: Partial<Record<ConductLevel, Outcome>>;
+  repeat?: Partial<ModerationProfile['repeat']>;
+  areaRules?: number[];
+  severeRules?: number[];
+  guidelines?: Array<{ outcome: string } | null>;
+}
+
+/** The longest outcome text a layer may set on a guideline tier. */
+export const MAX_GUIDELINE_OUTCOME = 1000;
+
+/** The label generated for a ladder cell with none, or null when the cell is not valid (the validator names why). */
+function generatedLabel(kind: unknown, durationMs: unknown): string | null {
+  if (typeof kind !== 'string' || !CELL_KINDS.includes(kind)) return null;
+  if (kind === 'warning') return 'Warning';
+  if (durationMs !== null && !(positiveInt(durationMs) && durationMs <= MAX_DURATION_MS)) return null;
+  return outcomeLabel({ kind: kind as 'chat' | 'area' | 'ban', durationMs });
+}
+
+function withLabel(cell: unknown): unknown {
+  if (!isPlain(cell) || Object.hasOwn(cell, 'label')) return cell;
+  return { ...cell, label: generatedLabel(cell['kind'], cell['durationMs']) ?? '-' };
+}
+
+function ladderOverride(v: unknown): unknown {
+  if (!Array.isArray(v)) return fail('profile.ladder', `must have exactly ${LADDER_ROWS} rows, steps 0 to 5`);
+  return v.map((row: unknown) => (isPlain(row) ? { ...row, lowMedium: withLabel(row['lowMedium']), high: withLabel(row['high']) } : row));
+}
+
+function guidelinesOverride(base: ModerationProfile, v: unknown): unknown {
+  if (!Array.isArray(v)) return fail('profile.guidelines', 'must be a list of outcome texts, one per guideline tier');
+  if (v.length > base.guidelines.length) fail('profile.guidelines', 'has more entries than the profile has guideline tiers');
+  return base.guidelines.map((tier, i) => {
+    const entry: unknown = v[i];
+    if (entry === undefined || entry === null) return clone(tier);
+    const path = `profile.guidelines[${i}]`;
+    if (!isPlain(entry)) return fail(path, 'must be an object with an outcome, or null');
+    if (!Object.hasOwn(entry, 'outcome')) fail(`${path}.outcome`, 'is required');
+    for (const k of Object.keys(entry)) if (k !== 'outcome') fail(`${path}.${k}`, 'is not an editable setting');
+    const outcomeText = entry['outcome'];
+    if (typeof outcomeText !== 'string' || outcomeText.trim() === '') return fail(`${path}.outcome`, 'must be a non-empty string');
+    if (outcomeText.length > MAX_GUIDELINE_OUTCOME) fail(`${path}.outcome`, `must be at most ${MAX_GUIDELINE_OUTCOME} characters`);
+    return { ...(clone(tier) as Record<string, unknown>), outcome: outcomeText };
+  });
+}
+
+function layerToOverrides(base: ModerationProfile, layer: unknown): Record<string, unknown> {
+  if (!isPlain(layer)) return fail('profile', 'must be an object');
+  for (const key of Object.keys(layer)) {
+    if (!(POLICY_SECTIONS as readonly string[]).includes(key)) fail(`profile.${key}`, 'is not an editable setting');
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(layer)) {
+    const value = layer[key];
+    if (value === undefined) continue;
+    if (key === 'ladder') setOwn(out, key, ladderOverride(value));
+    else if (key === 'guidelines') setOwn(out, key, guidelinesOverride(base, value));
+    else setOwn(out, key, value);
+  }
+  return out;
+}
+
+/** The same error, with the path named from the layer the editor sent (`profile.ladder[2]` is `layer.ladder[2]`). */
+function inLayerTerms(err: ProfileError): ProfileError {
+  const path = err.path === 'profile' ? 'layer' : err.path.startsWith('profile.') ? `layer.${err.path.slice('profile.'.length)}` : err.path;
+  return new ProfileError(path, err.reason);
+}
+
+/**
+ * The effective profile: `base` (a preset with the code overrides) with the stored `layer` merged on top, validated. The
+ * result is a deep-frozen copy that shares nothing with either. Throws {@link ProfileError} whose `path` starts with
+ * `layer` (`layer.profanity`, `layer.ladder[2].high.durationMs`): a layer that touches a setting outside
+ * {@link POLICY_SECTIONS}, or one that would make the profile invalid.
+ */
+export function applyPolicyLayer(base: ModerationProfile, layer: PolicyLayer): ModerationProfile {
+  try {
+    return finalize(merge(base, layerToOverrides(base, layer)));
+  } catch (err) {
+    throw err instanceof ProfileError ? inLayerTerms(err) : err;
+  }
+}
+
+/** The editable sections a layer holds, in {@link POLICY_SECTIONS} order. */
+export function layerSections(layer: unknown): PolicySection[] {
+  if (!isPlain(layer)) return [];
+  return POLICY_SECTIONS.filter((s) => Object.hasOwn(layer, s));
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x: unknown, i) => sameValue(x, b[i]));
+  }
+  if (isPlain(a) && isPlain(b)) {
+    const ka = Object.keys(a);
+    return ka.length === Object.keys(b).length && ka.every((k) => Object.hasOwn(b, k) && sameValue(a[k], b[k]));
+  }
+  return false;
+}
+
+/** The sections that differ between two layers (present in one and not the other, or with other values), in order. */
+export function changedSections(before: unknown, after: unknown): PolicySection[] {
+  const a = isPlain(before) ? before : {};
+  const b = isPlain(after) ? after : {};
+  return POLICY_SECTIONS.filter((s) => {
+    const inA = Object.hasOwn(a, s);
+    const inB = Object.hasOwn(b, s);
+    return inA !== inB || (inA && !sameValue(a[s], b[s]));
+  });
+}
+
+/** A deep-frozen copy of a plain value (a stored layer, handed out read-only). */
+export function frozenCopy<T>(v: T): T {
+  return deepFreeze(clone(v)) as T;
 }
