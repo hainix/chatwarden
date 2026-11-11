@@ -1,4 +1,4 @@
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 export { ROLES } from '@chatwarden/core';
 export type { Role } from '@chatwarden/core';
 export type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';

@@ -132,6 +132,75 @@ export function ReportMessage({ client, line, name, close }: { client: PlayerCli
 - **Stale settings.** If the studio changes the list while a dialog is open, the kit refuses an unknown reason (`reason_unknown`) or a
   missing one (`reason_required`) and the dialog says so. Read `GET /rules` again before the next report.
 
+## Put it on your server
+
+The components call the kit's player routes. The simplest way to run them is to **serve the built game page and the player routes under
+one origin**: the page's calls go to the same host, the player's cookie or session goes along, and there is no CORS to set up.
+
+With Express, mount the routes with the adapter from `@chatwarden/http`, then your game's built files:
+
+```ts
+import express from 'express';
+import { playerRoutes } from '@chatwarden/http';
+import type { KitRequest } from '@chatwarden/http';
+import { toExpress } from '@chatwarden/http/express';
+
+// `cw` is your createChatwarden(...) instance. Your own sign-in decides who is asking: here, the session cookie your login set.
+declare function keyFromSession(cookie: string | undefined): string | undefined;
+
+const app = express();
+app.use(
+  '/player',
+  toExpress(
+    playerRoutes(cw, {
+      identify: (req: KitRequest) => ({ clientKey: keyFromSession(req.headers.cookie), ip: req.remoteAddress ?? null }),
+    }),
+    { fallthrough: false },
+  ),
+);
+app.use(express.static('dist/game')); // your built game page, which renders the components
+app.listen(3000);
+```
+
+Any other server works the same way, because the player routes are plain HTTP (`createRouter(playerRoutes(...))` gives you a function from a
+request to a response for any framework; see `@chatwarden/http`). Another origin needs the player routes to answer CORS for the page's
+origin with credentials, and `credentials: 'include'` in the transport.
+
+## Signing players in
+
+The components send no identity of their own. Who is asking is decided on the server by the `identify` function you give
+`playerRoutes`: it returns the player's `clientKey` or `accountId` and the real client address, from your session, never from the page.
+Two ways to carry the credential:
+
+- **Cookies.** On the same origin the browser sends the page's cookies with each call (`credentials: 'same-origin'` is the default), and
+  `identify` reads the session from `req.headers.cookie`.
+- **A header.** `fetchTransport({ baseUrl, headers })` adds the headers to every call (a token your game already has, or a CSRF header).
+  The headers are fixed when the transport is made; for a token that changes, make the transport on each call:
+
+```ts
+import { fetchTransport, playerClient } from '@chatwarden/player-react';
+import type { Transport } from '@chatwarden/player-react';
+
+declare function currentSessionToken(): string;
+
+// A new fetchTransport per call, so the header is always the current token.
+const rotating: Transport = (req) => fetchTransport({ baseUrl: '/player', headers: { 'x-chatwarden-key': currentSessionToken() } })(req);
+
+export const client = playerClient({ transport: rotating });
+```
+
+The key in a header or cookie is a credential: keep it out of URLs and logs, and have `identify` read it from there (the kit hashes it and
+keeps nothing raw). A caller `identify` cannot name gets empty lists and a `200`, never someone else's record.
+
+## Content Security Policy
+
+The components need no `'unsafe-inline'` and no `'unsafe-eval'`. They inject no `<style>`, set no inline `style` attribute, use no
+`dangerouslySetInnerHTML` and load no third-party resource. Allow:
+
+- `script-src`: where your game's bundle is served from.
+- `style-src`: where `styles.css` is served from (`'self'`, or a hash if you inline it yourself).
+- `connect-src`: the origin of the player routes (`'self'` when they are under the same origin, as above).
+
 ## Options
 
 Every component also takes `t`, `locale`, `now`, `timeZone`, `theme` and `className` (see [Words and languages](#words-and-languages) and
@@ -218,7 +287,7 @@ radius and space is a `--cw-*` custom property, with a light and a dark value, a
   default that works on them. The font is yours already: the components inherit it, and `--cw-font` is only there if you want another.
 - **Light and dark.** By default the components follow the player's `prefers-color-scheme`. The `theme` prop (or `data-cw-theme="light"`
   or `"dark"` on `.cw-player` or any ancestor) forces one. Set it from your game's own setting.
-- **Re-theme it.** The defaults sit at zero specificity (`:where(.cw-player)`), so any rule of yours wins whatever its order.
+- **Re-theme it.** The defaults sit at zero specificity (`:where(.cw-player)`), so any rule of yours wins whatever its order. Put the tokens on the component's own root (`.cw-player` or the `className` you pass), not on an ancestor: the defaults are declared on `.cw-player` itself, so a value set higher up is shadowed by them.
 - **Strict CSP.** The stylesheet is a file. The components inject no `<style>`, set no inline `style` and use no `dangerouslySetInnerHTML`.
 - **Browsers.** The colours use `light-dark()` (Chrome 123, Firefox 120, Safari 17.5, all 2024). Older browsers that lack
   `light-dark()` get the light colours from a fallback block in the stylesheet, so the components keep their colours; they follow

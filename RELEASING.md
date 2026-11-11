@@ -1,8 +1,9 @@
 # Releasing Chatwarden
 
-Seven packages are published to npm under the `@chatwarden` scope: `core`, `store-memory`, `matcher`, `store-sqlite`,
-`profanity`, `http` and `discord`. They share one version number (a changesets "fixed" group), so every release bumps all seven
-together.
+Ten packages are published to npm under the `@chatwarden` scope: `core`, `store-memory`, `matcher`, `store-sqlite`,
+`profanity`, `http`, `discord`, `hub-react`, `player-react` and `hub-element`. They share one version number (a changesets
+"fixed" group), so every release bumps all ten together. The last three are new in 0.1.2 and have never been on npm (see "New packages:
+the first publish").
 
 Nothing is uploaded to npm until the owner has done the one-time steps below. Until then, the release workflow can only be
 run as a dry run, and adopters can use tarballs (see "Before the first publish").
@@ -23,36 +24,73 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
    so put the renewal in your calendar. The option names change from time to time, so check npm's current docs for granular
    access tokens before you create it.
 4. **Add it to the repository as the secret `NPM_TOKEN`.** On GitHub: Settings, Secrets and variables, Actions, New
-   repository secret. Name it exactly `NPM_TOKEN`. The first publish needs it, because npm only lets you set up trusted
-   publishing (step 6) on a package that already exists. Without the secret, the workflow publishes through trusted
+   repository secret. Name it exactly `NPM_TOKEN`. The first publish of any package needs it, because npm only lets you set up
+   trusted publishing (step 6) on a package that already exists. Without the secret, the workflow publishes through trusted
    publishing, and a package that has none set up fails with an auth error.
 5. **Protect `v*` tags.** On GitHub: Settings, Rules, New tag ruleset, target `v*`, and restrict creation, update and
    deletion to the owner. A pushed tag publishes, so only people you trust should be able to create one.
-6. **After the first publish: switch to npm trusted publishing (OIDC), and delete the token.** On npmjs.com, open each of
-   the seven packages, then Settings, Trusted Publisher, GitHub Actions. Enter the repository `hainix/chatwarden` and the workflow
-   file `release.yml`. Then delete the `NPM_TOKEN` secret on GitHub and revoke the token on npm. The workflow needs no change:
-   with no secret it publishes through trusted publishing (it upgrades npm to 11.5.1+ for this and already asks for
-   `id-token: write`), and each release still carries a signed provenance statement. Check npm's current docs if the
-   screens have moved.
+6. **After the first publish: switch to npm trusted publishing (OIDC).** On npmjs.com, open each of the ten packages that does
+   not have one yet, then Settings, Trusted Publisher, GitHub Actions. Enter the repository `hainix/chatwarden` and the workflow
+   file `release.yml`. The workflow needs no change: with no secret it publishes through trusted publishing (it upgrades npm to
+   11.5.1+ for this and already asks for `id-token: write`), and each release still carries a signed provenance statement. Check
+   npm's current docs if the screens have moved.
+   **Keep the `NPM_TOKEN` secret until a release has actually published through OIDC.** Trusted publishing has not been exercised by
+   this repository yet, so the token is the fallback: with the secret set the workflow uses it, so a release can still go out if OIDC
+   fails. Once a release has published with no secret and every package page shows the provenance badge, delete the secret on GitHub
+   and revoke the token on npm.
+
+## New packages: the first publish
+
+`hub-react`, `player-react` and `hub-element` do not exist on npm yet, and npm only lets you add a Trusted Publisher to a package
+that exists. So their first version goes out with the token, like the first release of the others did:
+
+1. Make sure `NPM_TOKEN` is set (steps 3 and 4) and its scope covers new packages in `@chatwarden`.
+2. Release as usual (below). The workflow publishes all ten in dependency order and skips what is already on npm, so only the three
+   new packages are uploaded the first time a version of them goes out; it publishes them with the token.
+3. Open each of the three on npmjs.com and add the Trusted Publisher (step 6). From the next release they publish through OIDC like the
+   rest, but keep the token until that has worked once (step 6).
+
+The three are public packages with provenance, like the others (`publishConfig.access` is `public` in each manifest).
 
 ## Each release
 
 1. **Describe the change.** In the pull request that changes a package, run `npx changeset`. Pick the packages (the group
-   moves together, so any one of them is enough), the bump (patch, minor or major) and write one plain sentence. Commit the
-   file it creates under `.changeset/`.
+   moves together; the text goes into the `CHANGELOG.md` of each package you pick), the bump (patch, minor or major) and write
+   plain sentences. Commit the file it creates under `.changeset/`. While the peer ranges are `^0.1.x`, release a patch: a minor
+   version (0.2.0) falls outside every `^0.1.x` peer range, so changesets would take it as a breaking change for every dependent and
+   make them major bumps.
 2. **Prepare the release.** On a clean `main`, run `npm run version`. It is the one way to bump: it runs `changeset version`
-   (bumps all seven packages to the new version, fixes the `@chatwarden/*` ranges between them and writes each `CHANGELOG.md`),
+   (bumps all ten packages to the new version, fixes the `@chatwarden/*` ranges between them and writes each `CHANGELOG.md`),
    then `node scripts/sync-version.mjs` (rewrites the `VERSION` constant each package exports so it matches its
-   `package.json`; `scripts/manifests.test.ts` fails CI if they differ), then `npm install --package-lock-only`. Then bump the
-   `@chatwarden/*` versions in `examples/tiny-chat/package.json` by hand to the same version. `changesets` ignores that
-   private example, and `scripts/manifests.test.ts` fails CI if it is left behind. Run `npm install` once more so
-   `package-lock.json` follows.
-   The `peerDependencies` ranges stay where they are (`^0.1.0`) through a compatible release:
-   `.changeset/config.json` sets `onlyUpdatePeerDependentsWhenOutOfRange`, so changesets only raises a peer range when the
-   new version falls outside it. `scripts/manifests.test.ts` fails CI if a range moves unexpectedly. The exact
-   `devDependencies` pins and the tiny-chat versions do move with the release.
+   `package.json`; `scripts/manifests.test.ts` fails CI if they differ), then `npm install --package-lock-only`. Then check
+   `examples/tiny-chat/package.json`: its `@chatwarden/*` versions must equal the new version. The 0.1.2 run moved them itself
+   (`changesets` rewrites the pins of a private workspace that depends on a package it bumps), but a dependency you add to the
+   example by hand, and any pin a run leaves behind, are yours to set; `scripts/manifests.test.ts` fails CI if one is left. Run
+   `npm install` once more so `package-lock.json` follows.
+   The `peerDependencies` ranges stay where they are through a compatible release: `.changeset/config.json` sets
+   `onlyUpdatePeerDependentsWhenOutOfRange`, so changesets only raises a peer range when the new version falls outside it.
+   `scripts/manifests.test.ts` fails CI if a range moves unexpectedly (it holds each package's floor: `^0.1.0` for `core`, `matcher`,
+   `profanity` and `discord`, `^0.1.2` for the rest). The exact `devDependencies` pins and the tiny-chat versions do move with the
+   release.
+
+   ### When a peer floor must rise
+
+   A peer floor is the oldest version of a package we promise to work with. The setting above never raises one inside a compatible
+   release, which is right when a release only fixes things. It is wrong when a package starts to use something that is new in
+   `@chatwarden/core` (or `http`): the old floor would let `npm` install it beside a core that lacks the API, and it would break at
+   run time or in the consumer's type check. 0.1.2 is that case: `cw.policy`, `ResolvedProfile`, `reporting`, `reportedReason`,
+   `addDetail`, `releaseWhenDone`, the take-next `reason`, `detailUntil` and the store methods for the policy layer, claims, reasons and
+   report details are new, so `store-memory`, `store-sqlite`, `http`, `hub-react` and `player-react` peer on `@chatwarden/core`
+   `^0.1.2` (`hub-react` also on `http`, `hub-element` on `hub-react`), while `core`, `matcher`, `profanity` and `discord` stay at
+   `^0.1.0`.
+
+   This deliberately overrides `onlyUpdatePeerDependentsWhenOutOfRange`, by hand, for correctness. When a release makes a package use a
+   new API: after `npm run version`, set that package's peer range to the version that introduced the API, run
+   `npm install --package-lock-only`, and change the expectation in `scripts/manifests.test.ts` (`NEEDS_NEW_KIT`, or the `peerRangeOf`
+   rule) in the same commit, so the floor is a decision somebody wrote down. Name each package and the API that forced it in the
+   changeset's upgrade notes. Never raise a floor to the current version just because the group moved.
 3. **Merge.** Open a pull request with those changes and merge it once CI is green.
-4. **Dry run first (recommended).** See the next section. It runs every check and `npm publish --dry-run` for all seven.
+4. **Dry run first (recommended).** See the next section. It runs every check and `npm publish --dry-run` for all ten.
 5. **Tag and push.** On the merged `main`, once CI is green on it, with `X.Y.Z` the new version:
 
    ```sh
@@ -64,14 +102,14 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
    match. Pushing the tag starts the real publish. The release job runs the lint and the full test suite again before it
    uploads anything.
 6. **Watch it.** Open the Actions tab and follow the "Release" run. It publishes in dependency order (`core`, `store-memory`,
-   `matcher`, `store-sqlite`, `profanity`, `http`, `discord`) and skips any package whose exact version is already on npm, so a failed
+   `matcher`, `store-sqlite`, `profanity`, `http`, `discord`, `hub-react`, `player-react`, `hub-element`) and skips any package whose exact version is already on npm, so a failed
    run can simply be re-run once the cause is fixed. Check each package page on npmjs.com for the provenance badge.
 
 ## Running a dry run
 
 A dry run does everything except upload: `npm ci`, the type check, the lint, the tests, the tarball check, the consumer smoke
-test (it installs the real tarballs into fresh ESM and CommonJS projects in a temporary folder outside the repository and runs
-them), and `npm publish --dry-run` for each package in order. It also checks that the repository is public, and only warns
+test (it installs the real tarballs into fresh ESM and CommonJS projects, and a third project with no React for
+`@chatwarden/hub-react/headless`, in a temporary folder outside the repository and runs them), and `npm publish --dry-run` for each package in order. It also checks that the repository is public, and only warns
 when it is not.
 
 1. Open the repository's **Actions** tab and choose **Release** in the list on the left.
@@ -90,7 +128,7 @@ provenance.
 Until the packages are on npm, an adopter can build the exact tarballs from a checkout and install those.
 
 1. In a checkout of this repository: `npm ci`, then `node scripts/smoke.mjs`. It builds and packs every package and checks
-   them in a fresh ESM and CommonJS project. The tarballs are left in `.smoke/tarballs/*.tgz`. (The CI "Smoke" job uploads
+   them in a fresh ESM and CommonJS project, and the kit-only subset in a third project that has no React. The tarballs are left in `.smoke/tarballs/*.tgz`. (The CI "Smoke" job uploads
    the same files as the `chatwarden-tarballs` artifact.)
 2. Copy the `.tgz` files into your project, for example into `vendor/`, and commit them.
 3. Reference them with `file:`, and add `overrides` so every package that has `@chatwarden/core` (or `matcher`) as a peer
@@ -99,10 +137,10 @@ Until the packages are on npm, an adopter can build the exact tarballs from a ch
    ```json
    {
      "dependencies": {
-       "@chatwarden/core": "file:vendor/chatwarden-core-0.1.0.tgz",
-       "@chatwarden/matcher": "file:vendor/chatwarden-matcher-0.1.0.tgz",
-       "@chatwarden/store-sqlite": "file:vendor/chatwarden-store-sqlite-0.1.0.tgz",
-       "@chatwarden/http": "file:vendor/chatwarden-http-0.1.0.tgz"
+       "@chatwarden/core": "file:vendor/chatwarden-core-0.1.2.tgz",
+       "@chatwarden/matcher": "file:vendor/chatwarden-matcher-0.1.2.tgz",
+       "@chatwarden/store-sqlite": "file:vendor/chatwarden-store-sqlite-0.1.2.tgz",
+       "@chatwarden/http": "file:vendor/chatwarden-http-0.1.2.tgz"
      },
      "overrides": {
        "@chatwarden/core": "$@chatwarden/core",
@@ -113,7 +151,7 @@ Until the packages are on npm, an adopter can build the exact tarballs from a ch
 
    Add `profanity` and `discord` the same way if you use them. `$@chatwarden/core` means "the version named in my own
    `dependencies`". Run `npm install`; `npm ls @chatwarden/core` should show exactly one copy.
-4. When the packages reach npm, replace each `file:` line with `^0.1.0` and delete the `overrides` block.
+4. When the packages reach npm, replace each `file:` line with `^0.1.2` and delete the `overrides` block.
 
 ### Docker
 
@@ -142,9 +180,9 @@ RUN cd server && npm install
 ```json
 {
   "dependencies": {
-    "@chatwarden/core": "file:../vendor/chatwarden-core-0.1.0.tgz",
-    "@chatwarden/matcher": "file:../vendor/chatwarden-matcher-0.1.0.tgz",
-    "@chatwarden/store-sqlite": "file:../vendor/chatwarden-store-sqlite-0.1.0.tgz"
+    "@chatwarden/core": "file:../vendor/chatwarden-core-0.1.2.tgz",
+    "@chatwarden/matcher": "file:../vendor/chatwarden-matcher-0.1.2.tgz",
+    "@chatwarden/store-sqlite": "file:../vendor/chatwarden-store-sqlite-0.1.2.tgz"
   }
 }
 ```

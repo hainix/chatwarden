@@ -316,6 +316,41 @@ describe('RELEASING.md', () => {
     expect(setup).toMatch(/check npm's current docs/i);
     expect(setup).not.toMatch(/classic/i);
   });
+  it('counts ten packages and names all of them, in publish order, wherever it lists them', () => {
+    const text = flat(doc);
+    expect(text).toMatch(/Ten packages are published/);
+    expect(text).not.toMatch(/\bseven\b/i);
+    expect(text).toMatch(/all ten/);
+    for (const name of ['core', 'store-memory', 'matcher', 'store-sqlite', 'profanity', 'http', 'discord', 'hub-react', 'player-react', 'hub-element']) {
+      expect(text, name).toContain(`\`${name}\``);
+    }
+    expect(text).toContain('(`core`, `store-memory`, `matcher`, `store-sqlite`, `profanity`, `http`, `discord`, `hub-react`, `player-react`, `hub-element`)');
+  });
+  it('says the three new packages are published once with the token, then get a Trusted Publisher', () => {
+    const text = flat(section(doc, 'New packages: the first publish'));
+    for (const name of ['hub-react', 'player-react', 'hub-element']) expect(text, name).toContain(`\`${name}\``);
+    expect(text).toMatch(/only lets you add a Trusted Publisher to a package that exists/);
+    expect(text).toMatch(/first version goes out with the token/);
+    expect(text).toMatch(/add the Trusted Publisher/);
+  });
+  it('keeps the NPM_TOKEN secret until a release has really published through OIDC, which is still untested', () => {
+    const text = flat(section(doc, 'One-time setup (the owner)'));
+    expect(text).toMatch(/Keep the `NPM_TOKEN` secret until a release has actually published through OIDC/);
+    expect(text).toMatch(/has not been exercised/);
+    // The old advice, to delete it straight after the first publish, is gone.
+    expect(text).not.toMatch(/Then delete the `NPM_TOKEN` secret/);
+  });
+  it('explains when a peer floor must rise, and that this overrides onlyUpdatePeerDependentsWhenOutOfRange', () => {
+    const text = flat(doc);
+    expect(text).toContain('### When a peer floor must rise');
+    const note = text.slice(text.indexOf('### When a peer floor must rise'));
+    expect(note).toMatch(/deliberately overrides `onlyUpdatePeerDependentsWhenOutOfRange`/);
+    for (const api of ['cw.policy', 'ResolvedProfile', 'reportedReason', 'addDetail', 'releaseWhenDone', 'detailUntil']) expect(note.slice(0, 1600), api).toContain(api);
+    expect(note).toContain('scripts/manifests.test.ts');
+  });
+  it('tells the releaser to cut a patch while the peer ranges are ^0.1.x', () => {
+    expect(flat(doc)).toMatch(/release a patch: a minor version \(0\.2\.0\) falls outside every `\^0\.1\.x` peer range/);
+  });
   it('documents the provenance input of the workflow', () => {
     expect(flat(doc)).toMatch(/provenance=false/);
   });
@@ -342,7 +377,7 @@ describe('RELEASING.md', () => {
     const json = /```json\n([\s\S]*?)```/.exec(doc)?.[1] ?? '';
     const parsed = JSON.parse(json) as { dependencies: Record<string, string>; overrides: Record<string, string> };
     expect(parsed.overrides['@chatwarden/core']).toBe('$@chatwarden/core');
-    for (const v of Object.values(parsed.dependencies)) expect(v).toMatch(/^file:vendor\/chatwarden-[a-z-]+-0\.1\.0\.tgz$/);
+    for (const v of Object.values(parsed.dependencies)) expect(v).toMatch(/^file:vendor\/chatwarden-[a-z-]+-\d+\.\d+\.\d+\.tgz$/);
   });
 });
 

@@ -72,7 +72,6 @@ export function checkFileList({ pkg, files }) {
       if (f.endsWith('.js')) problems.push(`${f} would ship, but ${dirOf(pkg)} ships its code as a bundle (dist/*.js), not as dist/src/**/*.js`);
       const m = /^dist\/src\/(.*)\.d\.ts$/.exec(f);
       if (m && !have.has(`dist/src/${m[1]}.d.ts.map`)) problems.push(`missing dist/src/${m[1]}.d.ts.map (next to ${f})`);
-      if (m && !have.has(`src/${m[1]}.ts`) && !have.has(`src/${m[1]}.tsx`)) problems.push(`missing src/${m[1]}.ts (next to ${f})`);
     }
   }
 
@@ -83,9 +82,19 @@ export function checkFileList({ pkg, files }) {
       for (const sibling of [`dist/src/${stem}.js.map`, `dist/src/${stem}.d.ts`, `dist/src/${stem}.d.ts.map`]) {
         if (!have.has(sibling)) problems.push(`missing ${sibling} (next to ${f})`);
       }
-      // The source is a .ts file, or a .tsx file in a React package.
-      if (!have.has(`src/${stem}.ts`) && !have.has(`src/${stem}.tsx`)) problems.push(`missing src/${stem}.ts (next to ${f})`);
     }
+  }
+
+  // Stale build output: every compiled file under dist/src (code, its map, its declarations and theirs) must have a source, a .ts or, in a
+  // React package, a .tsx. `tsc -b` never deletes what an earlier build wrote, so a source that was removed leaves its compiled files in the
+  // git-ignored dist/, and `npm pack` ships them. One message per stem, naming the first file found.
+  const compiled = new Map();
+  for (const f of dist) {
+    const m = /^dist\/src\/(.*?)(?:\.d\.ts\.map|\.d\.ts|\.js\.map|\.js)$/.exec(f);
+    if (m && !compiled.has(m[1])) compiled.set(m[1], f);
+  }
+  for (const [stem, f] of compiled) {
+    if (!have.has(`src/${stem}.ts`) && !have.has(`src/${stem}.tsx`)) problems.push(`missing src/${stem}.ts (next to ${f}): stale build output? Delete dist and rebuild`);
   }
 
   for (const target of exportTargets(pkg)) {

@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/player-react",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "description": "Player-facing React components for Chatwarden: the notice dialog, My record, the rules page, a report dialog and a restricted-chat line, over the player HTTP routes.",
   "license": "Apache-2.0",
@@ -47,15 +47,15 @@
     "prepack": "tsc -b"
   },
   "peerDependencies": {
-    "@chatwarden/core": "^0.1.1",
+    "@chatwarden/core": "^0.1.2",
     "react": "^18.3.0 || ^19.0.0",
     "react-dom": "^18.3.0 || ^19.0.0"
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.1",
-    "@chatwarden/http": "0.1.1",
-    "@chatwarden/hub-react": "0.1.1",
-    "@chatwarden/store-memory": "0.1.1",
+    "@chatwarden/core": "0.1.2",
+    "@chatwarden/http": "0.1.2",
+    "@chatwarden/hub-react": "0.1.2",
+    "@chatwarden/store-memory": "0.1.2",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

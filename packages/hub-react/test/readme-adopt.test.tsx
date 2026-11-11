@@ -9,20 +9,22 @@ import * as hub from '../src/index.js';
 import { exportsOf } from './apiNames.js';
 import { hubWorld } from './world.js';
 
-// The README's "Three ways to adopt" is the product an adopter copies from, so its snippets are compiled against the real sources
+// The README's "Four ways to adopt" is the product an adopter copies from, so its snippets are compiled against the real sources
 // and RUN, as written, on the real routes (as the headless example is). Only the imports are swapped for the test's own.
 
 const root = process.cwd();
 const readme = readFileSync(join(root, 'packages', 'hub-react', 'README.md'), 'utf8').replace(/\r\n/g, '\n');
-const start = readme.indexOf('\n## Three ways to adopt\n');
+const start = readme.indexOf('\n## Four ways to adopt\n');
 const section = readme.slice(start, readme.indexOf('\n## ', start + 1));
 const snippets = [...section.matchAll(/```tsx\n([\s\S]*?)```/g)].map((m) => m[1] as string);
 
 describe('the section', () => {
-  it('has three ways, the chill one first and shortest, then pieces, then the hooks and the controller', () => {
+  it('has four ways, the chill one first and shortest, then pieces, then the hooks and the controller, then the element', () => {
     expect(start).toBeGreaterThan(0);
     const ways = [...section.matchAll(/\n### (\d)\. (.*)\n/g)].map((m) => `${m[1]} ${m[2]}`);
-    expect(ways).toEqual(['1 Drop in `<Hub>`', '2 Pieces in your own dashboard', '3 Headless hooks, or the controller']);
+    expect(ways).toEqual(['1 Drop in `<Hub>`', '2 Pieces in your own dashboard', '3 Headless hooks, or the controller', '4 One script tag: the custom element']);
+    // The fourth is HTML, not a React snippet: it is the way for a page with no React build.
+    expect(section.slice(section.indexOf('### 4.'))).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
     expect(snippets).toHaveLength(3);
     expect(snippets[0]?.split('\n').length).toBeLessThan((snippets[1] as string).split('\n').length);
     expect(snippets[0]?.split('\n').length).toBeLessThan(8);

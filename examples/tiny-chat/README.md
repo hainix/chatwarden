@@ -108,6 +108,36 @@ If the store fails the route answers a bare 500 `{ "error": "internal" }` and wr
 answers 400 (`invalid_request`, and the like), an unknown report 404, one already decided 409, a missing or wrong token
 401. A subject the report does not name is refused.
 
+## The moderator hub at /mod
+
+Open `http://127.0.0.1:3000/mod` (with `TINY_CHAT_ADMIN_TOKEN` set) and sign in with the token: you get the moderator hub, Simple
+mode, on the same reports your players file. It is the shortest adoption path, `@chatwarden/hub-element`, so tiny-chat needs no React
+and no front-end build: the page is one script tag and one element, and `server.ts` serves the file the package ships.
+
+```html
+<script type="module" src="/mod/hub-element.js"></script>
+<chatwarden-hub base-url="/admin"></chatwarden-hub>
+```
+
+- `GET /mod` is that page. `GET /mod/hub-element.js` is `node_modules/@chatwarden/hub-element/dist/hub-element.js`, served as it is.
+  Run `npm run build` once from the repo root (`npm start` does it for the one package) so the file exists; without it the route answers
+  503 and says so.
+- The hub calls `/admin` on the same origin: `GET /admin/me` first, then the queue, the case and the decision. Nothing else is needed on
+  the server: it is the staff API tiny-chat already mounts.
+- **It sits behind the same authorize as `/admin`.** `/mod`, the script and the staff API all pass through one function, which wants the
+  `x-admin-token` header or the session cookie below, and answers 401 otherwise. A browser cannot send a header on a page load, so an
+  unsigned visitor to `/mod` gets a small sign-in form that posts the token to `POST /mod/login`. It answers with a `tiny_chat_staff`
+  cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`, and `Secure` over TLS) and sends the visitor back to `/mod`. The cookie goes along with the
+  hub's own calls to `/admin`, which is how the element signs in (it sends the page's cookies to its own origin). A wrong token is 401 and
+  sets nothing. `SameSite=Strict` is what stops another site from driving the staff API with that cookie.
+- **DEMO ONLY.** The cookie holds the shared admin token. A real app signs its moderators in with its own session and puts that session
+  in front of `/admin` and the page, in `authorize`; the hub needs nothing else.
+- Without an admin token every `/mod` path is a 404, like `/admin`.
+- The page sends a strict Content-Security-Policy: scripts and API calls only from the page's own origin, and one inline stylesheet by
+  its hash (no `unsafe-inline`). See the hub-element README for what the element itself needs.
+
+For React, `<Hub>` from `@chatwarden/hub-react` is the same hub as a component; this example uses the element because it needs no build.
+
 ## Staff-only vs player-facing
 
 Some kit values carry subject ids (they name a person). They are for staff channels only, never for a player:

@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes the seven @chatwarden packages to npm, in dependency order, with provenance.
+# Publishes the ten @chatwarden packages to npm, in dependency order, with provenance.
 #   - Run it by hand (Actions tab -> Release -> Run workflow) for a dry run: everything except the upload. dry_run defaults to true.
 #   - A real publish runs on a tag only: push a tag v<version> (for example v0.1.0). A tag push is never a dry run.
 #   - Provenance needs a PUBLIC source repository. The owner makes hainix/chatwarden public first (see RELEASING.md); until

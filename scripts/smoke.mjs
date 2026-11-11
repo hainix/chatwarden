@@ -1,5 +1,5 @@
 // Consumer smoke test. Packs every published @chatwarden/* package (a real `npm pack`, so `prepack` runs), installs the
-// tarballs into a fresh ESM project and a fresh CommonJS project, typechecks each, and runs a real scenario in each
+// tarballs into a fresh ESM project and a fresh CommonJS project (and the kit-only packages into a third, headless one with no React), typechecks each, and runs a real scenario in each
 // (scripts/smoke/scenario.ts). The tarballs are what an adopter, Moxgate first, vendors; they are left in `.smoke/tarballs/`.
 // The two projects are created in the OS temp directory (chatwarden-smoke-*), never inside the repository: from there Node
 // cannot fall back on the monorepo's node_modules, so a package that imports something it forgot to declare fails here.
@@ -14,11 +14,29 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** Per-project settings. `typescript` is the pinned `typescript@<spec>` installed into the project. */
+/**
+ * Per-project settings. `typescript` is the pinned `typescript@<spec>` installed into the project; `scenario` is the file under
+ * scripts/smoke/ that becomes its src/index.ts; `extras` are installed beside the tarballs.
+ * `only` limits the tarballs to those packages: the headless project holds just what `@chatwarden/hub-react/headless` needs and no React
+ * (react and react-dom are optional peers of hub-react, so npm does not fetch them; player-react and hub-element would bring React in).
+ */
 export const PROJECTS = {
-  esm: { typescript: '5.9' },
-  cjs: { typescript: '5.7' },
+  esm: { typescript: '5.9', scenario: 'scenario.ts', extras: ['express@5', '@types/express@5', '@types/react@19', '@types/react-dom@19'] },
+  cjs: { typescript: '5.7', scenario: 'scenario.ts', extras: ['express@5', '@types/express@5', '@types/react@19', '@types/react-dom@19'] },
+  headless: { typescript: '5.9', scenario: 'headless.ts', extras: [], only: ['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react'] },
 };
+
+/** The packed packages a project installs: all of them, or the `only` list of the project. A name on that list that was not packed throws. */
+export function packagesFor(project, packages) {
+  const settings = PROJECTS[project];
+  if (settings === undefined) throw new Error(`unknown smoke project: ${project}`);
+  if (settings.only === undefined) return packages;
+  return settings.only.map((name) => {
+    const found = packages.find((p) => p.name === name);
+    if (found === undefined) throw new Error(`smoke project ${project} needs ${name}, which was not packed`);
+    return found;
+  });
+}
 
 /** The file name `npm pack` gives a package: `@scope/name` + `0.1.0` becomes `scope-name-0.1.0.tgz`. */
 export function tarballName(name, version) {
@@ -47,8 +65,7 @@ export function installArgs(project, tarballPaths) {
     '--no-audit',
     '--no-fund',
     ...tarballPaths,
-    'express@5',
-    '@types/express@5',
+    ...settings.extras,
     '@types/node@22',
     `typescript@${settings.typescript}`,
   ];
@@ -103,7 +120,7 @@ function copyTemplates(root, project, dest) {
     const text = readFileSync(join(from, f), 'utf8');
     writeFileSync(join(dest, f), renderTemplate(text, { project }));
   }
-  cpSync(join(root, 'scripts', 'smoke', 'scenario.ts'), join(dest, 'src', 'index.ts'));
+  cpSync(join(root, 'scripts', 'smoke', PROJECTS[project].scenario), join(dest, 'src', 'index.ts'));
 }
 
 function main() {
@@ -127,7 +144,7 @@ function main() {
   }
 
   // Absolute paths: the projects are not next to the tarballs.
-  const tarballs = packages.map((p) => join(tarballDir, p.tarball));
+  const tarballsFor = (project) => packagesFor(project, packages).map((p) => join(tarballDir, p.tarball));
   // Outside the repository on purpose (see the header): no node_modules above these folders.
   const work = mkdtempSync(join(tmpdir(), TEMP_PREFIX));
   if (isInside(root, work)) throw new Error(`the temp directory ${work} is inside the repository`);
@@ -136,7 +153,7 @@ function main() {
     for (const project of Object.keys(PROJECTS)) {
       const dir = join(work, project);
       copyTemplates(root, project, dir);
-      run('npm', installArgs(project, tarballs), dir, `${project}: install`, 'install');
+      run('npm', installArgs(project, tarballsFor(project)), dir, `${project}: install`, 'install');
       run('npx', ['tsc', '--noEmit'], dir, `${project}: typecheck`, 'run');
       run('npx', ['tsc'], dir, `${project}: compile`, 'run');
       run(process.execPath, ['dist/index.js'], dir, `${project}: scenario`, 'run');
@@ -145,7 +162,7 @@ function main() {
     if (keepTemp(process.env)) console.log(`[smoke] SMOKE_KEEP=1: left ${work} in place`);
     else rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
-  console.log(`\n[smoke] ok: ${packages.length} tarballs, ESM and CJS consumers typecheck and run`);
+  console.log(`\n[smoke] ok: ${packages.length} tarballs; the ESM, CJS and headless (no React) consumers typecheck and run`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

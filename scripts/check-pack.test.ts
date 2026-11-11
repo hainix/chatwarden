@@ -98,6 +98,28 @@ describe('checkFileList', () => {
     const extra = ['dist/src/Hub.js', 'dist/src/Hub.js.map', 'dist/src/Hub.d.ts', 'dist/src/Hub.d.ts.map'];
     expect(check([...goodFiles(), ...extra]).join('\n')).toContain('src/Hub.ts');
   });
+  describe('stale build output (a dist file whose source was removed)', () => {
+    // tsc -b never deletes what an earlier build wrote: a component removed from src/ leaves its compiled files in the git-ignored
+    // dist/, and npm pack would ship them. hub-react nearly shipped dist/src/DecisionPanel.js this way.
+    const stale = (stem: string): string[] => [`dist/src/${stem}.js`, `dist/src/${stem}.js.map`, `dist/src/${stem}.d.ts`, `dist/src/${stem}.d.ts.map`];
+    it('names the stale DecisionPanel build of a React package, once, with the file it found', () => {
+      const problems = check([...goodFiles(), 'src/Hub.tsx', ...stale('Hub'), ...stale('DecisionPanel')]);
+      expect(problems).toEqual(['missing src/DecisionPanel.ts (next to dist/src/DecisionPanel.js): stale build output? Delete dist and rebuild']);
+    });
+    it.each(['.js', '.js.map', '.d.ts', '.d.ts.map'])('catches a lone %s with no source and no sibling', (ext) => {
+      const problems = check([...goodFiles(), `dist/src/Old${ext}`]);
+      expect(problems.join('\n')).toContain('missing src/Old.ts (next to dist/src/Old');
+    });
+    it('catches a stale file in a subfolder', () => {
+      const problems = check([...goodFiles(), 'src/pieces/Live.tsx', ...stale('pieces/Live'), ...stale('pieces/Gone')]);
+      expect(problems.filter((p) => p.includes('missing src/pieces/Gone.ts'))).toHaveLength(1);
+      expect(problems.join('\n')).not.toContain('Live');
+    });
+    it('is satisfied by a .ts or a .tsx source, and by nothing else', () => {
+      expect(check([...goodFiles(), 'src/A.ts', ...stale('A'), 'src/B.tsx', ...stale('B')])).toEqual([]);
+      expect(check([...goodFiles(), 'src/C.js', ...stale('C')]).join('\n')).toContain('missing src/C.ts');
+    });
+  });
   it('requires a CSS export target to be in the tarball', () => {
     const pkg = goodPkg();
     (pkg.exports as Record<string, unknown>)['./styles.css'] = './src/styles.css';
@@ -401,6 +423,10 @@ describe('a bundled package (hub-element ships dist/*.js, built by esbuild, and 
     'src/standalone.ts',
   ];
 
+  it('a stale declaration file in dist/src (its source removed) fails too: dist/src is only declarations here', () => {
+    const files = [...elementFiles(), 'dist/src/gone.d.ts', 'dist/src/gone.d.ts.map'];
+    expect(checkFileList({ pkg: elementPkg(), files }).join('\n')).toContain('missing src/gone.ts (next to dist/src/gone.d.ts)');
+  });
   it('is named as bundled, with its two scripts', () => {
     expect(BUNDLED['hub-element'].scripts).toEqual(['dist/hub-element.js', 'dist/index.js']);
   });

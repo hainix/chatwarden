@@ -6,16 +6,22 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
-import { createChatwarden } from '@chatwarden/core';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { createChatwarden, VERSION as CORE_VERSION } from '@chatwarden/core';
 import type { RawWho, Store } from '@chatwarden/core';
 import { discordFeed } from '@chatwarden/discord';
-import { healthRoutes } from '@chatwarden/http';
+import { healthRoutes, playerRoutes, VERSION as HTTP_VERSION } from '@chatwarden/http';
 import { adminRoutes, createRouter } from '@chatwarden/http/admin';
 import { toExpress } from '@chatwarden/http/express';
+import { defineChatwardenHub, VERSION as ELEMENT_VERSION } from '@chatwarden/hub-element/standalone';
+import { createHubClient, Hub, memoryRouter, routerTransport, VERSION as HUB_VERSION } from '@chatwarden/hub-react';
+import { createHubController } from '@chatwarden/hub-react/headless';
 import { buildMatcher, LiveTerms } from '@chatwarden/matcher';
 import type { Matcher } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { syntheticTermPack as legacySyntheticTermPack } from '@chatwarden/matcher/test-fixtures';
+import { playerClient, routerTransport as playerTransport, VERSION as PLAYER_VERSION } from '@chatwarden/player-react';
 import { createProfanityFilter } from '@chatwarden/profanity';
 import { createMemoryStore } from '@chatwarden/store-memory';
 import { openStore } from '@chatwarden/store-sqlite';
@@ -139,6 +145,30 @@ async function scenario(label: string, store: Store, matcher: Matcher): Promise<
   assert.equal(me.headers?.['cache-control'], 'no-store', 'staff answers are not cached');
   const anon = await staff({ method: 'GET', path: '/me', query: {}, headers: {}, body: undefined });
   assert.equal(anon.status, 401, 'GET /me is 401 with no caller');
+
+  // The React packages, run for real. CommonJS reaches these ES-module packages through Node's require(esm) (Node 22.13 or newer,
+  // the kit's floor), and the same compiled code runs here as in the ESM project. The hub is rendered to a string on the server
+  // over the staff router above, so React, the hub's code and the staff client all execute; no DOM is needed for that.
+  const hubClient = createHubClient(routerTransport(staff, { headers: { 'x-role': 'owner' } }));
+  assert.equal((await hubClient.me()).role, 'owner', 'the hub client reads GET /me through the router transport');
+  const hubHtml = renderToString(createElement(Hub, { client: hubClient, router: memoryRouter('/') }));
+  assert.ok(hubHtml.includes('cw-hub'), 'the hub renders on the server');
+  assert.equal(typeof createHubController, 'function', '@chatwarden/hub-react/headless is importable beside React');
+
+  // The player side: the player client reads Alice's notice (step 7) over the real player routes, with her key as her identity.
+  const playerHandle = createRouter(playerRoutes(cw, { identify: (req) => ({ clientKey: req.headers['x-chatwarden-key'] }) }));
+  const player = playerClient({ transport: playerTransport(playerHandle, { headers: { 'x-chatwarden-key': alice.clientKey ?? '' } }) });
+  const pending = await player.notices();
+  assert.equal(pending.length, 1, 'the player client sees the one pending notice');
+  assert.equal(pending[0]?.kind, 'warning');
+  assert.ok((await player.rules()).rules.length > 0, 'the player client reads the rules');
+
+  // The element script loads in Node, where there is no custom element registry: it registers nothing and does not throw.
+  assert.equal(typeof defineChatwardenHub(), 'function');
+  assert.equal(typeof (globalThis as { customElements?: unknown }).customElements, 'undefined', 'no custom element registry in Node');
+
+  // One release: every package that exports VERSION says the same.
+  for (const v of [HTTP_VERSION, HUB_VERSION, PLAYER_VERSION, ELEMENT_VERSION]) assert.equal(v, CORE_VERSION, 'the packages share one version');
 
   // 8. The probes, mounted through the Express adapter on an ephemeral port.
   const app = express();
