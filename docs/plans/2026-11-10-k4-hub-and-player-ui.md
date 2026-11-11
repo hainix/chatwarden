@@ -460,6 +460,96 @@ Tasks 7b to 7e implement the addendum `docs/design/2026-11-10-hub-simple-mode-an
   - A Playwright smoke run against a page that only has a script tag and the element.
 - **README:** the one-script-tag quick start, including the npm CDN form.
 
+Tasks 7f and 7g implement Part 1 of `docs/design/2026-11-10-editable-ladder-and-roadmap.md`, which the owner approved on
+2026-11-10. Its values are binding.
+
+### Task 7f: Editable profile in the kit (stored layer, routes)
+- **Core.**
+  - Add the profile fields `durations: number[]` and `customDuration: boolean` to every preset.
+    - `durations` defaults to `[1h, 6h, 12h, 24h, 3d, 7d, 30d]` in milliseconds, and must be sorted, unique, and each value 1 or
+      more and at most `MAX_DURATION_MS`.
+    - `customDuration` defaults to `true`.
+  - Validate both in `validateProfile`.
+  - Ladder cells edited without a label get one generated, for example "Restrict chat 6 hours", "Ban from public rooms 12 hours",
+    "Full ban 3 days" or "Full ban permanent".
+- **The policy layer.**
+  - `PolicyLayer` is a deep-partial of the editable sections: `durations`, `customDuration`, `ladder`, `firstOffense`, `repeat`,
+    `areaRules`, `severeRules`, and `guidelines[i].outcome`.
+  - A layer that touches any other field is refused.
+- **The live profile.**
+  - `cw.profile` becomes the effective profile (base, then code overrides, then the stored layer, validated) and is read live.
+  - Every consumer reads it at call time: `suggest`, the decide checks, `documents.*`, and the AI brief. Audit each call site; a
+    captured profile is a bug.
+  - `cw.policy` gets these members:
+    - `get()` returns `{effective, base, layer, version}`.
+    - `save(layer, {version, actor, reason})` returns `{ok:true, version} | {ok:false, error:'conflict'|'invalid', path?}`.
+    - `preview(layer)` returns the suggestions for the fixed sample records `clean`, `oneWarning`, `chat24h` and `ban7d`, each for
+      the four conduct levels.
+    - `reset(section?)`.
+    - `refresh()`.
+  - Another process's change is seen within 10 seconds, through a version check at most every 10 seconds on read.
+- **Store.**
+  - Add the optional methods `loadPolicyLayer(): {layer, version} | null` and `savePolicyLayer(layer, expectedVersion): number | null`.
+    `null` means a version conflict, and the save is atomic.
+  - Implement them in store-memory and store-sqlite. The SQLite store needs a migration: a new table, with an existing database
+    upgrading cleanly.
+  - Without these methods, `cw.policy.save` returns `{ok:false, error:'unsupported'}` and the rest works.
+- **HTTP routes.**
+  - `GET /policy/profile` needs `policy.read`.
+  - `PUT /policy/profile` takes `{layer, version, reason}` and needs `policy.write`. It answers 409 `conflict` and 400 `invalid`
+    with `path`. It writes audit `policy.update`, with the changed sections in the audit detail and the reason.
+  - `POST /policy/profile/preview` needs `policy.read`.
+  - `DELETE /policy/profile?section=` needs `policy.write` and is audited.
+  - Add the new permission `policy.write` to the owner role only.
+- **Tests (both stores where storage is involved):**
+  - validation tables (good and bad durations, layers touching forbidden fields)
+  - effective-profile merge order
+  - every consumer seeing a saved change at once (a suggestion changes after save)
+  - conflict on a stale version
+  - reset per section and for everything
+  - the 10-second cross-process refresh, with two `createChatwarden` instances on one store
+  - the unsupported store
+  - route permissions and audit rows
+  - a SQLite migration from an existing database
+  - generated labels
+  - the README and docs for the new API
+
+### Task 7g: Steps and ladder in the hub, durations in pickers, quick warning
+- **The settings screen.**
+  - Route `#/settings/ladder`. It is under More in Simple, and under a Settings nav item in Detailed.
+  - It is gated by `policy.read`. Editing needs `policy.write`; any other role sees the screen read-only.
+  - Sections, matching the addendum:
+    - durations, as chips plus the custom switch
+    - the ladder grid
+    - first offence
+    - repeated
+    - the area and severe rule pickers
+    - the guidelines' outcome text
+  - A live preview panel calls `POST /policy/profile/preview`, debounced.
+  - Saving requires a reason. A 409 shows "Someone else changed these settings" with a Reload button. A 400 focuses the field at
+    `path`.
+  - Each section has a reset, and there is a reset for everything. Both use an in-page confirm.
+  - With an unsupported store, the screen is read-only with one plain sentence saying why.
+  - The section is also exported as a piece, `LadderSettings`, plus the hook `usePolicy`. Both are `@experimental` and added to the
+    API lock.
+- **Pickers.**
+  - The decision bar and the sanction form offer the profile's `durations`, "Custom length" (hours or days) when `customDuration`
+    is on, and permanent when allowed.
+  - The bounds and validation match the kit.
+- **The Simple card's quick warning.**
+  - When the suggestion is harsher than a warning, add "Send a warning". It uses the same hold and Undo, with the reason set to the
+    rule title.
+  - Key 3 sends the warning in Simple only when "Something else…" is closed.
+- **Tests:**
+  - each section's edit, then preview, then save, then the suggestion change, against the real routes
+  - conflict, invalid path focus, resets, and the read-only role
+  - the unsupported store
+  - custom length bounds
+  - the quick warning: its body, Undo, and key 3
+  - axe in both themes
+  - layout at 360 px (the grid scrolls inside its own container)
+  - the API snapshot updated
+
 ### Task 8: The site demo uses the real hub and player UI
 - In `site/`:
   - Replace `src/demo/ModPane.tsx` with `<Hub client={hubClient(routerTransport(createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-mod', role: 'owner' }), terms }))))} router={memoryRouter} />`
