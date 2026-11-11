@@ -15,7 +15,7 @@ interface ProfileBody {
   layer: Record<string, unknown>;
   version: number;
   canSave: boolean;
-  layerError?: { path: string };
+  layerError?: { path: string; kind: string };
 }
 
 describe('permissions', () => {
@@ -83,7 +83,7 @@ describe('GET /policy/profile', () => {
     const { call, store } = await world();
     store.savePolicyLayer({ profanity: { mode: 'allow' } } as never, 0);
     const body = (await call('GET', '/policy/profile')).body as ProfileBody;
-    expect(body.layerError).toEqual({ path: 'layer.profanity' });
+    expect(body.layerError).toEqual({ path: 'layer.profanity', kind: 'invalid' });
     expect(body.effective.durations).toEqual(body.base.durations);
     expect(body.version).toBe(1);
   });
@@ -275,7 +275,7 @@ describe('POST /policy/profile/preview', () => {
       const res = await call('POST', '/policy/profile/preview', { role, body: { layer: { firstOffense: { rude: { kind: 'chat', durationMs: 6 * HOUR } } } } });
       expect(res.status, role).toBe(200);
       const body = res.body as { samples: Record<string, Record<string, { label: string; kind: string; durationMs: number | null }>> };
-      expect(Object.keys(body)).toEqual(['samples']);
+      expect(Object.keys(body)).toEqual(['samples', 'reporting']);
       expect(Object.keys(body.samples)).toEqual(['clean', 'oneWarning', 'chat24h', 'ban7d']);
       expect(body.samples.clean?.rude).toEqual({ label: 'Restrict chat 6 hours', kind: 'chat', durationMs: 6 * HOUR });
     }

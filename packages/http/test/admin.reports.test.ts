@@ -147,7 +147,7 @@ describe('GET /reports', () => {
     const res = await call('GET', '/reports');
     const item = (res.body as { items: Array<Record<string, unknown>> }).items[0] as Record<string, unknown>;
     expect(Object.keys(item).sort()).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
     expect(item).toMatchObject({ id: r.id, category: 'harassment', status: 'open', roomId: r.room, targetPerson: r.target, reporterPerson: r.reporter, badFaith: false, actionedAt: null, actionedBy: null });
     // Keys are the same on a decided report, and the decision shows through status / badFaith / actioned*.
@@ -834,7 +834,7 @@ describe('GET /people/:ref/history', () => {
       history: [],
       reports: [],
       sanctions: [],
-      asReporter: { reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null },
+      asReporter: { reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 },
       handle: null,
     });
     expect(audit().map((a) => a.action)).toEqual(['history.view']);

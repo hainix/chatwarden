@@ -1,5 +1,5 @@
-import { CATEGORY_TO_RULE, safeWarn } from '@chatwarden/core';
-import type { CaseClaim, ReportQuery, StaffReport } from '@chatwarden/core';
+import { reasonLabel, safeWarn, suggestedRule } from '@chatwarden/core';
+import type { CaseClaim, Chatwarden, ReportQuery, StaffReport } from '@chatwarden/core';
 import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { applyDecision, checkDurationsOffered, needForDecision, parseDecision, peopleOf } from './apply.js';
@@ -9,6 +9,12 @@ import { bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel,
 
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
 const HISTORY_REPORTS_DEFAULT = 20;
+
+/**
+ * The Community Rule suggested for a report: the first still-citable rule of the reason the reporter gave, from the reasons in force now, or
+ * `'uncovered'` when they gave none (the moderator picks). Never decides anything.
+ */
+const ruleOf = (cw: Chatwarden, report: StaffReport) => suggestedRule(cw.profile.reporting.reasons, report.reportedReason, cw.rules);
 
 /** The room for `suggest`: the report's own (an empty one is no room). Never from the request. */
 const roomOf = (report: StaffReport): string | null => (report.roomId === '' ? null : report.roomId);
@@ -24,7 +30,12 @@ export interface ReportSummary {
   createdAt: number;
   roomId: string;
   tags: Record<string, string>;
+  /** The 0.1.1 category the report is kept under (derived from the reason). Prefer `reportedReason`. */
   category: StaffReport['category'];
+  /** The reason the reporter gave (an id from the reporting reasons; an old category reads as its new id), or null when they gave none. A hint, never the truth. */
+  reportedReason: string | null;
+  /** The reason's label as it is now (a relabel shows at once), the id itself when the reason is no longer listed, null when none was given. */
+  reportedReasonLabel: string | null;
   status: StaffReport['status'];
   badFaith: boolean;
   targetPerson: string;
@@ -51,12 +62,14 @@ export interface ReportSummary {
 const claimView = (c: CaseClaim | undefined): ReportSummary['claim'] => (c === undefined ? null : { by: c.by, since: c.since, until: c.until });
 
 /** Project a report to its queue summary. Lists each field by name, so a field added to the record never leaks in. */
-const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string[] | undefined): ReportSummary => ({
+const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string[] | undefined, label: string | null): ReportSummary => ({
   id: r.id,
   createdAt: r.createdAt,
   roomId: r.roomId,
   tags: { ...r.tags },
   category: r.category,
+  reportedReason: r.reportedReason,
+  reportedReasonLabel: label,
   status: r.status,
   badFaith: r.badFaith,
   targetPerson: r.targetPerson,
@@ -71,10 +84,12 @@ const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string
 
 /**
  * The report and decision routes (staff only, each audited):
- * - `GET /reports?status&cursor&limit`: the queue as summaries, no evidence beyond the `targetHandle` and `reporterHandle`
+ * - `GET /reports?status&reason&cursor&limit`: the queue as summaries (`reason` is a reason id, the old `disruption` included, or `none` for
+ *   the reports that gave no reason; a malformed one is 400 `invalid_query`), no evidence beyond the `targetHandle` and `reporterHandle`
  *   (`report.view`, no target)
  *   Each item also carries `claim` and `viewing` for its open cases (see {@link ReportSummary}).
- * - `GET /reports/:id?level`: one report with each person's history and the suggestion for the reported person, and the
+ * - `GET /reports/:id?level`: one report (with `reportedReasonLabel` beside its `reportedReason`) with each person's history and the
+ *   suggestion for the reported person (`rule` is the first rule of the reported reason, `'uncovered'` with none), and the
  *   `claim` on the reported person's case (`{ by, since, until }` or null) (`report.view`)
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
  * - `POST /reports/:id/decide { verdict, actions, reason, evidence?, takeOver? }`: decide (`report.decide`, replays too). Another
@@ -83,10 +98,14 @@ const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string
  *   caller's claim; while they have other open reports it is kept (one case per person).
  * - `GET /people/:ref/history?limit`: a person's actions, recent reports against them, their sanctions as
  *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
- *   filed stand, `asReporter`, and `handle`, their handle on the newest report filed against them that recorded one, or null (`history.view`)
+ *   filed stand, `asReporter` (with `reasonMatched` of `reasonDecided`: how often their reported reason was borne out by the decision), and `handle`, their handle on the newest report filed against them that recorded one, or null (`history.view`)
  */
 export function reportRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
+
+  /** The reason's label in force now; the id when it is no longer listed; null when none was given. */
+  const labelOf = (r: StaffReport): string | null =>
+    r.reportedReason === null ? null : (reasonLabel(cw.profile.reporting.reasons, r.reportedReason) ?? r.reportedReason);
 
   /** A report's claim, only while its case is open. */
   const claimOf = (r: StaffReport): CaseClaim | undefined => (r.status === 'open' ? cw.cases.holders([r.targetPerson]).get(r.targetPerson) : undefined);
@@ -99,20 +118,22 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
 
   return {
     'GET /reports': ctx.secure('reports.read', (c) => {
-      const { status, cursor } = c.req.query;
+      const { status, cursor, reason } = c.req.query;
       const limit = queryLimit(c.req.query.limit);
       // The facade validates `status` and the cursor (ReportQueryError -> 400) and clamps the limit.
       const page = cw.reports.list({
         ...(status === undefined ? {} : { status: status as NonNullable<ReportQuery['status']> }),
         ...(cursor === undefined ? {} : { before: cursor }),
         ...(limit === undefined ? {} : { limit }),
+        // `none` is the reports with no reason; a malformed id is the facade's ReportQueryError (400).
+        ...(reason === undefined ? {} : { reason: reason === 'none' ? null : reason }),
       });
       const open = [...new Set(page.items.filter((r) => r.status === 'open').map((r) => r.targetPerson))];
       const claims = cw.cases.holders(open);
       const viewers = cw.cases.viewersOf(open, c.authz.actor);
       c.audit('report.view');
       const items = page.items.map((r) =>
-        r.status === 'open' ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson)) : summarize(r, undefined, undefined),
+        r.status === 'open' ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r)) : summarize(r, undefined, undefined, labelOf(r)),
       );
       return { status: 200, body: { items, next: page.next } };
     }),
@@ -121,12 +142,12 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const id = c.params.id as string;
       const level = queryLevel(c.req.query.level);
       const report = load(id);
-      const rule = CATEGORY_TO_RULE[report.category];
+      const rule = ruleOf(cw, report);
       const history = Object.fromEntries(peopleOf(report).map((p) => [p, cw.history(p)]));
       const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report) });
       const claim = claimView(claimOf(report));
       c.audit('report.view', { type: 'report', ref: id });
-      return { status: 200, body: { report, history, suggest, rule, claim } };
+      return { status: 200, body: { report: { ...report, reportedReasonLabel: labelOf(report) }, history, suggest, rule, claim } };
     }),
 
     'POST /reports/:id/suggest': ctx.secure('reports.read', (c) => {
@@ -140,7 +161,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // Only the people the report names: this is not a way to look up anyone's record.
       const named = new Set([...peopleOf(report), report.targetSubject, report.reporterSubject]);
       if (person !== undefined && !named.has(person)) throw new ValidationError();
-      const suggestion = cw.suggest(person ?? report.targetPerson, level, rule ?? CATEGORY_TO_RULE[report.category], {
+      const suggestion = cw.suggest(person ?? report.targetPerson, level, rule ?? ruleOf(cw, report), {
         roomId: roomOf(report),
       });
       c.audit('suggest', { type: 'report', ref: id });

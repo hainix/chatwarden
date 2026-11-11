@@ -412,7 +412,7 @@ describe('GET /rules', () => {
     const { call, cw } = await setup();
     const res = await call('GET', '/rules');
     expect(res.status).toBe(200);
-    expect(Object.keys(body(res)).sort()).toEqual(['rules', 'summary']);
+    expect(Object.keys(body(res)).sort()).toEqual(['reporting', 'rules', 'summary']);
     expect(body(res).summary).toBe(cw.summary);
     const rules = body(res).rules as Array<Record<string, unknown>>;
     expect(rules.map((r) => r.number)).toEqual(STARTER_RULES.map((r) => r.number));
