@@ -94,10 +94,7 @@ const measure = (page: Page): Promise<Fit> =>
     };
   });
 
-/**
- * `pageScroll` is checked from 360px up. At 320px the hero headline (outside the demo) is 16px wider than the screen, which is not the
- * composer's doing (the composer, the pane and Send all fit there, which the other checks hold); it is a separate follow-up.
- */
+/** `pageScroll`: the page itself never scrolls sideways, from 320px up (the hero headline used to be 16px too wide at 320). */
 const expectFits = (fit: Fit, label: string, pageScroll = true): void => {
   expect(fit.sendPastPane, `${label}: Send's right edge is inside the pane`).toBeLessThanOrEqual(0);
   expect(fit.sendBeforePane, `${label}: Send's left edge is inside the pane`).toBeGreaterThanOrEqual(0);
@@ -135,12 +132,71 @@ describe('the demo composer fits the game pane (built page, real Chromium)', () 
         const page = await open(width);
         if (ring) await page.evaluate(() => document.querySelector('.composer')?.setAttribute('data-tour-target', 'true'));
         const fit = await measure(page);
-        expectFits(fit, `${width}px`, width >= 360);
+        expectFits(fit, `${width}px`);
         if (width <= 480) expect(fit.countShown, 'the counter is hidden on a phone').toBe(false);
         await page.context().close();
       });
     }
   }
+
+  it('the page does not scroll sideways from 320px up, and the hero headline stays inside the gutter (it wraps instead of growing)', async (ctx) => {
+    if (browser === null) return ctx.skip();
+    for (const width of [320, 330, 340, 360, 375, 390, 414, 480]) {
+      const page = await open(width);
+      const h1 = await page.evaluate(() => {
+        const el = document.querySelector('h1') as HTMLElement;
+        const r = el.getBoundingClientRect();
+        const lines = [...el.querySelectorAll<HTMLElement>('.h1-line')].map((l) => Math.round(l.scrollWidth - l.clientWidth));
+        return {
+          right: Math.round(r.right * 10) / 10,
+          left: Math.round(r.left * 10) / 10,
+          viewport: document.documentElement.clientWidth,
+          overflow: Math.round(el.scrollWidth - el.clientWidth),
+          lines,
+          page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      });
+      expect(h1.page, `${width}px: no horizontal page scroll`).toBeLessThanOrEqual(0);
+      expect(h1.right, `${width}px: the headline's right edge is inside the screen`).toBeLessThanOrEqual(h1.viewport);
+      expect(h1.left, `${width}px: and its left edge`).toBeGreaterThanOrEqual(0);
+      expect(h1.overflow, `${width}px: the headline holds its own words`).toBeLessThanOrEqual(0);
+      expect(h1.lines.every((n) => n <= 0), `${width}px: each sentence holds its own words (${h1.lines.join(', ')})`).toBe(true);
+      await page.context().close();
+    }
+  });
+
+  it('the hero copy (headline, lead, install command) stays inside the gutter at 320px: the install command wraps its Copy button instead of widening the column', async (ctx) => {
+    if (browser === null) return ctx.skip();
+    const page = await open(320);
+    const edges = await page.evaluate(() => {
+      const vw = document.documentElement.clientWidth;
+      const pick = (sel: string): { right: number; left: number } => {
+        const r = (document.querySelector(sel) as HTMLElement).getBoundingClientRect();
+        return { right: Math.round(r.right * 10) / 10, left: Math.round(r.left * 10) / 10 };
+      };
+      return { vw, h1: pick('h1'), lead: pick('.hero-copy .lead'), actions: pick('.hero-actions'), cmd: pick('.cmd'), copy: pick('.cmd .copy'), note: pick('.hero-note') };
+    });
+    for (const [name, e] of Object.entries(edges)) {
+      if (name === 'vw') continue;
+      const edge = e as { right: number; left: number };
+      expect(edge.right, `${name}'s right edge is inside the 16px gutter`).toBeLessThanOrEqual(edges.vw - 16 + 0.5);
+      expect(edge.left, `${name}'s left edge`).toBeGreaterThanOrEqual(16 - 0.5);
+    }
+    await page.context().close();
+  });
+
+  it('the headline keeps its look on a desktop: the hero size, the display face and its weight', async (ctx) => {
+    if (browser === null) return ctx.skip();
+    const page = await open(1440);
+    const look = await page.evaluate(() => {
+      const style = getComputedStyle(document.querySelector('h1') as HTMLElement);
+      return { size: parseFloat(style.fontSize), family: style.fontFamily, weight: style.fontWeight };
+    });
+    expect(look.size).toBeCloseTo(73.6, 0); // 4.6rem: the top of the clamp
+    expect(look.family).toMatch(/Bungee/);
+    expect(look.weight).toBe('400');
+    await page.context().close();
+  });
 
   it('still fits with a full 200-character line typed (the counter is at its widest) and with the line near its limit', async (ctx) => {
     if (browser === null) return ctx.skip();

@@ -224,6 +224,7 @@ h2 {
 h1 {
   font-size: var(--fs-hero);
   line-height: 1.02;
+  overflow-wrap: anywhere; /* a long word wraps inside the gutter instead of pushing the page sideways */
 }
 h2 {
   font-size: var(--fs-h2);
@@ -496,6 +497,9 @@ li {
 .hero-copy {
   min-width: 0;
   display: grid;
+  /* One column that can shrink below its content. Without this the implicit track is as wide as its widest item (the install
+     command, 320px at a 320px phone), and the whole hero scrolled sideways by the 16px gutter. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   justify-items: start;
 }
@@ -508,6 +512,7 @@ li {
 }
 .cmd {
   display: inline-flex;
+  flex-wrap: wrap; /* on a very narrow phone the Copy button drops under the command instead of widening the column */
   align-items: center;
   gap: 12px;
   max-width: 100%;
