@@ -1,4 +1,4 @@
-import { LadderSettingsScreen } from '../screens/LadderSettings.js';
+import { LazyLadderSettings } from '../screens/lazy.js';
 import { Piece } from './Piece.js';
 import type { PieceProps } from './Piece.js';
 
@@ -22,7 +22,7 @@ export type LadderSettingsProps = PieceProps;
 export function LadderSettings({ className }: LadderSettingsProps) {
   return (
     <Piece name="LadderSettings" need="policy.read" className={className}>
-      <LadderSettingsScreen />
+      <LazyLadderSettings />
     </Piece>
   );
 }

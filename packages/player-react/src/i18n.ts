@@ -78,9 +78,12 @@ export const en = {
   'player.restricted.ended': 'Your chat is back on. The restriction ended {when}.',
   'player.restricted.ref': 'Reference {code}',
 
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.title': 'Report a player',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.titleNamed': 'Report {name}',
-  'player.report.intro': 'Tell us what happened and a moderator will look at it.',
+  'player.report.intro': 'Tell us why and a moderator will look at it.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.legend': 'What happened?',
   'player.report.titleOneTap': 'Report this message?',
   'player.report.titleOneTapNamed': 'Report {name}?',
@@ -90,24 +93,45 @@ export const en = {
   'player.report.oneTap.intro': 'We will pass it to the moderators. You do not need to say why.',
   'player.report.oneTap.send': 'Report',
   'player.report.quote': '“{line}”',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.skip': 'Skip and report',
   'player.report.needReason': 'Choose a reason.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.needReasonOrSkip': 'Choose what happened, or skip.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.addReason': 'Add a reason',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.addReasonHint': 'This helps, but the moderators decide what it really is. You can add this for a few minutes after you report.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.legend': 'What was it about?',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.send': 'Add to my report',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.need': 'Choose a reason or write a note.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.added': 'Added. Thanks.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.failed': 'We could not add that.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.refused.off': 'Adding to a report is not available right now.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.refused.not_found': 'We cannot find that report any more.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.refused.not_reporter': 'Only the player who sent a report can add to it.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.refused.too_late': 'It is too late to add to this report. We still have the report.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.refused.already_added': 'You already added to this report.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.detail.refused.reason_unknown': 'That reason is not available any more. Your report is still with us.',
-  'player.report.note': 'Add a note (optional)',
+  'player.report.note': 'Note (optional)',
+  'player.report.addNote': 'Add a note',
+  'player.report.why': 'Why? (optional)',
+  'player.report.whyRequired': 'Why?',
+  'player.report.choose': 'Choose a reason (optional)',
+  'player.report.chooseRequired': 'Choose a reason',
   'player.report.noteHint': 'A moderator will read this. Up to {max} characters. Do not include passwords or personal details.',
+  /** @deprecated unused since 0.1.3; removed in a later minor */
   'player.report.send': 'Send report',
   'player.report.cancel': 'Cancel',
   'player.report.close': 'Close',

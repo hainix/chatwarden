@@ -281,45 +281,51 @@ export function ThanksPanel({ draft, set, problems }: { draft: ReportingDraft; s
 
 // ---- What players see ------------------------------------------------------------------------------------------------------
 
-/** A rough picture of the player's report window with the draft's settings, drawn from the draft (text only, nothing to press). */
+/**
+ * A rough picture of the player's report window with the draft's settings, drawn from the draft (text only, nothing to press). The
+ * window is one step in every flow: the question, the line, "Why?" (a select, the reasons by group; required in `reason_required`),
+ * a door to a note, Report and Cancel; then "Report sent" and the thank-you. With no reason to offer there is just the question and Report.
+ */
 export function PlayersSee({ draft }: { draft: ReportingDraft }) {
   const { t } = useHub();
   const groups = playerGroups(draft);
-  const oneTap = draft.flow === 'one_tap';
+  const hasReasons = groups.length > 0;
+  const required = hasReasons && draft.flow === 'reason_required';
   const thanks = draft.thanks.trim();
-  let body: ReactNode;
-  if (oneTap) {
-    body = (
-      <>
-        <p className="cw-mock-title">{t('hub.reporting.preview.oneTap.title')}</p>
-        <p className="cw-mock-quote">{t('hub.reporting.preview.line')}</p>
-        <p>
-          <span className="cw-mock-btn cw-mock-btn--primary">{t('hub.reporting.preview.report')}</span>
-        </p>
-      </>
-    );
-  } else {
-    body = (
-      <>
-        <p className="cw-mock-title">{t('hub.reporting.preview.pick.title')}</p>
-        <p className="cw-mock-legend">{t('hub.reporting.preview.legend')}</p>
-        {groups.map((g, i) => (
-          <div key={`${g.name}-${i}`} className="cw-mock-group">
-            {g.name !== '' && <p className="cw-mock-heading">{g.name}</p>}
-            <ul>
-              {g.labels.map((label, j) => (
-                <li key={`${label}-${j}`}>{label}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
-        <p>
-          <span className="cw-mock-btn cw-mock-btn--primary">{t('hub.reporting.preview.send')}</span>
-          {draft.flow === 'reason_first' && <span className="cw-mock-btn">{t('hub.reporting.preview.skip')}</span>}
-        </p>
-      </>
-    );
-  }
+  const body: ReactNode = (
+    <>
+      <p className="cw-mock-title">{t('hub.reporting.preview.oneTap.title')}</p>
+      <p className="cw-mock-quote">{t('hub.reporting.preview.line')}</p>
+      {hasReasons && (
+        <div className="cw-mock-field">
+          <p className="cw-mock-legend">
+            {required ? t('hub.reporting.preview.whyRequired') : t('hub.reporting.preview.why')}
+            {required && (
+              <span className="cw-mock-req" aria-hidden="true">
+                {' *'}
+              </span>
+            )}
+          </p>
+          <p className="cw-mock-select">{required ? t('hub.reporting.preview.chooseRequired') : t('hub.reporting.preview.choose')}</p>
+          {groups.map((g, i) => (
+            <div key={`${g.name}-${i}`} className="cw-mock-group">
+              {g.name !== '' && <p className="cw-mock-heading">{g.name}</p>}
+              <ul>
+                {g.labels.map((label, j) => (
+                  <li key={`${label}-${j}`}>{label}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+      {hasReasons && <p className="cw-mock-door">{t('hub.reporting.preview.addNote')}</p>}
+      <p>
+        <span className="cw-mock-btn cw-mock-btn--primary">{t('hub.reporting.preview.report')}</span>
+        <span className="cw-mock-btn">{t('hub.reporting.preview.cancel')}</span>
+      </p>
+    </>
+  );
   return (
     <Panel title={t('hub.reporting.preview.title')}>
       <div className="cw-panel-pad">
@@ -329,15 +335,8 @@ export function PlayersSee({ draft }: { draft: ReportingDraft }) {
           {body}
           <div className="cw-mock-after">
             <p className="cw-hint">{t('hub.reporting.preview.after')}</p>
+            <p className="cw-mock-title">{t('hub.reporting.preview.sent')}</p>
             <p className="cw-mock-thanks">{thanks}</p>
-            {oneTap && (
-              <>
-                <p>
-                  <span className="cw-mock-btn">{t('hub.reporting.preview.addReason')}</span>
-                </p>
-                <p className="cw-hint">{t('hub.reporting.preview.addReason.hint')}</p>
-              </>
-            )}
           </div>
         </div>
       </div>

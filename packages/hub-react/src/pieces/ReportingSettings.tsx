@@ -1,4 +1,4 @@
-import { ReportingSettingsScreen } from '../screens/ReportingSettings.js';
+import { LazyReportingSettings } from '../screens/lazy.js';
 import { Piece } from './Piece.js';
 import type { PieceProps } from './Piece.js';
 
@@ -22,7 +22,7 @@ export type ReportingSettingsProps = PieceProps;
 export function ReportingSettings({ className }: ReportingSettingsProps) {
   return (
     <Piece name="ReportingSettings" need="policy.read" className={className}>
-      <ReportingSettingsScreen />
+      <LazyReportingSettings />
     </Piece>
   );
 }

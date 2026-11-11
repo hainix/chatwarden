@@ -27,12 +27,22 @@ Updated 2026-11-11. The full roadmap and the reasoning behind it: [design/2026-1
   Sketches: [design/2026-11-10-editable-ladder-and-roadmap.md](design/2026-11-10-editable-ladder-and-roadmap.md), Part 2.
 - **Later phases:** K4b init CLI, K5 Coop adapter, K7 term corpus service.
 
+## 0.1.3
+Ready, not published (the owner tags it: see [RELEASING.md](../RELEASING.md)). A hardening patch on branch `hardening-0.1.3`:
+- The matcher no longer ships obscenity's English word list to browsers (issue #8), and `obscenity` is a devDependency of the matcher.
+- SQLite migration 18: indexes on `kit_sanctions(starts_at)` and `kit_strikes(at)`.
+- Hub: a refresh handle (`onController`, `controller.refresh()`, experimental) and the settings and admin screens load on demand.
+- Players report in one step (reason and note inline); `onAddDetail` is deprecated and no longer called; the `extra` slot is experimental.
+  The "What players see" picture in the hub shows it. Nothing was removed from the exported catalogues (the unused words are deprecated).
+- The site demo follows the one-step dialog and no longer scrolls sideways at 320 px; its word-list workaround is gone.
+
 ## Open follow-ups
-- A public refresh handle on `<Hub>` for embedders. The site demo uses a guarded `visibilitychange` nudge today.
-- Lazy-load the hub's settings and admin screens.
-- SQLite indexes on `kit_sanctions.starts_at` and `kit_strikes.at`.
 - `/sanctions` makes one reports read per person (bounded at 200).
 - Unsaved settings are not guarded against the browser Back button or a typed URL (documented).
-- hub-element ships two near-identical bundles.
-- Issue #8: `@chatwarden/matcher` pulls obscenity's English list into browser bundles.
+- hub-element ships two near-identical bundles (`dist/hub-element.js` and `dist/index.js`, about 684 KB each). Left as it is in 0.1.3:
+  making `hub-element.js` a two-line module that imports `./index.js` would break the documented one-file use (the README tells people to
+  copy that one file, "no imports, so it works from any path"), add a second request in series on a CDN, and change what a patch ships.
+  Do it in a minor, with the README and the CSP notes changed with it.
+- Remove the deprecated words from `en` and `PlayerText` (player-react) and the six preview words of the hub's `en`, and the
+  `onAddDetail` prop, in a later minor.
 - Parked items from earlier phases: [plans/follow-ups.md](plans/follow-ups.md).

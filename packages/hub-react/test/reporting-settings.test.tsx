@@ -1,8 +1,10 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { createRouter, playerRoutes } from '@chatwarden/http';
 import type { ReportingSettings } from '@chatwarden/core';
 import type { TransportRequest } from '../src/transport.js';
+import { PlayersSee } from '../src/policy/ReportingPanels.js';
+import { HubProvider } from '../src/provider.js';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
@@ -87,9 +89,10 @@ describe('the flow', () => {
     await open(w);
     const group = screen.getByRole('radiogroup', { name: 'How players report' });
     expect(within(group).getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['one_tap', 'reason_first', 'reason_required']);
-    expect(screen.getByRole('radio', { name: 'One tap' })).toHaveAccessibleDescription('Players tap Report on a message and it is sent at once. They can add a reason afterwards if they want.');
-    expect(screen.getByRole('radio', { name: 'Pick a reason first' })).toHaveAccessibleDescription('Players choose a reason, or skip it, then send the report.');
-    expect(screen.getByRole('radio', { name: 'Reason required' })).toHaveAccessibleDescription('Players must choose a reason before they can send the report.');
+    // The window is one step: there is no "afterwards" and no skip.
+    expect(screen.getByRole('radio', { name: 'One tap' })).toHaveAccessibleDescription('Players press Report on a message, then Report in the window. Saying why is optional.');
+    expect(screen.getByRole('radio', { name: 'Pick a reason first' })).toHaveAccessibleDescription('Players are asked "Why?" in the same window. Saying why is still optional.');
+    expect(screen.getByRole('radio', { name: 'Reason required' })).toHaveAccessibleDescription('Players must choose a reason in the window before Report sends.');
     expect(screen.getByText('A reason is only a hint. Moderators decide what a report really is.')).toBeInTheDocument();
   });
 
@@ -482,30 +485,105 @@ describe('who can change it', () => {
 });
 
 describe('What players see', () => {
-  it('one tap: the question, the line, the Report button and the thank-you', async () => {
+  // The player's dialog is ONE step: the question, the line, "Why? (optional)" (a select, the reasons in groups), a door to a note,
+  // Report and Cancel; then "Report sent" and the thank-you. The picture shows exactly that, in every flow.
+  const OLD_STEP = ['Add a reason', 'Skip and report', 'Send report', 'Report a player', 'What happened?', 'Optional. They can add a reason and a note to the same report.'];
+
+  it('one tap: the question, the line, "Why? (optional)" with the reasons, the note door, Report and Cancel, then "Report sent" and the thank-you', async () => {
     const w = await owner();
     await open(w);
     const m = within(mock());
     expect(m.getByText('Report this message?')).toBeInTheDocument();
+    expect(m.getByText('An example message from another player')).toBeInTheDocument();
+    expect(m.getByText('Why? (optional)')).toBeInTheDocument();
+    expect(m.getByText('Choose a reason (optional)')).toBeInTheDocument();
+    expect(m.getByText('Chat')).toBeInTheDocument();
+    expect(m.getAllByRole('listitem').map((li) => li.textContent).at(-1)).toBe('Something else');
+    expect(m.getByText('Add a note')).toBeInTheDocument();
     expect(m.getByText('Report', { selector: '.cw-mock-btn' })).toBeInTheDocument();
+    expect(m.getByText('Cancel', { selector: '.cw-mock-btn' })).toBeInTheDocument();
+    expect(m.getByText('Report sent')).toBeInTheDocument();
     expect(m.getByText("Thanks for the report. We'll look into it.")).toBeInTheDocument();
-    expect(m.getByText('Add a reason')).toBeInTheDocument();
-    expect(m.queryByText('Skip and report')).toBeNull();
+    for (const gone of OLD_STEP) expect(m.queryByText(gone), gone).toBeNull();
   });
 
-  it('reason first: the reasons by group with "Something else" last and a skip; reason required has no skip', async () => {
+  it('shows the parts in the order the dialog has them', async () => {
+    const w = await owner();
+    await open(w);
+    const text = mock().textContent ?? '';
+    const order = ['Report this message?', 'An example message', 'Why? (optional)', 'Choose a reason (optional)', 'Chat', 'Something else', 'Add a note', 'Report', 'Cancel', 'Report sent', "Thanks for the report"];
+    let at = -1;
+    for (const part of order) {
+      const found = text.indexOf(part, at + 1);
+      expect(found, `${part} after ${at}`).toBeGreaterThan(at);
+      at = found;
+    }
+  });
+
+  it('is the same one step in pick-a-reason-first (no skip), and the reasons stay by group with "Something else" last', async () => {
     const w = await owner();
     const { user } = await open(w);
     await user.click(screen.getByRole('radio', { name: 'Pick a reason first' }));
-    let m = within(mock());
+    const m = within(mock());
+    expect(m.getByText('Why? (optional)')).toBeInTheDocument();
     expect(m.getByText('Chat')).toBeInTheDocument();
     expect(m.getByText('Gameplay')).toBeInTheDocument();
     expect(m.getAllByRole('listitem').map((li) => li.textContent).at(-1)).toBe('Something else');
-    expect(m.getByText('Skip and report')).toBeInTheDocument();
-    await user.click(screen.getByRole('radio', { name: 'Reason required' }));
-    m = within(mock());
-    expect(m.queryByText('Skip and report')).toBeNull();
+    expect(m.getByText('Add a note')).toBeInTheDocument();
+    for (const gone of OLD_STEP) expect(m.queryByText(gone), gone).toBeNull();
   });
+
+  it('reason required: "Why?" with the required mark, no "(optional)", and the first option asks for a reason', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    await user.click(screen.getByRole('radio', { name: 'Reason required' }));
+    const m = within(mock());
+    expect(m.getByText('Why?')).toBeInTheDocument();
+    expect(mock().querySelector('.cw-mock-req')).not.toBeNull();
+    expect(mock().querySelector('.cw-mock-req')?.getAttribute('aria-hidden')).toBe('true');
+    expect(m.getByText('Choose a reason')).toBeInTheDocument();
+    expect(m.queryByText('Why? (optional)')).toBeNull();
+    expect(m.queryByText('Choose a reason (optional)')).toBeNull();
+    expect(m.getByText('Report', { selector: '.cw-mock-btn' })).toBeInTheDocument();
+    expect(m.getByText('Cancel', { selector: '.cw-mock-btn' })).toBeInTheDocument();
+    // and back: the mark and the required wording go with the flow
+    await user.click(screen.getByRole('radio', { name: 'One tap' }));
+    expect(mock().querySelector('.cw-mock-req')).toBeNull();
+    expect(within(mock()).getByText('Why? (optional)')).toBeInTheDocument();
+  });
+
+  it('optional has no required mark in any flow but reason required', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    for (const flow of ['One tap', 'Pick a reason first']) {
+      await user.click(screen.getByRole('radio', { name: flow }));
+      expect(mock().querySelector('.cw-mock-req'), flow).toBeNull();
+    }
+  });
+
+  it.each([['one_tap'], ['reason_first'], ['reason_required']] as const)(
+    'with no reason to offer (%s) there is nothing to choose: the question, the line, Report and Cancel, no select and no note door',
+    async (flow) => {
+      const w = await hubWorld();
+      render(
+        <HubProvider client={w.client}>
+          <PlayersSee draft={{ flow, reasons: [], thanks: 'Thanks.' }} />
+        </HubProvider>,
+      );
+      const m = within(await screen.findByRole('region', { name: 'What players see' }));
+      expect(m.getByText('Report this message?')).toBeInTheDocument();
+      expect(m.getByText('An example message from another player')).toBeInTheDocument();
+      expect(m.queryByText(/^Why\?/)).toBeNull();
+      expect(m.queryByText(/^Choose a reason/)).toBeNull();
+      expect(m.queryByText('Add a note')).toBeNull();
+      expect(mock().querySelector('.cw-mock-req')).toBeNull();
+      expect(m.queryAllByRole('listitem')).toHaveLength(0);
+      expect(m.getByText('Report', { selector: '.cw-mock-btn' })).toBeInTheDocument();
+      expect(m.getByText('Cancel', { selector: '.cw-mock-btn' })).toBeInTheDocument();
+      expect(m.getByText('Report sent')).toBeInTheDocument();
+      expect(m.getByText('Thanks.')).toBeInTheDocument();
+    },
+  );
 
   it('follows every edit at once: a rename, a switched-off reason, a new group, the thank-you', async () => {
     const w = await owner();

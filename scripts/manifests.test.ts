@@ -10,6 +10,7 @@ type Manifest = {
   private?: boolean;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
 };
@@ -189,8 +190,16 @@ describe('matcher peers', () => {
     // Required, not optional: the store's .d.ts references matcher types, so a consumer without matcher fails typecheck.
     expect(p.peerDependenciesMeta?.['@chatwarden/matcher']?.optional).not.toBe(true);
   });
-  it('matcher keeps obscenity as a regular dependency', () => {
-    expect(byName('@chatwarden/matcher').dependencies?.obscenity).toBeDefined();
+  it('matcher no longer depends on obscenity at run time: it is a devDependency (the parity and version-pin tests only)', () => {
+    const m = byName('@chatwarden/matcher');
+    // The packed matcher must not pull obscenity (and its English word list, issue #8) into a consumer's install.
+    expect(m.dependencies?.obscenity).toBeUndefined();
+    expect(m.peerDependencies?.obscenity).toBeUndefined();
+    expect(m.optionalDependencies?.obscenity).toBeUndefined();
+    expect(m.devDependencies?.obscenity).toBe('^0.4.6');
+  });
+  it('profanity still needs obscenity at run time (its own filter)', () => {
+    expect(byName('@chatwarden/profanity').dependencies?.obscenity).toBeDefined();
   });
 });
 

@@ -1,4 +1,4 @@
-import { Terms } from '../screens/Terms.js';
+import { LazyTerms } from '../screens/lazy.js';
 import { Piece } from './Piece.js';
 import type { PieceProps } from './Piece.js';
 
@@ -21,7 +21,7 @@ export type TermsManagerProps = PieceProps;
 export function TermsManager({ className }: TermsManagerProps) {
   return (
     <Piece name="TermsManager" need="terms.read" className={className}>
-      <Terms />
+      <LazyTerms />
     </Piece>
   );
 }

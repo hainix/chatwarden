@@ -1,4 +1,4 @@
-import { Gaps } from '../screens/Gaps.js';
+import { LazyGaps } from '../screens/lazy.js';
 import { Piece } from './Piece.js';
 import type { PieceProps } from './Piece.js';
 
@@ -20,7 +20,7 @@ export type RuleGapsProps = PieceProps;
 export function RuleGaps({ className }: RuleGapsProps) {
   return (
     <Piece name="RuleGaps" need="gaps.read" className={className}>
-      <Gaps />
+      <LazyGaps />
     </Piece>
   );
 }

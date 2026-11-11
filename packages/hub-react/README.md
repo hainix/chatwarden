@@ -175,6 +175,23 @@ import { client } from './client';
 export const ModeratorPage = () => <Hub client={client} />;
 ```
 
+The settings and admin screens (Terms, Blocked, Rule gaps, Audit, the Guide, Steps and ladder, Reporting and All actions) are loaded when a moderator
+first opens them, so the hub's first load is the part everyone uses: your bundler (Vite, webpack, Rollup) writes each as its own file from the
+`import()` in the package, and the skeleton shows while it comes. If the file cannot be fetched, the screen shows the hub's error block with Try again (it takes the focus and is announced, as the screen would have been; after Try again has failed twice it suggests reloading the page).
+The pieces of the same names (`TermsManager`, `BlockedList`, `RuleGaps`, `AuditLog`, `Guide`, `LadderSettings`, `ReportingSettings`, `RecentActions`)
+load the same way. A bundler that does not split (and `<chatwarden-hub>`, which is one file) keeps them in the one file, and server rendering
+is unchanged: the first screens are not loaded on demand.
+
+When your page knows something just changed (it filed a report through the same kit), it can have the hub read its queue now instead of at the
+next poll (every 5 seconds, 30 while the tab is hidden). `<Hub onController={(controller) => { hub = controller; }} />` hands over the hub's own
+controller once it exists, and again if the `client` changes; `hub.refresh()` then reads the change token at once (and the queue, if it moved). It
+only reads: it sends nothing that writes, and it adds no audit entry beyond what a poll already does. It does nothing before the queue has started,
+while the browser is offline, or after the hub has gone. It reads at most once a second: a call made while a read is on its way is ignored, and one
+made within a second of the last is held and sent once when the second is up. Do not call it in a loop; it is for "something just changed", and the
+hub polls by itself. Do not `dispose()` that controller: the hub owns it. Keep the latest controller `onController` gives you: calls made after the hub
+has unmounted do nothing, and under React's StrictMode (development) you may first be given a controller that is then disposed, followed by the one
+that stays. Both `onController` and `refresh` are `@experimental`.
+
 ### 2. Pieces in your own dashboard
 
 Already have an ops page? Put single parts of the hub in it. `HubProvider` is the one thing every piece needs above it. The pieces need
@@ -328,7 +345,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 - the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `usePolicy`, and the types `HubRead`,
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
-  includes `HubController.configure` and `HubControllerOptions.host`. The names are the same declarations the main entry re-exports (`createHubClient`,
+  includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh` and `HubControllerOptions.host`. The names are the same declarations the main entry re-exports (`createHubClient`,
   `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
   (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
   - functions, values and classes:
@@ -353,6 +370,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `SanctionSource`, `Session`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermInput`,
     `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
     `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
+- the `<Hub>` prop `HubProps.onController`
 - in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`
 
 ## Options
@@ -372,6 +390,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 | `gameName` | `string` | Your game's name, shown beside the product name in the top bar. Default: none. |
 | `shortcuts` | `boolean` | Set `false` to turn every keyboard shortcut off (J, K, N, ?, Ctrl or Cmd+K, Escape), for a page that has its own. Default `true`. |
 | `primary` | `boolean` | Which hub answers keys when nothing on the page has focus, as after load. The only hub with shortcuts on always does; with several, only the one marked `primary`; with none marked, none. A hub always answers keys pressed while focus is inside it. Default `false`. |
+| `onController` | `(controller) => void` | `@experimental`. Called with the hub's controller once it exists, and again if the `client` changes. Keep it and call `controller.refresh()` to have the hub read its queue now. Do not `dispose()` it. |
 | `mode` | `'simple' \| 'detailed'` | Fixes the view and hides the Simple/Detailed switch. Left out, each moderator's last choice is kept in their browser (`localStorage`, key `chatwarden.hub.mode`), and a browser that cannot keep it gets `simple`. |
 
 ### Simple mode
@@ -789,6 +808,7 @@ typed result (a 409, a 404 or a dropped connection is `{ ok: false, error }` or 
 | `controller.queue` | The live queue: `status`, `rows`, `visible`, `incoming`, `connection` (`live`, `lost`, `offline`, `signedOut`), filters, and `showIncoming()`, `reload()`, `retryNow()`. |
 | `controller.decisions` | One entry per report in flight (`held`, `sending`, `done`, `failed`, `conflict`, `undone`), with the form to give back on a failure. |
 | `controller.opened` | The case that is open, and the person it is about. |
+| `controller.refresh()` | `@experimental`. Reads the change token now instead of at the next poll (and the queue, if it moved). Only reads; at most one read a second (do not call it in a loop); does nothing before `start()`, offline, or after `dispose()`. |
 | `controller.toasts` | The toast records and their timers. How they look is yours. |
 | `decide(command, { hold })`, `undo(id)`, `retry(id)` | `hold` is `true` (5 s, the default), a number of milliseconds, or `false` (send at once). `retry` sends a failed decision again with the same body. |
 | `open(id)`, `leave()`, `takeNext()`, `claim(person)`, `takeOver(person)`, `release(person)` | Claims. Leaving a case releases it, unless a decision on it is waiting or the claim is someone else's. |

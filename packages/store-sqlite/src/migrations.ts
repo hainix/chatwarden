@@ -7,7 +7,7 @@ export interface Migration {
 
 /**
  * The kit's schema, in order. Append only: never edit or reorder a shipped
- * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map, migration 15 is soft claims on a person's case and saved decision reasons, migration 16 is the editable profile's stored layer and the audit trail's detail column, migration 17 is the reason a reporter gave and the time of their one follow-up. All tables are prefixed `kit_`.
+ * entry. Migration 1 is subjects, migration 2 is terms and the audit trail, migration 3 is sanctions, migration 4 is lasting mutes, migration 5 is slur strikes, migration 6 is reports, migration 7 widens the sanction kinds (Warning) and adds the rule-gap columns, migration 8 is player notices, migration 9 is recorded decisions, migration 10 adds the bad-faith evidence column, migration 11 widens the sanction kinds again (Note) and adds the room column, migration 12 gives the audit trail a role column and an index on time, migration 13 is the incoming-webhook idempotency keys, migration 14 is the Discord feed's thread map, migration 15 is soft claims on a person's case and saved decision reasons, migration 16 is the editable profile's stored layer and the audit trail's detail column, migration 17 is the reason a reporter gave and the time of their one follow-up, migration 18 is the indexes for reading sanctions by start time and strikes by time. All tables are prefixed `kit_`.
  */
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -413,6 +413,22 @@ UPDATE kit_reports
   SET reported_reason = CASE category WHEN 'disruption' THEN 'griefing' ELSE category END
   WHERE category IN ('harassment', 'hate', 'cheating', 'spam', 'disruption', 'other');
 CREATE INDEX kit_reports_by_reason ON kit_reports (reported_reason, created_at);
+`,
+  },
+  {
+    version: 18,
+    // Indexes only (0.1.3): no table, column or row changes. Until now every read of "sanctions since a time" or "strikes since a time"
+    // scanned the table (sanctions: the whole target_type slice, then a sort). Both indexes are plain, so a rerun on a database that
+    // already has them is prevented by the version bump alone; the runner wraps this in one savepoint with that bump.
+    //   kit_sanctions_by_start (target_type, starts_at, id) serves loadSubjectActions and loadAutoChatGroups (`target_type = 'subject'
+    //     AND starts_at >= ?`) and listSubjectSanctions (`target_type = 'subject'`, optional `starts_at` range or keyset cursor, then
+    //     `ORDER BY starts_at DESC, id DESC`): the equality column first, the range and the sort next, and `id` last so the
+    //     descending walk needs no sort step.
+    //   kit_strikes_by_at (at) serves loadStrikes (`at >= ? ORDER BY at, rowid`; the rowid is the index's own tie-break, so no sort),
+    //     listStrikes, countStrikesByTerm and the retention purge (`at < ?`).
+    sql: `
+CREATE INDEX kit_sanctions_by_start ON kit_sanctions (target_type, starts_at, id);
+CREATE INDEX kit_strikes_by_at ON kit_strikes (at);
 `,
   },
 ];

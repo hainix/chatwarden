@@ -167,8 +167,8 @@ describe('no identifier leaks into the page', () => {
         onClose={() => undefined}
       />,
     );
-    await user.click(screen.getByRole('radio', { name: 'Spam' }));
-    await user.click(screen.getByRole('button', { name: 'Send report' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Why?' }), 'Spam');
+    await user.click(screen.getByRole('button', { name: 'Report' }));
     await findStatus();
     const html = document.body.innerHTML;
     const [report] = w.cw.reports.list().items.filter((r) => r.roomId === 'rd-room');

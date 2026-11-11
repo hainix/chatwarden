@@ -23,6 +23,15 @@ function rule(selector: string): string {
   return '';
 }
 
+/** The declarations of every rule whose selector list contains `selector`, joined (a property may sit in any of them). */
+function allRules(selector: string): string {
+  let out = '';
+  for (const m of css.matchAll(/([^{}@;]+)\{([^{}]*)\}/g)) {
+    if ((m[1] as string).split(',').map((x) => x.trim().replace(/\s+/g, ' ')).includes(selector)) out += m[2] as string;
+  }
+  return out;
+}
+
 describe('a 320px phone', () => {
   it('the root never grows past its container and counts padding in its width', () => {
     const r = rule('.cw-player');
@@ -79,18 +88,42 @@ describe('a 320px phone', () => {
 });
 
 describe('the report dialog on a 320px phone', () => {
-  it('a long reason label, hint or group heading wraps inside the choice (it never pushes the dialog wider)', () => {
-    expect(rule('.cw-player .cw-choice-text')).toMatch(/min-width:\s*0/);
-    expect(rule('.cw-player .cw-choice-text')).toMatch(/overflow-wrap:\s*(anywhere|break-word)/);
-    expect(rule('.cw-player .cw-group')).toMatch(/min-width:\s*0/);
-    expect(rule('.cw-player .cw-fieldset')).toMatch(/min-width:\s*0/);
+  it('the select and the note are as wide as the dialog and never wider (the form stacks, field over field)', () => {
+    for (const sel of ['.cw-player select', '.cw-player textarea']) {
+      expect(rule(sel), sel).toMatch(/width:\s*100%/);
+      expect(rule(sel), sel).toMatch(/max-width:\s*100%/);
+      expect(rule(sel), sel).toMatch(/min-width:\s*0/);
+    }
+    expect(rule('.cw-player .cw-field')).toMatch(/min-width:\s*0/);
+  });
+  it('a long hint, label or error wraps in the dialog (the root breaks long words) and the select shows an ellipsis, not a scrollbar', () => {
+    expect(rule('.cw-player')).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(allRules('.cw-player select')).toMatch(/text-overflow:\s*ellipsis/);
+  });
+  it('the select is a full control tall, so a thumb can hit it', () => {
+    expect(allRules('.cw-player select')).toMatch(/min-height:\s*var\(--cw-control-height\)/);
   });
   it('the quoted line wraps long words and is a block of its own', () => {
     expect(rule('.cw-player .cw-quote')).toMatch(/overflow-wrap:\s*(anywhere|break-word)/);
     expect(rule('.cw-player .cw-quote')).not.toMatch(/white-space:\s*nowrap/);
   });
-  it('the follow-up panel fits the dialog', () => {
-    expect(rule('.cw-player .cw-panel')).toMatch(/min-width:\s*0/);
+  it('the "Add a note" door is a small text button that is still at least 2rem tall', () => {
+    expect(rule('.cw-player .cw-linkbtn')).toMatch(/min-height:\s*2rem/);
+    expect(rule('.cw-player .cw-linkbtn')).not.toMatch(/white-space:\s*nowrap/);
+  });
+  it('on a touch screen (pointer: coarse) the "Add a note" door is a full control tall, like the buttons and the select', () => {
+    const blocks = [...css.matchAll(/@media\s*\(\s*pointer:\s*coarse\s*\)\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/g)].map((m) => m[1] as string);
+    expect(blocks.length).toBeGreaterThan(0);
+    const door = [...blocks.join('\n').matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((m) =>
+      (m[1] as string).split(',').map((s) => s.trim().replace(/\s+/g, ' ')).includes('.cw-player .cw-linkbtn'),
+    );
+    expect(door, 'a .cw-linkbtn rule inside @media (pointer: coarse)').toBeDefined();
+    expect(door?.[2]).toMatch(/min-height:\s*var\(--cw-control-height\)/);
+    // The mouse rule is unchanged: a pointer that can hit a small target keeps the small door.
+    expect(rule('.cw-player .cw-linkbtn')).toMatch(/min-height:\s*2rem/);
+    // And it reads the token the way the buttons do, with the private default behind it.
+    const raw = readFileSync(join(fileURLToPath(new URL('..', import.meta.url)), 'src', 'styles.css'), 'utf8');
+    expect(raw).toMatch(/@media \(pointer: coarse\)\s*\{[^@]*\.cw-linkbtn[^}]*min-height:\s*var\(--cw-control-height, var\(--cwd-control-height\)\)/);
   });
 });
 

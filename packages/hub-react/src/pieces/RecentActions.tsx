@@ -1,4 +1,4 @@
-import { Actions } from '../screens/Actions.js';
+import { LazyActions } from '../screens/lazy.js';
 import { Piece } from './Piece.js';
 import type { PieceProps } from './Piece.js';
 
@@ -23,7 +23,7 @@ export interface RecentActionsProps extends PieceProps {
 export function RecentActions({ className, onOpenPerson }: RecentActionsProps) {
   return (
     <Piece name="RecentActions" need="history.read" className={className} links={{ onOpenPerson }}>
-      <Actions />
+      <LazyActions />
     </Piece>
   );
 }

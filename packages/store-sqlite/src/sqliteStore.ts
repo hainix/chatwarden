@@ -405,8 +405,12 @@ export class SqliteStore implements Store, TermStore {
         args.push(q.before, q.before, q.beforeId);
       }
     }
+    // A listing for named people seeks by person (`kit_sanctions_by_target`), then sorts the few rows it finds. Left to itself SQLite,
+    // which has no table statistics here, prefers `kit_sanctions_by_start` for the `LIMIT` and would walk every sanction by time looking
+    // for them; every other listing is the case that index is for.
+    const via = q.subjects !== undefined ? ' INDEXED BY kit_sanctions_by_target' : '';
     const sql =
-      `SELECT ${SANCTION_COLUMNS}, revoked_at, revoked_by, revoke_reason FROM kit_sanctions WHERE ${where.join(' AND ')} ` +
+      `SELECT ${SANCTION_COLUMNS}, revoked_at, revoked_by, revoke_reason FROM kit_sanctions${via} WHERE ${where.join(' AND ')} ` +
       'ORDER BY starts_at DESC, id DESC LIMIT ?';
     return this.transaction(() => this.db.prepare(sql).all(...args, limit).map(toListedSanctionRow));
   }

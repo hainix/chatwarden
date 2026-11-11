@@ -35,6 +35,8 @@ const filePath = (): string => {
   return join(d, 'kit.db');
 };
 const M17 = MIGRATIONS.find((m) => m.version === 17);
+/** Later migrations (18 and on) leave the report columns alone, so these tests follow the latest version rather than pinning 17. */
+const LATEST = MIGRATIONS.at(-1)?.version;
 
 /** A report row as the 0.1.1 kit wrote it: no `reported_reason`, no `detail_at`. */
 const OLD_REPORT = `INSERT INTO kit_reports
@@ -50,11 +52,11 @@ function v16(): DatabaseSync {
 }
 
 describe('migration 17: the reported reason', () => {
-  it('is the latest migration and adds two nullable columns and an index', () => {
-    expect(MIGRATIONS.at(-1)?.version).toBe(17);
+  it('adds two nullable columns and an index', () => {
+    expect(M17).toBeDefined();
     const db = memDb();
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(17);
+    expect(store.schemaVersion()).toBe(LATEST);
     const cols = db.prepare('PRAGMA table_info(kit_reports)').all();
     for (const name of ['reported_reason', 'detail_at']) {
       const col = cols.find((c) => c.name === name);
@@ -74,7 +76,7 @@ describe('migration 17: the reported reason', () => {
     db.prepare(OLD_REPORT).run('done1', NOW, 'roomD', 's_rep', 's_tD', 'hate', null, 'actioned', NOW + 5, 'mod_1', 'handled');
 
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(17);
+    expect(store.schemaVersion()).toBe(LATEST);
     const got = Object.fromEntries(cats.map((c, i) => [c, store.loadReport(`old${i}`)]));
     expect(Object.entries(got).map(([c, r]) => [c, r?.reportedReason, r?.category, r?.detailAt, r?.note])).toEqual([
       ['harassment', 'harassment', 'harassment', null, 'note harassment'],
@@ -121,7 +123,7 @@ describe('migration 17: the reported reason', () => {
     });
     a.close();
     const b = openStore({ path });
-    expect(b.schemaVersion()).toBe(17);
+    expect(b.schemaVersion()).toBe(LATEST);
     expect(b.loadReport('r')?.reportedReason).toBe('hate');
     b.close();
   });
@@ -163,7 +165,7 @@ describe('a version 16 database read by the new kit', () => {
     raw.close();
 
     const store = openStore({ path });
-    expect(store.schemaVersion()).toBe(17);
+    expect(store.schemaVersion()).toBe(LATEST);
     const clock = { t: NOW + 100, now: () => clock.t };
     const cw = await createChatwarden({ store, secret: 'v16', platform: { identify: (c) => c as RawWho }, clock, retention: false });
     expect(cw.reports.get('old0')?.reportedReason).toBe('hate');

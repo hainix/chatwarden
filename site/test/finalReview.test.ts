@@ -84,13 +84,13 @@ describe('the no-JavaScript fallback', () => {
   });
 });
 
-describe('the obscenity follow-up is tracked in the repo', () => {
-  it('names the problem, the site workaround and the fix', () => {
+describe('the obscenity follow-up is closed in the repo', () => {
+  it('says it was fixed in the matcher in 0.1.3 and that the site workaround is gone', () => {
     const f = flat(text(repo, 'docs', 'plans', 'follow-ups.md'));
     expect(f).toMatch(/@chatwarden\/matcher/);
     expect(f).toMatch(/englishDataset/);
-    expect(f).toMatch(/real slurs/i);
-    expect(f).toMatch(/withoutObscenityWordList/);
-    expect(f).toMatch(/0\.1\.2/);
+    expect(f).toMatch(/Fixed in 0\.1\.3/);
+    expect(f).toMatch(/issue #8/i);
+    expect(f).toMatch(/site workaround .*removed/i);
   });
 });

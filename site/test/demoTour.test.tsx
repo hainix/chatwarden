@@ -39,6 +39,24 @@ describe('the seven steps', () => {
       expect(s.body).not.toMatch(/\bWarn\b|timeout button|category/i);
     }
   });
+  it('step 1 describes the one-step dialog: press Report on a line, choose a reason if you like, press Report once (no "Report again")', () => {
+    const body = TOUR_STEPS[0]?.body ?? '';
+    expect(body).not.toMatch(/report again|then report|add a reason|follow-?up|skip/i);
+    expect(body).toMatch(/Press Report on one of Bo/);
+    expect(body).toMatch(/reason/i);
+    expect(body).toMatch(/one step|one dialog|one press|once/i);
+    expect(body).toMatch(/thank-you/i);
+  });
+  it('no step still talks about the removed second step', () => {
+    for (const s of TOUR_STEPS) expect(`${s.title} ${s.body}`, s.title).not.toMatch(/report again|add a reason|add to my report|skip and report/i);
+  });
+  it('the demo hands the dialog no onAddDetail (the dialog has no follow-up step; the prop is deprecated)', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const source = await readFile(join(__dirname, '..', 'src', 'demo', 'Demo.tsx'), 'utf8');
+    expect(source).not.toMatch(/onAddDetail/);
+    expect(source).not.toMatch(/ReportFollowUp/);
+  });
   it('step 7 says where the 1, 6 and 12 hour lengths are', () => {
     const body = TOUR_STEPS[6]?.body ?? '';
     expect(body).toMatch(/1, 6 and 12 hour/i);

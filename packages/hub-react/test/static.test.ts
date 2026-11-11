@@ -83,6 +83,23 @@ describe('no words outside the catalog', () => {
   });
 });
 
+describe('words kept for compatibility', () => {
+  it('each hub catalogue key the screens stopped using is marked @deprecated, and each marked key is really unused', () => {
+    const catalogue = read(join(src, 'i18n.ts'));
+    const marked = [...catalogue.matchAll(/@deprecated unused since 0\.1\.3; removed in a later minor \*\/\s*'([^']+)':/g)].map((m) => m[1] as string);
+    expect(marked.sort()).toEqual([
+      'hub.reporting.preview.addReason',
+      'hub.reporting.preview.addReason.hint',
+      'hub.reporting.preview.legend',
+      'hub.reporting.preview.pick.title',
+      'hub.reporting.preview.send',
+      'hub.reporting.preview.skip',
+    ]);
+    const used = appCode.map(read).join('\n');
+    for (const key of marked) expect(used.includes(`'${key}'`), `${key} is still used`).toBe(false);
+  });
+});
+
 describe('nothing is injected and nothing is styled inline', () => {
   const FORBIDDEN: Array<[RegExp, string]> = [
     [/dangerouslySetInnerHTML/, 'dangerouslySetInnerHTML'],
@@ -554,7 +571,10 @@ describe('fix round 1: hygiene', () => {
     const prefixes = [...text.matchAll(/`(hub\.[A-Za-z0-9_.]*\.)\$\{/g)].map((m) => m[1] as string);
     const bases = [...new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
     const dead = bases.filter((k) => !literals.has(k) && !prefixes.some((p) => k.startsWith(p)));
-    expect(dead).toEqual([]);
+    // The words the screens stopped using stay in the exported catalogue for a patch release, marked `@deprecated unused since 0.1.3`
+    // (see 'words kept for compatibility'). The dead words are exactly the marked ones.
+    const marked = [...read(join(src, 'i18n.ts')).matchAll(/@deprecated unused since 0\.1\.3; removed in a later minor \*\/\s*'([^']+)':/g)].map((m) => m[1] as string);
+    expect(dead.sort()).toEqual(marked.sort());
   });
 });
 

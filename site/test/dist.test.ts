@@ -115,6 +115,26 @@ describe('built dist', () => {
     expect(hits).toEqual([]);
   });
 
+  // The matcher itself no longer carries obscenity's English preset (issue #8), so the site needs no workaround for it. These are the
+  // same markers as scripts/browser-bundle.test.ts: export names of the preset module and harmless words from its whitelist, so they
+  // can only come from that module being in the page. Together with the scan above, this proves the matcher fix on the built page.
+  it.each(['englishDataset', 'englishRecommendedTransformers', 'englishRecommendedBlacklistMatcherTransformers', 'analagous', 'dickory', 'benedick', 'cockney'])(
+    'the built page has no trace of obscenity’s English preset (%s)',
+    (marker) => {
+      const js = [...texts].filter(([f]) => f.endsWith('.js'));
+      expect(js.length).toBeGreaterThan(0);
+      for (const [file, text] of js) expect(text.includes(marker), `${relative(dist, file)} holds ${marker}`).toBe(false);
+    },
+  );
+
+  it('the site has no word-list workaround any more: the matcher is what keeps the list out', () => {
+    expect(existsSync(join(siteDir, 'vite', 'withoutObscenityWordList.ts'))).toBe(false);
+    expect(existsSync(join(siteDir, 'test', 'obscenityPlugin.test.ts'))).toBe(false);
+    const config = readFileSync(join(siteDir, 'vite.config.ts'), 'utf8');
+    expect(config).not.toMatch(/obscenity/i);
+    expect(config).not.toMatch(/WordList/);
+  });
+
   it('the scan reads whole tokens: "document" is not flagged where a fixed window would cut it (control)', () => {
     // 3998 characters of harmless words, then "document.body" starting at index 3998: a window that restarts at 4000 begins
     // inside the word ("cument") and the matcher reads a slur in it.
@@ -187,10 +207,13 @@ describe('built dist', () => {
     }
   });
 
-  it('the staff-route and hub-client markers are real: every one is in the demo chunk (so the first-load check above can fail)', () => {
-    const demo = files.filter((f) => /Demo-[\w-]+\.js$/.test(f));
-    expect(demo).toHaveLength(1);
-    const text = texts.get(demo[0] as string) ?? '';
+  it('the staff-route and hub-client markers are real: every one is in the lazy chunks (so the first-load check above can fail)', () => {
+    // The hub's own screens load on demand, so a marker may sit in the demo chunk or in a chunk it shares with them: look across
+    // every script that index.html does not name.
+    const html = texts.get(join(dist, 'index.html')) ?? '';
+    const lazy = files.filter((f) => f.endsWith('.js') && !html.includes(relative(dist, f).split(sep).join('/')));
+    expect(files.filter((f) => /Demo-[\w-]+\.js$/.test(f))).toHaveLength(1);
+    const text = lazy.map((f) => texts.get(f) ?? '').join('\n');
     for (const marker of STAFF_AND_CLIENT_MARKERS) expect(text, marker).toContain(marker);
   });
 

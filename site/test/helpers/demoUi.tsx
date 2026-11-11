@@ -64,6 +64,22 @@ export async function oneTapReport(user: User, line: RegExp = /report bo's line:
   return dialog;
 }
 
+/**
+ * Reports a line in the one step with a reason: the "Why?" select, the first real reason in it (or `reason`, an option's value),
+ * then Report. Waits for "Report sent". Returns the dialog and the id chosen.
+ */
+export async function reasonedReport(user: User, line: RegExp = /report bo's line: uninstall/i, reason?: string): Promise<{ dialog: HTMLElement; reason: string }> {
+  await user.click(reportBtn(line));
+  const dialog = await screen.findByRole('dialog');
+  const select = within(dialog).getByRole('combobox', { name: /^why\?/i }) as HTMLSelectElement;
+  const options = [...select.querySelectorAll('option')].filter((o) => o.value !== '');
+  const id = reason ?? (options[0] as HTMLOptionElement).value;
+  await user.selectOptions(select, id);
+  await user.click(within(dialog).getByRole('button', { name: 'Report' }));
+  await within(dialog).findByRole('heading', { name: 'Report sent' });
+  return { dialog, reason: id };
+}
+
 /** Closes the report dialog (the thank-you stays up until the player closes it). */
 export async function closeReport(user: User): Promise<void> {
   await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));

@@ -127,6 +127,17 @@ export interface HubController {
   /** Forget a finished, failed or undone decision (its form has been taken back). */
   dismiss(reportId: string): void;
   /**
+   * Read the live queue's change token now, instead of at the next poll: a host that knows something just changed (it filed a report
+   * through the same kit) calls this so the moderator sees it without the wait. It only reads (`GET /changes`, and the queue when the
+   * token moved): it adds no audit entry beyond what a normal poll does, and it changes no permission. It does nothing while the queue is
+   * not running (before `start()`, a role that cannot read reports, after `dispose()`), while the browser is offline, or once the staff
+   * session has ended. At most one read a second: a call made while a read is on its way is ignored, and one made within a second of the
+   * last is held and sent once when the second is up. A call while a read is in flight is ignored; a change made just after that read
+   * started shows at the next poll. Do not call it in a loop: it is for "something just changed", the queue polls by itself.
+   * @experimental
+   */
+  refresh(): void;
+  /**
    * Tell the controller what the host has changed since it was made: the words.
    * @experimental
    */
@@ -187,6 +198,7 @@ export function createHubController(options: HubControllerOptions): HubControlle
       }
       return { ok: true, value: who, release: () => undefined };
     },
+    refresh: () => queue.refresh(),
     open: cases.open,
     leave: cases.leave,
     takeNext: cases.takeNext,

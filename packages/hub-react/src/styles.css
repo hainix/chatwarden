@@ -2845,6 +2845,26 @@
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
   font-size: var(--cw-text-s, var(--cwd-text-s));
 }
+.cw-hub .cw-mock-field {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-mock-select {
+  padding: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-mock-req {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-mock-door {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
 .cw-hub .cw-mock-group ul {
   display: grid;
   gap: var(--cw-space-1, var(--cwd-space-1));

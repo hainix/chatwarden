@@ -352,7 +352,7 @@ describe('migration 7: kit_sanctions rebuild', () => {
     seedV6(db);
     openStore({ db });
     const idx = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'kit_sanctions' AND name NOT LIKE 'sqlite_autoindex%' ORDER BY name").all();
-    expect(idx.map((r) => String(r.name))).toEqual(['kit_sanctions_by_group', 'kit_sanctions_by_target', 'kit_sanctions_ref_code']);
+    expect(idx.map((r) => String(r.name))).toEqual(['kit_sanctions_by_group', 'kit_sanctions_by_start', 'kit_sanctions_by_target', 'kit_sanctions_ref_code']);
     const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_sanctions_ref_code'").get()?.sql);
     expect(sql).toMatch(/UNIQUE/i);
     expect(sql).toMatch(/WHERE target_type = 'subject'/);
@@ -528,7 +528,7 @@ describe('migration 11: kit_sanctions rebuild (kind CHECK gains note, room_id ad
     const idx = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'kit_sanctions' AND name NOT LIKE 'sqlite_autoindex%' ORDER BY name")
       .all();
-    expect(idx.map((r) => String(r.name))).toEqual(['kit_sanctions_by_group', 'kit_sanctions_by_target', 'kit_sanctions_ref_code']);
+    expect(idx.map((r) => String(r.name))).toEqual(['kit_sanctions_by_group', 'kit_sanctions_by_start', 'kit_sanctions_by_target', 'kit_sanctions_ref_code']);
     const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_sanctions_ref_code'").get()?.sql);
     expect(sql).toMatch(/UNIQUE/i);
     expect(sql).toMatch(/WHERE target_type = 'subject'/);

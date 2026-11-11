@@ -95,7 +95,23 @@ describe('no words outside the catalog', () => {
     const prefixes = [...text.matchAll(/`(player\.[A-Za-z0-9_.]*\.)\$\{/g)].map((m) => m[1] as string);
     const bases = [...new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
     const dead = bases.filter((k) => !literalsUsed.has(k) && !prefixes.some((p) => k.startsWith(p)));
-    expect(dead).toEqual([]);
+    // A key the components stopped using stays in the exported catalogue for a patch release (nothing is removed in 0.1.x), marked
+    // `@deprecated unused since 0.1.3`. So the dead words are exactly the marked ones: an unused key must be marked, and a marked
+    // key must really be unused (otherwise the mark is a lie).
+    const catalogue = read(join(src, 'i18n.ts'));
+    const marked = [...catalogue.matchAll(/@deprecated unused since 0\.1\.3; removed in a later minor \*\/\s*'([^']+)':/g)].map((m) => (m[1] as string).replace(/\.(zero|one|two|few|many|other)$/, ''));
+    expect(marked).toHaveLength(19); // the nineteen 0.1.2 keys the one-step dialog stopped using (test/i18n.test.ts lists them)
+    expect([...dead].sort()).toEqual([...new Set(marked)].sort());
+  });
+});
+
+describe('comments that explain a choice', () => {
+  it('the "Add a note" button says why it has no aria-expanded (a one-way door: removed when pressed, focus moves to the note)', () => {
+    const source = read(join(src, 'ReportDialog.tsx'));
+    const at = source.indexOf('className="cw-linkbtn"');
+    expect(at).toBeGreaterThan(0);
+    expect(source.slice(Math.max(0, at - 400), at)).toMatch(/no aria-expanded/i);
+    expect(source.slice(at, at + 300)).not.toMatch(/aria-expanded/);
   });
 });
 
@@ -369,7 +385,7 @@ describe('the palette', () => {
   });
 
   it('the accent is only a next action, a link, a choice or a focus', () => {
-    const allowed = [/:focus-visible$/, /cw-btn--primary(:hover)?$/, /cw-link$/, /cw-linkbtn$/, /cw-choice:has\(input:checked\)$/, /input\[type='radio'\]$/];
+    const allowed = [/:focus-visible$/, /cw-btn--primary(:hover)?$/, /cw-link$/, /cw-linkbtn$/, /select:has\(option:checked:not\(\[value=''\]\)\)$/];
     for (const token of ['--cw-accent', '--cw-accent-soft', '--cw-accent-ink']) {
       const bad = rulesUsing(token).filter((sel) => !allowed.some((re) => re.test(sel)));
       expect(bad, token).toEqual([]);

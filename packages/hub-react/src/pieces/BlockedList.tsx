@@ -1,4 +1,4 @@
-import { Blocked } from '../screens/Blocked.js';
+import { LazyBlocked } from '../screens/lazy.js';
 import { Piece } from './Piece.js';
 import type { PieceProps } from './Piece.js';
 
@@ -28,7 +28,7 @@ export interface BlockedListProps extends PieceProps {
 export function BlockedList({ className, onOpenPerson, onOpenTerms }: BlockedListProps) {
   return (
     <Piece name="BlockedList" need="blocked.read" className={className} links={{ onOpenPerson, onOpenTerms }}>
-      <Blocked />
+      <LazyBlocked />
     </Piece>
   );
 }

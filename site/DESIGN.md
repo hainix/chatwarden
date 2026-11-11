@@ -118,8 +118,8 @@ never reads as part of a screen; it points at the control with a static gold rin
   `reports.submit`, `reports.addDetail`, `notices.*`). `kitEngine.ts` binds the REAL kit behind it (core, the in-memory store, the
   matcher with its synthetic pack), one fixed room `lobby` and three seats. Every verdict is the kit's: the matcher refuses, the
   limits are its defaults (3 lines per 5 s, 3 blocked lines an hour earn an automatic 30 minute timeout). There is no demo-side
-  judgement any more: the suggestion is the ladder the hub asks the kit for. The kit is in the lazy demo chunk only. `vite.config.ts`
-  cuts obscenity's unused English word list out of the bundle (the site ships invented words only).
+  judgement any more: the suggestion is the ladder the hub asks the kit for. The kit is in the lazy demo chunk only. The matcher
+  no longer carries obscenity's English word list, so the page holds invented words only (`test/dist.test.ts` checks the build).
 - The moderator side (`HubPane.tsx`): `<Hub>` over `adminRoutes(cw, ...)` through `routerTransport` and a `memoryRouter`, signed in
   as a made-up owner; hub-react's own stylesheet (not its font file). Its keys answer only while the visitor works in the demo.
 - The player side: player-react's `ReportDialog` (the kit's own reporting settings, one tap by default) and `NoticeQueue`, through

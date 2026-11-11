@@ -20,7 +20,7 @@ exist in 18.3 (`useId`, `useRef`). The unit and interaction tests run on React 1
 only: no run-time import of it, or of the HTTP package, is in the bundle. Node 22.13 or newer for the tooling; the components
 themselves run in a browser and import no `node:` module.
 
-Your server needs `@chatwarden/http` for the routes the components call (`playerRoutes`). The JavaScript is under 15 KB gzipped
+Your server needs `@chatwarden/http` for the routes the components call (`playerRoutes`). The JavaScript is under 10 KB gzipped
 with React external, and the stylesheet under 6 KB.
 
 ## Quick start
@@ -54,23 +54,19 @@ export function GameShell({ inMatch }: { inMatch: boolean }) {
 }
 ```
 
-How reporting works is the studio's setting (the Reporting section of the moderator hub, or `reporting` in code): one tap, pick a reason
-first, or reason required, with the reasons, their groups and hints, and the thank-you. Read it from `GET /rules` and pass it to the
-dialog. Your server adds the room and the seats and calls the kit:
+Reporting is one step. The dialog asks "Report this message?", shows the line, and has an optional "Why?" (one select, the reasons in
+groups) and a Report button; a note is behind "Add a note". How it works is the studio's setting (the Reporting section of the moderator
+hub, or `reporting` in code): which reasons, their groups and hints, whether a reason is required, and the thank-you. Read it from
+`GET /rules` and pass it to the dialog. Your server adds the room and the seats and calls the kit:
 
 ```ts
-import type { ReportDetailResult, ReportResult } from '@chatwarden/core';
-import type { ReportFollowUp, ReportDraft } from '@chatwarden/player-react';
+import type { ReportResult } from '@chatwarden/core';
+import type { ReportDraft } from '@chatwarden/player-react';
 
-// `cw` is your createChatwarden(...) instance. Call these behind your own routes, for example POST /report and POST /report/:id/detail:
-// `roomId` and the seats come from your session, never from the client.
+// `cw` is your createChatwarden(...) instance. Call this behind your own route, for example POST /report: `roomId` and the seats come
+// from your session, never from the client. The draft is the kit's own `reason` and `note`, so it spreads straight in.
 export function takeReport(roomId: string, mySeat: string, theirSeat: string, draft: ReportDraft): Promise<ReportResult> {
   return cw.reports.submit({ roomId, reporterSeat: mySeat, targetSeat: theirSeat, ...draft });
-}
-
-// The optional follow-up of a one-tap report: a reason and a note, within ten minutes, once, from the reporter only.
-export function addToReport(reportId: string, mySeat: string, detail: ReportFollowUp): Promise<ReportDetailResult> {
-  return cw.reports.addDetail(reportId, mySeat, detail);
 }
 ```
 
@@ -82,7 +78,7 @@ spells it out, with the dialog's own words:
 import { useEffect, useState } from 'react';
 import type { PlayerClient, PlayerReporting } from '@chatwarden/player-react';
 
-/** One tap, no reasons to offer afterwards, the dialog's own thank-you: what a player gets when the settings cannot be loaded. */
+/** One tap, no reasons to offer, the dialog's own thank-you: what a player gets when the settings cannot be loaded. */
 const ONE_TAP: PlayerReporting = { flow: 'one_tap', thanks: '', reasons: [] };
 
 /** The studio's reporting settings from `GET /rules`: `undefined` while they load, the one-tap fallback if that fails. */
@@ -116,23 +112,51 @@ export function ReportMessage({ client, line, name, close }: { client: PlayerCli
       reporting={reporting}
       onClose={close}
       onSubmit={(draft) => fetch('/report', { method: 'POST', body: JSON.stringify(draft) }).then((r) => r.json())}
-      onAddDetail={(id, detail) => fetch(`/report/${id}/detail`, { method: 'POST', body: JSON.stringify(detail) }).then((r) => r.json())}
     />
   );
 }
 ```
 
-- **One tap is the studio's default, applied when you pass `reporting`.** The dialog asks "Report this message?" with the line in quotes and a
-  Report button. The report is filed at once and the studio's thank-you is shown. With `onAddDetail` there is then an optional "Add a reason"
-  step (a reason and a note) that attaches to the same report, offered until `detailUntil` (the kit's ten minutes). Closing at any point is
-  fine: the report is already filed. The heading then reads "Report sent" and the thank-you is announced.
-- **Pick a reason first / reason required.** The reasons in groups, with "Something else" last, then a note when the reason asks for one.
-  A reason is optional in the first ("Skip and report") and required in the second.
+- **One step, whatever the flow.** Report with nothing chosen files the report at once. A reason chosen in the select, and a note typed
+  behind "Add a note" (shown straight away when the chosen reason asks for one), go in the same report: `onSubmit` gets
+  `{ reason?, note? }` once. The dialog then reads "Report sent", shows the studio's thank-you (and how many reports are left today) and
+  has Close. There is no second step.
+- **Reason required** (`flow: 'reason_required'`): the label is "Why?" and the select is required. Report without a reason shows an inline
+  error, puts focus on the select and sends nothing. In the other flows the select is "Why? (optional)".
+- **`onAddDetail` is deprecated.** It is still accepted (and `ReportFollowUp` is still exported) so existing code compiles, but the dialog
+  never calls it. Remove it. `cw.reports.addDetail` is still there if you want a follow-up screen of your own.
 - **A reason is a hint.** The kit stores it as `reportedReason`; the moderators (and later the AI) decide what the report really is.
-- **Without `reporting`** the dialog is one tap with its own words and no reasons to offer afterwards: the same as when `GET /rules` cannot be
-  loaded. Pass `reporting` before the dialog opens: one that arrives later changes the flow under the player.
+- **Without `reporting`** the dialog has no reasons to offer: one press files the report, with its own words. That is the same as when
+  `GET /rules` cannot be loaded. Pass `reporting` before the dialog opens: one that arrives later changes the flow under the player.
 - **Stale settings.** If the studio changes the list while a dialog is open, the kit refuses an unknown reason (`reason_unknown`) or a
   missing one (`reason_required`) and the dialog says so. Read `GET /rules` again before the next report.
+- **Your own controls (`extra`, experimental).** A node placed inside the form under the reason and the note, above Report and Cancel,
+  for something of your own, such as an "Also mute this player" checkbox. You own its state; the dialog only places it (spacing, no other
+  styling), keeps its controls in the Tab order (reason, note, yours, Report, Cancel) and in the focus trap, and drops it once the report
+  is sent. It is inside the dialog's form, so give your buttons `type="button"`: a plain `<button>`, or Enter in a text field of
+  yours, sends the report. Send what you chose from your own `onSubmit`:
+
+```tsx
+import { useState } from 'react';
+import { ReportDialog } from '@chatwarden/player-react';
+import type { PlayerReporting, ReportResult } from '@chatwarden/player-react';
+
+export function ReportAndMaybeMute(props: { reporting: PlayerReporting; close: () => void; send: (mute: boolean, draft: object) => Promise<ReportResult> }) {
+  const [mute, setMute] = useState(false);
+  return (
+    <ReportDialog
+      reporting={props.reporting}
+      onClose={props.close}
+      onSubmit={(draft) => props.send(mute, draft)}
+      extra={
+        <label>
+          <input type="checkbox" checked={mute} onChange={(e) => setMute(e.target.checked)} /> Also mute this player
+        </label>
+      }
+    />
+  );
+}
+```
 
 ## Put it on your server
 
@@ -215,7 +239,7 @@ Theming).
 | `NoticeQueue` | The pending notices, oldest first, one at a time in a modal dialog. A warning has an Acknowledge button; every other notice has Got it. Both call `POST /notices/:id/ack`. Nothing is rendered when there is nothing to show. | `client`, `canShow` (default `true`), `appealUrl`, `refreshKey`, `onAcknowledged(notice)`, `onPendingChange(count)` |
 | `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `refreshKey` |
 | `RulesPage` | The summary and the numbered rules from `GET /rules`. The numbers are the kit's: a retired rule leaves a gap. | `client`, `refreshKey` |
-| `ReportDialog` | The studio's report flow (one tap, reason first, reason required) with grouped reasons and an optional note, and an optional "Add a reason" step after a one-tap report. Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `onAddDetail(reportId, detail)`, `line`, `targetName` |
+| `ReportDialog` | A one-step report: "Report this message?", the line, an optional "Why?" select (the studio's reasons in groups; required in the reason-required flow) and a note behind "Add a note". Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `line`, `targetName`, `extra` (experimental: your own controls in the form) (`onAddDetail` is deprecated and unused) |
 | `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when. | `until` (epoch ms or `null`), `byModerator`, `refCode` |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and

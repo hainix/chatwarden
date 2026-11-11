@@ -11,18 +11,8 @@ import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/**
- * The controls Tab visits, in order. A radio group is one stop (the checked radio, or the first when none is checked), because the
- * browser moves between its radios with the arrow keys: counting every radio would make "the first control" the wrong one to wrap at.
- */
-function tabStops(box: HTMLElement): HTMLElement[] {
-  const all = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)];
-  return all.filter((el) => {
-    if (!(el instanceof HTMLInputElement) || el.type !== 'radio' || el.name === '') return true;
-    const group = all.filter((o): o is HTMLInputElement => o instanceof HTMLInputElement && o.type === 'radio' && o.name === el.name);
-    return el === (group.find((r) => r.checked) ?? group[0]);
-  });
-}
+/** The controls Tab visits, in order. */
+const tabStops = (box: HTMLElement): HTMLElement[] => [...box.querySelectorAll<HTMLElement>(FOCUSABLE)];
 
 export function Dialog({
   labelledBy,

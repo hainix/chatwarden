@@ -393,60 +393,19 @@
 }
 
 /* ---- The report form --------------------------------------------------------------------------------------------- */
-.cw-player .cw-fieldset {
+.cw-player .cw-field {
   min-width: 0;
-  margin: 0 0 var(--cw-space-3, var(--cwd-space-3));
-  border: 0;
+  margin-bottom: var(--cw-space-3, var(--cwd-space-3));
 }
-.cw-player .cw-fieldset[aria-invalid='true'] {
-  border-left: 3px solid var(--cw-red, var(--cwd-red));
-  padding-left: var(--cw-space-3, var(--cwd-space-3));
+.cw-player .cw-field > .cw-hint {
+  margin: var(--cw-space-1, var(--cwd-space-1)) 0 0;
 }
-.cw-player .cw-legend {
-  margin-bottom: var(--cw-space-2, var(--cwd-space-2));
-  padding: 0;
-  font-weight: 600;
-}
-.cw-player .cw-choice {
-  display: flex;
-  align-items: center;
-  gap: var(--cw-space-3, var(--cwd-space-3));
-  min-height: var(--cw-control-height, var(--cwd-control-height));
-  padding: 0 var(--cw-space-3, var(--cwd-space-3));
-  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
-  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
-  cursor: pointer;
-}
-.cw-player .cw-choice + .cw-choice {
-  margin-top: var(--cw-space-1, var(--cwd-space-1));
-}
-.cw-player .cw-choice:has(input:checked) {
-  border-color: var(--cw-accent, var(--cwd-accent));
-  background: var(--cw-accent-soft, var(--cwd-accent-soft));
-}
-.cw-player .cw-choice-text {
-  display: flex;
-  flex-direction: column;
+.cw-player .cw-extra {
   min-width: 0;
-  padding: var(--cw-space-2, var(--cwd-space-2)) 0;
-  overflow-wrap: anywhere;
+  margin-bottom: var(--cw-space-3, var(--cwd-space-3));
 }
-.cw-player .cw-choice-hint {
-  color: var(--cw-ink-muted, var(--cwd-ink-muted));
-  font-size: var(--cw-text-s, var(--cwd-text-s));
-}
-.cw-player .cw-group {
-  min-width: 0;
-  margin: 0 0 var(--cw-space-3, var(--cwd-space-3));
-  padding: 0;
-  border: 0;
-}
-.cw-player .cw-group-legend {
-  margin-bottom: var(--cw-space-1, var(--cwd-space-1));
-  padding: 0;
-  color: var(--cw-ink-muted, var(--cwd-ink-muted));
-  font-size: var(--cw-text-s, var(--cwd-text-s));
-  font-weight: 600;
+.cw-player .cw-field > .cw-field-error {
+  margin: var(--cw-space-2, var(--cwd-space-2)) 0 0;
 }
 .cw-player .cw-quote {
   margin: 0 0 var(--cw-space-3, var(--cwd-space-3));
@@ -460,33 +419,58 @@
   gap: var(--cw-space-2, var(--cwd-space-2));
   margin-bottom: var(--cw-space-3, var(--cwd-space-3));
 }
-.cw-player .cw-disclosure {
-  margin-bottom: var(--cw-space-3, var(--cwd-space-3));
-}
-.cw-player .cw-panel {
-  min-width: 0;
-  margin-bottom: var(--cw-space-3, var(--cwd-space-3));
-}
-.cw-player input[type='radio'] {
-  flex: none;
-  accent-color: var(--cw-accent, var(--cwd-accent));
-}
 .cw-player .cw-label {
   display: block;
   margin-bottom: var(--cw-space-1, var(--cwd-space-1));
   font-weight: 600;
 }
-.cw-player textarea {
+.cw-player textarea,
+.cw-player select {
   display: block;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
   border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
   border-radius: var(--cw-radius-s, var(--cwd-radius-s));
   background: var(--cw-surface, var(--cwd-surface));
   color: var(--cw-ink, var(--cwd-ink));
   font: inherit;
+}
+.cw-player textarea {
   resize: vertical;
+}
+.cw-player select {
+  min-height: var(--cw-control-height, var(--cwd-control-height));
+  text-overflow: ellipsis;
+}
+/* A reason chosen is a choice you made: the accent, as the old radio was. */
+.cw-player select:has(option:checked:not([value=''])) {
+  border-color: var(--cw-accent, var(--cwd-accent));
+  background: var(--cw-accent-soft, var(--cwd-accent-soft));
+}
+.cw-player select[aria-invalid='true'] {
+  border-color: var(--cw-red, var(--cwd-red));
+}
+/* The one door to the advanced part: a text button, small, in the accent (it is the next action). */
+.cw-player .cw-linkbtn {
+  min-height: 2rem;
+  margin: 0 0 var(--cw-space-3, var(--cwd-space-3));
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cw-accent, var(--cwd-accent));
+  font: inherit;
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+/* A thumb needs the same target as the other buttons. */
+@media (pointer: coarse) {
+  .cw-player .cw-linkbtn {
+    min-height: var(--cw-control-height, var(--cwd-control-height));
+  }
 }
 .cw-player textarea + .cw-hint {
   margin-top: var(--cw-space-1, var(--cwd-space-1));

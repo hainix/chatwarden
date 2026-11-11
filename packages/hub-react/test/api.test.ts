@@ -780,9 +780,13 @@ describe('what is marked @experimental', () => {
     expect(headless.experimentalMembers).toMatchInlineSnapshot(`
       [
         "HubController.configure",
+        "HubController.refresh",
         "HubControllerOptions.host",
+        "LiveQueueStore.refresh",
       ]
     `);
+    // The prop that hands a page the controller is marked too: `<Hub onController>`.
+    expect(exportsOf(HUB).experimentalMembers).toContain('HubProps.onController');
   });
 
   it('the main entry: the pure helpers and the router internals are experimental too (not stable API)', () => {

@@ -55,6 +55,23 @@ async function scrollThrough(page: Page) {
 const RUDE = "uninstall the game, you're hopeless";
 const demoOf = (page: Page) => page.getByRole('group', { name: /chatwarden interactive demo/i });
 
+/** Opens the hub's "More" menu and follows one of its links. A press that lands while the hub is still settling (on a slow CI
+ *  runner, a case just opened) can leave the menu shut, so it presses again, up to three times, before it gives up. */
+async function viaMore(page: Page, link: string): Promise<void> {
+  const demo = demoOf(page);
+  const target = demo.getByRole('link', { name: link });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await target.isVisible())) await demo.getByRole('button', { name: 'More', exact: true }).click();
+    try {
+      await target.waitFor({ state: 'visible', timeout: 5_000 });
+      break;
+    } catch {
+      if (attempt === 2) throw new Error(`the "${link}" link never showed in the More menu`);
+    }
+  }
+  await target.click();
+}
+
 /** Loads the page, wakes the lazy demo and waits for the chat and the hub. */
 async function openDemo(page: Page) {
   await page.goto(server.url, { waitUntil: 'networkidle' });
@@ -159,9 +176,9 @@ describe('the built page under the _headers CSP', () => {
     }, 90_000);
   }
 
-  it('the built demo refuses the invented word: the matcher in the bundle works without obscenity’s word list', async () => {
-    // Vitest runs the real, unstripped obscenity. Only the built bundle has its word list cut out, so this is the test that
-    // proves the cut matcher still blocks: the visitor's word, and Bo's opening line.
+  it('the built demo refuses the invented word: the matcher in the bundle works, with no word list from obscenity', async () => {
+    // The built bundle holds no obscenity word list (the matcher no longer carries it, test/dist.test.ts), so this is the test that
+    // proves the matcher in the page still blocks: the visitor's word, and Bo's opening line.
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const { page, violations, consoleProblems } = await watch(ctx);
     await openDemo(page);
@@ -189,7 +206,7 @@ describe('the built page under the _headers CSP', () => {
     await hidden.first().getByRole('button', { name: /^show/i }).click();
     await demo.getByText(/zorbak/i).first().waitFor();
     expect(violations).toEqual([]);
-    expect(consoleProblems).toEqual([]); // no pageerror either: nothing in the cut matcher threw
+    expect(consoleProblems).toEqual([]); // no pageerror either: nothing in the matcher threw
     await ctx.close();
   }, 60_000);
 
@@ -352,8 +369,7 @@ describe('accessibility (axe) on the built page, with the real hub inside the de
         await openDemo(page);
         const demo = demoOf(page);
         if (viewport.width < 1152) await demo.getByRole('button', { name: /^moderator/i }).click();
-        await demo.getByRole('button', { name: 'More', exact: true }).click();
-        await demo.getByRole('link', { name: 'Steps and ladder' }).click();
+        await viaMore(page, 'Steps and ladder');
         await demo.getByRole('heading', { name: /steps and ladder/i }).waitFor();
         await demo.getByText('6 hours').first().waitFor();
         expect(await serious(page)).toEqual([]);
@@ -458,8 +474,7 @@ describe('layout on the built page', () => {
       await openCaseInHub(page);
       expect(await overflow()).toBeLessThanOrEqual(0);
       const demo = demoOf(page);
-      await demo.getByRole('button', { name: 'More', exact: true }).click();
-      await demo.getByRole('link', { name: 'Steps and ladder' }).click();
+      await viaMore(page, 'Steps and ladder');
       await demo.getByRole('heading', { name: /steps and ladder/i }).waitFor();
       expect(await overflow()).toBeLessThanOrEqual(0);
       await ctx.close();

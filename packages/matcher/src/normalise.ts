@@ -1,12 +1,12 @@
+import { KEEP_TWO } from './vendored/wordEngine.js';
+
 // Text normalisation for the matcher: everything that turns what a person typed, or what a moderator
 // entered, into the form the matcher compares. Pure functions, no state.
 
-/** Mirrors the repeated-letter thresholds of obscenity's englishRecommendedBlacklistMatcherTransformers
- *  (threshold 1, except b/e/o/l/s/g at 2). The preset collapses the INPUT before matching, so a pattern
- *  that still holds a collapsible double could never match. The patterns are therefore collapsed the same
- *  way. The preset does not export its table, hence this copy; the doubled-letter tests in
- *  matcher.test.ts (vlemmo, drakkuun) fail loudly if the two ever drift. */
-const KEEP_TWO = new Set(['b', 'e', 'o', 'l', 's', 'g']);
+/** Cuts runs of one letter the way the matcher reads text: to 1, or to 2 for b/e/o/l/s/g (the thresholds of the English
+ *  preset, kept once in ./vendored/wordEngine.ts as KEEP_TWO). The matcher collapses the INPUT before matching, so a
+ *  pattern that still holds a collapsible double could never match. The patterns are therefore collapsed the same way;
+ *  the doubled-letter tests in matcher.test.ts (vlemmo, drakkuun) and wordEngine.test.ts fail loudly if the two ever drift. */
 export function collapseLikePreset(word: string): string {
   let out = '';
   let prev = '';

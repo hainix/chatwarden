@@ -91,3 +91,35 @@ describe('the reference lists everything public', () => {
     expect(readme).toContain('<NoticeQueue t={t} locale="de" ... />');
   });
 });
+
+describe('reporting in the README is one step', () => {
+  const quick = flat(section('Quick start'));
+  it('describes the one dialog: the question, the optional Why? select, Add a note, and Report sent', () => {
+    expect(quick).toContain('Reporting is one step');
+    expect(quick).toContain('"Report this message?"');
+    expect(quick).toContain('"Why?"');
+    expect(quick).toContain('"Add a note"');
+    expect(quick).toContain('"Report sent"');
+  });
+  it('says onAddDetail is deprecated and never called, and has no follow-up step', () => {
+    expect(quick).toMatch(/`onAddDetail` is deprecated/);
+    expect(quick).not.toContain('"Add a reason"');
+    expect(quick).not.toContain('Skip and report');
+  });
+  it('its server snippet sends the draft (reason, note) to cw.reports.submit and no longer wires addDetail', () => {
+    expect(quick).toContain('...draft');
+    expect(quick).not.toContain('POST /report/:id/detail');
+    expect(quick).not.toMatch(/onAddDetail=\{/);
+  });
+  it('the components table lists ReportDialog as a one-step dialog', () => {
+    const row = readme.split('\n').find((l) => l.startsWith('| `ReportDialog` |')) ?? '';
+    expect(row).toContain('one-step');
+    expect(row).not.toContain('"Add a reason"');
+  });
+  it('documents the experimental extra prop with a small example, and the Tab order', () => {
+    expect(quick).toContain('`extra`, experimental');
+    expect(quick).toContain('Also mute this player');
+    expect(quick).toContain('reason, note, yours, Report, Cancel');
+    expect(readme.split(String.fromCharCode(10)).find((l) => l.startsWith('| `ReportDialog` |'))).toContain('`extra`');
+  });
+});

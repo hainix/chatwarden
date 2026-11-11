@@ -1,7 +1,8 @@
 import { playerReporting } from '@chatwarden/core';
 import { NoticeQueue, createPlayerClient, ReportDialog } from '@chatwarden/player-react';
-import type { PlayerClient, PlayerReporting, ReportFollowUp, ReportDraft, ReportResult } from '@chatwarden/player-react';
+import type { PlayerClient, PlayerReporting, ReportDraft, ReportResult } from '@chatwarden/player-react';
 import '@chatwarden/player-react/styles.css';
+import type { HubController } from '@chatwarden/hub-react/headless';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ReplayIcon } from '../components/Icons';
 import './demo.css';
@@ -91,19 +92,6 @@ function findTarget(root: HTMLElement, step: number): HTMLElement | null {
   }
 }
 
-/**
- * Asks the hub to read the queue now. The hub polls the kit every five seconds, and also the moment the page becomes visible again:
- * it listens for the browser's `visibilitychange`, so a synthetic one makes its poll run at once and a report shows in the queue
- * without the wait. But the hub reads the same event as "the page is going away" when the tab is hidden, and then sends any decision
- * held for Undo on the spot (hub-react `src/headless/toasts.ts`: `if (!page.visible()) flush()`). So the nudge does nothing unless the
- * tab is visible: a hidden tab keeps the visitor's five seconds. (The hub's `<Hub>` takes no handle for a refresh, so the event is the
- * only way in; it also reaches any other listener on the page, which is why it is sent from one place.)
- */
-function nudgeHub(): void {
-  if (document.visibilityState !== 'visible') return;
-  document.dispatchEvent(new Event('visibilitychange'));
-}
-
 /** What kind of control the tour is pointing at, for scrolling once per kind: a menu button, a link, a picker, a step button. */
 function targetKind(el: HTMLElement): string {
   const name = (el.getAttribute('aria-label') ?? el.textContent ?? '').trim();
@@ -160,6 +148,16 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
+  /**
+   * The hub's own controller, handed over by `<Hub onController>` (a Reset makes a new hub, and hands over its new one). The page asks
+   * the hub to read its queue now through it: the hub polls the kit every five seconds, and `refresh()` makes a report show without the
+   * wait. It only reads, so it is as safe on a hidden tab as on a visible one, and it is not an event the rest of the page can hear.
+   */
+  const hub = useRef<HubController | null>(null);
+  const keepHub = (controller: HubController): void => {
+    hub.current = controller;
+  };
+  const nudgeHub = (): void => hub.current?.refresh();
   const restartRef = useRef<HTMLButtonElement>(null);
   const paneNow = useRef<'game' | 'mod'>('game');
   const prevOn = useRef(true);
@@ -612,12 +610,6 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     return res;
   }
 
-  async function addDetail(reportId: string, detail: ReportFollowUp) {
-    const res = await engine.reports.addDetail(reportId, 'you', detail);
-    if (res.ok) nudgeHub(); // the hub reads the reason now, not in a few seconds
-    return res;
-  }
-
   /** What the hub tells the page: a case was opened, a decision was taken. */
   async function onStaffEvent(event: StaffEvent) {
     const g = gen.current;
@@ -805,7 +797,7 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
           inputRef={inputRef}
           logRef={logRef}
         />
-        <ModeratorPane world={world} hidden={modHidden} theme={theme} active={active} onEvent={(e) => void onStaffEvent(e)} />
+        <ModeratorPane world={world} hidden={modHidden} theme={theme} active={active} onEvent={(e) => void onStaffEvent(e)} onController={keepHub} />
       </div>
 
       {/* After the panes: on a phone the card is a bar that sticks to the bottom of the window while the demo is in view. */}
@@ -864,7 +856,6 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
           returnFocusTo={backToGame}
           onClose={() => setReport(null)}
           onSubmit={submitReport}
-          onAddDetail={addDetail}
         />
       )}
     </div>
