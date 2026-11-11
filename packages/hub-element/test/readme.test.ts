@@ -185,3 +185,43 @@ describe('the README is plain', () => {
     expect(size).toMatch(/under 185 KB gzipped/);
   });
 });
+
+describe('what the README says about the limits (fix round 1)', () => {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ');
+
+  it('keyboard shortcuts: several hubs share the keys today, the way out is memory routers and one hub with shortcuts', () => {
+    const keys = flat(section('Keyboard shortcuts'));
+    expect(keys).toMatch(/several hubs on one page share their shortcuts/i);
+    expect(keys).toMatch(/a key pressed in any of them reaches the first hub that has shortcuts on/);
+    expect(keys).toMatch(/`shortcuts="false"` on a hub does not stop another hub's shortcuts from answering a key pressed in it/);
+    expect(keys).toMatch(/later release/);
+    // The old, wrong advice is gone.
+    expect(keys).not.toMatch(/give only one of them the shortcuts and set `shortcuts="false"` on the rest/);
+  });
+
+  it('router: hash hubs share the URL hash, so give all but one router="memory"', () => {
+    const attributes = flat(section('Attributes'));
+    expect(attributes).toMatch(/hubs on `router="hash"` share the page's one URL hash/);
+    expect(attributes).toMatch(/`router="memory"` on all but one/);
+    expect(flat(section('Keyboard shortcuts'))).toMatch(/`router="memory"` on all but one/);
+  });
+
+  it('keyboard shortcuts: a hub inside another shadow root is not supported yet', () => {
+    expect(flat(section('Keyboard shortcuts'))).toMatch(/inside another shadow root/);
+    expect(flat(section('Keyboard shortcuts'))).toMatch(/focus and keys/);
+  });
+
+  it('cross-origin: base-url sends cookies to the same origin only, and points to the client property with credentials include; base-url is trusted', () => {
+    const attributes = flat(section('Attributes'));
+    expect(attributes).toMatch(/Calls go with `credentials: 'same-origin'`: cookies are sent to the page's own origin only/);
+    expect(attributes).toMatch(/[Ff]or another origin, set the `client` property with `credentials: 'include'`/);
+    expect(attributes).toMatch(/`base-url` is trusted and not checked: whoever can set the attribute chooses where the staff calls go/);
+    expect(flat(section('Quick start'))).toMatch(/cookies go along with each call to the page's own origin/);
+  });
+
+  it('events: the navigate detail and the URL hash carry full person references', () => {
+    const events = flat(section('Events'));
+    expect(events).toMatch(/`cw-navigate` detail, and the URL hash the `hash` router keeps, carry full person references/);
+    expect(events).toMatch(/browser history/);
+  });
+});

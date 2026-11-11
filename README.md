@@ -22,8 +22,10 @@ Status: pre-release, as-is, no support promise; PRs welcome.
 
 ## Install
 
-Pick what you need. `@chatwarden/core` is a peer dependency of every other package, so you install it yourself and your
-project gets exactly one copy of it. `store-sqlite` and `profanity` also need `matcher` as a peer.
+Pick what you need. `@chatwarden/core` is a peer dependency of every other package except `@chatwarden/hub-element`, so you install it
+yourself and your project gets exactly one copy of it. `store-sqlite` and `profanity` also need `matcher` as a peer.
+`@chatwarden/hub-element` bundles React and what it needs of the kit into one script, so it has no required peer;
+`@chatwarden/hub-react` is an optional peer, for TypeScript types only.
 
 | I want to | Install |
 | --- | --- |

@@ -8,7 +8,7 @@
   "engines": { "node": ">=22.13" },
   "workspaces": ["packages/*", "examples/*", "site"],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node packages/hub-element/build/build.mjs",
     "clean": "node scripts/clean.mjs",
     "typecheck": "tsc -b",
     "check:pack": "npm run build && node scripts/check-pack.mjs",

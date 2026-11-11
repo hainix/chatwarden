@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import type { Server } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { toExpress } from '@chatwarden/http/express';
 import express from 'express';
@@ -19,7 +20,8 @@ import type { HubWorld } from './world.js';
 // It needs a Chromium install (`npx playwright install chromium`). Without one the tests skip, unless CW_REQUIRE_BROWSER=1 (CI that
 // means to run it). Run on its own: `npm run smoke:browser --workspace @chatwarden/hub-element`.
 
-const SHOTS = process.env.CW_SHOTS_DIR ?? join(process.cwd(), '.superpowers', 'sdd', '2026-11-10-k4-hub-and-player-ui', 'screenshots', '7e');
+// Screenshots go to the OS temp directory unless CW_SHOTS_DIR says otherwise: a run never writes into the repository.
+const SHOTS = process.env.CW_SHOTS_DIR ?? join(tmpdir(), 'cw-hub-element-shots');
 // The page: a script tag and the element (the margin rule is the only thing besides; the strict-CSP page leaves even that out).
 const page = (extra = '', element = '<chatwarden-hub base-url="/admin"></chatwarden-hub>', margin = true) =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Moderation</title>${margin ? '<style>body { margin: 0 }</style>' : ''}${extra}</head><body><script type="module" src="/hub-element.js"></script>${element}</body></html>`;
@@ -299,6 +301,7 @@ describe('a bare page with a script tag and the element', () => {
         }
       }
     }
+    console.log(`screenshots written to ${SHOTS}`);
   }, 120_000);
 });
 

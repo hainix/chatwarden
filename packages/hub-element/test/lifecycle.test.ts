@@ -148,3 +148,28 @@ describe('a move in the DOM', () => {
     expect(el.shadowRoot?.querySelector('.cw-hub')).toBe(first);
   });
 });
+
+describe('attribute churn', () => {
+  it('changing theme, game-name or mode does not ask /me again, rebuild the controller, or drop a held decision', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich();
+    goTo(`/reports/${f.id}`);
+    const el = mount({ mode: 'simple' }, { client: w.client });
+    const q = inside(el);
+    (await q.findByRole('button', RESTRICT, { timeout: 5000 })).click();
+    await waitFor(() => expect(q.queryAllByRole('button', { name: /^Undo/ })).not.toHaveLength(0));
+    const me = w.sent.filter((r) => r.path === '/me').length;
+    el.setAttribute('theme', 'dark');
+    el.setAttribute('game-name', 'Dragon Duel');
+    await waitFor(() => expect(el.shadowRoot?.querySelector('.cw-hub')?.getAttribute('data-cw-theme')).toBe('dark'));
+    el.setAttribute('locale', 'de');
+    await new Promise((r) => setTimeout(r, 50));
+    // Nothing was sent, /me was not asked again, and the hold is still on screen (the controller was not disposed: that would send it).
+    expect(decides(w)).toHaveLength(0);
+    expect(w.sent.filter((r) => r.path === '/me').length).toBe(me);
+    expect(q.queryAllByRole('button', { name: /^Undo/ }).length).toBeGreaterThan(0);
+    // ...and it is still the same controller: the page hide sends the one decision, once.
+    pageHides();
+    await waitFor(() => expect(decides(w)).toHaveLength(1));
+  });
+});

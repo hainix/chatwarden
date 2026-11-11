@@ -17,7 +17,7 @@ add the script and the element:
 ```
 
 That is the whole integration. The hub asks `GET /admin/me` first and shows only what the signed-in role can use. The page's
-cookies go along with each call, so whatever signs your moderators in to `/admin` signs them in here. A signed-out visitor (401) or
+cookies go along with each call to the page's own origin, so whatever signs your moderators in to `/admin` signs them in here. A signed-out visitor (401) or
 an account with no access (403) gets a plain message inside the element.
 
 The hub fills the height of the window by default. Give the element a height of your own with `--cw-hub-height` (see "Theming").
@@ -44,13 +44,20 @@ one `console.warn` that names the attribute.
 
 | Attribute | Values | Default | What it does |
 | --- | --- | --- | --- |
-| `base-url` | an address | `/admin` | Where the kit's staff routes are mounted: `/admin` or `https://ops.example/admin`. Ignored when the `client` property is set. |
+| `base-url` | an address | `/admin` | Where the kit's staff routes are mounted: `/admin` on your origin (or a full address, see below). Ignored when the `client` property is set. |
 | `mode` | `simple`, `detailed` | the moderator's last choice, else `simple` | `simple` is one card per case, for a team of one or two; `detailed` is the full workbench. Set it to fix the mode and hide the switch. |
 | `theme` | `auto`, `light`, `dark` | `auto` | `auto` follows the visitor's `prefers-color-scheme`. |
 | `locale` | a language tag such as `en` or `pt-BR` | `en` | The language of dates, times and numbers. The words stay English unless you give a `t` function. |
 | `game-name` | text | none | Your game's name, shown beside the product name in the top bar. |
 | `shortcuts` | `true`, `false` | `true` | `shortcuts="false"` turns every keyboard shortcut off, for a page that has its own. |
 | `router` | `hash`, `memory` | `hash` | `hash` keeps the hub's place in the page's URL hash, so the back button and a bookmark work. `memory` keeps it inside the element and never touches the URL. |
+
+Calls go with `credentials: 'same-origin'`: cookies are sent to the page's own origin only, so a `base-url` on another origin carries no
+cookies. For another origin, set the `client` property with `credentials: 'include'` (see "Properties"). `base-url` is trusted and not
+checked: whoever can set the attribute chooses where the staff calls go. That is no extra boundary, since any script on the page already
+controls the hub.
+
+Several hubs on one page: hubs on `router="hash"` share the page's one URL hash, so they all show the same screen. Put `router="memory"` on all but one.
 
 ## Properties
 
@@ -92,6 +99,9 @@ hub.addEventListener('cw-navigate', (event) => {
   document.title = `Moderation ${event.detail.path}`;
 });
 ```
+
+The `cw-navigate` detail, and the URL hash the `hash` router keeps, carry full person references (`/people/<ref>`), not the 8-character tags the
+hub shows. The hash lands in browser history and in anything that records `location.hash`, so keep the page to your own moderators.
 
 A decision is held for five seconds so the moderator can press Undo. `cw-decided` fires when it is sent and accepted, not when the
 button is pressed. A decision the server refused, or one it had already recorded (a replay), fires nothing. If the element is
@@ -140,7 +150,14 @@ Sans, load `@chatwarden/hub-react/font.css` in your page (the page's own CSS) an
 
 The hub's shortcuts (J and K to move between cases, N to take the next, `?` for help, Ctrl or Cmd+K for the command bar) work while
 focus is inside the element, and never while focus is elsewhere on your page. Typing in one of the hub's fields never triggers one.
-With several hubs on one page, give only one of them the shortcuts and set `shortcuts="false"` on the rest.
+
+Known limits, until a later release scopes each hub's keys to itself:
+
+- Several hubs on one page share their shortcuts: a key pressed in any of them reaches the first hub that
+  has shortcuts on, and `shortcuts="false"` on a hub does not stop another hub's shortcuts from answering a key pressed in it. Use one hub
+  per page, or give only one hub shortcuts and put `router="memory"` on all but one (see "Attributes").
+- A `<chatwarden-hub>` inside another shadow root (your own web component's) is not supported yet for focus and keys: J and K and the
+  focus return after a window closes read the outer host as the focused element. Everything else works there.
 
 ## Content Security Policy
 

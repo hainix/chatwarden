@@ -238,6 +238,13 @@ describe('the root README', () => {
     expect(section(doc, 'Install')).toMatch(/peer dependenc/i);
   });
 
+  it('says core is a peer of every package except hub-element (which bundles what it needs), and that hub-react is its optional peer for types', () => {
+    const install = flat(section(doc, 'Install'));
+    expect(install).toMatch(/`@chatwarden\/core` is a peer dependency of every other package except `@chatwarden\/hub-element`/);
+    expect(install).toMatch(/`@chatwarden\/hub-element` bundles React and what it needs of the kit/);
+    expect(install).toMatch(/`@chatwarden\/hub-react` is an optional peer, for TypeScript types only/);
+  });
+
   it('installs @types/express next to express for the HTTP routes, and says why', () => {
     const http = rows(section(doc, 'Install')).find((r) => (r[1] ?? '').includes('@chatwarden/http'));
     expect(http?.[1]).toContain('npm install @chatwarden/http express @types/express');

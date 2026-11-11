@@ -58,6 +58,24 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      # The hub element's Chromium smoke (CW_REQUIRE_BROWSER makes a missing browser a failure, not a skip).
+      # The browser download is cached per Playwright version; the system packages (apt) are not part of the cache, so they are
+      # installed on a hit as well.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - run: npm run smoke:browser --workspace @chatwarden/hub-element
+        env:
+          CW_REQUIRE_BROWSER: '1'
       - run: npm run check:pack
       - name: Smoke test (pack, install and run in fresh ESM and CommonJS projects)
         run: node scripts/smoke.mjs

@@ -123,3 +123,59 @@ describe('properties set before the script defined the element', () => {
     expect(inside(early).getByRole('button', { name: 'Aller au contenu' })).toBeTruthy();
   });
 });
+
+describe('a client that is not a plain object', () => {
+  // The element watches `decide` through a wrapper. The wrapper must not break a client whose methods need their own `this`
+  // (a class with #private fields) or one that cannot be written to (a frozen object).
+  async function classClient(world: Awaited<ReturnType<typeof hubWorld>>) {
+    const inner = world.client;
+    class Sealed {
+      #inner = inner;
+      calls = 0;
+      static {
+        for (const key of Object.keys(inner) as Array<keyof typeof inner>) {
+          Object.defineProperty(Sealed.prototype, key, {
+            value(this: Sealed, ...args: unknown[]) {
+              this.calls++;
+              return (this.#inner[key] as (...a: unknown[]) => unknown)(...args);
+            },
+          });
+        }
+      }
+    }
+    return new Sealed() as unknown as typeof inner & { calls: number };
+  }
+
+  it('a class with #private fields works: the hub draws, and a decision is announced', async () => {
+    const w = await hubWorld();
+    const f = await w.fileRich();
+    window.location.hash = `#/reports/${f.id}`;
+    const client = await classClient(w);
+    const el = mount({ mode: 'simple' }, { client });
+    const seen: unknown[] = [];
+    el.addEventListener('cw-decided', (e) => seen.push((e as CustomEvent).detail));
+    const q = inside(el);
+    (await q.findByRole('button', { name: /^Restrict chat, 24 hours/ }, { timeout: 5000 })).click();
+    await waitFor(() => expect(q.queryAllByRole('button', { name: /^Undo/ })).not.toHaveLength(0));
+    window.dispatchEvent(new Event('pagehide'));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    expect(client.calls).toBeGreaterThan(1);
+    expect(seen[0]).toMatchObject({ reportId: f.id });
+  });
+
+  it('a frozen client works', async () => {
+    const w = await hubWorld();
+    const frozen = Object.freeze({ ...w.client });
+    const el = mount({}, { client: frozen });
+    await hubShown(el);
+    expect(el.client).toBe(frozen);
+  });
+
+  it('a client that has no decide of its own (inherited) still gets watched', async () => {
+    const w = await hubWorld();
+    const base = Object.create(w.client) as typeof w.client;
+    const el = mount({}, { client: base });
+    await hubShown(el);
+    expect(typeof el.client?.decide).toBe('function');
+  });
+});

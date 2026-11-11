@@ -199,8 +199,7 @@ export class ChatwardenHubElement extends Base {
   #watch(source: HubClient): HubClient {
     const known = this.#watched.get(source);
     if (known !== undefined) return known;
-    const watched: HubClient = Object.create(source) as HubClient;
-    watched.decide = async (id, input, options) => {
+    const decide: HubClient['decide'] = async (id, input, options) => {
       const result = await source.decide(id, input, options);
       // A replay means this decision was already made: it was announced then.
       if (!result.replay) {
@@ -208,6 +207,24 @@ export class ChatwardenHubElement extends Base {
       }
       return result;
     };
+    // A Proxy, so the page's client is never written to (it may be frozen) and its methods still run with their own `this` (a class with
+    // #private fields). The target is a bare object of ours: a Proxy over the client itself could not answer `decide` differently when
+    // that property is frozen. Every method but `decide` is the source's own, bound to the source.
+    const bound = new Map<PropertyKey, unknown>();
+    const watched = new Proxy({} as HubClient, {
+      get(_target, prop) {
+        if (prop === 'decide') return decide;
+        const value: unknown = Reflect.get(source, prop, source);
+        if (typeof value !== 'function') return value;
+        let method = bound.get(prop);
+        if (method === undefined) {
+          method = (value as (...args: unknown[]) => unknown).bind(source);
+          bound.set(prop, method);
+        }
+        return method;
+      },
+      has: (_target, prop) => prop in source,
+    });
     this.#watched.set(source, watched);
     return watched;
   }
