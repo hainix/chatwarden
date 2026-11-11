@@ -131,3 +131,89 @@ describe('the English catalog', () => {
     }
   });
 });
+
+// A patch release removes nothing from the public catalogue. `en` and `PlayerText` are exported, and a host that spreads `en` or
+// names a key must keep compiling and showing the same words. Every key the 0.1.2 `en` had is listed here. The ones the one-step
+// dialog no longer uses stay, marked @deprecated in src/i18n.ts, and go in a later minor.
+const V012_KEYS = [
+  'player.error.network', 'player.error.unauthorized', 'player.error.forbidden', 'player.error.notFound', 'player.error.rateLimited',
+  'player.error.rateLimited.after.one', 'player.error.rateLimited.after.other', 'player.error.server', 'player.error.generic',
+  'player.state.retry', 'player.notices.loadFailed',
+  'player.notice.title.warning', 'player.notice.title.chat', 'player.notice.title.area', 'player.notice.title.ban',
+  'player.notice.title.report_outcome', 'player.notice.title.fallback', 'player.notice.body.warning', 'player.notice.body.chat',
+  'player.notice.body.area', 'player.notice.body.ban', 'player.notice.body.report_outcome', 'player.notice.body.fallback',
+  'player.notice.position',
+  'player.record.loadFailed', 'player.record.intro', 'player.record.empty', 'player.record.kind.warning', 'player.record.kind.chat',
+  'player.record.kind.area', 'player.record.kind.ban', 'player.record.kind.fallback',
+  'player.rules.title', 'player.rules.loading', 'player.rules.loadFailed', 'player.rules.empty',
+  'player.restricted.moderator.until', 'player.restricted.moderator.noEnd', 'player.restricted.filter.until',
+  'player.restricted.filter.noEnd', 'player.restricted.ended', 'player.restricted.ref',
+  'player.report.title', 'player.report.titleNamed', 'player.report.intro', 'player.report.legend', 'player.report.titleOneTap',
+  'player.report.titleOneTapNamed', 'player.report.titleOneTapPlayer', 'player.report.titleSent', 'player.report.titleRefused',
+  'player.report.oneTap.intro', 'player.report.oneTap.send', 'player.report.quote', 'player.report.skip', 'player.report.needReason',
+  'player.report.needReasonOrSkip', 'player.report.addReason', 'player.report.addReasonHint', 'player.report.detail.legend',
+  'player.report.detail.send', 'player.report.detail.need', 'player.report.detail.added', 'player.report.detail.failed',
+  'player.report.detail.refused.off', 'player.report.detail.refused.not_found', 'player.report.detail.refused.not_reporter',
+  'player.report.detail.refused.too_late', 'player.report.detail.refused.already_added', 'player.report.detail.refused.reason_unknown',
+  'player.report.note', 'player.report.noteHint', 'player.report.send', 'player.report.cancel', 'player.report.close',
+  'player.report.failed', 'player.report.thanks', 'player.report.remaining.zero', 'player.report.remaining.one',
+  'player.report.remaining.other', 'player.report.refused.duplicate', 'player.report.refused.rate', 'player.report.refused.self',
+  'player.report.refused.not_player', 'player.report.refused.off', 'player.report.refused.suspended',
+  'player.report.refused.reason_required', 'player.report.refused.reason_unknown', 'player.report.refused.unknown',
+] as const;
+
+// The keys 0.1.3 stops using: kept, with their 0.1.2 English, so a host that shows or overrides them keeps working.
+const DEPRECATED_SINCE_013: Record<string, string> = {
+  'player.report.title': 'Report a player',
+  'player.report.titleNamed': 'Report {name}',
+  'player.report.legend': 'What happened?',
+  'player.report.skip': 'Skip and report',
+  'player.report.needReasonOrSkip': 'Choose what happened, or skip.',
+  'player.report.addReason': 'Add a reason',
+  'player.report.addReasonHint': 'This helps, but the moderators decide what it really is. You can add this for a few minutes after you report.',
+  'player.report.detail.legend': 'What was it about?',
+  'player.report.detail.send': 'Add to my report',
+  'player.report.detail.need': 'Choose a reason or write a note.',
+  'player.report.detail.added': 'Added. Thanks.',
+  'player.report.detail.failed': 'We could not add that.',
+  'player.report.detail.refused.off': 'Adding to a report is not available right now.',
+  'player.report.detail.refused.not_found': 'We cannot find that report any more.',
+  'player.report.detail.refused.not_reporter': 'Only the player who sent a report can add to it.',
+  'player.report.detail.refused.too_late': 'It is too late to add to this report. We still have the report.',
+  'player.report.detail.refused.already_added': 'You already added to this report.',
+  'player.report.detail.refused.reason_unknown': 'That reason is not available any more. Your report is still with us.',
+  'player.report.send': 'Send report',
+};
+
+describe('the 0.1.2 catalogue stays whole in a patch release', () => {
+  it('has every key the 0.1.2 en had', () => {
+    const have = new Set(Object.keys(en));
+    expect(V012_KEYS.filter((key) => !have.has(key))).toEqual([]);
+  });
+  it('lists the nineteen keys that went unused, and each is a 0.1.2 key', () => {
+    expect(Object.keys(DEPRECATED_SINCE_013)).toHaveLength(19);
+    for (const key of Object.keys(DEPRECATED_SINCE_013)) expect(V012_KEYS as readonly string[], key).toContain(key);
+  });
+  it('gives each deprecated key its old English text', () => {
+    for (const [key, words] of Object.entries(DEPRECATED_SINCE_013)) expect(text(key), key).toBe(words);
+  });
+  it('keeps the old keys in the PlayerText type: a host that names one still compiles, and t() answers', () => {
+    const named: PlayerText[] = ['player.report.title', 'player.report.titleNamed', 'player.report.send', 'player.report.detail.refused.too_late'];
+    const t = createT(en, 'en');
+    expect(named.map((key) => t(key, { name: 'Ann' }))).toEqual([
+      'Report a player',
+      'Report Ann',
+      'Send report',
+      'It is too late to add to this report. We still have the report.',
+    ]);
+  });
+  it('marks each deprecated key in the source, so the editor strikes it through', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const source = await readFile(new URL('../src/i18n.ts', import.meta.url), 'utf8');
+    for (const key of Object.keys(DEPRECATED_SINCE_013)) {
+      const at = source.indexOf(`'${key}':`);
+      expect(at, key).toBeGreaterThan(0);
+      expect(source.slice(Math.max(0, at - 120), at), key).toMatch(/@deprecated unused since 0\.1\.3; removed in a later minor \*\/\s*$/);
+    }
+  });
+});

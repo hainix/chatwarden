@@ -95,7 +95,13 @@ describe('no words outside the catalog', () => {
     const prefixes = [...text.matchAll(/`(player\.[A-Za-z0-9_.]*\.)\$\{/g)].map((m) => m[1] as string);
     const bases = [...new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
     const dead = bases.filter((k) => !literalsUsed.has(k) && !prefixes.some((p) => k.startsWith(p)));
-    expect(dead).toEqual([]);
+    // A key the components stopped using stays in the exported catalogue for a patch release (nothing is removed in 0.1.x), marked
+    // `@deprecated unused since 0.1.3`. So the dead words are exactly the marked ones: an unused key must be marked, and a marked
+    // key must really be unused (otherwise the mark is a lie).
+    const catalogue = read(join(src, 'i18n.ts'));
+    const marked = [...catalogue.matchAll(/@deprecated unused since 0\.1\.3; removed in a later minor \*\/\s*'([^']+)':/g)].map((m) => (m[1] as string).replace(/\.(zero|one|two|few|many|other)$/, ''));
+    expect(marked.length).toBeGreaterThan(0);
+    expect([...dead].sort()).toEqual([...new Set(marked)].sort());
   });
 });
 
