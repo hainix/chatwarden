@@ -17,8 +17,10 @@ npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-
 `react` and `react-dom` (18.3 or 19) are peer dependencies, so your app has one copy of React (they are optional only if you import just
 `@chatwarden/hub-react/headless`; see "Four ways to adopt"). The hub uses only APIs that exist in
 18.3 (`useSyncExternalStore`, `useId`), but it is tested only on React 19 so far. `@chatwarden/core` and
-`@chatwarden/http` are peers too: the hub imports types from both and one value from core (`LADDER_TABLE`, so the decision menu
-and the suggestion cannot drift apart), and its own type declarations name them. Node 22.13 or newer
+`@chatwarden/http` are peers too: the hub imports types from both, and these values from core (constants and defaults, so the hub
+and the kit cannot drift apart): `LADDER_TABLE`, `DEFAULT_DURATIONS`, `DEFAULT_AREA_RULES`, `DEFAULT_SEVERE_RULES`, `AUDIT_ACTIONS`,
+`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting` and `LEGACY_REASON_ALIASES`. Its own type declarations name
+both packages. Node 22.13 or newer
 for the tooling; the hub itself runs in a browser and imports no `node:` module.
 
 ## Quick start
