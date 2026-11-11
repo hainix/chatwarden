@@ -59,4 +59,11 @@ describe('the README sentence about what the hub imports from core', () => {
     expect(headless).toMatch(/`schedule` and `page`/);
     expect(headless).toMatch(/type declarations need no DOM lib/);
   });
+
+  it('says what the Overview and All actions cost in audited reads: GET /sanctions is history.view, read on open and on a user action only', () => {
+    expect(readme).toMatch(/What the Overview and All actions cost in audited reads/);
+    expect(readme).toMatch(/Recent actions is read once when the Overview opens/);
+    expect(readme).toMatch(/not again by itself/);
+    expect(readme).toMatch(/`history.view` row with no target/);
+  });
 });

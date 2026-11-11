@@ -224,12 +224,88 @@ describe('GET /people/:ref/history: sanctions and asReporter', () => {
 });
 
 describe('GET /sanctions', () => {
-  it('is empty with next null when nothing was sanctioned, and writes no audit row', async () => {
+  it('is empty with next null when nothing was sanctioned, and audits history.view (no target) with the caller', async () => {
     const w = await world();
-    const res = await w.call('GET', '/sanctions');
+    const res = await w.call('GET', '/sanctions', { actor: 'gus', role: 'moderator' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ items: [], next: null });
-    expect(w.routeAudit()).toEqual([]);
+    expect(w.routeAudit().map((a) => [a.actor, a.role, a.action, a.target])).toEqual([['gus', 'moderator', 'history.view', undefined]]);
+  });
+
+  describe('audit: one history.view row per successful read, counted in the real audit store', () => {
+    it('writes exactly one row for one read, and one more for each further read (a page, a filter, a second look)', async () => {
+      const w = await world();
+      const a = await file(w);
+      for (let i = 0; i < 3; i += 1) {
+        w.clock.t += 1000;
+        await sanction(w, a.target, { kind: 'warning', durationMs: null });
+      }
+      const before = w.audit().length;
+      const first = (await w.call('GET', '/sanctions', { query: { limit: '2' } })).body as { next: string | null };
+      expect(w.audit()).toHaveLength(before + 1);
+      expect(first.next).not.toBeNull();
+      await w.call('GET', '/sanctions', { query: { limit: '2', cursor: first.next as string } });
+      expect(w.audit()).toHaveLength(before + 2);
+      await w.call('GET', '/sanctions', { query: { source: 'moderator' } });
+      await w.call('GET', '/sanctions');
+      expect(w.audit()).toHaveLength(before + 4);
+      const rows = w.audit().slice(0, 4);
+      expect(rows.every((r) => r.action === 'history.view' && r.target === undefined)).toBe(true);
+    });
+
+    it('records the caller and the role, and nothing about the page: no person, cursor, handle or sanction in the row', async () => {
+      const w = await world();
+      const r = await file(w, { targetHandle: 'Zorbakk' });
+      await sanction(w, r.target);
+      await w.call('GET', '/sanctions', { actor: 'hana', role: 'senior' });
+      const row = w.routeAudit()[0];
+      expect([row?.actor, row?.role, row?.action, row?.target]).toEqual(['hana', 'senior', 'history.view', undefined]);
+      const text = JSON.stringify(w.routeAudit());
+      expect(text).not.toContain('Zorbakk');
+      expect(text).not.toContain(r.target);
+    });
+
+    it('is one row however many handles the page looks up (the handle reads are not audited on their own)', async () => {
+      const w = await world();
+      for (let i = 0; i < 4; i += 1) {
+        const r = await file(w, { targetHandle: 'Name' + i });
+        await sanction(w, r.target);
+      }
+      const before = w.audit().length;
+      await w.call('GET', '/sanctions');
+      expect(w.audit()).toHaveLength(before + 1);
+    });
+
+    it('writes no row when the read is refused: 400 for a bad limit, cursor or source, 403 without history.read, 401 without a login', async () => {
+      const w = await world({ permissions: { 'history.read': 'senior' } });
+      const before = w.audit().length;
+      for (const query of [{ limit: 'x' }, { limit: '1.5' }, { cursor: 'not-a-cursor' }, { source: 'nope' }] as Array<Record<string, string>>) {
+        expect((await w.call('GET', '/sanctions', { query, role: 'senior' })).status, JSON.stringify(query)).toBe(400);
+      }
+      expect((await w.call('GET', '/sanctions', { role: 'moderator' })).status).toBe(403);
+      expect((await w.call('GET', '/sanctions', { role: null })).status).toBe(401);
+      expect(w.audit()).toHaveLength(before);
+    });
+
+    it('fails closed (500) when the view cannot be audited, and nothing is returned', async () => {
+      const failing = await world({ wrap: (cw) => ({ ...cw, audit: { ...cw.audit, record: () => false } }) });
+      const a = await file(failing);
+      await sanction(failing, a.target);
+      const res = await failing.call('GET', '/sanctions');
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'internal' });
+    });
+
+    it('a write and a read count separately: a sanction applied through the route adds sanction.apply, the list adds history.view', async () => {
+      const w = await world();
+      const subject = w.person();
+      const before = w.audit().length;
+      expect((await w.call('POST', '/sanctions', { body: { subject, kind: 'chat', durationMs: 3600000, rule: 2 } })).status).toBe(200);
+      expect(w.audit()).toHaveLength(before + 1);
+      await w.call('GET', '/sanctions');
+      expect(w.audit()).toHaveLength(before + 2);
+      expect(w.audit().slice(0, 2).map((r) => r.action).sort()).toEqual(['history.view', 'sanction.apply']);
+    });
   });
 
   it('lists every person newest first as SanctionGroupView plus the person', async () => {
@@ -308,13 +384,13 @@ describe('GET /sanctions', () => {
       expect(await handleOf(w, auto.groupId)).toBe('Quissel');
     });
 
-    it('adds no audit row, and the handle is a string or null', async () => {
+    it('adds no audit row of its own (just the one history.view), and the handle is a string or null', async () => {
       const w = await world();
       const r = await file(w, { targetHandle: 'Drakkuun' });
       await sanction(w, r.target);
       const items = ((await w.call('GET', '/sanctions')).body as { items: Array<{ handle: unknown }> }).items;
       for (const i of items) expect(i.handle === null || typeof i.handle === 'string').toBe(true);
-      expect(w.routeAudit()).toEqual([]);
+      expect(w.routeAudit().map((a) => a.action)).toEqual(['history.view']);
     });
   });
 
@@ -390,9 +466,11 @@ describe('GET /sanctions', () => {
   it('is gated by history.read and 401 without authz; a 400 and a 403 write nothing', async () => {
     const locked = await world({ permissions: { 'history.read': 'owner' } });
     expect((await locked.call('GET', '/sanctions', { role: 'senior' })).status).toBe(403);
-    expect((await locked.call('GET', '/sanctions', { role: 'owner' })).status).toBe(200);
     expect((await locked.call('GET', '/sanctions', { role: null })).status).toBe(401);
     expect(locked.routeAudit()).toEqual([]);
+    // Only the read that was allowed is audited.
+    expect((await locked.call('GET', '/sanctions', { role: 'owner' })).status).toBe(200);
+    expect(locked.routeAudit().map((a) => [a.role, a.action])).toEqual([['owner', 'history.view']]);
   });
 });
 

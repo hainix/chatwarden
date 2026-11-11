@@ -72,6 +72,24 @@ describe('Recent actions name the person', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'All actions' })).toBeInTheDocument();
   });
 
+  it('each read of the list is on a user action: opening the Overview, opening All actions, coming back (3 reads, none in between)', async () => {
+    const w = await hubWorld();
+    const f = await w.file();
+    await w.sanction(f.person, 'warning', 1);
+    const { user, router } = renderHub(w);
+    await overview();
+    const reads = () => w.sent.filter((r) => r.path === '/sanctions').length;
+    expect(reads()).toBe(1);
+    await user.click(within(recent()).getByRole('link', { name: 'See all' }));
+    await waitFor(() => expect(router.path).toBe('/actions'));
+    await screen.findByRole('heading', { level: 2, name: 'All actions' });
+    await waitFor(() => expect(reads()).toBe(2));
+    await user.click(screen.getByRole('link', { name: 'Overview' }));
+    await waitFor(() => expect(router.path).toBe('/'));
+    await overview();
+    expect(reads()).toBe(3);
+  });
+
   it('has no panel and no link without history.read', async () => {
     const w = await hubWorld({ permissions: { 'history.read': 'owner' } });
     renderHub(w);

@@ -32,6 +32,15 @@ const errorTable = [...read('../src/errors.ts').matchAll(/^ {2}(\w+): \{ status:
 const MARKETING = /\b(blazing|seamless|powerful|robust|world-class|cutting-edge|revolutionary)\b/i;
 
 describe('packages/http/README.md', () => {
+  it('says GET /sanctions is an audited read (history.view, no target), not that it writes no row', () => {
+    const line = (start: string): string => http.split('\n').find((l) => l.startsWith(start)) ?? '';
+    const row = line('| `GET /sanctions');
+    expect(row).not.toMatch(/writes no audit row/);
+    expect(row).toMatch(/audits `history.view` with no target, once per successful read/);
+    expect(row).toMatch(/cannot be written, the read fails/);
+    expect(line('| `history.read`')).toMatch(/GET \/sanctions/);
+  });
+
   it('has the sections an adopter needs, setup first', () => {
     for (const heading of ['## Install', '## Set up', '## Auth', '## Permissions', '## Errors', '## Webhooks', '## Health probes', '## Security notes']) {
       expect(http, heading).toContain(heading);

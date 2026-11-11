@@ -468,20 +468,30 @@ describe('9: an Undo is never pushed off by news', () => {
   });
 });
 
-describe('10: Recent actions follows the live loop', () => {
-  it('a sanction made by a teammate shows up when the queue notices a change', async () => {
+describe('10: Recent actions is read on open, not by the live loop (every read of GET /sanctions is an audited history.view)', () => {
+  it('a sanction made by a teammate does not make the Overview read the list again; the queue loop still notices it', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });
     const a = await w.file({ target: 'Alpha' });
     await started(w);
     const recent = screen.getByRole('region', { name: 'Recent actions' });
     expect(within(recent).getByText(/No actions yet/)).toBeInTheDocument();
+    expect(calls(w, '/sanctions')).toBe(1);
+    const changes = calls(w, '/changes');
     await w.sanction(a.person, 'warning', 1);
     await tick(5_000);
-    expect(within(recent).queryByText(/No actions yet/)).not.toBeInTheDocument();
-    expect(within(recent).getByText('Warning')).toBeInTheDocument();
-    const asked = calls(w, '/sanctions');
-    await tick(30_000);
-    expect(calls(w, '/sanctions')).toBe(asked);
+    // The loop saw the change (it asked /changes again) but the list was not read again: no second audited read.
+    expect(calls(w, '/changes')).toBeGreaterThan(changes);
+    await tick(60_000);
+    expect(calls(w, '/sanctions')).toBe(1);
+    expect(within(recent).getByText(/No actions yet/)).toBeInTheDocument();
+  });
+
+  it('reads once when it opens and not at all in between, however long the hub stays open', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    await started(w);
+    expect(calls(w, '/sanctions')).toBe(1);
+    await tick(120_000);
+    expect(calls(w, '/sanctions')).toBe(1);
   });
 });
 

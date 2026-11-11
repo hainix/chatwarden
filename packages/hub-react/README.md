@@ -508,6 +508,8 @@ and for each reporter shown (a reporter's record is kept for 5 minutes, so a rep
 when the role can read blocked lines (kept 5 minutes), and `policy.view` once per session (the rules are kept until the hub closes).
 Deciding writes `report.decide` and nothing else about the case. The queue list is one `report.view` row with no target, as before.
 
+**What the Overview and All actions cost in audited reads.** `GET /sanctions` writes one `history.view` row with no target each time it is read. The Overview's Recent actions is read once when the Overview opens and not again by itself: it does not follow the live queue, so a teammate's decision shows there the next time the Overview is opened, or in "See all". All actions reads when it opens, once for each page a moderator asks for with "Load more", and once more when the filter changes. Nothing reads on a timer: the only repeating call is `GET /changes`, which is not audited.
+
 ### Terms, Blocked, Rule gaps, Audit and the Guide
 
 **Words stay hidden.** A blocked word is hidden until a moderator chooses to see it, on every screen that holds one. On Terms, "Show words" (off by default)
