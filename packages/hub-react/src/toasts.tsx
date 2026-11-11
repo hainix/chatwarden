@@ -29,9 +29,26 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const controller = useOptionalController();
   const tRef = useRef(t);
   tRef.current = t;
-  const own = useMemo<ToastStore | null>(() => (controller === null ? createToastStore({ words: () => tRef.current }) : null), [controller]);
-  useEffect(() => (own === null ? undefined : () => own.dispose()), [own]);
-  const store = (controller?.toasts ?? own) as ToastStore;
+  const alone = controller === null;
+  const make = (): ToastStore => createToastStore({ words: () => tRef.current });
+  const [own, setOwn] = useState<ToastStore | null>(() => (alone ? make() : null));
+  // A store of its own is disposed with the host. StrictMode runs that cleanup once in development and then mounts again, so a
+  // disposed store is replaced rather than left dead.
+  const disposed = useRef(false);
+  useEffect(() => {
+    if (!alone) return undefined;
+    if (disposed.current) {
+      disposed.current = false;
+      setOwn(make());
+      return undefined;
+    }
+    return () => {
+      disposed.current = true;
+      own?.dispose();
+    };
+    // `make` only reads a ref.
+  }, [alone, own]);
+  const store = controller?.toasts ?? (own as ToastStore);
   const shown = useStore(store);
   const api = useMemo<Toasts>(() => ({ push: store.push, hold: store.hold, dismiss: store.dismiss }), [store]);
 

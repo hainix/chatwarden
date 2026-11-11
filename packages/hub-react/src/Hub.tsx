@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { HubClient, HubError } from './client.js';
 import { CaseProvider } from './case/CaseContext.js';
@@ -27,7 +27,7 @@ import { ShortcutSheet } from './shell/ShortcutSheet.js';
 import { TopBar } from './shell/TopBar.js';
 import { ControllerContext } from './controllerContext.js';
 import { createHubController } from './headless/controller.js';
-import type { HubController } from './headless/controller.js';
+import type { HubController, HubControllerOptions } from './headless/controller.js';
 import { shortcutFor } from './shortcuts.js';
 import { ToastProvider } from './toasts.js';
 import type { Me, PermissionKey } from './types.js';
@@ -62,6 +62,8 @@ export interface HubProps {
   mode?: HubMode;
 }
 
+/** `useLayoutEffect` where there is a page to lay out; on a server (which runs no effects) a plain effect, so React 18 does not warn. */
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 const noopSubscribe = (): (() => void) => () => undefined;
 const cx = (...names: Array<string | false | undefined>): string => names.filter(Boolean).join(' ');
 
@@ -77,22 +79,25 @@ function clientId(client: object): number {
   return id;
 }
 
-/** One controller for as long as the hub is mounted with this client. A controller that was disposed (StrictMode runs the cleanup once, in development) is replaced. */
-function useHubController(client: HubClient, now: () => number): HubController {
-  const [made, setMade] = useState(() => ({ client, controller: createHubController({ client, now }) }));
+/**
+ * One controller for as long as the hub is mounted with this client. A controller that was disposed (StrictMode runs the cleanup
+ * once, in development) is replaced. The router is the controller's host: it says which report is open and brings the moderator to one.
+ */
+function useHubController(client: HubClient, make: () => HubControllerOptions): HubController {
+  const [made, setMade] = useState(() => ({ client, controller: createHubController(make()) }));
   let current = made;
   if (made.client !== client) {
-    current = { client, controller: createHubController({ client, now }) };
+    current = { client, controller: createHubController(make()) };
     setMade(current);
   }
   const controller = current.controller;
   useEffect(() => {
     if (controller.disposed) {
-      setMade({ client, controller: createHubController({ client, now }) });
+      setMade({ client, controller: createHubController(make()) });
       return undefined;
     }
     return () => controller.dispose();
-    // `now` reads a ref; a new client makes a new controller.
+    // `make` reads refs; a new client makes a new controller.
   }, [controller]);
   return controller;
 }
@@ -124,20 +129,29 @@ export function Hub({ client, t: tProp, locale = 'en', router: routerProp, theme
   routerRef.current = router;
   const nowRef = useRef(now ?? Date.now);
   nowRef.current = now ?? Date.now;
-  // One controller per hub: the session cache, the toasts and (as the hub is moved onto it) every other piece of state that does not
-  // belong to React. It is disposed with the hub, which sends a decision that is still held.
-  const controller = useHubController(client, () => nowRef.current());
-  controller.configure({
-    t,
-    // Where the moderator is looking, and the way to bring them to a report: the router's.
-    openReport: () => {
-      const at = parseRoute(routerRef.current.path);
-      return at.name === 'report' ? at.id : null;
+  const tRef = useRef(t);
+  tRef.current = t;
+  // One controller per hub: the session cache, the toasts, the live queue, claims and decisions. It is disposed with the hub, which
+  // sends a decision that is still held.
+  const controller = useHubController(client, () => ({
+    client,
+    now: () => nowRef.current(),
+    t: tRef.current,
+    host: {
+      openReport: () => {
+        const at = parseRoute(routerRef.current.path);
+        return at.name === 'report' ? at.id : null;
+      },
+      show: (id) => routerRef.current.navigate(buildPath({ name: 'report', id })),
     },
-    show: (id) => routerRef.current.navigate(buildPath({ name: 'report', id })),
-  });
-  // Who is signed in, once `GET /me` has answered: the controller needs it for claims and for the "mine" filter. Nothing listens for it.
-  if (me.data !== undefined) controller.identify(me.data);
+  }));
+  // The controller is told the words and who is signed in in a layout effect, not while rendering: a component that listens to
+  // `controller.me` must not be updated during another's render. A layout effect runs before any passive effect, so the effects of
+  // the screens below (which open the case and start the queue) already find it told.
+  useIsomorphicLayoutEffect(() => {
+    controller.configure({ t });
+    if (me.data !== undefined) controller.identify(me.data);
+  }, [controller, t, me.data]);
   const session = controller.session;
   const value = useMemo<HubContextValue | null>(() => {
     if (me.data === undefined) return null;

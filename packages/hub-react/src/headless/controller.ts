@@ -32,15 +32,28 @@ export interface HubControllerOptions {
   page?: Partial<PageSource>;
   /** The words for toasts. Default: English. */
   t?: HubT;
+  /**
+   * Where the moderator is looking, and how to bring them somewhere: a host with a router says so here.
+   * @experimental
+   */
+  host?: HubHost;
+}
+
+/**
+ * What the controller asks of the host it runs in. Both are optional: without them the open case (see `open`) is "what the
+ * moderator is looking at", and bringing them to a report does nothing (the controller never navigates by itself).
+ * @experimental
+ */
+export interface HubHost {
+  /** The report the moderator has open right now, or null. Asked when a decision fails or is undone, to know whether they have moved on. */
+  openReport?: () => string | null;
+  /** Bring the moderator to a report: Undo of a case they left, "Open the case" on a failed decision, a case taken by Take next. */
+  show?: (reportId: string) => void;
 }
 
 /** What a host may change after the controller is made. */
 export interface HubControllerSettings {
   t?: HubT;
-  /** The report the moderator has open right now, or null. The hub's router answers this; default: the case opened with `open()`. */
-  openReport?: () => string | null;
-  /** Bring the moderator to a report (Undo, a failed decision on a case they left, Take next). Default: nothing. */
-  show?: (reportId: string) => void;
 }
 
 /** A decision to make. `name` is how the reported person is named in a toast (default their short tag); `snapshot` the form to give back on a failure. */
@@ -118,10 +131,11 @@ export function createHubController(options: HubControllerOptions): HubControlle
   const session = createSession(client, now);
   const queue = createLiveQueue({ client, now, timers, page, toasts, words: () => words, actor: () => me.getSnapshot()?.actor ?? '' });
 
-  const host = { openReport: null as (() => string | null) | null, show: (reportId: string): void => void reportId };
-  const canRead = (): boolean => me.getSnapshot()?.can['reports.read'] !== false;
-  const decisions = createDecisionStore({ client, toasts, queue: () => (canRead() ? queue : null), words: () => words, host: { openReport: () => host.openReport?.() ?? cases.opened.getSnapshot()?.reportId ?? null, show: (id) => host.show(id) } });
-  const cases = createCaseStore({ client, now, timers, page, toasts, words: () => words, queue: () => (canRead() ? queue : null), decisions, me: () => me.getSnapshot(), show: (id) => host.show(id) });
+  const host = options.host ?? {};
+  /** One answer to "can this role read reports": yes until we know who is signed in, then what the server's permission table says. */
+  const canRead = (who: Me | null = me.getSnapshot()): boolean => who === null || who.can['reports.read'] === true;
+  const decisions = createDecisionStore({ client, toasts, queue: () => (canRead() ? queue : null), words: () => words, host: { openReport: () => host.openReport?.() ?? cases.opened.getSnapshot()?.reportId ?? null, show: (id) => host.show?.(id) } });
+  const cases = createCaseStore({ client, now, timers, page, toasts, words: () => words, queue: () => (canRead() ? queue : null), decisions, me: () => me.getSnapshot(), show: (id) => host.show?.(id) });
 
   const identify = (who: Me): void => {
     if (!disposed) me.set(who);
@@ -146,7 +160,7 @@ export function createHubController(options: HubControllerOptions): HubControlle
         }
         identify(who);
       }
-      if (!disposed && who.can['reports.read'] === true) await queue.start();
+      if (!disposed && canRead(who)) await queue.start();
       return { ok: true, value: who };
     },
     open: cases.open,
@@ -162,8 +176,6 @@ export function createHubController(options: HubControllerOptions): HubControlle
     dismiss: (reportId) => decisions.dismiss(reportId),
     configure(patch) {
       if (patch.t !== undefined) words = patch.t;
-      if (patch.openReport !== undefined) host.openReport = patch.openReport;
-      if (patch.show !== undefined) host.show = patch.show;
     },
     get disposed() {
       return disposed;

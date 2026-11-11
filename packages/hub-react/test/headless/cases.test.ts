@@ -351,8 +351,8 @@ describe('leaving a case', () => {
 });
 
 describe('one case per person', () => {
-  async function two() {
-    const r = await rig();
+  async function two(options: Parameters<typeof rig>[0] = {}) {
+    const r = await rig(options);
     const a = await r.w.file({ target: 'Alpha', reporter: 'R1' });
     const b = await r.w.file({ target: 'Alpha', reporter: 'R2' });
     await r.controller.start();
@@ -424,9 +424,8 @@ describe('one case per person', () => {
   });
 
   it('continueFrom goes to the same person\'s next open report, keeping the claim, and takes the next case only when there is none', async () => {
-    const { r, a, b } = await two();
     const shown: string[] = [];
-    r.controller.configure({ show: (id) => shown.push(id) });
+    const { r, a, b } = await two({ controller: { host: { show: (id) => shown.push(id) } } });
     r.controller.open(a.id);
     await settle();
     void r.controller.decide({ reportId: a.id, person: a.person, input: OK });
@@ -443,9 +442,8 @@ describe('one case per person', () => {
 
 describe('take next', () => {
   it('claims the longest-waiting unclaimed case, says which report to open, and shows it', async () => {
-    const { r, a } = await ready();
     const shown: string[] = [];
-    r.controller.configure({ show: (id) => shown.push(id) });
+    const { r, a } = await ready({ controller: { host: { show: (id) => shown.push(id) } } });
     const taken = await r.controller.takeNext();
     expect(taken).toEqual({ status: 'taken', reportId: a.id, person: a.person });
     expect(group(r, a.person)?.claim?.by).toBe(ME);
@@ -629,9 +627,8 @@ describe('the open case store', () => {
   });
 
   it('is what the controller means by "the open report" until the host says otherwise', async () => {
-    const { r, a } = await ready();
     const shown: string[] = [];
-    r.controller.configure({ show: (id) => shown.push(id) });
+    const { r, a } = await ready({ controller: { host: { show: (id) => shown.push(id) } } });
     r.controller.open(a.id);
     await settle();
     void r.controller.decide({ reportId: a.id, person: a.person, input: OK });

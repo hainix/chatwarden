@@ -491,6 +491,20 @@ describe('the live queue: snapshots', () => {
     expect(queue(r)).toBe(first);
   });
 
+  it('after dispose a read asks nothing and a finished Take next arms no cooldown timer', async () => {
+    const r = await started();
+    await r.w.file({ target: 'Alpha' });
+    await r.controller.start();
+    await settle();
+    r.controller.dispose();
+    const before = r.w.sent.length;
+    expect((await r.controller.queue.reload()).map((g) => g.person)).toHaveLength(1);
+    r.controller.queue.beginTake();
+    r.controller.queue.endTake(500);
+    expect(r.w.sent.length).toBe(before);
+    expect(r.timers.count()).toBe(0);
+  });
+
   it('dispose stops the loop, and a later start does nothing', async () => {
     const r = await started();
     await r.controller.start();

@@ -318,6 +318,8 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     setFilter: (p) => commit((prev) => (Object.entries(p).every(([k, v]) => prev.filter[k as keyof QueueFilter] === v) ? prev : { ...prev, filter: { ...prev.filter, ...p } })),
     showIncoming: () => commit((prev) => ({ ...prev, rows: adopt(prev.groups), incoming: 0 })),
     async reload() {
+      // A disposed hub asks nothing more: a decision it sent on the way out has been sent, and there is nobody to show the queue to.
+      if (disposed) return store.getSnapshot().groups;
       try {
         const groups = await read('adopt');
         succeeded();
@@ -364,6 +366,10 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     },
     endTake(cooldownMs) {
       timers.clearTimeout(takeTimer);
+      if (disposed) {
+        takeBusy = false;
+        return;
+      }
       takeTimer = timers.setTimeout(() => {
         takeBusy = false;
       }, cooldownMs);

@@ -8,7 +8,7 @@
 // Every store has `subscribe(listener)` and `getSnapshot()`, and a snapshot is the same object until something changes.
 
 export { createHubController } from './controller.js';
-export type { DecideCommand, HubController, HubControllerOptions, HubControllerSettings } from './controller.js';
+export type { DecideCommand, HubController, HubControllerOptions, HubControllerSettings, HubHost } from './controller.js';
 
 // The store contract, and what the controller needs from its runtime
 export { createStore } from './store.js';

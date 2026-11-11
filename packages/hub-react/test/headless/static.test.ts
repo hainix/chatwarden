@@ -33,7 +33,6 @@ function specifiers(file: string, text = readFileSync(file, 'utf8')): string[] {
 }
 
 const isReact = (s: string): boolean => s === 'react' || s.startsWith('react/') || s === 'react-dom' || s.startsWith('react-dom/') || s === 'scheduler';
-const isTsx = (s: string): boolean => /\.tsx(\.js)?$/.test(s);
 
 /** Resolves a relative `.js` specifier from `from` to the TypeScript file it was built from, or null for a package. */
 function resolveLocal(from: string, spec: string): string | null {
@@ -78,17 +77,16 @@ describe('src/headless imports no React', () => {
     expect(files.filter((f) => f.endsWith('.tsx'))).toEqual([]);
   });
 
-  it.each(files.map((f) => [f.slice(src.length + 1).replaceAll('\\', '/'), f] as const))('%s imports neither react nor react-dom nor a .tsx file', (_name, file) => {
-    const specs = specifiers(file);
-    expect(specs.filter(isReact)).toEqual([]);
-    expect(specs.filter(isTsx)).toEqual([]);
+  // Every file, not only the ones the entry exports: a file that nothing imports yet must not pull React in either. Specifiers in TS
+  // ESM are written `./x.js`, so a `.tsx` is found by resolving the import, not by reading its text.
+  it.each(files.map((f) => [f.slice(src.length + 1).replaceAll('\\', '/'), f] as const))('%s imports no React, and nothing it reaches does: no react, react-dom or .tsx file in its whole import closure', (_name, file) => {
+    const closure = reach(file);
+    expect(closure.filter((f) => f.endsWith('.tsx'))).toEqual([]);
+    expect(closure.filter((f) => specifiers(f).some(isReact)).map((f) => f.slice(src.length + 1).replaceAll('\\', '/'))).toEqual([]);
   });
 
-  it('and nothing it reaches does either: the whole closure of imports is free of React and .tsx', () => {
-    const closure = reach(join(headless, 'index.ts'));
-    expect(closure.length).toBeGreaterThan(10);
-    expect(closure.filter((f) => f.endsWith('.tsx'))).toEqual([]);
-    expect(closure.filter((f) => specifiers(f).some(isReact))).toEqual([]);
+  it('the entry reaches enough to be a real check (control)', () => {
+    expect(reach(join(headless, 'index.ts')).length).toBeGreaterThan(10);
   });
 
   it('the scan catches what it should (control)', () => {
@@ -99,6 +97,7 @@ describe('src/headless imports no React', () => {
       'react/jsx-runtime',
     ]);
     expect(specifiers('x.ts', "import type { ReactNode } from 'react';").filter(isReact)).toEqual(['react']);
-    expect(specifiers('x.ts', "import { Toast } from './toasts.tsx';").filter(isTsx)).toEqual(['./toasts.tsx']);
+    // A `.js` specifier that is really a .tsx file (the React toasts) is found by resolving it.
+    expect(resolveLocal(join(src, 'headless', 'x.ts'), '../toasts.js')?.endsWith('toasts.tsx')).toBe(true);
   });
 });

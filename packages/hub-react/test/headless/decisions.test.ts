@@ -152,8 +152,7 @@ describe('deciding: Undo', () => {
 
   it('a case Undo brings back is shown to a moderator who went on to another one', async () => {
     const shown: string[] = [];
-    const { r, a, cmd } = await ready();
-    r.controller.configure({ show: (id) => shown.push(id), openReport: () => 'some-other-report' });
+    const { r, a, cmd } = await ready({ controller: { host: { show: (id) => shown.push(id), openReport: () => 'some-other-report' } } });
     void r.controller.decide(cmd);
     r.controller.undo(a.id);
     expect(shown).toEqual([a.id]);
@@ -161,8 +160,9 @@ describe('deciding: Undo', () => {
 
   it('and not when they are still looking at it', async () => {
     const shown: string[] = [];
-    const { r, a, cmd } = await ready();
-    r.controller.configure({ show: (id) => shown.push(id), openReport: () => a.id });
+    let looking: string | null = null;
+    const { r, a, cmd } = await ready({ controller: { host: { show: (id) => shown.push(id), openReport: () => looking } } });
+    looking = a.id;
     void r.controller.decide(cmd);
     r.controller.undo(a.id);
     expect(shown).toEqual([]);
@@ -192,6 +192,8 @@ describe('deciding: sent once, whichever comes first', () => {
       if (first === 'toast dismissed') r.controller.toasts.dismiss(r.controller.toasts.getSnapshot().find((t) => t.held)?.id ?? -1);
       await settle();
       expect(decides(r)).toBe(1);
+      // However it was flushed, the one request carries keepalive: the page may be going away.
+      expect(r.w.sent.find((q) => /decide$/.test(q.path))?.keepalive).toBe(true);
       expect(await outcome).toMatchObject({ status: 'done' });
       r.page.close();
       r.page.hide();
@@ -201,6 +203,21 @@ describe('deciding: sent once, whichever comes first', () => {
       expect(status(r, a.id)).toBe('done');
     });
   }
+
+  it('dispose with a decision held: that one request goes (keepalive), and nothing is asked after it, no timer is left', async () => {
+    const { r, a, cmd } = await ready();
+    void r.controller.decide(cmd);
+    const before = r.w.sent.length;
+    r.controller.dispose();
+    await settle();
+    await r.timers.advance(UNDO_MS * 3);
+    await settle();
+    const after = r.w.sent.slice(before);
+    expect(after.map((q) => `${q.method} ${q.path}`)).toEqual([`POST /reports/${a.id}/decide`]);
+    expect(after[0]?.keepalive).toBe(true);
+    expect(r.timers.count()).toBe(0);
+    expect(status(r, a.id)).toBe('done');
+  });
 
   it('a send that closes the page carries keepalive', async () => {
     const { r, cmd } = await ready();
@@ -297,8 +314,7 @@ describe('deciding: failure, retry and restore', () => {
 
   it('a case that is not open says so, with a way back; one that is open says nothing', async () => {
     const shown: string[] = [];
-    const away = await ready();
-    away.r.controller.configure({ show: (id) => shown.push(id), openReport: () => 'elsewhere' });
+    const away = await ready({ controller: { host: { show: (id) => shown.push(id), openReport: () => 'elsewhere' } } });
     fail(away.r);
     void away.r.controller.decide(away.cmd);
     await away.r.timers.advance(UNDO_MS);
@@ -308,8 +324,9 @@ describe('deciding: failure, retry and restore', () => {
     note?.action?.run();
     expect(shown).toEqual([away.a.id]);
 
-    const here = await ready();
-    here.r.controller.configure({ openReport: () => here.a.id });
+    let hereId: string | null = null;
+    const here = await ready({ controller: { host: { openReport: () => hereId } } });
+    hereId = here.a.id;
     fail(here.r);
     void here.r.controller.decide(here.cmd);
     await here.r.timers.advance(UNDO_MS);
@@ -317,9 +334,8 @@ describe('deciding: failure, retry and restore', () => {
   });
 
   it('someone else holding the case: the failure puts their claim on screen and names them', async () => {
-    const { r, a, cmd } = await ready();
+    const { r, a, cmd } = await ready({ controller: { host: { openReport: () => 'elsewhere' } } });
     await r.w.clientFor('bea@example.test').claimCase(a.person);
-    r.controller.configure({ openReport: () => 'elsewhere' });
     void r.controller.decide(cmd);
     await r.timers.advance(UNDO_MS);
     const s = entry(r, a.id)?.state;
@@ -426,6 +442,18 @@ describe('deciding: the store', () => {
     expect(hasLeft(e('done'))).toBe(true);
     expect(hasLeft(e('done'), false)).toBe(false);
     expect(['failed', 'conflict', 'undone'].map((s) => hasLeft(e(s as never)))).toEqual([false, false, false]);
+  });
+
+  it('one answer to "can this role read reports": a permission table without the key reads nothing, in start() and after a decision alike', async () => {
+    const r = await rig();
+    const a = await r.w.file({ target: 'Alpha' });
+    const me = await r.w.client.me();
+    r.controller.identify({ ...me, can: {} as never });
+    await r.controller.start();
+    await r.controller.decide({ reportId: a.id, person: a.person, input: OK }, { hold: false });
+    expect(r.count('GET', '/changes')).toBe(0);
+    expect(r.count('GET', '/reports')).toBe(0);
+    expect(r.controller.decisions.entry(a.id)?.state.status).toBe('done');
   });
 
   it('a person with no claim and no queue yet can still be decided (no queue read needed)', async () => {
