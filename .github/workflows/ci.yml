@@ -51,9 +51,10 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
       - if: steps.pw-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-      - if: steps.pw-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
+        run: npx playwright install chromium
+      # System packages are best-effort: the runner image already has Chromium's libraries, and an apt mirror outage
+      # (2026-11-11) must not fail CI. A library that is really missing still fails the browser tests (CW_REQUIRE_BROWSER).
+      - run: npx playwright install-deps chromium || echo "::warning::playwright install-deps failed; using the runner image's libraries"
       - run: npm run test --workspace site
       - run: npm run build --workspace site
       # The build re-renders the OG image and icons. If they differ from the committed PNGs, fail: re-render locally
@@ -86,9 +87,10 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
       - if: steps.pw-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
-      - if: steps.pw-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium
+        run: npx playwright install chromium
+      # System packages are best-effort: the runner image already has Chromium's libraries, and an apt mirror outage
+      # (2026-11-11) must not fail CI. A library that is really missing still fails the browser tests (CW_REQUIRE_BROWSER).
+      - run: npx playwright install-deps chromium || echo "::warning::playwright install-deps failed; using the runner image's libraries"
       - run: npm run smoke:browser --workspace @chatwarden/hub-element
 
   smoke:

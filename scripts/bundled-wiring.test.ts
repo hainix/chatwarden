@@ -44,7 +44,10 @@ describe('the element\'s browser smoke runs in CI and in the release checks', ()
     expect(at, 'the smoke command').toBeGreaterThan(-1);
     const job = ci.slice(ci.lastIndexOf('\n  ', ci.lastIndexOf('runs-on', at)) - 200, at + 200);
     expect(job).toContain('CW_REQUIRE_BROWSER');
-    expect(ci.slice(0, at)).toContain('npx playwright install --with-deps chromium');
+    // apt is best-effort (an apt mirror outage on 2026-11-11 failed every browser job); the image has Chromium's libraries.
+    expect(ci.slice(0, at)).toContain('run: npx playwright install chromium\n');
+    expect(ci.slice(0, at)).toContain('npx playwright install-deps chromium || echo "::warning::');
+    expect(ci).not.toContain('install --with-deps');
     expect(ci.slice(0, at)).toContain('actions/cache@v4');
     expect(ci).toMatch(/CW_REQUIRE_BROWSER: '?1'?/);
   });
@@ -57,7 +60,9 @@ describe('the element\'s browser smoke runs in CI and in the release checks', ()
     const smoke = release.indexOf('npm run smoke:browser --workspace @chatwarden/hub-element');
     expect(smoke).toBeGreaterThan(release.indexOf('npm test'));
     expect(smoke).toBeLessThan(release.indexOf('npm run check:pack'));
-    expect(release).toContain('npx playwright install --with-deps chromium');
+    expect(release).toContain('run: npx playwright install chromium\n');
+    expect(release).toContain('npx playwright install-deps chromium || echo "::warning::');
+    expect(release).not.toContain('install --with-deps');
     expect(release).toMatch(/CW_REQUIRE_BROWSER: '?1'?/);
   });
 
