@@ -4,6 +4,7 @@ import type { Claim, ReportCategory, ReportSummary } from './types.js';
 /**
  * Everything waiting on one reported person. The unit of work in the queue is a person, not a report: the kit's queue is a flat,
  * paged list of reports, and this is the view the hub builds from it.
+ * @experimental
  */
 export interface QueueGroup {
   /** The reported person's staff ref (opaque). Show {@link personTag}, never this. */
@@ -49,6 +50,7 @@ export interface ReportedReason {
   label: string | null;
 }
 
+/** @experimental */
 export type QueueSort = 'latest' | 'oldest' | 'reports';
 
 const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
@@ -60,6 +62,7 @@ const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt 
  * - `oldest`: the longest-waiting first (by the oldest open report; a group with none open uses its oldest report).
  * - `reports`: the most reports first.
  * A tie is broken by the person ref, so the order is stable.
+ * @experimental
  */
 export function groupQueue(items: readonly ReportSummary[], options: { sort?: QueueSort } = {}): QueueGroup[] {
   const byId = new Map<string, ReportSummary>();
@@ -146,7 +149,10 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
 
 const NONE: ReadonlySet<string> = new Set();
 
-/** The next report to open about a person once `exceptId` is decided: the oldest other open one, and how many are left. */
+/**
+ * The next report to open about a person once `exceptId` is decided: the oldest other open one, and how many are left.
+ * @experimental
+ */
 export interface NextReport {
   id: string;
   category: ReportCategory;
@@ -159,6 +165,7 @@ export interface NextReport {
  * One case per person: the report to go on to after deciding `exceptId`, from the live queue (which holds open reports only). The
  * oldest other open report of the same person, or null when it was their last. Entries are newest first, so the oldest is the last.
  * This is the one place the rule lives: the notice, "Decide and take next" and Ctrl+Enter all ask it.
+ * @experimental
  */
 export function nextOpenReport(groups: readonly QueueGroup[], person: string, exceptId: string, decided: ReadonlySet<string> = NONE): NextReport | null {
   const group = groups.find((g) => g.person === person);
@@ -169,6 +176,7 @@ export function nextOpenReport(groups: readonly QueueGroup[], person: string, ex
   return oldest === undefined ? null : { ...oldest, left: others.length };
 }
 
+/** @experimental */
 export interface QueueFilter {
   claim: 'all' | 'unclaimed' | 'mine';
   /** @deprecated The hub no longer offers it (the reason a reporter chose is the filter); kept for embedders, and still applied and sent to take next. */
@@ -180,6 +188,7 @@ export interface QueueFilter {
 /**
  * The cases a moderator has asked to see: by who holds them (a lapsed claim is nobody) and by category and by reason (a person with any report
  * in it). Order is kept; the input is not changed.
+ * @experimental
  */
 export function filterGroups(groups: readonly QueueGroup[], filter: QueueFilter, me: string, now: number): QueueGroup[] {
   return groups.filter((g) => {
@@ -193,6 +202,7 @@ export function filterGroups(groups: readonly QueueGroup[], filter: QueueFilter,
   });
 }
 
+/** @experimental */
 export interface QueueStats {
   /** People with something open. */
   people: number;
@@ -204,7 +214,10 @@ export interface QueueStats {
   oldestGroup: QueueGroup | null;
 }
 
-/** The Overview's numbers, from groups built from the open queue. */
+/**
+ * The Overview's numbers, from groups built from the open queue.
+ * @experimental
+ */
 export function queueStats(groups: readonly QueueGroup[], now: number): QueueStats {
   let people = 0;
   let reports = 0;

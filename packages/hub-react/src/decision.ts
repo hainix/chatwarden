@@ -114,6 +114,7 @@ export interface Draft {
 
 export type UiVerdict = 'fair' | 'not_a_problem' | 'bad_faith';
 
+/** @experimental */
 export interface DecisionForm {
   verdict: UiVerdict | null;
   evidence: string;
@@ -121,6 +122,7 @@ export interface DecisionForm {
   actions: Draft[];
 }
 
+/** @experimental */
 export const emptyForm = (): DecisionForm => ({ verdict: null, evidence: '', reason: '', actions: [] });
 
 /** A new action for `person`; `rule` is the rule to start from (the report's), or `''`. */

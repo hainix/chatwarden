@@ -18,6 +18,7 @@ import type { Hold, Toasts } from './toasts.js';
 // Closing the hub sends a held decision at once (the toast store flushes on `pagehide`, when the tab is hidden and on dispose);
 // the send always carries `keepalive`, so the page going away does not cancel it.
 
+/** @experimental */
 export type DecisionState =
   /** In its Undo window: nothing has been sent. */
   | { status: 'held' }
@@ -30,6 +31,7 @@ export type DecisionState =
   /** Undone: nothing was sent, and the case comes back as it was. */
   | { status: 'undone' };
 
+/** @experimental */
 export interface DecisionEntry {
   reportId: string;
   person: string;
@@ -43,16 +45,21 @@ export interface DecisionEntry {
   state: DecisionState;
 }
 
-/** True while a decision is held for its Undo window or being sent: it is out of the moderator's hands. */
+/**
+ * True while a decision is held for its Undo window or being sent: it is out of the moderator's hands.
+ * @experimental
+ */
 export const isWaiting = (entry: DecisionEntry | undefined): boolean => entry !== undefined && (entry.state.status === 'held' || entry.state.status === 'sending');
 
 /**
  * True while the case should be off the screen: the decision is waiting, or it was sent in this visit. (An Undo, a failure or a
  * conflict brings the case back.) "Sent" counts only while the case as loaded is still open: a case that is read as closed is a
  * later visit to a decided case, and it is shown whole, with its result.
+ * @experimental
  */
 export const hasLeft = (entry: DecisionEntry | undefined, reportOpen = true): boolean => isWaiting(entry) || (entry?.state.status === 'done' && reportOpen);
 
+/** @experimental */
 export interface SubmitDecision {
   reportId: string;
   person: string;
@@ -61,7 +68,10 @@ export interface SubmitDecision {
   snapshot: DecisionForm;
 }
 
-/** How a decision ended. A decision that is held or being sent has not ended: its promise waits. */
+/**
+ * How a decision ended. A decision that is held or being sent has not ended: its promise waits.
+ * @experimental
+ */
 export type DecisionOutcome =
   | { status: 'done'; replay: boolean; groups: DecideResult['groups'] }
   /** The server did not take it: the entry keeps the error and what was typed, and `retry` sends it again. */
@@ -71,6 +81,7 @@ export type DecisionOutcome =
   /** Undone during the hold: nothing was sent. */
   | { status: 'undone' };
 
+/** @experimental */
 export interface DecideOptions {
   /**
    * The Undo window. `true` (default): 5 seconds. A number: that many milliseconds. `false`: send at once, with no Undo (a script,
@@ -79,6 +90,7 @@ export interface DecideOptions {
   hold?: boolean | number;
 }
 
+/** @experimental */
 export interface DecisionStore extends Store<ReadonlyMap<string, DecisionEntry>> {
   /** What is going on with a report's decision, or undefined. */
   entry: (reportId: string) => DecisionEntry | undefined;
@@ -101,7 +113,10 @@ export interface DecisionStore extends Store<ReadonlyMap<string, DecisionEntry>>
   dismiss: (reportId: string) => void;
 }
 
-/** Where the moderator is looking: the controller's host (the router, in the React hub) tells it. */
+/**
+ * Where the moderator is looking: the controller's host (the router, in the React hub) tells it.
+ * @experimental
+ */
 export interface DecisionHost {
   /** The report the moderator has open right now, or null. */
   openReport: () => string | null;
@@ -109,6 +124,7 @@ export interface DecisionHost {
   show: (reportId: string) => void;
 }
 
+/** @experimental */
 export interface DecisionStoreOptions {
   client: HubClient;
   toasts: Toasts;
@@ -133,6 +149,7 @@ const outcomeOf = (state: DecisionState): DecisionOutcome | null => {
   }
 };
 
+/** @experimental */
 export function createDecisionStore(options: DecisionStoreOptions): DecisionStore {
   const { client, toasts, host } = options;
   const store = createStore<ReadonlyMap<string, DecisionEntry>>(new Map());

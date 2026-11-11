@@ -326,7 +326,33 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
   `RecentActions`, `LadderSettings` and `ReportingSettings`, their `*Props` types, `PieceProps` and `PieceLinks`
 - the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `usePolicy`, and the types `HubRead`,
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
-- in `/headless`: `HubController.configure`, `HubControllerOptions.host`, and the types `HubHost` and `HubControllerSettings`
+- every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
+  includes `HubController.configure` and `HubControllerOptions.host`. The names are the same declarations the main entry re-exports (`createHubClient`,
+  `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
+  (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
+  - functions, values and classes:
+    `absoluteTime`, `actorInitial`, `actorName`, `browserPage`, `browserTimers`, `createAction`, `createCaseStore`,
+    `createDecisionStore`, `createHubClient`, `createHubController`, `createLiveQueue`, `createPagedList`, `createResource`,
+    `createSession`, `createStore`, `createT`, `createToastStore`, `emptyForm`, `en`, `fetchAll`, `fetchTransport`, `filterGroups`,
+    `formatDuration`, `groupQueue`, `hasLeft`, `holderOf`, `HubError`, `isWaiting`, `liveClaim`, `nextOpenReport`, `personTag`,
+    `queueStats`, `relativeTime`, `routerTransport`, `teamOf`, `toHubError`, `visibleRows`, `waitTone`
+  - constants:
+    `CLAIM_BEAT_MS`, `QUEUE_MAX_PAGES`, `QUEUE_PAGE`, `SESSION_REPORTERS_MAX`, `SESSION_TTL_MS`, `TAKE_COOLDOWN_MS`,
+    `TOAST_ERROR_MS`, `TOAST_MAX`, `TOAST_MS`, `UNDO_MS`, `VIEWING_BEAT_MS`
+  - types:
+    `ActionResult`, `ActionState`, `ActionStore`, `BlockedDays`, `BlockedLine`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
+    `ClaimResult`, `CloseGapInput`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
+    `DecisionEntry`, `DecisionForm`, `DecisionHost`, `DecisionOutcome`, `DecisionState`, `DecisionStore`, `DecisionStoreOptions`,
+    `ExceptionInput`, `ExceptionPatch`, `ExceptionRow`, `FetchTransportOptions`, `Handoff`, `Hold`, `HoldInput`, `Holder`,
+    `HubCatalog`, `HubClient`, `HubController`, `HubControllerOptions`, `HubControllerSettings`, `HubHost`, `HubParams`, `HubT`,
+    `HubText`, `ListAuditQuery`, `ListReportsQuery`, `ListSanctionsQuery`, `LiveQueueOptions`, `LiveQueueState`, `LiveQueueStore`,
+    `NextCase`, `NextReport`, `OpenCase`, `Page`, `PageSource`, `PagedListStore`, `PagedState`, `PersonHistory`, `PolicyDocs`,
+    `PolicyFormat`, `PolicySamples`, `PolicySaved`, `QueueFilter`, `QueueGroup`, `QueueHold`, `QueueSort`, `QueueStats`, `Reason`,
+    `ReportDetail`, `ReportStatus`, `ResourceState`, `ResourceStore`, `RouterTransportOptions`, `SanctionInput`, `SanctionRow`,
+    `SanctionSource`, `Session`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermInput`,
+    `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
+    `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
+- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`
 
 ## Options
 

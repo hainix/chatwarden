@@ -37,7 +37,7 @@ describe('the section', () => {
 
   it('lists exactly the names the API lock marks @experimental', () => {
     const list = section.slice(section.indexOf('### Experimental until 0.2'));
-    const named = new Set([...list.matchAll(/`([A-Za-z*][A-Za-z.*]*)`/g)].map((m) => m[1] as string));
+    const named = new Set([...list.matchAll(/`([A-Za-z*][A-Za-z0-9_.*]*)`/g)].map((m) => m[1] as string));
     const marked = exportsOf('packages/hub-react/src/index.ts').experimental;
     const wildcard = [...named].filter((n) => n.startsWith('*'));
     // `*Props` stands for each piece's props type; everything else is named.

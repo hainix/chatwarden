@@ -25,6 +25,7 @@ export interface KeyLike {
  * What a key press asks for, or null. Never while typing, while an input method is composing, or when something has already
  * handled the key. Ctrl or Cmd with K opens the command bar; every other combination with Ctrl, Cmd or Alt belongs to the
  * browser or the system and is left alone. `N` does not repeat, so holding it cannot take case after case.
+ * @experimental
  */
 export function shortcutFor(e: KeyLike): ShortcutAction | null {
   if (e.defaultPrevented === true || e.isComposing === true || isTypingTarget(e)) return null;

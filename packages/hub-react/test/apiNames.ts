@@ -17,6 +17,8 @@ export interface Names {
   experimental: string[];
   /** The `@experimental` members of the exports (`HubController.configure`), as `Export.member`. */
   experimentalMembers: string[];
+  /** The exports that are re-exports of another package's declaration (the kit's types): this package cannot mark those. */
+  foreign: string[];
 }
 
 // One program for all of them, built once: reading each entry's exports is then a lookup, not a compile.
@@ -58,13 +60,17 @@ export function exportsOf(entry: string): Names {
   const types: string[] = [];
   const experimental: string[] = [];
   const experimentalMembers: string[] = [];
+  const foreign: string[] = [];
+  const ownSrc = new RegExp('/packages/(hub-react|player-react)/src/');
   const marked = (symbol: ts.Symbol): boolean => symbol.getJsDocTags(checker).some((tag) => tag.name === 'experimental');
   for (const exported of checker.getExportsOfModule(moduleSymbol)) {
     const real = (exported.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(exported) : exported;
     if ((real.flags & ts.SymbolFlags.Value) !== 0) values.push(exported.name);
     else types.push(exported.name);
     if (marked(real)) experimental.push(exported.name);
+    const where = real.declarations?.[0]?.getSourceFile().fileName.replaceAll(String.fromCharCode(92), '/') ?? '';
+    if (!ownSrc.test(where)) foreign.push(exported.name);
     for (const [name, member] of real.members ?? []) if (marked(member)) experimentalMembers.push(`${exported.name}.${String(name)}`);
   }
-  return { values: values.sort(), types: types.sort(), experimental: experimental.sort(), experimentalMembers: experimentalMembers.sort() };
+  return { values: values.sort(), types: types.sort(), experimental: experimental.sort(), experimentalMembers: experimentalMembers.sort(), foreign: foreign.sort() };
 }

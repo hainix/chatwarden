@@ -4,7 +4,10 @@ import type { HubError } from '../client.js';
 // there is none (a worker, Node, a native shell). Both default to the browser's own, looked up when called, so a test's fake timers
 // and a test's events reach the controller.
 
-/** The timers, and the clock that measures them. Every member is optional in `createHubController({ schedule })`. */
+/**
+ * The timers, and the clock that measures them. Every member is optional in `createHubController({ schedule })`.
+ * @experimental
+ */
 export interface Timers {
   setTimeout(run: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
@@ -14,6 +17,7 @@ export interface Timers {
   now(): number;
 }
 
+/** @experimental */
 export const browserTimers: Timers = {
   setTimeout: (run, ms) => globalThis.setTimeout(run, ms),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as Parameters<typeof clearTimeout>[0]),
@@ -22,7 +26,10 @@ export const browserTimers: Timers = {
   now: () => Date.now(),
 };
 
-/** What the page is doing: whether anyone is looking, whether there is a network, and when the page is going away. */
+/**
+ * What the page is doing: whether anyone is looking, whether there is a network, and when the page is going away.
+ * @experimental
+ */
 export interface PageSource {
   /** False while the tab is hidden. */
   visible(): boolean;
@@ -43,7 +50,10 @@ const listen = (target: 'document' | 'window', type: string, listener: () => voi
   return () => t.removeEventListener(type, listener);
 };
 
-/** The browser's page: `document.visibilityState`, `navigator.onLine`, and their events. Outside a browser: always visible, always online. */
+/**
+ * The browser's page: `document.visibilityState`, `navigator.onLine`, and their events. Outside a browser: always visible, always online.
+ * @experimental
+ */
 export const browserPage: PageSource = {
   visible: () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
   online: () => typeof navigator === 'undefined' || navigator.onLine !== false,
@@ -53,5 +63,8 @@ export const browserPage: PageSource = {
   onOffline: (listener) => listen('window', 'offline', listener),
 };
 
-/** How a command answers: the value, or the error. A command never throws for an outcome it expects (a 409, a 404, no network). */
+/**
+ * How a command answers: the value, or the error. A command never throws for an outcome it expects (a 409, a 404, no network).
+ * @experimental
+ */
 export type ActionResult<R> = { ok: true; value: R } | { ok: false; error: HubError };

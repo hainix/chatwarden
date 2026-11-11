@@ -27,15 +27,22 @@ export type { PolicyLayer, PolicySection, PolicyState };
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 export type { Me, PermissionKey, ReportSummary, Role };
 
-/** One page of a list that pages with a cursor. `next` is null on the last page. */
+/**
+ * One page of a list that pages with a cursor. `next` is null on the last page.
+ * @experimental
+ */
 export interface Page<T> {
   items: T[];
   next: string | null;
 }
 
-/** The statuses the staff queue filters on. The hub's "All" leaves the filter out. */
+/**
+ * The statuses the staff queue filters on. The hub's "All" leaves the filter out.
+ * @experimental
+ */
 export type ReportStatus = 'open' | 'actioned' | 'dismissed';
 
+/** @experimental */
 export interface ListReportsQuery {
   status?: ReportStatus;
   /** Only reports that gave this reason (an id; the old `disruption` finds `griefing`), or `null` for the ones that gave none. */
@@ -44,14 +51,20 @@ export interface ListReportsQuery {
   limit?: number;
 }
 
-/** Who holds a case, since when, and until when (a claim lapses at `until` unless its holder keeps working: a heartbeat). */
+/**
+ * Who holds a case, since when, and until when (a claim lapses at `until` unless its holder keeps working: a heartbeat).
+ * @experimental
+ */
 export interface Claim {
   by: string;
   since: number;
   until: number;
 }
 
-/** `GET /reports/:id`: the report with each named person's counted history and the ladder's suggestion for the reported person. */
+/**
+ * `GET /reports/:id`: the report with each named person's counted history and the ladder's suggestion for the reported person.
+ * @experimental
+ */
 export interface ReportDetail {
   /** The report, with the label of the reason the reporter gave as it is now (`null`: none given, or an older server). */
   report: StaffReport & { reportedReasonLabel?: string | null };
@@ -63,26 +76,38 @@ export interface ReportDetail {
   claim: Claim | null;
 }
 
-/** `POST /cases/:ref/claim`. `tookOverFrom` is the previous holder when a senior moved a live claim, else null. */
+/**
+ * `POST /cases/:ref/claim`. `tookOverFrom` is the previous holder when a senior moved a live claim, else null.
+ * @experimental
+ */
 export interface ClaimResult {
   claim: Claim;
   tookOverFrom: string | null;
 }
 
-/** The case `POST /cases/next` handed out: the person, the report to open (their newest open one) and the claim now held. */
+/**
+ * The case `POST /cases/next` handed out: the person, the report to open (their newest open one) and the claim now held.
+ * @experimental
+ */
 export interface NextCase {
   person: string;
   reportId: string;
   claim: Claim;
 }
 
-/** `GET /changes`: the opaque token for the queue and claims, and whether it differs from `since`. */
+/**
+ * `GET /changes`: the opaque token for the queue and claims, and whether it differs from `since`.
+ * @experimental
+ */
 export interface Changes {
   token: string;
   changed: boolean;
 }
 
-/** A saved reason a moderator can put into a decision. */
+/**
+ * A saved reason a moderator can put into a decision.
+ * @experimental
+ */
 export interface Reason {
   id: string;
   label: string;
@@ -90,6 +115,7 @@ export interface Reason {
   active: boolean;
 }
 
+/** @experimental */
 export interface SuggestInput {
   /** The conduct level; absent or null asks for the default. */
   level?: ConductLevel | null;
@@ -98,6 +124,7 @@ export interface SuggestInput {
   person?: string;
 }
 
+/** @experimental */
 export interface DecideInput {
   verdict: 'upheld' | 'noted' | 'no_action' | 'bad_faith';
   reason: string;
@@ -107,13 +134,17 @@ export interface DecideInput {
   takeOver?: boolean;
 }
 
-/** `POST /reports/:id/decide`. `replay` is true when the same decision had already been made and nothing was applied again. */
+/**
+ * `POST /reports/:id/decide`. `replay` is true when the same decision had already been made and nothing was applied again.
+ * @experimental
+ */
 export interface DecideResult {
   ok: true;
   replay: boolean;
   groups: Array<{ refCode: string; kind: SanctionKind }>;
 }
 
+/** @experimental */
 export interface PersonHistory {
   history: ActionRecord[];
   reports: Array<{ id: string; createdAt: number; category: ReportCategory }>;
@@ -123,17 +154,23 @@ export interface PersonHistory {
   handle: string | null;
 }
 
-/** A sanction group with the person it is on and the name to show for them (`GET /sanctions`). `handle` is null when no report recorded one. */
+/**
+ * A sanction group with the person it is on and the name to show for them (`GET /sanctions`). `handle` is null when no report recorded one.
+ * @experimental
+ */
 export type SanctionRow = SanctionGroupView & { person: string; handle: string | null };
 
+/** @experimental */
 export type SanctionSource = 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai';
 
+/** @experimental */
 export interface ListSanctionsQuery {
   cursor?: string;
   limit?: number;
   source?: SanctionSource;
 }
 
+/** @experimental */
 export interface SanctionInput {
   subject: string;
   kind: SanctionKind;
@@ -147,46 +184,67 @@ export interface SanctionInput {
   takeOver?: boolean;
 }
 
+/** @experimental */
 export interface CloseGapInput {
   status: 'ruled' | 'not_a_rule';
   /** The number of the active rule that now covers it (required for `ruled`). */
   ref?: number | null;
 }
 
-/** A term as `GET /terms` lists it: the kit's row with its metadata always present (null when unknown). Derived, so the kit changing a field is a compile error here. */
+/**
+ * A term as `GET /terms` lists it: the kit's row with its metadata always present (null when unknown). Derived, so the kit changing a field is a compile error here.
+ * @experimental
+ */
 export type TermRow = Required<TermListRow>;
 
-/** An exception as `GET /terms` lists it. */
+/**
+ * An exception as `GET /terms` lists it.
+ * @experimental
+ */
 export type ExceptionRow = Required<ExceptionListRow>;
 
-/** `GET /terms`. `blocks30d` has an entry for every listed term. */
+/**
+ * `GET /terms`. `blocks30d` has an entry for every listed term.
+ * @experimental
+ */
 export interface TermsList {
   terms: TermRow[];
   exceptions: ExceptionRow[];
   blocks30d: Record<string, number>;
 }
 
+/** @experimental */
 export interface TermInput {
   term: string;
   language: string;
   note?: string;
 }
 
+/** @experimental */
 export interface ExceptionInput {
   phrase: string;
   language: string;
   note?: string;
 }
 
-/** A change to a row: any of its fields. A `null` note clears it. */
+/**
+ * A change to a row: any of its fields. A `null` note clears it.
+ * @experimental
+ */
 export type TermPatch = Partial<Omit<TermInput, 'note'>> & { note?: string | null };
+/** @experimental */
 export type ExceptionPatch = Partial<Omit<ExceptionInput, 'note'>> & { note?: string | null };
 
+/** @experimental */
 export type TextVerdict = 'blocked' | 'clean' | 'too_long';
 
+/** @experimental */
 export type BlockedDays = 1 | 7 | 30;
 
-/** One chat line the term filter refused. `term` and `language` are null when the caller may not read terms. */
+/**
+ * One chat line the term filter refused. `term` and `language` are null when the caller may not read terms.
+ * @experimental
+ */
 export interface BlockedLine {
   id: string;
   at: number;
@@ -200,15 +258,25 @@ export interface BlockedLine {
   text: string;
 }
 
-/** What `POST /policy/profile/preview` answers: for each sample record and each conduct level, what would be suggested. */
+/**
+ * What `POST /policy/profile/preview` answers: for each sample record and each conduct level, what would be suggested.
+ * @experimental
+ */
 export type PolicySamples = Extract<PolicyPreview, { ok: true }>['samples'];
 
-/** The answer to a save or a reset: the new version and the sections that changed. A newer kit also answers with the state now in force. */
+/**
+ * The answer to a save or a reset: the new version and the sections that changed. A newer kit also answers with the state now in force.
+ * @experimental
+ */
 export type PolicySaved = { ok: true; version: number; changed: PolicySection[] } & Partial<PolicyState>;
 
+/** @experimental */
 export type PolicyFormat = 'markdown' | 'html' | 'text';
 
-/** `GET /policy`: the profile and rules in force and the generated documents. */
+/**
+ * `GET /policy`: the profile and rules in force and the generated documents.
+ * @experimental
+ */
 export interface PolicyDocs {
   profile: Chatwarden['profile'];
   rules: CommunityRule[];
@@ -216,6 +284,7 @@ export interface PolicyDocs {
   documents: { codeOfConduct: string; moderatorGuide: string; agentBrief: string };
 }
 
+/** @experimental */
 export interface ListAuditQuery {
   cursor?: string;
   limit?: number;

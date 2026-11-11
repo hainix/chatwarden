@@ -21,6 +21,7 @@ import type { Store } from './store.js';
 import { createToastStore } from './toasts.js';
 import type { ToastStore } from './toasts.js';
 
+/** @experimental */
 export interface HubControllerOptions {
   /** The staff client: `createHubClient(fetchTransport({ baseUrl: '/admin' }))`. */
   client: HubClient;
@@ -59,7 +60,10 @@ export interface HubControllerSettings {
   t?: HubT;
 }
 
-/** A decision to make. `name` is how the reported person is named in a toast (default their short tag); `snapshot` the form to give back on a failure. */
+/**
+ * A decision to make. `name` is how the reported person is named in a toast (default their short tag); `snapshot` the form to give back on a failure.
+ * @experimental
+ */
 export interface DecideCommand {
   reportId: string;
   person: string;
@@ -68,9 +72,13 @@ export interface DecideCommand {
   snapshot?: DecisionForm;
 }
 
-/** How `start()` went, with what lets go of the hold it took on the queue (a no-op when there is none). */
+/**
+ * How `start()` went, with what lets go of the hold it took on the queue (a no-op when there is none).
+ * @experimental
+ */
 export type StartResult = ActionResult<Me> & { release: () => void };
 
+/** @experimental */
 export interface HubController {
   readonly client: HubClient;
   readonly session: Session;
@@ -129,6 +137,7 @@ export interface HubController {
   dispose(): void;
 }
 
+/** @experimental */
 export function createHubController(options: HubControllerOptions): HubController {
   const { client } = options;
   const timers: Timers = { ...browserTimers, ...options.schedule };

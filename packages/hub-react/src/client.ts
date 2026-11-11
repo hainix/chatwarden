@@ -47,6 +47,7 @@ import type {
  * not the shape the hub expects, `unexpected` for anything else, and `http_<status>` when the body is not a kit error.
  * `retryAfter` is the seconds from a `retry-after` header (a 429). A `claimed` error (409: another moderator is handling the
  * case) also says who (`heldBy`) and until when (`heldUntil`, epoch ms).
+ * @experimental
  */
 export class HubError extends Error {
   readonly status: number;
@@ -69,7 +70,10 @@ export class HubError extends Error {
   }
 }
 
-/** A `HubError` as is; anything else (a bug in the caller's code, say) becomes status 0, code `unexpected`. */
+/**
+ * A `HubError` as is; anything else (a bug in the caller's code, say) becomes status 0, code `unexpected`.
+ * @experimental
+ */
 export function toHubError(e: unknown): HubError {
   if (e instanceof HubError) return e;
   return new HubError({ status: 0, code: 'unexpected', message: e instanceof Error ? e.message : 'Something went wrong.' });
@@ -115,6 +119,7 @@ const q = (query: Record<string, string | number | undefined>): Record<string, s
   Object.fromEntries(Object.entries(query).filter(([, v]) => v !== undefined)) as Record<string, string | number>;
 const enc = encodeURIComponent;
 
+/** @experimental */
 export interface HubClient {
   // The signed-in staff member
   /** `GET /me`: who is calling and what their role may do. */
@@ -212,6 +217,7 @@ export interface HubClient {
 /**
  * The hub's view of the staff API: one method per route, each resolving with the parsed answer or rejecting with a
  * {@link HubError}. It knows nothing about how the call travels: that is the {@link Transport}.
+ * @experimental
  */
 export function createHubClient(transport: Transport): HubClient {
   const call = async <T>(req: TransportRequest): Promise<T> => {
@@ -277,6 +283,7 @@ export function createHubClient(transport: Transport): HubClient {
  * Follows `next` until the list ends, joining the pages in order. At most `maxPages` pages (default 20); when it stops early
  * the result's `next` is where to carry on. A cursor that repeats ends the loop, so a server that never finishes cannot hold
  * the page. A failed page rejects: the caller still has what it had before.
+ * @experimental
  */
 export async function fetchAll<T>(
   loadPage: (cursor: string | undefined) => Promise<Page<T>>,

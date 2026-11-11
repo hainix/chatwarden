@@ -18,13 +18,21 @@ import type { Toasts } from './toasts.js';
 // 30, never while the browser is offline. Only when its token changed is the queue read again. A fresh queue is folded into the
 // list on screen without moving anything under the cursor (see `reconcile`): new cases wait behind the "N new" pill.
 
-/** The open queue is read 200 reports a page, up to 5 pages: 1,000 reports. Past that the numbers say they are partial. */
+/**
+ * The open queue is read 200 reports a page, up to 5 pages: 1,000 reports. Past that the numbers say they are partial.
+ * @experimental
+ */
 export const QUEUE_PAGE = 200;
+/** @experimental */
 export const QUEUE_MAX_PAGES = 5;
 
+/** @experimental */
 export type Connection = 'live' | 'lost' | 'offline' | 'signedOut';
 
-/** What the queue knows, as a snapshot. */
+/**
+ * What the queue knows, as a snapshot.
+ * @experimental
+ */
 export interface LiveQueueState {
   /** `loading` until the first answer; `error` when there has never been one; `ready` after, even while a refresh fails. */
   status: 'loading' | 'error' | 'ready';
@@ -55,12 +63,16 @@ export interface LiveQueueState {
   pending: ReadonlySet<string>;
 }
 
-/** One hold on a live queue (see `acquire`). */
+/**
+ * One hold on a live queue (see `acquire`).
+ * @experimental
+ */
 export interface QueueHold {
   release: () => void;
   ready: Promise<void>;
 }
 
+/** @experimental */
 export interface LiveQueueStore extends Store<LiveQueueState> {
   /** True while it is polling (after `start`, until `stop` or `dispose`). A part that starts the queue for itself can ask first, and stop only what it started. */
   readonly running: boolean;
@@ -103,6 +115,7 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   endTake: (cooldownMs: number) => void;
 }
 
+/** @experimental */
 export interface LiveQueueOptions {
   client: HubClient;
   /** The hub's clock. */
@@ -117,12 +130,16 @@ export interface LiveQueueOptions {
 
 const NO_FILTER: QueueFilter = { claim: 'all', category: 'all' };
 
-/** The rows that pass the filters and whose decision is not on its way. Pure: the clock comes in. */
+/**
+ * The rows that pass the filters and whose decision is not on its way. Pure: the clock comes in.
+ * @experimental
+ */
 export function visibleRows(rows: readonly ShownRow[], filter: QueueFilter, pending: ReadonlySet<string>, actor: string, now: number): ShownRow[] {
   const keepPersons = new Set(filterGroups(rows.map((r) => r.group), filter, actor, now).map((g) => g.person));
   return rows.filter((r) => keepPersons.has(r.group.person) && !pending.has(r.group.person));
 }
 
+/** @experimental */
 export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   const { client, now, timers, page, toasts, words } = options;
   const initial: LiveQueueState = {

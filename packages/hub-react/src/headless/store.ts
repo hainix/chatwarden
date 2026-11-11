@@ -2,6 +2,7 @@
  * The contract every store of the headless controller follows, and the one `useSyncExternalStore` (and Vue's, Svelte's and Solid's
  * own bridges) expect: `getSnapshot()` returns the same value, by identity, until something changes, and `subscribe` tells a
  * listener when it has.
+ * @experimental
  */
 export interface Store<T> {
   /** Calls `listener` after every change; returns the function that stops it. */
@@ -10,6 +11,7 @@ export interface Store<T> {
   getSnapshot(): T;
 }
 
+/** @experimental */
 export interface WritableStore<T> extends Store<T> {
   /** Replaces the value. Nothing is told when it is the same value (`Object.is`). */
   set(next: T): void;
@@ -17,6 +19,7 @@ export interface WritableStore<T> extends Store<T> {
   update(change: (prev: T) => T): void;
 }
 
+/** @experimental */
 export function createStore<T>(initial: T): WritableStore<T> {
   let value = initial;
   const listeners = new Set<() => void>();

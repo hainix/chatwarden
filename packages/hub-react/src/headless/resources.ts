@@ -10,6 +10,7 @@ import type { Store } from './store.js';
 
 // ---- a read ------------------------------------------------------------------------------------------------------------
 
+/** @experimental */
 export interface ResourceState<T> {
   key: string;
   /** The answer for `key`. Kept through a failed reload; never the answer of another key. */
@@ -20,6 +21,7 @@ export interface ResourceState<T> {
   loading: boolean;
 }
 
+/** @experimental */
 export interface ResourceStore<T> extends Store<ResourceState<T>> {
   /** Load for `key`: a different key starts over (and shows nothing of the last one), the same key loads again. */
   start: (key: string) => void;
@@ -37,6 +39,7 @@ export interface ResourceStore<T> extends Store<ResourceState<T>> {
  * - Data of a previous key is never shown under a new key.
  * - A slow answer to an old request never overwrites a newer one (each request has a number; only the latest counts).
  * - A failed reload keeps the last good data and sets `error` beside it.
+ * @experimental
  */
 export function createResource<T>(load: () => Promise<T>, key = ''): ResourceStore<T> {
   let loader = load;
@@ -75,11 +78,13 @@ export function createResource<T>(load: () => Promise<T>, key = ''): ResourceSto
 
 // ---- a write -----------------------------------------------------------------------------------------------------------
 
+/** @experimental */
 export interface ActionState {
   busy: boolean;
   error: HubError | null;
 }
 
+/** @experimental */
 export interface ActionStore<A extends unknown[], R> extends Store<ActionState> {
   /** Runs the action. Never throws. A call made while one is running returns that run's answer and sends nothing. */
   run: (...args: A) => Promise<ActionResult<R>>;
@@ -93,6 +98,7 @@ export interface ActionStore<A extends unknown[], R> extends Store<ActionState> 
 /**
  * Runs one write. It is busy while it runs, a double submit sends once (the second call gets the first call's answer), and a failure
  * comes back as `{ ok: false, error }` and stays in `error` until the next run or `clearError()`.
+ * @experimental
  */
 export function createAction<A extends unknown[], R>(fn: (...args: A) => Promise<R>): ActionStore<A, R> {
   let current = fn;
@@ -138,6 +144,7 @@ export function createAction<A extends unknown[], R>(fn: (...args: A) => Promise
 
 // ---- a list read page by page -----------------------------------------------------------------------------------------------
 
+/** @experimental */
 export interface PagedState<T> {
   key: string;
   items: T[];
@@ -151,6 +158,7 @@ export interface PagedState<T> {
   loaded: boolean;
 }
 
+/** @experimental */
 export interface PagedListStore<T> extends Store<PagedState<T>> {
   /** Load the first page for `key`; a different key starts over. */
   start: (key: string) => void;
@@ -167,6 +175,7 @@ export const freshList = <T>(key: string): PagedState<T> => ({ key, items: [], n
 /**
  * A list read page by page. `key` names the query: a new key starts over. `loadMore` follows `next` and appends; a second call
  * while one is running does nothing; a failed page keeps what is shown and sets `error`, and `loadMore` tries that page again.
+ * @experimental
  */
 export function createPagedList<T>(load: (cursor: string | undefined) => Promise<Page<T>>, key = ''): PagedListStore<T> {
   let loader = load;

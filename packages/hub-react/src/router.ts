@@ -42,7 +42,10 @@ const STATUSES: readonly QueueStatus[] = ['open', 'actioned', 'dismissed', 'all'
 // What the server accepts for an id or a person ref in a path (RouteParams): letters, digits, underscore and hyphen, 1-64.
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** `#/reports?x=1` -> `/reports?x=1`; an empty path is `/`. */
+/**
+ * `#/reports?x=1` -> `/reports?x=1`; an empty path is `/`.
+ * @experimental
+ */
 export function normalizePath(path: string): string {
   const stripped = path.replace(/^#/, '');
   if (stripped === '') return '/';
@@ -57,7 +60,10 @@ function decode(segment: string): string | null {
   }
 }
 
-/** The route for a hub path (with or without a leading `#`). Never throws: a path that fits no screen is `notFound`. */
+/**
+ * The route for a hub path (with or without a leading `#`). Never throws: a path that fits no screen is `notFound`.
+ * @experimental
+ */
 export function parseRoute(path: string): Route {
   const normal = normalizePath(path);
   const notFound: Route = { name: 'notFound', path: normal };
@@ -104,7 +110,10 @@ export function parseRoute(path: string): Route {
   }
 }
 
-/** The hub path for a route. `parseRoute(buildPath(route))` is `route`. */
+/**
+ * The hub path for a route. `parseRoute(buildPath(route))` is `route`.
+ * @experimental
+ */
 export function buildPath(route: Route): string {
   switch (route.name) {
     case 'overview':
@@ -124,7 +133,10 @@ export function buildPath(route: Route): string {
   }
 }
 
-/** Which tab a route belongs to, or null (a path that matches nothing lights no tab). */
+/**
+ * Which tab a route belongs to, or null (a path that matches nothing lights no tab).
+ * @experimental
+ */
 export function tabOf(route: Route): TabName | null {
   switch (route.name) {
     case 'overview':
