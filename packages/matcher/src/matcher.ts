@@ -1,4 +1,3 @@
-import { DataSet, RegExpMatcher, englishRecommendedTransformers, parseRawPattern, type MatchPayload } from 'obscenity';
 import {
   collapseLikePreset,
   foldForExceptions,
@@ -9,6 +8,7 @@ import {
 } from './normalise.js';
 import { matchName } from './names.js';
 import { mergeSpans, stripWithMap, toOriginal, type Span } from './spans.js';
+import { compileWords, type EngineHit } from './vendored/wordEngine.js';
 
 /** A row of the term list: one whole word the matcher refuses. */
 export interface TermRow { id: string; term: string; language: string; active: boolean }
@@ -96,7 +96,7 @@ function isWordCharAt(text: string, i: number): boolean {
 /** True when the hit's range lies inside an occurrence of an exception phrase that is word-bounded on
  *  both sides. obscenity's own whitelist is a raw substring search, so "unglarn zorbak" would borrow
  *  "glarn zorbak" and "tarvo lakes" would borrow "tarvo lake"; this does the bounding itself. */
-function isExcepted(hit: MatchPayload, folded: Folded, phrases: readonly string[]): boolean {
+function isExcepted(hit: EngineHit, folded: Folded, phrases: readonly string[]): boolean {
   for (const phrase of phrases) {
     for (let at = folded.text.indexOf(phrase); at !== -1; at = folded.text.indexOf(phrase, at + 1)) {
       const last = at + phrase.length;
@@ -118,13 +118,13 @@ const LEET_PUNCTUATION_ALL = /[!|(/$@]/g;
  *  (and not validated); a malformed active row throws MatcherBuildError. All terms inactive gives a
  *  matcher that never matches. */
 export function buildMatcher(terms: readonly TermRow[], exceptions: readonly ExceptionRow[]): Matcher {
-  const dataset = new DataSet<{ rowId: string }>();
+  // The engine numbers its words by position, so the row ids are kept in the same order.
+  const words: string[] = [];
+  const rowIds: string[] = [];
   for (const row of terms) {
     if (!row.active) continue;
-    const word = normaliseTerm(row);
-    dataset.addPhrase((phrase) =>
-      phrase.setMetadata({ rowId: row.id }).addPattern(parseRawPattern(`|${word}|`)),
-    );
+    words.push(normaliseTerm(row));
+    rowIds.push(row.id);
   }
   const phrases: string[] = [];
   for (const row of exceptions) {
@@ -134,11 +134,9 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
 
   if (terms.every((t) => !t.active)) return { match: () => null, spans: () => [], matchName: () => null };
 
-  // No whitelistedTerms: exceptions are applied by isExcepted (word-bounded), not by obscenity.
-  const matcher = new RegExpMatcher({
-    blacklistedTerms: dataset.build().blacklistedTerms,
-    ...englishRecommendedTransformers,
-  });
+  // The engine reads text the way obscenity's English preset does (see ./vendored/wordEngine.ts) and has no whitelist:
+  // exceptions are applied by isExcepted (word-bounded), not by the engine.
+  const engine = compileWords(words);
 
   /** Every non-excepted hit of the text, as the matcher reads it (`stripInvisible` already applied), in
    *  the order the passes find them. Lazy, so `match` can stop at the first. */
@@ -148,12 +146,12 @@ export function buildMatcher(terms: readonly TermRow[], exceptions: readonly Exc
     // characters for spaces, so its indices still line up), so a phrase may itself contain ! | ( / $ @.
     const folded = phrases.length > 0 ? foldForExceptions(text) : null;
     for (const pass of passes) {
-      for (const hit of matcher.getAllMatches(pass, true)) {
+      for (const hit of engine.getAllMatches(pass)) {
         if (folded && isExcepted(hit, folded, phrases)) continue;
         yield {
           startIndex: hit.startIndex,
           endIndex: hit.endIndex,
-          termId: dataset.getPayloadWithPhraseMetadata(hit).phraseMetadata!.rowId,
+          termId: rowIds[hit.termId]!,
         };
       }
     }

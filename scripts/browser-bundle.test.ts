@@ -9,7 +9,8 @@
 //   - IIFE (global name `CW`), minified: what runs in the vm, and what the size is measured on. An ES module would need
 //     `vm.SourceTextModule`, which needs `node --experimental-vm-modules` on the vitest worker (a repo-wide config change
 //     for one test); a classic script runs cleanly on Node 22.13 and 24 with no flag and is the same code in a different wrapper.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { gzipSync } from 'node:zlib';
 import { webcrypto } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +21,9 @@ import { makeHasher } from '@chatwarden/core';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ENTRY = fileURLToPath(new URL('./browser-entry.ts', import.meta.url));
-const SIZE_BUDGET_GZIP = 120 * 1024;
+// 103 KB: the bundle measured 98.0 KB gzip once the matcher stopped carrying obscenity (it was 104.2 KB with the English word list in it); the
+// headroom is about 5 KB for the hub controller work that shares this entry.
+const SIZE_BUDGET_GZIP = 103 * 1024;
 
 const common: BuildOptions = {
   entryPoints: [ENTRY],
@@ -115,6 +118,32 @@ describe('browser bundle: static scan', () => {
     // The one reference is `globalThis.process`, read into a local that is then only used as `proc?.getBuiltinModule?.(...)`.
     const procRefs = [...code.matchAll(/\bprocess\b/g)].filter((m) => !code.slice(m.index! - 11).startsWith('globalThis.process'));
     expect(procRefs.map((m) => code.slice(m.index! - 40, m.index! + 40))).toEqual([]);
+  });
+});
+
+// The matcher builds its own word list from the term pack. obscenity's ready-made English list (a real slur list) must never ride along
+// into a page. The markers are NOT slurs: export names of obscenity's English preset module, and a few harmless words from its
+// whitelist, so they can only come from that module being in the bundle. `preset module still holds the markers` guards the test
+// itself: if obscenity renames or drops one, this fails instead of the absence checks passing for nothing.
+const PRESET_MARKERS = ['englishDataset', 'englishRecommendedTransformers', 'englishRecommendedBlacklistMatcherTransformers', 'analagous', 'dickory', 'benedick', 'cockney'];
+
+describe('browser bundle: no third-party word list', () => {
+  it('the preset module still holds the markers (guard for the checks below)', () => {
+    const entry = createRequire(import.meta.url).resolve('obscenity');
+    const preset = readFileSync(entry.replace(/index\.js$/, 'preset/english.js'), 'utf8');
+    for (const marker of PRESET_MARKERS) expect(preset, marker).toContain(marker);
+  });
+
+  it('bundles no file of obscenity, and in particular not its English preset', () => {
+    const inputs = Object.keys(metafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    expect(inputs.filter((p) => /node_modules\/obscenity\//.test(p))).toEqual([]);
+    expect(inputs.filter((p) => /preset\/english/.test(p))).toEqual([]);
+  });
+
+  it.each(PRESET_MARKERS)('has no trace of %s, in either build', (marker) => {
+    // A boolean, so a failure never prints the bundle (which, while the list is in it, holds the list).
+    expect(esm.includes(marker)).toBe(false);
+    expect(iife.includes(marker)).toBe(false);
   });
 });
 

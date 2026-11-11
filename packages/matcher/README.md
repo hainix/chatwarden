@@ -24,8 +24,9 @@ Status: pre-release, as-is, no support promise.
 npm install @chatwarden/matcher @chatwarden/core
 ```
 
-`@chatwarden/core` is a peer dependency, so your project has one copy of it. Node 22.13 or newer. The one runtime dependency is
-[`obscenity`](https://www.npmjs.com/package/obscenity), which does the pattern matching.
+`@chatwarden/core` is a peer dependency, so your project has one copy of it. Node 22.13 or newer. The matching engine is a small
+copy of the regexp matcher and the English-preset text handling of [`obscenity`](https://www.npmjs.com/package/obscenity) (MIT, see
+`src/vendored`). It does not carry obscenity's own English word list: the words come only from your term pack.
 
 ## Quick start
 
@@ -190,7 +191,8 @@ still read through `audit.list` under the closed names.
   name: read `after_json.active` (and `before_json.active`).
 - **New, optional.** `positiveCorpus` on a term pack, the refusal `code`, and `loadSync()` and `changeSync()`. Nothing you wrote
   for 0.1.0 has to change to keep working.
-- **Browsers.** Term ids are generated without `node:` imports, so the package bundles for a browser.
+- **Browsers.** Term ids are generated without `node:` imports, so the package bundles for a browser. Since 0.1.3 a browser bundle
+  also holds no third-party word list: the matcher no longer imports `obscenity`, whose root module loads its English list.
 
 ## Security notes
 
