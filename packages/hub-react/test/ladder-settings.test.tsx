@@ -492,6 +492,20 @@ describe('Saving', () => {
     expect(screen.getByText('No unsaved changes.')).toBeInTheDocument();
   });
 
+  it('a save sends back what another screen saved (a section this screen does not edit), so it is never dropped', async () => {
+    const w = await owner();
+    w.intercept.fn = async (req) => {
+      if (req.method !== 'GET' || req.path !== '/policy/profile') return undefined;
+      const state = await w.direct.policyProfile();
+      return { status: 200, body: { ...state, layer: { ...state.layer, reporting: { thanks: 'Thanks for the report.' } } } };
+    };
+    const { user } = await open(w);
+    await user.click(screen.getByRole('checkbox', { name: 'Let moderators type their own length' }));
+    await save(user);
+    await waitFor(() => expect(requests(w, 'PUT', '/policy/profile')).toHaveLength(1));
+    expect((requests(w, 'PUT', '/policy/profile')[0]?.body as { layer: object }).layer).toEqual({ customDuration: false, reporting: { thanks: 'Thanks for the report.' } });
+  });
+
   it('Discard changes puts the draft back to what is saved', async () => {
     const w = await owner();
     const { user } = await open(w);
