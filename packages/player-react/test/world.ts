@@ -1,5 +1,5 @@
 import { createChatwarden, defineRules, starterRules } from '@chatwarden/core';
-import type { Chatwarden, RawWho, ReportCategory } from '@chatwarden/core';
+import type { Chatwarden, ProfileOverrides, RawWho, ReportCategory } from '@chatwarden/core';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { createRouter, playerRoutes } from '@chatwarden/http';
 import type { KitResponse } from '@chatwarden/http';
@@ -35,6 +35,8 @@ export interface WorldOptions {
   gameName?: string;
   /** Rule numbers to retire (a retired rule drops out of GET /rules). */
   retire?: number[];
+  /** The studio's reporting settings in code (the flow, the reasons, the thank-you). */
+  reporting?: NonNullable<ProfileOverrides['reporting']>;
 }
 
 export async function playerWorld(opts: WorldOptions = {}) {
@@ -54,7 +56,7 @@ export async function playerWorld(opts: WorldOptions = {}) {
     clock,
     profile: 'standard',
     rules: defineRules(starterRules('standard').map((r) => (opts.retire?.includes(r.number) ? { ...r, retired: true } : r))),
-    overrides: { profanity: { mode: 'allow' } },
+    overrides: { profanity: { mode: 'allow' }, ...(opts.reporting === undefined ? {} : { reporting: opts.reporting }) },
     retention: false,
   });
   /** Who is calling: the key the transport sends. `null` sends none (the kit treats nobody as an empty answer). */

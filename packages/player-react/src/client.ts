@@ -1,4 +1,5 @@
-import type { PlayerNotice } from '@chatwarden/core';
+import type { PlayerNotice, PlayerReporting } from '@chatwarden/core';
+import { readReporting } from './reporting.js';
 import type { Transport, TransportRequest, TransportResponse } from './transport.js';
 
 /**
@@ -83,10 +84,12 @@ export interface PlayerRule {
   text: string;
 }
 
-/** `GET /rules`: the profile's one-line summary and the active rules. */
+/** `GET /rules`: the profile's one-line summary, the active rules and how reporting works here (`undefined` from an older server). */
 export interface PlayerRules {
   summary: string;
   rules: PlayerRule[];
+  /** The flow, the reasons a player may give and the thank-you: pass it to `ReportDialog` as `reporting`. */
+  reporting?: PlayerReporting;
 }
 
 export interface PlayerClient {
@@ -96,7 +99,7 @@ export interface PlayerClient {
   ack(id: string): Promise<boolean>;
   /** `GET /record`: the player's sanctions that still apply (seen or not). */
   record(): Promise<PlayerNotice[]>;
-  /** `GET /rules`: the summary and the numbered rules. */
+  /** `GET /rules`: the summary, the numbered rules and the reporting settings. */
   rules(): Promise<PlayerRules>;
 }
 
@@ -122,7 +125,8 @@ export function playerClient({ transport }: PlayerClientOptions): PlayerClient {
         .filter(isObject)
         .filter((r) => typeof r.number === 'number' && text(r.title) && text(r.text))
         .map((r) => ({ number: r.number as number, title: r.title as string, text: r.text as string }));
-      return { summary: body.summary, rules };
+      const reporting = readReporting(body.reporting);
+      return { summary: body.summary, rules, ...(reporting === undefined ? {} : { reporting }) };
     },
   };
 }

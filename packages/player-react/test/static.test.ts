@@ -235,8 +235,9 @@ describe('the stylesheet is a complete token contract', () => {
     expect(css).toMatch(/font-family:\s*var\(--cw-font, inherit\);/);
   });
 
-  it('is small: under 14 KB raw (the size test holds it to 6 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(14 * 1024);
+  // 16 KB raw at 7i: raised for the configurable report dialog (grouped reasons, quote, follow-up panel); the gzip budget is unchanged.
+  it('is small: under 16 KB raw (the size test holds it to 6 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(16 * 1024);
   });
 });
 

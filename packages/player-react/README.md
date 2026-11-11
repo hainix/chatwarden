@@ -53,38 +53,55 @@ export function GameShell({ inMatch }: { inMatch: boolean }) {
 }
 ```
 
-The report dialog gives your code the category and note; your server adds the room and the seats and calls the kit:
+How reporting works is the studio's setting (the Reporting section of the moderator hub, or `reporting` in code): one tap, pick a reason
+first, or reason required, with the reasons, their groups and hints, and the thank-you. Read it from `GET /rules` and pass it to the
+dialog. Your server adds the room and the seats and calls the kit:
 
 ```ts
-import type { ReportResult } from '@chatwarden/core';
-import type { ReportDraft } from '@chatwarden/player-react';
+import type { ReportDetailResult, ReportResult } from '@chatwarden/core';
+import type { ReportDetail, ReportDraft } from '@chatwarden/player-react';
 
-// `cw` is your createChatwarden(...) instance. Call this behind your own route, for example POST /report: `roomId` and the seats
-// come from your session, never from the client.
+// `cw` is your createChatwarden(...) instance. Call these behind your own routes, for example POST /report and POST /report/:id/detail:
+// `roomId` and the seats come from your session, never from the client.
 export function takeReport(roomId: string, mySeat: string, theirSeat: string, draft: ReportDraft): Promise<ReportResult> {
-  return cw.reports.submit({
-    roomId,
-    reporterSeat: mySeat,
-    targetSeat: theirSeat,
-    category: draft.category,
-    ...(draft.note === undefined ? {} : { note: draft.note }),
-  });
+  return cw.reports.submit({ roomId, reporterSeat: mySeat, targetSeat: theirSeat, ...draft });
+}
+
+// The optional follow-up of a one-tap report: a reason and a note, within ten minutes, once, from the reporter only.
+export function addToReport(reportId: string, mySeat: string, detail: ReportDetail): Promise<ReportDetailResult> {
+  return cw.reports.addDetail(reportId, mySeat, detail);
 }
 ```
 
 ```tsx
 import { ReportDialog } from '@chatwarden/player-react';
+import type { PlayerClient, PlayerReporting } from '@chatwarden/player-react';
 
-export function ReportPlayer({ name, close }: { name: string; close: () => void }) {
+export function ReportMessage({ client, line, name, close }: { client: PlayerClient; line: string; name: string; close: () => void }) {
+  const [reporting, setReporting] = useState<PlayerReporting>();
+  useEffect(() => void client.rules().then((r) => setReporting(r.reporting)), [client]);
   return (
     <ReportDialog
+      line={line}
       targetName={name}
+      {...(reporting === undefined ? {} : { reporting })}
       onClose={close}
       onSubmit={(draft) => fetch('/report', { method: 'POST', body: JSON.stringify(draft) }).then((r) => r.json())}
+      onAddDetail={(id, detail) => fetch(`/report/${id}/detail`, { method: 'POST', body: JSON.stringify(detail) }).then((r) => r.json())}
     />
   );
 }
 ```
+
+- **One tap (the default).** The dialog asks "Report this message?" with the line in quotes and a Report button. The report is filed at once
+  and the studio's thank-you is shown. With `onAddDetail` there is then an optional "Add a reason" step (a reason and a note) that attaches
+  to the same report. Closing at any point is fine: the report is already filed.
+- **Pick a reason first / reason required.** The reasons in groups, with "Something else" last, then a note when the reason asks for one.
+  A reason is optional in the first ("Skip and report") and required in the second.
+- **A reason is a hint.** The kit stores it as `reportedReason`; the moderators (and later the AI) decide what the report really is.
+- **Without `reporting`** the dialog is the 0.1.1 one: a required category from `categories` and an optional note, and `draft.category` is set.
+- **Stale settings.** If the studio changes the list while a dialog is open, the kit refuses an unknown reason (`reason_unknown`) or a
+  missing one (`reason_required`) and the dialog says so. Read `GET /rules` again before the next report.
 
 ## Options
 
@@ -98,7 +115,7 @@ Theming).
 | `NoticeQueue` | The pending notices, oldest first, one at a time in a modal dialog. A warning has an Acknowledge button; every other notice has Got it. Both call `POST /notices/:id/ack`. Nothing is rendered when there is nothing to show. | `client`, `canShow` (default `true`), `appealUrl`, `refreshKey`, `onAcknowledged(notice)`, `onPendingChange(count)` |
 | `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `refreshKey` |
 | `RulesPage` | The summary and the numbered rules from `GET /rules`. The numbers are the kit's: a retired rule leaves a gap. | `client`, `refreshKey` |
-| `ReportDialog` | A category picker and an optional note. Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `targetName`, `categories` |
+| `ReportDialog` | The studio's report flow (one tap, reason first, reason required) with grouped reasons and an optional note, and an optional "Add a reason" step after a one-tap report. Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `onAddDetail(reportId, detail)`, `line`, `targetName`, `categories` (old dialog only) |
 | `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when. | `until` (epoch ms or `null`), `byModerator`, `refCode` |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and

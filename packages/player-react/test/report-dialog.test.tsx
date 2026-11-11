@@ -184,11 +184,13 @@ describe('every refusal has its own plain message', () => {
     not_player: 'We cannot find that player any more. They may have left.',
     off: 'Reports are not available right now. Try again later.',
     suspended: 'You cannot send reports from this account for now.',
+    reason_required: 'This report needs a reason. Close this and report again to choose one.',
+    reason_unknown: 'That reason is not available any more. Close this and report again.',
   };
 
   it('covers every refusal the kit has, with no two alike', () => {
-    expect(Object.keys(MESSAGES).sort()).toEqual(['duplicate', 'not_player', 'off', 'rate', 'self', 'suspended']);
-    expect(new Set(Object.values(MESSAGES)).size).toBe(6);
+    expect(Object.keys(MESSAGES).sort()).toEqual(['duplicate', 'not_player', 'off', 'rate', 'reason_required', 'reason_unknown', 'self', 'suspended']);
+    expect(new Set(Object.values(MESSAGES)).size).toBe(8);
   });
 
   it.each(Object.entries(MESSAGES) as Array<[ReportRefusal, string]>)('%s', async (refusal, text) => {
@@ -205,7 +207,7 @@ describe('every refusal has its own plain message', () => {
   });
 
   it('shows a refusal in the words of its own key only: the catalog has one key per refusal', () => {
-    for (const r of ['duplicate', 'rate', 'self', 'not_player', 'off', 'suspended']) expect(en).toHaveProperty(`player.report.refused.${r}`);
+    for (const r of ['duplicate', 'rate', 'self', 'not_player', 'off', 'suspended', 'reason_required', 'reason_unknown']) expect(en).toHaveProperty(`player.report.refused.${r}`);
   });
 
   describe('from the real kit', () => {

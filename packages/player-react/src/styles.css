@@ -414,6 +414,44 @@
   border-color: var(--cw-accent);
   background: var(--cw-accent-soft);
 }
+.cw-player .cw-choice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--cw-space-2) 0;
+  overflow-wrap: anywhere;
+}
+.cw-player .cw-choice-hint {
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+}
+.cw-player .cw-group {
+  min-width: 0;
+  margin: 0 0 var(--cw-space-3);
+  padding: 0;
+  border: 0;
+}
+.cw-player .cw-group-legend {
+  margin-bottom: var(--cw-space-1);
+  padding: 0;
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+  font-weight: 600;
+}
+.cw-player .cw-quote {
+  margin: 0 0 var(--cw-space-3);
+  padding: var(--cw-space-2) var(--cw-space-3);
+  border-left: 3px solid var(--cw-border-strong);
+  background: var(--cw-surface-sunken);
+  overflow-wrap: anywhere;
+}
+.cw-player .cw-disclosure {
+  margin-bottom: var(--cw-space-3);
+}
+.cw-player .cw-panel {
+  min-width: 0;
+  margin-bottom: var(--cw-space-3);
+}
 .cw-player input[type='radio'] {
   flex: none;
   accent-color: var(--cw-accent);

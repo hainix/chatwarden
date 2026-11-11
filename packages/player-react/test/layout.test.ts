@@ -74,6 +74,22 @@ describe('a 320px phone', () => {
   });
 });
 
+describe('the report dialog on a 320px phone', () => {
+  it('a long reason label, hint or group heading wraps inside the choice (it never pushes the dialog wider)', () => {
+    expect(rule('.cw-player .cw-choice-text')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-player .cw-choice-text')).toMatch(/overflow-wrap:\s*(anywhere|break-word)/);
+    expect(rule('.cw-player .cw-group')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-player .cw-fieldset')).toMatch(/min-width:\s*0/);
+  });
+  it('the quoted line wraps long words and is a block of its own', () => {
+    expect(rule('.cw-player .cw-quote')).toMatch(/overflow-wrap:\s*(anywhere|break-word)/);
+    expect(rule('.cw-player .cw-quote')).not.toMatch(/white-space:\s*nowrap/);
+  });
+  it('the follow-up panel fits the dialog', () => {
+    expect(rule('.cw-player .cw-panel')).toMatch(/min-width:\s*0/);
+  });
+});
+
 describe('the busy and error states keep their place', () => {
   it('the inline error sits in the flow (no absolute position), so it is read with the notice', () => {
     expect(rule('.cw-player .cw-error')).not.toMatch(/position:\s*(absolute|fixed)/);
