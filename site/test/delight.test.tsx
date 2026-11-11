@@ -158,8 +158,8 @@ describe('AI level meter', () => {
 
 describe('open-source badges', () => {
   it('use their own class names, so the demo stylesheet (which styles .badge as a count chip) cannot restyle them', () => {
-    render(<OpenSource />);
-    const list = screen.getByRole('list');
+    const { container } = render(<OpenSource />);
+    const list = container.querySelector('ul.open-badges') as HTMLElement;
     for (const li of within(list).getAllByRole('listitem')) {
       expect(li.className).toContain('open-badge');
       expect(li.classList.contains('badge')).toBe(false);

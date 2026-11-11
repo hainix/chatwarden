@@ -5,6 +5,8 @@
 
 export const REPO_URL = 'https://github.com/hainix/chatwarden';
 export const NPM_URL = 'https://www.npmjs.com/package/@chatwarden/core';
+const NPM_PACKAGE_URL = 'https://www.npmjs.com/package/@chatwarden';
+const TREE_URL = `${REPO_URL}/tree/main/packages`;
 export const ISSUES_URL = `${REPO_URL}/issues`;
 export const LICENSE_URL = `${REPO_URL}/blob/main/LICENSE`;
 
@@ -37,7 +39,17 @@ export interface Feature {
   title: string;
   body: string;
   tag?: string;
+  link?: { label: string; href: string };
 }
+
+/** The UI packages, for the "Built in the open" links. Each is a published package of this repo. */
+export const NPM_PACKAGES = [
+  { name: '@chatwarden/hub-react', href: `${NPM_PACKAGE_URL}/hub-react` },
+  { name: '@chatwarden/player-react', href: `${NPM_PACKAGE_URL}/player-react` },
+  { name: '@chatwarden/hub-element', href: `${NPM_PACKAGE_URL}/hub-element` },
+] as const;
+
+export const PLAYER_REACT_URL = `${TREE_URL}/player-react`;
 
 export const FEATURES: Feature[] = [
   {
@@ -62,9 +74,9 @@ export const FEATURES: Feature[] = [
   },
   {
     id: 'hub',
-    title: 'Moderator hub and roles',
-    body: 'Moderator, senior and owner roles run on a staff HTTP API today: the queue, decisions, sanctions, terms and the audit trail.',
-    tag: 'Hub UI is coming',
+    title: 'Moderator hub and player screens',
+    body: 'A team workbench for moderators, with a Simple mode of one card per case. Editable steps and reporting: set the timeout lengths, the ladder and how players report (one tap by default). Adopt it four ways: drop-in, pieces, hooks or headless. Or one script tag: <chatwarden-hub>.',
+    link: { label: '@chatwarden/hub-react on npm', href: `${NPM_PACKAGE_URL}/hub-react` },
   },
   {
     id: 'discord',
@@ -157,6 +169,40 @@ export const STEPS: Step[] = [
     code: STEP_CHAT,
   },
 ];
+
+export interface HubSnippet {
+  lang: 'ts' | 'text';
+  file: string;
+  copyLabel: string;
+  code: string;
+}
+
+/**
+ * After the three steps: put the moderator hub in the page. Both snippets are blocks copied verbatim from a package README
+ * (test/content.test.ts checks them): the drop-in `<Hub>` from the hub-react README, and, as the alternative, the one-script-tag
+ * element from the hub-element README.
+ */
+export const HUB_STEP: { title: string; body: string; dropIn: HubSnippet; element: HubSnippet } = {
+  title: 'Then add the moderator hub',
+  body: 'Mount the staff routes, and the hub is one line in a React page.',
+  dropIn: {
+    lang: 'ts',
+    file: 'ModeratorPage.tsx',
+    copyLabel: 'Copy the drop-in hub',
+    code: `import '@chatwarden/hub-react/styles.css';
+import { Hub } from '@chatwarden/hub-react';
+import { client } from './client';
+
+export const ModeratorPage = () => <Hub client={client} />;`,
+  },
+  element: {
+    lang: 'text',
+    file: 'moderator.html',
+    copyLabel: 'Copy the one-script-tag hub',
+    code: `<script type="module" src="https://cdn.jsdelivr.net/npm/@chatwarden/hub-element@0.1/dist/hub-element.js"></script>
+<chatwarden-hub base-url="/admin"></chatwarden-hub>`,
+  },
+};
 
 export type LevelStatus = 'available' | 'coming';
 export interface Level {

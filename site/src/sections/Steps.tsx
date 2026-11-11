@@ -1,5 +1,5 @@
 import { CodeBlock } from '../components/CodeBlock';
-import { STEPS } from '../content';
+import { HUB_STEP, PLAYER_REACT_URL, STEPS } from '../content';
 
 export function Steps() {
   return (
@@ -23,6 +23,23 @@ export function Steps() {
             </li>
           ))}
         </ol>
+        <div className="hub-step" data-hub-step>
+          <h3>{HUB_STEP.title}</h3>
+          <p>
+            {HUB_STEP.body} Your players get their notices and a report dialog from{' '}
+            <a href={PLAYER_REACT_URL} target="_blank" rel="noopener noreferrer">
+              @chatwarden/player-react
+            </a>
+            .
+          </p>
+          <div className="hub-step-code">
+            <CodeBlock code={HUB_STEP.dropIn.code} lang={HUB_STEP.dropIn.lang} title={HUB_STEP.dropIn.file} copyLabel={HUB_STEP.dropIn.copyLabel} />
+            <div className="hub-alt">
+              <p>Or, with no React and no build step, one script tag and one element:</p>
+              <CodeBlock code={HUB_STEP.element.code} lang={HUB_STEP.element.lang} title={HUB_STEP.element.file} copyLabel={HUB_STEP.element.copyLabel} />
+            </div>
+          </div>
+        </div>
         <p className="steps-more">
           Want routes for moderators and players? Add <code>@chatwarden/http</code> and mount the Express adapter. The{' '}
           <a href="https://github.com/hainix/chatwarden/tree/main/packages/http" target="_blank" rel="noopener noreferrer">
