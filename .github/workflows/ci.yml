@@ -1,8 +1,15 @@
 name: CI
 
 on:
+  # One run per change: pushes to main, and pull requests (a PR branch push is covered by its pull_request run).
   push:
+    branches: [main]
   pull_request:
+
+# A newer push to the same PR (or to main) cancels the run it replaces.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

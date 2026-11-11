@@ -199,6 +199,28 @@ describe('fetchTransport', () => {
     expect(log[0]?.headers['content-type']).toBeUndefined();
   });
 
+  // Every write says JSON, body or not, so a host can refuse writes without it as a cross-site-forgery guard (a page on another
+  // site cannot send that content type without a CORS preflight). The kit reads an empty body as no body, whatever its type.
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'] as const)('a body-less %s still says content-type application/json, and sends no body', async (method) => {
+    const { base, log } = await serve();
+    await fetchTransport({ baseUrl: base })({ method, path: '/cases/p1/release' });
+    expect(log[0]?.headers['content-type']).toContain('application/json');
+    expect(log[0]?.body).toBe('');
+  });
+
+  it('a body-less write keeps a content type the host set itself (any case)', async () => {
+    const { base, log } = await serve();
+    await fetchTransport({ baseUrl: base, headers: { 'Content-Type': 'application/json; charset=utf-8' } })({ method: 'POST', path: '/cases/next' });
+    expect(log[0]?.headers['content-type']).toBe('application/json; charset=utf-8');
+  });
+
+  it('the body-less hub calls (release, claim, next, viewing) reach a host that refuses writes without JSON', async () => {
+    const { base, log } = await serve();
+    const t = fetchTransport({ baseUrl: base });
+    for (const path of ['/cases/p1/release', '/cases/p1/claim', '/cases/next', '/cases/p1/viewing']) await t({ method: 'POST', path });
+    expect(log.map((r) => r.headers['content-type'] ?? '')).toEqual(Array(4).fill('application/json'));
+  });
+
   it('returns an error status as a response with the kit error body', async () => {
     const { base } = await serve();
     const res = await fetchTransport({ baseUrl: base })({ method: 'GET', path: '/reports/nope' });

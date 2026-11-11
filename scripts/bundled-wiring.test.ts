@@ -110,4 +110,18 @@ describe('every workflow job runs on a free standard runner, with a time limit',
       });
     }
   }
+
+  // One run per change: a push to a PR branch used to start CI twice (the push event and the pull_request event). CI runs on
+  // pushes to main and on pull requests only, and a newer push to the same branch cancels the run it replaces.
+  it('ci.yml runs once per change: push only on main, every pull request, superseded runs cancelled', () => {
+    const ci = read('.github', 'workflows', 'ci.yml');
+    const on = ci.slice(ci.indexOf('\non:\n'), ci.indexOf('\npermissions:'));
+    expect(on).toMatch(/\n {2}push:\n {4}branches: \[main\]\n/);
+    expect(on).toMatch(/\n {2}pull_request:\n/);
+    expect(ci).toMatch(/\nconcurrency:\n {2}group: ci-\$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}\n {2}cancel-in-progress: true\n/);
+  });
+
+  it('release.yml is never cancelled by a newer run (a publish must finish)', () => {
+    expect(read('.github', 'workflows', 'release.yml')).not.toContain('cancel-in-progress: true');
+  });
 });
