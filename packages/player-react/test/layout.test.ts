@@ -8,7 +8,11 @@ import { describe, expect, it } from 'vitest';
 // words that wrap instead of pushing the page sideways, and a dialog that scrolls inside itself. The browser run of the preview
 // page measures the real pixels (scrollWidth against clientWidth at 320px).
 
-const css = readFileSync(join(fileURLToPath(new URL('..', import.meta.url)), 'src', 'styles.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+// Comments gone, and a token read written `var(--cw-x, var(--cwd-x))` folded to `var(--cw-x)`: these tests talk about the token alone
+// (tokens.test.ts holds that every read carries its own private default).
+const css = readFileSync(join(fileURLToPath(new URL('..', import.meta.url)), 'src', 'styles.css'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/var\((--cw-[a-z0-9-]+), var\(--cwd-[a-z0-9-]+\)\)/g, 'var($1)');
 
 /** The declarations of the first rule whose selector list contains `selector` exactly (whitespace-normalised). */
 function rule(selector: string): string {
@@ -65,7 +69,7 @@ describe('a 320px phone', () => {
   });
 
   it('the dialog width is a token with a phone-safe use: min() against the container', () => {
-    expect(css).toMatch(/--cw-dialog-width:\s*30rem;/);
+    expect(css).toMatch(/--cwd-dialog-width:\s*30rem;/);
   });
 
   it('nothing scrolls the page sideways: no negative margin and no fixed 100vw', () => {

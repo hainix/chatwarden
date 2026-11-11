@@ -65,8 +65,15 @@ describe('the Content Security Policy', () => {
 });
 
 describe('theming', () => {
-  it('says where the tokens go: the component root, not an ancestor, because the defaults sit on .cw-player', () => {
-    expect(flat(section('Theming'))).toMatch(/Put the tokens on the component's own root .* not on an ancestor/);
+  it('says where the tokens go: on any element above the components, because the defaults are private and sit at zero specificity', () => {
+    const theming = flat(section('Theming'));
+    expect(theming).toMatch(/Set a token on any element above the components .* on `\.cw-player`, or on the `className` you pass/);
+    expect(theming).toContain('private `--cwd-*` names');
+    expect(theming).not.toMatch(/not on an ancestor|shadowed/);
+  });
+
+  it('says a dialog drawn into another container does not see a wrapper\'s tokens', () => {
+    expect(flat(section('Theming'))).toMatch(/drawn into another `container` has its own root there/);
   });
 });
 

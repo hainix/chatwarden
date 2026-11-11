@@ -22,6 +22,13 @@ const code = files.filter((f) => /\.tsx?$/.test(f));
 const appCode = code.filter((f) => !f.endsWith('i18n.ts'));
 const read = (f: string): string => readFileSync(f, 'utf8');
 const rel = (f: string): string => f.slice(pkg.length).replaceAll('\\', '/');
+/** The public name of a private default: `--cwd-bg` is what `--cw-bg` falls back to. */
+const pub = (privateName: string): string => `--cw-${privateName.slice('--cwd-'.length)}`;
+/**
+ * A stylesheet as its rules read: comments gone, and a token read written `var(--cw-x, var(--cwd-x))` folded to `var(--cw-x)`, so a
+ * test can talk about the token alone. tokens.test.ts holds that every read carries its own private default.
+ */
+const folded = (sheet: string): string => sheet.replace(/\/\*[\s\S]*?\*\//g, '').replace(/var\((--cw-[a-z0-9-]+), var\(--cwd-[a-z0-9-]+\)\)/g, 'var($1)');
 
 describe('no words outside the catalog', () => {
   // Attributes whose string value a person reads or hears.
@@ -152,7 +159,8 @@ describe('the stylesheet is a complete token contract', () => {
   const fallback = css.slice(fbStart, fbEnd);
   // Everything after the tokens, without the fallback block (which holds plain colours on purpose).
   const rest = fbStart === -1 ? css.slice(end) : css.slice(end, fbStart) + css.slice(fbEnd);
-  const defined = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1] as string);
+  // The defaults are private (`--cwd-x`, what `var(--cw-x, var(--cwd-x))` falls back to), so a token is listed by its public name.
+  const defined = [...tokenBlock.matchAll(/^\s*(--cwd-[a-z0-9-]+):/gm)].map((m) => pub(m[1] as string));
   const used = [...new Set([...rest.matchAll(/var\((--cw-[a-z0-9-]+)/g)].map((m) => m[1] as string))];
 
   it('has a token block with a good number of tokens, each defined once', () => {
@@ -175,7 +183,7 @@ describe('the stylesheet is a complete token contract', () => {
   });
 
   it('gives every colour a light and a dark value', () => {
-    const colours = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*(.+);$/gm)].filter(([, , v]) => /#[0-9a-f]{3,8}\b/i.test(v as string));
+    const colours = [...tokenBlock.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*(.+);$/gm)].filter(([, , v]) => /#[0-9a-f]{3,8}\b/i.test(v as string));
     expect(colours.length).toBe(COLOUR_TOKENS.length);
     for (const [, name, value] of colours) expect(value, name).toMatch(/^light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\)$/i);
   });
@@ -219,10 +227,10 @@ describe('the stylesheet is a complete token contract', () => {
     expect(fbEnd).toBeGreaterThan(fbStart);
     expect(fallback).toMatch(/@supports not \(color: light-dark\(#000, #fff\)\)/);
     expect(fallback).toMatch(/:where\(\.cw-player\)\s*\{/);
-    const colours = [...tokenBlock.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), #[0-9a-f]{6}\);$/gim)];
+    const colours = [...tokenBlock.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), #[0-9a-f]{6}\);$/gim)];
     expect(colours.length).toBe(COLOUR_TOKENS.length);
     for (const [, name, light] of colours) expect(fallback, name).toContain(`${name}: ${light};`);
-    const inFallback = [...fallback.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1]);
+    const inFallback = [...fallback.matchAll(/^\s*(--cwd-[a-z0-9-]+):/gm)].map((m) => m[1]);
     expect(inFallback.sort()).toEqual(colours.map((c) => c[1]).sort());
   });
 
@@ -236,8 +244,10 @@ describe('the stylesheet is a complete token contract', () => {
   });
 
   // 16 KB raw at 7i: raised for the configurable report dialog (grouped reasons, quote, follow-up panel); the gzip budget is unchanged.
-  it('is small: under 16 KB raw (the size test holds it to 6 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(16 * 1024);
+  // 18 KB raw now: every read is `var(--cw-x, var(--cwd-x))` so a page can theme the components from any ancestor (the pattern hub-react
+  // adopted at 7j), which repeats the token name once more on each of ~120 reads: +2.8 KB raw, about +160 bytes gzipped.
+  it('is small: under 18 KB raw (the size test holds it to 6 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(18 * 1024);
   });
 });
 
@@ -263,9 +273,10 @@ const COLOUR_TOKENS = [
 describe('the palette', () => {
   const css = read(join(src, 'styles.css'));
   const block = css.slice(css.indexOf('/* ---- Tokens'), css.indexOf('/* ---- End of tokens'));
-  const pairs = [...block.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\);$/gim)];
+  // Each pair is [whole line, public name, light, dark]: the default is declared as `--cwd-x`, the token a page sets is `--cw-x`.
+  const pairs = [...block.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]{6}), (#[0-9a-f]{6})\);$/gim)].map((m) => [m[0], pub(m[1] as string), m[2], m[3]] as const);
   const theme = (which: 'light' | 'dark'): Record<string, string> =>
-    Object.fromEntries(pairs.map((m) => [m[1] as string, (which === 'light' ? m[2] : m[3]) as string]));
+    Object.fromEntries(pairs.map((m) => [m[1], (which === 'light' ? m[2] : m[3]) as string]));
 
   it('has exactly the documented colour tokens: a neutral base, one accent, red and yellow, and the shadow ink', () => {
     expect(pairs.map((m) => m[1]).sort()).toEqual([...COLOUR_TOKENS].sort());
@@ -321,7 +332,7 @@ describe('the palette', () => {
   });
 
   // Where each signal colour may appear. A rule outside its list is a colour that does not carry meaning.
-  const body = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const body = folded(css);
   const rulesUsing = (token: string): string[] => {
     const out: string[] = [];
     const split = (list: string): string[] => {
@@ -381,27 +392,35 @@ describe('the palette', () => {
   });
 
   it('the referee card has the same geometry as the hub card (a sanction looks the same to staff and player)', () => {
-    const hub = readFileSync(join(pkg, '..', 'hub-react', 'src', 'styles.css'), 'utf8');
+    // Both sheets as written, comments gone but the reads left as they are, so the card is held to the same token pattern as well:
+    // each colour is `var(--cw-x, var(--cwd-x))` in both.
+    const plain = (sheet: string): string => sheet.replace(/\/\*[\s\S]*?\*\//g, '');
+    const hub = plain(readFileSync(join(pkg, '..', 'hub-react', 'src', 'styles.css'), 'utf8'));
+    const mine = plain(css);
     const geometry = (sheet: string, root: string): string[] => {
       const m = new RegExp(`\\.${root} \\.cw-card\\s*\\{([^}]*)\\}`).exec(sheet)?.[1] ?? '';
       return m
         .split(';')
         .map((d) => d.trim())
-        .filter((d) => /^(width|height|border-radius|transform):/.test(d))
+        .filter((d) => /^(width|height|border-radius|transform|box-shadow):/.test(d))
         .sort();
     };
-    expect(geometry(hub, 'cw-hub').length).toBe(4);
-    expect(geometry(body, 'cw-player')).toEqual(geometry(hub, 'cw-hub'));
+    expect(geometry(hub, 'cw-hub').length).toBe(5);
+    expect(geometry(mine, 'cw-player')).toEqual(geometry(hub, 'cw-hub'));
+    expect(geometry(mine, 'cw-player').join(' ')).toContain('var(--cw-shadow-ink, var(--cwd-shadow-ink))');
     for (const cls of ['warning', 'restriction', 'ban']) {
       const of = (sheet: string, root: string): string => new RegExp(`\\.${root} \\.cw-card--${cls}\\s*\\{([^}]*)\\}`).exec(sheet)?.[1]?.replace(/\s+/g, ' ').trim() ?? '';
-      expect(of(body, 'cw-player'), cls).toBe(of(hub, 'cw-hub'));
+      expect(of(mine, 'cw-player'), cls).not.toBe('');
+      expect(of(mine, 'cw-player'), cls).toBe(of(hub, 'cw-hub'));
     }
   });
 
   it('the colour values of the shared palette are the hub values (one look)', () => {
+    // The defaults are private in both sheets (`--cwd-x`), so the two are compared by that name, value for value.
     const hub = readFileSync(join(pkg, '..', 'hub-react', 'src', 'styles.css'), 'utf8');
-    const hubPairs = Object.fromEntries([...hub.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*(light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\));$/gim)].map((m) => [m[1], m[2]]));
-    for (const m of pairs) expect(`${m[1]}: light-dark(${m[2]}, ${m[3]})`, String(m[1])).toBe(`${m[1]}: ${hubPairs[m[1] as string] as string}`);
+    const hubPairs = Object.fromEntries([...hub.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*(light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\));$/gim)].map((m) => [pub(m[1] as string), m[2]]));
+    expect(Object.keys(hubPairs).length).toBeGreaterThanOrEqual(pairs.length);
+    for (const m of pairs) expect(`${m[1]}: light-dark(${m[2]}, ${m[3]})`, String(m[1])).toBe(`${m[1]}: ${hubPairs[m[1]] as string}`);
   });
 });
 
@@ -423,7 +442,7 @@ describe('the README documents the token contract', () => {
   const readme = readFileSync(join(pkg, 'README.md'), 'utf8');
   const css = read(join(src, 'styles.css'));
   const block = css.slice(css.indexOf('/* ---- Tokens'), css.indexOf('/* ---- End of tokens'));
-  const defined = [...block.matchAll(/^\s*(--cw-[a-z0-9-]+):/gm)].map((m) => m[1] as string);
+  const defined = [...block.matchAll(/^\s*(--cwd-[a-z0-9-]+):/gm)].map((m) => pub(m[1] as string));
   const theming = readme.slice(readme.indexOf('\n## Theming\n'), readme.indexOf('\n## Security notes\n'));
 
   it('lists every token under Theming, and no token the stylesheet lacks', () => {
@@ -433,8 +452,8 @@ describe('the README documents the token contract', () => {
   });
 
   it('states each colour token default as written in the stylesheet', () => {
-    for (const m of block.matchAll(/^\s*(--cw-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]+), (#[0-9a-f]+)\);$/gim)) {
-      expect(theming, m[1]).toContain(`| \`${m[1]}\` | \`${m[2]}\`, \`${m[3]}\` |`);
+    for (const m of block.matchAll(/^\s*(--cwd-[a-z0-9-]+):\s*light-dark\((#[0-9a-f]+), (#[0-9a-f]+)\);$/gim)) {
+      expect(theming, m[1]).toContain(`| \`${pub(m[1] as string)}\` | \`${m[2]}\`, \`${m[3]}\` |`);
     }
   });
 

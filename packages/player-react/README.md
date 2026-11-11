@@ -236,7 +236,7 @@ Theming).
 - **Where the dialog is drawn.** It is `position: fixed`, drawn in place. If an ancestor of the component has a `transform`, `filter`,
   `contain` or `will-change: transform`, the browser makes the dialog relative to that ancestor and it can be clipped or off-centre. Pass
   `container={document.body}` (or a layer of your own) to `NoticeQueue` or `ReportDialog` to draw it there instead; the theme and
-  `className` still apply.
+  `className` still apply, and tokens set on `body` or `:root` reach it (see Theming).
 - **Refreshing.** Change `refreshKey` to ask the server again, for example when your own push channel says a notice is pending.
 
 ### `PlayerClient`
@@ -283,18 +283,25 @@ The components ship one stylesheet, `@chatwarden/player-react/styles.css`. Impor
 radius and space is a `--cw-*` custom property, with a light and a dark value, and every rule is scoped under `.cw-player`.
 
 - **Three inputs make it yours.** Set `--cw-surface` (the base: panels and the dialog), `--cw-accent` (your next action, links and
-  the focus ring) and `--cw-radius` (how round things are) on `.cw-player`, or on the `className` you pass. Every other token has a
-  default that works on them. The font is yours already: the components inherit it, and `--cw-font` is only there if you want another.
+  the focus ring) and `--cw-radius` (how round things are) on any element above the components, on `.cw-player`, or on the `className` you
+  pass (see "Re-theme it"). Every other token has a default that works on them. The font is yours already: the components inherit it, and `--cw-font` is only there if you want another.
 - **Light and dark.** By default the components follow the player's `prefers-color-scheme`. The `theme` prop (or `data-cw-theme="light"`
   or `"dark"` on `.cw-player` or any ancestor) forces one. Set it from your game's own setting.
-- **Re-theme it.** The defaults sit at zero specificity (`:where(.cw-player)`), so any rule of yours wins whatever its order. Put the tokens on the component's own root (`.cw-player` or the `className` you pass), not on an ancestor: the defaults are declared on `.cw-player` itself, so a value set higher up is shadowed by them.
+- **Re-theme it.** Set a token on any element above the components (`body`, `:root`, a wrapper around your game's UI), on `.cw-player`, or on
+  the `className` you pass: `body { --cw-accent: #7a2e8a }` themes every component alike. The stylesheet never declares a public `--cw-*`
+  name on `.cw-player` (that would hide what you set above it): its defaults sit under private `--cwd-*` names at zero specificity
+  (`:where(.cw-player)`), so any rule of yours wins whatever its order, and every rule reads `var(--cw-x, var(--cwd-x))`, your value if
+  there is one, ours if not. Set `--cw-*` names only; the `--cwd-*` ones are not part of the contract. A dialog drawn into another
+  `container` has its own root there, so a value set on a wrapper around the component does not reach it: set the token on `body` or
+  `:root`, or on the `className` you pass.
 - **Strict CSP.** The stylesheet is a file. The components inject no `<style>`, set no inline `style` and use no `dangerouslySetInnerHTML`.
 - **Browsers.** The colours use `light-dark()` (Chrome 123, Firefox 120, Safari 17.5, all 2024). Older browsers that lack
   `light-dark()` get the light colours from a fallback block in the stylesheet, so the components keep their colours; they follow
   neither the player's dark setting nor the `theme` prop.
 
 ```css
-.cw-player.acme {
+/* On any element above the components: the whole page, a wrapper around your game's UI, or the className you pass. */
+body {
   --cw-surface: light-dark(#fffaf0, #1d1a14);
   --cw-accent: light-dark(#7a2e8a, #d9a3e6);
   --cw-accent-ink: light-dark(#ffffff, #2a0f31);
