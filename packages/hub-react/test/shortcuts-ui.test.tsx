@@ -229,7 +229,7 @@ describe('Escape with no window open goes back to the queue', () => {
     const { w, filed } = await world();
     const { user } = renderHub(w, { path: `/reports/${filed[1]!.id}` });
     await ready();
-    await screen.findByRole('heading', { level: 2, name: /Harassment report against Bravo/ });
+    await screen.findByRole('heading', { level: 2, name: /Insults or harassment report against Bravo/ });
     (document.activeElement as HTMLElement | null)?.blur();
     await user.keyboard('{Escape}');
     expect(focusedName()).toBe('Bravo');
@@ -241,7 +241,7 @@ describe('no shortcut fires while typing', () => {
     const { w, filed } = await world();
     const view = renderHub(w, { path: `/reports/${filed[0]!.id}` });
     await ready();
-    await screen.findByRole('heading', { level: 2, name: /Harassment report against Alpha/ });
+    await screen.findByRole('heading', { level: 2, name: /Insults or harassment report against Alpha/ });
     return { w, filed, ...view };
   }
 
@@ -329,7 +329,7 @@ describe('shortcuts={false} turns them all off', () => {
     const { w, filed } = await world();
     const { user } = renderHub(w, { shortcuts: false, path: `/reports/${filed[0]!.id}` });
     await ready();
-    await screen.findByRole('heading', { level: 2, name: /Harassment report against Alpha/ });
+    await screen.findByRole('heading', { level: 2, name: /Insults or harassment report against Alpha/ });
     (document.activeElement as HTMLElement | null)?.blur();
     const before = document.activeElement;
     await user.keyboard('jkn?');

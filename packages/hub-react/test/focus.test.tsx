@@ -37,7 +37,7 @@ describe('focus and announcements when the screen changes', () => {
     await w.file({ target: 'Mallory' });
     const { user } = renderHub(w, { path: '/reports' });
     await user.click(await screen.findByRole('link', { name: 'Review the newest report against Mallory' }));
-    expect(await screen.findByRole('heading', { level: 2, name: /^(Report|Harassment report against Mallory)$/ })).toHaveFocus();
+    expect(await screen.findByRole('heading', { level: 2, name: /^(Report|Insults or harassment report against Mallory)$/ })).toHaveFocus();
   });
 
   it('keeps focus on the status button when only the query changes', async () => {

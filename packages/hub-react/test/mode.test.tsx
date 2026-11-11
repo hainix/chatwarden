@@ -177,7 +177,7 @@ describe('the switch', () => {
     expect(screen.queryByRole('tablist')).toBeNull();
     await user.click(within(view()).getByRole('button', { name: 'Detailed' }));
     expect(router.path).toBe(`/reports/${f.id}`);
-    expect(await screen.findByRole('heading', { level: 2, name: /Harassment report against Mallory/ })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: /Insults or harassment report against Mallory/ })).toBeInTheDocument();
     expect(screen.getByRole('tablist')).toBeInTheDocument();
     await user.click(within(view()).getByRole('button', { name: 'Simple' }));
     expect(router.path).toBe(`/reports/${f.id}`);
