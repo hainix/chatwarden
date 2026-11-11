@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/profanity",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": false,
   "description": "Chatwarden optional profanity filter: ordinary swearing that a game can allow, star or refuse. Slurs are the matcher's job, not this package's.",
   "license": "Apache-2.0",
@@ -46,9 +46,9 @@
     "obscenity": "^0.4.6"
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.2",
-    "@chatwarden/matcher": "0.1.2",
-    "@chatwarden/store-sqlite": "0.1.2"
+    "@chatwarden/core": "0.1.3",
+    "@chatwarden/matcher": "0.1.3",
+    "@chatwarden/store-sqlite": "0.1.3"
   },
   "peerDependencies": {
     "@chatwarden/core": "^0.1.0",

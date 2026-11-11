@@ -1,5 +1,37 @@
 # @chatwarden/profanity
 
+## 0.1.3
+
+### Patch Changes
+
+- A hardening release: smaller browser bundles, a faster SQLite store, a hub that loads its settings screens on demand, and players report in one step. All ten packages move to 0.1.3 together. There is nothing to migrate.
+  
+  **Browser bundles**
+  
+  - `@chatwarden/matcher` no longer ships obscenity's English word list to browsers (issue #8). Before, anyone who bundled the matcher for a web page carried that ready-made list, real slurs included, even though the matcher never used it. The matcher now carries only the few pieces of obscenity it needs, so those bundles are smaller and the matcher gives the same verdicts as before (it is tested word for word against obscenity's own engine). `obscenity` is no longer installed with `@chatwarden/matcher`. `@chatwarden/profanity` still uses it.
+  
+  **SQLite**
+  
+  - `@chatwarden/store-sqlite` runs migration 18 when it opens. It adds indexes on `kit_sanctions(starts_at)` and `kit_strikes(at)`, so the history and strike-window queries stay fast as the tables grow. It is applied automatically, changes no row, and needs nothing from you.
+  
+  **Moderator hub**
+  
+  - The hub's settings and admin screens (Steps and ladder, Reporting, Terms, Blocked, Rule gaps, Audit, Guide and All actions) load when they are first opened. The hub's first load is about a fifth smaller. `<chatwarden-hub>` is still one self-contained script with no extra request.
+  - Experimental: `<Hub onController={...}>` hands you the hub's controller, and `controller.refresh()` reads the queue's change token now instead of at the next poll. Use it when your game has just filed a report and you want the moderator to see it at once. It only reads: it adds nothing to the audit trail and changes no permission. It is rate-limited to one read a second, so do not call it in a loop. Both may change in a later release.
+  - The "What players see" picture on the Reporting settings screen now shows the one-step dialog below.
+  
+  **Players report in one step**
+  
+  - The report dialog is one step: "Report this message?", the line, an optional "Why?" list of reasons, a note behind "Add a note", then Report. After sending it says "Report sent" and the thank-you. The reason and the note go in the one report, so there is no "Add a reason" second step. When your studio's setting is "reason required", the "Why?" list is required and Report asks for a reason.
+  - `onAddDetail` on `ReportDialog` is deprecated. It is still accepted but is no longer called. `cw.reports.addDetail` is still in the kit for a follow-up of your own.
+  - Experimental: `ReportDialog` has an `extra` slot for your own controls (for example an "Also mute this player" checkbox). It sits inside the form, so give your buttons `type="button"`.
+  - If the reasons change while the dialog is open and the one a player chose is gone, the dialog no longer sends the old reason. The "Add a note" button is now a full-size touch target on phones.
+  - Nothing is removed from `en` and `PlayerText` in `@chatwarden/player-react`: the words the dialog no longer uses are kept and marked `@deprecated`, and go in a later minor. The same goes for six words of the hub's reporting preview.
+  
+  **Site demo**
+  
+  - The chatwarden.dev demo follows the one-step dialog (its tour copy and tests), its chat box no longer cuts Send off, and the page no longer scrolls sideways on a 320 px phone.
+
 ## 0.1.2
 
 ### Patch Changes

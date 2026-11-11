@@ -86,3 +86,68 @@ describe('the 0.1.2 upgrade notes (all ten CHANGELOGs)', () => {
     for (const dir of dirs) expect(section(dir), dir).toBe(first);
   });
 });
+
+// 0.1.3 is a patch release for studios: the notes say, in plain words, what changed and what is experimental or deprecated. They ship in
+// every tarball, so the same text is in all ten.
+const section013 = (dir: string): string => {
+  const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+  const at = text.indexOf('## 0.1.3');
+  const end = text.indexOf('\n## 0.1.2', at);
+  return at < 0 ? '' : text.slice(at, end < 0 ? undefined : end).replace(/\s+/g, ' ');
+};
+
+describe('the 0.1.3 notes (all ten CHANGELOGs)', () => {
+  it.each(dirs)('%s: has a 0.1.3 section above 0.1.2, as patch changes', (dir) => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    expect(text.indexOf('## 0.1.3')).toBeGreaterThan(-1);
+    expect(text.indexOf('## 0.1.3')).toBeLessThan(text.indexOf('## 0.1.2'));
+    expect(section013(dir)).toContain('### Patch Changes');
+  });
+
+  it.each(dirs)('%s: says the matcher no longer ships obscenity’s English list (issue #8), with the same verdicts', (dir) => {
+    const s = section013(dir);
+    expect(s).toContain('issue #8');
+    expect(s).toMatch(/word list/i);
+    expect(s).toMatch(/smaller/);
+    expect(s).toMatch(/same verdicts/);
+  });
+
+  it.each(dirs)('%s: says SQLite migration 18 adds indexes and is applied automatically', (dir) => {
+    const s = section013(dir);
+    expect(s).toContain('migration 18');
+    expect(s).toMatch(/indexes/);
+    expect(s).toMatch(/automatically/);
+  });
+
+  it.each(dirs)('%s: says the hub loads its screens on demand, a fifth smaller, and that onController and refresh are experimental', (dir) => {
+    const s = section013(dir);
+    expect(s).toMatch(/load when they are first opened/);
+    expect(s).toContain('about a fifth smaller');
+    expect(s).not.toMatch(/-?22\s?%/);
+    expect(s).toContain('onController');
+    expect(s).toContain('refresh()');
+    expect(s).toMatch(/Experimental/);
+  });
+
+  it.each(dirs)('%s: says players report in one step, onAddDetail is deprecated and not called, and extra is experimental', (dir) => {
+    const s = section013(dir);
+    expect(s).toMatch(/one step/);
+    expect(s).toContain('`onAddDetail`');
+    expect(s).toMatch(/deprecated/);
+    expect(s).toMatch(/no longer called/);
+    expect(s).toContain('`extra`');
+  });
+
+  it.each(dirs)('%s: mentions the site demo fixes', (dir) => {
+    expect(section013(dir)).toMatch(/demo/);
+  });
+
+  it('the 0.1.3 section is the same text in all ten', () => {
+    const first = section013(dirs[0] as string);
+    for (const dir of dirs) expect(section013(dir), dir).toBe(first);
+  });
+
+  it('uses no em dash and no real term (synthetic only)', () => {
+    for (const dir of dirs) expect(section013(dir), dir).not.toMatch(/—/);
+  });
+});
