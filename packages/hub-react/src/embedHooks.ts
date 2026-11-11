@@ -156,7 +156,8 @@ export interface UseCase {
 /**
  * One case. While it is in use the moderator is its handler if nobody is (the claim and the heartbeat are the hub's own: once per
  * case however many parts show it, and let go when the last one leaves). Pass `null` for no case. Only one case is held at a time: the
- * one most recently shown.
+ * one most recently shown. The report is read for this hook alone (audited): a `CaseCard` or `CaseWorkbench` for the same report on the
+ * same page reads it again for itself, so that page makes two audited reads of it.
  *
  * ```tsx
  * const { report, holder } = useCase(reportId);

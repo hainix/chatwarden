@@ -276,7 +276,7 @@ describe('the queue is started and stopped by whoever started it', () => {
     const w = await hubWorld();
     await w.file({ target: 'Alpha' });
     const controller = createHubController({ client: w.client, now: w.now });
-    const stop = vi.spyOn(controller.queue, 'stop');
+    const acquire = vi.spyOn(controller.queue, 'acquire');
     const view = render(
       <StrictMode>
         <HubProvider controller={controller} now={w.now}>
@@ -287,7 +287,8 @@ describe('the queue is started and stopped by whoever started it', () => {
     );
     await waitFor(() => expect(screen.getAllByText('Alpha')).toHaveLength(2));
     await act(() => settle());
-    expect(stop).not.toHaveBeenCalled();
+    // One hold for all the pieces, however many mounts StrictMode makes.
+    expect(acquire).toHaveBeenCalledTimes(1);
     view.rerender(
       <StrictMode>
         <HubProvider controller={controller} now={w.now}>
@@ -306,8 +307,7 @@ describe('the queue is started and stopped by whoever started it', () => {
   it('pieces that never need the queue neither start nor stop a borrowed one', async () => {
     const w = await hubWorld({ role: 'senior' });
     const controller = createHubController({ client: w.client, now: w.now });
-    const start = vi.spyOn(controller.queue, 'start');
-    const stop = vi.spyOn(controller.queue, 'stop');
+    const acquire = vi.spyOn(controller.queue, 'acquire');
     const view = render(
       <HubProvider controller={controller} now={w.now}>
         <TermsManager />
@@ -316,8 +316,8 @@ describe('the queue is started and stopped by whoever started it', () => {
     await screen.findByRole('heading', { level: 2, name: 'Terms' });
     view.unmount();
     await act(() => settle());
-    expect(start).not.toHaveBeenCalled();
-    expect(stop).not.toHaveBeenCalled();
+    expect(acquire).not.toHaveBeenCalled();
+    expect(controller.queue.running).toBe(false);
     controller.dispose();
   });
 });

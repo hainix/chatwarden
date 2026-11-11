@@ -55,12 +55,25 @@ export interface LiveQueueState {
   pending: ReadonlySet<string>;
 }
 
+/** One hold on a live queue (see `acquire`). */
+export interface QueueHold {
+  release: () => void;
+  ready: Promise<void>;
+}
+
 export interface LiveQueueStore extends Store<LiveQueueState> {
   /** True while it is polling (after `start`, until `stop` or `dispose`). A part that starts the queue for itself can ask first, and stop only what it started. */
   readonly running: boolean;
-  /** Begin loading and polling. Safe to call twice. Resolves once the first read has been tried (it never rejects: a failure is in the snapshot). */
+  /**
+   * Take a hold on the queue: it loads and polls while any hold is unreleased, and stops when the last one is released. Each part that
+   * needs the queue holds it for itself (the hub, a piece, your own code), so none can stop it from under another. `release` works
+   * once; `ready` settles when the first read has been tried (it never rejects). A disposed queue takes no hold.
+   */
+  acquire: () => QueueHold;
+  /**
+   * Begin loading and polling, and keep doing so until `stop()`: a hold that is never released. Safe to call twice. Resolves once the first read has been tried (it never rejects: a failure is in the snapshot). */
   start: () => Promise<void>;
-  /** Stop the polling, the minute and every listener (the state stays). */
+  /** Stop the polling, the minute and every listener (the state stays), whatever holds there are: they are all let go. */
   stop: () => void;
   /** Stop for good: a later `start` does nothing. */
   dispose: () => void;
@@ -301,20 +314,43 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     });
   };
 
+  // Who wants it running: holds taken with `acquire`, and `start()`, which is a hold that only `stop()` lets go.
+  const holds = new Set<object>();
+  let kept = false;
+  const halt = (): void => {
+    run?.stop();
+    run = null;
+    timers.clearTimeout(takeTimer);
+  };
+
   const api: LiveQueueStore = {
     subscribe: store.subscribe,
     getSnapshot: store.getSnapshot,
     get running() {
       return run !== null;
     },
+    acquire() {
+      const token = {};
+      if (disposed) return { release: () => undefined, ready: Promise.resolve() };
+      holds.add(token);
+      if (run === null) run = begin();
+      return {
+        ready: run.first,
+        release() {
+          if (!holds.delete(token)) return;
+          if (holds.size === 0 && !kept) halt();
+        },
+      };
+    },
     start() {
+      kept = true;
       if (run === null && !disposed) run = begin();
       return run?.first ?? Promise.resolve();
     },
     stop() {
-      run?.stop();
-      run = null;
-      timers.clearTimeout(takeTimer);
+      holds.clear();
+      kept = false;
+      halt();
     },
     dispose() {
       disposed = true;

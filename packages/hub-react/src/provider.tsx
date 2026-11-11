@@ -14,6 +14,7 @@ import { errorText } from './labels.js';
 import { QueueProvider } from './liveQueue.js';
 import { ModeProvider, useModeState } from './mode.js';
 import type { HubMode } from './mode.js';
+import { bindRuntime, createRuntime } from './pieceRuntime.js';
 import { buildPath, memoryRouter } from './router.js';
 import type { HubRouter } from './router.js';
 import { ToastProvider } from './toasts.js';
@@ -51,12 +52,18 @@ export interface HubProviderOptions {
  */
 export type HubControllerSource =
   | {
-      /** The staff client: `createHubClient(fetchTransport({ baseUrl: '/admin' }))`. Create it once, outside render. The provider makes the controller, and disposes it when it unmounts. */
+      /** The staff client: `createHubClient(fetchTransport({ baseUrl: '/admin' }))`. Create it once, outside render. The provider makes the controller, and disposes it when it unmounts. Its toasts ("Open the case", Undo of a case you left) open through the pieces' `onOpenCase` or `onOpenReport`, except for a case a piece is already showing. */
       client: HubClient;
       controller?: never;
     }
   | {
-      /** A controller you made with `createHubController` (see `@chatwarden/hub-react/headless`). The provider uses it and never disposes it: that is yours to do. */
+      /**
+       * A controller you made with `createHubController` (see `@chatwarden/hub-react/headless`). The provider uses it and never disposes it: that is
+       * yours to do. The pieces take their own hold on its queue (`queue.acquire`), so a `controller.start()` of yours keeps it running after they
+       * unmount. What the controller starts by itself (the "Open the case" toast after a failed decision, Undo of a case the moderator left) goes to
+       * the `host` you gave it, not to the pieces' callbacks: you own its navigation. What a piece does itself (Take next, decide and next) still calls
+       * the piece's `onOpenCase` or `onOpenReport`, so do not also open the same case from your `host.show` for those.
+       */
       controller: HubController;
       client?: never;
     };
@@ -140,7 +147,13 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
   hostRef.current = shell?.host;
 
   // One controller per provider: the session cache, the toasts, the live queue, claims and decisions.
-  const controller = useControllerOf(given, client, () => createHubController({ client, now: () => nowRef.current(), t: tRef.current, ...(hostRef.current === undefined ? {} : { host: hostRef.current }) }));
+  const controller = useControllerOf(given, client, () => {
+    // The hub's shell shows a case by its router; a provider placing pieces shows it by the pieces' callbacks (the runtime's host).
+    const runtime = createRuntime();
+    const made = createHubController({ client, now: () => nowRef.current(), t: tRef.current, host: hostRef.current ?? runtime.host });
+    bindRuntime(made, runtime);
+    return made;
+  });
 
   // Who is signed in: asked once per client, unless a controller of the adopter's already knows.
   const known = given?.me.getSnapshot() ?? null;

@@ -68,6 +68,9 @@ export interface DecideCommand {
   snapshot?: DecisionForm;
 }
 
+/** How `start()` went, with what lets go of the hold it took on the queue (a no-op when there is none). */
+export type StartResult = ActionResult<Me> & { release: () => void };
+
 export interface HubController {
   readonly client: HubClient;
   readonly session: Session;
@@ -82,9 +85,11 @@ export interface HubController {
   identify(me: Me): void;
   /**
    * Asks `GET /me` (unless `identify` was called) and, for a role that can read reports, starts the live queue and waits for its first
-   * read, so `queue.getSnapshot()` has the cases (or the error) when this resolves.
+   * read, so `queue.getSnapshot()` has the cases (or the error) when this resolves. The answer is `{ ok, value | error }` as before, and
+   * carries `release`: the start is a hold on the queue, which runs while any hold is unreleased (see `queue.acquire`), so the pieces of
+   * a `HubProvider` that share this controller never stop what you started. Ignore `release` and it runs until `dispose()`.
    */
-  start(): Promise<ActionResult<Me>>;
+  start(): Promise<StartResult>;
   /**
    * Open a case: the moderator becomes its handler if nobody is, the claim and the "viewing" hint are renewed while the tab is
    * visible, and its row stays in the queue. Opening another case leaves this one. Resolves once the first claim has answered.
@@ -162,12 +167,16 @@ export function createHubController(options: HubControllerOptions): HubControlle
         try {
           who = await client.me();
         } catch (e) {
-          return { ok: false, error: toHubError(e) };
+          return { ok: false, error: toHubError(e), release: () => undefined };
         }
         identify(who);
       }
-      if (!disposed && canRead(who)) await queue.start();
-      return { ok: true, value: who };
+      if (!disposed && canRead(who)) {
+        const hold = queue.acquire();
+        await hold.ready;
+        return { ok: true, value: who, release: hold.release };
+      }
+      return { ok: true, value: who, release: () => undefined };
     },
     open: cases.open,
     leave: cases.leave,

@@ -114,6 +114,72 @@ describe('the live queue: running', () => {
   });
 });
 
+describe('the live queue: holds', () => {
+  it('runs while any hold is unreleased and stops with the last release', async () => {
+    const r = await started();
+    await r.controller.start();
+    r.controller.queue.stop();
+    const one = r.controller.queue.acquire();
+    const two = r.controller.queue.acquire();
+    expect(r.controller.queue.running).toBe(true);
+    await one.ready;
+    one.release();
+    expect(r.controller.queue.running).toBe(true);
+    two.release();
+    expect(r.controller.queue.running).toBe(false);
+  });
+
+  it('a release works once: a second release of the same hold takes nothing from another', async () => {
+    const r = await started();
+    await r.controller.start();
+    r.controller.queue.stop();
+    const one = r.controller.queue.acquire();
+    const two = r.controller.queue.acquire();
+    one.release();
+    one.release();
+    expect(r.controller.queue.running).toBe(true);
+    two.release();
+    expect(r.controller.queue.running).toBe(false);
+  });
+
+  it('controller.start() is a hold: its result still says ok and the Me, and carries the release', async () => {
+    const r = await started();
+    const answer = await r.controller.start();
+    expect(answer.ok).toBe(true);
+    if (answer.ok) expect(answer.value.actor).toBe('ann@example.test');
+    const other = r.controller.queue.acquire();
+    other.release();
+    expect(r.controller.queue.running).toBe(true);
+    answer.release();
+    expect(r.controller.queue.running).toBe(false);
+  });
+
+  it('the older queue.start() and queue.stop() work as they did: start is idempotent and held until stop, stop ends every hold', async () => {
+    const r = await started();
+    await r.controller.start();
+    r.controller.queue.stop();
+    await r.controller.queue.start();
+    await r.controller.queue.start();
+    const hold = r.controller.queue.acquire();
+    hold.release();
+    expect(r.controller.queue.running).toBe(true);
+    const again = r.controller.queue.acquire();
+    r.controller.queue.stop();
+    expect(r.controller.queue.running).toBe(false);
+    again.release();
+    expect(r.controller.queue.running).toBe(false);
+  });
+
+  it('a disposed queue takes no hold', async () => {
+    const r = await started();
+    await r.controller.start();
+    r.controller.dispose();
+    const hold = r.controller.queue.acquire();
+    expect(r.controller.queue.running).toBe(false);
+    hold.release();
+  });
+});
+
 describe('the live queue: polling', () => {
   it('asks GET /changes every 5 seconds while visible, and reads the queue again only when the token moved', async () => {
     const r = await started();

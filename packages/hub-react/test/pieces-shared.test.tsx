@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createHubController } from '../src/headless/controller.js';
 import type { HubController } from '../src/headless/controller.js';
 import { CaseCard } from '../src/pieces/CaseCard.js';
@@ -106,7 +106,7 @@ describe('one poller, one queue read', () => {
     );
     await screen.findByText('Alpha');
     const c = controller as HubController;
-    const stop = vi.spyOn(c.queue, 'stop');
+    expect(c.queue.running).toBe(true);
     expect(count(w, 'GET', '/reports')).toBe(1);
     view.rerender(
       <HubProvider client={w.client} now={w.now}>
@@ -114,7 +114,7 @@ describe('one poller, one queue read', () => {
       </HubProvider>,
     );
     await act(() => settle());
-    expect(stop).toHaveBeenCalledTimes(1);
+    expect(c.queue.running).toBe(false);
   });
 });
 

@@ -8,7 +8,7 @@
 // Every store has `subscribe(listener)` and `getSnapshot()`, and a snapshot is the same object until something changes.
 
 export { createHubController } from './controller.js';
-export type { DecideCommand, HubController, HubControllerOptions, HubControllerSettings, HubHost } from './controller.js';
+export type { DecideCommand, HubController, HubControllerOptions, HubControllerSettings, HubHost, StartResult } from './controller.js';
 
 // The store contract, and what the controller needs from its runtime
 export { createStore } from './store.js';
@@ -18,7 +18,7 @@ export type { ActionResult, PageSource, Timers } from './env.js';
 
 // The live queue
 export { QUEUE_MAX_PAGES, QUEUE_PAGE, createLiveQueue, visibleRows } from './liveQueue.js';
-export type { Connection, LiveQueueOptions, LiveQueueState, LiveQueueStore } from './liveQueue.js';
+export type { Connection, LiveQueueOptions, LiveQueueState, LiveQueueStore, QueueHold } from './liveQueue.js';
 
 // Cases and claims
 export { CLAIM_BEAT_MS, TAKE_COOLDOWN_MS, VIEWING_BEAT_MS, createCaseStore } from './cases.js';

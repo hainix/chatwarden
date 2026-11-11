@@ -1,16 +1,20 @@
 import { createContext, useEffect } from 'react';
-import type { HubController } from './headless/controller.js';
+import type { HubController, HubHost } from './headless/controller.js';
+import type { QueueHold } from './headless/liveQueue.js';
 import { useOptionalController } from './controllerContext.js';
 import { useHub } from './context.js';
 
 // What pieces that share one controller must agree on, kept per controller (so every piece and hook under one `HubProvider`, or
 // under several that were given the same controller, sees the same):
-// - the queue is started once, by the first part that needs it, however many need it, and stopped when the last one leaves, but only
-//   if the parts started it (a controller the adopter already runs is left running);
+// - the queue is held once for all the parts that need it (one hold of the queue's own ref-count: see `queue.acquire`), so it runs
+//   while a piece needs it or the adopter started it, and the pieces release only their own hold;
 // - a case is claimed once and its heartbeat runs once, however many parts show it, and only one case is held at a time (the
 //   controller holds one open case): the case that was most recently shown or entered.
-// Where a piece sends the moderator is not here: a piece calls its own callbacks from the outcome of what it did (`showNext`), the
-// same way for a controller it made and one it was given.
+// Where a piece sends the moderator: a piece calls its own callbacks from the outcome of what it did (`showNext`), the same way for a
+// controller it made and one it was given. A controller the provider made also gets `host` (below), so what the controller starts by
+// itself (the "Open the case" toast on a failed decision, Undo of a case the moderator left) reaches the callbacks too; what a piece
+// did itself is `quietly` (the outcome already navigated) and a case a piece is showing needs no navigation. A controller the adopter
+// made keeps the adopter's own `host`.
 
 /** Where a piece was told cases, people and reports go. Read when called, so a new callback prop is used at once. */
 export interface PieceNav {
@@ -33,8 +37,14 @@ export function showNext(nav: PieceNav, person: string, reportId: string): void 
 }
 
 export interface PieceRuntime {
+  /** The host a provider-made controller is created with: `show` goes to the most recent piece that can open a case. */
+  readonly host: HubHost;
   /** Tell the runtime which controller it serves. */
   bind(controller: HubController): void;
+  /** A piece that can be told to open things. Returns what removes it. */
+  addNav(nav: { current: PieceNav }): () => void;
+  /** Run something the piece does itself (Take next, decide and next): the controller's own `show` is not repeated, the outcome navigates. */
+  quietly<T>(run: () => Promise<T>): Promise<T>;
   /** A part that needs the live queue running. Returns what lets it go. */
   needQueue(): () => void;
   /** A part that shows a case, and so wants it claimed and its heartbeat running. Returns what lets it go. */
@@ -52,7 +62,9 @@ export function createRuntime(): PieceRuntime {
   let current: string | null = null;
   let syncing = false;
   let queueUsers = 0;
-  let startedQueue = false;
+  let hold: QueueHold | null = null;
+  let quiet = 0;
+  const navs = new Set<{ current: PieceNav }>();
   let warned = false;
   let watching: (() => void) | null = null;
 
@@ -102,27 +114,50 @@ export function createRuntime(): PieceRuntime {
     });
   };
 
+  const host: HubHost = {
+    show(reportId) {
+      // A case a piece is showing is already in front of the moderator; and what a piece just did itself has navigated by its outcome.
+      if (quiet > 0 || shown.has(reportId)) return;
+      const person = controller?.queue.getSnapshot().groups.find((g) => g.reportIds.includes(reportId))?.person ?? null;
+      for (const nav of [...navs].reverse()) {
+        const to = nav.current;
+        if (to.onOpenCase !== undefined && person !== null) return to.onOpenCase(person, reportId);
+        if (to.onOpenReport !== undefined) return to.onOpenReport(reportId);
+      }
+    },
+  };
+
   return {
+    host,
     bind(c) {
       controller = c;
     },
+    addNav(nav) {
+      navs.add(nav);
+      return () => void navs.delete(nav);
+    },
+    async quietly(run) {
+      quiet += 1;
+      try {
+        return await run();
+      } finally {
+        quiet -= 1;
+      }
+    },
     needQueue() {
       queueUsers += 1;
-      // The first part starts it, unless something else (the adopter, the hub's shell) is already running it.
-      if (queueUsers === 1 && controller !== null && !controller.queue.running) {
-        startedQueue = true;
-        void controller.queue.start();
-      }
+      // The first part takes the hold for all of them; the adopter's own start() is another hold, so neither stops the other.
+      if (queueUsers === 1 && controller !== null && hold === null) hold = controller.queue.acquire();
       let released = false;
       return () => {
         if (released) return;
         released = true;
         queueUsers -= 1;
-        // Stopped only by the one that started it. In a microtask, so a remount in the same commit keeps it running.
+        // Released with the last part. In a microtask, so a remount in the same commit keeps it running.
         queueMicrotask(() => {
-          if (queueUsers === 0 && startedQueue) {
-            startedQueue = false;
-            controller?.queue.stop();
+          if (queueUsers === 0 && hold !== null) {
+            hold.release();
+            hold = null;
           }
         });
       };
@@ -153,7 +188,13 @@ export function createRuntime(): PieceRuntime {
 
 const runtimes = new WeakMap<HubController, PieceRuntime>();
 
-/** The runtime of a controller, made on first use (one per controller, whoever made it). */
+/** Remember the runtime of a controller a provider made with its host. */
+export function bindRuntime(controller: HubController, runtime: PieceRuntime): void {
+  runtime.bind(controller);
+  runtimes.set(controller, runtime);
+}
+
+/** The runtime of a controller: the one its provider made, or one made on first use for a controller the adopter brought. */
 export function runtimeOf(controller: HubController): PieceRuntime {
   let runtime = runtimes.get(controller);
   if (runtime === undefined) {

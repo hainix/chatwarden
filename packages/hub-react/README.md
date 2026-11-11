@@ -131,8 +131,11 @@ and nothing is asked of the server.
 - **`client`**: the provider makes the controller (the live queue, claims, the Undo hold and the toasts) and disposes it when it unmounts. A
   new client makes a new controller.
 - **`controller`**: yours, from `createHubController` (see "Headless" below). The provider uses it and never disposes it. The pieces
-  start its queue only if it is not already running, and stop it only if they started it, so a queue you started stays running. The
-  callbacks fire the same way as with a `client`.
+  take their own hold on its queue (the queue runs while any hold is unreleased), so a `controller.start()` of yours keeps it running
+  after they unmount; `start()` now returns `{ ok, value | error, release }` and `release()` lets go of yours. What the controller
+  starts by itself (the "Open the case" toast after a failed decision, Undo of a case you left) goes to the `host` you gave it; what a
+  piece does itself (Take next, decide and next) calls the piece's callback, exactly as with a `client`. With a `client`, the toasts
+  open through the pieces' callbacks too (never for a case a piece is already showing).
 - **`bare`**: by default the provider draws the `.cw-hub` theme root around its children, so the pieces are styled where they sit. With
   `bare` it draws none, and you place an element with the classes `cw-hub cw-hub--embed` (and `data-cw-theme="dark"` to force a theme).
 - Until `GET /me` answers, the provider shows a plain message (loading, signed out, no access, or a failed start with Try again), so a
@@ -612,6 +615,10 @@ if (first !== undefined) {
 stopList();
 controller.dispose();
 ```
+
+`controller.start()` is a hold on the queue: its answer carries `release`, and `controller.queue.acquire()` takes another (`{ release, ready }`). The
+queue loads and polls while any hold is unreleased, so several parts can share it and none stops it from under another; `queue.start()` and
+`queue.stop()` still work (`start()` is a hold that only `stop()` lets go of, and `stop()` ends every hold).
 
 Nothing in it throws for an outcome it expects: `start`, `decide`, `retry`, `claim`, `takeOver`, `release` and `takeNext` answer a
 typed result (a 409, a 404 or a dropped connection is `{ ok: false, error }` or `{ status: 'failed' | 'conflict' }`).

@@ -1,8 +1,8 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { HubContext, useHub } from '../context.js';
 import { KeyScope } from '../keyScope.js';
-import { PieceNavContext } from '../pieceRuntime.js';
+import { PieceNavContext, useRuntime } from '../pieceRuntime.js';
 import type { PieceNav } from '../pieceRuntime.js';
 import type { Route } from '../router.js';
 import type { PermissionKey } from '../types.js';
@@ -51,9 +51,11 @@ export function Piece({
   children: ReactNode;
 }) {
   const hub = useHub();
+  const runtime = useRuntime();
   const root = useRef<HTMLDivElement>(null);
   const latest = useRef<PieceNav>(links);
   latest.current = links;
+  useEffect(() => runtime.addNav(latest), [runtime]);
 
   const allowed = hub.can(need);
   const value = useMemo(() => {
