@@ -466,6 +466,12 @@
   text-underline-offset: 0.2em;
   cursor: pointer;
 }
+/* A thumb needs the same target as the other buttons. */
+@media (pointer: coarse) {
+  .cw-player .cw-linkbtn {
+    min-height: var(--cw-control-height, var(--cwd-control-height));
+  }
+}
 .cw-player textarea + .cw-hint {
   margin-top: var(--cw-space-1, var(--cwd-space-1));
 }

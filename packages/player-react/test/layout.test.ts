@@ -111,6 +111,20 @@ describe('the report dialog on a 320px phone', () => {
     expect(rule('.cw-player .cw-linkbtn')).toMatch(/min-height:\s*2rem/);
     expect(rule('.cw-player .cw-linkbtn')).not.toMatch(/white-space:\s*nowrap/);
   });
+  it('on a touch screen (pointer: coarse) the "Add a note" door is a full control tall, like the buttons and the select', () => {
+    const blocks = [...css.matchAll(/@media\s*\(\s*pointer:\s*coarse\s*\)\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/g)].map((m) => m[1] as string);
+    expect(blocks.length).toBeGreaterThan(0);
+    const door = [...blocks.join('\n').matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((m) =>
+      (m[1] as string).split(',').map((s) => s.trim().replace(/\s+/g, ' ')).includes('.cw-player .cw-linkbtn'),
+    );
+    expect(door, 'a .cw-linkbtn rule inside @media (pointer: coarse)').toBeDefined();
+    expect(door?.[2]).toMatch(/min-height:\s*var\(--cw-control-height\)/);
+    // The mouse rule is unchanged: a pointer that can hit a small target keeps the small door.
+    expect(rule('.cw-player .cw-linkbtn')).toMatch(/min-height:\s*2rem/);
+    // And it reads the token the way the buttons do, with the private default behind it.
+    const raw = readFileSync(join(fileURLToPath(new URL('..', import.meta.url)), 'src', 'styles.css'), 'utf8');
+    expect(raw).toMatch(/@media \(pointer: coarse\)\s*\{[^@]*\.cw-linkbtn[^}]*min-height:\s*var\(--cw-control-height, var\(--cwd-control-height\)\)/);
+  });
 });
 
 describe('the busy and error states keep their place', () => {

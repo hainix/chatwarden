@@ -132,7 +132,10 @@ export function ReportDialog(props: ReportDialogProps) {
   const groups = groupReasons(read.reasons);
   const named = groups.filter((g) => g.name !== '');
   const bare = groups.filter((g) => g.name === '').flatMap((g) => g.items);
+  // The reason is read from the CURRENT list: if `reporting` changes while the dialog is open and the id the player chose is gone, the
+  // select shows the placeholder, and this is undefined, so nothing stale is sent (and a required reason is asked for again).
   const chosen = read.reasons.find((r) => r.id === reason);
+  const reasonValue = chosen === undefined ? '' : chosen.id;
   const hint = chosen !== undefined && chosen.hint !== '' ? chosen.hint : null;
   const noteShown = hasReasons && noteOpen;
 
@@ -166,13 +169,13 @@ export function ReportDialog(props: ReportDialogProps) {
   const submit = (e: FormEvent): void => {
     e.preventDefault();
     if (sending.current) return;
-    if (required && reason === '') {
+    if (required && reasonValue === '') {
       setMissing(true);
       select.current?.focus();
       return;
     }
     const draft: ReportDraft = {};
-    if (reason !== '') draft.reason = reason;
+    if (reasonValue !== '') draft.reason = reasonValue;
     if (noteShown && trimmed !== '') draft.note = trimmed;
     void send(draft);
   };
@@ -224,7 +227,7 @@ export function ReportDialog(props: ReportDialogProps) {
                   id={reasonId}
                   ref={select}
                   className="cw-select"
-                  value={reason}
+                  value={reasonValue}
                   required={required}
                   aria-invalid={missing || undefined}
                   aria-describedby={describedBy === '' ? undefined : describedBy}
@@ -267,6 +270,7 @@ export function ReportDialog(props: ReportDialogProps) {
               </div>
             )}
             {hasReasons && !noteShown && (
+              // No aria-expanded: this is a one-way door. It is removed when pressed (the note takes its place) and focus moves to the note.
               <button
                 type="button"
                 className="cw-linkbtn"

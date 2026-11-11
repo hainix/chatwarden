@@ -100,8 +100,18 @@ describe('no words outside the catalog', () => {
     // key must really be unused (otherwise the mark is a lie).
     const catalogue = read(join(src, 'i18n.ts'));
     const marked = [...catalogue.matchAll(/@deprecated unused since 0\.1\.3; removed in a later minor \*\/\s*'([^']+)':/g)].map((m) => (m[1] as string).replace(/\.(zero|one|two|few|many|other)$/, ''));
-    expect(marked.length).toBeGreaterThan(0);
+    expect(marked).toHaveLength(19); // the nineteen 0.1.2 keys the one-step dialog stopped using (test/i18n.test.ts lists them)
     expect([...dead].sort()).toEqual([...new Set(marked)].sort());
+  });
+});
+
+describe('comments that explain a choice', () => {
+  it('the "Add a note" button says why it has no aria-expanded (a one-way door: removed when pressed, focus moves to the note)', () => {
+    const source = read(join(src, 'ReportDialog.tsx'));
+    const at = source.indexOf('className="cw-linkbtn"');
+    expect(at).toBeGreaterThan(0);
+    expect(source.slice(Math.max(0, at - 400), at)).toMatch(/no aria-expanded/i);
+    expect(source.slice(at, at + 300)).not.toMatch(/aria-expanded/);
   });
 });
 

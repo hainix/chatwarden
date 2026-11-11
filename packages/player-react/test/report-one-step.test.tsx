@@ -282,6 +282,99 @@ describe('reason_required', () => {
   });
 });
 
+describe('the reasons change while the dialog is open', () => {
+  const without = (id: string): PlayerReporting => ({ ...STUDIO, reasons: STUDIO.reasons.filter((r) => r.id !== id) });
+
+  it('a chosen reason that left the list is not sent: the select shows the placeholder and the payload has no reason', async () => {
+    const onSubmit = sender();
+    const { user, rerender } = renderUi(<ReportDialog {...props(onSubmit)} />);
+    await user.selectOptions(why(), 'harassment');
+    expect((why() as HTMLSelectElement).value).toBe('harassment');
+    rerender(<ReportDialog {...props(onSubmit, { reporting: without('harassment') })} />);
+    expect((why() as HTMLSelectElement).value).toBe('');
+    expect((why() as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('Choose a reason (optional)');
+    await user.click(reportButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({});
+    expect('reason' in (onSubmit.mock.calls[0]?.[0] ?? {})).toBe(false);
+  });
+
+  it('in reason_required, Report asks for a reason (the error shows, focus goes to the select, nothing is sent)', async () => {
+    const onSubmit = sender();
+    const required: PlayerReporting = { ...STUDIO, flow: 'reason_required' };
+    const { user, rerender } = renderUi(<ReportDialog {...props(onSubmit, { reporting: required })} />);
+    await user.selectOptions(why('Why?'), 'spam');
+    rerender(<ReportDialog {...props(onSubmit, { reporting: { ...without('spam'), flow: 'reason_required' } })} />);
+    expect((why('Why?') as HTMLSelectElement).value).toBe('');
+    await user.click(reportButton());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText('Choose a reason.')).toHaveAttribute('role', 'alert');
+    expect(why('Why?')).toHaveFocus();
+  });
+
+  it('control: a chosen reason that is still in the new list (even relabelled and moved) is still sent', async () => {
+    const onSubmit = sender();
+    const { user, rerender } = renderUi(<ReportDialog {...props(onSubmit)} />);
+    await user.selectOptions(why(), 'cheating');
+    rerender(
+      <ReportDialog
+        {...props(onSubmit, { reporting: { ...STUDIO, reasons: [reason('cheating', 'Cheating (renamed)', 'Elsewhere'), reason('spam', 'Spam', 'Chat')] } })}
+      />,
+    );
+    expect((why() as HTMLSelectElement).value).toBe('cheating');
+    expect((why() as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('Cheating (renamed)');
+    await user.click(reportButton());
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ reason: 'cheating' });
+  });
+
+  it('the list can drop to nothing: no select, no reason sent', async () => {
+    const onSubmit = sender();
+    const { user, rerender } = renderUi(<ReportDialog {...props(onSubmit)} />);
+    await user.selectOptions(why(), 'spam');
+    rerender(<ReportDialog {...props(onSubmit, { reporting: { ...STUDIO, reasons: [] } })} />);
+    expect(screen.queryByRole('combobox')).toBeNull();
+    await user.click(reportButton());
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({});
+  });
+
+  it('the hint of a reason that left the list is gone, and the note typed so far is kept and sent', async () => {
+    const onSubmit = sender();
+    const { user, rerender } = renderUi(<ReportDialog {...props(onSubmit)} />);
+    await user.selectOptions(why(), 'harassment');
+    expect(screen.getByText('Targeting or bullying someone')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add a note' }));
+    await user.type(screen.getByRole('textbox'), 'still here');
+    rerender(<ReportDialog {...props(onSubmit, { reporting: without('harassment') })} />);
+    expect(screen.queryByText('Targeting or bullying someone')).toBeNull();
+    await user.click(reportButton());
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ note: 'still here' });
+  });
+
+  it('after a stale reason left, picking another one sends the new one', async () => {
+    const onSubmit = sender();
+    const { user, rerender } = renderUi(<ReportDialog {...props(onSubmit)} />);
+    await user.selectOptions(why(), 'spam');
+    rerender(<ReportDialog {...props(onSubmit, { reporting: without('spam') })} />);
+    await user.selectOptions(why(), 'afk');
+    expect((why() as HTMLSelectElement).value).toBe('afk');
+    await user.click(reportButton());
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({ reason: 'afk' });
+  });
+});
+
+describe('the "Add a note" door', () => {
+  it('is a one-way door: a plain button with no aria-expanded (it is removed when pressed, and focus moves to the note)', async () => {
+    const { user } = renderUi(<ReportDialog {...props(sender())} />);
+    const door = screen.getByRole('button', { name: 'Add a note' });
+    expect(door).not.toHaveAttribute('aria-expanded');
+    expect(door).not.toHaveAttribute('aria-controls');
+    await user.click(door);
+    expect(screen.queryByRole('button', { name: 'Add a note' })).toBeNull();
+    expect(screen.getByRole('textbox')).toHaveFocus();
+  });
+  // The comment that says why is checked on the source in static.test.ts (this file runs in jsdom, with no file URLs).
+});
+
 describe('with no reasons to offer', () => {
   it.each([
     ['no payload', undefined],
@@ -324,9 +417,17 @@ describe('there is no follow-up step', () => {
     expect(onAddDetail).not.toHaveBeenCalled();
   });
 
-  it('the catalog has no words left for the old step', () => {
-    for (const key of ['player.report.addReason', 'player.report.addReasonHint', 'player.report.detail.send', 'player.report.skip', 'player.report.legend']) {
-      expect(Object.keys(en), key).not.toContain(key);
+  it('the old step\'s words stay in the catalogue (deprecated, a patch removes nothing) but the dialog never shows them', async () => {
+    const old = ['player.report.addReason', 'player.report.addReasonHint', 'player.report.detail.send', 'player.report.skip', 'player.report.legend'] as const;
+    for (const key of old) expect(Object.keys(en), key).toContain(key);
+    const { user } = renderUi(<ReportDialog {...props(sender())} />);
+    const shownBefore = screen.getByRole('dialog').textContent ?? '';
+    await user.click(reportButton());
+    await findStatus();
+    const shownAfter = screen.getByRole('dialog').textContent ?? '';
+    for (const key of old) {
+      expect(shownBefore, key).not.toContain(en[key]);
+      expect(shownAfter, key).not.toContain(en[key]);
     }
   });
 

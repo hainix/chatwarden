@@ -207,13 +207,5 @@ describe('the 0.1.2 catalogue stays whole in a patch release', () => {
       'It is too late to add to this report. We still have the report.',
     ]);
   });
-  it('marks each deprecated key in the source, so the editor strikes it through', async () => {
-    const { readFile } = await import('node:fs/promises');
-    const source = await readFile(new URL('../src/i18n.ts', import.meta.url), 'utf8');
-    for (const key of Object.keys(DEPRECATED_SINCE_013)) {
-      const at = source.indexOf(`'${key}':`);
-      expect(at, key).toBeGreaterThan(0);
-      expect(source.slice(Math.max(0, at - 120), at), key).toMatch(/@deprecated unused since 0\.1\.3; removed in a later minor \*\/\s*$/);
-    }
-  });
+  // That each one carries the @deprecated mark is checked on the source in static.test.ts (this file runs in jsdom, with no file URLs).
 });
