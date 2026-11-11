@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/hub-react",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": false,
   "description": "Moderator hub for Chatwarden: a themeable React UI over the staff HTTP API, with the report queue, decisions, sanctions, blocked terms and audit trail, plus a headless controller for other frameworks.",
   "license": "Apache-2.0",
@@ -76,10 +76,10 @@
     }
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.3",
-    "@chatwarden/http": "0.1.3",
-    "@chatwarden/matcher": "0.1.3",
-    "@chatwarden/store-memory": "0.1.3",
+    "@chatwarden/core": "0.1.4",
+    "@chatwarden/http": "0.1.4",
+    "@chatwarden/matcher": "0.1.4",
+    "@chatwarden/store-memory": "0.1.4",
     "@fontsource-variable/instrument-sans": "^5.3.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
