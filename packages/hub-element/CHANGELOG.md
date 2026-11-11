@@ -1,5 +1,11 @@
 # @chatwarden/hub-element
 
+## 0.1.4
+
+### Patch Changes
+
+- The element's single-file bundle carries `@chatwarden/hub-react` 0.1.4: every write the hub sends now says `content-type: application/json`, including the ones with no body (releasing, claiming, taking the next case, viewing). Your server can refuse writes that do not say JSON, as a guard against cross-site request forgery.
+
 ## 0.1.3
 
 ### Patch Changes
