@@ -10,16 +10,20 @@ import { excerptLines, personName } from '../excerpt.js';
 import type { ReportPerson } from '../excerpt.js';
 import { personTag, relativeTime } from '../format.js';
 import { useHubData } from '../hooks.js';
-import { categoryLabel, decideErrorText, outcomeLabel } from '../labels.js';
+import { decideErrorText, outcomeLabel } from '../labels.js';
 import { useKeyListener } from '../keyScope.js';
 import { isTypingTarget } from '../shortcuts.js';
 import { needsSenior, noActionForm, oneClickOf, ownLinesOf, recordLine, reporterDecided, reporterWarrants, stepLabel } from '../simple.js';
 import type { OneClick } from '../simple.js';
 import { UNDO_MS } from '../toasts.js';
+import type { QueueGroup } from '../queue.js';
 import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
+import { Field } from './ActionEditor.js';
 import { DecisionBar } from './DecisionBar.js';
+import { useRulePick } from './useRulePick.js';
+import type { RulePick } from './useRulePick.js';
 import { Line } from './Transcript.js';
 
 // The Simple case view: one card per case. Who, why, what they said, their record, the ladder's suggestion and three ways to
@@ -33,26 +37,22 @@ const UID = 'a1';
 const noName = (): string => '';
 const SECONDS = UNDO_MS / 1000;
 
-/** "Reported for spam by Saffron, yesterday." One report; several read "3 reports: hate, harassment." */
+/** "Reported as Hate by Saffron, yesterday." One report; several read "3 reports: hate, no reason given." A report that gave no reason says so. */
 function reportedLine(
   t: ReturnType<typeof useHub>['t'],
   locale: string,
-  report: StaffReport,
+  report: StaffReport & { reportedReasonLabel?: string | null },
   people: ReportPerson[],
   now: number,
-  group: { reports: number; categories: StaffReport['category'][] } | null,
+  group: { reports: number; reasons: QueueGroup['reasons'] } | null,
 ): string {
-  const lower = (s: string): string => s.toLocaleLowerCase(locale);
   if (group !== null && group.reports > 1) {
-    return t('hub.simple.reported', { count: group.reports, categories: group.categories.map((c) => lower(categoryLabel(t, c))).join(', ') });
+    return t('hub.simple.reported', { count: group.reports, reasons: group.reasons.map((r) => r.label ?? t('hub.simple.reportedNoneItem')).join(', ') });
   }
   const reporter = people.find((p) => p.role === 'reporter');
-  return t('hub.simple.reported', {
-    count: 1,
-    category: lower(categoryLabel(t, report.category)),
-    reporter: reporter === undefined ? '' : personName(reporter, people, t),
-    time: relativeTime(report.createdAt, now, locale),
-  });
+  const params = { reporter: reporter === undefined ? '' : personName(reporter, people, t), time: relativeTime(report.createdAt, now, locale) };
+  if (report.reportedReason == null) return t('hub.simple.reportedNone', params);
+  return t('hub.simple.reported', { count: 1, reason: report.reportedReasonLabel ?? report.reportedReason, ...params });
 }
 
 /** What the reported person said, and, on request, the whole chat around it. */
@@ -129,6 +129,53 @@ function ReporterWarning({ report, people }: { report: StaffReport; people: Repo
   );
 }
 
+/**
+ * The rule the report breaks. When the reason points at one rule it is preselected and says what the report was filed as, so it can be
+ * changed; when no rule is clear it asks, leading with the rules the reason usually means. Nothing is suggested until one is picked.
+ */
+function RuleField({ pick, rules, report }: { pick: RulePick; rules: ReadonlyArray<{ number: number; title: string }>; report: StaffReport & { reportedReasonLabel?: string | null } }) {
+  const { t } = useHub();
+  const id = useId();
+  const ask = pick.mode === 'ask';
+  const mapped = pick.choice?.kind === 'ask' ? pick.choice.mapped : [];
+  const option = (r: { number: number; title: string }): ReactNode => (
+    <option key={r.number} value={r.number}>
+      {t('hub.guide.rule.named', { number: r.number, title: r.title })}
+    </option>
+  );
+  const lead = rules.filter((r) => mapped.includes(r.number));
+  const rest = rules.filter((r) => !mapped.includes(r.number));
+  const hint = ask
+    ? pick.picked === null
+      ? t('hub.simple.rule.askHint')
+      : undefined
+    : t('hub.simple.rule.knownHint', { reason: report.reportedReasonLabel ?? report.reportedReason ?? '', rule: pick.picked ?? '' });
+  return (
+    <div className="cw-scard-rule">
+      <Field id={`${id}-rule`} label={t(ask ? 'hub.simple.rule.ask' : 'hub.simple.rule.known')} {...(hint === undefined ? {} : { hint })}>
+        {(a) => (
+          <select {...a} value={pick.picked ?? ''} onChange={(e) => pick.pick(e.target.value === '' ? null : Number(e.target.value))}>
+            {ask && <option value="">{t('hub.simple.rule.pick')}</option>}
+            {lead.length > 0 ? (
+              <>
+                <optgroup label={t('hub.simple.rule.usual')}>{lead.map(option)}</optgroup>
+                <optgroup label={t('hub.simple.rule.rest')}>{rest.map(option)}</optgroup>
+              </>
+            ) : (
+              rules.map(option)
+            )}
+          </select>
+        )}
+      </Field>
+      {pick.error !== null && (
+        <p className="cw-field-error" role="alert">
+          {t('hub.simple.rule.failed')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** The card for a case. Read through `<CaseProvider>`, the one the hub wraps a case in. */
 export function CaseCard() {
   const { t, locale, can, shortcuts, now } = useHub();
@@ -165,13 +212,20 @@ export function CaseCard() {
   const waiting = isWaiting(entry);
   const readOnly = holder.kind === 'other';
   const editable = open && canDecide && draft.status === 'ready' && !waiting && status !== 'done' && status !== 'conflict';
+  // Which rule the card works from: the reason's one rule (preselected), or the one the moderator picks when none is clear.
+  const pick = useRulePick({
+    detail: detail.data,
+    reasons: draft.reportReasons,
+    active: draft.rules.map((r) => r.number),
+    enabled: draft.rulesState === 'ok' && can('sanctions.apply'),
+  });
   // The suggestion and the rule come from the read of the case. A newer report about the person means the ladder may have moved
   // (and the case with it), so the case is read again, and until that read is in, one click offers nothing it could send stale.
   // A decision of your own that is on its way changes the count too: that is not news, so it reads nothing.
   const count = group?.reports ?? null;
   const readAt = useRef<number | null>(count);
   const behind = readAt.current !== null && count !== null && readAt.current !== count;
-  const fresh = !behind && !detail.loading;
+  const fresh = !behind && !detail.loading && !pick.busy;
   const settled = useRef(left);
   settled.current = left;
   useEffect(() => {
@@ -184,19 +238,20 @@ export function CaseCard() {
 
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
-  const suggest = detail.data?.suggest;
+  const suggest = pick.mode === 'none' ? detail.data?.suggest : (pick.suggestion ?? undefined);
+  const ruleCited = pick.mode === 'none' ? detail.data?.rule : pick.picked;
   const choice = suggest === undefined ? null : outcomeChoice(suggest.outcome);
   const one: OneClick | null = useMemo(
-    () => (suggest === undefined || detail.data === undefined ? null : oneClickOf(draft.ctx, draft.rules, suggest.outcome, detail.data.rule, detail.data.report.lineId, UID)),
-    [draft.ctx, draft.rules, suggest, detail.data],
+    () => (suggest === undefined || detail.data === undefined || ruleCited === undefined || ruleCited === null ? null : oneClickOf(draft.ctx, draft.rules, suggest.outcome, ruleCited, detail.data.report.lineId, UID)),
+    [draft.ctx, draft.rules, suggest, detail.data, ruleCited],
   );
   // The light tap: when the ladder suggests more than a warning, a warning is one click too (same hold, same Undo, the rule's title as the reason).
   const quick: OneClick | null = useMemo(
     () =>
-      detail.data === undefined || choice === null || choice.kind === 'warning' || choice.kind === 'note'
+      detail.data === undefined || choice === null || choice.kind === 'warning' || choice.kind === 'note' || ruleCited === undefined || ruleCited === null
         ? null
-        : oneClickOf(draft.ctx, draft.rules, 'warning', detail.data.rule, detail.data.report.lineId, UID),
-    [draft.ctx, draft.rules, choice, detail.data],
+        : oneClickOf(draft.ctx, draft.rules, 'warning', ruleCited, detail.data.report.lineId, UID),
+    [draft.ctx, draft.rules, choice, detail.data, ruleCited],
   );
   const sendError = status === 'failed' && entry?.state.status === 'failed' ? entry.state.error : null;
 
@@ -335,6 +390,15 @@ export function CaseCard() {
       suggestion = <p className="cw-hint">{t('hub.decide.rules.denied')}</p>;
     } else if (!can('sanctions.apply')) {
       suggestion = <p className="cw-hint">{t('hub.decide.noApply')}</p>;
+    } else if (pick.mode !== 'none' && (pick.picked === null || pick.error !== null)) {
+      // Asking which rule: the field below is the whole card until a rule is picked.
+      suggestion = null;
+    } else if (pick.mode !== 'none' && pick.busy) {
+      suggestion = (
+        <p className="cw-hint" role="status">
+          {t('hub.state.loading')}
+        </p>
+      );
     } else if (one !== null || (suggest !== undefined && needsSenior(choice, draft.ctx.canPermanent))) {
       suggestion = (
         <div className="cw-suggest" role="group" aria-labelledby={`${base}-title`}>
@@ -362,6 +426,7 @@ export function CaseCard() {
       );
     decision = (
       <section className="cw-scard-decision" aria-label={t('hub.decide.title')}>
+        {pick.mode !== 'none' && draft.status === 'ready' && <RuleField pick={pick} rules={draft.rules} report={report} />}
         {suggestion}
         {sendError !== null && (
           <div className="cw-error" role="alert" tabIndex={-1} ref={failedRef}>
@@ -416,7 +481,7 @@ export function CaseCard() {
               {name}
             </h2>
             <p className="cw-scard-sub">
-              {reportedLine(t, locale, report, people, now(), group === null ? null : { reports: group.reports, categories: group.categories })}
+              {reportedLine(t, locale, report, people, now(), group === null ? null : { reports: group.reports, reasons: group.reasons })}
             </p>
           </header>
           <ReporterWarning report={report} people={people} />

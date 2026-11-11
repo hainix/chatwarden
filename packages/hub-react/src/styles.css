@@ -2714,6 +2714,161 @@
   list-style: none;
 }
 
+/* The Reporting settings: the flow choices, one card per reason, and the "What players see" picture. Everything wraps inside its own box,
+   so nothing widens the page at a phone's width. Neutral colour only: the referee card and the red of a refused field are the signals. */
+.cw-hub .cw-flowopts {
+  display: grid;
+  gap: var(--cw-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-flowopt {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cw-space-3);
+  padding: var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-m);
+  cursor: pointer;
+}
+.cw-hub .cw-flowopt:has(input:checked) {
+  border-color: var(--cw-accent);
+  background: var(--cw-accent-soft);
+}
+.cw-hub .cw-flowopt input {
+  flex: none;
+  margin-top: var(--cw-space-1);
+}
+.cw-hub .cw-flowopt > span {
+  display: grid;
+  gap: var(--cw-space-1);
+  min-width: 0;
+}
+.cw-hub .cw-reasons {
+  display: grid;
+  gap: var(--cw-space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-reason > [role='group'] {
+  display: grid;
+  gap: var(--cw-space-3);
+  min-width: 0;
+  padding: var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-m);
+  background: var(--cw-surface);
+}
+.cw-hub .cw-reason-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--cw-space-3);
+  min-width: 0;
+}
+.cw-hub .cw-reason-fields input {
+  width: 100%;
+  min-width: 0;
+}
+.cw-hub .cw-reason-flags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2) var(--cw-space-4);
+}
+.cw-hub .cw-reason-moves {
+  display: inline-flex;
+  gap: var(--cw-space-1);
+  margin-left: auto;
+}
+.cw-hub .cw-reason-rules {
+  display: grid;
+  gap: var(--cw-space-2);
+  min-width: 0;
+}
+.cw-hub .cw-mock {
+  display: grid;
+  gap: var(--cw-space-3);
+  min-width: 0;
+  max-width: 26rem;
+  padding: var(--cw-space-4);
+  border: var(--cw-border-width) solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-m);
+  background: var(--cw-surface);
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-mock p,
+.cw-hub .cw-mock ul {
+  margin: 0;
+}
+.cw-hub .cw-mock-tag {
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+}
+.cw-hub .cw-mock-title {
+  font-size: var(--cw-text-l);
+  font-weight: var(--cw-weight-strong);
+}
+.cw-hub .cw-mock-quote {
+  padding: var(--cw-space-2) var(--cw-space-3);
+  border-left: 3px solid var(--cw-border-strong);
+  background: var(--cw-surface-sunken);
+}
+.cw-hub .cw-mock-legend,
+.cw-hub .cw-mock-heading {
+  font-weight: var(--cw-weight-strong);
+}
+.cw-hub .cw-mock-heading {
+  color: var(--cw-ink-muted);
+  font-size: var(--cw-text-s);
+}
+.cw-hub .cw-mock-group ul {
+  display: grid;
+  gap: var(--cw-space-1);
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-mock-group li {
+  padding: var(--cw-space-1) var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-s);
+}
+.cw-hub .cw-mock-btn {
+  display: inline-block;
+  margin: 0 var(--cw-space-2) var(--cw-space-1) 0;
+  padding: var(--cw-space-1) var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-s);
+}
+.cw-hub .cw-mock-btn--primary {
+  font-weight: var(--cw-weight-strong);
+}
+.cw-hub .cw-mock-after {
+  display: grid;
+  gap: var(--cw-space-2);
+  padding-top: var(--cw-space-3);
+  border-top: var(--cw-border-width) dashed var(--cw-border-strong);
+}
+.cw-hub .cw-mock-thanks {
+  padding: var(--cw-space-2) var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-s);
+  background: var(--cw-surface-sunken);
+}
+/* The Simple card's rule field: the whole card until a rule is picked, so it is as wide as the card. */
+.cw-hub .cw-scard-rule {
+  display: grid;
+  gap: var(--cw-space-2);
+  min-width: 0;
+}
+.cw-hub .cw-scard-rule select {
+  width: 100%;
+  min-width: 0;
+}
+
 /* The generated guide, drawn by the safe renderer: plain document typography. */
 .cw-hub .cw-doc {
   display: grid;

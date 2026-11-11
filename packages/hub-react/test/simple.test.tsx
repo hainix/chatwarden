@@ -57,7 +57,7 @@ describe('the card says who, why, what they said and their record', () => {
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     await open(w, f.id);
     expect(screen.getByRole('heading', { level: 2, name: 'Mallory' })).toBeInTheDocument();
-    expect(screen.getByText('Reported for harassment by Saffron, now.')).toBeInTheDocument();
+    expect(screen.getByText('Reported as Insults or harassment by Saffron, now.')).toBeInTheDocument();
   });
 
   it('says how long ago, in words', async () => {
@@ -65,17 +65,17 @@ describe('the card says who, why, what they said and their record', () => {
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     w.clock.t += 2 * DAY;
     await open(w, f.id);
-    expect(screen.getByText('Reported for harassment by Saffron, 2 days ago.')).toBeInTheDocument();
+    expect(screen.getByText('Reported as Insults or harassment by Saffron, 2 days ago.')).toBeInTheDocument();
   });
 
-  it('with several reports it counts them and lists the categories', async () => {
+  it('with several reports it counts them and lists the reasons', async () => {
     const w = await hubWorld();
     const a = await w.fileRich({ lines: TALK, target: 'Mallory', reporter: 'Saffron', category: 'hate', room: 'one' });
     await w.fileRich({ lines: TALK, target: 'Mallory', reporter: 'Rae', category: 'harassment', room: 'two' });
     await w.fileRich({ lines: TALK, target: 'Mallory', reporter: 'Kit', category: 'hate', room: 'three' });
     await open(w, a.id);
-    expect(screen.getByText('3 reports: hate, harassment.')).toBeInTheDocument();
-    expect(screen.queryByText(/^Reported for/)).toBeNull();
+    expect(screen.getByText('3 reports: Hate, Insults or harassment.')).toBeInTheDocument();
+    expect(screen.queryByText(/^Reported as .* by /)).toBeNull();
   });
 
   it('shows only the reported person\'s lines, the reported line marked', async () => {
@@ -279,7 +279,7 @@ describe('the reporter warning', () => {
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     await open(w, f.id);
     expect(await screen.findByText("Saffron's past reports were mostly not upheld (1 of 4).")).toBeInTheDocument();
-    expect(screen.queryByText(/bad faith|abuse|spam|liar/i)).toBeNull();
+    expect(warning()?.textContent ?? '').not.toMatch(/bad faith|abuse|spam|liar/i);
   });
 
   it('a reporter with no record gets no warning and no meter', async () => {
@@ -388,7 +388,8 @@ describe('when there is no suggestion', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK, category: 'other' });
     await open(w, f.id);
-    expect(within(decision()).getByText('No step is suggested. Choose one.')).toBeInTheDocument();
+    // No rule is clear (the rule it mapped to is retired, or "Something else" maps to none), so the card asks which rule.
+    expect(within(decision()).getByRole('combobox', { name: 'Which rule does this break?' })).toHaveValue('');
     expect(within(decision()).queryByRole('group', { name: 'The ladder suggests' })).toBeNull();
     expect(within(decision()).queryByRole('button', { name: /^(Restrict|Ban|Send a warning|Add a note)/ })).toBeNull();
     expect(something()).toHaveClass('cw-btn--primary');
@@ -400,7 +401,8 @@ describe('when there is no suggestion', () => {
     const w = await hubWorld({ retire: [RULE] });
     const f = await w.fileRich({ lines: TALK });
     await open(w, f.id);
-    expect(within(decision()).getByText('No step is suggested. Choose one.')).toBeInTheDocument();
+    // No rule is clear (the rule it mapped to is retired, or "Something else" maps to none), so the card asks which rule.
+    expect(within(decision()).getByRole('combobox', { name: 'Which rule does this break?' })).toHaveValue('');
     expect(something()).toHaveClass('cw-btn--primary');
   });
 
@@ -931,7 +933,8 @@ describe('what is not on the card', () => {
     // The editing parts of the bar.
     expect(screen.queryByRole('button', { name: 'Add an action' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: 'Reason' })).toBeNull();
-    expect(screen.queryByRole('combobox')).toBeNull();
+    // The one choice on the card is the rule the report breaks (preselected from what it was reported as).
+    expect(screen.queryAllByRole('combobox').map((c) => c.closest('.cw-scard-rule') !== null)).toEqual([true]);
     expect(screen.queryByRole('group', { name: 'Saved reasons' })).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
     // The queue's claim filters and category filter.

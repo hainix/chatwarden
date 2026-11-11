@@ -5,7 +5,7 @@ import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
 import { absoluteTime, formatDuration, listOf, waitTone } from '../format.js';
 import { Icon } from '../icons.js';
-import { CATEGORY_LIST, categoryLabel, errorText, groupName } from '../labels.js';
+import { CATEGORY_LIST, categoryLabel, errorText, groupName, reasonChip } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
 import { useMode } from '../mode.js';
 import type { ShownRow } from '../live.js';
@@ -147,6 +147,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
             </select>
           </label>
         )}
+        {!simple && <ReasonFilter />}
       </div>
       <div className="cw-newbar" role="status">
         {queue.incoming > 0 && (
@@ -182,6 +183,36 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
   );
 }
 
+/** The reasons in the queue (and "No reason given") to filter by: a person with any report that said so stays. */
+function ReasonFilter() {
+  const { t } = useHub();
+  const queue = useQueue();
+  const seen: Array<{ id: string; label: string }> = [];
+  let none = false;
+  for (const g of queue.groups) {
+    for (const r of g.reasons) {
+      if (r.id === null) none = true;
+      else if (!seen.some((x) => x.id === r.id)) seen.push({ id: r.id, label: r.label ?? r.id });
+    }
+  }
+  const value = queue.filter.reason ?? 'all';
+  return (
+    <label className="cw-select">
+      <span className="cw-sr">{t('hub.queue.filter.reason')}</span>
+      <select value={value} onChange={(e) => queue.setFilter({ reason: e.target.value })}>
+        <option value="all">{t('hub.queue.reason.all')}</option>
+        {seen.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.label}
+          </option>
+        ))}
+        {none && <option value="none">{t('hub.reason.none')}</option>}
+        {value !== 'all' && value !== 'none' && !seen.some((r) => r.id === value) && <option value={value}>{value}</option>}
+      </select>
+    </label>
+  );
+}
+
 /**
  * One case. The link opens it (and so claims it); the row's own button releases your claim. In Simple mode a claim is not shown
  * unless someone else holds the case ("maya is on it"), and nothing offers a release: leaving a case lets it go.
@@ -207,9 +238,9 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
           {!simple && <PersonChip person={g.person} />}
         </span>
         <span className="cw-case-cats">
-          {g.categories.map((c) => (
-            <span key={c} className="cw-cat">
-              {categoryLabel(t, c)}
+          {g.reasons.map((r) => (
+            <span key={r.id ?? 'none'} className="cw-cat">
+              {reasonChip(t, r.label)}
             </span>
           ))}
         </span>

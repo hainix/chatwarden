@@ -122,6 +122,7 @@ export function Moderation() {
 | `Guide` | The guide the kit generates from your rules | `policy.read` | none |
 | `RecentActions` | Everything done to anyone, a page at a time | `history.read` | `onOpenPerson` |
 | `LadderSettings` | The steps and ladder, editable, with a preview of each change | `policy.read` (changing needs `policy.write`) | none |
+| `ReportingSettings` | How players report, the reasons they can give and the thank-you, editable, with a picture of what players see | `policy.read` (changing needs `policy.write`) | none |
 
 Every piece takes `className` for its root element. A role without the permission sees one plain line ("Your role can't open this.")
 and nothing is asked of the server.
@@ -219,7 +220,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 
 - `HubProvider`, `useHubController`, and the types `HubProviderProps`, `HubProviderOptions` and `HubControllerSource`
 - the pieces `CaseList`, `CaseCard`, `CaseWorkbench`, `PersonRecord`, `TermsManager`, `BlockedList`, `AuditLog`, `RuleGaps`, `Guide`,
-  `RecentActions` and `LadderSettings`, their `*Props` types, `PieceProps` and `PieceLinks`
+  `RecentActions`, `LadderSettings` and `ReportingSettings`, their `*Props` types, `PieceProps` and `PieceLinks`
 - the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `usePolicy`, and the types `HubRead`,
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - in `/headless`: `HubController.configure`, `HubControllerOptions.host`, and the types `HubHost` and `HubControllerSettings`
@@ -277,6 +278,7 @@ for its Undo survives it.
 | `#/gaps` | Rule gaps: open gaps with their note and ref code, closed ones below. An owner closes one as "Made it rule N" (the rules in force) or "Not a rule" | `gaps.read`; closing needs `gaps.close` |
 | `#/audit` | The audit trail, newest first, 50 at a time: time, staff member, role, action and target, filtered by staff member and action | `audit.read` (a senior and up) |
 | `#/settings/ladder` | Steps and ladder (under Settings in Detailed, and More in Simple): the lengths moderators can pick, the ladder grid (six steps by a lighter and a harsher column, each a kind and a length), the first offence per conduct level, the repeat rule, the area and severe rules, and the outcome text of the written guidelines. The owner edits a local draft and sees a preview (400 ms after the last edit) of what it would suggest for sample records. Saving asks for a reason; a 409 reads "Someone else changed these settings" with Reload; a 400 puts keyboard focus on the field the kit named. Each section has a Reset, and so has the whole screen, both with an in-page confirm that asks why. Leaving with unsaved edits asks in the page (links, the command bar and buttons) and closing the tab asks the browser to confirm; the browser's Back button and an address typed by hand are not guarded. A role that cannot write (or a store that cannot save settings) sees it read-only with one sentence saying why; `usePolicy().save` and `reset` refuse with `not_allowed` for a role that cannot write, and a reset of several sections that fails part way answers `partial: true` (what did go through is already applied) | `policy.read`; changing needs `policy.write` |
+| `#/settings/reporting` | Reporting (beside Steps and ladder): how players report (one tap, pick a reason first, or reason required, each with a plain line), the reasons (add, rename, hint, group, move up and down with buttons, switch on and off, map to Community Rules with a rule multi-picker, ask for a note; "Something else" can be renamed and mapped but never removed or switched off), the thank-you, and a "What players see" picture drawn from the draft. It saves, conflicts, refuses, resets (Reset reporting) and guards leaving exactly as Steps and ladder does; each screen's save keeps what the other saved, and "Reset everything" on Steps and ladder leaves reporting alone. The reason a reporter gives is only a hint: Detailed shows "Reported as X" or "No reason given" beside each report and the queue can be filtered by it; the Simple card asks "Which rule does this break?" when no rule is clear (no reason, "Something else", a reason with no single rule) and suggests once one is picked, and preselects the rule when the reason maps to exactly one. A reporter's page says "Their reasons matched the decision 3 of 4 times" once three reports are decided | `policy.read`; changing needs `policy.write` |
 | `#/guide` | The Community Rules and the escalation ladder (the profile's own, else the kit's `LADDER_TABLE`) from the policy data, then the generated moderator guide (`GET /policy?format=markdown`) through a safe renderer | `policy.read` |
 
 The tabs a role cannot use are not shown: Audit appears for a senior and above, and every tab follows the permission table the

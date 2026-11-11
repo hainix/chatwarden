@@ -49,6 +49,8 @@ export interface DecisionDraft {
   ctx: ValidationContext;
   problems: Problems;
   rules: ReadonlyArray<{ number: number; title: string }>;
+  /** The reporting reasons and the rules each usually means, or undefined until the policy is read (or when the kit sends none). */
+  reportReasons: ReadonlyArray<{ id: string; rules: readonly number[] }> | undefined;
   /** Whether the rules are loaded; a verdict can still be sent without them (no actions). */
   rulesState: RulesState;
   rulesError: HubError | null;
@@ -96,6 +98,8 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     () => (policy.data?.rules ?? []).filter((r) => r.retired !== true).sort((a, b) => a.number - b.number).map((r) => ({ number: r.number, title: r.title })),
     [policy.data],
   );
+
+  const reportReasons = useMemo(() => policy.data?.profile.reporting?.reasons.map((r) => ({ id: r.id, rules: r.rules })), [policy.data]);
 
   const canApply = can('sanctions.apply') && rulesState === 'ok';
   const canPermanent = can('sanctions.apply.ban_permanent');
@@ -316,6 +320,7 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     ctx,
     problems,
     rules,
+    reportReasons,
     rulesState,
     rulesError: policy.error,
     reloadRules: policy.reload,

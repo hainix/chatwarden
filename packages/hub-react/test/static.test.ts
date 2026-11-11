@@ -385,6 +385,8 @@ describe('design v2: the palette', () => {
       /cw-member-you$/,
       /cw-suggest$/,
       /cw-radio:has\(input:checked\)$/,
+      // The Reporting settings' flow choices: the chosen one is a selection, like a verdict.
+      /cw-flowopt:has\(input:checked\)$/,
       /cw-result$/,
       // The case pane: your claim (a soft blue band), the open tab, your decision waiting for its Undo, the focus ring on a verdict,
       // and the key caps on the primary button (white-ish on the accent).

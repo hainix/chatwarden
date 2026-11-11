@@ -69,7 +69,7 @@ describe('a newer report re-reads the case, so one click never sends an older su
     await settle();
     expect(reads(w, f.id)).toBe(before + 1);
     expect(primaries().map((b) => b.textContent)).toEqual([expect.stringContaining(fresh)]);
-    expect(screen.getByText('2 reports: harassment.')).toBeInTheDocument();
+    expect(screen.getByText('2 reports: Insults or harassment.')).toBeInTheDocument();
   });
 
   it('what a click sends is the fresh step', async () => {

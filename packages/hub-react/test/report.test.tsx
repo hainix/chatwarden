@@ -381,7 +381,7 @@ describe('ReportView: people', () => {
       return undefined;
     };
     renderHub(w, { path: `/reports/${f.id}` });
-    expect(await heading(`Harassment report against Person ${personTag(f.person)}`)).toBeInTheDocument();
+    expect(await heading(`Insults or harassment report against Person ${personTag(f.person)}`)).toBeInTheDocument();
   });
 });
 
@@ -550,7 +550,7 @@ describe('ReportView: loading and failing', () => {
     const { router } = await open(w, a.id);
     expect(screen.getByText('alpha spoke')).toBeInTheDocument();
     act(() => router.navigate(`/reports/${b.id}`));
-    await heading('Harassment report against Beta');
+    await heading('Insults or harassment report against Beta');
     expect(screen.queryByText('alpha spoke')).not.toBeInTheDocument();
     expect(screen.getByText('beta spoke')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText(/text of alpha/)).not.toBeInTheDocument());

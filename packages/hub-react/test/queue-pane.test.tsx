@@ -68,8 +68,8 @@ describe('the queue pane: the rows', () => {
     ]);
     const alpha = within(rowOf('Alpha'));
     expect(alpha.getByText(personTag(a!.person))).toBeInTheDocument();
-    expect(alpha.getByText('Harassment')).toBeInTheDocument();
-    expect(alpha.getByText('Spam')).toBeInTheDocument();
+    expect(alpha.getByText('Insults or harassment')).toBeInTheDocument();
+    expect(alpha.getByText('Spam or ads')).toBeInTheDocument();
     expect(alpha.getByText('2 reports from 2 people')).toBeInTheDocument();
     expect(alpha.getByText('Waiting 3h')).toBeInTheDocument();
     expect(within(rowOf('Charlie')).getByText('1 report from 1 person')).toBeInTheDocument();
@@ -432,7 +432,7 @@ describe('opening a case claims it', () => {
     expect(w.cw.cases.holder(a!.person)?.by).toBe('maya@example.test');
     expect(rowOf('Alpha')).toHaveAttribute('data-claim', 'other');
     // The report page itself still loads: a claim never blocks a read.
-    expect(await screen.findByRole('heading', { level: 2, name: /Harassment report against Alpha/ })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: /Insults or harassment report against Alpha/ })).toBeInTheDocument();
   });
 
   it('a report that is not in the open queue (already decided) is opened without claiming anything', async () => {

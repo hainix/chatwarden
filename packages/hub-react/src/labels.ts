@@ -38,6 +38,10 @@ const SOURCE: Record<SanctionSource, HubText> = {
 export const CATEGORY_LIST = Object.keys(CATEGORY) as ReportCategory[];
 
 export const categoryLabel = (t: HubT, category: ReportCategory): string => t(CATEGORY[category]);
+/** What the reporter said a report was for, as a chip: the reason's name now, or "No reason given". */
+export const reasonChip = (t: HubT, label: string | null): string => (label === null ? t('hub.reason.none') : label);
+/** The same with its lead-in: "Reported as Hate", or "No reason given". */
+export const reasonSaid = (t: HubT, label: string | null): string => (label === null ? t('hub.reason.none') : t('hub.reason.reportedAs', { reason: label }));
 export const kindLabel = (t: HubT, kind: SanctionKind): string => t(KIND[kind]);
 export const sourceLabel = (t: HubT, source: SanctionSource): string => t(SOURCE[source]);
 

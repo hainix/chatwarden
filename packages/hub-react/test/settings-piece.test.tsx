@@ -4,6 +4,7 @@ import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { describe, expect, it } from 'vitest';
 import { LadderSettings } from '../src/pieces/LadderSettings.js';
+import { ReportingSettings } from '../src/pieces/ReportingSettings.js';
 import { usePolicy } from '../src/policyHooks.js';
 import { useHub } from '../src/context.js';
 import { HubProvider } from '../src/provider.js';
@@ -225,5 +226,45 @@ describe('usePolicy', () => {
     const { result } = await hook(w, usePolicy, true);
     await waitFor(() => expect(result.current?.data).toBeDefined());
     expect(gets(w)).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('the ReportingSettings piece', () => {
+  it('draws the reporting settings inside a piece box, for a role that may read them', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    const { container } = renderPieces(w, <ReportingSettings className="mine" />);
+    await screen.findByRole('list', { name: 'Reasons' });
+    const box = container.querySelector('[data-cw-piece="ReportingSettings"]');
+    expect(box).toHaveClass('mine');
+    expect(screen.getByRole('radio', { name: 'One tap' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Reset reporting' })).toBeInTheDocument();
+  });
+
+  it('says so in one line when the role cannot read the policy, and asks the server nothing', async () => {
+    const w = await hubWorld({ role: 'moderator', permissions: { 'policy.read': 'owner' } });
+    renderPieces(w, <ReportingSettings />);
+    await screen.findByText(/can't open this/);
+    expect(gets(w)).toBe(0);
+  });
+
+  it('a moderator reads it, and cannot change it', async () => {
+    const w = await hubWorld({ role: 'moderator' });
+    renderPieces(w, <ReportingSettings />);
+    await screen.findByRole('list', { name: 'Reasons' });
+    expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+    expect(screen.getByRole('radio', { name: 'One tap' })).toBeDisabled();
+  });
+
+  it('saves from inside a page without moving it', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    const before = window.location.hash;
+    const { user } = renderPieces(w, <ReportingSettings />);
+    await screen.findByRole('list', { name: 'Reasons' });
+    await user.click(screen.getByRole('radio', { name: 'Reason required' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await user.type(screen.getByRole('textbox', { name: /Why are you changing this/ }), 'stricter');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(w.cw.profile.reporting.flow).toBe('reason_required'));
+    expect(window.location.hash).toBe(before);
   });
 });

@@ -164,7 +164,7 @@ describe('reportingLayer', () => {
     expect(r.reasons.find((x) => x.id === 'sexual')?.enabled).toBe(false);
     expect(reportingDirty(reportingDraftOf(r), r)).toBe(false);
   });
-7652});
+});
 
 describe('reportingProblems', () => {
   it('has none for the defaults', () => {

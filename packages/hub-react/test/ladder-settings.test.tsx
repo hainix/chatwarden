@@ -583,7 +583,7 @@ describe('Saving', () => {
     await save(user);
     await screen.findByText('Saved the steps and ladder.');
     router.navigate('/audit');
-    await screen.findByText('Changed the steps and ladder');
+    await screen.findByText('Changed the settings');
     router.navigate('/guide');
     await screen.findByRole('region', { name: 'Escalation ladder' });
     expect(policyReads()).toBeGreaterThan(first);

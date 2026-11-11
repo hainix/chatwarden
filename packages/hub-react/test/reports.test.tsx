@@ -54,7 +54,7 @@ describe('Reports: grouping by person', () => {
     expect(r.getByText('1 report')).toBeInTheDocument();
     expect(r.getByText('1 room')).toBeInTheDocument();
     expect(r.getByText('1 reporter')).toBeInTheDocument();
-    expect(r.getByText('Harassment')).toBeInTheDocument();
+    expect(r.getByText('Insults or harassment')).toBeInTheDocument();
     expect(r.getByText('Waiting 2h')).toBeInTheDocument();
     expect(rows()[0]).toHaveAttribute('data-wait', 'aging');
   });
@@ -71,7 +71,7 @@ describe('Reports: grouping by person', () => {
     expect(r.getByText('3 reports')).toBeInTheDocument();
     expect(r.getByText('3 rooms')).toBeInTheDocument();
     expect(r.getByText('2 reporters')).toBeInTheDocument();
-    expect(r.getByText('Harassment')).toBeInTheDocument();
+    expect(r.getByText('Insults or harassment')).toBeInTheDocument();
     expect(r.getByText('Hate')).toBeInTheDocument();
   });
 
@@ -109,7 +109,7 @@ describe('Reports: grouping by person', () => {
     expect(r.getByRole('link', { name: 'Open the history of Target0' })).toHaveAttribute('href', `#/people/${filed[0]!.person}`);
   });
 
-  it('offers earlier reports behind a disclosure, each as its category and how long ago, never the raw id', async () => {
+  it('offers earlier reports behind a disclosure, each as what it was reported as and how long ago, never the raw id', async () => {
     const w = await hubWorld();
     const first = await w.file({ target: 'Mallory', reporter: 'A', category: 'hate' });
     w.clock.t += 3 * HOUR;
@@ -126,8 +126,8 @@ describe('Reports: grouping by person', () => {
     const links = within(r.getByRole('list', { name: 'Earlier reports' })).getAllByRole('link');
     expect(links).toHaveLength(2);
     expect(links[0]).toHaveAttribute('href', `#/reports/${second.id}`);
-    expect(links[0]).toHaveAccessibleName('Spam, 5 minutes ago');
-    expect(links[0]).toHaveTextContent('Spam, 5 minutes ago');
+    expect(links[0]).toHaveAccessibleName('Spam or ads, 5 minutes ago');
+    expect(links[0]).toHaveTextContent('Spam or ads, 5 minutes ago');
     expect(links[1]).toHaveAttribute('href', `#/reports/${first.id}`);
     expect(links[1]).toHaveAccessibleName('Hate, 3 hours ago');
     expect(document.body.textContent).not.toContain(first.id);

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useHub } from './context.js';
 import { absoluteTime, formatDuration, personTag, relativeTime, waitTone } from './format.js';
-import { categoryLabel } from './labels.js';
+import { reasonChip } from './labels.js';
 import type { QueueGroup } from './queue.js';
 import { Link, PersonChip, Tag } from './ui.js';
 
@@ -29,10 +29,8 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
         <div className="cw-qrow-who">
           <span className="cw-qrow-name">{name}</span>
           <PersonChip person={group.person} />
-          {group.categories.map((c) => (
-            <Tag key={c}>
-              {categoryLabel(t, c)}
-            </Tag>
+          {group.reasons.map((r) => (
+            <Tag key={r.id ?? 'none'}>{reasonChip(t, r.label)}</Tag>
           ))}
           {showStatus && group.open > 0 && <Tag>{t('hub.reports.tag.open')}</Tag>}
           {showStatus && group.actioned > 0 && <Tag>{t('hub.reports.tag.actioned')}</Tag>}
@@ -54,7 +52,7 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
                 {shown.map((e) => (
                   <li key={e.id}>
                     <Link to={{ name: 'report', id: e.id }} className="cw-link">
-                      {t('hub.reports.row.earlierItem', { category: categoryLabel(t, e.category), time: relativeTime(e.createdAt, now(), locale) })}
+                      {t('hub.reports.row.earlierItem', { category: reasonChip(t, e.reasonLabel), time: relativeTime(e.createdAt, now(), locale) })}
                     </Link>
                   </li>
                 ))}

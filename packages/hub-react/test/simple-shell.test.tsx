@@ -69,7 +69,7 @@ describe('the menu: Cases, Words, Blocked and More', () => {
     expect(within(sections()).getByRole('link', { name: 'Cases' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('More is a menu of Recent actions, Audit, Rule gaps, Guide and Steps and ladder, closed until opened', async () => {
+  it('More is a menu of Recent actions, Audit, Rule gaps, Guide, Steps and ladder and Reporting, closed until opened', async () => {
     const w = await hubWorld({ role: 'owner' });
     const { user } = renderHub(w, { mode: 'simple' });
     await screen.findByRole('region', { name: 'Open cases' });
@@ -78,7 +78,7 @@ describe('the menu: Cases, Words, Blocked and More', () => {
     expect(within(sections()).queryByRole('link', { name: 'Audit' })).toBeNull();
     await user.click(more);
     expect(more).toHaveAttribute('aria-expanded', 'true');
-    expect([...sections().querySelectorAll('.cw-snav-menu a')].map((a) => a.textContent)).toEqual(['Recent actions', 'Audit', 'Rule gaps', 'Guide', 'Steps and ladder']);
+    expect([...sections().querySelectorAll('.cw-snav-menu a')].map((a) => a.textContent)).toEqual(['Recent actions', 'Audit', 'Rule gaps', 'Guide', 'Steps and ladder', 'Reporting']);
   });
 
   it.each(MORE)('%s opens its screen from More, and More closes', async (name, _permission, path) => {
@@ -530,7 +530,7 @@ describe('accessibility', () => {
       first.unmount();
       const g = await w.fileRich({ lines: TALK, target: 'Gamma', category: 'other', reporter: 'Saffron', room: 'rg' });
       const second = renderHub(w, { mode: 'simple', theme, path: `/reports/${g.id}` });
-      await screen.findByText('No step is suggested. Choose one.');
+      await screen.findByRole('combobox', { name: 'Which rule does this break?' });
       expect(await violations(second.container)).toEqual([]);
       second.unmount();
       const third = renderHub(w, { mode: 'simple', theme });

@@ -28,6 +28,8 @@ export { Guide } from './pieces/Guide.js';
 export type { GuideProps } from './pieces/Guide.js';
 export { LadderSettings } from './pieces/LadderSettings.js';
 export type { LadderSettingsProps } from './pieces/LadderSettings.js';
+export { ReportingSettings } from './pieces/ReportingSettings.js';
+export type { ReportingSettingsProps } from './pieces/ReportingSettings.js';
 export { RecentActions } from './pieces/RecentActions.js';
 export type { RecentActionsProps } from './pieces/RecentActions.js';
 export { useBlocked, useCase, useCases, useClaim, useDecide, useMe, usePerson, useTerms } from './embedHooks.js';

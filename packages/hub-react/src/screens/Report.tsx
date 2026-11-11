@@ -12,7 +12,7 @@ import { useHub } from '../context.js';
 import { LINES_MAX } from '../decision.js';
 import { personName } from '../excerpt.js';
 import { absoluteTime, relativeTime } from '../format.js';
-import { categoryLabel } from '../labels.js';
+import { reasonChip, reasonSaid } from '../labels.js';
 import type { ReportDetail } from '../types.js';
 import { Empty, Fetched, Link, PersonChip, Tag, Time } from '../ui.js';
 
@@ -27,7 +27,8 @@ function Header({ detail }: { detail: ReportDetail }) {
   const { report } = detail;
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
-  const categories = group === null ? [report.category] : group.categories;
+  const label = report.reportedReason === null || report.reportedReason === undefined ? null : (report.reportedReasonLabel ?? report.reportedReason);
+  const reasons = group === null ? [{ id: report.reportedReason ?? null, label }] : group.reasons;
   const entries = Object.entries(report.tags);
   return (
     <header className="cw-casehead">
@@ -36,12 +37,12 @@ function Header({ detail }: { detail: ReportDetail }) {
           <span aria-hidden="true" className="cw-casename">
             {name}
           </span>
-          <span className="cw-sr">{t('hub.report.title', { category: categoryLabel(t, report.category), who: name })}</span>
+          <span className="cw-sr">{label === null ? t('hub.report.title.none', { who: name }) : t('hub.report.title', { category: label, who: name })}</span>
         </h2>
         {target !== undefined && <PersonChip person={target.ref} />}
         <span className="cw-casecats">
-          {categories.map((c) => (
-            <Tag key={c}>{categoryLabel(t, c)}</Tag>
+          {reasons.map((r) => (
+            <Tag key={r.id ?? 'none'}>{reasonChip(t, r.label)}</Tag>
           ))}
         </span>
         <span className="cw-casehead-gap" />
@@ -49,6 +50,7 @@ function Header({ detail }: { detail: ReportDetail }) {
       </div>
       <div className="cw-facts" role="group" aria-label={t('hub.report.facts.label')}>
         <Tag>{t(`hub.reports.tag.${report.status}`)}</Tag>
+        <span>{reasonSaid(t, label)}</span>
         {report.badFaith && <Tag tone="warn">{t('hub.report.tag.badFaith')}</Tag>}
         <span title={absoluteTime(report.createdAt, locale)}>{t('hub.report.fact.filed', { time: relativeTime(report.createdAt, now(), locale) })}</span>
         {report.roomId !== '' && <span>{t('hub.report.fact.room', { room: report.roomId })}</span>}
@@ -97,12 +99,16 @@ function Evidence({ detail }: { detail: ReportDetail }) {
 function Reports({ detail }: { detail: ReportDetail }) {
   const { t } = useHub();
   const { group } = useCase();
-  const list = group === null ? [{ id: detail.report.id, category: detail.report.category, createdAt: detail.report.createdAt }] : group.entries;
+  const own = detail.report;
+  const list =
+    group === null
+      ? [{ id: own.id, reasonLabel: own.reportedReason == null ? null : (own.reportedReasonLabel ?? own.reportedReason), createdAt: own.createdAt }]
+      : group.entries;
   return (
     <ul className="cw-case-reports" aria-label={t('hub.case.reports.label')}>
       {list.map((e) => (
         <li key={e.id} className="cw-case-report">
-          <Tag>{categoryLabel(t, e.category)}</Tag>
+          <Tag>{reasonSaid(t, e.reasonLabel)}</Tag>
           <span className="cw-hint">
             <Time at={e.createdAt} />
           </span>
