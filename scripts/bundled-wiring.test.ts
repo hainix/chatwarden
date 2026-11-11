@@ -66,6 +66,20 @@ describe('the element\'s browser smoke runs in CI and in the release checks', ()
     expect(release).toMatch(/CW_REQUIRE_BROWSER: '?1'?/);
   });
 
+  // The v0.1.2 release run failed: release.yml ran `npm test` after `npm run typecheck` (tsc -b only), so the hub-element bundle
+  // that examples/tiny-chat/mod.test.ts loads did not exist yet. ci.yml builds first (check:pack runs `npm run build`). Both
+  // workflows must run the full build, which writes the bundle, before the tests.
+  it.each([
+    ['release.yml', () => release],
+    ['ci.yml', () => ci],
+  ])('%s builds the packages, bundle included, before it runs the tests', (_name, text) => {
+    const yml = text();
+    const tests = yml.indexOf('run: npm test');
+    expect(tests).toBeGreaterThan(-1);
+    const before = yml.slice(0, tests);
+    expect(before.includes('run: npm run build') || before.includes('run: npm run check:pack')).toBe(true);
+  });
+
   it('the package script is the one the workflows run', () => {
     const pkg = JSON.parse(read('packages', 'hub-element', 'package.json')) as { scripts: Record<string, string> };
     expect(pkg.scripts['smoke:browser']).toContain('browser.smoke.test.ts');

@@ -57,6 +57,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      # The full build (tsc -b and the hub-element bundle) before the tests: examples/tiny-chat loads the bundle.
+      - run: npm run build
       - run: npm test
       # The hub element's Chromium smoke (CW_REQUIRE_BROWSER makes a missing browser a failure, not a skip).
       # The browser download is cached per Playwright version; the system packages (apt) are not part of the cache, so they are
