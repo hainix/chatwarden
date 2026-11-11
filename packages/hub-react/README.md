@@ -418,6 +418,10 @@ decision and the toasts. The React hub is built on it, so a Vue, Svelte or Solid
 behaviour. Every store has `subscribe(listener)` and `getSnapshot()`, and a snapshot is the same object until something changes
 (so it works with `useSyncExternalStore`, a Vue `shallowRef`, a Svelte store, or a bare callback).
 
+The headless entry needs no React. `react` and `react-dom` are optional peer dependencies of this package (`peerDependenciesMeta`),
+so a Vue, Svelte or plain-JS project that imports only `@chatwarden/hub-react/headless` installs without them, and its bundle holds
+no React. It does need the kit peers, `@chatwarden/core` and `@chatwarden/http` (types).
+
 ```ts
 import { createHubClient, createHubController, fetchTransport, personTag } from '@chatwarden/hub-react/headless';
 
@@ -470,6 +474,29 @@ typed result (a 409, a 404 or a dropped connection is `{ ok: false, error }` or 
 | `decide(command, { hold })`, `undo(id)`, `retry(id)` | `hold` is `true` (5 s, the default), a number of milliseconds, or `false` (send at once). `retry` sends a failed decision again with the same body. |
 | `open(id)`, `leave()`, `takeNext()`, `claim(person)`, `takeOver(person)`, `release(person)` | Claims. Leaving a case releases it, unless a decision on it is waiting or the claim is someone else's. |
 | `dispose()` | Safe to call twice. A closing page sends a held decision at once (`pagehide`, a hidden tab, `dispose`), and only once. |
+
+A dashboard with its own router tells the controller where the moderator is looking, so that an Undo (or a failed decision) on a
+case they have left can bring them back to it. This is `@experimental`, like the other names marked so in the type declarations, and
+may change before 0.2:
+
+```ts
+import { createHubClient, createHubController, fetchTransport } from '@chatwarden/hub-react/headless';
+
+let looking: string | null = null; // the report your own router shows, or null
+
+const show = (reportId: string): void => {
+  looking = reportId;
+  // ...and tell your router to open it.
+};
+
+export const controller = createHubController({
+  client: createHubClient(fetchTransport({ baseUrl: '/admin' })),
+  host: { openReport: () => looking, show },
+});
+```
+
+Without `host`, "what is open" is the case opened with `controller.open(id)`, and `show` does nothing. `controller.configure({ t })`
+changes the words the toasts use; it is the only thing `configure` takes.
 
 To run it without a DOM (a test, a worker, Node), hand it the timers and the page: `createHubController({ client, schedule, page })`.
 `schedule` is `{ setTimeout, clearTimeout, setInterval, clearInterval, now }` and `page` is `{ visible, online, onVisibilityChange,

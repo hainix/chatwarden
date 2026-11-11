@@ -25,6 +25,13 @@ describe('the README headless example', () => {
     }
   });
 
+  it('says that /headless needs no React, and documents the host callbacks as experimental', () => {
+    expect(section).toMatch(/needs no React/);
+    expect(section).toContain('host: { openReport: () => looking, show }');
+    expect(section).toMatch(/@experimental/);
+    expect(section).toMatch(/peerDependenciesMeta|optional peer/);
+  });
+
   it('runs: lists the case, opens it, decides it, undoes it, and disposes', async () => {
     const w = await hubWorld();
     const a = await w.file({ target: 'Alpha' });

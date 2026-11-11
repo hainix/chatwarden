@@ -182,6 +182,16 @@ describe('hub-react', () => {
     expect(hub().exports?.['./font.css']).toBe('./font.css');
     expect(hub().sideEffects).toEqual(['./src/styles.css', './font.css']);
   });
+  it('marks react and react-dom as optional peers, so the headless entry installs without React (and the kit peers stay required)', () => {
+    const meta = hub().peerDependenciesMeta ?? {};
+    expect(meta.react).toEqual({ optional: true });
+    expect(meta['react-dom']).toEqual({ optional: true });
+    expect(meta['@chatwarden/core']?.optional).not.toBe(true);
+    expect(meta['@chatwarden/http']?.optional).not.toBe(true);
+    // Still declared, with their ranges: the React hub needs them.
+    expect(hub().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
+    expect(hub().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
+  });
   it('exports the headless controller as ./headless, from dist, with types, and nothing else from it', () => {
     expect(hub().exports?.['./headless']).toEqual({ types: './dist/src/headless/index.d.ts', default: './dist/src/headless/index.js' });
     // A subpath that is ESM and types only: no `require` condition, no CSS, no side effects.
