@@ -1,11 +1,15 @@
+import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useHub } from '../context.js';
-import { CUSTOM_KINDS, DURATIONS, GAP_NOTE_MAX, LINES_MAX, choiceKey, hasLength, needsBanPermission, resolveDraft } from '../decision.js';
+import { CUSTOM_KINDS, GAP_NOTE_MAX, LINES_MAX, choiceKey, hasLength, needsBanPermission, resolveDraft } from '../decision.js';
 import type { ActionProblems, Choice, Draft } from '../decision.js';
 import type { ExcerptLine, ReportPerson } from '../excerpt.js';
 import { personName } from '../excerpt.js';
 import { personTag, timeOfDay } from '../format.js';
-import { choiceLabel, kindLabel, lengthPhrase } from '../labels.js';
+import { choiceLabel, kindLabel } from '../labels.js';
+import { LengthField } from '../policy/LengthField.js';
+import { menuOf, snapLength } from '../policy/lengths.js';
+import type { LengthPolicy } from '../policy/lengths.js';
 import { Card, Tag } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { Masked } from './Transcript.js';
@@ -64,6 +68,8 @@ export interface ActionProps {
   dismissal: boolean;
   rules: ReadonlyArray<{ number: number; title: string }>;
   choices: readonly Choice[];
+  /** The lengths the profile offers; undefined until it is read (then the four the form always had). */
+  lengths?: LengthPolicy | undefined;
   canPermanent: boolean;
   lines: readonly ExcerptLine[];
   problems: ActionProblems | undefined;
@@ -102,11 +108,18 @@ export function ActionTitle({ draft }: { draft: Draft }) {
 
 /** One action: who, what, under which rule, and which of their lines the player sees. */
 export function ActionCard(props: ActionProps) {
-  const { n, base, draft, people, target, dismissal, rules, choices, canPermanent, lines, problems, onChange, onToggleLine, onRemove } = props;
+  const { n, base, draft, people, target, dismissal, rules, choices, lengths, canPermanent, lines, problems, onChange, onToggleLine, onRemove } = props;
   const { t, locale } = useHub();
   const { reveal } = useCase();
   const idOf = (field: string): string => `${base}-${draft.uid}-${field}`;
   const choice = resolveDraft(draft);
+  // The length menu is the profile's. A draft starts on 24 hours, which the profile may not list: it moves to a length that is.
+  const menu = menuOf(lengths, draft.customKind, canPermanent);
+  const editsLength = draft.what === 'other' && hasLength(draft.customKind);
+  const snapped = snapLength(draft.customDuration, menu);
+  useEffect(() => {
+    if (editsLength && snapped !== draft.customDuration) onChange({ customDuration: snapped });
+  }, [editsLength, snapped, draft.customDuration]);
   const offered = choices.filter((c) => canPermanent || !needsBanPermission(c));
   // A one-off choice written in the draft (from a profile ladder) that the menu does not list is still shown, so it can be seen.
   const listed = choice !== null && draft.what !== 'other' && !offered.some((c) => choiceKey(c) === draft.what) ? [choice] : [];
@@ -158,17 +171,19 @@ export function ActionCard(props: ActionProps) {
               )}
             </Field>
             {hasLength(draft.customKind) && (
-              <Field id={idOf('length')} label={t('hub.decide.action.length')}>
-                {(a) => (
-                  <select {...a} value={draft.customDuration} onChange={(e) => onChange({ customDuration: e.target.value as Draft['customDuration'] })}>
-                    {DURATIONS.filter((d) => d.ms !== null || draft.customKind !== 'ban' || canPermanent).map((d) => (
-                      <option key={d.key} value={d.key}>
-                        {d.ms === null ? t('hub.decide.length.permanent') : lengthPhrase(t, locale, d.ms)}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </Field>
+              <div className="cw-field">
+                <LengthField
+                  id={idOf('length')}
+                  visible
+                  label={t('hub.decide.action.length')}
+                  numberLabel={t('hub.length.number')}
+                  unitLabel={t('hub.length.unit')}
+                  menu={menu}
+                  value={{ value: snapped, amount: draft.customAmount ?? '', unit: draft.customUnit ?? 'hours' }}
+                  onChange={(l) => onChange({ customDuration: l.value, customAmount: l.amount, customUnit: l.unit })}
+                  problem={problems?.length}
+                />
+              </div>
             )}
           </>
         )}

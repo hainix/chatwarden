@@ -39,9 +39,9 @@ describe('the section', () => {
     const marked = exportsOf('packages/hub-react/src/index.ts').experimental;
     const wildcard = [...named].filter((n) => n.startsWith('*'));
     // `*Props` stands for each piece's props type; everything else is named.
-    const ownProps = marked.filter((n) => /^(AuditLog|BlockedList|CaseCard|CaseList|CaseWorkbench|Guide|PersonRecord|RecentActions|RuleGaps|TermsManager)Props$/.test(n));
+    const ownProps = marked.filter((n) => /^(AuditLog|BlockedList|CaseCard|CaseList|CaseWorkbench|Guide|LadderSettings|PersonRecord|RecentActions|RuleGaps|TermsManager)Props$/.test(n));
     expect(wildcard.length).toBe(1);
-    expect(ownProps).toHaveLength(10);
+    expect(ownProps).toHaveLength(11);
     for (const name of marked.filter((n) => !ownProps.includes(n))) expect(named, name).toContain(name);
     const headless = exportsOf('packages/hub-react/src/headless/index.ts');
     for (const name of [...headless.experimental, ...headless.experimentalMembers]) expect(named, name).toContain(name);

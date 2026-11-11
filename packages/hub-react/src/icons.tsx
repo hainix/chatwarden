@@ -13,6 +13,7 @@ const PATHS: Record<IconName, string[]> = {
   gaps: ['M12 3v18M3 12h18'],
   audit: ['M6 3h9l3 3v15H6z', 'M9 11h6M9 15h6'],
   guide: ['M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z', 'M5 17a3 3 0 0 1 3-3h11'],
+  settings: ['M4 7h10M18 7h2M4 17h2M10 17h10', 'M16 5v4M8 15v4'],
   search: ['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z', 'm20 20-4-4'],
   eye: ['M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'],
   close: ['M6 6l12 12M18 6 6 18'],

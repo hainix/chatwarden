@@ -1,6 +1,8 @@
 import { LADDER_TABLE } from '@chatwarden/core';
 import type { LadderRow } from '@chatwarden/core';
 import type { HubParams, HubText } from './i18n.js';
+import { MAX_LENGTH_MS, resolveLength } from './policy/length.js';
+import type { LengthUnit } from './policy/length.js';
 import type { DecideInput, DecisionAction, SanctionKind, Suggestion } from './types.js';
 
 // The decision form as plain data and pure functions: what it holds, what it refuses before sending, and the body it sends.
@@ -46,7 +48,7 @@ export const choiceKey = (c: Choice): string => `${c.kind}:${c.durationMs === nu
 const KIND_RANK: Record<SanctionKind, number> = { warning: 0, chat: 1, area: 2, ban: 3, note: 4 };
 
 /** The longest sanction the server takes: 365 days. */
-export const MAX_DURATION_MS = 365 * 86_400_000;
+export const MAX_DURATION_MS = MAX_LENGTH_MS;
 
 /** What the menu is built from: the adopter's ladder and outcomes (`GET /policy` `profile`). Anything missing falls back to core's table. */
 export interface PresetSource {
@@ -100,7 +102,10 @@ export interface Draft {
   /** `''` nothing chosen yet, `'other'` for "Something else", otherwise a {@link choiceKey} of a preset. */
   what: string;
   customKind: SanctionKind;
-  customDuration: DurationKey;
+  /** The length of a "Something else" action: a length from the profile (see `lengthValue`), `permanent`, or `custom` with the number and unit below. */
+  customDuration: string;
+  customAmount?: string;
+  customUnit?: LengthUnit;
   /** `''` nothing chosen, `'uncovered'` for "No rule covers this", else a rule number as text. */
   rule: string;
   gapNote: string;
@@ -123,10 +128,17 @@ export function newDraft(uid: string, person: string, rule: number | ''): Draft 
   return { uid, person, what: '', customKind: 'chat', customDuration: '24h', rule: rule === '' ? '' : String(rule), gapNote: '', lineIds: [] };
 }
 
-/** What a draft does, or null while nothing is chosen. */
+/** What the length of a "Something else" action says: its milliseconds (null: permanent), or why it says nothing yet. */
+export const lengthOfDraft = (d: Draft): ReturnType<typeof resolveLength> => resolveLength({ value: d.customDuration, amount: d.customAmount ?? '', unit: d.customUnit ?? 'hours' });
+
+/** What a draft does, or null while nothing is chosen (or its own length is not valid yet: a bad length is never read as permanent). */
 export function resolveDraft(d: Draft): Choice | null {
   if (d.what === '') return null;
-  if (d.what === 'other') return { kind: d.customKind, durationMs: hasLength(d.customKind) ? durationOf(d.customDuration) : null };
+  if (d.what === 'other') {
+    if (!hasLength(d.customKind)) return { kind: d.customKind, durationMs: null };
+    const length = lengthOfDraft(d);
+    return length.ok ? { kind: d.customKind, durationMs: length.ms } : null;
+  }
   return parseChoiceKey(d.what);
 }
 
@@ -178,6 +190,8 @@ export interface Problem {
 export interface ActionProblems {
   person?: Problem;
   what?: Problem;
+  /** The custom length typed for "Something else" is not a length the kit takes. */
+  length?: Problem;
   rule?: Problem;
   gapNote?: Problem;
   lines?: Problem;
@@ -220,8 +234,10 @@ export function validate(form: DecisionForm, ctx: ValidationContext): Problems {
     if (!ctx.people.includes(d.person)) found.person = problem('hub.decide.error.personUnknown');
     else if (dismissal && d.person === ctx.target) found.person = problem('hub.decide.error.targetNeedsFair');
 
+    const badLength = d.what === 'other' && hasLength(d.customKind) ? lengthOfDraft(d) : null;
     const choice = resolveDraft(d);
-    if (choice === null) found.what = problem('hub.decide.error.whatRequired');
+    if (badLength !== null && !badLength.ok) found.length = badLength.problem;
+    else if (choice === null) found.what = problem('hub.decide.error.whatRequired');
     else if (needsBanPermission(choice) && !ctx.canPermanent) found.what = problem('hub.decide.error.permanent');
     if (choice !== null && found.what === undefined) {
       const key = `${d.person}\u0000${choice.kind}`;

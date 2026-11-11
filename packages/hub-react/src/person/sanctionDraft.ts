@@ -1,5 +1,8 @@
-import { DURATIONS, durationOf, hasLength, resolveDraft, validate } from '../decision.js';
-import type { DecisionForm, DurationKey, Problem } from '../decision.js';
+import { DURATIONS, hasLength, resolveDraft, validate } from '../decision.js';
+import type { DecisionForm, Problem } from '../decision.js';
+import { lengthValue } from '../policy/length.js';
+import type { LengthPolicy } from '../policy/lengths.js';
+import type { LengthUnit } from '../policy/length.js';
 import type { SanctionInput, SanctionKind } from '../types.js';
 
 // The direct-sanction form (a sanction or a note from the person page) as plain data and pure functions. It asks the decision
@@ -11,7 +14,10 @@ export type SanctionMode = 'sanction' | 'note';
 export interface SanctionDraft {
   /** `''` until one is chosen: nothing is pre-selected, so nothing is sent by accident. A note is always `note`. */
   kind: SanctionKind | '';
-  duration: DurationKey;
+  /** A length from the profile (see `lengthValue`), `permanent`, or `custom` with the number and unit below. */
+  duration: string;
+  customAmount?: string;
+  customUnit?: LengthUnit;
   /** `''` nothing chosen, `'uncovered'` for "No rule covers this", else a rule number as text. */
   rule: string;
   gapNote: string;
@@ -31,6 +37,8 @@ export interface SanctionContext {
 
 export interface SanctionProblems {
   kind?: Problem;
+  /** The custom length typed is not one the kit takes. */
+  length?: Problem;
   rule?: Problem;
   gapNote?: Problem;
   reason?: Problem;
@@ -48,10 +56,14 @@ export const emptySanction = (mode: SanctionMode): SanctionDraft => ({
   includeIp: false,
 });
 
-/** The lengths a kind offers, shortest first. A warning, a note, or nothing chosen has none. Only a permanent ban needs the senior permission. */
-export function durationChoices(kind: SanctionKind | '', canPermanent: boolean): DurationKey[] {
+/**
+ * The lengths a kind offers, shortest first: the profile's own list (else the four the form always had), then permanent, then "custom"
+ * when the profile allows it. A warning, a note, or nothing chosen has none. Only a permanent ban needs the senior permission.
+ */
+export function durationChoices(kind: SanctionKind | '', canPermanent: boolean, lengths?: LengthPolicy): string[] {
   if (kind === '' || !hasLength(kind)) return [];
-  return DURATIONS.filter((d) => d.ms !== null || kind !== 'ban' || canPermanent).map((d) => d.key);
+  if (lengths === undefined) return DURATIONS.filter((d) => d.ms !== null || kind !== 'ban' || canPermanent).map((d) => d.key);
+  return [...lengths.durations.map(lengthValue), ...(kind !== 'ban' || canPermanent ? ['permanent'] : []), ...(lengths.custom ? ['custom'] : [])];
 }
 
 const SUBJECT = 'subject';
@@ -70,6 +82,8 @@ function asDecision(d: SanctionDraft, mode: SanctionMode): DecisionForm {
         what: kind === '' ? '' : 'other',
         customKind: kind === '' ? 'chat' : kind,
         customDuration: d.duration,
+        ...(d.customAmount === undefined ? {} : { customAmount: d.customAmount }),
+        ...(d.customUnit === undefined ? {} : { customUnit: d.customUnit }),
         rule: d.rule,
         gapNote: d.gapNote,
         lineIds: [],
@@ -91,6 +105,7 @@ export function sanctionProblems(d: SanctionDraft, mode: SanctionMode, ctx: Sanc
   const action = found.actions.a ?? {};
   const out: SanctionProblems = { count: 0 };
   if (action.what !== undefined) out.kind = action.what;
+  if (action.length !== undefined) out.length = action.length;
   if (action.rule !== undefined) out.rule = action.rule;
   if (action.gapNote !== undefined) out.gapNote = action.gapNote;
   if (found.reason !== undefined) {
@@ -99,7 +114,7 @@ export function sanctionProblems(d: SanctionDraft, mode: SanctionMode, ctx: Sanc
       mode === 'sanction' ? found.reason : { ...found.reason, key: found.reason.key === 'hub.decide.error.reasonRequired' ? 'hub.person.note.error.required' : 'hub.person.note.error.long' };
   }
   if (found.list !== undefined) out.list = found.list;
-  out.count = [out.kind, out.rule, out.gapNote, out.reason, out.list].filter((x) => x !== undefined).length;
+  out.count = [out.kind, out.length, out.rule, out.gapNote, out.reason, out.list].filter((x) => x !== undefined).length;
   return out;
 }
 
@@ -114,7 +129,7 @@ export function toSanctionInput(subject: string, d: SanctionDraft, mode: Sanctio
   const input: SanctionInput = {
     subject,
     kind,
-    durationMs: hasLength(kind) ? durationOf(d.duration) : null,
+    durationMs: hasLength(kind) ? (choice?.durationMs ?? null) : null,
     rule: uncovered ? 'uncovered' : Number(d.rule),
     reason: d.reason.trim(),
     includeIp: hasLength(kind) && d.includeIp,

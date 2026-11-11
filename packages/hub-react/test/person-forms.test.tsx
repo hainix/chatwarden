@@ -104,7 +104,7 @@ describe('the fields', () => {
     expect(screen.queryByRole('checkbox', { name: /IP address/ })).toBeNull();
     await user.selectOptions(what(), 'chat');
     expect(length()).toHaveValue('24h');
-    expect([...length().options].map((o) => o.textContent)).toEqual(['1 hour', '24 hours', '7 days', '30 days', 'Permanent']);
+    expect([...length().options].map((o) => o.textContent)).toEqual(['1 hour', '6 hours', '12 hours', '24 hours', '3 days', '7 days', '30 days', 'Permanent', 'Custom length']);
     expect(ip()).toBeInTheDocument();
     await user.selectOptions(what(), 'warning');
     expect(screen.queryByLabelText('How long')).toBeNull();

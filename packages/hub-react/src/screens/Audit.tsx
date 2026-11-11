@@ -34,6 +34,8 @@ const LABEL: Record<AuditAction, HubText> = {
   'reason.add': 'hub.audit.label.reason.add',
   'reason.update': 'hub.audit.label.reason.update',
   'reason.toggle': 'hub.audit.label.reason.toggle',
+  'policy.update': 'hub.audit.label.policy.update',
+  'policy.reset': 'hub.audit.label.policy.reset',
 };
 
 /** What the hub's routes accept for an id in an address (the same pattern the router uses). */

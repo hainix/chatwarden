@@ -72,8 +72,8 @@ describe('the command bar: results', () => {
   it('with nothing typed lists the actions and the screens the role can open, and no people', async () => {
     const { user } = await setup({ role: 'moderator' });
     await open(user);
-    expect(labels()).toEqual(['Take next case', 'Show keyboard shortcuts', 'Overview', 'Reports', 'Blocked', 'Terms', 'Rule gaps', 'Guide']);
-    expect(options().map((o) => o.querySelector('.cw-cmdk-kind')?.textContent)).toEqual(['Action', 'Action', 'Screen', 'Screen', 'Screen', 'Screen', 'Screen', 'Screen']);
+    expect(labels()).toEqual(['Take next case', 'Show keyboard shortcuts', 'Overview', 'Reports', 'Blocked', 'Terms', 'Rule gaps', 'Guide', 'Settings']);
+    expect(options().map((o) => o.querySelector('.cw-cmdk-kind')?.textContent)).toEqual(['Action', 'Action', 'Screen', 'Screen', 'Screen', 'Screen', 'Screen', 'Screen', 'Screen']);
   });
 
   it('leaves out Audit for a moderator and offers it to a senior; leaves out Take next without reports.decide', async () => {

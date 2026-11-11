@@ -25,6 +25,8 @@ export interface Session {
    * both from the data). Read once; kept until the hub closes.
    */
   policy(): Promise<PolicyDocs>;
+  /** Forget the kept policy: the steps and ladder were saved or reset, so the next ask (a decision bar, a sanction form) reads the new profile. */
+  invalidatePolicy(): void;
   /** The saved reasons a moderator can use (switched-off ones left out). */
   reasons(): Promise<Reason[]>;
   /** How the reports a person filed stand. */
@@ -39,16 +41,21 @@ interface Kept<T> {
 }
 
 /** One answer kept for `ttl` ms (forever when null); a failed read is dropped, and only if it is still the kept one. */
-function memo<T>(load: () => Promise<T>, ttl: number | null, now: () => number): () => Promise<T> {
+function memo<T>(load: () => Promise<T>, ttl: number | null, now: () => number): { get: () => Promise<T>; forget: () => void } {
   let kept: Kept<T> | null = null;
-  return () => {
-    if (kept !== null && (ttl === null || now() - kept.at < ttl)) return kept.value;
-    const entry: Kept<T> = { at: now(), value: load() };
-    kept = entry;
-    entry.value.catch(() => {
-      if (kept === entry) kept = null;
-    });
-    return entry.value;
+  return {
+    get: () => {
+      if (kept !== null && (ttl === null || now() - kept.at < ttl)) return kept.value;
+      const entry: Kept<T> = { at: now(), value: load() };
+      kept = entry;
+      entry.value.catch(() => {
+        if (kept === entry) kept = null;
+      });
+      return entry.value;
+    },
+    forget: () => {
+      kept = null;
+    },
   };
 }
 
@@ -56,8 +63,8 @@ function memo<T>(load: () => Promise<T>, ttl: number | null, now: () => number):
 export function createSession(client: HubClient, now: () => number): Session {
   const reporters = new Map<string, Kept<ReporterRecord>>();
   const policy = memo(() => client.policy({ format: 'markdown', omit: ['rules', 'ladder'] }), null, now);
-  const reasons = memo(async () => (await client.listReasons()).reasons.filter((r) => r.active), SESSION_TTL_MS, now);
-  const blocked = memo(async () => (await client.listBlocked({ days: 7 })).items, SESSION_TTL_MS, now);
+  const reasons = memo(async () => (await client.listReasons()).reasons.filter((r) => r.active), SESSION_TTL_MS, now).get;
+  const blocked = memo(async () => (await client.listBlocked({ days: 7 })).items, SESSION_TTL_MS, now).get;
   let waiting: Handoff | null = null;
 
   return {
@@ -70,7 +77,8 @@ export function createSession(client: HubClient, now: () => number): Session {
         waiting = null;
       },
     },
-    policy,
+    policy: policy.get,
+    invalidatePolicy: policy.forget,
     reasons,
     blocked,
     reporter(ref) {

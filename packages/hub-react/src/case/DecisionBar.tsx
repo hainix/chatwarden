@@ -185,6 +185,7 @@ export function DecisionBar() {
     const where = (field: string): string => `${base}-${a.uid}-${field}`;
     if (p.person !== undefined) items.push({ id: where('person'), problem: p.person });
     if (p.what !== undefined) items.push({ id: where('what'), problem: p.what });
+    if (p.length !== undefined) items.push({ id: `${where('length')}-number`, problem: p.length });
     if (p.rule !== undefined) items.push({ id: where('rule'), problem: p.rule });
     if (p.gapNote !== undefined) items.push({ id: where('gap'), problem: p.gapNote });
     if (p.lines !== undefined) items.push({ id: where('person'), problem: p.lines });
@@ -379,6 +380,7 @@ export function DecisionBar() {
                           dismissal={dismissal}
                           rules={draft.rules}
                           choices={draft.choices}
+                          lengths={draft.lengths}
                           canPermanent={draft.ctx.canPermanent}
                           lines={lineList.filter((l) => l.person === a.person)}
                           problems={shown.actions[a.uid]}

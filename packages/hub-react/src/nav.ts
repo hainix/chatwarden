@@ -11,6 +11,7 @@ export const TABS: ReadonlyArray<{ tab: TabName; route: Route; label: HubText; p
   { tab: 'gaps', route: { name: 'gaps' }, label: 'hub.nav.gaps', permission: 'gaps.read' },
   { tab: 'audit', route: { name: 'audit' }, label: 'hub.nav.audit', permission: 'audit.read' },
   { tab: 'guide', route: { name: 'guide' }, label: 'hub.nav.guide', permission: 'policy.read' },
+  { tab: 'settings', route: { name: 'settings', section: 'ladder' }, label: 'hub.nav.settings', permission: 'policy.read' },
 ];
 
 /** The permission a route needs to open at all (`null`: any signed-in staff member). */
@@ -34,6 +35,7 @@ export function permissionFor(route: Route): PermissionKey | null {
     case 'audit':
       return 'audit.read';
     case 'guide':
+    case 'settings':
       return 'policy.read';
   }
 }

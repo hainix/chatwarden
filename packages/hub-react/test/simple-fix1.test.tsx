@@ -45,7 +45,7 @@ describe('a newer report re-reads the case, so one click never sends an older su
     const outcome = (await w.direct.getReport(id)).suggest.outcome;
     return stepLabel(words, 'en', outcomeChoice(outcome)!);
   };
-  const primaries = (): HTMLElement[] => within(screen.getByRole('region', { name: 'Decision' })).queryAllByRole('button', { name: /^(Restrict|Ban|Send a warning)/ });
+  const primaries = (): HTMLElement[] => within(screen.getByRole('region', { name: 'Decision' })).queryAllByRole('button', { name: /^(Restrict|Ban|Send a warning)/ }).filter((b) => b.getAttribute('aria-keyshortcuts') === '1');
 
   /** An open card, then: another report about the person arrives and somebody acts on them (so the ladder moves). */
   async function cardThatGoesStale() {

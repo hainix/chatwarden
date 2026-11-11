@@ -75,28 +75,28 @@ describe('Hub: tabs by role', () => {
     const w = await hubWorld({ role: 'moderator' });
     renderHub(w);
     await screen.findByRole('heading', { name: 'Overview' });
-    expect(tabNames()).toEqual(['Overview', 'Reports', 'Blocked', 'Terms', 'Rule gaps', 'Guide']);
+    expect(tabNames()).toEqual(['Overview', 'Reports', 'Blocked', 'Terms', 'Rule gaps', 'Guide', 'Settings']);
   });
 
   it('a senior sees Audit as well, in its place before Guide', async () => {
     const w = await hubWorld({ role: 'senior' });
     renderHub(w);
     await screen.findByRole('heading', { name: 'Overview' });
-    expect(tabNames()).toEqual(['Overview', 'Reports', 'Blocked', 'Terms', 'Rule gaps', 'Audit', 'Guide']);
+    expect(tabNames()).toEqual(['Overview', 'Reports', 'Blocked', 'Terms', 'Rule gaps', 'Audit', 'Guide', 'Settings']);
   });
 
   it('an owner sees every tab', async () => {
     const w = await hubWorld({ role: 'owner' });
     renderHub(w);
     await screen.findByRole('heading', { name: 'Overview' });
-    expect(tabNames()).toEqual(['Overview', 'Reports', 'Blocked', 'Terms', 'Rule gaps', 'Audit', 'Guide']);
+    expect(tabNames()).toEqual(['Overview', 'Reports', 'Blocked', 'Terms', 'Rule gaps', 'Audit', 'Guide', 'Settings']);
   });
 
   it('follows the permissions the server reports, not the role names: raising terms.read hides Terms from a moderator', async () => {
     const w = await hubWorld({ role: 'moderator', permissions: { 'terms.read': 'senior', 'blocked.read': 'owner', 'gaps.read': 'senior' } });
     renderHub(w);
     await screen.findByRole('heading', { name: 'Overview' });
-    expect(tabNames()).toEqual(['Overview', 'Reports', 'Guide']);
+    expect(tabNames()).toEqual(['Overview', 'Reports', 'Guide', 'Settings']);
   });
 
   it('lowering audit.read shows Audit to a moderator', async () => {

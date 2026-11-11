@@ -10,6 +10,10 @@ import type {
   DecisionAction,
   GapRow,
   GuideSection,
+  PolicyLayer,
+  PolicyPreview,
+  PolicySection,
+  PolicyState,
   ReporterRecord,
   ReportCategory,
   SanctionGroupView,
@@ -19,6 +23,7 @@ import type {
 } from '@chatwarden/core';
 import type { ExceptionListRow, Me, PermissionKey, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
+export type { PolicyLayer, PolicySection, PolicyState };
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 export type { Me, PermissionKey, ReportSummary, Role };
 
@@ -191,6 +196,12 @@ export interface BlockedLine {
   handle: string | null;
   text: string;
 }
+
+/** What `POST /policy/profile/preview` answers: for each sample record and each conduct level, what would be suggested. */
+export type PolicySamples = Extract<PolicyPreview, { ok: true }>['samples'];
+
+/** The answer to a save or a reset: the new version and the sections that changed. A newer kit also answers with the state now in force. */
+export type PolicySaved = { ok: true; version: number; changed: PolicySection[] } & Partial<PolicyState>;
 
 export type PolicyFormat = 'markdown' | 'html' | 'text';
 

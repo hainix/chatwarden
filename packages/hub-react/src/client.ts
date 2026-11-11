@@ -17,6 +17,11 @@ import type {
   PersonHistory,
   PolicyDocs,
   PolicyFormat,
+  PolicyLayer,
+  PolicySamples,
+  PolicySaved,
+  PolicySection,
+  PolicyState,
   ReportDetail,
   ReportSummary,
   SanctionInput,
@@ -49,8 +54,10 @@ export class HubError extends Error {
   readonly retryAfter: number | undefined;
   readonly heldBy: string | undefined;
   readonly heldUntil: number | undefined;
+  /** For a 400 `invalid_profile`: the field the kit refused, as the kit names it (`layer.ladder[2].high.durationMs`). */
+  readonly path: string | undefined;
 
-  constructor(init: { status: number; code: string; message: string; retryAfter?: number; heldBy?: string; heldUntil?: number }) {
+  constructor(init: { status: number; code: string; message: string; retryAfter?: number; heldBy?: string; heldUntil?: number; path?: string }) {
     super(init.message);
     this.name = 'HubError';
     this.status = init.status;
@@ -58,6 +65,7 @@ export class HubError extends Error {
     this.retryAfter = init.retryAfter;
     this.heldBy = init.heldBy;
     this.heldUntil = init.heldUntil;
+    this.path = init.path;
   }
 }
 
@@ -83,7 +91,8 @@ function errorOf(res: TransportResponse): HubError {
       b.error === 'claimed'
         ? { ...(typeof b.by === 'string' ? { heldBy: b.by } : {}), ...(typeof b.until === 'number' ? { heldUntil: b.until } : {}) }
         : {};
-    return new HubError({ status: res.status, code: b.error, message: b.message, ...rest, ...held });
+    const where = typeof b.path === 'string' ? { path: b.path } : {};
+    return new HubError({ status: res.status, code: b.error, message: b.message, ...rest, ...held, ...where });
   }
   // A proxy's HTML page, or an empty body: say the status, never echo the body.
   return new HubError({ status: res.status, code: `http_${res.status}`, message: `The server answered with status ${res.status}.`, ...rest });
@@ -184,7 +193,18 @@ export interface HubClient {
   policy(options?: { format?: PolicyFormat; omit?: readonly GuideSection[] }): Promise<PolicyDocs>;
   /** `GET /audit` (senior). */
   listAudit(query?: ListAuditQuery): Promise<Page<AuditItem>>;
+
+  // The steps and ladder
+  /** `GET /policy/profile`: the profile in force, the one in code, the saved layer and its version. Audited on every call: read it once, not on a timer. */
+  policyProfile(): Promise<PolicyState>;
+  /** `PUT /policy/profile` (owner): replace the whole saved layer. A stale `version` is a 409 `conflict`; a layer the kit refuses is a 400 `invalid_profile` with a `path`. */
+  savePolicyProfile(input: { layer: PolicyLayer; version: number; reason: string }): Promise<PolicySaved>;
+  /** `POST /policy/profile/preview`: what a layer would suggest for sample records, saving nothing. `rule` is a Community Rule number. */
+  previewPolicyProfile(input: { layer: PolicyLayer; rule?: number }): Promise<{ samples: PolicySamples }>;
+  /** `DELETE /policy/profile` (owner): reset one section, or everything. Always give a `reason`. */
+  resetPolicyProfile(input: { section?: PolicySection; reason: string; version?: number }): Promise<PolicySaved>;
 }
+
 
 /**
  * The hub's view of the staff API: one method per route, each resolving with the parsed answer or rejecting with a
@@ -239,6 +259,10 @@ export function createHubClient(transport: Transport): HubClient {
 
     listBlocked: (options = {}) => get<{ items: BlockedLine[] }>('/blocked', q({ days: options.days })),
     policy: (options = {}) => get<PolicyDocs>('/policy', q({ format: options.format, omit: options.omit === undefined || options.omit.length === 0 ? undefined : options.omit.join(',') })),
+    policyProfile: () => get<PolicyState>('/policy/profile'),
+    savePolicyProfile: (input) => call<PolicySaved>({ method: 'PUT', path: '/policy/profile', body: input }),
+    previewPolicyProfile: (input) => post<{ samples: PolicySamples }>('/policy/profile/preview', input),
+    resetPolicyProfile: ({ section, ...body }) => call<PolicySaved>({ method: 'DELETE', path: '/policy/profile', ...(section === undefined ? {} : { query: { section } }), body }),
     listAudit: (query = {}) => get<Page<AuditItem>>('/audit', q({ cursor: query.cursor, limit: query.limit, actor: query.actor, action: query.action })),
   };
 }

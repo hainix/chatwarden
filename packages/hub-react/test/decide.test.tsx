@@ -339,7 +339,7 @@ describe('DecisionPanel: building the actions', () => {
     const kinds = within(within(group).getByLabelText('Kind')).getAllByRole('option').map((o) => o.textContent);
     expect(kinds).toEqual(['Chat restriction', 'Area restriction', 'Ban', 'Warning', 'Note']);
     const lengths = within(within(group).getByLabelText('Length')).getAllByRole('option').map((o) => o.textContent);
-    expect(lengths).toEqual(['1 hour', '24 hours', '7 days', '30 days', 'Permanent']);
+    expect(lengths).toEqual(['1 hour', '6 hours', '12 hours', '24 hours', '3 days', '7 days', '30 days', 'Permanent', 'Custom length']);
   });
 
   it('a warning or a note has no length to choose', async () => {
@@ -587,7 +587,7 @@ describe('DecisionPanel: permanent, by role', () => {
     expect(within(within(group).getByLabelText('Length')).getByRole('option', { name: 'Permanent' })).toBeInTheDocument();
     await pick(user, within(group).getByLabelText('Kind'), 'Ban');
     expect(within(within(group).getByLabelText('Length')).queryByRole('option', { name: 'Permanent' })).not.toBeInTheDocument();
-    expect(within(within(group).getByLabelText('Length')).getAllByRole('option')).toHaveLength(4);
+    expect(within(within(group).getByLabelText('Length')).getAllByRole('option')).toHaveLength(8);
   });
 
   it.each(['senior', 'owner'] as const)('a %s is offered permanent, and it goes through as null', async (role) => {

@@ -277,7 +277,7 @@ describe('filters', () => {
     const { w, user } = await setup();
     const labels = [...action().options].map((o) => o.textContent);
     expect(labels[0]).toBe('Any action');
-    expect(labels).toHaveLength(1 + 19);
+    expect(labels).toHaveLength(1 + 21);
     expect(new Set(labels).size).toBe(labels.length);
     fireEvent.change(action(), { target: { value: 'history.view' } });
     await user.click(screen.getByRole('button', { name: 'Filter' }));

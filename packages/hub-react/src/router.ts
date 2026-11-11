@@ -14,11 +14,16 @@ export type Route =
   | { name: 'gaps' }
   | { name: 'audit' }
   | { name: 'guide' }
+  | { name: 'settings'; section: SettingsSection }
   | { name: 'actions' }
   | { name: 'notFound'; path: string };
 
+/** The sections of the settings screen (`#/settings/ladder`). A later section is another entry here and another panel on the screen. */
+export type SettingsSection = 'ladder';
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['ladder'];
+
 /** The tabs. A report and a person live under Reports. */
-export type TabName = 'overview' | 'reports' | 'blocked' | 'terms' | 'gaps' | 'audit' | 'guide';
+export type TabName = 'overview' | 'reports' | 'blocked' | 'terms' | 'gaps' | 'audit' | 'guide' | 'settings';
 
 /**
  * How the hub learns where it is and moves. The default is the URL hash (`#/reports`). To use your own router, pass an
@@ -89,6 +94,11 @@ export function parseRoute(path: string): Route {
     case 'guide':
     case 'actions':
       return second === undefined ? { name: first } : notFound;
+    case 'settings': {
+      if (second === undefined) return { name: 'settings', section: 'ladder' };
+      const section = SETTINGS_SECTIONS.find((x) => x === second);
+      return section === undefined ? notFound : { name: 'settings', section };
+    }
     default:
       return notFound;
   }
@@ -107,6 +117,8 @@ export function buildPath(route: Route): string {
       return `/people/${encodeURIComponent(route.ref)}`;
     case 'notFound':
       return route.path;
+    case 'settings':
+      return `/settings/${route.section}`;
     default:
       return `/${route.name}`;
   }
@@ -127,6 +139,7 @@ export function tabOf(route: Route): TabName | null {
     case 'gaps':
     case 'audit':
     case 'guide':
+    case 'settings':
       return route.name;
     case 'notFound':
       return null;

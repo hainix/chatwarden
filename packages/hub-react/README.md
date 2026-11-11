@@ -121,6 +121,7 @@ export function Moderation() {
 | `RuleGaps` | Cases no rule covered | `gaps.read` | none |
 | `Guide` | The guide the kit generates from your rules | `policy.read` | none |
 | `RecentActions` | Everything done to anyone, a page at a time | `history.read` | `onOpenPerson` |
+| `LadderSettings` | The steps and ladder, editable, with a preview of each change | `policy.read` (changing needs `policy.write`) | none |
 
 Every piece takes `className` for its root element. A role without the permission sees one plain line ("Your role can't open this.")
 and nothing is asked of the server.
@@ -201,6 +202,7 @@ export const Dashboard = () => (
 | `useCase(reportId, { claim })` | One case: `report`, `detail` (with the suggestion), `holder`, `decision`. It claims the case while in use unless `claim` is `false` |
 | `useDecide()` | `decide(command, { hold })`, `undo`, `retry`, `dismiss`, `entry(reportId)`. An outcome is `done`, `failed`, `conflict` or `undone`, never a throw |
 | `useClaim(person)` | `holder`, and `claim()`, `takeOver()`, `release()` as `{ ok, value }` or `{ ok: false, error }` |
+| `usePolicy()` | The steps and ladder: `{ allowed, canEdit, data, error, loading, busy, reload, preview(layer, rule?), save(layer, reason), reset(sections, reason) }`. `data` is `{ effective, base, layer, version, canSave }`. It reads `GET /policy/profile` (audited on every call) once, and again after a save or a reset, never on a timer |
 | `useTerms()`, `useBlocked({ days })`, `usePerson(ref)` | `{ allowed, data, error, loading, reload }`; nothing is asked of a role without the permission |
 | `useHubController()` | The provider's controller, for the headless API next to your pieces |
 
@@ -216,10 +218,10 @@ The embedding API is new and may change before 0.2. It is marked `@experimental`
 name of each entry point, so any change shows up as a snapshot diff and the changeset says which way. The experimental names are:
 
 - `HubProvider`, `useHubController`, and the types `HubProviderProps`, `HubProviderOptions` and `HubControllerSource`
-- the pieces `CaseList`, `CaseCard`, `CaseWorkbench`, `PersonRecord`, `TermsManager`, `BlockedList`, `AuditLog`, `RuleGaps`, `Guide` and
-  `RecentActions`, their `*Props` types, `PieceProps` and `PieceLinks`
-- the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked` and `usePerson`, and the types `HubRead`,
-  `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide` and `UseClaim`
+- the pieces `CaseList`, `CaseCard`, `CaseWorkbench`, `PersonRecord`, `TermsManager`, `BlockedList`, `AuditLog`, `RuleGaps`, `Guide`,
+  `RecentActions` and `LadderSettings`, their `*Props` types, `PieceProps` and `PieceLinks`
+- the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `usePolicy`, and the types `HubRead`,
+  `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - in `/headless`: `HubController.configure`, `HubControllerOptions.host`, and the types `HubHost` and `HubControllerSettings`
 
 ## Options
@@ -251,10 +253,14 @@ needed" sends Not a problem with the reason "No rule was broken". Both go throug
 and the same send, and the keys are `1`, `2` and Ctrl or Cmd+Enter (the suggested step, then the next case). When no rule covers the report, or the role
 cannot apply the step, the card says so and offers "Something else…" instead.
 
+**The light tap.** When the suggestion is harsher than a warning, the card also offers "Send a warning" (key `3`): the same one click, the same
+Undo, a warning under the same rule with the rule's title as the reason. Key `3` does nothing while "Something else…" is open, while a decision is
+waiting, or while you are typing.
+
 What Simple hides stays one click away in Detailed: claims are still taken and released quietly, and only a case someone else holds shows
 it ("maya is on it", read-only, with Take over for a role holding `claims.override`). A reporter's record shows only as a warning when they
-have three or more reports and fewer than a third were upheld. The menu is Cases, Words, Blocked and More (Recent actions, Audit, Rule gaps and
-Guide, each by permission); the command bar and every route still work. The switch in the top bar keeps the open case, and a decision waiting
+have three or more reports and fewer than a third were upheld. The menu is Cases, Words, Blocked and More (Recent actions, Audit, Rule gaps, Guide and Steps and
+ladder, each by permission); the command bar and every route still work. The switch in the top bar keeps the open case, and a decision waiting
 for its Undo survives it.
 
 ### Screens
@@ -270,6 +276,7 @@ for its Undo survives it.
 | `#/blocked` | The lines the term filter refused, over 24 hours, 7 or 30 days: time, the person (their handle when a report named them, and the short tag), room, the term and the blocked text, both hidden until shown (per line, with Show beside the text, or "Show blocked words"). "Add exception" opens the exception form on Terms, filled in; "View term" opens Terms at that term. Opening it, and each change of window, writes one `blocked.view`; showing a word reads nothing | `blocked.read`; the term needs `terms.read`; Add exception needs `terms.write` |
 | `#/gaps` | Rule gaps: open gaps with their note and ref code, closed ones below. An owner closes one as "Made it rule N" (the rules in force) or "Not a rule" | `gaps.read`; closing needs `gaps.close` |
 | `#/audit` | The audit trail, newest first, 50 at a time: time, staff member, role, action and target, filtered by staff member and action | `audit.read` (a senior and up) |
+| `#/settings/ladder` | Steps and ladder (under Settings in Detailed, and More in Simple): the lengths moderators can pick, the ladder grid (six steps by a lighter and a harsher column, each a kind and a length), the first offence per conduct level, the repeat rule, the area and severe rules, and the outcome text of the written guidelines. The owner edits a local draft and sees a preview (400 ms after the last edit) of what it would suggest for sample records. Saving asks for a reason; a 409 reads "Someone else changed these settings" with Reload; a 400 puts keyboard focus on the field the kit named. Each section has a Reset, and so has the whole screen, both with an in-page confirm that asks why. Leaving with unsaved edits asks in the page. A role that cannot write (or a store that cannot save settings) sees it read-only with one sentence saying why | `policy.read`; changing needs `policy.write` |
 | `#/guide` | The Community Rules and the escalation ladder (the profile's own, else the kit's `LADDER_TABLE`) from the policy data, then the generated moderator guide (`GET /policy?format=markdown`) through a safe renderer | `policy.read` |
 
 The tabs a role cannot use are not shown: Audit appears for a senior and above, and every tab follows the permission table the
@@ -399,7 +406,7 @@ No string is ever turned into HTML.
 ### `HubClient`
 
 `createHubClient(transport)` returns one method per staff route. Each resolves with the parsed answer or rejects with a `HubError`
-(`status`, `code`, `message`, `retryAfter`; for a 409 `claimed`, also `heldBy` and `heldUntil`). Codes are the kit's (`forbidden`, `not_found`, `already_decided`, ...), plus `network`
+(`status`, `code`, `message`, `retryAfter`; for a 409 `claimed`, also `heldBy` and `heldUntil`; for a 400 `invalid_profile`, the `path` of the field). Codes are the kit's (`forbidden`, `not_found`, `already_decided`, ...), plus `network`
 (no answer), `bad_response` and `unexpected`.
 
 | Method | Route |
@@ -423,6 +430,10 @@ No string is ever turned into HTML.
 | `listBlocked({ days? })` | `GET /blocked` |
 | `policy({ format?, omit? })` | `GET /policy` (`omit`: `['rules', 'ladder']` leaves those sections out of the generated guide) |
 | `listAudit({ cursor?, limit?, actor?, action? })` | `GET /audit` |
+| `policyProfile()` | `GET /policy/profile` (audited on every call) |
+| `savePolicyProfile({ layer, version, reason })` | `PUT /policy/profile` (a stale `version` is a 409 `conflict`; a refused layer is a 400 `invalid_profile` with `error.path`) |
+| `previewPolicyProfile({ layer, rule? })` | `POST /policy/profile/preview` |
+| `resetPolicyProfile({ section?, reason, version? })` | `DELETE /policy/profile?section=` |
 | `changes(since?)` | `GET /changes` |
 | `claimCase(person, { takeOver? })` | `POST /cases/:ref/claim` |
 | `releaseCase(person)` | `POST /cases/:ref/release` |

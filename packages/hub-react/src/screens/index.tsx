@@ -10,6 +10,7 @@ import { Overview } from './Overview.js';
 import { Person } from './Person.js';
 import { Report } from './Report.js';
 import { Reports } from './Reports.js';
+import { Settings } from './Settings.js';
 import { SimpleHome } from './SimpleHome.js';
 import { Terms } from './Terms.js';
 
@@ -39,6 +40,8 @@ export function screenFor(route: Route, simple = false): ReactNode {
       return <Audit />;
     case 'guide':
       return <Guide />;
+    case 'settings':
+      return <Settings section={route.section} />;
     case 'notFound':
       return null;
   }

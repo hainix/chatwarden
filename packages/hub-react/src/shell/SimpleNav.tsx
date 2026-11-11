@@ -27,6 +27,7 @@ const MORE: ReadonlyArray<Omit<Entry, 'id'>> = [
   { route: { name: 'audit' }, label: 'hub.nav.audit', permission: 'audit.read' },
   { route: { name: 'gaps' }, label: 'hub.nav.gaps', permission: 'gaps.read' },
   { route: { name: 'guide' }, label: 'hub.nav.guide', permission: 'policy.read' },
+  { route: { name: 'settings', section: 'ladder' }, label: 'hub.settings.ladder.nav', permission: 'policy.read' },
 ];
 
 /** The entry a route belongs to: Cases holds the overview, the queue, an open case and a person. */
@@ -44,6 +45,7 @@ function currentOf(route: Route): 'cases' | 'terms' | 'blocked' | 'more' | null 
     case 'audit':
     case 'gaps':
     case 'guide':
+    case 'settings':
       return 'more';
     case 'notFound':
       return null;

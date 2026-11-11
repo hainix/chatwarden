@@ -143,7 +143,8 @@ export function CaseCard() {
   const noActionRef = useRef<HTMLButtonElement>(null);
   const elseRef = useRef<HTMLButtonElement>(null);
   const failedRef = useRef<HTMLDivElement>(null);
-  const lastUsed = useRef<'primary' | 'none'>('primary');
+  const lastUsed = useRef<'primary' | 'none' | 'quick'>('primary');
+  const quickRef = useRef<HTMLButtonElement>(null);
   const titleFocused = useRef(false);
   const base = useId();
   const listen = useKeyListener();
@@ -184,11 +185,19 @@ export function CaseCard() {
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
   const suggest = detail.data?.suggest;
+  const choice = suggest === undefined ? null : outcomeChoice(suggest.outcome);
   const one: OneClick | null = useMemo(
     () => (suggest === undefined || detail.data === undefined ? null : oneClickOf(draft.ctx, draft.rules, suggest.outcome, detail.data.rule, detail.data.report.lineId, UID)),
     [draft.ctx, draft.rules, suggest, detail.data],
   );
-  const choice = suggest === undefined ? null : outcomeChoice(suggest.outcome);
+  // The light tap: when the ladder suggests more than a warning, a warning is one click too (same hold, same Undo, the rule's title as the reason).
+  const quick: OneClick | null = useMemo(
+    () =>
+      detail.data === undefined || choice === null || choice.kind === 'warning' || choice.kind === 'note'
+        ? null
+        : oneClickOf(draft.ctx, draft.rules, 'warning', detail.data.rule, detail.data.report.lineId, UID),
+    [draft.ctx, draft.rules, choice, detail.data],
+  );
   const sendError = status === 'failed' && entry?.state.status === 'failed' ? entry.state.error : null;
 
   /** Hands a form to the hold the decision bar uses; `andNext` goes on to the person's next report or the next case. */
@@ -202,14 +211,19 @@ export function CaseCard() {
     lastUsed.current = 'primary';
     send(one.form, andNext);
   };
+  const sendQuick = (): void => {
+    if (quick === null) return;
+    lastUsed.current = 'quick';
+    send(quick.form, false);
+  };
   const sendNoAction = (): void => {
     lastUsed.current = 'none';
     send(noActionForm(t('hub.simple.noAction.reason')), false);
   };
 
-  const latest = useRef({ usable, one, sendPrimary, sendNoAction });
-  latest.current = { usable, one, sendPrimary, sendNoAction };
-  // 1 is the primary button, 2 is No action needed, Ctrl or Cmd with Enter is the primary button and then the next case. Not while
+  const latest = useRef({ usable, one, quick, sendPrimary, sendNoAction, sendQuick });
+  latest.current = { usable, one, quick, sendPrimary, sendNoAction, sendQuick };
+  // 1 is the primary button, 2 is No action needed, 3 is Send a warning (when it is offered), Ctrl or Cmd with Enter is the primary button and then the next case. Not while
   // typing, under a window, or when the adopter turned shortcuts off. (With Something else open the decision bar's own keys apply.)
   useEffect(() => {
     if (!shortcuts) return;
@@ -230,6 +244,9 @@ export function CaseCard() {
       } else if (e.key === '2') {
         e.preventDefault();
         s.sendNoAction();
+      } else if (e.key === '3' && s.quick !== null) {
+        e.preventDefault();
+        s.sendQuick();
       }
     };
     // In the shell this listens on the page; in a piece, on the piece's own root (see `keyScope.ts`).
@@ -239,8 +256,12 @@ export function CaseCard() {
   // Undone: the card is back, with keyboard focus on the button that sent it. Failed: on the message.
   // (In a microtask: the decision store can change from a page event or a timer, and that commit runs its effects at once.)
   useEffect(() => {
-    if (status === 'undone') queueMicrotask(() => (lastUsed.current === 'primary' ? (primaryRef.current ?? noActionRef.current) : noActionRef.current)?.focus());
-    else if (status === 'failed') queueMicrotask(() => failedRef.current?.focus());
+    if (status === 'undone') {
+      queueMicrotask(() => {
+        const back = lastUsed.current === 'quick' ? quickRef.current : lastUsed.current === 'primary' ? primaryRef.current : noActionRef.current;
+        (back ?? noActionRef.current)?.focus();
+      });
+    } else if (status === 'failed') queueMicrotask(() => failedRef.current?.focus());
   }, [status]);
 
   // Something else opens the bar in place, with focus on its first control.
@@ -364,6 +385,12 @@ export function CaseCard() {
               <span>{t('hub.simple.noAction')}</span>
               {kbd('2')}
             </button>
+            {quick !== null && (
+              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '3' } : {})} onClick={sendQuick}>
+                <span>{stepLabel(t, locale, quick.choice)}</span>
+                {kbd('3')}
+              </button>
+            )}
             <button ref={elseRef} type="button" className={one === null ? 'cw-btn cw-btn--primary' : 'cw-btn'} onClick={() => setElseOpen(true)}>
               {t('hub.simple.else')}
             </button>

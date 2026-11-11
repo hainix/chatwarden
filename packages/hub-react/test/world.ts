@@ -3,6 +3,7 @@ import type { Chatwarden, RawWho, Role } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { MemoryTermStore, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MemoryStore } from '@chatwarden/store-memory';
+import type { Store } from '@chatwarden/core';
 import { adminRoutes, createRouter } from '@chatwarden/http/admin';
 import type { KitRequest, KitResponse, PermissionKey, RouteTable } from '@chatwarden/http/admin';
 import type { ReportCategory } from '@chatwarden/core';
@@ -30,6 +31,10 @@ export interface WorldOptions {
   retire?: number[];
   /** The adopter's own ladder (six rows, steps 0 to 5): replaces the profile's. */
   ladder?: NonNullable<Parameters<typeof createChatwarden>[0]['overrides']>['ladder'];
+  /** The store the kit runs on (default: a MemoryStore). A store without the policy methods cannot save settings. */
+  store?: Store;
+  /** More overrides on the profile in code (the base the stored layer is merged onto). */
+  overrides?: NonNullable<Parameters<typeof createChatwarden>[0]['overrides']>;
 }
 
 export interface FileOptions {
@@ -65,14 +70,14 @@ export async function hubWorld(opts: WorldOptions = {}) {
   const live = new LiveTerms({ store: new MemoryTermStore(), pack: syntheticTermPack(), clock });
   live.loadSync();
   const cw: Chatwarden = await createChatwarden({
-    store: new MemoryStore(),
+    store: opts.store ?? new MemoryStore(),
     matcher: live,
     secret: 'hub-react-test-secret-0000-not-real',
     platform: { identify: (ctx) => ctx as RawWho },
     clock,
     profile: 'standard',
     rules: defineRules(starterRules('standard').map((r) => (opts.retire?.includes(r.number) ? { ...r, retired: true } : r))),
-    overrides: { profanity: { mode: 'allow' }, ...(opts.ladder === undefined ? {} : { ladder: opts.ladder }) },
+    overrides: { profanity: { mode: 'allow' }, ...(opts.ladder === undefined ? {} : { ladder: opts.ladder }), ...opts.overrides },
     retention: false,
   });
   // The caller is whoever `session` says: tests change it to see a role, or nobody (401).

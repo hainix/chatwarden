@@ -2,7 +2,7 @@ import type { HubError } from './client.js';
 import { DURATIONS, hasLength, outcomeChoice } from './decision.js';
 import type { Choice, DurationKey } from './decision.js';
 import { actorName } from './claims.js';
-import { formatDuration, personTag } from './format.js';
+import { formatDuration, longDuration, personTag } from './format.js';
 import type { HubT, HubText } from './i18n.js';
 import type { ReportCategory, SanctionGroupView, SanctionKind, SanctionSource, Suggestion } from './types.js';
 
@@ -85,10 +85,10 @@ const LENGTH_WORD = {
   permanent: 'hub.decide.choice.length.permanent',
 } as const satisfies Record<DurationKey, HubText>;
 
-/** A length as a phrase: `24 hours`, `permanent`; a length the menus do not offer falls back to a short unit (`90m`). */
+/** A length as a phrase: `24 hours`, `6 hours`, `3 days`, `permanent`. */
 export function lengthPhrase(t: HubT, locale: string, durationMs: number | null): string {
   const known = DURATIONS.find((d) => d.ms === durationMs);
-  return known === undefined ? formatDuration(durationMs ?? 0, locale) : t(LENGTH_WORD[known.key]);
+  return known === undefined ? longDuration(durationMs ?? 0, locale) : t(LENGTH_WORD[known.key]);
 }
 
 /** What an action does, in words: `Warning`, `Note`, `Chat restriction, 24 hours`, `Ban, permanent`. */
@@ -118,6 +118,7 @@ export function decideErrorText(t: HubT, error: HubError): string {
   }
   if (error.status === 413) return t('hub.decide.fail.tooLarge');
   if (error.status === 400) {
+    if (error.code === 'duration_not_offered') return t('hub.error.durationNotOffered');
     if (error.code === 'invalid_excerpt') return t('hub.decide.fail.excerpt');
     if (error.code === 'invalid_sanction') return t('hub.decide.fail.sanction');
     return t('hub.decide.fail.invalid');

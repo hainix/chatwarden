@@ -26,10 +26,14 @@ export { RuleGaps } from './pieces/RuleGaps.js';
 export type { RuleGapsProps } from './pieces/RuleGaps.js';
 export { Guide } from './pieces/Guide.js';
 export type { GuideProps } from './pieces/Guide.js';
+export { LadderSettings } from './pieces/LadderSettings.js';
+export type { LadderSettingsProps } from './pieces/LadderSettings.js';
 export { RecentActions } from './pieces/RecentActions.js';
 export type { RecentActionsProps } from './pieces/RecentActions.js';
 export { useBlocked, useCase, useCases, useClaim, useDecide, useMe, usePerson, useTerms } from './embedHooks.js';
 export type { HubRead, UseCase, UseCaseOptions, UseCases, UseClaim, UseDecide, UseMe } from './embedHooks.js';
+export { usePolicy } from './policyHooks.js';
+export type { UsePolicy } from './policyHooks.js';
 
 export { createHubClient, fetchAll, HubError, toHubError } from './client.js';
 export type { HubClient } from './client.js';
@@ -40,7 +44,7 @@ export { createT, en } from './i18n.js';
 export type { HubCatalog, HubParams, HubT, HubText } from './i18n.js';
 
 export { buildPath, hashRouter, memoryRouter, normalizePath, parseRoute, tabOf } from './router.js';
-export type { HubRouter, MemoryRouter, ObservableRouter, QueueStatus, Route, TabName } from './router.js';
+export type { HubRouter, MemoryRouter, ObservableRouter, QueueStatus, Route, SettingsSection, TabName } from './router.js';
 
 export { filterGroups, groupQueue, queueStats } from './queue.js';
 export type { QueueFilter, QueueGroup, QueueSort, QueueStats } from './queue.js';

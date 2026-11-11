@@ -108,6 +108,8 @@ function screenKeyOf(route: Route): string {
       return `person:${route.ref}`;
     case 'notFound':
       return `notFound:${route.path}`;
+    case 'settings':
+      return `settings:${route.section}`;
     default:
       return route.name;
   }

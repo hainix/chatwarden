@@ -422,14 +422,14 @@ describe('the ladder of this adopter', () => {
     expect(detail.suggest.outcome).toEqual({ kind: 'ban', durationMs: 14 * DAY });
     const { user } = await open(w, f.id);
     const card = within(panel()).getByRole('group', { name: 'The ladder suggests' });
-    expect(within(card).getByText('Ban, 14d')).toBeInTheDocument();
+    expect(within(card).getByText('Ban, 14 days')).toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Change' }));
     const what = within(within(panel()).getByRole('group', { name: 'Action 1' })).getByLabelText('What happens');
-    expect(what).toHaveDisplayValue('Ban, 14d');
+    expect(what).toHaveDisplayValue('Ban, 14 days');
     // The menu is the adopter's ladder (and what a first offence can suggest), not core's table: 3 days and 14 days, no 30-day ban.
     const options = within(what).getAllByRole('option').map((o) => o.textContent);
-    expect(options).toContain('Chat restriction, 3d');
-    expect(options).toContain('Ban, 14d');
+    expect(options).toContain('Chat restriction, 3 days');
+    expect(options).toContain('Ban, 14 days');
     expect(options).not.toContain('Ban, 7 days');
     expect(options).not.toContain('Ban, 30 days');
     await user.keyboard('1');
@@ -448,7 +448,7 @@ describe('the ladder of this adopter', () => {
     await user.click(within(panel()).getByRole('button', { name: 'Change' }));
     await user.click(within(panel()).getByRole('button', { name: 'Remove action 1' }));
     await user.click(within(panel()).getByRole('button', { name: 'Add this action' }));
-    expect(within(within(panel()).getByRole('group', { name: 'Action 1' })).getByLabelText('What happens')).toHaveDisplayValue('Ban, 14d');
+    expect(within(within(panel()).getByRole('group', { name: 'Action 1' })).getByLabelText('What happens')).toHaveDisplayValue('Ban, 14 days');
   });
 });
 

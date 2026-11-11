@@ -23,6 +23,8 @@ import type { ReportPerson } from '../excerpt.js';
 import { useHubData } from '../hooks.js';
 import type { HubData } from '../hooks.js';
 import { outcomeLabel } from '../labels.js';
+import { lengthsOf } from '../policy/lengths.js';
+import type { LengthPolicy } from '../policy/lengths.js';
 import type { ConductLevel, PolicyDocs, ReportDetail, Suggestion } from '../types.js';
 
 // The decision form's state, kept above both the transcript (its margin boxes pick the lines the player sees) and the decision
@@ -53,6 +55,8 @@ export interface DecisionDraft {
   reloadRules: () => void;
   /** What the "What happens" menu offers. */
   choices: Choice[];
+  /** The lengths the profile offers (and whether a custom one is allowed), or undefined until the policy is read. */
+  lengths: LengthPolicy | undefined;
   suggestion: Suggestion;
   level: ConductLevel | null;
   /** A level was picked and its answer has not come back. */
@@ -172,6 +176,8 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     const suggested = current === undefined ? null : outcomeChoice(current.outcome);
     return presets(policy.data?.profile ?? {}, suggested === null ? [] : [suggested]);
   }, [policy.data, current]);
+
+  const lengths = useMemo(() => lengthsOf(policy.data?.profile), [policy.data]);
 
   const suggestionChoice = current === undefined ? null : outcomeChoice(current.outcome);
   const suggestionIndex =
@@ -314,6 +320,7 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     rulesError: policy.error,
     reloadRules: policy.reload,
     choices,
+    lengths,
     suggestion: current ?? ({ outcome: 'none', why: '' } as Suggestion),
     level,
     levelBusy,

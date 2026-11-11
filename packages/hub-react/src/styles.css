@@ -2580,6 +2580,140 @@
   gap: var(--cw-space-1) var(--cw-space-2);
 }
 
+/* The Steps and ladder settings: a stack of panels, the preview and the save bar. The ladder grid and the preview scroll inside their own
+   box (.cw-scroll), so the page never widens. The only colour is the referee card and the red of a refused field. */
+.cw-hub .cw-settings,
+.cw-hub .cw-settings-part,
+.cw-hub .cw-settings-body {
+  display: grid;
+  gap: var(--cw-space-4);
+  min-width: 0;
+}
+.cw-hub .cw-settings-part {
+  gap: var(--cw-space-2);
+}
+.cw-hub .cw-settings-body {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-settings-all {
+  display: flex;
+  justify-content: flex-end;
+}
+.cw-hub .cw-lchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-lchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-1);
+  min-height: 1.75rem;
+  padding: 0 var(--cw-space-1) 0 var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-m);
+  background: var(--cw-surface-sunken);
+  font-size: var(--cw-text-s);
+  font-weight: var(--cw-weight-medium);
+}
+.cw-hub .cw-lchip button {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--cw-radius-m);
+  background: transparent;
+  color: var(--cw-ink-muted);
+  cursor: pointer;
+}
+.cw-hub .cw-lchip button:hover {
+  background: var(--cw-border);
+  color: var(--cw-ink);
+}
+.cw-hub .cw-length,
+.cw-hub .cw-kl {
+  display: grid;
+  gap: var(--cw-space-1);
+  min-width: 0;
+}
+.cw-hub .cw-length-row,
+.cw-hub .cw-length-add,
+.cw-hub .cw-kl-kind,
+.cw-hub .cw-pair,
+.cw-hub .cw-row-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2);
+  min-width: 0;
+}
+.cw-hub .cw-length-row select,
+.cw-hub .cw-length-add select,
+.cw-hub .cw-kl-kind select {
+  width: auto;
+  max-width: 100%;
+}
+.cw-hub .cw-length-row input,
+.cw-hub .cw-length-add input {
+  width: 6rem;
+}
+.cw-hub .cw-pair {
+  align-items: start;
+}
+.cw-hub .cw-row-field {
+  align-items: start;
+}
+.cw-hub .cw-row-name {
+  min-width: 4.5rem;
+  padding-top: var(--cw-space-1);
+  font-weight: var(--cw-weight-strong);
+}
+.cw-hub .cw-grid td,
+.cw-hub .cw-grid th[scope='col'] {
+  min-width: 11rem;
+  vertical-align: top;
+}
+.cw-hub .cw-grid th[scope='row'] {
+  white-space: nowrap;
+}
+.cw-hub .cw-picklist {
+  display: grid;
+  gap: var(--cw-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-confirm {
+  display: grid;
+  gap: var(--cw-space-3);
+  border: var(--cw-border-width) solid var(--cw-border-strong);
+  border-radius: var(--cw-radius-m);
+  background: var(--cw-surface-sunken);
+}
+.cw-hub .cw-savebar {
+  display: grid;
+  gap: var(--cw-space-3);
+  padding: var(--cw-space-3) var(--cw-space-4);
+  border: var(--cw-border-width) solid var(--cw-border);
+  border-radius: var(--cw-radius-m);
+  background: var(--cw-surface);
+}
+.cw-hub .cw-settings-nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 /* The generated guide, drawn by the safe renderer: plain document typography. */
 .cw-hub .cw-doc {
   display: grid;

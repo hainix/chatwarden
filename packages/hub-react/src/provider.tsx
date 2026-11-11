@@ -9,6 +9,8 @@ import { createHubController } from './headless/controller.js';
 import type { HubController, HubHost } from './headless/controller.js';
 import { useHubData } from './hooks.js';
 import { createT, en } from './i18n.js';
+import { LeaveGuardContext } from './leaveGuard.js';
+import type { LeaveGuard } from './leaveGuard.js';
 import type { HubT } from './i18n.js';
 import { errorText } from './labels.js';
 import { QueueProvider } from './liveQueue.js';
@@ -143,6 +145,7 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
   nowRef.current = now ?? Date.now;
   const tRef = useRef(t);
   tRef.current = t;
+  const guard = useRef<LeaveGuard | null>(null);
   const hostRef = useRef(shell?.host);
   hostRef.current = shell?.host;
 
@@ -182,7 +185,11 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
       shortcuts,
       me: meData,
       can: (permission: PermissionKey) => meData.can[permission] === true,
-      go: (to) => routerRef.current.navigate(buildPath(to)),
+      go: (to) => {
+        const move = (): void => routerRef.current.navigate(buildPath(to));
+        // A screen with unsaved edits may take the move over and ask first.
+        if (guard.current?.(move) !== true) move();
+      },
       href: (to) => {
         const p = buildPath(to);
         return routerRef.current.href?.(p) ?? `#${p}`;
@@ -199,9 +206,11 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
     content = (
       <ControllerContext.Provider value={controller}>
         <HubContext.Provider value={value}>
-          <ModeProvider value={mode}>
-            <ToastProvider>{reads ? <QueueProvider run={shell !== undefined}>{inner}</QueueProvider> : inner}</ToastProvider>
-          </ModeProvider>
+          <LeaveGuardContext.Provider value={guard}>
+            <ModeProvider value={mode}>
+              <ToastProvider>{reads ? <QueueProvider run={shell !== undefined}>{inner}</QueueProvider> : inner}</ToastProvider>
+            </ModeProvider>
+          </LeaveGuardContext.Provider>
         </HubContext.Provider>
       </ControllerContext.Provider>
     );

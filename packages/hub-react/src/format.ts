@@ -53,6 +53,19 @@ export function formatDuration(ms: number, locale: string): string {
   return unit(Math.floor(ms / DAY), 'day');
 }
 
+/**
+ * A length of a sanction in words: `2 days`, `36 hours`, `90 minutes`, in the locale; the largest unit that holds it whole (days only from
+ * two), else the short form. For lengths no menu key names.
+ */
+export function longDuration(ms: number, locale: string): string {
+  const loc = safeLocale(locale);
+  const unit = (value: number, u: 'minute' | 'hour' | 'day'): string => new Intl.NumberFormat(loc, { style: 'unit', unit: u, unitDisplay: 'long', maximumFractionDigits: 0 }).format(value);
+  if (ms >= DAY * 2 && ms % DAY === 0) return unit(ms / DAY, 'day');
+  if (ms >= HOUR && ms % HOUR === 0) return unit(ms / HOUR, 'hour');
+  if (ms >= MIN && ms % MIN === 0) return unit(ms / MIN, 'minute');
+  return formatDuration(ms, locale);
+}
+
 export type WaitTone = 'fresh' | 'aging' | 'stale';
 
 /** How worried to look about a wait: under an hour is fresh, under a day aging, a day or more stale. */

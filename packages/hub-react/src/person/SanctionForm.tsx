@@ -2,14 +2,15 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Field, RuleOptions } from '../case/ActionEditor.js';
 import { actorName } from '../claims.js';
 import { useHub } from '../context.js';
-import { GAP_NOTE_MAX, REASON_MAX, durationOf } from '../decision.js';
-import type { DurationKey } from '../decision.js';
+import { GAP_NOTE_MAX, REASON_MAX, hasLength } from '../decision.js';
 import { useHubAction, useHubData } from '../hooks.js';
-import { choiceLabel, errorText, kindLabel, lengthPhrase } from '../labels.js';
+import { choiceLabel, errorText, kindLabel } from '../labels.js';
+import { LengthField } from '../policy/LengthField.js';
+import { lengthsOf, menuOf, snapLength } from '../policy/lengths.js';
 import { useToasts } from '../toasts.js';
 import type { PolicyDocs, SanctionKind } from '../types.js';
 import { ErrorBlock, Panel } from '../ui.js';
-import { durationChoices, emptySanction, sanctionProblems, toSanctionInput } from './sanctionDraft.js';
+import { emptySanction, sanctionProblems, toSanctionInput } from './sanctionDraft.js';
 import type { SanctionDraft, SanctionMode, SanctionProblems } from './sanctionDraft.js';
 
 const NO_PROBLEMS: SanctionProblems = { count: 0 };
@@ -38,6 +39,14 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
     [policy.data],
   );
   const canPermanent = can('sanctions.apply.ban_permanent');
+  // The lengths are the profile's. A form starts on 24 hours, which the profile may not list: it moves to a length that is.
+  const lengths = useMemo(() => lengthsOf(policy.data?.profile), [policy.data]);
+  const timedKind = draft.kind !== '' && hasLength(draft.kind);
+  const menu = menuOf(lengths, draft.kind, canPermanent);
+  const snapped = snapLength(draft.duration, menu);
+  useEffect(() => {
+    if (timedKind && snapped !== draft.duration) setDraft((d) => ({ ...d, duration: snapped }));
+  }, [timedKind, snapped, draft.duration]);
   const problems = sanctionProblems(draft, mode, { rules: rules.map((r) => r.number), canApply: can('sanctions.apply'), canPermanent });
   const shown = attempted ? problems : NO_PROBLEMS;
 
@@ -61,7 +70,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
     setAttempted(true);
     if (problems.count > 0) {
       // Focus the first field with a problem, in the order they are on the page.
-      const order = [problems.kind && 'what', problems.rule && 'rule', problems.gapNote && 'gap', problems.reason && 'reason'].filter(Boolean) as string[];
+      const order = [problems.kind && 'what', problems.length && 'length-number', problems.rule && 'rule', problems.gapNote && 'gap', problems.reason && 'reason'].filter(Boolean) as string[];
       document.getElementById(id(order[0] ?? 'what'))?.focus();
       return;
     }
@@ -77,21 +86,17 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
     onDone();
   };
 
-  const setKind = (kind: SanctionKind | ''): void =>
-    setDraft((d) => {
-      const allowed = durationChoices(kind, canPermanent);
-      // A length the new kind may not have falls back to the default; the IP only goes with a timed kind.
-      return { ...d, kind, duration: allowed.length === 0 || allowed.includes(d.duration) ? d.duration : '24h', includeIp: allowed.length === 0 ? false : d.includeIp };
-    });
+  // The IP only goes with a timed kind; a length the new kind may not have is moved by the menu check above.
+  const setKind = (kind: SanctionKind | ''): void => setDraft((d) => ({ ...d, kind, includeIp: kind !== '' && hasLength(kind) ? d.includeIp : false }));
   const set = (patch: Partial<SanctionDraft>): void => setDraft((d) => ({ ...d, ...patch }));
 
-  const lengths = durationChoices(draft.kind, canPermanent);
   const failed = apply.error;
   const claimed = failed !== null && failed.code === 'claimed';
   const retryable = failed !== null && (failed.code === 'network' || failed.status >= 500 || failed.status === 429);
   const failure = (): string => {
     if (failed === null) return '';
     if (failed.code === 'claimed') return failed.heldBy === undefined ? t('hub.person.fail.claimedUnknown') : t('hub.person.fail.claimed', { name: actorName(failed.heldBy) });
+    if (failed.code === 'duration_not_offered') return t('hub.error.durationNotOffered');
     if (failed.status === 400) return t('hub.person.fail.invalid');
     return errorText(t, failed);
   };
@@ -124,18 +129,20 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
                 )}
               </Field>
             )}
-            {lengths.length > 0 && (
-              <Field id={id('length')} label={t('hub.person.form.length')}>
-                {(a) => (
-                  <select {...a} value={draft.duration} onChange={(e) => set({ duration: e.target.value as DurationKey })}>
-                    {lengths.map((k) => (
-                      <option key={k} value={k}>
-                        {durationOf(k) === null ? t('hub.decide.length.permanent') : lengthPhrase(t, locale, durationOf(k))}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </Field>
+            {timedKind && (
+              <div className="cw-field">
+                <LengthField
+                  id={id('length')}
+                  visible
+                  label={t('hub.person.form.length')}
+                  numberLabel={t('hub.length.number')}
+                  unitLabel={t('hub.length.unit')}
+                  menu={menu}
+                  value={{ value: snapped, amount: draft.customAmount ?? '', unit: draft.customUnit ?? 'hours' }}
+                  onChange={(l) => set({ duration: l.value, customAmount: l.amount, customUnit: l.unit })}
+                  problem={shown.length}
+                />
+              </div>
             )}
             <Field id={id('rule')} label={t('hub.decide.action.rule')} problem={shown.rule}>
               {(a) => (
@@ -173,7 +180,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
               />
             )}
           </Field>
-          {lengths.length > 0 && (
+          {timedKind && (
             <div className="cw-field">
               <label className="cw-tick">
                 <input type="checkbox" checked={draft.includeIp} aria-describedby={id('ip-hint')} onChange={(e) => set({ includeIp: e.target.checked })} />
