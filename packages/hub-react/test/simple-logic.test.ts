@@ -126,7 +126,7 @@ describe('noActionForm: the "No action needed" body', () => {
 
 describe("reporterWarrants: when a reporter's record is worth a warning", () => {
   // Only decided reports count: open ones are neither upheld nor not upheld.
-  const rec = (open: number, actioned: number, dismissed: number) => ({ reports: open + actioned + dismissed, open, actioned, dismissed, badFaith: 0, suspendedUntil: null });
+  const rec = (open: number, actioned: number, dismissed: number) => ({ reports: open + actioned + dismissed, open, actioned, dismissed, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 });
   const table: Array<[number, number, number, boolean]> = [
     // open, upheld, not upheld, warning
     [0, 0, 0, false],

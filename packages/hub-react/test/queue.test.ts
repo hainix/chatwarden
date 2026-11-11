@@ -14,6 +14,8 @@ function report(over: Partial<ReportSummary> = {}): ReportSummary {
     roomId: 'room-a',
     tags: {},
     category: 'harassment',
+    reportedReason: 'harassment',
+    reportedReasonLabel: 'Insults or harassment',
     status: 'open',
     badFaith: false,
     targetPerson: 'person-a',

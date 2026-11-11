@@ -6,7 +6,7 @@ import type { PolicyDocs, Reason, ReporterRecord } from '../src/types.js';
 
 // The session keeps what a moderator would otherwise read again for every case: the rules once, the rest for a few minutes.
 
-const record = (reports: number): ReporterRecord => ({ reports, open: 0, actioned: reports, dismissed: 0, badFaith: 0, suspendedUntil: null });
+const record = (reports: number): ReporterRecord => ({ reports, open: 0, actioned: reports, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 });
 
 function fake() {
   const calls = { policy: 0, reasons: 0, blocked: 0, history: [] as string[] };

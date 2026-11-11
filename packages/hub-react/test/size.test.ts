@@ -5,11 +5,11 @@ import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
 // The package entry, bundled the way an adopter's bundler would see it: React, React DOM and the kit stay outside (they are
-// peers), everything else of ours is in. Minified and gzipped, it must stay under 84 KB. The budget was 60 KB, a guess made before the screens existed; it is a staff-only tool on the
-// adopter's admin route, raised at Task 6 (to 72 KB) so guidance copy is never cut to fit, and again to 84 KB: raised at 7d for the Steps and ladder settings screen (owner-approved feature, 2026-11-10).
+// peers), everything else of ours is in. Minified and gzipped, it must stay under 96 KB. The budget was 60 KB, a guess made before the screens existed; it is a staff-only tool on the
+// adopter's admin route, raised at Task 6 (to 72 KB) so guidance copy is never cut to fit, and again to 84 KB: raised at 7d for the Steps and ladder settings screen (owner-approved feature, 2026-11-10), and to 96 KB at 7i: raised at 7i for the Reporting settings section (owner-approved, 2026-11-10); lazy-loading the settings and admin screens is a tracked follow-up.
 
 const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-const BUDGET = 84 * 1024;
+const BUDGET = 96 * 1024;
 
 async function bundle() {
   const result = await build({
@@ -31,7 +31,7 @@ async function bundle() {
 }
 
 describe('bundle size', () => {
-  it('is under 84 KB gzipped with React and the kit external', async () => {
+  it('is under 96 KB gzipped with React and the kit external', async () => {
     const { bytes, gzip } = await bundle();
     console.log(`hub-react bundle: ${bytes} bytes minified, ${gzip} bytes gzipped (budget ${BUDGET})`);
     expect(gzip).toBeLessThan(BUDGET);
