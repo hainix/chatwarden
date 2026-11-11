@@ -1,9 +1,9 @@
 import type { FormEvent, RefObject } from 'react';
 import { LINE_MAX } from './engine';
-import type { DemoSeat, PlayerNotice, SeatState } from './engine';
+import type { DemoSeat, SeatState } from './engine';
 import { FlagIcon, SendIcon } from './icons';
-import { formatUntil, noticeEnd, noticeKindLabel } from './notice';
-import type { FeedItem, PendingBySeat } from './types';
+import { formatUntil } from './notice';
+import type { FeedItem } from './types';
 
 const AVATAR: Record<string, string> = { you: 'avatar-you', ada: 'avatar-a', bo: 'avatar-b' };
 
@@ -41,50 +41,33 @@ function Message({ item, tourTarget, onReport }: { item: FeedItem; tourTarget: b
   );
 }
 
-/** What a reported player sees: their notice, in a small "player's screen" frame. */
-function PlayerFrame({ name, you, notice, extra, onAck }: { name: string; you: boolean; notice: PlayerNotice; extra: number; onAck: () => void }) {
-  const end = noticeEnd(notice, endTime);
-  // The visitor's own screen speaks to her; the scripted players' screens are shown from outside.
-  const title = you ? 'Your screen' : `${name}’s screen`;
+/** One button per player who has a notice waiting. The notice itself is player-react's dialog, drawn by the demo. */
+function NoticeBar({ seats, waiting, tourSeat, onShow }: { seats: readonly DemoSeat[]; waiting: Record<string, number>; tourSeat: string | null; onShow: (seat: DemoSeat, opener: HTMLElement) => void }) {
+  const who = seats.filter((s) => (waiting[s.id] ?? 0) > 0);
+  if (who.length === 0) return null;
   return (
-    <section className="pframe" aria-label={title}>
-      <div className="pframe-bar">
-        <span className="pframe-dots" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-        <span className="pframe-title">{title}</span>
-        <span className="pframe-sub">{you ? 'what you see' : `what ${name} sees`}</span>
-      </div>
-      <div className="pframe-body">
-        <h4 className="pframe-kind" data-kind={notice.kind}>
-          {noticeKindLabel(notice.kind)}
-        </h4>
-        {notice.ruleLabel !== null && <p className="pframe-rule">{notice.ruleLabel}</p>}
-        {end !== '' && <p className="pframe-until">{end}</p>}
-        {notice.kind === 'report_outcome' && <p className="pframe-until">A moderator acted on a report you sent.</p>}
-        {notice.excerpt.length > 0 && (
-          <div className="pframe-quote">
-            <span className="pframe-quote-h">Your line</span>
-            {notice.excerpt.map((e, i) => (
-              <p key={i}>
-                <q>{e.text}</q> <small>{e.day}</small>
-              </p>
-            ))}
-          </div>
-        )}
-        <div className="pframe-foot">
-          <small>
-            {notice.refCode !== null && <code>{notice.refCode}</code>} Only {you ? 'you get' : `${name} gets`} this: no one else’s chat, no IP, no account or subject id.
-            {extra > 0 ? ` ${extra} more waiting.` : ''}
-          </small>
-          <button type="button" className="pframe-ack" data-tour="ack" onClick={onAck}>
-            Acknowledge
-          </button>
-        </div>
-      </div>
-    </section>
+    <ul className="notice-bar" aria-label="Players with a notice waiting">
+      {who.map((s) => {
+        const n = waiting[s.id] ?? 0;
+        const what = s.you ? 'you' : s.name;
+        return (
+          <li key={s.id}>
+            <span>
+              {s.you ? 'You have' : `${s.name} has`} {n === 1 ? 'a notice' : `${n} notices`} waiting.
+            </span>
+            <button
+              type="button"
+              className="notice-btn"
+              aria-label={`See what ${what} sees (${n} ${n === 1 ? 'notice' : 'notices'} waiting)`}
+              data-tour={s.id === tourSeat ? 'notice' : undefined}
+              onClick={(e) => onShow(s, e.currentTarget)}
+            >
+              See what {what} sees
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -93,7 +76,8 @@ interface Props {
   feed: FeedItem[];
   seats: SeatState[];
   allSeats: readonly DemoSeat[];
-  pending: PendingBySeat;
+  /** How many notices each player has waiting. */
+  waiting: Record<string, number>;
   draft: string;
   setDraft: (v: string) => void;
   note: string | null;
@@ -103,7 +87,7 @@ interface Props {
   onSend: (text: string) => void;
   onBlockedWord: () => void;
   onReport: (item: FeedItem, opener: HTMLElement) => void;
-  onAck: (seat: string, notice: PlayerNotice) => void;
+  onShowNotices: (seat: DemoSeat, opener: HTMLElement) => void;
   inputRef: RefObject<HTMLInputElement | null>;
   logRef: RefObject<HTMLDivElement | null>;
 }
@@ -113,7 +97,7 @@ export function GamePane({
   feed,
   seats,
   allSeats,
-  pending,
+  waiting,
   draft,
   setDraft,
   note,
@@ -122,12 +106,12 @@ export function GamePane({
   onSend,
   onBlockedWord,
   onReport,
-  onAck,
+  onShowNotices,
   inputRef,
   logRef,
 }: Props) {
-  const frameSeat = allSeats.find((s) => (pending[s.id]?.length ?? 0) > 0);
-  const frameNotice = frameSeat ? pending[frameSeat.id]?.[0] : undefined;
+  // The tour points at one notice at a time: the first player who has one.
+  const tourSeat = allSeats.find((s) => (waiting[s.id] ?? 0) > 0)?.id ?? null;
   const stateOf = (id: string) => seats.find((s) => s.id === id);
 
   function submit(e: FormEvent) {
@@ -165,16 +149,7 @@ export function GamePane({
           <Message key={item.id} item={item} tourTarget={item.id === tourLineId} onReport={onReport} />
         ))}
       </div>
-      {frameSeat && frameNotice && (
-        <PlayerFrame
-          key={frameNotice.id}
-          name={frameSeat.name}
-          you={frameSeat.you}
-          notice={frameNotice}
-          extra={(pending[frameSeat.id]?.length ?? 1) - 1}
-          onAck={() => onAck(frameSeat.id, frameNotice)}
-        />
-      )}
+      <NoticeBar seats={allSeats} waiting={waiting} tourSeat={tourSeat} onShow={onShowNotices} />
       <form className="composer" data-tour="composer" onSubmit={submit}>
         <div className="chips" role="group" aria-label="Quick lines">
           <button type="button" className="chip" onClick={() => onSend('gg')}>

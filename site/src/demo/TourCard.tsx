@@ -12,9 +12,11 @@ export interface TourPos {
 }
 
 interface Props {
-  /** 0 to 3 for the four steps, 4 when the tour is finished. */
+  /** 0 for the first step, up to `total - 1`; `total` when the tour is finished. */
   step: number;
   total: number;
+  /** The step is one the tour can do without. */
+  optional?: boolean;
   title: string;
   body: string;
   hint: string | null;
@@ -33,7 +35,7 @@ interface Props {
  * the step is about, never covers the page (it is inside the demo) and never takes focus.
  */
 export const TourCard = forwardRef<HTMLElement, Props>(function TourCard(
-  { step, total, title, body, hint, codeOpen, inert, pos, onNext, onSkip, onToggleCode, onPlayAgain },
+  { step, total, optional = false, title, body, hint, codeOpen, inert, pos, onNext, onSkip, onToggleCode, onPlayAgain },
   ref,
 ) {
   const done = step >= total;
@@ -60,7 +62,7 @@ export const TourCard = forwardRef<HTMLElement, Props>(function TourCard(
       onKeyDown={onKeyDown}
     >
       <div className="tour-top">
-        <span className="tour-count">{done ? 'Tour done' : `Step ${step + 1} of ${total}`}</span>
+        <span className="tour-count">{done ? 'Tour done' : `Step ${step + 1} of ${total}${optional ? ' (optional)' : ''}`}</span>
         <span className="tour-pips" aria-hidden="true">
           {Array.from({ length: total }, (_, i) => (
             <i key={i} data-pip={i < step ? 'done' : i === step ? 'current' : 'todo'} />

@@ -13,9 +13,25 @@ function bodies(selector: string): string[] {
 }
 
 describe('demo.css', () => {
-  it('the stacked breakpoint in JS matches the side-by-side breakpoint in CSS (899px and 900px)', () => {
-    expect(demoSrc).toMatch(/\(max-width: 899px\)/);
-    expect(css).toMatch(/@media \(min-width: 900px\)/);
+  it('the stacked breakpoint in JS matches the side-by-side breakpoint in CSS (1151px and 1152px)', () => {
+    expect(demoSrc).toMatch(/\(max-width: 1151px\)/);
+    expect(css).toMatch(/@media \(min-width: 1152px\)/);
+  });
+  it('side by side the game is the narrow column and the hub gets the rest (about 720px of the 1120px column)', () => {
+    expect(css).toMatch(/@media \(min-width: 1152px\)\s*\{\s*\.demo-panes\s*\{\s*grid-template-columns:\s*minmax\(300px, 340px\) minmax\(0, 1fr\)/);
+  });
+  it('the hub fills the pane under its heading, and in one-pane mode it is as tall as the window allows', () => {
+    expect(bodies('.hub-host .cw-hub').join(';')).toMatch(/--cw-hub-height:\s*100%/);
+    expect(bodies('.is-stacked .hub-host .cw-hub').join(';')).toMatch(/--cw-hub-height:\s*min\(82vh, 720px\)/);
+  });
+  it('from 820px the hub host contains fixed children, so the hub’s toasts and pop-ups sit at the hub’s corner, not the window’s', () => {
+    expect(css).toMatch(/@media \(min-width: 51\.25rem\)\s*\{\s*\.hub-host\s*\{\s*contain:\s*layout;/);
+  });
+  it('from a 1200px window the hub would draw three panes; here it stays stacked inside its pane (same rules the hub uses when narrow)', () => {
+    const block = /@media \(min-width: 75rem\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    expect(block).toMatch(/\.demo \.cw-hub \.cw-body\[data-case='true'\] \.cw-work\s*\{[^}]*display:\s*block/);
+    expect(block).toMatch(/\.cw-main\s*\{[^}]*display:\s*block/);
+    expect(block).toMatch(/\.cw-ctx\s*\{[^}]*border-left:\s*0/);
   });
   it('a hidden pane really hides (its display rule must not beat the hidden attribute)', () => {
     expect(bodies('.pane[hidden]').join(';')).toMatch(/display:\s*none/);
@@ -28,19 +44,24 @@ describe('demo.css', () => {
     expect(bodies('.report-btn').join(';')).toMatch(/opacity:\s*0/);
     expect(css).toMatch(/\.msg:focus-within \.report-btn/);
   });
-  it('the decide buttons stay in reach: the bar is sticky', () => {
-    expect(bodies('.decide-bar').join(';')).toMatch(/position:\s*sticky/);
-  });
-  it('the dark screens use the dark theme signature colours in both themes', () => {
-    const body = bodies('.pane,\n.dialog').join(';');
+  it('the dark game screen uses the dark theme signature colours in both themes', () => {
+    const body = bodies('.pane').join(';');
     expect(body).toMatch(/--warden:\s*#35e3c5/);
     expect(body).toMatch(/--gold:\s*#ffc83d/);
   });
-  it('the tour tooltip sits under the dialog, and both are in a sane order against the 50-high site header', () => {
+  it('the tour tooltip sits under player-react’s dialogs (z-index 1000), and the pane switcher under the 50-high site header', () => {
     const z = (sel: string) => Number(/z-index:\s*(\d+)/.exec(bodies(sel).join(';'))?.[1]);
-    expect(z('.dialog-backdrop')).toBeGreaterThan(50);
-    expect(z('.tour')).toBeLessThan(z('.dialog-backdrop'));
+    const playerCss = readFileSync(join(__dirname, '..', '..', 'packages', 'player-react', 'src', 'styles.css'), 'utf8');
+    expect(Number(/--cw-layer:\s*(\d+)/.exec(playerCss)?.[1])).toBeGreaterThan(50);
+    expect(z('.tour')).toBeLessThan(50);
     expect(z('.pane-tabs')).toBeLessThan(50);
+  });
+  it('the notice button is a 44px target and has its own ring when the tour points at it', () => {
+    expect(bodies('.notice-btn').join(';')).toMatch(/min-height:\s*44px/);
+    expect(bodies('.notice-btn[data-tour-target]').join(';')).toMatch(/border-radius/);
+  });
+  it('the demo carries no style for the hand-built console, dialog or player frame any more', () => {
+    expect(css).not.toMatch(/\.(pframe|decide-bar|dialog-backdrop|mod-body|evidence|cat-chip)(?![\w-])/);
   });
   it('the sticky pane switcher clears the 64px sticky site header', () => {
     expect(Number(/top:\s*(\d+)px/.exec(bodies('.pane-tabs').join(';'))?.[1])).toBeGreaterThanOrEqual(64);

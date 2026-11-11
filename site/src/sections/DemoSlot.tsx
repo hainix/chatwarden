@@ -1,8 +1,9 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
-// The demo is a separate chunk. It loads when this section nears the viewport (IntersectionObserver with a generous margin),
-// or as soon as a visitor points at or focuses the placeholder. Until then the placeholder has the demo's final size, so the
+// The demo is a separate chunk, and it is the heavy one: the real moderator hub, the staff routes it runs over, the player components
+// and the kit (about 180 KB gzip). It loads when this section nears the viewport (IntersectionObserver, 200px ahead, so a phone's
+// first screen does not fetch it), or as soon as a visitor points at or focuses the placeholder. Until then the placeholder has the demo's final size, so the
 // page does not jump when the demo arrives.
 const Demo = lazy(() => import('../demo/Demo'));
 
@@ -71,7 +72,7 @@ export function DemoSlot() {
           io.disconnect();
         }
       },
-      { rootMargin: '600px 0px' },
+      { rootMargin: '200px 0px' },
     );
     io.observe(el);
     return () => io.disconnect();

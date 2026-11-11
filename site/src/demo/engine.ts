@@ -1,10 +1,12 @@
 // The demo talks to the moderation kit through this interface only. It is shaped like the real `@chatwarden/core` facade
-// (`cw.chat.accept`, `cw.reports.submit`, `cw.decide`, `cw.notices.*`, `cw.suggest`). `KitEngine` (./kitEngine.ts) binds the
-// real kit behind it. Where the kit's own type is the right shape it is re-exported here (a type-only import, erased at build),
+// (`cw.chat.accept`, `cw.reports.submit`, `cw.notices.*`). `KitEngine` (./kitEngine.ts) binds the real kit behind it. The
+// moderator side is not here: the real hub (`@chatwarden/hub-react`) reads and decides through the kit's staff routes, built over
+// the `world()` below. Where the kit's own type is the right shape it is re-exported here (a type-only import, erased at build),
 // so a change in the kit breaks the demo's type check instead of drifting silently.
-import type { ChatResult, DecisionGroup, DecisionResult, PlayerNotice, RefuseReason, ReportRefusal } from '@chatwarden/core';
+import type { Chatwarden, ChatResult, PlayerNotice, RefuseReason, ReportDetailInput, ReportCategory, ReportDetailResult, ReportRefusal, ReportResult } from '@chatwarden/core';
+import type { TermsAdmin } from '@chatwarden/http/admin';
 
-export type { ChatResult, DecisionGroup, DecisionResult, PlayerNotice, RefuseReason, ReportRefusal };
+export type { ChatResult, PlayerNotice, RefuseReason, ReportDetailInput, ReportDetailResult, ReportRefusal, ReportResult };
 
 /** A seat in the demo lobby. `you` is the visitor's seat. */
 export interface DemoSeat {
@@ -15,85 +17,22 @@ export interface DemoSeat {
 
 export type RuleRef = number | 'uncovered';
 
-export type ReportCategory = 'harassment' | 'hate' | 'cheating' | 'spam' | 'disruption' | 'other';
-export const REPORT_CATEGORIES: readonly ReportCategory[] = ['harassment', 'hate', 'cheating', 'spam', 'disruption', 'other'];
+/** The kit running behind the demo, with the term list the staff routes edit. A new one is built on every reset. */
+export interface DemoWorld {
+  cw: Chatwarden;
+  terms: TermsAdmin;
+}
 
+/** What the game side files. A one-tap report names no reason; `reason` is an id from the reporting settings. */
 export interface ReportInput {
   reporterSeat: string;
   /** The seat reported. Ignored when `lineId` names a line still in the evidence buffer. */
   targetSeat: string;
-  category: ReportCategory;
+  reason?: string;
+  /** The 0.1.1 category, for the old report dialog. The demo's dialog sends `reason`, or nothing. */
+  category?: ReportCategory;
   note?: string;
   lineId?: string;
-}
-
-export type ReportResult =
-  | { ok: true; reportId: string; remaining: number }
-  | { ok: false; refused: ReportRefusal; remaining?: number };
-
-/** One chat line inside a report's evidence. Staff see blocked lines too (`delivered` is null for them). */
-export interface EvidenceLine {
-  lineId: string;
-  ts: number;
-  seatId: string;
-  handle: string;
-  raw: string;
-  delivered: string | null;
-  blocked: boolean;
-}
-
-export interface StaffReport {
-  id: string;
-  createdAt: number;
-  category: ReportCategory;
-  note: string | null;
-  reporterHandle: string;
-  targetHandle: string;
-  /** The reported line. */
-  lineId: string | null;
-  excerpt: EvidenceLine[];
-  status: 'open' | 'actioned' | 'dismissed';
-  /** Staff ref of the reported person. Staff surfaces only; never shown to a player. */
-  targetPerson: string;
-  /** For each person, the ids of the excerpt lines they wrote themselves. Offer these in the "line to show" picker. */
-  ownLineIds: Record<string, string[]>;
-}
-
-export interface ReportPage {
-  items: StaffReport[];
-  next: string | null;
-}
-
-export type Outcome = 'none' | 'note' | 'warning' | { kind: 'chat' | 'area' | 'ban'; durationMs: number | null };
-
-/** What the preset suggests: the outcome, a short label and a plain sentence on why (the kit's `Suggestion`). */
-export interface Suggestion {
-  outcome: Outcome;
-  label: string;
-  why: string;
-  rule: RuleRef;
-}
-
-/** What the demo's decide buttons send. The kit also has `area` and `ban`; the demo never sends them. */
-export type SanctionKind = 'chat' | 'warning' | 'note';
-
-export interface DecisionAction {
-  subject: string;
-  kind: SanctionKind;
-  durationMs: number | null;
-  rule: RuleRef;
-  gapNote?: string;
-  /** Up to five of THIS person's own lines in the report, shown to them in the notice. */
-  lineIds?: string[];
-}
-
-export interface DecisionInput {
-  reportId: string;
-  verdict: 'upheld' | 'noted' | 'no_action' | 'bad_faith';
-  evidence?: string;
-  actions: DecisionAction[];
-  /** Private; required, at most 500 characters. Never shown to a player. */
-  reason: string;
 }
 
 export interface SeatState {
@@ -107,21 +46,20 @@ export interface SeatState {
 export interface DemoEngine {
   /** One honest line shown under the demo about what is running it. */
   readonly note: string;
-  /** The demo's own settings and heuristics that a visitor would not otherwise know about. Short; shown beside the note. */
+  /** The demo's own settings that a visitor would not otherwise know about. Short; shown beside the note. */
   readonly noteDetails?: string;
   readonly seats: readonly DemoSeat[];
-  /** Clears every line, report, decision and notice. */
+  /** Clears every line, report, decision and notice: a brand new kit. */
   reset(): Promise<void>;
+  /** The kit as it is now, for the staff routes. After a `reset()` it is a different one. */
+  world(): Promise<DemoWorld>;
   rules: { label(ref: RuleRef): string };
   rooms: { seats(): Promise<SeatState[]> };
   chat: { accept(seat: string, text: string): Promise<ChatResult> };
   reports: {
     submit(input: ReportInput): Promise<ReportResult>;
-    list(query?: { status?: StaffReport['status'] }): Promise<ReportPage>;
-    get(id: string): Promise<StaffReport | null>;
+    addDetail(reportId: string, reporterSeat: string, detail: ReportDetailInput): Promise<ReportDetailResult>;
   };
-  suggest(reportId: string): Promise<Suggestion | null>;
-  decide(input: DecisionInput): Promise<DecisionResult>;
   notices: {
     pending(seat: string): Promise<PlayerNotice[]>;
     ack(seat: string, id: string): Promise<boolean>;
