@@ -8,7 +8,7 @@ import { toExpress } from '@chatwarden/http/express';
 import express from 'express';
 import { chromium } from 'playwright';
 import type { Browser, ConsoleMessage, Page } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
 
@@ -473,6 +473,8 @@ describe('keys are scoped to each hub', () => {
 // hub-react's own stylesheet in a plain page (no element, no shadow root): a token set on any ancestor themes the hub, and with
 // nothing set every token has the value it had before the defaults were made private. Computed by Chromium, which jsdom cannot do.
 describe('hub-react\'s stylesheet is themable from any ancestor', () => {
+  // Like every browser test here: skip without Chromium (the package test jobs have none), fail only under CW_REQUIRE_BROWSER=1.
+  beforeEach((ctx) => needsBrowser(ctx));
   const rgb = (hex: string): string => {
     const n = Number.parseInt(hex.slice(1), 16);
     return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;

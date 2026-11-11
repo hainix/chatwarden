@@ -81,7 +81,8 @@ describe('demo.css', () => {
   it('the tour tooltip sits under player-react’s dialogs (z-index 1000), and the pane switcher under the 50-high site header', () => {
     const z = (sel: string) => Number(/z-index:\s*(\d+)/.exec(bodies(sel).join(';'))?.[1]);
     const playerCss = readFileSync(join(__dirname, '..', '..', 'packages', 'player-react', 'src', 'styles.css'), 'utf8');
-    expect(Number(/--cw-layer:\s*(\d+)/.exec(playerCss)?.[1])).toBeGreaterThan(50);
+    // player-react keeps its defaults in private `--cwd-*` names (so a page can theme it from any ancestor).
+    expect(Number(/--cwd-layer:\s*(\d+)/.exec(playerCss)?.[1])).toBeGreaterThan(50);
     expect(z('.tour')).toBeLessThan(50);
     expect(z('.pane-tabs')).toBeLessThan(50);
     expect(z('.tour')).toBeLessThan(z('.pane-tabs')); // the pane switcher stays pressable where the card sits over it

@@ -87,11 +87,13 @@ describe('the hub and player packages on the page', () => {
     expect(hub?.link?.href).toBe('https://www.npmjs.com/package/@chatwarden/hub-react');
   });
 
-  it('counts the ways to adopt the way hub-react’s README does: three (drop-in, pieces, hooks and headless)', () => {
+  it('counts the ways to adopt the way hub-react’s README does: four (drop-in, pieces, hooks and headless, one script tag)', () => {
     const body = FEATURES.find((f) => f.id === 'hub')?.body ?? '';
-    expect(body).toContain('as a drop-in, as pieces, or as hooks and headless');
-    expect(body).not.toMatch(/four ways/i);
-    expect(readmeOf('hub-react')).toContain('## Three ways to adopt');
+    expect(body).toContain('Four ways to adopt it: a drop-in, pieces, hooks and headless, or one script tag (<chatwarden-hub>).');
+    expect(body).not.toMatch(/three ways/i);
+    const readme = readmeOf('hub-react');
+    expect(readme).toContain('## Four ways to adopt');
+    for (const h of ['### 1. Drop in', '### 2. Pieces', '### 3. Headless hooks', '### 4. One script tag']) expect(readme).toContain(h);
   });
 
   it('the hub step starts with the README’s install line, a contiguous block of the hub-react README', () => {

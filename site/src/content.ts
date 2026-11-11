@@ -75,7 +75,7 @@ export const FEATURES: Feature[] = [
   {
     id: 'hub',
     title: 'Moderator hub and player screens',
-    body: 'A team workbench for moderators, with a Simple mode of one card per case. Editable steps and reporting: set the timeout lengths, the ladder and how players report (one tap by default). Adopt it as a drop-in, as pieces, or as hooks and headless. Or with one script tag: <chatwarden-hub>.',
+    body: 'A team workbench for moderators, with a Simple mode of one card per case. Editable steps and reporting: set the timeout lengths, the ladder and how players report (one tap by default). Four ways to adopt it: a drop-in, pieces, hooks and headless, or one script tag (<chatwarden-hub>).',
     link: { label: '@chatwarden/hub-react on npm', href: `${NPM_PACKAGE_URL}/hub-react` },
   },
   {

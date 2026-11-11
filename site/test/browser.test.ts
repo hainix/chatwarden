@@ -98,8 +98,9 @@ describe('the built page under the _headers CSP', () => {
       expect(csp).toContain("default-src 'self'");
       expect(csp).toContain("style-src 'self'");
       await scrollThrough(page);
-      // The lazy demo chunk loaded and rendered under the policy.
-      await page.getByText(RUDE).waitFor({ timeout: 15_000 });
+      // The lazy demo chunk loaded and rendered under the policy. Wait for the script's first line, not a later one: the lines
+      // arrive on a timer, and on a busy CI runner the fifth (RUDE) took longer than the wait on the phone run.
+      await page.getByText('gg, that last clutch was wild').first().waitFor({ timeout: 30_000 });
       await demoOf(page).getByRole('navigation', { name: /moderator hub sections/i, includeHidden: true }).waitFor({ state: 'attached' });
       // The hub's stylesheet and the player stylesheet really are applied (not just loaded): a rule of each is in force.
       const sheets = await page.evaluate(() => {
