@@ -55,6 +55,23 @@ async function scrollThrough(page: Page) {
 const RUDE = "uninstall the game, you're hopeless";
 const demoOf = (page: Page) => page.getByRole('group', { name: /chatwarden interactive demo/i });
 
+/** Opens the hub's "More" menu and follows one of its links. A press that lands while the hub is still settling (on a slow CI
+ *  runner, a case just opened) can leave the menu shut, so it presses again, up to three times, before it gives up. */
+async function viaMore(page: Page, link: string): Promise<void> {
+  const demo = demoOf(page);
+  const target = demo.getByRole('link', { name: link });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await target.isVisible())) await demo.getByRole('button', { name: 'More', exact: true }).click();
+    try {
+      await target.waitFor({ state: 'visible', timeout: 5_000 });
+      break;
+    } catch {
+      if (attempt === 2) throw new Error(`the "${link}" link never showed in the More menu`);
+    }
+  }
+  await target.click();
+}
+
 /** Loads the page, wakes the lazy demo and waits for the chat and the hub. */
 async function openDemo(page: Page) {
   await page.goto(server.url, { waitUntil: 'networkidle' });
@@ -352,8 +369,7 @@ describe('accessibility (axe) on the built page, with the real hub inside the de
         await openDemo(page);
         const demo = demoOf(page);
         if (viewport.width < 1152) await demo.getByRole('button', { name: /^moderator/i }).click();
-        await demo.getByRole('button', { name: 'More', exact: true }).click();
-        await demo.getByRole('link', { name: 'Steps and ladder' }).click();
+        await viaMore(page, 'Steps and ladder');
         await demo.getByRole('heading', { name: /steps and ladder/i }).waitFor();
         await demo.getByText('6 hours').first().waitFor();
         expect(await serious(page)).toEqual([]);
@@ -458,8 +474,7 @@ describe('layout on the built page', () => {
       await openCaseInHub(page);
       expect(await overflow()).toBeLessThanOrEqual(0);
       const demo = demoOf(page);
-      await demo.getByRole('button', { name: 'More', exact: true }).click();
-      await demo.getByRole('link', { name: 'Steps and ladder' }).click();
+      await viaMore(page, 'Steps and ladder');
       await demo.getByRole('heading', { name: /steps and ladder/i }).waitFor();
       expect(await overflow()).toBeLessThanOrEqual(0);
       await ctx.close();
