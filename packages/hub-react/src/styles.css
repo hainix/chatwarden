@@ -173,6 +173,15 @@
   line-height: var(--cw-leading-tight, var(--cwd-leading-tight));
   font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
 }
+/* A host page that styles its own headings (a display font, capitals, wide spacing on h1 and h2) must not restyle the hub. These set the
+   hub's font, case, spacing and weight themselves, at (0,1,1): above a host's element selector whichever sheet comes last, below a class
+   the adopter writes (`.my-hub h2`) or a rule of the hub's own that sets a heading's spacing. */
+.cw-hub :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--cw-font, var(--cwd-font));
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
 .cw-hub a {
   color: inherit;
 }
