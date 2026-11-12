@@ -397,6 +397,7 @@ function aiOutcomeFromRow(r: Record<string, unknown>): AiOutcomeRow {
     badFaith: Number(r.bad_faith) === 1,
     example: parseExample(r.example_json),
     reversed: Number(r.reversed) === 1,
+    corrective: Number(r.corrective) === 1,
     dontTeach: Number(r.dont_teach) === 1,
   };
 }
@@ -1029,23 +1030,23 @@ export class SqliteStore implements Store, TermStore {
     return r === undefined ? null : aiOutcomeFromRow(r);
   }
 
-  markAiOutcome(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean {
+  markAiOutcome(reportId: string, patch: { reversed?: true; dontTeach?: true; corrective?: true }): boolean {
     return this.transaction(() => {
+      const reversed = patch.reversed === true ? 1 : 0;
+      const dontTeach = patch.dontTeach === true ? 1 : 0;
+      const corrective = patch.corrective === true ? 1 : 0;
       const changed = Number(
         this.db
           .prepare(
+            // The right-hand sides read the columns as they were, so each "now set" test is the patch OR the old column. A row that can no
+            // longer teach loses its chat text; a corrective one (a revoked appeal) keeps it, unless it was marked "don't teach".
             `UPDATE kit_ai_outcomes
              SET reversed = CASE WHEN ? = 1 THEN 1 ELSE reversed END, dont_teach = CASE WHEN ? = 1 THEN 1 ELSE dont_teach END,
-                 example_json = CASE WHEN ? = 1 OR ? = 1 THEN NULL ELSE example_json END
+                 corrective = CASE WHEN ? = 1 THEN 1 ELSE corrective END,
+                 example_json = CASE WHEN ? = 1 OR dont_teach = 1 OR ((? = 1 OR reversed = 1) AND NOT (? = 1 OR corrective = 1)) THEN NULL ELSE example_json END
              WHERE report_id = ?`,
           )
-          .run(
-            patch.reversed === true ? 1 : 0,
-            patch.dontTeach === true ? 1 : 0,
-            patch.reversed === true ? 1 : 0,
-            patch.dontTeach === true ? 1 : 0,
-            reportId,
-          ).changes,
+          .run(reversed, dontTeach, corrective, dontTeach, reversed, corrective, reportId).changes,
       );
       if (changed === 0) return false;
       this.bump();
@@ -1055,21 +1056,38 @@ export class SqliteStore implements Store, TermStore {
 
   aiExamples(rule: string, severity: string, limit: number | undefined, since: number): AiExampleRow[] {
     const n = pageSize(limit, EXAMPLES_DEFAULT_LIMIT);
-    return this.transaction(() =>
-      this.db
-        .prepare(
-          `SELECT report_id, decided_at, agreement, example_json FROM kit_ai_outcomes
-           WHERE rule = ? AND severity = ? AND decided_at >= ? AND ${AI_TEACHABLE_SQL}
-           ORDER BY decided_at DESC, report_id DESC LIMIT ?`,
-        )
-        .all(rule, severity, since, n)
-        .flatMap((r): AiExampleRow[] => {
-          const example = parseExample(r.example_json);
-          return example === null
-            ? []
-            : [{ reportId: String(r.report_id), decidedAt: Number(r.decided_at), agreement: String(r.agreement) as 'agree' | 'override', example }];
-        }),
-    );
+    return this.transaction(() => {
+      const rows = (sql: string, ...args: Array<string | number>): AiExampleRow[] =>
+        this.db
+          .prepare(sql)
+          .all(...args)
+          .flatMap((r): AiExampleRow[] => {
+            const example = parseExample(r.example_json);
+            return example === null
+              ? []
+              : [{ reportId: String(r.report_id), decidedAt: Number(r.decided_at), agreement: String(r.agreement) as 'agree' | 'override', example }];
+          });
+      const standard = rows(
+        `SELECT report_id, decided_at, agreement, example_json FROM kit_ai_outcomes
+         WHERE rule = ? AND severity = ? AND decided_at >= ? AND ${AI_TEACHABLE_SQL}
+         ORDER BY decided_at DESC, report_id DESC LIMIT ?`,
+        rule,
+        severity,
+        since,
+        n,
+      );
+      // At most one corrective row (the newest) beside them; it is not counted by `aiTeachableCount`.
+      const corrective = rows(
+        `SELECT report_id, decided_at, agreement, example_json FROM kit_ai_outcomes
+         WHERE rule = ? AND severity = ? AND decided_at >= ? AND corrective = 1 AND example_json IS NOT NULL AND agreement <> 'none'
+           AND dont_teach = 0 AND bad_faith = 0
+         ORDER BY decided_at DESC, report_id DESC LIMIT 1`,
+        rule,
+        severity,
+        since,
+      ).map((r): AiExampleRow => ({ kind: 'corrective', ...r }));
+      return [...standard, ...corrective];
+    });
   }
 
   aiTeachableCount(since: number): number {
@@ -1085,7 +1103,7 @@ export class SqliteStore implements Store, TermStore {
         .prepare(
           `SELECT rule, COUNT(*) AS decided,
                   SUM(agreement = 'agree') AS agree, SUM(agreement = 'override') AS override, SUM(agreement = 'none') AS none,
-                  SUM(ai_verdict IN ('upheld', 'noted') AND (verdict = 'no_action' OR reversed = 1)) AS false_positives,
+                  SUM(ai_verdict IN ('upheld', 'noted') AND (verdict = 'no_action' OR corrective = 1)) AS false_positives,
                   SUM(CASE WHEN agreement = 'agree' AND json_valid(detail_json) THEN COALESCE(json_extract(detail_json, '$.oneClick'), 0) = 1 ELSE 0 END) AS one_click
            FROM kit_ai_outcomes WHERE decided_at >= ? GROUP BY rule`,
         )

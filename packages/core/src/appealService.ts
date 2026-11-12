@@ -482,6 +482,15 @@ export class AppealService {
     }
   }
 
+  /**
+   * The rules whose revoke-on-appeal rate over 90 days is `elevated` or `high`, as rule numbers and bands only, for the AI read. A reduction is
+   * not a revoke, so a rule with many reduces and no revokes is never listed. Empty with appeals off.
+   */
+  cautions(): Array<{ rule: number; band: 'elevated' | 'high' }> {
+    if (!this.enabled()) return [];
+    return this.stats({ days: 90 }).perRule.flatMap((r) => (typeof r.rule === 'number' && (r.band === 'elevated' || r.band === 'high') ? [{ rule: r.rule, band: r.band }] : []));
+  }
+
   mine(who: RawWho): PlayerAppeal[] {
     if (!this.enabled()) return [];
     try {

@@ -1105,6 +1105,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           audit: (input) => audit.record(input),
           exampleRetentionMs: () => retentionPolicy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
           // The counts about the reported person the feed allows (`feeds.ai`), as label, polarity, distinct and window: nothing else leaves.
+          // The rules cautioned for by the appeals the moderators lost (revokes only), as bands and rule numbers: never a rate, a count or a person.
+          cautions: () => appealService.cautions(),
           signals: (subject) => signals.forAi(subject).map((c) => ({ label: c.label, polarity: c.polarity, distinct: c.distinct, windowDays: c.windowDays })),
         });
   aiRef.service = aiService;
@@ -1122,7 +1124,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     index: sanctions,
     clearStatements: clearAppealStatements,
     // A granted appeal marks the original decision reversed in the casebook; with no AI this is the inert facade and does nothing.
-    onGranted: (appeal) => void ai.markReversed(appeal.reportId as string),
+    // A REVOKE teaches the opposite sign and counts as a false positive; a REDUCE only keeps the decision from teaching (the rule applied).
+    onGranted: (appeal, outcome) => void (outcome === 'revoke' ? ai.markReversed(appeal.reportId as string, { corrective: true }) : ai.markReversed(appeal.reportId as string)),
   });
 
   return {

@@ -121,13 +121,15 @@ describe('what a decision teaches', () => {
     expect(store(w).aiTeachableCount(0)).toBe(1);
   });
 
-  it('markReversed excludes an example and counts as an ai false positive', async () => {
+  it('markReversed excludes an example; with corrective (a revoked appeal) it counts as an ai false positive, without (a reduced one) it does not', async () => {
     const w = await aiWorld({ level: 2, script: rudeUpheld });
     const r = await decided(w);
     expect(w.cw.ai.stats({ since: 0 })).toMatchObject({ decided: 1, falsePositives: 0 });
     expect(store(w).aiExamples('2', 'rude', 10, 0)).toHaveLength(1);
     expect(w.cw.ai.markReversed(r.id)).toBe(true);
     expect(store(w).aiExamples('2', 'rude', 10, 0)).toHaveLength(0);
+    expect(w.cw.ai.stats({ since: 0 })).toMatchObject({ decided: 1, falsePositives: 0 });
+    expect(w.cw.ai.markReversed(r.id, { corrective: true })).toBe(true);
     expect(w.cw.ai.stats({ since: 0 })).toMatchObject({ decided: 1, falsePositives: 1 });
     // Idempotent, and unknown reports are false.
     expect(w.cw.ai.markReversed(r.id)).toBe(true);

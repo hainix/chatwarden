@@ -205,11 +205,13 @@ export interface AiFacade {
   /** The casebook counts for decisions at or after `since` (default: the last 30 days). */
   stats(q?: { since?: number }): AiStatsView;
   /**
-   * The one function the appeals inbox calls when a decision is reversed (a granted appeal, a take-back): the report's casebook row can
-   * never teach again, loses its example text, and counts as an AI false positive when the AI had recommended action. True when the
-   * report has a row.
+   * The one function the appeals inbox calls when a decision is reversed on appeal: the report's casebook row can never teach as a
+   * positive example again and loses its example text. With `{ corrective: true }` (a REVOKE: a second moderator found the decision
+   * wrong) the example text is kept and becomes a corrective example, and the row counts as an AI false positive when the AI had
+   * recommended action. Without it (a REDUCE: the rule applied, the sanction was too heavy) the row only stops teaching: it is not a
+   * false positive and teaches nothing. True when the report has a row.
    */
-  markReversed(reportId: string): boolean;
+  markReversed(reportId: string, opts?: { corrective?: boolean }): boolean;
   /** A senior's "don't teach" mark on a decided case: the row can never teach again and loses its example text. True when the report has a row. */
   dontTeach(reportId: string): boolean;
   /** Resolves when no read is queued or running (tests, graceful shutdown). */
@@ -321,6 +323,8 @@ export interface AiServiceDeps {
   exampleRetentionMs: () => number;
   /** The signal counts about a person for the AI read (`feeds.ai`): empty with the feed off. Without it no signals are sent. */
   signals?: (subject: SubjectId) => AISignal[];
+  /** The rules with an elevated or high revoke-on-appeal rate (90 days): empty with appeals off. Without it no cautions are sent. */
+  cautions?: () => Array<{ rule: number; band: 'elevated' | 'high' }>;
 }
 
 const ruleOfText = (rule: string | null): number | 'uncovered' | null => (rule === null ? null : /^\d+$/.test(rule) ? Number(rule) : rule === 'uncovered' ? 'uncovered' : null);
@@ -560,15 +564,15 @@ export class AiService implements AiFacade {
     }
   }
 
-  markReversed(reportId: string): boolean {
-    return this.mark(reportId, { reversed: true });
+  markReversed(reportId: string, opts?: { corrective?: boolean }): boolean {
+    return this.mark(reportId, opts?.corrective === true ? { reversed: true, corrective: true } : { reversed: true });
   }
 
   dontTeach(reportId: string): boolean {
     return this.mark(reportId, { dontTeach: true });
   }
 
-  private mark(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean {
+  private mark(reportId: string, patch: { reversed?: true; dontTeach?: true; corrective?: true }): boolean {
     try {
       return typeof reportId === 'string' && this.store.markAiOutcome(reportId, patch);
     } catch (err) {
@@ -829,6 +833,7 @@ export class AiService implements AiFacade {
       prepare: (report) => this.prepare(report),
       examplesFor: (report, prepared) => this.examplesFor(report, prepared),
       signalsFor: (report) => this.deps.signals?.(report.targetSubject) ?? [],
+      cautionsFor: () => this.deps.cautions?.() ?? [],
       track: (c) => void this.controllers.add(c),
       untrack: (c) => void this.controllers.delete(c),
       auditRead: (reportId) => {
@@ -858,11 +863,15 @@ export class AiService implements AiFacade {
     if (this.store.aiTeachableCount(since) < AI_EXAMPLES_MIN) return [];
     const known = this.store.loadAiRead(report.id)?.read?.severity;
     const levels: readonly ConductLevel[] = known === undefined ? CONDUCT_LEVELS : [known];
-    return levels
-      .flatMap((level) => this.store.aiExamples(String(rule), level, 2, since))
-      .sort((a, b) => b.decidedAt - a.decidedAt || (a.reportId < b.reportId ? 1 : -1))
-      .slice(0, 2)
-      .map((row): AIExampleInput => ({ ...row.example, id: row.reportId }));
+    const newest = (a: { decidedAt: number; reportId: string }, b: { decidedAt: number; reportId: string }): number => b.decidedAt - a.decidedAt || (a.reportId < b.reportId ? 1 : -1);
+    const rows = levels.flatMap((level) => this.store.aiExamples(String(rule), level, 2, since));
+    // At most one of the two slots goes to a corrective example (the newest one); the standard examples fill the rest. The corrective row
+    // never counted toward the 30 above, and is only asked for once that threshold is met.
+    const corrective = rows.filter((r) => r.kind === 'corrective').sort(newest).slice(0, 1);
+    const standard = rows.filter((r) => r.kind !== 'corrective').sort(newest).slice(0, 2 - corrective.length);
+    return [...standard, ...corrective]
+      .sort(newest)
+      .map((row): AIExampleInput => ({ ...row.example, ...(row.kind === 'corrective' ? { kind: 'corrective' as const } : {}), id: row.reportId }));
   }
 
   // --- the casebook ----------------------------------------------------------------------------------------------------------

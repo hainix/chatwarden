@@ -463,14 +463,21 @@ export interface AiOutcomeInsert {
 
 /** A stored outcome: what was inserted, and the two marks a later action sets. */
 export interface AiOutcomeRow extends AiOutcomeInsert {
-  /** Set by a granted appeal or a take-back. Excludes the row from examples (and drops its example text); counts as an AI false positive. */
+  /** Set by a granted appeal. Excludes the row from standard examples; drops its example text unless the row is `corrective`. */
   reversed: boolean;
+  /**
+   * Set by a REVOKED appeal (a second moderator found the decision wrong): the example text is kept and teaches the opposite sign, and the
+   * row counts as an AI false positive when the AI had recommended action. A reduced appeal sets `reversed` only. Never cleared.
+   */
+  corrective: boolean;
   /** A senior's mark. Excludes the row from examples. */
   dontTeach: boolean;
 }
 
 /** One teachable casebook example, newest first from {@link Store.aiExamples}. The human's final decision is the label. */
 export interface AiExampleRow {
+  /** `'corrective'` for a decision a granted (revoked) appeal found wrong; absent for an ordinary example. */
+  kind?: 'corrective';
   reportId: string;
   decidedAt: number;
   agreement: 'agree' | 'override';
@@ -1232,14 +1239,17 @@ export interface Store {
 
   /**
    * OPTIONAL. Set the marks on an outcome (a mark is never cleared) and drop its example text in the same write: a reversed or marked
-   * row can never teach, so its chat text goes now. False for an unknown report. Moves the change token when the report has an outcome.
+   * row can never teach, so its chat text goes now, EXCEPT a `corrective` one (a revoked appeal), which keeps its text to teach the opposite
+   * sign (a `dontTeach` mark still drops it). False for an unknown report. Moves the change token when the report has an outcome.
    */
-  markAiOutcome?(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean;
+  markAiOutcome?(reportId: string, patch: { reversed?: true; dontTeach?: true; corrective?: true }): boolean;
 
   /**
    * OPTIONAL. Teachable examples with this human rule (`'3'`, `'uncovered'`) and conduct level, decided at or after `since`, newest
    * first (`decidedAt` descending, then `reportId` descending), at most `limit`. Teachable: an example is
    * stored, the AI recommended something (`agree` or `override`, not `none`), and the row is not `reversed`, `dontTeach` or `badFaith`.
+   * Besides these the answer may hold ONE corrective row (`kind: 'corrective'`: still has its example, not `dontTeach` or `badFaith`) of the
+   * same rule and level, the newest; it comes after the ordinary rows are cut to `limit` and is not counted by `aiTeachableCount`.
    * `limit` is clamped to 1..200 (a fraction is floored); one that is omitted, not finite or below 1 is the default of 2 (the prompt takes at most two
    * examples).
    */
