@@ -333,21 +333,37 @@ describe('tiny-chat example', () => {
   });
 });
 
+describe('ai-anthropic example', () => {
+  const ai = readJson<Manifest>('examples', 'ai-anthropic', 'package.json');
+  it('is private, named as the changeset config expects, and not a published package', () => {
+    expect(ai.private).toBe(true);
+    expect(ai.name).toBe('@chatwarden/example-ai-anthropic');
+    expect(names).not.toContain(ai.name);
+  });
+  it('takes the provider SDK as its own pinned dependency and core only as a dev dependency', () => {
+    expect(ai.dependencies?.['@anthropic-ai/sdk']).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(ai.dependencies?.['@chatwarden/core']).toBeUndefined();
+    expect(ai.devDependencies?.['@chatwarden/core']).toBe(VERSION);
+  });
+});
+
 describe('changesets config', () => {
   const config = readJson<{ fixed: string[][]; ignore: string[]; linked: string[][] }>('.changeset', 'config.json');
   it('versions every @chatwarden package together', () => {
     expect(config.fixed).toEqual([['@chatwarden/*']]);
   });
   it('ignores the example and the landing site (private, never versioned or published)', () => {
-    expect(config.ignore).toEqual(['@chatwarden/example-tiny-chat', '@chatwarden/site']);
+    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/site']);
   });
   it('has no linked groups', () => {
     expect(config.linked).toEqual([]);
   });
   it('ignores only private packages', () => {
     const tiny = readJson<Manifest>('examples', 'tiny-chat', 'package.json');
+    const ai = readJson<Manifest>('examples', 'ai-anthropic', 'package.json');
     const site = readJson<Manifest>('site', 'package.json');
-    expect(config.ignore).toEqual([tiny.name, site.name]);
+    expect(config.ignore).toEqual([ai.name, tiny.name, site.name]);
+    expect(ai.private).toBe(true);
     expect(tiny.private).toBe(true);
     expect(site.private).toBe(true);
     expect(site.name).toBe('@chatwarden/site');

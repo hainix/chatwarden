@@ -12,6 +12,7 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
+    "@chatwarden/example-ai-anthropic",
     "@chatwarden/example-tiny-chat",
     "@chatwarden/site"
   ],

@@ -60,7 +60,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'kit',
-          include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'scripts/*.test.ts'],
+          include: ['packages/*/test/**/*.test.ts', 'examples/*/*.test.ts', 'examples/ai-anthropic/test/*.test.ts', 'scripts/*.test.ts'],
           exclude: ['**/node_modules/**', '**/dist/**', 'packages/hub-react/**', 'packages/player-react/**', 'packages/hub-element/**'],
           setupFiles: ['./packages/store-sqlite/test/setup.ts'],
         },
