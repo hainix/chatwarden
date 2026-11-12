@@ -480,7 +480,7 @@ export class DecisionService {
     });
   }
 
-  private sanctionInput(norm: Normal, a: NormalAction, roomId: string) {
+  private sanctionInput(norm: Normal, a: NormalAction, roomId: string, reportId?: string) {
     return {
       kind: a.kind,
       subject: a.subject,
@@ -493,6 +493,8 @@ export class DecisionService {
       rule: a.rule,
       roomId: roomId === '' ? null : roomId,
       ...(a.gapNote === undefined ? {} : { gapNote: a.gapNote }),
+      // The report this decision closes: a granted appeal against the sanction marks that decision reversed.
+      ...(reportId === undefined ? {} : { reportId }),
     };
   }
 
@@ -513,7 +515,7 @@ export class DecisionService {
       const told = new Set<SubjectId>();
       for (const { action: a, lines } of plan) {
         // No index here: the rows reach it only after the transaction has committed.
-        const written = writeSanction(this.store, this.subjects, this.sanctionInput(norm, a, report.roomId), now, pending);
+        const written = writeSanction(this.store, this.subjects, this.sanctionInput(norm, a, report.roomId, report.id), now, pending);
         // A note is on the record and tells the player nothing: no notice, so nobody to announce to either.
         const noticeId =
           a.kind === 'note'
@@ -646,10 +648,12 @@ export function revokeAndWithdraw(
 ): Promise<{ revoked: boolean; withdrawn: number }> {
   try {
     const now = deps.clock.now();
-    const out = store.transaction(() => ({
-      revoked: store.revokeSanctionGroup(groupId, actor, now, reason) > 0,
-      withdrawn: deps.notices.withdrawGroup(groupId),
-    }));
+    const out = store.transaction(() => {
+      const revoked = store.revokeSanctionGroup(groupId, actor, now, reason) > 0;
+      // An appeal still open against this group is moot now (same transaction: both land or neither).
+      if (revoked) store.closeAppealsForGroup?.(groupId, actor, now);
+      return { revoked, withdrawn: deps.notices.withdrawGroup(groupId) };
+    });
     deps.index?.remove(groupId);
     return Promise.resolve(out);
   } catch (err) {

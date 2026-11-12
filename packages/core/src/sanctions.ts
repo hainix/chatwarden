@@ -49,6 +49,13 @@ const REF_ATTEMPTS = 5;
 /** No I, L, O, 0 or 1: a player reads the code aloud or types it from a screenshot. */
 const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
+/**
+ * The key to `SanctionInput.startsAt`. It is exported from this module only, never from the package index, so only code inside the kit (the
+ * appeals service) can hold it; a public caller passing a start time is refused with a `RangeError`.
+ * @internal
+ */
+export const APPEALS_START_TOKEN: unique symbol = Symbol('chatwarden.appeals.startsAt');
+
 export interface SanctionInput {
   kind: SanctionKind;
   /** The person to sanction; stored as its canonical (surviving) subject. */
@@ -77,6 +84,20 @@ export interface SanctionInput {
    * otherwise. Private; the ladder reads it to count notes from distinct games.
    */
   roomId?: string | null;
+  /**
+   * The report whose decision made this sanction: a non-empty string, kept on the subject row so a granted appeal can mark that decision
+   * reversed. Absent stores nothing (an automatic or direct sanction). Private.
+   */
+  reportId?: string;
+  /**
+   * The start time to write instead of "now", epoch ms, never after "now". For the appeals service only, so a reduced sanction keeps the
+   * original start (the ladder reads sanctions by start). The end is `startsAt + durationMs`. Honoured only with `startsAtToken`; any other
+   * caller passing it gets a `RangeError`.
+   * @internal
+   */
+  startsAt?: number;
+  /** @internal The key to `startsAt`: {@link APPEALS_START_TOKEN}. */
+  startsAtToken?: symbol;
 }
 
 /** What `active` tells the chat path. No reason, rule, actor or identifier. */
@@ -123,7 +144,16 @@ export function validateSanctionInput(input: SanctionInput): void {
   validate(input);
 }
 
-function validate(input: SanctionInput): Checked {
+function validate(input: SanctionInput, now?: number): Checked {
+  // A start time is the appeals service's alone: refused for everyone else before any other check, naming nothing of the input.
+  const start: unknown = Object.hasOwn(input, 'startsAt') ? input.startsAt : undefined;
+  if (start !== undefined) {
+    if (input.startsAtToken !== APPEALS_START_TOKEN) throw new RangeError('applySanction: startsAt is not accepted');
+    if (typeof start !== 'number' || !Number.isSafeInteger(start) || start < 0) throw new SanctionError('applySanction: invalid start');
+    if (now !== undefined && start > now) throw new SanctionError('applySanction: a start cannot be in the future');
+  }
+  const report: unknown = Object.hasOwn(input, 'reportId') ? input.reportId : undefined;
+  if (report !== undefined && (typeof report !== 'string' || report === '')) throw new SanctionError('applySanction: invalid report id');
   const d = input.durationMs;
   if (isRecordKind(input.kind)) {
     // A warning or a note has no end and no IP: it is a record, not a restriction.
@@ -175,11 +205,13 @@ function applyNow(
   now: number,
   pending: boolean,
 ): WrittenSanction {
-  const { rule, gapNote } = validate(input);
+  const { rule, gapNote } = validate(input, now);
   const subject = subjects.canonical(input.subject);
+  // The start is "now" unless the appeals service gave the original one (validate has refused anyone else).
+  const start = input.startsAt ?? now;
   // A warning or note has no end: it ends where it starts, so it is never "still running".
-  const endsAt = isRecordKind(input.kind) ? now : input.durationMs === null ? null : now + input.durationMs;
-  const ipEndsAt = endsAt === null ? now + IP_MAX_MS : Math.min(endsAt, now + IP_MAX_MS);
+  const endsAt = isRecordKind(input.kind) ? start : input.durationMs === null ? null : start + input.durationMs;
+  const ipEndsAt = endsAt === null ? start + IP_MAX_MS : Math.min(endsAt, start + IP_MAX_MS);
   const ip = input.includeIp ? subjects.latestIp(subject) : null;
   const groupId = newId();
 
@@ -188,7 +220,7 @@ function applyNow(
       groupId,
       refCode: code,
       kind: input.kind,
-      startsAt: now,
+      startsAt: start,
       reason: input.reason,
       rule,
       roomId: input.roomId ?? null,
@@ -206,6 +238,8 @@ function applyNow(
       endsAt,
       gapNote,
       gapStatus: gapNote === null ? null : 'open',
+      // Only a sanction a report decision made carries one; the key is absent otherwise, so every other row keeps its shape.
+      ...(input.reportId === undefined ? {} : { reportId: input.reportId }),
     };
     const rows: SanctionRow[] = [subjectRow];
     if (ip !== null) {
@@ -281,7 +315,12 @@ export function revokeSanction(
   index?: SanctionIndex,
 ): Promise<boolean> {
   try {
-    const n = store.transaction(() => store.revokeSanctionGroup(groupId, actor, now, reason));
+    const n = store.transaction(() => {
+      const revoked = store.revokeSanctionGroup(groupId, actor, now, reason);
+      // An appeal still open against this group is moot now: nobody ruled on it. In the same transaction, so both land or neither.
+      if (revoked > 0) store.closeAppealsForGroup?.(groupId, actor, now);
+      return revoked;
+    });
     index?.remove(groupId);
     return Promise.resolve(n > 0);
   } catch (err) {
