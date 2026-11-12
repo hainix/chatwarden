@@ -338,6 +338,32 @@ describe('cases.next: rankDownHabitual', () => {
     expect(t.cw.cases.next('mod-a', RANK)?.person).toBe(old.person);
   });
 
+  it('is lazy: with an ordinary case first, only a slice of candidates is ranked, not the whole page', async () => {
+    const t = await setup();
+    for (let i = 0; i < 40; i++) await t.fileFrom(`ordinary-${i}`, `tk-${i}`);
+    const reads = vi.spyOn(t.store as MemoryStore, 'listOpenReportsByPerson');
+    const first = t.cw.cases.next('mod-a', RANK);
+    expect(first).not.toBeNull();
+    // One read per ranked candidate (at most a slice of 20) plus the one that opens the winner on its newest report.
+    expect(reads.mock.calls.length).toBeLessThanOrEqual(21);
+    // The default path never ranks: only the winner's read.
+    reads.mockClear();
+    t.cw.cases.next('mod-b');
+    expect(reads.mock.calls.length).toBe(1);
+  });
+
+  it('later slices are still ranked: a normal case behind more than one slice of ranked-down ones is found first', async () => {
+    const t = await setup();
+    const downs = [];
+    for (let i = 0; i < 25; i++) {
+      t.habitual(`hab-${i}`);
+      downs.push(await t.fileFrom(`hab-${i}`, `tk-down-${i}`));
+    }
+    const normal = await t.fileFrom('ordinary', 'tk-normal');
+    expect(t.cw.cases.next('mod-a', RANK)?.person).toBe(normal.person);
+    expect(t.cw.cases.next('mod-a', RANK)?.person).toBe(downs[0]?.person);
+  });
+
   it('records no audit row and does not change a claim it did not take', async () => {
     const t = await setup();
     t.habitual('hab');

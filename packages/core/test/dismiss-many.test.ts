@@ -375,3 +375,72 @@ describe('dismissMany: stores without the by-reporter read', () => {
     expect(BULK_DISMISS_MAX).toBe(200);
   });
 });
+
+describe('dismissMany: onClosed', () => {
+  it('fires once per dismissed report, in order, with replay false, and never for a dry run or an empty sweep', async () => {
+    const t = await setup();
+    const a = await t.against('tk-a', 3);
+    const closed: Array<[string, boolean]> = [];
+    const onClosed = (id: string, replay: boolean) => void closed.push([id, replay]);
+    await t.cw.reports.dismissMany({ scope: { person: a.target }, actor: MOD, dryRun: true, onClosed });
+    expect(closed).toEqual([]);
+    const res = await t.cw.reports.dismissMany({ scope: { person: a.target }, actor: MOD, onClosed });
+    expect(res.ok && res.reportIds).toEqual(closed.map(([id]) => id));
+    expect(closed).toHaveLength(3);
+    expect(closed.every(([, replay]) => !replay)).toBe(true);
+    closed.length = 0;
+    await t.cw.reports.dismissMany({ scope: { person: a.target }, actor: MOD, onClosed });
+    expect(closed).toEqual([]);
+  });
+
+  it('fires with replay true for a report already closed by an identical dismissal, and not for one closed differently', async () => {
+    const t = await setup();
+    const a = await t.against('tk-a', 3);
+    const [fresh, same, other] = a.ids as [string, string, string];
+    await t.cw.decide({ reportId: same, verdict: 'no_action', actions: [], actor: 'mod-racer' });
+    await t.cw.decide({ reportId: other, verdict: 'bad_faith', actions: [], actor: 'mod-racer', reason: 'abuse', evidence: 'x' });
+    // A stale read: the listing still shows the two closed reports as open (what a race between the read and the write looks like).
+    const stale = t.store.loadReport.bind(t.store);
+    (t.store as { listOpenReportsByPerson: unknown }).listOpenReportsByPerson = () =>
+      [fresh, same, other].map((id) => ({ ...(stale(id) as NonNullable<ReturnType<typeof stale>>), status: 'open' as const }));
+    const closed: Array<[string, boolean]> = [];
+    const res = await t.cw.reports.dismissMany({ scope: { person: a.target }, actor: MOD, onClosed: (id, replay) => void closed.push([id, replay]) });
+    expect(res).toMatchObject({ ok: true, dismissed: 1, replayed: 1, skipped: { decided: 1 } });
+    expect(closed.sort()).toEqual([[fresh, false], [same, true]].sort());
+  });
+
+  it('a throwing onClosed never stops the sweep or changes the result', async () => {
+    const t = await setup();
+    const a = await t.against('tk-a', 4);
+    let calls = 0;
+    const res = await t.cw.reports.dismissMany({
+      scope: { person: a.target },
+      actor: MOD,
+      onClosed: () => {
+        calls += 1;
+        throw new Error('audit down');
+      },
+    });
+    expect(res).toMatchObject({ ok: true, dismissed: 4, replayed: 0 });
+    expect(calls).toBe(4);
+    for (const r of t.rows(a.ids)) expect(r?.status).toBe('dismissed');
+  });
+
+  it('a store failure on the fourth report still called onClosed for each of the three closed before it', async () => {
+    const store = new FailOnNthClose();
+    const t = await setup(store);
+    const a = await t.against('tk-a', 6);
+    store.failAt = store.closes + 4;
+    const closed: string[] = [];
+    await expect(t.cw.reports.dismissMany({ scope: { person: a.target }, actor: MOD, onClosed: (id) => void closed.push(id) })).rejects.toThrow('disk full');
+    expect(closed).toHaveLength(3);
+    for (const id of closed) expect(t.store.loadReport(id)?.status).toBe('dismissed');
+  });
+
+  it('a non-function onClosed is invalid and writes nothing', async () => {
+    const t = await setup();
+    const a = await t.against('tk-a', 1);
+    expect(await t.cw.reports.dismissMany({ scope: { person: a.target }, actor: MOD, onClosed: 'x' as never })).toEqual({ ok: false, error: 'invalid' });
+    expect(t.open()).toBe(1);
+  });
+});

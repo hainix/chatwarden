@@ -125,9 +125,9 @@ const indexNames = (db: DatabaseSync): string[] =>
   db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all().map((r) => String(r.name));
 
 describe('migration 18: indexes for sanctions by start time and strikes by time', () => {
-  it('is the latest migration and creates only the two new indexes', () => {
+  it('migration 18 is the 18th migration and creates only the two new indexes', () => {
     expect(M18).toBeDefined();
-    expect(MIGRATIONS.at(-1)?.version).toBeGreaterThanOrEqual(18);
+    expect(MIGRATIONS[17]?.version).toBe(18);
     const db = memDb();
     const before = openAt17(db, false);
     const had = indexNames(db);

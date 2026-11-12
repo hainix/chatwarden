@@ -358,6 +358,12 @@ export interface Chatwarden {
      * malformed id), or null. A case is a person, ranked by their oldest open report and opened on
      * their newest. A case anyone holds is skipped without a write (held cases are read once per page of reports). `category` and
      * `reason` are the only filters: the order is already oldest first. A candidate lost to a rival in between is retried like `claim`.
+     *
+     * With `rankDownHabitual` (default false: behaviour unchanged), a case whose open reports ALL come from habitual false reporters
+     * (see `cw.reports.reporterAccuracy`) and none of which has waited 24 hours (`REPORTER_RANK_LAPSE_MS`) is served after the ordinary
+     * ones, oldest first; it is never skipped, so a queue holding only such cases still serves them. One ordinary reporter, or no
+     * accuracy data (a store without `reporterOutcomes`), keeps a case normal. A non-boolean value is a `RangeError`.
+     * @experimental (the `rankDownHabitual` filter)
      */
     next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean }): NextCase | null;
     /**

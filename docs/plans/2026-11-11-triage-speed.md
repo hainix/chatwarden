@@ -357,6 +357,7 @@ export interface DismissManyInput {
   dryRun?: boolean;                   // count only; nothing is written
   ignoreClaims?: boolean;             // default false. For the staff layer only, after it has checked who may take a case over
   limit?: number;                     // default and maximum BULK_DISMISS_MAX; a non-integer or < 1 is invalid
+  onClosed?: (reportId: string, replay: boolean) => void;  // @experimental; called after each close, in try/catch (a throw never stops the sweep)
 }
 /** @experimental. Carries subject ids: staff channels only, never send to a player. */
 export type DismissManyResult =
@@ -368,7 +369,7 @@ export type DismissManyResult =
       replayed: number;               // already closed by an identical earlier dismissal
       skipped: { claimed: number; decided: number };  // held by another moderator / closed meanwhile by a different decision
       more: boolean;                  // more open reports in scope than limit
-      reportIds: string[];            // dismissed + replayed, for the staff layer's audit rows
+      reportIds: string[];            // dismissed + replayed (the staff layer's audit rows are written from `onClosed`, see Task 5)
       targets: SubjectId[];           // canonical people whose reports were closed, for releasing the actor's claims
     }
   | { ok: false; error: 'invalid' };
@@ -470,7 +471,7 @@ reporterAccuracy: { decided: number; unfounded: number; falseRate: number | null
 Route order (non-dry run): parse and validate; `need` is the route permission; person scope runs `gateCase(ctx, c, person, takeOver)`;
 write the summary audit row (`report.dismiss_case` target `{type:'person', ref}` or `report.dismiss_reporter`) in `required` mode;
 call `cw.reports.dismissMany({ scope, actor: c.authz.actor, ignoreClaims: scope === 'person', limit: BULK_DISMISS_MAX })`; write one
-`report.decide` row per `reportIds` entry that was dismissed (not replayed), `best-effort`; for each `targets` person call
+`report.decide` row per report closed, `best-effort`, written from `dismissMany`'s `onClosed(reportId, replay)` callback the moment each one closes (so a store failure partway still leaves a row for every report closed before it; a replay is audited too, matching the single `decide` route, which also audits replays); for each `targets` person call
 `cw.cases.releaseWhenDone(person, actor)` in a try/catch like `decide`. A `dryRun` runs the same validation, writes no audit row, takes
 no case over and returns counts only. The response never carries report ids or subject ids. Unknown refs answer 200 with zeros (no
 existence leak). Only `GET /reports` open rows get `reporterAccuracy`; the history route already carries `asReporter.accuracy`.

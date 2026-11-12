@@ -36,6 +36,9 @@ const VIEWING_SWEEP_AT = 1_000;
 /** Reports read per page while take next scans for a free case. */
 const NEXT_PAGE = 200;
 
+/** With `rankDownHabitual`, candidates are ranked this many at a time (see `next`). */
+const RANK_SLICE = 20;
+
 /** A claim as staff see it. Staff only: `by` is a staff actor. */
 export interface CaseClaim {
   by: string;
@@ -315,14 +318,19 @@ export class CaseDesk {
       }
       const held = new Set(this.store.loadClaims(candidates, this.clock.now()).map((c) => c.person));
       const free = candidates.filter((p) => !held.has(p));
-      const down = rankDown ? this.rankedDown(free) : new Set<SubjectId>();
-      for (const person of free) {
-        if (down.has(person)) {
-          deferred.push(person);
-          continue;
+      // Ranked lazily, a slice at a time: the first ordinary case ends the scan, so "next, next, next" does not read the open
+      // reports of a whole page of candidates to claim the first one.
+      for (let i = 0; i < free.length; i += RANK_SLICE) {
+        const slice = free.slice(i, i + RANK_SLICE);
+        const down = rankDown ? this.rankedDown(slice) : new Set<SubjectId>();
+        for (const person of slice) {
+          if (down.has(person)) {
+            deferred.push(person);
+            continue;
+          }
+          const won = this.tryClaim(person, actor);
+          if (won !== null) return won;
         }
-        const won = this.tryClaim(person, actor);
-        if (won !== null) return won;
       }
       const last = page[page.length - 1];
       if (page.length < NEXT_PAGE || last === undefined) break;

@@ -288,10 +288,12 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         actor,
         ignoreClaims: scope === 'person',
         limit: BULK_DISMISS_MAX,
+        // One `report.decide` row per report closed (a replay included, like the single route), written the moment it is closed, so a
+        // store failure later in the sweep still leaves a row for every report already closed. The reports are closed: an audit
+        // failure is logged, never turned into an error (and a throw here never stops the sweep).
+        onClosed: (id) => c.audit('report.decide', { type: 'report', ref: id }, 'best-effort'),
       });
       if (!res.ok) throw new ValidationError();
-      // The reports are closed (a replay included): an audit failure is logged, never turned into an error.
-      for (const id of res.reportIds) c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
       // The caller's own claim ends on a case with nothing left open; while other reports about the person are open it is kept.
       for (const person of res.targets) {
         try {

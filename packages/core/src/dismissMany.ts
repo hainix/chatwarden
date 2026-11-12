@@ -36,6 +36,13 @@ export interface DismissManyInput {
   ignoreClaims?: boolean;
   /** Default and maximum {@link BULK_DISMISS_MAX}; a non-integer or a value below 1 is invalid. */
   limit?: number;
+  /**
+   * Called right after each report is closed (`replay` true when an identical dismissal had already closed it), in order, never for
+   * a skip or a dry run. The staff layer writes its per-report audit row here, so the trail has a row for every report closed even
+   * when a later one fails and the call rejects. A throw is swallowed: it never stops the sweep.
+   * @experimental
+   */
+  onClosed?: (reportId: string, replay: boolean) => void;
 }
 
 /**
@@ -135,6 +142,8 @@ export async function dismissMany(deps: DismissManyDeps, input: DismissManyInput
     if (typeof input.limit !== 'number' || !Number.isInteger(input.limit) || input.limit < 1) return INVALID;
     limit = Math.min(input.limit, BULK_DISMISS_MAX);
   }
+  if (input.onClosed !== undefined && typeof input.onClosed !== 'function') return INVALID;
+  const onClosed = input.onClosed;
   const dryRun = input.dryRun === true;
 
   // Read one more than asked for, to know whether there is more.
@@ -190,6 +199,11 @@ export async function dismissMany(deps: DismissManyDeps, input: DismissManyInput
     });
     if (res.ok) {
       result.reportIds.push(r.id);
+      try {
+        onClosed?.(r.id, res.replay);
+      } catch {
+        // The caller's bookkeeping must never stop the sweep.
+      }
       if (res.replay) {
         result.replayed += 1;
       } else {

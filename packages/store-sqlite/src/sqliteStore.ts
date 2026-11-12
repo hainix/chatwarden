@@ -907,7 +907,8 @@ export class SqliteStore implements Store, TermStore {
     const marks = unique.map(() => '?').join(', ');
     // Served by kit_reports_by_reporter_outcome (migration 19): the reporter, then the filing time, with `status` read from the index
     // before a row is fetched. Named, because without statistics the planner would walk the by-status index (every open report in the
-    // store) and filter by reporter, which is the wrong end of a sweep of one reporter's reports.
+    // store) and filter by reporter, which is the wrong end of a sweep of one reporter's reports. Any migration that drops or renames
+    // this index MUST change this SQL: a named index that is gone is a runtime error ("no such index"), not a slower plan.
     const sql = `SELECT * FROM kit_reports INDEXED BY kit_reports_by_reporter_outcome WHERE reporter_subject IN (${marks}) AND status = 'open' ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...unique, n).map(reportFromRow));
   }

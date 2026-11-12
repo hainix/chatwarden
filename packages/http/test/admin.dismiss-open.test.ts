@@ -442,3 +442,66 @@ describe('the figure and the sweep stay on staff channels', () => {
     expect(events.some((e) => e.type === 'report.closed')).toBe(true);
   });
 });
+
+describe('POST /reports/dismiss-open: audit rows survive a failure partway', () => {
+  it('a store failure on the 3rd close: 500, one report.dismiss_case row, and a report.decide row for each report closed before it', async () => {
+    const w = await recorded();
+    const a = await against(w, 5);
+    const real = w.store.closeReport.bind(w.store);
+    let n = 0;
+    (w.store as { closeReport: unknown }).closeReport = (...args: Parameters<typeof real>) => {
+      if (++n === 3) throw new Error('disk full');
+      return real(...args);
+    };
+    w.seq.length = 0;
+    const res = await w.call('POST', ROUTE, { body: person(a.target), actor: 'ann' });
+    expect(res.status).toBe(500);
+    const closed = a.ids.filter((id) => statusOf(w, id) === 'dismissed');
+    expect(closed).toHaveLength(2);
+    expect(w.seq.map((r) => r.action)).toEqual(['report.dismiss_case', 'report.decide', 'report.decide']);
+    expect(w.seq.slice(1).map((r) => (r.target as { ref: string }).ref).sort()).toEqual([...closed].sort());
+    // A rerun finishes the rest and audits only those.
+    (w.store as { closeReport: unknown }).closeReport = real;
+    w.seq.length = 0;
+    const again = await w.call('POST', ROUTE, { body: person(a.target), actor: 'ann' });
+    expect(again.body).toMatchObject({ dismissed: 3 });
+    expect(w.seq.filter((r) => r.action === 'report.decide')).toHaveLength(3);
+  });
+
+  it('a throwing per-report audit write does not stop the sweep (logged, 200, every report closed)', async () => {
+    const w = await world({
+      wrap: (cw) => ({
+        ...cw,
+        audit: {
+          ...cw.audit,
+          record: (input) => {
+            if (input.action === 'report.decide') throw new Error('audit down');
+            return cw.audit.record(input);
+          },
+        },
+      }),
+    });
+    const a = await against(w, 3);
+    const res = await w.call('POST', ROUTE, { body: person(a.target) });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ dismissed: 3 });
+    for (const id of a.ids) expect(statusOf(w, id)).toBe('dismissed');
+    expect(w.logged.filter(([e]) => e === 'chatwarden.http_audit_failed')).toHaveLength(3);
+  });
+
+  it('a replayed report keeps its report.decide row, like the single decide route', async () => {
+    const w = await recorded();
+    const a = await against(w, 2);
+    const [fresh, same] = a.ids as [string, string];
+    await w.cw.decide({ reportId: same, verdict: 'no_action', actions: [], actor: 'bea' });
+    const load = w.store.loadReport.bind(w.store);
+    // A stale listing still shows the already-closed report as open: the sweep's decide is a replay.
+    (w.store as { listOpenReportsByPerson: unknown }).listOpenReportsByPerson = () =>
+      [fresh, same].map((id) => ({ ...(load(id) as NonNullable<ReturnType<typeof load>>), status: 'open' as const }));
+    w.seq.length = 0;
+    const res = await w.call('POST', ROUTE, { body: person(a.target), actor: 'ann' });
+    expect(res.body).toMatchObject({ dismissed: 1, replayed: 1 });
+    expect(w.seq.map((r) => r.action)).toEqual(['report.dismiss_case', 'report.decide', 'report.decide']);
+    expect(w.seq.slice(1).map((r) => (r.target as { ref: string }).ref).sort()).toEqual([fresh, same].sort());
+  });
+});

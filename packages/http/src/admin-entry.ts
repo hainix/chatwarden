@@ -38,6 +38,7 @@ export type {
   ExceptionListRow,
   Me,
   PolicyOptions,
+  ReporterAccuracySummary,
   ReportSummary,
   TermListRow,
   TermMetadata,
