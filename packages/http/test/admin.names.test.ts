@@ -301,7 +301,7 @@ describe('GET /blocked?source=name lists kept names with text as the name, needs
     expect(res.headers?.['cache-control']).toBe('no-store');
   });
 
-  it('the window is 1, 7 or 30 days (default 7); any other days or source is 400 invalid_query', async () => {
+  it('the window is 1, 7 or 30 days (default 7); any other days is 400 invalid_query', async () => {
     const w = await renameWorld(keep);
     w.cw.names.check('zorbak_old');
     w.clock.t += 8 * DAY;
@@ -311,11 +311,22 @@ describe('GET /blocked?source=name lists kept names with text as the name, needs
     expect(await names({ days: '1' })).toEqual(['zorbak_new']);
     expect(await names({ days: '30' })).toEqual(['zorbak_new', 'zorbak_old']);
     for (const days of ['0', '2', '31', 'x', '']) expect((await w.call('GET', '/blocked', { query: { source: 'name', days } })).status, days).toBe(400);
-    for (const source of ['', 'names', 'NAME', 'line', 'x']) {
+  });
+
+  it('an unknown or empty source is the default (the chat lines), exactly as 0.1.8 treated it; days stays strict', async () => {
+    const w = await renameWorld(keep);
+    w.cw.names.check('zorbak_kept');
+    const plain = await w.call('GET', '/blocked');
+    expect(plain.status).toBe(200);
+    for (const source of ['', 'names', 'NAME', 'Name', 'line', 'x', ' name', 'name ', 'chat ', 'CHAT', 'constructor', '__proto__']) {
       const res = await w.call('GET', '/blocked', { query: { source } });
-      expect(res.status, source).toBe(400);
-      expect(errorOf(res)).toBe('invalid_query');
+      expect(res.status, source).toBe(200);
+      expect(res.body, source).toEqual(plain.body);
+      expect((res.body as { items: Array<{ text: string }> }).items.map((i) => i.text), source).not.toContain('zorbak_kept');
     }
+    expect((await w.call('GET', '/blocked', { query: { source: 'x', days: '2' } })).status).toBe(400);
+    // the one value that still switches: exactly `name`
+    expect(((await w.call('GET', '/blocked', { query: { source: 'name' } })).body as { items: Array<{ text: string }> }).items.map((i) => i.text)).toEqual(['zorbak_kept']);
   });
 
   it('needs blocked.read: locked to the owner, a moderator and a senior are 403; no authz is 401; a refused read writes no row', async () => {

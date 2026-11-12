@@ -18,11 +18,9 @@ function queryDays(raw: string | undefined): BlockedDays {
   return found;
 }
 
-/** A query `source`: absent is the chat lines; otherwise `chat` or `name` (the kept blocked names), else 400 `invalid_query`. */
+/** A query `source`: exactly `name` is the kept blocked names; anything else, or nothing, is the chat lines (as 0.1.8, which ignored it). */
 function querySource(raw: string | undefined): 'chat' | 'name' {
-  if (raw === undefined || raw === 'chat') return 'chat';
-  if (raw === 'name') return 'name';
-  throw new HttpError('invalid_query');
+  return raw === 'name' ? 'name' : 'chat';
 }
 
 /**
@@ -40,7 +38,7 @@ function querySource(raw: string | undefined): 'chat' | 'name' {
  * `source=name` lists the blocked NAMES kept as evidence (`names.keepBlocked`) instead: the same items with `text` as the name as it was typed,
  * `roomId` null, `termId` null for a swear word the profanity pass caught (and `term` and `language` null with it), `reason` (`name_not_allowed` or
  * `name_profane`) and `person` null for a caller the kit did not hold. Empty (still 200) when none was kept, whatever the setting says now:
- * what exists is shown until retention removes it. `source` defaults to `chat`; any other value is 400 `invalid_query`.
+ * what exists is shown until retention removes it. `source` defaults to `chat`, and any other value (or none) is `chat` too, as before 0.1.9 (no new 400).
  *
  * Both sources carry `handleFlagged: true` beside a `handle` the matcher flags while `names.maskInHub` is on (else the key is absent).
  *
