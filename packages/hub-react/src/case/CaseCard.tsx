@@ -169,7 +169,7 @@ export function CaseCard() {
   // Detailed bar uses; the card sends each through the hold and goes on to the next case.
   const q = useQuickActions({ paused: elseOpen, refresh: true });
   // Simple's digits act at once unless the moderator turned Quick keys off (Ctrl+Enter stays the suggested step either way).
-  const digits = useQuickKeys().on;
+  const digits = useQuickKeys('simple').on;
   const keyed = shortcuts && digits;
   const { pick, fresh, suggest, choice } = q;
   const one = q.primary;

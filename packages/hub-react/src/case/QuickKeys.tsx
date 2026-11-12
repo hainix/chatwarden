@@ -11,7 +11,7 @@ import type { QuickActions } from './useQuickActions.js';
 //
 // A key acts only when the case is usable, once (a held key repeats and is ignored), not while typing (except Ctrl+Enter, made for
 // the reason box, and a digit on the rule field, a select that a digit cannot type into), not under a window, and not until
-// QUICK_ACT_COOLDOWN_MS after the case became usable.
+// QUICK_ACT_COOLDOWN_MS after the case appeared.
 
 export function QuickKeys({ quick, ctrlEnter = true, digits = true }: { quick: QuickActions; ctrlEnter?: boolean; digits?: boolean }) {
   const { shortcuts, now } = useHub();
@@ -20,9 +20,9 @@ export function QuickKeys({ quick, ctrlEnter = true, digits = true }: { quick: Q
   latest.current = quick;
   const nowRef = useRef(now);
   nowRef.current = now;
-  // When the case first became usable, on the hub's clock (null until it does). A moment of re-reading the case does not start it over.
+  // When this case appeared (this part is drawn once the case is read), on the hub's clock. Re-reading the case does not start it over.
   const since = useRef<number | null>(null);
-  if (quick.usable && since.current === null) since.current = now();
+  if (since.current === null) since.current = now();
 
   useEffect(() => {
     if (!shortcuts) return;

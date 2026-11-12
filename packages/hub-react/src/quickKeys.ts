@@ -64,9 +64,13 @@ const subscribe = (listener: () => void): (() => void) => {
   };
 };
 
-/** Quick keys for the hub's mode: the visit's choice, else the remembered one, else the mode's default. */
-export function useQuickKeys(): { on: boolean; set: (on: boolean) => void } {
-  const { mode } = useMode();
+/**
+ * Quick keys for the hub's mode: the visit's choice, else the remembered one, else the mode's default. A part that is one mode's own
+ * (the Simple card, wherever it is drawn: in the hub or as a piece) says which with `as`.
+ */
+export function useQuickKeys(as?: HubMode): { on: boolean; set: (on: boolean) => void } {
+  const context = useMode().mode;
+  const mode = as ?? context;
   const on = useSyncExternalStore(
     subscribe,
     () => visit ?? readQuickKeys(mode),

@@ -518,7 +518,7 @@ describe('12: the shortcut cap matches the keyboard', () => {
     expect(button).not.toHaveTextContent('Ctrl');
     fireEvent.keyDown(document.body, { key: '?' });
     const sheet = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
-    expect(within(sheet).getByText('⌘')).toBeInTheDocument();
+    expect(within(sheet).getAllByText('⌘').length).toBeGreaterThanOrEqual(2);
     expect(within(sheet).queryByText('Ctrl')).not.toBeInTheDocument();
     mac.unmount();
     vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('Win32');

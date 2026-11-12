@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { actorName, liveClaim } from '../claims.js';
 import type { HubError } from '../client.js';
 import { toHubError } from '../client.js';
@@ -133,7 +132,6 @@ export function BulkDismiss() {
   const decisions = useDecisions();
   const actions = useCaseActions();
   const [ask, setAsk] = useState<Ask | null>(null);
-  const anchor = useRef<HTMLDetailsElement>(null);
   const report = c.detail.data?.report;
   const reporterRef = report?.reporterPerson;
   const wantsRecord = can('history.read') && reporterRef !== undefined;
@@ -157,12 +155,11 @@ export function BulkDismiss() {
     if (a.scope === 'person') void actions.continueFrom({ reportId: report.id, person: report.targetPerson }, { quick: true });
   };
 
-  // The window is drawn at the hub's root, not inside the bar (which scrolls and stacks): a window must cover the page.
+  // The window is drawn in place; the bar rises above the page while it is open (see `.cw-dock:has(.cw-bulk-dialog)`), so it covers it.
   const dialog = ask === null ? null : <Confirm ask={ask} onClose={() => setAsk(null)} onConfirm={(count, takeOver) => confirm(ask, count, takeOver)} />;
-  const root = anchor.current?.closest('.cw-hub') ?? null;
 
   return (
-    <details className="cw-bulk" ref={anchor}>
+    <details className="cw-bulk">
       <summary>{t('hub.bulk.open')}</summary>
       <div className="cw-bulk-rows">
         {openAbout >= 2 && (
@@ -186,7 +183,7 @@ export function BulkDismiss() {
           )}
         </div>
       </div>
-      {dialog !== null && (root === null ? dialog : createPortal(dialog, root))}
+      {dialog}
     </details>
   );
 }

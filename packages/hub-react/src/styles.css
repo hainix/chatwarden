@@ -2525,7 +2525,7 @@
   width: 2.5rem;
   height: 1.4rem;
   padding: 0.15rem;
-  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong, currentColor));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
   border-radius: 999px;
   background: var(--cw-surface, var(--cwd-surface));
 }
@@ -2590,6 +2590,10 @@
 }
 .cw-hub .cw-bulk-dialog {
   max-width: 100%;
+}
+/* The bar is a stacking context (z-index 2): while its confirm window is open it rises above the top bar and the panes. */
+.cw-hub .cw-dock:has(.cw-bulk-dialog) {
+  z-index: 40;
 }
 .cw-hub .cw-bulk-title {
   font-size: var(--cw-text-l, var(--cwd-text-l));
