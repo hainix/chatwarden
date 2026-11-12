@@ -49,10 +49,16 @@ interface KeyState {
   floodSignalAt: number | null;
 }
 
-/** NFKC, lower-case, then only letters and digits: what "the same line again" means. Never stored. */
+/**
+ * NFKC, lower-case, then only letters, digits and the combining marks that belong to them: what "the same line again" means. Marks stay
+ * because in many scripts (Devanagari, Thai) the vowel signs are marks, and without them different words look alike. Never stored.
+ */
 export function normalizeForRepeat(text: string): string {
-  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\p{M}]/gu, '');
 }
+
+/** Letters and digits in a normalized line: marks do not count toward the minimum length, so a line of marks alone is never a repeat. */
+const baseChars = (normalized: string): number => Array.from(normalized.replace(/\p{M}/gu, '')).length;
 
 const OK: PaceVerdict = Object.freeze({ ok: true }) as PaceVerdict;
 
@@ -124,7 +130,7 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
   /** A normalized line long enough to be called a repeat, as its digest; null for one that is not. */
   const repeatHash = (line: string): string | null => {
     const normalized = normalizeForRepeat(line);
-    return Array.from(normalized).length < DUPLICATE_MIN_CHARS ? null : digest(normalized);
+    return baseChars(normalized) < DUPLICATE_MIN_CHARS ? null : digest(normalized);
   };
 
   const pacer: Pacer = {

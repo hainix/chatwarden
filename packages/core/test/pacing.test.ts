@@ -268,6 +268,58 @@ describe('lines that normalize to nothing or almost nothing (review focus 1)', (
   });
 });
 
+describe('combining marks are part of a line (Devanagari and Thai)', () => {
+  const dup = { duplicateWindowMs: 60_000 };
+  // Vowel signs are marks (\p{M}), not letters: dropping them made different words look the same.
+  const DEVANAGARI: [string, string] = ['किताब', 'कीताब'];
+  const THAI: [string, string] = ['กินข้าว', 'กันข้าว'];
+
+  it.each([['Devanagari', DEVANAGARI], ['Thai', THAI]] as const)('%s: two different lines are not a repeat', (_name, [a, b]) => {
+    expect(normalizeForRepeat(a)).not.toBe(normalizeForRepeat(b));
+    const { pacer, key, send } = setup(dup);
+    expect(send(a).ok).toBe(true);
+    expect(pacer.check(key, b).ok).toBe(true);
+    expect(send(b).ok).toBe(true);
+    // Each is still remembered on its own.
+    expect(refusal(pacer.check(key, a)).reason).toBe('duplicate');
+    expect(refusal(pacer.check(key, b)).reason).toBe('duplicate');
+  });
+
+  it.each([['Devanagari', DEVANAGARI[0]], ['Thai', THAI[0]]] as const)('%s control: the same line again is still a repeat, punctuation and spacing aside', (_name, line) => {
+    const { pacer, key, send } = setup(dup);
+    send(line);
+    expect(refusal(pacer.check(key, line)).reason).toBe('duplicate');
+    expect(refusal(pacer.check(key, `  ${line}!! `)).reason).toBe('duplicate');
+  });
+
+  it('a mark does not count toward the minimum length: marks alone, and emoji with a variation selector, are never a repeat', () => {
+    const { clock, send } = setup(dup);
+    for (const line of ['́́́́', '❤️❤️❤️', 'กิ', 'कि', 'á́́']) {
+      for (let i = 0; i < 3; i += 1) {
+        clock.t += 1;
+        expect(send(line).ok, JSON.stringify(line)).toBe(true);
+      }
+    }
+  });
+
+  it('the letters still decide the minimum: three letters with marks is a line, two are not', () => {
+    const { pacer, key, send } = setup(dup);
+    send('กิน');
+    expect(pacer.check(key, 'กิน').ok).toBe(true);
+    send('कितब');
+    expect(refusal(pacer.check(key, 'कितब')).reason).toBe('duplicate');
+  });
+
+  it('a composed and a decomposed spelling are the same line (NFKC), and Latin accents behave as before', () => {
+    expect(normalizeForRepeat('é')).toBe(normalizeForRepeat('é'));
+    expect(normalizeForRepeat('Wörld')).toBe('wörld');
+    const { pacer, key, send } = setup(dup);
+    send('café au lait');
+    expect(refusal(pacer.check(key, 'café AU lait')).reason).toBe('duplicate');
+    expect(pacer.check(key, 'cafe au lait').ok).toBe(true);
+  });
+});
+
 describe('order and purity', () => {
   it('slow_mode beats flood, flood beats duplicate', () => {
     const { clock, pacer, key, send } = setup({ slowModeMs: 1000, burst: { lines: 2, windowMs: 10_000 }, duplicateWindowMs: 15_000 });
