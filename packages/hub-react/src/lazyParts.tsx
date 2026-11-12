@@ -57,6 +57,7 @@ export const partLoaders: {
   pacePanel: () => Promise<ComponentType<PanelProps>>;
   signalPanel: () => Promise<ComponentType<PanelProps>>;
   appealPanel: () => Promise<ComponentType<PanelProps>>;
+  namePanel: () => Promise<ComponentType<PanelProps>>;
   appealList: () => Promise<ComponentType<{ selected: string | null }>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
@@ -68,6 +69,7 @@ export const partLoaders: {
   pacePanel: () => import('./screens/PaceSettings.js').then((m) => m.PaceSettings),
   signalPanel: () => import('./screens/SignalSettings.js').then((m) => m.SignalSettings),
   appealPanel: () => import('./screens/AppealSettings.js').then((m) => m.AppealSettings),
+  namePanel: () => import('./screens/NameSettings.js').then((m) => m.NameSettings),
   appealList: () => import('./appeals/AppealList.js').then((m) => m.AppealList),
 };
 
@@ -129,6 +131,7 @@ const signalLines = lazyPart(() => partLoaders.signalLines(), true);
 const pacePanel = lazyPart(() => partLoaders.pacePanel());
 const signalPanel = lazyPart(() => partLoaders.signalPanel());
 const appealPanel = lazyPart(() => partLoaders.appealPanel());
+const namePanel = lazyPart(() => partLoaders.namePanel());
 const appealList = lazyPart(() => partLoaders.appealList());
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
@@ -152,6 +155,9 @@ export const LazySignalSettings = signalPanel.Part;
 /** The "Appeals" panel of Settings > Advanced: loaded when that screen is opened. */
 export const LazyAppealSettings = appealPanel.Part;
 
+/** The "Names" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazyNameSettings = namePanel.Part;
+
 /** The list of open appeals in the queue pane (the Appeals view): loaded when that view is first opened. */
 export const LazyAppealList = appealList.Part;
 
@@ -166,6 +172,7 @@ export function resetLazyParts(): void {
   pacePanel.reset();
   signalPanel.reset();
   appealPanel.reset();
+  namePanel.reset();
   appealList.reset();
 }
 

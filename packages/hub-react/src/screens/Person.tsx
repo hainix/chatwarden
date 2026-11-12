@@ -17,18 +17,20 @@ type Form = null | 'sanction' | 'note';
 type Entry =
   | { kind: 'sanction'; at: number; key: string; s: SanctionGroupView }
   | { kind: 'report'; at: number; key: string; r: PersonHistory['reports'][number] }
-  | { kind: 'appeal'; at: number; key: string; a: AppealSummary };
+  | { kind: 'appeal'; at: number; key: string; a: AppealSummary }
+  | { kind: 'rename'; at: number; key: string; pending: boolean };
 
 /** At the same moment: an appeal comes first (it answers the sanction), then the sanction, then the report it followed. */
-const RANK = { appeal: 0, sanction: 1, report: 2 } as const;
+const RANK = { appeal: 0, rename: 1, sanction: 1, report: 2 } as const;
 
 /**
  * Reports, sanctions and appeals as one list, newest first. At the same moment a sanction comes before the report it followed (a decision
  * files both at once); otherwise the order the kit sent each in is kept.
  */
-export function timelineOf(history: Pick<PersonHistory, 'reports' | 'sanctions'> & Partial<Pick<PersonHistory, 'appeals'>>): Entry[] {
+export function timelineOf(history: Pick<PersonHistory, 'reports' | 'sanctions'> & Partial<Pick<PersonHistory, 'appeals' | 'renames'>>): Entry[] {
   const all: Entry[] = [
     ...(history.appeals ?? []).map((a): Entry => ({ kind: 'appeal', at: a.createdAt, key: `a:${a.id}`, a })),
+    ...(history.renames ?? []).map((r, i): Entry => ({ kind: 'rename', at: r.at, key: `n:${i}:${r.at}`, pending: r.pending })),
     ...history.sanctions.map((s): Entry => ({ kind: 'sanction', at: s.startsAt, key: `s:${s.groupId}`, s })),
     ...history.reports.map((r): Entry => ({ kind: 'report', at: r.createdAt, key: `r:${r.id}`, r })),
   ];
@@ -156,7 +158,7 @@ function PersonBody({ history, revoking, setRevoking, onRevoked }: { history: Pe
             <p className="cw-hint cw-panel-pad">{t('hub.person.timeline.hint')}</p>
             <ul className="cw-recs cw-panel-pad">
               {entries.map((e) =>
-                e.kind === 'sanction' ? <RecordItem key={e.key} s={e.s} detail /> : e.kind === 'appeal' ? <AppealEntry key={e.key} appeal={e.a} /> : <ReportEntry key={e.key} report={e.r} />,
+                e.kind === 'sanction' ? <RecordItem key={e.key} s={e.s} detail /> : e.kind === 'appeal' ? <AppealEntry key={e.key} appeal={e.a} /> : e.kind === 'rename' ? <RenameEntry key={e.key} at={e.at} pending={e.pending} /> : <ReportEntry key={e.key} report={e.r} />,
               )}
             </ul>
           </>
@@ -215,6 +217,24 @@ function AppealEntry({ appeal }: { appeal: AppealSummary }) {
               {t('hub.person.appeal.open.link')}
             </Link>
           )}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+/** A moderator asked them to choose a new name: when, and whether they have not done it yet. No referee card: nothing was imposed. */
+function RenameEntry({ at, pending }: { at: number; pending: boolean }) {
+  const { t } = useHub();
+  return (
+    <li className="cw-rec cw-rec--report">
+      <div className="cw-rec-body">
+        <p className="cw-rec-head">
+          <strong>{t('hub.person.rename.entry')}</strong>
+          {pending && <Tag>{t('hub.person.rename.pending')}</Tag>}
+        </p>
+        <p className="cw-facts cw-rec-meta">
+          <Time at={at} />
         </p>
       </div>
     </li>

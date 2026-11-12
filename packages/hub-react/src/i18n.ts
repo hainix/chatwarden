@@ -1241,6 +1241,8 @@ export const en = {
   'hub.audit.label.policy.reset': 'Reset the settings',
   'hub.audit.label.policy.reset.reporting': 'Reset the reporting settings',
   'hub.audit.label.policy.reset.ladder': 'Reset the steps and ladder',
+  'hub.mask.showBlockedName': 'Show the blocked name from {time}',
+  'hub.mask.hideBlockedName': 'Hide the blocked name from {time}',
   'hub.mask.showStatement': 'Show the hidden statement',
   'hub.mask.hideStatement': 'Hide the statement',
 
@@ -1349,6 +1351,26 @@ export const en = {
   'hub.settings.names.saved': 'Names settings saved.',
   'hub.settings.names.what': 'names',
   'hub.settings.names.done': 'names settings',
+  'hub.person.form.rename': 'Ask for a new name (no sanction)',
+  'hub.person.form.rename.hint': 'The player is asked to choose a new name. No sanction is applied.',
+  'hub.person.renameAsked': 'Asked {name} to choose a new name.',
+  'hub.person.fail.pendingRename': 'They have already been asked to choose a new name and have not done it yet.',
+  'hub.person.rename.entry': 'Asked to choose a new name',
+  'hub.person.rename.pending': 'Waiting for a new name',
+
+  'hub.blocked.screen.source': 'Source',
+  'hub.blocked.screen.source.chat': 'Chat lines',
+  'hub.blocked.screen.source.names': 'Names',
+  'hub.blocked.names.intro': 'Names the check refused, kept as evidence while keeping blocked names is on. The names stay hidden until you show them. Opening this list is recorded in the audit trail.',
+  'hub.blocked.names.list': 'Blocked names',
+  'hub.blocked.names.count.one': '{count} blocked name',
+  'hub.blocked.names.count.other': '{count} blocked names',
+  'hub.blocked.names.empty': 'No blocked names were kept in this time.',
+  'hub.blocked.names.col.name': 'Blocked name',
+  'hub.blocked.names.col.why': 'Why',
+  'hub.blocked.names.noPerson': 'Not known',
+  'hub.blocked.names.why.name_not_allowed': 'Not allowed',
+  'hub.blocked.names.why.name_profane': 'Swearing',
 } as const;
 
 /**

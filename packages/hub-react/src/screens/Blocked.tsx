@@ -6,7 +6,7 @@ import { timeOfDay } from '../format.js';
 import { displayName } from '../labels.js';
 import type { HubText } from '../i18n.js';
 import { WORD_MAX } from '../terms/TermForm.js';
-import type { BlockedDays, BlockedLine } from '../types.js';
+import type { BlockedDays, BlockedLine, BlockedName, PolicyDocs } from '../types.js';
 import { Empty, Fetched, Link, PersonChip, Scroll, Segmented, Time } from '../ui.js';
 
 /** The longest list the server sends: the newest 500. */
@@ -27,7 +27,14 @@ export function Blocked() {
   const [days, setDays] = useState<BlockedDays>(7);
   const [all, setAll] = useState(false);
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
-  const state = useHubData(`blocked:${days}`, () => client.listBlocked({ days }));
+  // "Names" joins the filter row only when the blocked names are being kept (`names.keepBlocked`). It is read from the settings, so a role that cannot read them
+  // cannot know and sees what it always saw.
+  const wantsPolicy = can('policy.read');
+  const policy = useHubData<PolicyDocs | null>(wantsPolicy ? 'policy' : 'policy:idle', () => (wantsPolicy ? session.policy() : Promise.resolve(null)));
+  const keepsNames = policy.data?.profile.names?.keepBlocked === true;
+  const [source, setSource] = useState<'chat' | 'name'>('chat');
+  const asNames = keepsNames && source === 'name';
+  const state = useHubData(asNames ? 'blocked:idle' : `blocked:${days}`, () => (asNames ? Promise.resolve({ items: [] as BlockedLine[] }) : client.listBlocked({ days })));
   // In a piece the Terms buttons are there only when the page said where Terms is.
   const canTerms = can('terms.read') && (canGo === undefined || canGo({ name: 'terms' }));
   const canException = canTerms && can('terms.write');
@@ -54,6 +61,20 @@ export function Blocked() {
         <h2 className="cw-screen-title" tabIndex={-1}>
           {t('hub.blocked.screen.title')}
         </h2>
+        {keepsNames && (
+          <Segmented
+            label={t('hub.blocked.screen.source')}
+            value={source}
+            options={[
+              { value: 'chat', label: t('hub.blocked.screen.source.chat') },
+              { value: 'name', label: t('hub.blocked.screen.source.names') },
+            ]}
+            onChange={(v) => {
+              setSource(v);
+              setAll(false);
+            }}
+          />
+        )}
         <Segmented
           label={t('hub.blocked.screen.days')}
           value={String(days) as '1' | '7' | '30'}
@@ -61,8 +82,22 @@ export function Blocked() {
           onChange={(v) => setDays(Number(v) as BlockedDays)}
         />
       </div>
-      <p className="cw-hint">{t('hub.blocked.screen.intro')}</p>
-      <Fetched state={state} what={t('hub.state.what.blocked')}>
+      <p className="cw-hint">{t(asNames ? 'hub.blocked.names.intro' : 'hub.blocked.screen.intro')}</p>
+      {asNames && (
+        <NamesList
+          days={days}
+          all={all}
+          setAll={setAll}
+          shown={shown}
+          toggle={toggle}
+          canTerms={canTerms}
+          viewTerm={(id) => {
+            session.handoff.set({ kind: 'term', id });
+            go({ name: 'terms' });
+          }}
+        />
+      )}
+      {!asNames && <Fetched state={state} what={t('hub.state.what.blocked')}>
         {({ items }) =>
           items.length === 0 ? (
             <Empty>{t('hub.blocked.screen.empty')}</Empty>
@@ -158,7 +193,123 @@ export function Blocked() {
             </>
           )
         }
-      </Fetched>
+      </Fetched>}
     </div>
+  );
+}
+
+/** The kept blocked names: when, who, why it was refused, the word it hit, and the name itself, hidden until shown (the word too, because it is a word). */
+function NamesList({
+  days,
+  all,
+  setAll,
+  shown,
+  toggle,
+  viewTerm,
+  canTerms,
+}: {
+  days: BlockedDays;
+  all: boolean;
+  setAll: (on: boolean) => void;
+  shown: ReadonlySet<string>;
+  toggle: (id: string) => void;
+  viewTerm: (termId: string) => void;
+  canTerms: boolean;
+}) {
+  const { client, t, locale, can } = useHub();
+  const state = useHubData(`blocked-names:${days}`, () => client.listBlockedNames({ days }));
+  return (
+    <Fetched state={state} what={t('hub.state.what.blocked')}>
+      {({ items }) =>
+        items.length === 0 ? (
+          <Empty>{t('hub.blocked.names.empty')}</Empty>
+        ) : (
+          <>
+            <div className="cw-bar">
+              <p className="cw-hint" role="status">
+                {t('hub.blocked.names.count', { count: items.length })}
+                {items.length >= BLOCKED_LIMIT && ` ${t('hub.blocked.screen.limit', { max: BLOCKED_LIMIT })}`}
+              </p>
+              <label className="cw-check cw-tr-reveal">
+                <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
+                <span>{t('hub.mask.all')}</span>
+              </label>
+            </div>
+            <Scroll label={t('hub.blocked.names.list')}>
+              <table className="cw-table cw-blocked-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{t('hub.blocked.screen.col.time')}</th>
+                    <th scope="col">{t('hub.blocked.screen.col.person')}</th>
+                    <th scope="col">{t('hub.blocked.names.col.why')}</th>
+                    <th scope="col">{t('hub.blocked.screen.col.term')}</th>
+                    <th scope="col">{t('hub.blocked.names.col.name')}</th>
+                    <th scope="col">{t('hub.blocked.screen.col.actions')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item: BlockedName) => {
+                    const visible = all || shown.has(item.id);
+                    const time = timeOfDay(item.at, locale);
+                    const who =
+                      item.person === null ? (
+                        <span className="cw-hint">{t('hub.blocked.names.noPerson')}</span>
+                      ) : (
+                        <>
+                          {item.handle !== null && <strong className="cw-arow-who">{displayName(t, { handle: item.handle, flagged: item.handleFlagged })}</strong>}
+                          <PersonChip person={item.person} />
+                        </>
+                      );
+                    return (
+                      <tr key={item.id}>
+                        <td className="cw-nowrap">
+                          <Time at={item.at} />
+                        </td>
+                        <td className="cw-term-word">
+                          {item.person !== null && can('history.read') ? (
+                            <Link to={{ name: 'person', ref: item.person }} className="cw-link">
+                              {who}
+                            </Link>
+                          ) : (
+                            who
+                          )}
+                        </td>
+                        <td>{t(item.reason === 'name_profane' ? 'hub.blocked.names.why.name_profane' : 'hub.blocked.names.why.name_not_allowed')}</td>
+                        <td className="cw-term-word">{item.term === null ? <span className="cw-hint">{t('hub.blocked.screen.termNone')}</span> : visible ? item.term : <Masked />}</td>
+                        <td className="cw-term-word">
+                          <div className="cw-row-actions">
+                            {visible ? <span>{item.text}</span> : <Masked />}
+                            {!all && (
+                              <button
+                                type="button"
+                                className="cw-linkbtn"
+                                aria-pressed={visible}
+                                aria-label={t(visible ? 'hub.mask.hideBlockedName' : 'hub.mask.showBlockedName', { time })}
+                                onClick={() => toggle(item.id)}
+                              >
+                                {t(visible ? 'hub.mask.hide' : 'hub.mask.show')}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="cw-row-actions">
+                            {canTerms && item.termId !== null && item.term !== null && (
+                              <button type="button" className="cw-linkbtn" aria-label={t('hub.blocked.screen.viewTerm.label', { time })} onClick={() => viewTerm(item.termId as string)}>
+                                {t('hub.blocked.screen.viewTerm')}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Scroll>
+          </>
+        )
+      }
+    </Fetched>
   );
 }

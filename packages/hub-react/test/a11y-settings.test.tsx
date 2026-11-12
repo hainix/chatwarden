@@ -279,3 +279,66 @@ describe.each(['light', 'dark'] as const)('axe on Settings > Advanced > Appeals,
     expect(await violations(r.container)).toEqual([]);
   });
 });
+
+describe.each(['light', 'dark'] as const)('axe on names: the panel, the rename form and the Blocked names, %s theme', (theme) => {
+  it('Settings > Advanced > Names: off, switched on, the save question, a role that only reads, and the Reset question have none', async () => {
+    const w = await appealsHub({ role: 'owner', actor: 'owen@example.test' });
+    const { container, user } = renderHub(w, { theme, path: '/settings/advanced' });
+    const panel = await screen.findByRole('region', { name: 'Names' });
+    expect(await violations(container)).toEqual([]);
+    await user.click(within(panel).getByRole('checkbox', { name: 'Let moderators ask a player for a new name' }));
+    await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
+    expect(await violations(container)).toEqual([]);
+    cleanup();
+    const o = await appealsHub({ role: 'owner', actor: 'o@example.test' });
+    const state = await o.direct.policyProfile();
+    await o.direct.savePolicyProfile({ layer: { names: { renames: true } }, version: state.version, reason: 'x' });
+    const r = renderHub(o, { theme, path: '/settings/advanced' });
+    await screen.findByRole('region', { name: 'Names' });
+    await r.user.click(screen.getByRole('button', { name: 'Reset names' }));
+    expect(await violations(r.container)).toEqual([]);
+    cleanup();
+    const s = await appealsHub({ role: 'senior', actor: 's@example.test' });
+    const read = renderHub(s, { theme, path: '/settings/advanced' });
+    await screen.findByRole('region', { name: 'Names' });
+    expect(await violations(read.container)).toEqual([]);
+  });
+
+  it('the Sanction form with the rename option chosen, with its message, and the timeline entry have none', async () => {
+    const w = await appealsHub({ names: { renames: true } });
+    const f = await w.file({ target: 'Mallory' });
+    const { container, user } = renderHub(w, { theme, path: `/people/${f.person}` });
+    await screen.findByRole('region', { name: 'Timeline' });
+    await user.click(await screen.findByRole('button', { name: 'Sanction' }));
+    await waitFor(() => expect((screen.getByLabelText('Community Rule') as HTMLSelectElement).options.length).toBeGreaterThan(2));
+    await user.selectOptions(screen.getByLabelText('What happens'), 'rename');
+    expect(await violations(container)).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(await screen.findByText('Write a reason. Only staff see it.')).toBeInTheDocument();
+    expect(await violations(container)).toEqual([]);
+    await user.type(screen.getByLabelText('Reason'), 'A name against the rules.');
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await screen.findByText('Asked to choose a new name');
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('Blocked > Names: the list, hidden and shown, and the empty list, have none', async () => {
+    const w = await appealsHub({ names: { keepBlocked: true } });
+    const empty = renderHub(w, { theme, path: '/blocked' });
+    await user_names(empty.user);
+    await screen.findByText('No blocked names were kept in this time.');
+    expect(await violations(empty.container)).toEqual([]);
+    cleanup();
+    w.cw.names.check('zorbakKid', { who: { clientKey: 'key-one' } });
+    const r = renderHub(w, { theme, path: '/blocked' });
+    await user_names(r.user);
+    await screen.findByRole('table');
+    expect(await violations(r.container)).toEqual([]);
+    await r.user.click(screen.getByRole('checkbox', { name: 'Show blocked words' }));
+    expect(await violations(r.container)).toEqual([]);
+  });
+});
+
+async function user_names(user: ReturnType<typeof renderHub>['user']): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: 'Names' }));
+}
