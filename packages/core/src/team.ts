@@ -204,6 +204,9 @@ export interface TeamDeps {
   boosted?: (people: readonly SubjectId[]) => Set<SubjectId>;
 }
 
+/** The key of a lapsed-claim marker: the moderator and the person, apart by a character neither can hold. */
+const markerKey = (actor: string, person: SubjectId): string => `${actor}\u0000${person}`;
+
 /** Claims, take next and viewing. The facade exposes it as `cw.cases`. */
 export class CaseDesk {
   private readonly store: Store;
@@ -257,6 +260,8 @@ export class CaseDesk {
         }
         const now = this.clock.now();
         const res = this.store.claimCase(canonical, actor, now, now + CLAIM_TTL_MS, opts.takeOver === true ? 'takeover' : 'claim');
+        // The holder keeping the claim alive (or taking it again) is not one who let it lapse.
+        if (res.won) this.served.delete(markerKey(actor, canonical));
         return res.won
           ? { ok: true, claim: claimOf(res.claim), tookOverFrom: res.from }
           : { ok: false, error: 'claimed', claim: claimOf(res.claim) };
@@ -268,6 +273,8 @@ export class CaseDesk {
   release(person: SubjectId, actor: string): boolean {
     needActor(actor);
     const canonical = this.subjects.canonical(needPerson(person));
+    // Released on purpose: not a claim that ran out (`lapsedByMe`).
+    this.served.delete(markerKey(actor, canonical));
     return this.store.transaction(() => this.store.releaseClaim(canonical, actor, this.clock.now()));
   }
 
@@ -282,6 +289,8 @@ export class CaseDesk {
     const canonical = this.subjects.canonical(needPerson(person));
     return this.store.transaction(() => {
       if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1).length > 0) return false;
+      // Decided and done: the claim ending is not "let it lapse".
+      this.served.delete(markerKey(actor, canonical));
       return this.store.releaseClaim(canonical, actor, this.clock.now());
     });
   }
@@ -407,7 +416,7 @@ export class CaseDesk {
 
   /** Did a claim `next` handed this moderator on this person run out within the last claim window? Forgets markers older than that. */
   private lapsedByMe(actor: string, person: SubjectId, now: number): boolean {
-    const key = `${actor} ${person}`;
+    const key = markerKey(actor, person);
     const until = this.served.get(key);
     if (until === undefined) return false;
     if (now - until >= CLAIM_TTL_MS) this.served.delete(key);
@@ -431,7 +440,7 @@ export class CaseDesk {
         const now = this.clock.now();
         const res = this.store.claimCase(person, actor, now, now + CLAIM_TTL_MS, 'free');
         if (!res.won) return null;
-        const key = `${actor} ${person}`;
+        const key = markerKey(actor, person);
         this.served.delete(key);
         this.served.set(key, res.claim.until);
         if (this.served.size > SERVED_MAX) this.served.delete(this.served.keys().next().value!);

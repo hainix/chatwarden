@@ -94,6 +94,23 @@ export function signalsContract(name: string, make: () => Store): void {
         expect(s.insertSignal(row())).toBe(true);
       });
 
+      it('refuses a non-finite at, capBucket or weight: it throws and writes nothing (FB M5)', () => {
+        const s = signals(make());
+        for (const over of [
+          { at: Number.NaN },
+          { at: Number.POSITIVE_INFINITY },
+          { at: Number.NEGATIVE_INFINITY },
+          { capBucket: Number.NaN },
+          { capBucket: Number.POSITIVE_INFINITY },
+          { capBucket: 1.5 },
+          { weight: Number.POSITIVE_INFINITY },
+        ]) {
+          expect(() => s.insertSignal(row(over)), JSON.stringify(over)).toThrow();
+        }
+        expect(s.listSignalSources(['s_target'], 0)).toEqual([]);
+        expect(s.insertSignal(row())).toBe(true);
+      });
+
       it('keeps a fractional weight, zero, and a null roomId and bySubject', () => {
         const s = signals(make());
         expect(s.insertSignal(row({ weight: 0.5, sourceKey: 'd:2027-01-15', bySubject: null, roomId: null }))).toBe(true);

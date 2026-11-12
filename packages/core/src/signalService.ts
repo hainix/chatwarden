@@ -1,4 +1,4 @@
-import { randomId } from './crypto.js';
+import { randomId, sha256Hex } from './crypto.js';
 import { errorClass, safeWarn, ThrottledWarn } from './log.js';
 import type { SignalHit } from './ladder.js';
 import { countSignals, evaluateThreshold } from './signalCounts.js';
@@ -21,9 +21,20 @@ const DEFAULT_WINDOW_DAYS = 30;
 const BOOSTED_MAX = 1000;
 const ROOM_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
 const SUBJECT_ID_MAX = 128;
+/** The longest connection detail (client key, account id, IP) a record may carry: longer is not a real one, and it would be hashed. */
+const DETAIL_MAX = 512;
+/** How long a player's account age is remembered, and for how many players. */
+const AGE_MEMO_MS = MIN_MS;
+const AGE_MEMO_MAX = 256;
 
 /** Is this a room id a signal may carry (1 to 64 of A-Z a-z 0-9 _ . : -)? */
 export const isSignalRoomId = (v: unknown): v is string => typeof v === 'string' && v.length <= 64 && ROOM_ID.test(v);
+
+/**
+ * The room id a flood row carries: the id itself when the signal rules accept it, else a stable `h` plus 16 hex digits of its SHA-256 (so a
+ * game whose room ids hold a space or run long still gets one source per room, and only the digest is stored). Undefined for no room.
+ */
+export const floodRoomId = (v: unknown): string | undefined => (typeof v !== 'string' || v === '' ? undefined : isSignalRoomId(v) ? v : `h${sha256Hex(v).slice(0, 16)}`);
 
 export type SignalRefusal = 'undeclared' | 'malformed' | 'unknown_subject' | 'self' | 'time' | 'capped' | 'no_store' | 'store_failed';
 
@@ -84,6 +95,8 @@ export class SignalService implements SignalRuntime {
   private readonly refusedWarn: ThrottledWarn;
   private readonly ageWarn: ThrottledWarn;
   private unsupportedLogged = false;
+  /** The account age the game's hook gave for a player, and when (see `accountFactor`). */
+  private readonly ageMemo = new Map<SubjectId, { age: unknown; at: number }>();
 
   constructor(deps: SignalServiceDeps) {
     this.deps = deps;
@@ -108,6 +121,11 @@ export class SignalService implements SignalRuntime {
 
   /** Record one signal. Synchronous, fenced, never throws: false for any refusal (logged by reason code, at most once a minute). */
   record(input: SignalInput): boolean {
+    return this.guarded(input, false);
+  }
+
+  /** `record`'s body. `quietCapped`: the cap refusing is the designed answer (a second flood trip the same day), so it is not logged. */
+  private guarded(input: unknown, quietCapped: boolean): boolean {
     try {
       if (!this.supported) {
         this.unsupported();
@@ -116,6 +134,7 @@ export class SignalService implements SignalRuntime {
       return this.recordRow(input);
     } catch (err) {
       const reason = err instanceof Refusal ? err.reason : 'malformed';
+      if (quietCapped && reason === 'capped') return false;
       try {
         this.refusedWarn.warn('chatwarden.signal_refused', err instanceof Refusal && err.detail !== undefined ? { reason, error: err.detail } : { reason });
       } catch {
@@ -126,7 +145,8 @@ export class SignalService implements SignalRuntime {
   }
 
   flood(subject: SubjectId, roomId: string): void {
-    this.record({ kind: 'flood_triggered', subject, ...(isSignalRoomId(roomId) ? { roomId } : {}) });
+    const room = floodRoomId(roomId);
+    this.guarded({ kind: 'flood_triggered', subject, ...(room === undefined ? {} : { roomId: room }) }, true);
   }
 
   private recordRow(input: unknown): boolean {
@@ -137,10 +157,12 @@ export class SignalService implements SignalRuntime {
     if (!Object.hasOwn(kinds, kindId)) throw new Refusal('undeclared');
     const spec = kinds[kindId]!;
 
-    const roomId = field(input, 'roomId');
+    // null is "left out" for the optional fields a game fills from a maybe-null variable: by, roomId and at.
+    const given = (key: string): unknown => field(input, key) ?? undefined;
+    const roomId = given('roomId');
     if (roomId !== undefined && !isSignalRoomId(roomId)) throw new Refusal('malformed');
     const now = this.deps.clock.now();
-    const givenAt = field(input, 'at');
+    const givenAt = given('at');
     if (givenAt !== undefined && !(typeof givenAt === 'number' && Number.isFinite(givenAt))) throw new Refusal('malformed');
     const at = givenAt ?? now;
     if (at > now + AHEAD_MS || at < now - this.deps.signalsMs()) throw new Refusal('time');
@@ -150,7 +172,7 @@ export class SignalService implements SignalRuntime {
     }
 
     const subject = this.party(field(input, 'subject'));
-    const rawBy = field(input, 'by');
+    const rawBy = given('by');
     const by = rawBy === undefined ? null : this.party(rawBy);
     if (by !== null && by === subject) throw new Refusal('self');
 
@@ -190,12 +212,12 @@ export class SignalService implements SignalRuntime {
     for (const key of ['clientKey', 'accountId'] as const) {
       const v = field(p, key);
       if (v === undefined) continue;
-      if (typeof v !== 'string') throw new Refusal('malformed');
+      if (typeof v !== 'string' || v.length > DETAIL_MAX) throw new Refusal('malformed');
       who[key] = v;
     }
     const ip = field(p, 'ip');
     if (ip !== undefined && ip !== null) {
-      if (typeof ip !== 'string') throw new Refusal('malformed');
+      if (typeof ip !== 'string' || ip.length > DETAIL_MAX) throw new Refusal('malformed');
       who.ip = ip;
     }
     const found = this.deps.personOf(who);
@@ -212,12 +234,21 @@ export class SignalService implements SignalRuntime {
     if (rule === null || hook === undefined || by === null) return 1;
     const accounts = this.deps.subjects.identifiersOf(by).accounts;
     if (accounts.length === 0) return 1;
+    // The game's hook is often a lookup: a player recording over and over is asked once a minute, not on every record.
+    const now = this.deps.clock.now();
+    const known = this.ageMemo.get(by);
     let age: unknown;
-    try {
-      age = hook(accounts);
-    } catch (err) {
-      this.ageWarn.warn('chatwarden.signal_age_failed', { error: errorClass(err) });
-      return 1;
+    if (known !== undefined && now >= known.at && now - known.at < AGE_MEMO_MS) age = known.age;
+    else {
+      try {
+        age = hook(accounts);
+      } catch (err) {
+        this.ageWarn.warn('chatwarden.signal_age_failed', { error: errorClass(err) });
+        return 1;
+      }
+      this.ageMemo.delete(by);
+      this.ageMemo.set(by, { age, at: now });
+      if (this.ageMemo.size > AGE_MEMO_MAX) this.ageMemo.delete(this.ageMemo.keys().next().value!);
     }
     return typeof age === 'number' && Number.isFinite(age) && age >= 0 && age < rule.belowDays ? rule.factor : 1;
   }

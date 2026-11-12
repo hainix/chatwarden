@@ -401,3 +401,27 @@ describe('pruneSignalFeeds (a stored layer made invalid later)', () => {
     });
   });
 });
+
+describe('the reason code of a drop does not depend on the wording of a message', () => {
+  const dropped = (feeds: unknown, o = opts): Array<[string, string]> => {
+    const out: Array<[string, string]> = [];
+    pruneSignalFeeds(feeds, KINDS, { ...o, onDrop: (feed, reason) => out.push([feed, reason]) });
+    return out;
+  };
+
+  it('a failed check carries a code: unknown_kind, positive_kind and window; anything else has none', () => {
+    const codeOf = (feeds: unknown): unknown => (failure(() => check(feeds, { signalsMs: 14 * DAY })) as { code?: unknown }).code;
+    expect(codeOf({ record: { kinds: ['removed_kind'], windowDays: 7 } })).toBe('unknown_kind');
+    expect(codeOf({ queue: threshold({ kinds: ['commended'] }) })).toBe('positive_kind');
+    expect(codeOf({ record: { kinds: '*', windowDays: 60 } })).toBe('window');
+    expect(codeOf({ record: { kinds: '*', windowDays: 0 } })).toBe('window');
+    expect(codeOf({ queue: threshold({ minDistinct: 'many' }) })).toBeUndefined();
+  });
+
+  it('the reasons pruneSignalFeeds reports are those codes', () => {
+    expect(dropped({ record: { kinds: ['removed_kind'], windowDays: 7 } })).toEqual([['record', 'unknown_kind']]);
+    expect(dropped({ queue: threshold({ kinds: ['commended'] }) })).toEqual([['queue', 'positive_kind']]);
+    expect(dropped({ ai: { kinds: '*', windowDays: 60 } }, { ...opts, signalsMs: 14 * 86_400_000 })).toEqual([['ai', 'window']]);
+    expect(dropped({ queue: threshold({ minDistinct: 'many' }) })).toEqual([['queue', 'invalid']]);
+  });
+});

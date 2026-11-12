@@ -1140,7 +1140,7 @@ function layerToOverrides(base: ModerationProfile, layer: unknown): Record<strin
 /** The same error, with the path named from the layer the editor sent (`profile.ladder[2]` is `layer.ladder[2]`). */
 function inLayerTerms(err: ProfileError): ProfileError {
   const path = err.path === 'profile' ? 'layer' : err.path.startsWith('profile.') ? `layer.${err.path.slice('profile.'.length)}` : err.path;
-  return new ProfileError(path, err.reason);
+  return new ProfileError(path, err.reason, err.code);
 }
 
 /**

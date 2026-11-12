@@ -460,3 +460,98 @@ describe('a claim this moderator let lapse', () => {
     expect(t.cw.cases.next('mod-0', BOOST)).not.toBeNull();
   });
 });
+
+// FC M7: the lapsed marker means "let it lapse", nothing wider. A moderator who released the case, decided it, or kept it alive is not
+// treated as one who let it lapse.
+describe('the lapsed marker is only for a claim that ran out unheld', () => {
+  const lapse = (t: { clock: { t: number } }): void => {
+    t.clock.t += CLAIM_TTL_MS + SEC;
+  };
+
+  it('a case released early is first again after the old expiry, not pushed behind', async () => {
+    const t = await setup();
+    await t.file();
+    const newer = await t.file();
+    t.boost(newer.person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    expect(t.cw.cases.release(newer.person, 'mod-a')).toBe(true);
+    lapse(t);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+  });
+
+  it('a case decided and released (releaseWhenDone) is not read as lapsed when the same person is reported again later', async () => {
+    const t = await setup();
+    const old = await t.file();
+    const file = async (seat: string): Promise<string> => {
+      t.clock.t += SEC;
+      const res = await t.cw.reports.submit({ roomId: 'dec-room', reporterSeat: seat, targetSeat: 'p2', category: 'harassment' });
+      if (!res.ok) throw new Error(`refused: ${res.refused}`);
+      return res.reportId;
+    };
+    t.cw.rooms.seat('dec-room', 'p1', { clientKey: 'dec-rep-1' }, 'R1');
+    t.cw.rooms.seat('dec-room', 'p3', { clientKey: 'dec-rep-2' }, 'R2');
+    t.cw.rooms.seat('dec-room', 'p2', { clientKey: 'dec-target' }, 'T');
+    t.cw.chat.accept('dec-room', 'p2', 'a line');
+    const first = await file('p1');
+    const person = t.cw.reports.get(first)!.targetPerson as SubjectId;
+    t.boost(person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person });
+    t.store.closeReport(first, 'dismissed', false, 'mod-a', t.clock.t, 'n');
+    expect(t.cw.cases.releaseWhenDone(person, 'mod-a')).toBe(true);
+    lapse(t);
+    await file('p3');
+    // Not "let it lapse": the boosted case is claimed ahead of the older ordinary one.
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person });
+    void old;
+  });
+
+  it('a decision that leaves another report open keeps the claim, and the marker for it (it can still lapse)', async () => {
+    const t = await setup();
+    const old = await t.file();
+    t.cw.rooms.seat('keep-room', 'p1', { clientKey: 'keep-rep-1' }, 'R1');
+    t.cw.rooms.seat('keep-room', 'p3', { clientKey: 'keep-rep-2' }, 'R2');
+    t.cw.rooms.seat('keep-room', 'p2', { clientKey: 'keep-target' }, 'T');
+    t.cw.chat.accept('keep-room', 'p2', 'a line');
+    const ids: string[] = [];
+    for (const seat of ['p1', 'p3']) {
+      t.clock.t += SEC;
+      const res = await t.cw.reports.submit({ roomId: 'keep-room', reporterSeat: seat, targetSeat: 'p2', category: 'harassment' });
+      if (!res.ok) throw new Error('refused');
+      ids.push(res.reportId);
+    }
+    const person = t.cw.reports.get(ids[0]!)!.targetPerson as SubjectId;
+    t.boost(person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person });
+    t.store.closeReport(ids[0]!, 'dismissed', false, 'mod-a', t.clock.t, 'n');
+    expect(t.cw.cases.releaseWhenDone(person, 'mod-a')).toBe(false);
+    lapse(t);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: old.person });
+  });
+
+  it('a claim renewed by its holder forgets the marker: the case is not read as lapsed at the original expiry', async () => {
+    const t = await setup();
+    const old = await t.file();
+    const newer = await t.file();
+    t.boost(newer.person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    t.clock.t += CLAIM_TTL_MS - SEC;
+    expect(t.cw.cases.claim(newer.person, 'mod-a')).toMatchObject({ ok: true });
+    t.clock.t += 2 * SEC;
+    expect(t.cw.cases.release(newer.person, 'mod-a')).toBe(true);
+    // The old expiry passed while the claim was alive: the marker is gone, so the boosted case is first again.
+    expect(t.cw.cases.next('mod-b', BOOST)).toMatchObject({ person: newer.person });
+    t.cw.cases.release(newer.person, 'mod-b');
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    void old;
+  });
+
+  it('a claim that really ran out unheld is still deprioritised (the rule itself is unchanged)', async () => {
+    const t = await setup();
+    const old = await t.file();
+    const newer = await t.file();
+    t.boost(newer.person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    lapse(t);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: old.person });
+  });
+});

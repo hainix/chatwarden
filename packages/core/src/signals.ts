@@ -106,12 +106,12 @@ export interface SignalInput {
   kind: string;
   /** Whom it is about. */
   subject: SignalParty;
-  /** Who produced it (the player who muted, the player who left). Omit for a source the game itself is, such as a timeout. */
-  by?: SignalParty;
-  /** The game's own room id: 1 to 64 characters of A-Z a-z 0-9 _ . : - . Not player text. */
-  roomId?: string;
-  /** When it happened, epoch ms. Default: now. Not more than 5 minutes ahead, not older than retention.signalsMs. */
-  at?: number;
+  /** Who produced it (the player who muted, the player who left). Omit (or `null`) for a source the game itself is, such as a timeout. */
+  by?: SignalParty | null;
+  /** The game's own room id: 1 to 64 characters of A-Z a-z 0-9 _ . : - . Not player text. `null` is the same as leaving it out. */
+  roomId?: string | null;
+  /** When it happened, epoch ms. Default: now (also for `null`). Not more than 5 minutes ahead, not older than retention.signalsMs. */
+  at?: number | null;
   /** Overrides the kind's default weight for this one record. 0 to 10. */
   weight?: number;
 }
@@ -177,8 +177,8 @@ const THRESHOLD_KEYS: readonly string[] = ['kinds', 'minDistinct', 'windowDays',
 const RULE_KEYS: readonly string[] = ['id', 'effect', ...THRESHOLD_KEYS];
 const WINDOW_FEED_KEYS: readonly string[] = ['kinds', 'windowDays'];
 
-function fail(path: string, reason: string): never {
-  throw new ProfileError(path, reason);
+function fail(path: string, reason: string, code?: SignalDropReason): never {
+  throw new ProfileError(path, reason, code);
 }
 
 function isPlain(v: unknown): v is Record<string, unknown> {
@@ -286,8 +286,8 @@ interface FeedContext {
 }
 
 function windowDays(v: unknown, path: string, ctx: FeedContext): void {
-  if (!whole(v, 1, SIGNAL_WINDOW_DAYS_MAX)) fail(path, `must be a whole number of days from 1 to ${SIGNAL_WINDOW_DAYS_MAX}`);
-  if (v * DAY_MS > ctx.signalsMs) fail(path, 'must not be longer than retention.signalsMs: rows older than that are deleted, so the window could never be met');
+  if (!whole(v, 1, SIGNAL_WINDOW_DAYS_MAX)) fail(path, `must be a whole number of days from 1 to ${SIGNAL_WINDOW_DAYS_MAX}`, 'window');
+  if (v * DAY_MS > ctx.signalsMs) fail(path, 'must not be longer than retention.signalsMs: rows older than that are deleted, so the window could never be met', 'window');
 }
 
 /** A list of declared kinds: 1 to `max`, each declared, no repeats; `negativeOnly` also refuses a positive kind. */
@@ -297,8 +297,8 @@ function kindList(v: unknown, path: string, ctx: FeedContext, max: number, negat
   v.forEach((id: unknown, i) => {
     const p = `${path}[${i}]`;
     const spec = typeof id === 'string' ? kindSpecOf(ctx.kinds, id) : undefined;
-    if (spec === undefined) fail(p, 'is not a kind this game declared');
-    if (negativeOnly && spec.polarity !== 'negative') fail(p, 'is a positive kind: positive kinds may inform but never raise or boost');
+    if (spec === undefined) fail(p, 'is not a kind this game declared', 'unknown_kind');
+    if (negativeOnly && spec.polarity !== 'negative') fail(p, 'is a positive kind: positive kinds may inform but never raise or boost', 'positive_kind');
     if (seen.has(id as string)) fail(p, 'is listed twice');
     seen.add(id as string);
   });
@@ -387,10 +387,10 @@ export function checkSignalFeeds(
 /** Why a stored feed was dropped: a code, never a value. */
 export type SignalDropReason = 'unknown_feed' | 'unknown_kind' | 'positive_kind' | 'window' | 'invalid';
 
-/** The code for a failed check, from the rule it broke (the messages above; they never carry a value). */
+/** The code for a failed check: the code the check itself put on its error (never the wording of a message), else `invalid`. */
 function dropReason(err: unknown): SignalDropReason {
-  const r = err instanceof ProfileError ? err.reason : '';
-  return /not a kind/.test(r) ? 'unknown_kind' : /positive/.test(r) ? 'positive_kind' : /longer|days/.test(r) ? 'window' : 'invalid';
+  const code = err instanceof ProfileError ? err.code : undefined;
+  return code === 'unknown_kind' || code === 'positive_kind' || code === 'window' ? code : 'invalid';
 }
 
 /**

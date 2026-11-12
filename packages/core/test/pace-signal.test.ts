@@ -103,14 +103,14 @@ describe('a flood trip records flood_triggered', () => {
     expect(new Set(rows(w).map((r) => r.subject)).size).toBe(2);
   });
 
-  it('a room id the signal rules do not accept is recorded without a room (a day source)', async () => {
+  it('a room id the signal rules do not accept is recorded under a stable digest of it, one source per room (FC M5)', async () => {
     const w = await world();
     w.seat('my room with spaces');
     w.trip('my room with spaces', 'x');
     await flush();
     expect(rows(w)).toHaveLength(1);
-    expect(rows(w)[0]?.roomId).toBeNull();
-    expect(rows(w)[0]?.sourceKey).toMatch(/^d:\d{4}-\d{2}-\d{2}$/);
+    expect(rows(w)[0]?.roomId).toMatch(/^h[0-9a-f]{16}$/);
+    expect(rows(w)[0]?.sourceKey).toBe(`r:${rows(w)[0]?.roomId}`);
   });
 
   it('works with nothing declared at all (the built-in kind only)', async () => {

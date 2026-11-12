@@ -29,8 +29,10 @@ class MemorySignals extends MemoryStore {
   }
 
   insertSignal(row: SignalRow): boolean {
-    // SQLite's CHECK (weight >= 0) is the reference; NaN fails it too.
-    if (!(row.weight >= 0)) throw new Error('insertSignal: weight must be 0 or more');
+    // SQLite is the reference: its CHECK (weight >= 0) and NOT NULL columns refuse these, and so does the SQLite store's own check of the numbers.
+    if (!(Number.isFinite(row.weight) && row.weight >= 0)) throw new Error('insertSignal: weight must be a finite number, 0 or more');
+    if (!Number.isFinite(row.at)) throw new Error('insertSignal: at must be a finite number');
+    if (!Number.isSafeInteger(row.capBucket)) throw new Error('insertSignal: capBucket must be a whole number');
     const s = this.signalState();
     const key = JSON.stringify([row.kind, row.subject, row.sourceKey, row.capBucket]);
     if (s.rows.has(key) || s.ids.has(row.id)) return false;

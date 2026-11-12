@@ -1094,7 +1094,11 @@ export class SqliteStore implements Store, TermStore {
 
   insertSignal(row: SignalRow): boolean {
     // One statement: the UNIQUE index kit_signals_cap (and the primary key) decide, so of two connections writing the same
-    // (kind, subject, source, bucket) exactly one gets a row back. A negative or NaN weight fails the table's CHECK and throws.
+    // (kind, subject, source, bucket) exactly one gets a row back. A negative or NaN weight fails the table's CHECK and throws; a time, bucket or
+    // weight that is not a finite number is refused here (as the memory store does), since SQLite would store an infinity or turn a NaN into NULL.
+    if (!(Number.isFinite(row.weight) && row.weight >= 0)) throw new Error('insertSignal: weight must be a finite number, 0 or more');
+    if (!Number.isFinite(row.at)) throw new Error('insertSignal: at must be a finite number');
+    if (!Number.isSafeInteger(row.capBucket)) throw new Error('insertSignal: capBucket must be a whole number');
     const wrote = this.db
       .prepare(
         `INSERT INTO kit_signals (id, kind, subject_id, source_key, by_subject, room_id, at, weight, cap_bucket)
