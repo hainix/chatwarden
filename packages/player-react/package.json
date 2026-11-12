@@ -32,10 +32,23 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./chat": {
+      "types": "./dist/src/chat/index.d.ts",
+      "default": "./dist/src/chat/index.js"
+    },
+    "./chat.css": "./src/chat.css"
+  },
+  "typesVersions": {
+    "*": {
+      "chat": [
+        "dist/src/chat/index.d.ts"
+      ]
+    }
   },
   "sideEffects": [
-    "./src/styles.css"
+    "./src/styles.css",
+    "./src/chat.css"
   ],
   "files": [
     "dist/src",

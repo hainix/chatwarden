@@ -1,0 +1,149 @@
+/*
+ * @chatwarden/player-react/chat.css
+ *
+ * The chat box's rules, on top of styles.css (load both). The same contract as styles.css: every rule is scoped under .cw-player,
+ * every colour, size and space is a --cw-* custom property read as var(--cw-x, var(--cwd-x)) with a private default, and nothing is
+ * injected at run time. The colours and spaces are styles.css's; this file adds three tokens of its own.
+ *
+ *   --cw-chat-height      the height of the list (default 20rem). Set it on the box's className to resize the box.
+ *   --cw-chat-gap         the space between two lines (default 0.25rem)
+ *   --cw-chat-name-width  the width of a name, for a game that wants the names aligned (default auto)
+ *
+ * Colour only where it means something: the accent for the player's own name and the Send button, red for a failure line.
+ */
+
+/* ---- Tokens ------------------------------------------------------------------------------------------------------ */
+:where(.cw-player) {
+  --cwd-chat-height: 20rem;
+  --cwd-chat-gap: 0.25rem;
+  --cwd-chat-name-width: auto;
+}
+/* ---- End of tokens ----------------------------------------------------------------------------------------------- */
+
+/* ---- The box ----------------------------------------------------------------------------------------------------- */
+.cw-player .cw-chat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-player .cw-chat-body {
+  position: relative;
+  min-width: 0;
+}
+.cw-player .cw-chat-log {
+  /* The hidden colons are absolutely placed: this is their containing block, so they scroll with the list and add no page height. */
+  position: relative;
+  height: var(--cw-chat-height, var(--cwd-chat-height));
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius, var(--cwd-radius));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+.cw-player .cw-chat-lines {
+  display: grid;
+  gap: var(--cw-chat-gap, var(--cwd-chat-gap));
+}
+.cw-player .cw-chat-empty {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+
+/* ---- A line ------------------------------------------------------------------------------------------------------ */
+.cw-player .cw-chat-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cw-player .cw-chat-name {
+  display: inline-block;
+  width: var(--cw-chat-name-width, var(--cwd-chat-name-width));
+  max-width: 100%;
+  margin-right: var(--cw-space-2, var(--cwd-space-2));
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+  vertical-align: top;
+}
+.cw-player .cw-chat-name--you {
+  color: var(--cw-accent, var(--cwd-accent));
+}
+/* The text is the player's own characters: right-to-left overrides stay inside it, long words break, line breaks are kept. */
+.cw-player .cw-chat-text {
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+  white-space: pre-wrap;
+}
+.cw-player .cw-chat-text time {
+  unicode-bidi: isolate;
+}
+/* Hidden from the eye, read by a screen reader: the colon after a name, the label of the input. */
+.cw-player .cw-chat-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Jump, connection and refusal lines -------------------------------------------------------------------------- */
+.cw-player .cw-chat-jump {
+  position: absolute;
+  right: var(--cw-space-3, var(--cwd-space-3));
+  bottom: var(--cw-space-2, var(--cwd-space-2));
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--cw-shadow-ink, var(--cwd-shadow-ink)) 35%, transparent);
+}
+/* The status regions stay in the page (so what is written into them is announced) and take no room while empty. */
+.cw-player .cw-chat-conn,
+.cw-player .cw-chat-refusal {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-player .cw-chat-conn:empty,
+.cw-player .cw-chat-refusal:empty {
+  height: 0;
+}
+.cw-player .cw-chat-refusal p {
+  color: var(--cw-red, var(--cwd-red));
+}
+
+/* ---- The input --------------------------------------------------------------------------------------------------- */
+.cw-player .cw-chat-foot {
+  min-width: 0;
+}
+.cw-player .cw-chat-form {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+}
+.cw-player .cw-chat-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-player .cw-chat-input {
+  flex: 1 1 auto;
+  min-height: var(--cw-control-height, var(--cwd-control-height));
+  max-height: 7.5rem;
+  resize: none;
+  field-sizing: content;
+}
+.cw-player .cw-chat-send {
+  flex: none;
+}
+.cw-player .cw-chat-send:disabled {
+  cursor: default;
+  border-color: var(--cw-border-strong, var(--cwd-border-strong));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-player .cw-chat-count {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  text-align: right;
+}

@@ -1,7 +1,8 @@
 // Every word the player components show is a key in this catalog; components never hold English.
 //
 // Key naming: `player.<area>.<thing>[.<detail>]`, lower camel case segments, for example `player.notice.title.warning`.
-// Areas: error, state, notice, notices, record, rules, restricted, report.
+// Areas: error, state, notice, notices, record, rules, restricted, report, chat. The `chat` words live in `chat/words.ts` (`enChat`), so
+// the main entry does not carry them; `PlayerText` names them all and the chat box falls back to them when a catalog lacks one.
 // Plural forms add the CLDR category as the last segment: `player.report.remaining.one`, `.other`. A caller asks for the base
 // key with a numeric `count` (`t('player.report.remaining', { count: 3 })`); `.zero` is used for 0 when it exists.
 // `{name}` marks a value to fill in. To translate, spread this catalog over yours so a missing key falls back to English:
@@ -9,6 +10,8 @@
 //
 // The copy is written for a player in the middle of a game: second person, sentence case, plain words, and never shaming. It says
 // what happened, until when, and what the player can do.
+
+import type { enChat } from './chat/words.js';
 
 export const en = {
   'player.error.network': 'Could not reach the server. Check your connection and try again.',
@@ -158,7 +161,7 @@ type PluralForm = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other';
 type BaseKey<K extends string> = K extends `${infer B}.${PluralForm}` ? B : K;
 
 /** Every key a component may ask for: the English catalog's keys with the plural suffix taken off. */
-export type PlayerText = BaseKey<keyof typeof en>;
+export type PlayerText = BaseKey<keyof typeof en | keyof typeof enChat>;
 
 export type PlayerParams = Readonly<Record<string, string | number>>;
 
