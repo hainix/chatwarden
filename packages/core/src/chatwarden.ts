@@ -412,9 +412,14 @@ export interface Chatwarden {
      * (see `cw.reports.reporterAccuracy`) and none of which has waited 24 hours (`REPORTER_RANK_LAPSE_MS`) is served after the ordinary
      * ones, oldest first; it is never skipped, so a queue holding only such cases still serves them. One ordinary reporter, or no
      * accuracy data (a store without `reporterOutcomes`), keeps a case normal. A non-boolean value is a `RangeError`.
-     * @experimental (the `rankDownHabitual` filter)
+     *
+     * With `signalBoost` (default false: behaviour unchanged; use it when the queue signal feed, `feeds.queue`, is on), the scan stays oldest
+     * first but a case is claimed only when it is overdue (its oldest open report has waited 24 hours) or boosted (the person meets the
+     * feed's threshold); the first such case wins. If the queue, or the first 200 people, hold neither, the oldest free case is claimed as
+     * usual, so nothing is ever left out. A boosted case is never ranked down. A non-boolean value is a `RangeError`.
+     * @experimental (the `rankDownHabitual` and `signalBoost` filters)
      */
-    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean }): NextCase | null;
+    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean }): NextCase | null;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
      * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
@@ -1020,6 +1025,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     clock,
     reasons: () => policy.profileNow().reporting.reasons,
     accuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
+    boosted: (people) => signals.boosted(people),
   });
   const reasonBook = new ReasonBook(store);
 

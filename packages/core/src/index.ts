@@ -67,6 +67,7 @@ export {
   REASONS_MAX,
   ReasonBook,
   ReasonError,
+  SIGNAL_BOOST_SCAN_MAX,
   ViewingPresence,
   VIEWING_TTL_MS,
 } from './team.js';
