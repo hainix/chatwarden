@@ -266,7 +266,7 @@ export class MemoryStore implements Store {
       .map((r) => ({ ...this.sanctionRow(r), revokedAt: r.revokedAt }));
   }
 
-  private sanctionRow(r: StoredSanction): SanctionRow {
+  protected sanctionRow(r: StoredSanction): SanctionRow {
     return {
       id: r.id,
       groupId: r.groupId,
@@ -285,6 +285,8 @@ export class MemoryStore implements Store {
       source: r.source,
       automated: r.automated,
       pending: r.pending,
+      // Only a row that was written with a report id carries the key, so a row without one reads back as it was written.
+      ...(r.reportId === undefined ? {} : { reportId: r.reportId }),
     };
   }
 

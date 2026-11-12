@@ -2,7 +2,9 @@
 // their own sections below.
 
 import type { AIExample, AIRead, AISignal } from './ai/types.js';
+import type { AppealStatus } from './appeals.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
+import type { NameReason } from './names.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
 
@@ -182,6 +184,13 @@ export interface SanctionRow {
    */
   revokedBy?: string | null;
   revokeReason?: string | null;
+  /**
+   * The report whose decision made this sanction (a moderator decision from 0.1.9 stores the decided report's id), so a granted appeal can
+   * mark that decision reversed. Absent or null for a sanction that did not come from a report decision (an automatic timeout, a direct
+   * `sanctions.apply`, and every row written before 0.1.9 that could not be linked). Optional so a store written for an older kit still
+   * type-checks; read an absent value as null. Private.
+   */
+  reportId?: string | null;
 }
 
 /**
@@ -338,6 +347,52 @@ export interface SignalRow {
   weight: number;
   /** floor(at / perByWindowMs): the cap bucket. */
   capBucket: number;
+}
+
+/**
+ * One appeal, as the store keeps it (appeals inbox, design 4.7). `statement` is the player's own text, capped at APPEAL_STATEMENT_MAX
+ * characters: the only new player free text, kept here and nowhere else, nulled by retention. Private: a player sees `PlayerAppeal`, never
+ * this. `rule` is the sanction's rule as TEXT (`'1'`.. or `'uncovered'`), like a sanction row.
+ * @experimental
+ */
+export interface AppealRow {
+  /** Random, never derived. */
+  id: string;
+  /** The canonical subject at filing time. */
+  subject: SubjectId;
+  /** The sanction group appealed; one appeal per group. */
+  groupId: string;
+  /** The notice the player filed it from. */
+  noticeId: string;
+  /** The report whose decision made the sanction, when known (so a granted appeal can mark that decision reversed). */
+  reportId: string | null;
+  rule: string | null;
+  kind: SanctionKind;
+  /** The player's statement; null once retention cleared it (or it was cleared at decision). */
+  statement: string | null;
+  status: AppealStatus;
+  createdAt: number;
+  decidedAt: number | null;
+  /** The staff ref that decided it (or revoked the sanction, for a moot one). */
+  decidedBy: string | null;
+  /** Private; never shown to the player. */
+  decisionReason: string | null;
+  /** The group written in place of a reduced sanction. */
+  replacementGroupId: string | null;
+}
+
+/**
+ * One blocked name kept as evidence (only when `names.keepBlocked` is on). `subject` is null when the check could not tie the name to a
+ * person; `termId` is the matcher's term id for a `name_not_allowed` hit and null for `name_profane`. Private staff data on a short clock.
+ * @experimental
+ */
+export interface BlockedNameRow {
+  id: string;
+  subject: SubjectId | null;
+  name: string;
+  termId: string | null;
+  reason: NameReason;
+  at: number;
 }
 
 /**
@@ -1225,6 +1280,97 @@ export interface Store {
 
   /** OPTIONAL. Delete rows with `at < before` (a row exactly on the line is kept); returns how many. */
   purgeSignals?(before: number): number;
+
+  // Appeals (appeals inbox, design 4.7). OPTIONAL: a store without them cannot keep appeals, and `createChatwarden` refuses a profile with
+  // `appeals.enabled` for one. SYNCHRONOUS on purpose (like claims and notices); they run inside `transaction`. Every insert, decide and moot
+  // moves the change token. Only `loadAppeal` and `listAppeals` return a statement (staff reads); `AppealRow` is private and never reaches
+  // a player.
+
+  /**
+   * OPTIONAL. Insert one appeal as ONE atomic statement: false, and nothing written, when an appeal for the group already exists (one
+   * appeal per sanction for its lifetime, whatever its status) or the id is taken. True when a row was written.
+   */
+  insertAppeal?(row: AppealRow): boolean;
+
+  /** OPTIONAL. One appeal by id, a copy, or null. A `moot` one is returned too. */
+  loadAppeal?(id: string): AppealRow | null;
+
+  /**
+   * OPTIONAL. Appeals oldest first (`createdAt` ascending, then `id`): `open` is the ones waiting, `decided` the upheld, reduced and
+   * revoked ones, `all` (the default) both. A `moot` appeal (nobody ruled on it) is never listed. `after` is the keyset cursor: the
+   * `createdAt` and `id` of the last row of the previous page, and the row it names is not repeated. `limit` is floored and clamped to
+   * 1..200. Returns copies.
+   */
+  listAppeals?(q: { status?: 'open' | 'decided' | 'all'; limit: number; after?: { createdAt: number; id: string } }): AppealRow[];
+
+  /**
+   * OPTIONAL. How many appeals these subjects (a person's canonical id and its aliases) filed at or after `since`, whatever their status
+   * (a moot or decided one still counts against the weekly cap), and the oldest `createdAt` among them. None: `{ count: 0, oldestAt: null }`.
+   */
+  countAppealsBy?(subjects: readonly SubjectId[], since: number): { count: number; oldestAt: number | null };
+
+  /** OPTIONAL. How many appeals are `open`. */
+  countOpenAppeals?(): number;
+
+  /**
+   * OPTIONAL. Decide an appeal, ONLY from `open`, as ONE atomic statement: false, and nothing changed, for an unknown id or an appeal that
+   * is decided or moot. True when it moved. `clearStatement` also nulls the statement (retention with `appealStatementsMs` at 0).
+   */
+  decideAppeal?(
+    id: string,
+    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean },
+  ): boolean;
+
+  /**
+   * OPTIONAL. The sanction group was revoked by someone else: move its appeal, if still `open`, to `moot` (`decidedAt` and `decidedBy`
+   * set, no reason). Returns how many moved (0 or 1); a decided or moot appeal is untouched.
+   */
+  closeAppealsForGroup?(groupId: string, by: string, at: number): number;
+
+  /**
+   * OPTIONAL. Per rule, the appeals FILED at or after `since`: `appealed` (every status, a moot one included), `granted` (revoked ONLY) and
+   * `lightened` (reduced: a reduction is not a false positive, so it is never counted as granted). `'uncovered'` and a null rule read as
+   * one null rule. A rule with no appeal has no row. In no promised order.
+   */
+  appealCountsByRule?(since: number): Array<{ rule: string | null; appealed: number; granted: number; lightened: number }>;
+
+  /**
+   * OPTIONAL. Per rule, the distinct sanction GROUPS whose subject row is a warning, chat, area or ban (never a note, never an IP row)
+   * starting at or after `since`, revoked ones included, EXCLUDING a group that is some appeal's `replacementGroupId` (a reduction is one
+   * sanction, not two). `'uncovered'` and a null rule read as one null rule. In no promised order.
+   */
+  countSanctionsByRule?(since: number): Array<{ rule: string | null; count: number }>;
+
+  /**
+   * OPTIONAL. The SUBJECT row of a sanction group (kind, actor, source, automated, start, end, rule, room, `reportId`), revoked or not, as
+   * a copy; null for an unknown group or one with only an IP row.
+   */
+  loadSanctionSubjectRow?(groupId: string): SanctionRow | null;
+
+  /**
+   * OPTIONAL. Null the statement of every appeal decided (or closed) before `before` (strict: one exactly on the line keeps it). The row
+   * stays. Returns how many statements were cleared. An open appeal is never touched.
+   */
+  clearAppealStatements?(before: number): number;
+
+  /**
+   * OPTIONAL. Delete appeals decided (or closed) before `before` (strict), EXCEPT one whose sanction group is permanent (a chat, area or ban
+   * with no end) and not revoked: that row is what stops the player appealing a live permanent sanction a second time. An open appeal is
+   * never deleted. Returns how many were deleted.
+   */
+  purgeAppeals?(before: number): number;
+
+  // Blocked names (offensive names, design 5.2 and 6.3). OPTIONAL: a kit with `names.keepBlocked` needs them. Synchronous. They do not move
+  // the change token: a kept name is evidence on a short clock, not a queue item.
+
+  /** OPTIONAL. Keep one blocked name. */
+  insertBlockedName?(row: BlockedNameRow): void;
+
+  /** OPTIONAL. Kept names at or after `since`, newest first (ties newest-inserted first), at most `limit` (floored, clamped to 1..200). Copies. */
+  listBlockedNames?(since: number, limit: number): BlockedNameRow[];
+
+  /** OPTIONAL. Delete names with `at < before` (a row exactly on the line is kept); returns how many. */
+  purgeBlockedNames?(before: number): number;
 
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).

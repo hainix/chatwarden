@@ -47,6 +47,8 @@ export type {
   ReasonRow,
   SignalRow,
   SignalSourceRow,
+  AppealRow,
+  BlockedNameRow,
   ConductLevel,
   Source,
   Store,
