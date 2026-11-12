@@ -527,6 +527,53 @@ describe('createChatwarden: chat.restricted (typing indicator)', () => {
     expect(cw.chat.accept(R, 'a', 'hello')).toMatchObject({ deliver: {} });
   });
 
+  it('restrictedBySubject reads the same answer from a subject id, so a server need not keep a credential to ask again', async () => {
+    const { cw, clock } = await setup();
+    cw.rooms.seat(R, 'a', { clientKey: 'key-alice', accountId: 'acct-alice', ip: '198.51.100.1' }, 'Alice');
+    cw.rooms.seat(R, 'b', bob, 'Bob');
+    const a = subjectOf(cw, 'a');
+    expect(cw.chat.restrictedBySubject(a)).toEqual(NONE);
+    expect(cw.chat.restrictedBySubject(a, { roomId: R, seatId: 'a' })).toEqual(NONE);
+    const ban = await cw.sanctions.apply(sanction(a, { kind: 'ban', durationMs: null }));
+    expect(cw.chat.restrictedBySubject(a)).toEqual({ restricted: true, until: null, kind: 'ban' });
+    expect(cw.chat.restrictedBySubject(a, { roomId: R, seatId: 'a' })).toEqual(cw.chat.restricted(alice, { roomId: R, seatId: 'a' }));
+    expect(cw.chat.restrictedBySubject(subjectOf(cw, 'b'))).toEqual(NONE);
+    await cw.sanctions.revoke(ban.groupId, 'mod@example.test', 'mistake');
+    await cw.sanctions.apply(sanction(a));
+    expect(cw.chat.restrictedBySubject(a)).toEqual({ restricted: true, until: NOW + H, kind: 'chat' });
+    clock.t = NOW + H;
+    expect(cw.chat.restrictedBySubject(a)).toEqual(NONE);
+    expect(cw.chat.restrictedBySubject(a)).not.toBeInstanceOf(Promise);
+  });
+
+  it('restrictedBySubject follows a merge: an old alias gets the surviving person answer', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', { accountId: 'acct-merge' }, 'A');
+    cw.rooms.seat(R, 'b', { clientKey: 'key-merge' }, 'B');
+    const before = subjectOf(cw, 'b');
+    await cw.sanctions.apply(sanction(subjectOf(cw, 'a')));
+    cw.rooms.seat(R, 'c', { accountId: 'acct-merge', clientKey: 'key-merge' }, 'C');
+    expect(cw.chat.restrictedBySubject(before).restricted).toBe(true);
+    expect(cw.chat.restrictedBySubject(subjectOf(cw, 'b'))).toEqual(cw.chat.restrictedBySubject(before));
+  });
+
+  it('restrictedBySubject for nothing, a stranger id or a non-string reads false and never throws', async () => {
+    const { cw } = await setup();
+    for (const bad of [null, undefined, '', 's_nobody', 5, {}, [], 's_' + 'x'.repeat(5000)]) {
+      expect(cw.chat.restrictedBySubject(bad as never)).toEqual(NONE);
+    }
+  });
+
+  it('restrictedBySubject carries no identifier: only restricted, until and kind', async () => {
+    const { cw } = await setup();
+    cw.rooms.seat(R, 'a', alice, 'Alice');
+    const s = subjectOf(cw, 'a');
+    await cw.sanctions.apply(sanction(s));
+    const answer = cw.chat.restrictedBySubject(s, { roomId: R, seatId: 'a' });
+    expect(Object.keys(answer).sort()).toEqual(['kind', 'restricted', 'until']);
+    expect(JSON.stringify(answer)).not.toContain(s);
+  });
+
   it('enabled() false switches it off with the rest of enforcement', async () => {
     let on = true;
     const { cw } = await setup({ enabled: () => on });

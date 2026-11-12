@@ -28,8 +28,11 @@ import { makeHasher } from '@chatwarden/core';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ENTRY = fileURLToPath(new URL('./browser-entry.ts', import.meta.url));
+const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.url));
 // 103 KB: the bundle measured 98.0 KB gzip once the matcher stopped carrying obscenity (it was 104.2 KB with the English word list in it); the
 // headroom is about 5 KB for the hub controller work that shares this entry. Not raised for the AI: the server-only AI module is not in this build.
+// The chat box's server side (`@chatwarden/http/chat`) is browser-SAFE but not something a page ships by default, so it is NOT in this entry and
+// not in this size: it has its own entry (`browser-entry-chat.ts`), bundled below only to prove it stays free of Node imports and runs in a bare context.
 const SIZE_BUDGET_GZIP = 103 * 1024;
 
 /**
@@ -78,6 +81,10 @@ let metafile: Metafile;
 let aiEsm = '';
 let aiIife = '';
 let aiMetafile: Metafile;
+// The same entry plus the chat server side (`@chatwarden/http/chat`), for the safety checks only.
+let chatEsm = '';
+let chatIife = '';
+let chatMetafile: Metafile;
 
 beforeAll(async () => {
   for (const pkg of ['core', 'matcher', 'store-memory', 'http']) {
@@ -94,6 +101,11 @@ beforeAll(async () => {
   const d = await build({ ...common, format: 'iife', globalName: 'CW', minify: true });
   aiIife = d.outputFiles[0]!.text;
   aiMetafile = d.metafile;
+  const e = await build({ ...common, entryPoints: [CHAT_ENTRY], format: 'esm' });
+  chatEsm = e.outputFiles[0]!.text;
+  const f = await build({ ...common, entryPoints: [CHAT_ENTRY], format: 'iife', globalName: 'CW', minify: true });
+  chatIife = f.outputFiles[0]!.text;
+  chatMetafile = f.metafile;
 }, 60_000);
 
 describe('browser bundle: static scan', () => {
@@ -125,6 +137,57 @@ describe('browser bundle: static scan', () => {
     for (const nodeSide of ['index', 'player', 'express', 'webhooks/in', 'webhooks/out', 'webhooks/sign', 'webhooks/fingerprint']) {
       expect(inputs, nodeSide).not.toContain(`packages/http/dist/src/${nodeSide}.js`);
     }
+  });
+
+  it('the size entry does not carry the chat server side', () => {
+    const inputs = Object.keys(metafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    expect(inputs.some((p) => p.startsWith('packages/http/dist/src/chat/'))).toBe(false);
+  });
+
+  it('bundles @chatwarden/http/chat from its own entry, and none of the Node-side http modules', () => {
+    const inputs = Object.keys(chatMetafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    for (const file of ['chat/index', 'chat/broadcaster', 'chat/routes', 'chat/sse', 'chat/wire', 'chat/history', 'chat/random', 'limiter']) {
+      expect(inputs, file).toContain(`packages/http/dist/src/${file}.js`);
+    }
+    for (const nodeSide of ['index', 'player', 'express', 'health', 'webhooks/in', 'webhooks/out', 'webhooks/sign', 'webhooks/fingerprint']) {
+      expect(inputs, nodeSide).not.toContain(`packages/http/dist/src/${nodeSide}.js`);
+    }
+  });
+
+  it('chat entry: has no node: import or export specifier', () => {
+    expect(chatEsm).not.toMatch(/\b(?:from|import)\s*\(?\s*["']node:/);
+    expect(chatEsm).not.toMatch(/\bexport\s*\*?\s*(?:\{[^}]*\}\s*)?from\s*["']node:/);
+  });
+
+  it('chat entry: has no require, in either build', () => {
+    expect(chatEsm).not.toMatch(/\brequire\b/);
+    expect(chatIife).not.toMatch(/\brequire\b/);
+  });
+
+  it('chat entry: mentions node: only as the argument of the guarded process.getBuiltinModule lookup', () => {
+    const leftover = chatEsm.replaceAll(/\?\.getBuiltinModule\?\.\(\s*["']node:crypto["']\s*\)/g, '');
+    expect(leftover).not.toContain('node:');
+    expect(chatIife.replaceAll(/\?\.getBuiltinModule\?\.\(\s*["']node:crypto["']\s*\)/g, '')).not.toContain('node:');
+  });
+
+  it('chat entry: only ever calls getBuiltinModule through optional chaining, inside a try', () => {
+    const calls = [...chatEsm.matchAll(/getBuiltinModule/g)];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const m of calls) {
+      expect(chatEsm.slice(m.index! - 2, m.index! + 'getBuiltinModule?.('.length)).toBe('?.getBuiltinModule?.(');
+    }
+    const at = chatEsm.indexOf('getBuiltinModule');
+    const before = chatEsm.slice(Math.max(0, at - 600), at);
+    expect(before.lastIndexOf('try')).toBeGreaterThan(before.lastIndexOf('}\n'));
+  });
+
+  it('chat entry: has no bare reference to process, Buffer or module outside the guarded lookup', () => {
+    const code = chatEsm.replaceAll(/\/\/.*$/gm, '').replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    expect(code).not.toMatch(/\bBuffer\b/);
+    expect(code).not.toMatch(/\bmodule\.exports\b/);
+    // The one reference is `globalThis.process`, read into a local that is then only used as `proc?.getBuiltinModule?.(...)`.
+    const procRefs = [...code.matchAll(/\bprocess\b/g)].filter((m) => !code.slice(m.index! - 11).startsWith('globalThis.process'));
+    expect(procRefs.map((m) => code.slice(m.index! - 40, m.index! + 40))).toEqual([]);
   });
 });
 
@@ -409,6 +472,46 @@ const ADMIN_SCENARIO = `(async () => {
   return JSON.stringify(out);
 })()`;
 
+// The chat box's server side, run in the context through `CW.httpChat`: the real broadcaster and routes over the in-memory store,
+// with no Buffer and no process. A player speaks, another hears it, a blocked line is refused to its author only.
+const CHAT_SCENARIO = `(async () => {
+  const { createChatwarden } = CW.core;
+  const { LiveTerms } = CW.matcher;
+  const { syntheticTermPack, MemoryTermStore } = CW.fixtures;
+  const { MemoryStore } = CW.storeMemory;
+  const { createRoomBroadcaster, chatRoutes, encodeFrame } = CW.httpChat;
+  const { createRouter } = CW.httpAdmin;
+  const clock = { now: () => Date.now() };
+  const terms = new LiveTerms({ store: new MemoryTermStore(), pack: syntheticTermPack(), clock, logger: { warn() {} } });
+  await terms.load();
+  const cw = await createChatwarden({ store: new MemoryStore(), secret: 'chat-secret', platform: { identify: (ctx) => ctx }, matcher: terms, clock });
+  const chat = createRoomBroadcaster(cw, { logger: { warn() {} } });
+  const out = { buffer: typeof Buffer, process: typeof process };
+  const sessionOf = (name) => {
+    const s = chat.session('room', { clientKey: 'key-' + name + '-aaaaaaaa', ip: '198.51.100.1' }, { name });
+    if (s.refused) throw new Error('refused ' + s.refused.reason);
+    return s;
+  };
+  const alice = sessionOf('Alice');
+  const bob = sessionOf('Bob');
+  const heard = [];
+  bob.open({ write: (frame) => { heard.push(encodeFrame(frame)); } });
+  out.hello = heard[0].split('\\n')[0];
+  out.sent = alice.send({ text: 'hello there' }).ok;
+  out.refused = alice.send({ text: 'you zorbak' });
+  out.heardLines = heard.slice(1).map((f) => JSON.parse(f.split('\\n')[1].slice(6)).line.text);
+  out.leak = heard.join('').includes('zorbak');
+  out.stats = chat.stats();
+  // the routes, through a router, with no HTTP server at all
+  const handle = createRouter(chatRoutes(cw, chat, { identify: (req) => ({ clientKey: req.headers['x-key'] }), join: () => ({ name: 'Carol' }) }));
+  const res = await handle({ method: 'POST', path: '/rooms/room/lines', query: {}, headers: { 'x-key': 'key-carol-aaaaaaaa', 'content-type': 'application/json' }, body: undefined, rawBody: '{"text":"from the routes"}' });
+  out.route = { status: res.status, ok: res.body.ok, text: res.body.line && res.body.line.text };
+  const form = await handle({ method: 'POST', path: '/rooms/room/lines', query: {}, headers: { 'x-key': 'key-carol-aaaaaaaa', 'content-type': 'text/plain' }, body: undefined, rawBody: '{"text":"cross site"}' });
+  out.form = form.status;
+  chat.close();
+  return JSON.stringify(out);
+})()`;
+
 // The headless hub controller, run in the context through `CW.hubHeadless`: no document, no window, no navigator. The staff client
 // talks to the real routes in the page; the controller loads the queue, takes a case, and holds and undoes a decision.
 const HUB_SCENARIO = `(async () => {
@@ -564,6 +667,21 @@ describe('browser bundle: runs in a context with no Node globals', () => {
     expect([out.overAscii, out.overEuro, out.overAstral]).toEqual([413, 413, 413]);
     expect(out.audit.status).toBe(200);
     expect(out.audit.body.items.length).toBeGreaterThan(0);
+  });
+
+  it('runs the chat broadcaster and routes (@chatwarden/http/chat) in the context: a send, a refusal to its author only, a cross-site post refused, no Buffer', async () => {
+    const ctx = browserContext();
+    run(ctx, chatIife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, CHAT_SCENARIO)) as Record<string, unknown>;
+    expect([out.buffer, out.process]).toEqual(['undefined', 'undefined']);
+    expect(out.hello).toBe('event: hello');
+    expect(out.sent).toBe(true);
+    expect(out.refused).toEqual({ ok: false, refused: { reason: 'blocked', rule: 1 } });
+    expect(out.heardLines).toEqual(['hello there']);
+    expect(out.leak).toBe(false);
+    expect(out.stats).toEqual({ rooms: 1, members: 2, streams: 1 });
+    expect(out.route).toEqual({ status: 200, ok: true, text: 'from the routes' });
+    expect(out.form).toBe(400);
   });
 
   it('runs the headless hub controller (@chatwarden/hub-react/headless) in the context: load, claim, hold, Undo, dispose, no DOM', async () => {

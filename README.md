@@ -13,10 +13,10 @@ Status: pre-release, as-is, no support promise; PRs welcome.
 | [`@chatwarden/store-memory`](packages/store-memory) | In-memory store for tests, demos and single-process prototypes. Everything is lost on restart. Runs in a browser. |
 | [`@chatwarden/matcher`](packages/matcher) | Text matcher that resists Unicode evasion without blocking innocent words. |
 | [`@chatwarden/profanity`](packages/profanity) | Optional ordinary-swearing filter (allow, star or refuse; style, add, remove, custom list). Slurs stay the matcher's job. |
-| [`@chatwarden/http`](packages/http) | HTTP routes: the staff API (reports, decisions, sanctions, terms, audit), the player API (notices, record, rules), health probes, signed webhooks in and out, and an Express adapter. |
+| [`@chatwarden/http`](packages/http) | HTTP routes: the staff API (reports, decisions, sanctions, terms, audit), the player API (notices, record, rules), health probes, signed webhooks in and out, an Express adapter, and a room broadcaster with chat routes (Server-Sent Events down, `POST` up). |
 | [`@chatwarden/discord`](packages/discord) | Posts the staff review queue into a Discord forum through a channel webhook, one thread per reported person. |
 | [`@chatwarden/hub-react`](packages/hub-react) | The moderator hub: a themeable React UI over the staff API (report queue, decisions, sanctions, blocked terms, audit). Runs in a browser. |
-| [`@chatwarden/player-react`](packages/player-react) | The player side: small React components for a game (a notice dialog, My record, the rules, a report dialog, a restricted-chat line) over the player routes. Runs in a browser. |
+| [`@chatwarden/player-react`](packages/player-react) | The player side: small React components for a game (a notice dialog, My record, the rules, a report dialog, a restricted-chat line) over the player routes, and a moderated `<ChatBox>` at its own lazy subpath. Runs in a browser. |
 | [`@chatwarden/hub-element`](packages/hub-element) | The moderator hub as one custom element, `<chatwarden-hub>`, in a single self-contained script (React inside): one script tag for plain HTML, Vue, Svelte or a server-rendered admin page. Runs in a browser. |
 | [`examples/tiny-chat`](examples/tiny-chat) | A one-room Express + `ws` chat server wired through `createChatwarden`, the kit's HTTP routes and an optional Discord feed (private, not published). |
 
@@ -35,6 +35,7 @@ yourself and your project gets exactly one copy of it. `store-sqlite` and `profa
 | Post the review queue into a Discord forum | add `npm install @chatwarden/discord` |
 | Give moderators a web UI over the staff routes | add `npm install @chatwarden/hub-react react react-dom` (it also needs `@chatwarden/http` as a peer) |
 | Put the moderator hub on any page with one script tag (no React or build step) | add `npm install @chatwarden/hub-element` to self-host the script, or load it from a CDN; it has no required peer |
+| Add chat to a game that has none: a moderated chat box with report and mute | `npm install @chatwarden/http @chatwarden/player-react express react react-dom` and `@chatwarden/core`: `createRoomBroadcaster` and `chatRoutes` on the server, `<ChatBox>` from `@chatwarden/player-react/chat` in the page (the chat names are experimental until 0.2) |
 | Show players their notices, record and the rules, and let them report | add `npm install @chatwarden/player-react react react-dom` (it needs `@chatwarden/core` as a peer, for types) |
 | Run tests or a demo with no database (everything is lost on restart) | swap `@chatwarden/store-sqlite` for `npm install @chatwarden/store-memory` |
 | Try it with invented test words, no real term list | nothing extra: `@chatwarden/matcher/fixtures` is part of `@chatwarden/matcher` |
@@ -72,7 +73,26 @@ discordFeed(cw, { webhookUrl: process.env.DISCORD_WEBHOOK_URL!, hubLink: (kind, 
 - `authorize` and `identify` are the only two hooks you write. The kit never sees a password or a token.
 - Full setup, the permissions table, the error codes and the webhook format: [`packages/http/README.md`](packages/http/README.md).
 - The Discord forum setup and its limits: [`packages/discord/README.md`](packages/discord/README.md).
-- A runnable example with a chat server: [`examples/tiny-chat`](examples/tiny-chat).
+- A runnable example with a chat server and a browser page that uses the chat box: [`examples/tiny-chat`](examples/tiny-chat).
+
+## Add chat to a game that has none
+The room broadcaster behind four routes, and the box in the page (all the chat names are experimental until 0.2):
+
+```ts
+import express from 'express';
+import { chatRoutes, createRoomBroadcaster } from '@chatwarden/http';
+import { toExpress } from '@chatwarden/http/express';
+
+const app = express();
+const chat = createRoomBroadcaster(cw);
+app.use('/chat', toExpress(chatRoutes(cw, chat, {
+  identify: (req) => ({ clientKey: req.headers['x-player-token'], ip: req.remoteAddress }),
+  join: (_req, roomId) => ({ name: 'Player' }), // who may enter this room, and under what display name (null refuses)
+}), { fallthrough: false }));
+```
+
+The page renders `<ChatBox transport={sseTransport({ baseUrl: '/chat' })} room="lobby" />` from `@chatwarden/player-react/chat`; see
+[`packages/http/README.md`](packages/http/README.md) ("Chat") and [`packages/player-react/README.md`](packages/player-react/README.md) ("The chat box").
 
 ## Pick a preset
 

@@ -1,0 +1,23 @@
+/* The page around the chat box. The box's own look is the player stylesheet's (see chat.css in the package). */
+body {
+  margin: 0;
+  font: 16px/1.5 system-ui, sans-serif;
+  background: Canvas;
+  color: CanvasText;
+}
+.page {
+  display: grid;
+  gap: 1rem;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+.page h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.page .demo {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: GrayText;
+}

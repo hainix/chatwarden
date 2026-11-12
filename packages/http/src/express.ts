@@ -6,7 +6,7 @@ import { BODY_MAX_BYTES } from './body.js';
 import { errorResponse, withErrors } from './errors.js';
 import { compileRoutes } from './router.js';
 import type { RouteTable } from './router.js';
-import type { KitRequest, KitResponse } from './types.js';
+import type { KitRequest, KitResponse, KitStream } from './types.js';
 
 export interface ExpressOptions {
   /**
@@ -157,6 +157,93 @@ function send(res: Response, kit: KitResponse, applied: string[], head = false):
 }
 
 /**
+ * Send a response that stays open (`KitResponse.stream`). The status and headers are set as for any response, plus `cache-control:
+ * no-store, no-transform`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` for each one the route left out. A HEAD gets
+ * those and no body, and `start` is not called. Otherwise `start` is called once with a sink over `res`, and the cancel it returns
+ * is called exactly once: when the client goes away, or when the sink ends the response, whichever comes first.
+ *
+ * The headers go out with the first write, or right after `start` returns if it wrote nothing, so a `start` that throws before any
+ * byte is still the kit's 500; once a byte has gone out, the caller destroys the connection.
+ */
+function sendStream(req: Request, res: Response, kit: KitResponse, stream: KitStream, applied: string[], head: boolean, logger: Logger | undefined): void {
+  if (typeof stream.start !== 'function') throw new TypeError('KitResponse.stream.start must be a function');
+  res.status(kit.status);
+  for (const [name, value] of Object.entries(kit.headers ?? {})) {
+    res.setHeader(name, value);
+    applied.push(name);
+  }
+  const set = (name: string, value: string): void => {
+    if (res.hasHeader(name)) return;
+    res.setHeader(name, value);
+    applied.push(name);
+  };
+  // `no-transform` is what keeps a body-rewriting middleware (`compression`) and a proxy from holding the first frames back.
+  set('cache-control', 'no-store, no-transform');
+  set('x-accel-buffering', 'no');
+  set('content-type', 'text/event-stream; charset=utf-8');
+  if (head) {
+    res.end();
+    return;
+  }
+  // The client left while the handler was still running: nothing to stream to, and nothing was started.
+  if (res.destroyed || req.socket.destroyed) return;
+  try {
+    req.socket.setNoDelay(true);
+  } catch {
+    // Optional: a socket that cannot (an HTTP/2 compat proxy, a test double) still streams, only less eagerly.
+  }
+  try {
+    // A peer that vanished without a FIN (a phone changing network) is noticed by the OS in about a minute, not after the default 2 hours.
+    req.socket.setKeepAlive(true, 15_000);
+  } catch {
+    // Optional, as above.
+  }
+
+  let finished = false; // the client is gone or the response has ended: no more writes
+  let cancelled = false;
+  let cancel: (() => void) | undefined;
+  const runCancel = (): void => {
+    if (!finished || cancelled || cancel === undefined) return;
+    cancelled = true;
+    try {
+      cancel();
+    } catch (err) {
+      safeWarn(logger, 'chatwarden.http_error', { error: errorClass(err) });
+    }
+  };
+  const gone = (): void => {
+    finished = true;
+    runCancel();
+  };
+  res.on('close', gone);
+  res.on('error', gone);
+
+  const returned = stream.start({
+    write(chunk: string): boolean {
+      if (finished || res.destroyed || res.writableEnded) return false;
+      try {
+        return res.write(chunk);
+      } catch {
+        return false;
+      }
+    },
+    end(): void {
+      if (!finished && !res.destroyed && !res.writableEnded) {
+        try {
+          res.end();
+        } catch {
+          // already gone
+        }
+      }
+      gone();
+    },
+  });
+  if (typeof returned === 'function') cancel = returned;
+  if (!res.headersSent && !res.writableEnded && !res.destroyed) res.flushHeaders();
+  runCancel();
+}
+
+/**
  * Mount kit routes (`adminRoutes`, `playerRoutes`, `healthRoutes`, or a table of your own) on an Express app:
  * `app.use('/admin', toExpress(adminRoutes(cw, { authorize })))`.
  *
@@ -188,6 +275,12 @@ function send(res: Response, kit: KitResponse, applied: string[], head = false):
  *   can reach a client: it is logged (`chatwarden.http_error`, error class only), the headers the adapter set are
  *   removed and the kit 500 `{ error: 'internal' }` is sent; if the headers had already gone out the connection is
  *   destroyed.
+ * - A `KitResponse` with `stream` stays open (Server-Sent Events): the adapter sends the status and headers, adds
+ *   `cache-control: no-store, no-transform`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` where the route
+ *   set none, turns off the socket's Nagle delay, calls `stream.start(sink)` and calls the cancel it returns exactly once,
+ *   when the client leaves or the sink ends the response. `body` is ignored; a HEAD gets the headers and no `start`. A
+ *   throw from `start` before any byte is the kit 500; after the first byte the connection is destroyed (that `start`
+ *   returned no cancel, so it releases what it took itself).
  *
  * `express` is a peer dependency (^5): this module imports `Router` from it, so import `@chatwarden/http/express` only
  * in an Express app.
@@ -245,7 +338,9 @@ export function toExpress(routes: RouteTable, options: ExpressOptions = {}): Rou
         rawBody: body.text,
         ...(typeof req.socket.remoteAddress === 'string' ? { remoteAddress: req.socket.remoteAddress } : {}),
       };
-      send(res, await handle(kit), applied, req.method === 'HEAD');
+      const response = await handle(kit);
+      if (response.stream === undefined) send(res, response, applied, req.method === 'HEAD');
+      else sendStream(req, res, response, response.stream, applied, req.method === 'HEAD', logger);
     } catch (err) {
       safeWarn(logger, 'chatwarden.http_error', { error: errorClass(err) });
       if (res.headersSent || res.writableEnded) {

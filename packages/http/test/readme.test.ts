@@ -304,3 +304,53 @@ describe('packages/http/README.md: gap notes, matchRoute and the retry-after flo
     expect(hooks).toContain(`${RETRY_AFTER_CAP_MS / 1000} seconds`);
   });
 });
+
+describe('packages/http/README.md, Chat', () => {
+  const chat = section(http, 'Chat').replace(/\s+/g, ' ');
+
+  it('shows the whole setup: the broadcaster, the routes, identify, join and noticePending', () => {
+    expect(chat).toContain('createRoomBroadcaster(cw)');
+    expect(chat).toContain('chatRoutes(cw, chat,');
+    expect(chat).toContain('identify');
+    expect(chat).toContain('join');
+    expect(chat).toContain('chat.noticePending(subject)');
+    expect(chat).toContain('chat.close()');
+  });
+
+  it('lists the four routes with their answers, and the JSON-only and silent-mute rules', () => {
+    for (const route of ['GET /rooms/:room/stream', 'POST /rooms/:room/lines', 'POST /rooms/:room/mute', 'POST /rooms/:room/report']) expect(chat, route).toContain(`\`${route}\``);
+    expect(chat).toContain('{ ok, hiddenIds }');
+    expect(chat).toMatch(/must be `application\/json`/);
+    expect(chat).toMatch(/A mute is silent/);
+    expect(chat).toMatch(/A refused line is never echoed to anyone but its author/);
+    expect(chat).toMatch(/with no seat, subject, key, hash or address/);
+  });
+
+  it('says what to do behind a proxy: no compression over the stream, buffering off, idle timeout above the heartbeat', () => {
+    expect(chat).toMatch(/Do not put `compression` middleware over `text\/event-stream`/);
+    expect(chat).toContain('x-accel-buffering: no');
+    expect(chat).toMatch(/idle timeout must be longer than the heartbeat/);
+  });
+
+  it('advises one process per room (sticky rooms) and says no cross-process bus is shipped', () => {
+    expect(chat).toMatch(/sticky rooms: route all of a room's connections to one process/);
+    expect(chat).toMatch(/A pub\/sub hook between processes is not shipped/);
+  });
+
+  it('warns that name is a display name, not an identifier', () => {
+    expect(chat).toMatch(/`name` is a display name, not an identifier/);
+    expect(chat).toMatch(/returns an account id as the name has leaked it itself/);
+  });
+
+  it('states the byModerator caveat and the newer-core requirement', () => {
+    expect(chat).toMatch(/a stored automatic chat timeout reads as a moderator's/);
+    expect(chat).toContain('cw.chat.restrictedBySubject');
+    expect(chat).toMatch(/from the same release/);
+  });
+
+  it('shows the Socket.IO sketch with the sink, and names ChatSink, ping and end', () => {
+    expect(chat).toContain('io.on(\'connection\'');
+    expect(chat).toContain('session.open({ write:');
+    expect(chat).toMatch(/`ChatSink` \(`write`, and optionally `ping` and `end`\)/);
+  });
+});

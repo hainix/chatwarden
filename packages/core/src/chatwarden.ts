@@ -253,6 +253,15 @@ export interface Chatwarden {
      * address alone finds nobody). An empty `roomId` or `seatId` counts as not given. Never carries an identifier.
      */
     restricted(who: RawWho, opts?: { roomId?: string | null; seatId?: string | null }): RestrictedAnswer;
+    /**
+     * `restricted` for a person you already hold as a subject id (`cw.rooms.subjectAt`), so a server that keeps a seated player's
+     * connection open can ask again without keeping their raw client key, account or address in memory. The same answer, the same
+     * rules (a merge is followed, a failure reads as not restricted and is logged once a minute), the same shape; `opts` as in
+     * `restricted`. A value that is not a subject id, or a subject nobody holds, reads `{ restricted: false, until: null, kind: null }`.
+     * A subject id is an identifier: pass it from server code, never from what a client sent, and never send it to a player.
+     * @experimental
+     */
+    restrictedBySubject(subject: SubjectId, opts?: { roomId?: string | null; seatId?: string | null }): RestrictedAnswer;
   };
   mutes: {
     /** `viewerSeat`'s occupant mutes (`on`) or unmutes `targetSeat`'s occupant. Does nothing if either seat has no subject. */
@@ -930,6 +939,15 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       restricted: (who, o) => {
         try {
           return chat.restricted(personOf(who), o?.roomId, o?.seatId);
+        } catch (err) {
+          restrictedWarn.warn('chatwarden.restricted_failed', { error: err instanceof Error ? err.name : typeof err });
+          return { restricted: false, until: null, kind: null };
+        }
+      },
+      restrictedBySubject: (subject, o) => {
+        if (typeof subject !== 'string' || subject === '') return { restricted: false, until: null, kind: null };
+        try {
+          return chat.restricted(subject, o?.roomId, o?.seatId);
         } catch (err) {
           restrictedWarn.warn('chatwarden.restricted_failed', { error: err instanceof Error ? err.name : typeof err });
           return { restricted: false, until: null, kind: null };

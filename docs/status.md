@@ -15,6 +15,16 @@ Updated 2026-11-12. The full roadmap and the reasoning behind it: [design/2026-1
 | K4 | Moderator hub (`hub-react`: team workbench, Simple mode, settings, four ways to adopt), `player-react`, `hub-element`; editable steps and ladder; configurable one-tap reporting; site demo on the real hub. Releases as 0.1.2 | PR #12 |
 | Triage speed | One-click "Nothing wrong here" with no typed reason, auto-advance with Undo after the move, bulk dismiss, reporter accuracy and the habitual-reporter ranking, keyboard queue mode. Releases as 0.1.5 | PR #20 (plan: [plans/2026-11-11-triage-speed.md](plans/2026-11-11-triage-speed.md)) |
 
+## Chat box (0.1.6; version prepared, not merged or published: the owner tags it, see [RELEASING.md](../RELEASING.md))
+A game with no chat adds moderated chat in minutes: `@chatwarden/http` gains a room broadcaster and four routes (Server-Sent Events down, `POST`
+up; `@chatwarden/http/chat`), `@chatwarden/player-react` gains `<ChatBox>` and `sseTransport` at the lazy subpath `@chatwarden/player-react/chat`
+(its own words, `enChat`, and `chat.css`), and `examples/tiny-chat` has a browser page that uses them. Design:
+[design/2026-11-12-chat-box.md](design/2026-11-12-chat-box.md); plan: [plans/2026-11-12-chat-box.md](plans/2026-11-12-chat-box.md). All new names are
+`@experimental` until 0.2; no store change, no migration. It needs core 0.1.6, which has `cw.chat.restrictedBySubject`: the `@chatwarden/http` peer floor on core is `^0.1.6` (raised by hand; player-react, hub-react and
+hub-element keep theirs). Known limits, written in the READMEs: rooms are per process (sticky rooms, no cross-process bus); every line is announced
+politely in the log, with one tab stop per line; a stored automatic chat timeout reads as a moderator's in `hello` until the next refused line.
+Not yet: the site demo adopting the box, and the site headline (after the release is on npm); pacing words wait for flood control (plan Task 11).
+
 ## Next
 - **K3c: AI levels 1-2** (read and recommend), **in progress** on branch `ai-levels`, built and reviewed, releasing as 0.1.7 after the chat box
   (0.1.6). The AI reads a report after the player's ack, shows a strip in the hub and, at level 2, pre-fills a mild decision the moderator accepts

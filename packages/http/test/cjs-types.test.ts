@@ -40,7 +40,12 @@ function resolve(specifier: string, declared: string[], patch?: (packagePath: st
   return found === undefined ? undefined : norm(found.resolvedFileName);
 }
 
-const BUILT = ['packages/http/dist/src/index.d.ts', 'packages/http/dist/src/express.d.ts', 'packages/http/dist/src/admin-entry.d.ts'];
+const BUILT = [
+  'packages/http/dist/src/index.d.ts',
+  'packages/http/dist/src/express.d.ts',
+  'packages/http/dist/src/admin-entry.d.ts',
+  'packages/http/dist/src/chat/index.d.ts',
+];
 
 describe('@chatwarden/http under module commonjs / moduleResolution node', () => {
   it('resolves the "./express" subpath types', () => {
@@ -49,6 +54,10 @@ describe('@chatwarden/http under module commonjs / moduleResolution node', () =>
 
   it('resolves the "./admin" subpath types', () => {
     expect(resolve('@chatwarden/http/admin', BUILT)).toMatch(/\/packages\/http\/dist\/src\/admin-entry\.d\.ts$/);
+  });
+
+  it('resolves the "./chat" subpath types', () => {
+    expect(resolve('@chatwarden/http/chat', BUILT)).toMatch(/\/packages\/http\/dist\/src\/chat\/index\.d\.ts$/);
   });
 
   it('still resolves the package root types', () => {
@@ -63,6 +72,7 @@ describe('@chatwarden/http under module commonjs / moduleResolution node', () =>
     };
     expect(resolve('@chatwarden/http/express', BUILT, stripped)).toBeUndefined();
     expect(resolve('@chatwarden/http/admin', BUILT, stripped)).toBeUndefined();
+    expect(resolve('@chatwarden/http/chat', BUILT, stripped)).toBeUndefined();
     expect(resolve('@chatwarden/http', BUILT, stripped)).toMatch(/index\.d\.ts$/);
   });
 

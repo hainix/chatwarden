@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/player-react",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": false,
   "description": "Player-facing React components for Chatwarden: the notice dialog, My record, the rules page, a report dialog and a restricted-chat line, over the player HTTP routes.",
   "license": "Apache-2.0",
@@ -32,10 +32,23 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./chat": {
+      "types": "./dist/src/chat/index.d.ts",
+      "default": "./dist/src/chat/index.js"
+    },
+    "./chat.css": "./src/chat.css"
+  },
+  "typesVersions": {
+    "*": {
+      "chat": [
+        "dist/src/chat/index.d.ts"
+      ]
+    }
   },
   "sideEffects": [
-    "./src/styles.css"
+    "./src/styles.css",
+    "./src/chat.css"
   ],
   "files": [
     "dist/src",
@@ -52,10 +65,10 @@
     "react-dom": "^18.3.0 || ^19.0.0"
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.5",
-    "@chatwarden/http": "0.1.5",
-    "@chatwarden/hub-react": "0.1.5",
-    "@chatwarden/store-memory": "0.1.5",
+    "@chatwarden/core": "0.1.6",
+    "@chatwarden/http": "0.1.6",
+    "@chatwarden/hub-react": "0.1.6",
+    "@chatwarden/store-memory": "0.1.6",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

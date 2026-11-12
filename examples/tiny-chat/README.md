@@ -13,6 +13,21 @@ Anything the server sends back is `{type:'welcome'|'chat'|'refused'|'notices'|'a
 threats and hate are not."), to show above the chat. A `refused` frame may carry `rule` (show it as "Community Rule N") and `noticeId` (the player's own notice that
 explains the refusal). `POST /report` files a report (`{ key, targetSeat, category }`).
 
+## The browser page (the chat box)
+
+`npm start` also builds a page that uses the chat box, and serves it at `http://127.0.0.1:3000/`. It is the HTTP chat beside the
+WebSocket protocol above: `createRoomBroadcaster(chatwarden)` and `chatRoutes` from `@chatwarden/http`, mounted at `/chat` (Server-Sent
+Events down, `POST` up), and `<ChatBox>` with `sseTransport` from `@chatwarden/player-react/chat` on the page (`web/chat-page.tsx`,
+bundled by `web/build.mjs` into `dist/web/`). The page also mounts `NoticeQueue` and, behind the box's Chat options, `RulesPage`.
+
+- Open `/?as=alice` in one tab and `/?as=bob` in another to be two players (`?as=` picks the demo key; without it the page makes a
+  key and keeps it in `localStorage`). The name other players see is `Player N`, N counted by the server per key, never any part of it.
+- The identity is DEMO ONLY, as for `/api`: the `x-chatwarden-key` header (or `?key=`). A real game passes its own session to
+  `identify` and its own room check to `join`.
+- Try a blocked line (the synthetic term `zorbak`): the box shows the refusal and keeps the draft. Use Report or Mute from the small
+  control on another player's line; a sanction from the staff hub (`/mod`) shows as the restricted line, and the notice dialog appears.
+- A strict CSP: scripts, styles and connections from this origin only. Rooms are per process: route a room's players to one process.
+
 The rest of the HTTP surface is the kit's own routes from `@chatwarden/http`, mounted with its Express adapter
 (`toExpress` from `@chatwarden/http/express`): `/admin/*` is the staff API (`adminRoutes`), `/api/*` the player API
 (`playerRoutes`), and `/healthz` and `/readyz` the probes (`healthRoutes`). The adapter reads the raw body itself, so it

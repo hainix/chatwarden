@@ -111,7 +111,7 @@ For the moderators' screens and the player's notices, mount the routes in
 | Part | What it is for |
 | --- | --- |
 | `cw.rooms` | `seat`, `seatConnection`, `unseat`, `close`: who is in which seat of which room. |
-| `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. `restricted(who)` says whether a person is chat-restricted, for typing indicators. |
+| `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. `restricted(who)` says whether a person is chat-restricted, for typing indicators; `restrictedBySubject(subject)` (`@experimental`) says the same for a subject id from `cw.rooms.subjectAt`, so a server that keeps a connection open need not keep the player's key to ask again. |
 | `cw.mutes` | A player mutes another player for themselves only. |
 | `cw.reports` | `submit` and `addDetail` (players; see "Reporting settings"), `list`, `get` and `reporterRecord` (staff). `reporterRecord(person)` is how the reports a person filed stand: `{ reports, open, actioned, dismissed, badFaith, suspendedUntil, reasonMatched, reasonDecided, accuracy }`. `reporterAccuracy(people)` is how often each person's recent reports turned out to be unfounded (see "Reporter accuracy"). |
 | `cw.decide(input)` | A moderator closes a report and writes the sanctions and notices in one transaction. Safe to send twice. `reason` is required, except for a `no_action` with no actions (a one-click dismissal): leave it out and the standard reason `NO_ACTION_DEFAULT_REASON` (`No action needed`) is stored. |

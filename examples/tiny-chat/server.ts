@@ -32,6 +32,16 @@
 //   /healthz, /readyz   the probes (`healthRoutes`)
 // Optional Discord feed (`@chatwarden/discord`): set DISCORD_WEBHOOK_URL (and DISCORD_MENTION_ROLE_ID) to post reports and
 //   outcomes into a forum channel. Off otherwise. The links in the posts open the /admin routes above.
+//   /chat/*    the HTTP chat (`chatRoutes` over `createRoomBroadcaster`, the room broadcaster in `@chatwarden/http`): the same chat as the
+//              WebSocket protocol above, for a browser: Server-Sent Events down, POST up.
+//              GET  /chat/rooms/:room/stream           the stream (hello, line, hide, state, notices, bye frames)
+//              POST /chat/rooms/:room/lines { text }   -> { ok: true, line } | { ok: false, refused: { reason, until?, rule?, noticeId?, ... } }
+//              POST /chat/rooms/:room/mute { lineId | ref, on }       -> { ok, hiddenIds }
+//              POST /chat/rooms/:room/report { lineId, reason?, note? } -> { ok: true, remaining } | { ok: false, refused }
+//              DEMO ONLY identity, as for /api: the `x-chatwarden-key` header, or `?key=`. The name other players see is `Player N`, N a
+//              counter this server assigns per key (never any part of the key). Rooms are per process: route a room's players to one process.
+//   /          the page that uses it (`@chatwarden/player-react/chat`'s ChatBox, built into dist/web by `npm start`), with /chat.js and
+//              /chat.css. A strict CSP: scripts, styles and connections from this origin only.
 // Tiny chat's own HTTP: POST /report { key, targetSeat, category, note?, lineId? } -> 200 { ok, remaining } | 4xx { ok: false, refused }
 //
 // "key" stands in for whatever credential your game already has (a session token, a device id). It is sent as a
@@ -39,6 +49,7 @@
 // carries it, a subject id or a hash back to a player.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +66,7 @@ import {
   type RawWho,
 } from '@chatwarden/core';
 import { discordFeed, type DiscordFeed } from '@chatwarden/discord';
-import { adminRoutes, healthRoutes, playerRoutes, type KitRequest } from '@chatwarden/http';
+import { adminRoutes, chatRoutes, createRoomBroadcaster, healthRoutes, playerRoutes, type KitRequest } from '@chatwarden/http';
 import { toExpress } from '@chatwarden/http/express';
 import { LiveTerms, type TermPack } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
@@ -63,6 +74,8 @@ import { createProfanityFilter } from '@chatwarden/profanity';
 import { openStore } from '@chatwarden/store-sqlite';
 
 const ROOM = 'lobby';
+/** The most players the chat demo numbers (it keeps a small table in memory). Under the broadcaster's 500 per room. */
+const MAX_DEMO_PLAYERS = 400;
 const GAME_NAME = 'tiny-chat';
 const CATEGORIES = ['harassment', 'hate', 'cheating', 'spam', 'disruption', 'other'] as const;
 type Category = (typeof CATEGORIES)[number];
@@ -241,6 +254,33 @@ function demoScript(input: AIReadInput): { output: unknown } {
   return { output: { ...base, rule, recommendation: { ...base.recommendation, rule } } };
 }
 
+const CHAT_PAGE_CSP = ["default-src 'none'", "script-src 'self'", "style-src 'self'", "connect-src 'self'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; ');
+
+/** The page the chat box lives on. Its script and stylesheet are /chat.js and /chat.css. */
+const CHAT_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tiny-chat</title>
+<link rel="stylesheet" href="/chat.css">
+</head>
+<body>
+<!-- DEMO ONLY identity: the page makes its own key and sends it in a header. A real game uses its own session. -->
+<div id="root"></div>
+<script type="module" src="/chat.js"></script>
+</body>
+</html>
+`;
+
+/** Where the built page is: next to the compiled server (dist/web), or under dist/ when run from source. Null when it is not built. */
+function webDir(): URL | null {
+  for (const dir of [new URL('./web/', import.meta.url), new URL('./dist/web/', import.meta.url)]) {
+    if (existsSync(new URL('chat.js', dir))) return dir;
+  }
+  return null;
+}
+
 export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat> {
   const secret = resolveSecret(opts.secret);
   // An empty token (option or environment variable) is no token: the route stays off rather than open to an empty header.
@@ -284,6 +324,8 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
         for (const seat of seats.values()) {
           if (chatwarden.rooms.subjectAt(ROOM, seat.seatId) === subject) pushNotices(seat);
         }
+        // The same news for the browser chat: its open boxes are told a notice is waiting (nothing about it is sent).
+        chat.noticePending(subject);
       },
     },
     matcher: terms,
@@ -298,6 +340,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     clock,
     onReport: opts.onReport,
   });
+
+  // The room broadcaster for the HTTP chat. `chatwarden` is assigned above; `platform.notify` reads `chat` only when a notice lands.
+  const chat = createRoomBroadcaster(chatwarden);
 
   // The optional Discord feed. Off unless a webhook URL is configured. The hub links point at this demo's own admin routes
   // (open them with the `x-admin-token` header); a real app links to its moderator console. `origin` is known once the
@@ -423,6 +468,54 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     ),
   );
 
+  // The HTTP chat. DEMO ONLY identity, as for /api. The display name is `Player N`: N is counted per key and the key is never in it.
+  const credentialOf = (req: KitRequest): string | undefined => {
+    const key = req.headers['x-chatwarden-key'] ?? req.query.key;
+    return key === undefined || key === '' ? undefined : key;
+  };
+  const players = new Map<string, number>();
+  app.use(
+    '/chat',
+    toExpress(
+      chatRoutes(chatwarden, chat, {
+        identify: (req: KitRequest): RawWho => {
+          const key = credentialOf(req);
+          return { ...(key === undefined ? {} : { clientKey: key }), ip: req.remoteAddress ?? null };
+        },
+        join: (req, roomId) => {
+          // The demo has one room: a room id from the URL does not make a room, and the table of numbered players is bounded.
+          if (roomId !== ROOM) return null;
+          const key = credentialOf(req) ?? '';
+          let n = players.get(key);
+          if (n === undefined) {
+            if (players.size >= MAX_DEMO_PLAYERS) return null;
+            n = players.size + 1;
+            players.set(key, n);
+          }
+          return { name: `Player ${n}` };
+        },
+      }),
+      { fallthrough: false },
+    ),
+  );
+
+  // The page and its bundle (built into dist/web by `npm start`). Static, no data; a strict CSP.
+  const asset = async (res: Response, file: string, type: string, csp?: string): Promise<void> => {
+    const dir = webDir();
+    if (dir === null) {
+      res.status(503).type('text').send('The chat page is not built: run npm start (or node web/build.mjs).');
+      return;
+    }
+    try {
+      res.status(200).set({ 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...(csp === undefined ? {} : { 'content-security-policy': csp }) }).type(type).send(await readFile(new URL(file, dir)));
+    } catch {
+      res.status(503).type('text').send('The chat page is not built: run npm start (or node web/build.mjs).');
+    }
+  };
+  app.get('/', (_req, res) => void res.status(200).set({ 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': CHAT_PAGE_CSP }).type('html').send(CHAT_PAGE));
+  app.get('/chat.js', (_req, res) => void asset(res, 'chat.js', 'text/javascript; charset=utf-8'));
+  app.get('/chat.css', (_req, res) => void asset(res, 'chat.css', 'text/css; charset=utf-8'));
+
   app.post('/report', express.json(), async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const { key, targetSeat, category, note, lineId } = body;
@@ -541,6 +634,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     discord: discord !== undefined,
     close: async () => {
       discord?.dispose();
+      chat.close();
       for (const { ws } of seats.values()) ws.terminate();
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       http.closeAllConnections();
