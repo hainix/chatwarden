@@ -872,6 +872,36 @@ describe('the appeals and names docs (0.1.9)', () => {
     }
   });
 
+  it('every CHANGELOG says in its first line that 0.1.9 adds notice kinds and a one-way migration, and carries the upgrade notes', () => {
+    for (const dir of published) {
+      const log = flat(read('packages', dir, 'CHANGELOG.md'));
+      const at = log.indexOf('## 0.1.9');
+      expect(at, dir).toBeGreaterThanOrEqual(0);
+      const text = log.slice(at, log.indexOf('## 0.1.8', at));
+      expect(text.slice(0, 400), `${dir} first line`).toContain('Adds notice kinds and a one-way migration');
+      for (const needle of [
+        '`rename_required`, `appeal_upheld`, `appeal_reduced` and `appeal_revoked` join `NoticeKind`', '`assertNever`', 'SQLite migration 22 is one-way', 'Take a backup',
+        'cannot be opened by 0.1.8 or older', '**A reduction on appeal is not a false positive**', '`names.maskInHub` (default `true`)', 'the one default-on display change',
+        '`overrides.names.maskInHub: false`', '`appeals.read` (default `moderator`', '`appeals.decide` (default `senior`', 'An older player-react shows the generic title',
+        '28 keys', 'from 11 KB to 14 KB', 'from 82 KB to 88 KB', 'The AI prompt version is now 4 for everyone', 'count against your daily call and money caps',
+        '`PurgeResult` gains `appeals`, `appealStatements`, `blockedNames` and `appealsClosed`', '`withdrawNotice(id, at)` is new and optional', 'a custom store without it has renames off',
+        '`closeOrphanAppeals`', '`clearStatement`', '`purgeNotices(before, unseen?)`', '`@experimental` until 0.2', 'No new package is published',
+      ]) {
+        expect(text, `${dir}: ${needle}`).toContain(needle);
+      }
+      // Every raised floor is named with the API that forced it.
+      for (const pkg of ['store-memory', 'store-sqlite', 'http', 'discord', 'hub-react', 'player-react']) expect(text, `${dir} names ${pkg}`).toContain(`\`@chatwarden/${pkg}\``);
+      for (const api of ['`AppealRow` and `BlockedNameRow`', '`cw.appeals`', '`APPEAL_STATEMENT_MAX`', '`AppealRefusal`, `PlayerAppeal` and `NameReason`', 'the two appeal events']) expect(text, `${dir}: ${api}`).toContain(api);
+    }
+  });
+
+  it('the 0.1.8 CHANGELOG text is unchanged by 0.1.9 (the control: it does not mention migration 22)', () => {
+    const log = flat(read('packages', 'core', 'CHANGELOG.md'));
+    const at = log.indexOf('## 0.1.8');
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(log.slice(at, log.indexOf('## 0.1.7', at))).not.toContain('migration 22');
+  });
+
   it('the control: a feature the docs do not have is not found', () => {
     expect(core).not.toContain('`definitelyNotAnAppealSetting`');
   });
