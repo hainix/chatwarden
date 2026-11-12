@@ -24,7 +24,12 @@ export const RANK_WEIGHTS = freeze({
   volumeMax: 0.5,
   volumeExtra: 4,
   reporterClamp: 0.5,
+  /** The most the signal-feed conduct term adds or takes (the same clamp as the reporter's). */
+  conductClamp: 0.5,
 });
+
+/** What a person who meets the queue signal feed (`boosted`) adds to the `priority` score: half a point, the clamp of its seam. @experimental */
+export const SIGNAL_BOOST = 0.5;
 
 const known = (table: Readonly<Record<string, number>>, key: string): number | undefined => (Object.hasOwn(table, key) ? table[key] : undefined);
 
@@ -72,6 +77,23 @@ export const reporterSignal = (g: QueueGroup): number => {
 };
 
 /**
+ * The hub's conduct signal for the `priority` sort: {@link SIGNAL_BOOST} for a person the server marked `boosted` (they meet the queue signal feed),
+ * else 0. Staff set the feed in Settings, Advanced, Signals; nothing is shown for it.
+ * @experimental
+ */
+export const conductSignal = (g: QueueGroup): number => (g.boosted === true ? SIGNAL_BOOST : 0);
+
+/** One seam's answer: finite numbers only, clamped to plus or minus `clamp`; anything else (or a throw) adds nothing. */
+function said(fn: ((g: QueueGroup) => number) | undefined, g: QueueGroup, clamp: number): number {
+  try {
+    const got: unknown = fn?.(g);
+    return typeof got === 'number' && Number.isFinite(got) ? Math.max(-clamp, Math.min(clamp, got)) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * The `priority` score of a case at `now`: wait + volume + ai + reporter. A weight, not a filter: nothing is hidden, and after 24 hours any case
  * outranks a fresh unread one. The seam for the triage-speed plan's reporter signal.
  * @experimental
@@ -84,14 +106,7 @@ export function priorityScore(g: QueueGroup, now: number, signals: RankSignals =
   const volume = g.open > 1 ? (w.volumeMax * Math.min(g.open - 1, w.volumeExtra)) / w.volumeExtra : 0;
   const read = brief === null ? w.neutral : readWeight(brief);
   const ai = brief !== null && unread === 0 ? read : Math.max(read, w.neutral);
-  let said = 0;
-  try {
-    const got: unknown = signals.reporter?.(g);
-    if (typeof got === 'number' && Number.isFinite(got)) said = Math.max(-w.reporterClamp, Math.min(w.reporterClamp, got));
-  } catch {
-    said = 0;
-  }
-  return wait + volume + ai + said;
+  return wait + volume + ai + said(signals.reporter, g, w.reporterClamp) + said(signals.conduct, g, w.conductClamp);
 }
 
 /** The sort `groupQueue` uses for `priority` once this is loaded: the AI fields are set on each group, then the highest score first (ties by person ref). */
@@ -103,7 +118,7 @@ function rankGroups(groups: QueueGroup[], options: { signals?: RankSignals; now?
     g.aiUnread = unread;
     g.reporterFalseRate = rate;
   }
-  const signals = options.signals ?? { reporter: reporterSignal };
+  const signals = options.signals ?? { reporter: reporterSignal, conduct: conductSignal };
   const scores = new Map(groups.map((g) => [g, priorityScore(g, at, signals)]));
   groups.sort((a, b) => (scores.get(b) as number) - (scores.get(a) as number) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
 }

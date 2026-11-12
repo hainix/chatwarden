@@ -4,6 +4,7 @@ import { ReporterStanding, ReporterTotals } from '../case/ReporterStanding.js';
 import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
 import { categoryLabel, groupName } from '../labels.js';
+import { LazySignalLines } from '../lazyParts.js';
 import { Revoke } from '../person/Revoke.js';
 import { SanctionForm } from '../person/SanctionForm.js';
 import type { SanctionGroupView, PersonHistory } from '../types.js';
@@ -145,6 +146,7 @@ function PersonBody({ history, revoking, setRevoking, onRevoked }: { history: Pe
             </ul>
           </>
         )}
+        {Array.isArray(history.signals) && history.signals.length > 0 && <LazySignalLines signals={history.signals} />}
       </Panel>
       <Panel title={t('hub.person.reporter.title')}>
         <div className="cw-panel-pad">

@@ -189,6 +189,7 @@ describe('@chatwarden/hub-react', () => {
         "SanctionSource",
         "SettingsSection",
         "ShortcutAction",
+        "SignalCountView",
         "StaffReport",
         "SuggestInput",
         "Suggestion",
@@ -386,6 +387,7 @@ describe('@chatwarden/hub-react/headless', () => {
         "SanctionRow",
         "SanctionSource",
         "Session",
+        "SignalCountView",
         "StaffReport",
         "StartResult",
         "Store",
@@ -435,6 +437,7 @@ describe('@chatwarden/player-react', () => {
         "en",
         "fetchTransport",
         "routerTransport",
+        "secondsLeft",
         "timeLeft",
         "toPlayerError",
         "untilText",
@@ -565,6 +568,7 @@ describe('what is marked @experimental', () => {
         "SanctionInput",
         "SanctionRow",
         "SanctionSource",
+        "SignalCountView",
         "SuggestInput",
         "TeamMember",
         "TermInput",
@@ -722,6 +726,7 @@ describe('what is marked @experimental', () => {
         "SanctionRow",
         "SanctionSource",
         "Session",
+        "SignalCountView",
         "StartResult",
         "Store",
         "SubmitDecision",
@@ -831,6 +836,7 @@ describe('what is marked @experimental', () => {
         "HubController.refresh",
         "HubControllerOptions.host",
         "LiveQueueStore.refresh",
+        "PersonHistory.signals",
         "PolicyLayer.pace",
         "PolicyLayer.signals",
         "PolicyState.dropped",
@@ -857,8 +863,8 @@ describe('what is marked @experimental', () => {
     for (const name of hub.experimental) expect([...hub.values, ...hub.types], name).toContain(name);
   });
 
-  it('player-react marks nothing: it is the small, settled side', () => {
-    expect(exportsOf(PLAYER).experimental).toEqual([]);
+  it('player-react marks only the pause helper of flood control (0.1.8, until 0.2): it is otherwise the small, settled side', () => {
+    expect(exportsOf(PLAYER).experimental).toEqual(['secondsLeft']);
   });
 
   it('every new value export of the main entry is marked (nothing slips in unmarked)', () => {

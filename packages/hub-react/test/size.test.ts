@@ -167,6 +167,13 @@ describe('bundle size', () => {
     }
   });
 
+  it('keeps the Person page signal lines out of the entry: a chunk of its own, loaded when a record has counts', async () => {
+    const { entryInputs, eagerInputs, chunkRoots } = await bundle();
+    expect(entryInputs.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toEqual([]);
+    expect(eagerInputs.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toEqual([]);
+    expect(chunkRoots.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toHaveLength(1);
+  });
+
   it('the stylesheet is small too', async () => {
     const { readFile } = await import('node:fs/promises');
     const css = await readFile(fileURLToPath(new URL('../src/styles.css', import.meta.url)));
