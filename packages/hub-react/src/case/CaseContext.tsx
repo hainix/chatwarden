@@ -105,15 +105,24 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   }, []);
 
   // When the case was drawn (its read is in), on the monotonic clock: act keys and quick buttons wait a moment after it.
+  const [aiCase, setAiCase] = useState<AiCaseApi | null>(null);
+  const aiOk = aiCase?.gate?.ok === true;
   const shownAt = useRef<number | null>(null);
   const hasData = detail.data !== undefined;
   if (hasData && shownAt.current === null) shownAt.current = monotonicNow();
+  // The AI's suggestion appearing or leaving changes what 1, A and Ctrl+Enter send: the quick-act wait starts again, as for a new case.
+  const armedFor = useRef(aiOk);
+  if (armedFor.current !== aiOk) {
+    armedFor.current = aiOk;
+    if (shownAt.current !== null) shownAt.current = monotonicNow();
+  }
   const [cooled, setCooled] = useState(false);
   useEffect(() => {
     if (!hasData) return undefined;
+    setCooled(false);
     const id = setTimeout(() => setCooled(true), QUICK_ACT_COOLDOWN_MS);
     return () => clearTimeout(id);
-  }, [hasData]);
+  }, [hasData, aiOk]);
   const settled = useCallback(() => hasAged(shownAt.current), []);
 
   const claim = group !== null ? group.claim : (detail.data?.claim ?? null);
@@ -125,8 +134,14 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   const aiRead = detail.data?.ai ?? null;
   const [aiFirst, setAiFirst] = useState<DecisionForm | null>(null);
   const [aiDecided, setAiDecided] = useState(false);
-  const [aiCase, setAiCase] = useState<AiCaseApi | null>(null);
-  const aiBus = useMemo<AiBus>(() => ({ first: setAiFirst, decided: setAiDecided, publish: setAiCase, edit: { current: null } }), []);
+  const aiBus = useMemo<AiBus>(() => ({ first: setAiFirst, decided: setAiDecided, publish: setAiCase, edit: { current: null }, hidden: { current: false } }), []);
+  // A part chunk that never arrives must not hold the form: after a few seconds it opens as the ladder's (a read that lands later takes over, see AiCase).
+  const waitsForAi = aiRead?.recommendation != null && !aiDecided;
+  useEffect(() => {
+    if (!waitsForAi) return undefined;
+    const id = setTimeout(() => setAiDecided(true), 4_000);
+    return () => clearTimeout(id);
+  }, [waitsForAi]);
 
   const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide'), aiFirst, aiDecided });
 
@@ -144,7 +159,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     aiRead,
     aiCase,
     aiBus,
-    echo: (accepted, form) => (aiCase !== null ? aiCase.echo(accepted, form) : aiRead === null ? undefined : { readId: aiRead.id, accepted: false }),
+    echo: (accepted, form) => (aiCase !== null ? aiCase.echo(accepted, form) : aiRead === null || aiBus.hidden.current ? undefined : { readId: aiRead.id, accepted: false }),
     settled,
     cooled,
     reveal: { all: revealAll, setAll: setRevealAll, shows: (id) => revealAll || revealed.has(id), toggle },

@@ -32,4 +32,6 @@ export interface AiBus {
   publish: (api: AiCaseApi | null) => void;
   /** Opens the editor: set by the decision bar (Detailed) or the card's "Something else" (Simple). */
   edit: MutableRefObject<(() => void) | null>;
+  /** The moderator hid the AI on this case (set by the strip): a read that is not shown is not echoed. */
+  hidden: MutableRefObject<boolean>;
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
 import { isWaiting, useDecisions } from '../decisions.js';
-import { outcomeChoice, toInput } from '../decision.js';
+import { initialForm, outcomeChoice, toInput } from '../decision.js';
 import type { AiFromState, DecisionForm, FormSource } from '../decision.js';
 import { isTypingTarget, modalIn } from '../dom.js';
 import { personName } from '../excerpt.js';
@@ -65,22 +65,26 @@ export function AiCase() {
     aiBus.decided(true);
   }, [draft.status, draft.rulesState, draft.wantsAi, data]);
 
-  // After it exists: a form that came back from an Undo is still the suggestion (the same shape); a read that arrives later, or a newer one, takes over
-  // a form nobody has touched.
+  // After it exists: a form that came back from an Undo is still the suggestion (the same shape); a read that arrives later (the case opened before it
+  // was made, or this part loaded after the form), or a newer one, takes over a form nobody has touched. A form the moderator has changed is never
+  // replaced: the bar then says Edited.
   const ladder = useRef<DecisionForm | null>(null);
   useEffect(() => {
-    if (draft.status !== 'ready' || !decided.current || data === undefined) return;
+    if (draft.status !== 'ready' || data === undefined || report === undefined) return;
     if (!seen.current) {
       seen.current = true;
-      if (aiFrom !== null && draft.form !== adopted && shapeOf(draft.form) === aiFrom.shape) setAdopted(draft.form);
-      else if (aiFrom === null) ladder.current = draft.form;
-      return;
+      if (aiFrom !== null) {
+        if (draft.form !== adopted && shapeOf(draft.form) === aiFrom.shape) setAdopted(draft.form);
+        return;
+      }
+      const fresh = initialForm(draft.ctx, data.suggest.outcome, data.rule, report.lineId, 'x');
+      ladder.current = shapeOf(draft.form) === shapeOf(fresh) ? draft.form : null;
     }
     if (read === null || read.recommendation === null) return;
-    const untouched = aiFrom === null ? draft.form === ladder.current : draft.form === adopted && aiFrom.readId !== read.id;
-    if (!untouched) return;
+    const untouched = aiFrom === null ? ladder.current !== null && draft.form === ladder.current : draft.form === adopted && aiFrom.readId !== read.id;
+    if (aiFrom !== null && !untouched) return;
     const from = make();
-    if (from !== null) take(from, true);
+    if (from !== null) take(from, untouched);
   }, [read?.id, draft.status]);
 
   const source: FormSource = aiFrom === null ? 'ladder' : draft.form === adopted ? 'ai' : 'edited';

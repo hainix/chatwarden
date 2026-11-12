@@ -28,8 +28,17 @@ export function AiStrip({ read }: { read: AiReadView | null }) {
   const [again, setAgain] = useState<string | null>(null);
   // The read (or none) the 20 seconds ran out on.
   const [spent, setSpent] = useState<string | null>(null);
+  // Hiding took the menu away with the focus on it: it goes to Show (not when the case opens already hidden).
+  const show = useRef<HTMLButtonElement>(null);
+  const wasHidden = useRef(hidden);
+  useEffect(() => {
+    if (hidden && !wasHidden.current) show.current?.focus();
+    wasHidden.current = hidden;
+  }, [hidden]);
+  c.aiBus.hidden.current = hidden;
   const key = read?.id ?? '';
-  const rereading = again !== null && again === key;
+  // A Read again that has not landed when the wait runs out is no longer waited for: it can be asked again.
+  const rereading = again !== null && again === key && spent !== key;
   const waiting = spent !== key && (read === null || rereading || read.stale);
 
   const reload = useRef(c.detail.reload);
@@ -48,7 +57,7 @@ export function AiStrip({ read }: { read: AiReadView | null }) {
     return (
       <p className="cw-ai-hidden cw-hint">
         <span>{t('hub.ai.hidden')}</span>{' '}
-        <button type="button" className="cw-linkbtn" onClick={() => setHidden(false)}>
+        <button ref={show} type="button" className="cw-linkbtn" onClick={() => setHidden(false)}>
           {t('hub.ai.show')}
         </button>
       </p>
@@ -97,7 +106,10 @@ export function AiStrip({ read }: { read: AiReadView | null }) {
             {t('hub.ai.checkAgain')}
           </button>
         )}
-        <AiDetails read={read} rereading={rereading} onAsked={() => setAgain(key)} />
+        <AiDetails read={read} rereading={rereading} onAsked={() => {
+            setAgain(key);
+            setSpent(null);
+          }} />
       </div>
       <p className="cw-ai-summary">{read.summary}</p>
     </section>

@@ -20,7 +20,7 @@ class LoadFailure extends Error {
   }
 }
 
-class Boundary extends Component<{ children: ReactNode; onFail: () => void }, { error: unknown }> {
+class Boundary extends Component<{ children: ReactNode; onFail: () => void; hide: boolean }, { error: unknown }> {
   override state: { error: unknown } = { error: null };
 
   static getDerivedStateFromError(error: unknown): { error: unknown } {
@@ -28,12 +28,13 @@ class Boundary extends Component<{ children: ReactNode; onFail: () => void }, { 
   }
 
   override componentDidCatch(error: unknown): void {
-    if (error instanceof LoadFailure) this.props.onFail();
+    if (error instanceof LoadFailure || this.props.hide) this.props.onFail();
   }
 
   override render(): ReactNode {
     const { error } = this.state;
-    if (error !== null && !(error instanceof LoadFailure)) throw error;
+    // A part that breaks while it renders is not ours to catch, except the AI's: those hide themselves (the case is never taken down by advice).
+    if (error !== null && !(error instanceof LoadFailure) && !this.props.hide) throw error;
     return error === null ? this.props.children : null;
   }
 }
@@ -58,7 +59,7 @@ export interface FailureAware {
   onFailed?: () => void;
 }
 
-function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>): { Part: ComponentType<P & FailureAware>; preload: () => void; reset: () => void } {
+function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>, hide = false): { Part: ComponentType<P & FailureAware>; preload: () => void; reset: () => void } {
   const make = () =>
     lazy(() =>
       load().then(
@@ -78,6 +79,7 @@ function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>): { Pa
     }
     return (
       <Boundary
+        hide={hide}
         onFail={() => {
           failed = true;
           onFailed?.();
@@ -104,8 +106,8 @@ function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>): { Pa
 const bulk = lazyPart(() => partLoaders.bulk());
 const sheet = lazyPart(() => partLoaders.sheet());
 const bar = lazyPart(() => partLoaders.bar());
-const strip = lazyPart(() => partLoaders.strip());
-const aiParts = lazyPart(() => partLoaders.aiParts());
+const strip = lazyPart(() => partLoaders.strip(), true);
+const aiParts = lazyPart(() => partLoaders.aiParts(), true);
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
