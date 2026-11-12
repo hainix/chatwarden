@@ -335,3 +335,6 @@ export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
 export { validateAIOutput } from './ai/validate.js';
 export type { AIValidation, AIValidationContext } from './ai/validate.js';
 export { AI_MAX_KIND, AI_MAX_PREFILL_MS, AICeilingError, assertWithinCeilings, automationAllowed } from './ai/ceilings.js';
+export { redactNote, redactText } from './ai/redact.js';
+export { chooseLines, redactReportNote } from './ai/lines.js';
+export type { ChosenLine, ChosenLines } from './ai/lines.js';
