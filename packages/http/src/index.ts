@@ -66,3 +66,14 @@ export {
   webhooksOut,
 } from './webhooks/index.js';
 export type { WebhookEndpoint, WebhookInOptions, WebhooksOut, WebhooksOutOptions } from './webhooks/index.js';
+export { CHAT_WIRE_VERSION } from './chat/wire.js';
+export type {
+  ChatFrame,
+  MuteTarget,
+  ReportOutcome,
+  SendResult,
+  WireLine,
+  WireMuted,
+  WireRefusal,
+  WireRestriction,
+} from './chat/wire.js';
