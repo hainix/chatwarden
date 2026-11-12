@@ -337,7 +337,7 @@ matcher that throws reads as not flagged (logged by class), the same fail-open t
 
 New optional `Store` methods, synchronous like claims and notices; memory and SQLite; one shared contract suite
 (`test/contract/appeals.contract.ts`). A store without them cannot enable appeals: `createChatwarden` throws a plain message when
-`profile.appeals.enabled` is true, and `cw.appeals.enabled()` is false otherwise.
+`profile.appeals.enabled` is true in code. An owner's stored layer is refused on save (`layer.appeals.enabled`) and, if already stored, leaves appeals off with the warning `chatwarden.appeals_unsupported_store`; `cw.appeals.enabled()` is false otherwise.
 
 ```ts
 export interface AppealRow {

@@ -217,6 +217,18 @@ describe('conflicts, refusals and reset', () => {
     expect(limit().value).toBe('5');
   });
 
+  it('a refusal of the on switch (a store that cannot keep appeals) marks the switch, in the same words, and keeps the draft', async () => {
+    const w = await owner();
+    const { user } = await open(w);
+    w.intercept.fn = (req) => (req.method === 'PUT' ? { status: 400, headers: {}, body: { error: 'invalid_profile', message: 'no', path: 'layer.appeals.enabled' } } : undefined);
+    await user.click(sw(ON));
+    await save(user);
+    await screen.findByText(/That setting isn't allowed/i);
+    expect(sw(ON)).toHaveAttribute('aria-invalid', 'true');
+    expect(within(panel()).getByText("This setting isn't allowed.")).toBeInTheDocument();
+    expect(sw(ON).checked).toBe(true);
+  });
+
   it('reset restores the base: the saved appeals go, the other sections stay', async () => {
     const w = await owner({ appeals: { enabled: true, perPlayerPerWeek: 2 } });
     const state = await w.direct.policyProfile();

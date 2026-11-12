@@ -448,7 +448,7 @@ if (waiting !== undefined) {
 
 - **Turning it on.** `overrides.appeals` takes `enabled` (default `false`), `perPlayerPerWeek` (1 to 20, default 3) and `allowSelfReview` (default `false`), or
   the owner sets them in the hub (Settings, Advanced). With appeals off every appeal route answers as if it did not exist, a notice keeps the old
-  `appealUrl` link if you gave one, and no response body changes. `appeals.enabled: true` over a store with no appeal methods throws when the kit is created.
+  `appealUrl` link if you gave one, and no response body changes. `appeals.enabled: true` in the profile or `overrides` over a store with no appeal methods throws when the kit is created; the owner's saved setting never does: saving it on such a store is refused (`invalid_profile`, path `layer.appeals.enabled`), and one already stored leaves appeals off and warns `chatwarden.appeals_unsupported_store`.
 - **What can be appealed.** A warning, a chat restriction, an area ban or a full ban that is in the player's record (the same 90-day rule "My record" uses), from
   its notice. A report outcome, a note and the four message notices (below) cannot. There is one appeal for each sanction for as long as it is kept. A sanction
   made lighter on appeal is a new sanction with its own notice, and can be appealed once.

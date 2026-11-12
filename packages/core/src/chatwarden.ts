@@ -918,7 +918,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store) });
   policy.load();
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
@@ -1027,8 +1027,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     const ids = hashWho(hasher, who);
     return subjects.lookup({ clientKey: ids.clientKey, accountId: ids.accountId, ipHash: null });
   };
-  // Appeals. Turning them on over a store that cannot keep them is a plain mistake, refused here before anything is started.
-  if (policy.profileNow().appeals.enabled && !hasAppealMethods(store)) {
+  // Appeals. Turning them on in code (the profile or its overrides) over a store that cannot keep them is a plain mistake, refused here
+  // before anything is started. A stored layer that does it is data, not code: the policy keeps appeals off and warns (see PolicyService).
+  if (baseProfile.appeals.enabled && !hasAppealMethods(store)) {
     throw new Error('createChatwarden: appeals are enabled, but this store has no appeal methods (SqliteStore has them from schema 22; the in-memory store needs its opt-in appeals wrapper)');
   }
   /** The one answer to "does a moot or a decision clear the statement at once": the retention the kit was created with. */

@@ -104,6 +104,8 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
   });
   const guard = useUnsavedGuard(isDirty);
   const limit = problems['perWeek'];
+  // The server refuses the switch for a store that cannot keep appeals: the same words as any refused field.
+  const onRefused = problems['enabled'];
 
   return (
     <div ref={root} className="cw-settings cw-appeal-settings">
@@ -125,12 +127,25 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
             <legend className="cw-sr">{t('hub.settings.appeals.title')}</legend>
             <div className="cw-pace-row">
               <label className="cw-choice cw-flowopt">
-                <input type="checkbox" checked={draft.enabled} aria-labelledby={`${base}-on-t`} aria-describedby={`${base}-on-hint`} data-field="enabled" onChange={(e) => set({ enabled: e.target.checked })} />
+                <input
+                  type="checkbox"
+                  checked={draft.enabled}
+                  aria-labelledby={`${base}-on-t`}
+                  aria-describedby={onRefused === undefined ? `${base}-on-hint` : `${base}-on-hint ${base}-on-err`}
+                  data-field="enabled"
+                  onChange={(e) => set({ enabled: e.target.checked })}
+                  {...(onRefused === undefined ? {} : { 'aria-invalid': true as const })}
+                />
                 <span>
                   <strong id={`${base}-on-t`}>{t('hub.settings.appeals.on')}</strong>
                   <span id={`${base}-on-hint`} className="cw-hint cw-flowopt-line">
                     {t('hub.settings.appeals.on.hint')}
                   </span>
+                  {onRefused !== undefined && (
+                    <span id={`${base}-on-err`} className="cw-field-error cw-flowopt-line">
+                      {t(onRefused.key, onRefused.params)}
+                    </span>
+                  )}
                 </span>
               </label>
               <div className="cw-pace-fields">

@@ -131,7 +131,7 @@ const cw = await createChatwarden({
 });
 ```
 
-A kit created with `appeals.enabled` over a store without the appeal methods is refused when it is created. Kept names over a store without the name
+A kit created with `appeals.enabled` in its profile over a store without the appeal methods is refused when it is created (an owner's saved setting is refused when saved, or left off with a warning if it was stored before). Kept names over a store without the name
 methods are simply not kept.
 
 ## Options
