@@ -333,7 +333,9 @@ export function Lobby() {
 }
 ```
 
-The transport reads the stream with `fetch`, not `EventSource`, so your header-based auth works. A game with its own socket implements
+The transport reads the stream with `fetch`, not `EventSource`, so your header-based auth works. **One player may have three streams (tabs)
+open in a room by default** (`maxStreamsPerMember` on the server): a fourth ends the oldest, and that box says "Chat is open in another
+window." with a "Try again" button instead of reconnecting by itself, so tabs over the limit never push each other out in a loop. A game with its own socket implements
 `ChatTransport` (`open(room, events)` returning `{ send, mute, report, close }`) and hands the same frames to `events.frame`.
 
 To load it only when a player opens the chat, import it lazily. It is one chunk and nothing in it runs until `ChatBox` is rendered:

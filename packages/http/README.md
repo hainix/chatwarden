@@ -385,7 +385,8 @@ app.use(
 ### The four routes
 
 All paths are relative to the mount point. `:room` is a kit route param (1 to 64 of `A-Z a-z 0-9 _ -`). Every response carries
-`cache-control: no-store, no-transform`. Errors use the kit's shapes.
+`cache-control: no-store`; the stream's is `no-store, no-transform`, which is what keeps a body-rewriting middleware (`compression`) and a
+proxy from holding its first frames back. Errors use the kit's shapes.
 
 | Route | Body | Answer |
 | --- | --- | --- |
@@ -405,7 +406,8 @@ key, hash or address. `hello` carries `epoch`, `room`, `you`, `maxLength`, `hear
 | `createRoomBroadcaster(cw, options)` | What it does |
 | --- | --- |
 | `history` | `{ lines, maxAgeMs }` kept per room for late joiners: at most 100 lines (default 50) and never older than the evidence window (default 15 min) |
-| `maxMembers`, `maxRooms`, `maxStreamsPerMember`, `maxStreams` | Limits; over one, a `429` with `retry-after` |
+| `maxMembers`, `maxRooms`, `maxStreams` | Limits (500 players per room, 10 000 rooms, 5 000 streams); over one, a `429` with `retry-after` |
+| `maxStreamsPerMember` | Streams (tabs) one player may have open in a room, default 3. A fourth is not refused: the player's OLDEST stream is sent `bye` with reason `replaced` and ended, so a connection that died without a word (a phone changing network) cannot lock them out. The box treats `replaced` as closed and offers "Try again" instead of reconnecting by itself, so tabs beyond the limit do not push each other out in a loop |
 | `heartbeatMs` | How often an idle stream gets a `: ping` (default 20 000, at most 60 000). The `hello` announces it, and the box drops a stream silent for 2.5 times that |
 | `seatGraceMs` | How long a seat with no stream and no request is kept (default 120 000) |
 | `maxBacklog` | A stream whose sink refused this many writes in a row is closed (default 64) |
@@ -426,6 +428,13 @@ key, hash or address. `hello` carries `epoch`, `room`, `you`, `maxLength`, `hear
 - A proxy's idle timeout must be longer than the heartbeat (20 s by default).
 - `identify` runs on every request, the stream included, and must read the real client address from your proxy's header (the same note as
   for the player routes).
+- **`identify` must authenticate a real login** (a session token, a signed cookie). The per-player limits (`actionRateLimit`,
+  `openRateLimit`) and the mutes are keyed by the identity `identify` returns, so a caller who can invent identities escapes them, and with a
+  permissive `join` each invented identity also takes a seat in the kit for `seatGraceMs`. Use header auth, or a `SameSite=Strict` cookie.
+  A cross-site `no-cors` GET carries no `Origin` header, so `allowedOrigins` does not see it: its response is unreadable to the other site, but
+  it can seat the victim and spend their `openRateLimit`. Validate the room id in `join` (a room id in a URL must not create a room).
+- **Line length.** The box shows a line of up to 1 000 characters and clips any longer one, so `createRoomBroadcaster` throws a `RangeError`
+  for a kit configured with `limits.chatMaxLength` above 1 000. The route answers `length` without asking the kit for any text over 2 000.
 
 ### One process per room
 
@@ -459,9 +468,9 @@ io.on('connection', (socket) => {
 - **`byModerator` on a restriction.** The refusal from `accept` says exactly who set a restriction. The restriction in `hello` and `state`
   is read from the stored sanction, and a stored automatic chat timeout reads as a moderator's there, so the box words it as a moderator's
   until the player's next refused line. A core change (`byModerator` on the answer of `cw.chat.restricted`) would make it exact.
-- **Needs a newer core.** The broadcaster re-reads a player's restriction with `cw.chat.restrictedBySubject`, which came after core 0.1.5
-  (`createRoomBroadcaster` throws a `TypeError` with a core that lacks it): install `@chatwarden/http` and `@chatwarden/core` from the same
-  release.
+- **Needs a newer core.** The broadcaster re-reads a player's restriction with `cw.chat.restrictedBySubject`, which is in the core release that ships it
+  (`cw.chat.restrictedBySubject` is new with the chat box; `createRoomBroadcaster` throws a `TypeError` with a core that lacks it): install
+  `@chatwarden/http` and `@chatwarden/core` from the same release. The package's peer range on core is raised to that release.
 - **Experimental names** (listed so until 0.2): `createRoomBroadcaster`, `chatRoutes`, `encodeFrame`, `HEARTBEAT`, `CHAT_WIRE_VERSION`,
   `refusalOf`, `ROOM_BROADCASTER_DEFAULTS`, and the types `ChatMember`, `ChatSession`, `ChatSink`, `ChatStream`, `RoomBroadcaster`,
   `RoomBroadcasterOptions`, `ChatRoutesOptions`, `ChatFrame`, `WireLine`, `WireRestriction`, `WireMuted`, `WireRefusal`, `SendResult`,
