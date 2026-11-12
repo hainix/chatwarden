@@ -97,6 +97,10 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
         'GET /reports/:id',
         'POST /reports/:id/decide',
         'POST /reports/:id/suggest',
+        // The AI routes (their own checks are in admin.ai.test.ts: they need a world with an adapter).
+        'GET /ai/status',
+        'POST /reports/:id/ai/read',
+        'POST /reports/:id/ai/dont-teach',
         ...SPECS.map((s) => s.name),
       ].sort(),
     );

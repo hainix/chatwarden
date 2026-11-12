@@ -829,7 +829,7 @@ describe('GET /reports: targetHandle', () => {
     expect(body.items).toHaveLength(1);
     expect(Object.keys(body.items[0]!)).toEqual([
       'id', 'createdAt', 'roomId', 'tags', 'category', 'reportedReason', 'reportedReasonLabel', 'status', 'badFaith', 'targetPerson', 'reporterPerson', 'actionedAt', 'actionedBy', 'targetHandle',
-      'reporterHandle', 'claim', 'viewing', 'reporterAccuracy',
+      'reporterHandle', 'claim', 'viewing', 'reporterAccuracy', 'ai',
     ]);
     expect(body.items[0]).toMatchObject({ id: r.id, targetPerson: r.target, targetHandle: 'SneakyPete', reporterHandle: 'Rep' });
   });

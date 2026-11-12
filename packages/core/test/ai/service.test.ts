@@ -440,6 +440,28 @@ describe('read again', () => {
     expect(capped.adapter.callCount).toBe(0);
   });
 
+  it('rate limit per actor: 10 a minute, whatever the answer, and each actor has their own', async () => {
+    const w = await aiWorld({ level: 2 });
+    const r = await w.report();
+    await w.idle();
+    for (let i = 0; i < 10; i += 1) expect(typeof (await w.cw.ai.readAgain(r.id, 'mod_ann'))).toBe('object');
+    expect(await w.cw.ai.readAgain(r.id, 'mod_ann')).toBe('rate');
+    expect(typeof (await w.cw.ai.readAgain(r.id, 'mod_bob'))).toBe('object');
+    // A minute later the window has moved on.
+    w.clock.t += 60_000;
+    expect(typeof (await w.cw.ai.readAgain(r.id, 'mod_ann'))).toBe('object');
+    await w.idle();
+    expect(w.adapter.callCount).toBe(1);
+  });
+
+  it('a refused ask (off) does not use up the actor allowance', async () => {
+    const w = await aiWorld({ level: 0 });
+    const r = await w.report();
+    for (let i = 0; i < 20; i += 1) expect(await w.cw.ai.readAgain(r.id, 'mod_ann')).toBe('off');
+    w.cw.policy.save({ ai: { level: 1 } }, { version: 0, ...OWNER });
+    expect(await w.cw.ai.readAgain(r.id, 'mod_ann')).toBe('pending');
+  });
+
   it('answers off for an unknown report', async () => {
     const w = await aiWorld();
     expect(await w.cw.ai.readAgain('nope', 'mod_ann')).toBe('off');

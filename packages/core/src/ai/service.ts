@@ -153,7 +153,7 @@ export interface AiStatsView {
 }
 
 /** What `cw.ai.readAgain` answers. */
-export type AiReadAgain = AiReadView | 'pending' | 'budget' | 'off';
+export type AiReadAgain = AiReadView | 'pending' | 'budget' | 'off' | 'rate';
 
 /**
  * `cw.ai`. Every method is safe to call at any time: with the AI off, without an adapter or with a failing provider or store it
@@ -169,7 +169,11 @@ export interface AiFacade {
    * `open: true` (the case page) a report with no read, or a stale one, is queued for a (re)read.
    */
   read(reportId: string, opts?: { open?: boolean }): AiReadView | null;
-  /** "Read again": the stored read when the input has not changed (no call), else a call is queued and the answer is `'pending'`. */
+  /**
+   * "Read again": the stored read when the input has not changed (no call), else a call is queued and the answer is `'pending'`.
+   * `'off'` at level 0 or for a report that is gone or decided, `'budget'` at the daily cap, and `'rate'` once `actor` has asked 10
+   * times in a minute.
+   */
   readAgain(reportId: string, actor: string): Promise<AiReadAgain>;
   /** The queue's brief of each report that has a read. Reports without one are absent. */
   briefs(reportIds: readonly string[]): Map<string, AiBrief>;
@@ -197,6 +201,8 @@ export const SWEEP_EVERY_MS = 60_000;
 export const SWEEP_BATCH = 20;
 /** The most stale reads one idle sweep queues. */
 export const STALE_PER_SWEEP = 5;
+/** How many times one moderator may ask for a read again in a minute. */
+export const READ_AGAIN_PER_MINUTE = 10;
 /** How many recent open reports a sweep looks at. */
 const SWEEP_SCAN = 200;
 /** The audit trail takes an actor of at most 128 characters of `A-Za-z0-9_.:@+-`. */
@@ -329,6 +335,7 @@ export class AiService implements AiFacade {
   private readonly parked = new Map<string, number>();
   private readonly controllers = new Set<AbortController>();
   private readonly cache = new Map<string, Prepared>();
+  private readonly asked = new Map<string, number[]>();
   private pumpTimer: ReturnType<typeof setTimeout> | undefined;
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   private unsubscribe: (() => void) | undefined;
@@ -417,12 +424,12 @@ export class AiService implements AiFacade {
   }
 
   readAgain(reportId: string, actor: string): Promise<AiReadAgain> {
-    void actor;
     try {
       const level = this.level();
       if (level === 0 || typeof reportId !== 'string') return Promise.resolve('off');
       const report = this.store.loadReport(reportId);
       if (report === null || report.status !== 'open') return Promise.resolve('off');
+      if (!this.allowAsk(actor)) return Promise.resolve('rate');
       const prepared = this.prepare(report);
       const row = this.store.loadAiRead(reportId);
       if (row !== null && row.read !== null && row.inputHash === prepared.hash) return Promise.resolve(this.view(row, report, prepared, level));
@@ -434,6 +441,21 @@ export class AiService implements AiFacade {
       this.warn('ai.read_again_failed', err);
       return Promise.resolve('off');
     }
+  }
+
+  /** A sliding minute per actor. Held in memory: it guards the provider's bill from one eager hand, not a security boundary. */
+  private allowAsk(actor: string): boolean {
+    const now = this.clock.now();
+    const key = String(actor);
+    const recent = (this.asked.get(key) ?? []).filter((t) => t > now - 60_000);
+    if (recent.length >= READ_AGAIN_PER_MINUTE) {
+      this.asked.set(key, recent);
+      return false;
+    }
+    recent.push(now);
+    this.asked.set(key, recent);
+    if (this.asked.size > 1000) this.asked.delete(this.asked.keys().next().value as string);
+    return true;
   }
 
   briefs(reportIds: readonly string[]): Map<string, AiBrief> {

@@ -35,10 +35,12 @@ const TABLE = {
   already_decided: { status: 409, message: 'The report has already been decided.' },
   conflict: { status: 409, message: 'The settings changed since you loaded them.' },
   claimed: { status: 409, message: 'Another moderator is handling this case.' },
+  ai_off: { status: 409, message: 'The AI is not reading reports.' },
   in_progress: { status: 409, message: 'A request with this idempotency key is still being processed.' },
   idempotency_mismatch: { status: 409, message: 'This idempotency key was used with a different request.' },
   payload_too_large: { status: 413, message: 'The request body is too large.' },
   rate_limited: { status: 429, message: 'Too many requests. Try again later.' },
+  ai_budget: { status: 429, message: 'The AI has reached its limit for today.' },
   not_supported: { status: 501, message: 'This store cannot save settings.' },
 } as const;
 

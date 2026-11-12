@@ -1,5 +1,6 @@
 import type { Chatwarden } from '@chatwarden/core';
 import type { RouteTable } from '../router.js';
+import { aiRoutes } from './ai.js';
 import { auditRoutes } from './audit.js';
 import { blockedRoutes } from './blocked.js';
 import { createAdminContext } from './context.js';
@@ -17,6 +18,7 @@ import type { TermsAdmin } from './terms.js';
 
 export { AuditFailedError, BadActorError, createAdminContext } from './context.js';
 export type { AdminCall, AdminContext, AdminOptions } from './context.js';
+export { aiRoutes } from './ai.js';
 export { auditRoutes } from './audit.js';
 export { blockedRoutes } from './blocked.js';
 export { gapRoutes } from './gaps.js';
@@ -66,6 +68,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
       ...(options.contactUrl === undefined ? {} : { contactUrl: options.contactUrl }),
     }),
     ...policyProfileRoutes(ctx),
+    ...aiRoutes(ctx),
     ...auditRoutes(ctx),
   };
 }

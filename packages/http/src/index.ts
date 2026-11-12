@@ -13,6 +13,7 @@ export { PERMISSION_KEYS, PERMISSIONS, resolvePermissions, roleAtLeast } from '.
 export type { PermissionKey, Permissions } from './permissions.js';
 export {
   adminRoutes,
+  aiRoutes,
   auditRoutes,
   AuditFailedError,
   BadActorError,
