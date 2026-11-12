@@ -23,6 +23,7 @@ const hello = (over: Record<string, unknown> = {}): ChatFrame =>
     room: 'lobby',
     you: { name: 'snerp' },
     maxLength: 200,
+    heartbeatMs: 20_000,
     summary: 'Trash talk is part of the game.',
     restriction: null,
     lines: [line()],
@@ -176,6 +177,17 @@ describe('what a frame may carry', () => {
     expect(JSON.stringify(out)).not.toMatch(/extra|sneaky|seat|account/);
   });
 
+  it('a hello with no heartbeatMs (an older server) gets the default 20 s', () => {
+    const raw: Record<string, unknown> = { ...hello() };
+    delete raw.heartbeatMs;
+    expect(readFrame(raw)).toEqual(hello());
+  });
+
+  it('an unusable heartbeatMs (a string, 0, 1.5, negative, huge, NaN) is the default, not a dropped frame', () => {
+    for (const bad of ['20000', 0, 1.5, -5, 3_600_001, Number.NaN, null]) expect(readFrame({ ...hello(), heartbeatMs: bad }), String(bad)).toEqual(hello());
+    expect(readFrame({ ...hello(), heartbeatMs: 60_000 })).toEqual(hello({ heartbeatMs: 60_000 }));
+  });
+
   it('ignores a `mine` that is not exactly true', () => {
     expect(readFrame({ type: 'line', line: { ...line(), mine: 'yes' } })).toEqual({ type: 'line', line: line() });
     expect(readFrame({ type: 'line', line: { ...line(), mine: false } })).toEqual({ type: 'line', line: line() });
@@ -255,7 +267,7 @@ describe('__proto__ and constructor keys in a frame do not pollute', () => {
     const out = readFrame(JSON.parse(text) as unknown);
     if (out?.type !== 'hello') throw new Error('expected a hello');
     expect(polluted()).toBe(false);
-    expect(Object.keys(out).sort()).toEqual(['epoch', 'lines', 'maxLength', 'muted', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
+    expect(Object.keys(out).sort()).toEqual(['epoch', 'heartbeatMs', 'lines', 'maxLength', 'muted', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
     expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
     const l = out.lines[0] as WireLine;
     expect(Object.keys(l).sort()).toEqual(['at', 'id', 'name', 'text']);

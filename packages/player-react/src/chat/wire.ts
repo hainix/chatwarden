@@ -61,6 +61,8 @@ export type ChatFrame =
       you: { name: string };
       /** The line length limit (`cw.limits.chatMaxLength`), for the input. */
       maxLength: number;
+      /** How often the server sends a heartbeat comment while a stream is idle (the broadcaster's `heartbeatMs`), so a client can size its liveness watchdog from it. */
+      heartbeatMs: number;
       /** `cw.summary`: the profile's one-line standard. */
       summary: string;
       restriction: WireRestriction | null;
@@ -92,6 +94,10 @@ export const MAX_TEXT = 1000;
 export const MAX_FRAME_BYTES = 64 * 1024;
 /** The longest `retryAfterMs` a refusal may carry: one hour (the server's own ceiling). */
 const MAX_RETRY_AFTER_MS = 3_600_000;
+/** The longest heartbeat believed (the server caps its own at 60 s). */
+const MAX_HEARTBEAT_MS = 3_600_000;
+/** The broadcaster's default heartbeat, for a hello that does not carry a usable one. */
+export const DEFAULT_HEARTBEAT_MS = 20_000;
 /** A line id over this is not an id. */
 const MAX_ID = 64;
 
@@ -184,6 +190,9 @@ function readHello(o: Bag): ChatFrame | null {
   const you = bagOf(own(o, 'you'));
   const youName = you === null ? undefined : own(you, 'name');
   const maxLength = own(o, 'maxLength');
+  // An older server that does not say gets the broadcaster's default.
+  const sent = own(o, 'heartbeatMs');
+  const heartbeat = isNum(sent) && Number.isInteger(sent) && sent >= 1 && sent <= MAX_HEARTBEAT_MS ? sent : DEFAULT_HEARTBEAT_MS;
   const summary = own(o, 'summary');
   const restriction = restrictionOf(own(o, 'restriction'));
   const lines = own(o, 'lines');
@@ -199,6 +208,7 @@ function readHello(o: Bag): ChatFrame | null {
     room,
     you: { name: cut(youName, MAX_NAME) },
     maxLength,
+    heartbeatMs: heartbeat,
     summary,
     restriction,
     lines: (lines as unknown[]).map(readLine).filter((l): l is WireLine => l !== null),

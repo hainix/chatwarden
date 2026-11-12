@@ -40,7 +40,7 @@ export interface SseTransportOptions extends FetchTransportOptions {
   retry?: { initialMs?: number; maxMs?: number };
   /**
    * How long the stream may be silent after the hello before it is dropped and reconnected, in ms. Any bytes count, a heartbeat included.
-   * Default 50 000 (2.5 times the broadcaster's 20 s heartbeat); raise it if your server heartbeats more slowly.
+   * Default: 2.5 times the heartbeat the server announces in its hello (50 000 for the broadcaster's 20 s), never under 10 000.
    */
   staleMs?: number;
 }
@@ -53,8 +53,10 @@ export interface SseTransportInternals {
 
 /** No hello this long after the attempt starts (connect, headers and hello): it is abandoned as a failure. */
 const HELLO_WAIT_MS = 10_000;
-/** The default silence allowed after the hello: 2.5 heartbeats of 20 s. */
-const DEFAULT_STALE_MS = 50_000;
+/** The silence allowed after the hello, in heartbeats; and its floor and ceiling in ms. */
+const STALE_HEARTBEATS = 2.5;
+const MIN_STALE_MS = 10_000;
+const MAX_STALE_MS = 10 * 60 * 1000;
 /** The back-off starts over only when a connection has stayed open this long, so a hello-then-drop loop keeps backing off. */
 const STABLE_MS = 30_000;
 /** The shortest wait before a retry: full jitter may pick near 0, and two instant retries in a row are a storm in miniature. */
@@ -86,6 +88,8 @@ interface Attempt {
   timer: ReturnType<typeof setTimeout> | undefined;
   /** Fires once the connection has stayed open for `STABLE_MS`. */
   stable: ReturnType<typeof setTimeout> | undefined;
+  /** The silence allowed once open; set by the hello. */
+  stale: number;
   opened: boolean;
 }
 
@@ -101,7 +105,8 @@ export function createSseTransport(options: SseTransportOptions, internals: SseT
   const base = options.baseUrl.replace(/\/+$/, '');
   const initialMs = positive(options.retry?.initialMs, 1000);
   const maxMs = Math.max(initialMs, positive(options.retry?.maxMs, 30_000));
-  const staleMs = positive(options.staleMs, DEFAULT_STALE_MS);
+  const explicitStale = positive(options.staleMs, 0);
+  const staleFor = (heartbeatMs: number): number => (explicitStale > 0 ? explicitStale : Math.min(MAX_STALE_MS, Math.max(MIN_STALE_MS, heartbeatMs * STALE_HEARTBEATS)));
   const random = internals.random ?? Math.random;
 
   return {
@@ -184,7 +189,7 @@ export function createSseTransport(options: SseTransportOptions, internals: SseT
 
       async function run(): Promise<void> {
         if (closed) return;
-        const attempt: Attempt = { ac: new AbortController(), timer: undefined, stable: undefined, opened: false };
+        const attempt: Attempt = { ac: new AbortController(), timer: undefined, stable: undefined, stale: staleFor(20_000), opened: false };
         current = attempt;
         arm(attempt, HELLO_WAIT_MS); // connect, headers and hello all fit in it
         if (status === null) setStatus('connecting');
@@ -240,7 +245,8 @@ export function createSseTransport(options: SseTransportOptions, internals: SseT
           const got: ChatFrame = frame;
           if (got.type === 'hello') {
             attempt.opened = true;
-            arm(attempt, staleMs);
+            attempt.stale = staleFor(got.heartbeatMs);
+            arm(attempt, attempt.stale);
             clearTimeout(attempt.stable);
             attempt.stable = setTimeout(() => {
               failures = 0;
@@ -259,7 +265,7 @@ export function createSseTransport(options: SseTransportOptions, internals: SseT
             const { done, value } = await reader.read();
             if (closed || current !== attempt) break;
             if (done) break;
-            if (attempt.opened) arm(attempt, staleMs); // any bytes at all, a heartbeat included
+            if (attempt.opened) arm(attempt, attempt.stale); // any bytes at all, a heartbeat included
             parser.push(decoder.decode(value, { stream: true }));
           }
         } catch {

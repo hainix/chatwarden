@@ -83,7 +83,7 @@ function fakeFetch(steps: Step[] = []) {
 
 const line = (id: string, text = `line ${id}`, extra: Partial<WireLine> = {}): WireLine => ({ id, at: 1_800_000_000_000 + Number(id), name: 'tarvo', text, ...extra });
 const helloFrame = (over: Record<string, unknown> = {}): ChatFrame =>
-  ({ type: 'hello', v: 1, epoch: 'e1', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, summary: 'Be kind.', restriction: null, lines: [], muted: [], ...over }) as ChatFrame;
+  ({ type: 'hello', v: 1, epoch: 'e1', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, heartbeatMs: 20_000, summary: 'Be kind.', restriction: null, lines: [], muted: [], ...over }) as ChatFrame;
 const sse = (f: ChatFrame): string => `event: ${f.type}\ndata: ${JSON.stringify(f)}\n\n`;
 
 type CollectOptions = Partial<SseTransportOptions> & { random?: () => number };
@@ -1355,5 +1355,84 @@ describe('the public typings', () => {
     expect(bad.baseUrl).toBe('/chat');
     const conn = sseTransport({ baseUrl: '/chat', fetch: fakeFetch().fetch }).open('lobby', { frame: () => undefined, status: () => undefined });
     expect(() => conn.close()).not.toThrow();
+  });
+});
+
+describe('the watchdog follows the heartbeat the server announces', () => {
+  it('a server heartbeating every 60 s (the cap) is not dropped, and its silence is waited out for 150 s', async () => {
+    const t = collect();
+    await tick();
+    const a = t.attempts[0] as Attempt;
+    a.push(sse(helloFrame({ heartbeatMs: 60_000 })));
+    for (let i = 0; i < 10; i += 1) {
+      await tick(60_000);
+      a.push(': ping' + String.fromCharCode(10, 10));
+    }
+    expect(a.signal.aborted).toBe(false);
+    expect(t.fn).toHaveBeenCalledTimes(1);
+    expect(t.statuses).toEqual(['connecting', 'open']);
+    // silent from here: 2.5 x 60 s
+    await tick(149_999);
+    expect(a.signal.aborted).toBe(false);
+    await tick(1);
+    expect(a.signal.aborted).toBe(true);
+    expect(t.statuses.at(-1)).toBe('reconnecting');
+    t.conn.close();
+  });
+
+  it('a silent stream still reconnects at 2.5 heartbeats of 20 s', async () => {
+    const t = collect();
+    await tick();
+    t.attempts[0]?.push(sse(helloFrame({ heartbeatMs: 20_000 })));
+    await tick(49_999);
+    expect(t.attempts[0]?.signal.aborted).toBe(false);
+    await tick(1);
+    expect(t.attempts[0]?.signal.aborted).toBe(true);
+    t.conn.close();
+  });
+
+  it('a short heartbeat is not trusted below 10 s of silence', async () => {
+    const t = collect();
+    await tick();
+    t.attempts[0]?.push(sse(helloFrame({ heartbeatMs: 1000 })));
+    await tick(9_999);
+    expect(t.attempts[0]?.signal.aborted).toBe(false);
+    await tick(1);
+    expect(t.attempts[0]?.signal.aborted).toBe(true);
+    t.conn.close();
+  });
+
+  it('a hello with no usable heartbeat falls back to 50 s', async () => {
+    const t = collect();
+    await tick();
+    t.attempts[0]?.push(sse({ ...(helloFrame() as object), heartbeatMs: 'x' } as unknown as ChatFrame));
+    await tick(49_999);
+    expect(t.attempts[0]?.signal.aborted).toBe(false);
+    await tick(1);
+    expect(t.attempts[0]?.signal.aborted).toBe(true);
+    t.conn.close();
+  });
+
+  it('the staleMs option beats the announced heartbeat', async () => {
+    const t = collect({ staleMs: 12_000 });
+    await tick();
+    t.attempts[0]?.push(sse(helloFrame({ heartbeatMs: 60_000 })));
+    await tick(11_999);
+    expect(t.attempts[0]?.signal.aborted).toBe(false);
+    await tick(1);
+    expect(t.attempts[0]?.signal.aborted).toBe(true);
+    t.conn.close();
+  });
+
+  it('the next connection reads its own hello: a new heartbeat replaces the old one', async () => {
+    const t = collect();
+    await tick();
+    t.attempts[0]?.push(sse(helloFrame({ heartbeatMs: 60_000 })));
+    await tick(150_000);
+    await tick(500);
+    t.attempts[1]?.push(sse(helloFrame({ heartbeatMs: 20_000 })));
+    await tick(50_000);
+    expect(t.attempts[1]?.signal.aborted).toBe(true);
+    t.conn.close();
   });
 });
