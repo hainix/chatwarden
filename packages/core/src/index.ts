@@ -354,6 +354,7 @@ export type {
 export { POLICY_REFRESH_MS, PREVIEW_SAMPLES } from './policy.js';
 export type {
   PolicyDropped,
+  PolicyLimits,
   PolicyPreview,
   PolicySaveContext,
   PolicySaveResult,

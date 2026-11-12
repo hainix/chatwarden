@@ -52,7 +52,8 @@ describe('the layer the owner reads is the layer in force', () => {
   ])('reason %s: feed %s is dropped with that code', async (reason, feed, value) => {
     const { cw } = await stored({ signals: { feeds: { [feed]: value } } }, { retention: { signalsMs: 14 * DAY } });
     expect(cw.policy.get().dropped).toEqual([{ feed, reason }]);
-    expect(cw.policy.get().layer.signals).toEqual({ feeds: {} });
+    // Nothing usable is left of the section, so it is not shown at all (FC M6a): the code's own feeds are what is in force.
+    expect(cw.policy.get().layer.signals).toBeUndefined();
   });
 
   it('a feed name the kit does not have is dropped as "unknown", and the stored name is never echoed', async () => {
@@ -121,7 +122,7 @@ describe('the stuck-save scenario', () => {
     const read = cw.policy.get();
     const next: PolicyLayer = { ...read.layer, pace: { slowModeMs: 2000 } };
     const res = cw.policy.save(next, { version: read.version, ...OWNER });
-    expect(res).toEqual({ ok: true, version: 2, changed: ['pace'] });
+    expect(res).toEqual({ ok: true, version: 2, changed: ['pace', 'signals'] });
     // The stored row is repaired by that save, and nothing is left to drop.
     expect(JSON.stringify(store.loadPolicyLayer?.()?.layer)).not.toContain('removed_kind');
     const after = cw.policy.get();
@@ -143,7 +144,7 @@ describe('the stuck-save scenario', () => {
     const read = cw.policy.get();
     expect(read.dropped).toEqual([{ feed: 'record', reason: 'window' }]);
     const res = cw.policy.save({ ...read.layer, firstOffense: { rude: { kind: 'chat', durationMs: 7_200_000 } } }, { version: read.version, ...OWNER });
-    expect(res).toMatchObject({ ok: true, changed: ['firstOffense'] });
+    expect(res).toMatchObject({ ok: true, changed: ['firstOffense', 'signals'] });
   });
 
   it('save stays strict for what is submitted: the stale feed sent back by hand is refused with its layer path, nothing written', async () => {
@@ -177,5 +178,56 @@ describe('the stuck-save scenario', () => {
   it('preview of the layer read from get() is accepted too (the hub previews before it saves)', async () => {
     const { cw } = await stored(staleLayer);
     expect(cw.policy.preview(cw.policy.get().layer).ok).toBe(true);
+  });
+});
+
+describe('FC M6: what is left of a pruned layer', () => {
+  it('a section whose feeds were all dropped is gone from the shown layer, other keys of the section stay, and the code feeds apply again', async () => {
+    const codeFeeds = { record: { kinds: '*' as const, windowDays: 7 } };
+    const { cw } = await stored({ ...ladderEdit, signals: { feeds: { queue: { kinds: ['removed_kind'], minDistinct: 3, windowDays: 7 } } } }, { overrides: { signals: { kinds: kindsInCode, feeds: codeFeeds } } as never });
+    const state = cw.policy.get();
+    expect('signals' in state.layer).toBe(false);
+    expect(state.layer.firstOffense).toEqual(ladderEdit.firstOffense);
+    expect(state.dropped).toEqual([{ feed: 'queue', reason: 'unknown_kind' }]);
+    expect(state.effective.signals.feeds).toEqual(codeFeeds);
+  });
+
+  it('a layer with an empty feeds object that nothing dropped is shown as stored', async () => {
+    const { cw } = await stored({ signals: { feeds: {} } });
+    expect(cw.policy.get().layer).toEqual({ signals: { feeds: {} } });
+    expect('dropped' in cw.policy.get()).toBe(false);
+  });
+
+  it('the repairing save lists signals in changed and in the audit sections, even when the layer sent is the one read', async () => {
+    const { cw } = await stored({ signals: { feeds: { queue: { kinds: ['removed_kind'], minDistinct: 3, windowDays: 7 } } } });
+    const read = cw.policy.get();
+    expect(cw.policy.save(read.layer, { version: read.version, ...OWNER })).toEqual({ ok: true, version: 2, changed: ['signals'] });
+  });
+
+  it('a save that was based on a clean read does not add signals to changed', async () => {
+    const { cw } = await stored({ ...ladderEdit });
+    const read = cw.policy.get();
+    expect(cw.policy.save({ ...read.layer, pace: { slowModeMs: 2000 } }, { version: read.version, ...OWNER })).toEqual({ ok: true, version: 2, changed: ['pace'] });
+  });
+
+  it('a reset of another section does not claim signals either', async () => {
+    const { cw } = await stored({ ...ladderEdit, signals: { feeds: { queue: { kinds: ['removed_kind'], minDistinct: 3, windowDays: 7 } } } });
+    expect(cw.policy.reset('firstOffense')).toMatchObject({ ok: true, changed: expect.arrayContaining(['firstOffense']) });
+  });
+});
+
+describe('FB M6: preview checks windows against the retention, as save does', () => {
+  it('a window longer than the retention is refused by preview with the same path as save', async () => {
+    const { cw } = await world({ overrides, retention: { signalsMs: 30 * DAY } });
+    const layer = { signals: { feeds: { record: { kinds: '*', windowDays: 60 } } } } as PolicyLayer;
+    const previewed = cw.policy.preview(layer);
+    expect(previewed).toEqual({ ok: false, error: 'invalid', path: 'layer.signals.feeds.record.windowDays' });
+    expect(cw.policy.save(layer, { version: 0, ...OWNER })).toEqual({ ok: false, error: 'invalid', path: 'layer.signals.feeds.record.windowDays' });
+  });
+
+  it('a window inside the retention previews fine; no signals section previews fine', async () => {
+    const { cw } = await world({ overrides, retention: { signalsMs: 30 * DAY } });
+    expect(cw.policy.preview({ signals: { feeds: { record: { kinds: '*', windowDays: 30 } } } } as PolicyLayer).ok).toBe(true);
+    expect(cw.policy.preview({}).ok).toBe(true);
   });
 });

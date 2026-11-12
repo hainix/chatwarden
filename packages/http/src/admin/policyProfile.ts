@@ -28,7 +28,7 @@ function bodyReason(v: unknown): string {
 /**
  * What the core answered, as the route answers it: 409, 501 or 400 with the path, or the success body after `onOk`. The success
  * body is `{ ok, changed }` and the fresh state in the shape of `GET /policy/profile` (`effective`, `base`, `layer`, `version`,
- * `canSave`), so a screen needs no follow-up read.
+ * `canSave`, `limits`), so a screen needs no follow-up read.
  */
 function answer(cw: Chatwarden, res: PolicySaveResult, onOk: (changed: PolicySection[]) => void) {
   if (!res.ok) {
@@ -44,12 +44,14 @@ function answer(cw: Chatwarden, res: PolicySaveResult, onOk: (changed: PolicySec
  * rules, the guideline outcome texts, the reporting settings: the flow, the reasons and the thank-you, the AI level and the pace settings: slow mode, burst and repeats). The profile in code is the base; the owner's edits are a versioned layer in the
  * adopter's store, and what is in force is the base with the layer on top (`cw.policy`). All JSON, all no-store.
  *
- * - `GET /policy/profile` (`policy.read`, audited as `policy.view`): `{ effective, base, layer, version, canSave }`, plus
+ * - `GET /policy/profile` (`policy.read`, audited as `policy.view`): `{ effective, base, layer, version, canSave, limits }`, where `limits` is
+ *   read only and not part of the layer: `{ chatRate: { count, windowMs }, signalsMs }`, the kit's chat rate limit actually in force and how long
+ *   signal rows are kept (the longest window a feed may look back). Numbers only. A server older than 0.1.8 has no `limits`. Plus
  *   `layerError` (`{ path }`) when the stored layer cannot be used and is being ignored, and `dropped` (`[{ feed, reason }]`, codes only)
  *   when a stored signal feed could no longer be used: `layer` is then the layer in force, without it. It looks at the store first, so it is
  *   never up to 10 seconds behind. `canSave` false means the store cannot save settings (the profile stays code-only).
  * - `PUT /policy/profile { layer, version, reason }` (`policy.write`, owner only by default): replace the stored layer, the WHOLE
- *   layer (a section left out is reset). 200 `{ ok, changed, effective, base, layer, version, canSave }` (the fresh state, as GET answers it); 409 `conflict` when `version` is no longer the stored
+ *   layer (a section left out is reset). 200 `{ ok, changed, effective, base, layer, version, canSave, limits }` (the fresh state, as GET answers it); 409 `conflict` when `version` is no longer the stored
  *   one (reload and merge); 400 `invalid_profile` with `path` for a layer that touches a setting that is not editable (profanity
  *   stays in code) or would make the profile invalid; 400 `invalid_request` for a bad body; 501 `not_supported` for a store that
  *   cannot save. Audits `policy.update` with the sections changed and the reason (never the values).

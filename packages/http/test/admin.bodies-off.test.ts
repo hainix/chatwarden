@@ -40,7 +40,8 @@ describe('bodies are byte-identical with everything off', () => {
       ['actionedAt', 'actionedBy', 'ai', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'reporterHandle', 'reporterPerson', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'],
     );
     expect(Object.keys((a.next as { case: object }).case).sort()).toEqual(['claim', 'person', 'reportId']);
-    expect(Object.keys(a.policy as object).sort()).toEqual(['base', 'canSave', 'effective', 'layer', 'version']);
+    // The one body that gained a key on purpose: `limits`, the read-only chat rate and retention the settings screens need (never a signal field).
+    expect(Object.keys(a.policy as object).sort()).toEqual(['base', 'canSave', 'effective', 'layer', 'limits', 'version']);
   });
 
   it('declaring kinds without any feed changes no body shape (the same shapes as declaring nothing)', async () => {

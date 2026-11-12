@@ -38,7 +38,7 @@ describe('a dropped signal feed over /policy/profile', () => {
     const read = (await call('GET', '/policy/profile')).body as ProfileBody;
     const res = await call('PUT', '/policy/profile', PUT({ layer: { ...read.layer, pace: { slowModeMs: 2000 } }, version: read.version, reason: 'a quiet room' }));
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ ok: true, version: 2, changed: ['pace'] });
+    expect(res.body).toMatchObject({ ok: true, version: 2, changed: ['pace', 'signals'] });
     expect('dropped' in (res.body as object)).toBe(false);
     expect(JSON.stringify(store.loadPolicyLayer?.()?.layer)).not.toContain('removed_kind');
     expect('dropped' in ((await call('GET', '/policy/profile')).body as object)).toBe(false);
