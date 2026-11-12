@@ -100,7 +100,7 @@ describe('each reason shows its sentence', () => {
 
   it('a pace reason says its wait', async () => {
     w.close();
-    await make({ wrap: scripted((_r, _s, text) => (text === 'flood' ? { refuse: { reason: 'flood' as never, retryAfterMs: 4000 } } : undefined)) });
+    await make({ wrap: scripted((_r, _s, text) => (text === 'flood' ? { refuse: { reason: 'flood', retryAfterMs: 4000 } } : undefined)) });
     await join('snerp');
     await press('flood');
     expect(await screen.findByText('You are sending messages too fast. Try again in 4 seconds.')).toBeInTheDocument();
@@ -108,7 +108,7 @@ describe('each reason shows its sentence', () => {
 
   it('the duplicate reason says its wait', async () => {
     w.close();
-    await make({ wrap: scripted((_r, _s, text) => (text === 'dupe' ? { refuse: { reason: 'duplicate' as never, retryAfterMs: 10_000 } } : undefined)) });
+    await make({ wrap: scripted((_r, _s, text) => (text === 'dupe' ? { refuse: { reason: 'duplicate', retryAfterMs: 10_000 } } : undefined)) });
     await join('snerp');
     await press('dupe');
     expect(await screen.findByText('You already sent that. Say something different, or try again in 10 seconds.')).toBeInTheDocument();
@@ -116,7 +116,7 @@ describe('each reason shows its sentence', () => {
 
   it('a wait of one second is singular', async () => {
     w.close();
-    await make({ wrap: scripted(() => ({ refuse: { reason: 'slow_mode' as never, retryAfterMs: 1000 } })) });
+    await make({ wrap: scripted(() => ({ refuse: { reason: 'slow_mode', retryAfterMs: 1000 } })) });
     await join('snerp');
     await press('hello');
     expect(await screen.findByText('Slow mode is on. You can send another message in 1 second.')).toBeInTheDocument();
@@ -124,7 +124,7 @@ describe('each reason shows its sentence', () => {
 });
 
 describe('a wait', () => {
-  const slow = (ms: number) => scripted((_r, _s, text) => (text === 'wait' ? { refuse: { reason: 'slow_mode' as never, retryAfterMs: ms } } : undefined));
+  const slow = (ms: number) => scripted((_r, _s, text) => (text === 'wait' ? { refuse: { reason: 'slow_mode', retryAfterMs: ms } } : undefined));
 
   it('slow_mode with retryAfterMs 3000 disables Send, says "3 seconds", and re-enables at 3000 ms', async () => {
     w.close();

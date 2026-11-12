@@ -35,7 +35,7 @@ export interface WireMuted {
 
 /**
  * Why a line was not sent, for its author. `reason` is one of: `length`, `rate`, `gate`, `restricted`, `blocked`, `profanity`, `banned`,
- * `empty`, and, once pacing ships, `slow_mode`, `flood`, `duplicate`. A reader treats any other string as unknown.
+ * `empty`, and, when pacing is on (`profile.pace`, a stored layer or `cw.rooms.setPace`), `slow_mode`, `flood`, `duplicate` (these carry `retryAfterMs`). A reader treats any other string as unknown.
  * Never carries text, a handle, an id or a moderator's note.
  */
 export interface WireRefusal {
