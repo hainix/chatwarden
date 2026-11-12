@@ -783,6 +783,7 @@ describe('what is marked @experimental', () => {
         "HubController.refresh",
         "HubControllerOptions.host",
         "LiveQueueStore.refresh",
+        "ReporterRecord.accuracy",
       ]
     `);
     // The prop that hands a page the controller is marked too: `<Hub onController>`.

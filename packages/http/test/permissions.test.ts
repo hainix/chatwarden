@@ -45,6 +45,7 @@ describe('PERMISSIONS defaults', () => {
       'policy.write': 'owner',
       'audit.read': 'senior',
       'claims.override': 'senior',
+      'reports.decide.bulk': 'moderator',
       'reasons.read': 'moderator',
       'reasons.write': 'senior',
       settings: 'owner',

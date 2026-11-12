@@ -31,6 +31,35 @@ export function bodyTakeOver(body: Record<string, unknown>): boolean {
   return body.takeOver;
 }
 
+/** What `POST /reports/dismiss-open` takes, checked for shape. */
+export interface DismissOpenBody {
+  scope: 'person' | 'reporter';
+  ref: string;
+  takeOver: boolean;
+  dryRun: boolean;
+}
+
+/**
+ * The body of a bulk dismissal: `{ scope: 'person' | 'reporter', ref, takeOver?, dryRun? }`. `takeOver` exists for the person
+ * scope only (a sweep over a reporter's cases never takes a case over). A sweep always carries the standard reason, so there is
+ * no `reason`. Any other key is 400 `forbidden_key`; any other shape is 400 `invalid_request`. The scope is checked first, so a
+ * body with a bad scope is `invalid_request` whatever else it holds.
+ */
+export function bodyDismissOpen(body: Record<string, unknown>): DismissOpenBody {
+  const scope = body.scope;
+  if (scope !== 'person' && scope !== 'reporter') throw new ValidationError();
+  const allowed = scope === 'person' ? ['scope', 'ref', 'takeOver', 'dryRun'] : ['scope', 'ref', 'dryRun'];
+  if (Object.keys(body).some((k) => !allowed.includes(k))) throw new HttpError('forbidden_key');
+  const ref = bodyId(body.ref);
+  const takeOver = scope === 'person' ? bodyTakeOver(body) : false;
+  let dryRun = false;
+  if (has(body, 'dryRun')) {
+    if (typeof body.dryRun !== 'boolean') throw new ValidationError();
+    dryRun = body.dryRun;
+  }
+  return { scope, ref, takeOver, dryRun };
+}
+
 /** True when the object has this key of its own (a JSON body has no `undefined`, so a present key has a value). */
 export const has = (o: Record<string, unknown>, key: string): boolean => Object.hasOwn(o, key);
 

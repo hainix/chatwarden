@@ -106,7 +106,7 @@ function keysDeep(value: unknown, out: Set<string> = new Set()): Set<string> {
 }
 
 describe('adminRoutes: shape', () => {
-  it('includes exactly the five report/decision/history routes (the other groups have their own files)', async () => {
+  it('includes exactly the six report/decision/history routes (the other groups have their own files)', async () => {
     const { routes } = await world();
     expect(Object.keys(routes).filter((k) => /\/(reports|people)/.test(k)).sort()).toEqual([
       'GET /people/:ref/history',
@@ -114,6 +114,7 @@ describe('adminRoutes: shape', () => {
       'GET /reports/:id',
       'POST /reports/:id/decide',
       'POST /reports/:id/suggest',
+      'POST /reports/dismiss-open',
     ]);
   });
 
@@ -147,7 +148,7 @@ describe('GET /reports', () => {
     const res = await call('GET', '/reports');
     const item = (res.body as { items: Array<Record<string, unknown>> }).items[0] as Record<string, unknown>;
     expect(Object.keys(item).sort()).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
     expect(item).toMatchObject({ id: r.id, category: 'harassment', status: 'open', roomId: r.room, targetPerson: r.target, reporterPerson: r.reporter, badFaith: false, actionedAt: null, actionedBy: null });
     // Keys are the same on a decided report, and the decision shows through status / badFaith / actioned*.
@@ -1104,3 +1105,126 @@ describe('audit rows hold ids and the action name only', () => {
   });
 });
 
+describe('GET /reports: reporterAccuracy on the open rows', () => {
+  type Item = { id: string; status: string; reporterPerson: string; reporterAccuracy: Record<string, unknown> | null };
+  type Wd = Awaited<ReturnType<typeof world>>;
+
+  /** A reporter (a fixed key) with `unfounded` dismissed and `founded` actioned reports in the last days, and one fresh open report. */
+  async function withHistory(w: Wd, key: string, unfounded: number, founded: number) {
+    const seatRoom = `hist-room-${key}`;
+    w.cw.rooms.seat(seatRoom, 'p1', { clientKey: key }, 'Rep');
+    const reporter = w.cw.rooms.subjectAt(seatRoom, 'p1') as string;
+    for (let i = 0; i < unfounded + founded; i++) {
+      const id = `hist-${key}-${i}`;
+      w.store.insertReport({
+        id,
+        createdAt: NOW - 3 * 24 * HOUR,
+        roomId: `hr-${id}`,
+        tags: {},
+        reporterSubject: reporter,
+        reporterSeat: 'p1',
+        reporterHandle: 'Rep',
+        targetSubject: `s_old_${id}`,
+        targetSeat: 'p2',
+        targetHandle: 'Tgt',
+        category: 'harassment',
+        note: null,
+        lineId: null,
+        excerpt: [],
+        people: [],
+        status: 'open',
+      });
+      w.store.closeReport(id, i < unfounded ? 'dismissed' : 'actioned', false, 'mod', NOW - 2 * 24 * HOUR, 'n');
+    }
+    const room = `fresh-room-${key}`;
+    w.cw.rooms.seat(room, 'p1', { clientKey: key }, 'Rep');
+    w.cw.rooms.seat(room, 'p2', { clientKey: `fresh-target-${key}` }, 'Tgt');
+    w.cw.chat.accept(room, 'p2', 'a line');
+    w.clock.t += 1000;
+    const res = await w.cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2', category: 'harassment' });
+    if (!res.ok) throw new Error(`refused: ${res.refused}`);
+    return { id: res.reportId, reporter };
+  }
+  const items = async (w: Wd, o: { role?: Role } = {}) =>
+    ((await w.call('GET', '/reports', { ...(o.role === undefined ? {} : { role: o.role }) })).body as { items: Item[] }).items;
+
+  it('an open row carries decided, unfounded, falseRate and habitual for a history.read caller, and nothing else', async () => {
+    const w = await world();
+    const r = await withHistory(w, 'habitual-key', 5, 1);
+    const row = (await items(w)).find((i) => i.id === r.id) as Item;
+    expect(row.reporterAccuracy).toEqual({ decided: 6, unfounded: 5, falseRate: 5 / 6, habitual: true });
+  });
+
+  it('below the minimum sample the rate is null and the reporter is not habitual; with no history the figure is null', async () => {
+    const w = await world();
+    const few = await withHistory(w, 'few-key', 3, 0);
+    const none = await w.file();
+    const rows = await items(w);
+    expect((rows.find((i) => i.id === few.id) as Item).reporterAccuracy).toEqual({ decided: 3, unfounded: 3, falseRate: null, habitual: false });
+    expect((rows.find((i) => i.id === none.id) as Item).reporterAccuracy).toBeNull();
+  });
+
+  it('a mostly-founded reporter is not habitual', async () => {
+    const w = await world();
+    const r = await withHistory(w, 'good-key', 1, 7);
+    expect(((await items(w)).find((i) => i.id === r.id) as Item).reporterAccuracy).toEqual({ decided: 8, unfounded: 1, falseRate: 1 / 8, habitual: false });
+  });
+
+  it('decided rows carry null', async () => {
+    const w = await world();
+    const r = await withHistory(w, 'habitual-key', 5, 0);
+    await w.call('POST', `/reports/${r.id}/decide`, { body: { verdict: 'no_action', actions: [] } });
+    const row = (await items(w)).find((i) => i.id === r.id) as Item;
+    expect(row.status).toBe('dismissed');
+    expect(row.reporterAccuracy).toBeNull();
+  });
+
+  it('a caller without history.read gets null on every row, and still gets the queue', async () => {
+    const w = await world({ permissions: { 'history.read': 'senior' } });
+    const r = await withHistory(w, 'habitual-key', 6, 0);
+    const mod = await items(w, { role: 'moderator' });
+    expect(mod.map((i) => i.id)).toContain(r.id);
+    expect(mod.every((i) => i.reporterAccuracy === null)).toBe(true);
+    const senior = await items(w, { role: 'senior' });
+    expect((senior.find((i) => i.id === r.id) as Item).reporterAccuracy).toMatchObject({ habitual: true });
+  });
+
+  it('is read in one batch for the page, each reporter once', async () => {
+    const calls: number[] = [];
+    const w = await world({
+      wrap: (cw) => ({ ...cw, reports: { ...cw.reports, reporterAccuracy: (people) => (calls.push(people.length), cw.reports.reporterAccuracy(people)) } }),
+    });
+    await withHistory(w, 'habitual-key', 6, 0);
+    await w.file();
+    await w.file();
+    await items(w);
+    expect(calls).toEqual([3]);
+  });
+
+  it('a failing accuracy read does not fail the queue: the figure is null and one line is logged', async () => {
+    const w = await world({
+      wrap: (cw) => ({
+        ...cw,
+        reports: {
+          ...cw.reports,
+          reporterAccuracy: () => {
+            throw new Error('disk full');
+          },
+        },
+      }),
+    });
+    await w.file();
+    const res = await w.call('GET', '/reports');
+    expect(res.status).toBe(200);
+    expect((res.body as { items: Item[] }).items.every((i) => i.reporterAccuracy === null)).toBe(true);
+    expect(w.logged.some(([e]) => e === 'chatwarden.http_accuracy_failed')).toBe(true);
+    expect(JSON.stringify(w.logged)).not.toContain('disk full');
+  });
+
+  it('the figure appears on no other route (the report page carries history, not the row figure)', async () => {
+    const w = await world();
+    const r = await withHistory(w, 'habitual-key', 6, 0);
+    const page = await w.call('GET', `/reports/${r.id}`);
+    expect(JSON.stringify(page.body)).not.toContain('reporterAccuracy');
+  });
+});
