@@ -66,7 +66,7 @@ function Header({ detail }: { detail: ReportDetail }) {
 
 function Evidence({ detail }: { detail: ReportDetail }) {
   const { t, can } = useHub();
-  const { people, draft, holder, entry } = useCase();
+  const { people, draft, holder, entry, aiRead: ai } = useCase();
   const { report } = detail;
   const target = people.find((p) => p.role === 'target');
   const state = entry?.state.status;
@@ -84,7 +84,7 @@ function Evidence({ detail }: { detail: ReportDetail }) {
       : null;
   return (
     <>
-      <AiReadSlot read={null} />
+      <AiReadSlot read={ai} />
       <div className="cw-note">
         <h3>{t('hub.report.note.label')}</h3>
         {report.note === null || report.note.trim() === '' ? <p className="cw-hint">{t('hub.report.note.none')}</p> : <p className="cw-note-text">{report.note}</p>}

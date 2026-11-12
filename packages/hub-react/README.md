@@ -379,7 +379,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
     `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
 - the `<Hub>` prop `HubProps.onController`
-- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`
+- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`, and `loadAiWords` (the English of the AI's parts, see "Words and languages")
 
 ## Options
 
@@ -703,6 +703,16 @@ export const t = createT({ ...en, ...de }, 'de');
 ```
 
 Pass it as `<Hub t={t} locale="de" />`. Times and numbers use `Intl` with the same locale.
+
+**The AI's words.** The parts that show the AI (the read on a case, its menu, the pre-filled decision and Settings > AI) are loaded only
+when they are first needed, so their English is not in `en` and costs the first load nothing. A key your `t` has no text for reads in
+English there. To translate them, spread them in with `loadAiWords()`, which returns the keys (named `hub.ai.*` and `hub.settings.ai.*`):
+
+```ts
+import { createT, en, loadAiWords } from '@chatwarden/hub-react';
+
+export const t = createT({ ...en, ...(await loadAiWords()), ...de }, 'de');
+```
 
 **Translators: add these words for 0.1.5.** A key you leave out falls back to English (it never shows as a key), so nothing breaks, but
 the faster-triage screens read English until you add them. A plural pair is listed by its base name and needs `.one` and `.other`

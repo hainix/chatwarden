@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { CommandBarProps } from './shell/CommandBar.js';
+import type { AiReadView } from './types.js';
 
 // Parts of the hub that few moderators open often are loaded the first time they are shown, so the hub's first load carries only
 // what every moderator uses: the sweep disclosure and its window (behind a closed disclosure), the shortcut sheet (opened by `?`) and the
@@ -41,10 +42,12 @@ export const partLoaders: {
   bulk: () => Promise<ComponentType<Record<string, never>>>;
   sheet: () => Promise<ComponentType<{ onClose: () => void }>>;
   bar: () => Promise<ComponentType<CommandBarProps>>;
+  strip: () => Promise<ComponentType<{ read: AiReadView | null }>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
   bar: () => import('./shell/CommandBar.js').then((m) => m.CommandBar),
+  strip: () => import('./case/AiStrip.js').then((m) => m.AiStrip),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -98,17 +101,21 @@ function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>): { Pa
 const bulk = lazyPart(() => partLoaders.bulk());
 const sheet = lazyPart(() => partLoaders.sheet());
 const bar = lazyPart(() => partLoaders.bar());
+const strip = lazyPart(() => partLoaders.strip());
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
 export const LazyShortcutSheet = sheet.Part;
 export const LazyCommandBar = bar.Part;
+/** The AI's read on the case (the strip and its menu): loaded when a case has a read or expects one. */
+export const LazyAiStrip = strip.Part;
 
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
   sheet.reset();
   bar.reset();
+  strip.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

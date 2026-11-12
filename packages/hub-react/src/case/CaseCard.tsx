@@ -20,6 +20,7 @@ import { DecisionBar } from './DecisionBar.js';
 import { useQuickKeys } from '../quickKeys.js';
 import { QuickKeys } from './QuickKeys.js';
 import { reporterRate } from './ReporterStanding.js';
+import { AiReadSlot } from './AiRead.js';
 import { RuleField } from './RuleField.js';
 import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
@@ -382,6 +383,7 @@ export function CaseCard() {
             </p>
           </header>
           <ReporterWarning report={report} people={people} />
+          <AiReadSlot read={c.aiRead} />
           <Said report={report} target={target} people={people} />
           <RecordSection />
         </>

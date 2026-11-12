@@ -12,7 +12,7 @@ import type { HubData } from '../hooks.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import { nextOpenReport } from '../queue.js';
 import type { NextReport, QueueGroup } from '../queue.js';
-import type { PersonHistory, ReportDetail } from '../types.js';
+import type { AiReadView, PersonHistory, ReportDetail } from '../types.js';
 import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
 import { useDecisionForm } from './useDecisionForm.js';
 import type { DecisionDraft } from './useDecisionForm.js';
@@ -39,6 +39,13 @@ export interface CaseValue {
   left: boolean;
   /** The decision form, shared by the transcript's margin boxes and the decision bar. */
   draft: DecisionDraft;
+  /** What the AI read of this report, or null (the AI is off, no read yet, or this moderator hid it on this case). Advice, never a decision. */
+  ai: AiReadView | null;
+  /** The moderator hid the AI on this case (kept for the session, per moderator). `read` is then still there for the strip's "Show". */
+  aiHidden: boolean;
+  /** The read the server sent, hidden or not. */
+  aiRead: AiReadView | null;
+  setAiHidden: (hidden: boolean) => void;
   /** The case was drawn long enough ago (the quick-act cooldown, on a monotonic clock) for an act key or a quick button to act on it. Read when a key is pressed. */
   settled: () => boolean;
   /** The same, as state, so a button can be drawn disabled for that moment. */
@@ -54,6 +61,13 @@ export interface CaseValue {
 }
 
 const CaseContext = createContext<CaseValue | null>(null);
+
+// "Hide the AI on this case": this moderator's choice, for the session (this page, not the server), one entry per moderator and case.
+const hiddenAi = new Set<string>();
+/** Forgets every "hide the AI" (tests). */
+export function forgetHiddenAi(): void {
+  hiddenAi.clear();
+}
 
 /** The open case. Throws outside `<CaseProvider>`. */
 export function useCase(): CaseValue {
@@ -112,6 +126,18 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   // Until the report is loaded it counts as open (the entry then decides); once loaded as closed, a sent decision no longer hides it.
   const left = hasLeft(entry, report === undefined || report.status === 'open');
   const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide') });
+  const [, hideTick] = useState(0);
+  const hideKey = `${me.actor}\u0000${reportId}`;
+  const aiHidden = hiddenAi.has(hideKey);
+  const aiRead = detail.data?.ai ?? null;
+  const setAiHidden = useCallback(
+    (hidden: boolean): void => {
+      if (hidden) hiddenAi.add(hideKey);
+      else hiddenAi.delete(hideKey);
+      hideTick((n) => n + 1);
+    },
+    [hideKey],
+  );
 
   const value: CaseValue = {
     reportId,
@@ -124,6 +150,10 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     entry,
     left,
     draft,
+    ai: aiHidden ? null : aiRead,
+    aiHidden,
+    aiRead,
+    setAiHidden,
     settled,
     cooled,
     reveal: { all: revealAll, setAll: setRevealAll, shows: (id) => revealAll || revealed.has(id), toggle },

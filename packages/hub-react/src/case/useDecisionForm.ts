@@ -79,6 +79,8 @@ export interface DecisionDraft {
   announce: (text: string) => void;
   /** The action whose lines the transcript's margin boxes edit: the reported person's first action that shows lines. */
   primary: Draft | null;
+  /** The AI level the hub is set to (0 off, 1 read, 2 recommend), from the policy; 0 when the role cannot read it. A hint that a read is on its way, nothing more. */
+  aiLevel: number;
 }
 
 /**
@@ -342,5 +344,6 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     announcement,
     announce,
     primary,
+    aiLevel: (policy.data?.profile as { ai?: { level?: number } } | undefined)?.ai?.level ?? 0,
   };
 }

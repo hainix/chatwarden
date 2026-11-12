@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { aiEn } from '../src/ai/i18n.js';
 import { createT, en } from '../src/i18n.js';
 import type { HubText } from '../src/i18n.js';
 
@@ -156,5 +157,38 @@ describe('the hub catalogue keeps its 0.1.2 preview words', () => {
     expect(text('hub.reporting.preview.addNote')).toBe('Add a note');
     expect(text('hub.reporting.preview.cancel')).toBe('Cancel');
     expect(text('hub.reporting.preview.sent')).toBe('Report sent');
+  });
+});
+
+describe('the AI catalog', () => {
+  const keys = Object.keys(aiEn);
+  const text = (k: string): string => (aiEn as Record<string, string>)[k] as string;
+  it('is keyed hub.ai.* or hub.settings.ai.*, apart from the hub catalog, and has no empty text', () => {
+    expect(keys.length).toBeGreaterThan(20);
+    for (const key of keys) {
+      expect(key, key).toMatch(/^hub\.(ai|settings\.ai)(\.[a-z][A-Za-z0-9_]*)+$/);
+      expect(Object.hasOwn(en, key), `${key} is also in the hub catalog`).toBe(false);
+      expect(text(key), key).not.toBe('');
+    }
+  });
+  it('gives every plural form both .one and .other, with {count} in .other', () => {
+    const bases = new Set(keys.filter((x) => /\.(zero|one|two|few|many|other)$/.test(x)).map((x) => x.replace(/\.[a-z]+$/, '')));
+    for (const base of bases) {
+      expect(keys, base).toContain(`${base}.one`);
+      expect(keys, base).toContain(`${base}.other`);
+      expect(text(`${base}.other`), base).toContain('{count}');
+    }
+  });
+  it('writes every placeholder as {name} with letters only', () => {
+    for (const key of keys) for (const m of text(key).matchAll(/\{([^}]*)\}/g)) expect(m[1], key).toMatch(/^[a-zA-Z]+$/);
+  });
+  it('is plain: no marketing words, no em dash, no exclamation mark', () => {
+    for (const key of keys) {
+      expect(text(key), key).not.toMatch(/[—!]/);
+      expect(text(key), key).not.toMatch(/\b(seamless|powerful|robust|blazing|magic|smart|intelligent|revolutionary)\b/i);
+    }
+  });
+  it('never says the AI decides: it reads, suggests and waits', () => {
+    for (const key of keys) expect(text(key), key).not.toMatch(/\b(the AI|AI) (bans|punishes|decides|sanctions)\b/i);
   });
 });

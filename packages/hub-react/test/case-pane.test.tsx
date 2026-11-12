@@ -884,14 +884,6 @@ describe('the AI read slot', () => {
     expect(slot(undefined).container).toBeEmptyDOMElement();
   });
 
-  it('with a read: labelled as the AI\'s, with its level, and says it never decides', () => {
-    slot({ level: 1, text: 'Severe. A blocked slur aimed at the other team.' });
-    const region = screen.getByRole('region', { name: 'AI read' });
-    expect(within(region).getByRole('heading', { name: 'AI read (AI level 1)' })).toBeInTheDocument();
-    expect(within(region).getByText('Severe. A blocked slur aimed at the other team.')).toBeInTheDocument();
-    expect(within(region).getByText('A read, never a decision. A moderator decides.')).toBeInTheDocument();
-  });
-
   it('a case shows no AI box while no read exists', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });

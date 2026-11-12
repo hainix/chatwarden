@@ -44,6 +44,15 @@ export type { FetchTransportOptions, RouterTransportOptions, Transport, Transpor
 
 export { createT, en } from './i18n.js';
 export type { HubCatalog, HubParams, HubT, HubText } from './i18n.js';
+import type { HubCatalog as AiCatalog } from './i18n.js';
+
+/**
+ * The English of the AI's parts (the strip on a case, its menu, the pre-filled decision, Settings > AI). They are loaded when first
+ * needed, not with the hub, so they are not in `en`. To translate them, spread this under your own words with `en`:
+ * `createT({ ...en, ...(await loadAiWords()), ...de }, 'de')`. A key you leave out reads in English.
+ * @experimental
+ */
+export const loadAiWords = (): Promise<AiCatalog> => import('./ai/i18n.js').then((m) => m.aiEn);
 
 export { buildPath, hashRouter, memoryRouter, normalizePath, parseRoute, tabOf } from './router.js';
 export type { HubRouter, MemoryRouter, ObservableRouter, QueueStatus, Route, SettingsSection, TabName } from './router.js';

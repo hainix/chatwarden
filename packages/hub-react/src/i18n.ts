@@ -233,6 +233,7 @@ export const en = {
 
   'hub.ai.label': 'AI read',
   'hub.ai.chip': 'AI read:',
+  'hub.ai.tick': 'Cited by the AI',
   'hub.ai.title': 'AI read (AI level {level})',
   'hub.ai.note': 'A read, never a decision. A moderator decides.',
 
