@@ -46,6 +46,9 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
   createChatwarden,
+  createFakeModerationAI,
+  fakeRead,
+  type AIReadInput,
   type Chatwarden,
   type ChatwardenOptions,
   type ProfileOverrides,
@@ -98,6 +101,13 @@ export interface TinyChatOptions {
   discordMentionRoleId?: string;
   /** The `fetch` the Discord feed posts with. Default: the global one. For tests. */
   discordFetch?: typeof fetch;
+  /**
+   * DEMO ONLY: wire a scripted fake AI (`createFakeModerationAI`, which reads a report by simple rules) at level 2, so the whole AI flow
+   * (a read on every new report, the strip in the hub, the pre-filled decision) can be seen with no key and no network. Default: on when
+   * the `CW_DEMO_AI` environment variable is exactly `1`. An explicit `false` forces it off. A real app passes its own adapter instead
+   * (see `docs/adoption/moxgate.md` and `examples/ai-anthropic`); the owner can still turn the level down in the hub's Settings.
+   */
+  demoAi?: boolean;
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -219,6 +229,18 @@ function hubScriptPath(): string | null {
   }
 }
 
+/**
+ * The demo AI's script: the fake's own rule (nothing by the reported player is banter; otherwise they were rude and the first line they wrote
+ * is the evidence), filed under Community Rule 2, so the pre-filled step is a mild one (the first rule is the slur rule, whose first step is
+ * longer than the 24 hours the pre-fill is held to).
+ */
+function demoScript(input: AIReadInput): { output: unknown } {
+  const rule = input.rules.find((r) => r.number === 2)?.number ?? input.rules[0]?.number ?? 'uncovered';
+  const base = fakeRead(input);
+  if (base.recommendation === null || base.recommendation.verdict !== 'upheld') return { output: base };
+  return { output: { ...base, rule, recommendation: { ...base.recommendation, rule } } };
+}
+
 export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat> {
   const secret = resolveSecret(opts.secret);
   // An empty token (option or environment variable) is no token: the route stays off rather than open to an empty header.
@@ -230,6 +252,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   };
   const clock = { now: () => Date.now() };
   const store = openStore({ path: ':memory:' });
+  // The demo AI: only when asked (the option, else CW_DEMO_AI=1). A fake with a scripted rule, so there is no key and no network call.
+  const demoAi = opts.demoAi !== undefined ? opts.demoAi : process.env.CW_DEMO_AI === '1';
+  if (demoAi) console.warn('tiny-chat: CW_DEMO_AI is on: a scripted fake AI reads new reports (no key, no network). It is a demo, not a moderator.');
   const terms = new LiveTerms({ store, pack: opts.pack ?? syntheticTermPack(), clock });
   await terms.load();
 
@@ -264,7 +289,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     matcher: terms,
     // The one-line preset. Try 'standard' or 'strict'; `overrides` changes single fields (see the README).
     profile: 'relaxed',
-    overrides: opts.overrides,
+    // The demo AI starts at level 2 so the pre-filled decision shows; a code override, so the owner can still lower it in Settings.
+    overrides: demoAi ? { ...opts.overrides, ai: { level: 2, ...opts.overrides?.ai } } : opts.overrides,
+    ...(demoAi ? { ai: { adapter: createFakeModerationAI(demoScript, { id: 'demo-fake' }) } } : {}),
     // The optional profanity package builds the star filter from the profile. Always pass a slur matcher too (above):
     // starring ordinary swearing is not slur protection.
     profanityPackage: { createProfanityFilter },
