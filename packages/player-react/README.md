@@ -16,8 +16,8 @@ npm install @chatwarden/player-react @chatwarden/core react react-dom
 
 `react` and `react-dom` (18.3 or 19) are peer dependencies, so your game has one copy of React. The components use only APIs that
 exist in 18.3 (`useId`, `useRef`). The unit and interaction tests run on React 19; the consumer smoke test installs React 18.3, type-checks against
-`@types/react` 18 and renders every component on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` is a peer too, for its types
-only: no run-time import of it, or of the HTTP package, is in the bundle. Node 22.13 or newer for the tooling; the components
+`@types/react` 18 and renders every component on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` is a peer too (`^0.1.9`), for its types
+only (`AppealRefusal`, `PlayerAppeal` and `NameReason` are new in 0.1.9): no run-time import of it, or of the HTTP package, is in the bundle. Node 22.13 or newer for the tooling; the components
 themselves run in a browser and import no `node:` module.
 
 Your server needs `@chatwarden/http` for the routes the components call (`playerRoutes`). The JavaScript is under 14 KB gzipped
@@ -301,6 +301,10 @@ form (in `NoticeQueue`, in place of the notice inside the same dialog; in `MyRec
 - **Outcome notices.** `appeal_upheld`, `appeal_reduced` and `appeal_revoked` appear in `NoticeQueue` as plain messages with one "Got it": no
   referee card, no appeal link, and they are not sanctions. So does `rename_required` ("Please choose a new name"); your own rename screen does the rest.
   A kind this version does not know shows the generic "A message from the moderators".
+- **New words to translate.** 0.1.9 adds 28 keys to `en`: 18 `player.appeal.*`, 2 `player.name.*`, and the title and body of each of the four new
+  notice kinds (`player.notice.title.*` and `player.notice.body.*`, 8 keys). A catalog that spreads `en` under your own words, as in "Words and languages",
+  shows them in English until you translate them; a catalog that does not shows the bare key. Translate them before you turn `appeals` on. A
+  `@chatwarden/player-react` older than 0.1.9 does not know the four new kinds and shows the generic message above for them.
 - **Names.** `nameReasonText(t, reason)` (`@experimental`) turns the reason of a refused name check (`name_not_allowed`, `name_profane`) into the
   sentence to show beside your sign-up field. A key your catalog lacks falls back to the English words.
 
