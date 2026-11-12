@@ -2,7 +2,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
+import type { MemoryAiStore } from '@chatwarden/store-memory';
 import { createFakeModerationAI, fakeRead } from '../../src/ai/fake.js';
 import { AIError } from '../../src/ai/types.js';
 import { createChatwarden } from '../../src/chatwarden.js';
@@ -17,7 +18,7 @@ const platform = { identify: (ctx: unknown) => ctx as never };
 describe('levels', () => {
   it('level 0 never calls the adapter and never reads the AI tables', async () => {
     const w = await aiWorld({ level: 0 });
-    const store = w.store as MemoryStore;
+    const store = w.store as MemoryAiStore;
     const touched: string[] = [];
     for (const name of ['reserveAiRead', 'completeAiRead', 'failAiRead', 'loadAiRead', 'loadAiReads', 'listAiRetries', 'aiSpendSince', 'loadAiOutcome', 'aiExamples', 'aiTeachableCount', 'aiStats'] as const) {
       const original = (store as unknown as Record<string, (...a: unknown[]) => unknown>)[name]!.bind(store);
@@ -73,16 +74,75 @@ describe('levels', () => {
     expect(w.cw.ai.stats({})).toMatchObject({ decided: 0, rules: [] });
   });
 
-  it('createChatwarden with a store lacking the AI methods throws', async () => {
-    const store = new MemoryStore() as unknown as Record<string, unknown>;
-    const bare = new Proxy(store, {
-      get: (target, key) => (typeof key === 'string' && /Ai(Read|Reads|Retries|Outcome|Examples|SpendSince|TeachableCount|Stats)|purgeAi|insertAiOutcome|markAiOutcome/.test(key) ? undefined : (target[key as string] as unknown)),
-    }) as unknown as Store;
-    await expect(
-      createChatwarden({ store: bare, secret: 's', platform, retention: false, ai: { adapter: createFakeModerationAI() } }),
-    ).rejects.toThrow(/store/i);
-    // And without an adapter nothing is asked of the store.
-    await expect(createChatwarden({ store: bare, secret: 's', platform, retention: false })).resolves.toBeDefined();
+  describe('a store without the AI methods (createMemoryStore carries none)', () => {
+    const EVENT = 'chatwarden.ai_store_unsupported';
+    const make = async (store: Store, ai: boolean) => {
+      const warned: Array<[string, unknown]> = [];
+      const adapter = createFakeModerationAI();
+      const cw = await createChatwarden({
+        store,
+        secret: 's',
+        platform,
+        retention: false,
+        logger: { warn: (event, detail) => void warned.push([event, detail]) },
+        ...(ai ? { ai: { adapter } } : {}),
+      });
+      return { cw, warned, adapter };
+    };
+
+    it('stays inert and logs the event once, instead of failing creation', async () => {
+      const { cw, warned, adapter } = await make(new MemoryStore(), true);
+      expect(warned.filter(([e]) => e === EVENT)).toHaveLength(1);
+      expect(warned.find(([e]) => e === EVENT)?.[1]).toMatchObject({ missing: expect.stringContaining('reserveAiRead') });
+      expect(cw.ai.level()).toBe(0);
+      expect(cw.ai.status()).toMatchObject({ available: false, level: 0, state: 'off' });
+      expect(cw.ai.read('x')).toBeNull();
+      expect(await cw.ai.readAgain('x', 'mod')).toBe('off');
+      expect(cw.ai.stats({})).toMatchObject({ decided: 0 });
+      await cw.ai.idle();
+      expect(adapter.callCount).toBe(0);
+      await cw.close();
+    });
+
+    it('still takes reports and decisions, and never says it again however much is done', async () => {
+      const { cw, warned, adapter } = await make(new MemoryStore(), true);
+      cw.rooms.seat('room', 'p1', { clientKey: 'k1' }, 'One');
+      cw.rooms.seat('room', 'p2', { clientKey: 'k2' }, 'Two');
+      cw.chat.accept('room', 'p2', 'you are rude');
+      const res = await cw.reports.submit({ roomId: 'room', reporterSeat: 'p1', targetSeat: 'p2', category: 'harassment' });
+      expect(res.ok).toBe(true);
+      await cw.ai.sweep();
+      await cw.ai.idle();
+      expect(adapter.callCount).toBe(0);
+      expect(warned.filter(([e]) => e === EVENT)).toHaveLength(1);
+      await cw.close();
+    });
+
+    it('a second kit over another bare store says it again (once per kit)', async () => {
+      const a = await make(new MemoryStore(), true);
+      const b = await make(new MemoryStore(), true);
+      expect(a.warned.filter(([e]) => e === EVENT)).toHaveLength(1);
+      expect(b.warned.filter(([e]) => e === EVENT)).toHaveLength(1);
+    });
+
+    it('is quiet when no adapter is given, and when the store has the methods (controls)', async () => {
+      expect((await make(new MemoryStore(), false)).warned.filter(([e]) => e === EVENT)).toEqual([]);
+      const ok = await make(withMemoryAi(new MemoryStore()), true);
+      expect(ok.warned.filter(([e]) => e === EVENT)).toEqual([]);
+      expect(ok.cw.ai.status().available).toBe(true);
+    });
+
+    it('a store that has only some of the methods is inert too, and names what is missing', async () => {
+      const part = withMemoryAi(new MemoryStore()) as unknown as Record<string, unknown>;
+      Object.defineProperty(part, 'aiStats', { value: undefined });
+      const { cw, warned } = await make(part as unknown as Store, true);
+      expect(cw.ai.status().available).toBe(false);
+      expect(String((warned.find(([e]) => e === EVENT)?.[1] as { missing: string }).missing)).toBe('aiStats');
+    });
+
+    it('a bad option is still refused at creation, whatever the store', async () => {
+      await expect(createChatwarden({ store: new MemoryStore(), secret: 's', platform, retention: false, ai: { adapter: { id: 'x' } as never } })).rejects.toThrow(/adapter/);
+    });
   });
 
   it('refuses a bad AI option at creation', async () => {
@@ -99,7 +159,7 @@ describe('levels', () => {
       { adapter, blockedLines: 'hide' as never },
       { adapter, contextTags: 'x' as never },
     ]) {
-      await expect(createChatwarden({ store: new MemoryStore(), secret: 's', platform, retention: false, ai })).rejects.toThrow();
+      await expect(createChatwarden({ store: withMemoryAi(new MemoryStore()), secret: 's', platform, retention: false, ai })).rejects.toThrow();
     }
   });
 });
@@ -108,7 +168,7 @@ describe('stale reads', () => {
   const edited = starterRules('standard').map((r) => (r.number === 2 ? { ...r, text: `${r.text} Also in voice.` } : r));
 
   it('a changed rule text marks the read stale and does not re-read all open reports', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     const a = await aiWorld({ store });
     const ids: string[] = [];
     for (let i = 0; i < 8; i += 1) ids.push((await a.report()).id);
@@ -140,7 +200,7 @@ describe('stale reads', () => {
   });
 
   it('opening a stale case re-reads once', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     const a = await aiWorld({ store });
     const r = await a.report();
     await a.idle();
@@ -203,7 +263,7 @@ describe('stale reads', () => {
   });
 
   it('a new adapter id is a new read, the old one stays as history', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     const a = await aiWorld({ store });
     const r = await a.report();
     await a.idle();
@@ -272,7 +332,7 @@ describe('a reporter follow-up', () => {
 
 describe('the sweeper', () => {
   it('the sweeper picks up an unread open report after a restart, newest first, at most 20', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     const a = await aiWorld({ store, level: 0 });
     const ids: string[] = [];
     for (let i = 0; i < 25; i += 1) {

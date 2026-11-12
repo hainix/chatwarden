@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import type { MemoryAiStore } from '@chatwarden/store-memory';
 import { fakeRead } from '../../src/ai/fake.js';
 import type { FakeStep } from '../../src/ai/fake.js';
 import type { AIExample, AIReadInput } from '../../src/ai/types.js';
@@ -19,7 +19,7 @@ const rudeUpheld = (input: AIReadInput): FakeStep => ({
     recommendation: { verdict: 'upheld', severity: 'rude', rule: 2, evidence: [ownRef(input)] },
   }),
 });
-const store = (w: AiWorld): MemoryStore => w.store as MemoryStore;
+const store = (w: AiWorld): MemoryAiStore => w.store as MemoryAiStore;
 
 const example = (n: number): AIExample => ({ rule: 2, severity: 'rude', verdict: 'upheld', lines: [{ who: 'P1', text: `seed words ${n}` }] });
 const outcome = (n: number, over: Partial<AiOutcomeInsert> = {}): AiOutcomeInsert => ({

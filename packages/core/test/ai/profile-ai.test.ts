@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
 import { createChatwarden } from '../../src/chatwarden.js';
 import { agentBrief, policyJson } from '../../src/documents.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from '../../src/retention.js';
@@ -272,7 +272,7 @@ describe('retention fields for the AI', () => {
 
   it('createChatwarden refuses a retention below the floor, and accepts the new fields', async () => {
     const make = (retention: object) =>
-      createChatwarden({ store: new MemoryStore(), secret: 'ai-retention', platform: { identify: (c) => c as never }, retention: retention as never });
+      createChatwarden({ store: withMemoryAi(new MemoryStore()), secret: 'ai-retention', platform: { identify: (c) => c as never }, retention: retention as never });
     await expect(make({ aiOutcomesMs: 1 })).rejects.toThrow(ProfileError);
     const cw = await make({ aiOutcomesMs: 100 * DAY, aiExamplesMs: 0, everyMs: 3_600_000 });
     await expect(cw.purge({ aiOutcomesMs: 1 })).rejects.toThrow(ProfileError);
@@ -281,7 +281,7 @@ describe('retention fields for the AI', () => {
   });
 
   it('purge of a store with no AI methods still works', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     const res = await purge(store, 1_800_000_000_000);
     expect(res).toMatchObject({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0 });
     const res2 = await purge(store, 1_800_000_000_000, { aiOutcomesMs: 100 * DAY, aiExamplesMs: 0 });
@@ -289,7 +289,7 @@ describe('retention fields for the AI', () => {
   });
 
   it('purge still checks the new windows', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     await expect(purge(store, 1, { aiExamplesMs: -1 })).rejects.toThrow(/invalid aiExamplesMs/);
     await expect(purge(store, 1, { aiOutcomesMs: Number.NaN })).rejects.toThrow(/invalid aiOutcomesMs/);
   });

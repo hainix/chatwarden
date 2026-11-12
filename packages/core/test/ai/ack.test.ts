@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import type { MemoryAiStore } from '@chatwarden/store-memory';
 import type { FakeScript } from '../../src/ai/fake.js';
 import { AIError } from '../../src/ai/types.js';
 import { world } from '../reportingWorld.js';
@@ -35,7 +35,7 @@ describe('the ack path', () => {
 
   it('the listener only enqueues: it does no store read of the AI tables on the submit path', async () => {
     const w = await aiWorld();
-    const store = w.store as MemoryStore;
+    const store = w.store as MemoryAiStore;
     const spies = (['reserveAiRead', 'loadAiRead', 'loadAiReads', 'aiSpendSince'] as const).map((n) => vi.spyOn(store as never, n as never));
     const t = w.table();
     w.cw.chat.accept(t.room, 'p2', 'rude words');
@@ -134,7 +134,7 @@ describe('fail-soft: the AI misbehaves and nothing else notices', () => {
   it('an AI store method that throws changes nothing for the player or the moderator', async () => {
     const baseline = await shape(await world());
     const w = await aiWorld({ level: 2 });
-    const store = w.store as MemoryStore;
+    const store = w.store as MemoryAiStore;
     for (const name of ['reserveAiRead', 'completeAiRead', 'failAiRead', 'loadAiRead', 'loadAiReads', 'listAiRetries', 'aiSpendSince', 'aiTeachableCount', 'insertAiOutcome', 'loadAiOutcome'] as const) {
       vi.spyOn(store as never as Record<string, () => unknown>, name).mockImplementation((() => {
         throw new Error('disk gone');

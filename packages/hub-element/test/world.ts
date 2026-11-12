@@ -2,7 +2,7 @@ import { createChatwarden, createFakeModerationAI, defineRules, starterRules } f
 import type { AiOptions, Chatwarden, FakeModerationAI, FakeScript, RawWho, Role } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { MemoryTermStore, syntheticTermPack } from '@chatwarden/matcher/fixtures';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
 import type { Store } from '@chatwarden/core';
 import { adminRoutes, createRouter } from '@chatwarden/http/admin';
 import type { KitRequest, KitResponse, PermissionKey, RouteTable } from '@chatwarden/http/admin';
@@ -71,7 +71,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
   live.loadSync();
   const adapter: FakeModerationAI | undefined = opts.ai === undefined ? undefined : createFakeModerationAI(opts.ai.script ?? []);
   const cw: Chatwarden = await createChatwarden({
-    store: opts.store ?? new MemoryStore(),
+    store: opts.store ?? withMemoryAi(new MemoryStore()),
     matcher: live,
     secret: 'hub-element-test-secret-0000-not-real',
     platform: { identify: (ctx) => ctx as RawWho },

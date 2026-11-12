@@ -315,8 +315,9 @@ console.log(cw.ai.status()); // { available: true, level: 0, maxLevel: 2, state:
   a minute and 2 at once, a hard deadline per call (`timeoutMs`) and a breaker that opens after repeated failures. At a limit, reads pause.
 - **It cannot get in the way.** A failing, slow, refusing or garbage-returning provider changes nothing else: the player's ack does not wait for
   the provider, the queue and the case page answer exactly as with the AI off, and a read that fails shows nothing.
-- **Your store needs the AI methods** (the memory and SQLite stores have them; a custom store without them makes `createChatwarden` throw when
-  `ai` is given). SQLite adds three tables in migration 20.
+- **Your store needs the AI methods.** The SQLite store has them (it adds three tables in migration 20); the in-memory store has them only
+  through `withMemoryAi(store)`. A store without them leaves the AI inert: `createChatwarden` logs `chatwarden.ai_store_unsupported` once and
+  carries on (a bad `ai` option still throws).
 - **`cw.ai`** is always there: `level()`, `status()`, `read(reportId)`, `readAgain(reportId, actor)`, `stats()` (the casebook counts) and `idle()`.
   Without an adapter it answers as if the AI were off. The kit loads the AI code only when you pass `ai`, so a bundler can leave it out of a
   browser build that never does.

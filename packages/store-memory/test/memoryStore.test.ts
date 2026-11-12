@@ -54,9 +54,9 @@ const report = (id: string, over: Partial<StoredReport> = {}): StoredReport => (
 });
 
 describe('the package', () => {
-  it('exports VERSION, MemoryStore and createMemoryStore, and nothing else at runtime', () => {
+  it('exports VERSION, MemoryStore, createMemoryStore and withMemoryAi, and nothing else at runtime', () => {
     expect(VERSION).toMatch(/^\d+\.\d+\.\d+/);
-    expect(Object.keys(pkg).sort()).toEqual(['MemoryStore', 'VERSION', 'createMemoryStore']);
+    expect(Object.keys(pkg).sort()).toEqual(['MemoryStore', 'VERSION', 'createMemoryStore', 'withMemoryAi']);
   });
 
   it('src has no node: specifier and no import of a Node builtin (it has to bundle for a browser)', () => {

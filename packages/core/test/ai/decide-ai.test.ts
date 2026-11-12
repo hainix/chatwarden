@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import type { MemoryAiStore } from '@chatwarden/store-memory';
 import { fakeRead } from '../../src/ai/fake.js';
 import type { FakeStep } from '../../src/ai/fake.js';
 import type { AIReadInput } from '../../src/ai/types.js';
@@ -24,7 +24,7 @@ const recommends =
     }),
   });
 
-const store = (w: AiWorld): MemoryStore => w.store as MemoryStore;
+const store = (w: AiWorld): MemoryAiStore => w.store as MemoryAiStore;
 
 /** A decision by moderator `mod_ann`, with the echo of the read. */
 const decision = (

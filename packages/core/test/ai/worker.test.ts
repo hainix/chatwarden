@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
+import type { MemoryAiStore } from '@chatwarden/store-memory';
 import { createFakeModerationAI, fakeRead } from '../../src/ai/fake.js';
 import type { FakeStep } from '../../src/ai/fake.js';
 import { AIError } from '../../src/ai/types.js';
@@ -17,7 +18,7 @@ describe('what a read stores', () => {
     const w = await aiWorld({ level: 1 });
     const r = await w.report();
     await w.idle();
-    const row = (w.store as MemoryStore).loadAiRead(r.id);
+    const row = (w.store as MemoryAiStore).loadAiRead(r.id);
     expect(row?.read?.recommendation?.verdict).toBe('upheld');
     const view = w.cw.ai.read(r.id);
     expect(view).not.toBeNull();
@@ -38,8 +39,8 @@ describe('what a read stores', () => {
     const w = await aiWorld({ level: 2 });
     const r = await w.report(['first words', 'second words']);
     await w.idle();
-    const row = (w.store as MemoryStore).loadAiRead(r.id);
-    const stored = (w.store as MemoryStore).loadReport(r.id);
+    const row = (w.store as MemoryAiStore).loadAiRead(r.id);
+    const stored = (w.store as MemoryAiStore).loadReport(r.id);
     const ids = new Set(stored?.excerpt.map((l) => l.lineId));
     const cited = [...(row?.read?.evidence ?? []), ...(row?.read?.recommendation?.evidence ?? [])];
     expect(cited.length).toBeGreaterThan(0);
@@ -53,7 +54,7 @@ describe('what a read stores', () => {
     const w = await aiWorld({ script: (input) => ({ output: fakeRead(input), usage: { costMicros: 777, inputTokens: 12, model: 'fake-2' } }) });
     const r = await w.report();
     await w.idle();
-    const row = (w.store as MemoryStore).loadAiRead(r.id);
+    const row = (w.store as MemoryAiStore).loadAiRead(r.id);
     expect(row).toMatchObject({ status: 'ok', costMicros: 777, inputTokens: 12, model: 'fake-2', adapter: 'fake:model' });
     expect(row?.exampleIds).toEqual([]);
   });
@@ -141,7 +142,7 @@ describe('the answer is checked in core', () => {
     // Counted in the spend although there is no read.
     expect(w.cw.ai.status().spentMicros).toBe(8400);
     expect(w.cw.audit.list({ limit: 20, action: 'ai.read' }).items).toHaveLength(1);
-    expect((w.store as MemoryStore).aiSpendSince(0).calls).toBe(2);
+    expect((w.store as MemoryAiStore).aiSpendSince(0).calls).toBe(2);
     // Final now: never a third.
     w.clock.t += 20 * MIN;
     await w.cw.ai.sweep();
@@ -429,7 +430,7 @@ describe('the audit row', () => {
 
 describe('two services on one store', () => {
   it('the lease lets exactly one call the adapter', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     // Service A's call is in flight (it hangs); service B, on the same store, finds the read taken.
     const a = await aiWorld({ store, script: [{ hang: true }] });
     const second = createFakeModerationAI();

@@ -1024,7 +1024,7 @@ export interface Store {
   savePolicyLayer?(layer: PolicyLayer, expectedVersion: number): number | null;
 
   // AI reads and the casebook (AI levels 1 and 2, design section 5). OPTIONAL: a store without them works as before, and
-  // `createChatwarden({ ai })` refuses to start with one. SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
+  // `createChatwarden({ ai })` leaves the AI inert with one (and logs it once). SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
 
   /**
    * OPTIONAL. Take the right to make one read, as ONE atomic conditional write: of two callers (two processes on one database

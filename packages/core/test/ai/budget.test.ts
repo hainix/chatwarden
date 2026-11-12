@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CallWindow, nextUtcMidnight, startOfUtcDay, utcDayLabel } from '../../src/ai/budget.js';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
+import type { MemoryAiStore } from '@chatwarden/store-memory';
 import { createFakeModerationAI } from '../../src/ai/fake.js';
 import { createChatwarden } from '../../src/chatwarden.js';
 import { aiWorld, MIN as MINUTE } from './aiWorld.js';
@@ -89,7 +90,7 @@ describe('the daily cap in the service', () => {
     // At the cap: nothing is called, and the read is marked skipped (not lost).
     expect(w.adapter.callCount).toBe(1);
     expect(w.cw.ai.read(b.id)).toBeNull();
-    const retries = (w.store as MemoryStore).listAiRetries(Date.UTC(2100, 0, 1), 50);
+    const retries = (w.store as MemoryAiStore).listAiRetries(Date.UTC(2100, 0, 1), 50);
     expect(retries.filter((r) => r.status === 'skipped' && r.errorKind === 'budget')).toHaveLength(1);
     // Later the same day: still paused, and the skipped read is not asked again.
     w.clock.t += 2 * MINUTE;
@@ -115,7 +116,7 @@ describe('the daily cap in the service', () => {
   });
 
   it('spend survives a new service instance on the same store', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     const a = await aiWorld({ store, ai: { dailyBudgetMicros: 1500 } });
     await a.report();
     await a.idle();

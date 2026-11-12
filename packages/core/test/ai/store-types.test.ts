@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
 import { purge, RETENTION_DEFAULTS } from '../../src/retention.js';
 import type { PurgeResult } from '../../src/retention.js';
 import type { Store } from '../../src/types.js';
@@ -31,7 +31,7 @@ const AI_METHODS = [
 
 /** A store the way a custom adapter written before the AI looks: every AI method is absent. */
 function withoutAi(): Store {
-  const store = new MemoryStore();
+  const store = withMemoryAi(new MemoryStore());
   for (const m of AI_METHODS) Object.defineProperty(store, m, { value: undefined });
   return store;
 }
@@ -43,7 +43,7 @@ describe('the AI Store methods are optional', () => {
   });
 
   it('the first-party memory store has all of them', () => {
-    const store: Store = new MemoryStore();
+    const store: Store = withMemoryAi(new MemoryStore());
     for (const m of AI_METHODS) expect(typeof store[m]).toBe('function');
   });
 });
@@ -55,7 +55,7 @@ describe('purge and the AI rows', () => {
   });
 
   it('passes the three cutoffs: reads with the report window, outcomes and examples with their own', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     const seen: number[][] = [];
     store.purgeAi = (a, b, c) => {
       seen.push([a, b, c]);
@@ -67,7 +67,7 @@ describe('purge and the AI rows', () => {
   });
 
   it('honours a custom policy field by field', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     const seen: number[][] = [];
     store.purgeAi = (a, b, c) => {
       seen.push([a, b, c]);
@@ -80,7 +80,7 @@ describe('purge and the AI rows', () => {
   });
 
   it('runs inside the one purge transaction: a failure in the AI purge undoes the report purge', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     store.insertReport({
       id: 'old',
       createdAt: NOW - 200 * DAY,
@@ -107,7 +107,7 @@ describe('purge and the AI rows', () => {
   });
 
   it('does not call the AI purge when the windows are invalid', async () => {
-    const store = new MemoryStore();
+    const store = withMemoryAi(new MemoryStore());
     let calls = 0;
     store.purgeAi = () => {
       calls += 1;
@@ -119,7 +119,7 @@ describe('purge and the AI rows', () => {
   });
 
   it('the real memory store reports 0 and 0 on an empty store (control)', async () => {
-    const res = await purge(new MemoryStore(), NOW);
+    const res = await purge(withMemoryAi(new MemoryStore()), NOW);
     expect(res.aiReads).toBe(0);
     expect(res.aiOutcomes).toBe(0);
   });

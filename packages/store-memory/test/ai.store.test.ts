@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AIRead, AiOutcomeInsert, AiReadDone } from '@chatwarden/core';
-import { MemoryStore } from '../src/index.js';
+import { MemoryStore, createMemoryStore, withMemoryAi } from '../src/index.js';
 
 // What is specific to MemoryStore in the AI methods: it stores copies, and it is built to be subclassed. The behaviour it shares
 // with SqliteStore is in the shared contract suite (test/contract/ai.contract.ts, run by contract.test.ts).
@@ -44,7 +44,7 @@ const outcomeRow = (): AiOutcomeInsert => ({
 
 describe('MemoryStore AI rows are copies', () => {
   it('changing the objects handed to completeAiRead afterwards does not change the stored read', () => {
-    const s = new MemoryStore();
+    const s = withMemoryAi(new MemoryStore());
     const r = s.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
     if (!r.reserved) throw new Error('expected a reservation');
     const read = aiRead();
@@ -56,7 +56,7 @@ describe('MemoryStore AI rows are copies', () => {
   });
 
   it('changing a loaded read, a listed row or a reserve answer does not change the store', () => {
-    const s = new MemoryStore();
+    const s = withMemoryAi(new MemoryStore());
     const r = s.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
     if (!r.reserved) throw new Error('expected a reservation');
     s.completeAiRead(r.id, r.lease, doneOf(aiRead()));
@@ -70,7 +70,7 @@ describe('MemoryStore AI rows are copies', () => {
   });
 
   it('changing the outcome row handed to insertAiOutcome afterwards does not change the stored one', () => {
-    const s = new MemoryStore();
+    const s = withMemoryAi(new MemoryStore());
     const row = outcomeRow();
     expect(s.insertAiOutcome(row)).toBe(true);
     row.verdict = 'no_action';
@@ -79,7 +79,7 @@ describe('MemoryStore AI rows are copies', () => {
   });
 
   it('an example listed by aiExamples is a copy', () => {
-    const s = new MemoryStore();
+    const s = withMemoryAi(new MemoryStore());
     s.insertAiOutcome(outcomeRow());
     const [row] = s.aiExamples('2', 'rude', 5, 0);
     row?.example.lines.splice(0);
@@ -89,7 +89,7 @@ describe('MemoryStore AI rows are copies', () => {
 
 describe('MemoryStore AI methods can be overridden on an instance, like every other', () => {
   it('a test can make completeAiRead fail and the lease row stays pending', () => {
-    const s = new MemoryStore();
+    const s = withMemoryAi(new MemoryStore());
     const r = s.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
     if (!r.reserved) throw new Error('expected a reservation');
     s.completeAiRead = () => {
@@ -97,5 +97,85 @@ describe('MemoryStore AI methods can be overridden on an instance, like every ot
     };
     expect(() => s.completeAiRead(r.id, r.lease, doneOf(aiRead()))).toThrow('disk full');
     expect(s.loadAiRead('r1')).toBeNull();
+  });
+});
+
+const AI_METHODS = [
+  'reserveAiRead',
+  'completeAiRead',
+  'failAiRead',
+  'loadAiRead',
+  'loadAiReadById',
+  'loadAiReadFor',
+  'loadAiReads',
+  'listAiRetries',
+  'aiSpendSince',
+  'insertAiOutcome',
+  'loadAiOutcome',
+  'markAiOutcome',
+  'aiExamples',
+  'aiTeachableCount',
+  'aiStats',
+  'purgeAi',
+] as const;
+const has = (s: object, name: string): boolean => typeof (s as Record<string, unknown>)[name] === 'function';
+
+describe('withMemoryAi: the AI methods are opt-in', () => {
+  it('createMemoryStore() and new MemoryStore() carry none of them (so a bundle that never opts in has none)', () => {
+    for (const s of [createMemoryStore(), new MemoryStore()]) for (const m of AI_METHODS) expect(has(s, m), m).toBe(false);
+  });
+
+  it('withMemoryAi adds every one, returns the same store, and the methods work', () => {
+    const base = createMemoryStore();
+    const s = withMemoryAi(base);
+    expect(s).toBe(base);
+    for (const m of AI_METHODS) expect(has(s, m), m).toBe(true);
+    const r = s.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
+    expect(r.reserved).toBe(true);
+    expect(s.aiSpendSince(0).calls).toBe(1);
+  });
+
+  it('twice changes nothing, and the data stays', () => {
+    const s = withMemoryAi(new MemoryStore());
+    s.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
+    expect(withMemoryAi(s)).toBe(s);
+    expect(s.aiSpendSince(0).calls).toBe(1);
+  });
+
+  it('keeps a method the store already has: a subclass override wins', () => {
+    class Failing extends MemoryStore {
+      loadAiRead(): null {
+        throw new Error('boom');
+      }
+    }
+    const s = withMemoryAi(new Failing()) as unknown as Record<string, () => unknown>;
+    expect(() => s.loadAiRead?.()).toThrow('boom');
+    expect(has(s, 'reserveAiRead')).toBe(true);
+  });
+
+  it('two stores do not share rows, and one without the methods is not touched by the other', () => {
+    const a = withMemoryAi(createMemoryStore());
+    const b = createMemoryStore();
+    a.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
+    expect(has(b, 'reserveAiRead')).toBe(false);
+    const c = withMemoryAi(createMemoryStore());
+    expect(c.aiSpendSince(0).calls).toBe(0);
+  });
+
+  it('a transaction that is undone undoes an AI write', () => {
+    const s = withMemoryAi(createMemoryStore());
+    expect(() =>
+      s.transaction(() => {
+        s.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
+        throw new Error('abort');
+      }),
+    ).toThrow('abort');
+    expect(s.aiSpendSince(0).calls).toBe(0);
+    expect(s.loadAiReadFor('r1', 'h')).toBeNull();
+  });
+
+  it('a store without the AI methods purges reports as before', () => {
+    const s = createMemoryStore();
+    expect(s.purgeReports(NOW, NOW)).toBe(0);
   });
 });

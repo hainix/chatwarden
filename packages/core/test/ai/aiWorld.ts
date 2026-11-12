@@ -1,4 +1,4 @@
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
 import { createFakeModerationAI } from '../../src/ai/fake.js';
 import type { FakeModerationAI, FakeScript } from '../../src/ai/fake.js';
 import type { AiOptions } from '../../src/ai/service.js';
@@ -32,7 +32,7 @@ export async function aiWorld(o: AiWorldOptions = {}) {
       overrides: { ai: { level, ...(o.dailyCalls === undefined ? {} : { dailyCalls: o.dailyCalls }) } },
       ...(o.over ?? {}),
     },
-    o.store ?? new MemoryStore(),
+    o.store ?? withMemoryAi(new MemoryStore()),
   );
   /** A fresh room, a few lines by the target, then the report. Returns the report id. */
   let reporters = 0;

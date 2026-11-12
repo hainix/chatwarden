@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import type { MemoryAiStore } from '@chatwarden/store-memory';
 import { AIError } from '../../src/ai/types.js';
 import { PARKED_MAX } from '../../src/ai/service.js';
 import type { FakeStep } from '../../src/ai/fake.js';
@@ -9,7 +9,7 @@ import { aiWorld, MIN, NOW, OWNER } from './aiWorld.js';
 // Fix round 1: the end of every road. A read again on a final row, a half-open breaker, the daily call ceiling, attempts that skips do
 // not use up, and a sweeper that does not leak or starve.
 
-const store = (w: { store: unknown }): MemoryStore => w.store as MemoryStore;
+const store = (w: { store: unknown }): MemoryAiStore => w.store as MemoryAiStore;
 /** The newest row of a report in the memory store, whatever its state (loadAiRead only returns finished reads). */
 const rowOf = (w: { store: unknown }, reportId: string): AiReadRow | undefined => [...(store(w) as unknown as { aiReads: AiReadRow[] }).aiReads].reverse().find((r) => r.reportId === reportId);
 const view = (a: unknown): a is { id: string } => typeof a === 'object' && a !== null && 'id' in a;

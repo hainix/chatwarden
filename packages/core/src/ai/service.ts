@@ -264,10 +264,13 @@ export function requireAiStore(store: Store): AiStore {
   return store as AiStore;
 }
 
-/** Check the AI option and the store before anything is started: throws a plain error for a bad option or a store without the AI methods. */
-export function checkAiSetup(store: Store, options: AiOptions): void {
+/**
+ * Check the AI option before anything is started (throws a plain error for a bad one) and name the AI methods the store lacks. A store that
+ * lacks some leaves the AI inert: `createChatwarden` says so once and carries on, as it does for any optional Store method.
+ */
+export function checkAiSetup(store: Store, options: AiOptions): string[] {
   checkOptions(options);
-  requireAiStore(store);
+  return REQUIRED_STORE_METHODS.filter((m) => typeof (store as unknown as Record<string, unknown>)[m] !== 'function');
 }
 
 function checkOptions(o: AiOptions): Required<Omit<AiOptions, 'adapter' | 'contextTags'>> & { contextTags: string[] } {

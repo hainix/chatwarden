@@ -198,8 +198,9 @@ export interface ChatwardenOptions {
   autoRestrictRule?: number;
   /**
    * AI levels 1 and 2 (read, and recommend). Off unless you give an adapter; the level itself is a moderator setting
-   * (`profile.ai.level`, default 0) held to at most `maxLevel`. Needs a store with the AI methods (the memory and SQLite stores
-   * have them) and throws at creation otherwise. The adapter runs on the server only; see `ModerationAI`.
+   * (`profile.ai.level`, default 0) held to at most `maxLevel`. Needs a store with the AI methods (SQLite has them; the
+   * in-memory store has them through `withMemoryAi`). A store without them leaves the AI inert and logs `chatwarden.ai_store_unsupported`
+   * once at creation, as with any optional Store method; a bad option still throws. The adapter runs on the server only; see `ModerationAI`.
    * @experimental
    */
   ai?: AiOptions;
@@ -681,7 +682,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   }
   // The AI service is loaded only when an adapter is given, so a bundler can leave it (about 40 KB minified) out of a build that never passes one.
   const aiModule = opts.ai === undefined ? undefined : await import('./ai/service.js');
-  if (opts.ai !== undefined && aiModule !== undefined) aiModule.checkAiSetup(store, opts.ai);
+  // A bad option throws here. A store without the AI methods (the in-memory store has them only through `withMemoryAi`) does not: the AI stays
+  // inert and the kit says so once, like any optional Store method it cannot use.
+  const aiMissing = opts.ai !== undefined && aiModule !== undefined ? aiModule.checkAiSetup(store, opts.ai) : [];
+  if (aiMissing.length > 0) safeWarn(logger, 'chatwarden.ai_store_unsupported', { missing: aiMissing.join(',') });
   const rules = opts.rules ?? defineRules(starterRules(baseProfile.rules));
   const autoRestrictRule = opts.autoRestrictRule ?? 1;
   const autoRule = rules.get(autoRestrictRule);
@@ -884,7 +888,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
 
   // The AI read service. It listens for new reports and only enqueues; with no adapter it is a facade that is always off.
   const aiService =
-    opts.ai === undefined || aiModule === undefined
+    opts.ai === undefined || aiModule === undefined || aiMissing.length > 0
       ? undefined
       : new aiModule.AiService({
           options: opts.ai,
