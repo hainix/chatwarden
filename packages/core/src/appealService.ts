@@ -124,7 +124,7 @@ function checkDecision(input: AppealDecision): CheckedDecision | null {
   if (typeof kind !== 'string' || !(SANCTION_KIND_ORDER as readonly string[]).includes(kind)) return null;
   if (kind === 'warning') {
     if (durationMs !== null) return null;
-  } else if (durationMs !== null && (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs <= 0 || durationMs > MAX_SANCTION_DURATION_MS)) {
+  } else if (durationMs !== null && (typeof durationMs !== 'number' || !Number.isSafeInteger(durationMs) || durationMs <= 0 || durationMs > MAX_SANCTION_DURATION_MS)) {
     return null;
   }
   return { appealId, outcome: 'reduce', actor, reason: why, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs: durationMs as number | null } };
@@ -132,9 +132,9 @@ function checkDecision(input: AppealDecision): CheckedDecision | null {
 
 /** A refusal that must roll the filing's transaction back (the row was written to test the unique group and the rate). */
 class Refuse extends Error {
-  readonly refused: 'already_appealed' | 'rate';
+  readonly refused: 'already_appealed' | 'rate' | 'not_appealable';
   readonly retryAfterMs: number | undefined;
-  constructor(refused: 'already_appealed' | 'rate', retryAfterMs?: number) {
+  constructor(refused: 'already_appealed' | 'rate' | 'not_appealable', retryAfterMs?: number) {
     super(refused);
     this.refused = refused;
     this.retryAfterMs = retryAfterMs;
@@ -228,13 +228,20 @@ export class AppealService {
     try {
       this.d.store.transaction(() => {
         // The unique group decides "already appealed" in the same statement that writes the row, so of two filings exactly one wins; the
-        // rate is then counted with the new row in it. Either refusal rolls the row back: a refusal writes nothing.
+        // rate is then counted with the new row in it. Either refusal rolls the row back: a refusal writes nothing. The sanction is read
+        // again here: a revoke by another process may have committed since the read above, and its hook cannot have closed a row that
+        // did not exist yet.
+        const live = this.d.store.loadSanctionSubjectRow?.(row.groupId) ?? null;
+        if (live === null || live.revokedAt !== undefined) throw new Refuse('not_appealable');
         if (this.d.store.insertAppeal?.(row) !== true) throw new Refuse('already_appealed');
         const count = this.d.store.countAppealsBy?.(aliases, since) ?? { count: 0, oldestAt: null };
         if (count.count > cap) throw new Refuse('rate', Math.max(1, (count.oldestAt ?? now) + WEEK_MS - now));
       });
     } catch (err) {
-      if (err instanceof Refuse) return err.refused === 'rate' ? { ok: false, refused: 'rate', retryAfterMs: err.retryAfterMs ?? 1 } : { ok: false, refused: 'already_appealed' };
+      if (err instanceof Refuse) {
+        if (err.refused === 'rate') return { ok: false, refused: 'rate', retryAfterMs: err.retryAfterMs ?? 1 };
+        return { ok: false, refused: err.refused };
+      }
       throw err;
     }
 
@@ -271,6 +278,8 @@ export class AppealService {
     const now = clock.now();
     const appeal = store.loadAppeal?.(d.appealId) ?? null;
     if (appeal === null) return { ok: false, error: 'not_found' };
+    // A moot appeal means its sanction was revoked first: that is `gone`. Any other closed appeal was decided.
+    if (appeal.status === 'moot') return { ok: false, error: 'gone' };
     if (appeal.status !== 'open') return { ok: false, error: 'already_decided' };
     const group = store.loadSanctionSubjectRow?.(appeal.groupId) ?? null;
     // The sanction is gone (retention) or was revoked by a path that did not make the appeal moot: nothing is left to rule on.
@@ -336,7 +345,14 @@ export class AppealService {
         }
       });
     } catch (err) {
-      if (err instanceof Stop) return err.why === 'gone' ? this.mootGone(appeal, d.actor, now) : { ok: false, error: 'already_decided' };
+      if (err instanceof Stop) {
+        if (err.why !== 'gone') return { ok: false, error: 'already_decided' };
+        // The revoke found nothing to revoke. When another process decided this appeal first (and so revoked or replaced the group), this
+        // call lost the race and the answer is `already_decided`; only an appeal still open has really lost its sanction.
+        const now_ = store.loadAppeal?.(appeal.id) ?? null;
+        if (now_ !== null && now_.status !== 'open') return { ok: false, error: now_.status === 'moot' ? 'gone' : 'already_decided' };
+        return this.mootGone(appeal, d.actor, now);
+      }
       throw err;
     }
 

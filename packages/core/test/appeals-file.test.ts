@@ -81,6 +81,36 @@ describe('file: refusals, in order', () => {
     expect(k.rows()).toEqual([]);
   });
 
+  it('a revoke that commits between the read and the insert (another process) leaves no appeal: not_appealable, no row, nothing open or counted, no event', async () => {
+    const k = await appealsKit({}, { perPlayerPerWeek: 1 });
+    const s = await k.sanction({ key: 'kr' });
+    const real = k.store.transaction.bind(k.store);
+    let raced = false;
+    (k.store as unknown as { transaction: unknown }).transaction = <T>(fn: () => T): T => {
+      if (!raced) {
+        raced = true;
+        // the other process's revoke: straight to the store, so no hook ran and the notice was not withdrawn
+        k.store.revokeSanctionGroup(s.groupId, 'other_proc', NOW, 'lifted');
+      }
+      return real(fn);
+    };
+    expect(k.cw.appeals.file(s.who, { noticeId: s.noticeId, statement: 'late' })).toEqual({ ok: false, refused: 'not_appealable' });
+    expect(k.rows()).toEqual([]);
+    expect(k.store.countOpenAppeals()).toBe(0);
+    expect(k.cw.appeals.openCount()).toBe(0);
+    expect(k.events.filter((e) => e.type === 'appeal.created')).toEqual([]);
+    // the refusal cost nothing against the weekly cap
+    const other = await k.sanction({ key: 'kr' });
+    expect(k.cw.appeals.file(other.who, { noticeId: other.noticeId, statement: 'fine' })).toMatchObject({ ok: true });
+  });
+
+  it('control: with no revoke in between the same filing is accepted', async () => {
+    const k = await appealsKit();
+    const s = await k.sanction({ key: 'kc' });
+    expect(k.cw.appeals.file(s.who, { noticeId: s.noticeId, statement: 'ok' })).toMatchObject({ ok: true });
+    expect(k.rows()).toHaveLength(1);
+  });
+
   it('a report_outcome, rename_required, appeal outcome and a withdrawn notice are not_appealable', async () => {
     const k = await appealsKit();
     const s = await k.sanction({ key: 'kw' });
@@ -112,6 +142,56 @@ describe('file: the statement', () => {
       expect(res, JSON.stringify(st)).toEqual({ ok: false, refused: 'statement_invalid' });
       expect(k.rows()).toEqual([]);
     }
+  });
+
+  it('only-invisible statements (Hangul fillers, braille blank, grapheme joiner, variation selectors, annotation marks, tag characters) are statement_invalid', async () => {
+    const onlyInvisible = [
+      '\u115f',
+      '\u1160',
+      '\u3164',
+      '\uffa0',
+      '\u2800',
+      '\u034f',
+      '\ufe00',
+      '\ufe0f',
+      '\u{e0100}',
+      '\u{e01ef}',
+      '\ufff9',
+      '\ufffa',
+      '\ufffb',
+      '\u{e0000}',
+      '\u{e0001}',
+      '\u{e0041}\u{e0042}\u{e007f}',
+      '\u3164\u2800 \u115f\u1160\u034f\ufe0f',
+    ];
+    for (const st of onlyInvisible) {
+      const { k, res } = await file(st);
+      expect(res, JSON.stringify(st)).toEqual({ ok: false, refused: 'statement_invalid' });
+      expect(k.rows()).toEqual([]);
+    }
+  });
+
+  it('those characters are removed from a real statement, at every position, and the edges of each range are covered', () => {
+    const edges = ['\u115f', '\u1160', '\u3164', '\uffa0', '\u2800', '\u034f', '\ufe00', '\ufe08', '\ufe0f', '\u{e0100}', '\u{e0170}', '\u{e01ef}', '\ufff9', '\ufffa', '\ufffb', '\u{e0000}', '\u{e0020}', '\u{e007f}'];
+    for (const c of edges) {
+      expect(normalizeStatement(`a${c}b`), c).toBe('ab');
+      expect(normalizeStatement(`${c}ab${c}`), c).toBe('ab');
+    }
+    // tag characters that hide a word inside a visible line do not survive
+    expect(normalizeStatement('hello\u{e0073}\u{e0065}\u{e0063}\u{e0072}\u{e0065}\u{e0074} world')).toBe('hello world');
+  });
+
+  it('the characters just outside each stripped range are kept', () => {
+    for (const c of ['\u115e', '\u1161', '\u3163', '\u3165', '\uff9f', '\uffa1', '\u27ff', '\u2801', '\u034e', '\u0350', '\ufdff', '\ufe10', '\u{dffff}', '\u{e0080}', '\u{e00ff}', '\u{e01f0}', '\ufff8', '\ufffc']) {
+      expect(normalizeStatement(`a${c}b`), c).toBe(`a${c}b`);
+    }
+  });
+
+  it('the cleaner stays idempotent and counts after stripping: 1000 visible characters plus invisible padding are accepted', async () => {
+    const mixed = 'x\u3164y\u2800\u{e0041}\ufe0f\ufff9z';
+    expect(normalizeStatement(mixed)).toBe('xyz');
+    expect(normalizeStatement(normalizeStatement(mixed))).toBe('xyz');
+    expect((await file('a'.repeat(1000) + '\u3164\u{e0041}'.repeat(400))).res).toMatchObject({ ok: true });
   });
 
   it('1000 code points are accepted and 1001 are refused; 1000 emoji are accepted (code points, not UTF-16 units)', async () => {

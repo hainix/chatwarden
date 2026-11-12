@@ -86,6 +86,11 @@ describe('reduce', () => {
       { kind: 'chat', durationMs: 0 },
       { kind: 'chat', durationMs: -5 },
       { kind: 'chat', durationMs: Number.NaN },
+      { kind: 'chat', durationMs: 0.5 },
+      { kind: 'chat', durationMs: HOUR + 0.5 },
+      { kind: 'chat', durationMs: Number.POSITIVE_INFINITY },
+      { kind: 'chat', durationMs: Number.MAX_SAFE_INTEGER + 2 },
+      { kind: 'ban', durationMs: 1.5 },
       { kind: 'chat', durationMs: 400 * DAY },
       { kind: 'chat' },
       null,
@@ -298,8 +303,8 @@ describe('gone and moot', () => {
     }
     expect(await k.cw.appeals.decide(decision(s.appealId))).toEqual({ ok: false, error: 'gone' });
     expect(k.store.loadAppeal(s.appealId)?.status).toBe('moot');
-    // a moot appeal is not decided again, and it has no outcome notice, no event
-    expect(await k.cw.appeals.decide(decision(s.appealId))).toEqual({ ok: false, error: 'already_decided' });
+    // a moot appeal is not decided again (its sanction was revoked first, so `gone` and not `already_decided`), and it has no outcome notice, no event
+    expect(await k.cw.appeals.decide(decision(s.appealId))).toEqual({ ok: false, error: 'gone' });
     expect(k.events.filter((e) => e.type === 'appeal.decided')).toEqual([]);
     expect(kinds(k, s.who).filter((x) => x.startsWith('appeal_'))).toEqual([]);
   });
@@ -332,7 +337,61 @@ describe('gone and moot', () => {
     expect(kinds(k, s.who)).toEqual([]);
     expect(k.events.filter((e) => e.type === 'appeal.decided')).toEqual([]);
     expect(k.store.appealCountsByRule(0)).toEqual([{ rule: '2', appealed: 1, granted: 0, lightened: 0 }]);
-    expect(await k.cw.appeals.decide(decision(s.appealId))).toEqual({ ok: false, error: 'already_decided' });
+    // the card a moderator opens after the revoke is told the sanction is gone, not that somebody decided it
+    for (const outcome of ['uphold', 'reduce', 'revoke'] as const) {
+      const res = await k.cw.appeals.decide(decision(s.appealId, outcome === 'reduce' ? { outcome, to: { kind: 'warning', durationMs: null } } : { outcome }));
+      expect(res, outcome).toEqual({ ok: false, error: 'gone' });
+    }
+    expect(k.store.loadAppeal(s.appealId)).toMatchObject({ status: 'moot', decidedBy: 'mod_cy' });
+  });
+
+  it('a decided appeal still answers already_decided (upheld, reduced and revoked), a moot one gone', async () => {
+    const k = await appealsKit({}, { perPlayerPerWeek: 20 });
+    for (const outcome of ['uphold', 'reduce', 'revoke'] as const) {
+      const s = await filed(k, { kind: 'ban', durationMs: null });
+      const to = outcome === 'reduce' ? { to: { kind: 'chat' as const, durationMs: HOUR } } : {};
+      expect(await k.cw.appeals.decide(decision(s.appealId, { outcome, ...to }))).toMatchObject({ ok: true });
+      expect(await k.cw.appeals.decide(decision(s.appealId, { outcome, actor: 'owner_cy', ...to })), outcome).toEqual({ ok: false, error: 'already_decided' });
+    }
+  });
+
+  it('a race loser answers already_decided, never gone: another process decided first, so the revoke finds nothing left to revoke', async () => {
+    for (const winner of ['revoke', 'reduce'] as const) {
+      const k = await appealsKit();
+      const s = await filed(k, { kind: 'ban', durationMs: null });
+      // The other process commits its decision just before this one's transaction opens (this one already read the appeal as open).
+      const real = k.store.transaction.bind(k.store);
+      let raced = false;
+      (k.store as unknown as { transaction: unknown }).transaction = <T>(fn: () => T): T => {
+        if (!raced) {
+          raced = true;
+          k.store.revokeSanctionGroup(s.groupId, 'other_proc', NOW, 'won');
+          k.store.decideAppeal(s.appealId, { status: winner === 'revoke' ? 'revoked' : 'reduced', at: NOW, by: 'other_proc', reason: 'won', replacementGroupId: null });
+        }
+        return real(fn);
+      };
+      const res = await k.cw.appeals.decide(decision(s.appealId, { outcome: 'revoke', actor: 'owner_cy' }));
+      expect(res, winner).toEqual({ ok: false, error: 'already_decided' });
+      expect(k.store.loadAppeal(s.appealId)).toMatchObject({ status: winner === 'revoke' ? 'revoked' : 'reduced', decidedBy: 'other_proc' });
+      expect(k.events.filter((e) => e.type === 'appeal.decided')).toEqual([]);
+      await k.cw.close();
+    }
+  });
+
+  it('control: the sanction revoked by a path that left the appeal open (no decision) is still gone and moots', async () => {
+    const k = await appealsKit();
+    const s = await filed(k, { kind: 'ban', durationMs: null });
+    const real = k.store.transaction.bind(k.store);
+    let raced = false;
+    (k.store as unknown as { transaction: unknown }).transaction = <T>(fn: () => T): T => {
+      if (!raced) {
+        raced = true;
+        k.store.revokeSanctionGroup(s.groupId, 'other_proc', NOW, 'direct');
+      }
+      return real(fn);
+    };
+    expect(await k.cw.appeals.decide(decision(s.appealId, { outcome: 'revoke' }))).toEqual({ ok: false, error: 'gone' });
+    expect(k.store.loadAppeal(s.appealId)?.status).toBe('moot');
   });
 });
 

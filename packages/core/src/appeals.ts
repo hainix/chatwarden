@@ -117,15 +117,22 @@ const STATEMENT_RAW_MAX = APPEAL_STATEMENT_MAX * 20;
 // Line and paragraph separators and the C1 next-line become a newline; a tab becomes a space.
 const NEWLINES = /\r\n|[\r\u0085\u2028\u2029]/g;
 // Control characters other than newline (tab is handled before), bidirectional controls and marks, zero-width and invisible format
-// characters, the soft hyphen, and the Mongolian vowel separator.
-// eslint-disable-next-line no-control-regex
-const STRIPPED = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
+// characters, the soft hyphen, the Mongolian vowel separator, the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0), the braille blank
+// (U+2800), the combining grapheme joiner (U+034F), the variation selectors (U+FE00 to U+FE0F) and the interlinear annotation marks
+// (U+FFF9 to U+FFFB). Each draws nothing, so a statement made of them would look blank to the staff reader.
+// eslint-disable-next-line no-control-regex, no-misleading-character-class
+const STRIPPED = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff9-\ufffb]/g;
+// Beyond the BMP (so this one needs the `u` flag): the tag characters (U+E0000 to U+E007F), which can carry hidden text, and the
+// variation selectors supplement (U+E0100 to U+E01EF).
+// eslint-disable-next-line no-misleading-character-class
+const STRIPPED_ASTRAL = /[\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
 // A surrogate with no partner: it cannot be stored as UTF-8 (SQLite writes U+FFFD, the memory store keeps it), so both are removed first.
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
 /**
  * Clean a statement before it is counted or stored: line and paragraph separators become newlines and tabs spaces; control, bidirectional
- * and zero-width characters, the soft hyphen, NUL and lone surrogates are removed; every line loses its trailing space; runs of blank lines
+ * and zero-width characters, the soft hyphen, the Hangul fillers, the braille blank, the grapheme joiner, variation selectors, annotation
+ * marks, tag characters, NUL and lone surrogates are removed; every line loses its trailing space; runs of blank lines
  * collapse to one; the whole is trimmed. Pure, idempotent, never throws; anything that is not a string, and a string longer than twenty times
  * the cap, gives an empty string (which the filing refuses). Count the result in code points, not UTF-16 units.
  * @experimental
@@ -137,6 +144,7 @@ export function normalizeStatement(input: unknown): string {
     .replace(/\t/g, ' ')
     .replace(LONE_SURROGATE, '')
     .replace(STRIPPED, '')
+    .replace(STRIPPED_ASTRAL, '')
     .split('\n')
     .map((line) => line.trimEnd())
     .join('\n')
