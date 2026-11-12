@@ -1062,3 +1062,7 @@ Each has a recommendation; the controller rules.
 ## 19. Rulings
 
 *(To be filled by the controller when the questions above are answered.)*
+
+## Rulings (2026-11-12, controller, under the owner's "go" on the roadmap order)
+All ten open questions take the recommendation: (1) no manual npm step now; the CLI is a `chatwarden` bin of `@chatwarden/http` (plus `@chatwarden/http/cli`); (2) if a package is added later it is `create-chatwarden`, and it needs the owner's one-time hand publish plus a Trusted Publisher (RELEASING.md steps); (3) service mode is the next phase after K4b, designed first as K4d; (4) the test kit ships at `@chatwarden/store-memory/testing`; (5) the generated staff sign-in is the fail-closed shared-token starter with `chatwarden init --check`; (6) every generated route family sits under `/chatwarden`; (7) Colyseus is a docs page tested against fakes; (8) the skill-only Claude Code plugin ships if Task 1's layout check confirms it, else the skill text goes to `docs/recipes/agents.md`; (9) a `windows-latest` CI job runs the CLI and test-kit tests; (10) core's own tests adopt the test kit only where it is a straight swap, as an optional last commit.
+Release: versions are assigned in merge order. Current order: 0.1.6 chat box, 0.1.7 AI levels, 0.1.8 flood control and signals, then appeals and names and this phase in whichever order they are ready.
