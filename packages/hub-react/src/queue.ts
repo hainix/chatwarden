@@ -94,14 +94,22 @@ export function setRankLoader(fn: (() => Promise<unknown>) | null): void {
   rankLoader = fn;
 }
 /** Fetches the AI's ranking code (it never fails: a queue without it sorts by the longest wait). Headless adopters get it too, with no setup. */
-export const loadRanker = (): Promise<unknown> => (rankLoader ?? (() => import('./ai/rank.js')))().catch(() => undefined);
+export const loadRanker = (): Promise<unknown> =>
+  (rankLoader ?? (() => import('./ai/rank.js')))()
+    // A loader that gave nothing (the fetch failed) installs nothing; otherwise the ranking installs itself, not as a side effect of loading.
+    .then((loaded) => (loaded == null ? undefined : import('./ai/rank.js').then((m) => m.installRanker())))
+    .catch(() => undefined);
 
 /**
  * The AI's queue ranking: `priorityScore`, `RANK_WEIGHTS` and `reporterSignal`, and, once loaded, the `priority` sort of `groupQueue`. Both hubs (React and
  * headless) load it by themselves when their queue holds a read; this is for code that calls `groupQueue(items, { sort: 'priority' })` on its own.
  * @experimental
  */
-export const loadAiRank = (): Promise<AiRank> => import('./ai/rank.js').then(({ priorityScore, RANK_WEIGHTS, reporterSignal }) => ({ priorityScore, RANK_WEIGHTS, reporterSignal }));
+export const loadAiRank = (): Promise<AiRank> =>
+  import('./ai/rank.js').then(({ installRanker, priorityScore, RANK_WEIGHTS, reporterSignal }) => {
+    installRanker();
+    return { priorityScore, RANK_WEIGHTS, reporterSignal };
+  });
 
 /** What a reporter said a report was for: a reason id and its label now, or both null for a report that gave none. */
 export interface ReportedReason {

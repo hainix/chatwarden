@@ -96,4 +96,33 @@ describe('the queue\'s ranking loader', () => {
     await queue.loadRanker();
     expect(queue.hasRanker()).toBe(true);
   });
+
+  // The module's own call to setRanker is a side effect of evaluating it, which a bundler that trusts `sideEffects` may drop: the loaders install
+  // the ranking themselves, so the order never depends on module evaluation.
+  it('loadRanker installs the ranking itself, even when the module was already evaluated', async () => {
+    const queue = await fresh().then(() => import('../src/queue.js'));
+    await import('../src/ai/rank.js');
+    queue.setRanker(null);
+    expect(queue.hasRanker()).toBe(false);
+    await queue.loadRanker();
+    expect(queue.hasRanker()).toBe(true);
+  });
+
+  it('loadAiRank installs the ranking too', async () => {
+    const queue = await fresh().then(() => import('../src/queue.js'));
+    await import('../src/ai/rank.js');
+    queue.setRanker(null);
+    const rank = await queue.loadAiRank();
+    expect(typeof rank.priorityScore).toBe('function');
+    expect(queue.hasRanker()).toBe(true);
+  });
+
+  it('a loader that gave nothing (the fetch failed) installs nothing', async () => {
+    const queue = await fresh().then(() => import('../src/queue.js'));
+    await import('../src/ai/rank.js');
+    queue.setRanker(null);
+    queue.setRankLoader(() => Promise.resolve(null));
+    await queue.loadRanker();
+    expect(queue.hasRanker()).toBe(false);
+  });
 });

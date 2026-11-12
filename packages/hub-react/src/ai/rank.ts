@@ -108,4 +108,13 @@ function rankGroups(groups: QueueGroup[], options: { signals?: RankSignals; now?
   groups.sort((a, b) => (scores.get(b) as number) - (scores.get(a) as number) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
 }
 
-setRanker(rankGroups);
+/**
+ * Teaches `groupQueue` the `priority` sort. The loaders in `queue.ts` call this themselves, so the order never depends on this module's
+ * evaluation (a bundler that trusts `sideEffects` may leave that out).
+ */
+export function installRanker(): void {
+  setRanker(rankGroups);
+}
+
+// Also on evaluation, so code that imports this module directly gets the sort as before.
+installRanker();
