@@ -551,8 +551,8 @@ describe('the AI sections', () => {
     expect(doc).toMatch(/A line the word filter blocked is sent as typed/);
   });
 
-  it('the status and the follow-ups name the work: K3c in progress, and every parked AI item', () => {
-    expect(flat(read('docs/status.md'))).toMatch(/K3c: AI levels 1-2\*\* \(read and recommend\), \*\*in progress\*\*/);
+  it('the status and the follow-ups name the work: K3c done, and every parked AI item', () => {
+    expect(flat(read('docs/status.md'))).toMatch(/K3c: AI levels 1-2\*\* \(read and recommend\), \*\*done\*\*/);
     const parked = flat(read('docs/plans/follow-ups.md'));
     for (const item of ['Batch backfill', 'Blind sampling', '`byTag` scope', 'Signals as AI context', '"Do not automate"', 'Site wording']) expect(parked, item).toContain(item);
   });
@@ -709,5 +709,25 @@ describe('the flood control and signals docs (0.1.8)', () => {
 
   it('the control: a feature the docs do not have is not found', () => {
     expect(core).not.toContain('`definitelyNotAFeed`');
+  });
+
+  it('store-sqlite: migration 21 is described like 19 and 20, one-way with a back-up note, with the flood rows and the retention', () => {
+    const doc = flat(readme('store-sqlite'));
+    for (const needle of ['Migration 21 adds one table, `kit_signals`', '`kit_ai_reads.signals_json`', '`retention.signalsMs`', '`flood_triggered` rows by itself, with no signals declared', 'a 0.1.7 store refuses a database at version 21', 'back up the file before upgrading', 'signal rows']) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('core and every CHANGELOG say the AI prompt version 3 changes the hash and re-reads open reports against the daily caps', () => {
+    const ai = flat(section(readme('core'), 'The AI (levels 1 and 2)'));
+    for (const needle of ['prompt version is 3 for everyone', 'changes the input hash', 'marked stale and read again, once per open report', 'daily call and money caps']) expect(ai, needle).toContain(needle);
+    for (const dir of published) {
+      const log = flat(read('packages', dir, 'CHANGELOG.md'));
+      const at = log.indexOf('## 0.1.8');
+      const text = log.slice(at, log.indexOf('## 0.1.7', at));
+      expect(text, dir).toContain('Upgrade notes, the AI after upgrading');
+      expect(text, dir).toContain('count against your daily call and money caps');
+      expect(text, dir).toContain('`AIStoredRead`');
+    }
   });
 });

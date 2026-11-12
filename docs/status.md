@@ -15,7 +15,7 @@ Updated 2026-11-12. The full roadmap and the reasoning behind it: [design/2026-1
 | K4 | Moderator hub (`hub-react`: team workbench, Simple mode, settings, four ways to adopt), `player-react`, `hub-element`; editable steps and ladder; configurable one-tap reporting; site demo on the real hub. Releases as 0.1.2 | PR #12 |
 | Triage speed | One-click "Nothing wrong here" with no typed reason, auto-advance with Undo after the move, bulk dismiss, reporter accuracy and the habitual-reporter ranking, keyboard queue mode. Releases as 0.1.5 | PR #20 (plan: [plans/2026-11-11-triage-speed.md](plans/2026-11-11-triage-speed.md)) |
 
-## Chat box (0.1.6; version prepared, not merged or published: the owner tags it, see [RELEASING.md](../RELEASING.md))
+## Chat box (0.1.6; merged, PR #23; tag and publish are the owner's, see [RELEASING.md](../RELEASING.md))
 A game with no chat adds moderated chat in minutes: `@chatwarden/http` gains a room broadcaster and four routes (Server-Sent Events down, `POST`
 up; `@chatwarden/http/chat`), `@chatwarden/player-react` gains `<ChatBox>` and `sseTransport` at the lazy subpath `@chatwarden/player-react/chat`
 (its own words, `enChat`, and `chat.css`), and `examples/tiny-chat` has a browser page that uses them. Design:
@@ -25,7 +25,7 @@ hub-element keep theirs). Known limits, written in the READMEs: rooms are per pr
 politely in the log, with one tab stop per line; a stored automatic chat timeout reads as a moderator's in `hello` until the next refused line.
 Not yet: the site demo adopting the box, and the site headline (after the release is on npm). The pacing words are in the box and are shown by 0.1.8's flood control (below).
 
-- **K7a: flood control and signals** (0.1.8), built and reviewed on branch `flood-signals`. **Slow mode, a burst limit and repeat refusal** per room and
+- **K7a: flood control and signals** (0.1.8), built and reviewed on branch `flood-signals` (PR #29; shipped once merged, then tagged by the owner). **Slow mode, a burst limit and repeat refusal** per room and
   player, off until set (code, or the hub: Settings, Advanced), with new refusal reasons `slow_mode`, `flood` and `duplicate` and a `retryAfterMs`, a
   per-room override (`cw.rooms.setPace`) and the chat box and `RestrictedChatLine` wording them. **Signals**: what a game records about a player
   (`cw.signals.record`, counted by distinct source, never acting on their own) feeding four switches, each off by default: the Person page record, the
@@ -35,20 +35,19 @@ Not yet: the site demo adopting the box, and the site headline (after the releas
   with `CW_DEMO_PACE=1`. The site wording waits until the release is on npm and has run in Moxgate.
 
 ## Next
-- **K3c: AI levels 1-2** (read and recommend), **in progress** on branch `ai-levels`, built and reviewed, releasing as 0.1.7 after the chat box
-  (0.1.6). The AI reads a report after the player's ack, shows a strip in the hub and, at level 2, pre-fills a mild decision the moderator accepts
-  or edits; it never writes a sanction. Off by default, per instance, with a daily money cap in code and an owner-set call ceiling. Every human
-  decision becomes a casebook example; granted appeals become corrective false-positive examples and feed a per-rule false-positive rate. The
-  site wording that says it is available is prepared and not published (see [plans/follow-ups.md](plans/follow-ups.md)).
+- **K3c: AI levels 1-2** (read and recommend), **done**: merged as 0.1.7 (PR #26; tag and publish are the owner's). The AI reads a report after the
+  player's ack, shows a strip in the hub and, at level 2, pre-fills a mild decision the moderator accepts or edits; it never writes a sanction. Off by
+  default, per instance, with a daily money cap in code and an owner-set call ceiling. Every human decision becomes a casebook example; granted appeals
+  become corrective false-positive examples and feed a per-rule false-positive rate. The site wording that says it is available is prepared and not
+  published (see [plans/follow-ups.md](plans/follow-ups.md)).
 - **K6b-d: Moxgate adopts the hub and player UI.**
-- **Roadmap items** chosen 2026-11-10, each to be designed before it is built:
+- **Roadmap items** chosen 2026-11-10 (slow mode and flood control and generic game signals have shipped as 0.1.8, above), each to be designed before
+  it is built:
   - offensive names
-  - an appeals inbox
-  - slow mode and flood control
-  - generic game signals (for example `muted_by_player` or `kicked_from_room`), feeding the record, the ladder rules and the AI read.
+  - an appeals inbox (0.1.8's successor: appeals and names)
 
   Sketches: [design/2026-11-10-editable-ladder-and-roadmap.md](design/2026-11-10-editable-ladder-and-roadmap.md), Part 2.
-- **Later phases:** K4b init CLI, K5 Coop adapter, K7 term corpus service.
+- **Later phases:** K4b fast adoption (init, recipes, test kit), K7 the shared term corpus, K5 integrations (Discord bot, Coop, EOS), and AI levels 3 and 4 (acting on clear cases, and watching); each has a design note and a plan under `docs/`.
 
 ## 0.1.5
 Version prepared (`npm run version` run, peer floors raised by hand, `check:pack` and the smoke test green), not merged or published (the owner tags it: see [RELEASING.md](../RELEASING.md)). Faster report triage, all additive (a patch), on branch `triage-speed`:
