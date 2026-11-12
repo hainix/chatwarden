@@ -93,7 +93,7 @@ describe('masked in the case: the heading, the transcript speaker, the people li
     await openCase(w, f.id);
     expect(lines().map(speakerOf).some((s) => s.includes('Mallory'))).toBe(true);
     expect(screen.queryByRole('button', { name: /hidden name/i })).toBeNull();
-    expect(screen.queryByRole('checkbox', { name: 'Show blocked words' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /^Show (blocked words|hidden words and names)$/ })).toBeNull();
   });
 });
 
@@ -115,11 +115,12 @@ describe('Show reveals one place; "show all" reveals every flagged name in the c
     expect(leaks(screen.getByRole('list', { name: 'Chat lines' }))).toBe(false);
   });
 
-  it('"Show blocked words" is there for a flagged name alone, and shows every name in the case at once', async () => {
+  it('the switch for a flagged name alone says "Show hidden words and names", and shows every name in the case at once', async () => {
     const w = await worldOf();
     const f = await w.fileRich({ target: BAD, lines: TALK });
     const { user } = await openCase(w, f.id);
-    const all = screen.getByRole('checkbox', { name: 'Show blocked words' });
+    expect(screen.queryByRole('checkbox', { name: 'Show blocked words' })).toBeNull();
+    const all = screen.getByRole('checkbox', { name: 'Show hidden words and names' });
     await user.click(all);
     expect(lines().filter((li) => speakerOf(li).includes(BAD))).toHaveLength(2);
     expect(within(screen.getByRole('region', { name: 'People' })).getAllByText(BAD).length).toBeGreaterThan(0);
@@ -129,18 +130,37 @@ describe('Show reveals one place; "show all" reveals every flagged name in the c
     expect(leaks(screen.getByRole('list', { name: 'Chat lines' }))).toBe(false);
   });
 
+  it('a case with a blocked line but no flagged name keeps the label "Show blocked words"', async () => {
+    const w = await worldOf();
+    const f = await w.fileRich({ target: 'Mallory', lines: [...TALK, { who: 'target', text: 'you zorbak' }] });
+    const { container } = await openCase(w, f.id);
+    expect(screen.getByRole('checkbox', { name: 'Show blocked words' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Show hidden words and names' })).toBeNull();
+    expect(container.querySelectorAll('.cw-tr-reveal')).toHaveLength(1);
+  });
+
+  it('a case with a flagged name and a blocked line has the one switch, with the longer label', async () => {
+    const w = await worldOf();
+    const f = await w.fileRich({ target: BAD, lines: [...TALK, { who: 'target', text: 'you zorbak' }] });
+    const { user } = await openCase(w, f.id);
+    expect(screen.getAllByRole('checkbox', { name: 'Show hidden words and names' })).toHaveLength(1);
+    expect(screen.queryByRole('checkbox', { name: 'Show blocked words' })).toBeNull();
+    await user.click(screen.getByRole('checkbox', { name: 'Show hidden words and names' }));
+    expect(screen.getByRole('checkbox', { name: 'Show hidden words and names' })).toBeChecked();
+  });
+
   it('revealing does not persist across cases, nor when the same case is opened again', async () => {
     const w = await worldOf();
     const a = await w.fileRich({ target: BAD, lines: TALK });
     const b = await w.fileRich({ target: 'zorbakTwo', lines: TALK });
     const { user, router } = await openCase(w, a.id);
-    await user.click(screen.getByRole('checkbox', { name: 'Show blocked words' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Show hidden words and names' }));
     await waitFor(() => expect(lines().filter((li) => speakerOf(li).includes(BAD))).toHaveLength(2));
     router.navigate(`/reports/${b.id}`);
     await waitFor(() => expect(leaks(screen.getByRole('list', { name: 'Chat lines' }))).toBe(false));
-    expect(screen.getByRole('checkbox', { name: 'Show blocked words' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Show hidden words and names' })).not.toBeChecked();
     router.navigate(`/reports/${a.id}`);
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Show blocked words' })).not.toBeChecked());
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Show hidden words and names' })).not.toBeChecked());
     expect(leaks(screen.getByRole('list', { name: 'Chat lines' }))).toBe(false);
   });
 });

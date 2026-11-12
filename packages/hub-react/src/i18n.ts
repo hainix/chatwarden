@@ -239,6 +239,7 @@ export const en = {
 
   'hub.mask.label': 'Blocked words, hidden',
   'hub.mask.all': 'Show blocked words',
+  'hub.mask.allNames': 'Show hidden words and names',
   'hub.mask.show': 'Show',
   'hub.mask.hide': 'Hide',
   'hub.mask.showLine': 'Show the blocked words in the line by {name} at {time}',

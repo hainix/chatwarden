@@ -217,6 +217,38 @@ describe('Simple: one quiet line when there is work', () => {
     expect(screen.queryByRole('group', { name: 'List' })).toBeNull();
   });
 
+  it('sits at the top of the Cases list, above the cases, and stays while a case is open', async () => {
+    const w = await appealsHub();
+    const f = await w.file({ target: 'Alpha' });
+    await w.appeal({ target: 'Mallory' });
+    const { router } = await homeReady(w);
+    await waitFor(() => expect(line()).not.toBeNull());
+    const pane = screen.getByRole('region', { name: 'Open cases' });
+    expect(pane).toContainElement(line() as HTMLElement);
+    // above the list of cases in the document
+    const list = within(pane).getByRole('list', { name: 'Cases' });
+    expect((line() as HTMLElement).compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // and it is not on the landing page as a second copy
+    expect(screen.getAllByRole('link', { name: /appeals? waiting/ })).toHaveLength(1);
+    // opening a case leaves it there
+    router.navigate(`/reports/${f.id}`);
+    await screen.findByRole('heading', { level: 2, name: /Alpha/ });
+    expect(line()).not.toBeNull();
+    expect(line()).toHaveTextContent('1 appeal waiting');
+  });
+
+  it('is not in the Appeals view itself (the list is the appeals), and not in Detailed (the switch is)', async () => {
+    const w = await appealsHub();
+    await w.appeal({ target: 'Mallory' });
+    const a = renderHub(w, { path: '/appeals', mode: 'simple' });
+    await screen.findByRole('region', { name: 'Open appeals' });
+    expect(line()).toBeNull();
+    a.unmount();
+    renderHub(w, { path: '/reports' });
+    await screen.findByRole('group', { name: 'List' });
+    expect(line()).toBeNull();
+  });
+
   it('says how many', async () => {
     const w = await appealsHub();
     await w.appeal();

@@ -145,7 +145,8 @@ export function Transcript({ report, people, picks }: { report: StaffReport; peo
   const focus = only === '' ? people.find((p) => p.role === 'target') : people.find((p) => p.ref === only);
   const quiet = focus !== undefined && focus.lines === 0 ? focus : undefined;
   // The one switch also serves a flagged name: in a line, or among the people the case names.
-  const anyBlocked = all.some((l) => l.blocked || l.handleFlagged) || people.some((p) => p.handleFlagged);
+  const anyName = all.some((l) => l.handleFlagged) || people.some((p) => p.handleFlagged);
+  const anyBlocked = anyName || all.some((l) => l.blocked);
   const count = report.roomId === '' ? t('hub.report.excerpt.count', { count: all.length }) : t('hub.report.excerpt.countRoom', { room: report.roomId, count: all.length });
 
   return (
@@ -171,7 +172,7 @@ export function Transcript({ report, people, picks }: { report: StaffReport; peo
             {anyBlocked && (
               <label className="cw-check cw-tr-reveal">
                 <input type="checkbox" checked={reveal.all} onChange={(e) => reveal.setAll(e.target.checked)} />
-                <span>{t('hub.mask.all')}</span>
+                <span>{t(anyName ? 'hub.mask.allNames' : 'hub.mask.all')}</span>
               </label>
             )}
             {picks !== null && <p className="cw-hint cw-tr-picks">{t('hub.report.excerpt.picks', { name: picks.name, chosen: picks.chosen.length, max: picks.max })}</p>}

@@ -173,7 +173,7 @@ function Statement({ appeal, nameFlagged }: { appeal: AppealDetail; nameFlagged:
         {(flagged || nameFlagged) && reveal?.setAll !== undefined && (
           <label className="cw-check cw-tr-reveal">
             <input type="checkbox" checked={all} onChange={(e) => reveal.setAll?.(e.target.checked)} />
-            <span>{t('hub.mask.all')}</span>
+            <span>{t(nameFlagged ? 'hub.mask.allNames' : 'hub.mask.all')}</span>
           </label>
         )}
       </div>

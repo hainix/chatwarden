@@ -1,7 +1,6 @@
 import { useHub } from '../context.js';
-import { useFeatures } from '../features.js';
 import { useOptionalQueue } from '../liveQueue.js';
-import { Link, Skeleton } from '../ui.js';
+import { Skeleton } from '../ui.js';
 import { Overview } from './Overview.js';
 
 /**
@@ -12,7 +11,6 @@ import { Overview } from './Overview.js';
 export function SimpleHome() {
   const { t, can } = useHub();
   const queue = useOptionalQueue();
-  const features = useFeatures();
   if (queue === null) return <Overview />;
   const ready = queue.status === 'ready';
   const waiting = queue.groups.length;
@@ -33,14 +31,6 @@ export function SimpleHome() {
         <div className="cw-simple-home">
           <p>{t('hub.simple.home.waiting', { count: waiting })}</p>
           {waiting > 0 && can('reports.decide') && <p className="cw-hint">{t('hub.simple.home.pick')}</p>}
-          {/* The one conditional line appeals add to Simple: only with appeals on, readable, and something waiting. */}
-          {features.appeals && (queue.appeals ?? 0) > 0 && (
-            <p className="cw-hint">
-              <Link to={{ name: 'appeals' }} className="cw-link">
-                {t('hub.simple.appeals.waiting', { count: queue.appeals ?? 0 })}
-              </Link>
-            </p>
-          )}
         </div>
       )}
     </div>

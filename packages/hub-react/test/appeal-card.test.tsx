@@ -177,15 +177,15 @@ describe('the statement is plain text, and a flagged one is hidden until shown',
     expect(/zorbak/i.test(document.body.innerHTML)).toBe(false);
   });
 
-  it('in Simple, "Show blocked words" reveals the statement and the person\'s flagged name together', async () => {
+  it('in Simple, "Show hidden words and names" reveals the statement and the person\'s flagged name together', async () => {
     const w = await appealsHub(SENIOR);
     const a = await w.appeal({ target: 'zorbakKid', statement: 'you zorbak, it was a joke' });
     const { user } = await open(w, a.appealId, { mode: 'simple' });
     expect(/zorbak/i.test(document.body.innerHTML)).toBe(false);
-    await user.click(screen.getByRole('checkbox', { name: 'Show blocked words' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Show hidden words and names' }));
     expect(within(statement()).getByText('you zorbak, it was a joke')).toBeInTheDocument();
     expect(screen.getByText('zorbakKid')).toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox', { name: 'Show blocked words' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Show hidden words and names' }));
     expect(/zorbak/i.test(document.body.innerHTML)).toBe(false);
   });
 

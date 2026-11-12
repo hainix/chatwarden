@@ -190,6 +190,14 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
           sync();
         }}
       >
+        {/* The one conditional line appeals add to Simple, at the top of the Cases list: appeals on, readable, something waiting, and not already in the Appeals view. */}
+        {simple && features.appeals && piece === undefined && !appealsView && waitingAppeals > 0 && (
+          <p className="cw-hint cw-queue-appeals">
+            <Link to={{ name: 'appeals' }} className="cw-link">
+              {t('hub.simple.appeals.waiting', { count: waitingAppeals })}
+            </Link>
+          </p>
+        )}
         {body}
         {!appealsView && queue.partial && queue.status === 'ready' && <p className="cw-hint cw-queue-note">{t('hub.overview.stat.partial', { count: queue.reports })}</p>}
       </div>

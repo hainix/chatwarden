@@ -32,3 +32,11 @@ describe('where it lives', () => {
     expect(src('labels.ts')).toMatch(/export function sanctionWhat/);
   });
 });
+
+describe('features', () => {
+  it('carry only what a screen reads: no decideAppeals (the card asks can(appeals.decide) itself)', () => {
+    const src = readFileSync(fileURLToPath(new URL('../src/features.ts', import.meta.url)), 'utf8');
+    expect(src).not.toMatch(/decideAppeals/);
+    expect(src).toMatch(/keepBlocked|renames/);
+  });
+});
