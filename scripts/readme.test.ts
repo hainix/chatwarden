@@ -492,3 +492,66 @@ declare const authorize: import('@chatwarden/http').Authenticate;
     expect(Object.fromEntries(diagnostics)).toEqual({});
   });
 });
+
+// AI levels 1 and 2 (0.1.7): where an adopter reads about them, and the one place that tells Moxgate how to turn them on.
+describe('the AI sections', () => {
+  it('core: the AI section says what it is, that it is off until an adapter is given, what it can never do, what it costs, and how to try it', () => {
+    const doc = flat(section(readme('core'), 'The AI (levels 1 and 2)'));
+    for (const needle of ['`ai`', '`ModerationAI`', '`createFakeModerationAI`', '@experimental', '0.1.7', '`AI_MAX_PREFILL_MS`', '`dailyBudgetMicros`', '`profile.ai.dailyCalls`', "`blockedLines: 'mask'`", 'examples/ai-anthropic', 'docs/adoption/moxgate.md', '`AIError`']) {
+      expect(doc, needle).toContain(needle);
+    }
+    expect(doc).toMatch(/never writes a sanction, a strike, a mute or a notice/);
+    expect(doc).toMatch(/Flags, mutes and report counts are never sent/);
+    expect(doc).toMatch(/off until you give it an adapter/i);
+    expect(doc).toMatch(/does not wait for the provider/i);
+    expect(doc).toMatch(/loads the AI code only when/i);
+  });
+
+  it('core: the options table has the ai row, and the section links the adapter and the demo', () => {
+    const table = rows(section(readme('core'), 'Options')).map((r) => r[0]);
+    expect(table).toContain('`ai`');
+    expect(flat(section(readme('core'), 'The AI (levels 1 and 2)'))).toContain('CW_DEMO_AI=1');
+  });
+
+  it('http: the AI routes are listed with their permissions and the four AI error codes', () => {
+    const text = readme('http');
+    const heading = '### The AI routes';
+    const start = text.indexOf(`\n${heading}\n`);
+    expect(start, 'the AI routes section').toBeGreaterThanOrEqual(0);
+    const doc = flat(text.slice(start, text.indexOf('\n### ', start + 1)));
+    for (const needle of ['`GET /ai/status`', '`POST /reports/:id/ai/read`', '`POST /reports/:id/ai/dont-teach`', '`policy.read`', '`reports.decide`', '`reasons.write`', '`ai_off`', '`ai_final`', '`ai_budget`', '`ai_unavailable`', '`ai.rerun`']) {
+      expect(doc, needle).toContain(needle);
+    }
+    expect(doc).toMatch(/no route changes a setting/i);
+  });
+
+  it('hub-react: the AI section names the demo and the words loader', () => {
+    const doc = flat(readme('hub-react'));
+    expect(doc).toContain('### The AI (levels 1 and 2)');
+    expect(doc).toContain('CW_DEMO_AI=1');
+    expect(doc).toContain('loadAiWords()');
+  });
+
+  it('tiny-chat: documents CW_DEMO_AI, what it wires and that it is a demo', () => {
+    const doc = flat(read('examples/tiny-chat/README.md'));
+    expect(doc).toContain('## AI reads (demo, optional)');
+    for (const needle of ['CW_DEMO_AI=1', '`createFakeModerationAI`', 'no key', 'no network', '`startServer({ demoAi })`']) expect(doc, needle).toContain(needle);
+    expect(doc).toMatch(/It is a demo, not a moderator/);
+  });
+
+  it('moxgate: "Turning on AI reads" has the steps, the key, the limits, what is sent, and how to roll back', () => {
+    const doc = flat(read('docs/adoption/moxgate.md'));
+    expect(doc).toContain('## 9. Turning on AI reads (0.1.7)');
+    for (const needle of ['examples/ai-anthropic', '@anthropic-ai/sdk', '`ANTHROPIC_API_KEY`', '`dailyBudgetMicros`', '`profile.ai.dailyCalls`', "`blockedLines: 'mask'`", 'Settings > AI', 'Migration 20', 'Rolling back']) {
+      expect(doc, needle).toContain(needle);
+    }
+    expect(doc).toMatch(/Never sent: subject ids/);
+    expect(doc).toMatch(/A line the word filter blocked is sent as typed/);
+  });
+
+  it('the status and the follow-ups name the work: K3c in progress, and every parked AI item', () => {
+    expect(flat(read('docs/status.md'))).toMatch(/K3c: AI levels 1-2\*\* \(read and recommend\), \*\*in progress\*\*/);
+    const parked = flat(read('docs/plans/follow-ups.md'));
+    for (const item of ['Batch backfill', 'Blind sampling', '`byTag` scope', 'Signals as AI context', '"Do not automate"', 'Site wording']) expect(parked, item).toContain(item);
+  });
+});

@@ -276,6 +276,52 @@ const res = await cw.reports.addDetail(reportId, 'seat-1', { reason: 'cheating',
 - **Your own store.** `addReportDetail` and `loadReporterDecisions` are optional on `Store`. Without the first, `addDetail` answers `off`; without the
   second, the accuracy counts are 0. `insertReport` must keep `reportedReason`, and `listReports` must apply the `reason` filter (`null` means none).
 
+## The AI (levels 1 and 2)
+
+Optional help for the moderator, `@experimental` until 0.2 and new in 0.1.7. With an adapter, the kit reads each new report after the player's
+ack, in the background, and the hub shows what it found (level 1, Read); at level 2 (Recommend) the decision form opens pre-filled with a mild
+suggestion that the moderator accepts or edits. It is off until you give it an adapter, and the level is then the owner's to set in the hub
+(Settings > AI): 0 by default, held to the `maxLevel` you pass.
+
+```ts
+import { createChatwarden, createFakeModerationAI } from '@chatwarden/core';
+import { openStore } from '@chatwarden/store-sqlite';
+
+// A scripted fake for a first look: it reads a report by simple rules, with no key and no network.
+// A real adapter is any object with an `id` and a `read` function (the `ModerationAI` type).
+const adapter = createFakeModerationAI([], { id: 'demo-fake' });
+
+const cw = await createChatwarden({
+  store: openStore({ path: './chatwarden.db' }),
+  secret: process.env.CHATWARDEN_SECRET!,
+  platform,
+  ai: { adapter, maxLevel: 2, dailyBudgetMicros: 1_000_000 },
+});
+console.log(cw.ai.status()); // { available: true, level: 0, maxLevel: 2, state: 'ok', ... }
+```
+
+- **The adapter only sends.** The kit chooses and redacts the lines, renders the prompt, checks the model's answer against the rules and
+  the ceilings, and stores it. Your `read(input, { signal })` sends `input.prompt` and returns `{ output, usage }`; anything it throws must
+  be an `AIError` (`'declined'`, `'fatal'`, `'timeout'`, `'retryable'`). `examples/ai-anthropic` is a copy-and-own adapter for Anthropic, and
+  `docs/adoption/moxgate.md` has the steps for turning it on.
+- **It advises; it never acts.** The AI never writes a sanction, a strike, a mute or a notice: nothing under `core/src/ai` imports the modules
+  that do (a lint rule and a test hold that). The one-key accept never fills in a ban, an area ban or anything longer than 24 hours
+  (`AI_MAX_PREFILL_MS`), and a suggestion to uphold or note needs a cited line by the reported person.
+- **What leaves your server.** Only the chosen lines of the report with the speakers replaced by `P1`, `P2`, ..., the reporter's reason and
+  note (redacted), your Community Rules and the standard. Flags, mutes and report counts are never sent, nor any id, handle, IP, hash, room or
+  tag. A line the word filter blocked is sent as typed unless you set `blockedLines: 'mask'`: the model needs the words to judge intent.
+- **What it costs.** `dailyBudgetMicros` (default $1.00 a UTC day) is set in code and a hub cannot raise it. The owner also sets a ceiling on
+  calls a day (`profile.ai.dailyCalls`, default 5 000), so an adapter that reports no cost still cannot run unbounded. There are at most 30 calls
+  a minute and 2 at once, a hard deadline per call (`timeoutMs`) and a breaker that opens after repeated failures. At a limit, reads pause.
+- **It cannot get in the way.** A failing, slow, refusing or garbage-returning provider changes nothing else: the player's ack does not wait for
+  the provider, the queue and the case page answer exactly as with the AI off, and a read that fails shows nothing.
+- **Your store needs the AI methods** (the memory and SQLite stores have them; a custom store without them makes `createChatwarden` throw when
+  `ai` is given). SQLite adds three tables in migration 20.
+- **`cw.ai`** is always there: `level()`, `status()`, `read(reportId)`, `readAgain(reportId, actor)`, `stats()` (the casebook counts) and `idle()`.
+  Without an adapter it answers as if the AI were off. The kit loads the AI code only when you pass `ai`, so a bundler can leave it out of a
+  browser build that never does.
+- **To try it with no key**, run `examples/tiny-chat` with `CW_DEMO_AI=1`; tests use `createFakeModerationAI` and never need a network.
+
 ## Typing indicators
 
 Do not show a "typing..." indicator for a player who cannot chat. `cw.chat.restricted(who, { roomId, seatId })` runs the
@@ -347,6 +393,7 @@ in a browser.
 | `logger` | `{ warn(event, detail?) }`. Defaults to `console.warn`. It only ever receives an event name and an error class. |
 | `rules` | The numbered Community Rules, from `defineRules`. Defaults to the preset's starter set. |
 | `autoRestrictRule` | The rule number the automatic slur filter cites (default 1). Must be an active rule. |
+| `ai` | `{ adapter, maxLevel?, dailyBudgetMicros?, ... }`: turns on AI reads (levels 1 and 2). Off without it. See "The AI (levels 1 and 2)" below. |
 
 Bad options throw at creation (`ProfileError`, `RangeError`), before the store is touched.
 

@@ -632,7 +632,8 @@ suggests. Nothing here decides: a moderator does, and every part is lazy, so a h
   per-rule table. Saving asks for a reason, like the steps and ladder; only the owner can save. The daily limit and the adapter are set in
   your server code and are read-only here.
 
-The words of these parts are not in `en` (they load with the parts); `loadAiWords()` returns them, see "Words and languages".
+The words of these parts are not in `en` (they load with the parts); `loadAiWords()` returns them, see "Words and languages". To see the whole
+flow with no key and no network, run `examples/tiny-chat` with `CW_DEMO_AI=1` (a scripted fake AI at level 2) and open `/mod`.
 
 ### Terms, Blocked, Rule gaps, Audit and the Guide
 
@@ -743,6 +744,7 @@ English there. To translate them, spread them in with `loadAiWords()`, which ret
 ```ts
 import { createT, en, loadAiWords } from '@chatwarden/hub-react';
 
+const de = { 'hub.nav.reports': 'Meldungen' };
 export const t = createT({ ...en, ...(await loadAiWords()), ...de }, 'de');
 ```
 

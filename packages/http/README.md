@@ -187,6 +187,21 @@ with a plain refusal word (`reason_required`, `reason_unknown`, `too_late`, ...)
 Other framework? `createRouter(routes)` returns `(req: KitRequest) => Promise<KitResponse>`. Fill `rawBody` with the body
 exactly as received and send the response as described on `KitResponse`.
 
+### The AI routes
+
+Three staff routes serve the AI. They are part of `adminRoutes` and answer as "not set up" until the kit is created with an `ai` adapter; no
+route changes a setting (the level moves through `PUT /policy/profile` with `layer.ai`, owner only).
+
+| Route | Permission | What it does |
+| --- | --- | --- |
+| `GET /ai/status` | `policy.read` | Where the AI stands, and the casebook's counts and rates. |
+| `POST /reports/:id/ai/read` | `reports.decide` | "Read again", behind the hub's AI details menu. Audited `ai.rerun` before any call is made. |
+| `POST /reports/:id/ai/dont-teach` | `reasons.write` | A senior's mark that a decided report's casebook row can never teach again. |
+
+The errors are `ai_off` (409: the AI is not reading, or the report is decided), `ai_final` (409: the read ended without an answer and was
+already retaken once), `ai_budget` (429: the daily money or call limit) and `ai_unavailable` (503, with `retryAfterMs`: the provider is failing
+or the minute's calls are used). The full rows are in the table of routes above and the table of errors below.
+
 ### Mounting
 
 **Mount `toExpress` before any body parser.** The adapter reads the raw body itself, because a webhook signature must be

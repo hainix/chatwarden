@@ -16,8 +16,11 @@ Updated 2026-11-12. The full roadmap and the reasoning behind it: [design/2026-1
 | Triage speed | One-click "Nothing wrong here" with no typed reason, auto-advance with Undo after the move, bulk dismiss, reporter accuracy and the habitual-reporter ranking, keyboard queue mode. Releases as 0.1.5 | PR #20 (plan: [plans/2026-11-11-triage-speed.md](plans/2026-11-11-triage-speed.md)) |
 
 ## Next
-- **K3c: AI levels 1-2** (read and recommend). Every human decision becomes a casebook example; granted appeals become corrective
-  false-positive examples and feed a per-rule false-positive rate.
+- **K3c: AI levels 1-2** (read and recommend), **in progress** on branch `ai-levels`, built and reviewed, releasing as 0.1.7 after the chat box
+  (0.1.6). The AI reads a report after the player's ack, shows a strip in the hub and, at level 2, pre-fills a mild decision the moderator accepts
+  or edits; it never writes a sanction. Off by default, per instance, with a daily money cap in code and an owner-set call ceiling. Every human
+  decision becomes a casebook example; granted appeals become corrective false-positive examples and feed a per-rule false-positive rate. The
+  site wording that says it is available is prepared and not published (see [plans/follow-ups.md](plans/follow-ups.md)).
 - **K6b-d: Moxgate adopts the hub and player UI.**
 - **Roadmap items** chosen 2026-11-10, each to be designed before it is built:
   - offensive names
