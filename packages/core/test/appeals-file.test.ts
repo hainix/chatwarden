@@ -163,6 +163,8 @@ describe('file: the statement', () => {
       '\u{e0001}',
       '\u{e0041}\u{e0042}\u{e007f}',
       '\u3164\u2800 \u115f\u1160\u034f\ufe0f',
+      '\ufe0f', // a lone emoji presentation selector draws nothing: kept inside a text, but alone the statement is still blank
+      '\ufe0f\ufe0f \ufe0f',
     ];
     for (const st of onlyInvisible) {
       const { k, res } = await file(st);
@@ -172,13 +174,35 @@ describe('file: the statement', () => {
   });
 
   it('those characters are removed from a real statement, at every position, and the edges of each range are covered', () => {
-    const edges = ['\u115f', '\u1160', '\u3164', '\uffa0', '\u2800', '\u034f', '\ufe00', '\ufe08', '\ufe0f', '\u{e0100}', '\u{e0170}', '\u{e01ef}', '\ufff9', '\ufffa', '\ufffb', '\u{e0000}', '\u{e0020}', '\u{e007f}'];
+    const edges = ['\u115f', '\u1160', '\u3164', '\uffa0', '\u2800', '\u034f', '\ufe00', '\ufe01', '\ufe08', '\ufe0e', '\u{e0100}', '\u{e0101}', '\u{e0170}', '\u{e01ef}', '\ufff9', '\ufffa', '\ufffb', '\u{e0000}', '\u{e0020}', '\u{e007f}'];
     for (const c of edges) {
       expect(normalizeStatement(`a${c}b`), c).toBe('ab');
       expect(normalizeStatement(`${c}ab${c}`), c).toBe('ab');
     }
     // tag characters that hide a word inside a visible line do not survive
     expect(normalizeStatement('hello\u{e0073}\u{e0065}\u{e0063}\u{e0072}\u{e0065}\u{e0074} world')).toBe('hello world');
+  });
+
+  it('U+FE0F (the emoji presentation selector) is kept, the other variation selectors are not', () => {
+    const heart = '\u2764\ufe0f';
+    expect(normalizeStatement(heart)).toBe(heart);
+    expect(normalizeStatement(`I ${heart} you`)).toBe(`I ${heart} you`);
+    expect(normalizeStatement('1\ufe0f\u20e3')).toBe('1\ufe0f\u20e3');
+    expect(normalizeStatement(`${heart}\ufe01`)).toBe(heart);
+    expect(normalizeStatement(`${heart}\u{e0101}`)).toBe(heart);
+    expect(normalizeStatement(`${heart}\ufe0e`)).toBe(heart);
+    // only FE00-FE0E go; one run keeps just its FE0F
+    expect(normalizeStatement('a\ufe00\ufe0f\ufe0eb')).toBe('a\ufe0fb');
+    expect(normalizeStatement(normalizeStatement(`${heart}\ufe01`))).toBe(heart);
+    // a statement of selectors alone is still blank
+    expect(normalizeStatement('\ufe0f')).toBe('');
+    expect(normalizeStatement(' \ufe0f\n\ufe0f ')).toBe('');
+  });
+
+  it('a heart emoji with its selector is stored as typed', async () => {
+    const { k, res } = await file('thanks \u2764\ufe0f');
+    expect(res).toMatchObject({ ok: true });
+    expect(k.rows()[0]?.statement).toBe('thanks \u2764\ufe0f');
   });
 
   it('the characters just outside each stripped range are kept', () => {
@@ -188,7 +212,7 @@ describe('file: the statement', () => {
   });
 
   it('the cleaner stays idempotent and counts after stripping: 1000 visible characters plus invisible padding are accepted', async () => {
-    const mixed = 'x\u3164y\u2800\u{e0041}\ufe0f\ufff9z';
+    const mixed = 'x\u3164y\u2800\u{e0041}\ufe01\ufff9z';
     expect(normalizeStatement(mixed)).toBe('xyz');
     expect(normalizeStatement(normalizeStatement(mixed))).toBe('xyz');
     expect((await file('a'.repeat(1000) + '\u3164\u{e0041}'.repeat(400))).res).toMatchObject({ ok: true });

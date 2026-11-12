@@ -118,10 +118,10 @@ const STATEMENT_RAW_MAX = APPEAL_STATEMENT_MAX * 20;
 const NEWLINES = /\r\n|[\r\u0085\u2028\u2029]/g;
 // Control characters other than newline (tab is handled before), bidirectional controls and marks, zero-width and invisible format
 // characters, the soft hyphen, the Mongolian vowel separator, the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0), the braille blank
-// (U+2800), the combining grapheme joiner (U+034F), the variation selectors (U+FE00 to U+FE0F) and the interlinear annotation marks
+// (U+2800), the combining grapheme joiner (U+034F), the variation selectors (U+FE00 to U+FE0E; U+FE0F, the emoji presentation selector, is kept: it is common and harmless) and the interlinear annotation marks
 // (U+FFF9 to U+FFFB). Each draws nothing, so a statement made of them would look blank to the staff reader.
 // eslint-disable-next-line no-control-regex, no-misleading-character-class
-const STRIPPED = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff9-\ufffb]/g;
+const STRIPPED = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\u2800\u3164\ufe00-\ufe0e\ufeff\uffa0\ufff9-\ufffb]/g;
 // Beyond the BMP (so this one needs the `u` flag): the tag characters (U+E0000 to U+E007F), which can carry hidden text, and the
 // variation selectors supplement (U+E0100 to U+E01EF).
 // eslint-disable-next-line no-misleading-character-class
@@ -139,7 +139,7 @@ const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[
  */
 export function normalizeStatement(input: unknown): string {
   if (typeof input !== 'string' || input.length > STATEMENT_RAW_MAX) return '';
-  return input
+  const text = input
     .replace(NEWLINES, '\n')
     .replace(/\t/g, ' ')
     .replace(LONE_SURROGATE, '')
@@ -150,6 +150,8 @@ export function normalizeStatement(input: unknown): string {
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  // U+FE0F is kept inside a text, but it draws nothing: a statement of nothing else is as blank as any other invisible one.
+  return /^[\s️]*$/.test(text) ? '' : text;
 }
 
 /** The length of a cleaned statement in characters (code points), the unit {@link APPEAL_STATEMENT_MAX} counts in. */
