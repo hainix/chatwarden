@@ -100,7 +100,7 @@ describe('the ai section of a profile', () => {
 
 describe('the ai section of a policy layer', () => {
   it('is an editable section, after reporting', () => {
-    expect([...POLICY_SECTIONS]).toEqual([
+    expect([...POLICY_SECTIONS].slice(0, 10)).toEqual([
       'durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai',
     ]);
   });

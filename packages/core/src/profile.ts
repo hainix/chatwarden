@@ -18,6 +18,8 @@ import {
   resolveReporting,
 } from './reporting.js';
 import type { ReportingSettings, ResolvedReporting } from './reporting.js';
+import { mergePace, resolvePace } from './pace.js';
+import type { PaceSettings, ResolvedPace } from './pace.js';
 import { ProfileError } from './profileError.js';
 
 /**
@@ -151,6 +153,12 @@ export interface ModerationProfile extends ModerationProfileBase {
    * hub edits this section; the code-side AI option sets the adapter and the highest level it may reach. See {@link AISettings}.
    */
   ai?: Partial<AISettings>;
+  /**
+   * How a room paces a player's lines: a least gap between them (`slowModeMs`), a burst limit (`burst`) and no repeats
+   * (`duplicateWindowMs`). Every setting is off until set, so a profile without `pace` changes nothing. See {@link PaceSettings}.
+   * @experimental
+   */
+  pace?: PaceSettings;
 }
 
 /**
@@ -194,6 +202,8 @@ export interface ResolvedProfile extends ModerationProfileBase {
   reporting: ResolvedReporting;
   /** The AI settings in force, every field filled in. */
   ai: AISettings;
+  /** The pace settings in force, every field filled in (`null` is off). @experimental */
+  pace: ResolvedPace;
 }
 
 /** @deprecated The same as {@link ModerationProfile}, which now has the two fields optional. */
@@ -231,12 +241,13 @@ const TOP_KEYS = [
   'customDuration',
   'reporting',
   'ai',
+  'pace',
   'levels',
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
-const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace'];
 const AI_KEYS = ['level', 'learn', 'dailyCalls'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
@@ -516,6 +527,7 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (Object.hasOwn(p, 'customDuration') && typeof p['customDuration'] !== 'boolean') fail('profile.customDuration', 'must be true or false');
   if (Object.hasOwn(p, 'reporting')) validateReporting(p['reporting'], 'profile.reporting');
   if (Object.hasOwn(p, 'ai')) validateAI(p['ai'], 'profile.ai');
+  if (Object.hasOwn(p, 'pace')) resolvePace(p['pace'] as PaceSettings, 'profile.pace');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
@@ -634,6 +646,8 @@ function finalize(value: unknown): ResolvedProfile {
   dedupeRuleLists(copy);
   fillDefaults(copy);
   validateProfile(copy);
+  // Checked above, so this cannot throw: every pace field is filled in, `null` meaning off.
+  if (isPlain(copy)) setOwn(copy, 'pace', resolvePace(copy['pace'] as PaceSettings | undefined, 'profile.pace'));
   return deepFreeze(copy as ResolvedProfile);
 }
 
@@ -648,6 +662,7 @@ export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
     customDuration: p.customDuration ?? true,
     reporting: resolveReporting(p.reporting),
     ai: { level: 0, learn: true, dailyCalls: AI_DAILY_CALLS_DEFAULT, ...p.ai },
+    pace: resolvePace(p.pace),
   };
 }
 
@@ -968,7 +983,7 @@ export function defineProfile(p: ModerationProfile): ResolvedProfile {
  * The parts of a profile the hub may edit, and the order they are listed in. Everything else (identity, the written
  * levels, the AI context, profanity handling) stays in code: changing profanity means rebuilding the filter.
  */
-export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai'] as const;
+export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace'] as const;
 export type PolicySection = (typeof POLICY_SECTIONS)[number];
 
 /** One ladder cell as the editor sends it: the label may be left out and is then generated ("Restrict chat 6 hours"). */
@@ -1004,6 +1019,11 @@ export interface PolicyLayer {
   reporting?: ReportingSettings;
   /** The AI settings: `level` (0 off, 1 read, 2 recommend), `learn` and `dailyCalls` (the owner's ceiling on calls in a UTC day, a whole number from 1 to 100 000). Each is optional and merges onto the profile's. Levels 3 and 4 are refused. */
   ai?: Partial<AISettings>;
+  /**
+   * The pace settings: each field is optional and merges onto the profile's (a field left out inherits, `null` turns it off, a value sets
+   * it); `burst` replaces whole. @experimental
+   */
+  pace?: PaceSettings;
 }
 
 /** The longest outcome text a layer may set on a guideline tier. */
@@ -1064,7 +1084,11 @@ function layerToOverrides(base: ModerationProfile, layer: unknown): Record<strin
       for (const level of Object.keys(value)) wholeOutcome(value[level], `profile.firstOffense.${level}`);
     }
     if (key === 'repeat' && isPlain(value)) wholeOutcome(value['outcome'], 'profile.repeat.outcome');
-    if (key === 'ladder') setOwn(out, key, ladderOverride(value));
+    if (key === 'pace') {
+      // Checked on its own so the error names layer.pace..., then merged here so `burst` replaces whole instead of merging by member.
+      resolvePace(value as PaceSettings, 'profile.pace');
+      setOwn(out, key, mergePace(resolvePace(base.pace, 'profile.pace'), value as PaceSettings));
+    } else if (key === 'ladder') setOwn(out, key, ladderOverride(value));
     else if (key === 'guidelines') setOwn(out, key, guidelinesOverride(base, value));
     else setOwn(out, key, value);
   }

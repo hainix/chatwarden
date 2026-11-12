@@ -41,7 +41,7 @@ function answer(cw: Chatwarden, res: PolicySaveResult, onOk: (changed: PolicySec
 
 /**
  * The editable moderation profile (the lengths offered, the ladder, the first offences, the repeat rule, the area and severe
- * rules, the guideline outcome texts and the reporting settings: the flow, the reasons and the thank-you). The profile in code is the base; the owner's edits are a versioned layer in the
+ * rules, the guideline outcome texts, the reporting settings: the flow, the reasons and the thank-you, the AI level and the pace settings: slow mode, burst and repeats). The profile in code is the base; the owner's edits are a versioned layer in the
  * adopter's store, and what is in force is the base with the layer on top (`cw.policy`). All JSON, all no-store.
  *
  * - `GET /policy/profile` (`policy.read`, audited as `policy.view`): `{ effective, base, layer, version, canSave }`, plus
@@ -57,7 +57,7 @@ function answer(cw: Chatwarden, res: PolicySaveResult, onOk: (changed: PolicySec
  *   durationMs }`, plus `reporting`: what players would read of the candidate's reporting settings (the enabled reasons, with no rule
  *   mapping, the flow and the thank-you). Saves nothing. `rule` (a Community Rule number) shows the area and severe rules taking effect.
  * - `DELETE /policy/profile?section=` (`policy.write`): reset one editable section (`durations`, `customDuration`, `ladder`,
- *   `firstOffense`, `repeat`, `areaRules`, `severeRules`, `guidelines`, `reporting`), or with no `section` everything. An optional body
+ *   `firstOffense`, `repeat`, `areaRules`, `severeRules`, `guidelines`, `reporting`, `ai`, `pace`), or with no `section` everything. An optional body
  *   `{ reason, version? }` (the reason is required, as for PUT): a `version` that is stale is 409. Audits `policy.reset` with the
  *   sections changed and the reason. An unknown or empty `section` is 400 `invalid_query`.
  */
