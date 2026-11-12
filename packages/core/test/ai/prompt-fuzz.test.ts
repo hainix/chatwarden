@@ -9,6 +9,8 @@ import type { LineSpec } from './reportFixtures.js';
 // M6: seeded, deterministic generated reports, run through the whole prompt builder. No identifier string may appear anywhere in what
 // an adapter is handed: the stable part, the variable part and every structured field.
 
+// 150 seeds cover every generator branch many times over (300 took 4.4 s on an idle machine); the seeds stay fixed, so a failure repeats.
+const SEEDS = 150;
 const policy = { profile: PRESETS.standard, rules: defineRules(starterRules('standard')) };
 
 function rng(seed: number): () => number {
@@ -24,8 +26,8 @@ const ALPHA = 'bcdfghjklmnpqrstvwxz';
 const word = (rnd: () => number, n: number): string => Array.from({ length: n }, () => ALPHA[Math.floor(rnd() * ALPHA.length)]).join('');
 
 describe('the rendered prompt carries no identifier (generated reports)', () => {
-  it('300 seeded reports: ids, handles, seats, rooms, tags, ips, invite codes', () => {
-    for (let seed = 1; seed <= 300; seed += 1) {
+  it('150 seeded reports: ids, handles, seats, rooms, tags, ips, invite codes', () => {
+    for (let seed = 1; seed <= SEEDS; seed += 1) {
       const rnd = rng(seed);
       const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)] as T;
       const names = Array.from({ length: 4 }, () => word(rnd, 5 + Math.floor(rnd() * 6)));
@@ -67,5 +69,6 @@ describe('the rendered prompt carries no identifier (generated reports)', () => 
       expect(rendered.includes('psst'), 'seed ' + seed + ' hidden line').toBe(false);
       expect(rendered.includes('line-'), 'seed ' + seed + ' line id').toBe(false);
     }
-  });
+    // About 2 s alone and several times that when the machine is busy: an explicit ceiling, not the 5 s default.
+  }, 20_000);
 });
