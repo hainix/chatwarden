@@ -33,7 +33,7 @@ describe('durations', () => {
 });
 
 describe('refusalMessage covers every RefuseReason', () => {
-  const reasons: RefuseReason[] = ['empty', 'length', 'rate', 'gate', 'restricted', 'blocked', 'profanity'];
+  const reasons: RefuseReason[] = ['empty', 'length', 'rate', 'gate', 'restricted', 'blocked', 'profanity', 'slow_mode', 'flood', 'duplicate'];
   it.each(reasons)('%s has a real message', (reason) => {
     const m = refusalMessage({ reason, until: 5_000, byModerator: true, rule: 2 }, 200, at, rule);
     expect(m.length).toBeGreaterThan(10);

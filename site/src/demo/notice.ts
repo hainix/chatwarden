@@ -83,6 +83,13 @@ export function refusalMessage(r: Refusal, lineMax: number, at: (ms: number) => 
       if (typeof r.until !== 'number') return `${by} has banned you from chat${under}. Press Start over to replay.`;
       return `${by} has put you on a chat timeout until ${at(r.until)}${under}. Press Start over to replay.`;
     }
+    // Pacing (0.1.8): the demo profile turns none of these on, so they are worded only for completeness.
+    case 'slow_mode':
+      return 'Slow mode is on. Wait a moment, then send again.';
+    case 'flood':
+      return 'Too many lines at once. Wait a moment, then send again.';
+    case 'duplicate':
+      return 'You just sent that. Say something new.';
     default:
       return assertNever(r.reason);
   }
