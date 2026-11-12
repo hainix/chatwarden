@@ -348,8 +348,10 @@ a moderator still clicks, and the AI cannot write a sanction, a strike, a mute o
 
 **Steps**
 
-1. Raise the kit packages to 0.1.7 the way section 6 says. Migration 20 (three new tables, no existing table touched) runs on the first start
-   against the SQLite store; nothing needs doing by hand.
+1. Back up the SQLite database file, then raise the kit packages to 0.1.7 the way section 6 says. Migration 20 (three new tables, no existing
+   table touched) runs on the first start against the SQLite store; nothing else needs doing by hand. **The migration is one-way:** a 0.1.6 build
+   refuses a database at schema version 20 ("database schema version 20 is newer than this kit supports"), so rolling the packages back later means
+   restoring the backup.
 2. Copy `src/anthropic.ts` and `src/prices.ts` from `examples/ai-anthropic` into the Moxgate server (for example `src/ai/`). Keep the file as
    Moxgate's own: the kit's tests and the eval set (`examples/ai-anthropic/eval`) are how a change to it is checked.
 3. Install the SDK in Moxgate: `npm install @anthropic-ai/sdk` (the example pins the version it was tested on).
@@ -373,6 +375,6 @@ counts. **A line the word filter blocked is sent as typed**, because the model n
 live read.
 
 **Rolling back.** Switch the level to Off in the hub: it takes effect at once and stops the calls. Removing the `ai` option from the code removes
-the rest. There is no schema rollback: the three tables stay, empty or not, and age out under the retention settings (read rows with their
+the rest. There is no schema rollback, and downgrading the packages to 0.1.6 does not work on a migrated database (restore the backup taken in step 1): the three tables stay, empty or not, and age out under the retention settings (read rows with their
 reports, casebook example text after 180 days, counts after 365).
 

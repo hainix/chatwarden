@@ -446,7 +446,7 @@ CREATE INDEX kit_reports_by_reporter_outcome ON kit_reports (reporter_subject, c
   },
   {
     version: 20,
-    // AI levels 1 and 2 (0.1.6). Three new tables and their indexes; no existing table, column or row is touched, and the runner wraps
+    // AI levels 1 and 2 (0.1.7). Three new tables and their indexes; no existing table, column or row is touched, and the runner wraps
     // this in one savepoint with the version bump, so a failure leaves version 19 and no new table.
     //   kit_ai_reads holds one row per (report, input hash): the model's validated read, the usage and cost of the call, and the state
     //     of the call while it runs. `lease_until` makes "I am about to call the model" visible to every process on the database
