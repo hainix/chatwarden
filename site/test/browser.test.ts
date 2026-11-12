@@ -452,7 +452,7 @@ describe('layout on the built page', () => {
           .filter((m) => m.scroll > m.client + 1),
       );
       expect(clipped).toEqual([]);
-      expect(await page.evaluate(() => document.querySelectorAll('#add-it pre').length)).toBe(5);
+      expect(await page.evaluate(() => document.querySelectorAll('#add-it pre').length)).toBe(8);
       await ctx.close();
     });
   }
@@ -498,8 +498,8 @@ describe('layout on the built page', () => {
       return { paneW: pane.width, cardW: card.width, wide: wide.slice(0, 3).map((e) => e.className) };
     });
     expect(m.paneW).toBeGreaterThan(600);
-    // The game pane is 360 to 400px now (fix D of the copy rewrite: bubbles wrap less), so the hub's case column is about 256px at 1440
-    // (it was about 300px beside a 340px game pane). Still a readable card; what must not happen is a crammed or overflowing one.
+    // The game pane is 360 to 400px (fix D of the copy rewrite: bubbles wrap less), so the hub case column is about 256px at 1440. A 360px pane
+    // was tried: 296px, still under the old 300px floor. Kept at 400px; the target-visible test below guards what mattered about that column.
     expect(m.cardW).toBeGreaterThanOrEqual(240);
     expect(m.wide).toEqual([]);
     await ctx.close();
@@ -851,4 +851,58 @@ describe('the demo holds still (fixes A to J of the copy rewrite)', () => {
     expect(await demo.getByRole('button', { name: /new messages?$/ }).count()).toBe(0);
     await ctx.close();
   }, 60_000);
+});
+
+describe('the tour target can be seen (step 3 names a button the visitor must be able to press)', () => {
+  for (const [name, viewport, touch] of [
+    ['desktop 1440', { width: 1440, height: 900 }, false],
+    ['phone 390', { width: 390, height: 844 }, true],
+  ] as const) {
+    it(`step 3's ringed button is inside the window and not covered by the header, the tour card or the bar, and the page was not scrolled for it (${name})`, async () => {
+      const ctx = await browser.newContext({ viewport, reducedMotion: 'reduce', hasTouch: touch });
+      const page = await ctx.newPage();
+      await openDemo(page);
+      const demo = demoOf(page);
+      // step 1's advice: a reason, so the hub card shows its suggestion at once
+      await demo.getByRole('button', { name: /report bo's message: "uninstall/i }).click();
+      const dialog = page.getByRole('dialog');
+      await dialog.getByRole('combobox', { name: /^why\?/i }).selectOption('harassment');
+      await dialog.getByRole('button', { name: 'Report', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Close' }).click();
+      if (touch) await demo.getByRole('button', { name: /^moderator/i }).click();
+      await demo.getByRole('button', { name: /^\d+ new cases?$/ }).click({ timeout: 15_000 });
+      await demo.getByRole('link', { name: /^Bo/ }).click();
+      await demo.getByRole('button', { name: /^(Restrict chat|Send a warning)/ }).first().waitFor();
+      // the visitor has the hub in front of them: on a phone its top is under the switcher, on a desktop the strip is under the header
+      await page.evaluate((phone) => {
+        const el = (phone ? document.querySelector('[data-pane="mod"]') : document.querySelector('.tour')) as HTMLElement;
+        window.scrollTo(0, window.scrollY + el.getBoundingClientRect().top - (phone ? 150 : 80));
+      }, touch);
+      await page.waitForFunction(() => /^(Restrict chat|Send a warning|Ban|Add a note)/.test(document.querySelector('[data-tour-target]')?.textContent ?? ''), undefined, { timeout: 10_000 });
+      await page.waitForTimeout(400);
+      const before = await page.evaluate(() => window.scrollY);
+      const m = await page.evaluate(() => {
+        const t = document.querySelector('[data-tour-target]') as HTMLElement;
+        const r = t.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, Math.min(Math.max(r.top + r.height / 2, 0), window.innerHeight - 1));
+        const pane = (document.querySelector('[data-pane="mod"]') as HTMLElement).getBoundingClientRect();
+        return {
+          text: (t.textContent ?? '').slice(0, 30),
+          top: r.top,
+          bottom: r.bottom,
+          vh: window.innerHeight,
+          hitsTarget: hit !== null && (t === hit || t.contains(hit) || hit.contains(t)),
+          inPane: r.top >= pane.top - 1 && r.bottom <= pane.bottom + 1,
+          scrollY: window.scrollY,
+        };
+      });
+      expect(m.text).toMatch(/^(Restrict chat|Send a warning)/);
+      expect(m.top, 'below the sticky header').toBeGreaterThanOrEqual(66);
+      expect(m.bottom, 'inside the window').toBeLessThanOrEqual(m.vh);
+      expect(m.inPane, 'inside the hub pane').toBe(true);
+      expect(m.hitsTarget, `${m.text} is not under the header, the tour strip or the bar`).toBe(true);
+      expect(m.scrollY, 'the tour did not scroll the page').toBe(before);
+      await ctx.close();
+    }, 90_000);
+  }
 });

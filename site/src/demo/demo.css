@@ -844,6 +844,7 @@
   flex: none;
 }
 .is-stacked .chat {
+  overscroll-behavior: auto; /* a swipe that starts over the chat and reaches its end moves the page on, it is not trapped */
   min-height: 240px;
   max-height: min(52vh, 440px);
 }
@@ -986,6 +987,15 @@
    stacks itself and the page scrolls as one. */
 .is-stacked .hub-host .cw-hub {
   --cw-hub-height: min(82vh, 720px);
+}
+/* Under 820px the hub lays itself out at its natural height and the page scrolls as one, which leaves a control further down the case
+   (the suggested action under the case's history) below the window with nothing the tour may scroll. In the demo the hub keeps the
+   height above and scrolls inside itself, so the tour can bring its target into view without ever moving the page. */
+@media (max-width: 51.1875rem) {
+  .is-stacked .hub-host .cw-hub {
+    height: var(--cw-hub-height);
+    overflow-y: auto;
+  }
 }
 /* The hub switches to three panes from a 1200px WINDOW (a media query), but here it sits in a pane about 720px wide. Keep its
    case and the person's record stacked, as it does when narrow: the same rules the hub itself uses below that width. */

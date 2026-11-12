@@ -31,3 +31,20 @@ Found writing the copy rewrite (`docs/design/2026-11-11-site-copy-rewrite.md`, b
 - **AI section.** It comes back as a section when level 1 ships (the work is on branch `ai-levels`); today it is one FAQ answer. (Ruling 4.)
 - **Moxgate mention.** Cut until the Moxgate adoption ships, then "Used in Moxgate" with a link and a screenshot. (Ruling 8.)
 - **Non-Node servers.** A chat-check HTTP route would give other server languages a ready path; the FAQ says plainly that there is none.
+
+## Open: left from the review of the landing-page rewrite (2026-11-11)
+
+- **Tour card.** Skip or Close removes the 124 or 184px strip and the panes jump up; reserve the height (or show a slim "Restart the tour"
+  strip). The finished card still says "That's the whole loop" and "That's what you add to your game"; "Done. A player reported, you decided,
+  and Bo was told why." is plainer.
+- **Chat overlay padding.** `.chat-wrap:has(.chat-overlay > *) .chat` adds 96px of bottom padding while an overlay row shows; when the last
+  row goes, a chat scrolled to the bottom is clamped and slides down. Keep the padding always, or use `scroll-padding`.
+- **Pause** only holds the replies now, which makes it nearly dead UI in a finite room; consider removing it.
+- **Phone swipe test.** `.is-stacked .chat` no longer traps a swipe (`overscroll-behavior: auto`); add a 360x640 Chromium test that a swipe
+  starting over the chat moves the page.
+- **Headline wrap.** "MODERATOR / HUB INCLUDED." splits "Moderator hub"; a non-breaking space would keep it whole. The copy also mixes
+  "recognise" and "Licence" (UK) with US spellings elsewhere.
+- **FAQ screenshots** show a band of hero-style grid under the sticky header at y 66 to 85 (`faq-1440-light.png`, `faq-390-dark.png`);
+  check it is only the screenshot and not a visible seam.
+- **Contrast.** Measure the hero fine print (small muted text on the lavender light background) against 4.5:1. The phone tour bar sets its
+  title in the display face, all caps, over three lines; consider a shorter title there.

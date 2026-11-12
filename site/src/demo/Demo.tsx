@@ -18,6 +18,7 @@ import { ModeratorPane } from './HubPane';
 import type { StaffEvent } from './HubPane';
 import { CodeIcon } from './icons';
 import { quietNote, refusalMessage } from './notice';
+import { revealInOwnScrollBoxes } from './reveal';
 import { seatTransport } from './playerTransport';
 import { AFTERWARDS, LOOP, NO_NOTICE_HINT, NO_REPORT_HINT, REPLIES, REPLY_DELAY_MS, RULE_PICKER_HINT, SEED, THANKS, THANKS_DELAY_MS, TOUR_STEPS } from './script';
 import type { ScriptLine } from './script';
@@ -164,6 +165,8 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
   const atBottom = useRef(true);
   /** The pointer is in the chat, or focus is: nothing under it may move. */
   const hold = useRef({ pointer: false, focus: false });
+  /** The control the tour last brought into view inside the hub, so it is done once per control. */
+  const revealed = useRef<HTMLElement | null>(null);
   /** A line arrived that should be scrolled to: the layout effect does it once the line is drawn. */
   const stickNext = useRef(false);
   const live = useRef({ paused, ready, dialog: false });
@@ -484,6 +487,17 @@ export default function Demo({ engine: given, scripted = true }: DemoProps) {
     const wantRule = tour.on && tour.step === STEP.apply && target !== null && target.tagName === 'SELECT';
     setNeedsRule((v) => (v === wantRule ? v : wantRule));
     target?.setAttribute('data-tour-target', 'true');
+    // A hub control below the hub's own fold (the suggested action sits under the case's history) is scrolled into view inside the hub,
+    // once. The page itself is never scrolled.
+    const hubPane = host.querySelector<HTMLElement>('[data-pane="mod"]');
+    if (target !== null && hubPane !== null && hubPane.contains(target)) {
+      if (revealed.current !== target) {
+        revealed.current = target;
+        revealInOwnScrollBoxes(target, hubPane);
+      }
+    } else {
+      revealed.current = null;
+    }
   });
 
   // ---------- actions ----------

@@ -2,7 +2,7 @@
 
 Date: 2026-11-11. Sources: the live site at 1440 and 390 wide (screenshots in this folder: `hero-*`, `demo-*`, `full-*`), the demo played end to end (report, take the case, decide, see Bo's notice), `site/src` (content.ts, sections/, demo/), index.html, public/llms.txt, and the product docs (README.md, hub-react, player-react, http, matcher and profanity READMEs, docs/status.md).
 
-Nothing in the repo was changed.
+This note was written before the build and changed nothing in the repo then. The site now follows it; where the build departed from it (and why), see the PR and the review fixes in `docs/plans/follow-ups.md`.
 
 ---
 
