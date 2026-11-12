@@ -165,4 +165,6 @@ export const LazyActions = lazyScreen('hub.state.what.allActions', () => import(
 export const LazyLadderSettings = lazyScreen('hub.state.what.settings', () => import('./LadderSettings.js').then((m) => m.LadderSettingsScreen));
 export const LazyAiSettings = lazyScreen('hub.state.what.settings', () => import('./AiSettings.js').then((m) => m.AiSettingsScreen));
 export const LazyAdvancedSettings = lazyScreen('hub.state.what.advanced', () => import('./AdvancedSettings.js').then((m) => m.AdvancedSettingsScreen));
+export const LazyAppealCard = lazyScreen('hub.state.what.appeal', () => import('../case/AppealCard.js').then((m) => m.AppealScreen));
+export const LazyAppeals = lazyScreen('hub.state.what.appeals', () => import('./Appeals.js').then((m) => m.Appeals));
 export const LazyReportingSettings = lazyScreen('hub.state.what.reportingSettings', () => import('./ReportingSettings.js').then((m) => m.ReportingSettingsScreen));

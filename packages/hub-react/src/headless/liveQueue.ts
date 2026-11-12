@@ -56,6 +56,8 @@ export interface LiveQueueState {
   authError: HubError | null;
   /** Changes each minute while the tab is visible, so what depends on the clock (waits, lapsed claims) is drawn again. */
   minute: number;
+  /** The appeals waiting, as `GET /changes` last said (only for a caller who may read appeals while they are on); absent otherwise and from an older server. */
+  appeals?: number;
   /** Counts every read of the queue that was put to use, so a screen can reload its own data when the queue moved. */
   revision: number;
   /** When the last read succeeded (the hub's clock), or null. */
@@ -209,12 +211,13 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
   const keep = (person: string): boolean => interacting || person === openPerson;
 
   /** Reads the queue and puts it on screen: in place (`refresh`), or as it is (`adopt`, for the first read and by request). */
-  const read = async (mode: 'adopt' | 'refresh', knownToken?: string): Promise<QueueGroup[]> => {
+  const read = async (mode: 'adopt' | 'refresh', known?: { token: string; appeals?: number }): Promise<QueueGroup[]> => {
     // Reads can overlap (a poll, Take next, Try again): only the one started last is put to use, so a slow old answer never
     // overwrites a newer one.
     const mine = ++seq;
     // The token is taken before the list: a change in between shows up at the next poll instead of being lost.
-    const at = knownToken ?? (await client.changes()).token;
+    const seen = known ?? (await client.changes());
+    const at = seen.token;
     const all = await fetchAllOpen(client);
     // Longest wait first, unless the server sends AI reads: then the `priority` sort (wait, open reports, the read, the reporter's record).
     const reads = all.items.some((r) => r.ai != null);
@@ -224,8 +227,10 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     if (mine !== seq) return groups;
     token = at;
     commit((prev) => {
+      const { appeals: _before, ...base } = prev;
+      void _before;
       const shown = mode === 'adopt' || prev.status !== 'ready' ? { rows: adopt(groups), incoming: 0 } : reconcile(prev.rows, groups, keep);
-      return { ...prev, status: 'ready', error: null, groups, ranked, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: all.items.length, updatedAt: now(), revision: prev.revision + 1 };
+      return { ...base, ...(seen.appeals === undefined ? {} : { appeals: seen.appeals }), status: 'ready', error: null, groups, ranked, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: all.items.length, updatedAt: now(), revision: prev.revision + 1 };
     });
     return groups;
   };
@@ -289,7 +294,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
         } else {
           const c = await client.changes(token);
           if (cancelled) return;
-          if (c.changed) await read('refresh', c.token);
+          if (c.changed) await read('refresh', c);
         }
         if (!cancelled) succeeded();
       } catch (e) {

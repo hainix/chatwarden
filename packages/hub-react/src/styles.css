@@ -1753,6 +1753,83 @@
   justify-self: start;
   font-size: var(--cw-text-s, var(--cwd-text-s));
 }
+/* The appeal card (appeals, design 4.9). No colour of its own: the referee card carries the kind, the statement is plain text, the outcome is words. */
+.cw-hub .cw-appeal {
+  display: grid;
+  gap: var(--cw-space-4, var(--cwd-space-4));
+  align-content: start;
+  min-width: 0;
+}
+.cw-hub .cw-appeal-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-appeal-title {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+}
+.cw-hub .cw-appeal-title .cw-screen-title {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-appeal-said,
+.cw-hub .cw-appeal-shown,
+.cw-hub .cw-appeal-decision {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-appeal-said h3,
+.cw-hub .cw-appeal-shown h3 {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-appeal-statement {
+  margin: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.cw-hub .cw-appeal-reveal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-4, var(--cwd-space-4));
+}
+.cw-hub .cw-appeal-shown ul {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-appeal-line {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-appeal-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-appeal-pick {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  justify-items: start;
+  min-width: 0;
+  margin: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+}
+.cw-hub .cw-appeal-reason {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .cw-hub .cw-line-text {
   min-width: 0;
   white-space: pre-wrap;

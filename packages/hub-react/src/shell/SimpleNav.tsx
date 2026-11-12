@@ -40,6 +40,8 @@ function currentOf(route: Route): 'cases' | 'terms' | 'blocked' | 'more' | null 
     case 'reports':
     case 'report':
     case 'person':
+    case 'appeals':
+    case 'appeal':
       return 'cases';
     case 'terms':
     case 'blocked':

@@ -7,12 +7,13 @@ import { absoluteTime, formatDuration, listOf, waitTone } from '../format.js';
 import { Icon } from '../icons.js';
 import { errorText, groupName, reasonChip } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
-import { LazyAiParts } from '../lazyParts.js';
+import { useFeatures } from '../features.js';
+import { LazyAiParts, LazyAppealList } from '../lazyParts.js';
 import { hasAiRead } from '../queue.js';
 import { useMode } from '../mode.js';
 import type { ShownRow } from '../live.js';
 import type { Route } from '../router.js';
-import { Avatar, Kbd, Link, PersonChip, Skeleton } from '../ui.js';
+import { Avatar, Kbd, Link, PersonChip, Segmented, Skeleton } from '../ui.js';
 
 /** The people shown by name on a row before it says "and N more". */
 const VIEWERS_NAMED = 1;
@@ -31,16 +32,21 @@ export interface PieceRows {
  * list never moves under the pointer or the keyboard focus: new cases wait behind a pill.
  */
 export function QueuePane({ route, shortcuts, piece }: { route: Route | null; shortcuts: boolean; piece?: PieceRows }) {
-  const { t, locale, can } = useHub();
+  const { t, locale, can, go } = useHub();
   const simple = useMode().mode === 'simple';
   const queue = useQueue();
+  // The Appeals view: the list source swaps (GET /appeals?status=open). It follows the route, so an address, the back button and Simple's line all agree.
+  const features = useFeatures();
+  const appealsView = features.appeals && piece === undefined && (route?.name === 'appeals' || route?.name === 'appeal');
+  const openAppeal = route?.name === 'appeal' ? route.id : null;
+  const waitingAppeals = queue.appeals ?? 0;
   const actions = useCaseActions();
   const titleId = useId();
   const canTake = can('reports.decide');
   const openReport = piece !== undefined ? piece.selected : route?.name === 'report' ? route.id : null;
   // While a case or a person is open the queue can fold to one row (on a phone, where it would sit above the open pane). Each
   // screen starts folded; the fold is the stylesheet's, so a desktop never sees it.
-  const paneKey = route === null ? null : route.name === 'report' ? `report:${route.id}` : route.name === 'person' ? `person:${route.ref}` : null;
+  const paneKey = route === null ? null : route.name === 'report' ? `report:${route.id}` : route.name === 'person' ? `person:${route.ref}` : route.name === 'appeal' ? `appeal:${route.id}` : null;
   const [unfolded, setUnfolded] = useState(false);
   useEffect(() => setUnfolded(false), [paneKey]);
 
@@ -53,7 +59,9 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
   const summary = listOf([t('hub.queue.people', { count: people }), t('hub.reports.row.reports', { count: queue.reports })], locale);
 
   let body;
-  if (queue.status === 'loading') {
+  if (appealsView) {
+    body = <LazyAppealList selected={openAppeal} />;
+  } else if (queue.status === 'loading') {
     body = (
       <div className="cw-queue-state">
         <p role="status" className="cw-sr">
@@ -115,10 +123,21 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
       )}
       <div className="cw-queue-head">
         <div className="cw-queue-title">
-          <h2 id={titleId}>{t('hub.queue.title')}</h2>
-          {queue.status === 'ready' && <span>{summary}</span>}
+          <h2 id={titleId}>{t(appealsView ? 'hub.appeals.queue.title' : 'hub.queue.title')}</h2>
+          {appealsView ? <span>{t('hub.appeals.queue.count', { count: waitingAppeals })}</span> : queue.status === 'ready' && <span>{summary}</span>}
         </div>
-        {canTake && (
+        {features.appeals && !simple && piece === undefined && (
+          <Segmented
+            label={t('hub.appeals.switch.label')}
+            value={appealsView ? 'appeals' : 'reports'}
+            options={[
+              { value: 'reports', label: t('hub.appeals.switch.reports') },
+              { value: 'appeals', label: t('hub.appeals.switch.appeals', { count: waitingAppeals }) },
+            ]}
+            onChange={(v) => go(v === 'appeals' ? { name: 'appeals' } : { name: 'reports', status: 'open' })}
+          />
+        )}
+        {canTake && !appealsView && (
           <button type="button" className="cw-take" onClick={() => void actions.takeNext()} {...(shortcuts ? { 'aria-keyshortcuts': 'N' } : {})}>
             <span className="cw-take-text">
               {queue.ranked ? (
@@ -133,7 +152,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
             {shortcuts && <Kbd>N</Kbd>}
           </button>
         )}
-        {!simple && (
+        {!simple && !appealsView && (
           <div className="cw-seg" role="group" aria-label={t('hub.queue.filter.claim')}>
             {(['all', 'unclaimed', 'mine'] as const).map((v) => (
               <button key={v} type="button" aria-pressed={queue.filter.claim === v} onClick={() => queue.setFilter({ claim: v })}>
@@ -142,10 +161,10 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
             ))}
           </div>
         )}
-        {!simple && <ReasonFilter />}
+        {!simple && !appealsView && <ReasonFilter />}
       </div>
       <div className="cw-newbar" role="status">
-        {queue.incoming > 0 && (
+        {!appealsView && queue.incoming > 0 && (
           <button type="button" className="cw-newpill" title={t('hub.queue.newTitle')} onClick={queue.showIncoming}>
             {t('hub.queue.new', { count: queue.incoming })}
           </button>
@@ -172,7 +191,7 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
         }}
       >
         {body}
-        {queue.partial && queue.status === 'ready' && <p className="cw-hint cw-queue-note">{t('hub.overview.stat.partial', { count: queue.reports })}</p>}
+        {!appealsView && queue.partial && queue.status === 'ready' && <p className="cw-hint cw-queue-note">{t('hub.overview.stat.partial', { count: queue.reports })}</p>}
       </div>
     </section>
   );

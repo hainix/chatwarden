@@ -9,6 +9,8 @@ export type Route =
   | { name: 'reports'; status: QueueStatus }
   | { name: 'report'; id: string }
   | { name: 'person'; ref: string }
+  | { name: 'appeals' }
+  | { name: 'appeal'; id: string }
   | { name: 'terms' }
   | { name: 'blocked' }
   | { name: 'gaps' }
@@ -89,6 +91,11 @@ export function parseRoute(path: string): Route {
       const id = idOf(second);
       return id === null ? notFound : { name: 'report', id };
     }
+    case 'appeals': {
+      if (second === undefined) return { name: 'appeals' };
+      const id = idOf(second);
+      return id === null ? notFound : { name: 'appeal', id };
+    }
     case 'people': {
       const ref = idOf(second);
       return ref === null ? notFound : { name: 'person', ref };
@@ -124,6 +131,8 @@ export function buildPath(route: Route): string {
       return `/reports/${encodeURIComponent(route.id)}`;
     case 'person':
       return `/people/${encodeURIComponent(route.ref)}`;
+    case 'appeal':
+      return `/appeals/${encodeURIComponent(route.id)}`;
     case 'notFound':
       return route.path;
     case 'settings':
@@ -145,6 +154,8 @@ export function tabOf(route: Route): TabName | null {
     case 'reports':
     case 'report':
     case 'person':
+    case 'appeals':
+    case 'appeal':
       return 'reports';
     case 'terms':
     case 'blocked':

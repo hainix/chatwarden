@@ -125,6 +125,8 @@ function screenKeyOf(route: Route): string {
       return `report:${route.id}`;
     case 'person':
       return `person:${route.ref}`;
+    case 'appeal':
+      return `appeal:${route.id}`;
     case 'notFound':
       return `notFound:${route.path}`;
     case 'settings':

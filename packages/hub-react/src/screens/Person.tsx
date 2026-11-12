@@ -3,29 +3,36 @@ import { RecordItem } from '../case/Record.js';
 import { ReporterStanding, ReporterTotals } from '../case/ReporterStanding.js';
 import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
-import { categoryLabel, groupName } from '../labels.js';
+import { categoryLabel, groupName, kindLabel } from '../labels.js';
 import { LazySignalLines } from '../lazyParts.js';
 import { LocalReveal, NameToggle, NameValue } from '../names.js';
 import { Revoke } from '../person/Revoke.js';
 import { SanctionForm } from '../person/SanctionForm.js';
-import type { SanctionGroupView, PersonHistory } from '../types.js';
+import type { AppealSummary, SanctionGroupView, PersonHistory } from '../types.js';
 import { Empty, Fetched, Link, Panel, PersonChip, Tag, Time } from '../ui.js';
 
 type Form = null | 'sanction' | 'note';
 
 /** One line of the timeline: a report about them, or a sanction. */
-type Entry = { kind: 'sanction'; at: number; key: string; s: SanctionGroupView } | { kind: 'report'; at: number; key: string; r: PersonHistory['reports'][number] };
+type Entry =
+  | { kind: 'sanction'; at: number; key: string; s: SanctionGroupView }
+  | { kind: 'report'; at: number; key: string; r: PersonHistory['reports'][number] }
+  | { kind: 'appeal'; at: number; key: string; a: AppealSummary };
+
+/** At the same moment: an appeal comes first (it answers the sanction), then the sanction, then the report it followed. */
+const RANK = { appeal: 0, sanction: 1, report: 2 } as const;
 
 /**
- * Reports and sanctions as one list, newest first. At the same moment a sanction comes before the report it followed (a decision
+ * Reports, sanctions and appeals as one list, newest first. At the same moment a sanction comes before the report it followed (a decision
  * files both at once); otherwise the order the kit sent each in is kept.
  */
-export function timelineOf(history: Pick<PersonHistory, 'reports' | 'sanctions'>): Entry[] {
+export function timelineOf(history: Pick<PersonHistory, 'reports' | 'sanctions'> & Partial<Pick<PersonHistory, 'appeals'>>): Entry[] {
   const all: Entry[] = [
+    ...(history.appeals ?? []).map((a): Entry => ({ kind: 'appeal', at: a.createdAt, key: `a:${a.id}`, a })),
     ...history.sanctions.map((s): Entry => ({ kind: 'sanction', at: s.startsAt, key: `s:${s.groupId}`, s })),
     ...history.reports.map((r): Entry => ({ kind: 'report', at: r.createdAt, key: `r:${r.id}`, r })),
   ];
-  return all.map((e, i) => ({ e, i })).sort((a, b) => b.e.at - a.e.at || (a.e.kind === b.e.kind ? a.i - b.i : a.e.kind === 'sanction' ? -1 : 1)).map((x) => x.e);
+  return all.map((e, i) => ({ e, i })).sort((a, b) => b.e.at - a.e.at || (a.e.kind === b.e.kind ? a.i - b.i : RANK[a.e.kind] - RANK[b.e.kind])).map((x) => x.e);
 }
 
 /**
@@ -148,7 +155,9 @@ function PersonBody({ history, revoking, setRevoking, onRevoked }: { history: Pe
           <>
             <p className="cw-hint cw-panel-pad">{t('hub.person.timeline.hint')}</p>
             <ul className="cw-recs cw-panel-pad">
-              {entries.map((e) => (e.kind === 'sanction' ? <RecordItem key={e.key} s={e.s} detail /> : <ReportEntry key={e.key} report={e.r} />))}
+              {entries.map((e) =>
+                e.kind === 'sanction' ? <RecordItem key={e.key} s={e.s} detail /> : e.kind === 'appeal' ? <AppealEntry key={e.key} appeal={e.a} /> : <ReportEntry key={e.key} report={e.r} />,
+              )}
             </ul>
           </>
         )}
@@ -181,6 +190,29 @@ function ReportEntry({ report }: { report: PersonHistory['reports'][number] }) {
           {can('reports.read') && (
             <Link to={{ name: 'report', id: report.id }} className="cw-link" omit aria-label={t('hub.person.report.openLabel', { category: categoryLabel(t, report.category) })}>
               {t('hub.person.report.open')}
+            </Link>
+          )}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+/** An appeal against one of their sanctions: "Appeal: reduced", with the kind it was against and its date. No referee card: the sanction has its own entry. */
+function AppealEntry({ appeal }: { appeal: AppealSummary }) {
+  const { t, can } = useHub();
+  return (
+    <li className="cw-rec cw-rec--report">
+      <div className="cw-rec-body">
+        <p className="cw-rec-head">
+          <strong>{t(`hub.person.appeal.${appeal.status}`)}</strong>
+          <Tag>{kindLabel(t, appeal.sanction.kind)}</Tag>
+        </p>
+        <p className="cw-facts cw-rec-meta">
+          <Time at={appeal.createdAt} />
+          {can('appeals.read') && (
+            <Link to={{ name: 'appeal', id: appeal.id }} className="cw-link" omit>
+              {t('hub.person.appeal.open.link')}
             </Link>
           )}
         </p>

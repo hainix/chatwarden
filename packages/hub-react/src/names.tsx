@@ -13,6 +13,8 @@ export interface NameReveal {
   all: boolean;
   shows: (key: string) => boolean;
   toggle: (key: string) => void;
+  /** Show or hide every flagged name and statement at once ("Show blocked words"). */
+  setAll?: (on: boolean) => void;
 }
 
 export const NameRevealContext = createContext<NameReveal | null>(null);
@@ -23,6 +25,7 @@ export const nameKey = (place: string): string => `name:${place}`;
 /** Gives the page below it its own reveal state (nothing is on show at first, and it is gone with the page). */
 export function LocalReveal({ children }: { children: ReactNode }) {
   const [on, setOn] = useState<ReadonlySet<string>>(() => new Set());
+  const [all, setAll] = useState(false);
   const toggle = useCallback((key: string): void => {
     setOn((prev) => {
       const next = new Set(prev);
@@ -30,7 +33,7 @@ export function LocalReveal({ children }: { children: ReactNode }) {
       return next;
     });
   }, []);
-  const value = useMemo<NameReveal>(() => ({ all: false, shows: (key) => on.has(key), toggle }), [on, toggle]);
+  const value = useMemo<NameReveal>(() => ({ all, shows: (key) => on.has(key), toggle, setAll }), [all, on, toggle]);
   return <NameRevealContext.Provider value={value}>{children}</NameRevealContext.Provider>;
 }
 

@@ -130,6 +130,18 @@ export function decideErrorText(t: HubT, error: HubError): string {
   return errorText(t, error);
 }
 
+/**
+ * Why a ruling on an appeal did not go through, in words from the catalog: the kit's own words are never shown. Each of the three 409s says what it means; a length
+ * the profile does not offer is the decision form's sentence.
+ */
+export function appealErrorText(t: HubT, error: HubError): string {
+  if (error.code === 'same_decider') return t('hub.appeals.fail.sameDecider');
+  if (error.code === 'already_decided') return t('hub.appeals.fail.alreadyDecided');
+  if (error.code === 'gone') return t('hub.appeals.fail.gone');
+  if (error.status === 400) return error.code === 'duration_not_offered' ? t('hub.error.durationNotOffered') : t('hub.appeals.fail.invalid');
+  return errorText(t, error);
+}
+
 /** Why a term change did not go through. A flat 400 `invalid_term` names no field and no reason, so one sentence says what it may be. */
 export function termErrorText(t: HubT, error: HubError): string {
   if (error.status === 400) return error.code === 'invalid_term' ? t('hub.terms.refused') : t('hub.terms.form.fail.invalid');

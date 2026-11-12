@@ -188,6 +188,7 @@ const LINES: Record<string, Array<[string, string]>> = {
   'screens/Person.tsx': [
     ['data?.handle ?? null', 'read once; every use goes through groupName or NameValue'],
   ],
+  'case/AppealCard.tsx': [['history.data?.handle ?? null', 'read once; it goes through groupName and NameValue']],
   'shell/CasePanel.tsx': [['group?.reporterHandles[ref]', 'feeds displayName on the next line']],
   'shell/CommandBar.tsx': [['keywords:', 'searched, never drawn: typing a name still finds the person']],
   'QueueRow.tsx': [

@@ -159,7 +159,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
 
   const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide'), aiFirst, aiDecided });
 
-  const nameReveal = useMemo<NameReveal>(() => ({ all: revealAll, shows: (key) => revealed.has(key), toggle }), [revealAll, revealed, toggle]);
+  const nameReveal = useMemo<NameReveal>(() => ({ all: revealAll, shows: (key) => revealed.has(key), toggle, setAll: setRevealAll }), [revealAll, revealed, toggle]);
   const value: CaseValue = {
     reportId,
     detail,
