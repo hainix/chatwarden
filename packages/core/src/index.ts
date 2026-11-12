@@ -327,3 +327,11 @@ export type {
   ResolvedProfile,
   RulesFlavour,
 } from './profile.js';
+
+// AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
+export { AI_PROMPT_VERSION, AIError } from './ai/types.js';
+export type { AIExample, AIPerson, AIRead, AIReadInput, AIReadResult, AIUsage, ModerationAI } from './ai/types.js';
+export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
+export { validateAIOutput } from './ai/validate.js';
+export type { AIValidation, AIValidationContext } from './ai/validate.js';
+export { AI_MAX_KIND, AI_MAX_PREFILL_MS, AICeilingError, assertWithinCeilings, automationAllowed } from './ai/ceilings.js';
