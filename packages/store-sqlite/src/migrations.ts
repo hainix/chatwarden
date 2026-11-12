@@ -567,4 +567,95 @@ CREATE INDEX        kit_signals_by_at      ON kit_signals (at);
 ALTER TABLE kit_ai_reads ADD COLUMN signals_json TEXT;
 `,
   },
+  {
+    version: 22,
+    // Appeals and offensive names (0.1.9). Two new tables with their indexes, a rebuilt kit_notices, and two nullable or defaulted columns on
+    // tables that already exist. The runner wraps this in one savepoint with the version bump, so a failure leaves version 21, the old
+    // notices table with its rows and indexes, and no new table or column. It is ONE-WAY: the notices table is rebuilt (SQLite cannot widen
+    // a CHECK in place), so a database that has run 22 cannot be opened by 0.1.7 or 0.1.8; the release notes say so, as 0.1.5's did for 19.
+    //   kit_appeals holds one row per appeal. `statement` is the one new free text a player writes (at most 1000 characters, enforced
+    //     by the service): it is set to NULL on its own shorter clock (`retention.appealStatementsMs`, 90 days after the decision) and the
+    //     row stays with its counts for `retention.appealsMs` (365 days). `rule` is the sanction's rule as text, copied at filing so the
+    //     per-rule counts need no join. UNIQUE (group_id) is the guard that lets exactly one filing win, for the life of the row: one appeal per sanction.
+    //     `status` moves from 'open' only (one conditional UPDATE decides it); 'moot' means the sanction was revoked by someone else, or
+    //     retention removed its rows, while the appeal was open.
+    //       kit_appeals_by_group (group_id): UNIQUE; the arbiter of `INSERT ... ON CONFLICT DO NOTHING`, and the moot lookup.
+    //       kit_appeals_by_subject (subject_id, created_at): the weekly cap (countAppealsBy) for a person and their aliases.
+    //       kit_appeals_by_status (status, created_at, id): the open count and the inbox, oldest first, with the keyset cursor.
+    //       kit_appeals_by_rule (rule, created_at): the per-rule counts the false-positive rate reads.
+    //   kit_sanctions.report_id is the report whose decision made a sanction, so a granted appeal can mark that decision reversed. Set by
+    //     `decide` from 0.1.9. The backfill links a moderator sanction row to the decision that holds its group id in `result_json`.
+    //     Group ids are random and long, so a false match is not a concern, and at kit scale one UPDATE is the same trade migration 17
+    //     made. Rows it cannot link (a direct apply, an automatic timeout, an IP row) keep NULL: an appeal against one still works and
+    //     still counts in the rate, and simply cannot mark a casebook row. The UPDATE only touches rows still NULL, so it is idempotent.
+    //   kit_notices is rebuilt (as migrations 7 and 11 rebuilt kit_sanctions) to add four kinds to the CHECK: 'rename_required',
+    //     'appeal_upheld', 'appeal_reduced', 'appeal_revoked'. The columns and the three indexes are the live ones (migration 8 made them
+    //     and no later migration touched them), copied in the same order with ORDER BY rowid, so every id, row and the order of rows
+    //     survives. Nothing references kit_notices.
+    //   kit_blocked_names keeps a blocked name as evidence, only for a kit with `names.keepBlocked`, on a 30 day clock (`retention.blockedNamesMs`).
+    //       kit_blocked_names_by_at (at): the retention sweep and the newest-first list.
+    //   kit_ai_outcomes.corrective is 1 for the casebook row of a decision a granted appeal reversed: a corrective example for that
+    //     rule. It needs migration 20 (which is always earlier in this list); existing rows read 0.
+    sql: `
+CREATE TABLE kit_appeals (
+  id                   TEXT PRIMARY KEY,
+  subject_id           TEXT NOT NULL,
+  group_id             TEXT NOT NULL,
+  notice_id            TEXT NOT NULL,
+  report_id            TEXT,
+  rule                 TEXT,
+  kind                 TEXT NOT NULL CHECK (kind IN ('warning', 'chat', 'area', 'ban')),
+  statement            TEXT,
+  status               TEXT NOT NULL CHECK (status IN ('open', 'upheld', 'reduced', 'revoked', 'moot')),
+  created_at           INTEGER NOT NULL,
+  decided_at           INTEGER,
+  decided_by           TEXT,
+  decision_reason      TEXT,
+  replacement_group_id TEXT
+);
+CREATE UNIQUE INDEX kit_appeals_by_group   ON kit_appeals (group_id);
+CREATE INDEX        kit_appeals_by_subject ON kit_appeals (subject_id, created_at);
+CREATE INDEX        kit_appeals_by_status  ON kit_appeals (status, created_at, id);
+CREATE INDEX        kit_appeals_by_rule    ON kit_appeals (rule, created_at);
+
+ALTER TABLE kit_sanctions ADD COLUMN report_id TEXT;
+UPDATE kit_sanctions SET report_id = (
+  SELECT d.report_id FROM kit_decisions d WHERE instr(d.result_json, kit_sanctions.group_id) > 0 LIMIT 1
+) WHERE target_type = 'subject' AND source = 'moderator' AND report_id IS NULL;
+
+CREATE TABLE kit_notices_v22 (
+  id           TEXT PRIMARY KEY,
+  subject_id   TEXT NOT NULL,
+  group_id     TEXT,
+  kind         TEXT NOT NULL CHECK (kind IN ('warning', 'chat', 'area', 'ban', 'report_outcome',
+                                             'rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked')),
+  rule         TEXT,
+  until        INTEGER,
+  ref_code     TEXT,
+  excerpt_json TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  acked_at     INTEGER,
+  withdrawn_at INTEGER
+);
+INSERT INTO kit_notices_v22 (id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at)
+  SELECT id, subject_id, group_id, kind, rule, until, ref_code, excerpt_json, created_at, acked_at, withdrawn_at FROM kit_notices ORDER BY rowid;
+DROP TABLE kit_notices;
+ALTER TABLE kit_notices_v22 RENAME TO kit_notices;
+CREATE INDEX kit_notices_by_subject ON kit_notices (subject_id, acked_at, withdrawn_at);
+CREATE INDEX kit_notices_by_group ON kit_notices (group_id);
+CREATE INDEX kit_notices_by_created ON kit_notices (created_at);
+
+CREATE TABLE kit_blocked_names (
+  id         TEXT PRIMARY KEY,
+  subject_id TEXT,
+  name       TEXT NOT NULL,
+  term_id    TEXT,
+  reason     TEXT NOT NULL CHECK (reason IN ('name_not_allowed', 'name_profane')),
+  at         INTEGER NOT NULL
+);
+CREATE INDEX kit_blocked_names_by_at ON kit_blocked_names (at);
+
+ALTER TABLE kit_ai_outcomes ADD COLUMN corrective INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

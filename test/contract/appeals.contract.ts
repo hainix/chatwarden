@@ -413,9 +413,9 @@ export function appealsContract(name: string, make: () => Store): void {
         expect(s.countSanctionsByRule(0)).toEqual([{ rule: '1', count: 1 }]);
       });
 
-      it('a revoked group still counts (it was a decision), and two subject rows of one group are one', () => {
+      it('a revoked group still counts (it was a decision), and a group with its IP row is one', () => {
         const s = store();
-        s.insertSanctionGroup([sanction({ groupId: 'sg-1', refCode: 'M-20001', rule: '3' }), sanction({ groupId: 'sg-1', refCode: 'M-20001', rule: '3', value: 's_b' })]);
+        s.insertSanctionGroup(subjectAndIp('sg-1', 'M-20001', { rule: '3' }));
         s.insertSanctionGroup([sanction({ groupId: 'sg-2', refCode: 'M-20002', rule: '3' })]);
         s.revokeSanctionGroup('sg-2', 'mod_ann', NOW, 'oops');
         expect(s.countSanctionsByRule(0)).toEqual([{ rule: '3', count: 2 }]);

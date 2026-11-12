@@ -2,6 +2,10 @@ import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, CONDUCT_LEVELS, ROLES } from '@chatwarden/core';
 import type {
+  AppealRow,
+  AppealStatus,
+  BlockedNameRow,
+  NameReason,
   AIExample,
   AIRead,
   AISignal,
@@ -165,6 +169,28 @@ function toSanctionRow(r: Record<string, unknown>): SanctionRow {
     pending: r.pending === 1,
     // Only a query that selects revoked_at gets the property; the other loads keep the plain row shape.
     ...(r.revoked_at === undefined ? {} : { revokedAt: r.revoked_at === null ? null : Number(r.revoked_at) }),
+  };
+}
+
+const APPEAL_COLUMNS =
+  'id, subject_id, group_id, notice_id, report_id, rule, kind, statement, status, created_at, decided_at, decided_by, decision_reason, replacement_group_id';
+
+function toAppealRow(r: Record<string, unknown>): AppealRow {
+  return {
+    id: String(r.id),
+    subject: String(r.subject_id),
+    groupId: String(r.group_id),
+    noticeId: String(r.notice_id),
+    reportId: r.report_id === null ? null : String(r.report_id),
+    rule: r.rule === null ? null : String(r.rule),
+    kind: String(r.kind) as SanctionKind,
+    statement: r.statement === null ? null : String(r.statement),
+    status: String(r.status) as AppealStatus,
+    createdAt: Number(r.created_at),
+    decidedAt: r.decided_at === null ? null : Number(r.decided_at),
+    decidedBy: r.decided_by === null ? null : String(r.decided_by),
+    decisionReason: r.decision_reason === null ? null : String(r.decision_reason),
+    replacementGroupId: r.replacement_group_id === null ? null : String(r.replacement_group_id),
   };
 }
 
@@ -531,13 +557,13 @@ export class SqliteStore implements Store, TermStore {
       const ins = this.db.prepare(
         `INSERT INTO kit_sanctions
            (id, group_id, ref_code, kind, target_type, target_value, starts_at, ends_at, reason, rule, actor, source, automated, pending,
-            gap_note, gap_status, room_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            gap_note, gap_status, room_id, report_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const r of rows) {
         ins.run(
           r.id, r.groupId, r.refCode, r.kind, r.targetType, r.value, r.startsAt, r.endsAt, r.reason, r.rule,
-          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus, r.roomId,
+          r.actor, r.source, r.automated ? 1 : 0, r.pending ? 1 : 0, r.gapNote, r.gapStatus, r.roomId, r.reportId ?? null,
         );
       }
       this.bump();
@@ -1145,6 +1171,246 @@ export class SqliteStore implements Store, TermStore {
 
   purgeSignals(before: number): number {
     return Number(this.db.prepare('DELETE FROM kit_signals WHERE at < ?').run(before).changes);
+  }
+
+  // Appeals (migration 22). SYNCHRONOUS on purpose (like claims and notices); they run inside `transaction`. A write that changes
+  // something moves the change token (the queue shows appeals), inside the same savepoint, so an undone write undoes the move.
+
+  insertAppeal(row: AppealRow): boolean {
+    return this.transaction(() => {
+      // One statement: UNIQUE (group_id) and the primary key decide, so of two connections filing for one group exactly one gets a row back.
+      const wrote = this.db
+        .prepare(
+          `INSERT INTO kit_appeals
+             (id, subject_id, group_id, notice_id, report_id, rule, kind, statement, status, created_at, decided_at, decided_by,
+              decision_reason, replacement_group_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT DO NOTHING
+           RETURNING id`,
+        )
+        .get(
+          row.id, row.subject, row.groupId, row.noticeId, row.reportId, row.rule, row.kind, row.statement, row.status, row.createdAt,
+          row.decidedAt, row.decidedBy, row.decisionReason, row.replacementGroupId,
+        );
+      if (wrote === undefined) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  loadAppeal(id: string): AppealRow | null {
+    const r = this.transaction(() => this.db.prepare(`SELECT ${APPEAL_COLUMNS} FROM kit_appeals WHERE id = ?`).get(id));
+    return r === undefined ? null : toAppealRow(r);
+  }
+
+  listAppeals(q: { status?: 'open' | 'decided' | 'all'; limit: number; after?: { createdAt: number; id: string } }): AppealRow[] {
+    const n = Math.floor(q.limit);
+    const limit = Number.isFinite(n) ? Math.min(200, Math.max(1, n)) : 1;
+    const status = q.status ?? 'all';
+    // A moot appeal (nobody ruled on it) is never listed.
+    const where =
+      status === 'open' ? "status = 'open'" : status === 'decided' ? "status IN ('upheld', 'reduced', 'revoked')" : "status IN ('open', 'upheld', 'reduced', 'revoked')";
+    const args: Array<string | number> = [];
+    let cursor = '';
+    if (q.after !== undefined) {
+      cursor = ' AND (created_at > ? OR (created_at = ? AND id > ?))';
+      args.push(q.after.createdAt, q.after.createdAt, q.after.id);
+    }
+    return this.transaction(() =>
+      this.db
+        .prepare(`SELECT ${APPEAL_COLUMNS} FROM kit_appeals WHERE ${where}${cursor} ORDER BY created_at, id LIMIT ?`)
+        .all(...args, limit)
+        .map(toAppealRow),
+    );
+  }
+
+  countAppealsBy(subjects: readonly SubjectId[], since: number): { count: number; oldestAt: number | null } {
+    const unique = [...new Set(subjects)];
+    let count = 0;
+    let oldestAt: number | null = null;
+    this.transaction(() => {
+      for (let i = 0; i < unique.length; i += CLAIM_BATCH) {
+        const batch = unique.slice(i, i + CLAIM_BATCH);
+        const r = this.db
+          .prepare(
+            `SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM kit_appeals
+             WHERE subject_id IN (${batch.map(() => '?').join(', ')}) AND created_at >= ?`,
+          )
+          .get(...batch, since);
+        count += Number(r?.n ?? 0);
+        if (r?.oldest !== null && r?.oldest !== undefined && (oldestAt === null || Number(r.oldest) < oldestAt)) oldestAt = Number(r.oldest);
+      }
+    });
+    return { count, oldestAt };
+  }
+
+  countOpenAppeals(): number {
+    return Number(this.transaction(() => this.db.prepare("SELECT COUNT(*) AS n FROM kit_appeals WHERE status = 'open'").get())?.n ?? 0);
+  }
+
+  decideAppeal(
+    id: string,
+    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean },
+  ): boolean {
+    return this.transaction(() => {
+      // One conditional UPDATE: only an open appeal moves, so of two connections deciding one appeal exactly one changes a row.
+      const res = this.db
+        .prepare(
+          `UPDATE kit_appeals
+           SET status = ?, decided_at = ?, decided_by = ?, decision_reason = ?, replacement_group_id = ?,
+               statement = CASE WHEN ? = 1 THEN NULL ELSE statement END
+           WHERE id = ? AND status = 'open'`,
+        )
+        .run(patch.status, patch.at, patch.by, patch.reason, patch.replacementGroupId, patch.clearStatement === true ? 1 : 0, id);
+      if (Number(res.changes) === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  closeAppealsForGroup(groupId: string, by: string, at: number, clearStatement?: boolean): number {
+    return this.transaction(() => {
+      const res = this.db
+        .prepare(
+          `UPDATE kit_appeals SET status = 'moot', decided_at = ?, decided_by = ?, statement = CASE WHEN ? = 1 THEN NULL ELSE statement END
+           WHERE group_id = ? AND status = 'open'`,
+        )
+        .run(at, by, clearStatement === true ? 1 : 0, groupId);
+      if (Number(res.changes) > 0) this.bump();
+      return Number(res.changes);
+    });
+  }
+
+  closeOrphanAppeals(by: string, at: number, clearStatement?: boolean): number {
+    return this.transaction(() => {
+      // An open appeal with no SUBJECT row left for its group: retention removed it (a revoked group still has its row).
+      const res = this.db
+        .prepare(
+          `UPDATE kit_appeals SET status = 'moot', decided_at = ?, decided_by = ?, statement = CASE WHEN ? = 1 THEN NULL ELSE statement END
+           WHERE status = 'open'
+             AND NOT EXISTS (SELECT 1 FROM kit_sanctions s WHERE s.group_id = kit_appeals.group_id AND s.target_type = 'subject')`,
+        )
+        .run(at, by, clearStatement === true ? 1 : 0);
+      if (Number(res.changes) > 0) this.bump();
+      return Number(res.changes);
+    });
+  }
+
+  appealCountsByRule(since: number): Array<{ rule: string | null; appealed: number; granted: number; lightened: number }> {
+    // Grouped by the raw rule (so the index kit_appeals_by_rule serves it); 'uncovered' and NULL are merged after.
+    const rows = this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT rule, COUNT(*) AS appealed, SUM(status = 'revoked') AS granted, SUM(status = 'reduced') AS lightened
+           FROM kit_appeals WHERE created_at >= ? GROUP BY rule`,
+        )
+        .all(since),
+    );
+    const out = new Map<string | null, { rule: string | null; appealed: number; granted: number; lightened: number }>();
+    for (const r of rows) {
+      const rule = r.rule === null || r.rule === 'uncovered' ? null : String(r.rule);
+      const c = out.get(rule) ?? { rule, appealed: 0, granted: 0, lightened: 0 };
+      c.appealed += Number(r.appealed);
+      c.granted += Number(r.granted);
+      c.lightened += Number(r.lightened);
+      out.set(rule, c);
+    }
+    return [...out.values()];
+  }
+
+  countSanctionsByRule(since: number): Array<{ rule: string | null; count: number }> {
+    // Distinct subject GROUPS of a restriction or a warning, never a note or an IP row, revoked ones included, and never a group an appeal
+    // wrote as the replacement of another (a reduction is one sanction, not two).
+    const rows = this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT rule, COUNT(DISTINCT group_id) AS n FROM kit_sanctions
+           WHERE target_type = 'subject' AND starts_at >= ? AND kind IN ('warning', 'chat', 'area', 'ban')
+             AND NOT EXISTS (SELECT 1 FROM kit_appeals a WHERE a.replacement_group_id = kit_sanctions.group_id)
+           GROUP BY rule`,
+        )
+        .all(since),
+    );
+    const out = new Map<string | null, { rule: string | null; count: number }>();
+    for (const r of rows) {
+      const rule = r.rule === null || r.rule === 'uncovered' ? null : String(r.rule);
+      const c = out.get(rule) ?? { rule, count: 0 };
+      c.count += Number(r.n);
+      out.set(rule, c);
+    }
+    return [...out.values()];
+  }
+
+  loadSanctionSubjectRow(groupId: string): SanctionRow | null {
+    const r = this.transaction(() =>
+      this.db
+        .prepare(`SELECT ${SANCTION_COLUMNS}, report_id FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' ORDER BY rowid LIMIT 1`)
+        .get(groupId),
+    );
+    if (r === undefined) return null;
+    // The one read that carries the report id (omitted when there is none, so every other load keeps the shape it had).
+    return { ...toSanctionRow(r), ...(r.report_id === null ? {} : { reportId: String(r.report_id) }) };
+  }
+
+  clearAppealStatements(before: number): number {
+    return this.transaction(() =>
+      Number(
+        this.db
+          .prepare("UPDATE kit_appeals SET statement = NULL WHERE status <> 'open' AND decided_at < ? AND statement IS NOT NULL")
+          .run(before).changes,
+      ),
+    );
+  }
+
+  purgeAppeals(before: number): number {
+    return this.transaction(() =>
+      Number(
+        this.db
+          .prepare(
+            // A decided appeal on a sanction still in force stays: no end, or an end after the cutoff, and not revoked. That row is what
+            // stops a second appeal against it.
+            `DELETE FROM kit_appeals
+             WHERE status <> 'open' AND decided_at < ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM kit_sanctions s
+                 WHERE s.group_id = kit_appeals.group_id AND s.target_type = 'subject' AND s.revoked_at IS NULL
+                   AND s.kind NOT IN ('warning', 'note') AND (s.ends_at IS NULL OR s.ends_at > ?))`,
+          )
+          .run(before, before).changes,
+      ),
+    );
+  }
+
+  // Blocked names (migration 22). A kept name is evidence, not a queue item: none of these moves the change token.
+
+  insertBlockedName(row: BlockedNameRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare('INSERT INTO kit_blocked_names (id, subject_id, name, term_id, reason, at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(row.id, row.subject, row.name, row.termId, row.reason, row.at);
+    });
+  }
+
+  listBlockedNames(since: number, limit: number): BlockedNameRow[] {
+    const n = Math.floor(limit);
+    const size = Number.isFinite(n) ? Math.min(200, Math.max(1, n)) : 1;
+    return this.transaction(() =>
+      this.db
+        .prepare('SELECT id, subject_id, name, term_id, reason, at FROM kit_blocked_names WHERE at >= ? ORDER BY at DESC, rowid DESC LIMIT ?')
+        .all(since, size)
+        .map((r) => ({
+          id: String(r.id),
+          subject: r.subject_id === null ? null : String(r.subject_id),
+          name: String(r.name),
+          termId: r.term_id === null ? null : String(r.term_id),
+          reason: String(r.reason) as NameReason,
+          at: Number(r.at),
+        })),
+    );
+  }
+
+  purgeBlockedNames(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_blocked_names WHERE at < ?').run(before).changes));
   }
 
   listReasons(): ReasonRow[] {
@@ -1841,17 +2107,24 @@ export class SqliteStore implements Store, TermStore {
     return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_mutes WHERE created_at < ?').run(before).changes));
   }
 
-  purgeNotices(before: number): number {
+  purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number {
+    // A seen message notice goes like a seen report outcome. An unseen one has a ceiling only when the caller gives one: an unseen appeal
+    // outcome goes past `appealBefore`, an unseen required rename past `renameBefore` (NULL compares false, so no ceiling means no match).
+    const appealBefore = unseen === undefined ? null : unseen.appealBefore;
+    const renameBefore = unseen === undefined ? null : unseen.renameBefore;
     return this.transaction(() =>
       Number(
         this.db
           .prepare(
             `DELETE FROM kit_notices
              WHERE (withdrawn_at IS NOT NULL AND created_at < ?)
-                OR (acked_at IS NOT NULL AND kind IN ('warning', 'report_outcome') AND created_at < ?)
+                OR (acked_at IS NOT NULL AND created_at < ?
+                    AND kind IN ('warning', 'report_outcome', 'rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'))
+                OR (acked_at IS NULL AND kind IN ('appeal_upheld', 'appeal_reduced', 'appeal_revoked') AND created_at < ?)
+                OR (acked_at IS NULL AND kind = 'rename_required' AND created_at < ?)
                 OR (until IS NOT NULL AND until < ?)`,
           )
-          .run(before, before, before).changes,
+          .run(before, before, appealBefore, renameBefore, before).changes,
       ),
     );
   }
