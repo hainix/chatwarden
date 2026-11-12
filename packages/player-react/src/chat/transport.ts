@@ -38,19 +38,34 @@ export interface ChatTransport {
 export interface SseTransportOptions extends FetchTransportOptions {
   /** Reconnect delays in ms: the first, then doubling to the largest, each with full jitter. Default `{ initialMs: 1000, maxMs: 30000 }`. */
   retry?: { initialMs?: number; maxMs?: number };
-  /** @internal The source of the jitter, a number in [0, 1). For tests. Default `Math.random`. */
+  /**
+   * How long the stream may be silent after the hello before it is dropped and reconnected, in ms. Any bytes count, a heartbeat included.
+   * Default 50 000 (2.5 times the broadcaster's 20 s heartbeat); raise it if your server heartbeats more slowly.
+   */
+  staleMs?: number;
+}
+
+/** What only tests set. Not part of the public options. */
+export interface SseTransportInternals {
+  /** The source of the jitter, a number in [0, 1). Default `Math.random`. */
   random?: () => number;
 }
 
-/** No hello this long after the response starts: the attempt is abandoned as a failure. */
+/** No hello this long after the attempt starts (connect, headers and hello): it is abandoned as a failure. */
 const HELLO_WAIT_MS = 10_000;
+/** The default silence allowed after the hello: 2.5 heartbeats of 20 s. */
+const DEFAULT_STALE_MS = 50_000;
+/** The back-off starts over only when a connection has stayed open this long, so a hello-then-drop loop keeps backing off. */
+const STABLE_MS = 30_000;
+/** The shortest wait before a retry: full jitter may pick near 0, and two instant retries in a row are a storm in miniature. */
+const MIN_RETRY_MS = 100;
 /** The longest a `retry-after` is honoured: a server asking for more is not taken at its word (and a timer cannot hold much more). */
 const MAX_RETRY_AFTER_MS = 10 * 60 * 1000;
 
 const positive = (v: unknown, fallback: number): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback);
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Seconds from a `retry-after` header as ms; null when it is missing or not whole seconds. */
+/** Seconds from a `retry-after` header (on a 429 or 503) as ms; null when it is missing or not whole seconds. An HTTP date is not read. */
 function retryAfterMs(res: Response): number | null {
   const raw = res.headers.get('retry-after');
   return raw !== null && /^\d{1,9}$/.test(raw.trim()) ? Math.min(Number(raw.trim()) * 1000, MAX_RETRY_AFTER_MS) : null;
@@ -67,17 +82,27 @@ const release = (res: Response): void => {
 
 interface Attempt {
   ac: AbortController;
-  helloTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The one watchdog: the wait for a hello, then the allowed silence. When it fires the attempt is aborted. */
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** Fires once the connection has stayed open for `STABLE_MS`. */
+  stable: ReturnType<typeof setTimeout> | undefined;
+  opened: boolean;
 }
 
 /** The default transport: the stream with `fetch`, the rest through `fetchTransport`'s calls. `baseUrl` is where `chatRoutes` is mounted. */
 export function sseTransport(options: SseTransportOptions): ChatTransport {
+  return createSseTransport(options, {});
+}
+
+/** `sseTransport` with the test-only knobs. Not exported from the package. @internal */
+export function createSseTransport(options: SseTransportOptions, internals: SseTransportInternals): ChatTransport {
   // The calls up are fetchTransport's: it also throws the TypeError for a missing baseUrl.
   const rest = fetchTransport(options);
   const base = options.baseUrl.replace(/\/+$/, '');
   const initialMs = positive(options.retry?.initialMs, 1000);
   const maxMs = Math.max(initialMs, positive(options.retry?.maxMs, 30_000));
-  const random = options.random ?? Math.random;
+  const staleMs = positive(options.staleMs, DEFAULT_STALE_MS);
+  const random = internals.random ?? Math.random;
 
   return {
     open(room, events) {
@@ -104,16 +129,15 @@ export function sseTransport(options: SseTransportOptions): ChatTransport {
       };
 
       const onOnline = (): void => {
-        if (closed || status === 'open') return;
+        if (closed) return;
         clearTimeout(retryTimer);
         retryTimer = undefined;
-        // An attempt that is hanging (the network just came back) is abandoned for a fresh one.
-        const hanging = current;
+        // The network just came back: whatever is running (a hanging attempt, or a stream that may be dead and has not said so) is
+        // abandoned for a fresh one. A live stream restarted this way costs one snapshot, which merges.
+        const old = current;
         current = null;
-        if (hanging !== null) {
-          clearTimeout(hanging.helloTimer);
-          hanging.ac.abort();
-        }
+        if (old !== null) end(old);
+        if (status === 'open') setStatus('reconnecting');
         void run();
       };
       const win = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : undefined;
@@ -126,10 +150,17 @@ export function sseTransport(options: SseTransportOptions): ChatTransport {
         win?.removeEventListener('online', onOnline);
         const live = current;
         current = null;
-        if (live !== null) {
-          clearTimeout(live.helloTimer);
-          live.ac.abort();
-        }
+        if (live !== null) end(live);
+      };
+      /** Stop an attempt's timers and its request. */
+      const end = (a: Attempt): void => {
+        clearTimeout(a.timer);
+        clearTimeout(a.stable);
+        a.ac.abort();
+      };
+      const arm = (a: Attempt, ms: number): void => {
+        clearTimeout(a.timer);
+        a.timer = setTimeout(() => a.ac.abort(), ms);
       };
       const finish = (why: ChatClosedWhy): void => {
         setStatus('closed', why);
@@ -140,10 +171,10 @@ export function sseTransport(options: SseTransportOptions): ChatTransport {
       const retry = (attempt: Attempt, atLeastMs = 0): void => {
         if (closed || current !== attempt) return;
         current = null;
-        clearTimeout(attempt.helloTimer);
+        end(attempt);
         const cap = Math.min(maxMs, initialMs * 2 ** Math.min(failures, 30));
         failures += 1;
-        const delay = Math.max(Math.floor(random() * cap), atLeastMs);
+        const delay = Math.max(Math.floor(random() * cap), MIN_RETRY_MS, atLeastMs);
         setStatus('reconnecting');
         retryTimer = setTimeout(() => {
           retryTimer = undefined;
@@ -153,8 +184,9 @@ export function sseTransport(options: SseTransportOptions): ChatTransport {
 
       async function run(): Promise<void> {
         if (closed) return;
-        const attempt: Attempt = { ac: new AbortController(), helloTimer: undefined };
+        const attempt: Attempt = { ac: new AbortController(), timer: undefined, stable: undefined, opened: false };
         current = attempt;
+        arm(attempt, HELLO_WAIT_MS); // connect, headers and hello all fit in it
         if (status === null) setStatus('connecting');
 
         const headers: Record<string, string> = {};
@@ -179,14 +211,23 @@ export function sseTransport(options: SseTransportOptions): ChatTransport {
           finish(res.status === 401 ? 'unauthorized' : 'forbidden');
           return;
         }
+        if (res.status === 404) {
+          release(res);
+          finish('not_found');
+          return;
+        }
         if (!res.ok || res.body === null) {
-          const wait = res.status === 429 ? retryAfterMs(res) : null;
+          const wait = res.status === 429 || res.status === 503 ? retryAfterMs(res) : null;
           release(res);
           retry(attempt, wait ?? 0);
           return;
         }
+        if (!/^\s*text\/event-stream\b/i.test(res.headers.get('content-type') ?? '')) {
+          release(res);
+          finish('unsupported');
+          return;
+        }
 
-        attempt.helloTimer = setTimeout(() => attempt.ac.abort(), HELLO_WAIT_MS);
         const onEvent = (event: SseEvent): void => {
           if (closed || current !== attempt) return;
           let frame: ChatFrame | null;
@@ -198,8 +239,12 @@ export function sseTransport(options: SseTransportOptions): ChatTransport {
           if (frame === null) return;
           const got: ChatFrame = frame;
           if (got.type === 'hello') {
-            clearTimeout(attempt.helloTimer);
-            failures = 0;
+            attempt.opened = true;
+            arm(attempt, staleMs);
+            clearTimeout(attempt.stable);
+            attempt.stable = setTimeout(() => {
+              failures = 0;
+            }, STABLE_MS);
             setStatus('open');
           }
           guard(() => events.frame(got));
@@ -214,13 +259,14 @@ export function sseTransport(options: SseTransportOptions): ChatTransport {
             const { done, value } = await reader.read();
             if (closed || current !== attempt) break;
             if (done) break;
+            if (attempt.opened) arm(attempt, staleMs); // any bytes at all, a heartbeat included
             parser.push(decoder.decode(value, { stream: true }));
           }
         } catch {
           // The stream broke (or was aborted): the cases are told apart below.
         }
-        clearTimeout(attempt.helloTimer);
         if (closed || current !== attempt) {
+          end(attempt);
           void reader.cancel().catch(() => undefined);
           return;
         }

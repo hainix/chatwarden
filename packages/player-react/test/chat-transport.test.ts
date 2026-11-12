@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlayerError } from '../src/client.js';
-import { sseTransport } from '../src/chat/transport.js';
+import { createSseTransport, sseTransport } from '../src/chat/transport.js';
 import type { ChatClosedWhy, ChatConnection, ChatStatus, SseTransportOptions } from '../src/chat/transport.js';
 import type { ChatFrame, WireLine } from '../src/chat/wire.js';
 
@@ -17,7 +17,7 @@ interface Attempt {
   fail(): void;
 }
 
-type Step = { status?: number; headers?: Record<string, string>; stream?: boolean; text?: string; noBody?: boolean } | Error;
+type Step = { hang?: boolean; status?: number; headers?: Record<string, string>; stream?: boolean; text?: string; noBody?: boolean } | Error;
 
 function fakeFetch(steps: Step[] = []) {
   const queue = [...steps];
@@ -26,6 +26,10 @@ function fakeFetch(steps: Step[] = []) {
     const step = queue.shift() ?? { status: 200, stream: true };
     if (step instanceof Error) return Promise.reject(step);
     const signal = init?.signal as AbortSignal;
+    if (step.hang === true) {
+      // An answer that never comes: only the abort ends it.
+      return new Promise<Response>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError'))));
+    }
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({
       start: (c) => {
@@ -66,7 +70,7 @@ function fakeFetch(steps: Step[] = []) {
         // already closed
       }
     });
-    const headers = new Headers(step.headers ?? {});
+    const headers = new Headers({ 'content-type': 'text/event-stream; charset=utf-8', ...step.headers });
     const status = step.status ?? 200;
     if (step.noBody === true) return Promise.resolve(new Response(null, { status, headers }));
     if (step.stream === false || status !== 200) {
@@ -82,11 +86,14 @@ const helloFrame = (over: Record<string, unknown> = {}): ChatFrame =>
   ({ type: 'hello', v: 1, epoch: 'e1', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, summary: 'Be kind.', restriction: null, lines: [], muted: [], ...over }) as ChatFrame;
 const sse = (f: ChatFrame): string => `event: ${f.type}\ndata: ${JSON.stringify(f)}\n\n`;
 
-function collect(over: Partial<SseTransportOptions> = {}, steps: Step[] = [], room = 'lobby') {
+type CollectOptions = Partial<SseTransportOptions> & { random?: () => number };
+
+function collect(over: CollectOptions = {}, steps: Step[] = [], room = 'lobby') {
   const ff = fakeFetch(steps);
   const frames: ChatFrame[] = [];
   const statuses: string[] = [];
-  const transport = sseTransport({ baseUrl: '/chat', fetch: ff.fetch, random: () => 0.5, ...over });
+  const { random = () => 0.5, ...options } = over;
+  const transport = createSseTransport({ baseUrl: '/chat', fetch: ff.fetch, ...options }, { random });
   const conn: ChatConnection = transport.open(room, {
     frame: (f) => frames.push(f),
     status: (s: ChatStatus, why?: ChatClosedWhy) => statuses.push(why === undefined ? s : `${s}:${why}`),
@@ -305,7 +312,7 @@ describe('frames split across chunks, a multi-byte character split across chunks
   it('a handler that throws does not break the stream or cause a reconnect', async () => {
     const ff = fakeFetch();
     let n = 0;
-    const conn = sseTransport({ baseUrl: '/chat', fetch: ff.fetch, random: () => 0.5 }).open('lobby', {
+    const conn = sseTransport({ baseUrl: '/chat', fetch: ff.fetch }).open('lobby', {
       frame: () => {
         n += 1;
         if (n === 1) throw new Error('handler');
@@ -360,7 +367,7 @@ describe('reconnect: delays are jittered between 0 and initial, 2x initial, ... 
     t.conn.close();
   });
 
-  it('the largest random() just under 1 still waits less than the cap; 0 retries at once', async () => {
+  it('the largest random() just under 1 still waits less than the cap; 0 waits the 100 ms floor', async () => {
     const hi = collect({ retry: { initialMs: 1000, maxMs: 30_000 }, random: () => 0.999 }, failing(2));
     await tick();
     await tick(998);
@@ -370,8 +377,10 @@ describe('reconnect: delays are jittered between 0 and initial, 2x initial, ... 
     hi.conn.close();
     const zero = collect({ random: () => 0 }, failing(2));
     await tick();
-    await tick(0);
-    expect(zero.fn.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await tick(99);
+    expect(zero.fn).toHaveBeenCalledTimes(1); // never 0 ms: the floor is 100 ms
+    await tick(1);
+    expect(zero.fn).toHaveBeenCalledTimes(2);
     zero.conn.close();
   });
 
@@ -405,12 +414,15 @@ describe('reconnect: delays are jittered between 0 and initial, 2x initial, ... 
     t.attempts[1]?.fail();
     await tick();
     expect(t.statuses).toEqual(['connecting', 'open', 'reconnecting', 'open', 'reconnecting']);
-    await tick(500);
+    // the first connection did not stay open for 30 s, so the back-off kept growing: cap 2000, so 1000 ms
+    await tick(999);
+    expect(t.fn).toHaveBeenCalledTimes(2);
+    await tick(1);
     expect(t.fn).toHaveBeenCalledTimes(3);
     t.conn.close();
   });
 
-  it('the delay resets after a hello', async () => {
+  it('the delay resets once the connection has stayed open for 30 s', async () => {
     const t = collect({ retry: { initialMs: 1000, maxMs: 30_000 } }, failing(3));
     await tick();
     await tick(500); // attempt 2 (cap 1000)
@@ -418,7 +430,9 @@ describe('reconnect: delays are jittered between 0 and initial, 2x initial, ... 
     await tick(2000); // attempt 4 (cap 4000, 0.5): this one answers
     expect(t.fn).toHaveBeenCalledTimes(4);
     t.attempts[0]?.push(sse(helloFrame()));
-    await tick();
+    await tick(29_000);
+    t.attempts[0]?.push(': ping\n\n');
+    await tick(1000);
     t.attempts[0]?.end();
     await tick();
     // back to the first delay (500), not 4000
@@ -426,6 +440,35 @@ describe('reconnect: delays are jittered between 0 and initial, 2x initial, ... 
     expect(t.fn).toHaveBeenCalledTimes(4);
     await tick(1);
     expect(t.fn).toHaveBeenCalledTimes(5);
+    t.conn.close();
+  });
+
+  it('a hello followed by a quick drop does not reset the back-off (a hello-then-drop loop backs off)', async () => {
+    const t = collect({ retry: { initialMs: 1000, maxMs: 30_000 } }, [new TypeError('x'), new TypeError('x')]);
+    await tick();
+    await tick(500); // attempt 2 (cap 1000)
+    await tick(1000); // attempt 3 (cap 2000): answers
+    expect(t.fn).toHaveBeenCalledTimes(3);
+    // hello, then the server drops us after 29.999 s: the count is still 2
+    const waits: number[] = [];
+    let at = 0;
+    for (let i = 0; i < 3; i += 1) {
+      const a = t.attempts[i] as Attempt;
+      a.push(sse(helloFrame()));
+      await tick(29_999);
+      a.end();
+      await tick();
+      const before = t.fn.mock.calls.length;
+      // cap doubles each time: 4000*0.5, 8000*0.5, 16000*0.5
+      const expected = [2000, 4000, 8000][i] as number;
+      await tick(expected - 1);
+      expect(t.fn.mock.calls.length, `before ${expected}`).toBe(before);
+      await tick(1);
+      expect(t.fn.mock.calls.length, `at ${expected}`).toBe(before + 1);
+      waits.push(expected);
+      at += expected;
+    }
+    expect(at).toBe(14_000);
     t.conn.close();
   });
 
@@ -546,7 +589,7 @@ describe('401 and 403 close without retry; 429 honours retry-after; 500 retries;
     t.conn.close();
   });
 
-  it.each([500, 502, 503, 504, 404, 400, 408])('%i retries with back-off', async (status) => {
+  it.each([500, 502, 503, 504, 400, 408])('%i retries with back-off', async (status) => {
     const t = collect({ retry: { initialMs: 1000, maxMs: 30_000 } }, [{ status, text: '<html>bad gateway</html>' }]);
     await tick();
     expect(t.statuses).toEqual(['connecting', 'reconnecting']);
@@ -600,7 +643,7 @@ describe('401 and 403 close without retry; 429 honours retry-after; 500 retries;
     await tick(9_999);
     t.attempts[0]?.push(sse(helloFrame()));
     await tick();
-    await tick(60_000);
+    await tick(40_000);
     expect(t.attempts[0]?.signal.aborted).toBe(false);
     expect(t.fn).toHaveBeenCalledTimes(1);
     expect(t.statuses).toEqual(['connecting', 'open']);
@@ -706,20 +749,27 @@ describe('an online event retries immediately; close() aborts the request and ig
     await tick();
     expect(t.fn).toHaveBeenCalledTimes(2);
     t.attempts[0]?.push(sse(helloFrame()));
-    await tick(60_000);
+    await tick(40_000);
     expect(t.fn).toHaveBeenCalledTimes(2); // the old timer did not fire a third
     t.conn.close();
   });
 
-  it('online while the stream is open does nothing', async () => {
+  it('online while the stream is open probes it: the connection is restarted at once and the snapshot resumes it', async () => {
     const t = collect();
     await tick();
     t.attempts[0]?.push(sse(helloFrame()));
     await tick();
     window.dispatchEvent(new Event('online'));
-    await tick(1000);
-    expect(t.fn).toHaveBeenCalledTimes(1);
-    expect(t.attempts[0]?.signal.aborted).toBe(false);
+    await tick();
+    expect(t.attempts[0]?.signal.aborted).toBe(true);
+    expect(t.fn).toHaveBeenCalledTimes(2);
+    expect(t.statuses).toEqual(['connecting', 'open', 'reconnecting']);
+    t.attempts[1]?.push(sse(helloFrame()));
+    await tick();
+    expect(t.statuses).toEqual(['connecting', 'open', 'reconnecting', 'open']);
+    // the abandoned attempt schedules no retry of its own
+    await tick(40_000);
+    expect(t.fn).toHaveBeenCalledTimes(2);
     t.conn.close();
   });
 
@@ -732,7 +782,7 @@ describe('an online event retries immediately; close() aborts the request and ig
     expect(t.fn).toHaveBeenCalledTimes(2);
     // the abandoned attempt does not schedule a retry of its own
     t.attempts[1]?.push(sse(helloFrame()));
-    await tick(120_000);
+    await tick(40_000);
     expect(t.fn).toHaveBeenCalledTimes(2);
     t.conn.close();
   });
@@ -1091,5 +1141,219 @@ describe('the POST calls send content-type application/json', () => {
     expect(headers.accept).toBe('application/json');
     expect(typeof calls[0]?.init.body).toBe('string');
     conn.close();
+  });
+});
+
+// ---- Fix round 1 ----
+
+describe('liveness: a connection that goes quiet after hello is dropped and retried', () => {
+  it('50 s (2.5 heartbeats) of silence after hello aborts the attempt and reconnects', async () => {
+    const t = collect({ retry: { initialMs: 1000, maxMs: 30_000 } });
+    await tick();
+    t.attempts[0]?.push(sse(helloFrame()));
+    await tick();
+    await tick(49_999);
+    expect(t.attempts[0]?.signal.aborted).toBe(false);
+    expect(t.statuses).toEqual(['connecting', 'open']);
+    await tick(1);
+    expect(t.attempts[0]?.signal.aborted).toBe(true);
+    expect(t.statuses).toEqual(['connecting', 'open', 'reconnecting']);
+    await tick(500);
+    expect(t.fn).toHaveBeenCalledTimes(2);
+    t.conn.close();
+  });
+
+  it('a half-open stream that stops sending after a few heartbeats is dropped 50 s after the last one', async () => {
+    const t = collect();
+    await tick();
+    const a = t.attempts[0] as Attempt;
+    a.push(sse(helloFrame()));
+    for (let i = 0; i < 3; i += 1) {
+      await tick(20_000);
+      a.push(': ping\n\n');
+    }
+    await tick(49_999);
+    expect(a.signal.aborted).toBe(false);
+    await tick(1);
+    expect(a.signal.aborted).toBe(true);
+    expect(t.statuses.at(-1)).toBe('reconnecting');
+    t.conn.close();
+  });
+
+  it('a heartbeat every 20 s keeps the connection open for as long as it comes', async () => {
+    const t = collect();
+    await tick();
+    const a = t.attempts[0] as Attempt;
+    a.push(sse(helloFrame()));
+    for (let i = 0; i < 30; i += 1) {
+      await tick(20_000);
+      a.push(': ping\n\n');
+    }
+    expect(a.signal.aborted).toBe(false);
+    expect(t.fn).toHaveBeenCalledTimes(1);
+    expect(t.statuses).toEqual(['connecting', 'open']);
+    t.conn.close();
+  });
+
+  it('any bytes count, even half an event', async () => {
+    const t = collect();
+    await tick();
+    const a = t.attempts[0] as Attempt;
+    a.push(sse(helloFrame()));
+    await tick(40_000);
+    a.push('event: li');
+    await tick(40_000);
+    expect(a.signal.aborted).toBe(false);
+    t.conn.close();
+  });
+
+  it('frames re-arm it too', async () => {
+    const t = collect();
+    await tick();
+    const a = t.attempts[0] as Attempt;
+    a.push(sse(helloFrame()));
+    await tick(45_000);
+    a.push(sse({ type: 'line', line: line('3') }));
+    await tick(45_000);
+    expect(a.signal.aborted).toBe(false);
+    t.conn.close();
+  });
+
+  it('staleMs sets the silence allowed (a server with a slower heartbeat)', async () => {
+    const t = collect({ staleMs: 100_000 });
+    await tick();
+    t.attempts[0]?.push(sse(helloFrame()));
+    await tick(99_999);
+    expect(t.attempts[0]?.signal.aborted).toBe(false);
+    await tick(1);
+    expect(t.attempts[0]?.signal.aborted).toBe(true);
+    t.conn.close();
+  });
+
+  it('after a watchdog reconnect the next hello opens again and the new connection is watched too', async () => {
+    const t = collect();
+    await tick();
+    t.attempts[0]?.push(sse(helloFrame()));
+    await tick(50_000);
+    await tick(500);
+    t.attempts[1]?.push(sse(helloFrame()));
+    await tick();
+    expect(t.statuses).toEqual(['connecting', 'open', 'reconnecting', 'open']);
+    await tick(50_000);
+    expect(t.attempts[1]?.signal.aborted).toBe(true);
+    t.conn.close();
+  });
+
+  it('close() leaves no watchdog timer', async () => {
+    const t = collect();
+    await tick();
+    t.attempts[0]?.push(sse(helloFrame()));
+    await tick();
+    t.conn.close();
+    expect(vi.getTimerCount()).toBe(0);
+    await tick(600_000);
+    expect(t.statuses).toEqual(['connecting', 'open']);
+  });
+});
+
+describe('the wait for a hello starts with the attempt', () => {
+  it('a fetch that never resolves is abandoned after 10 s and retried', async () => {
+    const t = collect({ retry: { initialMs: 1000, maxMs: 30_000 } }, [{ hang: true }]);
+    await tick(9_999);
+    expect(t.statuses).toEqual(['connecting']);
+    expect(t.fn).toHaveBeenCalledTimes(1);
+    await tick(1);
+    expect(t.statuses).toEqual(['connecting', 'reconnecting']);
+    await tick(500);
+    expect(t.fn).toHaveBeenCalledTimes(2);
+    t.conn.close();
+  });
+
+  it('close() while the fetch hangs clears the timer and never retries', async () => {
+    const t = collect({}, [{ hang: true }]);
+    await tick(1000);
+    t.conn.close();
+    expect(vi.getTimerCount()).toBe(0);
+    await tick(600_000);
+    expect(t.fn).toHaveBeenCalledTimes(1);
+    expect(t.statuses).toEqual(['connecting']);
+  });
+
+  it('a slow answer with the hello inside the 10 s is fine', async () => {
+    const t = collect();
+    await tick(9_000);
+    t.attempts[0]?.push(sse(helloFrame()));
+    await tick(1_500);
+    expect(t.attempts[0]?.signal.aborted).toBe(false);
+    expect(t.statuses).toEqual(['connecting', 'open']);
+    t.conn.close();
+  });
+
+  it('a hang on a reconnect attempt is abandoned the same way', async () => {
+    const t = collect({}, [new TypeError('x'), { hang: true }]);
+    await tick(500);
+    expect(t.fn).toHaveBeenCalledTimes(2);
+    await tick(10_000);
+    expect(t.statuses.at(-1)).toBe('reconnecting');
+    await tick(1000);
+    expect(t.fn).toHaveBeenCalledTimes(3);
+    t.conn.close();
+  });
+});
+
+describe('failures that will not heal stop with a why', () => {
+  it('404 is closed(not_found): no retry', async () => {
+    const t = collect({}, [{ status: 404, text: 'nope' }]);
+    await tick();
+    await tick(600_000);
+    expect(t.statuses).toEqual(['connecting', 'closed:not_found']);
+    expect(t.fn).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([['text/html; charset=utf-8'], ['application/json'], ['text/plain'], ['']])('a 200 with content-type "%s" is closed(unsupported): no retry', async (type) => {
+    const t = collect({}, [{ status: 200, headers: { 'content-type': type } }]);
+    await tick();
+    await tick(600_000);
+    expect(t.statuses).toEqual(['connecting', 'closed:unsupported']);
+    expect(t.fn).toHaveBeenCalledTimes(1);
+    expect(t.frames).toEqual([]);
+  });
+
+  it('text/event-stream with a charset or in another case is accepted', async () => {
+    for (const type of ['text/event-stream', 'Text/Event-Stream; charset=UTF-8']) {
+      const t = collect({}, [{ status: 200, headers: { 'content-type': type } }]);
+      await tick();
+      t.attempts[0]?.push(sse(helloFrame()));
+      await tick();
+      expect(t.statuses, type).toEqual(['connecting', 'open']);
+      t.conn.close();
+    }
+  });
+
+  it('503 and 429 honour retry-after; a 500 does not', async () => {
+    for (const [status, waitMs] of [
+      [503, 9000],
+      [429, 9000],
+      [500, 500],
+    ] as const) {
+      const t = collect({ retry: { initialMs: 1000, maxMs: 30_000 } }, [{ status, headers: { 'retry-after': '9' } }]);
+      await tick();
+      await tick(waitMs - 1);
+      expect(t.fn, `${status} before`).toHaveBeenCalledTimes(1);
+      await tick(1);
+      expect(t.fn, `${status} at`).toHaveBeenCalledTimes(2);
+      t.conn.close();
+    }
+  });
+});
+
+describe('the public typings', () => {
+  it('random is not an option of sseTransport', () => {
+    // @ts-expect-error random is internal; the public options do not have it
+    const bad: SseTransportOptions = { baseUrl: '/chat', random: () => 0.5 };
+    expect(bad.baseUrl).toBe('/chat');
+    const conn = sseTransport({ baseUrl: '/chat', fetch: fakeFetch().fetch }).open('lobby', { frame: () => undefined, status: () => undefined });
+    expect(() => conn.close()).not.toThrow();
   });
 });

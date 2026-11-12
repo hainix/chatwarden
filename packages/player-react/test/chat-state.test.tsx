@@ -314,3 +314,74 @@ describe('status, bye and closing', () => {
     expect(s.ready).toBe(false);
   });
 });
+
+describe('a sent line is not lost to an older snapshot', () => {
+  it('a mine line inside the snapshot window that the snapshot lacks stays', () => {
+    const s = run([
+      frame(hello({ lines: [L('1', 10)] })),
+      { type: 'sent', line: L('5', 10, 'mine', { mine: true }) },
+      frame(hello({ lines: [L('1', 10), L('2', 5), L('6', 20)] })),
+    ]);
+    expect(ids(s)).toEqual(['2', '1', '5', '6']);
+  });
+
+  it('a line newer than everything in the snapshot stays', () => {
+    const s = run([frame(hello({ lines: [L('1', 10)] })), { type: 'sent', line: L('9', 99, 'mine', { mine: true }) }, frame(hello({ lines: [L('1', 10), L('2', 20)] }))]);
+    expect(ids(s)).toEqual(['1', '2', '9']);
+  });
+
+  it('a held line newer than the snapshot is kept even when it is not mine (it can only be a late delivery)', () => {
+    const s = run([frame(hello({ lines: [L('1', 10), L('7', 70)] })), frame(hello({ lines: [L('1', 10), L('2', 20)] }))]);
+    expect(ids(s)).toEqual(['1', '2', '7']);
+  });
+
+  it('the snapshot copy replaces a sent line of the same id (no duplicate)', () => {
+    const s = run([frame(hello()), { type: 'sent', line: L('5', 50, 'hi', { mine: true }) }, frame(hello({ lines: [L('5', 50, 'hi', { mine: true })] }))]);
+    expect(ids(s)).toEqual(['5']);
+  });
+
+  it('a muted line inside the window that is not mine is still dropped', () => {
+    const s = run([frame(hello({ lines: [L('1', 10), L('2', 20), L('3', 30)] })), frame(hello({ lines: [L('1', 10), L('3', 30)] }))]);
+    expect(ids(s)).toEqual(['1', '3']);
+  });
+});
+
+describe('maxLines has a bound and lines are inserted without a full sort', () => {
+  it('a cap above the bound is clamped to 5 000, in the state and in the action', () => {
+    expect(createChatState(1_000_000).maxLines).toBe(5000);
+    const s = chatReducer(initialChatState, { type: 'maxLines', maxLines: 99_999 });
+    expect(s.maxLines).toBe(5000);
+  });
+
+  it('a cap that is not a whole number falls back to the default', () => {
+    expect(createChatState(Number.NaN).maxLines).toBe(200);
+    expect(createChatState(0).maxLines).toBe(200);
+    expect(createChatState(2.5).maxLines).toBe(200);
+  });
+
+  it('lines arriving in any order end up in the same order as a sort of all of them (seeded shuffle)', () => {
+    let seed = 7;
+    const rnd = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const all = Array.from({ length: 300 }, (_v, i) => L(String(i + 1), Math.floor(i / 3)));
+    const shuffled = [...all].sort(() => rnd() - 0.5);
+    const s = run([frame(hello()), ...shuffled.map((l) => frame({ type: 'line', line: l }))], createChatState(500));
+    expect(ids(s)).toEqual(all.map((l) => l.id));
+  });
+
+  it('in-order appends reuse the held line objects', () => {
+    const s1 = run([frame(hello({ lines: [L('1', 1), L('2', 2)] }))]);
+    const s2 = chatReducer(s1, frame({ type: 'line', line: L('3', 3) }));
+    expect(s2.lines[0]).toBe(s1.lines[0]);
+    expect(s2.lines[1]).toBe(s1.lines[1]);
+    expect(ids(s2)).toEqual(['1', '2', '3']);
+  });
+
+  it('a replaced line keeps its place and a changed at moves it', () => {
+    const s = run([frame(hello({ lines: [L('1', 1), L('2', 2), L('3', 3)] })), frame({ type: 'line', line: L('2', 2, 'edited') }), frame({ type: 'line', line: L('1', 9, 'moved') })]);
+    expect(ids(s)).toEqual(['2', '3', '1']);
+    expect(s.lines[0]?.text).toBe('edited');
+  });
+});

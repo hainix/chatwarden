@@ -3,6 +3,13 @@ import type { ChatFrame, WireLine, WireMuted, WireRestriction } from './wire.js'
 
 /** Lines kept when nothing else is asked for (the box's `maxLines` default). */
 export const DEFAULT_MAX_LINES = 200;
+/** The most lines a box may be asked to keep. */
+export const MAX_MAX_LINES = 5000;
+
+/** A usable cap: a whole number from 1; above the bound it is the bound; anything else is the default. */
+function capOf(n: number): number {
+  return Number.isInteger(n) && n >= 1 ? Math.min(n, MAX_MAX_LINES) : DEFAULT_MAX_LINES;
+}
 
 /** Why a stream ended for good. `until` is a ban's end (`bye` with `banned`): epoch ms, or null when it has none. */
 export interface ChatClosed {
@@ -57,7 +64,7 @@ export function createChatState(maxLines: number = DEFAULT_MAX_LINES): ChatState
     muted: [],
     closed: null,
     ready: false,
-    maxLines,
+    maxLines: capOf(maxLines),
   };
 }
 
@@ -103,11 +110,27 @@ function merge(held: WireLine[], incoming: WireLine[], max: number): WireLine[] 
   return settle([...byId.values()], max);
 }
 
+/** One line in: replaced in place when its id is held, else inserted where it belongs. No sort; the common case is an append. */
 function addLine(state: ChatState, line: WireLine): ChatState {
-  const held = state.lines.find((l) => l.id === line.id);
-  if (held !== undefined && sameLine(held, line)) return state;
-  const lines = merge(state.lines, [line], state.maxLines);
-  return lines.length === state.lines.length && lines.every((l, i) => l === state.lines[i]) ? state : { ...state, lines };
+  const held = state.lines;
+  const at = held.findIndex((l) => l.id === line.id);
+  if (at !== -1) {
+    const old = held[at] as WireLine;
+    if (sameLine(old, line)) return state;
+    const next = old.mine === true && line.mine !== true ? { ...line, mine: true as const } : line;
+    const lines = [...held];
+    lines.splice(at, 1);
+    return withLine(state, lines, next);
+  }
+  return withLine(state, held, line);
+}
+
+function withLine(state: ChatState, others: WireLine[], line: WireLine): ChatState {
+  let i = others.length;
+  while (i > 0 && compareLines(others[i - 1] as WireLine, line) > 0) i -= 1;
+  if (i === 0 && others.length >= state.maxLines) return others === state.lines ? state : { ...state, lines: others };
+  const lines = [...others.slice(0, i), line, ...others.slice(i)];
+  return { ...state, lines: lines.length > state.maxLines ? lines.slice(lines.length - state.maxLines) : lines };
 }
 
 function onHello(state: ChatState, f: Extract<ChatFrame, { type: 'hello' }>): ChatState {
@@ -116,8 +139,16 @@ function onHello(state: ChatState, f: Extract<ChatFrame, { type: 'hello' }>): Ch
   else {
     // Same epoch (a reconnect): merge by id. A held line inside the snapshot's window that the snapshot lacks was hidden while the
     // viewer was away (its author muted), so it goes; lines before the window stay.
-    const oldest = [...f.lines].sort(compareLines)[0];
-    const kept = oldest === undefined ? state.lines : state.lines.filter((l) => compareLines(l, oldest) < 0 || f.lines.some((s) => s.id === l.id));
+    const sorted = [...f.lines].sort(compareLines);
+    const oldest = sorted[0];
+    const newest = sorted[sorted.length - 1];
+    const inSnapshot = new Set(f.lines.map((l) => l.id));
+    // Only a line inside the snapshot's window, not mine, is judged: older ones may have aged out, newer ones (a late delivery, the
+    // answer to a send) the snapshot simply predates, and my own lines are never hidden from me.
+    const kept =
+      oldest === undefined || newest === undefined
+        ? state.lines
+        : state.lines.filter((l) => l.mine === true || inSnapshot.has(l.id) || compareLines(l, oldest) < 0 || compareLines(l, newest) > 0);
     lines = merge(kept, f.lines, state.maxLines);
   }
   return {
@@ -141,8 +172,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'reset':
       return createChatState(state.maxLines);
     case 'maxLines': {
-      const max = action.maxLines;
-      if (!Number.isInteger(max) || max < 1 || max === state.maxLines) return state;
+      if (!Number.isInteger(action.maxLines) || action.maxLines < 1) return state;
+      const max = capOf(action.maxLines);
+      if (max === state.maxLines) return state;
       return { ...state, maxLines: max, lines: state.lines.length > max ? state.lines.slice(state.lines.length - max) : state.lines };
     }
     case 'sent':

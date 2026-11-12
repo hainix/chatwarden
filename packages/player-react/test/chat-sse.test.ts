@@ -250,3 +250,56 @@ describe('oversize events and a throwing handler', () => {
     expect(out).toEqual([{ type: 'message', data: '2' }]);
   });
 });
+
+describe('an oversize line costs only itself', () => {
+  const opts = { maxEventChars: 1000 };
+  const big = 'x'.repeat(5000);
+
+  it('an oversize comment line, then two valid events: both arrive', () => {
+    expect(parse([`: ${big}\n\ndata: a\n\ndata: b\n\n`], opts)).toEqual([
+      { type: 'message', data: 'a' },
+      { type: 'message', data: 'b' },
+    ]);
+  });
+
+  it('an oversize comment line with no blank line after it does not spoil the event that follows', () => {
+    expect(parse([`: ${big}\ndata: a\n\ndata: b\n\n`], opts)).toEqual([
+      { type: 'message', data: 'a' },
+      { type: 'message', data: 'b' },
+    ]);
+  });
+
+  it('an oversize id, retry or unknown field is dropped alone', () => {
+    for (const name of ['id', 'retry', 'zzz']) expect(parse([`${name}: ${big}\ndata: a\n\n`], opts), name).toEqual([{ type: 'message', data: 'a' }]);
+  });
+
+  it('an oversize comment arriving in many chunks is dropped alone', () => {
+    const out: Ev[] = [];
+    const p = createSseParser((e) => out.push(e), opts);
+    p.push(': ');
+    for (let i = 0; i < 50; i += 1) p.push('q'.repeat(100));
+    p.push('\ndata: a\n\ndata: b\n\n');
+    expect(out).toEqual([
+      { type: 'message', data: 'a' },
+      { type: 'message', data: 'b' },
+    ]);
+  });
+
+  it('an oversize data line drops its event (the data is gone) and the next two parse', () => {
+    expect(parse([`event: line\ndata: ${big}\n\ndata: a\n\ndata: b\n\n`], opts)).toEqual([
+      { type: 'message', data: 'a' },
+      { type: 'message', data: 'b' },
+    ]);
+  });
+
+  it('an oversize event line drops its event and the next one parses', () => {
+    expect(parse([`event: ${big}\ndata: lost\n\ndata: a\n\n`], opts)).toEqual([{ type: 'message', data: 'a' }]);
+  });
+
+  it('a 300 000 character comment, then two valid events at the default limit', () => {
+    expect(parse([`: ${'c'.repeat(300_000)}\n\ndata: 1\n\ndata: 2\n\n`])).toEqual([
+      { type: 'message', data: '1' },
+      { type: 'message', data: '2' },
+    ]);
+  });
+});

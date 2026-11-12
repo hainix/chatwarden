@@ -28,6 +28,7 @@ export function createSseParser(onEvent: (event: SseEvent) => void, options: Sse
   let data: string[] = [];
   let dataChars = 0;
   let lineTooLong = false; // the current line went over the limit and was thrown away
+  let lineKillsEvent = false; // ... and it was a line the event cannot do without (its data or its name)
   let dropped = false; // this event went over the limit: nothing of it is emitted
 
   const drop = (): void => {
@@ -56,8 +57,10 @@ export function createSseParser(onEvent: (event: SseEvent) => void, options: Sse
     const line = partial;
     partial = '';
     if (lineTooLong) {
+      // Only itself is lost, unless it was part of the event: a comment, an id or an unknown field costs nothing.
       lineTooLong = false;
-      drop();
+      if (lineKillsEvent) drop();
+      lineKillsEvent = false;
       return;
     }
     if (line !== '') {
@@ -97,6 +100,9 @@ export function createSseParser(onEvent: (event: SseEvent) => void, options: Sse
         if (!lineTooLong && j > i) {
           partial += s.slice(i, j);
           if (partial.length > max + FIELD_ROOM) {
+            const colon = partial.indexOf(':');
+            const name = colon === -1 ? partial : partial.slice(0, colon);
+            lineKillsEvent = name === 'data' || name === 'event';
             partial = '';
             lineTooLong = true;
           }
