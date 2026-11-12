@@ -25,7 +25,7 @@ import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkPace, mergePace } from './pace.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
-import type { AppealDecideResult, AppealDecision, AppealFileResult, PlayerAppeal } from './appeals.js';
+import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, PlayerAppeal } from './appeals.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
@@ -634,6 +634,21 @@ export interface Chatwarden {
      * Staff-side: the permission and the audit row belong to the route. A store failure rejects and writes nothing.
      */
     decide(input: AppealDecision): Promise<AppealDecideResult>;
+    /**
+     * The inbox, oldest first: `open` (default), `decided` or `all`; `limit` 1 to 200 (default 50); an opaque `cursor`. A summary carries a
+     * staff ref and never the statement (`statementFlagged` says whether it trips the term filter). `RangeError` for a bad query. Empty with
+     * appeals off. Carries subject ids: staff channels only, never send to a player.
+     */
+    list(q: { status?: 'open' | 'decided' | 'all'; limit?: number; cursor?: string | null }): AppealPage;
+    /** One appeal in full, the statement included (null once purged), or null for an unknown id. The route audits this read. Staff only. */
+    get(id: string): AppealDetail | null;
+    /** How many appeals are waiting. */
+    openCount(): number;
+    /**
+     * The per-rule counts over the last 30, 90 (default) or 365 days. The rate is revoked appeals over sanctions given, null below 10
+     * sanctions; a reduction is `lightened`, shown beside the rate and never in it. `RangeError` for another window.
+     */
+    stats(q?: { days?: 30 | 90 | 365 }): AppealStats;
   };
   /**
    * Decide a report: close it, write each sanction and its notice, and tell the people involved, in one
@@ -1103,6 +1118,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     settings: () => policy.profileNow().appeals,
     personOf,
     emit: (event) => bus.emit(event),
+    matcher: opts.matcher,
     index: sanctions,
     clearStatements: clearAppealStatements,
     // A granted appeal marks the original decision reversed in the casebook; with no AI this is the inert facade and does nothing.
@@ -1340,6 +1356,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       file: (who, input) => appealService.file(who, input),
       mine: (who) => appealService.mine(who),
       decide: (input) => appealService.decide(input),
+      list: (q) => appealService.list(q),
+      get: (id) => appealService.get(id),
+      openCount: () => appealService.openCount(),
+      stats: (q) => appealService.stats(q),
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),

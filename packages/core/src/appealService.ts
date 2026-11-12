@@ -1,5 +1,26 @@
-import { APPEAL_OUTCOMES, APPEAL_STATEMENT_MAX, normalizeStatement, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
-import type { AppealDecideResult, AppealDecision, AppealFileResult, AppealOutcome, PlayerAppeal, ResolvedAppeals } from './appeals.js';
+import {
+  APPEAL_OUTCOMES,
+  APPEAL_RATE_ELEVATED,
+  APPEAL_RATE_HIGH,
+  APPEAL_STATEMENT_MAX,
+  APPEAL_STATS_MIN_SANCTIONS,
+  normalizeStatement,
+  SANCTION_KIND_ORDER,
+  statementLength,
+} from './appeals.js';
+import type {
+  AppealDecideResult,
+  AppealDecision,
+  AppealDetail,
+  AppealFileResult,
+  AppealOutcome,
+  AppealPage,
+  AppealRuleStats,
+  AppealStats,
+  AppealSummary,
+  PlayerAppeal,
+  ResolvedAppeals,
+} from './appeals.js';
 import { isValidAuditActor } from './audit.js';
 import { randomId } from './crypto.js';
 import type { KitEvent } from './events.js';
@@ -10,8 +31,9 @@ import { parseRuleRef } from './rules.js';
 import type { RuleRef } from './rules.js';
 import { APPEALS_START_TOKEN, MAX_SANCTION_DURATION_MS, writeSanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
+import { b64urlDecode, b64urlEncode } from './staffReports.js';
 import type { SubjectIndex } from './subjects.js';
-import type { AppealRow, Clock, Logger, RawWho, SanctionRow, Store, SubjectId } from './types.js';
+import type { AppealRow, Clock, Logger, Matcher, RawWho, SanctionRow, Store, SubjectId } from './types.js';
 
 // The appeals service: filing (the player side) here; deciding and the staff reads are added to the same class. It holds no state of its own:
 // every fact is in the store, so two processes on one database agree.
@@ -53,6 +75,8 @@ export interface AppealServiceDeps {
   personOf: (who: RawWho) => SubjectId | null;
   /** Announce an event after a commit. Fenced by the caller of the service. */
   emit: (event: KitEvent) => void;
+  /** The term matcher, to say whether a statement trips it (read on every list and get, so a term added later masks an older statement). */
+  matcher?: Matcher | undefined;
   /** The in-memory sanction index: a revoked or replaced group leaves it, a replacement joins it, after the commit. */
   index: SanctionIndex;
   /** True when `retention.appealStatementsMs` is 0: a statement is cleared in the decision (and as an appeal is made moot). */
@@ -338,6 +362,126 @@ export class AppealService {
     return { ok: false, error: 'gone' };
   }
 
+  // --- staff reads ----------------------------------------------------------------------------------------------------------
+
+  /** Whether `statement` trips the term filter now. A matcher that throws reads as not flagged (logged by class), like the chat path. */
+  private flagged(statement: string | null): boolean {
+    if (statement === null || this.d.matcher === undefined) return false;
+    try {
+      return this.d.matcher.match(statement) !== null;
+    } catch (err) {
+      this.warn(err);
+      return false;
+    }
+  }
+
+  private summaryOf(r: AppealRow): AppealSummary {
+    const g = this.d.store.loadSanctionSubjectRow?.(r.groupId) ?? null;
+    return {
+      id: r.id,
+      createdAt: r.createdAt,
+      status: r.status,
+      person: this.d.subjects.canonical(r.subject),
+      // The sanction rows can be gone (retention): the appeal still lists, from its own row.
+      sanction:
+        g === null
+          ? { groupId: r.groupId, refCode: '', kind: r.kind, rule: ruleRefOf(r.rule), startsAt: r.createdAt, endsAt: null, decidedBy: '', automated: false }
+          : { groupId: g.groupId, refCode: g.refCode, kind: g.kind, rule: ruleRefOf(g.rule), startsAt: g.startsAt, endsAt: g.endsAt, decidedBy: g.actor, automated: g.automated },
+      statementFlagged: this.flagged(r.statement),
+    };
+  }
+
+  /**
+   * The inbox, oldest first: `open` (default), `decided` or `all`; `limit` 1 to 200 (default 50); `cursor` the `next` of the previous page.
+   * A summary never carries the statement. A moot appeal is not listed. `RangeError` for a bad status, limit or cursor. Empty with appeals off.
+   */
+  list(q: { status?: 'open' | 'decided' | 'all'; limit?: number; cursor?: string | null }): AppealPage {
+    if (!this.enabled()) return { items: [], next: null };
+    const query: { status?: unknown; limit?: unknown; cursor?: unknown } = typeof q === 'object' && q !== null ? q : {};
+    const status = query.status === undefined ? 'open' : query.status;
+    if (status !== 'open' && status !== 'decided' && status !== 'all') throw new RangeError('appeals.list: status must be open, decided or all');
+    const limit = query.limit === undefined ? 50 : query.limit;
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 200) throw new RangeError('appeals.list: limit must be an integer from 1 to 200');
+    const after = query.cursor === undefined || query.cursor === null ? undefined : decodeCursor(query.cursor);
+    try {
+      const rows = this.d.store.listAppeals?.({ status, limit, ...(after === undefined ? {} : { after }) }) ?? [];
+      const last = rows[rows.length - 1];
+      return { items: rows.map((r) => this.summaryOf(r)), next: rows.length === limit && last !== undefined ? b64urlEncode(`${last.createdAt}:${last.id}`) : null };
+    } catch (err) {
+      this.warn(err);
+      return { items: [], next: null };
+    }
+  }
+
+  /** One appeal in full (the statement included), or null for an unknown id, a store failure, or with appeals off. */
+  get(id: string): AppealDetail | null {
+    if (!this.enabled() || typeof id !== 'string' || id === '') return null;
+    try {
+      const r = this.d.store.loadAppeal?.(id) ?? null;
+      if (r === null) return null;
+      const aliases = this.d.subjects.aliasesOf(this.d.subjects.canonical(r.subject));
+      const notice = this.d.store.loadNotices(aliases).find((n) => n.id === r.noticeId);
+      return {
+        ...this.summaryOf(r),
+        statement: r.statement,
+        decided: r.decidedAt === null || r.decidedBy === null ? null : { by: r.decidedBy, at: r.decidedAt, reason: r.decisionReason ?? '', replacementGroupId: r.replacementGroupId },
+        reportId: r.reportId,
+        shown: notice === undefined ? [] : notice.excerpt.map((l) => ({ text: l.text, day: l.day })),
+      };
+    } catch (err) {
+      this.warn(err);
+      return null;
+    }
+  }
+
+  /** How many appeals are waiting. 0 with appeals off or on a store failure. */
+  openCount(): number {
+    if (!this.enabled()) return 0;
+    try {
+      return this.d.store.countOpenAppeals?.() ?? 0;
+    } catch (err) {
+      this.warn(err);
+      return 0;
+    }
+  }
+
+  /**
+   * Per rule over the last 30, 90 (default) or 365 days: the sanctions given, the appeals filed, how many were revoked (`granted`, the
+   * only ones that count as wrong) and how many reduced (`lightened`, shown beside the rate, never in it). The rate is granted over
+   * sanctions, null below ten sanctions; `high` from 0.30, `elevated` from 0.15. `RangeError` for any other window.
+   */
+  stats(q?: { days?: 30 | 90 | 365 }): AppealStats {
+    const days: unknown = q === undefined || q === null || q.days === undefined ? 90 : q.days;
+    if (days !== 30 && days !== 90 && days !== 365) throw new RangeError('appeals.stats: days must be 30, 90 or 365');
+    const empty: AppealStats = { windowDays: days, perRule: [], overall: { sanctions: 0, appealed: 0, granted: 0, lightened: 0, rate: null } };
+    if (!this.enabled()) return empty;
+    try {
+      const since = this.d.clock.now() - days * 86_400_000;
+      const byRule = new Map<number | 'uncovered', { sanctions: number; appealed: number; granted: number; lightened: number }>();
+      const slot = (rule: string | null) => {
+        const key: number | 'uncovered' = rule === null || rule === 'uncovered' ? 'uncovered' : (ruleRefOf(rule) as number | 'uncovered' | null) ?? 'uncovered';
+        let c = byRule.get(key);
+        if (c === undefined) byRule.set(key, (c = { sanctions: 0, appealed: 0, granted: 0, lightened: 0 }));
+        return c;
+      };
+      for (const r of this.d.store.countSanctionsByRule?.(since) ?? []) slot(r.rule).sanctions += r.count;
+      for (const r of this.d.store.appealCountsByRule?.(since) ?? []) {
+        const c = slot(r.rule);
+        c.appealed += r.appealed;
+        c.granted += r.granted;
+        c.lightened += r.lightened;
+      }
+      const perRule: AppealRuleStats[] = [...byRule.entries()]
+        .sort(([a], [b]) => (a === 'uncovered' ? 1 : b === 'uncovered' ? -1 : a - b))
+        .map(([rule, c]) => ({ rule, ...c, ...rateOf(c.granted, c.sanctions) }));
+      const sum = perRule.reduce((t, r) => ({ sanctions: t.sanctions + r.sanctions, appealed: t.appealed + r.appealed, granted: t.granted + r.granted, lightened: t.lightened + r.lightened }), { sanctions: 0, appealed: 0, granted: 0, lightened: 0 });
+      return { windowDays: days, perRule, overall: { ...sum, rate: rateOf(sum.granted, sum.sanctions).rate } };
+    } catch (err) {
+      this.warn(err);
+      return empty;
+    }
+  }
+
   mine(who: RawWho): PlayerAppeal[] {
     if (!this.enabled()) return [];
     try {
@@ -370,6 +514,21 @@ function reductionOf(group: SanctionRow, to: CheckedDecision['to']): { kind: 'wa
   const end = to.durationMs === null ? group.endsAt : group.endsAt === null ? group.startsAt + to.durationMs : Math.min(group.endsAt, group.startsAt + to.durationMs);
   if (end !== null && end <= group.startsAt) return null;
   return { kind: to.kind, durationMs: end === null ? null : end - group.startsAt };
+}
+
+/** The rate and its band: null below the minimum number of sanctions; `high` from 0.30, `elevated` from 0.15. */
+function rateOf(granted: number, sanctions: number): { rate: number | null; band: 'normal' | 'elevated' | 'high' | null } {
+  if (sanctions < APPEAL_STATS_MIN_SANCTIONS) return { rate: null, band: null };
+  const rate = granted / sanctions;
+  return { rate, band: rate >= APPEAL_RATE_HIGH ? 'high' : rate >= APPEAL_RATE_ELEVATED ? 'elevated' : 'normal' };
+}
+
+/** The cursor of a page: base64url of `createdAt:id`. A value that is not one we issued is a `RangeError`. */
+function decodeCursor(cursor: unknown): { createdAt: number; id: string } {
+  const text = typeof cursor === 'string' ? b64urlDecode(cursor) : null;
+  const sep = text === null ? -1 : text.indexOf(':');
+  if (text === null || sep < 1 || sep === text.length - 1 || !/^\d{1,16}$/.test(text.slice(0, sep))) throw new RangeError('appeals.list: invalid cursor');
+  return { createdAt: Number(text.slice(0, sep)), id: text.slice(sep + 1) };
 }
 
 /** What a player may see of an appeal row: no staff ref, reason, sanction or person id. A moot appeal is never shown to a player. */

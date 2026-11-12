@@ -1,4 +1,6 @@
 import { ProfileError } from './profileError.js';
+import type { RuleRef } from './rules.js';
+import type { SanctionKind, SubjectId } from './types.js';
 
 // The appeal settings: whether players may appeal a sanction, how many a week, and whether the moderator who made a decision may
 // decide its appeal. Pure data and validation, no state and no clock; the service that acts on them comes later. Off until set, so a
@@ -169,3 +171,76 @@ export interface AppealDecision {
 export type AppealDecideResult =
   | { ok: true; status: 'upheld' | 'reduced' | 'revoked'; replacementGroupId?: string }
   | { ok: false; error: 'not_found' | 'already_decided' | 'invalid' | 'same_decider' | 'gone' };
+
+/** Below this many sanctions in the window a rule has no rate. */
+export const APPEAL_STATS_MIN_SANCTIONS = 10;
+/** A rule whose rate is at or above this is `elevated`. */
+export const APPEAL_RATE_ELEVATED = 0.15;
+/** A rule whose rate is at or above this is `high`. */
+export const APPEAL_RATE_HIGH = 0.3;
+
+/**
+ * One appeal as staff see it in a list. The statement is NOT here (see {@link AppealDetail}); `statementFlagged` says whether it trips the
+ * term filter, so the hub can mask it. Carries a staff ref: staff channels only, never send to a player.
+ * @experimental
+ */
+export interface AppealSummary {
+  id: string;
+  createdAt: number;
+  status: AppealStatus;
+  /** A staff ref. */
+  person: SubjectId;
+  /** The sanction. `decidedBy` is who made the original decision (the actor on its row); `''` and the appeal's own times when its rows are gone. */
+  sanction: { groupId: string; refCode: string; kind: SanctionKind; rule: RuleRef | null; startsAt: number; endsAt: number | null; decidedBy: string; automated: boolean };
+  statementFlagged: boolean;
+}
+
+/**
+ * One appeal in full, for one staff read (audited by the route).
+ * @experimental
+ */
+export interface AppealDetail extends AppealSummary {
+  /** The player's words. Staff only. Null once purged. Masked by the hub when `statementFlagged`. */
+  statement: string | null;
+  /** Who decided (or, for a moot appeal, who revoked the sanction), when, and why (private; empty for a moot appeal), once it is no longer open. */
+  decided: { by: string; at: number; reason: string; replacementGroupId: string | null } | null;
+  /** The report whose decision made the sanction, when known. */
+  reportId: string | null;
+  /** What the player was shown with the sanction: their own lines, as the notice kept them (already masked where blocked). */
+  shown: Array<{ text: string; day: string }>;
+}
+
+/** @experimental */
+export interface AppealPage {
+  items: AppealSummary[];
+  /** An opaque cursor for the next page, or null when this page was not full. */
+  next: string | null;
+}
+
+/**
+ * The appeal counts of one rule over a window. `granted` is REVOKED appeals only: a reduction is a severity dispute, not a false positive,
+ * so it is `lightened`, shown beside the rate and never in it.
+ * @experimental
+ */
+export interface AppealRuleStats {
+  rule: number | 'uncovered';
+  /** Sanctions given under the rule in the window (warning, chat, area, ban; notes are not counted, a reduction counts once). */
+  sanctions: number;
+  /** Appeals filed in the window (any outcome, a moot one included). */
+  appealed: number;
+  /** Revoked on appeal. */
+  granted: number;
+  /** Reduced on appeal. */
+  lightened: number;
+  /** granted / sanctions, or null below {@link APPEAL_STATS_MIN_SANCTIONS} sanctions. */
+  rate: number | null;
+  band: 'normal' | 'elevated' | 'high' | null;
+}
+
+/** @experimental */
+export interface AppealStats {
+  windowDays: number;
+  /** By rule number, `'uncovered'` last. */
+  perRule: AppealRuleStats[];
+  overall: { sanctions: number; appealed: number; granted: number; lightened: number; rate: number | null };
+}
