@@ -34,11 +34,20 @@ function App() {
   const [reporting, setReporting] = useState<PlayerReporting | undefined>(undefined);
   const [refresh, setRefresh] = useState(0);
   const [rules, setRules] = useState(false);
+  // Appeals are the server's switch (CW_DEMO_APPEALS=1): the route answers 404 while they are off, and then the button stays the old link.
+  const [appeals, setAppeals] = useState(false);
 
   useEffect(() => {
     client.rules().then(
       (r) => setReporting(r.reporting),
       () => undefined,
+    );
+  }, [client]);
+
+  useEffect(() => {
+    client.appeals().then(
+      () => setAppeals(true),
+      () => setAppeals(false),
     );
   }, [client]);
 
@@ -48,7 +57,7 @@ function App() {
       <p className="demo">DEMO ONLY: this page makes its own key and sends it in a header. A real game uses its own session.</p>
       <ChatBox transport={transport} room="lobby" {...(reporting === undefined ? {} : { reporting })} onNoticePending={() => setRefresh((n) => n + 1)} onOpenRules={() => setRules((open) => !open)} />
       {rules && <RulesPage client={client} />}
-      <NoticeQueue client={client} refreshKey={refresh} />
+      <NoticeQueue client={client} refreshKey={refresh} appeals={appeals} />
     </main>
   );
 }

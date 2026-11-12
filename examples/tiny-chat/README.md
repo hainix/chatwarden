@@ -77,6 +77,25 @@ CW_DEMO_PACE=1 npm start -w @chatwarden/example-tiny-chat
   a `pace` in `overrides` wins field by field. A real app sets `pace` in its profile, or the owner sets it in the hub (Settings, Advanced).
 - It is per process, like the fixed rate limit: this demo is one process.
 
+## Appeals and renames (demo, optional)
+
+Off unless `CW_DEMO_APPEALS=1`. With it, tiny-chat turns on appeals (`overrides.appeals.enabled`) and required renames (`overrides.names.renames`).
+A player who has a sanction notice sees "Think this is a mistake?" as a button on the chat page, writes up to 1000 characters and sends it. A
+moderator reads it in the hub (`/mod`, Cases, Appeals) and keeps the decision, makes it lighter or removes it. The player gets a plain message with
+the outcome. Without the variable none of it exists: the appeal routes answer 404 and the page keeps the old link.
+
+```sh
+CW_DEMO_APPEALS=1 TINY_CHAT_ADMIN_TOKEN=demo npm start -w @chatwarden/example-tiny-chat
+```
+
+- To get a sanction to appeal, type the synthetic blocked term (`zorbak`) three times in the chat page. The automatic timeout has no human decider,
+  so the demo's staff login can decide its appeal. A decision the staff login made itself cannot be decided by it (`409 same_decider`): that is the
+  rule working. Have another actor decide the report, as `examples/tiny-chat/appeals.test.ts` does.
+- The same switch lets a moderator ask a person for a new name (the Sanction form on their page, "Ask for a new name"). The demo has no rename screen:
+  a real game listens for `rename.required` and calls `cw.names.renamed(who)` afterwards (see the core README, "Names").
+- `startServer({ demoAppeals })` takes the same switch as an option (an option that is passed wins over the environment; `false` forces it off; only
+  the exact value `1` turns the variable on), and an `appeals` or `names` in `overrides` wins field by field.
+
 ## AI reads (demo, optional)
 
 Off unless `CW_DEMO_AI=1`. With it, tiny-chat wires a scripted fake AI (`createFakeModerationAI`: it reads a report by simple rules, with no

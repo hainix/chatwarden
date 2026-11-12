@@ -30,6 +30,8 @@
 //              Off (404) without an admin token, like /admin.
 //   /api/*     the player API (`playerRoutes`): GET /api/notices, POST /api/notices/:id/ack, GET /api/record,
 //              GET /api/rules, GET /api/code-of-conduct?format=html|markdown|text, POST /api/names/check.
+//              With CW_DEMO_APPEALS=1 also GET /api/appeals and POST /api/appeals { noticeId, statement } (404 without it), and the staff routes
+//              GET /admin/appeals, GET /admin/appeals/:id, POST /admin/appeals/:id/decide and POST /admin/people/:ref/rename.
 //              DEMO ONLY identity: the `x-chatwarden-key` header, or `?key=` (a key in a URL is unsafe, see the README).
 //   /healthz, /readyz   the probes (`healthRoutes`)
 // Optional Discord feed (`@chatwarden/discord`): set DISCORD_WEBHOOK_URL (and DISCORD_MENTION_ROLE_ID) to post reports and
@@ -130,6 +132,14 @@ export interface TinyChatOptions {
    * in its profile or the owner sets it in the hub (Settings, Advanced).
    */
   demoPace?: boolean;
+  /**
+   * DEMO ONLY: turn on appeals and required renames (`overrides.appeals.enabled` and `overrides.names.renames`), so a player can ask for a second look at a
+   * sanction and a moderator can decide it, with no setup. Default: on when the `CW_DEMO_APPEALS` environment variable is exactly `1`. An explicit
+   * `false` forces it off. An `appeals` or `names` you give in `overrides` wins field by field. The demo's one staff login is the actor
+   * `demo-admin`: it can decide an appeal of an automatic timeout or of a decision another actor made, but not of its own decision (`same_decider`),
+   * which is the rule working. A real app sets `appeals` and `names` in its profile, or the owner sets them in the hub (Settings, Advanced).
+   */
+  demoAppeals?: boolean;
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -307,6 +317,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   // The demo slow mode: only when asked (the option, else CW_DEMO_PACE=1). Off, the profile has no pace at all.
   const demoPace = opts.demoPace !== undefined ? opts.demoPace : process.env.CW_DEMO_PACE === '1';
   if (demoPace) console.warn('tiny-chat: CW_DEMO_PACE is on: slow mode, a 2 second gap between lines from one player. It is a demo setting; the owner can change it in the hub (Settings, Advanced).');
+  // The demo appeals: only when asked (the option, else CW_DEMO_APPEALS=1). Off, the profile has no appeals and no names section at all.
+  const demoAppeals = opts.demoAppeals !== undefined ? opts.demoAppeals : process.env.CW_DEMO_APPEALS === '1';
+  if (demoAppeals) console.warn('tiny-chat: CW_DEMO_APPEALS is on: players can appeal a sanction and moderators can ask for a new name. It is a demo setting; the owner can change it in the hub (Settings, Advanced).');
   const terms = new LiveTerms({ store, pack: opts.pack ?? syntheticTermPack(), clock });
   await terms.load();
 
@@ -348,6 +361,7 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       ...opts.overrides,
       ...(demoAi ? { ai: { level: 2, ...opts.overrides?.ai } } : {}),
       ...(demoPace ? { pace: { slowModeMs: 2000, ...opts.overrides?.pace } } : {}),
+      ...(demoAppeals ? { appeals: { enabled: true, ...opts.overrides?.appeals }, names: { renames: true, ...opts.overrides?.names } } : {}),
     },
     ...(demoAi ? { ai: { adapter: createFakeModerationAI(demoScript, { id: 'demo-fake' }) } } : {}),
     // The optional profanity package builds the star filter from the profile. Always pass a slur matcher too (above):
