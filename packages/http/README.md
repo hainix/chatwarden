@@ -341,6 +341,141 @@ error class only.
 | `not_supported` | 501 | The store cannot save profile settings (it has no `savePolicyLayer`). |
 | `internal` | 500 | Anything else. No detail is sent. |
 
+## Chat
+
+`@chatwarden/http/chat` (also exported from the root) is a room broadcaster and four routes: a game with no chat adds moderated chat in
+minutes. Every line goes through `cw.chat.accept` and nothing else decides delivery; a refusal is shown to its author only; a bounded
+in-memory history lets a late joiner see the room. The browser side is `<ChatBox>` in `@chatwarden/player-react/chat`. The subpath
+imports no `node:` module, so it can also run in a browser tab (a demo). All its names are `@experimental` until 0.2.
+
+```ts
+import express from 'express';
+import { chatRoutes, createRoomBroadcaster, type KitRequest } from '@chatwarden/http';
+import { toExpress } from '@chatwarden/http/express';
+import type { RawWho } from '@chatwarden/core';
+
+declare function sessionOf(req: KitRequest): { accountId: string; displayName: string; rooms: string[] } | null;
+
+const chat = createRoomBroadcaster(cw); // one per process
+const app = express();
+app.use(
+  '/chat',
+  toExpress(
+    chatRoutes(cw, chat, {
+      // The same identify as playerRoutes: who is asking, from your session. An address alone is never a chat identity (401).
+      identify: (req: KitRequest): RawWho => {
+        const s = sessionOf(req);
+        return s === null ? {} : { accountId: s.accountId };
+      },
+      // May this player enter this room, and under what name? null is 403. Required: the kit does not guess who may be where.
+      join: (req, roomId) => {
+        const s = sessionOf(req);
+        return s !== null && s.rooms.includes(roomId) ? { name: s.displayName } : null;
+      },
+    }),
+    { fallthrough: false },
+  ),
+);
+
+// A notice landed for someone: tell their open chat boxes (nothing about it is sent). Call it from your `platform.notify`.
+// chat.noticePending(subject);
+// On shutdown: chat.close() ends every stream with a `bye`.
+```
+
+### The four routes
+
+All paths are relative to the mount point. `:room` is a kit route param (1 to 64 of `A-Z a-z 0-9 _ -`). Every response carries
+`cache-control: no-store`; the stream's is `no-store, no-transform`, which is what keeps a body-rewriting middleware (`compression`) and a
+proxy from holding its first frames back. Errors use the kit's shapes.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `GET /rooms/:room/stream` | none | `200 text/event-stream`: a `hello` first, then `line`, `hide`, `state`, `notices` and `bye` frames, and a `: ping` comment every `heartbeatMs` |
+| `POST /rooms/:room/lines` | `{ text }` | `200 { ok: true, line }` or `200 { ok: false, refused: { reason, until?, byModerator?, rule?, noticeId?, retryAfterMs? } }` (a refusal is an answer) |
+| `POST /rooms/:room/mute` | `{ lineId, on }` or `{ ref, on }` | `200 { ok, hiddenIds }`: the ids of the muted player's lines the server hid from the muter |
+| `POST /rooms/:room/report` | `{ lineId, reason?, note? }` | `200 { ok: true, remaining }` or `200 { ok: false, refused }`; nothing else, never a report id |
+
+Bodies must be `application/json` (anything else is 400, so a cross-site form cannot make a player speak). A banned player's stream is
+one `bye` frame. A refused line is never echoed to anyone but its author, never kept in the history and never logged. A mute is silent:
+the muted player is never told. Nothing identifies a player on the wire: a line is `{ id, at, name, text, mine? }`, with no seat, subject,
+key, hash or address. `hello` carries `epoch`, `room`, `you`, `maxLength`, `heartbeatMs`, `now` (the server clock, ms), `summary`,
+`restriction`, `lines` (the viewer's snapshot, at most 50, never older than 15 minutes) and `muted`.
+
+### Chat options
+
+| `createRoomBroadcaster(cw, options)` | What it does |
+| --- | --- |
+| `history` | `{ lines, maxAgeMs }` kept per room for late joiners: at most 100 lines (default 50) and never older than the evidence window (default 15 min) |
+| `maxMembers`, `maxRooms`, `maxStreams` | Limits (500 players per room, 10 000 rooms, 5 000 streams); over one, a `429` with `retry-after` |
+| `maxStreamsPerMember` | Streams (tabs) one player may have open in a room, default 3. A fourth is not refused: the player's OLDEST stream is sent `bye` with reason `replaced` and ended, so a connection that died without a word (a phone changing network) cannot lock them out. The box treats `replaced` as closed and offers "Try again" instead of reconnecting by itself, so tabs beyond the limit do not push each other out in a loop |
+| `heartbeatMs` | How often an idle stream gets a `: ping` (default 20 000, at most 60 000). The `hello` announces it, and the box drops a stream silent for 2.5 times that |
+| `seatGraceMs` | How long a seat with no stream and no request is kept (default 120 000) |
+| `maxBacklog` | A stream whose sink refused this many writes in a row is closed (default 64) |
+| `seatSalt` | Keys the seat ids (default random per broadcaster). Seat ids never leave the server |
+| `nameCheck` | Check each display name with `cw.names.check` (default true); a refused or blank name becomes `Player N` |
+| `now`, `schedule`, `logger` | The clock, the timer and where failures are logged (event name and error class only) |
+
+| `chatRoutes(cw, chat, options)` | What it does |
+| --- | --- |
+| `identify`, `join` | Required, above |
+| `actionRateLimit`, `openRateLimit` | Lines, mutes and reports per player (default 30 per 10 s), and stream opens per player (default 10 per minute) |
+| `allowedOrigins` | When given, a request with an `Origin` not in the list is 403. A request with no `Origin` is allowed |
+| `logger`, `now` | As above |
+
+### Behind a proxy
+
+- Do not put `compression` middleware over `text/event-stream`: it buffers the stream. The adapter sends `x-accel-buffering: no` for nginx.
+- A proxy's idle timeout must be longer than the heartbeat (20 s by default).
+- `identify` runs on every request, the stream included, and must read the real client address from your proxy's header (the same note as
+  for the player routes).
+- **`identify` must authenticate a real login** (a session token, a signed cookie). The per-player limits (`actionRateLimit`,
+  `openRateLimit`) and the mutes are keyed by the identity `identify` returns, so a caller who can invent identities escapes them, and with a
+  permissive `join` each invented identity also takes a seat in the kit for `seatGraceMs`. Use header auth, or a `SameSite=Strict` cookie.
+  A cross-site `no-cors` GET carries no `Origin` header, so `allowedOrigins` does not see it: its response is unreadable to the other site, but
+  it can seat the victim and spend their `openRateLimit`. Validate the room id in `join` (a room id in a URL must not create a room).
+- **Line length.** The box shows a line of up to 1 000 characters and clips any longer one, so `createRoomBroadcaster` throws a `RangeError`
+  for a kit configured with `limits.chatMaxLength` above 1 000. The route answers `length` without asking the kit for any text over 2 000.
+
+### One process per room
+
+Everything the chat path reads is per process: the roster, the evidence buffer, the rate limiter and the history ring. In this release the
+supported arrangement is sticky rooms: route all of a room's connections to one process (as pacing already advises). Two processes serving
+one room would each have their own history and their own idea of who is in it. A pub/sub hook between processes is not shipped.
+
+### A game's own socket
+
+The broadcaster does not know about HTTP: it writes frames to a `ChatSink` (`write`, and optionally `ping` and `end`). `chatRoutes` is one
+adapter; a game with Socket.IO or Colyseus calls the broadcaster from its own handlers, and implements `ChatTransport` on the client.
+
+```ts
+// Socket.IO, sketch: everything between the socket and the kit is the broadcaster's job.
+io.on('connection', (socket) => {
+  const session = chat.session('lobby', yourWho(socket), { name: yourName(socket) });
+  if ('refused' in session) return socket.emit('chat:refused', session.refused);
+  const stream = session.open({ write: (frame) => socket.emit('chat:frame', frame) });
+  if ('refused' in stream) return socket.emit('chat:refused', stream.refused);
+  socket.on('chat:send', (text, ack) => ack(session.send({ text })));
+  socket.on('chat:mute', (input, ack) => ack(session.muteResult(input)));
+  socket.on('chat:report', async (input, ack) => ack(await session.report(input)));
+  socket.on('disconnect', () => stream.close());
+});
+```
+
+### Things to know
+
+- **`name` is a display name, not an identifier.** The kit checks it with `cw.names.check` and cuts it at 32 characters, but a game whose
+  `join` returns an account id as the name has leaked it itself.
+- **`byModerator` on a restriction.** The refusal from `accept` says exactly who set a restriction. The restriction in `hello` and `state`
+  is read from the stored sanction, and a stored automatic chat timeout reads as a moderator's there, so the box words it as a moderator's
+  until the player's next refused line. A core change (`byModerator` on the answer of `cw.chat.restricted`) would make it exact.
+- **Needs a newer core.** The broadcaster re-reads a player's restriction with `cw.chat.restrictedBySubject`, which is new in core 0.1.6
+  (`cw.chat.restrictedBySubject` is new with the chat box; `createRoomBroadcaster` throws a `TypeError` with a core that lacks it): install
+  `@chatwarden/http` and `@chatwarden/core` from the same release. The package's peer range on core is `^0.1.6`.
+- **Experimental names** (listed so until 0.2): `createRoomBroadcaster`, `chatRoutes`, `encodeFrame`, `HEARTBEAT`, `CHAT_WIRE_VERSION`,
+  `refusalOf`, `ROOM_BROADCASTER_DEFAULTS`, and the types `ChatMember`, `ChatSession`, `ChatSink`, `ChatStream`, `RoomBroadcaster`,
+  `RoomBroadcasterOptions`, `ChatRoutesOptions`, `ChatFrame`, `WireLine`, `WireRestriction`, `WireMuted`, `WireRefusal`, `SendResult`,
+  `MuteTarget`, `MuteResult`, `ReportOutcome`.
+
 ## Webhooks
 
 ### Outgoing: `webhooksOut`

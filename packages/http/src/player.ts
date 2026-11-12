@@ -4,14 +4,12 @@ import type { Chatwarden, DocumentFormat, Logger, RawWho } from '@chatwarden/cor
 import { bodyObject } from './admin/validate.js';
 import { DEFAULT_GAME_NAME } from './admin/policy.js';
 import { HttpError, ValidationError, withErrors } from './errors.js';
+import { checkLimit, Limiter } from './limiter.js';
+import type { NamesRateLimit } from './limiter.js';
 import type { RouteTable } from './router.js';
 import type { KitRequest, KitResponse } from './types.js';
 
-/** The names rate limit: at most `max` checks per `windowMs` per identity. */
-export interface NamesRateLimit {
-  max: number;
-  windowMs: number;
-}
+export type { NamesRateLimit } from './limiter.js';
 
 /** What the adopter gives the player API. */
 export interface PlayerOptions {
@@ -33,8 +31,6 @@ export interface PlayerOptions {
   now?: () => number;
 }
 
-/** The names limiter never holds more keys than this. */
-const MAX_LIMITER_KEYS = 10_000;
 const DEFAULT_NAMES_LIMIT: NamesRateLimit = { max: 20, windowMs: 60_000 };
 const NAME_MAX = 64;
 
@@ -49,53 +45,6 @@ const CONTENT_TYPES: Readonly<Record<DocumentFormat, string>> = {
   markdown: 'text/markdown; charset=utf-8',
   text: 'text/plain; charset=utf-8',
 };
-
-const isPositiveInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 1;
-
-function checkLimit(limit: unknown): NamesRateLimit {
-  if (limit === undefined) return DEFAULT_NAMES_LIMIT;
-  const l = limit as { max?: unknown; windowMs?: unknown } | null;
-  if (typeof l !== 'object' || l === null || !isPositiveInt(l.max) || !isPositiveInt(l.windowMs)) {
-    throw new RangeError('playerRoutes: namesRateLimit needs a positive whole max and windowMs');
-  }
-  return { max: l.max, windowMs: l.windowMs };
-}
-
-/**
- * A fixed-window counter per key, bounded. Entries live in insertion order, which is also window-start order (a reset
- * re-inserts), so expired ones are swept from the front in O(1) each. At the cap, the oldest live key goes.
- */
-class Limiter {
-  private readonly windows = new Map<string, { start: number; count: number }>();
-  private readonly limit: NamesRateLimit;
-  constructor(limit: NamesRateLimit) {
-    this.limit = limit;
-  }
-
-  /** 0 when the call is allowed (and counted); otherwise the milliseconds until the window reopens. */
-  hit(key: string, now: number): number {
-    const { max, windowMs } = this.limit;
-    for (const [k, w] of this.windows) {
-      if (now - w.start < windowMs) break;
-      this.windows.delete(k);
-    }
-    const w = this.windows.get(key);
-    if (w === undefined || now - w.start >= windowMs) {
-      this.windows.delete(key);
-      if (this.windows.size >= MAX_LIMITER_KEYS) {
-        const oldest = this.windows.keys().next();
-        if (oldest.done !== true) this.windows.delete(oldest.value);
-      }
-      this.windows.set(key, { start: now, count: 1 });
-      return 0;
-    }
-    if (w.count < max) {
-      w.count++;
-      return 0;
-    }
-    return Math.min(windowMs, Math.max(1, w.start + windowMs - now));
-  }
-}
 
 const known = (v: unknown): v is string => typeof v === 'string' && v !== '';
 
@@ -121,7 +70,7 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
   const { logger } = options;
   if (typeof options.identify !== 'function') throw new TypeError('playerRoutes: identify must be a function');
   const identifyHook = options.identify;
-  const limit = checkLimit(options.namesRateLimit);
+  const limit = checkLimit(options.namesRateLimit, DEFAULT_NAMES_LIMIT, 'playerRoutes: namesRateLimit');
   const now = options.now ?? Date.now;
   const gameName = options.gameName ?? DEFAULT_GAME_NAME;
   const contact = options.contactUrl === undefined ? {} : { contactUrl: options.contactUrl };

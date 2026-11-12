@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { en } from '../src/i18n.js';
+import { en as baseEn } from '../src/i18n.js';
+import { enChat } from '../src/chat/words.js';
+
+// The English words: the main catalog and the chat words (kept apart so the main entry does not carry them).
+const en = { ...baseEn, ...enChat };
 
 // Rules that bind every component of the package, checked on the source itself: no words outside the catalog, no inline
 // styles, no injected HTML, no import of another Chatwarden UI package, and a stylesheet whose tokens are a complete,
@@ -19,7 +23,7 @@ function walk(dir: string): string[] {
 const files = walk(src);
 const code = files.filter((f) => /\.tsx?$/.test(f));
 // The catalog itself and its comments name keys on purpose.
-const appCode = code.filter((f) => !f.endsWith('i18n.ts'));
+const appCode = code.filter((f) => !f.endsWith('i18n.ts') && !f.endsWith('words.ts'));
 const read = (f: string): string => readFileSync(f, 'utf8');
 const rel = (f: string): string => f.slice(pkg.length).replaceAll('\\', '/');
 /** The public name of a private default: `--cwd-bg` is what `--cw-bg` falls back to. */
@@ -501,9 +505,10 @@ describe('the manifest', () => {
     devDependencies: Record<string, string>;
   };
 
-  it('exports ./styles.css, lists only it under sideEffects, and ships src', () => {
+  it('exports ./styles.css and ./chat.css, lists only those two under sideEffects, and ships src', () => {
     expect(manifest.exports['./styles.css']).toBe('./src/styles.css');
-    expect(manifest.sideEffects).toEqual(['./src/styles.css']);
+    expect(manifest.exports['./chat.css']).toBe('./src/chat.css');
+    expect(manifest.sideEffects).toEqual(['./src/styles.css', './src/chat.css']);
     expect(manifest.files).toEqual(['dist/src', 'src', 'README.md', 'LICENSE']);
   });
 

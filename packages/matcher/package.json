@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/matcher",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": false,
   "description": "Slur matcher for game chat: whole-word term matching that resists Unicode, look-alike and leetspeak evasion, for chat lines and player names.",
   "license": "Apache-2.0",
@@ -65,7 +65,7 @@
     "@chatwarden/core": "^0.1.0"
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.5",
+    "@chatwarden/core": "0.1.6",
     "obscenity": "^0.4.6"
   },
   "publishConfig": {

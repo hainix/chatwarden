@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import * as http from '../src/index.js';
-import type { CompiledRoutes, KitResponse, RouteTable } from '../src/index.js';
+import type { CompiledRoutes, KitResponse, KitStream, RouteTable } from '../src/index.js';
+import type { KitStream as AdminKitStream } from '../src/admin-entry.js';
+import type { KitStream as DeclaredKitStream } from '../src/types.js';
+import * as wire from '../src/chat/wire.js';
 import { compileRoutes } from '../src/router.js';
 import { RETRY_AFTER_CAP_MS, RETRY_AFTER_FLOOR_MS } from '../src/webhooks/out.js';
 
@@ -49,5 +53,40 @@ describe('the public exports an adapter author needs', () => {
 
   it('keeps compileRoutes internal: the old name is not part of the public surface', () => {
     expect('compileRoutes' in http).toBe(false);
+  });
+
+  it('exports: KitStream is a type export of the root and of /admin', () => {
+    expectTypeOf<KitStream>().toEqualTypeOf<DeclaredKitStream>();
+    expectTypeOf<AdminKitStream>().toEqualTypeOf<DeclaredKitStream>();
+    expectTypeOf<KitResponse['stream']>().toEqualTypeOf<KitStream | undefined>();
+    expectTypeOf<KitStream['start']>().toEqualTypeOf<(sink: { write(chunk: string): boolean; end(): void }) => () => void>();
+    // a type has no run-time binding in either entry
+    expect('KitStream' in http).toBe(false);
+    for (const entry of ['../src/index.ts', '../src/admin-entry.ts']) {
+      const text = readFileSync(new URL(entry, import.meta.url), 'utf8');
+      expect(text).toMatch(/export type \{[^}]*KitStream[^}]*\} from '\.\/types\.js'/);
+    }
+  });
+
+  it('exports: the chat wire types, the broadcaster and the chat routes are on the root', () => {
+    expect(http.CHAT_WIRE_VERSION).toBe(1);
+    expect(http.CHAT_WIRE_VERSION).toBe(wire.CHAT_WIRE_VERSION);
+    expectTypeOf<http.ChatFrame>().toEqualTypeOf<wire.ChatFrame>();
+    expectTypeOf<http.WireLine>().toEqualTypeOf<wire.WireLine>();
+    expectTypeOf<http.WireRestriction>().toEqualTypeOf<wire.WireRestriction>();
+    expectTypeOf<http.WireMuted>().toEqualTypeOf<wire.WireMuted>();
+    expectTypeOf<http.WireRefusal>().toEqualTypeOf<wire.WireRefusal>();
+    expectTypeOf<http.SendResult>().toEqualTypeOf<wire.SendResult>();
+    expectTypeOf<http.MuteTarget>().toEqualTypeOf<wire.MuteTarget>();
+    expectTypeOf<http.MuteResult>().toEqualTypeOf<wire.MuteResult>();
+    expectTypeOf<wire.MuteResult>().toEqualTypeOf<{ ok: boolean; hiddenIds: string[] }>();
+    expectTypeOf<http.ReportOutcome>().toEqualTypeOf<wire.ReportOutcome>();
+    // types have no run-time binding
+    for (const name of ['ChatFrame', 'WireLine', 'WireRestriction', 'WireMuted', 'WireRefusal', 'SendResult', 'MuteTarget', 'MuteResult', 'ReportOutcome']) {
+      expect(name in http).toBe(false);
+    }
+    for (const name of ['chatRoutes', 'createRoomBroadcaster', 'encodeFrame', 'HEARTBEAT', 'refusalOf', 'ROOM_BROADCASTER_DEFAULTS']) {
+      expect(typeof (http as Record<string, unknown>)[name], name).not.toBe('undefined');
+    }
   });
 });

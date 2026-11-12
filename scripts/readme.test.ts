@@ -430,11 +430,13 @@ declare const authorize: import('@chatwarden/http').Authenticate;
         '@chatwarden/discord': src('discord/src/index.ts'),
         '@chatwarden/http': src('http/src/index.ts'),
         '@chatwarden/http/admin': src('http/src/admin-entry.ts'),
+        '@chatwarden/http/chat': src('http/src/chat/index.ts'),
         '@chatwarden/hub-element': src('hub-element/src/index.ts'),
         '@chatwarden/hub-element/standalone': src('hub-element/src/standalone.ts'),
         '@chatwarden/hub-react': src('hub-react/src/index.ts'),
         '@chatwarden/hub-react/headless': src('hub-react/src/headless/index.ts'),
         '@chatwarden/player-react': src('player-react/src/index.ts'),
+        '@chatwarden/player-react/chat': src('player-react/src/chat/index.ts'),
         '@chatwarden/http/express': src('http/src/express.ts'),
       },
       noEmit: true,
@@ -490,5 +492,76 @@ declare const authorize: import('@chatwarden/http').Authenticate;
     expect(control?.[0]).toContain("Type 'string' is not assignable to type 'number'");
     diagnostics.delete('control.ts');
     expect(Object.fromEntries(diagnostics)).toEqual({});
+  });
+});
+
+describe('the chat box docs', () => {
+  const httpDoc = readme('http');
+  const playerDoc = readme('player-react');
+  /** The names an entry file exports, by kind. */
+  const names = (src: string, kind: 'value' | 'type'): string[] =>
+    [...src.matchAll(/^export (type )?\{([^}]*)\}/gm)]
+      .filter((m) => (kind === 'type') === (m[1] !== undefined))
+      .flatMap((m) => (m[2] as string).split(',').map((n) => n.trim().replace(/^type /, '')))
+      .filter((n) => n !== '');
+  /** The field names of an exported interface. */
+  const fields = (src: string, iface: string): string[] => {
+    const start = src.indexOf(`export interface ${iface}`);
+    expect(start, iface).toBeGreaterThanOrEqual(0);
+    const body = src.slice(src.indexOf('{', start), src.indexOf('\n}', start));
+    return [...body.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+  };
+
+  it('every documented option name exists: the broadcaster, the routes and the box props are all written down', () => {
+    const broadcaster = fields(read('packages/http/src/chat/broadcaster.ts'), 'RoomBroadcasterOptions');
+    const routes = fields(read('packages/http/src/chat/routes.ts'), 'ChatRoutesOptions');
+    const props = fields(read('packages/player-react/src/chat/ChatBox.tsx'), 'ChatBoxProps');
+    expect(broadcaster.length).toBeGreaterThan(8);
+    expect(routes.length).toBeGreaterThan(5);
+    expect(props.length).toBeGreaterThan(10);
+    for (const f of broadcaster) expect(httpDoc, `RoomBroadcasterOptions.${f}`).toContain(`\`${f}\``);
+    for (const f of routes) expect(httpDoc, `ChatRoutesOptions.${f}`).toContain(`\`${f}\``);
+    // Each prop is in the first cell of a row of the props table (`container` and `returnFocusTo` share one row).
+    const propRows = flat(section(playerDoc, 'The chat box'));
+    for (const f of props) expect(propRows, `ChatBoxProps.${f}`).toContain(`\`${f}`);
+  });
+
+  it('the READMEs list the @experimental names, every one the entries export', () => {
+    const httpEntry = read('packages/http/src/chat/index.ts');
+    const httpNames = [...names(httpEntry, 'value'), ...names(httpEntry, 'type')].filter((n) => !['KitStream', 'NamesRateLimit'].includes(n));
+    const httpChat = flat(section(httpDoc, 'Chat'));
+    const httpList = httpChat.slice(httpChat.indexOf('Experimental names'));
+    expect(httpNames.length).toBeGreaterThan(15);
+    for (const n of httpNames) expect(httpList, n).toContain(`\`${n}\``);
+    const playerEntry = read('packages/player-react/src/chat/index.ts');
+    const playerNames = [...names(playerEntry, 'value'), ...names(playerEntry, 'type')];
+    const playerList = flat(section(playerDoc, 'The chat box'));
+    expect(playerNames.length).toBeGreaterThan(15);
+    for (const n of playerNames) expect(playerList, n).toContain(`\`${n}\``);
+    expect(playerList).toMatch(/`@experimental` until 0\.2/);
+    expect(httpChat).toMatch(/`@experimental` until 0\.2/);
+  });
+
+  it('the root README adds chat to the install table and the package rows, with a short chat block that compiles', () => {
+    const rootDoc = read('README.md');
+    expect(rootDoc).toMatch(/\| Add chat to a game that has none[^|]*\|[^|]*@chatwarden\/http[^|]*@chatwarden\/player-react/);
+    expect(rootDoc).toMatch(/room broadcaster with chat routes/);
+    expect(rootDoc).toMatch(/moderated `<ChatBox>` at its own lazy subpath/);
+    const block = [...rootDoc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string).find((c) => c.includes('createRoomBroadcaster'));
+    expect(block, 'the quick-start chat block').toBeDefined();
+    expect(block?.startsWith('import ')).toBe(true);
+  });
+
+  it('the project docs say it exists: status, follow-ups and CLAUDE.md', () => {
+    expect(read('docs/status.md')).toMatch(/## Chat box/);
+    expect(read('docs/plans/follow-ups.md')).toMatch(/Chat box on the site/);
+    expect(read('docs/plans/follow-ups.md')).not.toMatch(/A `<ChatBox>` in player-react and a room broadcaster in http, so the page can promise chat/);
+    const claude = read('CLAUDE.md');
+    expect(claude).toContain('@chatwarden/http/chat');
+    expect(claude).toContain('@chatwarden/player-react/chat');
+  });
+
+  it('the control: an option name the README does not have is not found', () => {
+    expect(httpDoc).not.toContain('`definitelyNotAnOption`');
   });
 });

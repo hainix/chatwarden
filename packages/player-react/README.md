@@ -303,6 +303,132 @@ Pass it as `<NoticeQueue t={t} locale="de" ... />`. Dates and times use `Intl` w
 fixed zone, or leave it out to use the player's own. The copy is written for a player in the middle of a game: second person,
 plain words, never shaming, and it says what happened, until when, and what the player can do.
 
+## The chat box
+
+`<ChatBox>` is a moderated chat for one room: the list, one input and Send. It lives at its own subpath, `@chatwarden/player-react/chat`
+(with `@chatwarden/player-react/chat.css`), so the main entry and its size are untouched; a page that never shows chat never loads it.
+The server side is `createRoomBroadcaster` and `chatRoutes` in `@chatwarden/http` (see its README, "Chat"). Every name here is
+`@experimental` until 0.2.
+
+```tsx
+import '@chatwarden/player-react/styles.css';
+import '@chatwarden/player-react/chat.css'; // load both: chat.css adds three tokens and the box's rules on top of styles.css
+import { createPlayerClient, fetchTransport, NoticeQueue } from '@chatwarden/player-react';
+import { ChatBox, sseTransport } from '@chatwarden/player-react/chat';
+import { useEffect, useMemo, useState } from 'react';
+
+export function Lobby() {
+  // Make the transport once (useMemo or module scope). The connection opens when the box mounts and when `room` changes.
+  const transport = useMemo(() => sseTransport({ baseUrl: '/chat', credentials: 'same-origin' }), []);
+  const client = useMemo(() => createPlayerClient({ transport: fetchTransport({ baseUrl: '/player' }) }), []);
+  const [reporting, setReporting] = useState<Awaited<ReturnType<typeof client.rules>>['reporting']>();
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => void client.rules().then((r) => setReporting(r.reporting)), [client]);
+  return (
+    <>
+      <ChatBox transport={transport} room="lobby" reporting={reporting} onNoticePending={() => setRefresh((n) => n + 1)} />
+      <NoticeQueue client={client} refreshKey={refresh} />
+    </>
+  );
+}
+```
+
+The transport reads the stream with `fetch`, not `EventSource`, so your header-based auth works. **One player may have three streams (tabs)
+open in a room by default** (`maxStreamsPerMember` on the server): a fourth ends the oldest, and that box says "Chat is open in another
+window." with a "Try again" button instead of reconnecting by itself, so tabs over the limit never push each other out in a loop. A game with its own socket implements
+`ChatTransport` (`open(room, events)` returning `{ send, mute, report, close }`) and hands the same frames to `events.frame`.
+
+To load it only when a player opens the chat, import it lazily. It is one chunk and nothing in it runs until `ChatBox` is rendered:
+
+```ts
+import type { ChatBoxProps } from '@chatwarden/player-react/chat';
+
+export async function loadChatBox(): Promise<(props: ChatBoxProps) => unknown> {
+  const { ChatBox } = await import('@chatwarden/player-react/chat');
+  return ChatBox;
+}
+```
+
+### What the player sees
+
+The always-visible box is the list, one input and Send, and one small control at the corner (Chat options). A line from another player
+has one quiet control (visible on hover and focus, and always, dimmed, on a touch screen) that opens Report and Mute. Chat options holds
+the muted players (each with Unmute), the profile's one-line standard and, when you pass `onOpenRules`, a Read the rules button. Nothing
+else is added.
+
+- **A refusal** is one line under the input, with the draft kept: too long (with the limit), too fast, not allowed here, blocked (with
+  "Community Rule N"), swearing, and the pacing reasons with their wait (Send holds until it ends). The line clears on the next
+  keystroke or after 8 seconds. A refusal is shown to its author only.
+- **A restriction** replaces the input with `RestrictedChatLine` and the input returns by itself when it ends. A ban, a closed room and
+  the other ways the stream can end for good show one sentence and no input, with a Try again button (except for a ban).
+- **Connection.** A quiet line appears only while reconnecting. The box reconnects with jittered back-off, drops a stream that has gone
+  silent for 2.5 heartbeats, and starts over at once when the browser says it is online again.
+
+### Accessibility
+
+Stated plainly, as designed: the list is `role="log"` with a name (`title`, default "Chat") and is focusable. The log is not live until
+the first snapshot has rendered, so joining does not read 50 lines aloud; after that **every line that arrives is announced politely,
+your own included**. In a very busy room that is a lot of speech, and there is no setting for it in this release. There is one tab stop
+per line from another player (its options control), so the Tab order is the log, those controls, the input, Send, Chat options. Escape
+closes an open row or panel and returns focus to its control; the report dialog is the existing modal with its focus trap and focus
+return. The connection line, the refusal line and the mute line are `role="status"` regions that exist before they have text. Targets are
+at least 2.25 rem tall, every colour pair meets 4.5:1 in both schemes, and no information is colour alone. A line is a text node, read as
+"name: text"; there is no markup, link detection or markdown.
+
+### Props
+
+| Prop | What it does |
+| --- | --- |
+| `transport` | `sseTransport({ baseUrl })` or your own `ChatTransport`. A new transport object on a later render does not reopen the stream; change the box's `key` to reconnect with a changed one |
+| `room` | The room id your server's `join` understands. A new `room` closes the connection and opens another |
+| `reporting` | `(await client.rules()).reporting`, passed to `ReportDialog`. Without it a report is one press |
+| `title` | The log's name. Default: the word "Chat" |
+| `onNoticePending()` | The server says a notice is waiting, or a refusal points at one: bump your `NoticeQueue` `refreshKey` |
+| `onRefused(refusal)` | Each refusal of the player's own line, for sound or telemetry. Never the text |
+| `onStatus(status, why?)` | `connecting`, `open`, `reconnecting`, `closed` (with `banned`, `forbidden`, `unauthorized`, `room_closed`, `shutdown`, `not_found` or `unsupported`) |
+| `onOpenRules()` | When given, Read the rules appears in Chat options and calls it |
+| `maxLines` | Lines kept in the page: 200 by default, at most 5 000 |
+| `autoFocus` | Focus the input when the box appears. Default `false`: a chat must not steal focus from a game |
+| `readOnly` | No input: a viewer who may read but not speak |
+| `container`, `returnFocusTo` | For the report dialog, as on `ReportDialog` |
+
+`sseTransport({ baseUrl, headers?, credentials?, fetch?, retry?, staleMs? })` takes `FetchTransportOptions` plus `retry: { initialMs,
+maxMs }` (default 1 000 and 30 000, each retry waits a random time up to double the last, never under 100 ms) and `staleMs` (how long a
+silent stream is kept; default 2.5 times the heartbeat the server announces). `401` and `403` are not retried, `404` and an answer that is
+not an event stream end the chat with `not_found` and `unsupported`, and `429` and `503` wait for `retry-after`.
+
+### Words
+
+The chat words are `enChat` (keys `player.chat.*`), kept apart from `en` so the main entry does not carry them. **A host that translates
+chat spreads `enChat` too:** `createT({ ...en, ...enChat, ...de }, 'de')`. The box falls back to the English chat words for any key the
+catalog it is given lacks, so a translation made before the chat existed shows English, not a key. It also reuses the report dialog's and
+the restricted line's words.
+
+### Chat theming
+
+`chat.css` follows the contract above: every rule under `.cw-player`, every colour and space a `--cw-*` token read with a private default.
+It adds three tokens of its own, and uses the colours of `styles.css`:
+
+| Token | Default | What it is |
+| --- | --- | --- |
+| `--cw-chat-height` | `20rem` | The height of the list. Set it on the box's `className` to resize the box |
+| `--cw-chat-gap` | `0.25rem` | The space between two lines |
+| `--cw-chat-name-width` | `auto` | The width of a name, for a game that wants the names aligned |
+
+Colour is used only where it means something: the accent for the player's own name and Send, red for a failure line.
+
+### Size
+
+Measured with React, React DOM and the kit external, minified and gzipped: the chat adds about 8 KB to a page that already has the
+player components, the chat entry on its own is about 15 KB, and `chat.css` is about 2 KB. The main entry stays under its own 10 KB budget.
+
+### The chat names
+
+`ChatBox`, `sseTransport`, `chatReducer`, `createChatState`, `initialChatState` and `readFrame` (the pure parts, for a game's own UI),
+`enChat`, and the types `ChatBoxProps`, `ChatRefusal`, `ChatTransport`, `ChatConnection`, `ChatTransportEvents`, `ChatStatus`,
+`ChatClosedWhy`, `SseTransportOptions`, `ChatFrame`, `WireLine`, `WireMuted`, `WireRefusal`, `WireRestriction`, `SendResult`,
+`MuteResult`, `MuteTarget`, `ChatState` and `ChatAction`. All are `@experimental` until 0.2.
+
 ## Theming
 
 The components ship one stylesheet, `@chatwarden/player-react/styles.css`. Import it once (a bundler, or a `<link>`). Every colour, size,

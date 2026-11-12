@@ -1,0 +1,28 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`toExpress: a response without a stream is unchanged > a response with no stream is byte-identical to before (one admin route, one player route) 1`] = `
+{
+  "admin": "HTTP/1.1 200 OK
+cache-control: no-store
+content-type: application/json; charset=utf-8
+Date: <date>
+Connection: close
+Content-Length: 451
+
+{"actor":"ann","role":"moderator","can":{"reports.read":true,"reports.decide":true,"reports.decide.bulk":true,"sanctions.apply":true,"sanctions.apply.ban_permanent":false,"sanctions.revoke":true,"history.read":true,"blocked.read":true,"gaps.read":true,"gaps.close":false,"terms.read":true,"terms.write":true,"policy.read":true,"policy.write":false,"audit.read":false,"claims.override":false,"reasons.read":true,"reasons.write":false,"settings":false}}",
+  "head": "HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+content-length: 2854
+Date: <date>
+Connection: close
+
+",
+  "player": "HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+Date: <date>
+Connection: close
+Content-Length: 2854
+
+{"summary":"Keep it friendly. Personal insults, harassment and hate aren't allowed.","rules":[{"number":1,"title":"No slurs or hate aimed at who someone is","text":"Do not use slurs, or put someone down for their race, religion, gender, sexuality, disability or similar. This applies to what you say about other players and about anyone else."},{"number":2,"title":"No insulting, threatening or targeting another player","text":"Do not insult, threaten or target another player as a person in chat. Talk about the game itself, like destroying or killing an opposing unit or character in play, is fine."},{"number":3,"title":"No sexual messages","text":"Do not send sexual messages or comments, and do not pressure anyone for them."},{"number":4,"title":"No spam, flooding or advertising","text":"Do not repeat the same message, flood the chat or advertise. Stick to talking about the game and the people in it."},{"number":5,"title":"No cheating or exploiting","text":"Do not cheat, or use a bug or loophole to get an unfair edge. Report bugs instead of using them."},{"number":6,"title":"No throwing, stalling or ruining games on purpose","text":"Do not lose on purpose, stall the game or leave a game running just to spoil it for others. Play to finish, or concede."},{"number":7,"title":"No offensive names","text":"Do not pick a name that breaks any other rule here, such as a slur, a sexual name or a name aimed at another player."},{"number":8,"title":"No false reports","text":"Do not report someone to get them in trouble when they have not broken a rule. Use reports for real problems."}],"reporting":{"flow":"one_tap","reasons":[{"id":"harassment","label":"Insults or harassment","hint":"Insults, put-downs or picking on someone","group":"Chat","asksNote":false},{"id":"hate","label":"Hate","hint":"Hate aimed at who someone is","group":"Chat","asksNote":false},{"id":"sexual","label":"Sexual content","hint":"Sexual messages or pressure","group":"Chat","asksNote":false},{"id":"threat","label":"Threats","hint":"Threatening someone","group":"Chat","asksNote":false},{"id":"spam","label":"Spam or ads","hint":"Repeated messages, flooding or advertising","group":"Chat","asksNote":false},{"id":"personal_info","label":"Sharing personal info","hint":"Posting someone's private details","group":"Chat","asksNote":false},{"id":"cheating","label":"Cheating","hint":"Cheating or exploiting a bug","group":"Gameplay","asksNote":false},{"id":"griefing","label":"Throwing or griefing","hint":"Losing on purpose or ruining the game","group":"Gameplay","asksNote":false},{"id":"afk","label":"Leaving or AFK","hint":"Leaving the game or not playing","group":"Gameplay","asksNote":false},{"id":"other","label":"Something else","hint":"Anything else you want us to look at","group":"","asksNote":true}],"thanks":"Thanks for the report. We'll look into it."}}",
+}
+`;

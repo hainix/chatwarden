@@ -10,6 +10,7 @@ import type { Transport as HubTransport } from '@chatwarden/hub-react';
 import { createHubController, createStore } from '@chatwarden/hub-react/headless';
 import { MyRecord, NoticeQueue, ReportDialog, RestrictedChatLine, RulesPage, createPlayerClient } from '@chatwarden/player-react';
 import type { Transport as PlayerTransport } from '@chatwarden/player-react';
+import { ChatBox, sseTransport } from '@chatwarden/player-react/chat';
 
 const require = createRequire(import.meta.url);
 const versionOf = (name: string): string => (require(`${name}/package.json`) as { version: string }).version;
@@ -47,6 +48,21 @@ async function main(): Promise<void> {
   assert.ok(parts.ReportDialog?.includes('cw-dialog'), 'the report dialog renders (one tap: no reporting given)');
   assert.ok(parts.RestrictedChatLine?.includes('cw-player'), 'the restricted-chat line renders');
   for (const [name, html] of Object.entries(parts)) assert.equal(typeof html, 'string', `${name} rendered to a string`);
+
+  // 3b. The chat box, from its own subpath, on the server under React 18.3: no warning (a layout effect on a server logs one in 18), and its
+  // stylesheet subpath resolves.
+  const logged: unknown[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => void logged.push(args);
+  let chatHtml: string;
+  try {
+    chatHtml = renderToString(<ChatBox room="lobby" transport={sseTransport({ baseUrl: '/chat' })} />);
+  } finally {
+    console.error = original;
+  }
+  assert.ok(chatHtml.includes('cw-chat'), 'the chat box renders on the server with React 18.3');
+  assert.deepEqual(logged, [], 'rendering the chat box on a server logs nothing');
+  assert.ok(require.resolve('@chatwarden/player-react/chat.css').endsWith('chat.css'), 'the chat stylesheet subpath resolves');
 
   // 4. The headless entry loads beside React 18.3 and builds the controller and a store.
   assert.equal(typeof createHubController, 'function');

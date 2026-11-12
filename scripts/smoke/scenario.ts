@@ -13,6 +13,7 @@ import type { RawWho, Store } from '@chatwarden/core';
 import { discordFeed } from '@chatwarden/discord';
 import { healthRoutes, playerRoutes, VERSION as HTTP_VERSION } from '@chatwarden/http';
 import { adminRoutes, createRouter } from '@chatwarden/http/admin';
+import { chatRoutes, createRoomBroadcaster } from '@chatwarden/http/chat';
 import { toExpress } from '@chatwarden/http/express';
 import { defineChatwardenHub, VERSION as ELEMENT_VERSION } from '@chatwarden/hub-element/standalone';
 import { createHubClient, Hub, memoryRouter, routerTransport, VERSION as HUB_VERSION } from '@chatwarden/hub-react';
@@ -22,6 +23,7 @@ import type { Matcher } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { syntheticTermPack as legacySyntheticTermPack } from '@chatwarden/matcher/test-fixtures';
 import { createPlayerClient, routerTransport as playerTransport, VERSION as PLAYER_VERSION } from '@chatwarden/player-react';
+import { ChatBox, sseTransport } from '@chatwarden/player-react/chat';
 import { createProfanityFilter } from '@chatwarden/profanity';
 import { createMemoryStore } from '@chatwarden/store-memory';
 import { openStore } from '@chatwarden/store-sqlite';
@@ -162,6 +164,22 @@ async function scenario(label: string, store: Store, matcher: Matcher): Promise<
   assert.equal(pending.length, 1, 'the player client sees the one pending notice');
   assert.equal(pending[0]?.kind, 'warning');
   assert.ok((await player.rules()).rules.length > 0, 'the player client reads the rules');
+
+  // The chat box, both halves, from the packed subpaths: the broadcaster and its routes (`@chatwarden/http/chat`), and the box on the server
+  // (`@chatwarden/player-react/chat`). The broadcaster needs the kit's `restrictedBySubject`, so this also proves core and http are packed together.
+  const chat = createRoomBroadcaster(cw);
+  const smokeSession = chat.session('smoke-room', { clientKey: 'smoke-key-chat-0000000009' }, { name: 'Smoke' });
+  assert.ok(!('refused' in smokeSession), 'the broadcaster seats a player');
+  const chatRouter = createRouter(chatRoutes(cw, chat, { identify: (req) => ({ clientKey: req.headers['x-chatwarden-key'] }), join: () => ({ name: 'Smoke' }) }));
+  const chatAnswer = await chatRouter({ method: 'POST', path: '/rooms/smoke-room/lines', query: {}, headers: { 'x-chatwarden-key': 'smoke-key-chat-0000000009', 'content-type': 'application/json' }, body: undefined, rawBody: '{"text":"hello from the smoke test"}' });
+  assert.equal(chatAnswer.status, 200, 'a line is sent through the chat routes');
+  assert.equal((chatAnswer.body as { ok: boolean }).ok, true);
+  const chatForm = await chatRouter({ method: 'POST', path: '/rooms/smoke-room/lines', query: {}, headers: { 'x-chatwarden-key': 'smoke-key-chat-0000000009', 'content-type': 'text/plain' }, body: undefined, rawBody: '{"text":"cross site"}' });
+  assert.equal(chatForm.status, 400, 'a cross-site content type is refused');
+  assert.equal(chat.stats().members, 1);
+  chat.close();
+  const chatHtml = renderToString(createElement(ChatBox, { room: 'smoke-room', transport: sseTransport({ baseUrl: '/chat' }) }));
+  assert.ok(chatHtml.includes('cw-chat'), 'the chat box renders on the server');
 
   // The element script loads in Node, where there is no custom element registry: it registers nothing and does not throw.
   assert.equal(typeof defineChatwardenHub(), 'function');

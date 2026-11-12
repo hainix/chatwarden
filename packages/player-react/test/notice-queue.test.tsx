@@ -535,10 +535,11 @@ describe('focus', () => {
     const menu = screen.getByRole('button', { name: 'Game menu' });
     menu.focus();
     await dialog();
-    expect(screen.getByRole('heading', { name: 'You have a warning' })).toHaveFocus();
+    // Focus moves in an effect after the dialog mounts; under a loaded CI run that can land after dialog() resolves.
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'You have a warning' })).toHaveFocus());
     await user.click(screen.getByRole('button', { name: 'Acknowledge' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(menu).toHaveFocus();
+    await waitFor(() => expect(menu).toHaveFocus());
   });
 
   it('returns focus only when the last notice closes, not between notices', async () => {

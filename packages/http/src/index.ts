@@ -1,7 +1,7 @@
-export const VERSION = '0.1.5';
+export const VERSION = '0.1.6';
 export { ROLES } from '@chatwarden/core';
 export type { Role } from '@chatwarden/core';
-export type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';
+export type { Authz, KitRequest, KitResponse, KitStream, RouteParams } from './types.js';
 export { compileRoutes as matchRoute, createRouter } from './router.js';
 export type { CompiledRoutes, RouteHandler, RouteTable } from './router.js';
 export { ClaimedError, errorResponse, HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
@@ -66,3 +66,30 @@ export {
   webhooksOut,
 } from './webhooks/index.js';
 export type { WebhookEndpoint, WebhookInOptions, WebhooksOut, WebhooksOutOptions } from './webhooks/index.js';
+export {
+  chatRoutes,
+  CHAT_WIRE_VERSION,
+  createRoomBroadcaster,
+  encodeFrame,
+  HEARTBEAT,
+  refusalOf,
+  ROOM_BROADCASTER_DEFAULTS,
+} from './chat/index.js';
+export type {
+  ChatFrame,
+  ChatMember,
+  ChatRoutesOptions,
+  ChatSession,
+  ChatSink,
+  ChatStream,
+  MuteResult,
+  MuteTarget,
+  ReportOutcome,
+  RoomBroadcaster,
+  RoomBroadcasterOptions,
+  SendResult,
+  WireLine,
+  WireMuted,
+  WireRefusal,
+  WireRestriction,
+} from './chat/index.js';

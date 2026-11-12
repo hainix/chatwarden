@@ -44,6 +44,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./packages/http/src/admin-entry.ts', import.meta.url)),
       },
       {
+        find: '@chatwarden/http/chat',
+        replacement: fileURLToPath(new URL('./packages/http/src/chat/index.ts', import.meta.url)),
+      },
+      {
         find: '@chatwarden/http/express',
         replacement: fileURLToPath(new URL('./packages/http/src/express.ts', import.meta.url)),
       },
