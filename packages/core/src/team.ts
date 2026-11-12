@@ -38,6 +38,11 @@ const NEXT_PAGE = 200;
 
 /** With `rankDownHabitual`, candidates are ranked this many at a time (see `next`). */
 const RANK_SLICE = 20;
+/** The most "handed to this moderator" markers `next` keeps (the oldest go). */
+const SERVED_MAX = 1000;
+
+/** With `signalBoost`, take-next looks at most this many people (oldest first) for an overdue or boosted case. @experimental */
+export const SIGNAL_BOOST_SCAN_MAX = 200;
 
 /** A claim as staff see it. Staff only: `by` is a staff actor. */
 export interface CaseClaim {
@@ -192,7 +197,15 @@ export interface TeamDeps {
   reasons?: () => readonly ReportReason[];
   /** How each person's reports have turned out (see `cw.reports.reporterAccuracy`). Without it, `rankDownHabitual` ranks nobody down. */
   accuracy?: (people: readonly SubjectId[]) => Map<SubjectId, ReporterAccuracy>;
+  /**
+   * Which of these people meet the queue signal feed (`cw.signals.boosted`), as canonical ids. Only asked when `next` is given
+   * `signalBoost`, once per page of candidates. Without it nobody is boosted. A throw reads as nobody boosted.
+   */
+  boosted?: (people: readonly SubjectId[]) => Set<SubjectId>;
 }
+
+/** The key of a lapsed-claim marker: the moderator and the person, apart by a character neither can hold. */
+const markerKey = (actor: string, person: SubjectId): string => `${actor}\u0000${person}`;
 
 /** Claims, take next and viewing. The facade exposes it as `cw.cases`. */
 export class CaseDesk {
@@ -201,7 +214,10 @@ export class CaseDesk {
   private readonly clock: Clock;
   private readonly reasons: () => readonly ReportReason[];
   private readonly accuracy: NonNullable<TeamDeps['accuracy']>;
+  private readonly boosted: TeamDeps['boosted'];
   private readonly presence: ViewingPresence;
+  /** `moderator, person` -> when the claim `next` handed that moderator ran out (this process only). See `lapsedByMe`. */
+  private readonly served = new Map<string, number>();
 
   constructor(deps: TeamDeps) {
     this.store = deps.store;
@@ -209,6 +225,7 @@ export class CaseDesk {
     this.clock = deps.clock;
     this.reasons = deps.reasons ?? (() => []);
     this.accuracy = deps.accuracy ?? (() => new Map());
+    this.boosted = deps.boosted;
     this.presence = new ViewingPresence(deps.clock);
   }
 
@@ -243,6 +260,8 @@ export class CaseDesk {
         }
         const now = this.clock.now();
         const res = this.store.claimCase(canonical, actor, now, now + CLAIM_TTL_MS, opts.takeOver === true ? 'takeover' : 'claim');
+        // The holder keeping the claim alive (or taking it again) is not one who let it lapse.
+        if (res.won) this.served.delete(markerKey(actor, canonical));
         return res.won
           ? { ok: true, claim: claimOf(res.claim), tookOverFrom: res.from }
           : { ok: false, error: 'claimed', claim: claimOf(res.claim) };
@@ -254,6 +273,8 @@ export class CaseDesk {
   release(person: SubjectId, actor: string): boolean {
     needActor(actor);
     const canonical = this.subjects.canonical(needPerson(person));
+    // Released on purpose: not a claim that ran out (`lapsedByMe`).
+    this.served.delete(markerKey(actor, canonical));
     return this.store.transaction(() => this.store.releaseClaim(canonical, actor, this.clock.now()));
   }
 
@@ -268,6 +289,8 @@ export class CaseDesk {
     const canonical = this.subjects.canonical(needPerson(person));
     return this.store.transaction(() => {
       if (this.store.listOpenReportsByPerson(this.subjects.aliasesOf(canonical), 1).length > 0) return false;
+      // Decided and done: the claim ending is not "let it lapse".
+      this.served.delete(markerKey(actor, canonical));
       return this.store.releaseClaim(canonical, actor, this.clock.now());
     });
   }
@@ -283,8 +306,20 @@ export class CaseDesk {
    * reporter, or no accuracy data, keeps the case normal). The first normal case in oldest-first order is claimed; ranked-down
    * ones are remembered in order and, when the scan ends (end of the queue, or {@link RANK_DOWN_SCAN_MAX} reports read), the
    * oldest of them is claimed. Nothing is skipped for good: a queue holding only habitual cases still serves them, oldest first.
+   *
+   * With `signalBoost` (default false: behaviour unchanged), the scan stays oldest first but a case is claimed only when it is OVERDUE (its
+   * oldest open report has waited {@link REPORTER_RANK_LAPSE_MS}) or BOOSTED (the person meets the queue signal feed, `TeamDeps.boosted`);
+   * the first such case wins. When the queue ends, or {@link SIGNAL_BOOST_SCAN_MAX} people have been looked at, with neither, the oldest
+   * free case is claimed as it would be without the filter. A boosted case is never ranked down as a habitual reporter's. Because the
+   * queue is oldest first an overdue case is always met before anything newer, so boosted cases cannot starve an old one past 24 hours.
+   * Nothing leaves the queue.
+   *
+   * Also with `signalBoost`: a case `next` handed this moderator whose claim then ran out (they did not decide it, and did not hold it)
+   * is served to them after every other free case for one claim window ({@link CLAIM_TTL_MS}) from the moment it ran out, so a boosted or
+   * overdue case does not come straight back to the person who let it lapse. Other moderators are not affected, it is still served when it
+   * is all that is left, and it is kept in this process only (a restart forgets it).
    */
-  next(actor: string, filter: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean } = {}): NextCase | null {
+  next(actor: string, filter: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean } = {}): NextCase | null {
     needActor(actor);
     const category = filter.category;
     if (category !== undefined && !REPORT_CATEGORIES.includes(category)) throw new RangeError('cases: unknown category');
@@ -294,9 +329,19 @@ export class CaseDesk {
     const rank = filter.rankDownHabitual;
     if (rank !== undefined && typeof rank !== 'boolean') throw new RangeError('cases: rankDownHabitual must be a boolean');
     const rankDown = rank === true;
+    const boost = filter.signalBoost;
+    if (boost !== undefined && typeof boost !== 'boolean') throw new RangeError('cases: signalBoost must be a boolean');
+    const boostMode = boost === true;
     const seen = new Set<SubjectId>();
     // Ranked-down people in the order the scan met them (oldest first).
     const deferred: SubjectId[] = [];
+    // With signalBoost: free people who are neither overdue nor boosted, in scan order, claimed when the scan ends (before the ranked-down).
+    const ordinary: SubjectId[] = [];
+    // With signalBoost: free people whose claim this moderator let lapse in the last claim window, claimed last of all.
+    const lapsed: SubjectId[] = [];
+    // With signalBoost: when each person's oldest open report was filed (the first one the scan met), and how many people were looked at.
+    const oldestAt = new Map<SubjectId, number>();
+    let scanned = 0;
     let read = 0;
     let after: { createdAt: number; id: string } | undefined;
     for (;;) {
@@ -315,17 +360,35 @@ export class CaseDesk {
         if (seen.has(person)) continue;
         seen.add(person);
         candidates.push(person);
+        if (boostMode) oldestAt.set(person, report.createdAt);
+      }
+      if (boostMode) {
+        // At most SIGNAL_BOOST_SCAN_MAX people in all, held ones included: they are looked at too.
+        candidates.length = Math.max(0, Math.min(candidates.length, SIGNAL_BOOST_SCAN_MAX - scanned));
+        scanned += candidates.length;
       }
       const held = new Set(this.store.loadClaims(candidates, this.clock.now()).map((c) => c.person));
       const free = candidates.filter((p) => !held.has(p));
+      // One grouped read for the page.
+      const boosted = boostMode ? this.boostedAmong(free) : new Set<SubjectId>();
+      const now = this.clock.now();
       // Ranked lazily, a slice at a time: the first ordinary case ends the scan, so "next, next, next" does not read the open
       // reports of a whole page of candidates to claim the first one.
       for (let i = 0; i < free.length; i += RANK_SLICE) {
         const slice = free.slice(i, i + RANK_SLICE);
         const down = rankDown ? this.rankedDown(slice) : new Set<SubjectId>();
         for (const person of slice) {
-          if (down.has(person)) {
+          if (boostMode && this.lapsedByMe(actor, person, now)) {
+            lapsed.push(person);
+            continue;
+          }
+          const isBoosted = boosted.has(person);
+          if (down.has(person) && !isBoosted) {
             deferred.push(person);
+            continue;
+          }
+          if (boostMode && !isBoosted && now - (oldestAt.get(person) ?? now) < REPORTER_RANK_LAPSE_MS) {
+            ordinary.push(person);
             continue;
           }
           const won = this.tryClaim(person, actor);
@@ -334,19 +397,40 @@ export class CaseDesk {
       }
       const last = page[page.length - 1];
       if (page.length < NEXT_PAGE || last === undefined) break;
+      if (boostMode && scanned >= SIGNAL_BOOST_SCAN_MAX) break;
       // Enough read to have looked for a normal case: serve the oldest ranked-down one rather than scan the whole queue.
       if (rankDown && read >= RANK_DOWN_SCAN_MAX && deferred.length > 0) break;
       after = { createdAt: last.createdAt, id: last.id };
     }
-    if (deferred.length === 0) return null;
+    const rest = [...ordinary, ...deferred, ...lapsed];
+    if (rest.length === 0) return null;
     // A rival may have taken one meanwhile: one read of the claims, so a held case costs no write.
-    const heldNow = new Set(this.store.loadClaims(deferred, this.clock.now()).map((c) => c.person));
-    for (const person of deferred) {
+    const heldNow = new Set(this.store.loadClaims(rest, this.clock.now()).map((c) => c.person));
+    for (const person of rest) {
       if (heldNow.has(person)) continue;
       const won = this.tryClaim(person, actor);
       if (won !== null) return won;
     }
     return null;
+  }
+
+  /** Did a claim `next` handed this moderator on this person run out within the last claim window? Forgets markers older than that. */
+  private lapsedByMe(actor: string, person: SubjectId, now: number): boolean {
+    const key = markerKey(actor, person);
+    const until = this.served.get(key);
+    if (until === undefined) return false;
+    if (now - until >= CLAIM_TTL_MS) this.served.delete(key);
+    return until <= now && now - until < CLAIM_TTL_MS;
+  }
+
+  /** Who of these people the queue signal feed boosts (canonical ids). Nobody without the dependency, or when it throws. */
+  private boostedAmong(people: readonly SubjectId[]): Set<SubjectId> {
+    if (this.boosted === undefined || people.length === 0) return new Set();
+    try {
+      return this.boosted(people);
+    } catch {
+      return new Set();
+    }
   }
 
   /** One atomic 'free' claim of a person's case, opened on their newest open report; null when a rival won or the case closed. */
@@ -356,6 +440,10 @@ export class CaseDesk {
         const now = this.clock.now();
         const res = this.store.claimCase(person, actor, now, now + CLAIM_TTL_MS, 'free');
         if (!res.won) return null;
+        const key = markerKey(actor, person);
+        this.served.delete(key);
+        this.served.set(key, res.claim.until);
+        if (this.served.size > SERVED_MAX) this.served.delete(this.served.keys().next().value!);
         const newest = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 1)[0];
         if (newest === undefined) {
           // The case closed under us: do not leave a claim on nothing.

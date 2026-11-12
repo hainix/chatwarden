@@ -63,6 +63,20 @@ DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/<id>/<token>' DISCORD_MENT
   passed wins over the environment, and an empty string passed as an option forces the feed off (or the ping off) even when the
   shell exports a value; an option that is left out falls back to the environment. `discordFetch` replaces `fetch` for tests.
 
+## Slow mode (demo, optional)
+
+Off unless `CW_DEMO_PACE=1`. With it, tiny-chat turns on a 2 second slow mode (`overrides.pace.slowModeMs: 2000`): type two lines inside two
+seconds in the chat page and the second is refused, the box holds Send for the wait and says "Slow mode is on. You can send another message in 2
+seconds." The WebSocket protocol sends `{ type: 'refused', reason: 'slow_mode', retryAfterMs }`. Without it nothing is paced.
+
+```sh
+CW_DEMO_PACE=1 npm start -w @chatwarden/example-tiny-chat
+```
+
+- `startServer({ demoPace })` takes the same switch as an option (an option that is passed wins over the environment; `false` forces it off), and
+  a `pace` in `overrides` wins field by field. A real app sets `pace` in its profile, or the owner sets it in the hub (Settings, Advanced).
+- It is per process, like the fixed rate limit: this demo is one process.
+
 ## AI reads (demo, optional)
 
 Off unless `CW_DEMO_AI=1`. With it, tiny-chat wires a scripted fake AI (`createFakeModerationAI`: it reads a report by simple rules, with no

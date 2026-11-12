@@ -16,9 +16,11 @@ import type {
   GuideSection,
   PolicyLayer,
   PolicyPreview,
+  PolicyLimits,
   PolicySection,
-  PolicyState,
+  PolicyState as KitPolicyState,
   ReporterRecord,
+  SignalCount,
   ReportCategory,
   SanctionGroupView,
   SanctionKind,
@@ -27,7 +29,14 @@ import type {
 } from '@chatwarden/core';
 import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
-export type { PolicyLayer, PolicySection, PolicyState };
+export type { PolicyLayer, PolicySection };
+
+/**
+ * The editable settings as the hub reads them: what is in force, what is saved, and what the kit left out. `limits` is the kit's chat rate and
+ * signals retention, read only; a server older than 0.1.8 does not send it, so the hub falls back to the kit's defaults.
+ * @experimental
+ */
+export type PolicyState = Omit<KitPolicyState, 'limits'> & { limits?: PolicyLimits };
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 export type { Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role };
 
@@ -222,12 +231,25 @@ export interface DecideResult {
 /** @experimental */
 export interface PersonHistory {
   history: ActionRecord[];
+  /**
+   * The signal counts the record feed (`feeds.record`) chose, one per kind with a counted source: present only when the feed is on, `[]` when no
+   * count qualifies. Absent from an older server. Staff only.
+   * @experimental
+   */
+  signals?: SignalCountView[];
   reports: Array<{ id: string; createdAt: number; category: ReportCategory }>;
   sanctions: SanctionGroupView[];
   asReporter: ReporterRecord;
   /** Their handle on the newest report filed against them, or null: the name to show for the person. */
   handle: string | null;
 }
+
+/**
+ * One signal count about a person (`GET /people/:ref/history`): a declared kind, how many different players, over how many days, and when the first
+ * and the last of them said it. No player, room or row.
+ * @experimental
+ */
+export type SignalCountView = SignalCount;
 
 /**
  * A sanction group with the person it is on and the name to show for them (`GET /sanctions`). `handle` is null when no report recorded one.

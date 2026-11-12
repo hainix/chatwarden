@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/store-sqlite",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "description": "SQLite store for Chatwarden chat moderation, on the SQLite built into Node: reports, sanctions, notices and the audit trail in one file.",
   "license": "Apache-2.0",
@@ -43,13 +43,13 @@
     "prepack": "tsc -b"
   },
   "peerDependencies": {
-    "@chatwarden/core": "^0.1.7",
+    "@chatwarden/core": "^0.1.8",
     "@chatwarden/matcher": "^0.1.0"
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.7",
-    "@chatwarden/matcher": "0.1.7",
-    "@chatwarden/store-memory": "0.1.7"
+    "@chatwarden/core": "0.1.8",
+    "@chatwarden/matcher": "0.1.8",
+    "@chatwarden/store-memory": "0.1.8"
   },
   "publishConfig": {
     "access": "public"

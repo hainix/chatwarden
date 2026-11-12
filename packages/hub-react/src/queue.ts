@@ -56,6 +56,11 @@ export interface QueueGroup {
   aiUnread?: number;
   /** Set by the `priority` sort: the mean false-report rate of the reporters on the person's open reports, or null. */
   reporterFalseRate?: number | null;
+  /**
+   * Set (true) when an open report of the person came marked `boosted` by the server: they meet the queue signal feed. The `priority` sort adds a
+   * capped half point (`signals.conduct`); nothing is hidden, and no other order or chip reads it.
+   */
+  boosted?: true;
 }
 
 /**
@@ -65,6 +70,8 @@ export interface QueueGroup {
  */
 export interface RankSignals {
   reporter?: (g: QueueGroup) => number;
+  /** What the person's conduct adds: the hub's own is `conductSignal` (a person who meets the queue signal feed). Same clamp. */
+  conduct?: (g: QueueGroup) => number;
 }
 
 /** The person has an open or decided report with an AI read: the queue shows the AI's chip. */
@@ -169,6 +176,7 @@ export function groupQueue(
     let dismissed = 0;
     let oldestOpenAt: number | null = null;
     let habitualOpen = 0;
+    let boosted = false;
     let claim: Claim | null = null;
     const viewing = new Set<string>();
     for (const r of list) {
@@ -189,6 +197,7 @@ export function groupQueue(
       const reporterHandle = r.reporterHandle ?? null;
       if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) reporterHandles[r.reporterPerson] = reporterHandle;
       if (r.status === 'open') {
+        if (r.boosted === true) boosted = true;
         open += 1;
         if (r.reporterAccuracy?.habitual === true) habitualOpen += 1;
         oldestOpenAt = oldestOpenAt === null ? r.createdAt : Math.min(oldestOpenAt, r.createdAt);
@@ -217,6 +226,7 @@ export function groupQueue(
       claim,
       viewing: [...viewing].sort(),
       summaries: list,
+      ...(boosted ? { boosted: true as const } : {}),
       ...(rankDown === undefined
         ? {}
         : { rankedLow: open > 0 && open <= RANK_DOWN_OPEN_MAX && habitualOpen === open && rankDown.now - (oldestOpenAt as number) < REPORTER_RANK_LAPSE_MS }),

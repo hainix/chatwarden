@@ -18,7 +18,10 @@ const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 // Raised to 77 KB at 0.1.7 (AI levels 1 and 2), approved by the maintainer: every AI module is lazy and an install with the AI off
 // loads none of it, but the hub carries the plug-in points (case slots and form gating, queue hooks and chip mounts, the client
 // methods and loaders, the Settings > AI entry): about 1.5 KB gzipped, 76,425 -> 77,959. The AI itself is about 13 KB of lazy chunks.
-const BUDGET = 77 * 1024;
+// Raised to 82 KB at 0.1.8 (flood control and signals): the maintainer's rule for this release is to raise budgets generously rather than trim. The first
+// load gains the plug-in points only (the queue's conduct seam, the Advanced settings entry and the lazy parts); the pace and signal panels and the Person
+// page's signal lines are chunks loaded when opened: 77,959 -> about 79,100.
+const BUDGET = 82 * 1024;
 const ENTRY_BUDGET = 52 * 1024;
 
 async function bundle() {
@@ -156,7 +159,7 @@ describe('bundle size', () => {
 
   it('keeps the settings and admin screens out of the entry: each is a chunk of its own', async () => {
     const { entryInputs, chunkRoots } = await bundle();
-    const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings', 'AiSettings'];
+    const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings', 'AiSettings', 'AdvancedSettings', 'PaceSettings', 'SignalSettings'];
     for (const name of lazy) {
       expect(entryInputs.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} is in the entry`).toEqual([]);
       expect(chunkRoots.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} has no chunk`).toHaveLength(1);
@@ -165,6 +168,13 @@ describe('bundle size', () => {
     for (const name of ['Overview', 'Reports', 'Report', 'Person', 'SimpleHome', 'Settings']) {
       expect(entryInputs.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} is not in the entry`).toHaveLength(1);
     }
+  });
+
+  it('keeps the Person page signal lines out of the entry: a chunk of its own, loaded when a record has counts', async () => {
+    const { entryInputs, eagerInputs, chunkRoots } = await bundle();
+    expect(entryInputs.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toEqual([]);
+    expect(eagerInputs.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toEqual([]);
+    expect(chunkRoots.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toHaveLength(1);
   });
 
   it('the stylesheet is small too', async () => {

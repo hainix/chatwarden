@@ -2840,6 +2840,8 @@
 }
 .cw-hub .cw-settings-all {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
   justify-content: flex-end;
 }
 .cw-hub .cw-lchips {
@@ -3561,6 +3563,49 @@
   display: grid;
   gap: var(--cw-space-3, var(--cwd-space-3));
   min-width: 0;
+}
+/* Settings > Advanced: a panel's forms (slow mode and flooding, signals). Each form is a switch with its fields indented under it; no colour of its own. */
+.cw-hub .cw-pace-row,
+.cw-hub .cw-signal-form {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-pace-fields,
+.cw-hub .cw-signal-fields {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
+  min-width: 0;
+}
+.cw-hub .cw-pace-fields input[type='number'],
+.cw-hub .cw-signal-fields input[type='number'],
+.cw-hub .cw-signal-fields select {
+  max-width: 14rem;
+}
+.cw-hub .cw-signal-rule {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  min-width: 0;
+  justify-items: start;
+}
+.cw-hub .cw-signal-kinds {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cw-hub .cw-signal-kind p {
+  margin: 0;
+}
+.cw-hub .cw-signal-dropped ul {
+  margin: 0;
+  padding-inline-start: var(--cw-space-5, var(--cwd-space-5));
 }
 .cw-hub .cw-ai-advanced {
   justify-items: start;

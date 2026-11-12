@@ -153,6 +153,30 @@ export interface SuggestContext {
    * escalation never fires: without it this incident cannot count as a different game.
    */
   roomId?: string | null;
+  /**
+   * The signal rules that fired for the reported person (design 5.6). Set by the facade (`cw.suggest` computes them from
+   * `feeds.ladder` and ignores a list passed to it); a rule only adds to the suggestion, never starts one: banter returns before any
+   * of this, and nothing here applies a sanction.
+   * @experimental
+   */
+  signals?: readonly SignalHit[];
+  /**
+   * Leave the signal rules' sentences and the `signals` key out of the suggestion (the outcome still moves, which is the part a decider must
+   * see). For a caller who may not read the person's record: the sentence is a count of what other players did. Set by a route; default false.
+   * @experimental
+   */
+  hideSignalText?: boolean;
+}
+
+/**
+ * One signal rule that fired: its id, what it does and the sentence for the moderator ("Muted by other players: 5 players in 14
+ * days"). Carries no identifier.
+ * @experimental
+ */
+export interface SignalHit {
+  id: string;
+  effect: 'note' | 'raise';
+  text: string;
 }
 
 /** One suggested next action, with the plain reason a moderator can read out. Carries no identifier. */
@@ -162,6 +186,8 @@ export interface Suggestion {
   label: string;
   /** One plain sentence naming the profile and the reason. */
   why: string;
+  /** Present only when a signal rule fired: the ids of the rules, and whether one of them raised the suggestion by a step. @experimental */
+  signals?: { raised: boolean; ids: string[] };
 }
 
 function plural(n: number, unit: string): string {
@@ -353,6 +379,24 @@ export function suggest(
     }
   }
 
+  // Signal rules (the ladder feed): a `raise` rule takes the ladder cell one step further down the column this suggestion read, only when
+  // it is stronger than the pick and not permanent; every other hit (and a raise that did nothing) is a sentence. Before the area swap.
+  const hits = usableHits(context.signals);
+  const sentences: string[] = [];
+  let raised = false;
+  if (hits.length > 0) {
+    const nextRow = step < 5 ? profile.ladder[step + 1] : undefined;
+    const cell = nextRow === undefined ? undefined : severe || read === 'hostile' ? nextRow.high : nextRow.lowMedium;
+    const target = cell === undefined || (cell.kind !== 'warning' && cell.durationMs === null) ? undefined : cellPick(cell);
+    for (const hit of hits) {
+      if (hit.effect === 'raise' && !raised && target !== undefined && !atLeast(pick.outcome, target.outcome)) {
+        pick = target;
+        raised = true;
+        if (context.hideSignalText !== true) sentences.push(`Raised one step: ${hit.text}.`);
+      } else if (context.hideSignalText !== true) sentences.push(`Also: ${hit.text}.`);
+    }
+  }
+
   let outcome = copyOutcome(pick.outcome);
   let label = pick.label ?? outcomeLabel(outcome);
   let areaNote = '';
@@ -361,5 +405,19 @@ export function suggest(
     label = outcomeLabel(outcome);
     areaNote = ' (this rule bans from public rooms instead of restricting chat)';
   }
-  return { outcome, label, why: `${name} profile: ${reason}${areaNote}.` };
+  const why = `${name} profile: ${reason}${areaNote}.${sentences.map((s) => ` ${s}`).join('')}`;
+  return hits.length === 0 || context.hideSignalText === true ? { outcome, label, why } : { outcome, label, why, signals: { raised, ids: hits.map((h) => h.id) } };
+}
+
+/** The hits `suggest` will use: well-formed ones only (a string id and text, a known effect), at most 20. Never throws. */
+function usableHits(v: unknown): SignalHit[] {
+  if (!Array.isArray(v)) return [];
+  const out: SignalHit[] = [];
+  for (const h of v.slice(0, 20) as unknown[]) {
+    if (typeof h !== 'object' || h === null) continue;
+    const { id, effect, text } = h as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof text !== 'string' || (effect !== 'note' && effect !== 'raise')) continue;
+    out.push({ id, effect, text });
+  }
+  return out;
 }

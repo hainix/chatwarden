@@ -2,6 +2,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import axe from 'axe-core';
 import { describe, expect, it } from 'vitest';
 import { renderHub } from './render.js';
+import { MemoryStore, withMemoryAi, withMemorySignals } from '@chatwarden/store-memory';
 import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
 
@@ -148,6 +149,89 @@ describe.each(['light', 'dark'] as const)('axe on Settings > AI, %s theme', (the
     const none = await hubWorld({ role: 'owner' });
     const r = renderHub(none, { theme, path: '/settings/ai' });
     await screen.findByText('Not set up on this server');
+    expect(await violations(r.container)).toEqual([]);
+  });
+});
+
+describe.each(['light', 'dark'] as const)('axe on Settings > Advanced > Slow mode and flooding, %s theme', (theme) => {
+  async function open(w: HubWorld) {
+    const r = renderHub(w, { theme, path: '/settings/advanced' });
+    await screen.findByRole('region', { name: 'Slow mode and flooding' });
+    return r;
+  }
+
+  it('axe: no violations: off, switched on, with field errors, with the save question, and the built-in limit hint', async () => {
+    const w = await hubWorld({ role: 'owner', actor: 'owen@example.test' });
+    const { container, user } = await open(w);
+    expect(await violations(container)).toEqual([]);
+    await user.click(screen.getByRole('checkbox', { name: 'Burst limit' }));
+    await user.type(screen.getByLabelText('Messages'), '10');
+    await user.type(screen.getByLabelText('Within seconds'), '10');
+    expect(await screen.findByText(/built-in limit of 3 messages per 5 seconds/)).toBeInTheDocument();
+    expect(await violations(container)).toEqual([]);
+    await user.clear(screen.getByLabelText('Messages'));
+    await user.click(within(screen.getByRole('region', { name: 'Slow mode and flooding' })).getByRole('button', { name: 'Save changes' }));
+    await screen.findByText(/whole number of messages/);
+    expect(await violations(container)).toEqual([]);
+    await user.type(screen.getByLabelText('Messages'), '5');
+    await user.click(within(screen.getByRole('region', { name: 'Slow mode and flooding' })).getByRole('button', { name: 'Save changes' }));
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('a role that only reads has none, and the Reset question has none', async () => {
+    const w = await hubWorld({ role: 'senior', actor: 's@example.test' });
+    const { container } = await open(w);
+    expect(await violations(container)).toEqual([]);
+    cleanup();
+    const o = await hubWorld({ role: 'owner', actor: 'o@example.test', overrides: { pace: { slowModeMs: 2000 } } });
+    const state = await o.direct.policyProfile();
+    await o.direct.savePolicyProfile({ layer: { pace: { slowModeMs: 3000 } }, version: state.version, reason: 'x' });
+    const r = await open(o);
+    await r.user.click(screen.getByRole('button', { name: 'Reset slow mode and flooding' }));
+    expect(await violations(r.container)).toEqual([]);
+  });
+});
+
+describe.each(['light', 'dark'] as const)('axe on Settings > Advanced > Signals, %s theme', (theme) => {
+  const KINDS = {
+    muted_by_player: { label: 'Muted by other players', polarity: 'negative' as const },
+    commended: { label: 'Commended by other players', polarity: 'positive' as const },
+  };
+  async function open(w: HubWorld) {
+    const r = renderHub(w, { theme, path: '/settings/advanced' });
+    await screen.findByRole('region', { name: 'Signals' });
+    return r;
+  }
+
+  it('axe: no violations: the kinds, every form switched on, a rule, field errors and the save question', async () => {
+    const w = await hubWorld({
+      role: 'owner',
+      actor: 'owen@example.test',
+      store: withMemorySignals(withMemoryAi(new MemoryStore())),
+      overrides: { signals: { kinds: KINDS } } as never,
+      ai: { level: 1 },
+    });
+    const { container, user } = await open(w);
+    expect(await violations(container)).toEqual([]);
+    for (const name of ['Show on a person’s record', 'Put these people sooner in the queue', 'Add to the suggested step', 'Give the AI read as background']) {
+      await user.click(screen.getByRole('checkbox', { name }));
+    }
+    expect(await violations(container)).toEqual([]);
+    await user.click(within(screen.getByRole('region', { name: 'Signals' })).getByRole('button', { name: 'Save changes' }));
+    await screen.findAllByText(/Choose at least one kind/);
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('read-only, with a dropped note, and with no declared kinds, has none', async () => {
+    const store = withMemorySignals(withMemoryAi(new MemoryStore()));
+    store.savePolicyLayer?.({ signals: { feeds: { queue: { kinds: ['removed_kind'], minDistinct: 3, windowDays: 7 } } } } as never, 0);
+    const w = await hubWorld({ role: 'senior', actor: 's@example.test', store, overrides: { signals: { kinds: KINDS } } as never });
+    const { container } = await open(w);
+    await screen.findByRole('status', { name: 'Saved settings that could not be used' });
+    expect(await violations(container)).toEqual([]);
+    cleanup();
+    const none = await hubWorld({ role: 'owner', actor: 'o@example.test' });
+    const r = await open(none);
     expect(await violations(r.container)).toEqual([]);
   });
 });

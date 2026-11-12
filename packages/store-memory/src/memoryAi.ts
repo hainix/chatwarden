@@ -1,4 +1,5 @@
 import type {
+  AISignal,
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
@@ -15,6 +16,12 @@ import { MemoryStore, compare, newId } from './memoryStore.js';
 
 // The in-memory store's AI methods (AI levels 1 and 2), kept apart from `MemoryStore` so a bundle that never calls `withMemoryAi` does not
 // carry them. The state they work on (`aiReads`, `aiSpend`, `aiOutcomes`) and the purge of a report's reads stay in `MemoryStore`.
+
+/** The signal counts a read stores: a copy of only the four fields, and null for none. */
+function signalsOf(v: readonly AISignal[] | undefined): AISignal[] | null {
+  const rows = (v ?? []).map((s) => ({ label: s.label, polarity: s.polarity, distinct: s.distinct, windowDays: s.windowDays }));
+  return rows.length === 0 ? null : rows;
+}
 
 /** The Store methods `withMemoryAi` adds. */
 export type MemoryAiMethods = Required<
@@ -64,6 +71,7 @@ class MemoryAi extends MemoryStore {
         promptVersion: row.promptVersion,
         read: null,
         exampleIds: [],
+        signals: null,
         inputTokens: null,
         outputTokens: null,
         cacheReadTokens: null,
@@ -157,6 +165,7 @@ class MemoryAi extends MemoryStore {
       errorKind: null,
       read: structuredClone(result.read),
       exampleIds: [...(result.exampleIds ?? [])],
+      signals: signalsOf(result.signals),
     });
     this.undoWith(() => Object.assign(row, before));
     this.addUsage(row, result);

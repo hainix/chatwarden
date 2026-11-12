@@ -5,9 +5,11 @@
 //        { type: 'ack', id }                        the player has seen that notice
 //   out: { type: 'welcome', seatId, summary }  `summary` is the profile's one-line standard, to show above the chat
 //        { type: 'chat', seatId, text, lineId }     a delivered line (the sender gets their own back)
-//        { type: 'refused', reason, until?, rule?, noticeId? }
+//        { type: 'refused', reason, until?, rule?, noticeId?, retryAfterMs? }
 //                                                   reason: blocked | rate | length | restricted | gate | banned | profanity
-//                                                   (profanity only when the profile refuses swearing; the default stars it).
+//                                                   (profanity only when the profile refuses swearing; the default stars it),
+//                                                   and slow_mode | flood | duplicate when pacing is on (CW_DEMO_PACE=1 turns on a
+//                                                   2 second slow mode); those carry `retryAfterMs`, the wait in ms, and nothing else.
 //                                                   `rule` is the Community Rule number to show as "Community Rule N";
 //                                                   `noticeId` is the player's own notice that explains it (look it up in
 //                                                   the `notices` frames or "My record"). Both are left out when unknown,
@@ -121,6 +123,13 @@ export interface TinyChatOptions {
    * (see `docs/adoption/moxgate.md` and `examples/ai-anthropic`); the owner can still turn the level down in the hub's Settings.
    */
   demoAi?: boolean;
+  /**
+   * DEMO ONLY: turn on a 2 second slow mode (`overrides.pace.slowModeMs: 2000`), so flood control can be seen with the chat box and over the
+   * WebSocket: a second line inside two seconds is refused with `slow_mode` and the wait. Default: on when the `CW_DEMO_PACE` environment
+   * variable is exactly `1`. An explicit `false` forces it off. A pace you give in `overrides.pace` wins field by field. A real app sets `pace`
+   * in its profile or the owner sets it in the hub (Settings, Advanced).
+   */
+  demoPace?: boolean;
 }
 
 /** The secret to run with, or a throw in production when none was configured. */
@@ -295,6 +304,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
   // The demo AI: only when asked (the option, else CW_DEMO_AI=1). A fake with a scripted rule, so there is no key and no network call.
   const demoAi = opts.demoAi !== undefined ? opts.demoAi : process.env.CW_DEMO_AI === '1';
   if (demoAi) console.warn('tiny-chat: CW_DEMO_AI is on: a scripted fake AI reads new reports (no key, no network). It is a demo, not a moderator.');
+  // The demo slow mode: only when asked (the option, else CW_DEMO_PACE=1). Off, the profile has no pace at all.
+  const demoPace = opts.demoPace !== undefined ? opts.demoPace : process.env.CW_DEMO_PACE === '1';
+  if (demoPace) console.warn('tiny-chat: CW_DEMO_PACE is on: slow mode, a 2 second gap between lines from one player. It is a demo setting; the owner can change it in the hub (Settings, Advanced).');
   const terms = new LiveTerms({ store, pack: opts.pack ?? syntheticTermPack(), clock });
   await terms.load();
 
@@ -332,7 +344,11 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
     // The one-line preset. Try 'standard' or 'strict'; `overrides` changes single fields (see the README).
     profile: 'relaxed',
     // The demo AI starts at level 2 so the pre-filled decision shows; a code override, so the owner can still lower it in Settings.
-    overrides: demoAi ? { ...opts.overrides, ai: { level: 2, ...opts.overrides?.ai } } : opts.overrides,
+    overrides: {
+      ...opts.overrides,
+      ...(demoAi ? { ai: { level: 2, ...opts.overrides?.ai } } : {}),
+      ...(demoPace ? { pace: { slowModeMs: 2000, ...opts.overrides?.pace } } : {}),
+    },
     ...(demoAi ? { ai: { adapter: createFakeModerationAI(demoScript, { id: 'demo-fake' }) } } : {}),
     // The optional profanity package builds the star filter from the profile. Always pass a slur matcher too (above):
     // starring ordinary swearing is not slur protection.
@@ -597,12 +613,14 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
 
       const result = chatwarden.chat.accept(ROOM, seatId, m.text);
       if ('refuse' in result) {
-        const { reason, until, rule, noticeId } = result.refuse;
+        const { reason, until, rule, noticeId, retryAfterMs } = result.refuse;
         if (reason !== 'empty') {
           send(ws, {
             type: 'refused',
             reason,
             ...(until === undefined ? {} : { until }),
+            // A pacing refusal (slow_mode, flood, duplicate) carries the wait in ms, and nothing else.
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
             // Both are the player's own: a rule number and the random handle of their notice, never an identifier.
             ...(rule === undefined ? {} : { rule }),
             ...(noticeId === undefined ? {} : { noticeId }),

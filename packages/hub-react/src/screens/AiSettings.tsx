@@ -65,7 +65,7 @@ function StatusLine({ status, notSetUp, t }: { status: AiStatusView | undefined;
   );
 }
 
-function Numbers({ status, draft, editable, onLearn, t }: { status: AiStatusView | undefined; draft: AiDraft; editable: boolean; onLearn: (on: boolean) => void; t: AiT }) {
+function Numbers({ status, draft, editable, onLearn, signalsSent, t }: { status: AiStatusView | undefined; draft: AiDraft; editable: boolean; onLearn: (on: boolean) => void; signalsSent: boolean; t: AiT }) {
   const { locale, t: hubT } = useHub();
   const id = useId();
   const money = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' });
@@ -82,6 +82,7 @@ function Numbers({ status, draft, editable, onLearn, t }: { status: AiStatusView
           </span>
         </span>
       </label>
+      {signalsSent && <p className="cw-hint">{t('hub.settings.ai.signals')}</p>}
       {status !== undefined && status.available && (
         <ul className="cw-ai-facts-list">
           <li>{t('hub.settings.ai.reads', { count: status.reads, max: status.capCalls })}</li>
@@ -232,7 +233,7 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
         </button>
         {advanced && (
           <div id={`${base}-advanced`}>
-            <Numbers status={readStatus} draft={draft} editable={editable} onLearn={(learn) => setDraftState((d) => ({ ...d, learn }))} t={t} />
+            <Numbers status={readStatus} draft={draft} editable={editable} onLearn={(learn) => setDraftState((d) => ({ ...d, learn }))} signalsSent={state.effective.signals?.feeds?.ai !== undefined} t={t} />
           </div>
         )}
       </div>

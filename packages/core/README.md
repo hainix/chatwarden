@@ -110,9 +110,10 @@ For the moderators' screens and the player's notices, mount the routes in
 
 | Part | What it is for |
 | --- | --- |
-| `cw.rooms` | `seat`, `seatConnection`, `unseat`, `close`: who is in which seat of which room. |
+| `cw.rooms` | `seat`, `seatConnection`, `unseat`, `close`: who is in which seat of which room. `setPace(roomId, pace)` and `pace(roomId)` (`@experimental`) give one room its own slow mode, burst limit and repeat rule, in this process only. See "Slow mode and flood control". |
 | `cw.chat.accept(room, seat, text)` | The answer for one line: `{ deliver }` or `{ refuse: { reason } }`. `visibleTo` applies a viewer's mutes. `restricted(who)` says whether a person is chat-restricted, for typing indicators; `restrictedBySubject(subject)` (`@experimental`) says the same for a subject id from `cw.rooms.subjectAt`, so a server that keeps a connection open need not keep the player's key to ask again. |
 | `cw.mutes` | A player mutes another player for themselves only. |
+| `cw.signals` | `@experimental`. What your game records about a player, counted by distinct source: `record`, `counts`, `kinds`, `boosted`, `forRecord`. See "Signals". |
 | `cw.reports` | `submit` and `addDetail` (players; see "Reporting settings"), `list`, `get` and `reporterRecord` (staff). `reporterRecord(person)` is how the reports a person filed stand: `{ reports, open, actioned, dismissed, badFaith, suspendedUntil, reasonMatched, reasonDecided, accuracy }`. `reporterAccuracy(people)` is how often each person's recent reports turned out to be unfounded (see "Reporter accuracy"). |
 | `cw.decide(input)` | A moderator closes a report and writes the sanctions and notices in one transaction. Safe to send twice. `reason` is required, except for a `no_action` with no actions (a one-click dismissal): leave it out and the standard reason `NO_ACTION_DEFAULT_REASON` (`No action needed`) is stored. |
 | `cw.sanctions` | `apply` and `revoke`, for a moderator who acts without a report. `forPerson(subject)` and `list({ cursor?, limit?, source? })` (staff) read sanctions as `SanctionGroupView`s: one per group, built from the person's own row, so no IP, hash or stored value is in them. |
@@ -126,7 +127,7 @@ For the moderators' screens and the player's notices, mount the routes in
 | `cw.names.check` | May a player use this as a name? |
 | `cw.history`, `cw.suggest` | A person's recent record, and what the preset suggests as the next step. |
 | `cw.rules`, `cw.profile`, `cw.limits`, `cw.summary`, `cw.documents` | The rules, standard and numbers in force, and the written code of conduct and guides. `cw.profile` and `cw.summary` are read live: the profile in force is your code's profile with the owner's stored edits on top (see "The editable profile"), so read it when you need it and never keep it. |
-| `cw.policy` | The editable profile: `get`, `save`, `preview`, `reset` and `refresh`. The lengths a moderator is offered, the ladder, the first offences, the repeat rule, the area and severe rules and the guideline outcome texts can be edited at runtime and are stored in your store. |
+| `cw.policy` | The editable profile: `get` (it also reports `limits`, read only: the chat rate in force and the signals retention), `save`, `preview`, `reset` and `refresh`. The lengths a moderator is offered, the ladder, the first offences, the repeat rule, the area and severe rules and the guideline outcome texts can be edited at runtime and are stored in your store. |
 | `cw.gaps`, `cw.audit` | Rule gaps for the periodic review, and the staff audit trail. |
 | `cw.on(type, listener)` | Events: `report.created`, `report.closed`, `sanction.applied`, `sanction.revoked`, `gap.created`, `auto.restricted`. |
 | `cw.purge`, `cw.ready`, `cw.flush`, `cw.close` | Housekeeping. |
@@ -190,6 +191,9 @@ cw.policy.reset('durations'); // put one section back to the base; reset() puts 
   cannot be used: it is then ignored, the base stays in force, and one `chatwarden.policy_layer_invalid` line is logged. `kind` is `'unreadable'`
   when the stored text could not be read at all (corrupted, not JSON, not an object), so the owner's edits are gone until they save again, and
   `'invalid'` when it was read but a setting is not valid (a field from a newer kit, say). A save or a full `reset()` repairs either.
+  `layer` is the layer in force: a stored signal feed that can no longer be used (its kind is no longer declared in code, or its window is longer
+  than `retention.signalsMs` now allows) is dropped alone, the rest of the layer stays, and `dropped` (`[{ feed, reason }]`, a feed name and a reason
+  code, never a kind or a rule id; `@experimental`) says what went. Send `layer` back to `save` and it is accepted and repairs the stored row.
 - **`save(layer, { version, actor, reason })`** stores the whole layer: a section you leave out goes back to the base. It answers
   `{ ok: true, version, changed }`, `{ ok: false, error: 'conflict' }` for a stale `version` (nothing is written),
   `{ ok: false, error: 'invalid', path }` for a layer that touches a setting that is not editable or would make the profile invalid
@@ -276,6 +280,119 @@ const res = await cw.reports.addDetail(reportId, 'seat-1', { reason: 'cheating',
 - **Your own store.** `addReportDetail` and `loadReporterDecisions` are optional on `Store`. Without the first, `addDetail` answers `off`; without the
   second, the accuracy counts are 0. `insertReport` must keep `reportedReason`, and `listReports` must apply the `reason` filter (`null` means none).
 
+## What is experimental in 0.1.8
+
+These may change before 0.2, and are marked `@experimental` in the types: `PaceSettings`, `ResolvedPace`, `resolvePace`, `mergePace`, `checkPace`,
+`PACE_SUGGESTIONS`, `cw.rooms.setPace`, `cw.rooms.pace`, `cw.signals` and every signal type (`SignalInput`, `SignalCount`, `SignalSettings`, the feeds,
+`PolicyDropped`, `PolicyLimits`, `PolicyState.limits` and `.dropped`), `SuggestContext.hideSignalText`, `Suggestion.signals`, `signalBoost` in
+`cw.cases.next`, `BUILTIN_SIGNAL_KINDS`, `withMemorySignals`, the `pace` prop of `RestrictedChatLine` and `secondsLeft` in `@chatwarden/player-react`.
+
+## Slow mode and flood control
+
+Optional and off until you set it, `@experimental` until 0.2 and new in 0.1.8. Three checks pace one player's lines in one room: **slow mode**
+(at least `slowModeMs` between lines, 500 to 600 000), a **burst limit** (at most `burst.lines` lines in any `burst.windowMs`: 2 to 100 lines
+in 1 000 to 600 000 ms) and **repeats** (the same line again inside `duplicateWindowMs`, 1 000 to 3 600 000, is refused). Set them in code with
+`overrides.pace`, or the owner sets them in the hub (Settings, Advanced, "Slow mode and flooding"); the stored layer wins over code. The presets set
+nothing, so no install changes by itself.
+
+```ts
+import { createChatwarden } from '@chatwarden/core';
+import { createMemoryStore } from '@chatwarden/store-memory';
+
+const cw = await createChatwarden({
+  store: createMemoryStore(),
+  secret: 'a-long-random-secret',
+  platform: { identify: (ctx) => ctx as { clientKey: string } },
+  overrides: { pace: { slowModeMs: 2000, burst: { lines: 6, windowMs: 10_000 }, duplicateWindowMs: 15_000 } },
+});
+
+// One room that differs, in this process, until the room closes: a tournament final is slower, a practice room is not paced at all.
+cw.rooms.setPace('tournament:final', { slowModeMs: 3000 });
+cw.rooms.setPace('practice', { slowModeMs: null, burst: null, duplicateWindowMs: null });
+console.log(cw.rooms.pace('tournament:final')); // the pace in force there: the defaults with the override on top
+```
+
+- **A refusal, not a sanction.** `cw.chat.accept` answers `{ refuse: { reason, retryAfterMs } }` with `reason` `'slow_mode'`, `'flood'` or
+  `'duplicate'`, and `retryAfterMs` (at least 1) is when the same player may try again, in milliseconds from now. There is no rule, no notice and no
+  text with it. **A new refusal reason**: a `switch (reason)` that ends in `assertNever` will not compile until it handles the three, though a kit
+  can only send them after you turn pacing on. The staff routes and the chat box carry them through (`@chatwarden/http`, `@chatwarden/player-react`).
+- **The order.** After the length check and before the fixed rate limit, so a player hammering a slow-mode room reads "slow mode" and not "too fast". A
+  line the fixed rate refuses does not count toward pacing, and a refusal never changes pacing state (repeating a refused line cannot extend its own
+  block). Repeats compare the line with letters and digits only, case and width folded and combining marks kept, so `gg` and `ok` (under three
+  characters) are never repeats; only a short digest is kept, never the text.
+- **Per process.** Pacing state lives in memory in the process that serves the room and is lost on restart, like the fixed rate limit. Route a room's
+  chat to one process for the full effect; send one player's lines to several and the effective limit is up to that many times looser. Nothing is shared
+  or written, by design: a store round trip per line is the cost this exists to avoid. At most 50 000 (room, player) states are kept (`PACE_KEYS_MAX`).
+  `cw.rooms.setPace` is per process as well: call it where you create the room, in each process that serves it.
+- **A burst looser than the fixed limit never triggers.** `limits.chatRate` (3 per 5 seconds by default) answers first inside the same window; the hub
+  says so beside the field, with the real numbers (`cw.policy.get().limits.chatRate`).
+- **Flooding is remembered.** When the burst limit trips, the built-in signal `flood_triggered` ("Flooded the chat") is recorded for that player in that
+  room, at most once a window, whether or not you declared any signals (see "Signals"). It needs a store with the signal methods, else it is skipped.
+- **Suggested values.** `PACE_SUGGESTIONS` (relaxed: burst 10 in 10 s, repeats 10 s; standard: 6 in 10 s, 15 s; strict: slow mode 2 s, 5 in 10 s, 30 s) is
+  what the hub's "Use suggested values" button fills in; nothing applies them by itself. `resolvePace`, `mergePace` and `checkPace` validate and merge.
+- **To try it**, run `examples/tiny-chat` with `CW_DEMO_PACE=1` (a 2 second slow mode) and open the page.
+
+## Signals
+
+Optional, `@experimental` until 0.2 and new in 0.1.8. A signal is one fact your game records about a player ("muted by another player", "kicked from a
+room", "left mid-game"). The kit counts them by distinct source and shows the counts where a profile rule says so. **A signal never acts on its own: it
+never writes a sanction, a mute or a notice, and a person always decides.** Nothing is recorded or shown until you declare kinds and switch a feed on.
+
+```ts
+import { createChatwarden } from '@chatwarden/core';
+import { openStore } from '@chatwarden/store-sqlite';
+
+const cw = await createChatwarden({
+  store: openStore({ path: './chatwarden.db' }),
+  secret: process.env.CHATWARDEN_SECRET!,
+  platform: { identify: (ctx) => ctx as { clientKey: string } },
+  overrides: {
+    signals: {
+      kinds: {
+        muted_by_player: { label: 'Muted by other players', polarity: 'negative' },
+        kicked_from_room: { label: 'Kicked from a room', polarity: 'negative', weight: 2 },
+        commended: { label: 'Commended by other players', polarity: 'positive' },
+      },
+      feeds: { record: { kinds: '*', windowDays: 14 } },
+    },
+  },
+});
+
+// From the game's own events, never from every chat line: one small write each.
+const player = { clientKey: 'a-client-key' };
+const muter = { clientKey: 'another-client-key' };
+cw.signals.record({ kind: 'muted_by_player', subject: player, by: muter, roomId: 'lobby-7' });
+console.log(cw.signals.counts(cw.rooms.subjectAt('lobby-7', 'p1') ?? 's_unknown'));
+```
+
+- **Kinds are code.** A kind id is a lower-case slug (`muted_by_player`); the label is plain text, 1 to 60 characters; `polarity` is `'negative'` or `'positive'`;
+  `weight` is 0 to 10 (default 1). The kit declares one itself, `flood_triggered`, which you may relabel or re-weight but not make positive.
+- **`cw.signals.record(input)`** is synchronous, fenced and never throws: it returns `true` when a row was written and `false` for any refusal
+  (logged by reason code, at most once a minute, never an id). `subject` and `by` are a subject id the kit already knows or a `RawWho`
+  (`{ clientKey?, accountId?, ip? }`, each under 513 characters) that it has already seen: a stranger is refused, never created. `by`, `roomId` and `at`
+  may be left out or `null`. A player cannot signal themselves (also across a merge), `at` may not be more than 5 minutes ahead or older than the
+  retention, and `roomId` is the game's own id: 1 to 64 of `A-Z a-z 0-9 _ . : -` (the built-in flood row uses a digest of a room id that does not fit).
+- **Events, not lines.** Record what happens in your game (a mute, a kick), not every chat line: each record is a store write.
+- **Counting is by distinct source.** A source is the `by` player; with no `by`, the room; with neither, the UTC day. A thousand mutes from one
+  player are one source. At most one row per kind, subject and source per `guards.perByWindowMs` (a day by default): the cap is a calendar bucket
+  (`floor(at / perByWindowMs)`), not a rolling window, so two rows a millisecond apart across a bucket edge both count, and changing the window later
+  re-buckets old rows. The optional `signals.accountAgeDays` hook (asked at most once a minute per player) with `guards.newAccount` makes a new account
+  count for a fraction of one. What this cannot stop is several real accounts that agree to signal one player: that is why a signal never acts.
+- **Four feeds** (`profile.signals.feeds`, each off until set, editable in the hub: Settings, Advanced, "Signals"; a layer's `feeds` replaces the code's
+  wholesale): **`record`** (counts on the Person page), **`queue`** (a person who meets a threshold is taken ahead of older ordinary cases, capped, and an
+  overdue case still comes first), **`ladder`** (rules that add a sentence to the suggested step, or raise it one step; negative kinds only for a raise)
+  and **`ai`** (the counts as background for the AI read). A threshold is `kinds`, `minDistinct` (1 to 50), `windowDays` (1 to 90 and not above
+  `retention.signalsMs`) and an optional `minWeight`.
+- **Retention.** Signal rows are kept 90 days by default (`retention.signalsMs`, never less than 14); a feed window longer than that is refused, in code
+  and in the hub, which reads the number from `cw.policy.get().limits.signalsMs`. A stored feed that can no longer be used (its kind is gone, or its window
+  is now too long) is dropped alone and reported as `dropped` on `cw.policy.get()`; the rest of the layer stays.
+- **Your store needs the signal methods** (`insertSignal`, `listSignalSources`, `purgeSignals`, optional on `Store`). The SQLite store has them (migration 21,
+  one-way: back up the database before upgrading, since 0.1.7 and older tools cannot read a database 0.1.8 has opened); the in-memory store has them only through
+  `withMemorySignals(store)`. Without them `record` answers `false` and logs `chatwarden.signals_store_unsupported` once, and declaring kinds or feeds throws at
+  creation. The kit loads the signal code only for a store that has the methods.
+- **Reads** (staff only, never to a player): `cw.signals.counts(subject, { windowDays?, kinds? })`, `kinds()`, `boosted(people)` and `forRecord(subject)`.
+  The `@chatwarden/http` routes read them for you and show a count only to a role that holds `history.read`.
+
 ## The AI (levels 1 and 2)
 
 Optional help for the moderator, `@experimental` until 0.2 and new in 0.1.7. With an adapter, the kit reads each new report after the player's
@@ -309,7 +426,9 @@ console.log(cw.ai.status()); // { available: true, level: 0, maxLevel: 2, state:
   (`AI_MAX_PREFILL_MS`), and a suggestion to uphold or note needs a cited line by the reported person.
 - **What leaves your server.** Only the chosen lines of the report with the speakers replaced by `P1`, `P2`, ..., the reporter's reason and
   note (redacted), your Community Rules and the standard. Flags, mutes and report counts are never sent, nor any id, handle, IP, hash, room or
-  tag. A line the word filter blocked is sent as typed unless you set `blockedLines: 'mask'`: the model needs the words to judge intent.
+  tag. The one exception is the signal feed `feeds.ai` (`profile.signals`, off unless you set it): the counts you chose about the reported player
+  only are sent as one last row, a label, a number of players and a number of days, and the read records what it was shown (shown to moderators as
+  "Context included: N signal counts"). The prompt version is 3 for everyone, whether or not you use signals: the stable part of the prompt gained a short paragraph about context, so it changes the input hash, and after upgrading from 0.1.7 every stored read is marked stale and read again, once per open report, the first time its case is opened or when the background sweep reaches it. Those reads spend your daily call and money caps, and your provider's prompt cache starts cold. A line the word filter blocked is sent as typed unless you set `blockedLines: 'mask'`: the model needs the words to judge intent.
 - **What it costs.** `dailyBudgetMicros` (default $1.00 a UTC day) is set in code and a hub cannot raise it. The owner also sets a ceiling on
   calls a day (`profile.ai.dailyCalls`, default 5 000), so an adapter that reports no cost still cannot run unbounded. There are at most 30 calls
   a minute and 2 at once, a hard deadline per call (`timeoutMs`) and a breaker that opens after repeated failures. At a limit, reads pause. A call that a shutdown aborts books nothing, so a restart loop around a slow provider can under-count the day's money; the call ceiling still bounds it.
@@ -389,7 +508,7 @@ in a browser.
 | `gate` | `(roomId, subject) => boolean`: who may chat. False refuses the line with `'gate'`. |
 | `onReport` | Told once for each stored report. It carries subject ids and the evidence: staff channels only. |
 | `onAutoRestrict` | Told when a blocked line earned an automatic timeout. The same moment is also the `auto.restricted` event. |
-| `retention` | How long rows are kept and how often the purge runs (every 6 hours by default), or `false` to run `purge()` yourself. Defaults: reports 90 days, strikes 30, notices 90, audit 365. Floors apply. |
+| `retention` | How long rows are kept and how often the purge runs (every 6 hours by default), or `false` to run `purge()` yourself. Defaults: reports 90 days, strikes 30, notices 90, audit 365, signals 90 (`signalsMs`, never less than 14). Floors apply. |
 | `profile` | `'relaxed'`, `'standard'` (default), `'strict'`, or your own profile from `defineProfile`. |
 | `overrides` | Changes to the profile, merged onto it (`{ profanity: { mode: 'allow' } }`). A list you give replaces the preset's list. |
 | `limits` | The numbers the kit enforces: line length and rate, strikes and timeouts, report limits. Each must be a whole number above 0. |
@@ -397,6 +516,7 @@ in a browser.
 | `rules` | The numbered Community Rules, from `defineRules`. Defaults to the preset's starter set. |
 | `autoRestrictRule` | The rule number the automatic slur filter cites (default 1). Must be an active rule. |
 | `ai` | `{ adapter, maxLevel?, dailyBudgetMicros?, ... }`: turns on AI reads (levels 1 and 2). Off without it. See "The AI (levels 1 and 2)" below. |
+| `signals` | `{ accountAgeDays? }`: the one hook the profile cannot hold (how old a player's account is, for the new-account guard). The kinds, guards and feeds are in `profile.signals`. Needs a store with the signal methods (SQLite; `withMemorySignals(store)` for the in-memory store). `@experimental`. |
 
 Bad options throw at creation (`ProfileError`, `RangeError`), before the store is touched.
 

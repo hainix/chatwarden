@@ -4,7 +4,7 @@ import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { roleAtLeast } from '../permissions.js';
 import { applyDecision, checkDurationsOffered, needForDecision, parseDecision, peopleOf } from './apply.js';
-import type { AdminContext } from './context.js';
+import type { AdminCall, AdminContext } from './context.js';
 import { gateCase } from './claims.js';
 import { bodyAiEcho, bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
 
@@ -71,6 +71,12 @@ export interface ReportSummary {
    * server's rows). Staff only.
    */
   ai?: AiBrief | null;
+  /**
+   * Present (true) only when the queue signal feed (`feeds.queue`) is on, the caller's role holds `history.read`, and the reported person
+   * meets its threshold; absent otherwise, so a server with the feed off answers exactly as before. A ranking hint (the hub's priority
+   * sort adds a capped amount): never a reason to hide a report, and it names no signal. Staff only. @experimental
+   */
+  boosted?: true;
 }
 
 /** The part of a reporter's accuracy a queue row carries. */
@@ -103,6 +109,7 @@ const summarize = (
   label: string | null,
   accuracy: ReporterAccuracy | undefined,
   ai: AiBrief | undefined,
+  boosted = false,
 ): ReportSummary => ({
   id: r.id,
   createdAt: r.createdAt,
@@ -124,6 +131,7 @@ const summarize = (
   reporterAccuracy:
     accuracy === undefined ? null : { decided: accuracy.decided, unfounded: accuracy.unfounded, falseRate: accuracy.falseRate, habitual: accuracy.habitual },
   ai: ai === undefined ? null : { ...ai },
+  ...(boosted ? { boosted: true as const } : {}),
 });
 
 /**
@@ -132,7 +140,8 @@ const summarize = (
  *   the reports that gave no reason; a malformed one is 400 `invalid_query`), no evidence beyond the `targetHandle` and `reporterHandle`
  *   (`report.view`, no target)
  *   Each item also carries `claim` and `viewing` for its open cases (see {@link ReportSummary}).
- *   An open item also carries `ai` (the AI's brief, see {@link ReportSummary.ai}), or null.
+ *   An open item also carries `ai` (the AI's brief, see {@link ReportSummary.ai}), or null. With the queue signal feed (`feeds.queue`) on, an open
+ *   item whose person meets it also carries `boosted: true` (only for a caller who holds `history.read`); with the feed off the key is absent.
  * - `GET /reports/:id?level`: one report (with `reportedReasonLabel` beside its `reportedReason`) with each person's history and the
  *   suggestion for the reported person (`rule` is the first rule of the reported reason, `'uncovered'` with none), and the
  *   `claim` on the reported person's case (`{ by, since, until }` or null) (`report.view`). It also carries `ai`: null, or the AI's read
@@ -140,7 +149,10 @@ const summarize = (
  *   `recommendation` is null at level 1 and otherwise `{ verdict, severity, rule, evidenceLineIds, step, stepWithinCeiling }` (`step` is
  *   the ladder's suggestion for the AI's conduct level, computed now; `stepWithinCeiling` says a one-key accept may fill it). Opening a
  *   case with no read, or a stale one, queues a read. Never an error: with the AI off, broken or over budget it is null.
- * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
+ * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`). When a signal ladder rule (`feeds.ladder`) fired it also
+ *   carries `signals: { raised, ids }` and the rule's sentence is in `why`; `GET /reports/:id` carries the same in its `suggest`. Both are only
+ *   for a caller whose role holds `history.read` (the sentence is a count of what other players did, like the counts on the record): a caller
+ *   without it gets the same outcome and label, but no `signals` key and no such sentence in `why`.
  * - `POST /reports/:id/decide { verdict, actions, reason?, evidence?, takeOver? }`: decide (`report.decide`, replays too). `reason` may be
  *   left out (or blank) only for a `no_action` with no actions, a one-click dismissal: the core then stores `NO_ACTION_DEFAULT_REASON`.
  *   Every other decision needs a real reason (400 `invalid_request`). The body may carry `ai: { readId, accepted, severity? }`, the read the
@@ -160,7 +172,8 @@ const summarize = (
  *   report closed (best effort). `dryRun` counts and writes nothing. An unknown ref is 200 with zeros. `reason` is not accepted.
  * - `GET /people/:ref/history?limit`: a person's actions, recent reports against them, their sanctions as
  *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
- *   filed stand, `asReporter` (with `reasonMatched` of `reasonDecided`: how often their reported reason was borne out by the decision), and `handle`, their handle on the newest report filed against them that recorded one, or null (`history.view`)
+ *   filed stand, `asReporter` (with `reasonMatched` of `reasonDecided`: how often their reported reason was borne out by the decision), and `handle`, their handle on the newest report filed against them that recorded one, or null (`history.view`). With the record signal feed (`feeds.record`) on it also carries `signals`: the chosen kinds' counts over the chosen window
+ *   (`SignalCount[]`, `[]` when none qualifies); with the feed off the key is absent.
  */
 export function reportRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
@@ -177,6 +190,10 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
     if (report === null) throw new NotFoundError();
     return report;
   };
+
+  // The signal rules' sentence is a count of what other players did to the person: it needs `history.read`, like the counts on the record. The
+  // outcome still moves (that is what a decider must see); only the sentence and the `signals` key are left out for a caller without it.
+  const hideSignalsFor = (c: AdminCall): { hideSignalText?: true } => (roleAtLeast(c.authz.role, ctx.permissions['history.read']) ? {} : { hideSignalText: true });
 
   return {
     'GET /reports': ctx.secure('reports.read', (c) => {
@@ -196,7 +213,10 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // The reporters' false-report figures: one batch for the page, for a caller who may read people's histories only. A failure
       // here must not take the queue down: the rows then carry null.
       let accuracy = new Map<string, ReporterAccuracy>();
+      let boosted = new Set<string>();
       if (roleAtLeast(c.authz.role, ctx.permissions['history.read'])) {
+        // Who meets the queue signal feed: one grouped read for the page, and none at all with the feed off. It never throws.
+        if (open.length > 0 && cw.profile.signals.feeds.queue !== undefined) boosted = cw.signals.boosted(open);
         const reporters = [...new Set(page.items.filter((r) => r.status === 'open').map((r) => r.reporterPerson))];
         if (reporters.length > 0) {
           try {
@@ -211,7 +231,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       c.audit('report.view');
       const items = page.items.map((r) =>
         r.status === 'open'
-          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), accuracy.get(r.reporterPerson), briefs.get(r.id))
+          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), accuracy.get(r.reporterPerson), briefs.get(r.id), boosted.has(r.targetPerson))
           : summarize(r, undefined, undefined, labelOf(r), undefined, undefined),
       );
       return { status: 200, body: { items, next: page.next } };
@@ -223,7 +243,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const report = load(id);
       const rule = ruleOf(cw, report);
       const history = Object.fromEntries(peopleOf(report).map((p) => [p, cw.history(p)]));
-      const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report) });
+      const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report), ...hideSignalsFor(c) });
       const claim = claimView(claimOf(report));
       // Opening a case is when a missing or stale read is asked for; the answer is whatever is stored now.
       const ai = cw.ai.read(id, { open: true });
@@ -251,6 +271,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (person !== undefined && !named.has(person)) throw new ValidationError();
       const suggestion = cw.suggest(person ?? report.targetPerson, level, rule ?? ruleOf(cw, report), {
         roomId: roomOf(report),
+        ...hideSignalsFor(c),
       });
       c.audit('suggest', { type: 'report', ref: id });
       return { status: 200, body: suggestion };
@@ -348,8 +369,10 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const handle = filed.find((r) => r.targetHandle !== '')?.targetHandle ?? null;
       const sanctions = cw.sanctions.forPerson(ref);
       const asReporter = cw.reports.reporterRecord(ref);
+      // The Person page record (`feeds.record`): the chosen kinds and window, counted by distinct source. Absent with the feed off.
+      const signals = cw.profile.signals.feeds.record === undefined ? undefined : cw.signals.forRecord(ref);
       c.audit('history.view', { type: 'person', ref });
-      return { status: 200, body: { history, reports, sanctions, asReporter, handle } };
+      return { status: 200, body: { history, reports, sanctions, asReporter, handle, ...(signals === undefined ? {} : { signals }) } };
     }),
   };
 }

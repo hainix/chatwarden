@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import axe from 'axe-core';
 import { describe, expect, it } from 'vitest';
+import { MemoryStore, withMemoryAi, withMemorySignals } from '@chatwarden/store-memory';
 import { renderHub } from './render.js';
 import { DAY, HOUR, hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
@@ -86,6 +87,31 @@ describe.each(['light', 'dark'] as const)('axe on the person page, %s theme', (t
     w.intercept.fn = (req) => (/\/history$/.test(req.path) ? { status: 500, body: { error: 'internal', message: 'x' } } : undefined);
     const { container } = renderHub(w, { theme, path: '/people/s_nobody_000000' });
     await screen.findByRole('alert');
+    expect(await violations(container)).toEqual([]);
+  });
+});
+
+describe.each(['light', 'dark'] as const)('axe on the person page with signal lines, %s theme', (theme) => {
+  it('the lines inside the Timeline panel have no violations', async () => {
+    const w = await hubWorld({
+      store: withMemorySignals(withMemoryAi(new MemoryStore())),
+      overrides: {
+        signals: {
+          kinds: { muted_by_player: { label: 'Muted by other players', polarity: 'negative' }, commended: { label: 'Commended by other players', polarity: 'positive' } },
+          feeds: { record: { kinds: '*', windowDays: 14 } },
+        },
+      } as never,
+    });
+    const f = await w.fileRich({ target: 'Vlemmo', reporter: 'Rae' });
+    for (const [kind, count] of [['muted_by_player', 3], ['commended', 2]] as const) {
+      for (let i = 0; i < count; i += 1) {
+        const by = `axe-${kind}-${i}`;
+        w.cw.rooms.seat(`room-${by}`, 'p1', { clientKey: by }, 'S');
+        w.cw.signals.record({ kind, subject: f.person, by: w.cw.rooms.subjectAt(`room-${by}`, 'p1') as string });
+      }
+    }
+    const { container } = renderHub(w, { theme, path: `/people/${f.person}` });
+    await screen.findByRole('list', { name: 'Signals from other players' });
     expect(await violations(container)).toEqual([]);
   });
 });

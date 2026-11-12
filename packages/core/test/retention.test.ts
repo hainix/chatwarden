@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { purge, RETENTION_DEFAULTS } from '../src/retention.js';
+import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from '../src/retention.js';
+import { ProfileError } from '../src/profile.js';
 import { applySanction, revokeSanction } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
-import type { NoticeRow, SanctionKind, StoredReport, StrikeRow, SubjectId } from '../src/types.js';
-import { MemoryStore } from '@chatwarden/store-memory';
+import type { NoticeRow, SanctionKind, SignalRow, StoredReport, StrikeRow, SubjectId } from '../src/types.js';
+import { MemoryStore, withMemorySignals } from '@chatwarden/store-memory';
 import { markReportBadFaith } from './markBadFaith.js';
 
 const H = 3_600_000;
@@ -11,7 +12,7 @@ const DAY = 24 * H;
 const NOW = 1_800_000_000_000;
 
 function setup() {
-  const store = new MemoryStore();
+  const store = withMemorySignals(new MemoryStore());
   const clock = { now: () => NOW };
   const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
   const subject = (key: string): SubjectId => {
@@ -76,6 +77,7 @@ describe('defaults', () => {
       auditMs: 365 * DAY,
       aiOutcomesMs: 365 * DAY,
       aiExamplesMs: 180 * DAY,
+      signalsMs: 90 * DAY,
     });
   });
 });
@@ -389,15 +391,15 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
     t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
-    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
+    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0 });
   });
 
   it('on an empty store, or run twice, deletes nothing', async () => {
     const { store } = setup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0 });
     store.insertReport(report('r1', NOW - 100 * DAY));
     await purge(store, NOW);
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0 });
   });
 
   it('a custom policy overrides the defaults, field by field', async () => {
@@ -406,9 +408,9 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 10 * DAY));
     await t.sanction(t.subject('k1'), NOW - 20 * DAY, DAY); // ended 19 d ago
     const res = await purge(t.store, NOW, { reportsMs: 5 * DAY });
-    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
+    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0 });
     const res2 = await purge(t.store, NOW, { strikesMs: 5 * DAY, sanctionAfterEndMs: 5 * DAY });
-    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
+    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0 });
   });
 
   it('a zero window purges everything already past', async () => {
@@ -441,7 +443,7 @@ describe('purge: result, policy and scope', () => {
 
   it('a finite now (zero, negative) is accepted (control)', async () => {
     const t = setup();
-    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
+    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0 });
     await expect(purge(t.store, -5)).resolves.toBeDefined();
   });
 
@@ -617,5 +619,116 @@ describe('purge: notices', () => {
       }),
     ).toThrow('x');
     expect(left(store)).toEqual(['old']);
+  });
+});
+
+describe('signals retention', () => {
+  const sig = (id: string, at: number, kind = 'muted_by_player'): SignalRow => ({
+    id,
+    kind,
+    subject: 's_x',
+    sourceKey: `d:${id}`,
+    bySubject: null,
+    roomId: null,
+    at,
+    weight: 1,
+    capBucket: Math.floor(at / DAY),
+  });
+  const kept = (store: ReturnType<typeof withMemorySignals<MemoryStore>>): string[] =>
+    store
+      .listSignalSources(['s_x'], 0)
+      .map((r) => r.sourceKey.slice(2))
+      .sort();
+
+  it('the default is 90 days', () => {
+    expect(RETENTION_DEFAULTS.signalsMs).toBe(90 * DAY);
+  });
+
+  it('14 days is accepted, 13 days is refused naming retention.signalsMs', () => {
+    expect(() => checkRetentionFloors({ signalsMs: 14 * DAY }, 30 * DAY)).not.toThrow();
+    expect(() => checkRetentionFloors({ signalsMs: 400 * DAY }, 30 * DAY)).not.toThrow();
+    for (const bad of [13 * DAY, 14 * DAY - 1, 0, -1]) {
+      let caught: unknown;
+      try {
+        checkRetentionFloors({ signalsMs: bad }, 30 * DAY);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught, String(bad)).toBeInstanceOf(ProfileError);
+      expect((caught as ProfileError).path).toBe('retention.signalsMs');
+      expect((caught as ProfileError).message).toContain('two weeks');
+    }
+  });
+
+  it('NaN, Infinity and a non-number are refused naming retention.signalsMs', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, '90', null, true]) {
+      let caught: unknown;
+      try {
+        checkRetentionFloors({ signalsMs: bad as never }, 30 * DAY);
+      } catch (err) {
+        caught = err;
+      }
+      expect((caught as ProfileError | undefined)?.path, String(bad)).toBe('retention.signalsMs');
+    }
+  });
+
+  it('a policy without signalsMs is as valid as before', () => {
+    expect(() => checkRetentionFloors({}, 30 * DAY)).not.toThrow();
+    expect(() => checkRetentionFloors({ reportsMs: 1 }, 30 * DAY)).not.toThrow();
+  });
+
+  it('purge deletes rows older than the default and reports how many', async () => {
+    const { store } = setup();
+    store.insertSignal(sig('old', NOW - 91 * DAY));
+    store.insertSignal(sig('edge', NOW - 90 * DAY));
+    store.insertSignal(sig('new', NOW - 1 * DAY));
+    const res = await purge(store, NOW);
+    expect(res.signals).toBe(1);
+    expect(kept(store)).toEqual(['edge', 'new']);
+  });
+
+  it('the cutoff is strict: a row exactly signalsMs old is kept, one millisecond older goes', async () => {
+    const { store } = setup();
+    store.insertSignal(sig('exact', NOW - 20 * DAY));
+    store.insertSignal(sig('older', NOW - 20 * DAY - 1));
+    const res = await purge(store, NOW, { signalsMs: 20 * DAY });
+    expect(res.signals).toBe(1);
+    expect(kept(store)).toEqual(['exact']);
+  });
+
+  it('purge deletes flood_triggered rows with the same field', async () => {
+    const { store } = setup();
+    store.insertSignal(sig('f-old', NOW - 30 * DAY, 'flood_triggered'));
+    store.insertSignal(sig('f-new', NOW - 5 * DAY, 'flood_triggered'));
+    store.insertSignal(sig('m-old', NOW - 30 * DAY));
+    const res = await purge(store, NOW, { signalsMs: 14 * DAY });
+    expect(res.signals).toBe(2);
+    expect(kept(store)).toEqual(['f-new']);
+  });
+
+  it('an invalid signalsMs makes purge throw and delete nothing', async () => {
+    const { store } = setup();
+    store.insertSignal(sig('a', NOW - 500 * DAY));
+    for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) await expect(purge(store, NOW, { signalsMs: bad })).rejects.toThrow(/purge/);
+    expect(kept(store)).toEqual(['a']);
+  });
+
+  it('a store without the method purges the rest and reports 0 signals', async () => {
+    const { store } = setup();
+    store.insertStrike(strike('old', NOW - 60 * DAY));
+    Object.defineProperty(store, 'purgeSignals', { value: undefined });
+    const res = await purge(store, NOW);
+    expect(res.signals).toBe(0);
+    expect(res.strikes).toBe(1);
+  });
+
+  it('is part of the one transaction: a later failure restores the signals', async () => {
+    const { store } = setup();
+    store.insertSignal(sig('old', NOW - 200 * DAY));
+    store.purgeMutes = () => {
+      throw new Error('disk full');
+    };
+    await expect(purge(store, NOW)).rejects.toThrow('disk full');
+    expect(kept(store)).toEqual(['old']);
   });
 });

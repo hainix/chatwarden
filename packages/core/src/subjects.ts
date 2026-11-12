@@ -201,6 +201,11 @@ export class SubjectIndex {
     return keyWins ? keyRoot : accountRoot;
   }
 
+  /** Has this index ever seen the subject id (a merged-away one included)? A pure read: it creates nothing. */
+  knows(id: SubjectId): boolean {
+    return typeof id === 'string' && this.created.has(id);
+  }
+
   /**
    * The surviving subject `id` was merged into, following the chain to the
    * root. An id the index has never seen is returned unchanged.

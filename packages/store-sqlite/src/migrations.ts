@@ -533,4 +533,38 @@ CREATE TABLE kit_ai_outcomes (
 CREATE INDEX kit_ai_outcomes_by_rule ON kit_ai_outcomes (rule, decided_at);
 `,
   },
+  {
+    version: 21,
+    // Flood control and signals (0.1.8). One new table with three indexes, and one nullable column on a table migration 20 made; no
+    // existing row is touched, and the runner wraps this in one savepoint with the version bump, so a failure leaves version 20, no
+    // table and no column.
+    //   kit_signals holds one row per signal a game recorded about a player: ids and numbers only, no text, handle or seat.
+    //     `source_key` is `b:<canonical by>` (the player who produced it), `r:<roomId>` or `d:<UTC day>` (a source-less signal is
+    //     counted per room, or per day without one). `cap_bucket` is floor(at / perByWindowMs) and the UNIQUE index on
+    //     (kind, subject_id, source_key, cap_bucket) is the per-source cap: of two processes writing the second row of a bucket exactly
+    //     one succeeds, and a script cannot grow the table. `weight` is the effective weight stored at record time (0 or more).
+    //       kit_signals_cap (kind, subject_id, source_key, cap_bucket): UNIQUE; the arbiter of `INSERT ... ON CONFLICT DO NOTHING`.
+    //       kit_signals_by_subject (subject_id, at): the grouped read for a person and their aliases in a window (listSignalSources).
+    //       kit_signals_by_at (at): the retention sweep (`at < ?`).
+    //   kit_ai_reads.signals_json is the counts the AI read was shown (label, polarity, distinct and window only), or NULL for a read made
+    //     without the signals feed, and for every read that exists now. It needs migration 20; if release order ever changes so that 20 is
+    //     not present, this one line moves to a later migration and nothing else here depends on the AI tables.
+    sql: `
+CREATE TABLE kit_signals (
+  id          TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,
+  subject_id  TEXT NOT NULL,
+  source_key  TEXT NOT NULL,
+  by_subject  TEXT,
+  room_id     TEXT,
+  at          INTEGER NOT NULL,
+  weight      REAL NOT NULL CHECK (weight >= 0),
+  cap_bucket  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX kit_signals_cap        ON kit_signals (kind, subject_id, source_key, cap_bucket);
+CREATE INDEX        kit_signals_by_subject ON kit_signals (subject_id, at);
+CREATE INDEX        kit_signals_by_at      ON kit_signals (at);
+ALTER TABLE kit_ai_reads ADD COLUMN signals_json TEXT;
+`,
+  },
 ];

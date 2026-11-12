@@ -10,6 +10,11 @@
 //     `vm.SourceTextModule`, which needs `node --experimental-vm-modules` on the vitest worker (a repo-wide config change
 //     for one test); a classic script runs cleanly on Node 22.13 and 24 with no flag and is the same code in a different wrapper.
 //
+// The signal service (core/src/signalService.ts and signalCounts.ts, with the in-memory store's signal methods) is server-only too, and is left out
+// the same way: the kit loads the service with a dynamic `import()` only for a store that keeps signals (an in-memory store has the methods only
+// through `withMemorySignals`), and the plugin keeps that import, its names in `export * as core` and `withMemorySignals` out of the size build.
+// The declarations (profile.signals validation) and the pacer stay in: the profile and the chat path need them.
+//
 // The AI module (core/src/ai, the fake adapter, the hub's ranking) is SERVER-ONLY: a page that shows the hub or runs the kit with no AI does not
 // carry it. So the size build leaves it out the way an adopter's bundler would: the kit loads the AI service with a dynamic `import()` only when
 // it is given an adapter, and the hub loads its ranking the same way; the plugin below keeps those as dynamic imports outside the bundle, and
@@ -33,7 +38,10 @@ const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.
 // headroom is about 5 KB for the hub controller work that shares this entry. Not raised for the AI: the server-only AI module is not in this build.
 // The chat box's server side (`@chatwarden/http/chat`) is browser-SAFE but not something a page ships by default, so it is NOT in this entry and
 // not in this size: it has its own entry (`browser-entry-chat.ts`), bundled below only to prove it stays free of Node imports and runs in a bare context.
-const SIZE_BUDGET_GZIP = 103 * 1024;
+// Raised to 125 KB at 0.1.8 on the maintainer's instruction ("size doesn't really matter, up the limit generously"): the slow-mode pacer runs
+// on every chat line (~2.4 KB) and signals validation and glue add ~3.8 KB (109.1 KB measured). The signal service itself still loads only for a
+// store that keeps signals. This guard now catches large accidental growth (a word list or a server module leaking in), not small features.
+const SIZE_BUDGET_GZIP = 125 * 1024;
 
 /**
  * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:
@@ -45,19 +53,22 @@ const withoutServerOnlyAi: Plugin = {
   name: 'without-server-only-ai',
   setup(b) {
     b.onLoad({ filter: /packages[\\/]core[\\/]dist[\\/]src[\\/]index\.js$/ }, (args) => ({
-      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*(?:\*|\{[^}]*\})\s*from\s*['"]\.\/ai\/(?!inert\.js)[^'"]*['"];?[ \t]*$/gm, ''),
+      contents: readFileSync(args.path, 'utf8')
+        .replaceAll(/^export\s*(?:\*|\{[^}]*\})\s*from\s*['"]\.\/ai\/(?!inert\.js)[^'"]*['"];?[ \t]*$/gm, '')
+        // The signal service and its counting: their names are left out of `export * as core` like the AI's.
+        .replaceAll(/^export\s*(?:\*|\{[^}]*\})\s*from\s*['"]\.\/signal(?:Service|Counts)\.js['"];?[ \t]*$/gm, ''),
       loader: 'js',
       resolveDir: dirname(args.path),
     }));
-    // `withMemoryAi` is the in-memory store's opt-in AI methods: its name is left out of `export * as storeMemory` like the core ones.
+    // `withMemoryAi` and `withMemorySignals` are the in-memory store's opt-in methods: their names are left out of `export * as storeMemory`.
     b.onLoad({ filter: /packages[\\/]store-memory[\\/]dist[\\/]src[\\/]index\.js$/ }, (args) => ({
-      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*\{[^}]*\}\s*from\s*['"]\.\/memoryAi\.js['"];?[ \t]*$/gm, ''),
+      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*\{[^}]*\}\s*from\s*['"]\.\/memory(?:Ai|Signals)\.js['"];?[ \t]*$/gm, ''),
       loader: 'js',
       resolveDir: dirname(args.path),
     }));
     // The two places that load AI code on demand are left out: the import() resolves to an empty stub (a bundler that splits would make it a
     // chunk nobody asks for; a stub keeps this one a single script that runs in the vm, with no `require` shim).
-    b.onResolve({ filter: /^\.\/ai\/(service|rank)\.js$/ }, (args) => (args.kind === 'dynamic-import' ? { path: args.path, namespace: LEFT_OUT } : undefined));
+    b.onResolve({ filter: /^\.\/(?:ai\/(?:service|rank)|signalService)\.js$/ }, (args) => (args.kind === 'dynamic-import' ? { path: args.path, namespace: LEFT_OUT } : undefined));
     b.onLoad({ filter: /.*/, namespace: LEFT_OUT }, () => ({ contents: 'export const leftOut = true;', loader: 'js' }));
   },
 };
@@ -355,6 +366,76 @@ describe('browser bundle: the server-only AI module', () => {
   });
 });
 
+// The signal service is server-only like the AI, so the size build must not hold any of it. The markers live only in the service and the
+// in-memory store's opt-in methods (log event names the service writes, and the opt-in function's name).
+const SIGNAL_MARKERS = ['chatwarden.signal_refused', 'chatwarden.signal_age_failed', 'withMemorySignals'];
+const SIGNAL_RUNTIME_FILES = ['signalService', 'signalCounts'];
+
+describe('browser bundle: the server-only signal machinery', () => {
+  it('the size build holds no signal service, no counting and no in-memory signal methods', () => {
+    for (const marker of SIGNAL_MARKERS) {
+      // Booleans, so a failure never prints the bundle.
+      expect(esm.includes(marker), `${marker} in the ESM build`).toBe(false);
+      expect(iife.includes(marker), `${marker} in the IIFE build`).toBe(false);
+    }
+    const inputs = inputsOf(metafile);
+    for (const file of SIGNAL_RUNTIME_FILES) expect(inputs, file).not.toContain(`packages/core/dist/src/${file}.js`);
+    expect(inputs).not.toContain('packages/store-memory/dist/src/memorySignals.js');
+    // The two reads that stay are the inert answer and the declarations the profile validates with.
+    expect(inputs).toContain('packages/core/dist/src/signalInert.js');
+    expect(inputs).toContain('packages/core/dist/src/signals.js');
+  });
+
+  it('is loaded on demand: the kit reaches the service through a dynamic import() only, and nothing else imports it', () => {
+    const imports = (file: string) => metafile.inputs[file]?.imports ?? [];
+    const toService = imports('packages/core/dist/src/chatwarden.js').filter((i) => i.path.endsWith('/signalService.js'));
+    expect(toService).toMatchObject([{ path: `${LEFT_OUT}:./signalService.js`, kind: 'dynamic-import', original: './signalService.js' }]);
+    const all = Object.entries(metafile.inputs).flatMap(([file, v]) => v.imports.map((i) => ({ file, ...i })));
+    expect(all.filter((i) => /\/signal(?:Service|Counts)\.js$/.test(i.path) && i.kind !== 'dynamic-import')).toEqual([]);
+    expect(esm).not.toMatch(/\bfrom\s*["']\.\/signal(?:Service|Counts)\.js["']/);
+  });
+
+  it('the pacer stays in the chat path: slow mode, burst and repeat refusal are in the size build', () => {
+    const inputs = inputsOf(metafile);
+    expect(inputs).toContain('packages/core/dist/src/pace.js');
+    expect(inputs).toContain('packages/core/dist/src/pacing.js');
+  });
+
+  it('the guard is not vacuous: the same entry built WITH the signal machinery holds every marker and the module files', () => {
+    for (const marker of SIGNAL_MARKERS) {
+      expect(aiEsm.includes(marker), `${marker} in the ESM build with the signal machinery`).toBe(true);
+      expect(aiIife.includes(marker), `${marker} in the IIFE build with the signal machinery`).toBe(true);
+    }
+    const inputs = inputsOf(aiMetafile);
+    for (const file of SIGNAL_RUNTIME_FILES) expect(inputs, file).toContain(`packages/core/dist/src/${file}.js`);
+    expect(inputs).toContain('packages/store-memory/dist/src/memorySignals.js');
+  });
+
+  it('is browser-safe: the build with the signal machinery imports no Node module (the scans above run on it too)', () => {
+    for (const input of Object.values(aiMetafile.inputs)) {
+      for (const imp of input.imports) expect(imp.external === true || imp.path.startsWith('node:'), imp.path).toBe(false);
+    }
+  });
+
+  it('runs in the bare context: slow mode refuses a line, and a signal is recorded and counted, with the machinery in', async () => {
+    const ctx = browserContext();
+    run(ctx, aiIife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, SIGNAL_SCENARIO)) as { recorded: boolean; counts: Array<{ kind: string; distinct: number }>; refused: unknown };
+    expect(out.recorded).toBe(true);
+    expect(out.counts).toMatchObject([{ kind: 'muted_by_player', distinct: 1 }]);
+    expect(out.refused).toEqual({ refuse: { reason: 'slow_mode', retryAfterMs: expect.any(Number) } });
+  });
+
+  it('the size build runs with no signal store: pacing refuses a line, cw.signals is inert and says so once, nothing is loaded', async () => {
+    const ctx = browserContext();
+    run(ctx, iife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, SIGNAL_OFF_SCENARIO)) as { refused: unknown; recorded: boolean; counts: unknown[]; boosted: number; kinds: string[]; logs: string[] };
+    expect(out.refused).toEqual({ refuse: { reason: 'slow_mode', retryAfterMs: expect.any(Number) } });
+    expect(out).toMatchObject({ recorded: false, counts: [], boosted: 0, kinds: ['flood_triggered'] });
+    expect(out.logs.filter((l) => l === 'chatwarden.signals_store_unsupported')).toHaveLength(1);
+  });
+});
+
 /** A fresh context with browser-like globals only. */
 function browserContext(): Record<string, unknown> {
   const logs: string[] = [];
@@ -576,6 +657,53 @@ const AI_OFF_SCENARIO = `(async () => {
   const clock = { now: () => Date.now() };
   const cw = await createChatwarden({ store: new MemoryStore(), secret: 'ai-off', platform: { identify: (ctx) => ctx }, clock, retention: false });
   const out = { level: cw.ai.level(), available: cw.ai.status().available, read: cw.ai.read('nope') };
+  cw.close();
+  return JSON.stringify(out);
+})()`;
+
+// A kit with slow mode on, the in-memory store given the signal methods, and one declared kind: a line is refused by the pacer, a signal is
+// recorded and counted. Run on the build WITH the signal machinery.
+const SIGNAL_SCENARIO = `(async () => {
+  const { createChatwarden } = CW.core;
+  const { MemoryStore, withMemorySignals } = CW.storeMemory;
+  const clock = { t: 1800000000000, now() { return this.t; } };
+  const cw = await createChatwarden({
+    store: withMemorySignals(new MemoryStore()), secret: 'sig-secret', platform: { identify: (ctx) => ctx }, clock, retention: false,
+    overrides: { pace: { slowModeMs: 5000 }, signals: { kinds: { muted_by_player: { label: 'Muted by other players', polarity: 'negative' } } } },
+  });
+  cw.rooms.seat('room', 'a', { clientKey: 'key-a' }, 'A');
+  cw.rooms.seat('room', 'b', { clientKey: 'key-b' }, 'B');
+  const subject = cw.rooms.subjectAt('room', 'a');
+  cw.chat.accept('room', 'a', 'first line');
+  const refused = cw.chat.accept('room', 'a', 'second line');
+  const recorded = cw.signals.record({ kind: 'muted_by_player', subject, by: { clientKey: 'key-b' } });
+  const out = { recorded, counts: cw.signals.counts(subject).map((c) => ({ kind: c.kind, distinct: c.distinct })), refused };
+  cw.close();
+  return JSON.stringify(out);
+})()`;
+
+// The same pacing over a store with no signal methods (a plain in-memory store), on the size build: the pacer works, `cw.signals` is inert.
+const SIGNAL_OFF_SCENARIO = `(async () => {
+  const { createChatwarden } = CW.core;
+  const { MemoryStore } = CW.storeMemory;
+  const logs = [];
+  const clock = { t: 1800000000000, now() { return this.t; } };
+  const cw = await createChatwarden({
+    store: new MemoryStore(), secret: 'sig-off', platform: { identify: (ctx) => ctx }, clock, retention: false, logger: { warn: (e) => logs.push(e) },
+    overrides: { pace: { slowModeMs: 5000 } },
+  });
+  cw.rooms.seat('room', 'a', { clientKey: 'key-a' }, 'A');
+  const subject = cw.rooms.subjectAt('room', 'a');
+  cw.chat.accept('room', 'a', 'first line');
+  const refused = cw.chat.accept('room', 'a', 'second line');
+  const out = {
+    refused,
+    recorded: (cw.signals.record({ kind: 'flood_triggered', subject }), cw.signals.record({ kind: 'flood_triggered', subject })),
+    counts: cw.signals.counts(subject),
+    boosted: cw.signals.boosted([subject]).size,
+    kinds: cw.signals.kinds().map((k) => k.kind),
+    logs,
+  };
   cw.close();
   return JSON.stringify(out);
 })()`;

@@ -1,8 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { AUDIT_ACTIONS } from '@chatwarden/core';
-import type { AuditRow, Store, StoredReport } from '@chatwarden/core';
-import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
+import type { AuditRow, SignalRow, Store, StoredReport } from '@chatwarden/core';
+import { MemoryStore, withMemoryAi, withMemorySignals } from '@chatwarden/store-memory';
 import { openStore } from '../src/index.js';
 
 // Differential tests: the same writes go to SqliteStore (the reference) and MemoryStore, and every combined query and cursor
@@ -11,7 +11,7 @@ import { openStore } from '../src/index.js';
 
 const NOW = 1_800_000_000_000;
 const sql = (): Store => openStore({ db: new DatabaseSync(':memory:') });
-const mem = (): Store => withMemoryAi(new MemoryStore());
+const mem = (): Store => withMemorySignals(withMemoryAi(new MemoryStore()));
 
 const report = (over: Partial<StoredReport> = {}): StoredReport => ({
   id: 'r1',
@@ -285,5 +285,82 @@ describe('the AI methods: reads, outcomes, spend, examples, stats and purge', ()
     const b = run(sql());
     expect(a.length).toBeGreaterThan(150);
     expect(b).toEqual(a);
+  });
+});
+
+describe('the signal methods: insert, grouped listing and purge', () => {
+  const DAY = 86_400_000;
+  const script = (): SignalRow[] => {
+    const rows: SignalRow[] = [];
+    let n = 0;
+    const kinds = ['muted_by_player', 'blocked_by_player', 'flood_triggered', 'constructor'];
+    for (let i = 0; i < 300; i++) {
+      const at = NOW - ((i * 7) % 40) * DAY - ((i * 13) % 1000);
+      const source = i % 5 === 0 ? { sourceKey: `r:room-${i % 4}`, bySubject: null, roomId: `room-${i % 4}` } : i % 7 === 0 ? { sourceKey: `d:${i % 6}`, bySubject: null, roomId: null } : { sourceKey: `b:s_from_${i % 11}`, bySubject: `s_from_${i % 11}`, roomId: null };
+      rows.push({
+        id: `sig-${(n += 1)}`,
+        kind: kinds[i % kinds.length] as string,
+        subject: `s_${i % 13}`,
+        ...source,
+        at,
+        weight: [0, 0.5, 1, 2, 10][i % 5] as number,
+        // Several rows of one source share a bucket now and then, so the cap refuses some of them.
+        capBucket: Math.floor(at / DAY) - (i % 3 === 0 ? 0 : 1),
+      });
+    }
+    // Repeats of earlier rows (same tuple, another id) and of earlier ids (another tuple): refused alike by both.
+    rows.push({ ...(rows[3] as SignalRow), id: 'dup-tuple', weight: 9 }, { ...(rows[4] as SignalRow), id: (rows[5] as SignalRow).id });
+    return rows;
+  };
+
+  it('give the same answer to every call of the same script', () => {
+    const a = mem();
+    const b = sql();
+    const rows = script();
+    const wrote = rows.map((r) => [a.insertSignal?.(r), b.insertSignal?.(r)]);
+    for (const [x, y] of wrote) expect(y).toBe(x);
+    expect(wrote.some(([x]) => x === false)).toBe(true);
+    expect(wrote.some(([x]) => x === true)).toBe(true);
+
+    const subjects = Array.from({ length: 13 }, (_, i) => `s_${i}`);
+    const queries: Array<[string[], number]> = [
+      [subjects, 0],
+      [subjects, NOW - 30 * DAY],
+      [subjects, NOW - 14 * DAY],
+      [subjects, NOW],
+      [subjects, NOW + 1],
+      [['s_1'], 0],
+      [['s_1', 's_2', 's_3'], NOW - 20 * DAY],
+      [['s_1', 's_1', 's_2'], 0],
+      [['s_nobody'], 0],
+      [[], 0],
+    ];
+    for (const [who, since] of queries) {
+      expect(b.listSignalSources?.(who, since), JSON.stringify([who.length, since])).toEqual(a.listSignalSources?.(who, since));
+    }
+    for (const before of [NOW - 35 * DAY, NOW - 20 * DAY, NOW - 20 * DAY, NOW + 1]) {
+      expect(b.purgeSignals?.(before), String(before)).toBe(a.purgeSignals?.(before));
+      for (const [who, since] of queries) expect(b.listSignalSources?.(who, since)).toEqual(a.listSignalSources?.(who, since));
+    }
+    // The cap slots freed by the purge are free in both.
+    for (const r of rows.slice(0, 30)) expect(b.insertSignal?.({ ...r, id: `again-${r.id}` })).toBe(a.insertSignal?.({ ...r, id: `again-${r.id}` }));
+  });
+
+  it('agree inside a transaction that is undone', () => {
+    const a = mem();
+    const b = sql();
+    const rows = script().slice(0, 40);
+    for (const s of [a, b]) {
+      for (const r of rows.slice(0, 20)) s.insertSignal?.(r);
+      expect(() =>
+        s.transaction(() => {
+          for (const r of rows.slice(20)) s.insertSignal?.(r);
+          s.purgeSignals?.(NOW);
+          throw new Error('undo');
+        }),
+      ).toThrow('undo');
+    }
+    const subjects = Array.from({ length: 13 }, (_, i) => `s_${i}`);
+    expect(b.listSignalSources?.(subjects, 0)).toEqual(a.listSignalSources?.(subjects, 0));
   });
 });

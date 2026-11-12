@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Field } from '../case/ActionEditor.js';
 import { useHub } from '../context.js';
 import { REASON_MAX } from '../decision.js';
@@ -16,6 +17,9 @@ export function SaveBar({
   dirtyCount,
   refusedField,
   idBase,
+  label,
+  saveLabel,
+  quiet = false,
   onDiscard,
   onReload,
 }: {
@@ -25,13 +29,27 @@ export function SaveBar({
   dirtyCount: number;
   refusedField: boolean;
   idBase: string;
+  /** The save bar's name as a landmark; a screen with more than one bar gives each its own. */
+  label?: string;
+  /** The words of the primary button, in place of "Save changes" (a save with its own meaning, such as removing what the kit left out). */
+  saveLabel?: string;
+  /** Only the primary button and the reason form: no Discard and no count of unsaved sections (for a save that is not an edit of a form). */
+  quiet?: boolean;
   onDiscard: () => void;
   onReload: () => void;
 }) {
   const { t } = useHub();
   const err = save.saveError;
+  const words = saveLabel ?? t('hub.settings.save');
+  // When the reason form closes without a problem (saved, or cancelled), the focus goes back to the button that opened it, not to the page.
+  const primary = useRef<HTMLButtonElement>(null);
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (wasAsking.current && !save.asking && save.saveError === null) primary.current?.focus();
+    wasAsking.current = save.asking;
+  }, [save.asking, save.saveError]);
   return (
-    <section className="cw-savebar" aria-label={t('hub.settings.save.form')}>
+    <section className="cw-savebar" aria-label={label ?? t('hub.settings.save.form')}>
       {err !== null && err.code === 'conflict' && (
         <div className="cw-error" role="alert">
           <p>
@@ -74,7 +92,7 @@ export function SaveBar({
           </Field>
           <div className="cw-action-foot">
             <button type="submit" className="cw-btn cw-btn--primary" aria-disabled={policy.busy} aria-busy={policy.busy}>
-              {t('hub.settings.save')}
+              {words}
             </button>
             <button type="button" className="cw-btn" onClick={() => save.setAsking(false)}>
               {t('hub.settings.save.cancel')}
@@ -83,15 +101,19 @@ export function SaveBar({
         </form>
       ) : (
         <div className="cw-action-foot">
-          <button type="button" className="cw-btn cw-btn--primary" aria-disabled={!isDirty} onClick={save.start}>
-            {t('hub.settings.save')}
+          <button ref={primary} type="button" className="cw-btn cw-btn--primary" aria-disabled={!isDirty} onClick={save.start}>
+            {words}
           </button>
-          <button type="button" className="cw-btn" aria-disabled={!isDirty} onClick={() => isDirty && onDiscard()}>
-            {t('hub.settings.discard')}
-          </button>
-          <p className="cw-hint" role="status">
-            {isDirty ? t('hub.settings.dirty', { count: dirtyCount }) : t('hub.settings.clean')}
-          </p>
+          {!quiet && (
+            <button type="button" className="cw-btn" aria-disabled={!isDirty} onClick={() => isDirty && onDiscard()}>
+              {t('hub.settings.discard')}
+            </button>
+          )}
+          {!quiet && (
+            <p className="cw-hint" role="status">
+              {isDirty ? t('hub.settings.dirty', { count: dirtyCount }) : t('hub.settings.clean')}
+            </p>
+          )}
         </div>
       )}
     </section>

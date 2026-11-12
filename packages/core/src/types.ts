@@ -1,7 +1,7 @@
 // Core types for @chatwarden/core. Organized by section; later tasks append
 // their own sections below.
 
-import type { AIExample, AIRead } from './ai/types.js';
+import type { AIExample, AIRead, AISignal } from './ai/types.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
@@ -270,6 +270,11 @@ export interface AiReadDone extends AiCallUsage {
    * hash, so the read records which ones it saw. Ids only; none by default.
    */
   exampleIds?: readonly string[];
+  /**
+   * The signal counts about the reported person the prompt carried (`feeds.ai`): exactly what was sent, label, polarity, distinct and window
+   * only. Stored with the read (`signals_json`); none (or an empty list) is stored as null.
+   */
+  signals?: readonly AISignal[];
 }
 
 /**
@@ -293,6 +298,8 @@ export interface AiReadRow {
   read: AIRead | null;
   /** The ids of the casebook examples this read saw (empty when none, and for every row but an `ok` one). */
   exampleIds: readonly string[];
+  /** The signal counts this read was shown (see {@link AiReadDone.signals}); null when none were sent, for every row but an `ok` one, and for a read made before signals existed. */
+  signals: readonly AISignal[] | null;
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
@@ -310,6 +317,43 @@ export interface AiReadRow {
    * happens once per row, for good: it is a fact of the row, so a restart, a second process or any pruning cannot allow another.
    */
   retaken: boolean;
+}
+
+/**
+ * One signal a game recorded about a player (flood control and signals, design 5.8). Staff-side data: it holds ids and numbers only, no
+ * text, handle or seat. `sourceKey` is `b:<canonical by>`, `r:<roomId>` or `d:<UTC day>`; `(kind, subject, sourceKey, capBucket)` is unique,
+ * which is the per-source cap.
+ * @experimental
+ */
+export interface SignalRow {
+  id: string;
+  kind: string;
+  subject: SubjectId;
+  /** 'b:<canonical by>' | 'r:<roomId>' | 'd:<UTC day>' */
+  sourceKey: string;
+  bySubject: SubjectId | null;
+  roomId: string | null;
+  at: number;
+  /** The effective weight, stored at record time (0 or more). */
+  weight: number;
+  /** floor(at / perByWindowMs): the cap bucket. */
+  capBucket: number;
+}
+
+/**
+ * What `listSignalSources` answers: one row per source of a kind about a subject. Rows are bounded by distinct sources, not by volume.
+ * @experimental
+ */
+export interface SignalSourceRow {
+  subject: SubjectId;
+  kind: string;
+  sourceKey: string;
+  /** The source's `by` (the smallest, when rows of one source name more than one); null for a room or day source. */
+  bySubject: SubjectId | null;
+  /** The highest weight among the source's rows in range. */
+  weight: number;
+  firstAt: number;
+  lastAt: number;
 }
 
 /**
@@ -1148,6 +1192,26 @@ export interface Store {
    * entries made before `readsBefore` go with the reads. Returns how many reads and outcomes were deleted. `purgeReports` deletes the reads of the reports it deletes itself.
    */
   purgeAi?(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number };
+
+  // Signals (flood control and signals, design 5.8). OPTIONAL: a store without them cannot keep signals, and `createChatwarden` refuses a
+  // profile that declares kinds or feeds with one. SYNCHRONOUS on purpose (like claims); they run inside `transaction`. They do not move
+  // the change token.
+
+  /**
+   * OPTIONAL. Insert one signal as ONE atomic statement: false, and nothing written, when a row with the same `(kind, subject, sourceKey,
+   * capBucket)` exists (the per-source cap; of two callers, two processes on one database included, exactly one writes) or the id is
+   * taken. True when a row was written.
+   */
+  insertSignal?(row: SignalRow): boolean;
+
+  /**
+   * OPTIONAL. One row per `(subject, kind, sourceKey)` that has a row at or after `since`, for these subjects (a person's canonical id and
+   * aliases): the highest weight, the earliest and the latest `at` among the rows in range. No subjects: `[]`. Returns copies.
+   */
+  listSignalSources?(subjects: readonly SubjectId[], since: number): SignalSourceRow[];
+
+  /** OPTIONAL. Delete rows with `at < before` (a row exactly on the line is kept); returns how many. */
+  purgeSignals?(before: number): number;
 
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).

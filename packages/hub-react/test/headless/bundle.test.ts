@@ -11,9 +11,12 @@ import { describe, expect, it } from 'vitest';
 const headless = fileURLToPath(new URL('../../src/headless/index.ts', import.meta.url));
 const full = fileURLToPath(new URL('../../src/index.ts', import.meta.url));
 /** Gzipped, minified, the kit's core external (a peer). Measured at 21.8 KB when it was written; the English catalog is most of it. */
-const BUDGET = 28 * 1024;
+// Raised to 34 KB at 0.1.8 (the maintainer's standing rule: a size budget is raised generously with a comment, never trimmed for bytes). Measured
+// 30,168 bytes: the pace and signals words and the policy types the controller carries (the panels themselves are lazy and not in this bundle).
+const BUDGET = 34 * 1024;
 /** The same, for everything: the first fetch plus the chunks loaded on demand (the AI's ranking, 0.7 KB when this was set: the first-fetch budget plus that, rounded up). A bundler that does not split puts them in one file, so this is the ceiling for such an adopter. */
-const TOTAL_BUDGET = 29 * 1024;
+// Raised to 36 KB at 0.1.8 with the first-fetch budget above (measured 30,953 bytes in all).
+const TOTAL_BUDGET = 36 * 1024;
 
 /** React, React DOM, the JSX runtime and the scheduler do not exist: resolving any of them is an error. */
 const noReact: Plugin = {
@@ -105,7 +108,7 @@ describe('@chatwarden/hub-react/headless bundles without React', () => {
     expect(inputs.some((i) => i.endsWith('src/ai/rank.ts'))).toBe(true);
   });
 
-  it('is small: under 28 KB gzipped, core external', async () => {
+  it('is small: under 34 KB gzipped, core external', async () => {
     const { bytes, gzip } = await bundle(headless);
     console.log(`hub-react/headless bundle: ${bytes} bytes minified, ${gzip} bytes gzipped (budget ${BUDGET})`);
     expect(gzip).toBeLessThan(BUDGET);

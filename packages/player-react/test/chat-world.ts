@@ -1,5 +1,5 @@
 import { createChatwarden } from '@chatwarden/core';
-import type { Chatwarden, ChatResult, ProfanityFilter, RawWho, SubjectId } from '@chatwarden/core';
+import type { Chatwarden, ChatResult, PaceSettings, ProfanityFilter, RawWho, SubjectId } from '@chatwarden/core';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { createRoomBroadcaster } from '@chatwarden/http';
 import type { ChatMember, ChatSession, RoomBroadcaster, RoomBroadcasterOptions } from '@chatwarden/http';
@@ -32,6 +32,8 @@ export function scripted(script: (roomId: string, seatId: string, text: string) 
 
 export interface ChatWorldOptions {
   profanity?: 'refuse' | 'star';
+  /** The kit's pace in force from the start (slow mode, burst, repeats): real pacing through the real core. */
+  pace?: PaceSettings;
   wrap?: (cw: Chatwarden) => Chatwarden;
   broadcaster?: RoomBroadcasterOptions;
 }
@@ -53,7 +55,9 @@ export async function chatWorld(over: ChatWorldOptions = {}) {
     },
     profanity: filter,
     gate: () => gate.open,
-    ...(over.profanity === 'refuse' ? { overrides: { profanity: { mode: 'refuse' as const } } } : {}),
+    ...(over.profanity === 'refuse' || over.pace !== undefined
+      ? { overrides: { ...(over.profanity === 'refuse' ? { profanity: { mode: 'refuse' as const } } : {}), ...(over.pace === undefined ? {} : { pace: over.pace }) } }
+      : {}),
     retention: false,
   });
   const cw = over.wrap === undefined ? real : over.wrap(real);

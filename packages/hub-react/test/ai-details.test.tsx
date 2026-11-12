@@ -1,7 +1,9 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { MemoryStore, withMemoryAi, withMemorySignals } from '@chatwarden/store-memory';
 import { forgetHiddenAi } from '../src/ai/hide.js';
 import { aiCase, aiWorld, noStrip, open, openPlain, reads, settle, strip } from './aiHub.js';
+import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
 
 // The AI details menu: the one door behind the strip. What it lists, how it opens and closes, what Read again does and how it fails,
@@ -235,5 +237,60 @@ describe('the menu in Simple mode', () => {
     expect(menu()).not.toBeNull();
     await user.keyboard('{Escape}');
     expect(menu()).toBeNull();
+  });
+});
+
+describe('the signal context line (menu only)', () => {
+  const KINDS = {
+    muted_by_player: { label: 'Muted by other players', polarity: 'negative' as const },
+    commended: { label: 'Commended by other players', polarity: 'positive' as const },
+  };
+  const FEED = { ai: { kinds: ['muted_by_player', 'commended'], windowDays: 14 } };
+
+  /** A world with the AI on, signals declared, and `counts` kinds of signals already recorded about the person the case is against. */
+  async function withSignals(feeds: Record<string, unknown> | null, counts: Array<'muted_by_player' | 'commended'>) {
+    const w = await hubWorld({
+      actor: 'ann@example.test',
+      store: withMemorySignals(withMemoryAi(new MemoryStore())),
+      overrides: { signals: { kinds: KINDS, ...(feeds === null ? {} : { feeds }) } } as never,
+      ai: { level: 1 },
+    });
+    // The person is known before the report: seat them (the same key as the report's target), then record the signals.
+    w.cw.rooms.seat('pre-room', 'p2', { clientKey: 'key-target-Mallory' }, 'Mallory');
+    const subject = w.cw.rooms.subjectAt('pre-room', 'p2') as string;
+    counts.forEach((kind, i) => {
+      for (let k = 0; k < 2; k += 1) {
+        w.cw.rooms.seat(`pre-${kind}-${i}-${k}`, 'p1', { clientKey: `key-${kind}-${k}` }, `H${k}`);
+        w.cw.signals.record({ kind, subject, by: w.cw.rooms.subjectAt(`pre-${kind}-${i}-${k}`, 'p1') as string });
+      }
+    });
+    const f = await w.fileRich({ note: 'Keeps following me.' });
+    await w.aiIdle();
+    return { w, f };
+  }
+
+  it('shows "Context included: 2 signal counts" when the read was shown two counts', async () => {
+    const { w, f } = await withSignals(FEED, ['muted_by_player', 'commended']);
+    const { user } = await open(w, f.id);
+    await user.click(await details());
+    expect(within(menu() as HTMLElement).getByText('Context included: 2 signal counts')).toBeInTheDocument();
+  });
+
+  it('one count reads in the singular', async () => {
+    const { w, f } = await withSignals(FEED, ['muted_by_player']);
+    const { user } = await open(w, f.id);
+    await user.click(await details());
+    expect(within(menu() as HTMLElement).getByText('Context included: 1 signal count')).toBeInTheDocument();
+  });
+
+  it('is not there when no signals were sent (feed off, or no counts), and the strip shows nothing of it either way', async () => {
+    for (const [feeds, counts] of [[null, ['muted_by_player']], [FEED, []]] as const) {
+      const { w, f } = await withSignals(feeds, [...counts]);
+      const { user } = await open(w, f.id);
+      expect(within(await strip()).queryByText(/Context included|signal/i)).toBeNull();
+      await user.click(await details());
+      expect(within(menu() as HTMLElement).queryByText(/Context included/)).toBeNull();
+      cleanup();
+    }
   });
 });

@@ -1,4 +1,4 @@
-export const VERSION = '0.1.7';
+export const VERSION = '0.1.8';
 
 export type {
   Clock,
@@ -45,6 +45,8 @@ export type {
   ClaimRow,
   OpenReportQuery,
   ReasonRow,
+  SignalRow,
+  SignalSourceRow,
   ConductLevel,
   Source,
   Store,
@@ -65,6 +67,7 @@ export {
   REASONS_MAX,
   ReasonBook,
   ReasonError,
+  SIGNAL_BOOST_SCAN_MAX,
   ViewingPresence,
   VIEWING_TTL_MS,
 } from './team.js';
@@ -277,7 +280,7 @@ export {
   recordStep,
   suggest,
 } from './ladder.js';
-export type { ActionRecord, LadderCell, LadderRow, LadderStep, Suggestion, SuggestContext } from './ladder.js';
+export type { ActionRecord, LadderCell, LadderRow, LadderStep, Suggestion, SuggestContext, SignalHit } from './ladder.js';
 export {
   DECISION_EVIDENCE_MAX,
   DECISION_REASON_MAX,
@@ -315,8 +318,43 @@ export {
   resolveProfile,
   validateProfile,
 } from './profile.js';
+// Pace settings (@experimental): slow mode, burst limit and repeat refusal, all off until set.
+export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
+export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
+// Signals (@experimental): kinds a game declares, the guards, and the feeds that say where counts may be read.
+export {
+  BUILTIN_SIGNAL_KINDS,
+  checkSignalFeeds,
+  kindSpecOf,
+  pruneSignalFeeds,
+  resolveSignals,
+  SIGNAL_KIND_PATTERN,
+  SIGNAL_KINDS_MAX,
+  SIGNAL_WINDOW_DAYS_MAX,
+} from './signals.js';
+export { countSignals, evaluateThreshold } from './signalCounts.js';
+export type { SignalRefusal } from './signalService.js';
+export type { CountContext, ThresholdResult } from './signalCounts.js';
+export type {
+  ResolvedSignalGuards,
+  ResolvedSignalKind,
+  ResolvedSignals,
+  SignalCount,
+  SignalDropReason,
+  SignalFeeds,
+  SignalGuards,
+  SignalInput,
+  SignalKindSpec,
+  SignalKindView,
+  SignalParty,
+  SignalPolarity,
+  SignalSettings,
+  SignalThreshold,
+} from './signals.js';
 export { POLICY_REFRESH_MS, PREVIEW_SAMPLES } from './policy.js';
 export type {
+  PolicyDropped,
+  PolicyLimits,
   PolicyPreview,
   PolicySaveContext,
   PolicySaveResult,
@@ -347,7 +385,7 @@ export type {
 
 // AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
 export { AI_PROMPT_VERSION, AIError } from './ai/types.js';
-export type { AbortSignalLike, AIExample, AIExampleInput, AIPerson, AIRead, AIReadInput, AIReadResult, AIStoredRead, AIUsage, ModerationAI } from './ai/types.js';
+export type { AbortSignalLike, AIExample, AIExampleInput, AIPerson, AIRead, AIReadInput, AIReadResult, AISignal, AIStoredRead, AIUsage, ModerationAI } from './ai/types.js';
 export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
 export { validateAIOutput } from './ai/validate.js';
 export type { AIValidation, AIValidationContext } from './ai/validate.js';

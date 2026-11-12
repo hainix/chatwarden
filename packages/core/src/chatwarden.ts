@@ -23,7 +23,13 @@ import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
-import { resolveProfile } from './profile.js';
+import { checkPace, mergePace } from './pace.js';
+import { createInertSignals } from './signalInert.js';
+import type { SignalRuntime } from './signalService.js';
+import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
+import type { SignalCount, SignalInput, SignalKindView } from './signals.js';
+import type { PaceSettings, ResolvedPace } from './pace.js';
+import { ProfileError, resolveProfile } from './profile.js';
 import type { ModerationProfile, PolicyLayer, PolicySection, PresetName, ProfanityConfig, ProfileOverrides, ResolvedProfile } from './profile.js';
 import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
@@ -204,6 +210,22 @@ export interface ChatwardenOptions {
    * @experimental
    */
   ai?: AiOptions;
+  /**
+   * Signals: what the game records about a player. The kinds, the guards and the feeds are in the profile (`profile.signals`); this
+   * holds the one hook the profile cannot. Signals need a store with the three signal methods (SQLite has them; the in-memory store has them
+   * through `withMemorySignals`): declaring kinds or feeds over a store without them is refused at creation, and the kit loads its signal
+   * service only for a store that has them.
+   * @experimental
+   */
+  signals?: {
+    /**
+     * How old is this player's account, in days, from the account ids the kit has for them (the strings your game gave it as
+     * `RawWho.accountId`)? Return null or undefined when unknown. Called synchronously at record time for `by`, and only for a player with
+     * at least one account id; a throw reads as unknown (logged by error class). Without this hook the new-account guard is not used,
+     * whatever the profile says.
+     */
+    accountAgeDays?: (accountIds: readonly string[]) => number | null | undefined;
+  };
 }
 
 /** The moderation kit as an adopter uses it. Nothing here returns an identifier meant for a player. */
@@ -226,6 +248,17 @@ export interface Chatwarden {
      * Carries subject ids: staff channels only, never send to a player.
      */
     subjectAt(roomId: string, seatId: string): SubjectId | null;
+    /**
+     * Pace this room differently from the defaults until it closes. Per field: absent inherits, `null` turns that check off, a value sets
+     * it. `null` instead of an object removes the override (`{}` is the same: nothing to override). A second call replaces the room's earlier
+     * override whole; it is not merged into it. The object is read once, so changing it afterwards changes nothing. Throws `ProfileError` for an invalid
+     * value (a setup mistake, not a hot-path call), and changes nothing when it does. In memory, this process only: `rooms.close(roomId)`
+     * drops it, and a game that runs several processes calls it in each process that serves the room. The override sits on top of the
+     * stored layer, which sits on top of the profile in code. @experimental
+     */
+    setPace(roomId: string, pace: PaceSettings | null): void;
+    /** The pace in force for the room: the profile's (code, then the stored layer) with the room's override applied. Every field filled, `null` is off. @experimental */
+    pace(roomId: string): ResolvedPace;
   };
   chat: {
     accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult;
@@ -382,9 +415,14 @@ export interface Chatwarden {
      * (see `cw.reports.reporterAccuracy`) and none of which has waited 24 hours (`REPORTER_RANK_LAPSE_MS`) is served after the ordinary
      * ones, oldest first; it is never skipped, so a queue holding only such cases still serves them. One ordinary reporter, or no
      * accuracy data (a store without `reporterOutcomes`), keeps a case normal. A non-boolean value is a `RangeError`.
-     * @experimental (the `rankDownHabitual` filter)
+     *
+     * With `signalBoost` (default false: behaviour unchanged; use it when the queue signal feed, `feeds.queue`, is on), the scan stays oldest
+     * first but a case is claimed only when it is overdue (its oldest open report has waited 24 hours) or boosted (the person meets the
+     * feed's threshold); the first such case wins. If the queue, or the first 200 people, hold neither, the oldest free case is claimed as
+     * usual, so nothing is ever left out. A boosted case is never ranked down. A non-boolean value is a `RangeError`.
+     * @experimental (the `rankDownHabitual` and `signalBoost` filters)
      */
-    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean }): NextCase | null;
+    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean; signalBoost?: boolean }): NextCase | null;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
      * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
@@ -477,6 +515,35 @@ export interface Chatwarden {
    * @experimental
    */
   ai: AiFacade;
+  /**
+   * Signals: what the game records about a player (muted by others, kicked, left mid-game), counted by distinct source. A signal never
+   * acts: it is read only where a profile rule says so (the Person page record, the ladder suggestion, the AI read, the queue order).
+   * Staff-side data: never send any of this to a player.
+   * @experimental
+   */
+  signals: {
+    /**
+     * Record one signal. Synchronous, fenced, never throws: it returns false (and logs `chatwarden.signal_refused` with a reason code,
+     * at most once a minute) for an undeclared or malformed kind, a party it cannot resolve (an unknown subject id, or a `RawWho` the kit
+     * has never seen: nobody is created), `subject` equal to `by` (also across a merge), a time out of range, the per-source cap, a
+     * store without signals, or a store failure. True means a row was written. One small write: record events, not every chat line.
+     */
+    record(input: SignalInput): boolean;
+    /**
+     * The counts for a person now: one entry per declared kind that has at least one source in the window (default 30 days, held to
+     * the retention and to 90), aliases folded. Never throws; a store failure reads []. Never send to a player.
+     */
+    counts(subject: SubjectId, opts?: { windowDays?: number; kinds?: readonly string[] }): SignalCount[];
+    /** The declared kinds, built-ins included, for building a form. */
+    kinds(): SignalKindView[];
+    /**
+     * Which of these people meet the queue feed (`feeds.queue`), as canonical ids, from one grouped read. Empty, with no store read,
+     * when the feed is off. Never throws.
+     */
+    boosted(people: readonly SubjectId[]): Set<SubjectId>;
+    /** The lines the Person page record shows (`feeds.record`: its kinds and window). `[]` when the feed is off. Never throws. */
+    forRecord(subject: SubjectId): SignalCount[];
+  };
   /** The registry in use (the one given, or the starter rules for the profile). Retired rules stay listed. */
   rules: CommunityRules;
   /**
@@ -642,6 +709,9 @@ export interface Chatwarden {
  * The profanity filter for the profile, or undefined. Mode `allow` builds nothing; a ready filter wins over the
  * package; a package that throws fails creation and one that returns a non-filter is a TypeError.
  */
+/** Does the store keep signals (all three optional methods)? */
+const storeKeepsSignals = (s: Store): boolean => typeof s.insertSignal === 'function' && typeof s.listSignalSources === 'function' && typeof s.purgeSignals === 'function';
+
 function buildProfanityFilter(opts: ChatwardenOptions, config: ProfanityConfig): ProfanityFilter | undefined {
   if (config.mode === 'allow') return undefined;
   if (opts.profanity !== undefined) return opts.profanity;
@@ -682,6 +752,28 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     badFaithMs: givenRetention.badFaithMs ?? Math.max(RETENTION_DEFAULTS.badFaithMs, limits.reports.suspendWindowMs),
   };
   checkRetentionFloors(retentionPolicy, limits.reports.suspendWindowMs);
+  // A feed window longer than the signal retention could never be met (rows older than that are deleted): refuse it in code too.
+  checkSignalFeeds(baseProfile.signals.feeds, baseProfile.signals.kinds, { signalsMs: retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs }, 'profile.signals.feeds');
+  // Declaring kinds or feeds is an explicit opt-in that a store without the signal methods would silently turn into nothing: refuse it.
+  // (Only the built-in `flood_triggered` and pacing: nothing declared, so the kit starts and skips that record, logged once.)
+  const declaresSignals =
+    Object.keys(baseProfile.signals.feeds).length > 0 ||
+    Object.keys(baseProfile.signals.kinds).some((id) => {
+      const k = baseProfile.signals.kinds[id]!;
+      const builtin = Object.hasOwn(BUILTIN_SIGNAL_KINDS, id) ? BUILTIN_SIGNAL_KINDS[id as 'flood_triggered'] : undefined;
+      return builtin === undefined || builtin.label !== k.label || k.weight !== 1;
+    });
+  if (declaresSignals && !storeKeepsSignals(opts.store)) {
+    throw new Error(
+      'createChatwarden: the profile declares signal kinds or feeds, but the store has no signal methods (insertSignal, listSignalSources, purgeSignals); use the memory or SQLite store, or leave "signals" out of the profile',
+    );
+  }
+  if (opts.signals?.accountAgeDays !== undefined && typeof opts.signals.accountAgeDays !== 'function') {
+    throw new TypeError('createChatwarden: signals.accountAgeDays must be a function');
+  }
+  // The signal service (and the counting under it) is loaded only for a store that can keep signals, so a bundler can leave it out of a build
+  // that never has one (the in-memory store has the methods only through `withMemorySignals`). Without it `cw.signals` is inert.
+  const signalModule = storeKeepsSignals(opts.store) ? await import('./signalService.js') : undefined;
   const purgeEveryMs = everyMs ?? DEFAULT_PURGE_EVERY_MS;
   if (opts.retention !== false && (!Number.isFinite(purgeEveryMs) || purgeEveryMs <= 0)) {
     throw new Error('createChatwarden: retention.everyMs must be a positive finite number');
@@ -718,7 +810,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate });
   policy.load();
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
@@ -733,6 +825,30 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     logger,
     notify: typeof platformNotify === 'function' ? (who, event) => platformNotify.call(platform, who, event) : undefined,
   });
+
+  /** The signal service, set once `personOf` exists (the chat path above it only calls it later, never during creation). */
+  const signalRef: { service?: SignalRuntime } = {};
+
+  // Room overrides of the pace: this process only, dropped by `rooms.close`. Each is the validated sparse override as given (a field
+  // left out inherits), kept as a frozen copy so the caller's object cannot change it later.
+  const paceOverrides = new Map<string, Readonly<PaceSettings>>();
+  /** The merged pace of a room with an override, with the profile pace it was merged onto: valid while that object is the one in force. */
+  const paceMerged = new Map<string, { base: ResolvedPace; merged: ResolvedPace }>();
+  /**
+   * The pace in force for a room: the override over the profile's (the layer over the code). A room without an override gets the
+   * profile's own object; one with an override is merged once per change of the profile's pace (it is a new object on every layer
+   * change), not once per line.
+   */
+  const paceOf = (roomId: string): ResolvedPace => {
+    const base = policy.profileNow().pace;
+    const over = paceOverrides.get(roomId);
+    if (over === undefined) return base;
+    const cached = paceMerged.get(roomId);
+    if (cached !== undefined && cached.base === base) return cached.merged;
+    const merged = mergePace(base, over);
+    paceMerged.set(roomId, { base, merged });
+    return merged;
+  };
 
   const chat = new ChatService({
     roster,
@@ -755,6 +871,21 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     notices,
     autoRestrictRule,
     limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
+    pace: {
+      settings: paceOf,
+      canonical: (subject) => subjects.canonical(subject),
+      // A flood trip records the built-in kind, deferred so the verdict is returned first. `flood` never throws and logs its own
+      // refusals; a room id the signal rules do not accept is left out (the trip is then a day source, not dropped).
+      onFlood: ({ roomId, subject }) => {
+        queueMicrotask(() => {
+          try {
+            signalRef.service?.flood(subject, roomId);
+          } catch (err) {
+            safeWarn(logger, 'chatwarden.pace_failed', { error: err instanceof Error ? err.name : typeof err });
+          }
+        });
+      },
+    },
   });
   const reports = new ReportService({
     roster,
@@ -788,6 +919,17 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     const ids = hashWho(hasher, who);
     return subjects.lookup({ clientKey: ids.clientKey, accountId: ids.accountId, ipHash: null });
   };
+  signalRef.service = signalModule === undefined ? createInertSignals(logger, () => policy.profileNow().signals) : new signalModule.SignalService({
+    store,
+    clock,
+    logger,
+    subjects,
+    personOf,
+    settings: () => policy.profileNow().signals,
+    signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs,
+    ...(opts.signals?.accountAgeDays === undefined ? {} : { accountAgeDays: opts.signals.accountAgeDays }),
+  });
+  const signals = signalRef.service;
   /** A player-facing read: a store failure is logged (class only) and reads as `fallback`. */
   const forPlayer = <T>(who: RawWho, fallback: T, read: (subject: SubjectId) => T): T => {
     try {
@@ -892,6 +1034,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     clock,
     reasons: () => policy.profileNow().reporting.reasons,
     accuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
+    boosted: (people) => signals.boosted(people),
   });
   const reasonBook = new ReasonBook(store);
 
@@ -910,12 +1053,21 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           subscribe: bus.on,
           audit: (input) => audit.record(input),
           exampleRetentionMs: () => retentionPolicy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
+          // The counts about the reported person the feed allows (`feeds.ai`), as label, polarity, distinct and window: nothing else leaves.
+          signals: (subject) => signals.forAi(subject).map((c) => ({ label: c.label, polarity: c.polarity, distinct: c.distinct, windowDays: c.windowDays })),
         });
   aiRef.service = aiService;
   const ai: AiFacade = aiService ?? createInertAi();
 
   return {
     ai,
+    signals: {
+      record: (input) => signals.record(input),
+      counts: (subject, o) => signals.counts(subject, o),
+      kinds: () => signals.kinds(),
+      boosted: (people) => signals.boosted(people),
+      forRecord: (subject) => signals.forRecord(subject),
+    },
     rooms: {
       seat,
       seatConnection: (roomId, seatId, ctx, handle, tags) => {
@@ -927,11 +1079,29 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       close: (roomId) => {
         roster.close(roomId);
         buffer.drop(roomId);
+        paceOverrides.delete(roomId);
+        paceMerged.delete(roomId);
+        chat.dropPaceRoom(roomId);
       },
       subjectAt: (roomId, seatId) => {
         const subject = roster.occupant(roomId, seatId)?.subject ?? null;
         return subject === null ? null : subjects.canonical(subject);
       },
+      setPace: (roomId, pace) => {
+        if (typeof roomId !== 'string' || roomId === '') throw new ProfileError('roomId', 'must be a non-empty string');
+        paceMerged.delete(roomId);
+        if (pace === null) {
+          paceOverrides.delete(roomId);
+          return;
+        }
+        // The caller's object is read once, into a validated snapshot of the fields it gave (a field left out inherits); that
+        // snapshot is what is kept, so nothing about it can change after the check.
+        const kept = checkPace(pace);
+        if (kept.burst !== undefined && kept.burst !== null) Object.freeze(kept.burst);
+        if (Object.keys(kept).length === 0) paceOverrides.delete(roomId);
+        else paceOverrides.set(roomId, Object.freeze(kept));
+      },
+      pace: (roomId) => paceOf(roomId),
     },
     chat: {
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),
@@ -1114,7 +1284,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
     suggest: (subject, level, rule, context) => {
       const now = clock.now();
-      return suggest(policy.profileNow(), historyOf(store, subjects, subject, now), level, rule, now, context);
+      // The signal hits are the kit's to compute: a list the caller passes is dropped, the real one set when a ladder rule is met.
+      const { signals: _ignored, ...given } = (context ?? {}) as SuggestContext;
+      void _ignored;
+      const hits = signals.ladderHits(subject);
+      return suggest(policy.profileNow(), historyOf(store, subjects, subject, now), level, rule, now, hits.length === 0 ? given : { ...given, signals: hits });
     },
     gaps: {
       list: () =>
@@ -1151,10 +1325,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       get: (subject) => store.transaction(() => store.getDiscordThread(subject)),
       put: (row) => store.transaction(() => store.putDiscordThread(row)),
     },
-    purge: async (policy) => {
+    purge: async (override) => {
       const merged: Partial<RetentionPolicy> = { ...retentionPolicy };
-      for (const [k, v] of Object.entries(policy ?? {})) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
+      for (const [k, v] of Object.entries(override ?? {})) if (v !== undefined) (merged as Record<string, unknown>)[k] = v;
       checkRetentionFloors(merged, limits.reports.suspendWindowMs);
+      // A feed window longer than the signal retention could never be met: refuse the purge that would make it so, deleting nothing.
+      const { kinds, feeds } = policy.profileNow().signals;
+      checkSignalFeeds(feeds, kinds, { signalsMs: merged.signalsMs ?? RETENTION_DEFAULTS.signalsMs }, 'profile.signals.feeds');
       return await purge(store, clock.now(), merged);
     },
     ready: () => {

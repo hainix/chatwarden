@@ -7,7 +7,7 @@ import { looksLikeInjection } from './injection.js';
 import { chooseLines } from './lines.js';
 import type { ChosenLines } from './lines.js';
 import { buildAIInput } from './prompt.js';
-import type { AIExampleInput, AIReadInput } from './types.js';
+import type { AIExampleInput, AIReadInput, AISignal } from './types.js';
 
 // One report, made ready for a read: the lines chosen and redacted, the prompt rendered, the input hash for this adapter, and the
 // facts the answer is checked against. Pure. The hash leaves the casebook examples out (ruling A3), so the same case always has the
@@ -32,8 +32,8 @@ export interface Prepared {
   idOf: ReadonlyMap<string, string>;
   /** The real ids of the lines the reported person wrote (among the chosen). */
   ownLineIds: ReadonlySet<string>;
-  /** The same input with casebook examples in it (at most two are used). The hash does not change. */
-  build(examples: readonly AIExampleInput[]): AIReadInput;
+  /** The same input with casebook examples and the signal counts about P1 in it (at most two examples are used). The hash does not change. */
+  build(examples: readonly AIExampleInput[], signals?: readonly AISignal[]): AIReadInput;
 }
 
 export interface PrepareArgs {
@@ -50,7 +50,7 @@ export function prepareCase(args: PrepareArgs): Prepared {
   const chosen = chooseLines(report, { mask: args.mask });
   const reasonId = report.reportedReason ?? null;
   const reason = reasonId === null ? null : { id: reasonId, label: reasonLabel(args.reasons, reasonId) ?? reasonId };
-  const build = (examples: readonly AIExampleInput[]): AIReadInput => buildAIInput({ policy, reason, chosen, examples });
+  const build = (examples: readonly AIExampleInput[], signals?: readonly AISignal[]): AIReadInput => buildAIInput({ policy, reason, chosen, examples, ...(signals === undefined ? {} : { signals }) });
   const input = build([]);
 
   // The tripwire reads what the players typed (the raw text), whatever is sent.

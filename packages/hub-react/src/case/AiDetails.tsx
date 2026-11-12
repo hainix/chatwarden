@@ -103,6 +103,7 @@ export function AiDetails({ read, rereading, onAsked }: { read: AiReadView; rere
               <dd>{t(`hub.ai.confidence.${read.confidence}`)}</dd>
             </div>
           </dl>
+          {read.contextSignals !== undefined && read.contextSignals > 0 && <p className="cw-hint">{t('hub.ai.details.context', { count: read.contextSignals })}</p>}
           {read.stale && <p className="cw-hint">{t('hub.ai.details.stale')}</p>}
           {read.injectionSuspected && <p className="cw-hint">{t('hub.ai.details.injection')}</p>}
           <p className="cw-hint">{hubT('hub.ai.note')}</p>

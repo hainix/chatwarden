@@ -4,6 +4,7 @@ import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, CONDUCT_LEVELS, ROLES } from '@chatw
 import type {
   AIExample,
   AIRead,
+  AISignal,
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
@@ -36,6 +37,8 @@ import type {
   ReporterDecision,
   ReporterOutcomeRow,
   ReporterTally,
+  SignalRow,
+  SignalSourceRow,
   SanctionKind,
   SanctionListQuery,
   SanctionRow,
@@ -247,6 +250,34 @@ function exampleIdsFromRow(v: unknown): string[] {
   }
 }
 
+/** The signal counts a read stores: only the four fields, and null for none. */
+function signalsToText(v: readonly AISignal[] | undefined): string | null {
+  const rows = (v ?? []).map((s) => ({
+    label: String(s.label),
+    polarity: s.polarity === 'positive' ? 'positive' : 'negative',
+    distinct: Math.max(0, Math.floor(Number(s.distinct))),
+    windowDays: Math.max(0, Math.floor(Number(s.windowDays))),
+  }));
+  return rows.length === 0 ? null : JSON.stringify(rows);
+}
+
+/** The counts stored with a read; null when the column is empty or damaged (a read made before signals existed has none). */
+function signalsFromRow(v: unknown): AISignal[] | null {
+  if (v === null || v === undefined) return null;
+  try {
+    const rows: unknown = JSON.parse(String(v));
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const out: AISignal[] = [];
+    for (const r of rows as Array<Record<string, unknown>>) {
+      if (typeof r?.label !== 'string' || (r.polarity !== 'negative' && r.polarity !== 'positive') || typeof r.distinct !== 'number' || typeof r.windowDays !== 'number') return null;
+      out.push({ label: r.label, polarity: r.polarity, distinct: r.distinct, windowDays: r.windowDays });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 /** A read row; null for an `ok` row whose answer cannot be read (with `lenient`, that row comes back with `read: null` instead). */
 function aiReadFromRow(r: Record<string, unknown>, lenient = false): AiReadRow | null {
   const status = String(r.status);
@@ -268,6 +299,7 @@ function aiReadFromRow(r: Record<string, unknown>, lenient = false): AiReadRow |
     promptVersion: Number(r.prompt_version),
     read,
     exampleIds: status === 'ok' ? exampleIdsFromRow(r.example_ids) : [],
+    signals: status === 'ok' ? signalsFromRow(r.signals_json) : null,
     inputTokens: nullableNumber(r.input_tokens),
     outputTokens: nullableNumber(r.output_tokens),
     cacheReadTokens: nullableNumber(r.cache_read_tokens),
@@ -315,6 +347,9 @@ function detailFromRow(json: unknown): AiOutcomeRow['detail'] {
 /** The page sizes used when a limit is omitted, not finite or below 1 (the memory store keeps the same two numbers). */
 const EXAMPLES_DEFAULT_LIMIT = 2;
 const RETRIES_DEFAULT_LIMIT = 20;
+
+/** Order two strings by code unit, the way the signal listing sorts (the memory store sorts the same way). */
+const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** A page size: the limit floored and capped at 200, or `fallback` when it is omitted, not finite or below 1. */
 const pageSize = (limit: number | undefined, fallback: number): number =>
@@ -797,7 +832,7 @@ export class SqliteStore implements Store, TermStore {
           .prepare(
             `UPDATE kit_ai_reads
              SET status = 'ok', lease_until = NULL, retry_at = NULL, error_kind = NULL,
-                 severity = ?, rule = ?, summary = ?, evidence_json = ?, confidence = ?, injection = ?, rec_json = ?, example_ids = ?
+                 severity = ?, rule = ?, summary = ?, evidence_json = ?, confidence = ?, injection = ?, rec_json = ?, example_ids = ?, signals_json = ?
              WHERE id = ? AND status = 'pending' AND attempts = ?`,
           )
           .run(
@@ -809,6 +844,7 @@ export class SqliteStore implements Store, TermStore {
             read.injectionSuspected ? 1 : 0,
             read.recommendation === null ? null : JSON.stringify(read.recommendation),
             JSON.stringify(result.exampleIds ?? []),
+            signalsToText(result.signals),
             id,
             lease,
           ).changes,
@@ -1051,6 +1087,64 @@ export class SqliteStore implements Store, TermStore {
       this.db.prepare('UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL').run(examplesBefore);
       return { reads, outcomes };
     });
+  }
+
+  // Signals (flood control and signals, migration 21). SYNCHRONOUS on purpose (like claims); they run inside `transaction`. A signal is not
+  // a queue change, so none of these moves the change token.
+
+  insertSignal(row: SignalRow): boolean {
+    // One statement: the UNIQUE index kit_signals_cap (and the primary key) decide, so of two connections writing the same
+    // (kind, subject, source, bucket) exactly one gets a row back. A negative or NaN weight fails the table's CHECK and throws; a time, bucket or
+    // weight that is not a finite number is refused here (as the memory store does), since SQLite would store an infinity or turn a NaN into NULL.
+    if (!(Number.isFinite(row.weight) && row.weight >= 0)) throw new Error('insertSignal: weight must be a finite number, 0 or more');
+    if (!Number.isFinite(row.at)) throw new Error('insertSignal: at must be a finite number');
+    if (!Number.isSafeInteger(row.capBucket)) throw new Error('insertSignal: capBucket must be a whole number');
+    const wrote = this.db
+      .prepare(
+        `INSERT INTO kit_signals (id, kind, subject_id, source_key, by_subject, room_id, at, weight, cap_bucket)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO NOTHING
+         RETURNING id`,
+      )
+      .get(row.id, row.kind, row.subject, row.sourceKey, row.bySubject, row.roomId, row.at, row.weight, row.capBucket);
+    return wrote !== undefined;
+  }
+
+  listSignalSources(subjects: readonly SubjectId[], since: number): SignalSourceRow[] {
+    const unique = [...new Set(subjects)];
+    if (unique.length === 0) return [];
+    return this.transaction(() => {
+      const out: SignalSourceRow[] = [];
+      for (let i = 0; i < unique.length; i += CLAIM_BATCH) {
+        const batch = unique.slice(i, i + CLAIM_BATCH);
+        // `by_subject` is the smallest one of the source's rows, so the answer does not depend on which row SQLite meets first.
+        const rows = this.db
+          .prepare(
+            `SELECT subject_id, kind, source_key, MIN(by_subject) AS by_subject, MAX(weight) AS weight, MIN(at) AS first_at, MAX(at) AS last_at
+             FROM kit_signals
+             WHERE subject_id IN (${batch.map(() => '?').join(', ')}) AND at >= ?
+             GROUP BY subject_id, kind, source_key`,
+          )
+          .all(...batch, since);
+        for (const r of rows) {
+          out.push({
+            subject: String(r.subject_id),
+            kind: String(r.kind),
+            sourceKey: String(r.source_key),
+            bySubject: r.by_subject === null ? null : String(r.by_subject),
+            weight: Number(r.weight),
+            firstAt: Number(r.first_at),
+            lastAt: Number(r.last_at),
+          });
+        }
+      }
+      // Sorted by subject, kind and source, whatever order SQLite grouped in (and across batches).
+      return out.sort((a, b) => cmp(a.subject, b.subject) || cmp(a.kind, b.kind) || cmp(a.sourceKey, b.sourceKey));
+    });
+  }
+
+  purgeSignals(before: number): number {
+    return Number(this.db.prepare('DELETE FROM kit_signals WHERE at < ?').run(before).changes);
   }
 
   listReasons(): ReasonRow[] {

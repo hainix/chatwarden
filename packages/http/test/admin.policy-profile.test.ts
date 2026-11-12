@@ -46,7 +46,7 @@ describe('GET /policy/profile', () => {
     for (const role of ['moderator', 'senior', 'owner'] as const) {
       const res = await call('GET', '/policy/profile', { role });
       expect(res.status, role).toBe(200);
-      expect(Object.keys(res.body as object).sort()).toEqual(['base', 'canSave', 'effective', 'layer', 'version']);
+      expect(Object.keys(res.body as object).sort()).toEqual(['base', 'canSave', 'effective', 'layer', 'limits', 'version']);
     }
     const body = (await call('GET', '/policy/profile')).body as ProfileBody;
     expect(body.version).toBe(0);
@@ -565,7 +565,7 @@ describe('DELETE /policy/profile needs a reason, like PUT', () => {
 });
 
 describe('PUT and DELETE answer with the fresh state, in the shape of GET', () => {
-  const shape = ['base', 'canSave', 'changed', 'effective', 'layer', 'ok', 'version'];
+  const shape = ['base', 'canSave', 'changed', 'effective', 'layer', 'limits', 'ok', 'version'];
 
   it('PUT returns ok, version, changed and effective, base, layer, version, canSave', async () => {
     const { call } = await world();
@@ -625,5 +625,46 @@ describe('already_decided comes before duration_not_offered', () => {
     const r = await file();
     const res = await call('POST', `/reports/${r.id}/decide`, { body: { verdict: 'upheld', actions: [{ subject: r.target, kind: 'chat', durationMs: 5 * HOUR, rule: 2 }], reason: 'r' } });
     expect([res.status, errorOf(res)]).toEqual([400, 'duration_not_offered']);
+  });
+});
+
+// The read-only `limits` object: what the settings screens need from the kit itself. Not part of the layer; a save cannot change it.
+describe('limits on /policy/profile', () => {
+  const DAYS = (n: number): number => n * 86_400_000;
+
+  it('GET carries the built-in chat rate and the signals retention, for any staff role', async () => {
+    const { call } = await world();
+    for (const role of ['moderator', 'senior', 'owner'] as const) {
+      const res = await call('GET', '/policy/profile', { role });
+      expect((res.body as { limits: unknown }).limits, role).toEqual({ chatRate: { count: 3, windowMs: 5000 }, signalsMs: DAYS(90) });
+    }
+  });
+
+  it('follows the kit: a configured chat rate and retention show as they are', async () => {
+    const { call } = await world({ limits: { chatRate: { count: 10, windowMs: 8000 } }, retention: { signalsMs: DAYS(30) } });
+    const res = await call('GET', '/policy/profile');
+    expect((res.body as { limits: unknown }).limits).toEqual({ chatRate: { count: 10, windowMs: 8000 }, signalsMs: DAYS(30) });
+  });
+
+  it('PUT and DELETE answer with the same limits, so a screen that takes the answer loses nothing', async () => {
+    const { call } = await world({ limits: { chatRate: { count: 10, windowMs: 8000 } } });
+    const put = await call('PUT', '/policy/profile', PUT({ layer: { pace: { slowModeMs: 2000 } }, version: 0, reason: 'a quiet room' }));
+    expect(put.status).toBe(200);
+    expect((put.body as { limits: unknown }).limits).toMatchObject({ chatRate: { count: 10, windowMs: 8000 } });
+    const del = await call('DELETE', '/policy/profile?section=pace', { role: 'owner', actor: 'owner_ann', body: { reason: 'back' } });
+    expect(del.status).toBe(200);
+    expect((del.body as { limits: unknown }).limits).toMatchObject({ chatRate: { count: 10, windowMs: 8000 } });
+  });
+
+  it('a layer that names limits is refused, and the limits are the same afterwards', async () => {
+    const { call } = await world();
+    const res = await call('PUT', '/policy/profile', PUT({ layer: { limits: { chatRate: { count: 1, windowMs: 1 } } }, version: 0, reason: 'sneaky' }));
+    expect(res.status).toBe(400);
+    expect(((await call('GET', '/policy/profile')).body as { limits: { chatRate: unknown } }).limits.chatRate).toEqual({ count: 3, windowMs: 5000 });
+  });
+
+  it('carries no identifier: numbers only', async () => {
+    const { call } = await world();
+    expect(JSON.stringify(((await call('GET', '/policy/profile')).body as { limits: unknown }).limits)).toMatch(/^[{}\d:,"a-zA-Z]+$/);
   });
 });

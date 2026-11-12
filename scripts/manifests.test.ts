@@ -37,8 +37,14 @@ const NEW_KIT_RANGE = '^0.1.2';
 // `assertWithinCeilings` plus the new core types in hub-react, which also names http's `AiReadAgainBody`. It sits above the floors the 0.1.5
 // (triage speed) and 0.1.6 (the chat box, `cw.chat.restrictedBySubject` for http) releases set, so those sets are folded into this one.
 // player-react uses none of it and stays at ^0.1.2; discord, matcher and profanity stay at ^0.1.0.
-const NEW_KIT_RANGE_0_1_7 = '^0.1.7';
-const NEEDS_NEW_KIT_0_1_7 = new Set(['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/http', '@chatwarden/hub-react']);
+// ...and, for 0.1.8 (flood control and signals), what is new in core and http: the three optional signal `Store` methods and the `SignalRow` and
+// `SignalSourceRow` types that store-memory and store-sqlite name in their signatures, `cw.signals.boosted` and `forRecord`, `signalBoost` on take-next,
+// `SuggestContext.hideSignalText` and `PolicyState.limits` in http, and `BUILTIN_SIGNAL_KINDS`, `PACE_SUGGESTIONS`, `PaceSettings` and the `pace` and
+// `signals` profile sections in hub-react, which also reads http's new wire fields. It sits above the 0.1.7 floor, so that set is folded into this one.
+// player-react's `pace` prop uses its own literal union and still imports nothing new from core; hub-element's optional hub-react peer is for types
+// that did not change. discord, matcher and profanity stay at ^0.1.0.
+const NEW_KIT_RANGE_0_1_8 = '^0.1.8';
+const NEEDS_NEW_KIT_0_1_8 = new Set(['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/http', '@chatwarden/hub-react']);
 // hub-element's optional peer on hub-react stays at ^0.1.5: it imports only what hub-react has had since then, and its types are unchanged.
 const HUB_REACT_RANGE_FOR_ELEMENT = '^0.1.5';
 const NEEDS_NEW_KIT = new Set(['@chatwarden/player-react']);
@@ -50,10 +56,10 @@ const BUNDLED = new Set(['@chatwarden/hub-element']);
 /** The range `pkgName` must declare for its peer `peerName`. */
 const peerRangeOf = (pkgName: string, peerName: string): string => {
   if (peerName === '@chatwarden/core') {
-    return NEEDS_NEW_KIT_0_1_7.has(pkgName) ? NEW_KIT_RANGE_0_1_7 : NEEDS_NEW_KIT.has(pkgName) ? NEW_KIT_RANGE : PEER_RANGE;
+    return NEEDS_NEW_KIT_0_1_8.has(pkgName) ? NEW_KIT_RANGE_0_1_8 : NEEDS_NEW_KIT.has(pkgName) ? NEW_KIT_RANGE : PEER_RANGE;
   }
-  // hub-react names http's `AiReadAgainBody` (new in 0.1.7) and reads the `ai` wire fields; hub-element's types are hub-react's, unchanged.
-  if (peerName === '@chatwarden/http') return NEW_KIT_RANGE_0_1_7;
+  // hub-react names http's `AiReadAgainBody` (0.1.7) and reads the `ai` wire fields, and since 0.1.8 `boosted`, `signals` and `limits`; hub-element's types are hub-react's, unchanged.
+  if (peerName === '@chatwarden/http') return NEW_KIT_RANGE_0_1_8;
   if (peerName === '@chatwarden/hub-react') return HUB_REACT_RANGE_FOR_ELEMENT;
   return PEER_RANGE;
 };
@@ -116,7 +122,7 @@ describe('core is a peer, never a dependency', () => {
     expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
-    '%s peers on core at its floor (^0.1.0, ^0.1.2 where it needs the 0.1.2 kit, ^0.1.7 where it needs the 0.1.7 kit) and dev-depends on core at the group version',
+    '%s peers on core at its floor (^0.1.0, ^0.1.2 where it needs the 0.1.2 kit, ^0.1.8 where it needs the 0.1.8 kit) and dev-depends on core at the group version',
     (_n, pkg) => {
       expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(peerRangeOf(pkg.name, '@chatwarden/core'));
       expect(pkg.devDependencies?.['@chatwarden/core']).toBe(VERSION);
@@ -161,13 +167,16 @@ describe('peer floors', () => {
   it.each([...NEEDS_NEW_KIT])('%s needs core ^0.1.2 (nothing since touches it)', (name) => {
     expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.2');
   });
-  it.each([...NEEDS_NEW_KIT_0_1_7])('%s needs core ^0.1.7 (the AI Store methods and Ai* row types, cw.ai, assertWithinCeilings)', (name) => {
-    expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.7');
+  it.each([...NEEDS_NEW_KIT_0_1_8])('%s needs core ^0.1.8 (the signal Store methods and row types, cw.signals, signalBoost, PolicyState.limits, the pace and signals profile sections)', (name) => {
+    expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.8');
+  });
+  it('the new floors are the ones in NEEDS_NEW_KIT: store-memory, store-sqlite, http and hub-react, and no other package', () => {
+    expect([...NEEDS_NEW_KIT_0_1_8].sort()).toEqual(['@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/store-memory', '@chatwarden/store-sqlite']);
   });
   it('the two sets are disjoint and together are exactly the packages that peer on a new core', () => {
-    for (const n of NEEDS_NEW_KIT_0_1_7) expect(NEEDS_NEW_KIT.has(n)).toBe(false);
+    for (const n of NEEDS_NEW_KIT_0_1_8) expect(NEEDS_NEW_KIT.has(n)).toBe(false);
     const peering = published.filter((p) => (p.pkg.peerDependencies?.['@chatwarden/core'] ?? '') !== '' && p.pkg.peerDependencies?.['@chatwarden/core'] !== PEER_RANGE).map((p) => p.pkg.name).sort();
-    expect(peering).toEqual([...NEEDS_NEW_KIT, ...NEEDS_NEW_KIT_0_1_7].sort());
+    expect(peering).toEqual([...NEEDS_NEW_KIT, ...NEEDS_NEW_KIT_0_1_8].sort());
   });
   it('player-react does not follow the floor up: its chat imports only what core 0.1.2 has', () => {
     expect(byName('@chatwarden/player-react').peerDependencies?.['@chatwarden/core']).toBe('^0.1.2');
@@ -175,8 +184,8 @@ describe('peer floors', () => {
   it.each(['@chatwarden/discord', '@chatwarden/matcher', '@chatwarden/profanity'])('%s uses nothing new in core and keeps ^0.1.0', (name) => {
     expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.0');
   });
-  it('hub-react peers on http ^0.1.7 (AiReadAgainBody) and hub-element on hub-react ^0.1.5 (it uses nothing newer)', () => {
-    expect(byName('@chatwarden/hub-react').peerDependencies?.['@chatwarden/http']).toBe('^0.1.7');
+  it('hub-react peers on http ^0.1.8 (boosted, signals, limits) and hub-element on hub-react ^0.1.5 (it uses nothing newer)', () => {
+    expect(byName('@chatwarden/hub-react').peerDependencies?.['@chatwarden/http']).toBe('^0.1.8');
     expect(byName('@chatwarden/hub-element').peerDependencies?.['@chatwarden/hub-react']).toBe('^0.1.5');
   });
   it('every @chatwarden floor is a caret range the group version satisfies, so each can be installed', () => {
@@ -244,7 +253,7 @@ describe('hub-react', () => {
     expect(Object.keys(hub().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', '@chatwarden/http', 'react', 'react-dom']);
     expect(hub().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
     expect(hub().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
-    expect(hub().peerDependencies?.['@chatwarden/http']).toBe(NEW_KIT_RANGE_0_1_7);
+    expect(hub().peerDependencies?.['@chatwarden/http']).toBe(NEW_KIT_RANGE_0_1_8);
     expect(hub().dependencies).toBeUndefined();
   });
   it('ships the stylesheet as ./styles.css and the optional font as ./font.css, and lists only those under sideEffects', () => {

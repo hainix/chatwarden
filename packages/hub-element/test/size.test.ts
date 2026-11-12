@@ -16,8 +16,12 @@ import { bundle } from '../build/build.mjs';
 
 // Raised to 202 KB gzipped at 0.1.7, approved by the maintainer: the standalone bundle inlines every lazy chunk, so the AI hub
 // (lazy in hub-react) counts here in full.
-const BUDGET_GZIP = 202 * 1024;
-const BUDGET_RAW = 760 * 1024;
+//
+// Raised to 240 KB gzipped and 860 KB raw at 0.1.8 (the maintainer's standing rule: a size budget is raised generously with a comment, never trimmed for
+// bytes). Measured 218,083 gzipped and 796,576 raw: the standalone bundle inlines every lazy chunk, so the Advanced screen (slow mode and flooding,
+// signals), the Person page signal lines and the AI parts all count here in full, and the hub's stylesheet grew with them.
+const BUDGET_GZIP = 240 * 1024;
+const BUDGET_RAW = 860 * 1024;
 
 interface Built {
   standalone: { text: string; bytes: number; gzip: number };

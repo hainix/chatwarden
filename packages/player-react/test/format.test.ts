@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayText, timeLeft, untilText } from '../src/format.js';
+import { dayText, secondsLeft, timeLeft, untilText } from '../src/format.js';
 import { DAY, HOUR, MINUTE, T0 } from './world.js';
 
 describe('dayText', () => {
@@ -52,5 +52,38 @@ describe('timeLeft', () => {
   });
   it('follows the locale', () => {
     expect(timeLeft(now + 2 * DAY, now, 'de')).toBe('in 2 Tagen');
+  });
+});
+
+describe('secondsLeft', () => {
+  // One wait convention for the chat refusal and the pace words: a BARE duration ("3 seconds"), and the sentence has its own "in {left}".
+  it('is whole seconds, rounded up, a bare duration in the locale words', () => {
+    expect(secondsLeft(500, 'en')).toBe('1 second');
+    expect(secondsLeft(1, 'en')).toBe('1 second');
+    expect(secondsLeft(1000, 'en')).toBe('1 second');
+    expect(secondsLeft(1001, 'en')).toBe('2 seconds');
+    expect(secondsLeft(3000, 'en')).toBe('3 seconds');
+    expect(secondsLeft(59_999, 'en')).toBe('60 seconds');
+  });
+  it('reads in seconds up to 120, then minutes (rounded up), then hours', () => {
+    expect(secondsLeft(119_000, 'en')).toBe('119 seconds');
+    expect(secondsLeft(120_000, 'en')).toBe('120 seconds');
+    expect(secondsLeft(120_001, 'en')).toBe('3 minutes');
+    expect(secondsLeft(125_000, 'en')).toBe('3 minutes');
+    expect(secondsLeft(3_600_000, 'en')).toBe('60 minutes');
+    expect(secondsLeft(7_200_000, 'en')).toBe('120 minutes');
+    expect(secondsLeft(7_200_001, 'en')).toBe('3 hours');
+    expect(secondsLeft(3 * 3_600_000, 'en')).toBe('3 hours');
+  });
+  it('never carries its own "in": the sentence has it', () => {
+    for (const ms of [1, 500, 3000, 120_000, 125_000, 3_600_000, 3 * 3_600_000, 3 * 86_400_000]) expect(secondsLeft(ms, 'en'), String(ms)).not.toMatch(/^in\b/);
+  });
+  it('says nothing for zero, a negative or a value that is not a finite number', () => {
+    for (const bad of [0, -1, -86_400_000, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) expect(secondsLeft(bad, 'en'), String(bad)).toBeNull();
+    expect(secondsLeft('3000' as never, 'en')).toBeNull();
+  });
+  it('follows the locale, and survives one the runtime does not know', () => {
+    expect(secondsLeft(3000, 'de')).toBe('3 Sekunden');
+    expect(secondsLeft(3000, 'not a locale')).toBe('3 seconds');
   });
 });

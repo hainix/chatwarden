@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/hub-element",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "description": "The Chatwarden moderator hub as one custom element, <chatwarden-hub>, in a single self-contained script: drop it into plain HTML, Vue, Svelte or a server-rendered admin page.",
   "license": "Apache-2.0",
@@ -72,11 +72,11 @@
     }
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.7",
-    "@chatwarden/http": "0.1.7",
-    "@chatwarden/hub-react": "0.1.7",
-    "@chatwarden/matcher": "0.1.7",
-    "@chatwarden/store-memory": "0.1.7",
+    "@chatwarden/core": "0.1.8",
+    "@chatwarden/http": "0.1.8",
+    "@chatwarden/hub-react": "0.1.8",
+    "@chatwarden/matcher": "0.1.8",
+    "@chatwarden/store-memory": "0.1.8",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/user-event": "^14.6.9",
     "@types/express": "^5.0.3",

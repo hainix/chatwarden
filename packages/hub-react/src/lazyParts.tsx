@@ -2,7 +2,8 @@ import { Component, Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { CommandBarProps } from './shell/CommandBar.js';
 import type { AiPartsProps } from './case/AiParts.js';
-import type { AiReadView } from './types.js';
+import type { UsePolicy } from './policyHooks.js';
+import type { AiReadView, PolicyState, SignalCountView } from './types.js';
 
 // Parts of the hub that few moderators open often are loaded the first time they are shown, so the hub's first load carries only
 // what every moderator uses: the sweep disclosure and its window (behind a closed disclosure), the shortcut sheet (opened by `?`) and the
@@ -39,6 +40,12 @@ class Boundary extends Component<{ children: ReactNode; onFail: () => void; hide
   }
 }
 
+/** What a panel of the Advanced settings screen is given: the policy as the screen read it (one read for all its panels). */
+export interface PanelProps {
+  state: PolicyState;
+  policy: UsePolicy;
+}
+
 /** What a part asks of the page to get its code. Exposed so a test can make a fetch fail or wait; nothing else replaces them. */
 export const partLoaders: {
   bulk: () => Promise<ComponentType<Record<string, never>>>;
@@ -46,12 +53,18 @@ export const partLoaders: {
   bar: () => Promise<ComponentType<CommandBarProps>>;
   strip: () => Promise<ComponentType<{ read: AiReadView | null; expected: boolean }>>;
   aiParts: () => Promise<ComponentType<AiPartsProps>>;
+  signalLines: () => Promise<ComponentType<{ signals: readonly SignalCountView[] | undefined }>>;
+  pacePanel: () => Promise<ComponentType<PanelProps>>;
+  signalPanel: () => Promise<ComponentType<PanelProps>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
   bar: () => import('./shell/CommandBar.js').then((m) => m.CommandBar),
   strip: () => import('./case/AiStrip.js').then((m) => m.AiStrip),
   aiParts: () => import('./case/AiParts.js').then((m) => m.AiParts),
+  signalLines: () => import('./person/SignalLines.js').then((m) => m.SignalLines),
+  pacePanel: () => import('./screens/PaceSettings.js').then((m) => m.PaceSettings),
+  signalPanel: () => import('./screens/SignalSettings.js').then((m) => m.SignalSettings),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -108,6 +121,9 @@ const sheet = lazyPart(() => partLoaders.sheet());
 const bar = lazyPart(() => partLoaders.bar());
 const strip = lazyPart(() => partLoaders.strip(), true);
 const aiParts = lazyPart(() => partLoaders.aiParts(), true);
+const signalLines = lazyPart(() => partLoaders.signalLines(), true);
+const pacePanel = lazyPart(() => partLoaders.pacePanel());
+const signalPanel = lazyPart(() => partLoaders.signalPanel());
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
@@ -118,6 +134,15 @@ export const LazyAiStrip = strip.Part;
 /** The AI's suggestion on a case (level 2): the bar's header, and the Simple card's suggestion, Accept button and reason. */
 export const LazyAiParts = aiParts.Part;
 
+/** The Person page's signal lines (inside the Timeline panel): loaded when the record has counts to show; an optional extra, never an error. */
+export const LazySignalLines = signalLines.Part;
+
+/** The "Slow mode and flooding" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazyPaceSettings = pacePanel.Part;
+
+/** The "Signals" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazySignalSettings = signalPanel.Part;
+
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
@@ -125,6 +150,9 @@ export function resetLazyParts(): void {
   bar.reset();
   strip.reset();
   aiParts.reset();
+  signalLines.reset();
+  pacePanel.reset();
+  signalPanel.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

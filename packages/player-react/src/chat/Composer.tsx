@@ -10,6 +10,8 @@ import type { SendResult, WireLine, WireRefusal } from './wire.js';
 const REFUSAL_MS = 8000;
 /** The reasons with a sentence of their own; any other gets the generic one. */
 const KNOWN = new Set(['length', 'rate', 'gate', 'blocked', 'profanity', 'slow_mode', 'flood', 'duplicate']);
+/** The reasons whose sentence holds the wait. */
+const WITH_WAIT = new Set(['slow_mode', 'flood', 'duplicate']);
 /** The counter shows in the last this many characters. */
 const COUNT_FROM = 20;
 
@@ -33,7 +35,9 @@ function refusalText(ui: Ui, refusal: WireRefusal, maxLength: number): string {
   if (refusal.reason === 'empty') return '';
   const wait = waitOf(refusal);
   const key = KNOWN.has(refusal.reason) ? refusal.reason : 'unknown';
-  const parts = [ui.t(`player.chat.refused.${key}` as PlayerText, { max: maxLength, left: wait === null ? '' : waitText(ui, wait) })];
+  // A pace refusal with no valid wait has sentences of its own with no time in them, never "in ." (the wait is bare: the sentence has the "in").
+  const soon = wait === null && WITH_WAIT.has(key) ? '.soon' : '';
+  const parts = [ui.t(`player.chat.refused.${key}${soon}` as PlayerText, { max: maxLength, left: wait === null ? '' : waitText(ui, wait) })];
   if (refusal.rule !== undefined) parts.push(ui.t('player.chat.refused.rule', { rule: refusal.rule }));
   if (refusal.noticeId !== undefined) parts.push(ui.t('player.chat.refused.notice'));
   return parts.join(' ');

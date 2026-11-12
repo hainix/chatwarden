@@ -1,4 +1,5 @@
 import { sha256Hex } from '../crypto.js';
+import { SIGNALS_ROW } from './prompt.js';
 import type { AIReadInput } from './types.js';
 
 /**
@@ -6,7 +7,9 @@ import type { AIReadInput } from './types.js';
  * policy text that changes meaning), the case's own rendered inputs and the adapter id, in that order. The casebook examples are
  * NOT part of it: a growing casebook must not make every stored read look stale, and the read records the ids of the examples it
  * used instead (`AIStoredRead.exampleIds`). The `example:` rows are therefore left out of the variable part before hashing; no
- * other row of the data block can begin that way (a chat line starts `L<n> `, the rest are fixed keys). The fields are framed as a
+ * other row of the data block can begin that way (a chat line starts `L<n> `, the rest are fixed keys). The same goes for the signal
+ * counts row (`Context about P1, ...`): counts move all day, so keying the hash on them would re-read every open report each time
+ * someone muted someone; the row is a snapshot taken when the read is made. The fields are framed as a
  * JSON array, so no part can slide into the next. Object key order in `input` cannot matter: only those values are read. A hex
  * string of 64 characters.
  * @experimental
@@ -14,7 +17,7 @@ import type { AIReadInput } from './types.js';
 export function inputHash(input: AIReadInput, adapterId: string): string {
   const caseInputs = input.prompt.variable
     .split('\n')
-    .filter((row) => !row.startsWith('example: '))
+    .filter((row) => !row.startsWith('example: ') && !row.startsWith(SIGNALS_ROW))
     .join('\n');
   return sha256Hex(JSON.stringify([input.promptVersion, input.prompt.stable, caseInputs, adapterId]));
 }

@@ -1,7 +1,10 @@
 import type { EvidenceBuffer, RoomRoster } from './evidence.js';
-import { safeWarn, ThrottledWarn } from './log.js';
+import { errorClass, safeWarn, ThrottledWarn } from './log.js';
 import type { MuteService } from './mutes.js';
 import type { NoticeService } from './notices.js';
+import type { PaceReason, ResolvedPace } from './pace.js';
+import { createPacer } from './pacing.js';
+import type { PaceKey, Pacer } from './pacing.js';
 import type { Limits } from './limits.js';
 import { slidingWindow } from './rateLimit.js';
 import type { SlidingWindow } from './rateLimit.js';
@@ -28,11 +31,14 @@ import type {
 //   2. the seat's occupant, then the gate hook
 //   3. active restriction                -> 'restricted' (chat, ban, or the in-memory automatic one)
 //   4. length > 200                      -> 'length'
-//   5. rate, 3 per 5 s per room:seat     -> 'rate' (spent even when the line is then blocked)
-//   6. matcher hit                       -> buffered as blocked, one strike, maybe an automatic timeout, 'blocked'
-//   7. profanity, by the profile's mode  -> allow: untouched; star: masked; refuse: 'profanity' (never a strike,
+//   5. pacing, when configured           -> 'slow_mode' | 'flood' | 'duplicate' (read only: a refusal writes nothing and
+//                                           spends nothing; it carries `retryAfterMs`)
+//   6. rate, 3 per 5 s per room:seat     -> 'rate' (spent even when the line is then blocked)
+//   7. pacing commit                     -- only now does the line count toward the next pacing check
+//   8. matcher hit                       -> buffered as blocked, one strike, maybe an automatic timeout, 'blocked'
+//   9. profanity, by the profile's mode  -> allow: untouched; star: masked; refuse: 'profanity' (never a strike,
 //                                           never buffered, never a notice: swearing is not a rule violation)
-//   8. buffer the delivered line         -> its lineId
+//  10. buffer the delivered line         -> its lineId
 // It never throws. Everything on this path reads in-memory state; the only store writes are the strike
 // (inside StrikeService) and the automatic timeout, and a failure of either is logged and absorbed.
 
@@ -64,8 +70,12 @@ interface BlockedLine {
  * automatic-filter rule (`autoRestrictRule`, CR 1 by default) for `blocked`, and for `restricted` the sanction's
  * own rule (omitted when it is `'uncovered'` or unknown; the in-memory fallback cites the automatic-filter rule). `noticeId` is the player's notice that explains a restriction, when one
  * exists. Never an identifier, a rule's private note or the matched term. `'empty'` means stay silent.
+ *
+ * `'slow_mode'`, `'flood'` and `'duplicate'` are pacing refusals and only ever appear once pacing is configured (`profile.pace`, a
+ * stored layer or `cw.rooms.setPace`). They carry `retryAfterMs` and nothing else: a pause, not a sanction, so no rule, notice or end
+ * time, and never the line.
  */
-export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity';
+export type RefuseReason = 'empty' | 'length' | 'rate' | 'gate' | 'restricted' | 'blocked' | 'profanity' | PaceReason;
 
 export type ChatResult =
   | { deliver: { lineId: string; text: string } }
@@ -76,6 +86,8 @@ export type ChatResult =
         byModerator?: boolean;
         rule?: number;
         noticeId?: string;
+        /** Present for `slow_mode`, `flood` and `duplicate`: when the same player may try again, in ms from now (a whole number, at least 1). @experimental */
+        retryAfterMs?: number;
       };
     };
 
@@ -136,13 +148,32 @@ export interface ChatServiceDeps {
    * `roomId:seatId`. The service trusts the numbers; the facade validates them.
    */
   limits?: { maxLength: Limits['chatMaxLength']; rate: Limits['chatRate'] };
+  /**
+   * Pacing: slow mode, a burst limit and repeat refusal. `settings` is read on every line (so a saved change applies at once) and
+   * answers every check off for a room that is not paced: such a line builds no key and makes no `canonical` call, and keeps no state.
+   * `canonical` folds a merged subject into the person the state is kept under. `onFlood` is told once per burst window when a known person trips the burst
+   * limit; a throw from it is logged by class and absorbed. Without `pace` nothing is paced.
+   * @experimental
+   */
+  pace?: {
+    settings: (roomId: string) => ResolvedPace;
+    canonical: (subject: SubjectId) => SubjectId;
+    onFlood?: (info: { roomId: string; subject: SubjectId }) => void;
+  };
 }
+
+/** What pacing says about a line: a refusal, or the key to commit under; neither when nothing is paced. */
+interface Paced {
+  refusal: ChatResult | null;
+  key: PaceKey | null;
+}
+const NOT_PACED: Paced = Object.freeze({ refusal: null, key: null });
 
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
 
 const refuse = (
   reason: RefuseReason,
-  extra?: { until?: number | null; byModerator?: boolean; rule?: number; noticeId?: string },
+  extra?: { until?: number | null; byModerator?: boolean; rule?: number; noticeId?: string; retryAfterMs?: number },
 ): ChatResult => ({ refuse: extra === undefined ? { reason } : { reason, ...extra } });
 
 interface Restriction {
@@ -203,6 +234,10 @@ export class ChatService {
   private readonly rate: SlidingWindow;
   /** The typing lookup runs at keystroke rate: its failure line is limited to one a minute. */
   private readonly typingWarn: ThrottledWarn;
+  /** Pacing runs on every line: a failure of it is limited to one log line a minute. */
+  private readonly paceWarn: ThrottledWarn;
+  private readonly pacer: Pacer | undefined;
+  private readonly pace: ChatServiceDeps['pace'];
 
   /**
    * Automatic restrictions that could not be stored (no subject to put a row on, or the write failed), by
@@ -229,6 +264,9 @@ export class ChatService {
     this.onAutoRestricted = deps.onAutoRestricted;
     this.logger = deps.logger;
     this.typingWarn = new ThrottledWarn(deps.logger, deps.clock);
+    this.paceWarn = new ThrottledWarn(deps.logger, deps.clock);
+    this.pace = deps.pace;
+    this.pacer = deps.pace === undefined ? undefined : createPacer({ clock: deps.clock, settings: deps.pace.settings });
     this.notices = deps.notices;
     this.autoRestrictRule = deps.autoRestrictRule ?? DEFAULT_AUTO_RESTRICT_RULE;
     this.maxLength = deps.limits?.maxLength ?? MAX_LEN;
@@ -309,6 +347,11 @@ export class ChatService {
     }
   }
 
+  /** Forget a room's pacing state (the room is closing). */
+  dropPaceRoom(roomId: string): void {
+    this.pacer?.dropRoom(roomId);
+  }
+
   // --- internals -----------------------------------------------------------
 
   private run(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult {
@@ -335,9 +378,20 @@ export class ChatService {
     }
 
     if (trimmed.length > this.maxLength) return refuse('length');
+
+    // Pacing asks before `rate` so the specific, retryable message wins over the blunt one; it only reads, so a refusal spends nothing.
+    // With every check off it builds nothing (no key, no canonical lookup) and there is nothing to commit.
+    const paced = this.pacer === undefined ? NOT_PACED : this.paceCheck(this.pacer, roomId, seatId, subject, trimmed);
+    if (paced.refusal !== null) return paced.refusal;
     // Spent even when the line is then blocked, so a flood of slurs is throttled like any flood and cannot
     // probe the term list faster than ordinary chat.
-    if (!this.rate.check(rateKey)) return refuse('rate');
+    if (!this.rate.check(rateKey)) {
+      // The line passed pacing but never commits: the pacer must not keep its text.
+      this.paceDiscard(this.pacer);
+      return refuse('rate');
+    }
+    // Past `rate` the line has happened as far as pacing is concerned (a blocked or profane line has spent its slot too).
+    if (this.pacer !== undefined && paced.key !== null) this.paceCommit(this.pacer, paced.key, trimmed);
 
     const audience = opts?.audience === undefined ? null : [...opts.audience];
 
@@ -387,6 +441,53 @@ export class ChatService {
       audience,
     });
     return { deliver: { lineId, text: delivered } };
+  }
+
+  /**
+   * Ask pacing about a line: a refusal to return, or the key to commit under once `rate` passes. Everything that can throw is in the
+   * fence (the settings, the canonical lookup, the pacer), and it fails open: a broken pacer must not silence chat, so the line goes on
+   * with nothing to commit and the class is logged (at most once a minute).
+   */
+  private paceCheck(pacer: Pacer, roomId: string, seatId: string, subject: SubjectId | null, text: string): Paced {
+    try {
+      if (!pacer.active(roomId)) return NOT_PACED;
+      const key: PaceKey = { roomId, who: subject === null ? `seat:${seatId}` : (this.pace?.canonical(subject) ?? subject) };
+      const verdict = pacer.check(key, text);
+      if (verdict.ok) return { refusal: null, key };
+      if (verdict.reason === 'flood' && verdict.signalFlood && subject !== null) this.tellFlood(roomId, key.who);
+      return { refusal: refuse(verdict.reason, { retryAfterMs: verdict.retryAfterMs }), key: null };
+    } catch (err) {
+      this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
+      return NOT_PACED;
+    }
+  }
+
+  private paceDiscard(pacer: Pacer | undefined): void {
+    try {
+      pacer?.discard();
+    } catch (err) {
+      this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
+    }
+  }
+
+  private paceCommit(pacer: Pacer, key: PaceKey, text: string): void {
+    try {
+      pacer.commit(key, text);
+    } catch (err) {
+      this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
+    }
+  }
+
+  /** Tell the facade a known person tripped the burst limit. Never changes the verdict: a throw or a rejection is logged by class and dropped. */
+  private tellFlood(roomId: string, subject: SubjectId): void {
+    const onFlood = this.pace?.onFlood;
+    if (onFlood === undefined) return;
+    try {
+      const out: unknown = onFlood({ roomId, subject });
+      if (isThenable(out)) out.then(undefined, (err: unknown) => this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) }));
+    } catch (err) {
+      this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
+    }
   }
 
   /** The gate hook; a throw is a refusal (it is access control, so it fails closed). */

@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { enChat } from '../src/chat/words.js';
+import { waitText } from '../src/chat/Composer.js';
+import { secondsLeft } from '../src/format.js';
 import { createT, en } from '../src/i18n.js';
 import type { PlayerText } from '../src/i18n.js';
 
@@ -208,4 +211,73 @@ describe('the 0.1.2 catalogue stays whole in a patch release', () => {
     ]);
   });
   // That each one carries the @deprecated mark is checked on the source in static.test.ts (this file runs in jsdom, with no file URLs).
+});
+
+describe('the pace words', () => {
+  const REASONS = ['slow_mode', 'flood', 'duplicate'] as const;
+
+  it('each reason has a sentence with the wait, and the sentence has the "in" (the value is a bare duration)', () => {
+    for (const reason of REASONS) {
+      const words = text(`player.pace.${reason}`);
+      expect(words, reason).toContain('{left}');
+      expect(words, reason).toMatch(/\bin \{left\}/);
+      expect(words, reason).toMatch(/^[A-Z]/);
+      expect(words, reason).toMatch(/\.$/);
+    }
+    expect(text('player.pace.ready')).toMatch(/^[A-Z].*\.$/);
+  });
+
+  it('never shames and holds no id: plain second person, no accusation, no number but the wait', () => {
+    for (const key of ['player.pace.slow_mode', 'player.pace.flood', 'player.pace.duplicate', 'player.pace.ready']) {
+      const words = text(key);
+      expect(words, key).not.toMatch(/spam|flood(ing)? the|abus|violat|offen|punish|ban\b|warn|moderator|rule|report|your (id|account|name)|cheat|stupid|annoy/i);
+      expect(words, key).not.toMatch(/\d/);
+      expect(words, key).toMatch(/\byou\b/i);
+    }
+  });
+
+  it('fills {left}, and a translation that leaves one key out falls back to English for it', () => {
+    const t = createT({ ...en, 'player.pace.flood': 'Zu schnell: {left}.' }, 'de');
+    expect(t('player.pace.flood', { left: '3 Sekunden' })).toBe('Zu schnell: 3 Sekunden.');
+    expect(t('player.pace.duplicate', { left: '3 seconds' })).toBe('You already sent that. Say something different, or try again in 3 seconds.');
+  });
+
+  it('are in the English catalogue the main entry carries, not in the chat words', () => {
+    for (const key of REASONS.map((r) => `player.pace.${r}`)) expect(Object.keys(en)).toContain(key);
+  });
+});
+
+// FD M5: one wait convention. Every sentence that takes a wait (`{left}`), in the pace words and in the chat box's refusal words, takes a BARE
+// duration ("3 seconds") and has its own "in {left}"; a catalog line that does otherwise would read "in in 3 seconds" or "3 seconds seconds".
+describe('one wait convention across the pace words and the chat refusal words', () => {
+  const all: Record<string, string> = { ...en, ...enChat };
+  const waitKeys = Object.keys(all).filter((k) => /^player\.(pace|chat\.refused)\./.test(k) && all[k]!.includes('{left}'));
+
+  it('there are wait sentences in both families', () => {
+    expect(waitKeys.filter((k) => k.startsWith('player.pace.'))).toHaveLength(3);
+    expect(waitKeys.filter((k) => k.startsWith('player.chat.refused.'))).toHaveLength(3);
+  });
+
+  it('every sentence that takes {left} says "in {left}"', () => {
+    for (const key of waitKeys) expect(all[key], key).toMatch(/\bin \{left\}/);
+  });
+
+  it('the no-wait sentences of the chat box hold no {left} and read as whole sentences', () => {
+    const soon = Object.keys(enChat).filter((k) => k.endsWith('.soon'));
+    expect(soon.sort()).toEqual(['player.chat.refused.duplicate.soon', 'player.chat.refused.flood.soon', 'player.chat.refused.slow_mode.soon']);
+    for (const key of soon) {
+      expect(all[key], key).not.toContain('{left}');
+      expect(all[key], key).toMatch(/^[A-Z].*\.$/);
+    }
+  });
+
+  it.each([['slow_mode'], ['flood'], ['duplicate']])('%s: the pace sentence over secondsLeft and the chat sentence over waitText are the same words', (reason) => {
+    const t = createT(all as typeof en, 'en');
+    for (const ms of [500, 3000, 90_000, 125_000]) {
+      const pace = t(`player.pace.${reason}` as PlayerText, { left: secondsLeft(ms, 'en') ?? '' });
+      const chat = t(`player.chat.refused.${reason}` as PlayerText, { left: waitText({ t } as never, ms) });
+      expect(pace, `${reason} ${ms}`).toBe(chat);
+      expect(pace).not.toMatch(/\bin in\b/);
+    }
+  });
 });

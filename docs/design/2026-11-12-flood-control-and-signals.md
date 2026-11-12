@@ -888,7 +888,7 @@ Sequencing: this release follows 0.1.6 (AI levels 1-2) and takes SQLite migratio
 
 ### Plan-time rulings (2026-11-12, from writing docs/plans/2026-11-12-flood-control-and-signals.md)
 All accepted as the plan states them:
-1. `secondsLeft` uses `Intl.RelativeTimeFormat` like `timeLeft`; the three pace messages drop the literal "in"; no `player.pace.wait.*` keys.
+1. `secondsLeft` uses `Intl`; no `player.pace.wait.*` keys. *Superseded in the final review round (FD M5): `secondsLeft` returns a bare duration ("3 seconds", through `Intl.NumberFormat` units) and the sentences say `in {left}` themselves, the same convention as the chat box's refusal words, with a test over both catalogs.*
 2. With `feeds.ai` off the variable prompt part is byte-identical to 0.1.6 and the stable part is identical whether the feed is on or off; the hash differs from 0.1.6 only through `promptVersion` 2.
 3. `inputHash` is computed over the variable text rendered without the signal block.
 4. `cw.signals.boosted(people)` and `cw.signals.forRecord(subject)` are added, `@experimental`; the ladder reads signals through facade-internal glue in `cw.suggest`.
@@ -900,3 +900,21 @@ All accepted as the plan states them:
 10-11. The plan rebases on main after 0.1.5 (merged, fbbaebc) and 0.1.6; Tasks 7, 12, 14 and 16 wait for 0.1.6.
 12. Peer floors: store-memory, store-sqlite and http on core `^0.1.7`; hub-react on core and http `^0.1.7`; player-react only if it imports a new core name; hub-element by `peerRangeOf`.
 13. The hub first-load budget is the number in `packages/hub-react/test/size.test.ts` on main at build time (76,800 B as of 0.1.5); fix a stale header comment if found.
+
+### Size and review rulings (2026-11-12, controller, after the rebase onto 0.1.7)
+1. The browser bundle budget is not raised for this release. The signal service and counting are server-only like the AI: the kit loads
+   them with a dynamic `import()` only for a store that has the three signal methods, and `cw.signals` is inert otherwise. The in-memory
+   store's signal methods are opt-in, `withMemorySignals(store)` (`@experimental`), as `withMemoryAi` is for the AI. The pacer stays in the
+   chat path.
+2. The layer the owner and the hub read (`cw.policy.get().layer`, the http body) is the layer in force: stale signal feeds are out of it.
+   `PolicyState.dropped` (`[{ feed, reason }]`, codes only, no ids) says what was dropped. A save that sends the pruned layer back succeeds;
+   a save that names a stale feed is still refused.
+3. With `signalBoost`, a case a moderator was handed and let lapse is served to that moderator after every other free case for one claim
+   window; it is still served when it is all that is left.
+
+### Final review round rulings (2026-11-12, after the five chunk reviews)
+1. `GET /policy/profile` (and `cw.policy.get()`, and the `PUT` and `DELETE` answers) gain a read-only `limits` object, `{ chatRate: { count, windowMs }, signalsMs }`: the chat rate limit in force and the signals retention window. It is not part of the layer and a save cannot change it. The hub takes the built-in limit hint and the feed window cap from it and falls back to the old numbers (3 per 5 seconds, 90 days) for a server without it. A refused `windowDays` reads as "Longer than your game keeps signals".
+2. The ladder signal sentence and the `signals` key of a suggestion need `history.read`, like the counts on the record; the outcome still moves for a caller without it.
+3. A pace refusal with no valid wait has sentences of its own ("Try again in a moment") and never ends "in .".
+4. A stored feed section whose feeds were all dropped is not shown in the layer; a repairing save lists `signals` in `changed`.
+5. Release 0.1.8; peer floors raised by hand on what each package imports (see the changeset).

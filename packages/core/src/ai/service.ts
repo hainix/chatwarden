@@ -21,7 +21,7 @@ import { actionsOnTarget, AI_EXAMPLES_MIN, pickExampleLines } from './casebook.j
 import type { AiOutcomeArgs } from './casebook.js';
 import { aiPolicyText } from './prompt.js';
 import { sha256Hex } from '../crypto.js';
-import type { AIExampleInput, AIRead, ModerationAI } from './types.js';
+import type { AIExampleInput, AIRead, AISignal, ModerationAI } from './types.js';
 import { isFinalRow, Meter, runRead } from './worker.js';
 import type { AiStore, ReadEnd, WorkerEnv } from './worker.js';
 
@@ -114,6 +114,8 @@ export interface AiReadView {
   model: string | null;
   /** When the read was started, epoch ms. */
   at: number;
+  /** How many signal counts the read was shown (`feeds.ai`); absent when it was shown none. Only the number: the counts stay in the stored row. */
+  contextSignals?: number;
   /** Level 2 only. */
   recommendation: null | {
     verdict: 'upheld' | 'noted' | 'no_action' | 'unclear';
@@ -317,6 +319,8 @@ export interface AiServiceDeps {
   audit: (input: AuditRecordInput) => boolean;
   /** How long the text of a casebook example is kept (`retention.aiExamplesMs`); 0 keeps none. */
   exampleRetentionMs: () => number;
+  /** The signal counts about a person for the AI read (`feeds.ai`): empty with the feed off. Without it no signals are sent. */
+  signals?: (subject: SubjectId) => AISignal[];
 }
 
 const ruleOfText = (rule: string | null): number | 'uncovered' | null => (rule === null ? null : /^\d+$/.test(rule) ? Number(rule) : rule === 'uncovered' ? 'uncovered' : null);
@@ -764,7 +768,7 @@ export class AiService implements AiFacade {
     return made;
   }
 
-  private view(row: { id: string; read: AIRead | null; inputHash: string; model: string | null; createdAt: number }, report: ReportRecord, prepared: Prepared, level: number): AiReadView {
+  private view(row: { id: string; read: AIRead | null; inputHash: string; model: string | null; createdAt: number; signals?: readonly AISignal[] | null }, report: ReportRecord, prepared: Prepared, level: number): AiReadView {
     const read = row.read as AIRead;
     const rec = read.recommendation;
     return {
@@ -778,6 +782,7 @@ export class AiService implements AiFacade {
       injectionSuspected: read.injectionSuspected,
       model: row.model,
       at: row.createdAt,
+      ...(row.signals === null || row.signals === undefined ? {} : { contextSignals: row.signals.length }),
       recommendation: level >= 2 && rec !== null ? { verdict: rec.verdict, severity: rec.severity, rule: rec.rule, evidenceLineIds: [...rec.evidence], ...this.stepFor(report, prepared, rec) } : null,
     };
   }
@@ -823,6 +828,7 @@ export class AiService implements AiFacade {
       closed: () => this.isClosed,
       prepare: (report) => this.prepare(report),
       examplesFor: (report, prepared) => this.examplesFor(report, prepared),
+      signalsFor: (report) => this.deps.signals?.(report.targetSubject) ?? [],
       track: (c) => void this.controllers.add(c),
       untrack: (c) => void this.controllers.delete(c),
       auditRead: (reportId) => {

@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { createChatwarden, createFakeModerationAI } from '@chatwarden/core';
-import type { AiOptions, Chatwarden, FakeModerationAI, FakeScript, Logger, ProfileOverrides, RawWho, ReportCategory } from '@chatwarden/core';
+import type { AiOptions, Chatwarden, ChatwardenOptions, FakeModerationAI, FakeScript, LimitsInput, Logger, ProfileOverrides, RawWho, ReportCategory } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { openStore } from '@chatwarden/store-sqlite';
@@ -34,6 +34,10 @@ export interface WorldOptions {
   ai?: { level?: 0 | 1 | 2; script?: FakeScript; options?: Partial<AiOptions> };
   /** Profile overrides (merged with the AI level). */
   overrides?: ProfileOverrides;
+  /** The kit's own limits (chat length and rate, strikes, reports). */
+  limits?: LimitsInput;
+  /** How long rows are kept (the automatic purge stays off: `false` is the default of this world). */
+  retention?: ChatwardenOptions['retention'];
 }
 
 export async function world(over: WorldOptions = {}) {
@@ -49,7 +53,8 @@ export async function world(over: WorldOptions = {}) {
     platform: { identify: (ctx) => ctx as RawWho },
     clock,
     logger,
-    retention: false,
+    retention: over.retention ?? false,
+    ...(over.limits === undefined ? {} : { limits: over.limits }),
     ...(adapter === undefined ? {} : { ai: { adapter, ...(over.ai?.options ?? {}) } }),
     ...(adapter === undefined && over.overrides === undefined
       ? {}

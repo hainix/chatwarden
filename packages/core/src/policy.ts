@@ -7,6 +7,10 @@ import { playerReporting } from './reporting.js';
 import type { PlayerReporting } from './reporting.js';
 import type { RuleRef } from './rules.js';
 import { errorClass, safeWarn } from './log.js';
+import { RETENTION_DEFAULTS } from './retention.js';
+import { checkSignalFeeds, pruneSignalFeeds, SIGNAL_FEED_NAMES } from './signals.js';
+import type { SignalDropReason } from './signals.js';
+import { RATE_LIMIT, RATE_WINDOW_MS } from './chat.js';
 import { retryBusy } from './team.js';
 import { CONDUCT_LEVELS } from './types.js';
 import type { Clock, ConductLevel, Logger, Store } from './types.js';
@@ -22,13 +26,38 @@ import type { Clock, ConductLevel, Logger, Store } from './types.js';
 /** How often a read may look at the store for a newer version: 10 seconds. */
 export const POLICY_REFRESH_MS = 10_000;
 
+/**
+ * A stored signal feed that was dropped when the layer was read: the feed (`record`, `queue`, `ladder`, `ai`, or `unknown` for a name the kit
+ * does not have) and why. A code only: never a kind id, a rule id, a label or a number from the stored layer.
+ * @experimental
+ */
+export interface PolicyDropped {
+  feed: string;
+  reason: SignalDropReason;
+}
+
+/**
+ * The kit's own numbers the settings screens need, read only: they come from `createChatwarden` (`limits.chatRate`, `retention.signalsMs`), are
+ * never part of the stored layer, and a save cannot change them.
+ * @experimental
+ */
+export interface PolicyLimits {
+  /** The chat rate the kit enforces per room and seat: at most `count` lines in any `windowMs` (default 3 per 5 000 ms). Slow mode and burst sit beside it. */
+  chatRate: { count: number; windowMs: number };
+  /** How long signal rows are kept, ms: the longest window a signal feed may look back (default 90 days, never less than 14). */
+  signalsMs: number;
+}
+
 /** What {@link PolicyService.get} answers. */
 export interface PolicyState {
   /** The profile in force: base, then the stored layer. Deep-frozen. */
   effective: ResolvedProfile;
   /** The profile from code (preset and overrides), without the stored layer. Deep-frozen. */
   base: ResolvedProfile;
-  /** The stored layer as last read (`{}` when none), deep-frozen. */
+  /**
+   * The layer in force, as last read (`{}` when none), deep-frozen: the stored layer with any signal feed that could no longer be used
+   * taken out (see `dropped`). Send it back to `save` and the save is accepted, and repairs the stored row.
+   */
   layer: PolicyLayer;
   /** The stored layer's version; 0 when nothing was ever saved. Pass it back to `save`. */
   version: number;
@@ -41,6 +70,19 @@ export interface PolicyState {
    * valid (a newer kit's field, a hand edit). Either way a save or a full `reset()` repairs it.
    */
   layerError?: { path: string; kind: 'unreadable' | 'invalid' };
+  /**
+   * Present only when the stored layer held signal feeds that could no longer be used (the code stopped declaring their kind, or a
+   * window is longer than the retention now allows) and were left out of `layer` and of what is in force. One entry per feed, with the
+   * reason of the first thing lost from it. The stored row itself is rewritten by the next save.
+   * @experimental
+   */
+  dropped?: readonly PolicyDropped[];
+  /**
+   * The chat rate limit actually in force and the signals retention window, so a settings screen can say what slow mode sits beside and how
+   * far back a feed may look. Read only, deep-frozen.
+   * @experimental
+   */
+  limits: PolicyLimits;
 }
 
 /** What {@link PolicyService.save} and {@link PolicyService.reset} answer. */
@@ -91,11 +133,18 @@ export class PolicyService {
   private readonly clock: Clock;
   private readonly logger: Logger | undefined;
   private readonly base: ResolvedProfile;
-  private state: { effective: ResolvedProfile; layer: PolicyLayer; version: number; layerError?: PolicyState['layerError'] };
+  private state: { effective: ResolvedProfile; layer: PolicyLayer; version: number; layerError?: PolicyState['layerError']; dropped?: readonly PolicyDropped[] };
   /** When the store was last looked at (epoch ms), or null before the first read. */
   private lastCheck: number | null = null;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile }) {
+  /** How long signal rows are kept, ms: a feed window longer than this could never be met. */
+  private readonly signalsMs: () => number;
+  /** The chat rate in force (`limits.chatRate`), for `get().limits`. */
+  private readonly chatRate: { count: number; windowMs: number };
+
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number } }) {
+    this.signalsMs = deps.signalsMs ?? (() => RETENTION_DEFAULTS.signalsMs);
+    this.chatRate = Object.freeze({ count: deps.chatRate?.count ?? RATE_LIMIT, windowMs: deps.chatRate?.windowMs ?? RATE_WINDOW_MS });
     this.store = deps.store;
     this.clock = deps.clock;
     this.logger = deps.logger;
@@ -121,7 +170,10 @@ export class PolicyService {
     const raw: unknown = stored === null ? {} : stored.layer;
     const layer = frozenCopy(raw as PolicyLayer);
     try {
-      this.state = { effective: applyPolicyLayer(this.base, layer), layer, version };
+      // What is read and shown is the layer in force: the stale feeds are out of it, so a save that sends it back is never refused for them.
+      const { layer: inForce, dropped } = this.withoutStaleFeeds(layer);
+      const shown = dropped.length === 0 ? layer : frozenCopy(inForce);
+      this.state = { effective: applyPolicyLayer(this.base, shown), layer: shown, version, ...(dropped.length === 0 ? {} : { dropped: Object.freeze(dropped.map((d) => Object.freeze(d))) }) };
     } catch (err) {
       if (!(err instanceof ProfileError)) throw err;
       // What `get()` shows is always an object: an unreadable layer reads as empty, with the error beside it.
@@ -131,6 +183,36 @@ export class PolicyService {
       // Once per version: `adopt` runs only when the stored version changed (or at start-up), never on a plain re-read.
       safeWarn(this.logger, 'chatwarden.policy_layer_invalid', { version, path: err.path });
     }
+  }
+
+  /**
+   * The stored layer with any signal feed that can no longer be used taken out (it names a kind the code stopped declaring, or a window
+   * longer than the retention now allows), and what was taken out. Without this one stale feed would make the whole layer unusable and
+   * silently drop the owner's other edits too. Logged by feed name only. Anything else wrong with the layer is left for
+   * `applyPolicyLayer` to refuse; a layer with nothing to drop comes back as it is.
+   */
+  private withoutStaleFeeds(layer: PolicyLayer): { layer: PolicyLayer; dropped: PolicyDropped[] } {
+    const dropped: PolicyDropped[] = [];
+    const signals: unknown = typeof layer === 'object' && layer !== null && !Array.isArray(layer) ? (layer as { signals?: unknown }).signals : undefined;
+    const feeds: unknown = typeof signals === 'object' && signals !== null && !Array.isArray(signals) ? (signals as { feeds?: unknown }).feeds : undefined;
+    if (typeof feeds !== 'object' || feeds === null || Array.isArray(feeds)) return { layer, dropped };
+    const pruned = pruneSignalFeeds(feeds, this.base.signals.kinds, {
+      signalsMs: this.signalsMs(),
+      onDrop: (name, reason) => {
+        const feed = SIGNAL_FEED_NAMES.includes(name) ? name : 'unknown';
+        safeWarn(this.logger, 'chatwarden.signal_feed_dropped', { feed });
+        dropped.push({ feed, reason });
+      },
+    });
+    if (dropped.length === 0) return { layer, dropped };
+    // Nothing usable is left of the section: it is not shown at all, so the code's own feeds are what is in force (a section with a `feeds`
+    // key replaces them wholesale, and an empty one would keep them off for a reason nobody can see).
+    const { feeds: _gone, ...others } = signals as { feeds?: unknown };
+    void _gone;
+    const rest = { ...layer } as Record<string, unknown>;
+    if (Object.keys(pruned).length === 0 && Object.keys(others).length === 0) delete rest['signals'];
+    else rest['signals'] = Object.keys(pruned).length === 0 ? others : { ...others, feeds: pruned };
+    return { layer: rest as PolicyLayer, dropped };
   }
 
   /** Look at the store now and adopt a strictly newer version (an older one, say a restored backup, never regresses what is in force). A store failure throws. */
@@ -166,8 +248,17 @@ export class PolicyService {
 
   get(): PolicyState {
     this.maybeRefresh();
-    const { effective, layer, version, layerError } = this.state;
-    return { effective, base: this.base, layer, version, canSave: this.supported, ...(layerError === undefined ? {} : { layerError: { ...layerError } }) };
+    const { effective, layer, version, layerError, dropped } = this.state;
+    return {
+      effective,
+      base: this.base,
+      layer,
+      version,
+      canSave: this.supported,
+      ...(layerError === undefined ? {} : { layerError: { ...layerError } }),
+      ...(dropped === undefined ? {} : { dropped }),
+      limits: Object.freeze({ chatRate: this.chatRate, signalsMs: this.signalsMs() }),
+    };
   }
 
   /** Look at the store now, whatever the interval. A store failure throws. */
@@ -191,6 +282,11 @@ export class PolicyService {
       return { ok: false, error: 'conflict' };
     }
     const changed = changedSections(before, layer);
+    // The layer this save was judged against had feeds taken out of it (`dropped`): the stored row loses them now, so `signals` changed.
+    if (this.state.version === expected && this.state.dropped !== undefined && !changed.includes('signals')) {
+      changed.push('signals');
+      changed.sort((a, b) => POLICY_SECTIONS.indexOf(a) - POLICY_SECTIONS.indexOf(b));
+    }
     this.lastCheck = this.clock.now();
     this.adopt({ layer, version: next });
     return { ok: true, version: next, changed };
@@ -212,7 +308,9 @@ export class PolicyService {
       return { ok: false, error: 'invalid', path: 'reason' };
     }
     try {
-      applyPolicyLayer(this.base, layer);
+      const effective = applyPolicyLayer(this.base, layer);
+      // The windows are checked against the retention here, where it is known: a window longer than it could never be met.
+      checkSignalFeeds(effective.signals.feeds, effective.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;
@@ -264,6 +362,8 @@ export class PolicyService {
     let candidate: ResolvedProfile;
     try {
       candidate = applyPolicyLayer(this.base, layer);
+      // As save: a window longer than the retention could never be met, so the candidate is refused here too, not only when it is saved.
+      checkSignalFeeds(candidate.signals.feeds, candidate.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;

@@ -551,8 +551,8 @@ describe('the AI sections', () => {
     expect(doc).toMatch(/A line the word filter blocked is sent as typed/);
   });
 
-  it('the status and the follow-ups name the work: K3c in progress, and every parked AI item', () => {
-    expect(flat(read('docs/status.md'))).toMatch(/K3c: AI levels 1-2\*\* \(read and recommend\), \*\*in progress\*\*/);
+  it('the status and the follow-ups name the work: K3c done, and every parked AI item', () => {
+    expect(flat(read('docs/status.md'))).toMatch(/K3c: AI levels 1-2\*\* \(read and recommend\), \*\*done\*\*/);
     const parked = flat(read('docs/plans/follow-ups.md'));
     for (const item of ['Batch backfill', 'Blind sampling', '`byTag` scope', 'Signals as AI context', '"Do not automate"', 'Site wording']) expect(parked, item).toContain(item);
   });
@@ -564,6 +564,14 @@ describe('the AI sections', () => {
     expect(doc).toMatch(/leaves the AI inert/i);
     expect(doc).toMatch(/does not carry them/i);
     expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemoryAi[^}]*\} from '@chatwarden\/store-memory';/);
+  });
+
+  it('store-memory: the signal methods are opt-in through withMemorySignals, said plainly, with a snippet that compiles (it starts with an import)', () => {
+    const doc = flat(readme('store-memory'));
+    expect(doc).toContain('## The signal methods (opt-in)');
+    for (const needle of ['`withMemorySignals(store)`', '@experimental', '`createMemoryStore()`', '`chatwarden.signals_store_unsupported`', 'SQLite store has them', 'refused when it is created']) expect(doc, needle).toContain(needle);
+    expect(doc).toMatch(/does not carry them/i);
+    expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemorySignals[^}]*\} from '@chatwarden\/store-memory';/);
   });
 
   it('core: a store without the AI methods leaves the AI inert and says so once; it does not throw', () => {
@@ -646,5 +654,80 @@ describe('the chat box docs', () => {
 
   it('the control: an option name the README does not have is not found', () => {
     expect(httpDoc).not.toContain('`definitelyNotAnOption`');
+  });
+});
+
+describe('the flood control and signals docs (0.1.8)', () => {
+  const core = flat(readme('core'));
+
+  it('core: slow mode and flood control says what a refusal is, the order, the per-process limit and how to try it', () => {
+    const doc = flat(section(readme('core'), 'Slow mode and flood control'));
+    for (const needle of ['`overrides.pace`', '`cw.rooms.setPace`', 'cw.rooms.pace', "'slow_mode'", "'flood'", "'duplicate'", '`retryAfterMs`', 'A new refusal reason', '`assertNever`', 'Per process', '`PACE_KEYS_MAX`', '`flood_triggered`', '`CW_DEMO_PACE=1`', '`limits.chatRate`']) {
+      expect(doc, needle).toContain(needle);
+    }
+    expect(doc).toMatch(/Route a room's chat to one process/);
+    expect(doc).toMatch(/no rule, no notice/);
+  });
+
+  it('core: signals says a signal never acts, events not lines, the cap, the retention, migration 21 one-way with a back-up, and withMemorySignals', () => {
+    const doc = flat(section(readme('core'), 'Signals'));
+    for (const needle of ['never acts on its own', 'Events, not lines', '`cw.signals.record(input)`', 'distinct source', 'calendar bucket', '`retention.signalsMs`', 'migration 21', 'one-way', 'back up the database', '`withMemorySignals(store)`', '`chatwarden.signals_store_unsupported`', 'limits.signalsMs', 'Four feeds']) {
+      expect(doc, needle).toContain(needle);
+    }
+    for (const feed of ['`record`', '`queue`', '`ladder`', '`ai`']) expect(doc, feed).toContain(feed);
+  });
+
+  it('core: the experimental list names the new API, and the table rows and retention default are there', () => {
+    const doc = flat(section(readme('core'), 'What is experimental in 0.1.8'));
+    for (const needle of ['`PaceSettings`', '`PACE_SUGGESTIONS`', '`cw.rooms.setPace`', '`cw.signals`', '`PolicyLimits`', '`withMemorySignals`', '`secondsLeft`', '`signalBoost`']) expect(doc, needle).toContain(needle);
+    expect(core).toContain('| `cw.signals` |');
+    expect(core).toContain('signals 90 (`signalsMs`, never less than 14)');
+  });
+
+  it('http: the changed bodies are described (boosted, signals on the history and the suggestion, signalBoost, limits)', () => {
+    const doc = flat(readme('http'));
+    for (const needle of ['`boosted: true`', '`signals: { raised, ids }`', 'only for a caller whose role holds `history.read`', 'when the record feed (`feeds.record`) is on', '`limits`', '{ chatRate: { count, windowMs }, signalsMs }', 'older than 0.1.8 sends none']) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('player-react: one wait convention, said plainly (a bare duration, the sentence has the "in")', () => {
+    const doc = flat(section(readme('player-react'), 'Pace words and `secondsLeft`'));
+    for (const needle of ['bare duration', 'in {left}', '`secondsLeft(ms, locale)`', '`player.pace.ready`', '`.soon`', '`RestrictedChatLine`', '@experimental']) expect(doc, needle).toContain(needle);
+    expect(doc).not.toMatch(/carry their own "in"/);
+  });
+
+  it('hub-react: the Advanced screen and the queue seam are documented', () => {
+    const doc = flat(readme('hub-react'));
+    for (const needle of ['#/settings/advanced', '`RankSignals.conduct`', '`QueueGroup.boosted`', '`conductSignal`']) expect(doc, needle).toContain(needle);
+  });
+
+  it('tiny-chat: the slow mode demo switch is documented', () => {
+    const doc = flat(read('examples/tiny-chat/README.md'));
+    for (const needle of ['## Slow mode (demo, optional)', '`CW_DEMO_PACE=1`', '`startServer({ demoPace })`']) expect(doc, needle).toContain(needle);
+  });
+
+  it('the control: a feature the docs do not have is not found', () => {
+    expect(core).not.toContain('`definitelyNotAFeed`');
+  });
+
+  it('store-sqlite: migration 21 is described like 19 and 20, one-way with a back-up note, with the flood rows and the retention', () => {
+    const doc = flat(readme('store-sqlite'));
+    for (const needle of ['Migration 21 adds one table, `kit_signals`', '`kit_ai_reads.signals_json`', '`retention.signalsMs`', '`flood_triggered` rows by itself, with no signals declared', 'a 0.1.7 store refuses a database at version 21', 'back up the file before upgrading', 'signal rows']) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('core and every CHANGELOG say the AI prompt version 3 changes the hash and re-reads open reports against the daily caps', () => {
+    const ai = flat(section(readme('core'), 'The AI (levels 1 and 2)'));
+    for (const needle of ['prompt version is 3 for everyone', 'changes the input hash', 'marked stale and read again, once per open report', 'daily call and money caps']) expect(ai, needle).toContain(needle);
+    for (const dir of published) {
+      const log = flat(read('packages', dir, 'CHANGELOG.md'));
+      const at = log.indexOf('## 0.1.8');
+      const text = log.slice(at, log.indexOf('## 0.1.7', at));
+      expect(text, dir).toContain('Upgrade notes, the AI after upgrading');
+      expect(text, dir).toContain('count against your daily call and money caps');
+      expect(text, dir).toContain('`AiReadRow`');
+    }
   });
 });

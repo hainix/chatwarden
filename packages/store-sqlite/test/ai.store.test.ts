@@ -293,6 +293,33 @@ describe('rows damaged by hand never break a read', () => {
     expect(store.loadAiReads(['r1']).map((r) => r.id)).toEqual([good]);
   });
 
+  it('a damaged or hand-edited signals_json reads as no signals; the read itself is unaffected, and a row from before the column has none', () => {
+    const db = memDb();
+    const store = openStore({ db });
+    stores.push(store);
+    const id = reserve(store);
+    complete(store, id, { ...done(), signals: [{ label: 'Muted by other players', polarity: 'negative', distinct: 3, windowDays: 14 }] });
+    expect(db.prepare('SELECT signals_json AS s FROM kit_ai_reads WHERE id = ?').get(id)).toEqual({ s: '[{"label":"Muted by other players","polarity":"negative","distinct":3,"windowDays":14}]' });
+    for (const bad of ['not json', '{"a":1}', '[]', '[{"label":5}]', '[{"label":"x","polarity":"sideways","distinct":1,"windowDays":1}]', null]) {
+      db.prepare('UPDATE kit_ai_reads SET signals_json = ? WHERE id = ?').run(bad, id);
+      const row = store.loadAiRead('r1');
+      expect(row?.signals, String(bad)).toBeNull();
+      expect(row?.read?.summary).toBe('P1 was rude to P2.');
+    }
+  });
+
+  it('only the four fields of a signal are written, whatever the caller handed in', () => {
+    const db = memDb();
+    const store = openStore({ db });
+    stores.push(store);
+    const id = reserve(store);
+    const dirty = { label: 'Muted', polarity: 'negative', distinct: 2.9, windowDays: 7, subject: 's_secret', kind: 'muted_by_player', weight: 3 } as never;
+    complete(store, id, { ...done(), signals: [dirty] });
+    const text = String((db.prepare('SELECT signals_json AS s FROM kit_ai_reads WHERE id = ?').get(id) as { s: string }).s);
+    expect(JSON.parse(text)).toEqual([{ label: 'Muted', polarity: 'negative', distinct: 2, windowDays: 7 }]);
+    expect(text).not.toMatch(/s_secret|muted_by_player|weight/);
+  });
+
   it('a read with an unknown severity or rule text is treated as unreadable', () => {
     const db = memDb();
     const store = openStore({ db });
