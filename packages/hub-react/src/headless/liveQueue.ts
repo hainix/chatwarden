@@ -3,7 +3,7 @@ import type { HubClient, HubError } from '../client.js';
 import type { HubT } from '../i18n.js';
 import { BANNER_AFTER_FAILURES, adopt, pollDelay, reconcile } from '../live.js';
 import type { ShownRow } from '../live.js';
-import { filterGroups, groupQueue } from '../queue.js';
+import { filterGroups, groupQueue, reporterSignal } from '../queue.js';
 import type { QueueFilter, QueueGroup } from '../queue.js';
 import type { Claim } from '../types.js';
 import type { PageSource, Timers } from './env.js';
@@ -213,7 +213,9 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     // The token is taken before the list: a change in between shows up at the next poll instead of being lost.
     const at = knownToken ?? (await client.changes()).token;
     const all = await fetchAllOpen(client);
-    const groups = groupQueue(all.items, { sort: 'oldest', rankDown: { now: now() } });
+    // Longest wait first, unless the server sends AI reads: then the `priority` sort (wait, open reports, the read, the reporter's record).
+    const ranked = all.items.some((r) => r.ai != null);
+    const groups = groupQueue(all.items, { sort: ranked ? 'priority' : 'oldest', now: now(), signals: { reporter: reporterSignal }, rankDown: { now: now() } });
     if (mine !== seq) return groups;
     token = at;
     commit((prev) => {

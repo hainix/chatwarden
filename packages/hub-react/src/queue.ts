@@ -1,6 +1,6 @@
 import { REPORTER_RANK_LAPSE_MS } from '@chatwarden/core';
 import { liveClaim } from './claims.js';
-import type { Claim, ReportCategory, ReportSummary } from './types.js';
+import type { AiBrief, Claim, ReportCategory, ReportSummary } from './types.js';
 
 /**
  * Everything waiting on one reported person. The unit of work in the queue is a person, not a report: the kit's queue is a flat,
@@ -48,6 +48,15 @@ export interface QueueGroup {
    * habitual false reporter and none has waited a day. It only re-orders; the case is still listed and counted.
    */
   rankedLow?: boolean;
+  /**
+   * The worst AI read among the person's open reports (by the `priority` weight), as the queue chip shows it, or null when none was read (the AI is
+   * off, nothing read yet, or an older server). A weight for ordering, never a filter.
+   */
+  ai?: AiBrief | null;
+  /** How many of the person's open reports have no AI read (all of them for an older server). They weigh as an unread case. */
+  aiUnread?: number;
+  /** The mean false-report rate of the reporters on the person's open reports, from the server's `reporterAccuracy`, or null when it tells none. */
+  reporterFalseRate?: number | null;
 }
 
 /** What a reporter said a report was for: a reason id and its label now, or both null for a report that gave none. */
@@ -58,6 +67,76 @@ export interface ReportedReason {
 
 /** @experimental */
 export type QueueSort = 'latest' | 'oldest' | 'reports';
+
+const freeze = <T extends object>(o: T): Readonly<T> => Object.freeze(o);
+
+/**
+ * What the `priority` sort adds up (design section 9): the wait (0 to 2, whatever the AI said), the open reports beyond the first (0 to 0.5),
+ * the AI's read (severity x confidence, 0.7 when stale, 1.2 when unread or flagged) and the reporter signal (clamped to plus or minus 0.5).
+ * @experimental
+ */
+export const RANK_WEIGHTS = freeze({
+  severity: freeze({ banter: 0, rude: 1, hostile: 2.5, severe: 5 }),
+  confidence: freeze({ low: 0.4, medium: 0.7, high: 1 }),
+  /** An unread case, and the floor of a read that a line tried to instruct. */
+  neutral: 1.2,
+  stale: 0.7,
+  waitMax: 2,
+  waitHours: 24,
+  volumeMax: 0.5,
+  volumeExtra: 4,
+  reporterClamp: 0.5,
+});
+
+/**
+ * Pure functions that add to the `priority` score. They take a group and answer a number; one that answers NaN, Infinity, anything but a number, or
+ * throws is ignored. The answer is clamped to plus or minus {@link RANK_WEIGHTS}.reporterClamp, so it can reorder close calls but never override severity.
+ * @experimental
+ */
+export interface RankSignals {
+  reporter?: (g: QueueGroup) => number;
+}
+
+const known = (table: Readonly<Record<string, number>>, key: string): number | undefined => (Object.hasOwn(table, key) ? table[key] : undefined);
+
+/** One read's weight: severity x confidence (x 0.7 when stale); a flagged read is raised to the neutral weight, never below it. An unknown word counts as neutral. */
+function readWeight(b: AiBrief): number {
+  const w = RANK_WEIGHTS;
+  const sev = known(w.severity, b.severity);
+  const conf = known(w.confidence, b.confidence);
+  if (sev === undefined || conf === undefined) return w.neutral;
+  const weight = sev * conf * (b.stale ? w.stale : 1);
+  return b.injectionSuspected ? Math.max(weight, w.neutral) : weight;
+}
+
+/**
+ * The hub's reporter signal for the `priority` sort: a reporter whose reports hold up more often than not raises a case, one whose reports mostly
+ * do not lowers it (0.5 minus the false-report rate, clamped by the sort to plus or minus half a point). Zero when the server tells nothing.
+ * @experimental
+ */
+export const reporterSignal = (g: QueueGroup): number => (g.reporterFalseRate == null ? 0 : 0.5 - g.reporterFalseRate);
+
+/**
+ * The `priority` score of a case at `now`: wait + volume + ai + reporter. A weight, not a filter: nothing is hidden, and after 24 hours any case
+ * outranks a fresh unread one. The seam for the triage-speed plan's reporter signal.
+ * @experimental
+ */
+export function priorityScore(g: QueueGroup, now: number, signals: RankSignals = {}): number {
+  const w = RANK_WEIGHTS;
+  const waited = Math.max(0, now - (g.oldestOpenAt ?? g.firstAt)) / 3_600_000;
+  const wait = (w.waitMax * Math.min(waited, w.waitHours)) / w.waitHours;
+  const volume = g.open > 1 ? (w.volumeMax * Math.min(g.open - 1, w.volumeExtra)) / w.volumeExtra : 0;
+  const read = g.ai == null ? w.neutral : readWeight(g.ai);
+  const ai = g.ai != null && !g.aiUnread ? read : Math.max(read, w.neutral);
+  let said = 0;
+  try {
+    const got: unknown = signals.reporter?.(g);
+    if (typeof got === 'number' && Number.isFinite(got)) said = Math.max(-w.reporterClamp, Math.min(w.reporterClamp, got));
+  } catch {
+    said = 0;
+  }
+  return wait + volume + ai + said;
+}
 
 /** A case with more open reports than this is never ranked lower: a mass report is not buried (core's take-next draws the same line). */
 const RANK_DOWN_OPEN_MAX = 200;
@@ -70,6 +149,8 @@ const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt 
  * - `latest` (default): the group with the newest report first.
  * - `oldest`: the longest-waiting first (by the oldest open report; a group with none open uses its oldest report).
  * - `reports`: the most reports first.
+ * - `priority`: the highest {@link priorityScore} first (wait, open reports, the AI's read, `signals`), measured at `now` (default: the newest report in
+ *   the list). Without any AI data every case weighs the same, so only the wait and the open reports decide.
  * A tie is broken by the person ref, so the order is stable.
  *
  * With `rankDown: { now }` a case is listed after the others (each part keeping the chosen sort) when it has an open report, EVERY open
@@ -77,7 +158,10 @@ const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt 
  * 200 open reports. Nothing is removed. A server that sends no accuracy ranks nobody lower. The same rule as core's take-next.
  * @experimental
  */
-export function groupQueue(items: readonly ReportSummary[], options: { sort?: QueueSort; rankDown?: { now: number } } = {}): QueueGroup[] {
+export function groupQueue(
+  items: readonly ReportSummary[],
+  options: { sort?: QueueSort | 'priority'; rankDown?: { now: number }; signals?: RankSignals; now?: number } = {},
+): QueueGroup[] {
   const byId = new Map<string, ReportSummary>();
   for (const item of items) if (!byId.has(item.id)) byId.set(item.id, item);
   const byPerson = new Map<string, ReportSummary[]>();
@@ -103,6 +187,11 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     let dismissed = 0;
     let oldestOpenAt: number | null = null;
     let habitualOpen = 0;
+    let ai: AiBrief | null = null;
+    let aiWeight = -1;
+    let aiUnread = 0;
+    let rates = 0;
+    let rateSum = 0;
     let claim: Claim | null = null;
     const viewing = new Set<string>();
     for (const r of list) {
@@ -125,6 +214,16 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       if (r.status === 'open') {
         open += 1;
         if (r.reporterAccuracy?.habitual === true) habitualOpen += 1;
+        const rate = r.reporterAccuracy?.falseRate;
+        if (typeof rate === 'number') {
+          rates += 1;
+          rateSum += rate;
+        }
+        if (r.ai == null) aiUnread += 1;
+        else if (readWeight(r.ai) > aiWeight) {
+          aiWeight = readWeight(r.ai);
+          ai = r.ai;
+        }
         oldestOpenAt = oldestOpenAt === null ? r.createdAt : Math.min(oldestOpenAt, r.createdAt);
       } else if (r.status === 'actioned') actioned += 1;
       else dismissed += 1;
@@ -150,6 +249,9 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       entries: list.map((r) => ({ id: r.id, category: r.category, reason: r.reportedReason ?? null, reasonLabel: r.reportedReason == null ? null : (r.reportedReasonLabel ?? r.reportedReason), createdAt: r.createdAt })),
       claim,
       viewing: [...viewing].sort(),
+      ai,
+      aiUnread,
+      reporterFalseRate: rates === 0 ? null : rateSum / rates,
       ...(rankDown === undefined
         ? {}
         : { rankedLow: open > 0 && open <= RANK_DOWN_OPEN_MAX && habitualOpen === open && rankDown.now - (oldestOpenAt as number) < REPORTER_RANK_LAPSE_MS }),
@@ -163,7 +265,13 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     oldest: (a, b) => waitStart(a) - waitStart(b),
     reports: (a, b) => b.reports - a.reports || b.latestAt - a.latestAt,
   };
-  const sorted = groups.sort((a, b) => order[sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+  const byRef = (a: QueueGroup, b: QueueGroup): number => (a.person < b.person ? -1 : a.person > b.person ? 1 : 0);
+  if (sort === 'priority') {
+    const at = options.now ?? groups.reduce((m, g) => Math.max(m, g.latestAt), 0);
+    const scores = new Map(groups.map((g) => [g, priorityScore(g, at, options.signals)]));
+    groups.sort((a, b) => (scores.get(b) as number) - (scores.get(a) as number) || byRef(a, b));
+  } else groups.sort((a, b) => order[sort](a, b) || byRef(a, b));
+  const sorted = groups;
   if (rankDown === undefined) return sorted;
   // A stable partition of the chosen order: ordinary cases first, ranked-low ones after, each part keeping its order.
   return [...sorted.filter((g) => g.rankedLow !== true), ...sorted.filter((g) => g.rankedLow === true)];

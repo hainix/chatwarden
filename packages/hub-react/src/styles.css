@@ -868,6 +868,18 @@
   font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
   line-height: 1.5;
 }
+/* The AI's one chip in the queue: neutral, with the dashed outline that says "machine-written". No hue. */
+.cw-hub .cw-aichip {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: 4px;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: 0.71875rem;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: 1.5;
+  white-space: nowrap;
+}
 .cw-hub .cw-case-facts {
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
   font-size: var(--cw-text-s, var(--cwd-text-s));

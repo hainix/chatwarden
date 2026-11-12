@@ -7,6 +7,7 @@ import { absoluteTime, formatDuration, listOf, waitTone } from '../format.js';
 import { Icon } from '../icons.js';
 import { errorText, groupName, reasonChip } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
+import { AiChip } from '../QueueRow.js';
 import { useMode } from '../mode.js';
 import type { ShownRow } from '../live.js';
 import type { Route } from '../router.js';
@@ -230,6 +231,7 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
               {reasonChip(t, r.label)}
             </span>
           ))}
+          {!simple && <AiChip ai={g.ai} />}
         </span>
         <span className="cw-case-facts">
           {t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}

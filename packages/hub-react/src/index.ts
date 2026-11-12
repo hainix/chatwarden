@@ -48,8 +48,8 @@ export type { HubCatalog, HubParams, HubT, HubText } from './i18n.js';
 export { buildPath, hashRouter, memoryRouter, normalizePath, parseRoute, tabOf } from './router.js';
 export type { HubRouter, MemoryRouter, ObservableRouter, QueueStatus, Route, SettingsSection, TabName } from './router.js';
 
-export { filterGroups, groupQueue, queueStats } from './queue.js';
-export type { QueueFilter, QueueGroup, QueueSort, QueueStats } from './queue.js';
+export { filterGroups, groupQueue, priorityScore, queueStats, RANK_WEIGHTS, reporterSignal } from './queue.js';
+export type { QueueFilter, QueueGroup, QueueSort, QueueStats, RankSignals } from './queue.js';
 
 export { actorInitial, actorName, holderOf, liveClaim, teamOf } from './claims.js';
 export type { Holder, TeamMember } from './claims.js';

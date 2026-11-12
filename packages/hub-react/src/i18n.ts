@@ -232,6 +232,7 @@ export const en = {
   'hub.claim.viewingMany': '{names} are viewing',
 
   'hub.ai.label': 'AI read',
+  'hub.ai.chip': 'AI read:',
   'hub.ai.title': 'AI read (AI level {level})',
   'hub.ai.note': 'A read, never a decision. A moderator decides.',
 

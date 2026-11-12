@@ -1,5 +1,7 @@
 import type { Transport, TransportRequest, TransportResponse } from './transport.js';
 import type {
+  AiReadAgainResult,
+  AiStatusView,
   BlockedDays,
   BlockedLine,
   CloseGapInput,
@@ -143,6 +145,19 @@ export interface HubClient {
    */
   dismissOpen(input: DismissOpenInput, options?: { keepalive?: boolean }): Promise<DismissOpenResult>;
 
+  // The AI (levels 1 and 2)
+  /**
+   * `POST /reports/:id/ai/read` (needs `reports.decide`): ask for the read again. `ready` carries the read when nothing changed (no call is
+   * made); `pending` means one was queued, so read the case again in a moment. Rejects with `ai_off`, `ai_final` (409), `ai_budget` (429),
+   * `rate_limited` (429) or `ai_unavailable` (503, with `retryAfter` seconds).
+   * @experimental
+   */
+  readAgain(id: string): Promise<AiReadAgainResult>;
+  /** `GET /ai/status` (needs `policy.read`, audited like the settings): the state, today's reads and spend, and the casebook counts. @experimental */
+  aiStatus(): Promise<AiStatusView>;
+  /** `POST /reports/:id/ai/dont-teach` (needs `reasons.write`): the decided case's example text is never used to teach the AI again. 404 when it has none. @experimental */
+  dontTeach(id: string): Promise<{ ok: true }>;
+
   // People and sanctions
   /** `GET /people/:ref/history`. */
   personHistory(ref: string, options?: { limit?: number }): Promise<PersonHistory>;
@@ -246,6 +261,9 @@ export function createHubClient(transport: Transport): HubClient {
     suggest: (id, input) => post<Suggestion>(`/reports/${enc(id)}/suggest`, input),
     decide: (id, input, options = {}) => post<DecideResult>(`/reports/${enc(id)}/decide`, input, options),
     dismissOpen: (input, options = {}) => post<DismissOpenResult>('/reports/dismiss-open', input, options),
+    readAgain: (id) => post<AiReadAgainResult>(`/reports/${enc(id)}/ai/read`, undefined),
+    aiStatus: () => get<AiStatusView>('/ai/status'),
+    dontTeach: (id) => post<{ ok: true }>(`/reports/${enc(id)}/ai/dont-teach`, undefined),
 
     personHistory: (ref, options = {}) => get<PersonHistory>(`/people/${enc(ref)}/history`, q({ limit: options.limit })),
     listSanctions: (query = {}) => get<Page<SanctionRow>>('/sanctions', q({ cursor: query.cursor, limit: query.limit, source: query.source })),

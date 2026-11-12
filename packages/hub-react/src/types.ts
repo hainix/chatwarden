@@ -2,6 +2,10 @@
 // come from the kit itself so a change in `@chatwarden/http` or core shows up as a compile error here.
 import type {
   ActionRecord,
+  AiBrief,
+  AiReadView,
+  AiStatsView,
+  AiStatus,
   AuditAction,
   AuditItem,
   Chatwarden,
@@ -21,11 +25,35 @@ import type {
   StaffReport,
   Suggestion,
 } from '@chatwarden/core';
-import type { ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
+import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
 export type { PolicyLayer, PolicySection, PolicyState };
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 export type { Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role };
+
+/**
+ * What the AI read of a report, as the queue shows it (`ReportSummary.ai`): the level, how sure, the rule, and two marks. No summary and no line ids.
+ * @experimental
+ */
+export type { AiBrief };
+
+/**
+ * A read as the case page shows it (`ReportDetail.ai`): the summary, the lines it cited and, at level 2, a recommendation. Advice, never a decision.
+ * @experimental
+ */
+export type { AiReadView };
+
+/**
+ * `GET /ai/status`: where the AI stands (state, today's reads and spend against the ceilings), the learning switch and the casebook counts of the last 30 days.
+ * @experimental
+ */
+export type AiStatusView = AiStatus & { learn: boolean; stats: AiStatsView };
+
+/**
+ * `POST /reports/:id/ai/read`: the read when nothing changed (`ready`, no call made), or `pending` when a read was queued.
+ * @experimental
+ */
+export type AiReadAgainResult = AiReadAgainBody;
 
 /**
  * One page of a list that pages with a cursor. `next` is null on the last page.
@@ -74,6 +102,8 @@ export interface ReportDetail {
   rule: number | 'uncovered';
   /** Who holds the reported person's case, or null. A claim never blocks a read. */
   claim: Claim | null;
+  /** What the AI read of the report, or null (the AI is off, or no read yet). An older server sends none. */
+  ai?: AiReadView | null;
 }
 
 /**
@@ -136,6 +166,11 @@ export interface DecideInput {
   evidence?: string;
   /** A senior or owner moving another moderator's live claim to themselves (audited by the server). */
   takeOver?: boolean;
+  /**
+   * The AI read the moderator was shown, and whether the decision is that read's pre-fill as it stood. The server checks it against the decision:
+   * it can never make a decision, only describe it. Send it whenever a read was shown.
+   */
+  ai?: { readId: string; accepted: boolean; severity?: ConductLevel };
 }
 
 /**
