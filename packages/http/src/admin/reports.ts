@@ -174,6 +174,9 @@ const summarize = (
  *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
  *   filed stand, `asReporter` (with `reasonMatched` of `reasonDecided`: how often their reported reason was borne out by the decision), and `handle`, their handle on the newest report filed against them that recorded one, or null (`history.view`). With the record signal feed (`feeds.record`) on it also carries `signals`: the chosen kinds' counts over the chosen window
  *   (`SignalCount[]`, `[]` when none qualifies); with the feed off the key is absent.
+ *   Two more keys, each only while its feature is on or there is something to show (else the body is what 0.1.7 sent): `appeals`, the
+ *   person's appeals as the core's `AppealSummary`s, newest first, with no statement (only for a caller who holds `appeals.read`), and `renames`,
+ *   `{ at, pending }` for each time a rename was required (no reason, no actor).
  */
 export function reportRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
@@ -371,8 +374,27 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const asReporter = cw.reports.reporterRecord(ref);
       // The Person page record (`feeds.record`): the chosen kinds and window, counted by distinct source. Absent with the feed off.
       const signals = cw.profile.signals.feeds.record === undefined ? undefined : cw.signals.forRecord(ref);
+      // Their appeals (summaries, no statement) for a caller who may read appeals, and their rename requests: each present only while its feature is
+      // on or there is something to show, so with both off the body is what 0.1.7 sent.
+      const mayReadAppeals = roleAtLeast(c.authz.role, ctx.permissions['appeals.read']);
+      const appeals = mayReadAppeals ? cw.appeals.forPerson(ref) : [];
+      const showAppeals = mayReadAppeals && (appeals.length > 0 || cw.appeals.enabled());
+      const renames = cw.names.renamesOf(ref);
+      const showRenames = renames.length > 0 || cw.names.renamesEnabled();
       c.audit('history.view', { type: 'person', ref });
-      return { status: 200, body: { history, reports, sanctions, asReporter, handle, ...(signals === undefined ? {} : { signals }) } };
+      return {
+        status: 200,
+        body: {
+          history,
+          reports,
+          sanctions,
+          asReporter,
+          handle,
+          ...(signals === undefined ? {} : { signals }),
+          ...(showAppeals ? { appeals } : {}),
+          ...(showRenames ? { renames } : {}),
+        },
+      };
     }),
   };
 }

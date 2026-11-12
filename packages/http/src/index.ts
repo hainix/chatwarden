@@ -14,6 +14,7 @@ export type { PermissionKey, Permissions } from './permissions.js';
 export {
   adminRoutes,
   aiRoutes,
+  appealRoutes,
   auditRoutes,
   AuditFailedError,
   BadActorError,
@@ -36,6 +37,7 @@ export type {
   AdminRoutesOptions,
   ExceptionListRow,
   Me,
+  MeFeatures,
   PolicyOptions,
   ReporterAccuracySummary,
   ReportSummary,

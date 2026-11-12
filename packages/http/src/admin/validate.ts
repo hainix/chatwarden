@@ -1,5 +1,5 @@
-import { CONDUCT_LEVELS, MAX_SANCTION_DURATION_MS, SANCTION_KINDS } from '@chatwarden/core';
-import type { ConductLevel, DecisionAction, RuleRef, SanctionKind } from '@chatwarden/core';
+import { APPEAL_OUTCOMES, CONDUCT_LEVELS, MAX_SANCTION_DURATION_MS, SANCTION_KIND_ORDER, SANCTION_KINDS } from '@chatwarden/core';
+import type { AppealDecision, AppealOutcome, ConductLevel, DecisionAction, RuleRef, SanctionKind } from '@chatwarden/core';
 import { parseJson } from '../body.js';
 import { HttpError, ValidationError } from '../errors.js';
 import type { KitRequest } from '../types.js';
@@ -169,4 +169,47 @@ export function parseAction(raw: unknown): DecisionAction {
     action.lineIds = ids.map((id) => bodyText(id, 64));
   }
   return action;
+}
+
+/** A query `status` of the appeals inbox: absent is `undefined` (the core's default, open); otherwise `open`, `decided` or `all`, else 400 `invalid_query`. */
+export function queryAppealStatus(raw: string | undefined): 'open' | 'decided' | 'all' | undefined {
+  if (raw === undefined) return undefined;
+  if (raw !== 'open' && raw !== 'decided' && raw !== 'all') throw new HttpError('invalid_query');
+  return raw;
+}
+
+/** A query `days` of the appeals numbers: absent is `undefined` (the core's default, 90); otherwise exactly `30`, `90` or `365`, else 400 `invalid_query`. */
+export function queryAppealDays(raw: string | undefined): 30 | 90 | 365 | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === '30') return 30;
+  if (raw === '90') return 90;
+  if (raw === '365') return 365;
+  throw new HttpError('invalid_query');
+}
+
+/** The ruling a staff body carries: the outcome, the private reason and, for `reduce` only, the lighter outcome. */
+export type AppealDecisionBody = Pick<AppealDecision, 'outcome' | 'reason' | 'to'>;
+
+/**
+ * The body of `POST /appeals/:id/decide`: `{ outcome, reason, to? }`. `outcome` is `uphold`, `reduce` or `revoke`; `reason` is text that is not
+ * blank (the core keeps it to 500 characters); `to` is `{ kind, durationMs }` and is required for `reduce` and refused for the others.
+ * Anything else is 400. The actor is never from the body. Whether `to` is lighter than the sanction is the core's to say.
+ */
+export function bodyAppealDecision(body: Record<string, unknown>): AppealDecisionBody {
+  const outcome = body.outcome;
+  if (typeof outcome !== 'string' || !(APPEAL_OUTCOMES as readonly string[]).includes(outcome)) throw new ValidationError();
+  const reason = bodyText(body.reason);
+  if (reason.trim() === '') throw new ValidationError();
+  if (outcome !== 'reduce') {
+    if (has(body, 'to')) throw new ValidationError();
+    return { outcome: outcome as AppealOutcome, reason };
+  }
+  const to = asObject(body.to);
+  if (to === undefined) throw new ValidationError();
+  const { kind, durationMs } = to;
+  if (typeof kind !== 'string' || !(SANCTION_KIND_ORDER as readonly string[]).includes(kind)) throw new ValidationError();
+  if (durationMs !== null && !(typeof durationMs === 'number' && Number.isSafeInteger(durationMs) && durationMs > 0 && durationMs <= MAX_SANCTION_DURATION_MS)) {
+    throw new ValidationError();
+  }
+  return { outcome: 'reduce', reason, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs } };
 }

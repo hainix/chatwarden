@@ -1,6 +1,7 @@
 import type { Chatwarden } from '@chatwarden/core';
 import type { RouteTable } from '../router.js';
 import { aiRoutes } from './ai.js';
+import { appealRoutes } from './appeals.js';
 import { auditRoutes } from './audit.js';
 import { blockedRoutes } from './blocked.js';
 import { createAdminContext } from './context.js';
@@ -19,12 +20,13 @@ import type { TermsAdmin } from './terms.js';
 export { AuditFailedError, BadActorError, createAdminContext } from './context.js';
 export type { AdminCall, AdminContext, AdminOptions } from './context.js';
 export { aiRoutes } from './ai.js';
+export { appealRoutes } from './appeals.js';
 export type { AiReadAgainBody, AiUnavailableBody } from './ai.js';
 export { auditRoutes } from './audit.js';
 export { blockedRoutes } from './blocked.js';
 export { gapRoutes } from './gaps.js';
 export { meRoutes } from './me.js';
-export type { Me } from './me.js';
+export type { Me, MeFeatures } from './me.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
 export { reportRoutes } from './reports.js';
@@ -61,6 +63,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...reportRoutes(ctx),
     ...teamRoutes(ctx),
     ...sanctionRoutes(ctx),
+    ...appealRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
     ...(options.terms === undefined ? {} : termRoutes(ctx, options.terms, options.recentLines ?? (() => []))),

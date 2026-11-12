@@ -901,7 +901,7 @@ describe('GET /changes', () => {
     expect(body(await w.call('GET', '/changes', { query: { since: '0' } })).changed).toBe(token !== '0');
   });
 
-  it('is cheap: it reads the token and nothing else, and writes no audit row', async () => {
+  it('is cheap: it reads the token and whether appeals are on, and writes no audit row', async () => {
     const reads: string[] = [];
     const w = await world({
       wrap: (cw) =>
@@ -915,7 +915,8 @@ describe('GET /changes', () => {
     reads.length = 0;
     const res = await w.call('GET', '/changes', { query: { since: 'x' } });
     expect(res.status).toBe(200);
-    expect(reads).toEqual(['changes']);
+    // The token, and one live read of whether appeals are on (the open count is read only while they are, and only for a caller who may read it).
+    expect(reads).toEqual(['changes', 'appeals']);
     expect(w.routeAudit()).toEqual([]);
   });
 

@@ -193,7 +193,7 @@ export class NameService {
     return { ok: true, noticeId };
   }
 
-  /** May a moderator require a rename now: the setting is on and the store can release one (the test `requireRename` applies first). */
+  /** Can a moderator ask for a rename now: the setting is on and the store can release one (the test `requireRename` applies first). */
   renamesEnabled(): boolean {
     return this.d.settings().renames && this.d.notices.canWithdrawOne();
   }
