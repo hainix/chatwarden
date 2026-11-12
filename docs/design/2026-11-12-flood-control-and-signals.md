@@ -885,3 +885,18 @@ All six open questions take the recommendation:
 5. `signals.record` accepts a subject id or a `RawWho`; an unknown identity is refused, never created.
 6. The suggested pace values are offered behind a hub button, never applied as defaults.
 Sequencing: this release follows 0.1.6 (AI levels 1-2) and takes SQLite migration 21. If the AI release slips, the one ALTER on an AI table moves as the doc says.
+
+### Plan-time rulings (2026-11-12, from writing docs/plans/2026-11-12-flood-control-and-signals.md)
+All accepted as the plan states them:
+1. `secondsLeft` uses `Intl.RelativeTimeFormat` like `timeLeft`; the three pace messages drop the literal "in"; no `player.pace.wait.*` keys.
+2. With `feeds.ai` off the variable prompt part is byte-identical to 0.1.6 and the stable part is identical whether the feed is on or off; the hash differs from 0.1.6 only through `promptVersion` 2.
+3. `inputHash` is computed over the variable text rendered without the signal block.
+4. `cw.signals.boosted(people)` and `cw.signals.forRecord(subject)` are added, `@experimental`; the ladder reads signals through facade-internal glue in `cw.suggest`.
+5. At load, `pruneSignalFeeds` drops only a feed that has become unusable and logs `chatwarden.signal_feed_dropped` (no ids); save-time validation stays strict.
+6. A layer's `feeds` replaces the base's wholesale.
+7. The pacer's `check` is timing-pure; its only write is the `floodSignalAt` bookkeeping when it returns `signalFlood: true`.
+8. `signals.record` refuses a subject-id string the subject index has never seen (`unknown_subject`).
+9. No audit action is added; a test pins `AUDIT_ACTIONS` unchanged.
+10-11. The plan rebases on main after 0.1.5 (merged, fbbaebc) and 0.1.6; Tasks 7, 12, 14 and 16 wait for 0.1.6.
+12. Peer floors: store-memory, store-sqlite and http on core `^0.1.7`; hub-react on core and http `^0.1.7`; player-react only if it imports a new core name; hub-element by `peerRangeOf`.
+13. The hub first-load budget is the number in `packages/hub-react/test/size.test.ts` on main at build time (76,800 B as of 0.1.5); fix a stale header comment if found.
