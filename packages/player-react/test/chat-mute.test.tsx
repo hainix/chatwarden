@@ -148,14 +148,18 @@ describe('mute', () => {
     expect(within(log()).getByText('still here')).toBeInTheDocument();
   });
 
-  it('a mute that changes nothing (false) hides nothing and says nothing', async () => {
+  it.each([
+    ['false', () => Promise.resolve(false as const)],
+    ['{ ok: false, hiddenIds: [] }', () => Promise.resolve({ ok: false, hiddenIds: [] as string[] })],
+  ])('a mute that changes nothing (%s) hides nothing and says so, with no Undo', async (_what, answer) => {
     w.say('lobby', 'tarvo', 'still here');
     const inner = w.transportFor('snerp');
-    const refusing: ChatTransport = { open: (room, events) => ({ ...inner.open(room, events), mute: () => Promise.resolve(false) }) };
+    const refusing: ChatTransport = { open: (room, events) => ({ ...inner.open(room, events), mute: answer }) };
     const { user } = await join('snerp', {}, refusing);
     await muteFrom(user, 'tarvo');
     expect(within(log()).getByText('still here')).toBeInTheDocument();
-    expect(note()).toBeEmptyDOMElement();
+    expect(await within(note()).findByText('Nothing changed. tarvo was not muted.')).toBeInTheDocument();
+    expect(within(note()).queryByRole('button', { name: 'Undo' })).toBeNull();
   });
 
   it('muting is silent: the muted player\'s own box shows nothing', async () => {

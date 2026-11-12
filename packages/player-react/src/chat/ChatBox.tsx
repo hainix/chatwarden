@@ -1,4 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+
+/** `useLayoutEffect` on a page, `useEffect` on a server: React 18 warns when a layout effect is rendered on the server, and it does nothing there anyway. */
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 import type { KeyboardEvent } from 'react';
 import type { PlayerReporting, ReportResult } from '@chatwarden/core';
 import { PlayerError } from '../client.js';
@@ -56,7 +59,7 @@ export interface ChatBoxProps extends PlayerUiProps, DialogHostProps {
 const BOTTOM_PX = 24;
 /** How long the mute line (with Undo) stays. */
 const MUTE_NOTE_MS = 8000;
-const CLOSED = new Set<string>(['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'not_found', 'unsupported']);
+const CLOSED = new Set<string>(['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'replaced', 'not_found', 'unsupported']);
 /** The longest a timer is set for (a larger delay fires at once). */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 /** How long a `restricted` refusal holds the input back whatever the clocks say. */
@@ -143,6 +146,8 @@ interface MuteNote {
   /** The refs held when the mute was made: the new one is the entry the next `state` frame adds under this name. */
   before: Set<string>;
   error: PlayerError | null;
+  /** The server answered but changed nothing (the line aged out, or the mute list is full): say so, with no Undo. */
+  unchanged?: boolean;
 }
 
 /**
@@ -237,7 +242,7 @@ export function ChatBox(props: ChatBoxProps) {
     const el = log.current;
     if (el !== null) el.scrollTop = el.scrollHeight;
   };
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (pinned.current) toBottom();
   }, [state.lines]);
   const onScroll = (): void => {
@@ -309,6 +314,8 @@ export function ChatBox(props: ChatBoxProps) {
           const named = typeof answer === 'boolean' || !Array.isArray(answer.hiddenIds) ? [] : answer.hiddenIds.filter((id) => typeof id === 'string');
           dispatch({ type: 'frame', frame: { type: 'hide', ids: [line.id, ...named] } });
           showNoteRef.current({ name: line.name, before, error: null });
+        } else {
+          showNoteRef.current({ name: line.name, before, error: null, unchanged: true });
         }
       } catch (e) {
         showNoteRef.current({ name: line.name, before, error: failureOf(e) });
@@ -347,7 +354,7 @@ export function ChatBox(props: ChatBoxProps) {
   const lines = state.lines;
   const you = t('player.chat.you');
   const status = connectionText(ui, state.status, state.ready, closed);
-  const undo = muteNote !== null && muteNote.error === null ? muteNote : null;
+  const undo = muteNote !== null && muteNote.error === null && muteNote.unchanged !== true ? muteNote : null;
 
   return (
     <Root theme={theme} className={className}>
@@ -418,6 +425,7 @@ export function ChatBox(props: ChatBoxProps) {
         </div>
         <div role="status" className="cw-chat-note">
           {muteNote !== null && muteNote.error !== null && <p className="cw-chat-failure">{errorText(t, muteNote.error)}</p>}
+          {muteNote !== null && muteNote.unchanged === true && <p className="cw-chat-failure">{t('player.chat.muteUnchanged', { name: muteNote.name })}</p>}
           {undo !== null && (
             <p>
               {t('player.chat.muted', { name: undo.name })}{' '}

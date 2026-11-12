@@ -275,6 +275,11 @@ describe('status, bye and closing', () => {
     expect(run([frame(hello()), frame({ type: 'bye', reason: 'shutdown' })]).closed).toEqual({ why: 'shutdown' });
   });
 
+  it('bye replaced is closed(replaced): this window gave way to a newer one', () => {
+    expect(run([frame(hello()), frame({ type: 'bye', reason: 'replaced' })]).closed).toEqual({ why: 'replaced' });
+    expect(run([frame(hello()), frame({ type: 'bye', reason: 'replaced' })]).status).toBe('closed');
+  });
+
   it('bye banned with a null until keeps the null', () => {
     expect(run([frame(hello()), frame({ type: 'bye', reason: 'banned', until: null })]).closed).toEqual({ why: 'banned', until: null });
   });

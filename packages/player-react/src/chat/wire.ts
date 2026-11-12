@@ -80,7 +80,7 @@ export type ChatFrame =
   /** A notice is waiting for this player: ask the player routes for it. Carries nothing else. */
   | { type: 'notices' }
   /** The server is ending this stream. `banned` carries when the ban ends. */
-  | { type: 'bye'; reason: 'banned' | 'room_closed' | 'shutdown'; until?: number | null };
+  | { type: 'bye'; reason: 'banned' | 'room_closed' | 'shutdown' | 'replaced'; until?: number | null };
 
 export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: WireRefusal };
 export type MuteTarget = { lineId: string } | { ref: string };
@@ -272,7 +272,7 @@ export function readFrame(raw: unknown, jsonLength?: number): ChatFrame | null {
         return { type: 'notices' };
       case 'bye': {
         const reason = own(o, 'reason');
-        if (reason !== 'banned' && reason !== 'room_closed' && reason !== 'shutdown') return null;
+        if (reason !== 'banned' && reason !== 'room_closed' && reason !== 'shutdown' && reason !== 'replaced') return null;
         const until = own(o, 'until');
         if (until !== undefined && until !== null && !isNum(until)) return null;
         return until === undefined ? { type: 'bye', reason } : { type: 'bye', reason, until };

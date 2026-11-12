@@ -144,7 +144,7 @@ describe('the chat entry', () => {
 });
 
 describe('closed is terminal but can be retried', () => {
-  it.each(['unauthorized', 'forbidden', 'not_found', 'unsupported', 'shutdown', 'room_closed'] as const)('%s offers Try again, which reopens the stream', async (why) => {
+  it.each(['unauthorized', 'forbidden', 'not_found', 'unsupported', 'shutdown', 'room_closed', 'replaced'] as const)('%s offers Try again, which reopens the stream', async (why) => {
     const transport = w.transportFor('snerp');
     const { user } = renderUi(box(transport));
     await screen.findByRole('textbox', { name: 'Message' });

@@ -70,7 +70,7 @@ describe('the words', () => {
   it('every dynamic player.chat.<x>.${...} key has a catalog entry for each value it is given', () => {
     // The refusal and closed tables are read as `player.chat.refused.${reason}` and `player.chat.closed.${why}`.
     for (const reason of ['length', 'rate', 'gate', 'blocked', 'profanity', 'slow_mode', 'flood', 'duplicate', 'unknown']) expect(keys.has(`player.chat.refused.${reason}`), reason).toBe(true);
-    for (const why of ['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'not_found', 'unsupported']) expect(keys.has(`player.chat.closed.${why}`), why).toBe(true);
+    for (const why of ['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'replaced', 'not_found', 'unsupported']) expect(keys.has(`player.chat.closed.${why}`), why).toBe(true);
   });
 
   it('the catalog comment lists the chat area', () => {
@@ -266,6 +266,27 @@ describe('chat.css is a complete token contract', () => {
 
   it('is small: under 12 KB raw (chat-size holds it to its gzip budget)', () => {
     expect(Buffer.byteLength(css)).toBeLessThan(12 * 1024);
+  });
+});
+
+describe('server rendering', () => {
+  it('no chat component calls useLayoutEffect directly: it goes through the isomorphic alias, so React 18 does not warn on a server render', () => {
+    for (const file of readdirSync(join(src, 'chat')).filter((f) => f.endsWith('.tsx'))) {
+      const code = read(join(src, 'chat', file)).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      const direct = [...code.matchAll(/(?<![A-Za-z0-9_])useLayoutEffect\s*\(/g)];
+      expect(direct, file).toEqual([]);
+    }
+    const box = read(join(src, 'chat', 'ChatBox.tsx'));
+    expect(box).toMatch(/const useIsomorphicLayoutEffect = typeof window === 'undefined' \? useEffect : useLayoutEffect;/);
+  });
+
+  it('the chat box renders to a string on a server (no window) without throwing', async () => {
+    const { renderToString } = await import('react-dom/server');
+    const { createElement } = await import('react');
+    const { ChatBox } = await import('../src/chat/ChatBox.js');
+    const transport = { open: () => ({ send: () => Promise.reject(new Error('x')), mute: () => Promise.resolve(false), report: () => Promise.reject(new Error('x')), close: () => undefined }) };
+    const html = renderToString(createElement(ChatBox, { room: 'lobby', transport } as never));
+    expect(html).toContain('role="log"');
   });
 });
 

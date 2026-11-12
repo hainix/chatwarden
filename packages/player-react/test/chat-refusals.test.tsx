@@ -358,6 +358,7 @@ describe('closed', () => {
     ['banned', 'You are banned, so you cannot join this chat.'],
     ['room_closed', 'This chat has closed.'],
     ['shutdown', 'Chat is closed for now. Try again in a moment.'],
+    ['replaced', 'Chat is open in another window.'],
     ['forbidden', 'You cannot join this chat.'],
     ['unauthorized', 'You are signed out. Sign in again to chat.'],
     ['not_found', 'We could not find this chat.'],

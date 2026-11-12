@@ -20,6 +20,7 @@ export const enChat = {
   'player.chat.report': 'Report',
   'player.chat.mute': 'Mute {name}',
   'player.chat.muted': 'Muted {name}. You will not see their messages.',
+  'player.chat.muteUnchanged': 'Nothing changed. {name} was not muted.',
   'player.chat.undo': 'Undo',
   'player.chat.unmute': 'Unmute',
   'player.chat.unmuteName': 'Unmute {name}',
@@ -47,6 +48,7 @@ export const enChat = {
   'player.chat.closed.unauthorized': 'You are signed out. Sign in again to chat.',
   'player.chat.closed.room_closed': 'This chat has closed.',
   'player.chat.closed.shutdown': 'Chat is closed for now. Try again in a moment.',
+  'player.chat.closed.replaced': 'Chat is open in another window.',
   'player.chat.closed.not_found': 'We could not find this chat.',
   'player.chat.closed.unsupported': 'Chat is not working here right now.',
 } as const;

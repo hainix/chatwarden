@@ -86,6 +86,7 @@ describe('readFrame accepts what encodeFrame writes, for every frame type', () =
     { type: 'bye', reason: 'banned', until: null },
     { type: 'bye', reason: 'room_closed' },
     { type: 'bye', reason: 'shutdown' },
+    { type: 'bye', reason: 'replaced' },
   ];
   it.each(frames.map((f, i) => [`${f.type} #${i}`, f] as const))('%s', (_n, frame) => {
     expect(roundTrip(frame)).toEqual(frame);

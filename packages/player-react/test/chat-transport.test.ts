@@ -697,7 +697,7 @@ describe('401 and 403 close without retry; 429 honours retry-after; 500 retries;
 });
 
 describe('a bye banned is closed(banned) and not retried; a bye shutdown is closed(shutdown)', () => {
-  it.each(['banned', 'room_closed', 'shutdown'] as const)('bye %s: the frame is delivered, the status closes with why, nothing retries', async (reason) => {
+  it.each(['banned', 'room_closed', 'shutdown', 'replaced'] as const)('bye %s: the frame is delivered, the status closes with why, nothing retries', async (reason) => {
     const t = collect();
     await tick();
     t.attempts[0]?.push(sse(helloFrame()) + sse({ type: 'bye', reason, ...(reason === 'banned' ? { until: 1_800_003_600_000 } : {}) }));
