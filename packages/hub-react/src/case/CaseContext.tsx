@@ -116,11 +116,20 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     armedFor.current = aiOk;
     if (shownAt.current !== null) shownAt.current = monotonicNow();
   }
+  // What the buttons are drawn from: set by a timer that re-reads the same guard clock `settled()` reads, never by the timer alone, so a
+  // button can only read enabled when the guard would let the click through (they cannot disagree, on a slow machine or in a test that
+  // holds the clock). A tick that finds the case not yet old enough waits for what is left.
   const [cooled, setCooled] = useState(false);
   useEffect(() => {
     if (!hasData) return undefined;
     setCooled(false);
-    const id = setTimeout(() => setCooled(true), QUICK_ACT_COOLDOWN_MS);
+    let id: ReturnType<typeof setTimeout>;
+    const tick = (): void => {
+      const shown = shownAt.current;
+      if (shown !== null && hasAged(shown)) setCooled(true);
+      else id = setTimeout(tick, Math.max(1, shown === null ? QUICK_ACT_COOLDOWN_MS : QUICK_ACT_COOLDOWN_MS - (monotonicNow() - shown)));
+    };
+    id = setTimeout(tick, QUICK_ACT_COOLDOWN_MS);
     return () => clearTimeout(id);
   }, [hasData, aiOk]);
   const settled = useCallback(() => hasAged(shownAt.current), []);

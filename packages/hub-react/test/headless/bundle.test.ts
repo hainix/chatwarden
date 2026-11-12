@@ -12,6 +12,8 @@ const headless = fileURLToPath(new URL('../../src/headless/index.ts', import.met
 const full = fileURLToPath(new URL('../../src/index.ts', import.meta.url));
 /** Gzipped, minified, the kit's core external (a peer). Measured at 21.8 KB when it was written; the English catalog is most of it. */
 const BUDGET = 28 * 1024;
+/** The same, for everything: the first fetch plus the chunks loaded on demand (the AI's ranking, 0.7 KB when this was set: the first-fetch budget plus that, rounded up). A bundler that does not split puts them in one file, so this is the ceiling for such an adopter. */
+const TOTAL_BUDGET = 29 * 1024;
 
 /** React, React DOM, the JSX runtime and the scheduler do not exist: resolving any of them is an error. */
 const noReact: Plugin = {
@@ -60,6 +62,8 @@ async function bundle(entry: string) {
   return {
     /** Every file's text, the chunks loaded on demand too. */
     texts: result.outputFiles.map((o) => o.text),
+    /** Everything the build writes, the chunks loaded on demand too, gzipped together: what an adopter whose bundler does not split pays. */
+    totalGzip: gzipSync(Buffer.concat(result.outputFiles.map((o) => Buffer.from(o.contents))), { level: 9 }).byteLength,
     /** What a first load fetches: the entry and the chunks it imports statically. */
     bytes: joined.byteLength,
     gzip: gzipSync(joined, { level: 9 }).byteLength,
@@ -106,5 +110,12 @@ describe('@chatwarden/hub-react/headless bundles without React', () => {
     console.log(`hub-react/headless bundle: ${bytes} bytes minified, ${gzip} bytes gzipped (budget ${BUDGET})`);
     expect(gzip).toBeLessThan(BUDGET);
     expect(bytes).toBeGreaterThan(5_000);
+  });
+
+  it('is bounded as a whole too: the first fetch and the chunks loaded on demand together stay under the total ceiling', async () => {
+    const { gzip, totalGzip } = await bundle(headless);
+    console.log(`hub-react/headless total (all chunks): ${totalGzip} bytes gzipped, first fetch ${gzip} (total ceiling ${TOTAL_BUDGET})`);
+    expect(totalGzip).toBeGreaterThanOrEqual(gzip);
+    expect(totalGzip).toBeLessThan(TOTAL_BUDGET);
   });
 });
