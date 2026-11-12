@@ -554,4 +554,24 @@ describe('the AI sections', () => {
     const parked = flat(read('docs/plans/follow-ups.md'));
     for (const item of ['Batch backfill', 'Blind sampling', '`byTag` scope', 'Signals as AI context', '"Do not automate"', 'Site wording']) expect(parked, item).toContain(item);
   });
+
+  it('store-memory: the AI methods are opt-in through withMemoryAi, said plainly, with a snippet that compiles (it starts with an import)', () => {
+    const doc = flat(readme('store-memory'));
+    expect(doc).toContain('## The AI methods (opt-in)');
+    for (const needle of ['`withMemoryAi(store)`', '@experimental', '`createMemoryStore()`', '`chatwarden.ai_store_unsupported`', 'SQLite store has them']) expect(doc, needle).toContain(needle);
+    expect(doc).toMatch(/leaves the AI inert/i);
+    expect(doc).toMatch(/does not carry them/i);
+    expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemoryAi[^}]*\} from '@chatwarden\/store-memory';/);
+  });
+
+  it('core: a store without the AI methods leaves the AI inert and says so once; it does not throw', () => {
+    const doc = flat(section(readme('core'), 'The AI (levels 1 and 2)'));
+    expect(doc).toContain('`chatwarden.ai_store_unsupported`');
+    expect(doc).toContain('`withMemoryAi(store)`');
+    expect(doc).not.toMatch(/makes `createChatwarden` throw/);
+  });
+
+  it('follow-ups: the memory store move is recorded as resolved', () => {
+    expect(flat(read('docs/plans/follow-ups.md'))).toMatch(/\*\*Done: the memory store's AI methods are opt-in\.\*\*/);
+  });
 });

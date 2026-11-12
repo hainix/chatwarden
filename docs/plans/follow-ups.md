@@ -81,7 +81,8 @@ Decided in [design/2026-11-11-ai-levels-1-2.md](../design/2026-11-11-ai-levels-1
   capped weight in the queue and never in the read.
 - **"Do not automate".** The mark belongs to level 3 (acting). `automationAllowed(person)` exists and returns true; level 3 backs it with the mark.
 - **Levels 3 and 4.** Acting on clear cases and watching are separate designs; the seams are in section 12 of the design note.
-- **Moving the memory store's AI methods out of the browser bundle.** `scripts/browser-bundle.test.ts` measures the browser build without the AI
-  service, its names and the hub's ranking; what is left of the AI in it (the in-memory store's methods, the staff AI routes, the profile section
-  and the decision echo) is a few KB gzip and is the reason that budget has no headroom. A lazy or opt-in store mixin would remove it.
+- **Done: the memory store's AI methods are opt-in.** `createMemoryStore()` no longer carries them; `withMemoryAi(store)` (`@experimental`) adds
+  them, so a browser bundle that never opts in does not either. `scripts/browser-bundle.test.ts` measures the browser build without the AI service,
+  its names, the hub's ranking and `withMemoryAi`, and holds its 103 KB budget (102.8 KB). A kit given `ai` over a store without the methods stays
+  inert and logs `chatwarden.ai_store_unsupported` once.
 

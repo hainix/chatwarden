@@ -46,6 +46,12 @@ const withoutServerOnlyAi: Plugin = {
       loader: 'js',
       resolveDir: dirname(args.path),
     }));
+    // `withMemoryAi` is the in-memory store's opt-in AI methods: its name is left out of `export * as storeMemory` like the core ones.
+    b.onLoad({ filter: /packages[\\/]store-memory[\\/]dist[\\/]src[\\/]index\.js$/ }, (args) => ({
+      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*\{[^}]*\}\s*from\s*['"]\.\/memoryAi\.js['"];?[ \t]*$/gm, ''),
+      loader: 'js',
+      resolveDir: dirname(args.path),
+    }));
     // The two places that load AI code on demand are left out: the import() resolves to an empty stub (a bundler that splits would make it a
     // chunk nobody asks for; a stub keeps this one a single script that runs in the vm, with no `require` shim).
     b.onResolve({ filter: /^\.\/ai\/(service|rank)\.js$/ }, (args) => (args.kind === 'dynamic-import' ? { path: args.path, namespace: LEFT_OUT } : undefined));
@@ -215,6 +221,8 @@ describe('browser bundle: size', () => {
 // The AI module is server-only (design: the adapter runs on the server), so the hub's browser bundle must not hold any of it. The markers are
 // names that live only in the AI module: the prompt builder, the output schema and the scripted fake adapter.
 const AI_MARKERS = ['buildAIInput', 'AI_OUTPUT_SCHEMA', 'createFakeModerationAI'];
+// And the in-memory store's AI methods, which are opt-in (`withMemoryAi`) so a bundle that never calls it does not carry them.
+const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries'];
 const inputsOf = (m: Metafile): string[] => Object.keys(m.inputs).map((p) => p.replaceAll('\\', '/'));
 
 describe('browser bundle: the server-only AI module', () => {
@@ -224,7 +232,12 @@ describe('browser bundle: the server-only AI module', () => {
       expect(esm.includes(marker), `${marker} in the ESM build`).toBe(false);
       expect(iife.includes(marker), `${marker} in the IIFE build`).toBe(false);
     }
+    for (const marker of MEMORY_AI_MARKERS) {
+      expect(esm.includes(marker), `${marker} in the ESM build`).toBe(false);
+      expect(iife.includes(marker), `${marker} in the IIFE build`).toBe(false);
+    }
     const inputs = inputsOf(metafile);
+    expect(inputs.filter((p) => /packages\/store-memory\/dist\/src\//.test(p)).sort()).toEqual(['packages/store-memory/dist/src/index.js', 'packages/store-memory/dist/src/memoryStore.js']);
     // Only the inert facade (a few lines) is there: nothing of the service, the worker, the prompt, the validator, the fake or the ranking.
     expect(inputs.filter((p) => /packages\/core\/dist\/src\/ai\//.test(p))).toEqual(['packages/core/dist/src/ai/inert.js']);
     expect(inputs.filter((p) => /packages\/hub-react\/dist\/src\/ai\//.test(p))).toEqual([]);
@@ -252,6 +265,8 @@ describe('browser bundle: the server-only AI module', () => {
       expect(inputs, file).toContain(`packages/core/dist/src/ai/${file}.js`);
     }
     expect(inputs).toContain('packages/hub-react/dist/src/ai/rank.js');
+    expect(inputs).toContain('packages/store-memory/dist/src/memoryAi.js');
+    for (const marker of MEMORY_AI_MARKERS) expect(aiEsm.includes(marker), `${marker} in the ESM build with the AI module`).toBe(true);
   });
 
   it('is browser-safe: the build with the AI module imports no Node module (the scans above run on it too)', () => {
@@ -434,11 +449,11 @@ const HUB_SCENARIO = `(async () => {
 // The AI module in the bare context: the kit with the scripted fake adapter at level 1, a report filed, the read made after the ack.
 const AI_SCENARIO = `(async () => {
   const { createChatwarden, createFakeModerationAI } = CW.core;
-  const { MemoryStore } = CW.storeMemory;
+  const { MemoryStore, withMemoryAi } = CW.storeMemory;
   const R = 'room';
   const clock = { now: () => Date.now() };
   const adapter = createFakeModerationAI([]);
-  const cw = await createChatwarden({ store: new MemoryStore(), secret: 'ai-secret', platform: { identify: (ctx) => ctx }, clock, retention: false, ai: { adapter }, overrides: { ai: { level: 1 } } });
+  const cw = await createChatwarden({ store: withMemoryAi(new MemoryStore()), secret: 'ai-secret', platform: { identify: (ctx) => ctx }, clock, retention: false, ai: { adapter }, overrides: { ai: { level: 1 } } });
   cw.rooms.seat(R, 'a', { clientKey: 'key-alice', ip: '198.51.100.1' }, 'Alice');
   cw.rooms.seat(R, 'b', { clientKey: 'key-bob', ip: '198.51.100.2' }, 'Bob');
   cw.chat.accept(R, 'a', 'hello there');
