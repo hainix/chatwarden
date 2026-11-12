@@ -116,10 +116,10 @@ One-time setup, in the Cloudflare dashboard (or with wrangler), before the first
 4. Check `https://chatwarden.dev/`, `/og.png`, `/llms.txt` and `/robots.txt`, and look at the response headers once
    (`curl -sI https://chatwarden.dev/`) to see the CSP.
 
-5. **Turn on HSTS in the dashboard** (SSL/TLS, Edge Certificates, HTTP Strict Transport Security, and "Always Use HTTPS"), for
-   `chatwarden.dev`. It is deliberately not in `public/_headers`: Pages sends `_headers` on every preview URL too
-   (`<hash>.chatwarden-bvf.pages.dev`), and a preview host should not get an HSTS policy. Start with a short max-age and raise it
-   once the site has been fine for a while.
+5. **HSTS needs no setting.** The whole `.dev` top-level domain is on the browsers' built-in HSTS preload list, so every major
+   browser already loads `chatwarden.dev` over HTTPS only, before any request goes out. It is deliberately not in
+   `public/_headers` either: Pages sends `_headers` on every preview URL too (`<hash>.chatwarden-bvf.pages.dev`), and a preview
+   host should not get an HSTS policy.
 
 6. **Leave Cloudflare's script injectors off.** Do not turn on Web Analytics (the one-click Pages option or the zone's beacon),
    Rocket Loader or email address obfuscation for this project or zone. They inject scripts, the CSP blocks them (console
