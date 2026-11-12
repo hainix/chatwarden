@@ -333,11 +333,15 @@ describe('RELEASING.md', () => {
     expect(text).toMatch(/first version goes out with the token/);
     expect(text).toMatch(/add the Trusted Publisher/);
   });
-  it('keeps the NPM_TOKEN secret until a release has really published through OIDC, which is still untested', () => {
+  // The workflow uses NPM_TOKEN whenever the secret exists, so OIDC is never exercised while it is set. The order is: remove the
+  // GitHub secret (keep the npm token, unrevoked, as the fallback), release once through OIDC, then revoke the token and disallow
+  // tokens. The old "keep the secret until OIDC has published" could never complete.
+  it('removes the GitHub secret to exercise OIDC, keeps the npm token until a release has published through it, then locks tokens out', () => {
     const text = flat(section(doc, 'One-time setup (the owner)'));
-    expect(text).toMatch(/Keep the `NPM_TOKEN` secret until a release has actually published through OIDC/);
-    expect(text).toMatch(/has not been exercised/);
-    // The old advice, to delete it straight after the first publish, is gone.
+    expect(text).toMatch(/while the secret is set, trusted publishing is never used/i);
+    expect(text).toMatch(/delete the `NPM_TOKEN` secret on GitHub but do not revoke the token on npm yet/i);
+    expect(text).toMatch(/disallow tokens/i);
+    expect(text).not.toMatch(/Keep the `NPM_TOKEN` secret until a release has actually published through OIDC/);
     expect(text).not.toMatch(/Then delete the `NPM_TOKEN` secret/);
   });
   it('explains when a peer floor must rise, and that this overrides onlyUpdatePeerDependentsWhenOutOfRange', () => {

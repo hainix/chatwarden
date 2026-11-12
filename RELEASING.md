@@ -34,10 +34,14 @@ run as a dry run, and adopters can use tarballs (see "Before the first publish")
    file `release.yml`. The workflow needs no change: with no secret it publishes through trusted publishing (it upgrades npm to
    11.5.1+ for this and already asks for `id-token: write`), and each release still carries a signed provenance statement. Check
    npm's current docs if the screens have moved.
-   **Keep the `NPM_TOKEN` secret until a release has actually published through OIDC.** Trusted publishing has not been exercised by
-   this repository yet, so the token is the fallback: with the secret set the workflow uses it, so a release can still go out if OIDC
-   fails. Once a release has published with no secret and every package page shows the provenance badge, delete the secret on GitHub
-   and revoke the token on npm.
+   **Then switch over in three steps.** The workflow uses the `NPM_TOKEN` secret whenever it exists, so while the secret is set,
+   trusted publishing is never used.
+   1. Once every package lists the Trusted Publisher, delete the `NPM_TOKEN` secret on GitHub but do not revoke the token on npm yet:
+      it is the fallback. If trusted publishing fails, put it back as the secret (or make a new one) and the next run uses it.
+   2. Release as usual. The run logs "No NPM_TOKEN secret: publishing through npm trusted publishing (OIDC)". Check that all ten
+      versions reached npm with the provenance badge.
+   3. Then revoke the token on npm, and on each package set Settings, Publishing access, "Require two-factor authentication and
+      disallow tokens". From then on only this workflow (through trusted publishing) or you (with your 2FA) can publish.
 
 ## New packages: the first publish
 
@@ -47,8 +51,8 @@ that exists. So their first version goes out with the token, like the first rele
 1. Make sure `NPM_TOKEN` is set (steps 3 and 4) and its scope covers new packages in `@chatwarden`.
 2. Release as usual (below). The workflow publishes all ten in dependency order and skips what is already on npm, so only the three
    new packages are uploaded the first time a version of them goes out; it publishes them with the token.
-3. Open each of the three on npmjs.com and add the Trusted Publisher (step 6). From the next release they publish through OIDC like the
-   rest, but keep the token until that has worked once (step 6).
+3. Open each of the three on npmjs.com and add the Trusted Publisher (step 6), then follow step 6's three-step switch: remove the
+   secret, release once through OIDC, then revoke the token.
 
 The three are public packages with provenance, like the others (`publishConfig.access` is `public` in each manifest).
 
