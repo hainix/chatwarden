@@ -39,6 +39,17 @@ export function auditContract(name: string, make: () => Store): void {
       expect(got.map((r) => r.action).sort()).toEqual([...AUDIT_ACTIONS].sort());
     });
 
+    it('an ai.read row (an ai: actor, no role, a report target) round-trips and filters by action and actor', () => {
+      const s = make();
+      const ai = row('a1', NOW, { actor: 'ai:anthropic:claude-haiku-5-5', role: null, action: 'ai.read', target: { type: 'report', ref: 'rep_1' } });
+      s.insertAudit(ai);
+      s.insertAudit(row('m1', NOW + 1, { action: 'ai.rerun', target: { type: 'report', ref: 'rep_1' } }));
+      s.insertAudit(row('m2', NOW + 2, { action: 'ai.outcome', target: { type: 'report', ref: 'rep_1' } }));
+      expect(s.listAudit({ limit: 5, action: 'ai.read' })).toEqual([ai]);
+      expect(s.listAudit({ limit: 5, actor: 'ai:anthropic:claude-haiku-5-5' })).toEqual([ai]);
+      expect(s.listAudit({ limit: 5 }).map((r) => r.action)).toEqual(['ai.outcome', 'ai.rerun', 'ai.read']);
+    });
+
     it('newest first, ties on at by id descending', () => {
       const s = make();
       for (const [id, at] of [['b', 10], ['a', 10], ['c', 10], ['d', 5], ['e', 20]] as const) s.insertAudit(row(id, at));

@@ -11,7 +11,11 @@ export type Role = (typeof ROLES)[number];
 
 /**
  * The closed list of things the audit trail records. The `term.*` and `exception.*` names also cover the rows the
- * term editor (`LiveTerms`) wrote before the trail existed.
+ * term editor (`LiveTerms`) wrote before the trail existed. The list only ever grows at the end.
+ *
+ * The three `ai.*` actions target a report and carry no detail: `ai.read` is written by the AI itself (an `ai:` actor, no role)
+ * when a read finishes, `ai.rerun` by a moderator who asked for another read, `ai.outcome` by a moderator whose decision was
+ * recorded against a read.
  */
 export const AUDIT_ACTIONS = [
   'report.view',
@@ -37,6 +41,9 @@ export const AUDIT_ACTIONS = [
   'policy.reset',
   'report.dismiss_case',
   'report.dismiss_reporter',
+  'ai.read',
+  'ai.rerun',
+  'ai.outcome',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -52,6 +59,12 @@ export interface AuditDetail {
 
 /** The longest reason a policy audit row keeps. */
 export const AUDIT_REASON_MAX = 2000;
+
+/** The actions that point at a report (and only at one), and carry nothing else. */
+const AI_ACTIONS: readonly string[] = ['ai.read', 'ai.rerun', 'ai.outcome'];
+
+/** An actor that is the AI itself, not a person: `ai:` and the adapter's id (`ai:anthropic:claude-haiku-5-5`). */
+const AI_ACTOR_PREFIX = 'ai:';
 
 /** The actions whose row carries an {@link AuditDetail}, and the only ones that may. */
 const DETAIL_ACTIONS: readonly string[] = ['policy.update', 'policy.reset'];
@@ -77,7 +90,8 @@ export interface AuditRecordInput {
    * them as they are.)
    */
   actor: string;
-  role: Role;
+  /** The staff member's role. `null` only for the AI's own actor (`ai:<adapter id>`), which records `ai.read` and nothing else. */
+  role: Role | null;
   action: AuditAction;
   target?: AuditTarget;
   /** Required for `policy.update` and `policy.reset` (and refused for every other action). */
@@ -204,7 +218,14 @@ function parse(input: unknown): AuditRecordInput | null {
   if (typeof input !== 'object' || input === null) return null;
   const { actor, role, action, target, detail } = input as Record<string, unknown>;
   if (typeof actor !== 'string' || !ACTOR_RE.test(actor)) return null;
-  if (!isRole(role) || !isAction(action)) return null;
+  if (!isAction(action)) return null;
+  // The AI is the one actor with no role: `ai:<adapter id>` records `ai.read`, and only it does. A person always has a role.
+  if (actor.startsWith(AI_ACTOR_PREFIX)) {
+    if (actor.length === AI_ACTOR_PREFIX.length || role !== null || action !== 'ai.read') return null;
+  } else if (!isRole(role) || action === 'ai.read') {
+    return null;
+  }
+  const roleOut: Role | null = actor.startsWith(AI_ACTOR_PREFIX) ? null : (role as Role);
   // A policy row must say what it changed; no other row may carry anything but ids.
   let parsedDetail: AuditDetail | undefined;
   if (DETAIL_ACTIONS.includes(action)) {
@@ -215,11 +236,12 @@ function parse(input: unknown): AuditRecordInput | null {
     return null;
   }
   const extra = parsedDetail === undefined ? {} : { detail: parsedDetail };
-  if (target === undefined) return { actor, role, action, ...extra };
+  if (target === undefined) return AI_ACTIONS.includes(action) ? null : { actor, role: roleOut, action, ...extra };
   if (typeof target !== 'object' || target === null) return null;
   const { type, ref } = target as Record<string, unknown>;
   if (!isTargetType(type) || typeof ref !== 'string' || !REF_RE.test(ref)) return null;
-  return { actor, role, action, target: { type, ref }, ...extra };
+  if (AI_ACTIONS.includes(action) && type !== 'report') return null;
+  return { actor, role: roleOut, action, target: { type, ref }, ...extra };
 }
 
 /**
