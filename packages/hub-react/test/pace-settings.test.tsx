@@ -203,7 +203,7 @@ describe('the hints', () => {
   it('say the settings apply per process and to every room unless the game overrides a room', async () => {
     const w = await owner();
     await open(w);
-    expect(within(panel()).getByText(/apply to this server process and to every room unless your game overrides a room/i)).toBeInTheDocument();
+    expect(within(panel()).getByText(/apply to this server and to every room unless your game overrides a room/i)).toBeInTheDocument();
   });
 
   it('the built-in limit hint shows beside a burst looser than 3 per 5 seconds and not beside a tighter or equal one', async () => {

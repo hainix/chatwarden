@@ -1069,7 +1069,7 @@ export const en = {
   'hub.settings.pace.builtin.window.one': '{count} second',
   'hub.settings.pace.builtin.window.other': '{count} seconds',
   'hub.settings.pace.suggest.done': 'Suggested values filled in. Review them, then save.',
-  'hub.settings.pace.scope': 'These settings apply to this server process and to every room unless your game overrides a room.',
+  'hub.settings.pace.scope': 'These settings apply to this server and to every room unless your game overrides a room.',
   'hub.settings.pace.save.form': 'Save slow mode and flooding settings',
   'hub.settings.pace.saved': 'Slow mode and flooding settings saved.',
   'hub.settings.pace.what': 'slow mode and flooding',
