@@ -13,6 +13,7 @@ import {
 } from '../src/profile.js';
 import { HISTORY_LOOKBACK_MS, LADDER_TABLE } from '../src/ladder.js';
 import { defaultReporting } from '../src/reporting.js';
+import { resolveSignals } from '../src/signals.js';
 import { CONDUCT_LEVELS } from '../src/types.js';
 import type { ConductLevel } from '../src/types.js';
 
@@ -486,7 +487,7 @@ describe('defineProfile', () => {
   it('round-trips a custom profile', () => {
     const d = defineProfile(custom);
     // A profile with no reporting section gets the default reporting settings.
-    expect(d).toEqual({ ...custom, reporting: defaultReporting(), ai: { level: 0, learn: true, dailyCalls: 5000 }, pace: { slowModeMs: null, burst: null, duplicateWindowMs: null } });
+    expect(d).toEqual({ ...custom, reporting: defaultReporting(), ai: { level: 0, learn: true, dailyCalls: 5000 }, pace: { slowModeMs: null, burst: null, duplicateWindowMs: null }, signals: resolveSignals(undefined) });
     expect(d.id).toBe('mygame');
     expect(resolveProfile(d, { name: 'Renamed' }).name).toBe('Renamed');
     expect(resolveProfile(d)).toEqual(d);

@@ -7,6 +7,8 @@ import { playerReporting } from './reporting.js';
 import type { PlayerReporting } from './reporting.js';
 import type { RuleRef } from './rules.js';
 import { errorClass, safeWarn } from './log.js';
+import { RETENTION_DEFAULTS } from './retention.js';
+import { checkSignalFeeds, pruneSignalFeeds, SIGNAL_FEED_NAMES } from './signals.js';
 import { retryBusy } from './team.js';
 import { CONDUCT_LEVELS } from './types.js';
 import type { Clock, ConductLevel, Logger, Store } from './types.js';
@@ -95,7 +97,11 @@ export class PolicyService {
   /** When the store was last looked at (epoch ms), or null before the first read. */
   private lastCheck: number | null = null;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile }) {
+  /** How long signal rows are kept, ms: a feed window longer than this could never be met. */
+  private readonly signalsMs: () => number;
+
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number }) {
+    this.signalsMs = deps.signalsMs ?? (() => RETENTION_DEFAULTS.signalsMs);
     this.store = deps.store;
     this.clock = deps.clock;
     this.logger = deps.logger;
@@ -121,7 +127,7 @@ export class PolicyService {
     const raw: unknown = stored === null ? {} : stored.layer;
     const layer = frozenCopy(raw as PolicyLayer);
     try {
-      this.state = { effective: applyPolicyLayer(this.base, layer), layer, version };
+      this.state = { effective: applyPolicyLayer(this.base, this.withoutStaleFeeds(layer)), layer, version };
     } catch (err) {
       if (!(err instanceof ProfileError)) throw err;
       // What `get()` shows is always an object: an unreadable layer reads as empty, with the error beside it.
@@ -131,6 +137,24 @@ export class PolicyService {
       // Once per version: `adopt` runs only when the stored version changed (or at start-up), never on a plain re-read.
       safeWarn(this.logger, 'chatwarden.policy_layer_invalid', { version, path: err.path });
     }
+  }
+
+  /**
+   * The stored layer with any signal feed that can no longer be used taken out (it names a kind the code stopped declaring, or a window
+   * longer than the retention now allows). Without this one stale feed would make the whole layer unusable and silently drop the
+   * owner's other edits too. Logged by feed name only. Anything else wrong with the layer is left for `applyPolicyLayer` to refuse.
+   */
+  private withoutStaleFeeds(layer: PolicyLayer): PolicyLayer {
+    if (typeof layer !== 'object' || layer === null || Array.isArray(layer)) return layer;
+    const signals: unknown = (layer as { signals?: unknown }).signals;
+    if (typeof signals !== 'object' || signals === null || Array.isArray(signals)) return layer;
+    const feeds: unknown = (signals as { feeds?: unknown }).feeds;
+    if (typeof feeds !== 'object' || feeds === null || Array.isArray(feeds)) return layer;
+    const pruned = pruneSignalFeeds(feeds, this.base.signals.kinds, {
+      signalsMs: this.signalsMs(),
+      onDrop: (name) => safeWarn(this.logger, 'chatwarden.signal_feed_dropped', { feed: SIGNAL_FEED_NAMES.includes(name) ? name : 'unknown' }),
+    });
+    return { ...layer, signals: { ...(signals as object), feeds: pruned } } as PolicyLayer;
   }
 
   /** Look at the store now and adopt a strictly newer version (an older one, say a restored backup, never regresses what is in force). A store failure throws. */
@@ -212,7 +236,9 @@ export class PolicyService {
       return { ok: false, error: 'invalid', path: 'reason' };
     }
     try {
-      applyPolicyLayer(this.base, layer);
+      const effective = applyPolicyLayer(this.base, layer);
+      // The windows are checked against the retention here, where it is known: a window longer than it could never be met.
+      checkSignalFeeds(effective.signals.feeds, effective.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;

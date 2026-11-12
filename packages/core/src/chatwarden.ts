@@ -24,6 +24,7 @@ import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { mergePace, resolvePace } from './pace.js';
+import { checkSignalFeeds } from './signals.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
 import { ProfileError, resolveProfile } from './profile.js';
 import type { ModerationProfile, PolicyLayer, PolicySection, PresetName, ProfanityConfig, ProfileOverrides, ResolvedProfile } from './profile.js';
@@ -694,6 +695,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     badFaithMs: givenRetention.badFaithMs ?? Math.max(RETENTION_DEFAULTS.badFaithMs, limits.reports.suspendWindowMs),
   };
   checkRetentionFloors(retentionPolicy, limits.reports.suspendWindowMs);
+  // A feed window longer than the signal retention could never be met (rows older than that are deleted): refuse it in code too.
+  checkSignalFeeds(baseProfile.signals.feeds, baseProfile.signals.kinds, { signalsMs: retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs }, 'profile.signals.feeds');
   const purgeEveryMs = everyMs ?? DEFAULT_PURGE_EVERY_MS;
   if (opts.retention !== false && (!Number.isFinite(purgeEveryMs) || purgeEveryMs <= 0)) {
     throw new Error('createChatwarden: retention.everyMs must be a positive finite number');
@@ -730,7 +733,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs });
   policy.load();
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and

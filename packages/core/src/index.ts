@@ -320,6 +320,32 @@ export {
 // Pace settings (@experimental): slow mode, burst limit and repeat refusal, all off until set.
 export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
 export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
+// Signals (@experimental): kinds a game declares, the guards, and the feeds that say where counts may be read.
+export {
+  BUILTIN_SIGNAL_KINDS,
+  checkSignalFeeds,
+  kindSpecOf,
+  pruneSignalFeeds,
+  resolveSignals,
+  SIGNAL_KIND_PATTERN,
+  SIGNAL_KINDS_MAX,
+  SIGNAL_WINDOW_DAYS_MAX,
+} from './signals.js';
+export type {
+  ResolvedSignalGuards,
+  ResolvedSignalKind,
+  ResolvedSignals,
+  SignalCount,
+  SignalFeeds,
+  SignalGuards,
+  SignalInput,
+  SignalKindSpec,
+  SignalKindView,
+  SignalParty,
+  SignalPolarity,
+  SignalSettings,
+  SignalThreshold,
+} from './signals.js';
 export { POLICY_REFRESH_MS, PREVIEW_SAMPLES } from './policy.js';
 export type {
   PolicyPreview,
