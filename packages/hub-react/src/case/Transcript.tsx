@@ -3,9 +3,11 @@ import { useHub } from '../context.js';
 import { excerptLines, filterLines, personName } from '../excerpt.js';
 import type { ExcerptLine, ReportPerson } from '../excerpt.js';
 import { timeOfDay } from '../format.js';
+import { displayName } from '../labels.js';
 import { LazyAiParts } from '../lazyParts.js';
+import { NameToggle, NameValue } from '../names.js';
 import type { StaffReport } from '../types.js';
-import { Empty, Notice, Segmented, Tag } from '../ui.js';
+import { Empty, Masked, Notice, Segmented, Tag } from '../ui.js';
 import { useCase } from './CaseContext.js';
 
 // The transcript: what was said, in order. The reported line has a red rail, the reported person's lines a neutral tint, and
@@ -22,14 +24,7 @@ export interface LinePicks {
   onToggle: (lineId: string) => void;
 }
 
-/**
- * Hidden text: a quiet pill that says what is there and not what it says. It holds no part of the words (not even their length), so
- * neither the page nor a screen reader ever has them until a moderator chooses to show them.
- */
-export function Masked() {
-  const { t } = useHub();
-  return <span className="cw-mask">{t('hub.mask.label')}</span>;
-}
+export { Masked };
 
 /** How Simple mode draws a line: its own columns, and who said it only when the whole chat is shown. */
 export interface SimpleLine {
@@ -55,12 +50,21 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
   const on = theirs && picks.chosen.includes(line.id);
   const full = picks !== null && picks.chosen.length >= picks.max;
   const reveals = line.blocked && !reveal.all;
+  // Who said it: the handle, hidden while the server flags it, with its own Show for this line.
+  const place = `line:${line.id}`;
+  const who = (
+    <span className="cw-line-who">
+      <NameValue text={line.handle} flagged={line.handleFlagged} place={place} />
+      {line.handleFlagged && ' '}
+      <NameToggle flagged={line.handleFlagged} place={place} time={time} />
+    </span>
+  );
   const toggle = (
     <button
       type="button"
       className="cw-linkbtn"
       aria-pressed={shown}
-      aria-label={t(shown ? 'hub.mask.hideLine' : 'hub.mask.showLine', { name: name(line.person) || line.handle, time })}
+      aria-label={t(shown ? 'hub.mask.hideLine' : 'hub.mask.showLine', { name: name(line.person) || displayName(t, { handle: line.handle, flagged: line.handleFlagged }), time })}
       onClick={() => reveal.toggle(line.id)}
     >
       {t(shown ? 'hub.mask.hide' : 'hub.mask.show')}
@@ -78,7 +82,7 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
         <time className="cw-line-time" dateTime={new Date(line.ts).toISOString()}>
           {time}
         </time>
-        {simple.whole && <span className="cw-line-who">{line.handle}</span>}
+        {simple.whole && who}
         <span className="cw-line-text">{hidden ? <Masked /> : line.raw}{tick}</span>
         {(line.reported || reveals) && (
           <span className="cw-line-meta">
@@ -110,7 +114,7 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
       <time className="cw-line-time" dateTime={new Date(line.ts).toISOString()}>
         {time}
       </time>
-      <span className="cw-line-who">{line.handle}</span>
+      {who}
       <span className="cw-line-text">{hidden ? <Masked /> : line.raw}{tick}</span>
       {(line.reported || line.blocked || line.audience !== null || showDelivered) && (
         <span className="cw-line-meta">
@@ -140,7 +144,8 @@ export function Transcript({ report, people, picks }: { report: StaffReport; peo
   // The person to warn about: whoever is picked, else (with Everyone) the reported person. Either may have written nothing.
   const focus = only === '' ? people.find((p) => p.role === 'target') : people.find((p) => p.ref === only);
   const quiet = focus !== undefined && focus.lines === 0 ? focus : undefined;
-  const anyBlocked = all.some((l) => l.blocked);
+  // The one switch also serves a flagged name: in a line, or among the people the case names.
+  const anyBlocked = all.some((l) => l.blocked || l.handleFlagged) || people.some((p) => p.handleFlagged);
   const count = report.roomId === '' ? t('hub.report.excerpt.count', { count: all.length }) : t('hub.report.excerpt.countRoom', { room: report.roomId, count: all.length });
 
   return (

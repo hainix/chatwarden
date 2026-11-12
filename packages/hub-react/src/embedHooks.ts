@@ -96,7 +96,8 @@ export interface UseCases {
  *
  * ```tsx
  * const { cases, takeNext } = useCases();
- * return <ul>{cases.map((c) => <li key={c.person}>{c.handle} ({c.open})</li>)}</ul>;
+ * // A name the server flags (`handleFlagged`) is hidden until a moderator shows it: draw it hidden, as the hub does (see `displayName`).
+ * return <ul>{cases.map((c) => <li key={c.person}>{c.handleFlagged ? 'A hidden name' : c.handle} ({c.open})</li>)}</ul>;
  * ```
  * @experimental
  */

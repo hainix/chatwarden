@@ -15,6 +15,8 @@ import type { NextReport, QueueGroup } from '../queue.js';
 import type { AiBus, AiCaseApi } from '../ai/api.js';
 import type { DecisionForm } from '../decision.js';
 import { LazyAiParts } from '../lazyParts.js';
+import { NameRevealContext } from '../names.js';
+import type { NameReveal } from '../names.js';
 import type { AiReadView, DecideInput, PersonHistory, ReportDetail } from '../types.js';
 import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
 import { useDecisionForm } from './useDecisionForm.js';
@@ -54,13 +56,16 @@ export interface CaseValue {
   settled: () => boolean;
   /** The same, as state, so a button can be drawn disabled for that moment. */
   cooled: boolean;
-  /** Blocked words are hidden until shown: for the whole case, or one line. */
+  /**
+   * Blocked words, and the names the server flags, are hidden until shown: for the whole case, or one place. A key is a line's id (its blocked words) or
+   * `name:<place>` (a name, see `nameKey`), so the one state serves both and a new case starts with nothing shown.
+   */
   reveal: {
     all: boolean;
     setAll: (on: boolean) => void;
-    /** Whether this line's text is on show. */
-    shows: (lineId: string) => boolean;
-    toggle: (lineId: string) => void;
+    /** Whether this place is on show (a line's blocked words, or a name: see the key above). */
+    shows: (key: string) => boolean;
+    toggle: (key: string) => void;
   };
 }
 
@@ -154,6 +159,7 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
 
   const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide'), aiFirst, aiDecided });
 
+  const nameReveal = useMemo<NameReveal>(() => ({ all: revealAll, shows: (key) => revealed.has(key), toggle }), [revealAll, revealed, toggle]);
   const value: CaseValue = {
     reportId,
     detail,
@@ -175,8 +181,10 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   };
   return (
     <CaseContext.Provider value={value}>
-      {children}
-      {aiRead?.recommendation != null && <LazyAiParts part="case" onFailed={() => setAiDecided(true)} />}
+      <NameRevealContext.Provider value={nameReveal}>
+        {children}
+        {aiRead?.recommendation != null && <LazyAiParts part="case" onFailed={() => setAiDecided(true)} />}
+      </NameRevealContext.Provider>
     </CaseContext.Provider>
   );
 }

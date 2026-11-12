@@ -1,9 +1,15 @@
 import type { Transport, TransportRequest, TransportResponse } from './transport.js';
 import type {
   AiReadAgainResult,
+  AppealDecided,
+  AppealDecisionInput,
+  AppealDetail,
+  AppealRow,
+  AppealStats,
   AiStatusView,
   BlockedDays,
   BlockedLine,
+  BlockedName,
   CloseGapInput,
   DecideInput,
   DecideResult,
@@ -13,6 +19,7 @@ import type {
   ExceptionPatch,
   GapRow,
   GuideSection,
+  ListAppealsQuery,
   ListAuditQuery,
   ListReportsQuery,
   ListSanctionsQuery,
@@ -168,6 +175,26 @@ export interface HubClient {
   /** `POST /sanctions/:groupId/revoke`. */
   revokeSanction(groupId: string, reason: string): Promise<{ ok: true }>;
 
+  // Appeals (needs `features.appeals` and `appeals.read`; every route is a 404 while appeals are off)
+  /** `GET /appeals`: the inbox, oldest first, `open` unless asked. No statement is in a list. @experimental */
+  appeals(query?: ListAppealsQuery): Promise<Page<AppealRow>>;
+  /** `GET /appeals/:id`: one appeal in full, the player's statement included. Audited. @experimental */
+  appeal(id: string): Promise<{ appeal: AppealDetail }>;
+  /**
+   * `POST /appeals/:id/decide` (needs `appeals.decide`): keep the decision, make it lighter (`to`) or remove it, with a private reason. Rejects with
+   * `already_decided`, `same_decider` or `gone` (409), `duration_not_offered` or another 400 for a `to` the profile does not allow. @experimental
+   */
+  decideAppeal(id: string, input: AppealDecisionInput): Promise<AppealDecided>;
+  /** `GET /appeals/stats`: the per-rule counts over the last 30, 90 (default) or 365 days. Audited. @experimental */
+  appealStats(options?: { days?: 30 | 90 | 365 }): Promise<AppealStats>;
+
+  // Names
+  /**
+   * `POST /people/:ref/rename` (needs `sanctions.apply`, and `features.renames`): ask the player for a new name, with no sanction. The reason is checked
+   * and kept by the audit trail only. Rejects with `pending_rename` (409) while one is waiting, `claimed` (409) like a sanction. @experimental
+   */
+  rename(ref: string, input: { reason: string; rule?: number; takeOver?: boolean }): Promise<{ ok: true }>;
+
   // Rule gaps
   /** `GET /gaps`. */
   listGaps(): Promise<{ items: GapRow[] }>;
@@ -220,6 +247,8 @@ export interface HubClient {
   // Blocked lines, policy, audit
   /** `GET /blocked`: the lines the term filter refused (default the last 7 days). */
   listBlocked(options?: { days?: BlockedDays }): Promise<{ items: BlockedLine[] }>;
+  /** `GET /blocked?source=name` (needs `blocked.read`): the blocked names kept as evidence (`names.keepBlocked`), default the last 7 days. Empty (still 200) when none was kept. @experimental */
+  listBlockedNames(options?: { days?: BlockedDays }): Promise<{ items: BlockedName[] }>;
   /** `GET /policy`: the profile, rules and generated documents. */
   policy(options?: { format?: PolicyFormat; omit?: readonly GuideSection[] }): Promise<PolicyDocs>;
   /** `GET /audit` (senior). */
@@ -265,6 +294,12 @@ export function createHubClient(transport: Transport): HubClient {
     aiStatus: () => get<AiStatusView>('/ai/status'),
     dontTeach: (id) => post<{ ok: true }>(`/reports/${enc(id)}/ai/dont-teach`, undefined),
 
+    appeals: (query = {}) => get<Page<AppealRow>>('/appeals', q({ status: query.status, cursor: query.cursor, limit: query.limit })),
+    appeal: (id) => get<{ appeal: AppealDetail }>(`/appeals/${enc(id)}`),
+    decideAppeal: (id, input) => post<AppealDecided>(`/appeals/${enc(id)}/decide`, input),
+    appealStats: (options = {}) => get<AppealStats>('/appeals/stats', q({ days: options.days })),
+    rename: (ref, input) => post<{ ok: true }>(`/people/${enc(ref)}/rename`, input),
+
     personHistory: (ref, options = {}) => get<PersonHistory>(`/people/${enc(ref)}/history`, q({ limit: options.limit })),
     listSanctions: (query = {}) => get<Page<SanctionRow>>('/sanctions', q({ cursor: query.cursor, limit: query.limit, source: query.source })),
     applySanction: (input) => post<{ groupId: string; refCode: string }>('/sanctions', input),
@@ -297,6 +332,7 @@ export function createHubClient(transport: Transport): HubClient {
     setReasonActive: (id, active) => post<{ reason: Reason }>(`/reasons/${enc(id)}/active`, { active }),
 
     listBlocked: (options = {}) => get<{ items: BlockedLine[] }>('/blocked', q({ days: options.days })),
+    listBlockedNames: (options = {}) => get<{ items: BlockedName[] }>('/blocked', q({ days: options.days, source: 'name' })),
     policy: (options = {}) => get<PolicyDocs>('/policy', q({ format: options.format, omit: options.omit === undefined || options.omit.length === 0 ? undefined : options.omit.join(',') })),
     policyProfile: () => get<PolicyState>('/policy/profile'),
     savePolicyProfile: (input) => call<PolicySaved>({ method: 'PUT', path: '/policy/profile', body: input }),

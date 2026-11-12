@@ -64,4 +64,5 @@ export type { Holder, TeamMember } from '../claims.js';
 export { emptyForm } from '../decision.js';
 export type { DecisionForm } from '../decision.js';
 export { absoluteTime, formatDuration, personTag, relativeTime, waitTone } from '../format.js';
+export { displayName } from '../labels.js';
 export type * from '../types.js';

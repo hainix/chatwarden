@@ -31,12 +31,12 @@ const auto = (w: HubWorld, person: string, over: Record<string, unknown> = {}) =
 describe('Recent actions name the person', () => {
   it('shows the handle from the latest report, with the short tag beside it, and links to the person page', async () => {
     const w = await hubWorld();
-    const f = await w.file({ target: 'Zorbak-fan' });
+    const f = await w.file({ target: 'Zephyr-fan' });
     await w.sanction(f.person, 'chat', 1);
     renderHub(w);
     await overview();
     const row = rowsIn(recent())[0]!;
-    const link = within(row).getByRole('link', { name: /Zorbak-fan/ });
+    const link = within(row).getByRole('link', { name: /Zephyr-fan/ });
     expect(link).toHaveAttribute('href', `#/people/${f.person}`);
     expect(within(row).getByText(personTag(f.person))).toBeInTheDocument();
   });
@@ -54,7 +54,7 @@ describe('Recent actions name the person', () => {
 
   it('never shows more of the ref than the tag', async () => {
     const w = await hubWorld();
-    const f = await w.file({ target: 'Vlemmo' });
+    const f = await w.file({ target: 'Velmora' });
     await w.sanction(f.person, 'ban', 2);
     renderHub(w);
     await overview();
@@ -109,7 +109,7 @@ describe('Recent actions name the person', () => {
 describe('a very long handle in the action rows', () => {
   it('shows whole in Recent actions and in All actions', async () => {
     const w = await hubWorld();
-    const LONG = 'Vlemmo'.repeat(10);
+    const LONG = 'Velmora'.repeat(10);
     const f = await w.file({ target: LONG });
     await w.sanction(f.person, 'warning', 1);
     renderHub(w);
@@ -121,20 +121,20 @@ describe('a very long handle in the action rows', () => {
 describe('All actions', () => {
   it('lists every sanction newest first with the person, the card, what, the rule and who', async () => {
     const w = await hubWorld();
-    const a = await w.file({ target: 'Tarvo' });
-    const b = await w.file({ target: 'Snerp' });
+    const a = await w.file({ target: 'Tarvana' });
+    const b = await w.file({ target: 'Snorlo' });
     await w.sanction(a.person, 'chat', 1);
     await w.sanction(b.person, 'ban', 2, 7 * 24 * HOUR);
     await all(w);
     const rows = rowsIn(list());
     expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveTextContent('Ban');
-    expect(rows[0]).toHaveTextContent('Snerp');
+    expect(rows[0]).toHaveTextContent('Snorlo');
     expect(rows[0]).toHaveTextContent('Rule 2');
     expect(rows[0]).toHaveTextContent('by ann@example.test');
     expect(rows[0]!.querySelector('.cw-card--ban')).not.toBeNull();
-    expect(rows[1]).toHaveTextContent('Tarvo');
-    expect(within(rows[1]!).getByRole('link', { name: /Tarvo/ })).toHaveAttribute('href', `#/people/${a.person}`);
+    expect(rows[1]).toHaveTextContent('Tarvana');
+    expect(within(rows[1]!).getByRole('link', { name: /Tarvana/ })).toHaveAttribute('href', `#/people/${a.person}`);
   });
 
   it('says so when there are none', async () => {

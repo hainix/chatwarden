@@ -136,7 +136,18 @@ export function termErrorText(t: HubT, error: HubError): string {
   return errorText(t, error);
 }
 
-/** How a reported person is named in a queue or a toast: their handle, or "Person" and the short tag. */
-export function groupName(t: HubT, g: { handle: string | null; person: string }): string {
-  return g.handle ?? t('hub.person.unnamed', { tag: personTag(g.person) });
+/**
+ * A handle as text, and the only way one becomes text (names, design 5.5). A handle the server flags (`names.maskInHub`) is the same "hidden" label a blocked line
+ * has until a moderator shows it; a handle that is not flagged, or from a server that flags nothing, is as typed. No handle is the empty string: a caller that
+ * must say something else (the tag) says it. The label holds no part of the name, not even its length.
+ * @experimental
+ */
+export function displayName(t: HubT, name: { handle: string | null; flagged?: boolean | undefined; revealed?: boolean | undefined }): string {
+  if (name.handle === null) return '';
+  return name.flagged === true && name.revealed !== true ? t('hub.mask.label') : name.handle;
+}
+
+/** How a reported person is named in a queue or a toast: their handle (hidden when flagged), or "Person" and the short tag. */
+export function groupName(t: HubT, g: { handle: string | null; person: string; handleFlagged?: boolean | undefined }, revealed = false): string {
+  return g.handle === null ? t('hub.person.unnamed', { tag: personTag(g.person) }) : displayName(t, { handle: g.handle, flagged: g.handleFlagged, revealed });
 }

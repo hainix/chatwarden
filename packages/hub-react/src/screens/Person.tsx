@@ -5,6 +5,7 @@ import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
 import { categoryLabel, groupName } from '../labels.js';
 import { LazySignalLines } from '../lazyParts.js';
+import { LocalReveal, NameToggle, NameValue } from '../names.js';
 import { Revoke } from '../person/Revoke.js';
 import { SanctionForm } from '../person/SanctionForm.js';
 import type { SanctionGroupView, PersonHistory } from '../types.js';
@@ -51,7 +52,9 @@ export function Person({ person }: { person: string }) {
 
   const data = history.data;
   const handle = data?.handle ?? null;
-  const name = groupName(t, { handle, person });
+  const flagged = data?.handleFlagged === true;
+  // Hidden while the server flags the handle: in the title, in the forms and in every label. The title's own Show reveals it.
+  const name = groupName(t, { handle, person, handleFlagged: flagged });
   const canApply = can('sanctions.apply');
   const wrote = (): void => {
     refocus.current = true;
@@ -66,52 +69,55 @@ export function Person({ person }: { person: string }) {
   };
 
   return (
-    <div className="cw-screen">
-      <div className="cw-bar">
-        <div className="cw-personhead">
-          <h2 className="cw-screen-title" tabIndex={-1} ref={headingRef}>
-            {name}
-          </h2>
-          {handle !== null && <PersonChip person={person} />}
-        </div>
-        {canApply && (
-          <div className="cw-bar-actions">
-            <button ref={sanctionButton} type="button" className="cw-btn cw-btn--primary" aria-expanded={form === 'sanction'} onClick={() => toggle('sanction')}>
-              {t('hub.person.sanction')}
-            </button>
-            <button ref={noteButton} type="button" className="cw-btn" aria-expanded={form === 'note'} onClick={() => toggle('note')}>
-              {t('hub.person.addNote')}
-            </button>
+    <LocalReveal>
+      <div className="cw-screen">
+        <div className="cw-bar">
+          <div className="cw-personhead">
+            <h2 className="cw-screen-title" tabIndex={-1} ref={headingRef}>
+              <NameValue text={groupName(t, { handle, person }, true)} flagged={flagged} place="head" />
+            </h2>
+            {handle !== null && <PersonChip person={person} />}
+            <NameToggle flagged={flagged} place="head" />
           </div>
-        )}
-      </div>
-      {form !== null && (
-        <SanctionForm
-          key={form}
-          person={person}
-          name={name}
-          mode={form}
-          onDone={() => {
-            setForm(null);
-            wrote();
-          }}
-          onCancel={closeForm}
-        />
-      )}
-      <Fetched state={history} what={t('hub.state.what.history')}>
-        {(h) => (
-          <PersonBody
-            history={h}
-            revoking={revoking}
-            setRevoking={setRevoking}
-            onRevoked={() => {
-              setRevoking(null);
+          {canApply && (
+            <div className="cw-bar-actions">
+              <button ref={sanctionButton} type="button" className="cw-btn cw-btn--primary" aria-expanded={form === 'sanction'} onClick={() => toggle('sanction')}>
+                {t('hub.person.sanction')}
+              </button>
+              <button ref={noteButton} type="button" className="cw-btn" aria-expanded={form === 'note'} onClick={() => toggle('note')}>
+                {t('hub.person.addNote')}
+              </button>
+            </div>
+          )}
+        </div>
+        {form !== null && (
+          <SanctionForm
+            key={form}
+            person={person}
+            name={name}
+            mode={form}
+            onDone={() => {
+              setForm(null);
               wrote();
             }}
+            onCancel={closeForm}
           />
         )}
-      </Fetched>
-    </div>
+        <Fetched state={history} what={t('hub.state.what.history')}>
+          {(h) => (
+            <PersonBody
+              history={h}
+              revoking={revoking}
+              setRevoking={setRevoking}
+              onRevoked={() => {
+                setRevoking(null);
+                wrote();
+              }}
+            />
+          )}
+        </Fetched>
+      </div>
+    </LocalReveal>
   );
 }
 

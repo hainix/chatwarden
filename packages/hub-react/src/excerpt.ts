@@ -1,6 +1,7 @@
 import { personTag } from './format.js';
 import type { HubT } from './i18n.js';
-import type { ActionRecord, SanctionKind, StaffReport } from './types.js';
+import { displayName } from './labels.js';
+import type { ActionRecord, FlaggedReport, SanctionKind } from './types.js';
 
 // Reading a report: who is in it, whose each line is, and what a person's record says. Pure; no words here.
 
@@ -12,6 +13,8 @@ export interface ReportPerson {
   role: PersonRole;
   /** The name they were seen under: their first handle in the excerpt, else the one recorded on the report, else null. */
   handle: string | null;
+  /** The server flags `handle` (`names.maskInHub`): the page hides it until shown. False from an older server. */
+  handleFlagged: boolean;
   /** Every handle seen in the excerpt, in order. */
   handles: string[];
   /** How many excerpt lines they wrote. */
@@ -21,7 +24,7 @@ export interface ReportPerson {
 }
 
 /** The writer of an excerpt line: `people[p]`, or null when the line has no writer or `p` points nowhere. */
-function writerOf(report: StaffReport, p: number | null): string | null {
+function writerOf(report: FlaggedReport, p: number | null): string | null {
   if (typeof p !== 'number' || !Number.isInteger(p) || p < 0 || p >= report.people.length) return null;
   return report.people[p] ?? null;
 }
@@ -30,7 +33,7 @@ function writerOf(report: StaffReport, p: number | null): string | null {
  * The people a report names, reported person first, then the reporter, then everyone else in the order they first wrote. The kit
  * does not say who is who: roles come from comparing refs with `targetPerson` and `reporterPerson`, and handles from the lines.
  */
-export function peopleOfReport(report: StaffReport): ReportPerson[] {
+export function peopleOfReport(report: FlaggedReport): ReportPerson[] {
   const order: string[] = [];
   const add = (ref: string): void => {
     if (!order.includes(ref)) order.push(ref);
@@ -41,6 +44,11 @@ export function peopleOfReport(report: StaffReport): ReportPerson[] {
 
   const handles = new Map<string, string[]>();
   const counts = new Map<string, number>();
+  // Whether each handle the report shows is flagged: the server's word, per line and for the two handles recorded on the report.
+  const flagged = new Set<string>();
+  for (const l of report.excerpt) if (l.handleFlagged === true) flagged.add(l.handle);
+  if (report.targetHandleFlagged === true) flagged.add(report.targetHandle);
+  if (report.reporterHandleFlagged === true) flagged.add(report.reporterHandle);
   for (const l of report.excerpt) {
     const who = writerOf(report, l.p);
     if (who === null) continue;
@@ -54,10 +62,12 @@ export function peopleOfReport(report: StaffReport): ReportPerson[] {
     const role: PersonRole = ref === report.targetPerson ? 'target' : ref === report.reporterPerson ? 'reporter' : 'other';
     const seen = handles.get(ref) ?? [];
     const recorded = role === 'target' ? report.targetHandle : role === 'reporter' ? report.reporterHandle : '';
+    const handle = seen[0] ?? (recorded === '' ? null : recorded);
     return {
       ref,
       role,
-      handle: seen[0] ?? (recorded === '' ? null : recorded),
+      handle,
+      handleFlagged: handle !== null && flagged.has(handle),
       handles: seen,
       lines: counts.get(ref) ?? 0,
       lineIds: [...(report.ownLineIds[ref] ?? [])],
@@ -67,13 +77,16 @@ export function peopleOfReport(report: StaffReport): ReportPerson[] {
 
 /**
  * What to call a person: their handle, or "Person <tag>"; a handle two people share gets the tag too. The shape of both comes
- * from the catalog (`hub.person.unnamed`, `hub.person.named`), so a language can put the tag where it reads best.
+ * from the catalog (`hub.person.unnamed`, `hub.person.named`), so a language can put the tag where it reads best. A flagged handle is the
+ * "hidden" label (`displayName`) unless `revealed`: every sentence and label built from a name is hidden by default, and only a place
+ * with a Show control passes `revealed`.
  */
-export function personName(person: ReportPerson, all: readonly ReportPerson[], t: HubT): string {
+export function personName(person: ReportPerson, all: readonly ReportPerson[], t: HubT, revealed = false): string {
   const tag = personTag(person.ref);
   if (person.handle === null) return t('hub.person.unnamed', { tag });
+  const name = displayName(t, { handle: person.handle, flagged: person.handleFlagged, revealed });
   const shared = all.some((o) => o.ref !== person.ref && o.handle === person.handle);
-  return shared ? t('hub.person.named', { name: person.handle, tag }) : person.handle;
+  return shared ? t('hub.person.named', { name, tag }) : name;
 }
 
 /** One line of the excerpt, ready to show. */
@@ -81,6 +94,8 @@ export interface ExcerptLine {
   id: string;
   ts: number;
   handle: string;
+  /** The server flags `handle`: the page hides it until shown. */
+  handleFlagged: boolean;
   raw: string;
   /** What the others were shown; null when the line was blocked. */
   delivered: string | null;
@@ -93,11 +108,12 @@ export interface ExcerptLine {
   reported: boolean;
 }
 
-export function excerptLines(report: StaffReport): ExcerptLine[] {
+export function excerptLines(report: FlaggedReport): ExcerptLine[] {
   return report.excerpt.map((l) => ({
     id: l.lineId,
     ts: l.ts,
     handle: l.handle,
+    handleFlagged: l.handleFlagged === true,
     raw: l.raw,
     delivered: l.delivered,
     blocked: l.blocked,

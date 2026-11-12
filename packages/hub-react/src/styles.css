@@ -1744,6 +1744,15 @@
   font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
   overflow-wrap: anywhere;
 }
+/* The Show beside a hidden name (names, design 5.5): quiet, never bold, and in the grid of the Simple card's head it sits under the title. */
+.cw-hub .cw-line-who .cw-linkbtn {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  font-weight: normal;
+}
+.cw-hub .cw-scard-head > .cw-linkbtn {
+  justify-self: start;
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
 .cw-hub .cw-line-text {
   min-width: 0;
   white-space: pre-wrap;

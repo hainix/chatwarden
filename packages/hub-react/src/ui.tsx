@@ -63,6 +63,15 @@ export function Link({
   );
 }
 
+/**
+ * Hidden text: a quiet pill that says what is there and not what it says. It holds no part of the words (not even their length), so
+ * neither the page nor a screen reader ever has them until a moderator chooses to show them.
+ */
+export function Masked() {
+  const { t } = useHub();
+  return <span className="cw-mask">{t('hub.mask.label')}</span>;
+}
+
 /** A short coloured label. The words carry the meaning; the colour only helps. */
 export function Tag({ tone = 'idle', children }: { tone?: Tone; children: ReactNode }) {
   return <span className={cx('cw-tag', `cw-tag--${tone}`)}>{children}</span>;

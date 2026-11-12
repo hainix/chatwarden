@@ -3,6 +3,7 @@ import { Masked } from '../case/Transcript.js';
 import { useHub } from '../context.js';
 import { useHubData } from '../hooks.js';
 import { timeOfDay } from '../format.js';
+import { displayName } from '../labels.js';
 import type { HubText } from '../i18n.js';
 import { WORD_MAX } from '../terms/TermForm.js';
 import type { BlockedDays, BlockedLine } from '../types.js';
@@ -98,7 +99,7 @@ export function Blocked() {
                       const label = (key: HubText): string => (room === '' ? t(key, { time }) : t('hub.blocked.screen.inRoom', { what: t(key, { time }), room }));
                       const who = (
                         <>
-                          {line.handle !== null && <strong className="cw-arow-who">{line.handle}</strong>}
+                          {line.handle !== null && <strong className="cw-arow-who">{displayName(t, { handle: line.handle, flagged: line.handleFlagged })}</strong>}
                           <PersonChip person={line.person} />
                         </>
                       );

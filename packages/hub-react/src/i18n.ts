@@ -245,6 +245,10 @@ export const en = {
   'hub.mask.hideLine': 'Hide the blocked words in the line by {name} at {time}',
   'hub.mask.showBlocked': 'Show the blocked line from {time}',
   'hub.mask.hideBlocked': 'Hide the blocked line from {time}',
+  'hub.mask.showName': 'Show the hidden name',
+  'hub.mask.hideName': 'Hide the name',
+  'hub.mask.showNameLine': 'Show the hidden name on the line at {time}',
+  'hub.mask.hideNameLine': 'Hide the name on the line at {time}',
 
   'hub.record.title': '{name}’s record, 90 days',
   'hub.record.label': '{name}’s record',

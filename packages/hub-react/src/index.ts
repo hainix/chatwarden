@@ -75,5 +75,6 @@ export { useHubAction, useHubData, usePagedList } from './hooks.js';
 export type { ActionResult, HubAction, HubData, PagedList } from './hooks.js';
 
 export { absoluteTime, formatDuration, personTag, relativeTime, waitTone } from './format.js';
+export { displayName } from './labels.js';
 
 export type * from './types.js';

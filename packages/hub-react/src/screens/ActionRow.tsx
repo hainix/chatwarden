@@ -1,5 +1,5 @@
 import { useHub } from '../context.js';
-import { kindLabel, ruleLabel, sanctionLength, sanctionState, sourceLabel } from '../labels.js';
+import { displayName, kindLabel, ruleLabel, sanctionLength, sanctionState, sourceLabel } from '../labels.js';
 import type { SanctionRow } from '../types.js';
 import { Card, Link, PersonChip, Tag, Time } from '../ui.js';
 
@@ -20,7 +20,7 @@ export function ActionRow({ sanction: s }: { sanction: SanctionRow }) {
   const length = sanctionLength(t, locale, s);
   const who = (
     <>
-      {s.handle !== null && <strong className="cw-arow-who">{s.handle}</strong>}
+      {s.handle !== null && <strong className="cw-arow-who">{displayName(t, { handle: s.handle, flagged: s.handleFlagged })}</strong>}
       <PersonChip person={s.person} />
     </>
   );
