@@ -40,7 +40,8 @@ function errorOf(res: TransportResponse): PlayerError {
   return new PlayerError({ status: res.status, code: `http_${res.status}`, message: `The server answered with status ${res.status}.`, ...rest });
 }
 
-async function send(transport: Transport, req: TransportRequest): Promise<unknown> {
+/** One call through a transport: the body of a 2xx answer; a `PlayerError` for anything else. The chat transport reuses it. */
+export async function send(transport: Transport, req: TransportRequest): Promise<unknown> {
   let res: TransportResponse;
   try {
     res = await transport(req);
@@ -51,7 +52,8 @@ async function send(transport: Transport, req: TransportRequest): Promise<unknow
   return res.body;
 }
 
-const bad = (): PlayerError => new PlayerError({ status: 200, code: 'bad_response', message: 'The server sent an answer these components do not understand.' });
+/** The error for an answer that is not the shape the components expect. */
+export const bad = (): PlayerError => new PlayerError({ status: 200, code: 'bad_response', message: 'The server sent an answer these components do not understand.' });
 
 /** One notice, keeping only the fields the kit documents for a player. Anything else the server sent never reaches the page. */
 function noticeOf(raw: unknown): PlayerNotice | null {
