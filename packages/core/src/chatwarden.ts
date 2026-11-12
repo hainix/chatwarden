@@ -383,6 +383,7 @@ export interface Chatwarden {
      * The blocked NAMES kept as evidence (`names.keepBlocked`) over the last `days` days (1, 7 or 30, else `RangeError`), newest first, at most
      * 200: `{ id, at, person, name, termId, reason }`, the person a staff ref or null. Empty when none was kept, or the store keeps none. A name
      * is a player's text and `person` a subject id: staff channels only, never send either to a player.
+     * @experimental
      */
     names(q: { days: BlockedDays }): BlockedNameItem[];
   };
@@ -538,18 +539,20 @@ export interface Chatwarden {
      * false (or the store cannot release a rename); `invalid` for a reason that is not 1 to 500 characters or a rule that is not an active
      * integer rule; `not_found` for a person the kit does not hold; `pending` while a request is already waiting. `rule` defaults to the
      * slur filter's (`autoRestrictRule`) and is shown to the player as a rule label. A store failure is logged (class only) and thrown.
+     * @experimental
      */
     requireRename(input: { subject: SubjectId; actor: string; reason: string; rule?: number }): { ok: true; noticeId: string } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
-    /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. */
+    /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. @experimental */
     pendingRename(who: RawWho): boolean;
-    /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. */
+    /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. @experimental */
     renamed(who: RawWho): boolean;
     /**
      * Whether `requireRename` can work right now: `names.renames` is on AND the store can release a rename (the test `requireRename` applies
      * first). A live read. For a staff screen, so it never offers a rename that always answers `off`.
+     * @experimental
      */
     renamesEnabled(): boolean;
-    /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. */
+    /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. @experimental */
     renamesOf(subject: SubjectId): Array<{ at: number; pending: boolean }>;
   };
   /**
@@ -693,6 +696,7 @@ export interface Chatwarden {
     /**
      * One person's appeals (across their merged subjects) as summaries, newest first, at most 50; a moot appeal is left out. For the person's
      * page. Empty with appeals off or for a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
+     * @experimental
      */
     forPerson(subject: SubjectId): AppealSummary[];
   };
@@ -774,6 +778,7 @@ export interface Chatwarden {
      * The account ids the kit holds for this person across their merged aliases, sorted: exactly the strings the game passed as
      * `RawWho.accountId` (no client key, no IP, no hash). A guest has none; so does an unknown id. For the game to find the player to rename
      * after `rename.required`. Server side only: never send to a player.
+     * @experimental
      */
     accountIds(subject: SubjectId): string[];
   };

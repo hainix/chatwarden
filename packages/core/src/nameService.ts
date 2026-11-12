@@ -3,7 +3,8 @@ import { randomId } from './crypto.js';
 import type { KitEvent } from './events.js';
 import { hashWho } from './hasher.js';
 import { safeWarn, ThrottledWarn } from './log.js';
-import { evidenceName, NameEvidenceLimiter, profanityView, RENAME_REASON_MAX } from './names.js';
+import { DECISION_REASON_MAX } from './decide.js';
+import { evidenceName, NameEvidenceLimiter, profanityView } from './names.js';
 import type { NameCheckResult, NameReason, ResolvedNames } from './names.js';
 import type { NoticeService } from './notices.js';
 import type { CommunityRules } from './rules.js';
@@ -45,6 +46,12 @@ interface CheckedRename {
   subject: SubjectId;
   rule: number;
 }
+
+/**
+ * The longest private reason a required rename takes, in characters: the decision's limit, one constant for every private reason. (Defined here,
+ * not in `names.ts`: the profile imports that file and the decision module imports the profile, so the other way round is a cycle.)
+ */
+export const RENAME_REASON_MAX = DECISION_REASON_MAX;
 
 /** The most rename requests `renamesOf` lists. */
 const RENAMES_OF_MAX = 20;
@@ -167,7 +174,7 @@ export class NameService {
    */
   requireRename(input: { subject: SubjectId; actor: string; reason: string; rule?: number }): RenameResult {
     const d = this.d;
-    if (!d.settings().renames || !d.notices.canWithdrawOne()) return { ok: false, error: 'off' };
+    if (!this.renamesEnabled()) return { ok: false, error: 'off' };
     const checked = this.checkRename(input);
     if (checked === null) return { ok: false, error: 'invalid' };
     let noticeId: string;

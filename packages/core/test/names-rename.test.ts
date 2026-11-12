@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryStore, withMemoryAppeals } from '@chatwarden/store-memory';
 import type { KitEvent } from '../src/events.js';
+import { DECISION_REASON_MAX } from '../src/decide.js';
+import { NameService, RENAME_REASON_MAX } from '../src/nameService.js';
 import type { NoticeRow, RawWho, Store, SubjectId } from '../src/types.js';
 import { NOW, world } from './reportingWorld.js';
 
@@ -445,5 +449,35 @@ describe('people.accountIds', () => {
     ask(k, a.subject);
     expect(k.cw.people.accountIds(a.subject)).toEqual(['acct-three']);
     expect(JSON.stringify(k.events)).not.toContain('acct-three');
+  });
+});
+
+describe('one predicate, one reason limit', () => {
+  it('requireRename asks renamesEnabled() for "off" instead of repeating the predicate', async () => {
+    const spy = vi.spyOn(NameService.prototype, 'renamesEnabled');
+    try {
+      const { cw } = await kit({ renames: true });
+      const before = spy.mock.calls.length;
+      cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: REASON });
+      expect(spy.mock.calls.length).toBeGreaterThan(before);
+      // and the answer follows it: when renamesEnabled says no, nothing else is looked at
+      spy.mockReturnValue(false);
+      expect(cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: '' })).toEqual({ ok: false, error: 'off' });
+      spy.mockReturnValue(true);
+      expect(cw.names.requireRename({ subject: 's_nobody_nobody_nobody_00' as SubjectId, actor: ACTOR, reason: '' })).toEqual({ ok: false, error: 'invalid' });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('the rename reason limit is the decision reason limit (one constant), and 500 is in and 501 is out', async () => {
+    expect(RENAME_REASON_MAX).toBe(DECISION_REASON_MAX);
+    // not a second literal that happens to match today: the constant is defined from the decision's
+    expect(readFileSync(fileURLToPath(new URL('../src/nameService.ts', import.meta.url)), 'utf8')).toMatch(/export const RENAME_REASON_MAX = DECISION_REASON_MAX;/);
+    const w = await kit({ renames: true });
+    const a = await w.seat('ka');
+    const b = await w.seat('kb');
+    expect(w.cw.names.requireRename({ subject: a.subject, actor: ACTOR, reason: 'x'.repeat(DECISION_REASON_MAX + 1) })).toEqual({ ok: false, error: 'invalid' });
+    expect(w.cw.names.requireRename({ subject: b.subject, actor: ACTOR, reason: 'x'.repeat(DECISION_REASON_MAX) })).toMatchObject({ ok: true });
   });
 });

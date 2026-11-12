@@ -116,6 +116,27 @@ describe('unchanged with names.profanity off', () => {
     expect(JSON.stringify(boom.logged)).not.toContain('secret');
   });
 
+  it('a matcher that answers undefined (from match or from matchName) is no hit: the name passes, flagged is false, nothing is logged', async () => {
+    const viaMatch = await names({ matcher: { match: () => undefined as never } });
+    const viaName = await names({ matcher: { match: () => ({ termId: 'x' }), matchName: () => undefined as never } });
+    for (const { cw, logged } of [viaMatch, viaName]) {
+      for (const n of ['Alice', 'Zorbak_99', '']) {
+        expect(cw.names.check(n), n).toEqual(OFF);
+        expect(cw.names.flagged(n), n).toBe(false);
+      }
+      expect(logged).toEqual([]);
+    }
+  });
+
+  it('control: a hit object with no termId still blocks, with a null term; an undefined answer does not stop the profanity pass', async () => {
+    const noTerm = await names({ matcher: { match: () => ({}) as never } }, { keepBlocked: true });
+    expect(noTerm.cw.names.check('Alice', { who: { clientKey: 'k1' } })).toEqual(SLUR);
+    expect(noTerm.cw.names.flagged('Alice')).toBe(true);
+    const undef = await names({ matcher: { match: () => undefined as never } }, { profanity: true });
+    expect(undef.cw.names.check('snerp')).toEqual(PROFANE);
+    expect(undef.cw.names.check('Alice')).toEqual(OFF);
+  });
+
   it('a non-string is a TypeError, with or without who', async () => {
     const { cw } = await names();
     for (const bad of [undefined, null, 5, {}, ['zorbak'], Symbol('x')]) {

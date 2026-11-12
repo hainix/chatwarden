@@ -62,9 +62,6 @@ export function resolveNames(input: NameSettings | undefined, path = 'names'): R
   return out;
 }
 
-/** The longest private reason a required rename takes, in characters (like a sanction's). */
-export const RENAME_REASON_MAX = 500;
-
 /** Most kept blocked names per person in an hour. */
 export const NAME_EVIDENCE_PER_PERSON_HOUR = 5;
 /** Most kept blocked names an hour, over everyone, in this process. */
