@@ -294,8 +294,8 @@ form (in `NoticeQueue`, in place of the notice inside the same dialog; in `MyRec
 
 - **One appeal for each sanction.** Once one is sent, the same place reads "Appeal sent <date>", and when a moderator has decided it, the
   outcome in words ("We kept the decision", "We made it lighter", "We removed it"). Change `refreshKey` to load the outcome.
-- **The form.** A textarea with a live count against 1000 characters (counted as the server counts them: trimmed, in characters, an emoji is
-  one). Send is off while it is empty or over the limit (the text is refused, never cut). The text is sent as typed; the server cleans it.
+- **The form.** A textarea with a live count against 1000 characters (the client counts code points of the trimmed text, so an emoji is one; the server cleans the text first
+  and removes zero-width joiners, stray surrogates and runs of blank lines, so the client may count slightly more than the server, never less). Send is off while it is empty or over the limit (the text is refused, never cut). The text is sent as typed; the server cleans it.
 - **Every refusal in words.** Already appealed, too many appeals for now, no longer appealable (the server gives one answer for "not yours", "gone" and
   "appeals off"), and an empty or over-long statement; a failure to reach the server says so and keeps the text.
 - **Outcome notices.** `appeal_upheld`, `appeal_reduced` and `appeal_revoked` appear in `NoticeQueue` as plain messages with one "Got it": no

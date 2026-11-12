@@ -290,6 +290,130 @@ describe('after a sent appeal the button is replaced by "Appeal sent <date>" and
   });
 });
 
+/** A promise a test settles by hand, to hold a request on its way. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+describe('NoticeQueue: the hold lifting while the appeal form is open', () => {
+  it('typed text is kept: the hold hides the dialog, and the same words are in the box when it is released', async () => {
+    const w = await warned();
+    const { user, rerender } = renderUi(<NoticeQueue {...queue(w, { appeals: true, canShow: true })} />);
+    await user.click(await screen.findByRole('button', { name: 'Think this is a mistake?' }));
+    await user.type(screen.getByRole('textbox', { name: 'What should we know?' }), 'It was a joke, honestly.');
+    rerender(<NoticeQueue {...queue(w, { appeals: true, canShow: false })} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    rerender(<NoticeQueue {...queue(w, { appeals: true, canShow: true })} />);
+    const box = (await screen.findByRole('textbox', { name: 'What should we know?' })) as HTMLTextAreaElement;
+    expect(box.value).toBe('It was a joke, honestly.');
+    expect(screen.getByRole('heading', { name: 'Ask for a second look' })).toHaveFocus();
+    // and it can still be sent
+    await user.click(screen.getByRole('button', { name: 'Send appeal' }));
+    await screen.findByText(SENT);
+    expect(calls(w, 'POST', '/appeals')).toHaveLength(1);
+    expect((calls(w, 'POST', '/appeals')[0]?.body as { statement: string }).statement).toBe('It was a joke, honestly.');
+  });
+
+  it('a send that finishes while the dialog is held is recorded: the sent screen is there on release, and later the notice says "Appeal sent"', async () => {
+    const w = await warned();
+    const hold = deferred<void>();
+    w.intercept.fn = async (req) => {
+      if (req.method === 'POST' && req.path === '/appeals') await hold.promise;
+      return undefined;
+    };
+    const { user, rerender } = renderUi(<NoticeQueue {...queue(w, { appeals: true, canShow: true })} />);
+    await user.click(await screen.findByRole('button', { name: 'Think this is a mistake?' }));
+    await user.type(screen.getByRole('textbox', { name: 'What should we know?' }), 'Please look again.');
+    await user.click(screen.getByRole('button', { name: 'Send appeal' }));
+    await waitFor(() => expect(calls(w, 'POST', '/appeals')).toHaveLength(1));
+    rerender(<NoticeQueue {...queue(w, { appeals: true, canShow: false })} />);
+    hold.resolve();
+    await waitFor(async () => expect(await w.client.appeals()).toHaveLength(1));
+    rerender(<NoticeQueue {...queue(w, { appeals: true, canShow: true })} />);
+    await screen.findByText(SENT);
+    // no blank form that would file a second appeal, and no second request
+    expect(screen.queryByRole('textbox', { name: 'What should we know?' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    const d = await dialog();
+    const at = (await w.client.appeals())[0]?.createdAt as number;
+    expect(within(d).getByText(`Appeal sent ${day(at)}`)).toBeInTheDocument();
+    expect(mistake(d)).toBeNull();
+    expect(calls(w, 'POST', '/appeals')).toHaveLength(1);
+  });
+
+  it('a send still on its way when the hold lifts shows busy and ends with the sent screen', async () => {
+    const w = await warned();
+    const hold = deferred<void>();
+    w.intercept.fn = async (req) => {
+      if (req.method === 'POST' && req.path === '/appeals') await hold.promise;
+      return undefined;
+    };
+    const { user, rerender } = renderUi(<NoticeQueue {...queue(w, { appeals: true, canShow: true })} />);
+    await user.click(await screen.findByRole('button', { name: 'Think this is a mistake?' }));
+    await user.type(screen.getByRole('textbox', { name: 'What should we know?' }), 'Please look again.');
+    await user.click(screen.getByRole('button', { name: 'Send appeal' }));
+    await waitFor(() => expect(calls(w, 'POST', '/appeals')).toHaveLength(1));
+    rerender(<NoticeQueue {...queue(w, { appeals: true, canShow: false })} />);
+    rerender(<NoticeQueue {...queue(w, { appeals: true, canShow: true })} />);
+    const send = await screen.findByRole('button', { name: 'Send appeal' });
+    expect(send).toHaveAttribute('aria-disabled', 'true');
+    await user.click(send);
+    expect(calls(w, 'POST', '/appeals')).toHaveLength(1);
+    hold.resolve();
+    await screen.findByText(SENT);
+  });
+
+  it('a draft belongs to one opening: Cancel drops it, and the next opening starts empty', async () => {
+    const w = await warned();
+    const { user } = renderUi(<NoticeQueue {...queue(w, { appeals: true })} />);
+    await user.click(await screen.findByRole('button', { name: 'Think this is a mistake?' }));
+    await user.type(screen.getByRole('textbox', { name: 'What should we know?' }), 'draft');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(await screen.findByRole('button', { name: 'Think this is a mistake?' }));
+    expect((screen.getByRole('textbox', { name: 'What should we know?' }) as HTMLTextAreaElement).value).toBe('');
+  });
+});
+
+describe('NoticeQueue: the appeal button while an acknowledge is on its way', () => {
+  it('is inert: pressing it does not swap the card for the form, and it works again if the acknowledge fails', async () => {
+    const w = await warned();
+    const hold = deferred<void>();
+    w.intercept.fn = async (req) => {
+      if (req.method === 'POST' && /\/ack$/.test(req.path)) {
+        await hold.promise;
+        return { status: 500, body: { error: 'internal', message: 'x' }, headers: {} };
+      }
+      return undefined;
+    };
+    const { user } = renderUi(<NoticeQueue {...queue(w, { appeals: true })} />);
+    const button = await screen.findByRole('button', { name: 'Think this is a mistake?' });
+    await user.click(screen.getByRole('button', { name: 'Acknowledge' }));
+    await waitFor(() => expect(calls(w, 'POST', `/notices/${w.noticeOf(ALICE)}/ack`)).toHaveLength(1));
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    await user.click(button);
+    expect(screen.queryByRole('textbox', { name: 'What should we know?' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'You have a warning' })).toBeInTheDocument();
+    hold.resolve();
+    await screen.findByRole('alert');
+    expect(screen.getByRole('button', { name: 'Think this is a mistake?' })).not.toHaveAttribute('aria-disabled');
+    await user.click(screen.getByRole('button', { name: 'Think this is a mistake?' }));
+    expect(await screen.findByRole('textbox', { name: 'What should we know?' })).toBeInTheDocument();
+  });
+
+  it('control: with nothing in flight the button is not marked and opens the form', async () => {
+    const w = await warned();
+    const { user } = renderUi(<NoticeQueue {...queue(w, { appeals: true })} />);
+    const button = await screen.findByRole('button', { name: 'Think this is a mistake?' });
+    expect(button).not.toHaveAttribute('aria-disabled');
+    await user.click(button);
+    expect(await screen.findByRole('textbox', { name: 'What should we know?' })).toBeInTheDocument();
+  });
+});
+
 describe('the four new notice kinds render with their titles and one "Got it", no referee card and no appeal link; an unknown kind falls back to the generic title; rename_required shows', () => {
   const KINDS: Array<[string, string, string]> = [
     ['rename_required', 'Please choose a new name', 'A moderator asked you to change your name because it breaks the community rules. Choose a new name to keep playing.'],

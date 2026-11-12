@@ -49,6 +49,7 @@ export function AppealSlot({
   onOpen,
   focus,
   onFocused,
+  inert = false,
 }: {
   ui: Ui;
   notice: PlayerNotice;
@@ -56,6 +57,8 @@ export function AppealSlot({
   onOpen: () => void;
   focus: boolean;
   onFocused: () => void;
+  /** The button does nothing (and says so with `aria-disabled`): the host has something in flight that opening the form would lose. */
+  inert?: boolean;
 }) {
   const { t } = ui;
   const target = useRef<HTMLElement | null>(null);
@@ -72,7 +75,15 @@ export function AppealSlot({
   if (appeal === undefined) {
     return (
       <p className="cw-appeal">
-        <button type="button" className="cw-linkbtn" ref={(el) => void (target.current = el)} onClick={onOpen}>
+        <button
+          type="button"
+          className="cw-linkbtn"
+          ref={(el) => void (target.current = el)}
+          aria-disabled={inert || undefined}
+          onClick={() => {
+            if (!inert) onOpen();
+          }}
+        >
           {t('player.notice.appeal')}
         </button>
       </p>

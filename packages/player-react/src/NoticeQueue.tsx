@@ -60,7 +60,9 @@ export function NoticeQueue(props: NoticeQueueProps) {
   // when the notice comes back.
   const [appealFor, setAppealFor] = useState<string | null>(null);
   const [returned, setReturned] = useState<string | null>(null);
-  const appealState = useRef<AppealState>({ busy: false, sent: null });
+  const appealState = useRef<AppealState>({ busy: false, sent: null, draft: '' });
+  // A send is recorded the moment it is filed, even while the hold has the dialog away: the card says "Appeal sent" when it comes back.
+  appealState.current.onSent = appeals.add;
   const closeAppeal = useCallback(
     (sent?: PlayerAppeal) => {
       if (sent !== undefined) appeals.add(sent);
@@ -131,7 +133,7 @@ export function NoticeQueue(props: NoticeQueueProps) {
             returned={returned === current.id}
             onReturned={() => setReturned(null)}
             onAppeal={() => {
-              appealState.current = { busy: false, sent: null };
+              appealState.current = { busy: false, sent: null, draft: '', onSent: appeals.add };
               setAppealFor(current.id);
             }}
             titleId={titleId}
@@ -225,7 +227,11 @@ function NoticeCard({
       {notice.refCode !== null && <p className="cw-hint">{t('player.notice.refHint')}</p>}
       <Lines ui={ui} notice={notice} id={linesId} />
       {isSanction(notice.kind) &&
-        (appeals === null ? <AppealLink ui={ui} href={appealUrl} /> : <AppealSlot ui={ui} notice={notice} appeals={appeals} onOpen={onAppeal} focus={returned} onFocused={onReturned} />)}
+        (appeals === null ? (
+        <AppealLink ui={ui} href={appealUrl} />
+      ) : (
+        <AppealSlot ui={ui} notice={notice} appeals={appeals} onOpen={onAppeal} focus={returned} onFocused={onReturned} inert={busy} />
+      ))}
       {mustAck && <p className="cw-hint">{t('player.notice.todo.warning')}</p>}
       {failure !== null && (
         <div className="cw-error" role="alert">

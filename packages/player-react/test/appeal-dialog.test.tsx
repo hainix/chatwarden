@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import { normalizeStatement, statementLength } from '@chatwarden/core';
 import type { PlayerAppeal } from '@chatwarden/core';
 import { AppealDialog } from '../src/AppealDialog.js';
 import type { AppealDialogProps } from '../src/AppealDialog.js';
@@ -107,6 +108,46 @@ describe('the count and the Send button', () => {
     expect(screen.getByText('2 of 1,000')).toBeInTheDocument();
   });
 
+  it('a lone surrogate counts one character, and a ZWJ sequence counts every code point in it (the server removes both, so it never counts more than the client)', async () => {
+    const { w, noticeId } = await world();
+    renderUi(<AppealDialog {...props(w, noticeId)} />);
+    type('a\uD800b');
+    expect(screen.getByText('3 of 1,000')).toBeInTheDocument();
+    // a family: three people joined by two zero-width joiners is five code points
+    type('\u{1F468}\u200D\u{1F469}\u200D\u{1F467}');
+    expect(screen.getByText('5 of 1,000')).toBeInTheDocument();
+    // a flag is two regional indicators, a keycap three code points
+    type('\u{1F1E9}\u{1F1EA}');
+    expect(screen.getByText('2 of 1,000')).toBeInTheDocument();
+    type('1\uFE0F\u20E3');
+    expect(screen.getByText('3 of 1,000')).toBeInTheDocument();
+  });
+
+  it('the count is never less than the kit\'s own count of the cleaned text (it may be a little more)', () => {
+    const samples = [
+      '',
+      'plain words',
+      '  padded  ',
+      'a\uD800b',
+      '\uDC00',
+      '\u{1F468}\u200D\u{1F469}\u200D\u{1F467} family',
+      'zero\u200Bwidth\u200Cjoin\u200Der',
+      'line one   \nline two\t\n\n\n\n\nline three',
+      '\r\n\r\ncrlf\r\n\r\n\r\nlines\r\n',
+      'tags\u{E0041}\u{E0042} hidden',
+      'braille\u2800blank\u3164fill',
+      '\u2764\uFE0F heart',
+      '1\uFE0F\u20E3 keycap',
+      'bidi \u202Ereversed\u202C',
+      '\u200B\u200B\u200B',
+    ];
+    for (const text of samples) {
+      const client = [...text.trim()].length;
+      const server = statementLength(normalizeStatement(text));
+      expect(client, JSON.stringify(text)).toBeGreaterThanOrEqual(server);
+    }
+  });
+
   it('counts the text without the white space around it (the server trims), and live as the player types', async () => {
     const { w, noticeId } = await world();
     const { user } = renderUi(<AppealDialog {...props(w, noticeId)} />);
@@ -192,10 +233,49 @@ describe('sending', () => {
     const { user } = renderUi(<AppealDialog {...props(w, noticeId, { onClose })} />);
     await user.click(cancelButton());
     expect(onClose).toHaveBeenLastCalledWith();
+    // The host unmounts in answer; one that has not yet is not told twice for the same answer.
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(w.sent).toEqual([]);
+  });
+
+  it('onClose is called once for one answer: Cancel twice, Escape twice, Escape then Cancel, and Close then Escape', async () => {
+    const { w, noticeId } = await world();
+    const a = vi.fn();
+    const first = renderUi(<AppealDialog {...props(w, noticeId, { onClose: a })} />);
+    await first.user.click(cancelButton());
+    await first.user.click(cancelButton());
+    expect(a).toHaveBeenCalledTimes(1);
+    first.unmount();
+    const b = vi.fn();
+    const second = renderUi(<AppealDialog {...props(w, noticeId, { onClose: b })} />);
+    await second.user.keyboard('{Escape}{Escape}');
+    await second.user.click(cancelButton());
+    expect(b).toHaveBeenCalledTimes(1);
+    second.unmount();
+    const c = vi.fn();
+    const third = renderUi(<AppealDialog {...props(w, noticeId, { onClose: c })} />);
+    type('hello');
+    await third.user.click(sendButton());
+    await screen.findByText(SENT);
+    await third.user.click(screen.getByRole('button', { name: 'Close' }));
+    await third.user.keyboard('{Escape}');
+    expect(c).toHaveBeenCalledTimes(1);
+    expect((c.mock.calls[0]?.[0] as PlayerAppeal).status).toBe('open');
+  });
+
+  it('a different answer is still told: leaving without sending, then sending and leaving, is two calls with different values', async () => {
+    const { w, noticeId } = await world();
+    const onClose = vi.fn();
+    const { user } = renderUi(<AppealDialog {...props(w, noticeId, { onClose })} />);
+    await user.keyboard('{Escape}');
+    type('hello');
+    await user.click(sendButton());
+    await screen.findByText(SENT);
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(2);
-    expect(onClose).toHaveBeenLastCalledWith();
-    expect(w.sent).toEqual([]);
+    expect(onClose.mock.calls[0]).toEqual([]);
+    expect((onClose.mock.calls[1]?.[0] as PlayerAppeal).status).toBe('open');
   });
 
   it('Escape works from the text field, and from the sent screen it closes with the appeal', async () => {

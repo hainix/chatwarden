@@ -10,8 +10,8 @@ import { describe, expect, it } from 'vitest';
 //
 // Why so small: these components run inside a game, on the player's device, next to the game's own code, and a player waits for
 // them (a notice appears before the next match). The hub is a staff tool on an admin page and has a 72 KB budget; the player
-// side is five small components over four routes, with no markdown renderer, no router and no table code, so 10 KB is already
-// generous. If the real size nears the budget, trim before raising it.
+// side is small components over a few routes, with no markdown renderer, no router and no table code, so the budget stays tight.
+// If the real size nears it, trim before raising it (raise it, with a line above, only when the new words and components earn it).
 
 const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 const JS_BUDGET = 14 * 1024;

@@ -24,7 +24,7 @@ export interface MyRecordProps extends PlayerUiProps, DialogHostProps {
 
 /** "My record": what is on the player's record now, newest first, from `GET /record`; or a calm line when it is clear. */
 export function MyRecord(props: MyRecordProps) {
-  const { client, appealUrl, appeals: appealsProp = false, refreshKey, theme, className } = props;
+  const { client, appealUrl, appeals: appealsProp = false, refreshKey, theme, className, t: words, locale, now, timeZone, container, returnFocusTo } = props;
   const ui = useUi(props);
   const { t } = ui;
   const state = usePlayerData(() => client.record(), refreshKey);
@@ -75,7 +75,15 @@ export function MyRecord(props: MyRecordProps) {
       </Root>
       {appealFor !== null && (
         <AppealDialog
-          {...props}
+          client={client}
+          {...(words === undefined ? {} : { t: words })}
+          {...(locale === undefined ? {} : { locale })}
+          {...(now === undefined ? {} : { now })}
+          {...(timeZone === undefined ? {} : { timeZone })}
+          {...(theme === undefined ? {} : { theme })}
+          {...(className === undefined ? {} : { className })}
+          {...(container === undefined ? {} : { container })}
+          {...(returnFocusTo === undefined ? {} : { returnFocusTo })}
           noticeId={appealFor}
           onClose={(sent?: PlayerAppeal) => {
             // The button the dialog was opened from is gone once an appeal was sent: its words take focus instead.

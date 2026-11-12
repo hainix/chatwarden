@@ -15,8 +15,9 @@ export interface AppealDialogProps extends PlayerUiProps, DialogHostProps {
   /** The notice the appeal is about: the id of a notice from `NoticeQueue` or `MyRecord`'s list (`PlayerNotice.id`). */
   noticeId: string;
   /**
-   * Called on Escape, Cancel and Close, once. With the appeal when one was filed in this dialog (so the host can write "Appeal sent" in
-   * its place), and with nothing when the player left without sending. Unmount the dialog in answer. It is not called while a send is on its way.
+   * Called on Escape, Cancel and Close: once for one answer (Cancel then Escape on a dialog you have not unmounted yet is one call). With the appeal
+   * when one was filed in this dialog (so the host can write "Appeal sent" in its place), and with nothing when the player left without sending.
+   * Unmount the dialog in answer. It is not called while a send is on its way.
    */
   onClose: (sent?: PlayerAppeal) => void;
 }
@@ -25,11 +26,24 @@ export interface AppealDialogProps extends PlayerUiProps, DialogHostProps {
 export interface AppealState {
   busy: boolean;
   sent: PlayerAppeal | null;
+  /** What the player has typed. A host that can hide the form (the hold of `NoticeQueue`) keeps this, so the text survives the form unmounting. */
+  draft?: string;
+  /** What `onClose` was last told: the appeal, or `null` for "left without sending"; `undefined` before the first call. Not told twice for one answer. */
+  reported?: PlayerAppeal | null;
+  /** Set by the mounted form: called when a send ends, so a form mounted after the send began shows the answer. */
+  settled?: (() => void) | undefined;
+  /** Called once with the appeal the moment it is filed, even if the form was unmounted meanwhile (the host records it). */
+  onSent?: ((appeal: PlayerAppeal) => void) | undefined;
 }
 
-/** Leaves the form: with the appeal when one was filed, and never while a send is on its way. */
+/**
+ * Leaves the form: with the appeal when one was filed, and never while a send is on its way. One answer is told once: Cancel then Escape on a form the host has
+ * not yet unmounted calls `onClose` once; leaving without sending and later leaving with an appeal are two different answers.
+ */
 export function leaveAppeal(state: AppealState, onClose: (sent?: PlayerAppeal) => void): void {
   if (state.busy) return;
+  if (state.reported !== undefined && state.reported === state.sent) return;
+  state.reported = state.sent;
   if (state.sent === null) onClose();
   else onClose(state.sent);
 }
@@ -69,16 +83,30 @@ export function AppealBody({
   const fieldId = useId();
   const hintId = useId();
   const countId = useId();
-  const [statement, setStatement] = useState('');
-  const [busy, setBusy] = useState(false);
+  // The host's state outlives this form when the host hides it (the hold): what was typed, a send in flight and a send that finished all come back with it.
+  const [statement, setStatement] = useState(state.current.draft ?? '');
+  const [busy, setBusy] = useState(state.current.busy);
   const [refused, setRefused] = useState<AppealRefusal | null>(null);
   const [failure, setFailure] = useState<PlayerError | null>(null);
-  const [sent, setSent] = useState<PlayerAppeal | null>(null);
+  const [sent, setSent] = useState<PlayerAppeal | null>(state.current.sent);
+
+  // A send that ends after this form was mounted (it began in an earlier mount) updates this one.
+  useEffect(() => {
+    const own = state.current;
+    own.settled = () => {
+      setBusy(own.busy);
+      setSent(own.sent);
+    };
+    return () => {
+      if (own.settled !== undefined) own.settled = undefined;
+    };
+  }, [state]);
 
   // The heading is what a screen reader reads first, when the form opens and again when the answer replaces it.
   useEffect(() => heading.current?.focus(), [sent, heading]);
 
-  // The statement is counted as the server counts it: trimmed, in characters (code points), not UTF-16 units. It is sent as typed.
+  // The statement is counted in code points of the trimmed text, not UTF-16 units. It is sent as typed. The server cleans it first (zero-width joiners, stray
+  // surrogates, blank-line runs and trailing spaces go), so this may count a little more than the server does, never less.
   const count = [...statement.trim()].length;
   const empty = count === 0;
   const over = count > APPEAL_MAX;
@@ -94,6 +122,7 @@ export function AppealBody({
       const result = await client.fileAppeal(noticeId, statement);
       if (result.ok) {
         state.current.sent = result.appeal;
+        state.current.onSent?.(result.appeal);
         setSent(result.appeal);
       } else setRefused(result.refused);
     } catch (error) {
@@ -101,6 +130,7 @@ export function AppealBody({
     } finally {
       state.current.busy = false;
       setBusy(false);
+      state.current.settled?.();
     }
   };
 
@@ -133,6 +163,7 @@ export function AppealBody({
               aria-describedby={`${hintId} ${countId}`}
               onChange={(e) => {
                 setStatement(e.target.value);
+                state.current.draft = e.target.value;
                 setRefused(null);
                 setFailure(null);
               }}
