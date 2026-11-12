@@ -48,7 +48,7 @@ export type { Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role };
 
 /**
  * Which of the optional features are on, from `GET /me` (`Me.features`): `appeals` (appeals are on) and `renames` (a moderator may ask for a new name, and the store can
- * keep one). `Me` has none with both off, as 0.1.7 sent it.
+ * keep one) and `keepBlocked` (blocked names are kept as evidence, so Blocked offers the Names list). `Me` has none with all off, as 0.1.7 sent it.
  * @experimental
  */
 export type MeFeatures = NonNullable<Me['features']>;

@@ -201,10 +201,11 @@ describe('what opening it costs', () => {
     expect(audits(w, 'blocked.view')).toHaveLength(2);
   });
 
-  it('opening reads no other audited thing (no report or record), and the settings at most once (0.1.9: they say whether the Names choice is offered)', async () => {
+  it('opening reads no other audited thing (no report, record or settings)', async () => {
     const { w } = await openBlocked({}, seed);
     expect(audits(w, 'history.view')).toHaveLength(0);
-    expect(audits(w, 'policy.view').length).toBeLessThanOrEqual(1);
+    expect(audits(w, 'policy.view')).toHaveLength(0);
+    expect(w.sent.filter((r) => r.method === 'GET' && r.path.startsWith('/policy'))).toEqual([]);
     expect(audits(w, 'report.view').filter((r) => (r as { target?: unknown }).target !== undefined)).toHaveLength(0);
   });
 });

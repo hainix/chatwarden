@@ -50,7 +50,7 @@ describe('appeals on, but the caller may not read them: the same pages, byte for
     await twoPeople(w);
     await w.appeal({ target: 'Mallory' });
     renderHub(w, { path: '/reports' });
-    expect((await w.client.me()).features).toEqual({ appeals: true, renames: false });
+    expect((await w.client.me()).features).toEqual({ appeals: true, renames: false, keepBlocked: false });
     await expect(normalized(await paneOf())).toMatchFileSnapshot(baseline('queue-pane-detailed'));
     expect(screen.queryByRole('group', { name: 'List' })).toBeNull();
   });

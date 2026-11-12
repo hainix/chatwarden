@@ -117,12 +117,12 @@ describe('saving', () => {
 
   it('turning renames on makes the server offer the rename (features.renames follows)', async () => {
     const w = await owner();
-    expect((await w.client.me()).features).toEqual({ appeals: true, renames: false });
+    expect((await w.client.me()).features).toEqual({ appeals: true, renames: false, keepBlocked: false });
     const { user } = await open(w);
     await user.click(sw(RENAMES));
     await save(user);
     await waitFor(() => expect(puts(w)).toHaveLength(1));
-    await waitFor(async () => expect((await w.client.me()).features).toEqual({ appeals: true, renames: true }));
+    await waitFor(async () => expect((await w.client.me()).features).toEqual({ appeals: true, renames: true, keepBlocked: false }));
   });
 
   it('a 409 offers to reload, and Reload shows what the other owner saved', async () => {

@@ -42,10 +42,25 @@ describe('without keepBlocked the Blocked screen is what 0.1.7 drew', () => {
     expect(w.sent.filter(isBlockedNames)).toEqual([]);
   });
 
-  it('a role that cannot read the settings cannot know, so it shows no choice', async () => {
-    const w = await appealsHub({ names: { keepBlocked: true }, permissions: { 'policy.read': 'owner' } });
+  it('a role that cannot read the settings is told by /me all the same: with keepBlocked off it shows no choice', async () => {
+    const w = await appealsHub({ permissions: { 'policy.read': 'owner' } });
     await open(w);
     expect(screen.queryByRole('group', { name: 'Source' })).toBeNull();
+  });
+
+  it('opening reads no settings and writes no policy.view row, with keepBlocked off or on, with or without policy.read', async () => {
+    for (const [names, permissions] of [
+      [undefined, undefined],
+      [{ keepBlocked: true }, undefined],
+      [{ keepBlocked: true }, { 'policy.read': 'owner' }],
+      [undefined, { 'policy.read': 'owner' }],
+    ] as const) {
+      const w = await appealsHub({ ...(names ? { names } : {}), ...(permissions ? { permissions } : {}) } as never);
+      const { unmount } = await open(w);
+      expect(w.sent.filter((r) => r.path.startsWith('/policy')), JSON.stringify([names, permissions])).toEqual([]);
+      expect(w.cw.audit.list({ limit: 200 }).items.filter((r) => r.action === 'policy.view')).toHaveLength(0);
+      unmount();
+    }
   });
 });
 
@@ -164,5 +179,28 @@ describe('Simple mode gets nothing new from names', () => {
     await screen.findByRole('heading', { level: 2, name: 'Cases' });
     expect(within(container.querySelector('nav.cw-snav') as HTMLElement).getAllByRole('link').map((a) => a.textContent)).toEqual(['Cases', 'Words', 'Blocked']);
     expect(container.textContent).not.toMatch(/new name|Names/);
+  });
+});
+
+describe('the choice comes from /me, not from the settings', () => {
+  it('a role with blocked.read but no policy.read still gets Names when keepBlocked is on', async () => {
+    const w = await appealsHub({ names: { keepBlocked: true }, permissions: { 'policy.read': 'owner' } });
+    await open(w);
+    expect(within(choice()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Chat lines', 'Names']);
+    expect(w.sent.filter((r) => r.path.startsWith('/policy'))).toEqual([]);
+  });
+
+  it('the choice is there on the first paint (no flash in after a second read)', async () => {
+    const w = await keeping();
+    renderHub(w, { path: '/blocked' });
+    await screen.findByRole('heading', { level: 2, name: 'Blocked' });
+    expect(screen.getByRole('group', { name: 'Source' })).toBeInTheDocument();
+  });
+
+  it('keepBlocked off after the page loaded is picked up from /me (the next load), never from the policy', async () => {
+    const w = await appealsHub({ names: { keepBlocked: false } });
+    await open(w);
+    expect(screen.queryByRole('group', { name: 'Source' })).toBeNull();
+    expect(w.sent.some((r) => r.method === 'GET' && r.path === '/me')).toBe(true);
   });
 });

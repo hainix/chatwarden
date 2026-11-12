@@ -6,7 +6,7 @@ import { timeOfDay } from '../format.js';
 import { displayName } from '../labels.js';
 import type { HubText } from '../i18n.js';
 import { WORD_MAX } from '../terms/TermForm.js';
-import type { BlockedDays, BlockedLine, BlockedName, PolicyDocs } from '../types.js';
+import type { BlockedDays, BlockedLine, BlockedName } from '../types.js';
 import { Empty, Fetched, Link, PersonChip, Scroll, Segmented, Time } from '../ui.js';
 
 /** The longest list the server sends: the newest 500. */
@@ -18,20 +18,18 @@ const DAYS_KEY = { 1: 'hub.blocked.screen.days.day', 7: 'hub.blocked.screen.days
 /**
  * The chat lines the term filter refused, newest first, over the last 1, 7 or 30 days. Each blocked text is masked until a
  * moderator shows it (one line, or "Show blocked words" for the screen), and so is the term, because a term is a word.
- * Opening the list is one audited read (`blocked.view`), and so is each change of window; showing a word is never a read.
+ * Opening the list is one audited read (`blocked.view`) and nothing else, and so is each change of window; showing a word is never a read.
  * From a line a moderator can add an exception or look at the term: both go to Terms through the session, so nothing but the
  * screen is in an address.
  */
 export function Blocked() {
-  const { client, t, locale, can, session, go, canGo } = useHub();
+  const { client, t, locale, can, session, go, canGo, me } = useHub();
   const [days, setDays] = useState<BlockedDays>(7);
   const [all, setAll] = useState(false);
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
-  // "Names" joins the filter row only when the blocked names are being kept (`names.keepBlocked`). It is read from the settings, so a role that cannot read them
-  // cannot know and sees what it always saw.
-  const wantsPolicy = can('policy.read');
-  const policy = useHubData<PolicyDocs | null>(wantsPolicy ? 'policy' : 'policy:idle', () => (wantsPolicy ? session.policy() : Promise.resolve(null)));
-  const keepsNames = policy.data?.profile.names?.keepBlocked === true;
+  // "Names" joins the filter row only when the blocked names are being kept (`names.keepBlocked`). `GET /me` says so (`features.keepBlocked`), so opening the
+  // screen reads nothing else and every role that may read the list knows.
+  const keepsNames = me.features?.keepBlocked === true;
   const [source, setSource] = useState<'chat' | 'name'>('chat');
   const asNames = keepsNames && source === 'name';
   const state = useHubData(asNames ? 'blocked:idle' : `blocked:${days}`, () => (asNames ? Promise.resolve({ items: [] as BlockedLine[] }) : client.listBlocked({ days })));
