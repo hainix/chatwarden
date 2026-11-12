@@ -238,7 +238,9 @@ describe('seats', () => {
     expect(seat).toMatch(/^s[0-9a-f]{32}$/);
     for (const secret of [key, account, '203.0.113.50']) {
       expect(seat).not.toContain(secret);
-      for (let n = 3; n <= secret.length; n += 1) {
+      // From 5 characters: every 5-character prefix or suffix of these secrets holds a non-hex character, so a random hex seat id can
+      // never contain one by chance (a 3- or 4-character slice such as "acc" or "9999" is all hex and would match a random id sometimes).
+      for (let n = 5; n <= secret.length; n += 1) {
         expect(seat).not.toContain(secret.slice(0, n));
         expect(seat).not.toContain(secret.slice(secret.length - n));
       }
