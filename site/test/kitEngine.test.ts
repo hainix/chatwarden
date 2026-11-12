@@ -549,7 +549,8 @@ describe('seats', () => {
     expect((await engine.rooms.seats()).map((s) => s.id)).toEqual(['you', 'ada', 'bo']);
   });
   it('says plainly what runs it', () => {
-    expect(make().engine.note).toBe('This is the real Chatwarden kit running in your browser, with a made-up word list.');
+    expect(make().engine.note).toBe('The real packages, running in your browser. The blocked words are made up, like "zorbak".');
+    expect(make().engine.noteDetails).toContain('You get no "action taken" notice for your own reports');
     expect(make().engine.note).not.toMatch(/stand-in/i);
   });
 });

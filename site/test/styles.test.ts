@@ -72,11 +72,10 @@ describe('gold on dark surfaces', () => {
   });
 });
 
-describe('the open-source badges and the demo count chip', () => {
+describe('the demo count chip', () => {
   const demoCss = readFileSync(join(__dirname, '..', 'src', 'demo', 'demo.css'), 'utf8');
   it('the demo owns a bare .badge (a magenta count chip), so the site sheet must not define one', () => {
     expect(demoCss).toMatch(/^\.badge\s*\{/m);
     expect(bodies('.badge')).toEqual([]);
-    expect(bodies('.open-badge').join(';')).toMatch(/border-radius:\s*999px/);
   });
 });

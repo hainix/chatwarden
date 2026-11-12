@@ -181,7 +181,7 @@ describe('built dist', () => {
   const DEMO_JS_GZ = 190 * 1024;
   const DEMO_CSS_GZ = 16 * 1024;
 
-  const STAFF_AND_CLIENT_MARKERS = ['GET /changes', 'POST /cases/next', 'POST /reports/:id/decide', 'GET /policy/profile', 'POST /terms/check', '/cases/:ref/claim', 'HubError', 'createHubClient'];
+  const STAFF_AND_CLIENT_MARKERS = ['GET /changes', 'POST /cases/next', 'POST /reports/:id/decide', 'GET /policy/profile', 'POST /terms/check', '/cases/:ref/claim', 'HubError', 'The server answered with something the hub cannot read.'];
 
   const gzipSize = async (file: string) => (await import('node:zlib')).gzipSync(readFileSync(file)).length;
 
