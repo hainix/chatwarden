@@ -5,7 +5,7 @@ import type { Route } from './router.js';
 export type CommandKind = 'action' | 'screen' | 'person' | 'report' | 'term';
 
 /** What choosing an item does. */
-export type CommandTarget = { type: 'go'; route: Route } | { type: 'takeNext' } | { type: 'shortcuts' };
+export type CommandTarget = { type: 'go'; route: Route } | { type: 'takeNext' } | { type: 'shortcuts' } | { type: 'undo' };
 
 export interface CommandItem {
   id: string;

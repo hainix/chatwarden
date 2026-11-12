@@ -186,3 +186,30 @@ describe('an open window holds the keys of its own hub only', () => {
     expect(within(a.container).queryByText('Decision queued.')).toBeNull();
   });
 });
+
+describe('the single keys that act, with two hubs on one page', () => {
+  it('a key pressed in one hub is answered once, by that one: 2 dismisses in it, and U in the other undoes nothing', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const f = await w.fileRich({ lines: [{ who: 'reporter', text: 'hello' }, { who: 'target', text: 'a line from the target' }], target: 'Alpha' });
+    const user = userEvent.setup();
+    const make = () =>
+      render(<Hub client={w.client} router={stayingRouter(`/reports/${f.id}`)} now={w.now} mode="simple" />, { container: document.body.appendChild(document.createElement('div')) });
+    const a = make();
+    const b = make();
+    for (const v of [a, b]) await within(v.container).findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 1000;
+    a.container.querySelector<HTMLElement>('.cw-skip')?.focus();
+    await user.keyboard('2');
+    await within(a.container).findByText('Dismissing Alpha in 5 s.');
+    expect(within(b.container).queryByText('Dismissing Alpha in 5 s.')).toBeNull();
+    b.container.querySelector<HTMLElement>('.cw-skip')?.focus();
+    await user.keyboard('u');
+    expect(within(a.container).queryByText('Undid the decision on Alpha.')).toBeNull();
+    expect(within(b.container).queryByText('Undid the decision on Alpha.')).toBeNull();
+    a.container.querySelector<HTMLElement>('.cw-skip')?.focus();
+    await user.keyboard('u');
+    await within(a.container).findByText('Undid the decision on Alpha.');
+    expect(within(b.container).queryByText('Undid the decision on Alpha.')).toBeNull();
+    expect(w.sent.filter((r) => r.method === 'POST' && /\/decide$/.test(r.path))).toHaveLength(0);
+  });
+});

@@ -30,6 +30,8 @@ export interface Decisions {
   retry: (reportId: string) => void;
   /** Forget a finished, failed or undone entry (its form has been taken back). */
   dismiss: (reportId: string) => void;
+  /** A decision or sweep is in its Undo window now (so Undo has something to take back). */
+  canUndo: boolean;
   /** Undo the newest decision or sweep still in its Undo window and answer the report to show again, or null when nothing is waiting. */
   undoLatest: () => string | null;
   /** Dismiss all open reports about a person or from a reporter: held for the Undo window, then sent once. Answers how it ended. */
@@ -65,6 +67,7 @@ export function DecisionProvider({ children }: { children: ReactNode }) {
       undo: d.undo,
       retry: (id) => void d.retry(id),
       dismiss: d.dismiss,
+      canUndo: [...entries.values()].some((e) => e.state.status === 'held'),
       undoLatest: d.undoLatest,
       dismissOpen: d.dismissOpen,
       previewDismiss: d.previewDismiss,

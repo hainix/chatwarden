@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { rankCommands } from '../commands.js';
 import type { CommandItem, CommandKind, CommandTarget } from '../commands.js';
 import { useHub } from '../context.js';
+import { useOptionalDecisions } from '../decisions.js';
 import { Dialog } from '../Dialog.js';
 import { personTag } from '../format.js';
 import { Icon } from '../icons.js';
@@ -28,6 +29,7 @@ const KIND_LABEL = {
 export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolean; onClose: () => void; onChoose: (target: CommandTarget) => void }) {
   const { t, can, client } = useHub();
   const queue = useOptionalQueue();
+  const canUndo = useOptionalDecisions()?.canUndo === true;
   const [query, setQuery] = useState('');
   // The result that is chosen, by id: results join the list as the terms arrive, and the chosen one must not slide away.
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -55,6 +57,7 @@ export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolea
   const items = useMemo<CommandItem[]>(() => {
     const out: CommandItem[] = [];
     if (queue !== null && can('reports.decide')) out.push({ id: 'action:take-next', kind: 'action', label: t('hub.queue.takeNext'), target: { type: 'takeNext' } });
+    if (canUndo) out.push({ id: 'action:undo', kind: 'action', label: t('hub.command.undo'), target: { type: 'undo' } });
     out.push({ id: 'action:shortcuts', kind: 'action', label: t('hub.command.shortcuts'), target: { type: 'shortcuts' } });
     for (const tab of TABS) {
       if (tab.permission === null || can(tab.permission)) out.push({ id: `screen:${tab.tab}`, kind: 'screen', label: t(tab.label), target: { type: 'go', route: tab.route } });
@@ -87,7 +90,7 @@ export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolea
     }
     for (const term of terms) out.push({ id: `term:${term}`, kind: 'term', label: term, target: { type: 'go', route: { name: 'terms' } } });
     return out;
-  }, [queue, can, t, terms]);
+  }, [queue, can, t, terms, canUndo]);
 
   const results = useMemo(() => rankCommands(items, query), [items, query]);
   const found = activeId === null ? -1 : results.findIndex((r) => r.id === activeId);

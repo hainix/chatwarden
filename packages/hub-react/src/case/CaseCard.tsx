@@ -17,6 +17,7 @@ import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
+import { useQuickKeys } from '../quickKeys.js';
 import { QuickKeys } from './QuickKeys.js';
 import { RuleField } from './RuleField.js';
 import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
@@ -158,6 +159,9 @@ export function CaseCard() {
   // What the card offers as one tap, and when it may be sent (the case is open, read, fresh, and nothing is waiting). The same rule the
   // Detailed bar uses; the card sends each through the hold and goes on to the next case.
   const q = useQuickActions({ paused: elseOpen, refresh: true });
+  // Simple's digits act at once unless the moderator turned Quick keys off (Ctrl+Enter stays the suggested step either way).
+  const digits = useQuickKeys().on;
+  const keyed = shortcuts && digits;
   const { pick, fresh, suggest, choice } = q;
   const one = q.primary;
   const quick = q.warning;
@@ -302,7 +306,7 @@ export function CaseCard() {
       suggestion = <p className="cw-scard-none">{t('hub.simple.suggest.none')}</p>;
     }
     const kbd = (key: string) =>
-      shortcuts && (
+      keyed && (
         <span className="cw-scard-key" aria-hidden="true">
           <Kbd>{key}</Kbd>
         </span>
@@ -324,17 +328,17 @@ export function CaseCard() {
         {draft.status === 'ready' && (
           <div className="cw-scard-actions">
             {one !== null && (
-              <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '1' } : {})} onClick={q.sendPrimary}>
+              <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh} {...(keyed ? { 'aria-keyshortcuts': '1' } : {})} onClick={q.sendPrimary}>
                 <span>{stepLabel(t, locale, one.choice)}</span>
                 {kbd('1')}
               </button>
             )}
-            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '2' } : {})} onClick={q.sendDismiss}>
+            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(keyed ? { 'aria-keyshortcuts': '2' } : {})} onClick={q.sendDismiss}>
               <span>{t('hub.simple.noAction')}</span>
               {kbd('2')}
             </button>
             {quick !== null && (
-              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '3' } : {})} onClick={q.sendWarning}>
+              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(keyed ? { 'aria-keyshortcuts': '3' } : {})} onClick={q.sendWarning}>
                 <span>{stepLabel(t, locale, quick.choice)}</span>
                 {kbd('3')}
               </button>
@@ -357,7 +361,7 @@ export function CaseCard() {
 
   return (
     <section className="cw-scard" ref={root} aria-label={t('hub.simple.case.label', { who: name })} {...(left ? { 'data-gone': 'true' } : {})}>
-      <QuickKeys quick={q} />
+      <QuickKeys quick={q} digits={digits} />
       {!left && (
         <>
           <header className="cw-scard-head">

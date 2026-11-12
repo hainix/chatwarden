@@ -162,7 +162,7 @@ describe('? shows the shortcuts', () => {
       expect(within(dialog!).getByText(text)).toBeInTheDocument();
     }
     expect(within(dialog!).getAllByText('K').length).toBeGreaterThanOrEqual(2);
-    expect(within(dialog!).getByText('Ctrl')).toBeInTheDocument();
+    expect(within(dialog!).getAllByText('Ctrl').length).toBeGreaterThanOrEqual(2);
     expect(within(dialog!).getByText('Esc')).toBeInTheDocument();
     expect(within(dialog!).getByRole('button', { name: 'Close' })).toHaveFocus();
     await user.keyboard('{Escape}');

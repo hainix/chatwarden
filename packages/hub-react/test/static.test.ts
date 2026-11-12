@@ -421,6 +421,8 @@ describe('design v2: the palette', () => {
       /cw-cmdk-item\[aria-selected='true'\]$/,
       /cw-cmdk-field:has\(input:focus-visible\)$/,
       /cw-toast-bar$/,
+      // The Quick keys switch, when on: a choice made (a selection), like a chosen verdict.
+      /cw-switch\[aria-checked='true'\] \.cw-switch-track$/,
       /input\[type='checkbox'\],?$/,
       /input\[type='radio'\]$/,
     ];

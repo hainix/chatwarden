@@ -2484,6 +2484,76 @@
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
 }
 
+.cw-hub .cw-sheet-group {
+  margin-top: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-sheet-group h3 {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-sheet-or {
+  margin: 0 0.35rem;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-sheet-needs {
+  display: block;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-sheet-quick {
+  margin-top: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+/* The Quick keys switch: a labelled track that is filled when on. The state is also in aria-checked. */
+.cw-hub .cw-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  cursor: pointer;
+}
+.cw-hub .cw-switch-track {
+  display: inline-flex;
+  align-items: center;
+  width: 2.5rem;
+  height: 1.4rem;
+  padding: 0.15rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong, currentColor));
+  border-radius: 999px;
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-switch-thumb {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: currentColor;
+  transition: transform 0.12s ease;
+}
+.cw-hub .cw-switch[aria-checked='true'] .cw-switch-track {
+  background: var(--cw-accent, var(--cwd-accent));
+  border-color: var(--cw-accent, var(--cwd-accent));
+  color: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-switch[aria-checked='true'] .cw-switch-thumb {
+  transform: translateX(1.1rem);
+}
+.cw-hub .cw-switch:focus-visible {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-hub .cw-switch-thumb {
+    transition: none;
+  }
+}
+
 /* ---- Terms, Blocked, Rule gaps, Audit and the Guide ---------------------------------------------------------------------- */
 /* Middle-pane views. A wide table scrolls inside its own box (.cw-scroll) and each column has a floor, so a phone scrolls the table
    and never the page; every word and handle may break anywhere. Nothing here uses a signal colour: they are neutral. */

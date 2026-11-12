@@ -13,7 +13,7 @@ import type { QuickActions } from './useQuickActions.js';
 // the reason box, and a digit on the rule field, a select that a digit cannot type into), not under a window, and not until
 // QUICK_ACT_COOLDOWN_MS after the case became usable.
 
-export function QuickKeys({ quick, ctrlEnter = true }: { quick: QuickActions; ctrlEnter?: boolean }) {
+export function QuickKeys({ quick, ctrlEnter = true, digits = true }: { quick: QuickActions; ctrlEnter?: boolean; digits?: boolean }) {
   const { shortcuts, now } = useHub();
   const listen = useKeyListener();
   const latest = useRef(quick);
@@ -31,7 +31,7 @@ export function QuickKeys({ quick, ctrlEnter = true }: { quick: QuickActions; ct
       if (e.defaultPrevented || e.isComposing || e.repeat || !q.usable) return;
       if (modalIn(hub) !== null) return;
       const isCtrlEnter = e.key === 'Enter' && e.ctrlKey !== e.metaKey && !e.altKey && !e.shiftKey;
-      const isDigit = (e.key === '1' || e.key === '2' || e.key === '3') && !e.ctrlKey && !e.metaKey && !e.altKey;
+      const isDigit = digits && (e.key === '1' || e.key === '2' || e.key === '3') && !e.ctrlKey && !e.metaKey && !e.altKey;
       if (!isDigit && !(ctrlEnter && isCtrlEnter)) return;
       if (isDigit) {
         // The rule field is a select: a digit cannot type into it, so 1, 2 and 3 keep working while it has focus.
@@ -55,7 +55,7 @@ export function QuickKeys({ quick, ctrlEnter = true }: { quick: QuickActions; ct
     };
     // Heard on the hub's root in the shell, and on the piece's own root in a piece (see `keyScope.ts`).
     return listen(onKeyDown);
-  }, [shortcuts, ctrlEnter]);
+  }, [shortcuts, ctrlEnter, digits]);
 
   return null;
 }

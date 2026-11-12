@@ -56,16 +56,13 @@ export function Dialog({
       e.preventDefault();
       return;
     }
-    const first = items[0] as HTMLElement;
-    const last = items[items.length - 1] as HTMLElement;
+    // Tab is moved here, always (not only at the ends): a window inside a shadow root is not seen by the browser's own Tab order
+    // from outside it, and the list of what can take focus is this window's.
+    e.preventDefault();
     const active = activeOf(box.current);
-    if (e.shiftKey && (active === first || active === box.current)) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
-    }
+    const at = items.findIndex((x) => x === active);
+    const to = e.shiftKey ? (at <= 0 ? items.length - 1 : at - 1) : at < 0 || at === items.length - 1 ? 0 : at + 1;
+    (items[to] as HTMLElement).focus();
   };
 
   return (

@@ -3,6 +3,7 @@ import { CaseProvider } from './case/CaseContext.js';
 import { CaseSession, useCaseActions } from './cases.js';
 import type { CommandTarget } from './commands.js';
 import { useHub } from './context.js';
+import { useOptionalDecisions } from './decisions.js';
 import { activeOf } from './dom.js';
 import type { HubClient } from './client.js';
 import type { HubController, HubHost } from './headless/controller.js';
@@ -12,6 +13,7 @@ import { useOptionalQueue } from './liveQueue.js';
 import { useMode } from './mode.js';
 import type { HubMode } from './mode.js';
 import { permissionFor } from './nav.js';
+import { useQuickKeys } from './quickKeys.js';
 import { HubRoot } from './provider.js';
 import { buildPath, hashRouter, memoryRouter, parseRoute } from './router.js';
 import type { HubRouter, Route } from './router.js';
@@ -24,7 +26,8 @@ import { QueuePane } from './shell/QueuePane.js';
 import { Rail } from './shell/Rail.js';
 import { ShortcutSheet } from './shell/ShortcutSheet.js';
 import { TopBar } from './shell/TopBar.js';
-import { shortcutFor } from './shortcuts.js';
+import { QUEUE_OPEN_DELAY_MS, shortcutFor } from './shortcuts.js';
+import { useToasts } from './toasts.js';
 import { Link } from './ui.js';
 
 export interface HubProps {
@@ -251,24 +254,54 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
 function CommandWindow({ shortcuts, onClose, open }: { shortcuts: boolean; onClose: () => void; open: (d: Dialogs) => void }) {
   const { go } = useHub();
   const actions = useCaseActions();
+  const undo = useUndo();
   const choose = (target: CommandTarget): void => {
     onClose();
     if (target.type === 'go') go(target.route);
     else if (target.type === 'shortcuts') open('shortcuts');
+    else if (target.type === 'undo') undo();
     else void actions.takeNext();
   };
   return <CommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} />;
+}
+
+/**
+ * Undoes the newest decision (or sweep) still in its Undo window and says so; the moderator is taken back to its case. Does nothing,
+ * and says nothing, when none is waiting. Answers whether something was undone.
+ */
+function useUndo(): () => boolean {
+  const { t } = useHub();
+  const decisions = useOptionalDecisions();
+  const toasts = useToasts();
+  return () => {
+    if (decisions === null) return false;
+    const id = decisions.undoLatest();
+    if (id === null) return false;
+    toasts.push({ text: t('hub.toast.undone', { who: decisions.entry(id)?.name ?? '' }) });
+    return true;
+  };
 }
 
 /** The hub's one key listener, on the hub's own root: it hears a key pressed while focus is inside this hub (or, with nothing focused on the page, the one the page gives it: see `registerHub`). See `shortcutFor` for what each key means and when it stays quiet. */
 function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivElement | null }; dialogOpen: boolean; open: (d: Dialogs) => void }) {
   const { can } = useHub();
   const actions = useCaseActions();
+  const undo = useUndo();
   const listen = useKeyListener();
-  const latest = useRef({ dialogOpen, canTake: can('reports.decide'), actions });
-  latest.current = { dialogOpen, canTake: can('reports.decide'), actions };
+  const quickKeys = useQuickKeys().on;
+  const latest = useRef({ dialogOpen, canTake: can('reports.decide'), actions, undo, quickKeys });
+  latest.current = { dialogOpen, canTake: can('reports.decide'), actions, undo, quickKeys };
 
   useEffect(() => {
+    // With Quick keys on, a move opens the case it ends on once the key has been still for a moment (a held key passes the rows in
+    // between without claiming them). Another move, a click, Escape or the hub going away cancels it.
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const cancel = (): void => {
+      if (pending !== null) clearTimeout(pending);
+      pending = null;
+    };
+    const body = bodyRef.current;
+    body?.addEventListener('click', cancel, true);
     const rows = (): HTMLElement[] => [...(bodyRef.current?.querySelectorAll<HTMLElement>('.cw-queue .cw-case-link') ?? [])];
     const onKeyDown = (e: KeyboardEvent): void => {
       const action = shortcutFor(e);
@@ -276,9 +309,12 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
       const state = latest.current;
       // A window is open: it has its own keys (Escape closes it) and the page behind it is not the target.
       if (state.dialogOpen) return;
+      if (action !== 'next' && action !== 'previous') cancel();
       if (action === 'command') {
         e.preventDefault();
         open('command');
+      } else if (action === 'undo') {
+        if (state.undo()) e.preventDefault();
       } else if (action === 'help') {
         e.preventDefault();
         open('shortcuts');
@@ -295,7 +331,16 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
         let at = list.findIndex((r) => r === active);
         if (at < 0) at = list.findIndex((r) => r.getAttribute('aria-current') === 'true');
         const to = at < 0 ? (action === 'next' ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, at + (action === 'next' ? 1 : -1)));
-        list[to]?.focus();
+        const row = list[to];
+        row?.focus();
+        cancel();
+        if (state.quickKeys && row !== undefined) {
+          pending = setTimeout(() => {
+            pending = null;
+            // Only the row the cursor is still on: a moderator who has gone elsewhere is not taken somewhere by a timer.
+            if (row.isConnected && activeOf(bodyRef.current) === row) row.click();
+          }, QUEUE_OPEN_DELAY_MS);
+        }
       } else {
         // Escape with no window open: back to the queue, on the open case's row or the first one.
         const list = rows();
@@ -306,7 +351,12 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
         }
       }
     };
-    return listen(onKeyDown);
+    const stop = listen(onKeyDown);
+    return () => {
+      stop();
+      cancel();
+      body?.removeEventListener('click', cancel, true);
+    };
   }, [bodyRef, open]);
 
   return null;
