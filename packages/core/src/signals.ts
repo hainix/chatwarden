@@ -27,7 +27,11 @@ export interface SignalKindSpec {
 
 /** @experimental */
 export interface SignalGuards {
-  /** At most one row per (kind, subject, source) per this many ms. Default 86 400 000 (one day). 60 000 to 30 days. */
+  /**
+   * At most one row per (kind, subject, source) per this many ms. Default 86 400 000 (one day). 60 000 to 30 days. The cap is a calendar bucket
+   * (`floor(at / perByWindowMs)`), not a rolling window: two rows a millisecond apart across a bucket edge both insert, and changing this later
+   * re-buckets the rows already stored.
+   */
   perByWindowMs?: number;
   /** Used ONLY when the adopter supplies `signals.accountAgeDays` to createChatwarden. Default: not set (no weighting). */
   newAccount?: { belowDays: number; factor: number } | null;
