@@ -161,6 +161,10 @@ describe('the keys stay quiet in three more places', () => {
     } finally {
       field.remove();
     }
+    // Control: with the field gone the same key acts, so the zero above was the field's doing.
+    await user.keyboard('2');
+    await pageHides();
+    expect(decides(w)).toHaveLength(1);
   });
 
   it('inside the command bar: typing 1 or 2, or Ctrl+Enter, decides nothing', async () => {

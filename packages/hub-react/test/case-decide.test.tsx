@@ -376,6 +376,15 @@ describe('a case someone else holds', () => {
     expect(decides(w)).toHaveLength(0);
   });
 
+  it('control: on a case nobody holds the same key selects Fair', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = await open(w, f.id);
+    await within(panel()).findByRole('radio', { name: 'Fair' });
+    await user.keyboard('1');
+    expect(within(panel()).getByRole('radio', { name: 'Fair' })).toBeChecked();
+  });
+
   it('a senior sees Take over, and taking over makes the case theirs and the bar usable', async () => {
     const w = await hubWorld({ role: 'senior', actor: 'sen@example.test' });
     const f = await w.fileRich({ lines: TALK });

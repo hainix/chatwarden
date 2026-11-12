@@ -773,6 +773,16 @@ describe('the case someone else holds', () => {
     expect(decides(w)).toHaveLength(0);
   });
 
+  it('control: the same keys act on a case nobody else holds (so the test above is not passing for another reason)', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = renderHub(w, { path: `/reports/${f.id}`, mode: 'simple' });
+    await screen.findByRole('button', { name: /^No action needed/ });
+    await user.keyboard('2');
+    await pageHides();
+    expect(decides(w)).toHaveLength(1);
+  });
+
   it('a senior is offered Take over, and taking over brings the controls', async () => {
     const w = await hubWorld({ role: 'senior', actor: 'sen@example.test' });
     const f = await w.fileRich({ lines: TALK });

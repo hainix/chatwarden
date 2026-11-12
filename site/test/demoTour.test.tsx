@@ -5,7 +5,7 @@ import { cleanup, fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CODE_STEPS } from '../src/demo/codeSteps';
 import { TOUR_STEPS } from '../src/demo/script';
-import { caseLink, closeReport, composer, gamePane, live, modPane, noticeBtn, oneTapReport, openCase, pickRule, reportBtn, screen, sendHeldDecision, setup, stepText, stubMatchMedia, tour, waitFor, within } from './helpers/demoUi';
+import { caseLink, cardSettles, closeReport, composer, gamePane, live, modPane, noticeBtn, oneTapReport, openCase, pickRule, reportBtn, screen, sendHeldDecision, setup, stepText, stubMatchMedia, tour, waitFor, within } from './helpers/demoUi';
 
 beforeEach(() => stubMatchMedia(false));
 afterEach(() => {
@@ -272,6 +272,7 @@ describe('the whole tour by keyboard alone', () => {
     rule.focus();
     await user.selectOptions(rule, '2'); // (jsdom does not move a select with the arrow keys; this is the same change)
     await within(modPane()).findByText(/the ladder suggests/i);
+    await cardSettles();
     const warn = within(modPane()).getByRole('button', { name: /^send a warning/i });
     warn.focus();
     await user.keyboard('{Enter}');

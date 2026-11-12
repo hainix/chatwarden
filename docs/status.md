@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-11-11. The full roadmap and the reasoning behind it: [design/2026-11-09-product-scope.md](design/2026-11-09-product-scope.md).
+Updated 2026-11-12. The full roadmap and the reasoning behind it: [design/2026-11-09-product-scope.md](design/2026-11-09-product-scope.md).
 
 ## Shipped
 | Phase | What | Where |
@@ -13,6 +13,7 @@ Updated 2026-11-11. The full roadmap and the reasoning behind it: [design/2026-1
 | K8a | Browser-ready core, store-memory; 0.1.1 published | PR #7 |
 | K8b | chatwarden.dev landing site with a live demo | PR #9, #11 |
 | K4 | Moderator hub (`hub-react`: team workbench, Simple mode, settings, four ways to adopt), `player-react`, `hub-element`; editable steps and ladder; configurable one-tap reporting; site demo on the real hub. Releases as 0.1.2 | PR #12 |
+| Triage speed | One-click "Nothing wrong here" with no typed reason, auto-advance with Undo after the move, bulk dismiss, reporter accuracy and the habitual-reporter ranking, keyboard queue mode. Releases as 0.1.5 | branch `triage-speed` (plan: [plans/2026-11-11-triage-speed.md](plans/2026-11-11-triage-speed.md)) |
 
 ## Next
 - **K3c: AI levels 1-2** (read and recommend). Every human decision becomes a casebook example; granted appeals become corrective
@@ -26,6 +27,24 @@ Updated 2026-11-11. The full roadmap and the reasoning behind it: [design/2026-1
 
   Sketches: [design/2026-11-10-editable-ladder-and-roadmap.md](design/2026-11-10-editable-ladder-and-roadmap.md), Part 2.
 - **Later phases:** K4b init CLI, K5 Coop adapter, K7 term corpus service.
+
+## 0.1.5
+Ready, not published (the owner tags it: see [RELEASING.md](../RELEASING.md)). Faster report triage, all additive (a patch), on branch `triage-speed`:
+- **Dismiss.** `reason` is optional for a `no_action` decision with no actions; the kit stores the standard reason `No action needed`
+  (`NO_ACTION_DEFAULT_REASON`). The hub's "Nothing wrong here" sends none. Every quick action moves on to the next case; Undo still works
+  after the move and `U` undoes the newest waiting decision.
+- **Bulk dismiss.** `cw.reports.dismissMany`, `POST /reports/dismiss-open`, new permission `reports.decide.bulk` (moderator), audit actions
+  `report.dismiss_case` and `report.dismiss_reporter` beside one `report.decide` row per report. Never marks bad faith. Behind "Close more
+  reports at once" in the hub, held for the five-second Undo.
+- **Reporter accuracy.** `cw.reports.reporterAccuracy` (30 days, minimum 5 decided), a line on the case, and a lower place in the queue and
+  in take-next for habitual false reporters (80% or more; reports over 24 hours old rank normally). Staff only; nothing is hidden.
+- **Keyboard queue mode.** J/K and the arrow keys, 1/2/3 act, U undoes; "Quick keys" (on in Simple, off in Detailed).
+- SQLite migration 19 adds one index. Peer floors rise to 0.1.5 for `store-memory`, `store-sqlite`, `http` and `hub-react` on core, and for
+  `hub-react` on `http`. The hub's first load stays under its 76,800 byte budget (the command bar, shortcut sheet and bulk window load on demand).
+- Parked (see "Open follow-ups"): a server-side reopen of a dismissed report; dropping `kit_reports_by_reporter` (a prefix of the new
+  index) in a minor; putting the accuracy thresholds in `limits.reports`; an owner view of reporter accuracy (deliberately not built: no
+  per-person leaderboards); bulk by room or reason; J/K open-on-move in the `CaseList` piece; a keyup arm for act keys for hosts that send
+  repeated keydowns with `repeat: false`; the held-toast progress bar restarting when an older toast returns to view.
 
 ## 0.1.3
 Ready, not published (the owner tags it: see [RELEASING.md](../RELEASING.md)). A hardening patch on branch `hardening-0.1.3`:

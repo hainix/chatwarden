@@ -25,7 +25,7 @@ export function useToasts(): Toasts {
  * hub controller's; with no controller above it (a toast host on its own) it keeps its own.
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const { t } = useHub();
+  const { t, shortcuts } = useHub();
   const controller = useOptionalController();
   const tRef = useRef(t);
   tRef.current = t;
@@ -57,25 +57,38 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const shown = all.filter((s) => !s.held || s === newestHeld);
   const earlier = all.filter((s) => s.held).length - (newestHeld === undefined ? 0 : 1);
   const api = useMemo<Toasts>(() => ({ push: store.push, hold: store.hold, dismiss: store.dismiss }), [store]);
+  // The count of earlier decisions changes about every second as their timers end. A screen reader hears it once, when it RISES (a
+  // new decision stacked up); the visible line below is hidden from it, and the region is always in the page so a change is spoken.
+  const [heard, setHeard] = useState('');
+  const lastCount = useRef(0);
+  useEffect(() => {
+    const before = lastCount.current;
+    lastCount.current = earlier;
+    if (earlier === 0) setHeard('');
+    else if (earlier > before) setHeard(tRef.current('hub.toast.waiting', { count: earlier }));
+  }, [earlier]);
 
   return (
     <ToastContext.Provider value={api}>
       {children}
       <div className="cw-toasts" role="region" aria-label={t('hub.toast.region')}>
         {shown.map((s) => (
-          <ToastView key={s.id} toast={s} dismissLabel={t('hub.toast.dismiss')} store={store} />
+          <ToastView key={s.id} toast={s} dismissLabel={t('hub.toast.dismiss')} store={store} keyHint={shortcuts} />
         ))}
         {earlier > 0 && (
-          <div className="cw-toast-waiting" role="status">
+          <div className="cw-toast-waiting" aria-hidden="true">
             {t('hub.toast.waiting', { count: earlier })}
           </div>
         )}
+        <div className="cw-sr" aria-live="polite" aria-atomic="true" data-cw-waiting-live="">
+          {heard}
+        </div>
       </div>
     </ToastContext.Provider>
   );
 }
 
-function ToastView({ toast, dismissLabel, store }: { toast: ToastRecord; dismissLabel: string; store: ToastStore }) {
+function ToastView({ toast, dismissLabel, store, keyHint }: { toast: ToastRecord; dismissLabel: string; store: ToastStore; keyHint: boolean }) {
   const [paused, setPaused] = useState(false);
   // The store owns the clock; hovering or focusing the toast only holds it still.
   useEffect(() => {
@@ -106,7 +119,7 @@ function ToastView({ toast, dismissLabel, store }: { toast: ToastRecord; dismiss
     >
       <span className="cw-toast-text">{toast.text}</span>
       {toast.action !== null && (
-        <button type="button" className="cw-toast-btn" onClick={act}>
+        <button type="button" className="cw-toast-btn" onClick={act} aria-keyshortcuts={toast.held && keyHint ? 'u' : undefined}>
           {toast.action.label}
         </button>
       )}

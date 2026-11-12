@@ -153,6 +153,10 @@ describe('key 3', () => {
     await pageHides();
     expect(decides(w)).toHaveLength(0);
     input.remove();
+    // Control: with the field gone the same key sends the warning.
+    press('3');
+    await pageHides();
+    await waitFor(() => expect(decides(w)).toHaveLength(1));
   });
 
   it('not when Something else is open, nor with a modifier', async () => {

@@ -265,6 +265,14 @@ describe('guards: a key is one action on one case that has been read', () => {
     expect(decides(s.w)).toHaveLength(0);
   });
 
+  it('control: the same keys act for a role that may decide, once the case has aged', async () => {
+    const s = await start({ cases: 1, mode: 'simple' });
+    waitCooldown(s.w);
+    await s.user.keyboard('2');
+    await pageHides();
+    expect(decides(s.w)).toHaveLength(1);
+  });
+
   it('typing in the reason box, a note field or a select: digits do nothing (except the rule select, digits only)', async () => {
     const s = await start({ mode: 'detailed', quickKeys: 'on', cases: 2 });
     const reason = within(decision()).getByRole('textbox', { name: /Reason/ });
@@ -278,6 +286,12 @@ describe('guards: a key is one action on one case that has been read', () => {
     fireEvent.keyDown(select, { key: '2' });
     await pageHides();
     expect(decides(s.w)).toHaveLength(0);
+    // Control: aged, with focus off every field, the same key acts.
+    (document.activeElement as HTMLElement | null)?.blur();
+    waitCooldown(s.w);
+    fireEvent.keyDown(document.body, { key: '2' });
+    await pageHides();
+    expect(decides(s.w)).toHaveLength(1);
   });
 
   it('with Something else open (Simple) the digits select verdicts in the bar, as before', async () => {
@@ -457,7 +471,7 @@ describe.each(['light', 'dark'] as const)('axe on the new controls, %s theme', (
       await screen.findByRole('heading', { level: 2, name });
       s.w.clock.t += QUICK_ACT_COOLDOWN_MS + 1;
     }
-    expect(await screen.findByText('2 earlier decisions waiting.')).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('.cw-toast-waiting')).toHaveTextContent('2 earlier decisions waiting.'));
     expect(await found(s.container)).toEqual([]);
   });
 });

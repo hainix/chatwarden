@@ -390,7 +390,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 | `now` | `() => number` | The clock for "5 minutes ago". Default `Date.now`. Tests pass their own. |
 | `className` | `string` | Extra class names for the root element, handy for theming. |
 | `gameName` | `string` | Your game's name, shown beside the product name in the top bar. Default: none. |
-| `shortcuts` | `boolean` | Set `false` to turn every keyboard shortcut off (J, K, N, ?, Ctrl or Cmd+K, Escape), for a page that has its own. Default `true`. |
+| `shortcuts` | `boolean` | Set `false` to turn every keyboard shortcut off (J, K, the arrow keys, N, 1, 2, 3, U, ?, Ctrl or Cmd+K, Ctrl or Cmd+Enter, Escape), for a page that has its own. Default `true`. |
 | `primary` | `boolean` | Which hub answers keys when nothing on the page has focus, as after load. The only hub with shortcuts on always does; with several, only the one marked `primary`; with none marked, none. A hub always answers keys pressed while focus is inside it. Default `false`. |
 | `onController` | `(controller) => void` | `@experimental`. Called with the hub's controller once it exists, and again if the `client` changes. Keep it and call `controller.refresh()` to have the hub read its queue now. Do not `dispose()` it. |
 | `mode` | `'simple' \| 'detailed'` | Fixes the view and hides the Simple/Detailed switch. Left out, each moderator's last choice is kept in their browser (`localStorage`, key `chatwarden.hub.mode`), and a browser that cannot keep it gets `simple`. |
@@ -401,9 +401,12 @@ Simple is the default view: one card per case, for a team of one or two. The car
 for and by whom, what they said (only their own lines, the reported one marked, with "Show the whole chat" for the rest; blocked words
 stay hidden until shown), their record in one line, and the ladder's suggestion as a referee card with three buttons: the suggested step
 ("Restrict chat, 24 hours"), "No action needed", and "Something else…", which opens the full decision bar in place. One click sends
-Fair, the suggested rule, the rule's title as the reason and the person's own lines (up to five) as what the player is shown; "No action
-needed" sends Not a problem with the reason "No rule was broken". Both go through the same five-second Undo as Detailed, the same claims
-and the same send, and the keys are `1`, `2` and Ctrl or Cmd+Enter (the suggested step, then the next case). When no rule covers the report, or the role
+Fair, the suggested rule, the rule's title as the reason and the person's own lines (up to five) as what the player is shown. "No action
+needed" sends Not a problem and **no reason at all**: the moderator types nothing, and the kit stores its standard reason (core's
+`NO_ACTION_DEFAULT_REASON`, "No action needed"), which the hub shows in the moderator's language as "No reason given". Both go through the
+same five-second Undo as Detailed, the same claims and the same send, and **both go on to the next case at once** (the same person's next
+report, else Take next, else the team view); Undo still takes the decision back after the move. The keys are `1`, `2` and Ctrl or Cmd+Enter
+(the suggested step, then the next case), `3` for the light tap below, and `U` to undo. When no rule covers the report, or the role
 cannot apply the step, the card says so and offers "Something else…" instead.
 
 **The light tap.** When the suggestion is harsher than a warning, the card also offers "Send a warning" (key `3`): the same one click, the same
@@ -472,16 +475,53 @@ with `primary`; among several and none marked, none does. Escape is only ever th
 
 | Key | What it does |
 | --- | --- |
-| `J` / `K` | Move focus to the next or previous case in the queue. It moves; it does not open or claim. Enter opens the one you are on. |
+| `J` / Down arrow | Move to the next case in the queue. With Quick keys on it also opens that case a moment later (200 ms, so a held key opens only the last one it stops on); with them off it moves focus and Enter opens. |
+| `K` / Up arrow | The same, to the previous case. |
 | `N` | Take the next case. A held key takes one. |
+| `1` | The suggested step, then the next case. In Detailed with Quick keys off it selects the "Fair" verdict instead. |
+| `2` | "Nothing wrong here", then the next case. In Detailed with Quick keys off it selects "Not a problem" (Ctrl or Cmd+Enter then dismisses with no reason typed). |
+| `3` | A warning, then the next case (offered only when the ladder suggests more than a warning). In Detailed with Quick keys off it selects "Bad faith", which needs written evidence and never acts at once. |
+| `Ctrl+Enter` (`⌘Enter`) | The suggested step, then the next case. Works while typing in the reason box; in Detailed it decides the form as you filled it in. |
+| `U` | Undo the newest waiting decision and show its case. |
 | `Ctrl+K` (`⌘K` on a Mac) | Open the command bar: jump to a person or report in the queue, a term, a screen, or run Take next. |
 | `?` | List the shortcuts. |
 | `Esc` | Close the window that is open; otherwise go back to the queue. |
+
+The arrow keys move cases only while focus is on a queue row or on the case's title (where the hub puts focus on arrival), and never inside
+the transcript, a field, a menu or a window; anywhere else they scroll the page as usual. `J` and `K` work wherever the other keys do.
+
+**Quick keys.** A per-moderator switch in the `?` sheet (`role="switch"`, kept in the browser under `chatwarden.hub.quickKeys`, like the
+mode). With it on, `1`, `2` and `3` act at once and `J`, `K` and the arrow keys open the case they move to. It is **on in Simple and off in
+Detailed**, because Detailed's `1`, `2` and `3` have always selected a verdict, and the hub does not change that by surprise. In Detailed
+the "Nothing wrong here" button and Ctrl or Cmd+Enter work either way. A `CaseCard` piece, which has no mode above it, keeps its digits
+on by default.
+
+**Guards on the act keys.** An act key (`1`, `2`, `3`, Ctrl or Cmd+Enter) and every quick button act only when it is safe to:
+- A held key is one action (`e.repeat` is ignored), and a case accepts an act key only 300 ms (`QUICK_ACT_COOLDOWN_MS`) after it appeared,
+  so the second tap of a double tap, meant for the case just closed, cannot act on the next one. That wait runs on the browser's
+  monotonic clock, `performance.now()`, not on the hub's `now`: a frozen `now` (a test, a replay) does not lock the keys out, and a
+  `now` that jumps forward does not skip the wait.
+- Keys pressed while a case is loading, while the next case is being taken, or while a window is opening or open (the command bar, the
+  shortcut sheet, the bulk confirm) are dropped without a message: nothing happens and nothing is said. This is on purpose, so a late key
+  cannot land on a case nobody read. The buttons show the wait with `aria-disabled` and are not dimmed for it.
+- Not while typing (except Ctrl or Cmd+Enter, and a digit on the rule select, which a digit cannot type into), not with Ctrl, Cmd or Alt
+  held, not on a case someone else holds, a closed case, or for a role without `reports.decide`, and not while a decision for the same
+  report is already waiting.
+- `U` undoes the newest waiting decision first, then, pressed again, the one before it. Older held decisions are never undone out of
+  order.
+
+Every key has a button. Screen readers' browse mode swallows single keys, so the keys are an accelerator only, and `shortcuts={false}`
+turns them all off.
 
 **Toasts and Undo.** Toasts pause while the pointer or focus is on them. `useToasts()` (exported) gives `push`, `dismiss` and `hold`:
 `hold({ text, run, onUndo })` waits 5 seconds with an Undo button and a progress bar, then runs `run` once; Undo cancels it, and it
 runs at once if the toast is dismissed early or the page is closing (`pagehide`, the tab becoming hidden, or the hub unmounting). Releasing a claim uses
 `push` with an action; decisions use `hold`.
+
+Quick actions stack decisions faster than five seconds each. The newest held decision shows in full with its Undo (the button names `U`
+as its shortcut), and the ones before it collapse into one line, "N earlier decisions waiting." Their timers keep running and each comes
+back into view as the ones after it end or are undone. A screen reader hears that line once, when the count rises, not every time a
+timer ends. At most `TOAST_HELD_MAX` (10) decisions wait at once; the oldest is sent early beyond that.
 
 **Limits.** "On now" lists the people who hold or are viewing a case, and you: the kit has no presence route, so someone signed in and idle is
 not shown. Recent actions is read again whenever the queue is read because the change token moved.
@@ -502,14 +542,38 @@ half red restriction, red ban, dashed note), the lines they tried to send in the
 and who is in the case.
 
 **The decision bar** is docked under the evidence and opens **pre-filled**: the ladder's suggestion as the reported person's action, the
-report's Community Rule, and their own lines chosen (never a verdict: that is yours). Keys: `1` Fair, `2` Not a problem, `3` Bad faith;
-Ctrl or Cmd with Enter decides and takes the next case. A saved reason (`GET /reasons`) is one chip. "Change" opens the full action editor
+report's Community Rule, and their own lines chosen (never a verdict: that is yours). Keys: `1` Fair, `2` Not a problem, `3` Bad faith
+(these select a verdict, and with **Quick keys** on they act at once, see Keyboard); Ctrl or Cmd with Enter decides and takes the next case. A saved reason (`GET /reasons`) is one chip. "Change" opens the full action editor
 (the conduct level, every field, more actions, up to 20), and the menu is built from your profile's own ladder (`GET /policy`
 `profile`), with the suggestion always on it; a length the form cannot send is said so, not hidden. It refuses what the server would
 refuse before sending: no action on the reported person unless the report is fair, bad-faith evidence of 1 to 500 characters, a gap note
 for an uncovered rule, at most five lines that are the person's own, one action of a kind per person. Only a permanent **ban** needs
 `sanctions.apply.ban_permanent`, as on the server. The role's `can` map decides what is offered, never the role name. Without
 `policy.read`, or when the rules cannot be loaded, the bar still decides: verdict, reason and no actions.
+
+**"Nothing wrong here".** The bar's row of buttons has one more, in every mode: "Nothing wrong here" closes the report with no action and no
+typed reason, then goes on to the next case. Nobody is told and nobody is marked. It is for the most common case of all, a report that
+should not have been made. A "Not a problem" decision with no actions needs no reason in the bar either (the reason box says "Optional for
+'Not a problem'"); every other verdict, and any decision that acts on someone, still needs a real one. The server is `@chatwarden/http`
+0.1.5 or later (an older one answers 400 to a dismissal with no reason).
+
+**Closing more reports at once.** Under the decision bar (in Simple, inside "Something else…") a closed disclosure, "Close more reports at once",
+offers two sweeps: all open reports about this person, and all open reports from this reporter. It is shown only to a role holding both
+`reports.decide` and `reports.decide.bulk` (moderator by default), and a server that does not list `reports.decide.bulk` in `can` hides it.
+Choosing one opens a window that counts the open reports live (a dry run: it writes nothing), says how many another moderator holds (they
+stay open), and asks "Dismiss N reports". Confirming holds the request for the same five-second Undo as a decision, then sends one
+`POST /reports/dismiss-open`. At most 200 reports are closed a call (`more` offers "Dismiss more"). A sweep closes each report as
+"Nothing wrong here" and **never marks bad faith**: nobody is told, nobody is marked, and every report keeps its own audit row beside one
+summary row. A person's case held by someone else is never read as "nothing to do": the window names the holder, and a role holding
+`claims.override` can take over and dismiss. After the send there is no undo: the kit has no reopen.
+
+**The reporter's record.** The case shows how the reporter's recent reports turned out: "{name}: most of their recent reports were
+dismissed (X of Y in the last 30 days)." appears once at least five of their reports were decided and 60% or more were dismissed, and
+when 80% or more were, a second line says "Their reports are listed lower in the queue. None is hidden." In the queue such a reporter's
+rows sort after the rest (`data-ranked="low"`, one screen-reader-only phrase, no badge and no colour) unless the report is older than 24
+hours or the person has more than 200 open reports. It is a hint for ordering, never a reason to ignore a report; nothing is hidden and
+nobody is suspended by it. The figure comes from the staff route and shows only to a role with `history.read`, only for a reporter on the
+case, and never on a player screen (there is no per-person list, by design).
 
 **Held for five seconds.** Pressing Decide does not send. The decision waits for `UNDO_MS` (5 s) with an Undo toast, the case leaves the
 queue at once, and the bar shows "Decision queued". Undo cancels with nothing sent and gives the form back. The decision is sent at once
@@ -633,6 +697,37 @@ export const t = createT({ ...en, ...de }, 'de');
 ```
 
 Pass it as `<Hub t={t} locale="de" />`. Times and numbers use `Intl` with the same locale.
+
+**Translators: add these words for 0.1.5.** A key you leave out falls back to English (it never shows as a key), so nothing breaks, but
+the faster-triage screens read English until you add them. A plural pair is listed by its base name and needs `.one` and `.other`
+(and any other category your language has). Nothing was removed: `hub.simple.noAction.reason` stays in the catalogue, deprecated, and is
+no longer sent (a dismissal with no reason sends none).
+- Quick dismissal and the decided view: `hub.quick.dismiss`, `hub.quick.dismiss.hint`, `hub.quick.held`, `hub.decided.reason.default`,
+  `hub.decide.reason.hint.dismissal`, `hub.toast.undone`, `hub.toast.waiting` (`.one`, `.other`), `hub.window.failed`.
+- Keys and the shortcut sheet: `hub.key.up`, `hub.key.down`, `hub.command.undo`, `hub.shortcuts.group.move`, `hub.shortcuts.group.act`,
+  `hub.shortcuts.group.general`, `hub.shortcuts.primary`, `hub.shortcuts.dismiss`, `hub.shortcuts.warning`, `hub.shortcuts.decide`,
+  `hub.shortcuts.or`, `hub.shortcuts.undo`, `hub.shortcuts.quickKeys.label`, `hub.shortcuts.quickKeys.hint`,
+  `hub.shortcuts.quickKeys.on`, `hub.shortcuts.quickKeys.off`, `hub.shortcuts.quickKeys.only`.
+- Bulk dismiss: `hub.bulk.open`, `hub.bulk.person` (`.one`, `.other`), `hub.bulk.reporter`, `hub.bulk.reporter.habitual`,
+  `hub.bulk.confirm.counting`, `hub.bulk.confirm.title.person` (`.one`, `.other`), `hub.bulk.confirm.title.reporter` (`.one`, `.other`),
+  `hub.bulk.confirm.body`, `hub.bulk.confirm.claimed` (`.one`, `.other`), `hub.bulk.confirm.heldBy`, `hub.bulk.confirm.takeOver`
+  (`.one`, `.other`), `hub.bulk.confirm.none`, `hub.bulk.confirm.go` (`.one`, `.other`), `hub.bulk.confirm.cancel`, `hub.bulk.confirm.close`,
+  `hub.bulk.held` (`.one`, `.other`), `hub.bulk.done` (`.one`, `.other`), `hub.bulk.skipped.claimed` (`.one`, `.other`), `hub.bulk.more`,
+  `hub.bulk.more.again`, `hub.bulk.failed`, `hub.bulk.failed.claimed`.
+- The reporter's record and the audit log: `hub.reporter.rate.line`, `hub.reporter.rate.ranked`, `hub.queue.row.rankedLow`,
+  `hub.audit.label.report.dismissCase`, `hub.audit.label.report.dismissReporter`.
+
+### Troubleshooting
+
+- **"Could not open this window. Try again."** The command bar, the shortcut sheet and the bulk-dismiss window load on demand, a moment
+  after the hub's first paint. If that file could not be fetched (a flaky network, a deploy that replaced it, a CSP that blocks it), the
+  hub closes the window, says so in a toast and asks again the next time you open it. A window or screen that failed to load may stay
+  failed until the page reloads: browsers keep a failed module request in memory, so a second try can fail the same way. Reload the page.
+- **A dismissal with no reason is answered 400.** The server is older than the hub. The reasonless "Nothing wrong here" and the bulk
+  dismiss need `@chatwarden/http` 0.1.5 or later (hub-react 0.1.5 says so in its peer range), and a server that does not list
+  `reports.decide.bulk` in `can` simply hides the bulk window.
+- **A key does nothing.** See "Guards on the act keys" above: a case that has just appeared, one still loading, an open window, a field
+  with focus and a case someone else holds all ignore the act keys on purpose, and none of them says so.
 
 ## Theming
 
