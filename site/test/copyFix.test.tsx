@@ -16,8 +16,8 @@ describe('no overclaim about dodged filters', () => {
   it('the hero lead promises blocking, not catching every dodge', () => {
     render(<Hero />);
     const lead = document.querySelector('.lead')?.textContent ?? '';
-    expect(lead).toMatch(/blocks slurs before they're posted/);
-    expect(lead).not.toMatch(/every|all slurs|any slur|never|dodge/i);
+    expect(lead).toMatch(/blocks slurs from your word list before they're posted/);
+    expect(lead).not.toMatch(/catches? every|all slurs|any slur|never|dodge/i);
   });
   it('no meta tag, llms.txt, content or hero file promises a bare "slurs that dodge filters" or "every" dodge', () => {
     const html = read('index.html');
@@ -28,7 +28,7 @@ describe('no overclaim about dodged filters', () => {
   });
   it('the chat panel names the tricks it reads through (a list, not a blanket claim) and says the word list is yours', () => {
     const chat = HOW_PANELS.find((p) => p.id === 'chat')?.body ?? '';
-    expect(chat).toMatch(/Slurs on your word list are blocked, even written with leetspeak, look-alike letters, accents or repeated letters\./);
+    expect(chat).toMatch(/Slurs on your word list are blocked, even written with numbers for letters \(z0rbak\), look-alike letters, accents or repeated letters\./);
     expect(chat).not.toMatch(/catches? every|any dodge|all dodges|any way|all (the )?ways/i);
   });
 });
@@ -50,8 +50,10 @@ describe('the FAQ states the spaced-letters limit', () => {
     render(<Faq />);
     expect(screen.getByText(/Words with spaces between the letters are not caught, on purpose/)).toBeTruthy();
   });
-  it('the profanity filter is described the way its README does: allow, star or block, with an English list built in', () => {
+  it('the profanity filter is described the way its README does: an optional package, allow, star or block, with an English list built in', () => {
     const a = item()?.a ?? '';
+    expect(a).toContain('the optional @chatwarden/profanity package');
+    expect(item()?.links?.map((l) => l.label)).toContain('@chatwarden/profanity');
     expect(a).toMatch(/built-in English list that you can allow, star or block/);
     const readme = readFileSync(join(site, '..', 'packages', 'profanity', 'README.md'), 'utf8');
     expect(readme).toMatch(/allow/i);

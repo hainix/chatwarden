@@ -34,8 +34,8 @@ describe('the four steps', () => {
   it('say what to do, in the proposal’s words', () => {
     expect(TOUR_STEPS.map((s) => s.body)).toEqual([
       'Bo\'s being rude. Press Report next to his highlighted message, choose "Insults or harassment", then press Report.',
-      'It just reached your moderator hub, with the chat around it as evidence. Press "1 new case", then open Bo\'s report.',
-      "This is the hub's default view: one card per report. It shows what Bo said, his history, and the action your rules suggest. Press the suggested action. You have five seconds to undo.",
+      "It just reached your moderator hub, with the chat around it as evidence. A case is all the open reports about one player. Press \"1 new case\", then open Bo's case.",
+      "This is the hub's default view: one card per player. It shows what Bo said, his history, and the action your rules suggest. Press the suggested action. You have five seconds to undo.",
       "Bo gets a plain notice: what he did, which rule, and for how long. Press See Bo's screen.",
     ]);
   });

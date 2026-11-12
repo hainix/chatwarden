@@ -73,12 +73,12 @@ describe('the no-JavaScript fallback', () => {
   });
   it('has the proposal’s words: blocks slurs, one-tap reports, a moderator hub, your own Node server, and that the demo needs JavaScript', () => {
     const n = flat(noscript().replace(/<[^>]+>/g, ' '));
-    expect(n).toContain('Chatwarden is free, open-source chat moderation for games. It blocks slurs before they');
-    expect(n).toContain('lets players report a message in one tap');
-    expect(n).toContain('gives your team a moderator hub to handle each report in one click');
+    expect(n).toContain('Chatwarden is free, open-source chat moderation for games. It blocks slurs from your word list before they');
+    expect(n).toContain('lets players report a message right from the chat');
+    expect(n).toContain('gives your team a moderator hub where each player with open reports is a case, handled in one click');
     expect(n).toContain('It runs on your own Node server.');
     expect(n).toContain('The live demo needs JavaScript.');
-    expect(n).not.toMatch(/refus|fair ladder|dodge simple filters/i);
+    expect(n).not.toMatch(/refus|fair ladder|dodge simple filters|one tap|one card per report/i);
   });
   it('is one paragraph styled by a class from the stylesheet (the CSP forbids inline style)', () => {
     const n = noscript();

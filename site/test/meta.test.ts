@@ -36,7 +36,7 @@ describe('document head', () => {
   it('says what you get: chat moderation for games, with a moderator hub (the proposal’s meta copy)', () => {
     expect(/<title>([^<]+)<\/title>/.exec(html())?.[1]).toBe('Chatwarden: chat moderation for games, with a moderator hub');
     expect(meta('description')).toBe(
-      'Block slurs, let players report in one tap, and handle every report from a moderator hub. Free, open-source packages for your Node game server.',
+      "Block slurs from your word list, let players report from the chat, and handle reports in a moderator hub. Free, open-source packages for Node game servers.",
     );
     expect((meta('description') ?? '').length).toBeLessThanOrEqual(155);
     expect(meta('og:title')).toBe('Chatwarden: chat moderation for games');
@@ -191,10 +191,11 @@ describe('llms.txt', () => {
   });
   it('has the proposal’s summary: what it is, that it moderates an existing chat, and what it is not', () => {
     expect(txt()).toContain(
-      '> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one card per report by default). TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. It moderates an existing chat; it is not a chat system. Not a child-safety tool.',
+      "> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one case per player by default). TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. It moderates an existing chat; it is not a chat system. Not a child-safety tool.",
     );
-    expect(txt()).toContain('one card per report by default');
-    expect(txt()).not.toMatch(/Simple mode of one card per case|fair ladder|dodge simple filters|\brefuses?\b/i);
+    expect(txt()).toContain('one case per player by default');
+    expect(txt()).not.toMatch(/Simple mode of one card per case|one card per report|one tap|fair ladder|dodge simple filters|\brefuses?\b/i);
+    expect(txt()).toContain('and `@chatwarden/http` for the routes');
   });
   it('is honest: pre-release, and no promises the site would not make', () => {
     expect(txt()).toMatch(/pre-release/i);

@@ -36,7 +36,7 @@ export const HERO_CHAT: ChatLine[] = [
 
 export const HERO = {
   title: ['Chat moderation for your game.', 'Moderator hub included.'],
-  lead: "Chatwarden blocks slurs before they're posted, lets players report a message in one tap, and gives your team a moderator hub: one card per report, one click to act. Add it to the chat you already have with a few lines on your Node server.",
+  lead: "Chatwarden blocks slurs from your word list before they're posted, lets players report a message right from the chat, and gives your team a moderator hub: each player with open reports is a case, with every report about them and one click to act. Add it to the chat you already have with a short setup on your Node server.",
   primary: 'Try the live demo',
   secondary: 'Add it to your game',
   proof: 'Free · Open source (Apache-2.0) · Runs on your server, no account',
@@ -46,7 +46,7 @@ export const HERO = {
 
 export const DEMO_SECTION = {
   title: "Try it: you're the player and the moderator",
-  lead: 'On the left, a game lobby. On the right, the moderator hub your team would use. Report a message, then deal with it. It takes about a minute, and it all runs in your browser.',
+  lead: 'On the left, a game lobby. On the right, the moderator hub your team would use. Report a message, then deal with it. It takes a few clicks, and it all runs in your browser.',
 } as const;
 
 export interface Panel {
@@ -66,18 +66,18 @@ export const HOW_PANELS: Panel[] = [
   {
     id: 'chat',
     title: 'In the chat',
-    body: 'Every message goes through one check before your server sends it. Slurs on your word list are blocked, even written with leetspeak, look-alike letters, accents or repeated letters. Ordinary swearing is your call: allow it, star it out, or block it. Trash talk stays. The sender sees why their message was blocked, and nobody else sees it.',
+    body: 'Every message goes through one check before your server sends it. Slurs on your word list are blocked, even written with numbers for letters (z0rbak), look-alike letters, accents or repeated letters. Ordinary swearing is your call: allow it, star it out, or block it. Insults and trash talk are not blocked; players can report them. The sender sees why their message was blocked, and nobody else sees it.',
   },
   {
     id: 'game',
     title: 'In your game',
-    body: "Players report a message in one tap. The report carries the chat around it, so your moderators see what happened, not just a complaint. When a moderator acts, the player gets a plain notice: what they did, which rule, and for how long. Ready-made React components cover the report dialog, notices, the player's record and your rules.",
+    body: "Players report a message right from the chat. The report carries the chat around it, so your moderators see what happened, not just a complaint. When a moderator acts, the player gets a plain notice: what they did, which rule, and for how long. Ready-made React components cover the report dialog, notices, the player's record and your rules.",
   },
   {
     id: 'hub',
     title: 'In your moderator hub',
-    body: 'The moderator hub is a web page where your team handles reports. Each report is one card: what was said, the player\'s history, and the action your rules suggest. One click to act, five seconds to undo. Repeat offenders go from a warning to timeouts to a ban.',
-    aside: 'Bigger team? Switch to the Detailed view for a full queue with filters and claims, so two moderators never take the same report. Prefer Discord? Each reported player can get a thread in a Discord forum.',
+    body: "The moderator hub is a web page where your team handles reports. Each case is one card: what the player said, their history, and the action your rules suggest. One click to act, five seconds to undo. Repeat offenders go from a warning to timeouts to a ban.",
+    aside: "Bigger team? The hub's Detailed view adds a full queue with filters, and lets a moderator claim a case so two never take the same one. Prefer Discord? Each reported player can get a thread in a Discord forum.",
   },
 ];
 
@@ -87,6 +87,8 @@ export const RULES_STRIP = {
 } as const;
 
 export const PLAYER_REACT_URL = `${TREE_URL}/player-react`;
+const MATCHER_README_URL = `${TREE_URL}/matcher#readme`;
+const PROFANITY_URL = `${TREE_URL}/profanity`;
 
 export const ADD_IT = {
   title: 'Add it to your game',
@@ -103,6 +105,8 @@ export interface Step {
   file: string;
   copyLabel: string;
   code: string;
+  /** A link after the text, for where to read more. */
+  link?: { label: string; href: string };
   /** Show this many lines, with a "Show the full file" button for the rest. The whole file stays in the page. */
   collapsedLines?: number;
 }
@@ -166,12 +170,13 @@ export const STEPS: Step[] = [
   {
     id: 'engine',
     title: 'Set it up once',
-    body: 'Tell it how to recognise a player: your login token and their IP address, both hashed before anything is stored. Load your word list and pick relaxed, standard or strict.',
+    body: 'Tell it how to recognise a player: your login token and their IP address, both hashed before anything is stored. Load your word list and pick relaxed, standard or strict. The code uses made-up test words; see the matcher README for the term pack format.',
+    link: { label: 'the matcher README', href: MATCHER_README_URL },
     lang: 'ts',
     file: 'moderation.ts',
     copyLabel: 'Copy step 2 engine setup',
     code: STEP_ENGINE,
-    collapsedLines: 10,
+    collapsedLines: 22,
   },
   {
     id: 'chat',
@@ -191,33 +196,68 @@ export interface Snippet {
   code: string;
 }
 
-/** The Express mount from the root README's Quick start (two contiguous lines), for the hub step's Server tab. */
-export const SERVER_MOUNT = `// Mount the kit BEFORE any body parser: it reads the raw body itself.
-app.use('/admin', toExpress(adminRoutes(cw, { authorize: (req) => yourModeratorLogin(req) }))); // { actor, role } or null`;
-
 export interface HubTab {
-  id: 'react' | 'page' | 'server';
+  id: 'react' | 'page';
   label: string;
   snippets: Snippet[];
 }
 
 /**
- * Step 4: the moderator hub. Every snippet is a block copied verbatim from a README (test/content.test.ts checks them): the install
- * line and the drop-in `<Hub>` from hub-react, the one script tag from hub-element, and the Express mount from the root README.
+ * Step 4: the moderator hub, doable from the page alone. First the server (install the routes and Express, import what the mount uses,
+ * mount the routes behind your login), which every way of showing the hub needs; then the page: React (install, the client the
+ * drop-in imports, the drop-in) or any page (one script tag). Every snippet is a block copied verbatim from a README
+ * (test/content.test.ts checks them): the install line and the server example from hub-react, its client and drop-in, and the one
+ * script tag from hub-element.
  */
-export const HUB_STEP: { title: string; body: string; tabs: HubTab[] } = {
+export const HUB_STEP: { title: string; body: string; server: Snippet[]; pageTitle: string; tabs: HubTab[] } = {
   title: 'Add the moderator hub',
-  body: "Mount the moderator routes behind your own login: you write one function that says who's a moderator. Then put the hub on a page. In React it's one component; anywhere else it's one script tag.",
+  body: "Mount the moderator routes on your server, behind your own login: you write one function that says who's a moderator. Then put the hub on a page. In React it's one component; anywhere else it's one script tag.",
+  server: [
+    {
+      lang: 'sh',
+      file: 'terminal',
+      copyLabel: 'Copy the moderator routes install command',
+      code: 'npm install @chatwarden/http express @types/express',
+    },
+    {
+      lang: 'ts',
+      file: 'server.ts',
+      copyLabel: 'Copy the moderator routes mount',
+      code: `import express from 'express';
+import { adminRoutes } from '@chatwarden/http';
+import { toExpress } from '@chatwarden/http/express';
+
+// \`cw\` is your createChatwarden(...) instance; \`yourModeratorLogin\` is your own sign-in check (see "Signing moderators in").
+const app = express();
+// The kit's routes read the raw body themselves: mount them before any body parser.
+app.use('/admin', toExpress(adminRoutes(cw, { authorize: yourModeratorLogin }), { fallthrough: false }));
+app.use('/mod', express.static('dist/mod')); // the built page: an index.html and the script and stylesheet it loads
+app.listen(3000);`,
+    },
+  ],
+  pageTitle: 'Then put the hub on a page',
   tabs: [
     {
       id: 'react',
       label: 'React',
       snippets: [
         {
-          lang: 'text',
+          lang: 'sh',
           file: 'terminal',
           copyLabel: 'Copy the hub install command',
           code: 'npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom',
+        },
+        {
+          lang: 'ts',
+          file: 'client.ts',
+          copyLabel: 'Copy the hub client',
+          code: `import { createHubClient, fetchTransport } from '@chatwarden/hub-react';
+
+// The staff routes are mounted at /admin on this origin. Cookies go along with each call.
+export const client = createHubClient(fetchTransport({ baseUrl: '/admin', credentials: 'same-origin' }));
+
+const me = await client.me(); // who is signed in, and what their role may do
+console.log(me.role, me.can['reports.read']);`,
         },
         {
           lang: 'ts',
@@ -244,11 +284,6 @@ export const ModeratorPage = () => <Hub client={client} />;`,
         },
       ],
     },
-    {
-      id: 'server',
-      label: 'Server',
-      snippets: [{ lang: 'ts', file: 'server.ts', copyLabel: 'Copy the moderator routes mount', code: SERVER_MOUNT }],
-    },
   ],
 };
 
@@ -261,7 +296,7 @@ export const PLAYER_STEP = {
 } as const;
 
 export const OPEN_SOURCE = {
-  title: 'Free, open source, and yours to run',
+  title: 'Free and open source',
   body: 'Apache-2.0, with no paid tier and nothing hosted. It runs on your server and keeps its data in your database file. Chatwarden is pre-release (version 0.1): ready to try, with no support promise yet. Issues and pull requests are welcome.',
   small: 'Published to npm with provenance.',
 } as const;
@@ -282,12 +317,13 @@ export const FAQ: FaqItem[] = [
   {
     id: 'server',
     q: 'Will it work with my game server?',
-    a: "If your server runs Node 22.13 or newer, yes, with any framework: the check is one function call. The moderator routes come with an Express adapter, and work with any other framework through a small router. If your server is written in another language, there's no ready-made bridge yet.",
+    a: "If your server runs Node 22.13 or newer, yes, with any framework: the check is one function call. The moderator routes come with an Express adapter, and any other framework can use createRouter, which turns the routes into one plain request-to-response function. If your server is written in another language, there's no ready-made bridge yet.",
   },
   {
     id: 'words',
     q: 'Which words does it block?',
-    a: "Slurs from a word list you provide. There's no shared list yet, so you bring your own, and moderators can edit it from the hub while the game runs. Ordinary swearing uses a built-in English list that you can allow, star or block. Words with spaces between the letters are not caught, on purpose, because that would block innocent messages. Players can report those.",
+    links: [{ label: '@chatwarden/profanity', href: PROFANITY_URL }],
+    a: "Slurs from a word list you provide. There's no shared list yet, so you bring your own, and moderators can edit it from the hub while the game runs. Ordinary swearing uses the optional @chatwarden/profanity package, with a built-in English list that you can allow, star or block. Words with spaces between the letters are not caught, on purpose, because that would block innocent messages. Players can report those.",
   },
   {
     id: 'signin',
@@ -307,7 +343,7 @@ export const FAQ: FaqItem[] = [
   {
     id: 'ai',
     q: 'Does it use AI?',
-    a: "No. Optional AI help that sorts reports and drafts decisions is planned, with a person always deciding. It isn't built yet.",
+    a: "No. Optional AI help that reads reports and suggests a decision is planned. It isn't built yet.",
   },
   {
     id: 'discord',

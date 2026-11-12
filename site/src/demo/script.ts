@@ -72,11 +72,11 @@ export const TOUR_STEPS: readonly TourStep[] = [
   },
   {
     title: 'Open the report in the hub',
-    body: 'It just reached your moderator hub, with the chat around it as evidence. Press "1 new case", then open Bo\'s report.',
+    body: 'It just reached your moderator hub, with the chat around it as evidence. A case is all the open reports about one player. Press "1 new case", then open Bo\'s case.',
   },
   {
     title: 'Take the suggested action',
-    body: "This is the hub's default view: one card per report. It shows what Bo said, his history, and the action your rules suggest. Press the suggested action. You have five seconds to undo.",
+    body: "This is the hub's default view: one card per player. It shows what Bo said, his history, and the action your rules suggest. Press the suggested action. You have five seconds to undo.",
   },
   {
     title: 'See what Bo sees',

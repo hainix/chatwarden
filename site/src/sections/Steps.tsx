@@ -31,6 +31,11 @@ export function Steps() {
                 </span>
                 <h3>{s.title}</h3>
                 <p>{s.body}</p>
+                {s.link !== undefined && (
+                  <a className="card-link" href={s.link.href} target="_blank" rel="noopener noreferrer">
+                    {s.link.label} <ExternalIcon />
+                  </a>
+                )}
               </div>
               <CodeBlock code={s.code} lang={s.lang} title={s.file} copyLabel={s.copyLabel} collapsedLines={s.collapsedLines} />
             </li>
@@ -43,7 +48,15 @@ export function Steps() {
               <h3>{HUB_STEP.title}</h3>
               <p>{HUB_STEP.body}</p>
             </div>
-            <Tabs label="Ways to put the hub on a page" items={hubTabs} />
+            <div className="hub-stack">
+              <div className="hub-server">
+                {HUB_STEP.server.map((x) => (
+                  <CodeBlock key={x.file} code={x.code} lang={x.lang} title={x.file} copyLabel={x.copyLabel} />
+                ))}
+              </div>
+              <h4 className="hub-page-title">{HUB_STEP.pageTitle}</h4>
+              <Tabs label="Ways to put the hub on a page" items={hubTabs} />
+            </div>
           </li>
           <li className="step step-optional">
             <div className="step-text">

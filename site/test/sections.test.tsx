@@ -47,7 +47,7 @@ describe('Hero', () => {
   it('says what you get, including the hub, in the sub-line', () => {
     const { container } = render(<Hero />);
     expect(container.querySelector('.lead')?.textContent).toBe(
-      "Chatwarden blocks slurs before they're posted, lets players report a message in one tap, and gives your team a moderator hub: one card per report, one click to act. Add it to the chat you already have with a few lines on your Node server.",
+      "Chatwarden blocks slurs from your word list before they're posted, lets players report a message right from the chat, and gives your team a moderator hub: each player with open reports is a case, with every report about them and one click to act. Add it to the chat you already have with a short setup on your Node server.",
     );
   });
   it('has a ghost button to the setup steps and a proof line, and no install command (it moved into step 1)', () => {
@@ -89,7 +89,7 @@ describe('DemoSlot placeholder', () => {
     expect(section?.getAttribute('aria-labelledby')).toBeTruthy();
     expect(within(section as HTMLElement).getByRole('heading', { level: 2 }).textContent).toBe("Try it: you're the player and the moderator");
     expect(section?.querySelector('.section-lead')?.textContent).toBe(
-      'On the left, a game lobby. On the right, the moderator hub your team would use. Report a message, then deal with it. It takes about a minute, and it all runs in your browser.',
+      'On the left, a game lobby. On the right, the moderator hub your team would use. Report a message, then deal with it. It takes a few clicks, and it all runs in your browser.',
     );
     expect(screen.getByText(/loading the demo/i)).toBeTruthy();
     expect(section?.querySelector('[data-demo-slot]')).toBeTruthy();
@@ -121,10 +121,11 @@ describe('HowItWorks', () => {
     const { container } = render(<HowItWorks />);
     const text = container.textContent ?? '';
     expect(text).toContain("Every message goes through one check before your server sends it.");
-    expect(text).toContain('Players report a message in one tap.');
+    expect(text).toContain('Players report a message right from the chat.');
     expect(text).toContain('The moderator hub is a web page where your team handles reports.');
     expect(text).toContain('One click to act, five seconds to undo.');
-    expect(text).toContain('Bigger team? Switch to the Detailed view');
+    expect(text).toContain("Bigger team? The hub's Detailed view adds a full queue with filters");
+    expect(text).not.toMatch(/one tap|one card per report|a few lines/i);
   });
   it('has the "Your rules" strip', () => {
     const { container } = render(<HowItWorks />);
@@ -164,44 +165,58 @@ describe('Steps', () => {
     ).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /^copy /i }).length).toBeGreaterThanOrEqual(3);
   });
-  it('step 4 is tabs: React (install and the drop-in <Hub>), Any page (one script tag), Server (the Express mount); each copyable', async () => {
+  it('step 4 can be done from the page alone: the server first (install, imports, mount), then the page: React (install, the client, the drop-in <Hub>) or Any page (one script tag)', async () => {
     const user = userEvent.setup();
     const { container } = render(<Steps />);
     const more = container.querySelector('[data-hub-step]') as HTMLElement;
+    const server = more.querySelector('.hub-server') as HTMLElement;
+    expect(server).toBeTruthy();
+    expect(server.textContent).toContain('npm install @chatwarden/http express @types/express');
+    expect(server.textContent).toContain("import { adminRoutes } from '@chatwarden/http';");
+    expect(server.textContent).toContain("import { toExpress } from '@chatwarden/http/express';");
+    expect(server.textContent).toContain("app.use('/admin', toExpress(adminRoutes(cw, { authorize: yourModeratorLogin }), { fallthrough: false }));");
+    // the server block comes before the tabs
+    expect(server.compareDocumentPosition(more.querySelector('[role="tablist"]') as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const tabs = within(more).getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['React', 'Any page', 'Server']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['React', 'Any page']);
     expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
-    expect(within(more).getByRole('tabpanel').textContent).toContain('<Hub client={client} />');
-    expect(within(more).getByRole('tabpanel').textContent).toContain('npm install @chatwarden/hub-react');
-    expect(within(more).getAllByRole('button', { name: /^copy /i })).toHaveLength(2);
+    const panel = () => within(more).getByRole('tabpanel');
+    expect(panel().textContent).toContain('npm install @chatwarden/hub-react');
+    expect(panel().textContent).toContain("export const client = createHubClient(fetchTransport({ baseUrl: '/admin', credentials: 'same-origin' }));");
+    expect(panel().textContent).toContain('<Hub client={client} />');
     await user.click(tabs[1] as HTMLElement);
-    expect(within(more).getByRole('tabpanel').textContent).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
-    expect(within(more).getByRole('tabpanel').textContent).not.toContain('<Hub client');
-    await user.click(tabs[2] as HTMLElement);
-    expect(within(more).getByRole('tabpanel').textContent).toContain("app.use('/admin', toExpress(adminRoutes(cw, { authorize: (req) => yourModeratorLogin(req) })));");
-    expect(within(more).getAllByRole('button', { name: /^copy /i })).toHaveLength(1);
+    expect(panel().textContent).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
+    expect(panel().textContent).not.toContain('<Hub client');
+    expect(within(more).getAllByRole('button', { name: /^copy /i }).length).toBe(3); // the server's two blocks and the script tag
   });
-  it('the tabs work by keyboard: arrows move and select, Home and End jump; only the selected tab is in the tab order', async () => {
+  it('the tabs work by keyboard: arrows move and select (and wrap), Home and End jump; only the selected tab is in the tab order', async () => {
     const { container } = render(<Steps />);
     const more = container.querySelector('[data-hub-step]') as HTMLElement;
     const tabs = () => within(more).getAllByRole('tab');
-    expect(tabs().map((t) => t.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
+    expect(tabs().map((t) => t.getAttribute('tabindex'))).toEqual(['0', '-1']);
     tabs()[0]?.focus();
     fireEvent.keyDown(tabs()[0] as HTMLElement, { key: 'ArrowRight' });
     expect(tabs()[1]?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(tabs()[1]);
-    fireEvent.keyDown(tabs()[1] as HTMLElement, { key: 'End' });
-    expect(tabs()[2]?.getAttribute('aria-selected')).toBe('true');
-    fireEvent.keyDown(tabs()[2] as HTMLElement, { key: 'ArrowRight' });
+    fireEvent.keyDown(tabs()[1] as HTMLElement, { key: 'ArrowRight' });
     expect(tabs()[0]?.getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(tabs()[0] as HTMLElement, { key: 'ArrowLeft' });
-    expect(tabs()[2]?.getAttribute('aria-selected')).toBe('true');
-    fireEvent.keyDown(tabs()[2] as HTMLElement, { key: 'Home' });
+    expect(tabs()[1]?.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(tabs()[1] as HTMLElement, { key: 'Home' });
     expect(tabs()[0]?.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(tabs()[0] as HTMLElement, { key: 'End' });
+    expect(tabs()[1]?.getAttribute('aria-selected')).toBe('true');
     // each tab names its panel, and the panel names the tab
     const panel = within(more).getByRole('tabpanel');
-    expect(panel.getAttribute('aria-labelledby')).toBe(tabs()[0]?.id);
-    expect(tabs()[0]?.getAttribute('aria-controls')).toBe(panel.id);
+    expect(panel.getAttribute('aria-labelledby')).toBe(tabs()[1]?.id);
+    expect(tabs()[1]?.getAttribute('aria-controls')).toBe(panel.id);
+  });
+  it('step 2 points a real word list at the matcher README, which has the term pack format', () => {
+    const { container } = render(<Steps />);
+    const step = container.querySelectorAll('ol > li')[1] as HTMLElement;
+    expect(step.textContent).toContain('The code uses made-up test words; see the matcher README for the term pack format.');
+    const link = within(step).getByRole('link', { name: /matcher readme/i });
+    expect(link.getAttribute('href')).toBe('https://github.com/hainix/chatwarden/tree/main/packages/matcher#readme');
   });
   it('step 2 shows the first lines and a "Show the full file" button that opens the whole file (all of it is in the page either way)', async () => {
     const user = userEvent.setup();
@@ -252,7 +267,7 @@ describe('Steps', () => {
   it('names each scrollable code block as a region (aria-label alone is not allowed on a bare pre)', () => {
     const { container } = render(<Steps />);
     const pres = [...container.querySelectorAll('pre')];
-    expect(pres).toHaveLength(5); // steps 1 to 3, then the React tab's install line and drop-in
+    expect(pres).toHaveLength(8); // steps 1 to 3, the server's install and mount, then the React tab's install line, client and drop-in
     for (const pre of pres) {
       expect(pre.getAttribute('role')).toBe('region');
       expect(pre.getAttribute('aria-label')).toBeTruthy();
@@ -263,7 +278,7 @@ describe('Steps', () => {
 describe('OpenSource', () => {
   it('has the proposal’s heading and says it plainly', () => {
     const { container } = render(<OpenSource />);
-    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Free, open source, and yours to run');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Free and open source');
     const text = container.textContent ?? '';
     expect(text).toContain('Apache-2.0, with no paid tier and nothing hosted.');
     expect(text).toContain('Chatwarden is pre-release (version 0.1): ready to try, with no support promise yet.');

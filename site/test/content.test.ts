@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FAQ, HERO_CHAT, HOW_PANELS, HUB_STEP, INSTALL_KIT, OPEN_SOURCE, PLAYER_STEP, RULES_STRIP, SERVER_MOUNT, STEPS } from '../src/content';
+import { FAQ, HERO, HERO_CHAT, HOW_PANELS, HUB_STEP, INSTALL_KIT, OPEN_SOURCE, PLAYER_STEP, RULES_STRIP, STEPS } from '../src/content';
 
 const repo = join(__dirname, '..', '..');
 const readmes = [
@@ -54,9 +54,11 @@ describe('content is grounded in the READMEs', () => {
   it('step 2 shows its code collapsed (the full file stays in the page), and says what it does', () => {
     const engine = STEPS[1];
     expect(engine?.title).toBe('Set it up once');
-    expect(engine?.collapsedLines).toBeGreaterThanOrEqual(8);
-    expect(engine?.collapsedLines).toBeLessThanOrEqual(12);
-    expect(engine?.code.split('\n').length).toBeGreaterThan((engine?.collapsedLines ?? 0) + 10);
+    // the preview runs down to the matcher, so it shows the platform hook and the store, not only the imports
+    expect(engine?.collapsedLines).toBeGreaterThanOrEqual(20);
+    expect(engine?.collapsedLines).toBeLessThanOrEqual(24);
+    expect(engine?.code.split('\n').length).toBeGreaterThan((engine?.collapsedLines ?? 0) + 6);
+    expect(engine?.code.split('\n').slice(0, engine.collapsedLines).join('\n')).toContain('const platform: Platform');
   });
 });
 
@@ -76,7 +78,7 @@ describe('the steps, panels and questions', () => {
   it('the step texts are the proposal’s', () => {
     expect(STEPS.map((s) => s.body)).toEqual([
       'The engine, its storage (one SQLite file, using the SQLite built into Node) and the word filter.',
-      'Tell it how to recognise a player: your login token and their IP address, both hashed before anything is stored. Load your word list and pick relaxed, standard or strict.',
+      'Tell it how to recognise a player: your login token and their IP address, both hashed before anything is stored. Load your word list and pick relaxed, standard or strict. The code uses made-up test words; see the matcher README for the term pack format.',
       'Call it before you broadcast a message. It answers deliver, or block with a reason you show only to the sender.',
     ]);
   });
@@ -122,6 +124,20 @@ describe('the steps, panels and questions', () => {
     ]);
     expect(prose).not.toMatch(/\bladder\b|\brefus(e|ed|es|al)\b|\bseats?\b|staff routes|headless|ceilings?|\bpreset\b|simple mode|\bidentify\b|\bAI levels?\b/i);
   });
+  it('the page promises only what is true: two presses to report, one card per player (a case), blocks from your list, a short setup', () => {
+    const prose = JSON.stringify([HERO, HOW_PANELS, FAQ, STEPS.map((x) => x.body)]);
+    expect(prose).not.toMatch(/one tap|one card per report|a few lines|always deciding|\bone-tap\b/i);
+    expect(HERO.lead).toBe("Chatwarden blocks slurs from your word list before they're posted, lets players report a message right from the chat, and gives your team a moderator hub: each player with open reports is a case, with every report about them and one click to act. Add it to the chat you already have with a short setup on your Node server.");
+    expect(HERO.lead).toContain('slurs from your word list');
+    expect(HOW_PANELS[1]?.body).toMatch(/^Players report a message right from the chat\./);
+    expect(HOW_PANELS[2]?.body).toMatch(/^The moderator hub is a web page where your team handles reports\. Each case is one card:/);
+  });
+  it('"case" is defined once, where the hub is first described (the hero), and the tour uses it the same way', () => {
+    expect(HERO.lead).toContain('each player with open reports is a case');
+  });
+  it('the AI answer promises nothing about who decides (levels 3 and 4 are planned to act on clear cases)', () => {
+    expect(FAQ.find((f) => f.id === 'ai')?.a).toBe("No. Optional AI help that reads reports and suggests a decision is planned. It isn't built yet.");
+  });
   it('invents no customers, counts or stats', () => {
     const text = JSON.stringify([HOW_PANELS, FAQ, OPEN_SOURCE]);
     expect(text).not.toMatch(/\b\d[\d,.]*\s?[kKmM]?\+?\s+(users|customers|studios|games|downloads|stars|developers)\b/);
@@ -134,34 +150,46 @@ describe('the hub and player packages on the page', () => {
   const readmeOf = (pkg: string) => normal(readFileSync(join(repo, 'packages', pkg, 'README.md'), 'utf8').replace(/\r\n/g, '\n'));
   const rootReadme = () => normal(readFileSync(join(repo, 'README.md'), 'utf8').replace(/\r\n/g, '\n'));
 
-  it('the hub step has three ways in, React first, then any page, then the server', () => {
-    expect(HUB_STEP.tabs.map((t) => t.label)).toEqual(['React', 'Any page', 'Server']);
+  it('the hub step is the server first, then two ways to put the hub on a page (React, any page)', () => {
+    expect(HUB_STEP.server.map((x) => x.file)).toEqual(['terminal', 'server.ts']);
+    expect(HUB_STEP.tabs.map((t) => t.label)).toEqual(['React', 'Any page']);
     expect(HUB_STEP.body).toBe(
-      "Mount the moderator routes behind your own login: you write one function that says who's a moderator. Then put the hub on a page. In React it's one component; anywhere else it's one script tag.",
+      "Mount the moderator routes on your server, behind your own login: you write one function that says who's a moderator. Then put the hub on a page. In React it's one component; anywhere else it's one script tag.",
     );
   });
 
-  it('the React tab starts with the README’s install line, a contiguous block of the hub-react README', () => {
-    const react = HUB_STEP.tabs.find((t) => t.id === 'react');
-    expect(react?.snippets[0]?.code).toBe('npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom');
-    expect(readmeOf('hub-react')).toContain(normal(react?.snippets[0]?.code ?? ''));
+  it('the server block installs the routes and Express, imports what it uses, and mounts the routes: contiguous blocks of a README', () => {
+    const [install, mount] = HUB_STEP.server;
+    expect(install?.code).toBe('npm install @chatwarden/http express @types/express');
+    expect(readmeOf('hub-react')).toContain(normal(install?.code ?? ''));
+    expect(mount?.code).toContain("import { adminRoutes } from '@chatwarden/http';");
+    expect(mount?.code).toContain("import { toExpress } from '@chatwarden/http/express';");
+    expect(mount?.code).toContain("app.use('/admin', toExpress(adminRoutes(cw, { authorize: yourModeratorLogin }), { fallthrough: false }));");
+    expect(readmeOf('hub-react')).toContain(normal(mount?.code ?? ''));
   });
 
-  it('the tabs show the drop-in <Hub>, the one-script-tag element and the server mount, each a contiguous README block', () => {
-    const code = (id: string) => HUB_STEP.tabs.find((t) => t.id === id)?.snippets.map((s) => s.code) ?? [];
-    expect(code('react')[1]).toContain('<Hub client={client} />');
-    expect(code('page')[0]).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
-    expect(readmeOf('hub-react')).toContain(normal(code('react')[1] ?? ''));
-    expect(readmeOf('hub-element')).toContain(normal(code('page')[0] ?? ''));
-    expect(code('server')[0]).toBe(SERVER_MOUNT);
-    expect(SERVER_MOUNT).toContain("app.use('/admin', toExpress(adminRoutes(cw, { authorize: (req) => yourModeratorLogin(req) })));");
-    expect(rootReadme()).toContain(normal(SERVER_MOUNT));
+  it('the React tab has the install line, the client the drop-in imports from ./client, and the drop-in <Hub>: contiguous README blocks', () => {
+    const react = HUB_STEP.tabs.find((t) => t.id === 'react');
+    const [install, client, dropIn] = react?.snippets ?? [];
+    expect(install?.code).toBe('npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom');
+    expect(client?.file).toBe('client.ts');
+    expect(client?.code).toContain("export const client = createHubClient(fetchTransport({ baseUrl: '/admin', credentials: 'same-origin' }));");
+    expect(dropIn?.code).toContain("import { client } from './client';");
+    expect(dropIn?.code).toContain('<Hub client={client} />');
+    for (const snippet of [install, client, dropIn]) expect(readmeOf('hub-react')).toContain(normal(snippet?.code ?? ''));
+  });
+
+  it('the Any page tab is the one-script-tag element, a contiguous block of the hub-element README', () => {
+    const page = HUB_STEP.tabs.find((t) => t.id === 'page');
+    expect(page?.snippets[0]?.code).toContain('<chatwarden-hub base-url="/admin"></chatwarden-hub>');
+    expect(readmeOf('hub-element')).toContain(normal(page?.snippets[0]?.code ?? ''));
   });
 
   it('every non-blank line of the hub step is a verbatim README line (and the check can fail: a changed line is caught)', () => {
     const all = new Set([readmeOf('hub-react'), readmeOf('hub-element'), rootReadme()].flatMap((t) => t.split('\n')));
-    const lines = HUB_STEP.tabs.flatMap((t) => t.snippets.map((s) => s.code)).flatMap((c) => c.split('\n')).filter((l) => l.trim() !== '');
-    expect(lines.length).toBeGreaterThanOrEqual(8);
+    const snippets = [...HUB_STEP.server, ...HUB_STEP.tabs.flatMap((t) => t.snippets)];
+    const lines = snippets.flatMap((x) => x.code.split('\n')).filter((l) => l.trim() !== '');
+    expect(lines.length).toBeGreaterThanOrEqual(20);
     expect(lines.filter((l) => !all.has(l.trimEnd()))).toEqual([]);
     expect(all.has('export const ModeratorPage = () => <Hub client={client} />; // changed')).toBe(false);
   });
@@ -181,7 +209,7 @@ describe('the words of the proposal (docs/design/2026-11-11-site-copy-rewrite.md
     expect(blocked?.notice).toBe('Blocked. Only Bo sees this.');
   });
   it('the third panel points bigger teams at the Detailed view and Discord users at the forum feed', () => {
-    expect(HOW_PANELS[2]?.aside).toMatch(/^Bigger team\? Switch to the Detailed view/);
+    expect(HOW_PANELS[2]?.aside).toMatch(/^Bigger team\? The hub's Detailed view adds a full queue/);
     expect(HOW_PANELS[2]?.aside).toMatch(/Prefer Discord\?/);
   });
   it('the rules strip', () => {

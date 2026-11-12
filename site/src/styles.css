@@ -1127,7 +1127,23 @@ li {
   gap: 16px;
   min-width: 0;
 }
+.hub-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.hub-server {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.hub-page-title {
+  margin-top: 8px;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
 /* The README's own lines stay verbatim, so a long one (the CDN address, the Express mount) wraps instead of being cut off. */
+.hub-server pre,
 .tabpanel pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

@@ -42,7 +42,7 @@ describe('Show the code', () => {
     expect(CODE_STEPS.map((c) => c.blurb)).toEqual([
       'Your server files the report with one call. The room and players come from your session, never from the client.',
       'The whole hub is one component on a page of your admin site.',
-      "A decision closes the report, applies the timeout and writes the player's notice in one step.",
+      "A decision closes the report, applies the action (here a warning) and writes the player's notice in one step.",
       "Your game reads the player's notices from one route and shows them with the notice dialog.",
     ]);
   });

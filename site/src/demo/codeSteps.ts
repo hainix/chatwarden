@@ -45,7 +45,7 @@ export const ModeratorPage = () => <Hub client={client} />;`,
   },
   {
     title: 'Take the suggested action',
-    blurb: "A decision closes the report, applies the timeout and writes the player's notice in one step.",
+    blurb: "A decision closes the report, applies the action (here a warning) and writes the player's notice in one step.",
     demoNote: 'The hub sends the decision after its five seconds of Undo. A replay applies nothing twice.',
     file: 'decide.ts',
     lang: 'ts',
