@@ -1267,7 +1267,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
     suggest: (subject, level, rule, context) => {
       const now = clock.now();
-      return suggest(policy.profileNow(), historyOf(store, subjects, subject, now), level, rule, now, context);
+      // The signal hits are the kit's to compute: a list the caller passes is dropped, the real one set when a ladder rule is met.
+      const { signals: _ignored, ...given } = (context ?? {}) as SuggestContext;
+      void _ignored;
+      const hits = signals.ladderHits(subject);
+      return suggest(policy.profileNow(), historyOf(store, subjects, subject, now), level, rule, now, hits.length === 0 ? given : { ...given, signals: hits });
     },
     gaps: {
       list: () =>

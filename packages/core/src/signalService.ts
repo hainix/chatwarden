@@ -1,5 +1,6 @@
 import { randomId } from './crypto.js';
 import { errorClass, safeWarn, ThrottledWarn } from './log.js';
+import type { SignalHit } from './ladder.js';
 import { countSignals, evaluateThreshold } from './signalCounts.js';
 import { BUILTIN_SIGNAL_KINDS, SIGNAL_WINDOW_DAYS_MAX } from './signals.js';
 import type { ResolvedSignals, SignalCount, SignalInput, SignalKindView } from './signals.js';
@@ -280,6 +281,39 @@ export class SignalService {
       return out;
     } catch {
       return new Set();
+    }
+  }
+
+  /**
+   * The ladder rules (`feeds.ladder`) this person meets, for `suggest`: each as its id, effect and the sentence ("Muted by other players:
+   * 5 players in 14 days"). Rows are read once per distinct window. `[]` (and no store read) when the feed is off. Never throws.
+   */
+  ladderHits(subject: SubjectId): SignalHit[] {
+    try {
+      const { feeds, kinds } = this.deps.settings();
+      const rules = feeds.ladder;
+      if (rules === undefined || rules.length === 0 || !this.supported || typeof subject !== 'string' || subject === '') return [];
+      const { subjects, store, clock } = this.deps;
+      const aliases = subjects.aliasesOf(subject);
+      const ctxKinds = this.kindsFor(undefined);
+      const byWindow = new Map<number, ReturnType<NonNullable<Store['listSignalSources']>>>();
+      const hits: SignalHit[] = [];
+      for (const rule of rules) {
+        let rows = byWindow.get(rule.windowDays);
+        if (rows === undefined) {
+          rows = store.listSignalSources?.(aliases, clock.now() - rule.windowDays * DAY_MS) ?? [];
+          byWindow.set(rule.windowDays, rows);
+        }
+        const res = evaluateThreshold(rows, { kinds: ctxKinds, canonical: (s) => subjects.canonical(s) }, rule);
+        if (!res.met) continue;
+        const labels = rule.kinds.map((k) => kinds[k]?.label ?? k).join(', ');
+        const players = `${res.distinct} player${res.distinct === 1 ? '' : 's'}`;
+        const days = `${rule.windowDays} day${rule.windowDays === 1 ? '' : 's'}`;
+        hits.push({ id: rule.id, effect: rule.effect, text: `${labels}: ${players} in ${days}` });
+      }
+      return hits;
+    } catch {
+      return [];
     }
   }
 
