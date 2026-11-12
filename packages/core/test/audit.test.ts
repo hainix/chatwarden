@@ -55,6 +55,9 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'ai.read',
       'ai.rerun',
       'ai.outcome',
+      'appeal.view',
+      'appeal.decide',
+      'name.rename_required',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -95,13 +98,20 @@ describe('cw.audit.record and list', () => {
       // The AI rows point at a report; ai.read is the AI's own, with no role (see ai/audit-ai.test.ts).
       const ai = action.startsWith('ai.') ? { target: { type: 'report', ref: 'r1' } } : {};
       const who = action === 'ai.read' ? { actor: 'ai:test:model', role: null } : {};
-      expect(rec(cw, { action, ...detail, ...ai, ...who })).toBe(true);
+      // appeal.decide points at an appeal and name.rename_required at a person (see vocabulary-appeals.test.ts).
+      const own =
+        action === 'appeal.decide'
+          ? { target: { type: 'appeal', ref: 'ap1' } }
+          : action === 'name.rename_required'
+            ? { target: { type: 'person', ref: 's_a1' } }
+            : {};
+      expect(rec(cw, { action, ...detail, ...ai, ...own, ...who })).toBe(true);
     }
     for (const role of ROLES) expect(rec(cw, { role })).toBe(true);
-    for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason']) {
+    for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal']) {
       expect(rec(cw, { target: { type, ref: 'x1' } })).toBe(true);
     }
-    expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 6);
+    expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 7);
   });
 
   it('report.dismiss_case and report.dismiss_reporter take a person target, round-trip, filter, and refuse a detail', async () => {

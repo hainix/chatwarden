@@ -14,6 +14,17 @@ const PER_WEEK_DEFAULT = 3;
 
 const KEYS = ['enabled', 'perPlayerPerWeek', 'allowSelfReview'] as const;
 
+/** What a moderator may rule on an appeal: the sanction stands, is made lighter, or is lifted. @experimental */
+export const APPEAL_OUTCOMES = ['uphold', 'reduce', 'revoke'] as const;
+export type AppealOutcome = (typeof APPEAL_OUTCOMES)[number];
+
+/**
+ * Where an appeal stands. `open` until decided; `upheld`, `reduced` and `revoked` are the three outcomes; `moot` means the sanction was
+ * revoked by someone else while the appeal was open, so nobody ruled on it.
+ * @experimental
+ */
+export type AppealStatus = 'open' | 'upheld' | 'reduced' | 'revoked' | 'moot';
+
 /**
  * How appeals run. Every field is optional; a profile without `appeals` has them off.
  * @experimental

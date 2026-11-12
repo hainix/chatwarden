@@ -1,4 +1,5 @@
 import { safeWarn } from './log.js';
+import type { AppealOutcome } from './appeals.js';
 import type { RuleRef } from './rules.js';
 import type { Logger, ReportCategory, SanctionKind, Source, SubjectId } from './types.js';
 
@@ -67,7 +68,25 @@ export type KitEvent =
    * person who was timed out (canonical at emit time).
    * Carries subject ids: staff channels only, never send to a player.
    */
-  | { type: 'auto.restricted'; groupId: string; refCode: string; second: boolean; subject: StaffRef };
+  | { type: 'auto.restricted'; groupId: string; refCode: string; second: boolean; subject: StaffRef }
+  /**
+   * A player filed an appeal against a sanction. `target` is the person (canonical at emit time), `kind` the sanction's kind and `rule`
+   * the Community Rule it cited. Like `report.created` it carries ids, codes and times, never the statement or the player's handle.
+   * Carries subject ids: staff channels only, never send to a player. @experimental
+   */
+  | { type: 'appeal.created'; appealId: string; createdAt: number; target: StaffRef; kind: SanctionKind; rule: RuleRef | null }
+  /**
+   * A moderator decided an appeal: `outcome` is uphold, reduce or revoke. Never the reason, the statement or a handle; an appeal made
+   * moot by someone else's revoke announces nothing.
+   * Carries subject ids: staff channels only, never send to a player. @experimental
+   */
+  | { type: 'appeal.decided'; appealId: string; at: number; target: StaffRef; outcome: AppealOutcome; rule: RuleRef | null }
+  /**
+   * A moderator required a rename. It names no name and no reason: the game learns who to rename through `cw.people.accountIds(target)`
+   * or a webhook that opted in to accounts.
+   * Carries subject ids: staff channels only, never send to a player. @experimental
+   */
+  | { type: 'rename.required'; at: number; target: StaffRef; rule: RuleRef | null };
 
 /** Every event type, for checking a subscription. */
 export const KIT_EVENT_TYPES: readonly KitEvent['type'][] = [
@@ -77,6 +96,9 @@ export const KIT_EVENT_TYPES: readonly KitEvent['type'][] = [
   'sanction.revoked',
   'gap.created',
   'auto.restricted',
+  'appeal.created',
+  'appeal.decided',
+  'rename.required',
 ];
 
 /** The event of a type. */

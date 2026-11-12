@@ -20,7 +20,7 @@ const rec = (cw: Awaited<ReturnType<typeof world>>['cw'], over: Record<string, u
 describe('the AI audit actions', () => {
   it('append after the 0.1.5 list and change nothing before it', () => {
     expect(AUDIT_ACTIONS.slice(0, SHIPPED.length)).toEqual(SHIPPED);
-    expect(AUDIT_ACTIONS.slice(SHIPPED.length)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
+    expect(AUDIT_ACTIONS.slice(SHIPPED.length, SHIPPED.length + 3)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
     expect(new Set(AUDIT_ACTIONS).size).toBe(AUDIT_ACTIONS.length);
   });
 

@@ -235,9 +235,8 @@ describe('cw.policy and the pace section', () => {
     expect(brief).not.toMatch(/slow mode|slowMode|burst/i);
   });
 
-  it('AUDIT_ACTIONS is unchanged', () => {
-    expect(AUDIT_ACTIONS).toHaveLength(26);
-    expect(AUDIT_ACTIONS.slice(-3)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
+  it('AUDIT_ACTIONS gained no pace action (the 0.1.7 list is a prefix)', () => {
+    expect(AUDIT_ACTIONS.slice(23, 26)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
     expect([...AUDIT_ACTIONS].filter((a) => /pace|flood|signal/.test(a))).toEqual([]);
   });
 });

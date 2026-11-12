@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PERMISSIONS, resolvePermissions, roleAtLeast, ROLES } from '@chatwarden/http';
+import { PERMISSION_KEYS, PERMISSIONS, resolvePermissions, roleAtLeast, ROLES } from '@chatwarden/http';
 import type { PermissionKey, Role } from '@chatwarden/http';
 
 describe('roleAtLeast', () => {
@@ -49,7 +49,18 @@ describe('PERMISSIONS defaults', () => {
       'reasons.read': 'moderator',
       'reasons.write': 'senior',
       settings: 'owner',
+      'appeals.read': 'moderator',
+      'appeals.decide': 'senior',
     });
+  });
+
+  it('appeals.read defaults to moderator and appeals.decide to senior', () => {
+    expect(PERMISSIONS['appeals.read']).toBe('moderator');
+    expect(PERMISSIONS['appeals.decide']).toBe('senior');
+    expect(roleAtLeast('moderator', PERMISSIONS['appeals.read'])).toBe(true);
+    expect(roleAtLeast('moderator', PERMISSIONS['appeals.decide'])).toBe(false);
+    expect(roleAtLeast('senior', PERMISSIONS['appeals.decide'])).toBe(true);
+    expect(PERMISSION_KEYS.slice(-2)).toEqual(['appeals.read', 'appeals.decide']);
   });
 
   it('is frozen', () => {
@@ -61,6 +72,17 @@ describe('resolvePermissions', () => {
   it('returns the defaults with no overrides', () => {
     expect(resolvePermissions()).toEqual({ ...PERMISSIONS });
     expect(resolvePermissions({})).toEqual({ ...PERMISSIONS });
+  });
+
+  it('the permissions option lowers either appeals key, or raises it, and an unknown key is still refused', () => {
+    const lowered = resolvePermissions({ 'appeals.decide': 'moderator' });
+    expect(lowered['appeals.decide']).toBe('moderator');
+    expect(lowered['appeals.read']).toBe('moderator');
+    expect(resolvePermissions({ 'appeals.read': 'owner' })['appeals.read']).toBe('owner');
+    expect(PERMISSIONS['appeals.decide']).toBe('senior');
+    expect(() => resolvePermissions({ 'appeals.decided': 'owner' } as never)).toThrow(/"appeals\.decided"/);
+    expect(() => resolvePermissions({ 'appeals.decide': 'admin' as Role })).toThrow(RangeError);
+    expect(() => resolvePermissions({ 'appeals.decide': 'nope-value' as Role })).toThrow(/appeals\.decide/);
   });
 
   it('applies an override and leaves the rest', () => {

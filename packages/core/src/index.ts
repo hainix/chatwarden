@@ -325,8 +325,8 @@ export {
 export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
 export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
 // Appeals and names settings (@experimental): off until set (names masking in the hub is the one default-on setting).
-export { APPEAL_STATEMENT_MAX, resolveAppeals } from './appeals.js';
-export type { AppealSettings, ResolvedAppeals } from './appeals.js';
+export { APPEAL_OUTCOMES, APPEAL_STATEMENT_MAX, resolveAppeals } from './appeals.js';
+export type { AppealOutcome, AppealSettings, AppealStatus, ResolvedAppeals } from './appeals.js';
 export { resolveNames } from './names.js';
 export type { NameCheckResult, NameReason, NameSettings, ResolvedNames } from './names.js';
 // Signals (@experimental): kinds a game declares, the guards, and the feeds that say where counts may be read.

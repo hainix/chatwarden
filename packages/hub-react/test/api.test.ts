@@ -838,6 +838,8 @@ describe('what is marked @experimental', () => {
         "HubControllerOptions.host",
         "LiveQueueStore.refresh",
         "PersonHistory.signals",
+        "PolicyLayer.appeals",
+        "PolicyLayer.names",
         "PolicyLayer.pace",
         "PolicyLayer.signals",
         "ReportSummary.boosted",

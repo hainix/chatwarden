@@ -16,6 +16,10 @@ export type Role = (typeof ROLES)[number];
  * The three `ai.*` actions target a report and carry no detail: `ai.read` is written by the AI itself (an `ai:` actor, no role)
  * when a read finishes, `ai.rerun` by a moderator who asked for another read, `ai.outcome` by a moderator whose decision was
  * recorded against a read.
+ *
+ * The three appeal and name actions (0.1.9): `appeal.view` is a staff read of the inbox, one appeal or the numbers (its target is the
+ * `appeal`, or none for the list and the numbers); `appeal.decide` points at the `appeal` decided and needs it; `name.rename_required`
+ * points at the `person` asked to rename and needs it. None of them carries a detail: a statement, a reason or a name never reaches the trail.
  */
 export const AUDIT_ACTIONS = [
   'report.view',
@@ -44,6 +48,9 @@ export const AUDIT_ACTIONS = [
   'ai.read',
   'ai.rerun',
   'ai.outcome',
+  'appeal.view',
+  'appeal.decide',
+  'name.rename_required',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -63,14 +70,20 @@ export const AUDIT_REASON_MAX = 2000;
 /** The actions that point at a report (and only at one), and carry nothing else. */
 const AI_ACTIONS: readonly string[] = ['ai.read', 'ai.rerun', 'ai.outcome'];
 
+/** The actions that point at an appeal (and only at one). `appeal.view` may point at none: the list and the numbers are not about one. */
+const APPEAL_ACTIONS: readonly string[] = ['appeal.view', 'appeal.decide'];
+
+/** The actions that cannot be recorded without a target. */
+const TARGET_REQUIRED: readonly string[] = [...AI_ACTIONS, 'appeal.decide', 'name.rename_required'];
+
 /** An actor that is the AI itself, not a person: `ai:` and the adapter's id (`ai:anthropic:claude-haiku-5-5`). */
 const AI_ACTOR_PREFIX = 'ai:';
 
 /** The actions whose row carries an {@link AuditDetail}, and the only ones that may. */
 const DETAIL_ACTIONS: readonly string[] = ['policy.update', 'policy.reset'];
 
-/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id or a saved reason id. */
-export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason'] as const;
+/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id, a saved reason id or an appeal id. */
+export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal'] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
 export interface AuditTarget {
@@ -236,11 +249,13 @@ function parse(input: unknown): AuditRecordInput | null {
     return null;
   }
   const extra = parsedDetail === undefined ? {} : { detail: parsedDetail };
-  if (target === undefined) return AI_ACTIONS.includes(action) ? null : { actor, role: roleOut, action, ...extra };
+  if (target === undefined) return TARGET_REQUIRED.includes(action) ? null : { actor, role: roleOut, action, ...extra };
   if (typeof target !== 'object' || target === null) return null;
   const { type, ref } = target as Record<string, unknown>;
   if (!isTargetType(type) || typeof ref !== 'string' || !REF_RE.test(ref)) return null;
   if (AI_ACTIONS.includes(action) && type !== 'report') return null;
+  if (APPEAL_ACTIONS.includes(action) && type !== 'appeal') return null;
+  if (action === 'name.rename_required' && type !== 'person') return null;
   return { actor, role: roleOut, action, target: { type, ref }, ...extra };
 }
 
