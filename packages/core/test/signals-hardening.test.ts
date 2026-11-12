@@ -219,3 +219,83 @@ describe('FC M4 and M5: flood_triggered', () => {
     expect(ids.some((id) => /^h[0-9a-f]{16}$/.test(id ?? ''))).toBe(true);
   });
 });
+
+describe('review M2: a failing signal read is logged once, by event name and error class', () => {
+  const readFailed = (w: SignalWorld): unknown[] => w.logged.filter(([e]) => e === 'chatwarden.signal_read_failed').map(([, d]) => d);
+  async function broken(feeds: unknown) {
+    const w = await sworld({ feeds: feeds as never });
+    const target = w.person('target');
+    w.store.listSignalSources = () => {
+      throw new TypeError('db is gone: ' + target);
+    };
+    w.logged.length = 0;
+    return { w, target };
+  }
+  const FEEDS = {
+    record: { kinds: '*', windowDays: 14 },
+    queue: { kinds: ['muted_by_player'], minDistinct: 3, windowDays: 14 },
+    ladder: [{ id: 'a-rule', effect: 'note', kinds: ['muted_by_player'], minDistinct: 3, windowDays: 14 }],
+    ai: { kinds: '*', windowDays: 14 },
+  };
+
+  it.each([
+    ['counts', (w: SignalWorld, t: string) => w.cw.signals.counts(t), []],
+    ['forRecord', (w: SignalWorld, t: string) => w.cw.signals.forRecord(t), []],
+    ['boosted', (w: SignalWorld, t: string) => [...w.cw.signals.boosted([t])], []],
+  ])('%s answers empty and logs the class only', async (_n, read, expected) => {
+    const { w, target } = await broken(FEEDS);
+    expect(read(w, target)).toEqual(expected);
+    expect(readFailed(w)).toEqual([{ error: 'TypeError' }]);
+    expect(JSON.stringify(w.logged)).not.toContain(target);
+    expect(JSON.stringify(w.logged)).not.toContain('db is gone');
+  });
+
+  it('the ladder and the AI context log too, and a burst of failures is one line a minute', async () => {
+    const { w, target } = await broken(FEEDS);
+    for (let i = 0; i < 20; i += 1) {
+      w.cw.signals.counts(target);
+      w.cw.signals.forRecord(target);
+    }
+    expect(readFailed(w)).toHaveLength(1);
+    w.clock.t += 61_000;
+    w.cw.signals.counts(target);
+    expect(readFailed(w)).toHaveLength(2);
+    expect(readFailed(w)[1]).toMatchObject({ error: 'TypeError', suppressed: 39 });
+  });
+
+  it('a healthy read logs nothing', async () => {
+    const w = await sworld({ feeds: FEEDS as never });
+    const target = w.person('target');
+    w.logged.length = 0;
+    w.cw.signals.counts(target);
+    w.cw.signals.forRecord(target);
+    w.cw.signals.boosted([target]);
+    expect(readFailed(w)).toEqual([]);
+  });
+});
+
+describe('review M3: signal_refused is throttled per reason', () => {
+  it('a burst of malformed records does not hide a store failure', async () => {
+    const w = await sworld();
+    const target = w.person('target');
+    w.logged.length = 0;
+    for (let i = 0; i < 5; i += 1) expect(rec(w, { kind: 5, subject: target })).toBe(false);
+    w.store.insertSignal = () => {
+      throw new TypeError('x');
+    };
+    expect(rec(w, { kind: 'muted_by_player', subject: target })).toBe(false);
+    const reasons = refusals(w).map((d) => (d as { reason: string }).reason);
+    expect(reasons).toEqual(['malformed', 'store_failed']);
+  });
+
+  it('the same reason is still one line a minute, with the count of what it held', async () => {
+    const w = await sworld();
+    const target = w.person('target');
+    w.logged.length = 0;
+    for (let i = 0; i < 4; i += 1) rec(w, { kind: 5, subject: target });
+    expect(refusals(w)).toHaveLength(1);
+    w.clock.t += 61_000;
+    rec(w, { kind: 5, subject: target });
+    expect(refusals(w)[1]).toMatchObject({ reason: 'malformed', suppressed: 3 });
+  });
+});

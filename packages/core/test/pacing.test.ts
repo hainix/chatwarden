@@ -847,3 +847,58 @@ describe('memory', () => {
     for (const h of hashes) expect(h).toMatch(/^[0-9a-f]{16}$/);
   });
 });
+
+// Review M1: the digest memo holds one line's text between `check` and `commit`. A line that passes `check` and is then refused by the fixed
+// rate never commits, so the caller discards it: no text outlives the call that carried it.
+describe('the digest memo never outlives the call', () => {
+  const warm = () => {
+    const { clock, pacer } = setup({ duplicateWindowMs: 60_000 });
+    const k: PaceKey = { roomId: 'room', who: 'person' };
+    pacer.check(k, 'the first line');
+    pacer.commit(k, 'the first line');
+    clock.t += 10;
+    return { clock, pacer, k };
+  };
+
+  it('holds nothing before any check, and nothing after a commit', () => {
+    const { pacer, k } = warm();
+    expect(pacer.holdsText()).toBe(false);
+    expect(pacer.check(k, 'a second line').ok).toBe(true);
+    expect(pacer.holdsText()).toBe(true);
+    pacer.commit(k, 'a second line');
+    expect(pacer.holdsText()).toBe(false);
+  });
+
+  it('discard drops what a check that passed holds, and a later commit of the same line still works', () => {
+    const { clock, pacer, k } = warm();
+    expect(pacer.check(k, 'a second line').ok).toBe(true);
+    expect(pacer.holdsText()).toBe(true);
+    pacer.discard();
+    expect(pacer.holdsText()).toBe(false);
+    pacer.discard();
+    clock.t += 10;
+    pacer.commit(k, 'a second line');
+    clock.t += 10;
+    expect(pacer.check(k, 'a second line')).toMatchObject({ ok: false, reason: 'duplicate' });
+  });
+
+  it('a refused check holds nothing, and the next check replaces what an earlier one held', () => {
+    const { pacer, k } = warm();
+    expect(pacer.check(k, 'the first line')).toMatchObject({ ok: false });
+    expect(pacer.holdsText()).toBe(false);
+    pacer.check(k, 'another one');
+    expect(pacer.holdsText()).toBe(true);
+    expect(pacer.check(k, 'the first line').ok).toBe(false);
+    expect(pacer.holdsText()).toBe(false);
+  });
+
+  it('with repeats off nothing is ever held', () => {
+    const { clock, pacer } = setup({ slowModeMs: 1000 });
+    const k: PaceKey = { roomId: 'room', who: 'person' };
+    pacer.check(k, 'a line');
+    pacer.commit(k, 'a line');
+    clock.t += 5000;
+    pacer.check(k, 'another line');
+    expect(pacer.holdsText()).toBe(false);
+  });
+});

@@ -92,7 +92,9 @@ export interface SignalRuntime {
 
 export class SignalService implements SignalRuntime {
   private readonly deps: SignalServiceDeps;
-  private readonly refusedWarn: ThrottledWarn;
+  /** One throttle per refusal reason, so a burst of `malformed` cannot hide a `store_failed` for a minute. */
+  private readonly refusedWarn = new Map<string, ThrottledWarn>();
+  private readonly readWarn: ThrottledWarn;
   private readonly ageWarn: ThrottledWarn;
   private unsupportedLogged = false;
   /** The account age the game's hook gave for a player, and when (see `accountFactor`). */
@@ -100,7 +102,7 @@ export class SignalService implements SignalRuntime {
 
   constructor(deps: SignalServiceDeps) {
     this.deps = deps;
-    this.refusedWarn = new ThrottledWarn(deps.logger, deps.clock);
+    this.readWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.ageWarn = new ThrottledWarn(deps.logger, deps.clock);
   }
 
@@ -136,7 +138,9 @@ export class SignalService implements SignalRuntime {
       const reason = err instanceof Refusal ? err.reason : 'malformed';
       if (quietCapped && reason === 'capped') return false;
       try {
-        this.refusedWarn.warn('chatwarden.signal_refused', err instanceof Refusal && err.detail !== undefined ? { reason, error: err.detail } : { reason });
+        let throttle = this.refusedWarn.get(reason);
+        if (throttle === undefined) this.refusedWarn.set(reason, (throttle = new ThrottledWarn(this.deps.logger, this.deps.clock)));
+        throttle.warn('chatwarden.signal_refused', err instanceof Refusal && err.detail !== undefined ? { reason, error: err.detail } : { reason });
       } catch {
         // The log must never change the answer.
       }
@@ -253,6 +257,15 @@ export class SignalService implements SignalRuntime {
     return typeof age === 'number' && Number.isFinite(age) && age >= 0 && age < rule.belowDays ? rule.factor : 1;
   }
 
+  /** A read that failed (a store fault) answers empty; it is said once a minute, by the error's class only. Never throws. */
+  private readFailed(err: unknown): void {
+    try {
+      this.readWarn.warn('chatwarden.signal_read_failed', { error: errorClass(err) });
+    } catch {
+      // The log must never change the answer.
+    }
+  }
+
   // --- reads ----------------------------------------------------------------------------------------------------
 
   /** The declared kinds, built-ins included. */
@@ -272,7 +285,8 @@ export class SignalService implements SignalRuntime {
       const asked = opts?.kinds;
       const kinds = this.kindsFor(Array.isArray(asked) ? (asked as unknown[]) : undefined);
       return this.countFor(subject, windowDays, kinds);
-    } catch {
+    } catch (err) {
+      this.readFailed(err);
       return [];
     }
   }
@@ -329,7 +343,8 @@ export class SignalService implements SignalRuntime {
         if (evaluateThreshold(list, { kinds, canonical: (s) => subjects.canonical(s) }, queue).met) out.add(person);
       }
       return out;
-    } catch {
+    } catch (err) {
+      this.readFailed(err);
       return new Set();
     }
   }
@@ -362,7 +377,8 @@ export class SignalService implements SignalRuntime {
         hits.push({ id: rule.id, effect: rule.effect, text: `${labels}: ${players} in ${days}` });
       }
       return hits;
-    } catch {
+    } catch (err) {
+      this.readFailed(err);
       return [];
     }
   }
@@ -382,7 +398,8 @@ export class SignalService implements SignalRuntime {
       if (feed === undefined || !this.supported) return [];
       const kinds = this.kindsFor(feed.kinds === '*' ? undefined : feed.kinds);
       return this.countFor(subject, this.windowOf(feed.windowDays), kinds);
-    } catch {
+    } catch (err) {
+      this.readFailed(err);
       return [];
     }
   }

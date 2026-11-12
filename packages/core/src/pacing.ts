@@ -34,6 +34,10 @@ export interface Pacer {
   commit(key: PaceKey, line: string): void;
   /** Is any check on for this room right now? When not, `check` and `commit` do nothing and the caller need not build a key. */
   active(roomId: string): boolean;
+  /** The line `check` accepted will not be committed (the fixed rate refused it): drop the digest memo that holds its text. */
+  discard(): void;
+  /** Is a line's text held in the digest memo (between a `check` that passed and its `commit` or `discard`)? A diagnostic. */
+  holdsText(): boolean;
   /** Forget every key of a room in one step. */
   dropRoom(roomId: string): void;
   /** Keys held. A diagnostic: it stays at or under {@link PACE_KEYS_MAX}. */
@@ -217,6 +221,12 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
       }
       memo = null;
     },
+
+    discard() {
+      memo = null;
+    },
+
+    holdsText: () => memo !== null,
 
     dropRoom(roomId) {
       const room = rooms.get(roomId);

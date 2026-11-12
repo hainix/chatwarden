@@ -385,7 +385,11 @@ export class ChatService {
     if (paced.refusal !== null) return paced.refusal;
     // Spent even when the line is then blocked, so a flood of slurs is throttled like any flood and cannot
     // probe the term list faster than ordinary chat.
-    if (!this.rate.check(rateKey)) return refuse('rate');
+    if (!this.rate.check(rateKey)) {
+      // The line passed pacing but never commits: the pacer must not keep its text.
+      this.paceDiscard(this.pacer);
+      return refuse('rate');
+    }
     // Past `rate` the line has happened as far as pacing is concerned (a blocked or profane line has spent its slot too).
     if (this.pacer !== undefined && paced.key !== null) this.paceCommit(this.pacer, paced.key, trimmed);
 
@@ -455,6 +459,14 @@ export class ChatService {
     } catch (err) {
       this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
       return NOT_PACED;
+    }
+  }
+
+  private paceDiscard(pacer: Pacer | undefined): void {
+    try {
+      pacer?.discard();
+    } catch (err) {
+      this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
     }
   }
 

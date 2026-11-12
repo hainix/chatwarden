@@ -1020,3 +1020,30 @@ describe('through the facade', () => {
     expect(cw.blocked.list({ days: 1 })).toHaveLength(0);
   });
 });
+
+describe('review M1: a rate-refused line leaves no text in the pacer', () => {
+  const pacerOf = (e: ReturnType<typeof setup>): { holdsText(): boolean } => (e.chat as unknown as { pacer: { holdsText(): boolean } }).pacer;
+
+  it('the line that passes pacing and is refused by rate is not held afterwards', () => {
+    const e = setup({ pace: { ...OFF, duplicateWindowMs: 60_000 } });
+    e.sit('p1', who('k1'));
+    for (const t of ['c1 line', 'c2 line', 'c3 line']) {
+      e.say('p1', t);
+      e.clock.t += 1;
+    }
+    expect(pacerOf(e).holdsText()).toBe(false);
+    expect(reasonOf(e.say('p1', 'refused by rate'))).toBe('rate');
+    expect(pacerOf(e).holdsText()).toBe(false);
+  });
+
+  it('a delivered line holds nothing either, and chat still works afterwards', () => {
+    const e = setup({ pace: { ...OFF, duplicateWindowMs: 60_000 } });
+    e.sit('p1', who('k1'));
+    e.say('p1', 'first');
+    e.clock.t += 5 * SEC;
+    expect(reasonOf(e.say('p1', 'a delivered line'))).toBe('deliver');
+    expect(pacerOf(e).holdsText()).toBe(false);
+    e.clock.t += 5 * SEC;
+    expect(reasonOf(e.say('p1', 'a delivered line'))).toBe('duplicate');
+  });
+});
