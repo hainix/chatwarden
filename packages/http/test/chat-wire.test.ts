@@ -26,6 +26,7 @@ const FRAMES: ChatFrame[] = [
   { type: 'notices' },
   { type: 'bye', reason: 'banned', until: 1_800_003_600_000 },
   { type: 'bye', reason: 'room_closed' },
+  { type: 'bye', reason: 'replaced' },
 ];
 
 /** Split an encoded event into its physical lines. */
@@ -275,9 +276,9 @@ describe('the wire types', () => {
       expectTypeOf(f.restriction).toEqualTypeOf<WireRestriction | null>();
     }
     const g = { type: 'bye', reason: 'shutdown' } as ChatFrame;
-    if (g.type === 'bye') expectTypeOf(g.reason).toEqualTypeOf<'banned' | 'room_closed' | 'shutdown'>();
+    if (g.type === 'bye') expectTypeOf(g.reason).toEqualTypeOf<'banned' | 'room_closed' | 'shutdown' | 'replaced'>();
     if (g.type === 'line') expectTypeOf(g.line).toEqualTypeOf<WireLine>();
     if (g.type === 'hide') expectTypeOf(g.ids).toEqualTypeOf<string[]>();
-    expect(FRAMES.map((x) => x.type)).toEqual(['hello', 'line', 'hide', 'state', 'notices', 'bye', 'bye']);
+    expect(FRAMES.map((x) => x.type)).toEqual(['hello', 'line', 'hide', 'state', 'notices', 'bye', 'bye', 'bye']);
   });
 });

@@ -143,13 +143,13 @@ describe('hello', () => {
     }
   });
 
-  it('stays under the 64 KiB a client reads: a profile with long lines trims the history oldest first', async () => {
-    const w = await chatWorld({ limits: { chatMaxLength: 1500 } });
+  it('stays under the 64 KiB a client reads: a profile with the longest lines (1 000) trims the history oldest first', async () => {
+    const w = await chatWorld({ limits: { chatMaxLength: 1000 } });
     const authors = ['plenk', 'wumbo', 'glarn', 'mivvo'].map((n) => w.join(ROOM, n));
     let i = 0;
     for (let round = 0; round < 13; round += 1) {
       for (const a of authors) {
-        const text = `${String(i).padStart(3, '0')} ` + 'x'.repeat(1400);
+        const text = `${String(i).padStart(3, '0')} ` + 'x'.repeat(980);
         const res = say(w, a, text);
         if (!res.ok) throw new Error(`refused ${res.refused.reason}`);
         i += 1;
@@ -179,6 +179,43 @@ describe('hello', () => {
     const late = spoken();
     a.session.open(late.sink);
     expect(late.of('hello')[0]?.lines).toHaveLength(50);
+  });
+});
+
+describe('line length ceiling', () => {
+  it('a chat length above what the box shows (1 000) is a RangeError at construction; 1 000 builds', async () => {
+    const ok = await chatWorld({ noBroadcaster: true, limits: { chatMaxLength: 1000 } });
+    expect(() => createRoomBroadcaster(ok.cw)).not.toThrow();
+    const over = await chatWorld({ noBroadcaster: true, limits: { chatMaxLength: 1001 } });
+    let message = '';
+    try {
+      createRoomBroadcaster(over.cw);
+    } catch (err) {
+      expect(err).toBeInstanceOf(RangeError);
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/chatMaxLength/);
+    expect(message).toMatch(/1000/);
+    expect(message).not.toContain('1001');
+  });
+});
+
+describe('one broadcast, one encoding', () => {
+  it('every stream that is not the author\'s is handed the very same frame object, so a sink can encode it once', async () => {
+    const w = await chatWorld();
+    const author = w.attend(ROOM, 'plenk');
+    const listeners = ['wumbo', 'glarn', 'mivvo'].map((n) => w.attend(ROOM, n));
+    const seen: object[] = [];
+    for (const l of listeners) {
+      const stream = l.session.open({ write: (f) => void (f.type === 'line' && seen.push(f)) });
+      void stream;
+    }
+    say(w, author.session, 'one broadcast');
+    expect(seen.length).toBe(3);
+    expect(new Set(seen).size).toBe(1);
+    // the author's own copy is different (it says mine)
+    expect(author.heard.of('line')[0]?.line.mine).toBe(true);
+    expect(JSON.stringify(seen[0])).not.toContain('mine');
   });
 });
 
@@ -436,6 +473,41 @@ describe('the muted list keeps players who left', () => {
     expect(muter.session.mute({ ref, on: false })).toBe(true);
     expect(w.cw.rooms.subjectAt(ROOM, w.seatOf(ROOM, 'plenk'))).toBeNull();
     void other;
+  });
+});
+
+describe('mute tokens are bounded under churn', () => {
+  const held = (w: Awaited<ReturnType<typeof chatWorld>>, ref: string): number => strings(inspectBroadcaster(w.chat)).filter((s) => s === ref).length;
+
+  it('muting and unmuting the same player over and over leaves no token behind', async () => {
+    const w = await chatWorld();
+    const author = w.attend(ROOM, 'plenk');
+    const muter = w.attend(ROOM, 'wumbo');
+    const line = say(w, author.session, 'a line');
+    if (!line.ok) throw new Error('refused');
+    for (let i = 0; i < 200; i += 1) {
+      expect(muter.session.mute({ lineId: line.line.id, on: true })).toBe(true);
+      const ref = muter.heard.of('state').at(-1)?.muted[0]?.ref as string;
+      expect(held(w, ref)).toBe(2); // a token is held once in each direction while it is in use
+      expect(muter.session.mute({ ref, on: false })).toBe(true);
+      expect(held(w, ref)).toBe(0);
+    }
+  });
+
+  it('a token for a seat the kit no longer lists as muted (it expired, or another tab undid it) is dropped at the next listing', async () => {
+    const w = await chatWorld();
+    const author = w.attend(ROOM, 'plenk');
+    const muter = w.attend(ROOM, 'wumbo');
+    const line = say(w, author.session, 'a line');
+    if (!line.ok) throw new Error('refused');
+    muter.session.mute({ lineId: line.line.id, on: true });
+    const ref = muter.heard.of('state')[0]?.muted[0]?.ref as string;
+    expect(held(w, ref)).toBe(2);
+    w.cw.mutes.set(ROOM, w.seatOf(ROOM, 'wumbo'), w.seatOf(ROOM, 'plenk'), false); // undone behind the broadcaster's back
+    const heard = spoken();
+    muter.session.open(heard.sink);
+    expect(heard.of('hello')[0]?.muted).toEqual([]);
+    expect(held(w, ref)).toBe(0);
   });
 });
 

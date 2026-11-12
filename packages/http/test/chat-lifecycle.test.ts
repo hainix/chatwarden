@@ -298,8 +298,11 @@ describe('limits', () => {
     b.open(bs.sink);
     const third = a.open(sinks[2].sink);
     expect('close' in third).toBe(true);
-    // the oldest was ended (its sink told), the second and third stay, the other player is untouched
+    // the oldest was told why and then ended (its sink told), the second and third stay, the other player is untouched
     expect(sinks.map((s) => s.ended)).toEqual([1, 0, 0]);
+    expect(sinks[0].frames.at(-1)).toEqual({ type: 'bye', reason: 'replaced' });
+    expect(sinks[1].of('bye')).toEqual([]);
+    expect(sinks[2].of('bye')).toEqual([]);
     expect(bs.ended).toBe(0);
     expect(w.chat.stats().streams).toBe(3);
     // the evicted stream hears nothing more and its own close is harmless

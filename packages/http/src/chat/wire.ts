@@ -97,8 +97,11 @@ export type ChatFrame =
   | { type: 'state'; restriction: WireRestriction | null; muted: WireMuted[] }
   /** A notice is waiting for this player: ask the player routes for it. Carries nothing else. */
   | { type: 'notices' }
-  /** The server is ending this stream. `banned` carries when the ban ends. */
-  | { type: 'bye'; reason: 'banned' | 'room_closed' | 'shutdown'; until?: number | null };
+  /**
+   * The server is ending this stream. `banned` carries when the ban ends. `replaced`: this player opened more streams than `maxStreamsPerMember`
+   * allows and this was the oldest, so a client treats it as closed and does not reconnect by itself (a flap loop between tabs otherwise).
+   */
+  | { type: 'bye'; reason: 'banned' | 'room_closed' | 'shutdown' | 'replaced'; until?: number | null };
 
 /** @experimental */
 export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: WireRefusal };

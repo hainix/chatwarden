@@ -87,7 +87,9 @@ describe('every route and status in the table', () => {
       expect(res.status).toBe(200);
       const fresh = w.listen(res);
       expect(old.sink.ended).toBe(true);
+      expect(old.text()).toContain('event: bye\ndata: {"type":"bye","reason":"replaced"}');
       expect(fresh.sink.ended).toBe(false);
+      expect(fresh.text()).not.toContain('replaced');
       expect(w.chat.stats().streams).toBe(1);
     });
 

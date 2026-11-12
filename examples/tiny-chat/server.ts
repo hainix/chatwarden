@@ -71,6 +71,8 @@ import { createProfanityFilter } from '@chatwarden/profanity';
 import { openStore } from '@chatwarden/store-sqlite';
 
 const ROOM = 'lobby';
+/** The most players the chat demo numbers (it keeps a small table in memory). Under the broadcaster's 500 per room. */
+const MAX_DEMO_PLAYERS = 400;
 const GAME_NAME = 'tiny-chat';
 const CATEGORIES = ['harassment', 'hate', 'cheating', 'spam', 'disruption', 'other'] as const;
 type Category = (typeof CATEGORIES)[number];
@@ -453,10 +455,13 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
           const key = credentialOf(req);
           return { ...(key === undefined ? {} : { clientKey: key }), ip: req.remoteAddress ?? null };
         },
-        join: (req) => {
+        join: (req, roomId) => {
+          // The demo has one room: a room id from the URL does not make a room, and the table of numbered players is bounded.
+          if (roomId !== ROOM) return null;
           const key = credentialOf(req) ?? '';
           let n = players.get(key);
           if (n === undefined) {
+            if (players.size >= MAX_DEMO_PLAYERS) return null;
             n = players.size + 1;
             players.set(key, n);
           }

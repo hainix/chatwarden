@@ -318,3 +318,34 @@ describe('close', () => {
     server = await startServer({ port: 0, secret: 'chat-test-secret-not-for-production', discordWebhookUrl: '' });
   });
 });
+
+describe('the demo join', () => {
+  beforeAll(async () => {
+    await boot();
+  });
+
+  it('opens the demo room only: any other room id is 403 for a stream and a line', async () => {
+    const stream = await fetch(`${base}/chat/rooms/some-other-room/stream`, { headers: as('rooma') });
+    expect(stream.status).toBe(403);
+    await stream.body?.cancel();
+    const line = await post('rooma', 'lines', { text: 'hello' }, 'some-other-room');
+    expect(line.status).toBe(403);
+    expect((await post('rooma', 'lines', { text: 'hello' })).status).toBe(200);
+  });
+
+  it('does not grow without bound: the table of players it numbers is capped, and past the cap a new key is refused', async () => {
+    await boot();
+    let refused = 0;
+    for (let i = 0; i < 1100; i += 1) {
+      const res = await fetch(`${base}/chat/rooms/${ROOM}/stream`, { headers: { 'x-chatwarden-key': `demo-key-cap-${i}-0001-secret` } });
+      await res.body?.cancel();
+      if (res.status === 403) refused += 1;
+    }
+    expect(refused).toBe(1100 - 400); // the first 400 keys are numbered and let in, the rest are not
+    // a key that was already numbered still gets in
+    const again = await fetch(`${base}/chat/rooms/${ROOM}/stream`, { headers: { 'x-chatwarden-key': 'demo-key-cap-0-0001-secret' } });
+    expect(again.status).toBe(200);
+    await again.body?.cancel();
+  }, 60_000);
+});
+

@@ -12,7 +12,7 @@ import type { KitRequest, KitResponse } from '../types.js';
 import type { ChatMember, ChatSession, RoomBroadcaster } from './broadcaster.js';
 import { randomHex } from './random.js';
 import { encodeFrame, HEARTBEAT } from './sse.js';
-import type { WireRefusal } from './wire.js';
+import type { ChatFrame, WireRefusal } from './wire.js';
 
 /** @experimental */
 export interface ChatRoutesOptions {
@@ -112,6 +112,16 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
   const opens = new Limiter(checkLimit(options.openRateLimit, DEFAULT_OPEN_LIMIT, 'chatRoutes: openRateLimit'));
   // Limiter keys: a salted hash of the caller's identity, per instance and in memory only. The same shape as a seat id; never a credential.
   const hasher = makeHasher(randomHex(16));
+  // A frame is encoded once however many streams it goes to: the broadcaster hands every non-author stream the same frame object.
+  const encoded = new WeakMap<object, string>();
+  const encode = (frame: ChatFrame): string => {
+    let text = encoded.get(frame);
+    if (text === undefined) {
+      text = encodeFrame(frame);
+      encoded.set(frame, text);
+    }
+    return text;
+  };
 
   /** The caller, as a fresh object of the known fields only. Fails closed to nobody. */
   const identify = async (req: KitRequest): Promise<RawWho> => {
@@ -223,7 +233,7 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
             let opened: ReturnType<ChatSession['open']>;
             try {
               opened = entered.open({
-                write: (frame) => sink.write(encodeFrame(frame)),
+                write: (frame) => sink.write(encode(frame)),
                 ping: () => sink.write(HEARTBEAT),
                 end: () => sink.end(),
               });

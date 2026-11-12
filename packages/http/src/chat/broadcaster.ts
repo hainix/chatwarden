@@ -155,6 +155,8 @@ export const ROOM_BROADCASTER_DEFAULTS = {
 const DEFAULTS = ROOM_BROADCASTER_DEFAULTS;
 
 const NAME_MAX = 32;
+/** The longest line the chat box shows whole (the client cuts any text at this). */
+const CHAT_LINE_MAX = 1000;
 /** The `hello` is trimmed (oldest lines first) to this many bytes of JSON: a client drops any frame over 64 KiB. */
 const HELLO_MAX_BYTES = 48 * 1024;
 const REF_LENGTH = 8;
@@ -244,6 +246,12 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
   const kitChat = (cw as { chat?: { restrictedBySubject?: unknown } } | null | undefined)?.chat;
   if (typeof kitChat !== 'object' || kitChat === null || typeof kitChat.restrictedBySubject !== 'function') {
     throw new TypeError('createRoomBroadcaster: the kit has no chat.restrictedBySubject; use a version of @chatwarden/core that has it');
+  }
+  // The chat box shows a line of up to 1 000 characters and clips any longer one; refuse a kit configured for more rather than deliver lines the
+  // box cannot show whole.
+  const chatMaxLength = (cw as { limits?: { chatMaxLength?: unknown } }).limits?.chatMaxLength;
+  if (typeof chatMaxLength === 'number' && chatMaxLength > CHAT_LINE_MAX) {
+    throw new RangeError(`createRoomBroadcaster: the chat box shows lines of up to ${CHAT_LINE_MAX} characters; set limits.chatMaxLength to ${CHAT_LINE_MAX} or less`);
   }
   const history = resolveHistory(options.history);
   const maxMembers = whole(options.maxMembers, 'maxMembers', DEFAULTS.maxMembers, 1, 100_000);
@@ -500,9 +508,27 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     if (room.ghosts.delete(targetSeat)) unseatSeat(room, targetSeat);
   }
 
+  /** Forget the token held for a seat the player no longer mutes. */
+  function dropRef(member: MemberRec, targetSeat: string): void {
+    const ref = member.refByTarget.get(targetSeat);
+    if (ref === undefined) return;
+    member.refByTarget.delete(targetSeat);
+    member.targetByRef.delete(ref);
+  }
+
   function mutedOf(room: RoomRec, member: MemberRec): WireMuted[] {
     const out: WireMuted[] = [];
-    for (const seat of mutedSeatsOf(room, member)) {
+    let listed: string[];
+    try {
+      listed = cw.mutes.mutedSeats(room.id, member.seat);
+    } catch (err) {
+      warn('chatwarden.chat_mutes_failed', err);
+      return out;
+    }
+    // A token for a seat the kit no longer lists (undone in another tab, or expired) is dropped: the maps stay as small as the mute list.
+    const still = new Set(listed);
+    for (const target of [...member.refByTarget.keys()]) if (!still.has(target)) dropRef(member, target);
+    for (const seat of listed) {
       const name = room.members.get(seat)?.name ?? room.ghosts.get(seat);
       if (name === undefined) continue;
       hold(room, member.seat, seat);
@@ -669,7 +695,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         // lock them out. Otherwise the process-wide limit applies.
         const oldest = member.streams.size >= maxStreamsPerMember ? member.streams.values().next().value : undefined;
         if (oldest === undefined && streamCount >= maxStreams) return { refused: { reason: 'full' } };
-        if (oldest !== undefined) dropStream(oldest, false, true);
+        if (oldest !== undefined) endStream(oldest, { type: 'bye', reason: 'replaced' });
         const rec: StreamRec = { member, sink, closed: false, backlog: 0 };
         member.streams.add(rec);
         streamCount += 1;
@@ -705,11 +731,14 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         const at = now();
         room.ring.append({ id, at, seat: member.seat, name: member.name, text: delivered.text });
         const base = { id, at, name: member.name, text: delivered.text };
+        // One frame object for every stream that is not the author's, so a sink can encode it once. A sink must not change a frame it is given.
+        const shared: ChatFrame = { type: 'line', line: wireLine(base, false) };
         for (const other of [...room.members.values()]) {
           if (other.streams.size === 0) continue;
           const mine = other.seat === member.seat;
           if (!mine && !visible(room.id, other.seat, member.seat)) continue;
-          writeAll(other, () => ({ type: 'line', line: wireLine(base, mine) }));
+          if (mine) writeAll(other, () => ({ type: 'line', line: wireLine(base, true) }));
+          else writeAll(other, () => shared);
         }
         return { ok: true, line: { ...wireLine(base, true), mine: true } };
       },
@@ -743,7 +772,10 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         const after = mutedSeatsOf(room, member).includes(target);
         if (after !== on) return none; // the kit did nothing (a seat with no person, or the viewer's list is full)
         if (on) hold(room, member.seat, target);
-        else release(room, member.seat, target);
+        else {
+          release(room, member.seat, target);
+          dropRef(member, target);
+        }
         const ids = on ? room.ring.bySeat(target).map((l) => l.id) : [];
         if (before !== after) {
           if (ids.length > 0) writeAll(member, () => ({ type: 'hide', ids: [...ids] }));
