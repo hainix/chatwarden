@@ -82,6 +82,7 @@ export type {
   ChatSession,
   ChatSink,
   ChatStream,
+  MuteResult,
   MuteTarget,
   ReportOutcome,
   RoomBroadcaster,

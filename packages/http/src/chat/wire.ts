@@ -102,6 +102,13 @@ export type ChatFrame =
 export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: WireRefusal };
 /** @experimental */
 export type MuteTarget = { lineId: string } | { ref: string };
+/**
+ * The answer to a mute. `ok`: the kit holds the mute (or the unmute) now. `hiddenIds`: when it muted, the ids of the muted player's lines that are
+ * still in the room's history, oldest first (the same ids as the `hide` frame), so a client can hide exactly those without waiting for the
+ * stream; empty for an unmute and for anything that did nothing. At most the history size.
+ * @experimental
+ */
+export type MuteResult = { ok: boolean; hiddenIds: string[] };
 /** @experimental */
 export type ReportOutcome =
   | { ok: true; remaining: number }

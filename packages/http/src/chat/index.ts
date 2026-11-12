@@ -6,6 +6,6 @@ export { chatRoutes } from './routes.js';
 export type { ChatRoutesOptions } from './routes.js';
 export { encodeFrame, HEARTBEAT } from './sse.js';
 export { CHAT_WIRE_VERSION, refusalOf } from './wire.js';
-export type { ChatFrame, MuteTarget, ReportOutcome, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from './wire.js';
+export type { ChatFrame, MuteResult, MuteTarget, ReportOutcome, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from './wire.js';
 export type { KitStream } from '../types.js';
 export type { NamesRateLimit } from '../limiter.js';

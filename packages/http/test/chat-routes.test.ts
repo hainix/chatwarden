@@ -339,14 +339,14 @@ describe('every route and status in the table', () => {
       const heard = w.listen(await w.stream(ROOM, w.as('wumbo')));
       const muted = await w.post(ROOM, 'mute', w.as('wumbo'), { lineId, on: true });
       expect(muted.status).toBe(200);
-      expect(body(muted)).toEqual({ ok: true });
+      expect(body(muted)).toEqual({ ok: true, hiddenIds: [lineId] });
       expectSafeHeaders(muted);
       const state = /event: state\ndata: (.*)\n/.exec(heard.text());
       const ref = (JSON.parse(state?.[1] ?? '{}') as { muted: Array<{ ref: string }> }).muted[0]?.ref as string;
       const unmuted = await w.post(ROOM, 'mute', w.as('wumbo'), { ref, on: false });
-      expect(body(unmuted)).toEqual({ ok: true });
-      expect(body(await w.post(ROOM, 'mute', w.as('wumbo'), { ref, on: false }))).toEqual({ ok: false });
-      expect(body(await w.post(ROOM, 'mute', w.as('wumbo'), { lineId: 'nope', on: true }))).toEqual({ ok: false });
+      expect(body(unmuted)).toEqual({ ok: true, hiddenIds: [] });
+      expect(body(await w.post(ROOM, 'mute', w.as('wumbo'), { ref, on: false }))).toEqual({ ok: false, hiddenIds: [] });
+      expect(body(await w.post(ROOM, 'mute', w.as('wumbo'), { lineId: 'nope', on: true }))).toEqual({ ok: false, hiddenIds: [] });
     });
 
     it('400 for a body that is wrong in shape', async () => {

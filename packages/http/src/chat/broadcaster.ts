@@ -10,7 +10,7 @@ import { createRing, HISTORY_LINES_DEFAULT, resolveHistory } from './history.js'
 import type { Ring } from './history.js';
 import { randomHex, randomToken } from './random.js';
 import { CHAT_WIRE_VERSION, refusalOf } from './wire.js';
-import type { ChatFrame, MuteTarget, ReportOutcome, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from './wire.js';
+import type { ChatFrame, MuteResult, MuteTarget, ReportOutcome, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from './wire.js';
 
 /**
  * The game's description of a player in a room.
@@ -73,6 +73,8 @@ export interface ChatSession {
   send(input: { text: string }): SendResult;
   /** Mute or unmute a player, named by one of their lines or by the token from `muted`. `false`: nothing to do. */
   mute(input: MuteTarget & { on: boolean }): boolean;
+  /** `mute`, with the ids of the lines it hid from this player (see `MuteResult`). The routes answer a mute with this. */
+  muteResult(input: MuteTarget & { on: boolean }): MuteResult;
   /** Report a line. The reporter is this session; the person is the line's author. Never rejects for a kit refusal. */
   report(input: { lineId: string; reason?: string; note?: string }): Promise<ReportOutcome>;
 }
@@ -236,6 +238,12 @@ const bye = (reason: 'banned' | 'room_closed' | 'shutdown'): ChatFrame => ({ typ
 export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOptions = {}): RoomBroadcaster {
   if (typeof options !== 'object' || options === null || Array.isArray(options)) {
     throw new TypeError('createRoomBroadcaster: options must be an object');
+  }
+  // The restriction is read by subject (the broadcaster keeps no credential to ask with), so the kit must have the method: an older core
+  // would otherwise read as "not restricted" for ever. Fail at construction, where the adopter is looking.
+  const kitChat = (cw as { chat?: { restrictedBySubject?: unknown } } | null | undefined)?.chat;
+  if (typeof kitChat !== 'object' || kitChat === null || typeof kitChat.restrictedBySubject !== 'function') {
+    throw new TypeError('createRoomBroadcaster: the kit has no chat.restrictedBySubject; use a version of @chatwarden/core that has it');
   }
   const history = resolveHistory(options.history);
   const maxMembers = whole(options.maxMembers, 'maxMembers', DEFAULTS.maxMembers, 1, 100_000);
@@ -641,7 +649,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       if (member.streams.size === 0) armGrace(room, member);
       return { room, member };
     };
-    return {
+    const session: ChatSession = {
       name,
 
       canOpen() {
@@ -706,8 +714,13 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       },
 
       mute(input): boolean {
+        return session.muteResult(input).ok;
+      },
+
+      muteResult(input): MuteResult {
+        const none: MuteResult = { ok: false, hiddenIds: [] };
         const found = live();
-        if (found === null || typeof input !== 'object' || input === null || typeof input.on !== 'boolean') return false;
+        if (found === null || typeof input !== 'object' || input === null || typeof input.on !== 'boolean') return none;
         const { room, member } = found;
         const on = input.on;
         let target: string | undefined;
@@ -718,26 +731,24 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
           // A token only ever names a seat this player has muted; anything else (another player's token, a stale one) does nothing.
           target = named !== undefined && mutedSeatsOf(room, member).includes(named) ? named : undefined;
         }
-        if (target === undefined || target === member.seat || !(room.members.has(target) || room.ghosts.has(target))) return false;
+        if (target === undefined || target === member.seat || !(room.members.has(target) || room.ghosts.has(target))) return none;
         const before = mutedSeatsOf(room, member).includes(target);
         try {
           cw.mutes.set(room.id, member.seat, target, on);
         } catch (err) {
           warn('chatwarden.chat_mute_failed', err);
-          return false;
+          return none;
         }
         const after = mutedSeatsOf(room, member).includes(target);
-        if (after !== on) return false; // the kit did nothing (a seat with no person, or the viewer's list is full)
+        if (after !== on) return none; // the kit did nothing (a seat with no person, or the viewer's list is full)
         if (on) hold(room, member.seat, target);
         else release(room, member.seat, target);
+        const ids = on ? room.ring.bySeat(target).map((l) => l.id) : [];
         if (before !== after) {
-          if (on) {
-            const ids = room.ring.bySeat(target).map((l) => l.id);
-            if (ids.length > 0) writeAll(member, () => ({ type: 'hide', ids: [...ids] }));
-          }
+          if (ids.length > 0) writeAll(member, () => ({ type: 'hide', ids: [...ids] }));
           writeAll(member, () => stateFor(room, member));
         }
-        return true;
+        return { ok: true, hiddenIds: [...ids] };
       },
 
       async report(input): Promise<ReportOutcome> {
@@ -765,6 +776,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         }
       },
     };
+    return session;
   }
 
   const api: RoomBroadcaster = {
@@ -798,6 +810,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
             if (answer !== null && answer.restricted && answer.kind === 'ban') {
               // A ban that lands while the player is connected ends their streams: the door refuses them from here on.
               for (const rec of [...member.streams]) endStream(rec, { type: 'bye', reason: 'banned', until: answer.until });
+              // Ending streams does not start the seat's grace (it is not a close by the player): do it, so the seat, the room and the ring go.
+              if (member.streams.size === 0 && room.members.get(member.seat) === member) armGrace(room, member);
               continue;
             }
             writeAll(member, () => ({ type: 'notices' }));

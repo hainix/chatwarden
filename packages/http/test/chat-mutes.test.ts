@@ -279,3 +279,62 @@ describe('a mute persists in the kit', () => {
     expect(late.of('hello')[0]?.lines).toEqual([]);
   });
 });
+
+describe('the mute answer names the lines it hid (hiddenIds)', () => {
+  it('muteResult returns the ids of the author\'s lines in the ring, the same ids as the hide frame, oldest first', async () => {
+    const { w, author, muter, firstId } = await scene();
+    say(w, author.session, 'plenk says two');
+    say(w, author.session, 'plenk says three');
+    const ids = author.heard.ids();
+    expect(ids).toHaveLength(3);
+    const result = muter.session.muteResult({ lineId: firstId, on: true });
+    expect(result).toEqual({ ok: true, hiddenIds: ids });
+    expect(muter.heard.of('hide')[0]?.ids).toEqual(result.hiddenIds);
+    // the answer is a copy: changing it changes nothing in the broadcaster
+    result.hiddenIds.push('forged');
+    expect(muter.session.muteResult({ lineId: firstId, on: true }).hiddenIds).toEqual(ids);
+  });
+
+  it('is capped by the ring: only the lines still in it are named', async () => {
+    const w = await chatWorld({ options: { history: { lines: 3 } } });
+    const author = w.attend(ROOM, 'plenk');
+    const muter = w.attend(ROOM, 'wumbo');
+    let last = '';
+    for (let i = 1; i <= 6; i += 1) {
+      const r = say(w, author.session, `line ${i}`);
+      if (r.ok) last = r.line.id;
+    }
+    const result = muter.session.muteResult({ lineId: last, on: true });
+    expect(result.ok).toBe(true);
+    expect(result.hiddenIds).toHaveLength(3);
+    expect(result.hiddenIds.at(-1)).toBe(last);
+  });
+
+  it('only the author\'s lines: other players\' lines are never named', async () => {
+    const { w, author, muter, other, firstId } = await scene();
+    say(w, other.session, 'glarn says something');
+    say(w, muter.session, 'wumbo says something');
+    const result = muter.session.muteResult({ lineId: firstId, on: true });
+    expect(result.hiddenIds).toEqual([firstId]);
+    void author;
+  });
+
+  it('muting again (already muted) still names them; unmuting, and anything that does nothing, name none', async () => {
+    const { muter, firstId } = await scene();
+    expect(muter.session.muteResult({ lineId: firstId, on: true }).hiddenIds).toEqual([firstId]);
+    expect(muter.session.muteResult({ lineId: firstId, on: true })).toEqual({ ok: true, hiddenIds: [firstId] });
+    expect(muter.session.muteResult({ lineId: firstId, on: false })).toEqual({ ok: true, hiddenIds: [] });
+    for (const bad of [{ lineId: 'nope', on: true }, { ref: 'aaaaaaaa', on: true }, { lineId: firstId }, null, undefined, 5]) {
+      expect(muter.session.muteResult(bad as never)).toEqual({ ok: false, hiddenIds: [] });
+    }
+    // muting yourself hides nothing
+    expect(muter.session.muteResult({ lineId: 'x', on: true }).hiddenIds).toEqual([]);
+  });
+
+  it('mute() is still the boolean of the same answer', async () => {
+    const { muter, firstId } = await scene();
+    expect(muter.session.mute({ lineId: firstId, on: true })).toBe(true);
+    expect(muter.session.mute({ lineId: 'nope', on: true })).toBe(false);
+  });
+});
+

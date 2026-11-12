@@ -77,7 +77,7 @@ function optionalText(body: Record<string, unknown>, key: string, max: number): 
  * The chat routes over a broadcaster. Mount them with `createRouter` / `toExpress`, under `/chat` for example:
  * - `GET /rooms/:room/stream`: `200 text/event-stream`, an open response of `ChatFrame`s (the first is `hello`). `401`, `403`, `429`.
  * - `POST /rooms/:room/lines { text }`: `200 SendResult` (a refusal is an answer, not an error). `400`, `401`, `403`, `413`, `429`.
- * - `POST /rooms/:room/mute { lineId | ref, on }`: `200 { ok }`.
+ * - `POST /rooms/:room/mute { lineId | ref, on }`: `200 { ok, hiddenIds }` (the ids of the lines it hid from this player; see `MuteResult`).
  * - `POST /rooms/:room/report { lineId, reason?, note? }`: `200 ReportOutcome`.
  * POST bodies must be `application/json`; any other content type is `400`, which is what stops a cross-site form from making a player speak.
  * Every response is `cache-control: no-store` (the stream's is `no-store, no-transform`, so a body-rewriting middleware leaves it alone).
@@ -267,8 +267,8 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
       const target = hasLine ? { lineId: tokenField(body.lineId) } : { ref: tokenField(body.ref) };
       const who = await caller(req, actions);
       const entered = await enter(req, params.room as string, who);
-      if ('banned' in entered) return ok({ ok: false });
-      return ok({ ok: entered.mute({ ...target, on: body.on }) });
+      if ('banned' in entered) return ok({ ok: false, hiddenIds: [] });
+      return ok(entered.muteResult({ ...target, on: body.on }));
     }),
 
     'POST /rooms/:room/report': route(async (req, params) => {

@@ -295,7 +295,7 @@ describe('the stream over real HTTP', () => {
     const sent = (await (await post(base, ROOM, 'lines', w.as('wumbo'), { text: 'hello from wumbo' })).json()) as { line: { id: string } };
     await until(() => c.events().some((e) => e.event === 'line'), 'the line');
     const muted = await post(base, ROOM, 'mute', w.as('plenk'), { lineId: sent.line.id, on: true });
-    expect(await muted.json()).toEqual({ ok: true });
+    expect(await muted.json()).toEqual({ ok: true, hiddenIds: [sent.line.id] });
     await until(() => c.events().some((e) => e.event === 'state'), 'state');
     expect(c.events().find((e) => e.event === 'hide')?.data).toEqual({ type: 'hide', ids: [sent.line.id] });
     const report = await post(base, ROOM, 'report', w.as('glarn'), { lineId: sent.line.id });

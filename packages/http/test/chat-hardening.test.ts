@@ -204,6 +204,61 @@ describe('a ban that lands mid-stream', () => {
   });
 });
 
+describe('after a ban ends the streams', () => {
+  it('the seat grace is armed, so the seat, the room and the ring are released', async () => {
+    const w = await chatWorld();
+    const banned = w.attend(ROOM, 'plenk');
+    const seat = w.seatOf(ROOM, 'plenk');
+    say(w, banned.session, 'a line before the ban');
+    await w.sanction('ban', ROOM, 'plenk', 3_600_000);
+    w.chat.noticePending(w.cw.rooms.subjectAt(ROOM, seat) as string);
+    expect(banned.heard.frames.at(-1)).toMatchObject({ type: 'bye', reason: 'banned' });
+    expect(w.chat.stats()).toEqual({ rooms: 1, members: 1, streams: 0 });
+    expect(w.pending()).toBe(1); // the seat grace; the heartbeat is gone with the last stream
+    w.advance(GRACE - 1);
+    expect(w.chat.stats().members).toBe(1);
+    w.advance(1);
+    expect(w.chat.stats()).toEqual({ rooms: 0, members: 0, streams: 0 });
+    expect(w.cw.rooms.subjectAt(ROOM, seat)).toBeNull();
+    expect(w.pending()).toBe(0);
+  });
+
+  it('with other players in the room, only the banned seat is released and the ring stays for them', async () => {
+    const w = await chatWorld();
+    const banned = w.attend(ROOM, 'plenk');
+    const stays = w.attend(ROOM, 'wumbo');
+    say(w, banned.session, 'a line before the ban');
+    await w.sanction('ban', ROOM, 'plenk', 3_600_000);
+    w.chat.noticePending(w.cw.rooms.subjectAt(ROOM, w.seatOf(ROOM, 'plenk')) as string);
+    w.advance(GRACE);
+    expect(w.chat.stats()).toEqual({ rooms: 1, members: 1, streams: 1 });
+    const late = spoken();
+    stays.session.open(late.sink);
+    expect(late.of('hello')[0]?.lines.map((l) => l.text)).toEqual(['a line before the ban']);
+  });
+});
+
+describe('the facade the broadcaster is built over', () => {
+  it('a kit without chat.restrictedBySubject is a TypeError at construction, not a silent "not restricted" later', async () => {
+    const w = await chatWorld({ noBroadcaster: true });
+    const old = Object.create(w.cw) as Chatwarden;
+    old.chat = { ...w.cw.chat, restrictedBySubject: undefined as never };
+    expect(() => createRoomBroadcaster(old)).toThrow(TypeError);
+    let message = '';
+    try {
+      createRoomBroadcaster(old);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/restrictedBySubject/);
+    expect(message).toMatch(/@chatwarden\/core/);
+    for (const bad of [undefined, null, 5, {}, { chat: {} }, { chat: { restrictedBySubject: 'no' } }]) {
+      expect(() => createRoomBroadcaster(bad as never)).toThrow(TypeError);
+    }
+    expect(() => createRoomBroadcaster(w.cw)).not.toThrow();
+  });
+});
+
 describe('visibility fails closed', () => {
   it('a visibleTo that throws hides the line from that viewer (a mute is a promise), keeps the author\'s own, and fails a report as not_found', async () => {
     let breakIt = false;
