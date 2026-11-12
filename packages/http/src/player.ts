@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { errorClass, playerReporting, safeWarn } from '@chatwarden/core';
-import type { Chatwarden, DocumentFormat, Logger, RawWho } from '@chatwarden/core';
+import type { Chatwarden, DocumentFormat, Logger, PlayerAppeal, RawWho } from '@chatwarden/core';
 import { bodyObject } from './admin/validate.js';
 import { DEFAULT_GAME_NAME } from './admin/policy.js';
-import { HttpError, ValidationError, withErrors } from './errors.js';
+import { HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
 import { checkLimit, Limiter } from './limiter.js';
 import type { NamesRateLimit } from './limiter.js';
 import type { RouteTable } from './router.js';
@@ -25,6 +25,11 @@ export interface PlayerOptions {
   contactUrl?: string;
   /** `POST /names/check` limit per identity. Default 20 per minute. Both must be positive whole numbers (`RangeError`). */
   namesRateLimit?: NamesRateLimit;
+  /**
+   * `POST /appeals` limit per identity, in front of the core's own checks so a script cannot hammer them. Default 10 per hour. Both must be
+   * positive whole numbers (`RangeError`). Malformed requests count. It is not the weekly cap (`profile.appeals.perPlayerPerWeek`, the core's).
+   */
+  appealsRateLimit?: NamesRateLimit;
   /** Where failures are logged (event and error class only). Defaults to `console.warn`. */
   logger?: Logger;
   /** Epoch-ms clock for the rate limit. Default `Date.now`. */
@@ -32,6 +37,7 @@ export interface PlayerOptions {
 }
 
 const DEFAULT_NAMES_LIMIT: NamesRateLimit = { max: 20, windowMs: 60_000 };
+const DEFAULT_APPEALS_LIMIT: NamesRateLimit = { max: 10, windowMs: 3_600_000 };
 const NAME_MAX = 64;
 
 const NO_STORE = { 'cache-control': 'no-store' } as const;
@@ -61,9 +67,17 @@ const known = (v: unknown): v is string => typeof v === 'string' && v !== '';
  * - `GET /code-of-conduct?format=html|markdown|text` (default markdown; anything else 400). The string body goes out
  *   with the `content-type` given here. HTML is a full document with a CSP of `default-src 'none'; style-src
  *   'unsafe-inline'`; every format has `x-content-type-options: nosniff`.
- * - `POST /names/check { name }` -> the core's answer. `name` is a string of 1..64 characters. Limited per identity
+ * - `POST /names/check { name }` -> the core's answer (`{ ok: true }` or `{ ok: false, reason, rule }`, the reason `name_not_allowed` or, with
+ *   `names.profanity` on, `name_profane`). `name` is a string of 1..64 characters. The caller is passed to the core so a blocked name can be
+ *   kept as evidence when the adopter opted in (`names.keepBlocked`); it never changes the answer. Limited per identity
  *   (default 20 a minute): 429 `rate_limited` with `retry-after` in seconds. The limiter holds a salted SHA-256 of the
  *   identity (account, else client key, else address; one shared bucket for nobody), never a raw value.
+ * - `GET /appeals` -> `{ appeals }`: the caller's own appeals, newest first, each `{ id, noticeId, status, createdAt, decidedAt }` (no reason,
+ *   no staff ref, no sanction or person id). Empty for an unknown or IP-only identity.
+ * - `POST /appeals { noticeId, statement }` -> 200 `{ appeal }`. 400 `invalid_statement`; 404 `not_found` (one answer for appeals off, a
+ *   notice that is not the caller's, one that is not an appealable sanction, and a malformed id); 409 `already_appealed`; 429 `rate_limited`
+ *   with `retry-after` in whole seconds (at least 1), either from the request limiter (`appealsRateLimit`, default 10 an hour per identity,
+ *   counting malformed bodies too) or the weekly cap. Both appeal routes are 404 `not_found` while appeals are off, and every answer is `no-store`.
  * An unknown, IP-only or failed identity gets empty lists and 200.
  */
 export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable {
@@ -78,6 +92,8 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
   cw.documents.codeOfConduct({ format: 'markdown', gameName, ...contact });
 
   const limiter = new Limiter(limit);
+  const appealsLimit = checkLimit(options.appealsRateLimit, DEFAULT_APPEALS_LIMIT, 'playerRoutes: appealsRateLimit');
+  const appealsLimiter = new Limiter(appealsLimit);
   // Per-instance, in memory only: the limiter keys cannot be recomputed or compared across restarts or processes.
   const salt = randomBytes(32);
   const keyFor = (who: RawWho): string => {
@@ -113,6 +129,16 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
   const personal = (body: unknown): KitResponse => ({ status: 200, headers: { ...NO_STORE }, body });
   const route = (handler: (req: KitRequest, params: Record<string, string>) => KitResponse | Promise<KitResponse>) =>
     withErrors(handler, logger);
+  /** A route whose every answer, error or not, is `no-store`: an appeal is personal and its refusals say something about the caller. */
+  const personalRoute = (handler: (req: KitRequest) => KitResponse | Promise<KitResponse>) => {
+    const guarded = withErrors(handler, logger);
+    return async (req: KitRequest): Promise<KitResponse> => {
+      const res = await guarded(req);
+      return { ...res, headers: { ...res.headers, ...NO_STORE } };
+    };
+  };
+  /** The documented fields of an appeal, copied by name: nothing else the core holds can reach a player. */
+  const playerAppeal = (a: PlayerAppeal): PlayerAppeal => ({ id: a.id, noticeId: a.noticeId, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt });
 
   return {
     'GET /notices': route(async (req) => personal({ notices: cw.notices.pending(await identify(req)) })),
@@ -158,6 +184,39 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
       };
     }),
 
+    'GET /appeals': personalRoute(async (req) => {
+      const who = await identify(req);
+      if (!cw.appeals.enabled()) throw new NotFoundError();
+      return personal({ appeals: cw.appeals.mine(who).map(playerAppeal) });
+    }),
+
+    'POST /appeals': personalRoute(async (req) => {
+      const who = await identify(req);
+      // Off reads as no route at all: nothing is counted and nothing about the body is looked at.
+      if (!cw.appeals.enabled()) throw new NotFoundError();
+      // Limit first, so malformed and refused requests count too.
+      const wait = appealsLimiter.hit(keyFor(who), now());
+      if (wait > 0) throw new HttpError('rate_limited', { 'retry-after': String(Math.max(1, Math.ceil(wait / 1000))) });
+      const body = bodyObject(req);
+      // A noticeId that is not a string reads as an id that matches nothing, and a statement that is not a string as an empty one: the
+      // core answers in its own order (not found before a bad statement), so ids cannot be probed with a bad statement.
+      const noticeId = typeof body.noticeId === 'string' ? body.noticeId : '';
+      const statement = typeof body.statement === 'string' ? body.statement : '';
+      const res = cw.appeals.file(who, { noticeId, statement });
+      if (res.ok) return personal({ appeal: playerAppeal(res.appeal) });
+      switch (res.refused) {
+        case 'statement_invalid':
+          throw new HttpError('invalid_statement');
+        case 'already_appealed':
+          throw new HttpError('already_appealed');
+        case 'rate':
+          throw new HttpError('rate_limited', { 'retry-after': String(Math.max(1, Math.ceil((res.retryAfterMs ?? 0) / 1000))) });
+        default:
+          // off, not_found and not_appealable: one answer, so a notice id cannot be probed.
+          throw new NotFoundError();
+      }
+    }),
+
     'POST /names/check': route(async (req) => {
       const who = await identify(req);
       // Limit first, so malformed and refused requests count too.
@@ -165,7 +224,7 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
       if (wait > 0) throw new HttpError('rate_limited', { 'retry-after': String(Math.ceil(wait / 1000)) });
       const name = bodyObject(req).name;
       if (typeof name !== 'string' || name.length < 1 || name.length > NAME_MAX) throw new ValidationError();
-      return personal(cw.names.check(name));
+      return personal(cw.names.check(name, { who }));
     }),
   };
 }

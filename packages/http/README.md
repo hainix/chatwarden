@@ -316,6 +316,8 @@ The minimum role for each action. These are defaults; override any of them with 
 | `reasons.read` | moderator | `GET /reasons`. |
 | `reasons.write` | senior | Adding, editing and switching saved reasons, and `POST /reports/:id/ai/dont-teach`. |
 | `settings` | owner | Reserved. No route uses it yet. |
+| `appeals.read` | moderator | `GET /appeals`, `GET /appeals/stats`, `GET /appeals/:id` (appeals are off until turned on). |
+| `appeals.decide` | senior | `POST /appeals/:id/decide`: uphold, reduce or revoke. A team of moderators lowers it with `permissions`. |
 
 ```ts
 adminRoutes(cw, { authorize, permissions: { 'sanctions.apply.ban_permanent': 'owner', 'audit.read': 'moderator' } });
@@ -344,12 +346,16 @@ error class only.
 | `invalid_term` | 400 | The matcher refused a term change. |
 | `invalid_gap_ref` | 400 | Closing a gap as `ruled` needs the number of an active rule. |
 | `invalid_idempotency_key` | 400 | The incoming webhook's key is missing or malformed. |
+| `invalid_statement` | 400 | An appeal statement is empty after cleaning, not text, or over 1000 characters (appeals are off until turned on). |
 | `duration_not_offered` | 400 | The profile has `customDuration` off and the length is not one it offers. |
 | `unauthorized` | 401 | `authorize` returned nobody, or a webhook signature did not verify. |
 | `forbidden` | 403 | The caller's role is below the permission's. |
 | `not_found` | 404 | No such id, path, or the group was already revoked. |
 | `method_not_allowed` | 405 | The path exists under other methods; the `allow` header lists them. |
-| `already_decided` | 409 | The report was decided already, differently. |
+| `already_decided` | 409 | The report (or the appeal) was decided already, differently. |
+| `already_appealed` | 409 | This sanction has had its appeal (one per sanction). |
+| `same_decider` | 409 | The moderator who made the decision cannot decide its appeal (`appeals.allowSelfReview` lifts this for a team of one). |
+| `gone` | 409 | The sanction an appeal was about is gone (revoked meanwhile); the appeal is closed as moot. |
 | `conflict` | 409 | The profile settings changed since the caller loaded them (`PUT` or `DELETE /policy/profile` with an old `version`). |
 | `claimed` | 409 | Another moderator holds the case. The body also has `by` (who) and `until` (when the claim lapses, epoch ms). |
 | `ai_off` | 409 | `POST /reports/:id/ai/read` while the AI is not reading (level 0, no adapter, or the report is decided). |
