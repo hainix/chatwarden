@@ -477,9 +477,24 @@ export class MemoryStore implements Store {
     }
   }
 
+  /** A stale owner's call was still paid for: book its cost to its own attempt's ledger entry, once. Nothing else changes. */
+  private bookStale(row: AiReadRow, lease: number, usage: AiCallUsage | undefined): void {
+    if (usage === undefined || lease >= row.attempts) return;
+    const entry = this.aiSpend.find((e) => e.readId === row.id && e.attempt === lease);
+    if (entry === undefined || entry.micros !== 0) return;
+    entry.micros = usage.costMicros;
+    this.undoWith(() => {
+      entry.micros = 0;
+    });
+  }
+
   completeAiRead(id: string, lease: number, result: AiReadDone): boolean {
     const row = this.aiReads.find((r) => r.id === id);
-    if (row === undefined || row.status !== 'pending' || row.attempts !== lease) return false;
+    if (row === undefined) return false;
+    if (row.status !== 'pending' || row.attempts !== lease) {
+      this.bookStale(row, lease, result);
+      return false;
+    }
     const before = { ...row };
     Object.assign(row, {
       status: 'ok',
@@ -504,7 +519,11 @@ export class MemoryStore implements Store {
     usage?: AiCallUsage,
   ): boolean {
     const row = this.aiReads.find((r) => r.id === id);
-    if (row === undefined || row.status !== 'pending' || row.attempts !== lease) return false;
+    if (row === undefined) return false;
+    if (row.status !== 'pending' || row.attempts !== lease) {
+      this.bookStale(row, lease, usage);
+      return false;
+    }
     const before = { ...row };
     Object.assign(row, { status, errorKind, retryAt, leaseUntil: null });
     this.undoWith(() => Object.assign(row, before));
@@ -534,7 +553,7 @@ export class MemoryStore implements Store {
     return out;
   }
 
-  listAiRetries(now: number, limit: number): AiReadRow[] {
+  listAiRetries(now: number, limit: number | undefined): AiReadRow[] {
     return this.aiReads
       .filter(
         (r) =>
@@ -542,7 +561,7 @@ export class MemoryStore implements Store {
           (r.status === 'pending' && r.leaseUntil !== null && r.leaseUntil <= now),
       )
       .sort((a, b) => a.createdAt - b.createdAt || compare(a.id, b.id))
-      .slice(0, clampLimit(limit))
+      .slice(0, pageSize(limit, RETRIES_DEFAULT_LIMIT))
       .map((r) => structuredClone(r));
   }
 
@@ -583,8 +602,8 @@ export class MemoryStore implements Store {
     return true;
   }
 
-  aiExamples(rule: string, severity: string, limit: number, since: number): AiExampleRow[] {
-    const n = clampLimit(limit);
+  aiExamples(rule: string, severity: string, limit: number | undefined, since: number): AiExampleRow[] {
+    const n = pageSize(limit, EXAMPLES_DEFAULT_LIMIT);
     const out: AiExampleRow[] = [];
     for (const r of [...this.aiOutcomes.values()].sort((a, b) => b.decidedAt - a.decidedAt || compare(b.reportId, a.reportId))) {
       if (out.length >= n) break;
@@ -1322,9 +1341,13 @@ export function createMemoryStore(): MemoryStore {
   return new MemoryStore();
 }
 
-/** A page size: a limit that is not finite or is below 1 counts as 1; at most 200. */
-function clampLimit(limit: number): number {
-  return Number.isFinite(limit) && limit >= 1 ? Math.min(200, Math.floor(limit)) : 1;
+/** The page sizes used when a limit is omitted, not finite or below 1. Local copies of core's: this package links no runtime core code. */
+const EXAMPLES_DEFAULT_LIMIT = 2;
+const RETRIES_DEFAULT_LIMIT = 20;
+
+/** A page size: the limit floored and capped at 200, or `fallback` when it is omitted, not finite or below 1. */
+function pageSize(limit: number | undefined, fallback: number): number {
+  return limit !== undefined && Number.isFinite(limit) && limit >= 1 ? Math.min(200, Math.floor(limit)) : fallback;
 }
 
 /** The newest `ok` row (`createdAt`, then `id`, both descending), as a copy; null when there is none. */

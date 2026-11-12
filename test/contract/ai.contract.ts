@@ -20,6 +20,10 @@ import type {
 // complete, fail, load, retry list, spend), the casebook outcomes (insert, mark, examples, stats) and their purge. One suite, run
 // against every Store; SqliteStore is the reference.
 
+/** The page sizes used when a limit is omitted, not finite or below 1 (the prompt takes at most 2 examples; the sweeper enqueues 20). */
+const EXAMPLES_DEFAULT = 2;
+const RETRIES_DEFAULT = 20;
+
 const MIN = 60_000;
 const H = 3_600_000;
 const DAY = 24 * H;
@@ -653,7 +657,7 @@ export function aiContract(name: string, make: () => Store): void {
         expect(b).toBe(2);
       });
 
-      it('a stale owner cannot complete a row that was taken over, and the new owner still can (its spend is booked)', () => {
+      it('a stale owner cannot complete a row that was taken over, and the new owner still can', () => {
         const s = ai(make());
         const { id, a, b } = takeOver(s);
         const token = s.changeToken();
@@ -662,7 +666,61 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.loadAiRead('r1')).toBeNull();
         expect(s.completeAiRead(id, b, done({ costMicros: 400, read: read({ summary: 'fresh' }) }))).toBe(true);
         expect(s.loadAiRead('r1')).toMatchObject({ status: 'ok', costMicros: 400, read: { summary: 'fresh' } });
-        expect(s.aiSpendSince(0)).toEqual({ micros: 400, calls: 2 });
+        expect(s.aiSpendSince(0)).toEqual({ micros: 700, calls: 2 }); // the stale 300 is booked as well
+      });
+
+      it('a stale owner that finishes with usage still has its paid call booked; the row keeps only the new owner result', () => {
+        const s = ai(make());
+        const { id, a, b } = takeOver(s);
+        const token = s.changeToken();
+        expect(s.completeAiRead(id, a, done({ costMicros: 300, inputTokens: 11, read: read({ summary: 'stale' }) }))).toBe(false);
+        expect(s.changeToken()).toBe(token);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 300, calls: 2 });
+        expect(s.completeAiRead(id, b, done({ costMicros: 700, inputTokens: 22, read: read({ summary: 'fresh' }) }))).toBe(true);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 1000, calls: 2 });
+        expect(s.loadAiRead('r1')).toMatchObject({ costMicros: 700, inputTokens: 22, read: { summary: 'fresh' }, attempts: 2 });
+      });
+
+      it('a stale owner that fails with usage is booked too, to the day of its own attempt', () => {
+        const s = ai(make());
+        const late = MIDNIGHT + DAY - 30_000;
+        const r1 = s.reserveAiRead(pending(), late + MIN, late);
+        const nextDay = MIDNIGHT + DAY + 2 * MIN;
+        const r2 = s.reserveAiRead(pending(), nextDay + 9 * MIN, nextDay);
+        if (!r1.reserved || !r2.reserved) throw new Error('expected two reservations');
+        expect(s.failAiRead(r1.id, r1.lease, 'invalid', 'invalid', null, usage({ costMicros: 250 }))).toBe(false);
+        expect(s.aiSpendSince(MIDNIGHT + DAY)).toEqual({ micros: 0, calls: 1 }); // day 2 holds only the new attempt
+        expect(s.aiSpendSince(MIDNIGHT)).toEqual({ micros: 250, calls: 2 });
+        expect(s.loadAiRead('r1')).toBeNull();
+        expect(s.completeAiRead(r2.id, r2.lease, done({ costMicros: 5 }))).toBe(true);
+        expect(s.loadAiRead('r1')?.costMicros).toBe(5);
+      });
+
+      it('a stale call is booked once: repeating it, or a second stale call, adds nothing more', () => {
+        const s = ai(make());
+        const { id, a } = takeOver(s);
+        expect(s.completeAiRead(id, a, done({ costMicros: 300 }))).toBe(false);
+        expect(s.completeAiRead(id, a, done({ costMicros: 300 }))).toBe(false);
+        expect(s.failAiRead(id, a, 'invalid', 'invalid', null, usage({ costMicros: 300 }))).toBe(false);
+        expect(s.aiSpendSince(0).micros).toBe(300);
+      });
+
+      it('a repeated call by the current owner after it finished is not booked again', () => {
+        const s = ai(make());
+        const id = reserve(s);
+        expect(complete(s, id, done({ costMicros: 40 }))).toBe(true);
+        expect(complete(s, id, done({ costMicros: 40 }))).toBe(false);
+        expect(fail(s, id, 'invalid', 'invalid', null, usage({ costMicros: 40 }))).toBe(false);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 40, calls: 1 });
+      });
+
+      it('a stale call for an unknown row or a future token books nothing', () => {
+        const s = ai(make());
+        const id = reserve(s);
+        expect(s.completeAiRead('nope', 1, done({ costMicros: 9 }))).toBe(false);
+        expect(s.completeAiRead(id, 9, done({ costMicros: 9 }))).toBe(false);
+        expect(s.failAiRead(id, 0, 'invalid', 'invalid', null, usage({ costMicros: 9 }))).toBe(false);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 0, calls: 1 });
       });
 
       it('a stale owner cannot fail a row the new owner is working on', () => {
@@ -672,7 +730,7 @@ export function aiContract(name: string, make: () => Store): void {
         const row = s.listAiRetries(NOW + 3 * MIN, 10);
         expect(row).toEqual([]); // still pending under B's live lease
         expect(s.completeAiRead(id, b, done({ costMicros: 5 }))).toBe(true);
-        expect(s.aiSpendSince(0).micros).toBe(5);
+        expect(s.aiSpendSince(0).micros).toBe(1004); // 999 from the stale owner, 5 from the new one
       });
 
       it('a stale owner cannot touch the row after the new owner has finished it either', () => {
@@ -743,14 +801,23 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.listAiRetries(NOW + 3 * MIN, 5)).toEqual([]);
       });
 
-      it('clamps the limit to at least 1', () => {
+      it('a limit is floored and used as given; at most 200', () => {
         const s = ai(make());
-        reserve(s, { reportId: 'a' }, NOW, NOW + MIN);
-        reserve(s, { reportId: 'b' }, NOW + 1, NOW + MIN);
-        expect(s.listAiRetries(NOW + 9 * MIN, 0)).toHaveLength(1);
-        expect(s.listAiRetries(NOW + 9 * MIN, -4)).toHaveLength(1);
+        for (let i = 0; i < 205; i++) reserve(s, { reportId: `lim${String(i).padStart(3, '0')}` }, NOW + i, NOW + MIN);
         expect(s.listAiRetries(NOW + 9 * MIN, 1.9)).toHaveLength(1);
+        expect(s.listAiRetries(NOW + 9 * MIN, 7)).toHaveLength(7);
+        expect(s.listAiRetries(NOW + 9 * MIN, 5000)).toHaveLength(200);
       });
+
+      it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -5, 0.4])(
+        'a limit of %s falls back to the default page of %i rows, the same as an omitted limit',
+        (limit) => {
+          const s = ai(make());
+          for (let i = 0; i < 25; i++) reserve(s, { reportId: `dflt${String(i).padStart(2, '0')}` }, NOW + i, NOW + MIN);
+          expect(s.listAiRetries(NOW + 9 * MIN, limit)).toHaveLength(RETRIES_DEFAULT);
+          expect(s.listAiRetries(NOW + 9 * MIN, undefined)).toHaveLength(RETRIES_DEFAULT);
+        },
+      );
     });
 
     describe('outcomes', () => {
@@ -894,24 +961,22 @@ export function aiContract(name: string, make: () => Store): void {
         expect(reportIds(s.aiExamples('3', 'hostile', 10, NOW - DAY + 1))).toEqual(['e3', 'e2', 'e1']);
       });
 
-      it('clamps the limit to at least 1', () => {
+      it('a limit is floored and used as given', () => {
         const s = ai(make());
-        s.insertAiOutcome(outcome({ reportId: 'a' }));
-        s.insertAiOutcome(outcome({ reportId: 'b' }));
-        expect(s.aiExamples('3', 'hostile', 0, 0)).toHaveLength(1);
-        expect(s.aiExamples('3', 'hostile', -3, 0)).toHaveLength(1);
+        for (let i = 0; i < 6; i++) s.insertAiOutcome(outcome({ reportId: `l${i}` }));
+        expect(s.aiExamples('3', 'hostile', 1.9, 0)).toHaveLength(1);
+        expect(s.aiExamples('3', 'hostile', 4, 0)).toHaveLength(4);
       });
 
-
-      it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -3, 0.4])('a limit of %s counts as 1, the same in every store', (limit) => {
-        const s = ai(make());
-        s.insertAiOutcome(outcome({ reportId: 'a' }));
-        s.insertAiOutcome(outcome({ reportId: 'b' }));
-        expect(s.aiExamples('3', 'hostile', limit, 0)).toHaveLength(1);
-        reserve(s, { reportId: 'x' }, NOW, NOW + MIN);
-        reserve(s, { reportId: 'y' }, NOW, NOW + MIN);
-        expect(s.listAiRetries(NOW + 9 * MIN, limit)).toHaveLength(1);
-      });
+      it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -5, 0.4])(
+        'a limit of %s falls back to the default of %i examples, the same as an omitted limit',
+        (limit) => {
+          const s = ai(make());
+          for (let i = 0; i < 6; i++) s.insertAiOutcome(outcome({ reportId: `d${i}` }));
+          expect(s.aiExamples('3', 'hostile', limit, 0)).toHaveLength(EXAMPLES_DEFAULT);
+          expect(s.aiExamples('3', 'hostile', undefined, 0)).toHaveLength(EXAMPLES_DEFAULT);
+        },
+      );
 
       it('aiTeachableCount counts every teachable example across rules, within the window', () => {
         const s = ai(make());

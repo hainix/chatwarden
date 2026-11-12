@@ -311,8 +311,13 @@ function detailFromRow(json: unknown): AiOutcomeRow['detail'] {
   return { ...EMPTY_DETAIL };
 }
 
-/** A page size: a limit that is not finite or is below 1 counts as 1; at most 200. */
-const clampLimit = (limit: number): number => (Number.isFinite(limit) && limit >= 1 ? Math.min(200, Math.floor(limit)) : 1);
+/** The page sizes used when a limit is omitted, not finite or below 1 (the memory store keeps the same two numbers). */
+const EXAMPLES_DEFAULT_LIMIT = 2;
+const RETRIES_DEFAULT_LIMIT = 20;
+
+/** A page size: the limit floored and capped at 200, or `fallback` when it is omitted, not finite or below 1. */
+const pageSize = (limit: number | undefined, fallback: number): number =>
+  limit !== undefined && Number.isFinite(limit) && limit >= 1 ? Math.min(200, Math.floor(limit)) : fallback;
 
 function aiOutcomeFromRow(r: Record<string, unknown>): AiOutcomeRow {
   const detail = detailFromRow(r.detail_json);
@@ -751,6 +756,20 @@ export class SqliteStore implements Store, TermStore {
     return { reserved: true, id: readId, lease: attempt };
   }
 
+  /**
+   * A stale owner's call was still paid for: book its cost to its own attempt's ledger entry, once (only an entry still at 0 takes
+   * it). The read row is not touched. Only an attempt that has been superseded (`lease` below the row's `attempts`) is booked.
+   */
+  private bookStale(id: string, lease: number, usage: AiCallUsage | undefined): void {
+    if (usage === undefined) return;
+    this.db
+      .prepare(
+        `UPDATE kit_ai_spend SET micros = ?
+         WHERE read_id = ? AND attempt = ? AND micros = 0 AND attempt < (SELECT attempts FROM kit_ai_reads WHERE id = ?)`,
+      )
+      .run(usage.costMicros, id, lease, id);
+  }
+
   /** Add what a call cost to its read row (cost and tokens summed over attempts) and to its ledger entry. */
   private addUsage(id: string, attempt: number, u: AiCallUsage): void {
     this.db
@@ -790,7 +809,10 @@ export class SqliteStore implements Store, TermStore {
             lease,
           ).changes,
       );
-      if (changed === 0) return false;
+      if (changed === 0) {
+        this.bookStale(id, lease, result);
+        return false;
+      }
       this.addUsage(id, lease, result);
       this.bump();
       return true;
@@ -814,7 +836,10 @@ export class SqliteStore implements Store, TermStore {
           )
           .run(status, errorKind, retryAt, id, lease).changes,
       );
-      if (changed === 0) return false;
+      if (changed === 0) {
+        this.bookStale(id, lease, usage);
+        return false;
+      }
       if (usage !== undefined) this.addUsage(id, lease, usage);
       // A skipped read was never a call: its attempt leaves the ledger.
       if (status === 'skipped') this.db.prepare('DELETE FROM kit_ai_spend WHERE read_id = ? AND attempt = ?').run(id, lease);
@@ -862,8 +887,8 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
-  listAiRetries(now: number, limit: number): AiReadRow[] {
-    const n = clampLimit(limit);
+  listAiRetries(now: number, limit: number | undefined): AiReadRow[] {
+    const n = pageSize(limit, RETRIES_DEFAULT_LIMIT);
     return this.transaction(() =>
       this.db
         .prepare(
@@ -944,8 +969,8 @@ export class SqliteStore implements Store, TermStore {
     });
   }
 
-  aiExamples(rule: string, severity: string, limit: number, since: number): AiExampleRow[] {
-    const n = clampLimit(limit);
+  aiExamples(rule: string, severity: string, limit: number | undefined, since: number): AiExampleRow[] {
+    const n = pageSize(limit, EXAMPLES_DEFAULT_LIMIT);
     return this.transaction(() =>
       this.db
         .prepare(

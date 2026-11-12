@@ -864,7 +864,7 @@ export interface Store {
    * Reports that are still `open`, OLDEST first (`createdAt` ascending, then `id` ascending, so a tie is stable), whole
    * records. `category` filters; `after` keeps only reports newer than that instant (exclusive), and with `afterId` also
    * the ones filed AT that instant whose id sorts above it (keyset paging: pass the last row's `createdAt` and `id`).
-   * `limit` is clamped to 1..200 (a fraction is floored); a limit that is not finite, or is below 1, counts as 1. The scan behind "take next".
+   * `limit` is clamped to 1..200 (a fraction is floored); a limit that is omitted, not finite or below 1 is the default of 2 (the prompt takes at most two examples). The scan behind "take next".
    */
   listOpenReports(q: OpenReportQuery): ReportRecord[];
 
@@ -1032,7 +1032,8 @@ export interface Store {
    * OPTIONAL. Store the validated read and the usage on a `pending` row: status `ok`, the lease cleared; cost and tokens are added to
    * the row, and the cost to this attempt's ledger entry. `lease` is the token `reserveAiRead` returned. True only when this call did
    * it; false (nothing changed) for an unknown row, one that is not `pending`, or one whose `attempts` is no longer `lease` (another
-   * caller took it over: a stale owner can neither finish nor fail the new owner's row). Moves the change token.
+   * caller took it over: a stale owner can neither finish nor fail the new owner's row). A stale owner's call was still paid for: its
+   * `result` cost is booked to its own attempt's ledger entry (once), and nothing else is touched. Moves the change token only on true.
    */
   completeAiRead?(id: string, lease: number, result: AiReadDone): boolean;
 
@@ -1041,8 +1042,8 @@ export interface Store {
    * a retry, the time it may be taken again (`retryAt`; null is final). The lease is cleared. `usage`, when the provider still
    * charged for the call (a refusal, an invalid answer, a failure after tokens were billed), is added to the row and to this attempt's
    * ledger entry, so it counts toward `aiSpendSince`. A `skipped` read was never a call: its ledger entry is removed. `lease` fences as
-   * in `completeAiRead`. True when this call did it; false for an unknown row, one that is not `pending`, or a stale `lease`. Does not
-   * move the change token.
+   * in `completeAiRead`, including the booking of a stale owner's `usage`. True when this call did it; false for an unknown row, one that
+   * is not `pending`, or a stale `lease`. Does not move the change token.
    */
   failAiRead?(
     id: string,
@@ -1069,9 +1070,9 @@ export interface Store {
   /**
    * OPTIONAL. The rows the sweeper should pick up at `now`, oldest first (`createdAt`, then `id`), at most `limit` (clamped to
    * 1..200): `failed` or `skipped` rows whose `retryAt` has come (`retryAt <= now`), and `pending` rows whose lease has ended
-   * (`leaseUntil <= now`: the process that held them died). `limit` as for `aiExamples`.
+   * (`leaseUntil <= now`: the process that held them died). `limit` is clamped to 1..200 (a fraction is floored); one that is omitted, not finite or below 1 is the default of 20 (what the sweeper enqueues at a time).
    */
-  listAiRetries?(now: number, limit: number): AiReadRow[];
+  listAiRetries?(now: number, limit: number | undefined): AiReadRow[];
 
   /**
    * OPTIONAL. What the attempts made at or after `since` cost: the sum of their `costMicros` (a failed attempt with usage included),
@@ -1102,7 +1103,7 @@ export interface Store {
    * stored, the AI recommended something (`agree` or `override`, not `none`), and the row is not `reversed`, `dontTeach` or `badFaith`.
    * `limit` is clamped to 1..200 (a fraction is floored).
    */
-  aiExamples?(rule: string, severity: string, limit: number, since: number): AiExampleRow[];
+  aiExamples?(rule: string, severity: string, limit: number | undefined, since: number): AiExampleRow[];
 
   /** OPTIONAL. How many teachable examples (see `aiExamples`) were decided at or after `since`. */
   aiTeachableCount?(since: number): number;
