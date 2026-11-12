@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { CommandBarProps } from './shell/CommandBar.js';
+import type { AiPartsProps } from './case/AiParts.js';
 import type { AiReadView } from './types.js';
 
 // Parts of the hub that few moderators open often are loaded the first time they are shown, so the hub's first load carries only
@@ -43,11 +44,13 @@ export const partLoaders: {
   sheet: () => Promise<ComponentType<{ onClose: () => void }>>;
   bar: () => Promise<ComponentType<CommandBarProps>>;
   strip: () => Promise<ComponentType<{ read: AiReadView | null }>>;
+  aiParts: () => Promise<ComponentType<AiPartsProps>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
   bar: () => import('./shell/CommandBar.js').then((m) => m.CommandBar),
   strip: () => import('./case/AiStrip.js').then((m) => m.AiStrip),
+  aiParts: () => import('./case/AiParts.js').then((m) => m.AiParts),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -102,6 +105,7 @@ const bulk = lazyPart(() => partLoaders.bulk());
 const sheet = lazyPart(() => partLoaders.sheet());
 const bar = lazyPart(() => partLoaders.bar());
 const strip = lazyPart(() => partLoaders.strip());
+const aiParts = lazyPart(() => partLoaders.aiParts());
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
@@ -109,6 +113,8 @@ export const LazyShortcutSheet = sheet.Part;
 export const LazyCommandBar = bar.Part;
 /** The AI's read on the case (the strip and its menu): loaded when a case has a read or expects one. */
 export const LazyAiStrip = strip.Part;
+/** The AI's suggestion on a case (level 2): the bar's header, and the Simple card's suggestion, Accept button and reason. */
+export const LazyAiParts = aiParts.Part;
 
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
@@ -116,6 +122,7 @@ export function resetLazyParts(): void {
   sheet.reset();
   bar.reset();
   strip.reset();
+  aiParts.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

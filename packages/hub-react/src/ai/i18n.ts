@@ -38,6 +38,24 @@ export const aiEn = {
   'hub.ai.error.budget': 'The AI has reached its limit for today.',
   'hub.ai.error.unavailable': 'The AI is not available right now.',
   'hub.ai.error.off': 'The AI is off.',
+
+  'hub.ai.bar.label': 'AI suggestion',
+  'hub.ai.bar.suggested': 'Suggested by AI',
+  'hub.ai.bar.edited': 'Edited',
+  'hub.ai.bar.unsure': 'The AI was not sure, so this is the usual starting point.',
+  'hub.ai.accept.with': 'Accept AI suggestion: {step}',
+  'hub.ai.accept.dismiss': 'Accept AI suggestion: no action needed',
+  'hub.ai.edit': 'Edit',
+  'hub.ai.suggest.title': 'The AI suggests',
+  'hub.ai.why.claimed': 'Another moderator has this case, so it cannot be accepted.',
+  'hub.ai.why.role': 'Your role cannot apply this step.',
+  'hub.ai.why.rules': 'The rules have not loaded yet.',
+  'hub.ai.why.stale': 'This read is out of date. A new one is on its way.',
+  'hub.ai.why.step': "The AI never fills a ban, an area ban or a step over 24 hours. The ladder's step is yours to add.",
+  'hub.ai.why.nostep': 'The AI named no step to fill. Choose one yourself.',
+  'hub.ai.why.invalid': 'This suggestion needs a change before it can be sent.',
+  'hub.ai.shortcuts.accept': 'Accept the AI suggestion',
+  'hub.ai.shortcuts.edit': 'Edit the AI suggestion',
 } as const;
 
 type PluralForm = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other';

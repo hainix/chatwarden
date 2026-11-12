@@ -133,6 +133,19 @@ describe('bundle size', () => {
     }
   });
 
+  it("keeps the AI's strip, its menu, its suggestion and their words out of the entry: they load when a case has a read to show", async () => {
+    const { entryInputs, chunkRoots } = await bundle();
+    // The strip and the suggestion parts, and the code that fills a form from a recommendation, are chunks of their own ...
+    for (const file of ['case/AiStrip.tsx', 'case/AiParts.tsx', 'ai/offer.ts']) {
+      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
+      expect(chunkRoots.filter((i) => i.endsWith(`src/${file}`)), `${file} has no chunk`).toHaveLength(1);
+    }
+    // ... and nothing they hold rides in the first load: not the menu, not the pre-fill, not their words, not the shortcut sheet's level.
+    for (const file of ['case/AiDetails.tsx', 'ai/prefill.ts', 'ai/i18n.ts', 'ai/level.ts']) {
+      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
+    }
+  });
+
   it('keeps the settings and admin screens out of the entry: each is a chunk of its own', async () => {
     const { entryInputs, chunkRoots } = await bundle();
     const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings'];

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAiOffer } from '../ai/load.js';
 import { toHubError } from '../client.js';
 import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
@@ -14,18 +15,19 @@ import {
   outcomeChoice,
   presets,
   resolveDraft,
+  shapeOf,
   validate,
   whyNotAdded,
   withSuggestion,
 } from '../decision.js';
-import type { Choice, DecisionForm, Draft, NotAdded, Problems, UiVerdict, ValidationContext } from '../decision.js';
+import type { AiFromState, Choice, DecisionForm, Draft, FormSource, NotAdded, Problems, UiVerdict, ValidationContext } from '../decision.js';
 import type { ReportPerson } from '../excerpt.js';
 import { useHubData } from '../hooks.js';
 import type { HubData } from '../hooks.js';
 import { outcomeLabel } from '../labels.js';
 import { lengthsOf } from '../policy/lengths.js';
 import type { LengthPolicy } from '../policy/lengths.js';
-import type { ConductLevel, PolicyDocs, ReportDetail, Suggestion } from '../types.js';
+import type { ConductLevel, DecideInput, PolicyDocs, ReportDetail, Suggestion } from '../types.js';
 
 // The decision form's state, kept above both the transcript (its margin boxes pick the lines the player sees) and the decision
 // bar. It starts from what the ladder suggests (so most decisions are a verdict, a reason and one key) and gives back the form
@@ -81,13 +83,19 @@ export interface DecisionDraft {
   primary: Draft | null;
   /** The AI level the hub is set to (0 off, 1 read, 2 recommend), from the policy; 0 when the role cannot read it. A hint that a read is on its way, nothing more. */
   aiLevel: number;
+  /** The AI's recommendation as this form was filled from it (with the read it came from), or null: the ladder's pre-fill. */
+  aiFrom: AiFromState | null;
+  /** Whose form it is: the ladder's, the AI's as it stands, or the AI's after the moderator changed anything. */
+  source: FormSource;
+  /** What a decision says about the AI read that was shown (`accepted` defaults to "the form is the AI's as it stands"), or undefined when none was shown. */
+  aiEcho: (accepted?: boolean, form?: DecisionForm) => NonNullable<DecideInput['ai']> | undefined;
 }
 
 /**
  * The form for the open report. `enabled` is false for a closed report or a role that cannot decide: then nothing is read, and
  * `status` stays `loading` (the bar shows its own message).
  */
-export function useDecisionForm({ detail, people, enabled }: { detail: ReportDetail | undefined; people: ReportPerson[]; enabled: boolean }): DecisionDraft {
+export function useDecisionForm({ detail, people, enabled, aiHidden = false }: { detail: ReportDetail | undefined; people: ReportPerson[]; enabled: boolean; aiHidden?: boolean }): DecisionDraft {
   const { t, locale, can, session, client } = useHub();
   const decisions = useDecisions();
   const report = detail?.report;
@@ -139,19 +147,56 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
   const current = suggestion ?? detail?.suggest;
   const reportedLine = report?.lineId ?? null;
 
+  // The AI's read of the case, as this moderator sees it (not hidden), and the code that fills a form from its recommendation, which
+  // comes the first time a case has one: the form waits for it, so it opens as the AI's rather than changing under the moderator's eyes.
+  const read = aiHidden ? null : (detail?.ai ?? null);
+  const wantsAi = enabled && read !== null && read.recommendation !== null;
+  const loader = useAiOffer(wantsAi);
+  const [aiFrom, setAiFrom] = useState<AiFromState | null>(null);
+  const [touched, setTouched] = useState(false);
+  const pristine = useRef<string | null>(null);
+  const askRef = useRef<((picked: ConductLevel | null, rule: number | null) => void) | null>(null);
+  /** Opens the form as the AI's, and asks the ladder what it gives for the AI's level, so "Add suggested step" is the ladder's for that level. */
+  const takeAi = (from: AiFromState, set: boolean): void => {
+    if (set) setFormState(from.form);
+    setAiFrom(from);
+    setTouched(false);
+    const same = (c: Choice | null): boolean => {
+      const ladder = detail === undefined ? null : outcomeChoice(detail.suggest.outcome);
+      return c === null || (ladder !== null && ladder.kind === c.kind && ladder.durationMs === c.durationMs);
+    };
+    if (!same(from.choice ?? from.held)) askRef.current?.(from.severity, from.rule === '' ? null : from.rule);
+  };
+
   // The form, once the rules are known (or known to be unavailable). After an Undo or a failed send, the form as it was.
-  const ready = enabled && report !== undefined && detail !== undefined && rulesState !== 'loading';
+  const ready = enabled && report !== undefined && detail !== undefined && rulesState !== 'loading' && (!wantsAi || loader.settled);
   useEffect(() => {
     if (!ready || formState !== null || detail === undefined) return;
+    const from = loader.offer?.prefillFrom(ctx, rules, read, detail.rule, nextUid()) ?? null;
     const before = decisions.entry(detail.report.id);
     if (before !== undefined && (before.state.status === 'failed' || before.state.status === 'undone')) {
       uids.current = Math.max(uids.current, ...before.snapshot.actions.map((a) => Number(a.uid.slice(1)) || 0));
       setFormState(before.snapshot);
+      // An untouched suggestion that was held and taken back is still the AI's.
+      if (from !== null && shapeOf(before.snapshot) === from.shape) takeAi(from, false);
       if (before.state.status === 'undone') decisions.dismiss(before.reportId);
       return;
     }
-    setFormState(initialForm(ctx, detail.suggest.outcome, detail.rule, reportedLine, nextUid()));
+    const ladder = initialForm(ctx, detail.suggest.outcome, detail.rule, reportedLine, nextUid());
+    pristine.current = shapeOf(ladder);
+    if (from === null) setFormState(ladder);
+    else takeAi(from, true);
   }, [ready]);
+
+  // The read arrived after the form was made, or a newer one came while the form is still untouched (the ladder's, or an earlier read's):
+  // the form becomes the AI's, once. A form the moderator has changed is never touched.
+  const edited = aiFrom !== null && (touched || (formState !== null && shapeOf(formState) !== aiFrom.shape));
+  useEffect(() => {
+    if (formState === null || detail === undefined || loader.offer === null || read === null || read.recommendation === null) return;
+    if (aiFrom === null ? shapeOf(formState) !== pristine.current : edited || aiFrom.readId === read.id) return;
+    const from = loader.offer.prefillFrom(ctx, rules, read, detail.rule, nextUid());
+    if (from !== null) takeAi(from, true);
+  }, [read?.id, loader.offer]);
 
   // The entry for this report: after an Undo the snapshot has been taken back (nothing stale is left to be restored over newer
   // edits), and when a send fails while the form is up, the form is what it was when Decide was pressed.
@@ -175,7 +220,10 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
   const formRef = useRef<DecisionForm | null>(formState);
   formRef.current = formState;
   const form = formState ?? emptyForm();
-  const setForm = useCallback((update: (f: DecisionForm) => DecisionForm): void => setFormState((f) => update(f ?? emptyForm())), []);
+  const setForm = useCallback((update: (f: DecisionForm) => DecisionForm): void => {
+    setTouched(true);
+    setFormState((f) => update(f ?? emptyForm()));
+  }, []);
   const problems = formState === null ? NO_PROBLEMS : validate(formState, ctx);
 
   const choices = useMemo(() => {
@@ -224,6 +272,7 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
         next = result.form;
       }
       formRef.current = next;
+      setTouched(true);
       setFormState(next);
     },
     [announce, ctx, detail, nextUid, reportedLine, t],
@@ -260,9 +309,11 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
   );
   const levelRef = useRef(level);
   levelRef.current = level;
+  askRef.current = ask;
 
   const patchAction = useCallback(
     (uid: string, patch: Partial<Draft>): void => {
+      setTouched(true);
       setFormState((f) => (f === null ? f : { ...f, actions: f.actions.map((a) => (a.uid === uid ? { ...a, ...patch } : a)) }));
       // The suggestion depends on the rule cited (a severe rule reads the severe column): citing another rule on the reported
       // person's action asks the ladder again.
@@ -271,6 +322,7 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     [ask, primary?.uid],
   );
   const toggleLine = useCallback((uid: string, lineId: string): void => {
+    setTouched(true);
     setFormState((f) =>
       f === null
         ? f
@@ -288,6 +340,7 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
   const addEmptyAction = useCallback((): string | null => {
     if (formState === null || !ctx.canApply || formState.actions.length >= MAX_ACTIONS || detail === undefined) return null;
     const uid = nextUid();
+    setTouched(true);
     setFormState(addAction(formState, ctx, detail.rule, uid));
     announce(t('hub.decide.announce.added', { n: formState.actions.length + 1 }));
     return uid;
@@ -295,6 +348,7 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
 
   const removeAction = useCallback(
     (uid: string, n: number): void => {
+      setTouched(true);
       setFormState((f) => (f === null ? f : { ...f, actions: f.actions.filter((a) => a.uid !== uid) }));
       announce(t('hub.decide.announce.removed', { n }));
     },
@@ -303,12 +357,24 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
 
   const useSuggestion = useCallback((): void => {
     if (formState === null || current === undefined || detail === undefined) return;
-    const lines = defaultLines(ctx.ownLineIds[target] ?? [], reportedLine);
-    const next = withSuggestion(formState, ctx, current.outcome, detail.rule, nextUid(), lines);
+    // Added from an AI suggestion, the step is the ladder's but the rule and the lines are the AI's.
+    const lines = aiFrom !== null && aiFrom.lines.length > 0 ? aiFrom.lines : defaultLines(ctx.ownLineIds[target] ?? [], reportedLine);
+    const next = withSuggestion(formState, ctx, current.outcome, aiFrom !== null && aiFrom.rule !== '' ? aiFrom.rule : detail.rule, nextUid(), lines);
     if (next === null) return;
+    setTouched(true);
     setFormState(next);
     announce(formState.verdict === null ? t('hub.decide.announce.addedFair', { n: next.actions.length }) : t('hub.decide.announce.added', { n: next.actions.length }));
-  }, [announce, ctx, current, detail, formState, nextUid, reportedLine, t, target]);
+  }, [aiFrom, announce, ctx, current, detail, formState, nextUid, reportedLine, t, target]);
+
+  const source: FormSource = aiFrom === null ? 'ladder' : edited ? 'edited' : 'ai';
+  const aiEcho = (accepted?: boolean, sent: DecisionForm = form): NonNullable<DecideInput['ai']> | undefined => {
+    if (read === null) return undefined;
+    const yes = accepted ?? source === 'ai';
+    // A dismissal that is not the AI's own carries no conduct level of its own (the server files it as banter).
+    const dismissed = sent.verdict === 'not_a_problem' || sent.verdict === 'bad_faith';
+    const severity = dismissed && !yes ? undefined : (level ?? (yes && aiFrom !== null ? aiFrom.severity : undefined));
+    return { readId: read.id, accepted: yes, ...(severity === undefined ? {} : { severity }) };
+  };
 
   const pickLevel = useCallback(
     (picked: ConductLevel): void => ask(picked, primary !== null && /^[1-9]\d*$/.test(primary.rule) ? Number(primary.rule) : null),
@@ -345,5 +411,8 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     announce,
     primary,
     aiLevel: (policy.data?.profile as { ai?: { level?: number } } | undefined)?.ai?.level ?? 0,
+    aiFrom,
+    source,
+    aiEcho,
   };
 }

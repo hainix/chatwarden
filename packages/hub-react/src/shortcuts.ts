@@ -22,6 +22,12 @@ export interface KeyLike {
 }
 
 /**
+ * The keys of the AI's suggestion (level 2), answered by the case that is open, where Quick keys act: A accepts it into the Undo hold, E opens
+ * the editor. Neither is one the hub's own listener answers ({@link shortcutFor} leaves them alone).
+ */
+export const AI_KEYS = { accept: 'a', edit: 'e' } as const;
+
+/**
  * How long after a move (with Quick keys on) the case under the cursor is opened. Every further move starts it again, so a held key
  * opens only the row it stops on.
  * @experimental

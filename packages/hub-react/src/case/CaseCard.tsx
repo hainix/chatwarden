@@ -17,6 +17,7 @@ import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
+import { LazyAiParts } from '../lazyParts.js';
 import { useQuickKeys } from '../quickKeys.js';
 import { QuickKeys } from './QuickKeys.js';
 import { reporterRate } from './ReporterStanding.js';
@@ -175,6 +176,8 @@ export function CaseCard() {
   const { pick, fresh, suggest, choice } = q;
   const one = q.primary;
   const quick = q.warning;
+  // The AI's suggestion stands in for the ladder's step when it can be accepted: the same button, the same keys, the same hold.
+  const aiOk = q.ai?.gate.ok === true;
 
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
@@ -209,7 +212,7 @@ export function CaseCard() {
   }, [status]);
   useEffect(() => {
     if (refocus.current === null) return;
-    const back = refocus.current === 'warning' ? quickRef.current : refocus.current === 'none' ? noActionRef.current : primaryRef.current;
+    const back = refocus.current === 'warning' ? quickRef.current : refocus.current === 'none' ? noActionRef.current : (primaryRef.current ?? root.current?.querySelector<HTMLElement>('.cw-ai-accept') ?? null);
     const target = back ?? noActionRef.current;
     if (target === null) return;
     refocus.current = null;
@@ -287,6 +290,8 @@ export function CaseCard() {
       suggestion = <p className="cw-hint">{t('hub.decide.rules.denied')}</p>;
     } else if (!can('sanctions.apply')) {
       suggestion = <p className="cw-hint">{t('hub.decide.noApply')}</p>;
+    } else if (aiOk) {
+      suggestion = <LazyAiParts part="suggest" q={q} />;
     } else if (pick.mode !== 'none' && (pick.picked === null || pick.error !== null)) {
       // Asking which rule: the field below is the whole card until a rule is picked.
       suggestion = null;
@@ -323,7 +328,7 @@ export function CaseCard() {
       );
     decision = (
       <section className="cw-scard-decision" aria-label={t('hub.decide.title')}>
-        {pick.mode !== 'none' && draft.status === 'ready' && <RuleField pick={pick} rules={draft.rules} report={report} />}
+        {pick.mode !== 'none' && !aiOk && draft.status === 'ready' && <RuleField pick={pick} rules={draft.rules} report={report} />}
         {suggestion}
         {sendError !== null && (
           <div className="cw-error" role="alert" tabIndex={-1} ref={failedRef}>
@@ -337,7 +342,8 @@ export function CaseCard() {
         )}
         {draft.status === 'ready' && (
           <div className="cw-scard-actions">
-            {one !== null && (
+            {aiOk && <LazyAiParts part="accept" q={q} />}
+            {!aiOk && one !== null && (
               <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '1' } : {})} onClick={(e) => q.sendPrimary(e)}>
                 <span>{stepLabel(t, locale, one.choice)}</span>
                 {kbd('1')}
@@ -358,7 +364,8 @@ export function CaseCard() {
             </button>
           </div>
         )}
-        {one !== null && (
+        {q.ai !== null && !aiOk && draft.status === 'ready' && <LazyAiParts part="why" q={q} />}
+        {!aiOk && one !== null && (
           <p className="cw-hint cw-scard-fine">
             {one.choice.kind === 'note'
               ? t('hub.simple.sees.note', { name, seconds: SECONDS })
@@ -371,7 +378,7 @@ export function CaseCard() {
 
   return (
     <section className="cw-scard" ref={root} aria-label={t('hub.simple.case.label', { who: name })} {...(left ? { 'data-gone': 'true' } : {})}>
-      <QuickKeys quick={q} digits={digits} />
+      <QuickKeys quick={q} digits={digits} onEdit={openElse} />
       {!left && (
         <>
           <header className="cw-scard-head">

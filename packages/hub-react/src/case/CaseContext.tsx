@@ -125,7 +125,6 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   const entry = decisions.entry(reportId);
   // Until the report is loaded it counts as open (the entry then decides); once loaded as closed, a sent decision no longer hides it.
   const left = hasLeft(entry, report === undefined || report.status === 'open');
-  const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide') });
   const [, hideTick] = useState(0);
   const hideKey = `${me.actor}\u0000${reportId}`;
   const aiHidden = hiddenAi.has(hideKey);
@@ -138,6 +137,8 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     },
     [hideKey],
   );
+
+  const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide'), aiHidden });
 
   const value: CaseValue = {
     reportId,
