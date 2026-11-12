@@ -23,11 +23,14 @@ describe('_headers', () => {
 });
 
 describe('site/README.md', () => {
-  it('tells the owner to enable HSTS in the Cloudflare dashboard, and why it is not in _headers', () => {
+  // The whole .dev top-level domain is on the browsers' built-in HSTS preload list, so chatwarden.dev is HTTPS-only in every
+  // major browser already. Neither _headers (which preview hosts would inherit) nor the dashboard needs to set it.
+  it('says HSTS needs no setting: .dev is HSTS-preloaded as a whole, and it is not in _headers on purpose', () => {
     expect(readme).toMatch(/HSTS/);
-    expect(readme).toMatch(/dashboard/i);
-    expect(readme).toMatch(/preview/i);
+    expect(readme).toMatch(/preload/i);
+    expect(readme).toMatch(/\.dev/);
     expect(readme).toMatch(/_headers/);
+    expect(readme).not.toMatch(/Turn on HSTS/i);
   });
 });
 
