@@ -21,6 +21,9 @@ const BOOSTED_MAX = 1000;
 const ROOM_ID = /^[A-Za-z0-9_.:-]{1,64}$/;
 const SUBJECT_ID_MAX = 128;
 
+/** Is this a room id a signal may carry (1 to 64 of A-Z a-z 0-9 _ . : -)? */
+export const isSignalRoomId = (v: unknown): v is string => typeof v === 'string' && v.length <= 64 && ROOM_ID.test(v);
+
 export type SignalRefusal = 'undeclared' | 'malformed' | 'unknown_subject' | 'self' | 'time' | 'capped' | 'no_store' | 'store_failed';
 
 /** Thrown inside `record` to end it with a reason; never leaves the service. */
@@ -115,7 +118,7 @@ export class SignalService {
     const spec = kinds[kindId]!;
 
     const roomId = field(input, 'roomId');
-    if (roomId !== undefined && !(typeof roomId === 'string' && roomId.length <= 64 && ROOM_ID.test(roomId))) throw new Refusal('malformed');
+    if (roomId !== undefined && !isSignalRoomId(roomId)) throw new Refusal('malformed');
     const now = this.deps.clock.now();
     const givenAt = field(input, 'at');
     if (givenAt !== undefined && !(typeof givenAt === 'number' && Number.isFinite(givenAt))) throw new Refusal('malformed');

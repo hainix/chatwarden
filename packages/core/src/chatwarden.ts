@@ -24,7 +24,7 @@ import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkPace, mergePace } from './pace.js';
-import { SignalService } from './signalService.js';
+import { isSignalRoomId, SignalService } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
 import type { SignalCount, SignalInput, SignalKindView } from './signals.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
@@ -857,7 +857,21 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     notices,
     autoRestrictRule,
     limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
-    pace: { settings: paceOf, canonical: (subject) => subjects.canonical(subject) },
+    pace: {
+      settings: paceOf,
+      canonical: (subject) => subjects.canonical(subject),
+      // A flood trip records the built-in kind, deferred so the verdict is returned first. `record` never throws and logs its own
+      // refusals; a room id the signal rules do not accept is left out (the trip is then a day source, not dropped).
+      onFlood: ({ roomId, subject }) => {
+        queueMicrotask(() => {
+          try {
+            signalRef.service?.record({ kind: 'flood_triggered', subject, ...(isSignalRoomId(roomId) ? { roomId } : {}) });
+          } catch (err) {
+            safeWarn(logger, 'chatwarden.pace_failed', { error: err instanceof Error ? err.name : typeof err });
+          }
+        });
+      },
+    },
   });
   const reports = new ReportService({
     roster,
