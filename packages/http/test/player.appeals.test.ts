@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { keysDeep } from './world.js';
-import { ALICE, BOB, bodyOf, CAROL, errorOf, HOUR, playerWorld, RAW_VALUES } from './playerWorld.js';
+import { ALICE, BOB, bodyOf, CAROL, errorOf, HOUR, identifyFromHeaders, playerWorld, RAW_VALUES } from './playerWorld.js';
 import type { PlayerWorld } from './playerWorld.js';
 
 // The player's appeal routes: GET /appeals, POST /appeals, and the request limiter in front of the second. Appeals are off until turned on:
@@ -107,6 +107,37 @@ describe('GET returns only documented fields (id, noticeId, status, createdAt, d
       expect(res.body).toEqual({ error: 'not_found', message: 'Not found.' });
     }
     expect(a.noticeId).toBeTruthy();
+  });
+
+  it('with appeals off the hook is not asked who the caller is: nothing is called for either route, and the answer is the same 404', async () => {
+    const identify = vi.fn(identifyFromHeaders);
+    const w = await playerWorld({ appeals: false, routes: { identify } });
+    const answers: unknown[] = [];
+    for (const who of [ALICE, undefined]) {
+      for (const res of [
+        await w.call('GET', '/appeals', who === undefined ? {} : { who }),
+        await w.call('POST', '/appeals', { ...(who === undefined ? {} : { who }), body: { noticeId: 'x', statement: 'y' } }),
+        await w.call('POST', '/appeals', { ...(who === undefined ? {} : { who }), raw: '{not json' }),
+        await w.call('GET', '/appeals', { headers: { 'x-identify': 'throw' } }),
+      ]) {
+        expect(res.status).toBe(404);
+        answers.push(JSON.stringify([res.status, res.headers, res.body]));
+      }
+    }
+    expect(identify).not.toHaveBeenCalled();
+    expect(new Set(answers).size).toBe(1);
+    expect(w.logged).toEqual([]);
+  });
+
+  it('control: with appeals on the hook is called once per request, and turning them on later starts calling it', async () => {
+    const identify = vi.fn(identifyFromHeaders);
+    const w = await playerWorld({ appeals: { enabled: false }, routes: { identify } });
+    await w.call('GET', '/appeals', { who: ALICE });
+    expect(identify).not.toHaveBeenCalled();
+    w.cw.policy.save({ appeals: { enabled: true } }, { version: 0, actor: 'owner', reason: 'turn them on' });
+    await w.call('GET', '/appeals', { who: ALICE });
+    await w.call('POST', '/appeals', { who: ALICE, body: { noticeId: 'x', statement: 'y' } });
+    expect(identify).toHaveBeenCalledTimes(2);
   });
 
   it('is 404 when the profile has appeals enabled: false explicitly, and live when turned on later', async () => {

@@ -185,15 +185,16 @@ export function playerRoutes(cw: Chatwarden, options: PlayerOptions): RouteTable
     }),
 
     'GET /appeals': personalRoute(async (req) => {
-      const who = await identify(req);
+      // Off first: with appeals off the adopter's identify hook is not even called, and the route costs nothing.
       if (!cw.appeals.enabled()) throw new NotFoundError();
+      const who = await identify(req);
       return personal({ appeals: cw.appeals.mine(who).map(playerAppeal) });
     }),
 
     'POST /appeals': personalRoute(async (req) => {
-      const who = await identify(req);
-      // Off reads as no route at all: nothing is counted and nothing about the body is looked at.
+      // Off reads as no route at all: nothing is counted, nothing about the body is looked at and the identify hook is not called.
       if (!cw.appeals.enabled()) throw new NotFoundError();
+      const who = await identify(req);
       // Limit first, so malformed and refused requests count too.
       const wait = appealsLimiter.hit(keyFor(who), now());
       if (wait > 0) throw new HttpError('rate_limited', { 'retry-after': String(Math.max(1, Math.ceil(wait / 1000))) });
