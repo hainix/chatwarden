@@ -38,7 +38,15 @@ export interface KitStream {
    * Called once, after the status and headers are decided. `write` appends text and returns `false` when the connection is backed up
    * (or the client has left or the response has ended, in which case nothing is written); `end` finishes the response. Return a
    * function the adapter calls exactly once when the client goes away or the response ends; it must stop writing and release
-   * anything the stream holds. A `start` that throws has returned no cancel, so it must release what it took before it throws.
+   * anything the stream holds.
+   *
+   * Backpressure: `write` does not queue for you. When it returns `false` the connection is backed up, and the chunk was still accepted
+   * (it sits in the response's buffer); there is no drain event. A producer must count the `false`s, stop or drop what it can, and end
+   * the response (`end()`) once the consumer has stayed backed up too long; the chat broadcaster closes a stream after `maxBacklog`
+   * writes in a row that returned `false`, and the client reconnects with a fresh snapshot. A producer that ignores `false` grows the
+   * response's buffer without bound.
+   *
+   * A `start` that throws has returned no cancel, so it must release what it took before it throws.
    */
   start(sink: { write(chunk: string): boolean; end(): void }): () => void;
 }
@@ -51,7 +59,7 @@ export interface KitStream {
  * Every `headers` entry is sent as given.
  *
  * With `stream` the response stays open instead (see {@link KitStream}): `body` is ignored, and an adapter that streams adds
- * `cache-control: no-store`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` unless `headers` has them.
+ * `cache-control: no-store, no-transform`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` unless `headers` has them.
  */
 export interface KitResponse {
   status: number;

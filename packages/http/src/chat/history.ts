@@ -61,7 +61,12 @@ export function createRing(opts: { lines: number; maxAgeMs: number; now: () => n
 
   return {
     append(line) {
-      held.push(copyOf(line));
+      const copy = copyOf(line);
+      // A stamp that is not a finite number would never age out (`at - NaN > max` is false): use the ring's own clock instead, and keep
+      // nothing at all if that is not a time either.
+      if (typeof copy.at !== 'number' || !Number.isFinite(copy.at)) copy.at = now();
+      if (!Number.isFinite(copy.at)) return;
+      held.push(copy);
       prune();
     },
     snapshot() {

@@ -198,6 +198,13 @@ describe('refusalOf', () => {
     expect(refusalOf({})).toEqual({ reason: 'unknown' });
   });
 
+  it('a reason longer than 64 characters (the most a client reads) is "unknown": a custom refusal cannot smuggle text through it', () => {
+    expect(refusalOf({ reason: 'r'.repeat(64) })).toEqual({ reason: 'r'.repeat(64) });
+    expect(refusalOf({ reason: 'r'.repeat(65) })).toEqual({ reason: 'unknown' });
+    expect(refusalOf({ reason: 'you said: ' + 'x'.repeat(200), rule: 2 })).toEqual({ reason: 'unknown', rule: 2 });
+    expect(refusalOf({ reason: '' })).toEqual({ reason: '' });
+  });
+
   it('refusalOf never throws for null, a number, an array or a getter that throws', () => {
     for (const bad of [null, undefined, 7, 'text', [], [1, 2], true, () => 1, Symbol('s')]) {
       expect(refusalOf(bad)).toEqual({ reason: 'unknown' });

@@ -82,6 +82,95 @@ function streamWorld(over: { headers?: Record<string, string>; status?: number; 
 
 const decoder = new TextDecoder();
 
+/**
+ * What the `compression` middleware does, in the part that matters here: unless the response says `Cache-Control: no-transform`, it holds
+ * written bytes back (until a threshold or the end), so a stream's first frame never arrives.
+ */
+function compressionLike(): express.RequestHandler {
+  return (_req, res, next) => {
+    const write = res.write.bind(res) as (chunk: unknown, ...rest: unknown[]) => boolean;
+    const end = res.end.bind(res) as unknown as (...args: unknown[]) => unknown;
+    const held: unknown[] = [];
+    const transforms = (): boolean => !/(?:^|,)\s*no-transform\s*(?:,|$)/i.test(String(res.getHeader('cache-control') ?? ''));
+    res.write = ((chunk: unknown, ...rest: unknown[]) => {
+      if (!transforms()) return write(chunk, ...rest);
+      held.push(chunk);
+      return true;
+    }) as typeof res.write;
+    res.end = ((...args: unknown[]) => {
+      for (const chunk of held.splice(0)) write(chunk);
+      return end(...args);
+    }) as unknown as typeof res.end;
+    next();
+  };
+}
+
+describe('toExpress: a body-rewriting middleware in front of a stream', () => {
+  it('cache-control carries no-transform on every stream response, so compression-style middleware leaves it alone', async () => {
+    const app = express();
+    app.use(compressionLike());
+    const world = streamWorld();
+    app.use(world.app);
+    const { base } = await listen(app);
+    const res = await fetch(`${base}/kit/s`);
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const first = await reader.read(); // would hang here if the first frame were held back
+    expect(decoder.decode(first.value)).toBe('event: hello\ndata: {}\n\n');
+    expect(res.headers.get('cache-control')).toMatch(/(^|,)\s*no-transform\s*(,|$)/);
+    await reader.cancel();
+  });
+
+  it('control: a route that sets its own cache-control without no-transform is held back by the same middleware', async () => {
+    const world = streamWorld({ headers: { 'cache-control': 'no-store' } });
+    const app = express();
+    app.use(compressionLike());
+    app.use(world.app);
+    const { base } = await listen(app);
+    const res = await fetch(`${base}/kit/s`);
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const raced = await Promise.race([reader.read().then(() => 'frame'), new Promise((resolve) => setTimeout(() => resolve('held'), 300))]);
+    expect(raced).toBe('held');
+    world.state.sink?.end();
+    await reader.cancel().catch(() => undefined);
+  });
+});
+
+describe('toExpress: sockets that cannot set no-delay', () => {
+  for (const [what, patch] of [
+    [
+      'setNoDelay throws',
+      (socket: { setNoDelay: unknown }) => {
+        socket.setNoDelay = () => {
+          throw new Error('ERR_HTTP2_NO_SOCKET_MANIPULATION');
+        };
+      },
+    ],
+    [
+      'setNoDelay is missing',
+      (socket: { setNoDelay: unknown }) => {
+        socket.setNoDelay = undefined;
+      },
+    ],
+  ] as const) {
+    it(`a stream still starts when ${what}`, async () => {
+      const world = streamWorld();
+      const app = express();
+      app.use((req, _res, next) => {
+        patch(req.socket as unknown as { setNoDelay: unknown });
+        next();
+      });
+      app.use(world.app);
+      const { base } = await listen(app);
+      const res = await fetch(`${base}/kit/s`);
+      expect(res.status).toBe(200);
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      expect(decoder.decode((await reader.read()).value)).toBe('event: hello\ndata: {}\n\n');
+      expect(world.state.logged).toEqual([]);
+      await reader.cancel();
+    });
+  }
+});
+
 describe('toExpress: streaming responses', () => {
   it('a stream response sends status, headers and the first chunk before the stream ends', async () => {
     const { app, state } = streamWorld();
@@ -89,7 +178,7 @@ describe('toExpress: streaming responses', () => {
     const res = await fetch(`${base}/kit/s`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/event-stream; charset=utf-8');
-    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('cache-control')).toBe('no-store, no-transform');
     expect(res.headers.get('x-accel-buffering')).toBe('no');
     expect(res.headers.get('x-powered-by')).toBeNull();
     const reader = (res.body as ReadableStream<Uint8Array>).getReader();
@@ -232,7 +321,7 @@ describe('toExpress: streaming responses', () => {
     expect(await res.json()).toEqual({ error: 'internal' });
     expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('x-accel-buffering')).toBeNull(); // the stream defaults were taken back off
-    expect(res.headers.get('cache-control')).not.toBe('no-store');
+    expect(res.headers.get('cache-control')).not.toBe('no-store, no-transform');
     expect(state.logged).toEqual([['chatwarden.http_error', { error: 'TypeError' }]]);
     expect(JSON.stringify(state.logged)).not.toContain('secret detail');
   });
@@ -334,7 +423,7 @@ describe('toExpress: streaming responses', () => {
     });
     expect(out.status).toBe(200);
     expect(out.headers['content-type']).toBe('text/event-stream; charset=utf-8');
-    expect(out.headers['cache-control']).toBe('no-store');
+    expect(out.headers['cache-control']).toBe('no-store, no-transform');
     expect(out.headers['x-own']).toBe('1');
     expect(out.body).toBe('');
     expect(state.starts).toBe(0);

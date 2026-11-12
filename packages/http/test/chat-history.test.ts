@@ -185,6 +185,24 @@ describe('createRing', () => {
     expect(ring.snapshot()).toEqual([]);
   });
 
+  it('a line with a stamp that is not a finite number is stamped with the ring clock, so it can age out', () => {
+    const clock = clocked();
+    const ring = createRing({ lines: 5, maxAgeMs: MIN, now: clock.now });
+    for (const at of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, undefined as unknown as number, '5' as unknown as number]) {
+      ring.append({ ...mk(1, 0), id: String(String(at)), at });
+    }
+    expect(ring.size()).toBe(5);
+    expect(ring.snapshot().every((l) => l.at === T0)).toBe(true);
+    clock.t += MIN + 1;
+    expect(ring.size()).toBe(0);
+  });
+
+  it('a line is dropped, not stored, when even the ring clock gives no finite time', () => {
+    const ring = createRing({ lines: 5, maxAgeMs: MIN, now: () => Number.NaN });
+    expect(() => ring.append(mk(1, Number.NaN))).not.toThrow();
+    expect(ring.size()).toBe(0);
+  });
+
   it('the clock is read on every call, not captured', () => {
     const clock = clocked();
     let reads = 0;

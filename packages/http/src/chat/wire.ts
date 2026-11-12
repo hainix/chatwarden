@@ -32,7 +32,11 @@ export interface WireLine {
 export interface WireRestriction {
   /** Epoch ms it ends, or null when it does not end on its own. */
   until: number | null;
-  /** True when a moderator set it; false for the automatic filter. */
+  /**
+   * True when a moderator set it; false for the automatic filter. In `hello` and `state` this is read from the kit's `restricted()`
+   * answer, which says only a kind: an in-memory automatic timeout is the filter's, anything else (a stored sanction, automatic ones
+   * included) reads as a moderator's. It is exact in a refusal (`WireRefusal.byModerator`), which comes from the sanction itself.
+   */
   byModerator: boolean;
 }
 
@@ -105,6 +109,8 @@ export type ReportOutcome =
 const RETRY_AFTER_MAX_MS = 3_600_000;
 /** The longest `noticeId` a refusal may carry. */
 const NOTICE_ID_MAX = 64;
+/** The longest `reason` a refusal may carry: the most a client reads. A longer one is not a reason, so it is `unknown`. */
+const REASON_MAX = 64;
 
 /** An own, readable property of `source`, or `undefined`. A getter or a proxy that throws reads as absent. */
 function ownField(source: object, key: string): unknown {
@@ -119,13 +125,13 @@ function ownField(source: object, key: string): unknown {
  * The refusal a player may be told, built from whatever the check returned. Copies `reason`, `until`, `byModerator`, `rule`, `noticeId`
  * and `retryAfterMs` by name, each only when it has the right shape; every other key is dropped, so text, a seat, a subject or a handle
  * that rode along on the core refusal can never reach the wire. Never throws: anything that is not an object, or a field that cannot be
- * read, is simply absent, and a missing or non-string `reason` is `"unknown"`.
+ * read, is simply absent, and a missing, non-string or over-long (more than 64 characters) `reason` is `"unknown"`.
  * @experimental
  */
 export function refusalOf(refuse: unknown): WireRefusal {
   if (typeof refuse !== 'object' || refuse === null) return { reason: 'unknown' };
   const reason = ownField(refuse, 'reason');
-  const out: WireRefusal = { reason: typeof reason === 'string' ? reason : 'unknown' };
+  const out: WireRefusal = { reason: typeof reason === 'string' && reason.length <= REASON_MAX ? reason : 'unknown' };
   const until = ownField(refuse, 'until');
   if (until === null || (typeof until === 'number' && Number.isFinite(until))) out.until = until;
   const byModerator = ownField(refuse, 'byModerator');

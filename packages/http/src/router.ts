@@ -102,7 +102,7 @@ export interface CompiledRoutes {
  * - The path is the URL path only. The query string is ignored by `matches` and stripped by `run`.
  * - HEAD runs the GET handler; send its status and headers, but not its body.
  * - A response with `stream` (a `KitStream`) is a response that stays open. Send its status and headers, add `cache-control:
- *   no-store`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` for each the response left out, flush
+ *   no-store, no-transform`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` for each the response left out, flush
  *   the headers, call `stream.start(sink)` once with a `write(chunk): boolean` and an `end()`, and call the function it returns
  *   exactly once, when the client goes away or the response ends. `write` after that writes nothing and returns false. `body` is
  *   ignored. For a HEAD, send the status and headers only and do not call `start`.

@@ -158,7 +158,7 @@ function send(res: Response, kit: KitResponse, applied: string[], head = false):
 
 /**
  * Send a response that stays open (`KitResponse.stream`). The status and headers are set as for any response, plus `cache-control:
- * no-store`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` for each one the route left out. A HEAD gets
+ * no-store, no-transform`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` for each one the route left out. A HEAD gets
  * those and no body, and `start` is not called. Otherwise `start` is called once with a sink over `res`, and the cancel it returns
  * is called exactly once: when the client goes away, or when the sink ends the response, whichever comes first.
  *
@@ -177,7 +177,8 @@ function sendStream(req: Request, res: Response, kit: KitResponse, stream: KitSt
     res.setHeader(name, value);
     applied.push(name);
   };
-  set('cache-control', 'no-store');
+  // `no-transform` is what keeps a body-rewriting middleware (`compression`) and a proxy from holding the first frames back.
+  set('cache-control', 'no-store, no-transform');
   set('x-accel-buffering', 'no');
   set('content-type', 'text/event-stream; charset=utf-8');
   if (head) {
@@ -186,7 +187,11 @@ function sendStream(req: Request, res: Response, kit: KitResponse, stream: KitSt
   }
   // The client left while the handler was still running: nothing to stream to, and nothing was started.
   if (res.destroyed || req.socket.destroyed) return;
-  req.socket.setNoDelay(true);
+  try {
+    req.socket.setNoDelay(true);
+  } catch {
+    // Optional: a socket that cannot (an HTTP/2 compat proxy, a test double) still streams, only less eagerly.
+  }
 
   let finished = false; // the client is gone or the response has ended: no more writes
   let cancelled = false;
@@ -265,7 +270,7 @@ function sendStream(req: Request, res: Response, kit: KitResponse, stream: KitSt
  *   removed and the kit 500 `{ error: 'internal' }` is sent; if the headers had already gone out the connection is
  *   destroyed.
  * - A `KitResponse` with `stream` stays open (Server-Sent Events): the adapter sends the status and headers, adds
- *   `cache-control: no-store`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` where the route
+ *   `cache-control: no-store, no-transform`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` where the route
  *   set none, turns off the socket's Nagle delay, calls `stream.start(sink)` and calls the cancel it returns exactly once,
  *   when the client leaves or the sink ends the response. `body` is ignored; a HEAD gets the headers and no `start`. A
  *   throw from `start` before any byte is the kit 500; after the first byte the connection is destroyed (that `start`
