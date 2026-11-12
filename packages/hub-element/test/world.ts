@@ -1,5 +1,5 @@
-import { createChatwarden, defineRules, starterRules } from '@chatwarden/core';
-import type { Chatwarden, RawWho, Role } from '@chatwarden/core';
+import { createChatwarden, createFakeModerationAI, defineRules, starterRules } from '@chatwarden/core';
+import type { AiOptions, Chatwarden, FakeModerationAI, FakeScript, RawWho, Role } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { MemoryTermStore, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MemoryStore } from '@chatwarden/store-memory';
@@ -33,6 +33,8 @@ export interface WorldOptions {
   store?: Store;
   /** More overrides on the profile in code (the base the stored layer is merged onto). */
   overrides?: NonNullable<Parameters<typeof createChatwarden>[0]['overrides']>;
+  /** Turn the AI on with the scripted fake (never a network): the level the hub has set, the fake's script, and the code-side options. */
+  ai?: { level?: 0 | 1 | 2; script?: FakeScript; options?: Partial<AiOptions> };
 }
 
 export interface FileOptions {
@@ -67,6 +69,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
   // The term list is built first: the kit asks it to judge chat, and a kit with no matcher logs a warning on start.
   const live = new LiveTerms({ store: new MemoryTermStore(), pack: syntheticTermPack(), clock });
   live.loadSync();
+  const adapter: FakeModerationAI | undefined = opts.ai === undefined ? undefined : createFakeModerationAI(opts.ai.script ?? []);
   const cw: Chatwarden = await createChatwarden({
     store: opts.store ?? new MemoryStore(),
     matcher: live,
@@ -75,7 +78,13 @@ export async function hubWorld(opts: WorldOptions = {}) {
     clock,
     profile: 'standard',
     rules: defineRules(starterRules('standard').map((r) => (opts.retire?.includes(r.number) ? { ...r, retired: true } : r))),
-    overrides: { profanity: { mode: 'allow' }, ...(opts.ladder === undefined ? {} : { ladder: opts.ladder }), ...opts.overrides },
+    overrides: {
+      profanity: { mode: 'allow' },
+      ...(opts.ladder === undefined ? {} : { ladder: opts.ladder }),
+      ...opts.overrides,
+      ...(adapter === undefined ? {} : { ai: { ...(opts.overrides?.ai ?? {}), level: opts.ai?.level ?? 1 } }),
+    },
+    ...(adapter === undefined ? {} : { ai: { adapter, ...(opts.ai?.options ?? {}) } }),
     retention: false,
   });
   // The caller is whoever `session` says: tests change it to see a role, or nobody (401).
@@ -225,7 +234,12 @@ export async function hubWorld(opts: WorldOptions = {}) {
   const raw = (req: Partial<KitRequest> & { method: string; path: string }): Promise<KitResponse> =>
     handle({ query: {}, headers: {}, body: undefined, ...req });
 
-  return { cw, clock, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, blockLine, raw, live, now: () => clock.t };
+  /** Lets every queued AI read land (a job may queue another; settle until nothing moves). */
+  const aiIdle = async (): Promise<void> => {
+    for (let i = 0; i < 5; i += 1) await cw.ai.idle();
+  };
+
+  return { cw, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, blockLine, raw, live, now: () => clock.t };
 }
 
 export type HubWorld = Awaited<ReturnType<typeof hubWorld>>;

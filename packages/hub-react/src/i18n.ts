@@ -1054,6 +1054,7 @@ export const en = {
   'hub.settings.leave.stay': 'Keep editing',
   'hub.settings.leave.go': 'Leave',
   'hub.settings.reporting.nav': 'Reporting',
+  'hub.settings.ai.nav': 'AI',
   'hub.reporting.title': 'Reporting',
   'hub.reporting.intro': 'How players report a message, what they can say it is about, and what they read afterwards. A change applies at once to new reports. Reports already filed are not changed.',
   'hub.reporting.body': 'Reporting settings',

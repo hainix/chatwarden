@@ -1475,12 +1475,10 @@
 .cw-hub .cw-ai {
   display: grid;
   gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
   padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
   border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border-strong, var(--cwd-border-strong));
   border-radius: var(--cw-radius-m, var(--cwd-radius-m));
-}
-.cw-hub .cw-ai {
-  min-width: 0;
 }
 .cw-hub .cw-ai-head {
   display: flex;
@@ -1501,17 +1499,13 @@
 .cw-hub .cw-ai-level {
   font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
 }
+.cw-hub .cw-ai-summary {
+  overflow-wrap: anywhere;
+}
 .cw-hub .cw-ai-rule,
 .cw-hub .cw-ai-count {
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
   font-size: var(--cw-text-s, var(--cwd-text-s));
-}
-.cw-hub .cw-ai-summary {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.cw-hub .cw-ai-hidden {
-  margin: 0;
 }
 /* The menu takes no box of its own: its button joins the strip's row and its panel takes a row under it (in the flow, never floating). */
 .cw-hub .cw-ai-menu {
@@ -1532,9 +1526,6 @@
   padding: var(--cw-space-3, var(--cwd-space-3));
   border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
   border-radius: var(--cw-radius-m, var(--cwd-radius-m));
-}
-.cw-hub .cw-ai-panel p {
-  margin: 0;
 }
 .cw-hub .cw-ai-facts {
   display: grid;
@@ -3555,4 +3546,51 @@
   .cw-hub .cw-avatar {
     border: 1px solid CanvasText;
   }
+}
+
+/* Settings > AI: the level, the status line and one Advanced disclosure. Neutral tokens only: nothing here means danger or a next step. */
+.cw-hub .cw-ai-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-ai-advanced,
+.cw-hub .cw-ai-numbers {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-ai-advanced {
+  justify-items: start;
+}
+.cw-hub .cw-ai-advanced > div {
+  justify-self: stretch;
+}
+.cw-hub .cw-ai-facts-list {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-aibar {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-aibar p,
+.cw-hub .cw-ai-hidden,
+.cw-hub .cw-ai-panel p,
+.cw-hub .cw-ai-numbers p,
+.cw-hub .cw-ai-summary {
+  margin: 0;
+}
+.cw-hub .cw-aibar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
 }

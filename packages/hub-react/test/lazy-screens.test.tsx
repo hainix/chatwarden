@@ -18,6 +18,7 @@ const SCREENS = [
   { path: '/actions', title: 'All actions' },
   { path: '/settings/ladder', title: 'Steps and ladder' },
   { path: '/settings/reporting', title: 'Reporting' },
+  { path: '/settings/ai', title: 'AI' },
 ] as const;
 
 describe.each(['simple', 'detailed'] as const)('lazy screens in %s mode', (mode) => {

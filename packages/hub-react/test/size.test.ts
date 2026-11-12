@@ -148,7 +148,7 @@ describe('bundle size', () => {
 
   it('keeps the settings and admin screens out of the entry: each is a chunk of its own', async () => {
     const { entryInputs, chunkRoots } = await bundle();
-    const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings'];
+    const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings', 'AiSettings'];
     for (const name of lazy) {
       expect(entryInputs.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} is in the entry`).toEqual([]);
       expect(chunkRoots.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} has no chunk`).toHaveLength(1);

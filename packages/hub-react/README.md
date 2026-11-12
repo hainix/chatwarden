@@ -26,7 +26,7 @@ npm install @chatwarden/http express @types/express
 `@types/react` 18 and renders the hub and the headless entry on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` and
 `@chatwarden/http` are peers too: the hub imports types from both, and these values from core (constants and defaults, so the hub
 and the kit cannot drift apart): `LADDER_TABLE`, `DEFAULT_DURATIONS`, `DEFAULT_AREA_RULES`, `DEFAULT_SEVERE_RULES`, `AUDIT_ACTIONS`,
-`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES`, `REPORTER_RANK_LAPSE_MS` and `isDefaultNoActionReason`. Its own type declarations name
+`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES`, `REPORTER_RANK_LAPSE_MS`, `isDefaultNoActionReason` and `assertWithinCeilings` (the one check the AI's pre-fill is held to, from the kit itself). Its own type declarations name
 both packages. Node 22.13 or newer
 for the tooling; the hub itself runs in a browser and imports no `node:` module.
 
@@ -601,6 +601,32 @@ when the role can read blocked lines (kept 5 minutes), and `policy.view` once pe
 Deciding writes `report.decide` and nothing else about the case. The queue list is one `report.view` row with no target, as before.
 
 **What the Overview and All actions cost in audited reads.** `GET /sanctions` writes one `history.view` row with no target each time it is read. The Overview's Recent actions is read once when the Overview opens and not again by itself: it does not follow the live queue, so a teammate's decision shows there the next time the Overview is opened, or in "See all". All actions reads when it opens, once for each page a moderator asks for with "Load more", and once more when the filter changes. Nothing reads on a timer: the only repeating call is `GET /changes`, which is not audited.
+
+### The AI (levels 1 and 2)
+
+When the server runs the kit's AI (`ai` option, a provider adapter in your code) the hub shows what it read and, at level 2, what it
+suggests. Nothing here decides: a moderator does, and every part is lazy, so a hub with the AI off loads none of it.
+
+- **Level 1, Read.** A neutral strip with a dashed outline (it is machine-written) sits between the case header and the transcript: an `AI`
+  tag, the conduct level in words, the rule and a one-line summary, shown as plain text. The lines the AI cited carry a small tick. One
+  `⋯` menu holds the model, when it read, how sure it was, the two plain notes (older rules; a line that tried to instruct the AI), Read
+  again and Hide the AI on this case (kept for this browser session, per moderator). While a read is expected a skeleton holds for up to
+  20 seconds, then nothing: no error is ever shown on a case. The queue gets one neutral chip with the level word, and orders cases by the
+  `priority` sort when the server sends reads (`groupQueue(items, { sort: 'priority', signals })`, `priorityScore`, `RANK_WEIGHTS`): wait,
+  open reports, the read and the reporter's record, as a weight and never a filter.
+- **Level 2, Recommend.** The decision bar opens pre-filled from the recommendation, labelled "Suggested by AI" (it says "Edited" once
+  anything changes). `A` accepts it into the usual five-second Undo hold and goes on to the next case; `E` opens the editor. Both act where
+  Quick keys act (on in Simple, off in Detailed), through the same act guard as `1`, `2` and `3`, and never while typing. In Simple mode the
+  primary button reads "Accept AI suggestion" with the step in words. The hub fills the AI's step only when it is a warning, a note or a
+  chat restriction of 24 hours or less, whatever the server says (`AI_MAX_PREFILL_MS` in core); a ban, an area ban or anything longer is
+  left to the ladder's own "Add suggested step". Every decision tells the server which read the moderator was shown and whether it is that
+  read's pre-fill as it stood (`DecideInput.ai`).
+- **Settings > AI.** Off, Read or Recommend, a status line (Working, Paused, Unavailable, Not set up on this server) and one Advanced
+  disclosure: reads and spend against the limits, the cache hit rate, "Learn from our decisions", agreement and one-click rates and a
+  per-rule table. Saving asks for a reason, like the steps and ladder; only the owner can save. The daily limit and the adapter are set in
+  your server code and are read-only here.
+
+The words of these parts are not in `en` (they load with the parts); `loadAiWords()` returns them, see "Words and languages".
 
 ### Terms, Blocked, Rule gaps, Audit and the Guide
 
