@@ -86,3 +86,20 @@ Decided in [design/2026-11-11-ai-levels-1-2.md](../design/2026-11-11-ai-levels-1
   its names, the hub's ranking and `withMemoryAi`, and holds its 103 KB budget (102.8 KB). A kit given `ai` over a store without the methods stays
   inert and logs `chatwarden.ai_store_unsupported` once.
 
+## Flood control and signals (0.1.8), parked
+
+- **Webhook action `signal`.** An incoming `POST /webhooks/in/action` for games that are not Node; today `cw.signals.record` runs in process.
+- **A signal that lowers a suggestion**, or any effect from a positive kind other than a note or the record.
+- **Who meets a rule now.** A hub view of the people who currently meet a rule, a signal preview in the ladder preview, a moderator-side discard of a signal.
+- **Per-room settings stored in the kit.** A room override (`cw.rooms.setPace`) lives in the game's process.
+- **Shared pacing state across processes.** A store-backed limiter; today route a room's chat to one process.
+- **A fan-out guard.** One `by` signalling many subjects in a short time.
+- **Signals in webhooks, the Discord feed or any player-facing surface.**
+- **A locale other than English** for the new words (the keys are flat, so translations are additive).
+- **Site copy.** The public site flips a promise only after the release is on npm and has run in Moxgate.
+- **The built-in kind in the hub.** The Signals panel lists only the kinds the game declared; the kit's own "Flooded the chat" is chosen by "All kinds" or
+  by a feed written in code. Listing it read-only and letting the record and AI forms pick it is a possible follow-up.
+- **Value goldens for the staff bodies.** `admin.bodies-off.test.ts` pins shapes and key lists; a literal JSON golden for `POST /reports/:id/suggest` and
+  the `POST /cases/next` case body would also pin values and order.
+- **A countdown in the pace line.** `RestrictedChatLine` fixes the end once and shows `player.pace.ready` only if the parent renders again; a live
+  countdown is the host's to add (it owns the timer).

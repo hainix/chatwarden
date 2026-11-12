@@ -656,3 +656,58 @@ describe('the chat box docs', () => {
     expect(httpDoc).not.toContain('`definitelyNotAnOption`');
   });
 });
+
+describe('the flood control and signals docs (0.1.8)', () => {
+  const core = flat(readme('core'));
+
+  it('core: slow mode and flood control says what a refusal is, the order, the per-process limit and how to try it', () => {
+    const doc = flat(section(readme('core'), 'Slow mode and flood control'));
+    for (const needle of ['`overrides.pace`', '`cw.rooms.setPace`', 'cw.rooms.pace', "'slow_mode'", "'flood'", "'duplicate'", '`retryAfterMs`', 'A new refusal reason', '`assertNever`', 'Per process', '`PACE_KEYS_MAX`', '`flood_triggered`', '`CW_DEMO_PACE=1`', '`limits.chatRate`']) {
+      expect(doc, needle).toContain(needle);
+    }
+    expect(doc).toMatch(/Route a room's chat to one process/);
+    expect(doc).toMatch(/no rule, no notice/);
+  });
+
+  it('core: signals says a signal never acts, events not lines, the cap, the retention, migration 21 one-way with a back-up, and withMemorySignals', () => {
+    const doc = flat(section(readme('core'), 'Signals'));
+    for (const needle of ['never acts on its own', 'Events, not lines', '`cw.signals.record(input)`', 'distinct source', 'calendar bucket', '`retention.signalsMs`', 'migration 21', 'one-way', 'back up the database', '`withMemorySignals(store)`', '`chatwarden.signals_store_unsupported`', 'limits.signalsMs', 'Four feeds']) {
+      expect(doc, needle).toContain(needle);
+    }
+    for (const feed of ['`record`', '`queue`', '`ladder`', '`ai`']) expect(doc, feed).toContain(feed);
+  });
+
+  it('core: the experimental list names the new API, and the table rows and retention default are there', () => {
+    const doc = flat(section(readme('core'), 'What is experimental in 0.1.8'));
+    for (const needle of ['`PaceSettings`', '`PACE_SUGGESTIONS`', '`cw.rooms.setPace`', '`cw.signals`', '`PolicyLimits`', '`withMemorySignals`', '`secondsLeft`', '`signalBoost`']) expect(doc, needle).toContain(needle);
+    expect(core).toContain('| `cw.signals` |');
+    expect(core).toContain('signals 90 (`signalsMs`, never less than 14)');
+  });
+
+  it('http: the changed bodies are described (boosted, signals on the history and the suggestion, signalBoost, limits)', () => {
+    const doc = flat(readme('http'));
+    for (const needle of ['`boosted: true`', '`signals: { raised, ids }`', 'only for a caller whose role holds `history.read`', 'when the record feed (`feeds.record`) is on', '`limits`', '{ chatRate: { count, windowMs }, signalsMs }', 'older than 0.1.8 sends none']) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('player-react: one wait convention, said plainly (a bare duration, the sentence has the "in")', () => {
+    const doc = flat(section(readme('player-react'), 'Pace words and `secondsLeft`'));
+    for (const needle of ['bare duration', 'in {left}', '`secondsLeft(ms, locale)`', '`player.pace.ready`', '`.soon`', '`RestrictedChatLine`', '@experimental']) expect(doc, needle).toContain(needle);
+    expect(doc).not.toMatch(/carry their own "in"/);
+  });
+
+  it('hub-react: the Advanced screen and the queue seam are documented', () => {
+    const doc = flat(readme('hub-react'));
+    for (const needle of ['#/settings/advanced', '`RankSignals.conduct`', '`QueueGroup.boosted`', '`conductSignal`']) expect(doc, needle).toContain(needle);
+  });
+
+  it('tiny-chat: the slow mode demo switch is documented', () => {
+    const doc = flat(read('examples/tiny-chat/README.md'));
+    for (const needle of ['## Slow mode (demo, optional)', '`CW_DEMO_PACE=1`', '`startServer({ demoPace })`']) expect(doc, needle).toContain(needle);
+  });
+
+  it('the control: a feature the docs do not have is not found', () => {
+    expect(core).not.toContain('`definitelyNotAFeed`');
+  });
+});

@@ -240,7 +240,7 @@ Theming).
 | `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `refreshKey` |
 | `RulesPage` | The summary and the numbered rules from `GET /rules`. The numbers are the kit's: a retired rule leaves a gap. | `client`, `refreshKey` |
 | `ReportDialog` | A one-step report: "Report this message?", the line, an optional "Why?" select (the studio's reasons in groups; required in the reason-required flow) and a note behind "Add a note". Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `line`, `targetName`, `extra` (experimental: your own controls in the form) (`onAddDetail` is deprecated and unused) |
-| `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when; or, with `pace`, a pause (slow mode, too many lines, the same line again) and how long to wait, with no referee card. | `until` (epoch ms or `null`), `byModerator`, `refCode`; or `pace` (`{ reason: 'slow_mode' \| 'flood' \| 'duplicate', retryAfterMs }`, `@experimental`, new in 0.1.8: the refusal's own values; the end is worked out once on the first render) |
+| `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when; or, with `pace`, a pause (slow mode, too many lines, the same line again) and how long to wait, with no referee card. | `until` (epoch ms or `null`), `byModerator`, `refCode`; or `pace` (`{ reason: 'slow_mode' \| 'flood' \| 'duplicate', retryAfterMs }`, `@experimental`, new in 0.1.8: the refusal's own values; the end is worked out once on the first render, and the line is not a live countdown: it shows `player.pace.ready` only if the parent renders again after the wait) |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and
   not acknowledged, and appear in order when `canShow` turns `true`. The list is asked for once more at that moment, so a warning that
@@ -500,6 +500,17 @@ it from the values below.
 | `--cw-control-height` | `2.5rem` | Minimum height of buttons and choices. |
 | `--cw-dialog-width` | `30rem` | The widest a dialog gets (it is never wider than the screen). |
 | `--cw-layer` | `1000` | The stacking order of the dialog, above your game. |
+
+## Pace words and `secondsLeft`
+
+New in 0.1.8, `@experimental` until 0.2. When a game turns pacing on, a refusal can be `slow_mode`, `flood` or `duplicate` and carries `retryAfterMs`. The box words
+it itself (`player.chat.refused.*`, with the wait held on Send); for your own UI, `RestrictedChatLine` takes `pace` and says the same in `player.pace.*`, and
+`secondsLeft(ms, locale)` turns a wait into a **bare duration** in the locale's words ("3 seconds", "3 minutes", "3 hours"), `null` for no usable wait.
+
+**One convention for every wait sentence: the value is bare and the sentence has its own "in".** `player.pace.flood` is "Try again in {left}." and so is
+`player.chat.refused.flood`, so feeding `secondsLeft` into either never reads "in in 3 seconds". A translation keeps `in {left}` (a test checks both
+catalogs). With no usable wait the box uses the `.soon` sentences ("Try again in a moment."), and `player.pace.ready` ("You can send a message again.") is
+what `RestrictedChatLine` says once the wait is over; it appears only when the parent renders again.
 
 ## Security notes
 

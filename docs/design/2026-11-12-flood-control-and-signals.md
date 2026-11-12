@@ -888,7 +888,7 @@ Sequencing: this release follows 0.1.6 (AI levels 1-2) and takes SQLite migratio
 
 ### Plan-time rulings (2026-11-12, from writing docs/plans/2026-11-12-flood-control-and-signals.md)
 All accepted as the plan states them:
-1. `secondsLeft` uses `Intl.RelativeTimeFormat` like `timeLeft`; the three pace messages drop the literal "in"; no `player.pace.wait.*` keys.
+1. `secondsLeft` uses `Intl`; no `player.pace.wait.*` keys. *Superseded in the final review round (FD M5): `secondsLeft` returns a bare duration ("3 seconds", through `Intl.NumberFormat` units) and the sentences say `in {left}` themselves, the same convention as the chat box's refusal words, with a test over both catalogs.*
 2. With `feeds.ai` off the variable prompt part is byte-identical to 0.1.6 and the stable part is identical whether the feed is on or off; the hash differs from 0.1.6 only through `promptVersion` 2.
 3. `inputHash` is computed over the variable text rendered without the signal block.
 4. `cw.signals.boosted(people)` and `cw.signals.forRecord(subject)` are added, `@experimental`; the ladder reads signals through facade-internal glue in `cw.suggest`.
@@ -911,3 +911,10 @@ All accepted as the plan states them:
    a save that names a stale feed is still refused.
 3. With `signalBoost`, a case a moderator was handed and let lapse is served to that moderator after every other free case for one claim
    window; it is still served when it is all that is left.
+
+### Final review round rulings (2026-11-12, after the five chunk reviews)
+1. `GET /policy/profile` (and `cw.policy.get()`, and the `PUT` and `DELETE` answers) gain a read-only `limits` object, `{ chatRate: { count, windowMs }, signalsMs }`: the chat rate limit in force and the signals retention window. It is not part of the layer and a save cannot change it. The hub takes the built-in limit hint and the feed window cap from it and falls back to the old numbers (3 per 5 seconds, 90 days) for a server without it. A refused `windowDays` reads as "Longer than your game keeps signals".
+2. The ladder signal sentence and the `signals` key of a suggestion need `history.read`, like the counts on the record; the outcome still moves for a caller without it.
+3. A pace refusal with no valid wait has sentences of its own ("Try again in a moment") and never ends "in .".
+4. A stored feed section whose feeds were all dropped is not shown in the layer; a repairing save lists `signals` in `changed`.
+5. Release 0.1.8; peer floors raised by hand on what each package imports (see the changeset).

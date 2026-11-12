@@ -620,7 +620,9 @@ suggests. Nothing here decides: a moderator does, and every part is lazy, so a h
   next takes (its button says "Take next: highest priority" and `controller.takeNext()` and `continueFrom()` claim the first case on the list as shown
   that nobody holds, passing over one that was claimed a moment before; `queue.getSnapshot().ranked` says which order it is in), and in the
   longest-wait order it is the server's oldest unclaimed case as before. For `groupQueue(items, { sort: 'priority', signals })` on your own,
-  `await loadAiRank()` first (from the main entry or `/headless`; it returns `priorityScore`, `RANK_WEIGHTS` and `reporterSignal`), or the sort is the longest wait.
+  `await loadAiRank()` first (from the main entry or `/headless`; it returns `priorityScore`, `RANK_WEIGHTS`, `reporterSignal` and `conductSignal`, with `SIGNAL_BOOST`), or the sort is the longest wait.
+  The queue signal feed adds one more weight: a person the server marks `boosted` (`QueueGroup.boosted`, `@experimental`, new in 0.1.8) gets +0.5, never a filter. A host that passes its own
+  `signals` to `groupQueue` must add `RankSignals.conduct` to keep that boost; the default signals include it.
 - **Level 2, Recommend.** The decision bar opens pre-filled from the recommendation, labelled "Suggested by AI" (it says "Edited" once
   anything changes). `A` accepts it into the usual five-second Undo hold and goes on to the next case; `E` opens the editor. Both act where
   Quick keys act (on in Simple, off in Detailed), through the same act guard as `1`, `2` and `3`, and never while typing. In Simple mode the

@@ -23,7 +23,16 @@ up; `@chatwarden/http/chat`), `@chatwarden/player-react` gains `<ChatBox>` and `
 `@experimental` until 0.2; no store change, no migration. It needs core 0.1.6, which has `cw.chat.restrictedBySubject`: the `@chatwarden/http` peer floor on core is `^0.1.6` (raised by hand; player-react, hub-react and
 hub-element keep theirs). Known limits, written in the READMEs: rooms are per process (sticky rooms, no cross-process bus); every line is announced
 politely in the log, with one tab stop per line; a stored automatic chat timeout reads as a moderator's in `hello` until the next refused line.
-Not yet: the site demo adopting the box, and the site headline (after the release is on npm); pacing words wait for flood control (plan Task 11).
+Not yet: the site demo adopting the box, and the site headline (after the release is on npm). The pacing words are in the box and are shown by 0.1.8's flood control (below).
+
+- **K7a: flood control and signals** (0.1.8), built and reviewed on branch `flood-signals`. **Slow mode, a burst limit and repeat refusal** per room and
+  player, off until set (code, or the hub: Settings, Advanced), with new refusal reasons `slow_mode`, `flood` and `duplicate` and a `retryAfterMs`, a
+  per-room override (`cw.rooms.setPace`) and the chat box and `RestrictedChatLine` wording them. **Signals**: what a game records about a player
+  (`cw.signals.record`, counted by distinct source, never acting on their own) feeding four switches, each off by default: the Person page record, the
+  queue order, the ladder suggestion and the AI read's context. SQLite migration 21 (one-way: back up first); the in-memory store opts in with
+  `withMemorySignals`. `GET /policy/profile` also reports `limits` (the chat rate and the signals retention). Known limits, written in the READMEs: pacing
+  state is per process; a signal is a fact a game reports, so several real accounts that agree can still count. `examples/tiny-chat` shows slow mode
+  with `CW_DEMO_PACE=1`. The site wording waits until the release is on npm and has run in Moxgate.
 
 ## Next
 - **K3c: AI levels 1-2** (read and recommend), **in progress** on branch `ai-levels`, built and reviewed, releasing as 0.1.7 after the chat box
