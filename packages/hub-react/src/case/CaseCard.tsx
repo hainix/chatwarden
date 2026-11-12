@@ -177,7 +177,7 @@ export function CaseCard() {
   const one = q.primary;
   const quick = q.warning;
   // The AI's suggestion stands in for the ladder's step when it can be accepted: the same button, the same keys, the same hold.
-  const aiOk = q.ai?.gate.ok === true;
+  const aiOk = q.aiOk;
 
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
@@ -188,6 +188,7 @@ export function CaseCard() {
    * for it, unless the moderator has already changed the bar's form (what was filled in from the case, or from an earlier pick, is replaced).
    */
   const seeded = useRef<string | null>(null);
+  c.aiBus.edit.current = () => openElse();
   const openElse = (): void => {
     const suggestion = pick.suggestion;
     if (pick.mode !== 'none' && pick.picked !== null && suggestion !== null && detail.data !== undefined) {
@@ -291,7 +292,7 @@ export function CaseCard() {
     } else if (!can('sanctions.apply')) {
       suggestion = <p className="cw-hint">{t('hub.decide.noApply')}</p>;
     } else if (aiOk) {
-      suggestion = <LazyAiParts part="suggest" q={q} />;
+      suggestion = <LazyAiParts part="suggest" />;
     } else if (pick.mode !== 'none' && (pick.picked === null || pick.error !== null)) {
       // Asking which rule: the field below is the whole card until a rule is picked.
       suggestion = null;
@@ -342,7 +343,7 @@ export function CaseCard() {
         )}
         {draft.status === 'ready' && (
           <div className="cw-scard-actions">
-            {aiOk && <LazyAiParts part="accept" q={q} />}
+            {aiOk && <LazyAiParts part="accept" />}
             {!aiOk && one !== null && (
               <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '1' } : {})} onClick={(e) => q.sendPrimary(e)}>
                 <span>{stepLabel(t, locale, one.choice)}</span>
@@ -364,7 +365,7 @@ export function CaseCard() {
             </button>
           </div>
         )}
-        {q.ai !== null && !aiOk && draft.status === 'ready' && <LazyAiParts part="why" q={q} />}
+        {c.aiCase?.from != null && !aiOk && draft.status === 'ready' && <LazyAiParts part="why" />}
         {!aiOk && one !== null && (
           <p className="cw-hint cw-scard-fine">
             {one.choice.kind === 'note'
@@ -378,7 +379,7 @@ export function CaseCard() {
 
   return (
     <section className="cw-scard" ref={root} aria-label={t('hub.simple.case.label', { who: name })} {...(left ? { 'data-gone': 'true' } : {})}>
-      <QuickKeys quick={q} digits={digits} onEdit={openElse} />
+      <QuickKeys quick={q} digits={digits} />
       {!left && (
         <>
           <header className="cw-scard-head">

@@ -86,7 +86,7 @@ export function SuggestionCard({
       )}
       {canAdd && (
         <button type="button" className="cw-btn" aria-disabled={draft.levelBusy} onClick={() => !draft.levelBusy && draft.useSuggestion()}>
-          {t(draft.aiFrom === null ? 'hub.decide.suggest.use' : 'hub.ai.addStep')}
+          {t(draft.addHint === null ? 'hub.decide.suggest.use' : 'hub.ai.addStep')}
         </button>
       )}
       {why !== null && <p className="cw-hint">{why}</p>}

@@ -12,7 +12,10 @@ import type { HubData } from '../hooks.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import { nextOpenReport } from '../queue.js';
 import type { NextReport, QueueGroup } from '../queue.js';
-import type { AiReadView, PersonHistory, ReportDetail } from '../types.js';
+import type { AiBus, AiCaseApi } from '../ai/api.js';
+import type { DecisionForm } from '../decision.js';
+import { LazyAiParts } from '../lazyParts.js';
+import type { AiReadView, DecideInput, PersonHistory, ReportDetail } from '../types.js';
 import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
 import { useDecisionForm } from './useDecisionForm.js';
 import type { DecisionDraft } from './useDecisionForm.js';
@@ -39,13 +42,14 @@ export interface CaseValue {
   left: boolean;
   /** The decision form, shared by the transcript's margin boxes and the decision bar. */
   draft: DecisionDraft;
-  /** What the AI read of this report, or null (the AI is off, no read yet, or this moderator hid it on this case). Advice, never a decision. */
-  ai: AiReadView | null;
-  /** The moderator hid the AI on this case (kept for the session, per moderator). `read` is then still there for the strip's "Show". */
-  aiHidden: boolean;
-  /** The read the server sent, hidden or not. */
+  /** What the AI read of this report, or null (the AI is off, or no read yet). Advice, never a decision. */
   aiRead: AiReadView | null;
-  setAiHidden: (hidden: boolean) => void;
+  /** What the AI's part of the case published (case/AiCase.tsx): its suggestion, whether it can be accepted, and how. Null until it has, and for a case with no recommendation. */
+  aiCase: AiCaseApi | null;
+  /** How the AI's part of the case talks to the case: what the form opens with, that it has decided, what it publishes, and the way to the editor. */
+  aiBus: AiBus;
+  /** What a decision says about the AI read that was shown (the server checks it against the decision), or undefined when none was shown. */
+  echo: (accepted: boolean | undefined, form: DecisionForm) => NonNullable<DecideInput['ai']> | undefined;
   /** The case was drawn long enough ago (the quick-act cooldown, on a monotonic clock) for an act key or a quick button to act on it. Read when a key is pressed. */
   settled: () => boolean;
   /** The same, as state, so a button can be drawn disabled for that moment. */
@@ -62,14 +66,6 @@ export interface CaseValue {
 
 const CaseContext = createContext<CaseValue | null>(null);
 
-// "Hide the AI on this case": this moderator's choice, for the session (this page, not the server), one entry per moderator and case.
-const hiddenAi = new Set<string>();
-/** Forgets every "hide the AI" (tests). */
-export function forgetHiddenAi(): void {
-  hiddenAi.clear();
-}
-
-/** The open case. Throws outside `<CaseProvider>`. */
 export function useCase(): CaseValue {
   const value = useContext(CaseContext);
   if (value === null) throw new Error('useCase must be used inside <CaseProvider>');
@@ -125,20 +121,14 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   const entry = decisions.entry(reportId);
   // Until the report is loaded it counts as open (the entry then decides); once loaded as closed, a sent decision no longer hides it.
   const left = hasLeft(entry, report === undefined || report.status === 'open');
-  const [, hideTick] = useState(0);
-  const hideKey = `${me.actor}\u0000${reportId}`;
-  const aiHidden = hiddenAi.has(hideKey);
+  // The AI's part of the case (case/AiCase.tsx, a lazy part) tells the form what to open with and publishes what the keys and the buttons need.
   const aiRead = detail.data?.ai ?? null;
-  const setAiHidden = useCallback(
-    (hidden: boolean): void => {
-      if (hidden) hiddenAi.add(hideKey);
-      else hiddenAi.delete(hideKey);
-      hideTick((n) => n + 1);
-    },
-    [hideKey],
-  );
+  const [aiFirst, setAiFirst] = useState<DecisionForm | null>(null);
+  const [aiDecided, setAiDecided] = useState(false);
+  const [aiCase, setAiCase] = useState<AiCaseApi | null>(null);
+  const aiBus = useMemo<AiBus>(() => ({ first: setAiFirst, decided: setAiDecided, publish: setAiCase, edit: { current: null } }), []);
 
-  const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide'), aiHidden });
+  const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide'), aiFirst, aiDecided });
 
   const value: CaseValue = {
     reportId,
@@ -151,13 +141,18 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     entry,
     left,
     draft,
-    ai: aiHidden ? null : aiRead,
-    aiHidden,
     aiRead,
-    setAiHidden,
+    aiCase,
+    aiBus,
+    echo: (accepted, form) => (aiCase !== null ? aiCase.echo(accepted, form) : aiRead === null ? undefined : { readId: aiRead.id, accepted: false }),
     settled,
     cooled,
     reveal: { all: revealAll, setAll: setRevealAll, shows: (id) => revealAll || revealed.has(id), toggle },
   };
-  return <CaseContext.Provider value={value}>{children}</CaseContext.Provider>;
+  return (
+    <CaseContext.Provider value={value}>
+      {children}
+      {aiRead?.recommendation != null && <LazyAiParts part="case" onFailed={() => setAiDecided(true)} />}
+    </CaseContext.Provider>
+  );
 }

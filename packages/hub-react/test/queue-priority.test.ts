@@ -1,6 +1,7 @@
 import type { ReportSummary } from '@chatwarden/http/admin';
 import { describe, expect, it } from 'vitest';
-import { groupQueue, priorityScore, RANK_WEIGHTS } from '../src/queue.js';
+import { priorityScore, RANK_WEIGHTS } from '../src/ai/rank.js';
+import { groupQueue } from '../src/queue.js';
 import type { QueueGroup, RankSignals } from '../src/queue.js';
 import type { AiBrief } from '../src/types.js';
 
@@ -314,7 +315,7 @@ describe('the reporter signal the hub supplies', () => {
       row('q', 0, null, { reporterAccuracy: null }),
       row('r', 0, null),
     ];
-    const by = Object.fromEntries(groupQueue(items, { now: NOW }).map((g) => [g.person, g.reporterFalseRate]));
+    const by = Object.fromEntries(groupQueue(items, { sort: 'priority', now: NOW }).map((g) => [g.person, g.reporterFalseRate]));
     expect(by['p']).toBeCloseTo(0.4, 10);
     expect(by['q']).toBeNull();
     expect(by['r']).toBeNull();

@@ -2,24 +2,10 @@ import { useState } from 'react';
 import { useHub } from './context.js';
 import { absoluteTime, formatDuration, personTag, relativeTime, waitTone } from './format.js';
 import { reasonChip } from './labels.js';
+import { LazyAiParts } from './lazyParts.js';
+import { hasAiRead } from './queue.js';
 import type { QueueGroup } from './queue.js';
-import type { AiBrief } from './types.js';
 import { Link, PersonChip, Tag } from './ui.js';
-
-/**
- * The queue's one AI chip: the conduct level the AI read, in a word, neutral with a dashed outline (machine-written). It says nothing of the
- * evidence; a stale read or a flagged line shows only in the case's AI details.
- */
-export function AiChip({ ai }: { ai: AiBrief | null | undefined }) {
-  const { t } = useHub();
-  if (ai == null) return null;
-  return (
-    <span className="cw-aichip" title={t('hub.ai.label')}>
-      <span className="cw-sr">{t('hub.ai.chip')} </span>
-      {t(`hub.decide.suggest.level.${ai.severity}`)}
-    </span>
-  );
-}
 
 /** How many earlier reports the disclosure lists; older ones are in the person's history. */
 export const EARLIER_SHOWN = 10;
@@ -48,7 +34,7 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
           {group.reasons.map((r) => (
             <Tag key={r.id ?? 'none'}>{reasonChip(t, r.label)}</Tag>
           ))}
-          <AiChip ai={group.ai} />
+          {hasAiRead(group) && <LazyAiParts part="chip" group={group} />}
           {showStatus && group.open > 0 && <Tag>{t('hub.reports.tag.open')}</Tag>}
           {showStatus && group.actioned > 0 && <Tag>{t('hub.reports.tag.actioned')}</Tag>}
           {showStatus && group.dismissed > 0 && <Tag>{t('hub.reports.tag.dismissed')}</Tag>}

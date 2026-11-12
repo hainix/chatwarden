@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useAiOffer } from '../ai/load.js';
-import type { AiGate } from '../ai/offer.js';
 import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
 import { isWaiting, useDecisions } from '../decisions.js';
-import { outcomeChoice, shapeOf, toInput } from '../decision.js';
-import type { AiFromState, Choice, DecisionForm } from '../decision.js';
+import { outcomeChoice, toInput } from '../decision.js';
+import type { Choice, DecisionForm } from '../decision.js';
 import { personName } from '../excerpt.js';
 import { noActionForm, oneClickOf } from '../simple.js';
 import type { OneClick } from '../simple.js';
@@ -31,6 +29,12 @@ export type QuickKind = 'primary' | 'none' | 'warning';
 // on it. Taken once.
 const lastSent = new Map<string, QuickKind>();
 const LAST_SENT_MAX = 50;
+/** Remembers the button that sent a report's quick action (the AI's accept uses it too), so Undo can put focus back on it. */
+export function rememberQuick(reportId: string, kind: QuickKind): void {
+  if (lastSent.size >= LAST_SENT_MAX) lastSent.clear();
+  lastSent.set(reportId, kind);
+}
+
 /** The button that sent this report's last quick action, once; undefined when it was not a quick action. */
 export function takeLastQuick(reportId: string): QuickKind | undefined {
   const kind = lastSent.get(reportId);
@@ -55,11 +59,8 @@ export interface QuickActions {
   sendWarning: (click?: { detail?: number }) => void;
   /** The case's read is current (no newer report has arrived since). */
   fresh: boolean;
-  /**
-   * The AI's suggestion (level 2): the pre-fill it made and whether it can be accepted with one key (`gate`), or null when it made none. When
-   * the gate is open, 1, A and Ctrl+Enter on a card send it (`sendPrimary`) in place of the ladder's step.
-   */
-  ai: { from: AiFromState; gate: AiGate } | null;
+  /** The AI's suggestion can be accepted: 1, A and Ctrl+Enter on a card send it (`sendPrimary`) in place of the ladder's step. */
+  aiOk: boolean;
   /** Which rule the card works from, for the rule field and "Something else". */
   pick: RulePick;
   suggest: Suggestion | undefined;
@@ -78,7 +79,8 @@ export interface QuickActionsOptions {
   refresh?: boolean;
 }
 
-export { shapeOf };
+/** A form without its action ids, to tell whether the moderator has changed it. */
+export const shapeOf = (form: DecisionForm): string => JSON.stringify({ verdict: form.verdict, reason: form.reason, actions: form.actions.map((a) => ({ ...a, uid: '' })) });
 
 /** The quick actions of the open case. Used inside `<CaseProvider>`. */
 export function useQuickActions({ enabled = true, paused = false, refresh = false }: QuickActionsOptions = {}): QuickActions {
@@ -87,8 +89,6 @@ export function useQuickActions({ enabled = true, paused = false, refresh = fals
   const decisions = useDecisions();
   const actions = useCaseActions();
   const { detail, entry, holder, people, group, left, draft } = c;
-  // The AI's suggestion is judged by code that is already here whenever it made one (it was needed to make it).
-  const { offer } = useAiOffer(false);
   const report = detail.data?.report;
   const status = entry?.state.status;
   const open = report?.status === 'open';
@@ -144,21 +144,13 @@ export function useQuickActions({ enabled = true, paused = false, refresh = fals
   const name = target === undefined ? '' : personName(target, people, t);
 
   /** Hands a form to the hold and goes on. Nothing is sent unless the case is usable. */
-  const from = draft.aiFrom;
-  const ai =
-    from === null || offer === null || c.ai === null
-      ? null
-      : { from, gate: offer.gateOf({ from, source: draft.source, read: c.ai, ctx: draft.ctx, rulesState: draft.rulesState, mayApply: can('sanctions.apply'), heldByOther: readOnly }) };
-
-  /** `accepts`: the form is the AI's suggestion, taken as it stood. Every send says which read the moderator was shown, if one was. */
-  const send = (form: DecisionForm, kind: QuickKind, click?: { detail?: number }, accepts = false): void => {
+  const send = (form: DecisionForm, kind: QuickKind, click?: { detail?: number }): void => {
     // Keys and clicks alike: the case must have aged, and the second click of a double click is the first one's echo.
     if (!usable || report === undefined || !c.settled() || isRepeatClick(click)) return;
-    if (lastSent.size >= LAST_SENT_MAX) lastSent.clear();
-    lastSent.set(report.id, kind);
-    const echo = draft.aiEcho(accepts, form);
+    rememberQuick(report.id, kind);
+    const ai = c.echo(false, form);
     const input = toInput(form);
-    decisions.submit({ reportId: report.id, person: report.targetPerson, name, input: echo === undefined ? input : { ...input, ai: echo }, snapshot: form });
+    decisions.submit({ reportId: report.id, person: report.targetPerson, name, input: ai === undefined ? input : { ...input, ai }, snapshot: form });
     void actions.continueFrom({ reportId: report.id, person: report.targetPerson }, { quick: true });
   };
 
@@ -167,12 +159,12 @@ export function useQuickActions({ enabled = true, paused = false, refresh = fals
     primary,
     warning,
     fresh,
-    ai,
     pick,
     suggest,
     choice,
     cooled: c.cooled,
-    sendPrimary: (click) => (ai !== null && ai.gate.ok ? send(ai.from.form, 'primary', click, true) : primary !== null && send(primary.form, 'primary', click)),
+    aiOk: c.aiCase?.gate?.ok === true,
+    sendPrimary: (click) => (c.aiCase?.gate?.ok === true ? c.aiCase.accept(click) : primary !== null && send(primary.form, 'primary', click)),
     sendDismiss: (click) => send(noActionForm(), 'none', click),
     sendWarning: (click) => warning !== null && send(warning.form, 'warning', click),
   };

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAiT } from '../ai/i18n.js';
+import { useAiHidden } from '../ai/hide.js';
 import { useHub } from '../context.js';
 import { ruleLabel } from '../labels.js';
 import type { AiReadView } from '../types.js';
@@ -22,6 +23,7 @@ export function AiStrip({ read }: { read: AiReadView | null }) {
   const t = useAiT();
   const { t: hubT } = useHub();
   const c = useCase();
+  const [hidden, setHidden] = useAiHidden(c.reportId);
   // The id of the read that "Read again" was asked for: waiting until a read with another id comes.
   const [again, setAgain] = useState<string | null>(null);
   // The read (or none) the 20 seconds ran out on.
@@ -42,11 +44,11 @@ export function AiStrip({ read }: { read: AiReadView | null }) {
     };
   }, [waiting, key]);
 
-  if (c.aiHidden && read !== null) {
+  if (hidden && read !== null) {
     return (
       <p className="cw-ai-hidden cw-hint">
         <span>{t('hub.ai.hidden')}</span>{' '}
-        <button type="button" className="cw-linkbtn" onClick={() => c.setAiHidden(false)}>
+        <button type="button" className="cw-linkbtn" onClick={() => setHidden(false)}>
           {t('hub.ai.show')}
         </button>
       </p>

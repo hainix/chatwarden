@@ -133,17 +133,18 @@ describe('bundle size', () => {
     }
   });
 
-  it("keeps the AI's strip, its menu, its suggestion and their words out of the entry: they load when a case has a read to show", async () => {
+  it('with the AI off the first load carries none of the AI: every piece of it is a chunk loaded when the hub learns the AI is on', async () => {
     const { entryInputs, chunkRoots } = await bundle();
-    // The strip and the suggestion parts, and the code that fills a form from a recommendation, are chunks of their own ...
-    for (const file of ['case/AiStrip.tsx', 'case/AiParts.tsx', 'ai/offer.ts']) {
+    // The strip, the pieces drawn inside the always-present parts (chip, tick, decision bar header, Simple card), the AI's part of the case, the
+    // queue's ranking and the pre-fill's code are chunks of their own ...
+    for (const file of ['case/AiStrip.tsx', 'case/AiParts.tsx', 'ai/core.ts']) {
       expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
       expect(chunkRoots.filter((i) => i.endsWith(`src/${file}`)), `${file} has no chunk`).toHaveLength(1);
     }
-    // ... and nothing they hold rides in the first load: not the menu, not the pre-fill, not their words, not the shortcut sheet's level.
-    for (const file of ['case/AiDetails.tsx', 'ai/prefill.ts', 'ai/i18n.ts', 'ai/level.ts']) {
-      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
-    }
+    // ... and no module of the AI rides in the first load: not the menu, the case controller, the ranking, the pre-fill, the hide state, the words, the
+    // shortcut sheet's level, nor the AI settings screen. Only `ai/load.ts` (the fetch) and `case/AiRead.tsx` (the slot that mounts the strip) are the entry's.
+    const inEntry = entryInputs.filter((i) => /src\/(ai|case\/Ai|screens\/AiSettings)/.test(i));
+    expect(inEntry.map((i) => i.slice(i.indexOf('src/')))).toEqual(['src/ai/load.ts', 'src/case/AiRead.tsx']);
   });
 
   it('keeps the settings and admin screens out of the entry: each is a chunk of its own', async () => {

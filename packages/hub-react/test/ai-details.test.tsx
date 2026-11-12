@@ -1,6 +1,6 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { forgetHiddenAi } from '../src/case/CaseContext.js';
+import { forgetHiddenAi } from '../src/ai/hide.js';
 import { aiCase, aiWorld, noStrip, open, openPlain, reads, settle, strip } from './aiHub.js';
 import type { HubWorld } from './world.js';
 

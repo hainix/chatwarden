@@ -1,9 +1,9 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { AI_MAX_PREFILL_MS } from '@chatwarden/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { forgetHiddenAi } from '../src/case/CaseContext.js';
+import { forgetHiddenAi } from '../src/ai/hide.js';
 import { aiBar, aiCase, aiWorld, decision, noAiBar, open, openPlain, reads, rewrite, settle, strip } from './aiHub.js';
-import { aiLoaders, resetAiOffer } from '../src/ai/load.js';
+import { partLoaders, resetLazyParts } from '../src/lazyParts.js';
 import { resetQuickKeysVisit } from '../src/quickKeys.js';
 
 // Level 2: the decision bar opens pre-filled from the AI's recommendation, labelled, and never fills a ban, an area ban or more than 24
@@ -25,7 +25,7 @@ const prefillOf = (): { actions: string; reason: string; verdict: boolean } => (
   reason: reason().value,
   verdict: verdict('Fair').checked || verdict('Not a problem').checked || verdict('Bad faith').checked,
 });
-const picked = (): string[] => [...document.querySelectorAll<HTMLInputElement>('.cw-lines input[type="checkbox"]')].filter((b) => b.checked).map((b) => b.closest('.cw-line')?.querySelector('.cw-line-text')?.textContent ?? '');
+const picked = (): string[] => [...document.querySelectorAll<HTMLInputElement>('.cw-lines input[type="checkbox"]')].filter((b) => b.checked).map((b) => b.closest('.cw-line')?.querySelector('.cw-line-text')?.firstChild?.textContent ?? '');
 
 describe('level 1 and the cases where the AI has nothing to fill', () => {
   it('level 1 never pre-fills from the AI', async () => {
@@ -325,9 +325,9 @@ describe('when the code that fills from the AI cannot be fetched', () => {
     await aiCase({ level: 0 });
     const ladder = prefillOf();
     cleanup();
-    const real = aiLoaders.offer;
-    resetAiOffer();
-    aiLoaders.offer = () => Promise.reject(new Error('offline'));
+    const real = partLoaders.aiParts;
+    resetLazyParts();
+    partLoaders.aiParts = () => Promise.reject(new Error('offline'));
     try {
       await aiCase({ level: 2 });
       // The form came, as the ladder's: no verdict, no label, nothing to accept.
@@ -335,8 +335,8 @@ describe('when the code that fills from the AI cannot be fetched', () => {
       expect(screen.queryByText('Suggested by AI')).toBeNull();
       expect(screen.queryByRole('button', { name: /^Accept AI/ })).toBeNull();
     } finally {
-      aiLoaders.offer = real;
-      resetAiOffer();
+      partLoaders.aiParts = real;
+      resetLazyParts();
     }
   });
 });

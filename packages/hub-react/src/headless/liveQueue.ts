@@ -3,7 +3,7 @@ import type { HubClient, HubError } from '../client.js';
 import type { HubT } from '../i18n.js';
 import { BANNER_AFTER_FAILURES, adopt, pollDelay, reconcile } from '../live.js';
 import type { ShownRow } from '../live.js';
-import { filterGroups, groupQueue, reporterSignal } from '../queue.js';
+import { filterGroups, groupQueue, loadRanker } from '../queue.js';
 import type { QueueFilter, QueueGroup } from '../queue.js';
 import type { Claim } from '../types.js';
 import type { PageSource, Timers } from './env.js';
@@ -214,8 +214,9 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     const at = knownToken ?? (await client.changes()).token;
     const all = await fetchAllOpen(client);
     // Longest wait first, unless the server sends AI reads: then the `priority` sort (wait, open reports, the read, the reporter's record).
-    const ranked = all.items.some((r) => r.ai != null);
-    const groups = groupQueue(all.items, { sort: ranked ? 'priority' : 'oldest', now: now(), signals: { reporter: reporterSignal }, rankDown: { now: now() } });
+    const reads = all.items.some((r) => r.ai != null);
+    if (reads) await loadRanker();
+    const groups = groupQueue(all.items, { sort: reads ? 'priority' : 'oldest', now: now(), rankDown: { now: now() } });
     if (mine !== seq) return groups;
     token = at;
     commit((prev) => {

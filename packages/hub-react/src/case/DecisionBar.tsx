@@ -79,6 +79,7 @@ export function DecisionBar() {
   const [attempted, setAttempted] = useState(false);
   const [failedTries, setFailedTries] = useState(0);
   const [editing, setEditing] = useState(false);
+  c.aiBus.edit.current = () => setEditing(true);
   const [sheet, setSheet] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
   const summary = useRef<HTMLDivElement>(null);
@@ -162,7 +163,7 @@ export function DecisionBar() {
       return;
     }
     // What the AI's read was, if one was shown, and whether this is its suggestion as it stood (the server checks it against the decision).
-    const ai = draft.aiEcho(undefined, form);
+    const ai = c.echo(undefined, form);
     const input = toInput(form);
     decisions.submit({ reportId: report.id, person: report.targetPerson, name: nameOfTarget, input: ai === undefined ? input : { ...input, ai }, snapshot: form });
     // On to the same person's next report, or the next case: one rule, in `continueFrom`.
@@ -328,7 +329,7 @@ export function DecisionBar() {
         ) : (
           <form className="cw-form" noValidate hidden={!editable} onSubmit={(e) => e.preventDefault()}>
             <fieldset className="cw-readonly" disabled={readOnly}>
-              {c.ai?.recommendation != null && <LazyAiParts part="bar" q={lite} onEdit={() => setEditing(true)} />}
+              {c.aiRead?.recommendation != null && <LazyAiParts part="bar" />}
               <fieldset className="cw-verdicts">
                 <legend className="cw-sr">{t('hub.decide.verdict.legend')}</legend>
                 <div className="cw-verdict-grid">
@@ -564,7 +565,7 @@ export function DecisionBar() {
         </button>
       </div>
       <div className="cw-dock-body" id={bodyId}>
-        {quickActive && <DetailedQuickKeys onEdit={() => setEditing(true)} />}
+        {quickActive && <DetailedQuickKeys />}
         <div className="cw-sr" role="status" aria-label={t('hub.decide.live')}>
           <span key={live.n}>{live.text}</span>
         </div>

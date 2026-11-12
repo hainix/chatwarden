@@ -377,9 +377,6 @@ export function initialForm(ctx: ValidationContext, outcome: Suggestion['outcome
   return form === null ? emptyForm() : { ...form, verdict: null };
 }
 
-/** A form without its action ids, as a string: the way to tell whether the moderator has changed it. */
-export const shapeOf = (form: DecisionForm): string => JSON.stringify({ verdict: form.verdict, reason: form.reason, actions: form.actions.map((a) => ({ ...a, uid: '' })) });
-
 /**
  * Where the form in the bar came from: the ladder's pre-fill (as always), the AI's recommendation as it stands, or the AI's after the
  * moderator changed anything (a key counts: pressing 1, 2 or 3 by hand is an edit, not an accept).

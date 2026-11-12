@@ -1,47 +1,38 @@
-import { useEffect, useState } from 'react';
+// The AI's code is loaded when the hub learns the AI is on (a queue that holds a read, a case that has one or expects one), not with the hub:
+// an install with the AI off pays for none of it. `ensureAi()` fetches it once and keeps it; a failed fetch leaves the hub as it is without the
+// AI (the ladder's pre-fill, the longest-wait order): these are optional extras, not screens. No React here: the headless queue uses it too.
 
-// The code that builds the AI's pre-fill is loaded the first time a case has a recommendation, not with the hub: nobody who runs without
-// the AI pays for it. A case that has one waits for it before its decision form is made (a few milliseconds from the second case on).
-// A failed fetch means the ladder's own pre-fill, as without the AI: these are optional extras, not screens.
+type Core = typeof import('./core.js');
 
-type Offer = typeof import('./offer.js');
-
-/** What a part asks of the page to get the AI's pre-fill code. Exposed so a test can make a fetch fail or wait; nothing else replaces it. */
-export const aiLoaders: { offer: () => Promise<Offer> } = {
-  offer: () => import('./offer.js'),
+/** What the hub asks of the page to get the AI's code. Exposed so a test can make a fetch fail or wait; nothing else replaces it. */
+export const aiLoaders: { core: () => Promise<Core> } = {
+  core: () => import('./core.js'),
 };
 
-let loaded: Offer | null = null;
+let core: Core | null = null;
 let failed = false;
+let pending: Promise<Core | null> | null = null;
 
-/**
- * The AI's pre-fill code, once it is here. `wanted` asks for it (a case with a recommendation); without it nothing is fetched, and the
- * code is returned only if some earlier case already brought it. `settled` is true once it is here or could not be fetched.
- */
-export function useAiOffer(wanted: boolean): { offer: Offer | null; settled: boolean } {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    if (!wanted || loaded !== null) return undefined;
-    let live = true;
-    aiLoaders.offer().then(
-      (m) => {
-        loaded = m;
-        if (live) tick((n) => n + 1);
-      },
-      () => {
-        failed = true;
-        if (live) tick((n) => n + 1);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [wanted]);
-  return { offer: loaded, settled: loaded !== null || failed };
+/** The AI's code if it is here, else null. Never fetches. */
+export const aiCore = (): Core | null => core;
+/** Whether the fetch was tried and failed. */
+export const aiFailed = (): boolean => failed;
+
+/** Fetches the AI's code (once) and resolves with it, or null when it cannot be fetched. */
+export function ensureAi(): Promise<Core | null> {
+  pending ??= aiLoaders.core().then(
+    (m) => (core = m),
+    () => {
+      failed = true;
+      return null;
+    },
+  );
+  return pending;
 }
 
 /** Forgets what was fetched (tests). */
-export function resetAiOffer(): void {
-  loaded = null;
+export function resetAiCore(): void {
+  core = null;
   failed = false;
+  pending = null;
 }

@@ -1,27 +1,31 @@
 import { useId } from 'react';
 import { useAiT } from '../ai/i18n.js';
 import type { AiText } from '../ai/i18n.js';
+import { useAiHidden } from '../ai/hide.js';
 import type { AiWhy } from '../ai/offer.js';
+import { readsOf } from '../ai/rank.js';
 import { useHub } from '../context.js';
 import { personName } from '../excerpt.js';
 import { choiceLabel } from '../labels.js';
 import { useQuickKeys } from '../quickKeys.js';
+import type { QueueGroup } from '../queue.js';
 import { stepLabel } from '../simple.js';
 import { UNDO_MS } from '../toasts.js';
 import { Card, Kbd } from '../ui.js';
+import { AiCase } from './AiCase.js';
 import { useCase } from './CaseContext.js';
-import type { QuickActions } from './useQuickActions.js';
 
-// The AI's suggestion on a case (level 2), in the places it shows: the header of the decision bar (Detailed), and on the Simple card the
-// suggestion, the Accept button and, when it cannot be accepted, the reason. One lazy part with a `part` prop, so it is one chunk and one
-// fetch. Accepting goes through `QuickActions.sendPrimary` (the same hold, the same guards, the same go-on-to-the-next as the ladder's step);
-// nothing here sends anything by itself, and a button whose gate is shut does nothing.
+// The AI's pieces that are drawn inside parts of the hub that are always there: the queue's chip, the tick on a cited line, the decision bar's
+// header, the Simple card's suggestion, Accept button and reason, and the AI's part of the case itself (`case`, which draws nothing). One lazy
+// part with a `part` prop, so it is one chunk and one fetch. Accepting goes through `AiCaseApi.accept` (the same hold, the same guards, the same
+// go-on-to-the-next as the ladder's step); a button whose gate is shut does nothing.
 
 export interface AiPartsProps {
-  part: 'bar' | 'suggest' | 'accept' | 'why';
-  q: QuickActions;
-  /** Open the editor (the bar's, or the card's "Something else"). */
-  onEdit?: () => void;
+  part: 'case' | 'bar' | 'suggest' | 'accept' | 'why' | 'chip' | 'tick';
+  /** The queue row's person (the chip). */
+  group?: QueueGroup;
+  /** The line (the tick). */
+  lineId?: string;
 }
 
 const WHY: Record<Exclude<AiWhy, 'edited'>, AiText> = {
@@ -35,35 +39,45 @@ const WHY: Record<Exclude<AiWhy, 'edited'>, AiText> = {
 
 const SECONDS = UNDO_MS / 1000;
 
+/** What the AI's part of the case published, unless the moderator hid the AI on this case. */
+function useApi() {
+  const c = useCase();
+  const [hidden] = useAiHidden(c.reportId);
+  return { c, api: hidden ? null : c.aiCase };
+}
+
 /** The sentence for a shut gate, or null when the form was only edited (it says so in its label and needs no excuse). */
-function useWhy(q: QuickActions): string | null {
+function useWhy(): string | null {
   const t = useAiT();
-  if (q.ai === null || q.ai.gate.ok || q.ai.gate.why === 'edited') return null;
-  const why = q.ai.gate.why;
-  return t(why === 'step' && q.ai.from.held === null ? 'hub.ai.why.nostep' : WHY[why]);
+  const { api } = useApi();
+  if (api === null || api.gate === null || api.gate.ok || api.gate.why === 'edited') return null;
+  const why = api.gate.why;
+  return t(why === 'step' && api.from?.held === null ? 'hub.ai.why.nostep' : WHY[why]);
 }
 
 /** "Accept AI suggestion: Restrict chat, 24 hours", or "...: no action needed". Null when the suggestion names no step to accept. */
-function useAcceptLabel(q: QuickActions): string | null {
+function useAcceptLabel(): string | null {
   const t = useAiT();
   const { t: hubT, locale } = useHub();
-  if (q.ai === null) return null;
-  const { from } = q.ai;
+  const { api } = useApi();
+  const from = api?.from;
+  if (from === null || from === undefined) return null;
   if (from.kind === 'dismiss') return t('hub.ai.accept.dismiss');
   return from.choice === null ? null : t('hub.ai.accept.with', { step: stepLabel(hubT, locale, from.choice) });
 }
 
-function Bar({ q, onEdit }: { q: AiPartsProps['q']; onEdit: (() => void) | undefined }) {
+function Bar() {
   const t = useAiT();
   const { shortcuts } = useHub();
   const quickOn = useQuickKeys().on;
   const keys = shortcuts && quickOn;
-  const c = useCase();
+  const { c, api } = useApi();
   const hint = useId();
-  const why = useWhy(q);
-  const label = useAcceptLabel(q);
+  const why = useWhy();
+  const label = useAcceptLabel();
   const group = t('hub.ai.bar.label');
-  if (q.ai === null) {
+  if (api === null) return null;
+  if (api.from === null) {
     // Level 2, a read, and nothing the AI is sure enough to fill: the bar is the ladder's, with a quiet word about it.
     return (
       <div className="cw-aibar" role="group" aria-label={group}>
@@ -71,8 +85,8 @@ function Bar({ q, onEdit }: { q: AiPartsProps['q']; onEdit: (() => void) | undef
       </div>
     );
   }
-  const edited = c.draft.source === 'edited';
-  const ok = q.ai.gate.ok;
+  const edited = api.source === 'edited';
+  const ok = api.gate?.ok === true;
   return (
     <div className="cw-aibar" role="group" aria-label={group}>
       <div className="cw-aibar-head">
@@ -82,10 +96,10 @@ function Bar({ q, onEdit }: { q: AiPartsProps['q']; onEdit: (() => void) | undef
           <button
             type="button"
             className="cw-btn cw-btn--primary cw-ai-accept"
-            aria-disabled={!ok || !q.usable || !q.cooled}
+            aria-disabled={!ok || !api.usable || !c.cooled}
             {...(!ok ? { 'aria-describedby': hint } : {})}
             {...(keys ? { 'aria-keyshortcuts': 'A' } : {})}
-            onClick={(e) => ok && q.sendPrimary(e)}
+            onClick={(e) => ok && api.accept(e)}
           >
             <span>{label}</span>
             {keys && (
@@ -95,8 +109,8 @@ function Bar({ q, onEdit }: { q: AiPartsProps['q']; onEdit: (() => void) | undef
             )}
           </button>
         )}
-        {!edited && onEdit !== undefined && (
-          <button type="button" className="cw-btn cw-ai-edit" {...(keys ? { 'aria-keyshortcuts': 'E' } : {})} onClick={onEdit}>
+        {!edited && (
+          <button type="button" className="cw-btn cw-ai-edit" {...(keys ? { 'aria-keyshortcuts': 'E' } : {})} onClick={() => c.aiBus.edit.current?.()}>
             <span>{t('hub.ai.edit')}</span>
             {keys && (
               <span aria-hidden="true">
@@ -116,15 +130,15 @@ function Bar({ q, onEdit }: { q: AiPartsProps['q']; onEdit: (() => void) | undef
 }
 
 /** On the Simple card: what the AI suggests, in the place the ladder's suggestion goes, and what the player will see. */
-function Suggest({ q }: { q: AiPartsProps['q'] }) {
+function Suggest() {
   const t = useAiT();
   const { t: hubT, locale } = useHub();
-  const { people } = useCase();
+  const { c, api } = useApi();
   const id = useId();
-  if (q.ai === null) return null;
-  const { from } = q.ai;
-  const target = people.find((p) => p.role === 'target');
-  const name = target === undefined ? '' : personName(target, people, hubT);
+  const from = api?.from;
+  if (from === null || from === undefined) return null;
+  const target = c.people.find((p) => p.role === 'target');
+  const name = target === undefined ? '' : personName(target, c.people, hubT);
   return (
     <div className="cw-suggest" role="group" aria-labelledby={`${id}-title`}>
       <h3 id={`${id}-title`} className="cw-sr">
@@ -148,21 +162,22 @@ function Suggest({ q }: { q: AiPartsProps['q'] }) {
 }
 
 /** On the Simple card: the primary button, "Accept AI suggestion" and the step in words. */
-function Accept({ q }: { q: AiPartsProps['q'] }) {
+function Accept() {
   const { shortcuts } = useHub();
   const quickOn = useQuickKeys('simple').on;
   const keyed = shortcuts && quickOn;
-  const label = useAcceptLabel(q);
-  if (label === null || q.ai === null) return null;
-  const ok = q.ai.gate.ok;
+  const label = useAcceptLabel();
+  const { c, api } = useApi();
+  if (label === null || api === null) return null;
+  const ok = api.gate?.ok === true;
   return (
     <button
       type="button"
       className="cw-btn cw-btn--primary cw-ai-accept"
-      aria-disabled={!ok || !q.fresh || !q.cooled}
-      {...(ok && q.fresh && !q.cooled ? { 'data-cooling': 'true' } : {})}
+      aria-disabled={!ok || !api.usable || !c.cooled}
+      {...(ok && api.usable && !c.cooled ? { 'data-cooling': 'true' } : {})}
       {...(keyed ? { 'aria-keyshortcuts': 'A 1' } : {})}
-      onClick={(e) => ok && q.sendPrimary(e)}
+      onClick={(e) => ok && api.accept(e)}
     >
       <span>{label}</span>
       {keyed && (
@@ -174,20 +189,54 @@ function Accept({ q }: { q: AiPartsProps['q'] }) {
   );
 }
 
-function Why({ q }: { q: AiPartsProps['q'] }) {
-  const why = useWhy(q);
+function Why() {
+  const why = useWhy();
   return why === null ? null : <p className="cw-hint cw-scard-fine">{why}</p>;
 }
 
-export function AiParts({ part, q, onEdit }: AiPartsProps) {
+/** The queue's one AI chip: the conduct level the AI read, in a word, neutral with a dashed outline. It says nothing of the evidence. */
+function Chip({ group }: { group: QueueGroup }) {
+  const t = useAiT();
+  const { t: hubT } = useHub();
+  const { ai } = readsOf(group);
+  if (ai === null) return null;
+  return (
+    <span className="cw-aichip" title={hubT('hub.ai.label')}>
+      <span className="cw-sr">{t('hub.ai.chip')} </span>
+      {hubT(`hub.decide.suggest.level.${ai.severity}`)}
+    </span>
+  );
+}
+
+/** A small mark on a line the AI cited. Not a control; its words are for a screen reader and the tooltip. */
+function Tick({ lineId }: { lineId: string }) {
+  const t = useAiT();
+  const c = useCase();
+  const [hidden] = useAiHidden(c.reportId);
+  if (hidden || c.aiRead?.evidenceLineIds.includes(lineId) !== true) return null;
+  return (
+    <span className="cw-aitick" title={t('hub.ai.tick')}>
+      <span aria-hidden="true">✓</span>
+      <span className="cw-sr">{t('hub.ai.tick')}</span>
+    </span>
+  );
+}
+
+export function AiParts({ part, group, lineId }: AiPartsProps) {
   switch (part) {
+    case 'case':
+      return <AiCase />;
     case 'bar':
-      return <Bar q={q} onEdit={onEdit} />;
+      return <Bar />;
     case 'suggest':
-      return <Suggest q={q} />;
+      return <Suggest />;
     case 'accept':
-      return <Accept q={q} />;
+      return <Accept />;
     case 'why':
-      return <Why q={q} />;
+      return <Why />;
+    case 'chip':
+      return group === undefined ? null : <Chip group={group} />;
+    case 'tick':
+      return lineId === undefined ? null : <Tick lineId={lineId} />;
   }
 }

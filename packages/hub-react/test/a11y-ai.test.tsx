@@ -1,7 +1,7 @@
 import { cleanup, screen, within } from '@testing-library/react';
 import axe from 'axe-core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { forgetHiddenAi } from '../src/case/CaseContext.js';
+import { forgetHiddenAi } from '../src/ai/hide.js';
 import { aiCase, strip } from './aiHub.js';
 import { rulesCss } from './css.js';
 

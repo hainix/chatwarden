@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { QUICK_ACT_COOLDOWN_MS } from '../src/case/actGuard.js';
-import { forgetHiddenAi } from '../src/case/CaseContext.js';
+import { forgetHiddenAi } from '../src/ai/hide.js';
 import { QUICK_KEYS_KEY, resetQuickKeysVisit, writeQuickKeys } from '../src/quickKeys.js';
 import { aiBar, aiWorld, decides, decision, open, settle } from './aiHub.js';
 import { advanceGuardTime, useExactGuardClock } from './guardTime.js';

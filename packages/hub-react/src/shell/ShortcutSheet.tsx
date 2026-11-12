@@ -1,10 +1,11 @@
 import { Fragment, useId, useRef, useState } from 'react';
 import { useAiT } from '../ai/i18n.js';
 import { useAiLevel } from '../ai/level.js';
+import { AI_KEYS } from '../ai/offer.js';
 import { useHub } from '../context.js';
 import { Dialog } from '../Dialog.js';
 import { useQuickKeys } from '../quickKeys.js';
-import { AI_KEYS, SHORTCUT_GROUPS, keyLabel, modKey } from '../shortcuts.js';
+import { SHORTCUT_GROUPS, keyLabel, modKey } from '../shortcuts.js';
 import { Kbd } from '../ui.js';
 
 /** The key caps of one binding: `Ctrl` is Cmd on a Mac. */

@@ -232,7 +232,6 @@ export const en = {
   'hub.claim.viewingMany': '{names} are viewing',
 
   'hub.ai.label': 'AI read',
-  'hub.ai.chip': 'AI read:',
   'hub.ai.tick': 'Cited by the AI',
   'hub.ai.addStep': 'Add suggested step',
   'hub.ai.title': 'AI read (AI level {level})',

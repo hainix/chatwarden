@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { useHub } from '../context.js';
 import { isTypingTarget, modalIn } from '../dom.js';
 import { useKeyListener } from '../keyScope.js';
-import { AI_KEYS } from '../shortcuts.js';
 import { actsBlocked } from './actGuard.js';
 import { useCase } from './CaseContext.js';
 import { useQuickActions } from './useQuickActions.js';
@@ -16,7 +15,7 @@ import type { QuickActions } from './useQuickActions.js';
 // the reason box, and a digit on the rule field, a select that a digit cannot type into), not under a window, and not until
 // QUICK_ACT_COOLDOWN_MS after the case appeared (see actGuard.ts).
 
-export function QuickKeys({ quick, ctrlEnter = true, digits = true, onEdit }: { quick: QuickActions; ctrlEnter?: boolean; digits?: boolean; onEdit?: () => void }) {
+export function QuickKeys({ quick, ctrlEnter = true, digits = true }: { quick: QuickActions; ctrlEnter?: boolean; digits?: boolean }) {
   const { shortcuts } = useHub();
   const c = useCase();
   const listen = useKeyListener();
@@ -24,8 +23,6 @@ export function QuickKeys({ quick, ctrlEnter = true, digits = true, onEdit }: { 
   latest.current = quick;
   const settledRef = useRef(c.settled);
   settledRef.current = c.settled;
-  const editRef = useRef(onEdit);
-  editRef.current = onEdit;
 
   useEffect(() => {
     if (!shortcuts) return;
@@ -35,15 +32,6 @@ export function QuickKeys({ quick, ctrlEnter = true, digits = true, onEdit }: { 
       if (modalIn(hub) !== null) return;
       const isCtrlEnter = e.key === 'Enter' && e.ctrlKey !== e.metaKey && !e.altKey && !e.shiftKey;
       const isDigit = digits && (e.key === '1' || e.key === '2' || e.key === '3') && !e.ctrlKey && !e.metaKey && !e.altKey;
-      // The AI's suggestion (level 2): A accepts it, E opens the editor. Letters, so never while typing; they act where the digits act.
-      const ai = digits && q.ai !== null && !e.ctrlKey && !e.metaKey && !e.altKey && !isTypingTarget(e) ? e.key.toLowerCase() : '';
-      if (ai === AI_KEYS.accept || ai === AI_KEYS.edit) {
-        if (!settledRef.current() || actsBlocked(hub)) return;
-        e.preventDefault();
-        if (ai === AI_KEYS.edit) editRef.current?.();
-        else if (q.ai?.gate.ok === true) q.sendPrimary();
-        return;
-      }
       if (!isDigit && !(ctrlEnter && isCtrlEnter)) return;
       if (isDigit) {
         // The rule field is a select: a digit cannot type into it, so 1, 2 and 3 keep working while it has focus.
@@ -54,7 +42,7 @@ export function QuickKeys({ quick, ctrlEnter = true, digits = true, onEdit }: { 
       // Not until the case has aged (a double tap is for the case just closed), and not while a move to another case is on its way.
       if (!settledRef.current() || actsBlocked(hub)) return;
       if (isCtrlEnter || e.key === '1') {
-        if (q.primary === null && q.ai?.gate.ok !== true) return;
+        if (q.primary === null && !q.aiOk) return;
         e.preventDefault();
         q.sendPrimary();
       } else if (e.key === '2') {
@@ -76,7 +64,7 @@ export function QuickKeys({ quick, ctrlEnter = true, digits = true, onEdit }: { 
  * The Detailed workbench's quick keys: 1, 2 and 3 act (Ctrl+Enter stays the bar's, which decides the form the moderator filled in).
  * Mounted by the decision bar only while Quick keys are on.
  */
-export function DetailedQuickKeys({ onEdit }: { onEdit?: () => void }) {
+export function DetailedQuickKeys() {
   const quick = useQuickActions({ refresh: true });
-  return <QuickKeys quick={quick} ctrlEnter={false} {...(onEdit === undefined ? {} : { onEdit })} />;
+  return <QuickKeys quick={quick} ctrlEnter={false} />;
 }

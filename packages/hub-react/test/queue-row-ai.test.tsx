@@ -33,6 +33,8 @@ async function reportsScreen(options: WorldOptions, targets: string[]) {
   for (const t of targets) await filed(w, t);
   const r = renderHub(w, { path: '/reports', mode: 'detailed' });
   await screen.findByRole('list', { name: 'Reported people' });
+  // The chip is a lazy part: it is there a moment after the row.
+  if (options.ai !== undefined && options.ai.script !== undefined) await waitFor(() => expect(r.container.querySelector('.cw-qrow .cw-aichip')).not.toBeNull());
   return { w, ...r };
 }
 

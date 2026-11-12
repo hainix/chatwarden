@@ -1,7 +1,7 @@
 import { assertWithinCeilings } from '@chatwarden/core';
-import { shapeOf, validate } from '../decision.js';
+import { shapeOf } from '../case/useQuickActions.js';
+import { validate } from '../decision.js';
 import type { AiFromState, FormSource, ValidationContext } from '../decision.js';
-import type { RulesState } from '../case/useDecisionForm.js';
 import { fromRecommendation } from './prefill.js';
 import type { AiReadView } from '../types.js';
 
@@ -21,11 +21,19 @@ export function prefillFrom(
   return made === null ? null : { ...made, readId: read.id, severity: read.recommendation.severity, shape: shapeOf(made.form) };
 }
 
+/**
+ * The keys of the AI's suggestion (level 2), answered by the AI's part of the case where Quick keys act: A accepts it into the Undo hold, E opens the
+ * editor. Neither is one the hub's own listener answers (`shortcutFor` leaves them alone).
+ */
+export const AI_KEYS = { accept: 'a', edit: 'e' } as const;
+
 /** Why the AI's suggestion cannot be accepted right now, as a word the bar and the card turn into a sentence. */
 export type AiWhy = 'claimed' | 'role' | 'rules' | 'stale' | 'step' | 'edited' | 'invalid';
 
 /** Whether the AI's suggestion may be accepted with one key, and if not, why. */
 export type AiGate = { ok: true } | { ok: false; why: AiWhy };
+
+type RulesState = 'loading' | 'ok' | 'denied' | 'failed';
 
 export interface GateInput {
   from: AiFromState;

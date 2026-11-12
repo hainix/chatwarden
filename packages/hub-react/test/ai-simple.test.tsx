@@ -1,9 +1,10 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import axe from 'axe-core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { forgetHiddenAi } from '../src/case/CaseContext.js';
+import { forgetHiddenAi } from '../src/ai/hide.js';
 import { QUICK_KEYS_KEY, resetQuickKeysVisit } from '../src/quickKeys.js';
-import { AI_KEYS, SHORTCUT_GROUPS, shortcutFor } from '../src/shortcuts.js';
+import { AI_KEYS } from '../src/ai/offer.js';
+import { SHORTCUT_GROUPS, shortcutFor } from '../src/shortcuts.js';
 import { aiBar, aiCase, aiWorld, decides, decision, flushHold, lastDecide, noAiBar, open, reads, rewrite, settle, strip } from './aiHub.js';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';

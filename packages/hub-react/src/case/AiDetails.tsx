@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import { useAiHidden } from '../ai/hide.js';
 import { useAiT } from '../ai/i18n.js';
 import type { AiT } from '../ai/i18n.js';
 import { toHubError } from '../client.js';
@@ -32,6 +33,7 @@ export function AiDetails({ read, rereading, onAsked }: { read: AiReadView; rere
   const t = useAiT();
   const { client, can, locale, t: hubT } = useHub();
   const c = useCase();
+  const [, setHidden] = useAiHidden(c.reportId);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<HubError | null>(null);
   const [ready, setReady] = useState(false);
@@ -132,7 +134,7 @@ export function AiDetails({ read, rereading, onAsked }: { read: AiReadView; rere
               className="cw-btn"
               onClick={() => {
                 setOpen(false);
-                c.setAiHidden(true);
+                setHidden(true);
               }}
             >
               {t('hub.ai.hide')}

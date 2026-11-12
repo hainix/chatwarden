@@ -59,10 +59,7 @@ describe('groupQueue', () => {
       entries: [{ id: 'r1', category: 'harassment', reason: 'harassment', reasonLabel: 'Insults or harassment', createdAt: T }],
       claim: null,
       viewing: [],
-      // The AI's brief and the reporters' record: nothing from this server, so nothing is known.
-      ai: null,
-      aiUnread: 1,
-      reporterFalseRate: null,
+      summaries: [expect.objectContaining({ id: 'r1' })],
     });
   });
 
@@ -247,7 +244,7 @@ describe('groupQueue', () => {
     const [g] = groupQueue([report({ targetPerson: '__proto__' })]);
     expect(g?.person).toBe('__proto__');
     expect(Object.keys(g ?? {}).sort()).toEqual(
-      ['actioned', 'ai', 'aiUnread', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reasons', 'reportIds', 'reporterFalseRate', 'reporterHandles', 'reporterPersons', 'reporters', 'reports', 'rooms', 'viewing'].sort(),
+      ['actioned', 'categories', 'claim', 'dismissed', 'entries', 'firstAt', 'handle', 'handles', 'latestAt', 'oldestOpenAt', 'open', 'person', 'reasons', 'reportIds', 'reporterHandles', 'reporterPersons', 'reporters', 'reports', 'rooms', 'summaries', 'viewing'].sort(),
     );
   });
 });

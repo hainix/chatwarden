@@ -360,7 +360,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `createDecisionStore`, `createHubClient`, `createHubController`, `createLiveQueue`, `createPagedList`, `createResource`,
     `createSession`, `createStore`, `createT`, `createToastStore`, `emptyForm`, `en`, `fetchAll`, `fetchTransport`, `filterGroups`,
     `formatDuration`, `groupQueue`, `hasLeft`, `holderOf`, `HubError`, `isWaiting`, `liveClaim`, `nextOpenReport`, `personTag`,
-    `priorityScore`, `queueStats`, `RANK_WEIGHTS`, `relativeTime`, `reporterSignal`, `routerTransport`, `teamOf`, `toHubError`, `visibleRows`, `waitTone`
+    `queueStats`, `relativeTime`, `routerTransport`, `teamOf`, `toHubError`, `visibleRows`, `waitTone`
   - constants:
     `CLAIM_BEAT_MS`, `QUEUE_MAX_PAGES`, `QUEUE_PAGE`, `SESSION_REPORTERS_MAX`, `SESSION_TTL_MS`, `TAKE_COOLDOWN_MS`,
     `TOAST_ERROR_MS`, `TOAST_HELD_MAX`, `TOAST_MAX`, `TOAST_MS`, `UNDO_MS`, `VIEWING_BEAT_MS`
@@ -379,7 +379,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
     `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
 - the `<Hub>` prop `HubProps.onController`
-- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`, and `loadAiWords` (the English of the AI's parts, see "Words and languages")
+- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`, `loadAiWords` (the English of the AI's parts, see "Words and languages") and `loadAiRank` (the AI's queue ranking: `priorityScore`, `RANK_WEIGHTS`, `reporterSignal`, and the `priority` sort of `groupQueue`)
 
 ## Options
 
@@ -612,8 +612,9 @@ suggests. Nothing here decides: a moderator does, and every part is lazy, so a h
   `⋯` menu holds the model, when it read, how sure it was, the two plain notes (older rules; a line that tried to instruct the AI), Read
   again and Hide the AI on this case (kept for this browser session, per moderator). While a read is expected a skeleton holds for up to
   20 seconds, then nothing: no error is ever shown on a case. The queue gets one neutral chip with the level word, and orders cases by the
-  `priority` sort when the server sends reads (`groupQueue(items, { sort: 'priority', signals })`, `priorityScore`, `RANK_WEIGHTS`): wait,
-  open reports, the read and the reporter's record, as a weight and never a filter.
+  `priority` sort when the server sends reads: wait, open reports, the read and the reporter's record, as a weight and never a filter. Its code
+  loads on its own then; for `groupQueue(items, { sort: 'priority', signals })` on your own, `await loadAiRank()` first (it also returns `priorityScore`,
+  `RANK_WEIGHTS` and `reporterSignal`), or the sort is the longest wait.
 - **Level 2, Recommend.** The decision bar opens pre-filled from the recommendation, labelled "Suggested by AI" (it says "Edited" once
   anything changes). `A` accepts it into the usual five-second Undo hold and goes on to the next case; `E` opens the editor. Both act where
   Quick keys act (on in Simple, off in Detailed), through the same act guard as `1`, `2` and `3`, and never while typing. In Simple mode the

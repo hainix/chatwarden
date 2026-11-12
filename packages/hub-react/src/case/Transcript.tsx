@@ -3,6 +3,7 @@ import { useHub } from '../context.js';
 import { excerptLines, filterLines, personName } from '../excerpt.js';
 import type { ExcerptLine, ReportPerson } from '../excerpt.js';
 import { timeOfDay } from '../format.js';
+import { LazyAiParts } from '../lazyParts.js';
 import type { StaffReport } from '../types.js';
 import { Empty, Notice, Segmented, Tag } from '../ui.js';
 import { useCase } from './CaseContext.js';
@@ -37,25 +38,15 @@ export interface SimpleLine {
   theirs: boolean;
 }
 
-/** A small mark on a line the AI cited. Not a control; its words are for a screen reader and the tooltip. */
-function Tick() {
-  const { t } = useHub();
-  return (
-    <span className="cw-aitick" title={t('hub.ai.tick')}>
-      <span aria-hidden="true">✓</span>
-      <span className="cw-sr">{t('hub.ai.tick')}</span>
-    </span>
-  );
-}
-
 /**
  * One line of the chat, for the Transcript and for the Simple card: the one place that decides when blocked words stay hidden.
  * `simple` draws the card's lighter line (no margin box, no tags but "Reported line"); without it this is the transcript's.
  */
 export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: LinePicks | null; name: (ref: string | null) => string; simple?: SimpleLine }) {
   const { t, locale } = useHub();
-  const { reveal, ai } = useCase();
-  const cited = ai?.evidenceLineIds.includes(line.id) === true;
+  const { reveal, aiRead } = useCase();
+  // A line the AI cited carries a small tick (a lazy part, drawn only when the case has a read).
+  const tick = aiRead === null ? null : <LazyAiParts part="tick" lineId={line.id} />;
   const showDelivered = line.delivered !== null && line.delivered !== line.raw;
   const shown = reveal.shows(line.id);
   const hidden = line.blocked && !shown;
@@ -88,10 +79,9 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
           {time}
         </time>
         {simple.whole && <span className="cw-line-who">{line.handle}</span>}
-        <span className="cw-line-text">{hidden ? <Masked /> : line.raw}</span>
-        {(line.reported || reveals || cited) && (
+        <span className="cw-line-text">{hidden ? <Masked /> : line.raw}{tick}</span>
+        {(line.reported || reveals) && (
           <span className="cw-line-meta">
-            {cited && <Tick />}
             {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}
             {reveals && toggle}
           </span>
@@ -121,10 +111,9 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
         {time}
       </time>
       <span className="cw-line-who">{line.handle}</span>
-      <span className="cw-line-text">{hidden ? <Masked /> : line.raw}</span>
-      {(line.reported || line.blocked || line.audience !== null || showDelivered || cited) && (
+      <span className="cw-line-text">{hidden ? <Masked /> : line.raw}{tick}</span>
+      {(line.reported || line.blocked || line.audience !== null || showDelivered) && (
         <span className="cw-line-meta">
-          {cited && <Tick />}
           {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}
           {line.blocked && <Tag>{t('hub.report.line.blocked')}</Tag>}
           {reveals && toggle}

@@ -54,10 +54,17 @@ import type { HubCatalog as AiCatalog } from './i18n.js';
  */
 export const loadAiWords = (): Promise<AiCatalog> => import('./ai/i18n.js').then((m) => m.aiEn);
 
+/**
+ * The AI's queue ranking: `priorityScore`, `RANK_WEIGHTS` and `reporterSignal`, and, once loaded, the `priority` sort of `groupQueue`. The hub loads it by
+ * itself when its queue holds a read; this is for code that calls `groupQueue(items, { sort: 'priority' })` on its own. (`/headless` exports the names.)
+ * @experimental
+ */
+export const loadAiRank = (): Promise<typeof import('./ai/rank.js')> => import('./ai/rank.js');
+
 export { buildPath, hashRouter, memoryRouter, normalizePath, parseRoute, tabOf } from './router.js';
 export type { HubRouter, MemoryRouter, ObservableRouter, QueueStatus, Route, SettingsSection, TabName } from './router.js';
 
-export { filterGroups, groupQueue, priorityScore, queueStats, RANK_WEIGHTS, reporterSignal } from './queue.js';
+export { filterGroups, groupQueue, queueStats } from './queue.js';
 export type { QueueFilter, QueueGroup, QueueSort, QueueStats, RankSignals } from './queue.js';
 
 export { actorInitial, actorName, holderOf, liveClaim, teamOf } from './claims.js';
