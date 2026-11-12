@@ -14,6 +14,12 @@ Status: pre-release, as-is, no support promise.
 npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-dom
 ```
 
+The server that mounts the staff routes (the Express example under "Quick start" below) also needs Express, with its types in a TypeScript project:
+
+```sh
+npm install @chatwarden/http express @types/express
+```
+
 `react` and `react-dom` (18.3 or 19) are peer dependencies, so your app has one copy of React (they are optional only if you import just
 `@chatwarden/hub-react/headless`; see "Four ways to adopt"). The hub uses only APIs that exist in
 18.3 (`useSyncExternalStore`, `useId`). The unit and interaction tests run on React 19; the consumer smoke test installs React 18.3, type-checks against

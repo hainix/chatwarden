@@ -47,21 +47,25 @@ describe('refusalMessage covers every RefuseReason', () => {
     expect(refusalMessage({ reason: 'rate' }, 200, at, rule)).toMatch(/three lines every five seconds/i);
     expect(refusalMessage({ reason: 'length' }, 200, at, rule)).toMatch(/200 characters/);
   });
+  it('a blocked line is worded the way the chat note is: rule number, and only you can see it', () => {
+    expect(refusalMessage({ reason: 'blocked', rule: 1 }, 200, at, rule)).toBe('Blocked (rule 1). Only you can see this.');
+    expect(refusalMessage({ reason: 'blocked' }, 200, at, rule)).toBe('Blocked (rule 1). Only you can see this.');
+  });
   it('gate and profanity are their own sentences', () => {
     expect(refusalMessage({ reason: 'gate' }, 200, at, rule)).toMatch(/cannot chat in this lobby/i);
     expect(refusalMessage({ reason: 'profanity' }, 200, at, rule)).toMatch(/language this lobby does not allow/i);
   });
-  it('a timeout shows its end time, the rule and Reset as the way out; a moderator and the filter are told apart', () => {
+  it('a timeout shows its end time, the rule and Start over as the way out; a moderator and the filter are told apart', () => {
     const mod = refusalMessage({ reason: 'restricted', until: 9_000, byModerator: true, rule: 2 }, 200, at, rule);
-    expect(mod).toBe('A moderator has put you on a chat timeout until T9000 (Community Rule 2). Press Reset demo to start over.');
+    expect(mod).toBe('A moderator has put you on a chat timeout until T9000 (Community Rule 2). Press Start over to replay.');
     const auto = refusalMessage({ reason: 'restricted', until: 9_000, byModerator: false, rule: 1 }, 200, at, rule);
     expect(auto).toMatch(/^The automatic filter has put you on a chat timeout until T9000 \(Community Rule 1\)/);
-    expect(auto).toMatch(/Reset demo/);
+    expect(auto).toMatch(/Start over/);
     expect(refusalMessage({ reason: 'restricted', until: 9_000 }, 200, at, rule)).toMatch(/^The automatic filter/);
   });
   it('a restriction with no end is a ban, and a missing rule is simply left out', () => {
     expect(refusalMessage({ reason: 'restricted', until: null, byModerator: true }, 200, at, rule)).toBe(
-      'A moderator has banned you from chat. Press Reset demo to start over.',
+      'A moderator has banned you from chat. Press Start over to replay.',
     );
   });
   it('an unknown reason fails loudly instead of saying something false', () => {
@@ -111,9 +115,9 @@ describe('formatUntil: one clock for every end time', () => {
 });
 
 describe('quietNote: why a timed out scripted player goes silent', () => {
-  it('names the player, the real length and Reset, for a long timeout', () => {
-    expect(quietNote('Bo', 7 * DAY, 'he')).toBe('Bo is timed out for 7 days, so he stays quiet. Press Reset demo to replay.');
-    expect(quietNote('Ada', 24 * HOUR, 'she')).toBe('Ada is timed out for 24 hours, so she stays quiet. Press Reset demo to replay.');
+  it('names the player, the real length and Start over, for a long timeout', () => {
+    expect(quietNote('Bo', 7 * DAY, 'he')).toBe("Bo is timed out for 7 days, so he's gone quiet. Press Start over to replay.");
+    expect(quietNote('Ada', 24 * HOUR, 'she')).toBe("Ada is timed out for 24 hours, so she's gone quiet. Press Start over to replay.");
     expect(quietNote('Bo', 30 * MIN, 'he')).toMatch(/^Bo is timed out for 30 minutes/);
   });
   it('says nothing for a few minutes or less', () => {

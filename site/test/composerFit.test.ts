@@ -165,7 +165,7 @@ describe('the demo composer fits the game pane (built page, real Chromium)', () 
     }
   });
 
-  it('the hero copy (headline, lead, install command) stays inside the gutter at 320px: the install command wraps its Copy button instead of widening the column', async (ctx) => {
+  it('the hero copy (headline, lead, both buttons, proof line) stays inside the gutter at 320px: the buttons wrap instead of widening the column', async (ctx) => {
     if (browser === null) return ctx.skip();
     const page = await open(320);
     const edges = await page.evaluate(() => {
@@ -174,7 +174,7 @@ describe('the demo composer fits the game pane (built page, real Chromium)', () 
         const r = (document.querySelector(sel) as HTMLElement).getBoundingClientRect();
         return { right: Math.round(r.right * 10) / 10, left: Math.round(r.left * 10) / 10 };
       };
-      return { vw, h1: pick('h1'), lead: pick('.hero-copy .lead'), actions: pick('.hero-actions'), cmd: pick('.cmd'), copy: pick('.cmd .copy'), note: pick('.hero-note') };
+      return { vw, h1: pick('h1'), lead: pick('.hero-copy .lead'), actions: pick('.hero-actions'), primary: pick('.hero-actions .btn-primary'), ghost: pick('.hero-actions .btn-ghost'), note: pick('.hero-note') };
     });
     for (const [name, e] of Object.entries(edges)) {
       if (name === 'vw') continue;
@@ -185,6 +185,31 @@ describe('the demo composer fits the game pane (built page, real Chromium)', () 
     await page.context().close();
   });
 
+  it('the headline never breaks a word across lines (MODERATION is the longest), from a 320px phone to a wide desktop', async (ctx) => {
+    if (browser === null) return ctx.skip();
+    for (const width of [320, 360, 390, 768, 960, 1152, 1440]) {
+      const page = await open(width);
+      const broken = await page.evaluate(() => {
+        const h1 = document.querySelector('h1') as HTMLElement;
+        const walker = document.createTreeWalker(h1, NodeFilter.SHOW_TEXT);
+        const out: string[] = [];
+        for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+          const text = node.textContent ?? '';
+          for (const m of text.matchAll(/[A-Za-z]+/g)) {
+            const range = document.createRange();
+            range.setStart(node, m.index ?? 0);
+            range.setEnd(node, (m.index ?? 0) + m[0].length);
+            // a word on one line has one client rect; a word broken across lines has one per line
+            if (new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size > 1) out.push(m[0]);
+          }
+        }
+        return out;
+      });
+      expect(broken, `${width}px: no word of the headline is broken across lines`).toEqual([]);
+      await page.context().close();
+    }
+  });
+
   it('the headline keeps its look on a desktop: the hero size, the display face and its weight', async (ctx) => {
     if (browser === null) return ctx.skip();
     const page = await open(1440);
@@ -192,7 +217,7 @@ describe('the demo composer fits the game pane (built page, real Chromium)', () 
       const style = getComputedStyle(document.querySelector('h1') as HTMLElement);
       return { size: parseFloat(style.fontSize), family: style.fontFamily, weight: style.fontWeight };
     });
-    expect(look.size).toBeCloseTo(73.6, 0); // 4.6rem: the top of the clamp
+    expect(look.size).toBeCloseTo(49.6, 0); // 3.1rem: the top of the clamp (the headline is four short lines)
     expect(look.family).toMatch(/Bungee/);
     expect(look.weight).toBe('400');
     await page.context().close();

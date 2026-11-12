@@ -1,4 +1,4 @@
-// "Show me the code": the few lines of real kit code behind each tour step. Every non-blank line is copied verbatim from a
+// "Show the code": the few lines of real kit code behind each tour step. Every non-blank line is copied verbatim from a
 // package README (test/demoCode.test.ts checks that against the repo, so this cannot drift into invention).
 import type { Lang } from '../lib/highlight';
 
@@ -7,6 +7,8 @@ export interface CodeStep {
   title: string;
   /** What the lines do, in one sentence. */
   blurb: string;
+  /** Where the demo differs from a real game, when it does (the demo runs the kit in the page, a game runs it on its server). */
+  demoNote?: string;
   file: string;
   lang: Lang;
   code: string;
@@ -16,8 +18,9 @@ export interface CodeStep {
 
 export const CODE_STEPS: readonly CodeStep[] = [
   {
-    title: 'Report a message',
-    blurb: 'Your server files the report: one call, with the room and the seats from your session. The report dialog is player-react’s; this demo calls cw.reports.submit in the page.',
+    title: "Report Bo's message",
+    blurb: 'Your server files the report with one call. The room and players come from your session, never from the client.',
+    demoNote: "The report dialog is player-react's; this demo calls cw.reports.submit in the page.",
     file: 'report.ts',
     lang: 'ts',
     source: 'packages/player-react/README.md',
@@ -28,8 +31,9 @@ export function takeReport(roomId: string, mySeat: string, theirSeat: string, dr
 }`,
   },
   {
-    title: 'The case appears in the hub',
-    blurb: 'The moderator hub is one component over the staff routes. Simple mode is its default view.',
+    title: 'Open the report in the hub',
+    blurb: 'The whole hub is one component on a page of your admin site.',
+    demoNote: 'Here the hub reads the report from the real moderator routes running in this page, with no network. On a server you point it at /admin instead.',
     file: 'ModeratorPage.tsx',
     lang: 'ts',
     source: 'packages/hub-react/README.md',
@@ -40,23 +44,9 @@ import { client } from './client';
 export const ModeratorPage = () => <Hub client={client} />;`,
   },
   {
-    title: 'Open it in Simple',
-    blurb: 'Here the hub reads the case from the real staff routes running in this page, with no network. On a server you point it at /admin instead.',
-    file: 'client.ts',
-    lang: 'ts',
-    source: 'packages/hub-react/README.md',
-    code: `const cw = await createChatwarden({
-  store: createMemoryStore(),
-  secret: 'demo-secret-0000-not-for-production',
-  platform: { identify: (ctx) => ctx as RawWho },
-});
-const handle = createRouter(adminRoutes(cw, { authorize: () => ({ actor: 'demo-mod', role: 'owner' }) }));
-
-export const client = createHubClient(routerTransport(handle));`,
-  },
-  {
-    title: 'Apply the suggestion',
-    blurb: 'A decision closes the report and writes the sanction and the player notice in one step. A replay applies nothing twice. The hub sends it after its five seconds of Undo.',
+    title: 'Take the suggested action',
+    blurb: "A decision closes the report, applies the action (here a warning) and writes the player's notice in one step.",
+    demoNote: 'The hub sends the decision after its five seconds of Undo. A replay applies nothing twice.',
     file: 'decide.ts',
     lang: 'ts',
     source: 'packages/core/README.md',
@@ -72,8 +62,9 @@ const decided: DecisionResult = await cw.decide({
 console.log(decided.ok ? \`applied \${decided.groups.length} action\` : \`not applied: \${decided.error}\`);`,
   },
   {
-    title: 'The player sees the notice',
-    blurb: 'A real game’s client reads notices over the HTTP player API (GET /notices). This demo calls cw.notices.pending in process, through a small local transport, and gets the same notices. A notice never carries anyone else’s chat, an IP, or an account or subject id.',
+    title: 'See what Bo sees',
+    blurb: "Your game reads the player's notices from one route and shows them with the notice dialog.",
+    demoNote: 'A real game reads notices over the HTTP player routes (GET /notices). This demo calls cw.notices.pending in process, through a small local transport, and gets the same notices. A notice never carries anyone else’s chat, an IP, or an account or subject id.',
     file: 'client.ts',
     lang: 'ts',
     source: 'packages/player-react/README.md',
@@ -84,25 +75,5 @@ export const client = createPlayerClient({ transport: fetchTransport({ baseUrl: 
 
 const notices = await client.notices(); // what is waiting for this player, oldest first
 console.log(notices.length);`,
-  },
-  {
-    title: 'The Detailed switch',
-    blurb: 'Simple is the hub’s CaseCard, one card per case, and you can also place it in your own dashboard. Detailed is the full workbench, CaseWorkbench.',
-    file: 'Moderation.tsx',
-    lang: 'ts',
-    source: 'packages/hub-react/README.md',
-    code: `      <CaseList selected={open} onOpenCase={(_person, reportId) => setOpen(reportId)} />
-      {open !== null && <CaseCard reportId={open} onOpenReport={setOpen} />}
-      <RecentActions />`,
-  },
-  {
-    title: 'Steps and ladder',
-    blurb: 'The lengths a moderator can pick, and the ladder itself, are the studio’s setting. The hub edits them with a preview; in code it is a layer you preview and save.',
-    file: 'policy.ts',
-    lang: 'ts',
-    source: 'packages/core/README.md',
-    code: `// What would this suggest for a clean record, a warning, a 24 hour restriction and a 7 day ban? Nothing is saved.
-const layer = { durations: [HOUR, 6 * HOUR, 12 * HOUR, 24 * HOUR], firstOffense: { rude: { kind: 'chat' as const, durationMs: 6 * HOUR } } };
-const preview = cw.policy.preview(layer);`,
   },
 ];

@@ -5,9 +5,8 @@ import { REPO_URL } from '../content';
 
 const LINKS = [
   { href: '#demo', label: 'Demo' },
-  { href: '#features', label: 'Features' },
+  { href: '#how', label: 'How it works' },
   { href: '#add-it', label: 'Add it' },
-  { href: '#levels', label: 'AI levels' },
   { href: '#faq', label: 'FAQ' },
 ];
 

@@ -1,4 +1,4 @@
-// The interactive demo: a chat room (left), the real moderator hub (right), a seven-step tour and a "show me the code" drawer.
+// The interactive demo: a chat room (left), the real moderator hub (right), a four-step tour and a "Show the code" drawer.
 // These tests cover the game side and the frame around the hub; demoHub.test.tsx plays the loop through the hub and the player
 // components, demoTour.test.tsx the tour. They run against KitEngine, the real Chatwarden kit, and never touch the network.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -23,8 +23,8 @@ afterEach(() => {
 describe('the room', () => {
   it('shows the game and the moderator panes, three seats, and the seeded conversation', async () => {
     await setup();
-    expect(screen.getByRole('heading', { name: 'The game' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Your moderator' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Your game' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Moderator hub' })).toBeTruthy();
     expect(document.querySelector('[data-pane="mod"] .cw-hub')).toBeTruthy(); // the real hub
     const seats = screen.getByRole('list', { name: /players in the lobby/i });
     expect(within(seats).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
@@ -38,9 +38,9 @@ describe('the room', () => {
     // Bo's blocked line is private to Bo: the room never shows it
     expect(within(log).queryByText(/absolute zorbak/)).toBeNull();
   });
-  it('says the other two players are scripted', async () => {
+  it('says the other two players are bots and that you can type too', async () => {
     await setup();
-    expect(screen.getAllByText(/scripted/i).length).toBeGreaterThan(0);
+    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are bots. You can type too.');
   });
   it('limits the composer to 200 characters and shows a counter', async () => {
     const { user } = await setup();
@@ -72,7 +72,7 @@ describe('the room', () => {
 });
 
 describe('a refused line', () => {
-  it('is struck through with the REFUSED! stamp and a note that only you see it', async () => {
+  it('is struck through with the Blocked stamp and a note that only you can see it', async () => {
     const { user } = await setup();
     await sayBad(user);
     const log = screen.getByRole('log', { name: /lobby chat/i });
@@ -81,10 +81,10 @@ describe('a refused line', () => {
       if (!el) throw new Error('not yet');
       return el as HTMLElement;
     });
-    expect(within(refused).getByText(/refused!/i)).toBeTruthy();
+    expect(refused.querySelector('.stamp')?.textContent).toBe('Blocked');
     expect(within(refused).getByText('you absolute zorbak')).toBeTruthy();
-    expect(refused.textContent).toMatch(/Community Rule 1/);
-    expect(refused.textContent).toMatch(/only you/i);
+    expect(refused.querySelector('.msg-notice')?.textContent).toBe('Blocked (rule 1). Only you can see this.');
+    expect(refused.textContent).toMatch(/only you can see this/i);
   });
   it('is announced in the polite live region', async () => {
     const { user } = await setup();
@@ -92,12 +92,12 @@ describe('a refused line', () => {
     expect(region.getAttribute('aria-live')).toBe('polite');
     expect(region.getAttribute('role')).toBe('status');
     await sayBad(user);
-    await waitFor(() => expect(live().textContent).toMatch(/blocked.*community rule 1/i));
+    await waitFor(() => expect(live().textContent).toMatch(/blocked \(rule 1\)\. only you can see this/i));
   });
   it('cannot be reported (you cannot report your own line)', async () => {
     const { user } = await setup();
     await sayBad(user);
-    await screen.findByText(/refused!/i);
+    await waitFor(() => expect(document.querySelector('.stamp')).toBeTruthy());
     expect(screen.queryByRole('button', { name: /report you/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /report your/i })).toBeNull();
   });
@@ -105,7 +105,7 @@ describe('a refused line', () => {
     const { user } = await setup();
     await user.type(composer(), 'z0rbak!!');
     await user.keyboard('{Enter}');
-    await screen.findByText(/refused!/i);
+    await waitFor(() => expect(document.querySelector('.stamp')).toBeTruthy());
     await user.type(composer(), 'zorbaking along');
     await user.keyboard('{Enter}');
     expect(await screen.findByText('zorbaking along')).toBeTruthy();
@@ -123,8 +123,8 @@ describe('a refused line', () => {
 describe('the report button', () => {
   it('is on the other players’ lines and none on yours', async () => {
     const { user } = await setup();
-    expect(reportBtn(/report bo's line: uninstall/i)).toBeTruthy();
-    expect(reportBtn(/report ada's line: gg/i)).toBeTruthy();
+    expect(reportBtn(/report bo's message: "uninstall/i)).toBeTruthy();
+    expect(reportBtn(/report ada's message: "gg/i)).toBeTruthy();
     await user.type(composer(), 'mine');
     await user.keyboard('{Enter}');
     await screen.findByText('mine');
@@ -132,7 +132,7 @@ describe('the report button', () => {
   });
   it('opens player-react’s dialog, a modal with focus inside (the dialog itself is tested in demoHub.test.tsx)', async () => {
     const { user } = await setup();
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     const dialog = await screen.findByRole('dialog');
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.contains(document.activeElement)).toBe(true);
@@ -140,7 +140,7 @@ describe('the report button', () => {
   });
   it('keeps Tab inside the dialog', async () => {
     const { user } = await setup();
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     const dialog = await screen.findByRole('dialog');
     for (let i = 0; i < 10; i++) {
       await user.tab();
@@ -153,7 +153,7 @@ describe('the report button', () => {
   });
   it('while the dialog is open, the tour card, the toolbar, the panes and the pane switcher are inert', async () => {
     const { user, container } = await setup({ stacked: true });
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     await screen.findByRole('dialog');
     expect(container.querySelector('.demo-toolbar')?.hasAttribute('inert')).toBe(true);
     expect(container.querySelector('.demo-panes')?.hasAttribute('inert')).toBe(true);
@@ -164,7 +164,7 @@ describe('the report button', () => {
   });
   it('files nothing when it is cancelled', async () => {
     const { user, engine } = await setup();
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     expect((await engine.kit()).reports.list({ status: 'open' }).items).toHaveLength(0);
   });
@@ -185,25 +185,25 @@ describe('reset', () => {
     await sayBad(user);
     await oneTapReport(user);
     await closeReport(user);
-    await user.click(screen.getByRole('button', { name: /reset demo/i }));
-    await waitFor(() => expect(screen.queryByText(/refused!/i)).toBeNull());
-    expect(screen.getByRole('region', { name: /guided tour/i }).textContent).toMatch(/step 1 of 7/i);
+    await user.click(screen.getByRole('button', { name: /start over/i }));
+    await waitFor(() => expect(document.querySelector('.stamp')).toBeNull());
+    expect(screen.getByRole('region', { name: /guided tour/i }).textContent).toMatch(/step 1 of 4/i);
     expect(composer().value).toBe('');
     expect(await screen.findByText(RUDE)).toBeTruthy();
     expect((await engine.kit()).reports.list({ status: 'open' }).items).toHaveLength(0);
     expect(await engine.notices.pending('bo')).toEqual([]);
     expect(await engine.notices.record('bo')).toEqual([]);
-    await waitFor(() => expect(live().textContent).toMatch(/demo reset/i));
+    await waitFor(() => expect(live().textContent).toMatch(/started over/i));
   });
   it('brings back a skipped tour and closes the code drawer and any open dialog', async () => {
     const { user } = await setup();
     const t = () => screen.getByRole('region', { name: /guided tour/i });
-    await user.click(within(t()).getByRole('button', { name: /show me the code/i }));
+    await user.click(within(t()).getByRole('button', { name: /show the code/i }));
     await user.click(within(t()).getByRole('button', { name: /skip tour/i }));
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     await screen.findByRole('dialog');
     await user.keyboard('{Escape}');
-    await user.click(screen.getByRole('button', { name: /reset demo/i }));
+    await user.click(screen.getByRole('button', { name: /start over/i }));
     expect(t()).toBeTruthy();
     expect(screen.queryByRole('region', { name: /kit code/i })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -212,8 +212,8 @@ describe('reset', () => {
     const { user } = await setup();
     await oneTapReport(user);
     await closeReport(user);
-    await user.click(screen.getByRole('button', { name: /reset demo/i }));
-    await user.click(screen.getByRole('button', { name: /reset demo/i }));
+    await user.click(screen.getByRole('button', { name: /start over/i }));
+    await user.click(screen.getByRole('button', { name: /start over/i }));
     await screen.findByText(RUDE);
     expect(screen.getAllByText(RUDE)).toHaveLength(1);
     await waitFor(() => expect(document.querySelector('[data-pane="mod"]')?.textContent).toMatch(/nothing is waiting/i));
@@ -228,12 +228,12 @@ describe('every control has a name', () => {
   });
 });
 
-describe('the scripted players', () => {
+describe('the endless script (scripted="loop", kept for tests; the default room is quiet, see demoCalm.test.tsx)', () => {
   it('chat on a gentle timer, about every 4 to 6 seconds', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
     const engine = new KitEngine();
-    render(<Demo engine={engine} scripted />);
+    render(<Demo engine={engine} scripted="loop" />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });
@@ -252,22 +252,22 @@ describe('the scripted players', () => {
     });
     expect(count()).toBeGreaterThanOrEqual(before + 3);
   });
-  it('pause stops them, resume starts them again, and the button says which', async () => {
+  it('pause (in the game pane header) stops them, resume starts them again, and the button says which', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
-    render(<Demo engine={new KitEngine()} scripted />);
+    render(<Demo engine={new KitEngine()} scripted="loop" />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });
     const count = () => screen.getByRole('log', { name: /lobby chat/i }).querySelectorAll('.msg').length;
-    fireEvent.click(screen.getByRole('button', { name: /pause chat/i }));
-    expect(screen.getByRole('button', { name: /resume chat/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^pause$/i }));
+    expect(screen.getByRole('button', { name: /^resume$/i })).toBeTruthy();
     const frozen = count();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(count()).toBe(frozen);
-    fireEvent.click(screen.getByRole('button', { name: /resume chat/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^resume$/i }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(7000);
     });
@@ -276,7 +276,7 @@ describe('the scripted players', () => {
   it('wait while you are typing, and while the tab is hidden', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
-    render(<Demo engine={new KitEngine()} scripted />);
+    render(<Demo engine={new KitEngine()} scripted="loop" />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });
@@ -311,7 +311,7 @@ describe('the scripted players', () => {
     stubMatchMedia(false);
     const engine = new KitEngine();
     const spy = vi.spyOn(engine.chat, 'accept');
-    const { unmount } = render(<Demo engine={engine} scripted />);
+    const { unmount } = render(<Demo engine={engine} scripted="loop" />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });

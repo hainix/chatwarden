@@ -56,7 +56,7 @@ export const gamePane = () => document.querySelector('[data-pane="game"]') as HT
 export const hubRoot = () => modPane().querySelector('.cw-hub') as HTMLElement;
 
 /** Reports a line with one tap, through the player-react dialog, and waits for "Report sent". */
-export async function oneTapReport(user: User, line: RegExp = /report bo's line: uninstall/i): Promise<HTMLElement> {
+export async function oneTapReport(user: User, line: RegExp = /report bo's message: "uninstall/i): Promise<HTMLElement> {
   await user.click(reportBtn(line));
   const dialog = await screen.findByRole('dialog');
   await user.click(within(dialog).getByRole('button', { name: 'Report' }));
@@ -68,7 +68,7 @@ export async function oneTapReport(user: User, line: RegExp = /report bo's line:
  * Reports a line in the one step with a reason: the "Why?" select, the first real reason in it (or `reason`, an option's value),
  * then Report. Waits for "Report sent". Returns the dialog and the id chosen.
  */
-export async function reasonedReport(user: User, line: RegExp = /report bo's line: uninstall/i, reason?: string): Promise<{ dialog: HTMLElement; reason: string }> {
+export async function reasonedReport(user: User, line: RegExp = /report bo's message: "uninstall/i, reason?: string): Promise<{ dialog: HTMLElement; reason: string }> {
   await user.click(reportBtn(line));
   const dialog = await screen.findByRole('dialog');
   const select = within(dialog).getByRole('combobox', { name: /^why\?/i }) as HTMLSelectElement;
@@ -127,7 +127,8 @@ export async function sendHeldDecision(): Promise<void> {
   });
 }
 
-export const noticeBtn = (name = 'Bo') => screen.findByRole('button', { name: new RegExp(`see what ${name} sees`, 'i') });
+/** The notice button in the game pane: "See Bo's screen", or "See your screen" for the visitor. */
+export const noticeBtn = (name = 'Bo') => screen.findByRole('button', { name: name.toLowerCase() === 'you' ? /see your screen/i : new RegExp(`see ${name}'s screen`, 'i') });
 
 // Silence the "not wrapped in act" noise of the hub's own timers only where a test asks to.
 export { act, waitFor, within, screen };

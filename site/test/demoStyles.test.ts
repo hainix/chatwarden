@@ -17,8 +17,8 @@ describe('demo.css', () => {
     expect(demoSrc).toMatch(/\(max-width: 1151px\)/);
     expect(css).toMatch(/@media \(min-width: 1152px\)/);
   });
-  it('side by side the game is the narrow column and the hub gets the rest (about 720px of the 1120px column)', () => {
-    expect(css).toMatch(/@media \(min-width: 1152px\)\s*\{\s*\.demo-panes\s*\{\s*grid-template-columns:\s*minmax\(300px, 340px\) minmax\(0, 1fr\)/);
+  it('side by side the game is the narrow column (360 to 400px, so bubbles wrap less) and the hub gets the rest (about 700px of the 1120px column)', () => {
+    expect(css).toMatch(/@media \(min-width: 1152px\)\s*\{\s*\.demo-panes\s*\{\s*grid-template-columns:\s*minmax\(360px, 400px\) minmax\(0, 1fr\)/);
   });
   it('the hub fills the pane under its heading, and in one-pane mode it is as tall as the window allows', () => {
     expect(bodies('.hub-host .cw-hub').join(';')).toMatch(/--cw-hub-height:\s*100%/);
@@ -52,8 +52,8 @@ describe('demo.css', () => {
     expect(b).toMatch(/bottom:\s*calc\(\d+px \+ env\(safe-area-inset-bottom/);
     expect(b).toMatch(/z-index:\s*(\d+)/);
     expect(Number(/z-index:\s*(\d+)/.exec(b)?.[1])).toBeLessThan(50);
-    // the card the wide layouts float is placed by script; the bar must not inherit that offset
-    expect(b).toMatch(/left:\s*auto/);
+    // the card is docked everywhere (nothing places it by script), so the bar has no offset to undo
+    expect(css).not.toMatch(/\.tour[^{]*\{[^}]*\bleft:/);
   });
   it('a control the tour points at keeps clear of the sticky site header, the pane switcher and the bar when it is scrolled to', () => {
     const margin = bodies('[data-tour-target]').join(';');
@@ -68,10 +68,10 @@ describe('demo.css', () => {
   it('the control the tour points at has a static ring, so it shows under reduced motion too', () => {
     expect(bodies('[data-tour-target]').join(';')).toMatch(/outline:\s*3px solid/);
   });
-  it('the report button is always visible on touch screens (no hover there)', () => {
-    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\)\s*\{\s*\.report-btn\s*\{[^}]*opacity:\s*1/);
-    expect(bodies('.report-btn').join(';')).toMatch(/opacity:\s*0/);
-    expect(css).toMatch(/\.msg:focus-within \.report-btn/);
+  it('the report button is always visible, and on touch screens a 44px target', () => {
+    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\)\s*\{\s*\.report-btn\s*\{[^}]*min-height:\s*44px/);
+    expect(bodies('.report-btn').join(';')).not.toMatch(/opacity/);
+    expect(css).not.toMatch(/\.msg:focus-within \.report-btn|\.msg:hover \.report-btn/);
   });
   it('the dark game screen uses the dark theme signature colours in both themes', () => {
     const body = bodies('.pane').join(';');

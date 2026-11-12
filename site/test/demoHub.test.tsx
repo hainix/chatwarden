@@ -18,7 +18,7 @@ describe('the moderator pane is the real hub', () => {
     await setup();
     const hub = hubRoot();
     expect(hub).toBeTruthy();
-    expect(within(modPane()).getByRole('heading', { level: 3, name: 'Your moderator' })).toBeTruthy();
+    expect(within(modPane()).getByRole('heading', { level: 3, name: 'Moderator hub' })).toBeTruthy();
     const view = within(hub).getByRole('group', { name: 'View' });
     expect(within(view).getByRole('button', { name: 'Simple' }).getAttribute('aria-pressed')).toBe('true');
     expect(within(view).getByRole('button', { name: 'Detailed' }).getAttribute('aria-pressed')).toBe('false');
@@ -86,7 +86,7 @@ describe('the hub’s keys never fire while the visitor types in the game', () =
   it('typing in the report dialog’s note field is never taken either', async () => {
     const { user, engine } = await setup();
     vi.spyOn(engine.reports, 'submit');
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     const dialog = await screen.findByRole('dialog');
     expect(dialog.contains(document.activeElement)).toBe(true);
     await user.keyboard('nnn');
@@ -185,7 +185,7 @@ describe('scripted chat to a report to a case in the hub', () => {
     await oneTapReport(user);
     await closeReport(user);
     await caseLink(user);
-    await oneTapReport(user, /report ada's line: ok that was close/i);
+    await oneTapReport(user, /report ada's message: "ok that was close/i);
     await closeReport(user);
     await caseLink(user, /^Ada/);
     expect(within(modPane()).getAllByRole('link', { name: /^(Bo|Ada)/ })).toHaveLength(2);
@@ -252,7 +252,7 @@ describe('the whole loop: report, decide in the hub, the player’s notice', () 
     await user.click(undo);
     await sendHeldDecision();
     expect(await engine.notices.pending('bo')).toEqual([]);
-    expect(screen.queryByRole('button', { name: /see what bo sees/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /see bo's screen/i })).toBeNull();
     expect((await engine.kit()).reports.list({ status: 'open' }).items).toHaveLength(1);
   });
 
@@ -276,7 +276,7 @@ describe('the whole loop: report, decide in the hub, the player’s notice', () 
       await user.type(composer(), `you ${w}`);
       await user.keyboard('{Enter}');
     }
-    const see = await screen.findByRole('button', { name: /see what you see/i });
+    const see = await screen.findByRole('button', { name: /see your screen/i });
     await user.click(see);
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: /chat/i })).toBeTruthy();
@@ -299,7 +299,7 @@ describe('the whole loop: report, decide in the hub, the player’s notice', () 
 describe('the report dialog is player-react’s, on the kit’s own reporting settings', () => {
   it('one tap by default: a question, the line, Report and Cancel; no category list', async () => {
     const { user } = await setup();
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     const dialog = await screen.findByRole('dialog', { name: /report this message/i });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.textContent).toContain(RUDE);
@@ -310,7 +310,7 @@ describe('the report dialog is player-react’s, on the kit’s own reporting se
 
   it('Cancel and Escape close it without filing, and focus goes back to the report button', async () => {
     const { user, engine } = await setup();
-    const opener = reportBtn(/report bo's line: uninstall/i);
+    const opener = reportBtn(/report bo's message: "uninstall/i);
     await user.click(opener);
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -326,7 +326,7 @@ describe('the report dialog is player-react’s, on the kit’s own reporting se
     const { user, engine } = await setup();
     const add = vi.spyOn(engine.reports, 'addDetail');
     const submit = vi.spyOn(engine.reports, 'submit');
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     const open = await screen.findByRole('dialog', { name: /report this message/i });
     const select = within(open).getByRole('combobox', { name: /^why\?/i }) as HTMLSelectElement;
     expect([...select.querySelectorAll('option')].filter((o) => o.value !== '').length).toBeGreaterThan(2);
@@ -365,7 +365,7 @@ describe('the report dialog is player-react’s, on the kit’s own reporting se
     const cw = await engine.kit();
     const saved = cw.policy.save({ reporting: { flow: 'reason_first' } }, { version: cw.policy.get().version, actor: 'demo-mod', reason: 'test' });
     expect(saved.ok).toBe(true);
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     const dialog = await screen.findByRole('dialog', { name: /report this message/i });
     expect(within(dialog).getAllByRole('combobox')).toHaveLength(1);
     expect(within(dialog).queryAllByRole('radio')).toHaveLength(0);
@@ -378,7 +378,7 @@ describe('the report dialog is player-react’s, on the kit’s own reporting se
     const cw = await engine.kit();
     const saved = cw.policy.save({ reporting: { flow: 'reason_required' } }, { version: cw.policy.get().version, actor: 'demo-mod', reason: 'test' });
     expect(saved.ok).toBe(true);
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     const dialog = await screen.findByRole('dialog', { name: /report this message/i });
     const select = within(dialog).getByRole('combobox', { name: 'Why?' });
     expect((select as HTMLSelectElement).required).toBe(true);
@@ -395,7 +395,7 @@ describe('the report dialog is player-react’s, on the kit’s own reporting se
     const { user } = await setup();
     await oneTapReport(user);
     await closeReport(user);
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Report' }));
     expect((await screen.findByRole('alert')).textContent).toMatch(/already reported this player/i);
   });
@@ -403,7 +403,7 @@ describe('the report dialog is player-react’s, on the kit’s own reporting se
   it('shows the dialog in the page theme', async () => {
     document.documentElement.dataset.theme = 'light';
     const { user } = await setup();
-    await user.click(reportBtn(/report bo's line: uninstall/i));
+    await user.click(reportBtn(/report bo's message: "uninstall/i));
     await screen.findByRole('dialog');
     expect(document.querySelector('.cw-player')?.getAttribute('data-cw-theme')).toBe('light');
   });
@@ -420,8 +420,8 @@ describe('reset', () => {
     await sendHeldDecision();
     await noticeBtn('Bo');
     const before = await engine.kit();
-    await user.click(screen.getByRole('button', { name: /reset demo/i }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /see what bo sees/i })).toBeNull());
+    await user.click(screen.getByRole('button', { name: /start over/i }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /see bo's screen/i })).toBeNull());
     expect(await engine.kit()).not.toBe(before);
     await waitFor(() => expect(hubRoot().textContent).toMatch(/nothing is waiting/i));
     expect(within(modPane()).queryByRole('link', { name: /^Bo/ })).toBeNull();
@@ -432,7 +432,7 @@ describe('reset', () => {
     const { user } = await setup();
     await user.click(within(hubRoot()).getByRole('button', { name: 'Detailed' }));
     expect(within(hubRoot()).getByRole('button', { name: 'Detailed' }).getAttribute('aria-pressed')).toBe('true');
-    await user.click(screen.getByRole('button', { name: /reset demo/i }));
+    await user.click(screen.getByRole('button', { name: /start over/i }));
     await waitFor(() => expect(within(hubRoot()).getByRole('button', { name: 'Simple' }).getAttribute('aria-pressed')).toBe('true'));
   });
 });
@@ -465,7 +465,7 @@ describe('the page nudges the hub to read the queue without flushing a decision 
     const { user, engine } = await setup();
     await holdAWarning(user, engine);
     setVisibility(state);
-    await oneTapReport(user, /report ada's line: ok that was close/i);
+    await oneTapReport(user, /report ada's message: "ok that was close/i);
     await stillHeld(engine);
   });
 
@@ -473,7 +473,7 @@ describe('the page nudges the hub to read the queue without flushing a decision 
     const { user, engine } = await setup();
     await holdAWarning(user, engine);
     setVisibility(state);
-    const { dialog } = await reasonedReport(user, /report ada's line: ok that was close/i);
+    const { dialog } = await reasonedReport(user, /report ada's message: "ok that was close/i);
     expect(within(dialog).getByRole('heading', { name: 'Report sent' })).toBeTruthy();
     await stillHeld(engine);
   });

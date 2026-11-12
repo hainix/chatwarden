@@ -44,10 +44,18 @@ The demo is the real thing, not a drawing of it:
   one step: an optional reason and note inline, then Report) and `NoticeQueue`. The kit has no player report route and the
   player routes do not run in a browser, so `src/demo/playerTransport.ts` is a small local transport that answers the same calls
   from the kit directly, for one seat.
-- The tour (seven steps, the last two optional) points at hub controls by role and accessible name (`src/demo/hubTarget.ts`):
-  hub-react has no tour-hook option and the page does not change it.
-- Layout: side by side from 1152px (the game is the narrow column; the hub gets about 720px), one pane at a time below that, with a
-  switch (and the tour moves for the visitor). The hub switches to three panes from a 1200px window; `demo.css` keeps it stacked
+- The tour (four steps: report Bo's message, open the report in the hub, take the suggested action, see what Bo sees) points at hub
+  controls by role and accessible name (`src/demo/hubTarget.ts`): hub-react has no tour-hook option and the page does not change it.
+  It is docked (a strip above the panes, a bar at the bottom of a phone window): it never follows the control, and it never scrolls the
+  page or switches panes for the visitor. Step 1 tells the visitor to choose "Insults or harassment", which maps to exactly one rule
+  (core `reporting.ts`), so the hub card shows its suggestion at once.
+- The room is finite and reactive (`src/demo/script.ts`): the opening plays once and then nothing happens on a timer. Ada or Bo
+  answers a line the visitor sends two seconds later, and Ada thanks the moderators after a decision. `<Demo scripted="loop" />` is
+  the old endless script, kept for the tests of the chat's scrolling and the Pause button. The chat scrolls to a new line only when
+  the reader is at the bottom and the pointer or focus is not in it; otherwise a "new messages" pill counts what is waiting. Every
+  Report button is always visible, in a column of fixed width, so every line's button is at the same x.
+- Layout: side by side from 1152px (the game is the narrow column, 360 to 400px; the hub gets the rest), one pane at a time below that,
+  with a Game / Moderator switch (the tour says which tab to open and the tab pulses; it never switches for the visitor). The hub switches to three panes from a 1200px window; `demo.css` keeps it stacked
   inside its pane. The hub's font file (`font.css`) is not loaded: the site keeps its own two fonts.
 - It is a separate chunk that loads when the section nears the viewport (200px ahead) or a visitor points at it, so the hub, the
   staff routes, the player components and their CSS are not in the first load.
@@ -140,6 +148,6 @@ PNGs from the CI artifact), commit them, or relax the guard to a size check.
 
 - Words live in `src/content.ts`. Code samples and install commands must stay verbatim lines of a package README; the tests
   fail if they drift. That includes "Then add the moderator hub" (the drop-in `<Hub>` from the hub-react README and the one-script-tag
-  `<chatwarden-hub>` from the hub-element README) and "Show me the code" in the demo.
+  `<chatwarden-hub>` from the hub-element README) and "Show the code" in the demo. The copy itself is `docs/design/2026-11-11-site-copy-rewrite.md` (section 3).
 - If you add a package, add its README and npm link to `public/llms.txt`.
 - The only demo words are the invented ones from `@chatwarden/matcher/fixtures`. Never put a real slur anywhere in the site.

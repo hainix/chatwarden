@@ -1,7 +1,7 @@
 import { CodeBlock } from '../components/CodeBlock';
 import { CODE_STEPS } from './codeSteps';
 
-/** The few real kit lines behind a step, copied from the READMEs. Open from the tour card or the toolbar. */
+/** The few real kit lines behind a step, copied from the READMEs, and where this demo differs from a game. Open from the tour card or the toolbar. */
 export function CodeDrawer({ step, onPick }: { step: number; onPick: (i: number) => void }) {
   const s = CODE_STEPS[Math.min(Math.max(step, 0), CODE_STEPS.length - 1)];
   if (s === undefined) return null;
@@ -14,6 +14,7 @@ export function CodeDrawer({ step, onPick }: { step: number; onPick: (i: number)
             Step {n + 1}: {s.title}
           </h3>
           <p>{s.blurb}</p>
+          {s.demoNote !== undefined && <p className="drawer-note">{s.demoNote}</p>}
         </div>
         <div className="drawer-steps" role="group" aria-label="Pick a step">
           {CODE_STEPS.map((c, i) => (

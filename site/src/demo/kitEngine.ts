@@ -40,12 +40,11 @@ const DEMO_SECRET = 'chatwarden-landing-demo-secret-0000-not-a-real-secret';
 /** The standard preset's starter Community Rules. Passed to the kit and read for labels, so both always agree. */
 const RULES = defineRules(starterRules('standard'));
 
-export const KIT_NOTE = 'This is the real Chatwarden kit running in your browser, with a made-up word list.';
+export const KIT_NOTE = 'The real packages, running in your browser. The blocked words are made up, like "zorbak".';
 
 /** What the demo sets itself, so nothing about the verdicts is hidden. */
 export const KIT_NOTE_DETAILS =
-  "Swearing filter: allowed (no profanity word list ships). Reporter feedback: off, so the tour stays on Bo's screen. " +
-  "The moderator is the real hub, signed in as an owner so every screen opens. Everything else is the kit's defaults.";
+  `Swearing is allowed. Bo's notice opens here so you can see his screen. You get no "action taken" notice for your own reports, so the tour stays on Bo's screen. You're signed in as the owner, so every page of the hub is open. Everything else is the default.`;
 
 // ---------- the engine ----------
 
