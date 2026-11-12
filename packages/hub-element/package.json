@@ -60,7 +60,8 @@
   "scripts": {
     "build": "tsc -b && node build/build.mjs",
     "prepack": "tsc -b && node build/build.mjs",
-    "smoke:browser": "cd ../.. && vitest run --project hub-element packages/hub-element/test/browser.smoke.test.ts"
+    "smoke:browser": "cd ../.. && vitest run --project hub-element packages/hub-element/test/browser.smoke.test.ts",
+    "smoke:triage": "cd ../.. && vitest run --project hub-element packages/hub-element/test/triage-speed.browser.test.ts"
   },
   "peerDependencies": {
     "@chatwarden/hub-react": "^0.1.2"
