@@ -23,7 +23,8 @@ const TOKEN_RE = /^[A-Za-z0-9_.-]{1,64}$/;
  *   `disruption` finds `griefing`) or `none` for the reports that gave none; `category` still works, and both together must hold.
  *   They are the only filters: the order is already oldest first, and there is no wait filter. A malformed one is 400. The order is
  *   oldest first, except that a case whose open reports all come from habitual false reporters (and none has waited 24 hours) is served
- *   after the ordinary ones; it is never skipped.
+ *   after the ordinary ones; it is never skipped. With the queue signal feed (`feeds.queue`) on, the route also passes `signalBoost: true`:
+ *   an overdue case (24 hours) or one whose person meets the feed is claimed first, else the oldest as before.
  * - `POST /cases/:ref/viewing` (`reports.read`): a heartbeat that you have the case open (30 s, in memory, never stored).
  *   `{ viewers: string[] }`, the others. 404 `not_found` when the person has no open case (nothing is tracked); one actor
  *   keeps at most 20 cases open, a newer beat dropping their oldest.
@@ -61,6 +62,8 @@ export function teamRoutes(ctx: AdminContext): RouteTable {
         ...(category === undefined ? {} : { category }),
         ...(reason === undefined ? {} : { reason }),
         rankDownHabitual: true,
+        // With the queue signal feed on, a case whose person meets it is claimed ahead of older ordinary ones (capped, never hiding a case).
+        ...(cw.profile.signals.feeds.queue === undefined ? {} : { signalBoost: true }),
       });
       return {
         status: 200,
