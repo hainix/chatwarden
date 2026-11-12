@@ -219,6 +219,17 @@ export interface ReporterTally {
 }
 
 /**
+ * One reporter's decided reports (filed at or after `since`) by outcome, for {@link Store.reporterOutcomes}. `reporter` is the id
+ * as stored. `actioned` is `upheld` and `noted` alike; `noAction` is a dismissal without the bad-faith mark and `badFaith` one with it.
+ */
+export interface ReporterOutcomeRow {
+  reporter: SubjectId;
+  actioned: number;
+  noAction: number;
+  badFaith: number;
+}
+
+/**
  * One decided report a person filed that carried a reason, with what its decision did: for the reporter's accuracy. `reason` is
  * the report's stored `reportedReason`; `target` the reported subject as stored; `actions` one entry per sanction group the
  * decision wrote (its subject row: who, and the rule cited, `'uncovered'` included). A dismissal with no actions has an empty list.
@@ -724,6 +735,14 @@ export interface Store {
    * 200 (newest first). A decision row that cannot be read is a decision with no actions, never an error.
    */
   loadReporterDecisions?(reporters: readonly SubjectId[]): ReporterDecision[];
+
+  /**
+   * OPTIONAL. How the reports FILED BY any of the given subjects (`reporterSubject` as stored) that are no longer `open` and were
+   * filed (`createdAt`) at or after `since` turned out, one row per stored reporter id that has at least one: `actioned` (upheld
+   * or noted), `noAction` (dismissed, not marked bad faith) and `badFaith` (dismissed with the mark). The one grouped read behind
+   * reporter accuracy. An empty list gives `[]`; a repeated id counts once. A store that leaves it out shows no reporter accuracy.
+   */
+  reporterOutcomes?(reporters: readonly SubjectId[], since: number): ReporterOutcomeRow[];
 
   /**
    * OPTIONAL. Attach the reporter's one follow-up to an `open` report that has none yet: set `reportedReason` and `note` (the

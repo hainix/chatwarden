@@ -25,6 +25,7 @@ export type {
   SanctionRow,
   SanctionTargetType,
   ReporterDecision,
+  ReporterOutcomeRow,
   ReporterTally,
   ClaimAttempt,
   ClaimMode,
@@ -158,6 +159,16 @@ export {
   isSanctionActive,
   sanctionGroupView,
 } from './staffViews.js';
+export {
+  REPORTER_ACCURACY_BATCH_MAX,
+  REPORTER_ACCURACY_MIN_DECIDED,
+  REPORTER_ACCURACY_WINDOW_MS,
+  REPORTER_FALSE_RATE_HABITUAL,
+  REPORTER_FALSE_RATE_NOTICEABLE,
+  reporterAccuracyFor,
+  summarizeOutcomes,
+} from './reporterAccuracy.js';
+export type { ReporterAccuracy } from './reporterAccuracy.js';
 export type {
   BlockedDays,
   BlockedItem,

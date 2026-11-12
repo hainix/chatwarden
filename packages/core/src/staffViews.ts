@@ -3,6 +3,8 @@ import type { Limits } from './limits.js';
 import { reporterSuspendedUntil } from './reports.js';
 import { findReason } from './reporting.js';
 import type { ReportReason } from './reporting.js';
+import { reporterAccuracyFor, summarizeOutcomes } from './reporterAccuracy.js';
+import type { ReporterAccuracy } from './reporterAccuracy.js';
 import { parseRuleRef } from './rules.js';
 import type { RuleRef } from './rules.js';
 import { SANCTION_SOURCES } from './sanctions.js';
@@ -230,6 +232,13 @@ export interface ReporterRecord {
   suspendedUntil: number | null;
   reasonMatched: number;
   reasonDecided: number;
+  /**
+   * How their reports filed in the last 30 days turned out (see {@link ReporterAccuracy}): a ranking hint and a line on the case.
+   * Null when the store cannot tell (it has no `reporterOutcomes`); otherwise always set, with `falseRate` null below the minimum
+   * sample. Staff only: never send to a player.
+   * @experimental
+   */
+  accuracy?: ReporterAccuracy | null;
 }
 
 export function reporterRecord(
@@ -268,6 +277,10 @@ export function reporterRecord(
     suspendedUntil: reporterSuspendedUntil(marks, limits),
     reasonMatched,
     reasonDecided,
+    accuracy:
+      store.reporterOutcomes === undefined
+        ? null
+        : (reporterAccuracyFor(store, subjects, [root], now).get(root) ?? summarizeOutcomes({ actioned: 0, noAction: 0, badFaith: 0 })),
   };
 }
 

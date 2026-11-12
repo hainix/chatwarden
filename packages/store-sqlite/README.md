@@ -89,6 +89,7 @@ How it behaves:
   of it or a query on it to a player, and keep the file readable by the app's user only (`chmod 600`).
 - **What is never logged.** The store itself logs nothing. Errors it throws are SQLite's own and may name a table or column but
   never a value; the kit logs only an event name and the error class.
+- **Reporter outcomes.** Migration 19 adds one index, `kit_reports_by_reporter_outcome (reporter_subject, created_at, status, bad_faith)`, and nothing else: no table, column or row changes. It lets `reporterOutcomes` (how a reporter's recent reports turned out, one grouped read for a whole queue page) be answered from the index alone. An existing database upgrades in place.
 - **The editable profile.** Migration 16 adds `kit_policy_layer` (at most one row: the owner's stored edits to the moderation
   profile as JSON, and a version) and a nullable `detail_json` column on `kit_audit` (the sections changed and the reason of a
   `policy.update` or `policy.reset` row; NULL on every other row). A save is one conditional `INSERT` or `UPDATE` on the version, so

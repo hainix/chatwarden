@@ -46,7 +46,8 @@ const SANCTION_VIEW_KEYS = [
   'revokedAt', 'revokedBy', 'revokeReason',
 ].sort();
 
-const ZERO_REPORTER = { reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 };
+const NO_ACCURACY = { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000 };
+const ZERO_REPORTER = { reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0, accuracy: NO_ACCURACY };
 
 describe('the permission table', () => {
   it('has blocked.read at moderator, and the key list includes it', () => {
@@ -189,7 +190,7 @@ describe('GET /people/:ref/history: sanctions and asReporter', () => {
     w.store.closeReport('extra-1', 'actioned', false, 'mod', NOW + 1, 'ok');
     w.store.closeReport('extra-2', 'dismissed', true, 'mod', NOW + 2, 'bad faith');
     const body = (await w.call('GET', `/people/${reporter}/history`)).body as { asReporter: unknown };
-    expect(body.asReporter).toEqual({ reports: 3, open: 1, actioned: 1, dismissed: 1, badFaith: 1, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0 });
+    expect(body.asReporter).toEqual({ reports: 3, open: 1, actioned: 1, dismissed: 1, badFaith: 1, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0, accuracy: { ...NO_ACCURACY, decided: 2, noAction: 0, badFaith: 1, unfounded: 1 } });
     // Filed against: nothing as a reporter.
     expect(((await w.call('GET', `/people/${second.target}/history`)).body as { asReporter: unknown }).asReporter).toEqual(ZERO_REPORTER);
   });

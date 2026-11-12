@@ -47,6 +47,7 @@ describe('reporterRecord: reasonMatched and reasonDecided', () => {
     const t = w.table();
     expect(w.cw.reports.reporterRecord(t.reporter)).toEqual({
       reports: 0, open: 0, actioned: 0, dismissed: 0, badFaith: 0, suspendedUntil: null, reasonMatched: 0, reasonDecided: 0,
+      accuracy: { decided: 0, noAction: 0, badFaith: 0, unfounded: 0, falseRate: null, noticeable: false, habitual: false, windowMs: 30 * 86_400_000 },
     });
   });
 

@@ -431,4 +431,17 @@ CREATE INDEX kit_sanctions_by_start ON kit_sanctions (target_type, starts_at, id
 CREATE INDEX kit_strikes_by_at ON kit_strikes (at);
 `,
   },
+  {
+    version: 19,
+    // One index, no table, column or row change (0.1.5), like 17 and 18. Reporter accuracy asks, for a page of reporters, how their
+    // recent reports turned out: `WHERE reporter_subject IN (...) AND created_at >= ? AND status != 'open' GROUP BY reporter_subject`.
+    // The older `kit_reports_by_reporter (reporter_subject, created_at)` finds the rows, but every row then needs a table read for
+    // `status` and `bad_faith`; a queue page asks for up to 200 reporters x up to ~300 rows each. With the two extra columns the
+    // grouped query is answered from the index alone (a covering index), and "open reports by reporter" reads `status` from the index
+    // before it touches the table. The older index is now a prefix of the new one; it is kept in this patch (dropping is parked). A
+    // plain index, so a rerun is prevented by the version bump alone; the runner wraps this in one savepoint with that bump.
+    sql: `
+CREATE INDEX kit_reports_by_reporter_outcome ON kit_reports (reporter_subject, created_at, status, bad_faith);
+`,
+  },
 ];

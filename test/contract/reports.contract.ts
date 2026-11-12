@@ -361,6 +361,93 @@ export function reportsContract(name: string, make: () => Store): void {
       });
     });
 
+    describe('reporterOutcomes', () => {
+      // Reporter-accuracy read: a reporter's DECIDED reports (filed at or after `since`) split by outcome.
+      type Outcomes = Array<{ reporter: string; actioned: number; noAction: number; badFaith: number }>;
+      const outcomes = (s: Store, reporters: string[], since: number): Outcomes => {
+        if (s.reporterOutcomes === undefined) throw new Error('this store has no reporterOutcomes');
+        return s.reporterOutcomes(reporters, since);
+      };
+      let n = 0;
+      /** One report in its own room (the UNIQUE index never trips), closed as given (or left open). */
+      const filed = (s: Store, reporter: string, how: 'open' | 'upheld' | 'noted' | 'dismissed' | 'bad_faith', createdAt = NOW) => {
+        const id = `o${++n}`;
+        s.insertReport(report({ id, roomId: `OR${n}`, createdAt, reporterSubject: reporter, targetSubject: `s_t${n}`, people: [`s_t${n}`] }));
+        if (how === 'upheld' || how === 'noted') s.closeReport(id, 'actioned', false, 'mod', createdAt + 1, 'n');
+        if (how === 'dismissed') s.closeReport(id, 'dismissed', false, 'mod', createdAt + 1, 'n');
+        if (how === 'bad_faith') s.closeReport(id, 'dismissed', true, 'mod', createdAt + 1, 'n', 'evidence');
+        return id;
+      };
+      const sorted = (rows: Outcomes) => [...rows].sort((a, b) => (a.reporter < b.reporter ? -1 : 1));
+
+      it('splits decided reports by outcome: actioned, dismissed, dismissed with the bad-faith mark', () => {
+        const s = make();
+        for (const how of ['upheld', 'noted', 'dismissed', 'dismissed', 'dismissed', 'bad_faith'] as const) filed(s, 's_a', how);
+        expect(outcomes(s, ['s_a'], 0)).toEqual([{ reporter: 's_a', actioned: 2, noAction: 3, badFaith: 1 }]);
+      });
+
+      it('bad-faith dismissals are badFaith, not noAction', () => {
+        const s = make();
+        filed(s, 's_a', 'bad_faith');
+        filed(s, 's_a', 'bad_faith');
+        expect(outcomes(s, ['s_a'], 0)).toEqual([{ reporter: 's_a', actioned: 0, noAction: 0, badFaith: 2 }]);
+      });
+
+      it('excludes open reports (a reporter with only open reports has no row)', () => {
+        const s = make();
+        filed(s, 's_a', 'open');
+        filed(s, 's_a', 'open');
+        filed(s, 's_b', 'open');
+        filed(s, 's_b', 'dismissed');
+        expect(outcomes(s, ['s_a', 's_b'], 0)).toEqual([{ reporter: 's_b', actioned: 0, noAction: 1, badFaith: 0 }]);
+      });
+
+      it('honours since on the filing time: a report filed exactly at since counts, one a millisecond earlier does not', () => {
+        const s = make();
+        filed(s, 's_a', 'dismissed', NOW - 1);
+        filed(s, 's_a', 'dismissed', NOW);
+        filed(s, 's_a', 'upheld', NOW + 1);
+        expect(outcomes(s, ['s_a'], NOW)).toEqual([{ reporter: 's_a', actioned: 1, noAction: 1, badFaith: 0 }]);
+        expect(outcomes(s, ['s_a'], NOW + 2)).toEqual([]);
+        expect(outcomes(s, ['s_a'], NOW - 1)).toEqual([{ reporter: 's_a', actioned: 1, noAction: 2, badFaith: 0 }]);
+      });
+
+      it('an empty list gives []', () => {
+        const s = make();
+        filed(s, 's_a', 'dismissed');
+        expect(outcomes(s, [], 0)).toEqual([]);
+      });
+
+      it('gives one row per stored reporter id, so aliases are folded by the caller', () => {
+        const s = make();
+        filed(s, 's_a', 'dismissed');
+        filed(s, 's_a', 'upheld');
+        filed(s, 's_a2', 'dismissed');
+        filed(s, 's_other', 'dismissed');
+        expect(sorted(outcomes(s, ['s_a', 's_a2'], 0))).toEqual([
+          { reporter: 's_a', actioned: 1, noAction: 1, badFaith: 0 },
+          { reporter: 's_a2', actioned: 0, noAction: 1, badFaith: 0 },
+        ]);
+      });
+
+      it('controls: an unknown reporter, a similar id and an injection string match nothing; reports against a person are not theirs', () => {
+        const s = make();
+        filed(s, 's_a', 'dismissed');
+        expect(outcomes(s, ['s_zzz'], 0)).toEqual([]);
+        expect(outcomes(s, ['s_'], 0)).toEqual([]);
+        expect(outcomes(s, ["s_a' OR 1=1 --"], 0)).toEqual([]);
+        // s_t1 is the TARGET of the report above, not a reporter.
+        expect(outcomes(s, ['s_t1'], 0)).toEqual([]);
+      });
+
+      it('reads a long list of reporters and agrees with a short one', () => {
+        const s = make();
+        for (let i = 0; i < 3; i++) filed(s, 's_a', 'dismissed');
+        const many = Array.from({ length: 700 }, (_, i) => `s_none${i}`);
+        expect(outcomes(s, [...many, 's_a'], 0)).toEqual([{ reporter: 's_a', actioned: 0, noAction: 3, badFaith: 0 }]);
+      });
+    });
+
     describe('listReportsByPerson', () => {
       const seeded = (s: Store) => {
         // Reports against s_a (two aliases: s_a and s_a2), s_b, and one filed BY s_a against s_b.

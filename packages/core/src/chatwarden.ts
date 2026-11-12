@@ -40,6 +40,8 @@ import {
   reporterRecord,
   sanctionsOfPerson,
 } from './staffViews.js';
+import { reporterAccuracyFor } from './reporterAccuracy.js';
+import type { ReporterAccuracy } from './reporterAccuracy.js';
 import type {
   BlockedDays,
   BlockedItem,
@@ -284,6 +286,15 @@ export interface Chatwarden {
      * never send to a player (a player is not told who reported or how often).
      */
     reporterRecord(subject: SubjectId): ReporterRecord;
+    /**
+     * How each person's reports filed in the last 30 days turned out, keyed by canonical person (merged aliases folded in): one
+     * grouped store read for up to `REPORTER_ACCURACY_BATCH_MAX` (200) people, more is a `RangeError`. A person with no decided
+     * report in the window is absent; a store without `reporterOutcomes` gives an empty map. `falseRate` is null below
+     * `REPORTER_ACCURACY_MIN_DECIDED` decided reports. A ranking hint and a line on the case: it never refuses a report and never
+     * counts toward a suspension. Staff only: never send to a player.
+     * @experimental
+     */
+    reporterAccuracy(people: readonly SubjectId[]): Map<SubjectId, ReporterAccuracy>;
   };
   /**
    * Blocked chat lines, from the slur filter's strikes (purged after 30 days). Staff only: the lines are raw chat text
@@ -835,6 +846,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         return record === null ? null : staffReport(record, subjects);
       },
       reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
+      reporterAccuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
     },
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),

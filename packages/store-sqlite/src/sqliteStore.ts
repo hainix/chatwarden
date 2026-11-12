@@ -21,6 +21,7 @@ import type {
   ReportListQuery,
   ReportRecord,
   ReporterDecision,
+  ReporterOutcomeRow,
   ReporterTally,
   SanctionKind,
   SanctionListQuery,
@@ -911,6 +912,33 @@ export class SqliteStore implements Store, TermStore {
       if (Number(r.bad_faith) === 1) tally.badFaith += n;
     }
     return tally;
+  }
+
+  reporterOutcomes(reporters: readonly SubjectId[], since: number): ReporterOutcomeRow[] {
+    // A repeated id would be counted once per chunk it lands in: ask for each reporter once.
+    const unique = [...new Set(reporters)];
+    if (unique.length === 0) return [];
+    // SQLite caps the variables of one statement, so a long list is asked for in chunks. The columns after `reporter_subject` are
+    // all in kit_reports_by_reporter_outcome (migration 19), so each chunk is answered from that index alone.
+    const CHUNK = 500;
+    return this.transaction(() => {
+      const out: ReporterOutcomeRow[] = [];
+      for (let i = 0; i < unique.length; i += CHUNK) {
+        const part = unique.slice(i, i + CHUNK);
+        const marks = part.map(() => '?').join(', ');
+        const sql = `SELECT reporter_subject AS reporter,
+                SUM(status = 'actioned') AS actioned,
+                SUM(status = 'dismissed' AND bad_faith = 0) AS no_action,
+                SUM(status = 'dismissed' AND bad_faith = 1) AS bad_faith
+         FROM kit_reports
+         WHERE reporter_subject IN (${marks}) AND created_at >= ? AND status != 'open'
+         GROUP BY reporter_subject`;
+        for (const r of this.db.prepare(sql).all(...part, since)) {
+          out.push({ reporter: String(r.reporter), actioned: Number(r.actioned), noAction: Number(r.no_action), badFaith: Number(r.bad_faith) });
+        }
+      }
+      return out;
+    });
   }
 
   listReports(q: ReportListQuery): ReportRecord[] {
