@@ -44,7 +44,7 @@ export const partLoaders: {
   bulk: () => Promise<ComponentType<Record<string, never>>>;
   sheet: () => Promise<ComponentType<{ onClose: () => void }>>;
   bar: () => Promise<ComponentType<CommandBarProps>>;
-  strip: () => Promise<ComponentType<{ read: AiReadView | null }>>;
+  strip: () => Promise<ComponentType<{ read: AiReadView | null; expected: boolean }>>;
   aiParts: () => Promise<ComponentType<AiPartsProps>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),

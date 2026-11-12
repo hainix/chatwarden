@@ -104,6 +104,12 @@ export interface ReportDetail {
   claim: Claim | null;
   /** What the AI read of the report, or null (the AI is off, or no read yet). An older server sends none. */
   ai?: AiReadView | null;
+  /**
+   * Whether a read is on its way now (the server's word, not the policy level): true only with the AI on, an adapter configured, the breaker
+   * closed, both daily limits open and the report's read not ended without an answer. The case waits for a read only when this is true;
+   * absent (the AI is off, or an older server) or false, it renders exactly as with the AI off.
+   */
+  aiExpected?: boolean;
 }
 
 /**

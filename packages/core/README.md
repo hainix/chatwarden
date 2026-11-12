@@ -318,7 +318,7 @@ console.log(cw.ai.status()); // { available: true, level: 0, maxLevel: 2, state:
 - **Your store needs the AI methods.** The SQLite store has them (it adds three tables in migration 20); the in-memory store has them only
   through `withMemoryAi(store)`. A store without them leaves the AI inert: `createChatwarden` logs `chatwarden.ai_store_unsupported` once and
   carries on (a bad `ai` option still throws).
-- **`cw.ai`** is always there: `level()`, `status()`, `read(reportId)`, `readAgain(reportId, actor)`, `stats()` (the casebook counts) and `idle()`.
+- **`cw.ai`** is always there: `level()`, `status()`, `read(reportId)`, `expected(reportId)` (whether a read of that report is on its way now: the level is 1 or 2, an adapter is set up, the breaker is closed, neither daily limit is reached and its read has not ended without an answer), `readAgain(reportId, actor)`, `stats()` (the casebook counts) and `idle()`.
   Without an adapter it answers as if the AI were off. The kit loads the AI code only when you pass `ai`, so a bundler can leave it out of a
   browser build that never does.
 - **To try it with no key**, run `examples/tiny-chat` with `CW_DEMO_AI=1`; tests use `createFakeModerationAI` and never need a network.

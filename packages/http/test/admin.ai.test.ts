@@ -116,6 +116,69 @@ describe('the case page', () => {
     expect(page.ai).toBeNull();
   });
 
+  describe('aiExpected says whether a read is on its way (present when the AI is on)', () => {
+    const expected = async (w: AiWorld, id: string) => body(await w.call('GET', `/reports/${id}`)).aiExpected;
+
+    it('is a boolean, true while the AI is on and healthy (with or without a read yet)', async () => {
+      const w = await aiWorld(1);
+      const f = await w.file();
+      expect(await expected(w, f.id)).toBe(true);
+      await w.idle();
+      w.clock.t += 1000;
+      const page = body(await w.call('GET', `/reports/${f.id}`));
+      expect(page.ai).not.toBeNull();
+      expect(page.aiExpected).toBe(true);
+    });
+
+    it('is absent at level 0 and with no adapter: the page is exactly as before', async () => {
+      const off = await aiWorld(0);
+      expect(await expected(off, (await off.file()).id)).toBeUndefined();
+      const none = await world({});
+      const f = await none.file();
+      expect(body(await none.call('GET', `/reports/${f.id}`))).not.toHaveProperty('aiExpected');
+    });
+
+    it('is false while the breaker is open', async () => {
+      const w = await aiWorld(1, [{ error: new AIError('fatal') }]);
+      const a = await w.file();
+      await w.idle();
+      expect(w.cw.ai.status().state).toBe('unavailable');
+      const b = await w.file();
+      expect(await expected(w, b.id)).toBe(false);
+      expect(await expected(w, a.id)).toBe(false);
+    });
+
+    it('is false at the daily money cap and at the daily call ceiling', async () => {
+      const money = await aiWorld(1, reads('upheld'), { ai: { options: { dailyBudgetMicros: 0 } } });
+      expect(await expected(money, (await money.file()).id)).toBe(false);
+      const calls = await aiWorld(1, reads('upheld'), { overrides: { ai: { dailyCalls: 1 } } });
+      await calls.file();
+      await calls.idle();
+      expect(calls.cw.ai.status().state).toBe('paused_budget');
+      const later = await calls.file();
+      expect(await expected(calls, later.id)).toBe(false);
+    });
+
+    it('is false for a read that ended without an answer, and true for the next report', async () => {
+      const w = await aiWorld(1, [{ error: new AIError('declined') }]);
+      const a = await w.file();
+      await w.idle();
+      const b = await w.file();
+      expect(await expected(w, a.id)).toBe(false);
+      expect(await expected(w, b.id)).toBe(true);
+    });
+
+    it('opening a case in a degraded mode queues no read and the page is otherwise unchanged', async () => {
+      const w = await aiWorld(1, reads('upheld'), { ai: { options: { dailyBudgetMicros: 0 } } });
+      const f = await w.file();
+      const page = body(await w.call('GET', `/reports/${f.id}`));
+      expect(page.ai).toBeNull();
+      expect(page.aiExpected).toBe(false);
+      await w.idle();
+      expect(w.adapter.callCount).toBe(0);
+    });
+  });
+
   it('opening a case with no read yet queues one', async () => {
     const w = await aiWorld(0);
     const f = await w.file();
@@ -599,7 +662,9 @@ describe('a failing AI over HTTP', () => {
       const b = await run(bad);
       expect(b.list.ai).toBeNull();
       expect(b.page.ai).toBeNull();
-      expect(scrubbed({ ...b, list: without(b.list, 'ai'), page: without(b.page, 'ai') })).toEqual(scrubbed({ ...a, list: without(a.list, 'ai'), page: without(a.page, 'ai') }));
+      // The one addition: with the AI on the page says whether a read is expected (a boolean; false once the read has ended without an answer).
+      expect(typeof b.page.aiExpected).toBe('boolean');
+      expect(scrubbed({ ...b, list: without(b.list, 'ai'), page: without(without(b.page, 'ai'), 'aiExpected') })).toEqual(scrubbed({ ...a, list: without(a.list, 'ai'), page: without(a.page, 'ai') }));
     });
   }
 });

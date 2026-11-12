@@ -19,7 +19,7 @@ export const AI_WAIT_MS = 20_000;
 /** When the case is read again while waiting (milliseconds after the strip appeared). */
 const POLLS_MS = [5_000, 15_000] as const;
 
-export function AiStrip({ read }: { read: AiReadView | null }) {
+export function AiStrip({ read, expected }: { read: AiReadView | null; expected: boolean }) {
   const t = useAiT();
   const { t: hubT } = useHub();
   const c = useCase();
@@ -39,7 +39,8 @@ export function AiStrip({ read }: { read: AiReadView | null }) {
   const key = read?.id ?? '';
   // A Read again that has not landed when the wait runs out is no longer waited for: it can be asked again.
   const rereading = again !== null && again === key && spent !== key;
-  const waiting = spent !== key && (read === null || rereading || read.stale);
+  // A read is waited for only while the server says one is on its way (a stale read in a degraded mode is shown, not waited for).
+  const waiting = spent !== key && (rereading || ((read === null || read.stale) && expected));
 
   const reload = useRef(c.detail.reload);
   reload.current = c.detail.reload;

@@ -610,9 +610,9 @@ suggests. Nothing here decides: a moderator does, and every part is lazy, so a h
 - **Level 1, Read.** A neutral strip with a dashed outline (it is machine-written) sits between the case header and the transcript: an `AI`
   tag, the conduct level in words, the rule and a one-line summary, shown as plain text. The lines the AI cited carry a small tick. One
   `⋯` menu holds the model, when it read, how sure it was, the two plain notes (older rules; a line that tried to instruct the AI), Read
-  again and Hide the AI on this case (kept for this browser session, per moderator). While a read is expected a skeleton holds for up to
+  again and Hide the AI on this case (kept for this browser session, per moderator). While the server says a read is expected (`aiExpected` on the case answer: the AI is on, an adapter is set up, the breaker is closed, neither daily limit is reached and the read has not ended without an answer) a skeleton holds for up to
   20 seconds and reads the case again at about 5 and 15 seconds (at most three audited reads of the case per open); then it leaves one
-  quiet line, "The AI has not answered yet", with a Check again action, and never an error banner. Read again that is not answered can be
+  quiet line, "The AI has not answered yet", with a Check again action, and never an error banner. When no read is expected (the AI off or degraded) the case looks exactly as with the AI off: no skeleton, no extra reads of the case. Read again that is not answered can be
   asked again after the wait. A case that is closed shows no strip. The queue gets one neutral chip with the level word, and orders cases by the
   `priority` sort when the server sends reads: wait, open reports, the read and the reporter's record, as a weight and never a filter. Its code
   loads on its own then, in the React hub and in the headless controller alike. While the queue is in that order the top of the list is what Take

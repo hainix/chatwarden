@@ -184,6 +184,12 @@ export interface AiFacade {
    */
   read(reportId: string, opts?: { open?: boolean }): AiReadView | null;
   /**
+   * Whether a read of this report is on its way now, so the case page may wait for one: the effective level is 1 or 2, an adapter is
+   * configured, the breaker is closed, neither daily cap (money, calls) is reached, the report is open and its read has not ended
+   * without an answer. False otherwise, and on any failure; the page then renders exactly as with the AI off.
+   */
+  expected(reportId: string): boolean;
+  /**
    * "Read again": the stored read when the input has not changed (no call), else a call is queued and the answer is `'pending'`.
    * `'off'` at level 0 or for a report that is gone or decided, `'budget'` at the daily money or call cap, `'rate'` once `actor` has
    * asked 10 times in a minute (counted in this process; every answer below uses an ask), `{ unavailable }` while the breaker is open or
@@ -427,6 +433,20 @@ export class AiService implements AiFacade {
     } catch (err) {
       this.warn('ai.read_view_failed', err);
       return null;
+    }
+  }
+
+  expected(reportId: string): boolean {
+    try {
+      if (this.level() === 0 || typeof reportId !== 'string') return false;
+      if (this.status().state !== 'ok') return false;
+      const report = this.store.loadReport(reportId);
+      if (report === null || report.status !== 'open') return false;
+      const own = this.store.loadAiReadFor(reportId, this.prepare(report).hash);
+      return !(own !== null && isFinalRow(own));
+    } catch (err) {
+      this.warn('ai.expected_failed', err);
+      return false;
     }
   }
 

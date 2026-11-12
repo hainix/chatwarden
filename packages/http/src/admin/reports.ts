@@ -227,8 +227,15 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const claim = claimView(claimOf(report));
       // Opening a case is when a missing or stale read is asked for; the answer is whatever is stored now.
       const ai = cw.ai.read(id, { open: true });
+      // Whether a read is on its way, so the hub waits only when one is: present when the AI is on (level 1 or 2), absent when it is off, so a
+      // server with the AI off answers exactly as before. False in a degraded mode (breaker open, a daily cap reached, a read that ended
+      // without an answer).
+      const aiExpected = cw.ai.level() === 0 ? undefined : cw.ai.expected(id);
       c.audit('report.view', { type: 'report', ref: id });
-      return { status: 200, body: { report: { ...report, reportedReasonLabel: labelOf(report) }, history, suggest, rule, claim, ai } };
+      return {
+        status: 200,
+        body: { report: { ...report, reportedReasonLabel: labelOf(report) }, history, suggest, rule, claim, ai, ...(aiExpected === undefined ? {} : { aiExpected }) },
+      };
     }),
 
     'POST /reports/:id/suggest': ctx.secure('reports.read', (c) => {
