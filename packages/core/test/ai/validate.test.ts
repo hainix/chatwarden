@@ -166,7 +166,7 @@ describe('validateAIOutput: rejects', () => {
   });
 
   it('does not mistake ordinary sentences for a link', () => {
-    for (const s of ['Rude, then apologises.Later calms down.', 'Mentions the version 1.2 patch.', 'Says "no.way" as a joke.']) {
+    for (const s of ['Mentions the version 1.2 patch.', 'Rule 2, 3 and 5 (maybe).', 'Says "no way" as a joke.']) {
       expect(validateAIOutput(edited((x) => (x.summary = s)), ctx()).ok, s).toBe(true);
     }
   });

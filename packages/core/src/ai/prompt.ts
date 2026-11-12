@@ -2,10 +2,10 @@ import type { DocumentPolicy } from '../documents.js';
 import { validateProfile } from '../profile.js';
 import { CONDUCT_LEVELS } from '../types.js';
 import type { ChosenLines } from './lines.js';
-import { cleanText } from './redact.js';
+import { cleanText, redactText } from './redact.js';
 import { AI_OUTPUT_SCHEMA } from './schema.js';
 import { AI_PROMPT_VERSION } from './types.js';
-import type { AIExample, AIReadInput } from './types.js';
+import type { AIExample, AIExampleInput, AIReadInput } from './types.js';
 
 // The prompt (design sections 6, 7 and 8). Two parts. The STABLE part is the instructions plus the team's rules, level meanings
 // and standard: byte-identical for the same policy, so a provider can cache it, and free of outcomes, ladder, ids and times, so a
@@ -35,7 +35,7 @@ const INSTRUCTIONS = [
   '- P1 is the reported player, P2 the reporter, P3 and up other players. Lines are L1, L2 and so on, oldest first, with seconds since the first line.',
   '- Judge what P1 wrote against the COMMUNITY RULES and CONDUCT LEVELS below, in light of the STANDARD. Judge the pattern across the lines, not one heated moment.',
   '- The reporter\'s reason and note are a hint, not the truth. "pointed" is the line the reporter pointed at.',
-  '- A line marked blocked was stopped by the word filter and never reached the room. Its words are still evidence of what P1 meant.',
+  '- A line marked blocked was stopped by the word filter and never reached the room; a line marked filtered was shown to the room with its swearing starred. You see the words as typed, and they are still evidence of what P1 meant.',
   '- Personal data in the lines is replaced by [email], [phone], [ip], [link], [tag], [mention] and [token]. A line that posts such data about someone can be doxxing.',
   '- If "truncated" is true you did not see every line. Do not claim to have.',
   '',
@@ -98,11 +98,15 @@ function renderExample(e: AIExample): string {
   return `example: ${escapeJson(JSON.stringify({ rule: e.rule, severity: e.severity, verdict: e.verdict, lines: e.lines }))}`;
 }
 
-/** Cut an example to six lines and to the character budget: whole lines while they fit, then the next line's text shortened. */
-function fitExample(e: AIExample): AIExample {
+/**
+ * Cut an example to six lines and to the character budget: whole lines while they fit, then the next line's text shortened. The text
+ * goes through the same redaction as a chat line (defence in depth: the store pseudonymises, this is idempotent on what it kept).
+ * Null when no line fits at all: an example with no lines teaches nothing.
+ */
+function fitExample(e: AIExample): AIExample | null {
   const out: AIExample = { rule: e.rule, severity: e.severity, verdict: e.verdict, lines: [] };
   for (const l of e.lines.slice(0, EXAMPLE_LINES)) {
-    const line = { who: oneLine(String(l.who)), text: oneLine(String(l.text)) };
+    const line = { who: oneLine(String(l.who)), text: redactText(String(l.text), [], () => null) };
     const withLine = (text: string): AIExample => ({ ...out, lines: [...out.lines, { who: line.who, text }] });
     if (renderExample(withLine(line.text)).length <= EXAMPLE_CHARS) {
       out.lines.push(line);
@@ -120,7 +124,27 @@ function fitExample(e: AIExample): AIExample {
     if (lo > 0) out.lines.push({ who: line.who, text: chars.slice(0, lo).join('') });
     break;
   }
+  return out.lines.length > 0 ? out : null;
+}
+
+/** The examples that are sent: the first two that have at least one line after the cut, each with the id of its casebook row. */
+function prepareExamples(examples: readonly AIExampleInput[] | undefined): Array<{ id: string; example: AIExample }> {
+  const out: Array<{ id: string; example: AIExample }> = [];
+  for (const e of examples ?? []) {
+    if (out.length === EXAMPLES_MAX) break;
+    const example = fitExample(e);
+    if (example !== null) out.push({ id: e.id, example });
+  }
   return out;
+}
+
+/**
+ * The ids of the casebook examples {@link buildAIInput} would put in the prompt for these, in order (at most two). The read stores
+ * them (`AIStoredRead.exampleIds`): the examples are not part of the input hash, so this is how a read says which ones it saw.
+ * @experimental
+ */
+export function usedExampleIds(examples: readonly AIExampleInput[]): string[] {
+  return prepareExamples(examples).map((e) => e.id);
 }
 
 /** What {@link buildAIInput} needs. `note` and the lines are already redacted (see `redactReportNote` and `chooseLines`). */
@@ -128,11 +152,11 @@ export interface BuildAIInputArgs {
   policy: DocumentPolicy;
   /** The reporter's reason, as an id and the label shown to players, or null. */
   reason: { id: string; label: string } | null;
-  /** The redacted note, or null. */
-  note: string | null;
+  /** The redacted note, or null. Leave it out to use `chosen.note`, which shares the lines' aliases. */
+  note?: string | null;
   chosen: ChosenLines;
-  /** Casebook examples, already pseudonymised; at most two are used. */
-  examples?: readonly AIExample[];
+  /** Casebook examples, already pseudonymised; at most two are used (see {@link usedExampleIds}). */
+  examples?: readonly AIExampleInput[];
 }
 
 /**
@@ -145,25 +169,26 @@ export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
   const { policy, chosen } = args;
   const profile: unknown = policy.profile;
   validateProfile(profile);
-  const examples = (args.examples ?? []).slice(0, EXAMPLES_MAX).map(fitExample);
-  const lines = chosen.lines.map((l) => ({ ref: l.ref, secondsIn: l.secondsIn, who: l.who, text: l.text, blocked: l.blocked }));
+  const examples = prepareExamples(args.examples).map((e) => e.example);
+  const note = args.note === undefined ? chosen.note : args.note;
+  const lines = chosen.lines.map((l) => ({ ref: l.ref, secondsIn: l.secondsIn, who: l.who, text: l.text, blocked: l.blocked, filtered: l.filtered }));
   const people = chosen.people.map((p) => ({ alias: p.alias, role: p.role }));
 
   const data = [
     '<data>',
     ...examples.map(renderExample),
     `reason: ${args.reason === null ? 'null' : lit(oneLine(args.reason.label))}`,
-    `note: ${args.note === null ? 'null' : lit(args.note)}`,
+    `note: ${note === null ? 'null' : lit(note)}`,
     `truncated: ${chosen.truncated}`,
     `pointed: ${chosen.reportedLine === null ? 'null' : lit(chosen.reportedLine)}`,
     `people: ${people.map((p) => `${p.alias} ${p.role}`).join(', ')}`,
-    ...lines.map((l) => `${l.ref} +${l.secondsIn}s ${l.who}${l.blocked ? ' blocked' : ''} ${lit(l.text)}`),
+    ...lines.map((l) => `${l.ref} +${l.secondsIn}s ${l.who}${l.blocked ? ' blocked' : l.filtered ? ' filtered' : ''} ${lit(l.text)}`),
     '</data>',
   ];
 
   return {
     promptVersion: PROMPT_VERSION,
-    report: { reason: args.reason === null ? null : { id: args.reason.id, label: oneLine(args.reason.label) }, note: args.note },
+    report: { reason: args.reason === null ? null : { id: args.reason.id, label: oneLine(args.reason.label) }, note },
     people,
     lines,
     reportedLine: chosen.reportedLine,

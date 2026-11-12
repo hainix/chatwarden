@@ -29,6 +29,11 @@ export interface ChosenLine {
   text: string;
   /** The term filter blocked it (the raw text is sent; an adapter option may mask it). */
   blocked: boolean;
+  /**
+   * The profanity filter starred it in the room but did not block it: the raw text is sent. Like `blocked`, this is a line the filter
+   * touched, and the same future adapter option (`mask`) governs both.
+   */
+  filtered: boolean;
   /** Written by the reported person. */
   byReported: boolean;
 }
@@ -45,6 +50,8 @@ export interface ChosenLines {
   people: AIPerson[];
   /** The ref of the line the reporter pointed at, or null. */
   reportedLine: string | null;
+  /** The reporter's note, redacted with the same aliases as the lines and cut to 300 characters; null when there is none. */
+  note: string | null;
 }
 
 type Role = AIPerson['role'];
@@ -166,10 +173,13 @@ function analyse(report: ReportRecord, opts: { max?: number } | undefined): Anal
     who: whos[k] as string,
     text: redactText(line.raw, handles, aliasOf),
     blocked: line.blocked,
+    // Star-masked in the room (not blocked): the filter touched it, the raw text is still what we send.
+    filtered: !line.blocked && line.delivered !== null && line.delivered !== line.raw,
     byReported: roles[positions[k] as number] === 'reported',
   }));
   const reportedLine = report.lineId === null ? null : (lines.find((l) => l.lineId === report.lineId)?.ref ?? null);
-  return { result: { lines, truncated: chosen.size < n, people, reportedLine }, handles, aliasOf };
+  const note = redactNote(report.note, handles, aliasOf);
+  return { result: { lines, truncated: chosen.size < n, people, reportedLine, note }, handles, aliasOf };
 }
 
 /**
@@ -183,7 +193,8 @@ export function chooseLines(report: ReportRecord, opts?: { max?: number }): Chos
 }
 
 /**
- * The reporter's note, redacted with the same aliases as {@link chooseLines} and cut to 300 characters; null when there is none.
+ * The reporter's note, redacted and cut to 300 characters (the `note` of {@link chooseLines}). Pass the same `opts` as the
+ * `chooseLines` call it goes with, or prefer `chooseLines(...).note`, which cannot disagree with the lines.
  * @experimental
  */
 export function redactReportNote(report: ReportRecord, opts?: { max?: number }): string | null {

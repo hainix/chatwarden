@@ -344,15 +344,15 @@ export type {
 
 // AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
 export { AI_PROMPT_VERSION, AIError } from './ai/types.js';
-export type { AIExample, AIPerson, AIRead, AIReadInput, AIReadResult, AIUsage, ModerationAI } from './ai/types.js';
+export type { AIExample, AIExampleInput, AIPerson, AIRead, AIReadInput, AIReadResult, AIStoredRead, AIUsage, ModerationAI } from './ai/types.js';
 export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
 export { validateAIOutput } from './ai/validate.js';
 export type { AIValidation, AIValidationContext } from './ai/validate.js';
-export { AI_MAX_KIND, AI_MAX_PREFILL_MS, AICeilingError, assertWithinCeilings, automationAllowed } from './ai/ceilings.js';
+export { AI_MAX_KIND, AI_MAX_PREFILL_MS, AICeilingError, assertWithinCeilings, automationAllowed, isAllowedKind } from './ai/ceilings.js';
 export { redactNote, redactText } from './ai/redact.js';
 export { chooseLines, redactReportNote } from './ai/lines.js';
 export type { ChosenLine, ChosenLines } from './ai/lines.js';
-export { aiPolicyText, buildAIInput, PROMPT_VERSION } from './ai/prompt.js';
+export { aiPolicyText, buildAIInput, PROMPT_VERSION, usedExampleIds } from './ai/prompt.js';
 export type { BuildAIInputArgs } from './ai/prompt.js';
 export { inputHash } from './ai/hash.js';
 export { looksLikeInjection } from './ai/injection.js';

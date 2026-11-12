@@ -1,5 +1,6 @@
 import { CONDUCT_LEVELS } from '../types.js';
 import type { ConductLevel } from '../types.js';
+import { isInvisible } from './redact.js';
 import type { AIRead } from './types.js';
 
 // Core's own check of a model's answer (design section 8, layer 4). Hand-written: core keeps no dependency. It downgrades, it does
@@ -65,18 +66,33 @@ function checkEvidence(v: unknown, sent: ReadonlySet<string>): string[] | string
   return out.length > EVIDENCE_MAX ? 'too_much_evidence' : out;
 }
 
-// Domains are matched by a list of unambiguous endings, so "fine.Later" and "no.way" stay plain sentences.
+// The summary is shown to a moderator as plain text, so it is checked as the hub will show it: after NFKC (full-width letters and dots
+// fold to ASCII), with no control or invisible character, no tag, no link or address of any kind, no alias and no markdown.
 const LINK = new RegExp(
   [
     String.raw`\b(?:https?|ftp)://`,
     String.raw`\bwww\.`,
-    String.raw`\b(?:discord(?:app)?\.(?:gg|com)|invite\.gg|t\.me)\b`,
-    String.raw`\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|gg|app|dev|xyz|info|biz|link|club|shop|store|online|site)\b`,
+    // Any domain-like token: label(.label)*.ending, the ending being 2 to 24 letters. "apologises.Later" is one too: a summary that
+    // runs two sentences together is rejected rather than risk a link.
+    String.raw`[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,24}(?![\p{L}\p{N}_-])`,
   ].join('|'),
+  'iu',
+);
+const IPV4 = /(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w]|\.\d)/;
+const IPV6 = new RegExp(
+  [
+    String.raw`(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}`,
+    String.raw`(?:[0-9a-f]{1,4}:){1,7}:(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?`,
+    String.raw`::(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4}`,
+  ]
+    .map((p) => String.raw`(?<![\w:])${p}(?![\w:])`)
+    .join('|'),
   'i',
 );
+const MENTION = /@[\p{L}\p{N}_]/u;
 const ALIAS = /\bP\d+\b/i;
 const hasControl = (s: string): boolean => [...s].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+const hasInvisible = (s: string): boolean => [...s].some((c) => isInvisible(c.codePointAt(0) ?? 0));
 const MARKDOWN = [
   /^\s*#{1,6}(?:\s|$)/, // a heading
   /^\s*(?:[-*+>]|\d+\.)\s/, // a list item, a quote
@@ -87,14 +103,21 @@ const MARKDOWN = [
 
 function checkSummary(v: unknown): string | { summary: string } {
   if (typeof v !== 'string') return 'bad_summary';
-  const summary = v.trim();
+  const summary = v.normalize('NFKC').trim();
   if (summary === '') return 'summary_empty';
   if ([...summary].length > SUMMARY_MAX) return 'summary_too_long';
+  if (hasControl(summary)) return 'summary_markdown';
+  if (hasInvisible(summary)) return 'summary_invisible';
+  if (MENTION.test(summary)) return 'summary_mention';
   if (LINK.test(summary)) return 'summary_link';
+  if (IPV4.test(summary) || IPV6.test(summary)) return 'summary_ip';
   if (ALIAS.test(summary)) return 'summary_alias';
-  if (hasControl(summary) || MARKDOWN.some((re) => re.test(summary))) return 'summary_markdown';
+  if (MARKDOWN.some((re) => re.test(summary))) return 'summary_markdown';
+  if (/[<>]/.test(summary)) return 'summary_markup';
   return { summary };
 }
+
+
 
 /**
  * Validate a model's parsed JSON against the answer shape and against what was sent. Never throws and never echoes the text it

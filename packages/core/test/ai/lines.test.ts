@@ -83,7 +83,7 @@ describe('chooseLines: the cap and the choice', () => {
     const rep = mkReport([...mine(2), ...others(2)]);
     const c = chooseLines(rep);
     expect(c.lines.map((l) => l.lineId)).toEqual(rep.excerpt.map((l) => l.lineId));
-    expect(Object.keys(c.lines[0] ?? {}).sort()).toEqual(['blocked', 'byReported', 'lineId', 'ref', 'secondsIn', 'text', 'who']);
+    expect(Object.keys(c.lines[0] ?? {}).sort()).toEqual(['blocked', 'byReported', 'filtered', 'lineId', 'ref', 'secondsIn', 'text', 'who']);
   });
 
   it('honours opts.max and keeps the pointed-at line and the newest of the reported lines first', () => {

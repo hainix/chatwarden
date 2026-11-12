@@ -36,7 +36,7 @@ describe('redactText: handles', () => {
   it('handles with regex characters are literal', () => {
     expect(r('hi a.b+c bye')).toBe('hi P3 bye');
     expect(r('hi aXb+c bye')).toBe('hi aXb+c bye');
-    expect(r('hi a.bbc', ['a.b+c', '.*'])).toBe('hi a.bbc');
+    expect(r('hi aXbbc', ['a.b+c', '.*'])).toBe('hi aXbbc');
     expect(redactText('x.*y and xzzy', ['x.*y'], () => 'P9')).toBe('P9 and xzzy');
     expect(redactText('weird (round) [sq] {cu} ^$|?', ['(round)', '[sq]', '{cu}', '^$|?'], () => 'P8')).toBe('weird P8 P8 P8 P8');
   });

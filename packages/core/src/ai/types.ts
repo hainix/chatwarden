@@ -35,6 +35,13 @@ export interface AIExample {
 }
 
 /**
+ * A casebook example as the store hands it over: the {@link AIExample} and its row id. The id never reaches the provider; the read
+ * stores the ids of the examples it used (`AIStoredRead.exampleIds`).
+ * @experimental
+ */
+export type AIExampleInput = AIExample & { id: string };
+
+/**
  * Everything an adapter may use to read one report. The lines and the note are already redacted and carry aliases and refs
  * only; no identifier is in here.
  * @experimental
@@ -47,7 +54,7 @@ export interface AIReadInput {
   /** `P1` reported, `P2` reporter, `P3...` the rest. */
   people: AIPerson[];
   /** `L1...Ln`, redacted, in time order. */
-  lines: Array<{ ref: string; secondsIn: number; who: string; text: string; blocked: boolean }>;
+  lines: Array<{ ref: string; secondsIn: number; who: string; text: string; blocked: boolean; filtered: boolean }>;
   /** The ref the reporter pointed at, or null. */
   reportedLine: string | null;
   /** True when lines were left out of the 40 kept. */
@@ -61,6 +68,15 @@ export interface AIReadInput {
   examples: AIExample[];
   /** The same content rendered by core. An adapter should use it as is. */
   prompt: { stable: string; variable: string; schema: object };
+}
+
+/**
+ * A read as it is stored: the validated answer plus the ids of the casebook examples that were in its prompt. The examples are not part
+ * of the input hash (a growing casebook must not make every stored read look stale), so the read records which ones it saw.
+ * @experimental
+ */
+export interface AIStoredRead extends AIRead {
+  exampleIds: string[];
 }
 
 /**

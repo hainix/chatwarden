@@ -263,6 +263,10 @@ export class AuditService {
   /**
    * Write one entry, now. Synchronous and fenced: it never throws, and returns false (nothing written, one log line
    * carrying the event name and at most the error class) for an input outside the closed lists or a store failure.
+   *
+   * A person always has a `role`. The AI is the one actor without: pass `role: null` explicitly (`undefined` is refused) with an actor
+   * that begins `ai:` (and is longer than that), for `ai.read` only. So a staff ref or login that begins `ai:` is refused (false), and
+   * so is `ai.read` from anyone else. The three `ai.*` actions need a `report` target and take no detail.
    */
   record(input: AuditRecordInput): boolean {
     try {

@@ -31,7 +31,7 @@ export function person(who: string): Person {
 
 export function mkReport(
   lines: LineSpec[],
-  o: { point?: number | null; note?: string | null; reason?: string | null; id?: string } = {},
+  o: { point?: number | null; note?: string | null; reason?: string | null; id?: string; tags?: Record<string, string> } = {},
 ): ReportRecord {
   const target = person('target');
   const reporter = person('reporter');
@@ -65,7 +65,7 @@ export function mkReport(
     id: o.id ?? 'report-1',
     createdAt: T0 + 600_000,
     roomId: 'room-secret-42',
-    tags: { mode: 'ranked' },
+    tags: o.tags ?? { mode: 'ranked' },
     reporterSubject: reporter.subject,
     reporterSeat: reporter.seat,
     reporterHandle: reporter.handle,

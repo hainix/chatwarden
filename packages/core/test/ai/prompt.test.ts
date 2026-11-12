@@ -3,7 +3,7 @@ import { aiPolicyText, buildAIInput, PROMPT_VERSION } from '../../src/ai/prompt.
 import { chooseLines, redactReportNote } from '../../src/ai/lines.js';
 import { AI_OUTPUT_SCHEMA } from '../../src/ai/schema.js';
 import { AI_PROMPT_VERSION } from '../../src/ai/types.js';
-import type { AIExample } from '../../src/ai/types.js';
+import type { AIExampleInput } from '../../src/ai/types.js';
 import type { DocumentPolicy } from '../../src/documents.js';
 import { LADDER_TABLE } from '../../src/ladder.js';
 import { PRESETS } from '../../src/profile.js';
@@ -20,7 +20,7 @@ function policyOf(name: PresetName = 'standard', over: Partial<ModerationProfile
   return { profile, rules: defineRules(rules ?? starterRules(profile.rules)) };
 }
 
-function inputFor(policy: DocumentPolicy, lines: LineSpec[], o: { note?: string | null; reason?: string | null; examples?: AIExample[]; point?: number | null } = {}) {
+function inputFor(policy: DocumentPolicy, lines: LineSpec[], o: { note?: string | null; reason?: string | null; examples?: AIExampleInput[]; point?: number | null } = {}) {
   const report = mkReport(lines, { note: o.note ?? null, reason: o.reason ?? null, point: o.point ?? null });
   const chosen = chooseLines(report);
   return buildAIInput({
@@ -159,7 +159,7 @@ describe('buildAIInput', () => {
     }
     // Every line of the data block is structure we wrote: a key, or a chat line.
     for (const line of v.trimEnd().split('\n')) {
-      expect(line, line).toMatch(/^(<data>|<\/data>|reason: .+|note: .+|truncated: (true|false)|pointed: .+|people: .+|L\d+ \+\d+s P\d+( blocked)? ".*"|example: \{.*\})$/u);
+      expect(line, line).toMatch(/^(<data>|<\/data>|reason: .+|note: .+|truncated: (true|false)|pointed: .+|people: .+|L\d+ \+\d+s P\d+( blocked| filtered)? ".*"|example: \{.*\})$/u);
     }
   });
 
@@ -196,8 +196,8 @@ describe('buildAIInput', () => {
     expect(PROMPT_VERSION).toBe(AI_PROMPT_VERSION);
     expect(input.report).toEqual({ reason: { id: 'harassment', label: 'Harassment' }, note: 'n' });
     expect(input.reportedLine).toBe('L5');
-    expect(input.lines[4]).toEqual({ ref: 'L5', secondsIn: 4, who: 'P1', text: 'blocked words', blocked: true });
-    expect(Object.keys(input.lines[0] ?? {}).sort()).toEqual(['blocked', 'ref', 'secondsIn', 'text', 'who']);
+    expect(input.lines[4]).toEqual({ ref: 'L5', secondsIn: 4, who: 'P1', text: 'blocked words', blocked: true, filtered: false });
+    expect(Object.keys(input.lines[0] ?? {}).sort()).toEqual(['blocked', 'filtered', 'ref', 'secondsIn', 'text', 'who']);
     expect(input.people[0]).toEqual({ alias: 'P1', role: 'reported' });
     expect(input.rules.map((r) => r.number)).toEqual(policy.rules.active().map((r) => r.number));
     expect(input.levels.map((l) => l.level)).toEqual(['banter', 'rude', 'hostile', 'severe']);
@@ -226,7 +226,8 @@ describe('buildAIInput', () => {
 
   it('at most two examples, each cut at 400 characters', () => {
     const long = 'quissel '.repeat(80);
-    const ex = (rule: number): AIExample => ({
+    const ex = (rule: number): AIExampleInput => ({
+      id: 'ex' + rule,
       rule,
       severity: 'hostile',
       verdict: 'upheld',
@@ -251,14 +252,14 @@ describe('buildAIInput', () => {
 
   it('keeps a short example whole and caps its lines at six', () => {
     const input = inputFor(policyOf('standard'), chat(3), {
-      examples: [{ rule: 2, severity: 'rude', verdict: 'no_action', lines: Array.from({ length: 9 }, (_, i) => ({ who: 'P1', text: `l${i}` })) }],
+      examples: [{ id: 'e1', rule: 2, severity: 'rude', verdict: 'no_action', lines: Array.from({ length: 9 }, (_, i) => ({ who: 'P1', text: `l${i}` })) }],
     });
     expect(input.examples[0]?.lines).toHaveLength(6);
     expect(input.prompt.variable.split('\n').filter((l) => l.startsWith('example: '))).toHaveLength(1);
   });
 
   it('puts examples in the variable part, never the stable part', () => {
-    const a = inputFor(policyOf('standard'), chat(3), { examples: [{ rule: 2, severity: 'rude', verdict: 'noted', lines: [{ who: 'P1', text: 'glarn' }] }] });
+    const a = inputFor(policyOf('standard'), chat(3), { examples: [{ id: 'e2', rule: 2, severity: 'rude', verdict: 'noted', lines: [{ who: 'P1', text: 'glarn' }] }] });
     const b = inputFor(policyOf('standard'), chat(3));
     expect(a.prompt.stable).toBe(b.prompt.stable);
     expect(a.prompt.variable).toContain('example: ');
