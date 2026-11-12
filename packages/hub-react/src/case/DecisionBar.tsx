@@ -22,6 +22,7 @@ import { Decided } from './Decided.js';
 import { DecisionResult } from './DecisionResult.js';
 import { SuggestionCard } from './SuggestionCard.js';
 import { useCase } from './CaseContext.js';
+import { BulkDismiss } from './BulkDismiss.js';
 import { DetailedQuickKeys } from './QuickKeys.js';
 import { takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { UNDO_MS } from '../toasts.js';
@@ -527,6 +528,7 @@ export function DecisionBar() {
                 <p className="cw-hint">{t('hub.decide.undoHint', { seconds: SECONDS })}</p>
               </div>
             </fieldset>
+            <BulkDismiss />
           </form>
         )}
       </>

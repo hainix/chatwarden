@@ -2554,6 +2554,53 @@
   }
 }
 
+/* ---- Close more reports at once ---------------------------------------------------------------------------------------- */
+/* One collapsed disclosure at the bottom of the decision bar: nothing is added to the always-visible bar. Neutral, no signal colour. */
+.cw-hub .cw-bulk {
+  min-width: 0;
+  padding-top: var(--cw-space-2, var(--cwd-space-2));
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-bulk > summary {
+  cursor: pointer;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-bulk > summary:focus-visible {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 2px;
+}
+.cw-hub .cw-bulk-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin-top: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-bulk-rows .cw-btn {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.cw-hub .cw-bulk-row {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+  max-width: 100%;
+}
+.cw-hub .cw-bulk-dialog {
+  max-width: 100%;
+}
+.cw-hub .cw-bulk-title {
+  font-size: var(--cw-text-l, var(--cwd-text-l));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-bulk-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+
 /* ---- Terms, Blocked, Rule gaps, Audit and the Guide ---------------------------------------------------------------------- */
 /* Middle-pane views. A wide table scrolls inside its own box (.cw-scroll) and each column has a floor, so a phone scrolls the table
    and never the page; every word and handle may break anywhere. Nothing here uses a signal colour: they are neutral. */

@@ -106,6 +106,8 @@ export interface DismissOpenRequest {
   /** How the person or reporter is named in a toast. */
   name: string;
   reportIds: readonly string[];
+  /** How many reports the moderator was told it would close (their confirmation); for the toast. Default: `reportIds.length`. */
+  count?: number;
   /** A senior or owner moving another moderator's live claim on a person's case. */
   takeOver?: boolean;
 }
@@ -370,7 +372,7 @@ export function createDecisionStore(options: DecisionStoreOptions): DecisionStor
     const fresh = request.scope === 'person' ? request.reportIds.filter((id) => !isWaiting(live.get(id))) : [];
     const hides = fresh.length > 0;
     const ids = hides ? fresh : [`bulk:${key}`];
-    const count = Math.max(1, request.reportIds.length);
+    const count = Math.max(1, request.count ?? request.reportIds.length);
     const input: DecideInput = { verdict: 'no_action', actions: [] };
 
     let finish!: (outcome: DismissOpenOutcome) => void;

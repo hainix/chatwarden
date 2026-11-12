@@ -381,3 +381,33 @@ describe('the admin screens on a phone', () => {
     }
   });
 });
+
+describe('the bulk dismissal on a phone (360 px)', () => {
+  const rule = (selector: string): string => {
+    const lines = css.split('\n');
+    const at = lines.findIndex((l) => l.trim() === `${selector} {`);
+    if (at < 0) return '';
+    return lines.slice(at + 1, lines.findIndex((l, n) => n > at && l.includes('}'))).join('\n');
+  };
+
+  it('the disclosure and its rows shrink and wrap: no fixed width, long names break, buttons wrap onto more lines', () => {
+    expect(rule('.cw-hub .cw-bulk')).toMatch(/min-width:\s*0/);
+    expect(rule('.cw-hub .cw-bulk-rows')).toMatch(/flex-wrap:\s*wrap/);
+    expect(rule('.cw-hub .cw-bulk-rows .cw-btn')).toMatch(/max-width:\s*100%/);
+    expect(rule('.cw-hub .cw-bulk-rows .cw-btn')).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(rule('.cw-hub .cw-bulk-row')).toMatch(/min-width:\s*0/);
+  });
+
+  it('the confirm window is never wider than the page, its title breaks long names and its buttons wrap', () => {
+    expect(rule('.cw-hub .cw-bulk-dialog')).toMatch(/max-width:\s*100%/);
+    expect(rule('.cw-hub .cw-bulk-title')).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(rule('.cw-hub .cw-bulk-buttons')).toMatch(/flex-wrap:\s*wrap/);
+    expect(rule('.cw-hub .cw-dialog')).toMatch(/width:\s*min\(38rem,\s*100%\)/);
+  });
+
+  it('colours nothing: the disclosure is neutral (its focus ring is the one accent use)', () => {
+    for (const sel of ['.cw-hub .cw-bulk', '.cw-hub .cw-bulk > summary', '.cw-hub .cw-bulk-rows', '.cw-hub .cw-bulk-dialog']) {
+      expect(rule(sel), sel).not.toMatch(/--cw-(red|yellow|green|accent)/);
+    }
+  });
+});
