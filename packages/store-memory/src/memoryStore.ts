@@ -999,11 +999,14 @@ export class MemoryStore implements Store {
 
   purgeNotices(before: number): number {
     const snapshot = [...this.notices];
+    // A seen notice of these kinds goes after the cutoff; the rest of the kinds follow their end time. An unseen message notice (an
+    // appeal outcome, a required rename) stays until it is seen or withdrawn. Spelled out here, not imported: this package links to old cores.
+    const seenGoes = ['warning', 'report_outcome', 'rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'];
     const kept = snapshot.filter(
       (n) =>
         !(
           (n.withdrawnAt !== null && n.createdAt < before) ||
-          (n.ackedAt !== null && (n.kind === 'warning' || n.kind === 'report_outcome') && n.createdAt < before) ||
+          (n.ackedAt !== null && seenGoes.includes(n.kind) && n.createdAt < before) ||
           (n.until !== null && n.until < before)
         ),
     );

@@ -228,6 +228,7 @@ export { WEBHOOK_KEY_TTL_MS } from './types.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export {
   ExcerptError,
+  MESSAGE_NOTICE_KINDS,
   NOTICE_EXCERPT_MAX,
   NOTICE_RECORD_WINDOW_MS,
   NoticeService,
@@ -236,6 +237,8 @@ export {
 } from './notices.js';
 export type {
   ExcerptErrorCode,
+  MessageNoticeKind,
+  MessageNoticeOptions,
   NoticeCreateOptions,
   NoticeServiceDeps,
   PlayerNotice,

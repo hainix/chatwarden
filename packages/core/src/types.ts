@@ -709,8 +709,21 @@ export interface ReportActivity {
 // Notices (storage shape)
 // ---------------------------------------------------------------------------
 
-/** What a player notice is about: a sanction of that kind, or the outcome of a report the player filed. */
-export type NoticeKind = 'warning' | 'chat' | 'area' | 'ban' | 'report_outcome';
+/**
+ * What a player notice is about: a sanction of that kind, the outcome of a report the player filed, or one of four messages (a rename
+ * is required, an appeal was upheld, reduced or revoked). The messages are not sanctions: they have no group, no end and no excerpt,
+ * never appear on "My record" and never need an acknowledgement.
+ */
+export type NoticeKind =
+  | 'warning'
+  | 'chat'
+  | 'area'
+  | 'ban'
+  | 'report_outcome'
+  | 'rename_required'
+  | 'appeal_upheld'
+  | 'appeal_reduced'
+  | 'appeal_revoked';
 
 /**
  * One stored player notice. `subject` is the CANONICAL subject at write time (a later merge is resolved at query
@@ -722,7 +735,7 @@ export interface NoticeRow {
   /** Random, never derived. */
   id: string;
   subject: SubjectId;
-  /** The sanction group this notice is about; null for a report outcome. */
+  /** The sanction group this notice is about; null for a report outcome and for the four message kinds. */
   groupId: string | null;
   kind: NoticeKind;
   rule: string | null;
