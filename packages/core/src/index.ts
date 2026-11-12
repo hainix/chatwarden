@@ -162,11 +162,13 @@ export {
 export { BULK_DISMISS_MAX, BULK_REPORTER_SCAN_MAX } from './dismissMany.js';
 export type { DismissManyInput, DismissManyResult, DismissScope } from './dismissMany.js';
 export {
+  RANK_DOWN_SCAN_MAX,
   REPORTER_ACCURACY_BATCH_MAX,
   REPORTER_ACCURACY_MIN_DECIDED,
   REPORTER_ACCURACY_WINDOW_MS,
   REPORTER_FALSE_RATE_HABITUAL,
   REPORTER_FALSE_RATE_NOTICEABLE,
+  REPORTER_RANK_LAPSE_MS,
   reporterAccuracyFor,
   summarizeOutcomes,
 } from './reporterAccuracy.js';

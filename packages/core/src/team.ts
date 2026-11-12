@@ -1,5 +1,7 @@
 import { randomId } from './crypto.js';
 import { isValidAuditActor } from './audit.js';
+import { RANK_DOWN_SCAN_MAX, REPORTER_ACCURACY_BATCH_MAX, REPORTER_RANK_LAPSE_MS } from './reporterAccuracy.js';
+import type { ReporterAccuracy } from './reporterAccuracy.js';
 import { REPORT_CATEGORIES } from './reports.js';
 import { canonicalReasonId, isReasonId } from './reporting.js';
 import type { ReportReason } from './reporting.js';
@@ -185,6 +187,8 @@ export interface TeamDeps {
   clock: Clock;
   /** The reporting reasons in force, so an old id (`disruption`) finds the reason that replaced it. Default: none. */
   reasons?: () => readonly ReportReason[];
+  /** How each person's reports have turned out (see `cw.reports.reporterAccuracy`). Without it, `rankDownHabitual` ranks nobody down. */
+  accuracy?: (people: readonly SubjectId[]) => Map<SubjectId, ReporterAccuracy>;
 }
 
 /** Claims, take next and viewing. The facade exposes it as `cw.cases`. */
@@ -193,6 +197,7 @@ export class CaseDesk {
   private readonly subjects: SubjectIndex;
   private readonly clock: Clock;
   private readonly reasons: () => readonly ReportReason[];
+  private readonly accuracy: NonNullable<TeamDeps['accuracy']>;
   private readonly presence: ViewingPresence;
 
   constructor(deps: TeamDeps) {
@@ -200,6 +205,7 @@ export class CaseDesk {
     this.subjects = deps.subjects;
     this.clock = deps.clock;
     this.reasons = deps.reasons ?? (() => []);
+    this.accuracy = deps.accuracy ?? (() => new Map());
     this.presence = new ViewingPresence(deps.clock);
   }
 
@@ -268,15 +274,27 @@ export class CaseDesk {
    * category, `reason` to cases with an open report that gave that reason id, or none at all for `null`; both may be given), or null. A case is a person, ranked by their OLDEST open report; it opens on their NEWEST. A case
    * `actor` already holds is skipped. Each candidate is one atomic conditional claim, so two moderators racing never
    * get the same case.
+   *
+   * With `rankDownHabitual`, a case is ranked DOWN when none of its open reports has waited {@link REPORTER_RANK_LAPSE_MS} and
+   * every open report against the person was filed by a habitual false reporter (`ReporterAccuracy.habitual`: one ordinary
+   * reporter, or no accuracy data, keeps the case normal). The first normal case in oldest-first order is claimed; ranked-down
+   * ones are remembered in order and, when the scan ends (end of the queue, or {@link RANK_DOWN_SCAN_MAX} reports read), the
+   * oldest of them is claimed. Nothing is skipped for good: a queue holding only habitual cases still serves them, oldest first.
    */
-  next(actor: string, filter: { category?: ReportCategory; reason?: string | null } = {}): NextCase | null {
+  next(actor: string, filter: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean } = {}): NextCase | null {
     needActor(actor);
     const category = filter.category;
     if (category !== undefined && !REPORT_CATEGORIES.includes(category)) throw new RangeError('cases: unknown category');
     const asked = filter.reason;
     if (asked !== undefined && asked !== null && !isReasonId(asked)) throw new RangeError('cases: unknown reason');
     const reason = asked === undefined || asked === null ? asked : canonicalReasonId(this.reasons(), asked);
+    const rank = filter.rankDownHabitual;
+    if (rank !== undefined && typeof rank !== 'boolean') throw new RangeError('cases: rankDownHabitual must be a boolean');
+    const rankDown = rank === true;
     const seen = new Set<SubjectId>();
+    // Ranked-down people in the order the scan met them (oldest first).
+    const deferred: SubjectId[] = [];
+    let read = 0;
     let after: { createdAt: number; id: string } | undefined;
     for (;;) {
       const page = this.store.listOpenReports({
@@ -285,6 +303,7 @@ export class CaseDesk {
         ...(after === undefined ? {} : { after: after.createdAt, afterId: after.id }),
         limit: NEXT_PAGE,
       });
+      read += page.length;
       // New people on this page, oldest report first. Who already holds one is read once for the whole page, so a held case
       // costs no write; only the rest get the atomic 'free' claim (which stays the arbiter if a rival slips in).
       const candidates: SubjectId[] = [];
@@ -295,28 +314,75 @@ export class CaseDesk {
         candidates.push(person);
       }
       const held = new Set(this.store.loadClaims(candidates, this.clock.now()).map((c) => c.person));
-      for (const person of candidates) {
-        if (held.has(person)) continue;
-        const won = retryBusy(() =>
-          this.store.transaction(() => {
-            const now = this.clock.now();
-            const res = this.store.claimCase(person, actor, now, now + CLAIM_TTL_MS, 'free');
-            if (!res.won) return null;
-            const newest = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 1)[0];
-            if (newest === undefined) {
-              // The case closed under us: do not leave a claim on nothing.
-              this.store.releaseClaim(person, actor, now);
-              return null;
-            }
-            return { person, reportId: newest.id, claim: claimOf(res.claim) };
-          }),
-        );
+      const free = candidates.filter((p) => !held.has(p));
+      const down = rankDown ? this.rankedDown(free) : new Set<SubjectId>();
+      for (const person of free) {
+        if (down.has(person)) {
+          deferred.push(person);
+          continue;
+        }
+        const won = this.tryClaim(person, actor);
         if (won !== null) return won;
       }
       const last = page[page.length - 1];
-      if (page.length < NEXT_PAGE || last === undefined) return null;
+      if (page.length < NEXT_PAGE || last === undefined) break;
+      // Enough read to have looked for a normal case: serve the oldest ranked-down one rather than scan the whole queue.
+      if (rankDown && read >= RANK_DOWN_SCAN_MAX && deferred.length > 0) break;
       after = { createdAt: last.createdAt, id: last.id };
     }
+    if (deferred.length === 0) return null;
+    // A rival may have taken one meanwhile: one read of the claims, so a held case costs no write.
+    const heldNow = new Set(this.store.loadClaims(deferred, this.clock.now()).map((c) => c.person));
+    for (const person of deferred) {
+      if (heldNow.has(person)) continue;
+      const won = this.tryClaim(person, actor);
+      if (won !== null) return won;
+    }
+    return null;
+  }
+
+  /** One atomic 'free' claim of a person's case, opened on their newest open report; null when a rival won or the case closed. */
+  private tryClaim(person: SubjectId, actor: string): NextCase | null {
+    return retryBusy(() =>
+      this.store.transaction(() => {
+        const now = this.clock.now();
+        const res = this.store.claimCase(person, actor, now, now + CLAIM_TTL_MS, 'free');
+        if (!res.won) return null;
+        const newest = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 1)[0];
+        if (newest === undefined) {
+          // The case closed under us: do not leave a claim on nothing.
+          this.store.releaseClaim(person, actor, now);
+          return null;
+        }
+        return { person, reportId: newest.id, claim: claimOf(res.claim) };
+      }),
+    );
+  }
+
+  /**
+   * Which of these people's cases are ranked down: no open report has waited {@link REPORTER_RANK_LAPSE_MS} and every open report
+   * against them came from a habitual reporter. One read of each person's open reports and the accuracy of all their reporters
+   * (chunked at the accuracy batch limit). A person with more open reports than one read returns is never ranked down.
+   */
+  private rankedDown(people: readonly SubjectId[]): Set<SubjectId> {
+    const out = new Set<SubjectId>();
+    if (people.length === 0) return out;
+    const now = this.clock.now();
+    const reporters = new Map<SubjectId, SubjectId[]>();
+    for (const person of people) {
+      const open = this.store.listOpenReportsByPerson(this.subjects.aliasesOf(person), 201);
+      // 201 or more is a case of its own kind: never bury it. One report past the lapse is a case that has waited long enough.
+      if (open.length === 0 || open.length > 200) continue;
+      if (open.some((r) => now - r.createdAt >= REPORTER_RANK_LAPSE_MS)) continue;
+      reporters.set(person, [...new Set(open.map((r) => this.subjects.canonical(r.reporterSubject)))]);
+    }
+    const all = [...new Set([...reporters.values()].flat())];
+    const habitual = new Set<SubjectId>();
+    for (let i = 0; i < all.length; i += REPORTER_ACCURACY_BATCH_MAX) {
+      for (const [who, acc] of this.accuracy(all.slice(i, i + REPORTER_ACCURACY_BATCH_MAX))) if (acc.habitual) habitual.add(who);
+    }
+    for (const [person, who] of reporters) if (who.length > 0 && who.every((r) => habitual.has(r))) out.add(person);
+    return out;
   }
 
   /**

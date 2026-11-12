@@ -359,7 +359,7 @@ export interface Chatwarden {
      * their newest. A case anyone holds is skipped without a write (held cases are read once per page of reports). `category` and
      * `reason` are the only filters: the order is already oldest first. A candidate lost to a rival in between is retried like `claim`.
      */
-    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null }): NextCase | null;
+    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean }): NextCase | null;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
      * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
@@ -836,7 +836,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   };
 
   const audit = new AuditService({ store, clock, logger });
-  const desk = new CaseDesk({ store, subjects, clock, reasons: () => policy.profileNow().reporting.reasons });
+  const desk = new CaseDesk({
+    store,
+    subjects,
+    clock,
+    reasons: () => policy.profileNow().reporting.reasons,
+    accuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
+  });
   const reasonBook = new ReasonBook(store);
 
   return {

@@ -23,6 +23,15 @@ export const REPORTER_FALSE_RATE_HABITUAL = 0.8;
 export const REPORTER_ACCURACY_BATCH_MAX = 200;
 
 /**
+ * Take-next with `rankDownHabitual`: a case that has waited this long ranks normally whoever reported it (the hub's "overdue" line,
+ * 24 hours). The safety against burying a real report from a habitual reporter. @experimental
+ */
+export const REPORTER_RANK_LAPSE_MS = 24 * 3_600_000;
+
+/** Take-next with `rankDownHabitual`: open reports read, at most, while looking for a case that is not ranked down. @experimental */
+export const RANK_DOWN_SCAN_MAX = 1_000;
+
+/**
  * How a reporter's decided reports (filed in the last `windowMs`) turned out. `decided` is `actioned + noAction + badFaith`;
  * `unfounded` is `noAction + badFaith` (a dismissal, with or without the bad-faith mark: the strongest false report counts too).
  * `noted` and `upheld` are both founded: something was found. `falseRate` is `unfounded / decided`, null below
