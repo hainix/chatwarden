@@ -14,7 +14,7 @@ import { bundle } from '../build/build.mjs';
 // Raised at 7j to 760 KB raw and 200 KB gzipped: the script bundles hub-react, so the budget has to absorb hub-react's own growth;
 // raised at 7j so normal hub growth doesn't break the element.
 
-// Raised to 202 KB gzipped at 0.1.6, approved by the maintainer: the standalone bundle inlines every lazy chunk, so the AI hub
+// Raised to 202 KB gzipped at 0.1.7, approved by the maintainer: the standalone bundle inlines every lazy chunk, so the AI hub
 // (lazy in hub-react) counts here in full.
 const BUDGET_GZIP = 202 * 1024;
 const BUDGET_RAW = 760 * 1024;

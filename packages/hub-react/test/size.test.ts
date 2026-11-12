@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 // pass). The bundle is built with splitting on, as an adopter's bundler splits at a dynamic import().
 
 const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-// Raised to 77 KB at 0.1.6 (AI levels 1 and 2), approved by the maintainer: every AI module is lazy and an install with the AI off
+// Raised to 77 KB at 0.1.7 (AI levels 1 and 2), approved by the maintainer: every AI module is lazy and an install with the AI off
 // loads none of it, but the hub carries the plug-in points (case slots and form gating, queue hooks and chip mounts, the client
 // methods and loaders, the Settings > AI entry): about 1.5 KB gzipped, 76,425 -> 77,959. The AI itself is about 13 KB of lazy chunks.
 const BUDGET = 77 * 1024;

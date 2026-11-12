@@ -49,7 +49,7 @@ describe('the ai section of a profile', () => {
     }
   });
 
-  it('a profile written before 0.1.6 (no ai) gets the default', () => {
+  it('a profile written before 0.1.7 (no ai) gets the default', () => {
     const { ai: _ai, ...without } = PRESETS.standard as ModerationProfile & { ai?: unknown };
     void _ai;
     expect(defineProfile(without as ModerationProfile).ai).toEqual({ level: 0, learn: true, dailyCalls: 5000 });
