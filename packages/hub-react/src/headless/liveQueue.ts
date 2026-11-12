@@ -213,7 +213,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     // The token is taken before the list: a change in between shows up at the next poll instead of being lost.
     const at = knownToken ?? (await client.changes()).token;
     const all = await fetchAllOpen(client);
-    const groups = groupQueue(all.items, { sort: 'oldest' });
+    const groups = groupQueue(all.items, { sort: 'oldest', rankDown: { now: now() } });
     if (mine !== seq) return groups;
     token = at;
     commit((prev) => {

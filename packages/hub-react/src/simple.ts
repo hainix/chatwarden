@@ -48,8 +48,11 @@ export function oneClickOf(
   return { form, choice, rule, lineCount: action.lineIds.length };
 }
 
-/** The decision "No action needed" makes: the Not-a-problem verdict, a reason, and no actions. */
-export function noActionForm(reason: string): DecisionForm {
+/**
+ * The decision "Nothing wrong here" makes: the Not-a-problem verdict and no actions. With no reason (the default) none is sent and the
+ * kit stores its standard one; a reason given is sent as written.
+ */
+export function noActionForm(reason = ''): DecisionForm {
   return { ...emptyForm(), verdict: 'not_a_problem', reason };
 }
 

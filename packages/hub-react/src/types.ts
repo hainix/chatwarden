@@ -21,11 +21,11 @@ import type {
   StaffReport,
   Suggestion,
 } from '@chatwarden/core';
-import type { ExceptionListRow, Me, PermissionKey, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
+import type { ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
 export type { PolicyLayer, PolicySection, PolicyState };
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
-export type { Me, PermissionKey, ReportSummary, Role };
+export type { Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role };
 
 /**
  * One page of a list that pages with a cursor. `next` is null on the last page.
@@ -127,11 +127,45 @@ export interface SuggestInput {
 /** @experimental */
 export interface DecideInput {
   verdict: 'upheld' | 'noted' | 'no_action' | 'bad_faith';
-  reason: string;
+  /**
+   * Why. Required for every verdict except `no_action` with no actions: leave it out there and the kit stores its standard reason
+   * (an older server answers 400, see the peer floors).
+   */
+  reason?: string;
   actions: DecisionAction[];
   evidence?: string;
   /** A senior or owner moving another moderator's live claim to themselves (audited by the server). */
   takeOver?: boolean;
+}
+
+/**
+ * `POST /reports/dismiss-open`: close every open report about one person (their case), or every open report from one reporter, as
+ * "nothing wrong here". The server decides on the live set; `dryRun` only counts. A sweep never takes a reason.
+ * @experimental
+ */
+export interface DismissOpenInput {
+  scope: 'person' | 'reporter';
+  /** The staff ref of the reported person (`person`) or of the reporter (`reporter`). */
+  ref: string;
+  /** Person scope only: a senior or owner moving another moderator's live claim to themselves. */
+  takeOver?: boolean;
+  /** Count and check only: nothing is closed, written or taken over. */
+  dryRun?: boolean;
+}
+
+/**
+ * What a sweep answers: counts only, never a report id. `skipped.claimed` stayed open because another moderator holds the case (reporter
+ * scope); `more` is true when the sweep stopped at the kit's maximum and can be run again.
+ * @experimental
+ */
+export interface DismissOpenResult {
+  ok: true;
+  dryRun: boolean;
+  open: number;
+  dismissed: number;
+  replayed: number;
+  skipped: { claimed: number; decided: number };
+  more: boolean;
 }
 
 /**

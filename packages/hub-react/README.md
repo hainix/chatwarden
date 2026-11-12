@@ -20,7 +20,7 @@ npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-
 `@types/react` 18 and renders the hub and the headless entry on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` and
 `@chatwarden/http` are peers too: the hub imports types from both, and these values from core (constants and defaults, so the hub
 and the kit cannot drift apart): `LADDER_TABLE`, `DEFAULT_DURATIONS`, `DEFAULT_AREA_RULES`, `DEFAULT_SEVERE_RULES`, `AUDIT_ACTIONS`,
-`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting` and `LEGACY_REASON_ALIASES`. Its own type declarations name
+`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES` and `REPORTER_RANK_LAPSE_MS`. Its own type declarations name
 both packages. Node 22.13 or newer
 for the tooling; the hub itself runs in a browser and imports no `node:` module.
 
@@ -345,7 +345,8 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
 - the hooks `useMe`, `useCases`, `useCase`, `useDecide`, `useClaim`, `useTerms`, `useBlocked`, `usePerson` and `usePolicy`, and the types `HubRead`,
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
-  includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh` and `HubControllerOptions.host`. The names are the same declarations the main entry re-exports (`createHubClient`,
+  includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`,
+  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss` and `ReporterRecord.accuracy`. The names are the same declarations the main entry re-exports (`createHubClient`,
   `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
   (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
   - functions, values and classes:
@@ -356,11 +357,12 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `queueStats`, `relativeTime`, `routerTransport`, `teamOf`, `toHubError`, `visibleRows`, `waitTone`
   - constants:
     `CLAIM_BEAT_MS`, `QUEUE_MAX_PAGES`, `QUEUE_PAGE`, `SESSION_REPORTERS_MAX`, `SESSION_TTL_MS`, `TAKE_COOLDOWN_MS`,
-    `TOAST_ERROR_MS`, `TOAST_MAX`, `TOAST_MS`, `UNDO_MS`, `VIEWING_BEAT_MS`
+    `TOAST_ERROR_MS`, `TOAST_HELD_MAX`, `TOAST_MAX`, `TOAST_MS`, `UNDO_MS`, `VIEWING_BEAT_MS`
   - types:
     `ActionResult`, `ActionState`, `ActionStore`, `BlockedDays`, `BlockedLine`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
     `ClaimResult`, `CloseGapInput`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
     `DecisionEntry`, `DecisionForm`, `DecisionHost`, `DecisionOutcome`, `DecisionState`, `DecisionStore`, `DecisionStoreOptions`,
+    `DismissOpenInput`, `DismissOpenOutcome`, `DismissOpenRequest`, `DismissOpenResult`,
     `ExceptionInput`, `ExceptionPatch`, `ExceptionRow`, `FetchTransportOptions`, `Handoff`, `Hold`, `HoldInput`, `Holder`,
     `HubCatalog`, `HubClient`, `HubController`, `HubControllerOptions`, `HubControllerSettings`, `HubHost`, `HubParams`, `HubT`,
     `HubText`, `ListAuditQuery`, `ListReportsQuery`, `ListSanctionsQuery`, `LiveQueueOptions`, `LiveQueueState`, `LiveQueueStore`,

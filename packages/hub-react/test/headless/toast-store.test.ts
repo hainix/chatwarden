@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { createT, en } from '../../src/i18n.js';
-import { TOAST_ERROR_MS, TOAST_MAX, TOAST_MS, UNDO_MS, createToastStore } from '../../src/headless/toasts.js';
+import { TOAST_ERROR_MS, TOAST_HELD_MAX, TOAST_MAX, TOAST_MS, UNDO_MS, createToastStore } from '../../src/headless/toasts.js';
 import { fakePage, manualTimers, settle } from './kit.js';
 
 function make() {
@@ -194,15 +194,14 @@ describe('toast store: a held action', () => {
     expect(page.listeners()).toBe(0);
   });
 
-  it('a toast pushed out by the cap still runs its held action (it was never undone)', async () => {
+  it('a held toast pushed out by the held cap still runs its action (it was never undone)', async () => {
     const { store } = make();
     const run = vi.fn();
-    // Every toast has an action, so the oldest goes: the held one is first.
     store.hold({ text: 'Held.', run });
-    for (const t of ['a', 'b', 'c']) store.push({ text: t, action: act });
+    for (let i = 0; i < TOAST_HELD_MAX; i += 1) store.hold({ text: `h${i}`, run: () => undefined });
     await settle();
     expect(run).toHaveBeenCalledTimes(1);
-    expect(texts(store)).toEqual(['a', 'b', 'c']);
+    expect(texts(store)).toHaveLength(TOAST_HELD_MAX);
   });
 
   it('a held action that throws or rejects is swallowed', async () => {

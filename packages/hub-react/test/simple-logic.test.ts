@@ -321,3 +321,20 @@ describe('ruleChoiceOf: is the rule clear from the reason?', () => {
     expect(ruleChoiceOf('x', [{ id: 'x', rules: [2, 2] }], [2])).toEqual({ kind: 'one', rule: 2 });
   });
 });
+
+describe('noActionForm with no reason: the dismissal the kit stores the standard reason for', () => {
+  it('noActionForm() has no reason, the Not-a-problem verdict and no actions', () => {
+    const f = noActionForm();
+    expect(f).toMatchObject({ verdict: 'not_a_problem', reason: '', actions: [] });
+    expect(validate(f, ctx()).count).toBe(0);
+  });
+  it('its body has no reason key at all', () => {
+    const body = toInput(noActionForm());
+    expect(body).toEqual({ verdict: 'no_action', actions: [] });
+    expect(Object.keys(body)).not.toContain('reason');
+  });
+  it('a blank reason given on purpose is the same as none; a typed one is kept', () => {
+    expect(toInput(noActionForm('   '))).not.toHaveProperty('reason');
+    expect(toInput(noActionForm('Fine.'))).toMatchObject({ reason: 'Fine.' });
+  });
+});

@@ -455,15 +455,18 @@ describe('9: an Undo is never pushed off by news', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('when every toast has an action, the oldest goes (and a held action still runs)', async () => {
+  it('when every news toast has an action, the oldest news goes; a held action is not pushed off by them, and is still sent once', async () => {
     const api = mount();
     const run = vi.fn();
     act(() => {
       api().hold({ text: 'Held.', run });
-      for (const text of ['A', 'B', 'C']) api().push({ text, action: { label: 'Undo', run: () => undefined } });
+      for (const text of ['A', 'B', 'C', 'D']) api().push({ text, action: { label: 'Open', run: () => undefined } });
     });
     await tick(0);
-    expect(screen.queryByText('Held.')).not.toBeInTheDocument();
+    expect(screen.getByText('Held.')).toBeInTheDocument();
+    expect(screen.queryByText('A')).not.toBeInTheDocument();
+    expect(run).not.toHaveBeenCalled();
+    await tick(5_100);
     expect(run).toHaveBeenCalledTimes(1);
   });
 });

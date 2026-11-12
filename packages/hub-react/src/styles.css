@@ -2332,6 +2332,14 @@
 .cw-hub .cw-toast button:focus-visible {
   outline-color: var(--cw-surface, var(--cwd-surface));
 }
+/* Several held decisions: the newest has its toast, the earlier ones are this one line. */
+.cw-hub .cw-toast-waiting {
+  padding: 0.25rem 0.7rem;
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-ink, var(--cwd-ink));
+  color: var(--cw-surface, var(--cwd-surface));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
 /* The Undo window: a bar that runs down over the 5 seconds the action is held. */
 .cw-hub .cw-toast-bar {
   position: absolute;

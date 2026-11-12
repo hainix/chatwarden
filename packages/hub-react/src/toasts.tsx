@@ -2,13 +2,13 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import type { ReactNode } from 'react';
 import { useOptionalController, useStore } from './controllerContext.js';
 import { useHub } from './context.js';
-import { TOAST_ERROR_MS, TOAST_MAX, TOAST_MS, UNDO_MS, createToastStore } from './headless/toasts.js';
+import { TOAST_ERROR_MS, TOAST_HELD_MAX, TOAST_MAX, TOAST_MS, UNDO_MS, createToastStore } from './headless/toasts.js';
 import type { Hold, HoldInput, ToastInput, ToastRecord, ToastStore, Toasts } from './headless/toasts.js';
 
 // Toasts: short news that does not need an answer ("You took the case"), and the one that does, for a few seconds: Undo.
 // The queue of toasts and the Undo hold are the headless controller's (`./headless/toasts.ts`); this draws them.
 
-export { TOAST_ERROR_MS, TOAST_MAX, TOAST_MS, UNDO_MS };
+export { TOAST_ERROR_MS, TOAST_HELD_MAX, TOAST_MAX, TOAST_MS, UNDO_MS };
 export type { Hold, HoldInput, ToastInput, Toasts };
 
 const ToastContext = createContext<Toasts | null>(null);
@@ -49,7 +49,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     // `make` only reads a ref.
   }, [alone, own]);
   const store = controller?.toasts ?? (own as ToastStore);
-  const shown = useStore(store);
+  const all = useStore(store);
+  // Quick decisions stack several held toasts. The newest shows in full with its Undo; the rest are one line (their timers run on, and
+  // each comes back into view as the ones after it end or are undone).
+  const newestHeld = all.findLast((s) => s.held);
+  const shown = all.filter((s) => !s.held || s === newestHeld);
+  const earlier = all.filter((s) => s.held).length - (newestHeld === undefined ? 0 : 1);
   const api = useMemo<Toasts>(() => ({ push: store.push, hold: store.hold, dismiss: store.dismiss }), [store]);
 
   return (
@@ -59,6 +64,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {shown.map((s) => (
           <ToastView key={s.id} toast={s} dismissLabel={t('hub.toast.dismiss')} store={store} />
         ))}
+        {earlier > 0 && (
+          <div className="cw-toast-waiting" role="status">
+            {t('hub.toast.waiting', { count: earlier })}
+          </div>
+        )}
       </div>
     </ToastContext.Provider>
   );

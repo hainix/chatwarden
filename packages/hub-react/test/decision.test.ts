@@ -520,3 +520,39 @@ describe('initialForm: a case opens with the suggestion ready and nothing decide
     expect(problems({ ...f, verdict: 'fair', reason: 'ok' }).count).toBe(0);
   });
 });
+
+// A dismissal with no typed reason: the kit stores its standard reason, so the form neither asks for one nor sends one.
+describe('a Not-a-problem dismissal needs no typed reason', () => {
+  const dismissal = (over: Partial<DecisionForm> = {}): DecisionForm => form({ verdict: 'not_a_problem', reason: '', ...over });
+
+  it('not_a_problem with a blank reason validates, and toInput omits reason', () => {
+    expect(problems(dismissal()).count).toBe(0);
+    expect(problems(dismissal()).reason).toBeUndefined();
+    expect(toInput(dismissal())).toEqual({ verdict: 'no_action', actions: [] });
+    expect(toInput(dismissal())).not.toHaveProperty('reason');
+  });
+  it('a reason of only spaces and line breaks counts as blank', () => {
+    const f = dismissal({ reason: '  \n\t ' });
+    expect(problems(f).count).toBe(0);
+    expect(toInput(f)).not.toHaveProperty('reason');
+  });
+  it('not_a_problem with a reason keeps it, trimmed', () => {
+    const f = dismissal({ reason: '  Banter between friends.  ' });
+    expect(problems(f).count).toBe(0);
+    expect(toInput(f)).toEqual({ verdict: 'no_action', reason: 'Banter between friends.', actions: [] });
+  });
+  it('fair, bad_faith and any verdict with actions still require a reason', () => {
+    expect(problems(form({ reason: '' })).reason?.key).toBe('hub.decide.error.reasonRequired');
+    expect(problems(form({ verdict: 'bad_faith', evidence: 'made it up', reason: '' })).reason?.key).toBe('hub.decide.error.reasonRequired');
+    const withAction = dismissal({ actions: [draft({ person: R, what: 'warning:null', rule: '3' })] });
+    expect(problems(withAction).reason?.key).toBe('hub.decide.error.reasonRequired');
+    expect(problems(dismissal({ verdict: null })).verdict).toBeDefined();
+  });
+  it('a dismissal that acts on someone keeps its reason field (validate refuses it blank before it is ever sent)', () => {
+    expect(toInput(dismissal({ actions: [draft({ person: R, what: 'warning:null', rule: '3' })] }))).toHaveProperty('reason', '');
+  });
+  it('a 501 character reason is refused for not_a_problem too; 500 is fine', () => {
+    expect(problems(dismissal({ reason: 'x'.repeat(501) })).reason?.key).toBe('hub.decide.error.reasonLong');
+    expect(problems(dismissal({ reason: 'x'.repeat(500) })).reason).toBeUndefined();
+  });
+});
