@@ -158,6 +158,15 @@ describe('closed is terminal but can be retried', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 
+  it('focus moves to the log when Try again is pressed (the button is gone, focus is not lost to the page)', async () => {
+    const transport = w.transportFor('snerp');
+    const { user } = renderUi(box(transport));
+    await screen.findByRole('textbox', { name: 'Message' });
+    act(() => transport.status('closed', 'unauthorized'));
+    await user.click(await screen.findByRole('button', { name: 'Try again' }));
+    expect(log()).toHaveFocus();
+  });
+
   it('a ban does not offer it', async () => {
     const transport = w.transportFor('snerp');
     renderUi(box(transport));

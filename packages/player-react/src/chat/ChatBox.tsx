@@ -406,7 +406,11 @@ export function ChatBox(props: ChatBoxProps) {
           {closed !== null && closed !== 'banned' && (
             <>
               {' '}
-              <button type="button" className="cw-chat-retry" onClick={() => setAttempt((n) => n + 1)}>
+              <button type="button" className="cw-chat-retry" onClick={() => {
+                  setAttempt((n) => n + 1);
+                  // The button goes with the closed line: keep focus in the box.
+                  log.current?.focus();
+                }}>
                 {t('player.state.retry')}
               </button>
             </>
