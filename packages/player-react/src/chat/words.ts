@@ -36,6 +36,10 @@ export const enChat = {
   'player.chat.refused.slow_mode': 'Slow mode is on. You can send another message in {left}.',
   'player.chat.refused.flood': 'You are sending messages too fast. Try again in {left}.',
   'player.chat.refused.duplicate': 'You already sent that. Say something different, or try again in {left}.',
+  // The same three, for an answer with no usable wait (a custom or older server): a sentence with no time in it.
+  'player.chat.refused.slow_mode.soon': 'Slow mode is on. Please wait a moment before sending another message.',
+  'player.chat.refused.flood.soon': 'You are sending messages too fast. Try again in a moment.',
+  'player.chat.refused.duplicate.soon': 'You already sent that. Say something different, or try again in a moment.',
   'player.chat.refused.unknown': 'That message was not sent.',
   'player.chat.refused.rule': 'Community Rule {rule}.',
   'player.chat.refused.notice': 'We sent you a notice with details.',

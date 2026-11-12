@@ -192,10 +192,34 @@ describe('a wait', () => {
       await make({ wrap: slow(bad) });
       const view = await join('snerp');
       await press('wait');
-      expect(await screen.findByText(/Slow mode is on/)).toBeInTheDocument();
+      // FD M1: the whole sentence, with no time in it and no "in ." left over.
+      expect(await screen.findByText('Slow mode is on. Please wait a moment before sending another message.')).toBeInTheDocument();
       expect(send(), String(bad)).not.toBeDisabled();
       view.unmount();
     }
+  });
+
+  it.each([
+    ['slow_mode', 'Slow mode is on. Please wait a moment before sending another message.'],
+    ['flood', 'You are sending messages too fast. Try again in a moment.'],
+    ['duplicate', 'You already sent that. Say something different, or try again in a moment.'],
+  ])('%s with no wait at all reads a whole sentence (never "in .")', async (reason, sentence) => {
+    w.close();
+    await make({ wrap: scripted(() => ({ refuse: { reason: reason as never } })) });
+    await join('snerp');
+    await press('hello');
+    const region = await screen.findByText(sentence);
+    expect(region).toBeInTheDocument();
+    expect(region.textContent).not.toMatch(/\bin \.|\{left\}/);
+  });
+
+  it('a valid wait still reads its time, not the no-wait sentence', async () => {
+    w.close();
+    await make({ wrap: scripted(() => ({ refuse: { reason: 'flood', retryAfterMs: 2000 } })) });
+    await join('snerp');
+    await press('hello');
+    expect(await screen.findByText('You are sending messages too fast. Try again in 2 seconds.')).toBeInTheDocument();
+    expect(screen.queryByText(/in a moment/)).toBeNull();
   });
 });
 

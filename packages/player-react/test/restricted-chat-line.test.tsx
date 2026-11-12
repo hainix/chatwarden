@@ -147,7 +147,7 @@ describe('RestrictedChatLine: a pace refusal (a pause, not a sanction)', () => {
   });
 
   it('the words follow the translation, and a missing key falls back to English', () => {
-    const t = createT({ ...en, 'player.pace.flood': 'Zu schnell. Nochmal {left}.' }, 'de');
+    const t = createT({ ...en, 'player.pace.flood': 'Zu schnell. Nochmal in {left}.' }, 'de');
     const a = render(<RestrictedChatLine {...common} t={t} locale="de" pace={pause('flood', 3000)} />);
     expect(screen.getByRole('status')).toHaveTextContent('Zu schnell. Nochmal in 3 Sekunden.');
     a.unmount();

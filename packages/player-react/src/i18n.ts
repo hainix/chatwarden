@@ -82,9 +82,9 @@ export const en = {
   'player.restricted.ref': 'Reference {code}',
 
   // A pause, not a sanction (slow mode, too many lines, the same line again). {left} is the wait with its own "in" ("in 3 seconds").
-  'player.pace.slow_mode': 'Slow mode is on. You can send another message {left}.',
-  'player.pace.flood': 'You are sending messages too fast. Try again {left}.',
-  'player.pace.duplicate': 'You already sent that. Say something different, or try again {left}.',
+  'player.pace.slow_mode': 'Slow mode is on. You can send another message in {left}.',
+  'player.pace.flood': 'You are sending messages too fast. Try again in {left}.',
+  'player.pace.duplicate': 'You already sent that. Say something different, or try again in {left}.',
   'player.pace.ready': 'You can send a message again.',
 
   /** @deprecated unused since 0.1.3; removed in a later minor */

@@ -52,14 +52,24 @@ export function timeLeft(at: number, now: number, locale: string): string | null
   return rtf.format(Math.round(left / DAY), 'day');
 }
 
+/** A whole number of one unit, bare and in the locale's words ("3 seconds", "3 Sekunden"). */
+function bare(n: number, unit: 'second' | 'minute' | 'hour' | 'day', locale: string): string {
+  return new Intl.NumberFormat(safeLocale(locale), { style: 'unit', unit, unitDisplay: 'long' }).format(n);
+}
+
 /**
- * A short wait (`ms` left, not an end time), as the locale says it ("in 3 seconds"): whole seconds, a part of a second counting as a whole
- * one, up to 120 seconds; longer waits are {@link timeLeft}'s ("in 3 minutes"). Null for zero, a negative or a value that is not a finite
- * number. The words carry their own "in": a sentence puts the value where the wait goes.
+ * A short wait (`ms` left, not an end time) as a BARE duration in the locale's words ("3 seconds"): whole seconds, a part of a second
+ * counting as a whole one, up to 120 seconds; then whole minutes (rounded up) up to 120, then hours up to two days, then days. Null for zero,
+ * a negative or a value that is not a finite number.
+ *
+ * One convention for every wait sentence the kit words (the pace words and the chat box's refusal words): the value is bare and the sentence
+ * has its own "in", as in "You can send another message in {left}." A translation that follows it never reads "in in 3 seconds".
  * @experimental
  */
 export function secondsLeft(ms: number, locale: string): string | null {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || !(ms > 0)) return null;
-  if (ms > 120_000) return timeLeft(ms, 0, locale);
-  return new Intl.RelativeTimeFormat(safeLocale(locale), { numeric: 'always' }).format(Math.ceil(ms / 1000), 'second');
+  if (ms <= 120_000) return bare(Math.ceil(ms / 1000), 'second', locale);
+  if (ms <= 120 * MIN) return bare(Math.ceil(ms / MIN), 'minute', locale);
+  if (ms < 2 * DAY) return bare(Math.ceil(ms / HOUR), 'hour', locale);
+  return bare(Math.ceil(ms / DAY), 'day', locale);
 }
