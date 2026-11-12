@@ -3,7 +3,7 @@ import { actorName } from '../claims.js';
 import { useHub } from '../context.js';
 import { REASON_MAX } from '../decision.js';
 import type { Problem } from '../decision.js';
-import { appealErrorText, groupName, kindLabel, lengthPhrase, ruleLabel } from '../labels.js';
+import { appealErrorText, groupName, kindLabel, lengthPhrase, ruleLabel, sanctionWhat } from '../labels.js';
 import { useHubAction, useHubData } from '../hooks.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import { useMode } from '../mode.js';
@@ -12,7 +12,6 @@ import { lengthValue } from '../policy/length.js';
 import { LEGACY_LENGTHS, lengthsOf } from '../policy/lengths.js';
 import { recordLine } from '../simple.js';
 import { useToasts } from '../toasts.js';
-import { sanctionWhat } from '../appeals/AppealList.js';
 import { lighterKinds, lighterLengths } from '../appeals/lighter.js';
 import type { LighterKind } from '../appeals/lighter.js';
 import type { AppealDecisionInput, AppealDetail, PersonHistory, PolicyDocs, Reason } from '../types.js';
@@ -61,10 +60,12 @@ function Body({ appeal }: { appeal: AppealDetail }) {
   const mayDecide = can('appeals.decide');
   const what = sanctionWhat(t, locale, sanction);
 
-  // Their name and record: one read of their history (the name to show, and in Simple the one line). Without `history.read` they are the tag.
+  // Their record: in Simple one read of their history gives the one line (and the name to show). Detailed reads nothing for the header: the appeal carries no name,
+  // and a name is not worth an audited `history.view` row, so it has the tag and the link to the record. Without `history.read` it is the tag alone.
   const wantsHistory = can('history.read');
-  const history = useHubData<PersonHistory | null>(wantsHistory ? `appeal-history:${appeal.person}` : 'appeal-history:idle', () =>
-    wantsHistory ? client.personHistory(appeal.person, { limit: 1 }) : Promise.resolve(null),
+  const readsHistory = wantsHistory && simple;
+  const history = useHubData<PersonHistory | null>(readsHistory ? `appeal-history:${appeal.person}` : 'appeal-history:idle', () =>
+    readsHistory ? client.personHistory(appeal.person, { limit: 1 }) : Promise.resolve(null),
   );
   const handle = history.data?.handle ?? null;
   const nameFlagged = history.data?.handleFlagged === true;
@@ -84,11 +85,13 @@ function Body({ appeal }: { appeal: AppealDetail }) {
             {t('hub.appeals.card.title', { what })}
           </h2>
           <p className="cw-facts">
-            <span className="cw-appeal-who">
-              <NameValue text={groupName(t, { handle, person: appeal.person }, true)} flagged={nameFlagged} place="head" />
-              {nameFlagged && ' '}
-              <NameToggle flagged={nameFlagged} place="head" />
-            </span>
+            {simple && (
+              <span className="cw-appeal-who">
+                <NameValue text={groupName(t, { handle, person: appeal.person }, true)} flagged={nameFlagged} place="head" />
+                {nameFlagged && ' '}
+                <NameToggle flagged={nameFlagged} place="head" />
+              </span>
+            )}
             <PersonChip person={appeal.person} />
             <Tag>{ruleLabel(t, sanction.rule)}</Tag>
             <Time at={sanction.startsAt} />
@@ -212,6 +215,8 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
   const [picking, setPicking] = useState(false);
   const [kind, setKind] = useState<LighterKind | null>(null);
   const [length, setLength] = useState<string | null>(null);
+  // The appeal is closed (someone else decided it, or the sanction is gone): nothing is left to send, so the controls go and the words stay with a way back.
+  const [settled, setSettled] = useState(false);
   const reasonBox = useRef<HTMLTextAreaElement>(null);
   const sending = useRef(false);
   const action = useHubAction((input: AppealDecisionInput) => client.decideAppeal(appeal.id, input));
@@ -238,7 +243,14 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
     const result = await action.run({ ...input, reason: reason.trim() }).finally(() => {
       sending.current = false;
     });
-    if (!result.ok) return;
+    if (!result.ok) {
+      if (result.error.code === 'already_decided' || result.error.code === 'gone') {
+        setSettled(true);
+        setPicking(false);
+        if (queue !== null) void queue.reload();
+      }
+      return;
+    }
     toasts.push({ text: t(`hub.appeals.toast.${result.value.status}`) });
     // The queue reads again, so the list and the number drop the appeal at once; the moderator goes back to the list.
     if (queue !== null) void queue.reload();
@@ -254,7 +266,7 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
   const failed = action.error;
   return (
     <section className="cw-appeal-decision" aria-label={t('hub.appeals.decide.title')}>
-      <ReasonChips reasons={reasons} onPick={(r) => setReason((v) => (v.trim() === '' ? r.text : `${v.trimEnd()} ${r.text}`))} />
+      {!settled && <ReasonChips reasons={reasons} onPick={(r) => setReason((v) => (v.trim() === '' ? r.text : `${v.trimEnd()} ${r.text}`))} />}
       <Field
         id={`${base}-reason`}
         label={t('hub.appeals.reason.label')}
@@ -262,26 +274,34 @@ function Decision({ appeal, reasons, offered }: { appeal: AppealDetail; reasons:
         counter={t('hub.decide.counter', { count: reason.trim().length, max: REASON_MAX })}
         problem={problem}
       >
-        {(a) => <textarea {...a} ref={reasonBox} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />}
+        {(a) => <textarea {...a} ref={reasonBox} rows={3} value={reason} readOnly={settled} onChange={(e) => setReason(e.target.value)} />}
       </Field>
       {failed !== null && (
         <div className="cw-error" role="alert">
           <p>{appealErrorText(t, failed)}</p>
         </div>
       )}
-      <div className="cw-appeal-controls">
-        <button type="button" className="cw-btn cw-btn--primary" aria-disabled={action.busy} onClick={() => void send({ outcome: 'uphold' })}>
-          {t('hub.appeals.decide.keep')}
-        </button>
-        <button type="button" className="cw-btn" aria-expanded={picking} aria-controls={`${base}-pick`} disabled={kinds.length === 0} onClick={() => setPicking((v) => !v)}>
-          {t('hub.appeals.decide.lighter')}
-        </button>
-        <button type="button" className="cw-btn" aria-disabled={action.busy} onClick={() => void send({ outcome: 'revoke' })}>
-          {t('hub.appeals.decide.remove')}
-        </button>
-      </div>
-      {appeal.sanction.kind === 'warning' && <p className="cw-hint">{t('hub.appeals.decide.warning')}</p>}
-      {picking && chosenKind !== null && (
+      {settled ? (
+        <div className="cw-appeal-controls">
+          <button type="button" className="cw-btn" onClick={() => go({ name: 'appeals' })}>
+            {t('hub.appeals.back')}
+          </button>
+        </div>
+      ) : (
+        <div className="cw-appeal-controls">
+          <button type="button" className="cw-btn cw-btn--primary" aria-disabled={action.busy} onClick={() => void send({ outcome: 'uphold' })}>
+            {t('hub.appeals.decide.keep')}
+          </button>
+          <button type="button" className="cw-btn" aria-expanded={picking} aria-controls={`${base}-pick`} disabled={kinds.length === 0} onClick={() => setPicking((v) => !v)}>
+            {t('hub.appeals.decide.lighter')}
+          </button>
+          <button type="button" className="cw-btn" aria-disabled={action.busy} onClick={() => void send({ outcome: 'revoke' })}>
+            {t('hub.appeals.decide.remove')}
+          </button>
+        </div>
+      )}
+      {!settled && appeal.sanction.kind === 'warning' && <p className="cw-hint">{t('hub.appeals.decide.warning')}</p>}
+      {!settled && picking && chosenKind !== null && (
         <fieldset id={`${base}-pick`} className="cw-appeal-pick">
           <legend>{t('hub.appeals.pick.title')}</legend>
           <div className="cw-field">

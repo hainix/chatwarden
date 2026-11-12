@@ -1295,6 +1295,7 @@ export const en = {
   'hub.appeals.toast.upheld': 'Appeal decided: the decision stands.',
   'hub.appeals.toast.reduced': 'Appeal decided: the sanction was made lighter.',
   'hub.appeals.toast.revoked': 'Appeal decided: the sanction was removed.',
+  'hub.appeals.back': 'Back to the list',
   'hub.appeals.fail.sameDecider': 'You made the original decision, so someone else has to decide this appeal.',
   'hub.appeals.fail.alreadyDecided': 'Someone else has already decided this appeal.',
   'hub.appeals.fail.gone': 'The sanction is gone, so this appeal is closed.',

@@ -36,7 +36,8 @@ describe('what the card says', () => {
     const main = within(document.querySelector('main') as HTMLElement);
     expect(main.getByText('Rule 2')).toBeInTheDocument();
     expect(main.getByText('by mod_ann')).toBeInTheDocument();
-    expect(main.getByText('Mallory')).toBeInTheDocument();
+    // Detailed names the person by the link and the tag alone: the name is not read for the header (see the history tests below).
+    expect(main.queryByText('Mallory')).toBeNull();
   });
 
   it('a warning gets the yellow card and no length; a ban the red one', async () => {
@@ -96,6 +97,53 @@ describe('what the card says', () => {
   });
 });
 
+const historyReads = (w: AppealsHub): TransportRequest[] => w.sent.filter((r) => r.method === 'GET' && /^\/people\/[^/]+\/history/.test(r.path));
+const historyAudits = (w: AppealsHub): unknown[] => w.cw.audit.list({ limit: 200 }).items.filter((r) => r.action === 'history.view');
+
+describe('opening the card reads no record in Detailed (a name is not worth an audited read)', () => {
+  it('Detailed: no history read and no history.view row, with a plain or a flagged name, and the link to the record is still there', async () => {
+    for (const target of ['Mallory', 'zorbakKid']) {
+      const w = await appealsHub(SENIOR);
+      const a = await w.appeal({ target, statement: 'a plain statement' });
+      const { unmount } = await open(w, a.appealId);
+      expect(historyReads(w), target).toEqual([]);
+      expect(historyAudits(w), target).toHaveLength(0);
+      expect(screen.getByRole('link', { name: 'Open their record' })).toHaveAttribute('href', `#/people/${a.person}`);
+      // The name, flagged or not, is nowhere in the card (the queue beside it has its own row); neither is a switch for it.
+      expect((document.querySelector('main') as HTMLElement).innerHTML).not.toContain(target);
+      expect(screen.queryByRole('checkbox', { name: 'Show blocked words' })).toBeNull();
+      unmount();
+    }
+  });
+
+  it('Detailed: a flagged statement still offers its own reveal, and no history is read', async () => {
+    const w = await appealsHub(SENIOR);
+    const a = await w.appeal({ target: 'Mallory', statement: 'you zorbak, it was a joke' });
+    const { user } = await open(w, a.appealId);
+    await user.click(screen.getByRole('checkbox', { name: 'Show blocked words' }));
+    expect(within(statement()).getByText('you zorbak, it was a joke')).toBeInTheDocument();
+    expect(historyReads(w)).toEqual([]);
+  });
+
+  it('Simple still reads the record once: its one line, and the name', async () => {
+    const w = await appealsHub(SENIOR);
+    const a = await w.appeal({ target: 'Mallory' });
+    renderHub(w, { path: `/appeals/${a.appealId}`, mode: 'simple' });
+    await screen.findByRole('region', { name: 'Their record' });
+    await waitFor(() => expect(historyReads(w)).toHaveLength(1));
+    expect(historyAudits(w)).toHaveLength(1);
+    expect((await screen.findAllByText('Mallory')).length).toBeGreaterThan(0);
+  });
+
+  it('Detailed without history.read is the same: no read, no link to the record', async () => {
+    const w = await appealsHub({ ...SENIOR, permissions: { 'history.read': 'owner' } });
+    const a = await w.appeal({ target: 'Mallory' });
+    await open(w, a.appealId);
+    expect(historyReads(w)).toEqual([]);
+    expect(screen.queryByRole('link', { name: 'Open their record' })).toBeNull();
+  });
+});
+
 describe('the statement is plain text, and a flagged one is hidden until shown', () => {
   it('renders a <script> statement and a markdown link literally', async () => {
     const w = await appealsHub(SENIOR);
@@ -129,10 +177,10 @@ describe('the statement is plain text, and a flagged one is hidden until shown',
     expect(/zorbak/i.test(document.body.innerHTML)).toBe(false);
   });
 
-  it('"Show blocked words" reveals the statement and the person\'s flagged name together', async () => {
+  it('in Simple, "Show blocked words" reveals the statement and the person\'s flagged name together', async () => {
     const w = await appealsHub(SENIOR);
     const a = await w.appeal({ target: 'zorbakKid', statement: 'you zorbak, it was a joke' });
-    const { user } = await open(w, a.appealId);
+    const { user } = await open(w, a.appealId, { mode: 'simple' });
     expect(/zorbak/i.test(document.body.innerHTML)).toBe(false);
     await user.click(screen.getByRole('checkbox', { name: 'Show blocked words' }));
     expect(within(statement()).getByText('you zorbak, it was a joke')).toBeInTheDocument();
@@ -370,6 +418,44 @@ describe('a refusal comes back in words, with everything typed kept, and nothing
     await user.click(remove());
     expect(await screen.findByRole('alert')).toHaveTextContent('Someone else has already decided this appeal.');
     expect(reason()).toHaveValue('second');
+  });
+
+  it.each([
+    ['already_decided', 'Someone else has already decided this appeal.'],
+    ['gone', 'The sanction is gone, so this appeal is closed.'],
+  ])('%s settles the card: the three controls go, the words stay with a way back to the list, the typed text stays, the queue reads again', async (code, words) => {
+    const w = await appealsHub(SENIOR);
+    const a = await w.appeal();
+    const { user, router } = await open(w, a.appealId);
+    w.intercept.fn = (req) => (req.method === 'POST' && /\/decide$/.test(req.path) ? { status: 409, body: { error: code, message: 'x' } } : undefined);
+    await user.type(reason(), 'my reason');
+    const changes = (): number => w.sent.filter((r) => r.method === 'GET' && r.path === '/changes').length;
+    const before = changes();
+    await user.click(keep());
+    expect(await screen.findByRole('alert')).toHaveTextContent(words);
+    expect(screen.queryByRole('button', { name: 'Keep the decision' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Make it lighter...' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove it' })).toBeNull();
+    expect(reason()).toHaveValue('my reason');
+    expect(reason()).toHaveAttribute('readonly');
+    // The queue reads again (its change token), so the list stops showing the appeal.
+    await waitFor(() => expect(changes()).toBeGreaterThan(before));
+    await user.click(within(decision()).getByRole('button', { name: 'Back to the list' }));
+    expect(router.path).toBe('/appeals');
+  });
+
+  it('after same_decider the three controls stay (only a settled appeal loses them)', async () => {
+    const w = await appealsHub(SENIOR);
+    const a = await w.appeal({ actor: 'bea@example.test' });
+    const { user } = await open(w, a.appealId);
+    await user.type(reason(), 'x');
+    await user.click(keep());
+    await screen.findByRole('alert');
+    expect(keep()).toBeInTheDocument();
+    expect(remove()).toBeInTheDocument();
+    expect(lighter()).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back to the list' })).toBeNull();
+    expect(reason()).not.toHaveAttribute('readonly');
   });
 
   it('gone: the sanction is gone', async () => {

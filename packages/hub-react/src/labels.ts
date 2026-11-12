@@ -101,6 +101,11 @@ export function choiceLabel(t: HubT, locale: string, choice: Choice): string {
   return t('hub.decide.choice.timed', { kind: kindLabel(t, choice.kind), length: lengthPhrase(t, locale, choice.durationMs) });
 }
 
+/** What a sanction was, in words: "Chat restriction, 24 hours", "Ban, permanent", "Warning" (a warning and a note have no length). Shared by the appeals list and the appeal card. */
+export function sanctionWhat(t: HubT, locale: string, s: { kind: SanctionKind; startsAt: number; endsAt: number | null }): string {
+  return choiceLabel(t, locale, { kind: s.kind, durationMs: !hasLength(s.kind) || s.endsAt === null ? null : s.endsAt - s.startsAt });
+}
+
 /** The ladder's suggested outcome, in words. */
 export function outcomeLabel(t: HubT, locale: string, outcome: Suggestion['outcome']): string {
   const choice = outcomeChoice(outcome);

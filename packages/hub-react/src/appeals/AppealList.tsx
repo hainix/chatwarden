@@ -2,18 +2,12 @@ import { useEffect, useRef } from 'react';
 import { useHub } from '../context.js';
 import { formatDuration } from '../format.js';
 import { useHubData } from '../hooks.js';
-import { choiceLabel, groupName, ruleLabel } from '../labels.js';
+import { groupName, ruleLabel, sanctionWhat } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
 import { ErrorBlock, Link, PersonChip, Skeleton } from '../ui.js';
-import type { AppealRow } from '../types.js';
 
 // The open appeals in the queue pane, oldest first (the Appeals view). One row per appeal: who, what was given and under which rule, and how long it has waited.
 // A row opens the appeal card in the main pane. There is no claim: an appeal is decided by one write, and the second of two moderators is told so.
-
-/** What the sanction was, in words: "Chat restriction, 24 hours", "Ban, permanent", "Warning". */
-export function sanctionWhat(t: ReturnType<typeof useHub>['t'], locale: string, s: AppealRow['sanction']): string {
-  return choiceLabel(t, locale, { kind: s.kind, durationMs: s.kind === 'warning' || s.kind === 'note' ? null : s.endsAt === null ? null : s.endsAt - s.startsAt });
-}
 
 export function AppealList({ selected }: { selected: string | null }) {
   const { client, t, locale, now } = useHub();
