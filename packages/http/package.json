@@ -36,6 +36,10 @@
       "types": "./dist/src/admin-entry.d.ts",
       "default": "./dist/src/admin-entry.js"
     },
+    "./chat": {
+      "types": "./dist/src/chat/index.d.ts",
+      "default": "./dist/src/chat/index.js"
+    },
     "./express": {
       "types": "./dist/src/express.d.ts",
       "default": "./dist/src/express.js"
@@ -45,6 +49,9 @@
     "*": {
       "admin": [
         "dist/src/admin-entry.d.ts"
+      ],
+      "chat": [
+        "dist/src/chat/index.d.ts"
       ],
       "express": [
         "dist/src/express.d.ts"

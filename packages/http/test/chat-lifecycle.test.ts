@@ -429,3 +429,70 @@ describe('restart', () => {
     expect(typeof next?.epoch).toBe('string');
   });
 });
+
+describe('telling the sink it is done', () => {
+  it('end is called when the broadcaster drops a stream (backed up, thrown, bye) and not when the caller closes it', async () => {
+    const w = await chatWorld({ options: { maxBacklog: 2 } });
+    const closedByCaller = w.attend(ROOM, 'plenk');
+    const backedUp = w.attend(ROOM, 'wumbo');
+    const thrower = w.attend(ROOM, 'glarn');
+    const talker = w.attend(ROOM, 'mivvo');
+    closedByCaller.stream.close();
+    expect(closedByCaller.heard.ended).toBe(0);
+    backedUp.heard.backedUp = true;
+    thrower.heard.broken = true;
+    say(w, talker.session, 'one');
+    say(w, talker.session, 'two');
+    expect(backedUp.heard.ended).toBe(1);
+    expect(thrower.heard.ended).toBe(1);
+    expect(talker.heard.ended).toBe(0);
+    w.chat.closeRoom(ROOM);
+    expect(talker.heard.frames.at(-1)).toEqual({ type: 'bye', reason: 'room_closed' });
+    expect(talker.heard.ended).toBe(1);
+    expect(backedUp.heard.ended).toBe(1); // never twice
+  });
+
+  it('end is called after the bye of close()', async () => {
+    const w = await chatWorld();
+    const a = w.attend(ROOM, 'plenk');
+    w.chat.close();
+    expect(a.heard.ended).toBe(1);
+  });
+
+  it('a sink whose end throws does not break the broadcaster', async () => {
+    const w = await chatWorld();
+    const a = w.attend(ROOM, 'plenk');
+    const bad = w.join(ROOM, 'wumbo');
+    bad.open({
+      write: () => false,
+      end: () => {
+        throw new Error('end failed');
+      },
+    });
+    expect(() => w.chat.closeRoom(ROOM)).not.toThrow();
+    expect(a.heard.ended).toBe(1);
+  });
+});
+
+describe('canOpen', () => {
+  it('is false when open would be refused, and agrees with open', async () => {
+    const w = await chatWorld({ options: { maxStreamsPerMember: 1, maxStreams: 2 } });
+    const a = w.join(ROOM, 'plenk');
+    const b = w.join(ROOM, 'wumbo');
+    const c = w.join(ROOM, 'glarn');
+    expect(a.canOpen()).toBe(true);
+    const first = a.open(spoken().sink);
+    expect(a.canOpen()).toBe(false); // per-player limit
+    expect(a.open(spoken().sink)).toEqual({ refused: { reason: 'full' } });
+    expect(b.canOpen()).toBe(true);
+    b.open(spoken().sink);
+    expect(c.canOpen()).toBe(false); // process limit
+    expect(c.open(spoken().sink)).toEqual({ refused: { reason: 'full' } });
+    if ('refused' in first) throw new Error('refused');
+    first.close();
+    expect(c.canOpen()).toBe(true);
+    w.chat.close();
+    expect(c.canOpen()).toBe(false);
+  });
+});
+

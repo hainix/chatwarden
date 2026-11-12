@@ -3,7 +3,11 @@ import type { Chatwarden, ChatResult, Logger, ProfanityFilter, RawWho, SubjectId
 import { LiveTerms } from '@chatwarden/matcher';
 import { MemoryTermStore, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MemoryStore } from '@chatwarden/store-memory';
+import { createRouter } from '../src/router.js';
 import { createRoomBroadcaster } from '../src/chat/broadcaster.js';
+import { chatRoutes } from '../src/chat/routes.js';
+import type { ChatRoutesOptions } from '../src/chat/routes.js';
+import type { KitRequest, KitResponse } from '../src/types.js';
 import type { ChatMember, ChatSession, ChatSink, ChatStream, RoomBroadcaster, RoomBroadcasterOptions } from '../src/chat/broadcaster.js';
 import type { ChatFrame, WireLine } from '../src/chat/wire.js';
 
@@ -22,6 +26,8 @@ export interface Spoken {
   frames: ChatFrame[];
   /** Pings received. */
   pings: number;
+  /** Times the broadcaster told the sink it was done. */
+  ended: number;
   /** Return false from the sink (backed up) while true. */
   backedUp: boolean;
   /** Throw from the sink while true. */
@@ -40,6 +46,7 @@ export function spoken(): Spoken {
   const s: Spoken = {
     frames: [],
     pings: 0,
+    ended: 0,
     backedUp: false,
     broken: false,
     sink: {
@@ -47,6 +54,9 @@ export function spoken(): Spoken {
         if (s.broken) throw new Error('socket is gone: zorbak');
         s.frames.push(structuredClone(frame));
         return s.backedUp ? false : true;
+      },
+      end: () => {
+        s.ended += 1;
       },
       ping: () => {
         if (s.broken) throw new Error('socket is gone');
@@ -209,3 +219,82 @@ export function scripted(script: (roomId: string, seatId: string, text: string) 
     return facade;
   };
 }
+
+/** Identity from headers: x-key, x-account, x-ip; x-identify=throw / reject / null / string breaks the hook. */
+export const identifyFromHeaders = async (req: KitRequest): Promise<RawWho> => {
+  const h = req.headers;
+  const mode = h['x-identify'];
+  if (mode === 'throw') throw new Error(`boom for ${h['x-key'] ?? ''}`);
+  if (mode === 'reject') return Promise.reject(new TypeError(`boom for ${h['x-key'] ?? ''}`));
+  if (mode === 'null') return null as unknown as RawWho;
+  if (mode === 'string') return 'not an object' as unknown as RawWho;
+  const who: Record<string, unknown> = {};
+  if (h['x-key'] !== undefined) who.clientKey = h['x-key'];
+  if (h['x-account'] !== undefined) who.accountId = h['x-account'];
+  if (h['x-ip'] !== undefined) who.ip = h['x-ip'];
+  return who as RawWho;
+};
+
+export interface RouteWorldOptions extends WorldOptions {
+  routes?: Partial<ChatRoutesOptions>;
+}
+
+/** The chat world with its routes mounted on a router. Callers are told apart by `x-key` (default: the name given), named by `x-name`. */
+export async function routeWorld(over: RouteWorldOptions = {}) {
+  const w = await chatWorld(over);
+  const routes = chatRoutes(w.cw, w.chat, {
+    identify: identifyFromHeaders,
+    join: (req) => {
+      const mode = req.headers['x-join'];
+      if (mode === 'null') return null;
+      if (mode === 'throw') throw new TypeError('join exploded');
+      return { name: req.headers['x-name'] ?? 'plenk' };
+    },
+    logger: { warn: (event, detail) => void w.logs.push([event, detail]) },
+    now: w.now,
+    ...over.routes,
+  });
+  const router = createRouter(routes);
+
+  /** Headers that identify player `name`. */
+  const as = (name: string, extra: Record<string, string> = {}): Record<string, string> => ({
+    'x-key': `raw-client-key-${name}-0001`,
+    'x-ip': '203.0.113.7',
+    'x-name': name,
+    ...extra,
+  });
+
+  const call = (
+    method: string,
+    path: string,
+    o: { headers?: Record<string, string>; body?: unknown; raw?: string; type?: string | null } = {},
+  ): Promise<KitResponse> => {
+    const headers: Record<string, string> = { ...o.headers };
+    const rawBody = o.raw ?? (o.body === undefined ? undefined : JSON.stringify(o.body));
+    if (rawBody !== undefined && o.type !== null && headers['content-type'] === undefined) headers['content-type'] = o.type ?? 'application/json';
+    return router({ method, path, query: {}, headers, body: undefined, ...(rawBody === undefined ? {} : { rawBody }) });
+  };
+  const post = (room: string, route: 'lines' | 'mute' | 'report', headers: Record<string, string>, body?: unknown, extra: { raw?: string; type?: string | null } = {}) =>
+    call('POST', `/rooms/${room}/${route}`, { headers, ...(body === undefined ? {} : { body }), ...extra });
+  const stream = (room: string, headers: Record<string, string>) => call('GET', `/rooms/${room}/stream`, { headers });
+
+  /** Start a stream response into a recording sink; the text written is in `chunks`. */
+  const listen = (res: KitResponse) => {
+    if (res.stream === undefined) throw new Error(`not a stream: ${res.status}`);
+    const sink = { chunks: [] as string[], ended: false, backedUp: false };
+    const cancel = res.stream.start({
+      write: (chunk) => {
+        if (!sink.ended) sink.chunks.push(chunk);
+        return !sink.backedUp;
+      },
+      end: () => {
+        sink.ended = true;
+      },
+    });
+    return { sink, cancel, text: () => sink.chunks.join('') };
+  };
+
+  return { ...w, routes, router, as, call, post, stream, listen };
+}
+
+export type RouteWorld = Awaited<ReturnType<typeof routeWorld>>;

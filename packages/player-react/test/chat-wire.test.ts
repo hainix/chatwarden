@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { CHAT_WIRE_VERSION as HTTP_VERSION } from '@chatwarden/http';
+import { CHAT_WIRE_VERSION as HTTP_VERSION, encodeFrame } from '@chatwarden/http';
 import type {
   ChatFrame as HttpFrame,
   MuteTarget as HttpMuteTarget,
@@ -30,8 +30,8 @@ const hello = (over: Record<string, unknown> = {}): ChatFrame =>
     ...over,
   }) as ChatFrame;
 
-/** One frame as the server writes it on the stream (section 7). */
-const encode = (frame: ChatFrame): string => `event: ${frame.type}\ndata: ${JSON.stringify(frame)}\n\n`;
+/** One frame as the server writes it on the stream (section 7): the real encoder of `@chatwarden/http`. */
+const encode = (frame: ChatFrame): string => encodeFrame(frame);
 /** The frame a client reads back from the text, the way sseTransport does. */
 function roundTrip(frame: ChatFrame): ChatFrame | null {
   let out: ChatFrame | null | undefined;

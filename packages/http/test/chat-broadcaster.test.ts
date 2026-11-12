@@ -632,7 +632,7 @@ describe('browser safety', () => {
 
   it('the module graph imports no node: module and uses no Buffer, process or require', () => {
     const files = reach(join(SRC, 'chat', 'broadcaster.ts'));
-    expect([...files.keys()].map((f) => f.replaceAll('\\', '/').split('/src/')[1]).sort()).toEqual(['chat/broadcaster.ts', 'chat/history.ts', 'chat/wire.ts']);
+    expect([...files.keys()].map((f) => f.replaceAll('\\', '/').split('/src/')[1]).sort()).toEqual(['chat/broadcaster.ts', 'chat/history.ts', 'chat/random.ts', 'chat/wire.ts']);
     for (const [file, text] of files) {
       const code = text.replaceAll(/\/\/.*$/gm, '').replaceAll(/\/\*[\s\S]*?\*\//g, '');
       expect(code, file).not.toMatch(/from\s*['"]node:/);

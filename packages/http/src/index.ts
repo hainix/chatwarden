@@ -66,14 +66,29 @@ export {
   webhooksOut,
 } from './webhooks/index.js';
 export type { WebhookEndpoint, WebhookInOptions, WebhooksOut, WebhooksOutOptions } from './webhooks/index.js';
-export { CHAT_WIRE_VERSION } from './chat/wire.js';
+export {
+  chatRoutes,
+  CHAT_WIRE_VERSION,
+  createRoomBroadcaster,
+  encodeFrame,
+  HEARTBEAT,
+  refusalOf,
+  ROOM_BROADCASTER_DEFAULTS,
+} from './chat/index.js';
 export type {
   ChatFrame,
+  ChatMember,
+  ChatRoutesOptions,
+  ChatSession,
+  ChatSink,
+  ChatStream,
   MuteTarget,
   ReportOutcome,
+  RoomBroadcaster,
+  RoomBroadcasterOptions,
   SendResult,
   WireLine,
   WireMuted,
   WireRefusal,
   WireRestriction,
-} from './chat/wire.js';
+} from './chat/index.js';

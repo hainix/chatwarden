@@ -8,6 +8,7 @@ import { errorClass, EVIDENCE_MAX_AGE_MS, makeHasher, safeWarn } from '@chatward
 import type { Chatwarden, Logger, RawWho, SubjectId } from '@chatwarden/core';
 import { createRing, HISTORY_LINES_DEFAULT, resolveHistory } from './history.js';
 import type { Ring } from './history.js';
+import { randomHex, randomToken } from './random.js';
 import { CHAT_WIRE_VERSION, refusalOf } from './wire.js';
 import type { ChatFrame, MuteTarget, ReportOutcome, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from './wire.js';
 
@@ -34,6 +35,11 @@ export interface ChatSink {
    * own keep-alive leaves it out and gets no heartbeat. Same return rule as `write`.
    */
   ping?(): boolean | void;
+  /**
+   * Optional. The broadcaster is done with this stream and will write no more: it said `bye`, or the receiver was backed up for `maxBacklog`
+   * writes, or a write threw. End the connection (the client reconnects). Not called when the caller closed the stream itself.
+   */
+  end?(): void;
 }
 
 /**
@@ -56,6 +62,8 @@ export interface ChatSession {
    * player already has `maxStreamsPerMember` streams open in the room, or the process is at `maxStreams`, or the broadcaster is closed.
    */
   open(sink: ChatSink): ChatStream | { refused: WireRefusal };
+  /** True when `open` would not be refused right now. For a caller (the HTTP route) that must say 429 before it has a sink. */
+  canOpen(): boolean;
   /** Check a line with the kit and, if it passes, deliver it to the room. Never throws. */
   send(input: { text: string }): SendResult;
   /** Mute or unmute a player, named by one of their lines or by the token from `muted`. `false`: nothing to do. */
@@ -147,26 +155,6 @@ function whole(value: unknown, name: string, fallback: number, min: number, max:
 
 function fn(value: unknown, name: string): void {
   if (value !== undefined && typeof value !== 'function') throw new TypeError(`createRoomBroadcaster: ${name} must be a function`);
-}
-
-/** Random lower-case hex from the platform's `crypto.getRandomValues`. */
-function randomHex(bytes: number): string {
-  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto;
-  if (c?.getRandomValues === undefined) throw new Error('createRoomBroadcaster: this runtime has no crypto.getRandomValues');
-  const buf = c.getRandomValues(new Uint8Array(bytes));
-  let out = '';
-  for (const b of buf) out += b.toString(16).padStart(2, '0');
-  return out;
-}
-
-const REF_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
-function randomRef(): string {
-  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto;
-  if (c?.getRandomValues === undefined) throw new Error('createRoomBroadcaster: this runtime has no crypto.getRandomValues');
-  const buf = c.getRandomValues(new Uint8Array(REF_LENGTH));
-  let out = '';
-  for (const b of buf) out += REF_ALPHABET.charAt(b % REF_ALPHABET.length);
-  return out;
 }
 
 const hasText = (v: unknown): v is string => typeof v === 'string' && v !== '';
@@ -327,8 +315,20 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     }
   }
 
-  /** Stop one stream. `rearm`: start the seat's grace when it was the member's last one. Idempotent. */
-  function dropStream(rec: StreamRec, rearm: boolean): void {
+  /** Tell a sink the broadcaster is done with it. A throw is ignored. */
+  function endSink(rec: StreamRec): void {
+    try {
+      rec.sink.end?.();
+    } catch (err) {
+      warn('chatwarden.chat_stream_failed', err);
+    }
+  }
+
+  /**
+   * Stop one stream. `rearm`: start the seat's grace when it was the member's last one. `ended`: the broadcaster is the one stopping it
+   * (not the caller), so the sink is told. Idempotent.
+   */
+  function dropStream(rec: StreamRec, rearm: boolean, ended = false): void {
     if (rec.closed) return;
     rec.closed = true;
     const member = rec.member;
@@ -342,6 +342,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       const room = roomOf(member);
       if (room !== undefined) armGrace(room, member);
     }
+    if (ended) endSink(rec);
   }
 
   const memberRoom = new WeakMap<MemberRec, RoomRec>();
@@ -355,12 +356,12 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       result = frame === null ? rec.sink.ping?.() : rec.sink.write(frame);
     } catch (err) {
       warn('chatwarden.chat_stream_failed', err);
-      dropStream(rec, true);
+      dropStream(rec, true, true);
       return;
     }
     if (result === false) {
       rec.backlog += 1;
-      if (rec.backlog >= maxBacklog) dropStream(rec, true);
+      if (rec.backlog >= maxBacklog) dropStream(rec, true, true);
     } else {
       rec.backlog = 0;
     }
@@ -374,7 +375,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     } catch (err) {
       warn('chatwarden.chat_stream_failed', err);
     }
-    dropStream(rec, false);
+    dropStream(rec, false, true);
   }
 
   function armHeartbeat(): void {
@@ -426,8 +427,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
   function refFor(member: MemberRec, targetSeat: string): string {
     const known = member.refByTarget.get(targetSeat);
     if (known !== undefined) return known;
-    let ref = randomRef();
-    while (member.targetByRef.has(ref)) ref = randomRef();
+    let ref = randomToken(REF_LENGTH);
+    while (member.targetByRef.has(ref)) ref = randomToken(REF_LENGTH);
     member.refByTarget.set(targetSeat, ref);
     member.targetByRef.set(ref, targetSeat);
     return ref;
@@ -573,6 +574,11 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
 
     return {
       name,
+
+      canOpen() {
+        const found = live();
+        return found !== null && found.member.streams.size < maxStreamsPerMember && streamCount < maxStreams;
+      },
 
       open(sink) {
         const found = live();

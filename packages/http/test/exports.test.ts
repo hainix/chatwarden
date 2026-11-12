@@ -68,7 +68,7 @@ describe('the public exports an adapter author needs', () => {
     }
   });
 
-  it('exports: the chat wire types and CHAT_WIRE_VERSION are on the root; the chat routes are not yet', () => {
+  it('exports: the chat wire types, the broadcaster and the chat routes are on the root', () => {
     expect(http.CHAT_WIRE_VERSION).toBe(1);
     expect(http.CHAT_WIRE_VERSION).toBe(wire.CHAT_WIRE_VERSION);
     expectTypeOf<http.ChatFrame>().toEqualTypeOf<wire.ChatFrame>();
@@ -83,7 +83,8 @@ describe('the public exports an adapter author needs', () => {
     for (const name of ['ChatFrame', 'WireLine', 'WireRestriction', 'WireMuted', 'WireRefusal', 'SendResult', 'MuteTarget', 'ReportOutcome']) {
       expect(name in http).toBe(false);
     }
-    // the routes and the broadcaster arrive with the later task
-    expect('chatRoutes' in http).toBe(false);
+    for (const name of ['chatRoutes', 'createRoomBroadcaster', 'encodeFrame', 'HEARTBEAT', 'refusalOf', 'ROOM_BROADCASTER_DEFAULTS']) {
+      expect(typeof (http as Record<string, unknown>)[name], name).not.toBe('undefined');
+    }
   });
 });
