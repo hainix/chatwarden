@@ -13,6 +13,7 @@ import { reportReasonsContract } from './reportReasons.contract.js';
 import { reportsContract } from './reports.contract.js';
 import { retentionContract } from './retention.contract.js';
 import { sanctionsContract } from './sanctions.contract.js';
+import { signalsContract } from './signals.contract.js';
 import { strikesContract } from './strikes.contract.js';
 import { teamContract } from './team.contract.js';
 import { subjectsContract } from './subjects.contract.js';
@@ -31,6 +32,7 @@ export {
   reportsContract,
   retentionContract,
   sanctionsContract,
+  signalsContract,
   strikesContract,
   subjectsContract,
   teamContract,

@@ -45,6 +45,8 @@ export type {
   ClaimRow,
   OpenReportQuery,
   ReasonRow,
+  SignalRow,
+  SignalSourceRow,
   ConductLevel,
   Source,
   Store,

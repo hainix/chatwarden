@@ -35,6 +35,11 @@ export interface RetentionPolicy {
    * outlives a report, so it is the shortest of the three; 0 keeps no text at all.
    */
   aiExamplesMs: number;
+  /**
+   * A signal row (what a game recorded about a player, `flood_triggered` included) is deleted once it is older than this. At least 14
+   * days: a counting window needs at least two weeks of rows. A feed window longer than this is refused.
+   */
+  signalsMs: number;
 }
 
 export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
@@ -46,12 +51,13 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   auditMs: 365 * DAY_MS,
   aiOutcomesMs: 365 * DAY_MS,
   aiExamplesMs: 180 * DAY_MS,
+  signalsMs: 90 * DAY_MS,
 };
 
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
-const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs'] as const;
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'signalsMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -62,6 +68,7 @@ const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'ba
  * - `auditMs` at least 90 days: the staff trail is how a community answers "who did that"
  * - `aiOutcomesMs` at least 90 days: the agree-or-override record is the data the AI's later gates read
  * - `aiExamplesMs` at least 0 (0 keeps no example text at all)
+ * - `signalsMs` at least 14 days: a counting window needs at least two weeks of rows
  *
  * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
  *
@@ -96,6 +103,9 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   if (below(policy.aiExamplesMs, 0)) {
     throw new ProfileError('retention.aiExamplesMs', 'must be 0 or more: 0 keeps no example text at all');
   }
+  if (below(policy.signalsMs, 14 * DAY_MS)) {
+    throw new ProfileError('retention.signalsMs', 'must be at least 14 days: a counting window needs at least two weeks of rows');
+  }
   if (below(policy.badFaithMs, suspendWindowMs)) {
     throw new ProfileError(
       'retention.badFaithMs',
@@ -118,6 +128,8 @@ export interface PurgeResult {
   aiReads: number;
   /** AI casebook outcomes deleted. 0 for a store without the AI methods. */
   aiOutcomes: number;
+  /** Signal rows deleted (flood_triggered included). 0 for a store without the signal methods. */
+  signals: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -141,6 +153,7 @@ function checkWindow(name: string, ms: number): void {
  * - AI reads: `createdAt < now - reportsMs` (a read also goes with its report, in `purgeReports`); AI outcomes (agree-or-override
  *   record, no chat text): `decidedAt < now - aiOutcomesMs`; the pseudonymised example kept with an outcome:
  *   `decidedAt < now - aiExamplesMs`, the row stays with its counts. A store without the AI methods has none of these.
+ * - signals: `at < now - signalsMs` (90 days by default, never less than 14); a store without the signal methods has none
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn.
@@ -162,6 +175,7 @@ export async function purge(
     auditMs: policy.auditMs ?? RETENTION_DEFAULTS.auditMs,
     aiOutcomesMs: policy.aiOutcomesMs ?? RETENTION_DEFAULTS.aiOutcomesMs,
     aiExamplesMs: policy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
+    signalsMs: policy.signalsMs ?? RETENTION_DEFAULTS.signalsMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
@@ -172,6 +186,7 @@ export async function purge(
   checkWindow('auditMs', p.auditMs);
   checkWindow('aiOutcomesMs', p.aiOutcomesMs);
   checkWindow('aiExamplesMs', p.aiExamplesMs);
+  checkWindow('signalsMs', p.signalsMs);
   return store.transaction(() => {
     const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
     const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
@@ -185,6 +200,7 @@ export async function purge(
       webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
       aiReads: ai.reads,
       aiOutcomes: ai.outcomes,
+      signals: store.purgeSignals?.(now - p.signalsMs) ?? 0,
     };
   });
 }
