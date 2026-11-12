@@ -61,7 +61,8 @@ function matchPath(route: Route, segments: string[]): RouteParams | null {
  * - no match -> 404; a path that matches under other methods only -> 405 with an `allow` header.
  * - HEAD on a path with a GET route (and no HEAD route of its own) runs the GET handler and returns its response as is;
  *   the adapter must send that response's status, headers and body length for a HEAD but not the body itself. `allow`
- *   lists HEAD wherever it lists GET.
+ *   lists HEAD wherever it lists GET. A response with `stream` has no body length: for a HEAD the adapter sends its status
+ *   and headers (with the stream defaults) and does not call `start`.
  * Handler errors propagate: wrap the router (or each handler) in `withErrors`.
  * `compileRoutes` is the same router with a `matches(path)` check beside `run`, for an adapter that must tell "this path is
  * not mine" (hand it on) from a handler's own 404 (answer it).
@@ -100,6 +101,11 @@ export interface CompiledRoutes {
  *   Pass the request method so a CORS preflight (`OPTIONS`) to a known path stays the app's, unless a route answers it.
  * - The path is the URL path only. The query string is ignored by `matches` and stripped by `run`.
  * - HEAD runs the GET handler; send its status and headers, but not its body.
+ * - A response with `stream` (a `KitStream`) is a response that stays open. Send its status and headers, add `cache-control:
+ *   no-store`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` for each the response left out, flush
+ *   the headers, call `stream.start(sink)` once with a `write(chunk): boolean` and an `end()`, and call the function it returns
+ *   exactly once, when the client goes away or the response ends. `write` after that writes nothing and returns false. `body` is
+ *   ignored. For a HEAD, send the status and headers only and do not call `start`.
  */
 export function compileRoutes(routes: RouteTable): CompiledRoutes {
   const table: Route[] = [];

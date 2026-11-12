@@ -30,16 +30,38 @@ export interface KitRequest {
 }
 
 /**
+ * A response that stays open: the adapter sends the status and headers, then calls `start` once. Server-Sent Events use it.
+ * @experimental
+ */
+export interface KitStream {
+  /**
+   * Called once, after the status and headers are decided. `write` appends text and returns `false` when the connection is backed up
+   * (or the client has left or the response has ended, in which case nothing is written); `end` finishes the response. Return a
+   * function the adapter calls exactly once when the client goes away or the response ends; it must stop writing and release
+   * anything the stream holds. A `start` that throws has returned no cancel, so it must release what it took before it throws.
+   */
+  start(sink: { write(chunk: string): boolean; end(): void }): () => void;
+}
+
+/**
  * One HTTP response. How an adapter sends `body`:
  * - a `string` is sent RAW, as the response body, with the response's own `content-type` header (the code of conduct is
  *   `text/html`, `text/markdown` or `text/plain`). Never JSON-encode it: that would quote the document.
  * - anything else is serialised as JSON and sent with `content-type: application/json; charset=utf-8`.
  * Every `headers` entry is sent as given.
+ *
+ * With `stream` the response stays open instead (see {@link KitStream}): `body` is ignored, and an adapter that streams adds
+ * `cache-control: no-store`, `x-accel-buffering: no` and `content-type: text/event-stream; charset=utf-8` unless `headers` has them.
  */
 export interface KitResponse {
   status: number;
   headers?: Record<string, string>;
   body: unknown;
+  /**
+   * When present, `body` is ignored and the response stays open until `start`'s sink ends it or the client leaves.
+   * @experimental
+   */
+  stream?: KitStream;
 }
 
 /** Who is calling: supplied by the adopter's auth hook. */

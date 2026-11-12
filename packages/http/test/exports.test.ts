@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import * as http from '../src/index.js';
-import type { CompiledRoutes, KitResponse, RouteTable } from '../src/index.js';
+import type { CompiledRoutes, KitResponse, KitStream, RouteTable } from '../src/index.js';
+import type { KitStream as AdminKitStream } from '../src/admin-entry.js';
+import type { KitStream as DeclaredKitStream } from '../src/types.js';
 import { compileRoutes } from '../src/router.js';
 import { RETRY_AFTER_CAP_MS, RETRY_AFTER_FLOOR_MS } from '../src/webhooks/out.js';
 
@@ -49,5 +52,18 @@ describe('the public exports an adapter author needs', () => {
 
   it('keeps compileRoutes internal: the old name is not part of the public surface', () => {
     expect('compileRoutes' in http).toBe(false);
+  });
+
+  it('exports: KitStream is a type export of the root and of /admin', () => {
+    expectTypeOf<KitStream>().toEqualTypeOf<DeclaredKitStream>();
+    expectTypeOf<AdminKitStream>().toEqualTypeOf<DeclaredKitStream>();
+    expectTypeOf<KitResponse['stream']>().toEqualTypeOf<KitStream | undefined>();
+    expectTypeOf<KitStream['start']>().toEqualTypeOf<(sink: { write(chunk: string): boolean; end(): void }) => () => void>();
+    // a type has no run-time binding in either entry
+    expect('KitStream' in http).toBe(false);
+    for (const entry of ['../src/index.ts', '../src/admin-entry.ts']) {
+      const text = readFileSync(new URL(entry, import.meta.url), 'utf8');
+      expect(text).toMatch(/export type \{[^}]*KitStream[^}]*\} from '\.\/types\.js'/);
+    }
   });
 });

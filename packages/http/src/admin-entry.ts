@@ -4,7 +4,7 @@
 // Every name here is the same binding the root export gives.
 export { ROLES } from '@chatwarden/core';
 export type { Role } from '@chatwarden/core';
-export type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';
+export type { Authz, KitRequest, KitResponse, KitStream, RouteParams } from './types.js';
 export { compileRoutes as matchRoute, createRouter } from './router.js';
 export type { CompiledRoutes, RouteHandler, RouteTable } from './router.js';
 export { ClaimedError, errorResponse, HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
