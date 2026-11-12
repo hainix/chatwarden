@@ -3,6 +3,7 @@ import axe from 'axe-core';
 import { describe, expect, it } from 'vitest';
 import { renderHub } from './render.js';
 import { MemoryStore, withMemoryAi, withMemorySignals } from '@chatwarden/store-memory';
+import { appealsHub } from './appealsWorld.js';
 import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
 
@@ -232,6 +233,49 @@ describe.each(['light', 'dark'] as const)('axe on Settings > Advanced > Signals,
     cleanup();
     const none = await hubWorld({ role: 'owner', actor: 'o@example.test' });
     const r = await open(none);
+    expect(await violations(r.container)).toEqual([]);
+  });
+});
+
+describe.each(['light', 'dark'] as const)('axe on Settings > Advanced > Appeals, %s theme', (theme) => {
+  async function open(w: HubWorld) {
+    const r = renderHub(w, { theme, path: '/settings/advanced' });
+    await screen.findByRole('region', { name: 'Appeals' });
+    return r;
+  }
+  const panel = (): HTMLElement => screen.getByRole('region', { name: 'Appeals' });
+
+  it('axe: no violations: off, switched on, a field error, the save question, and Mistakes by rule open', async () => {
+    const w = await appealsHub({ role: 'owner', actor: 'owen@example.test', appeals: false });
+    const { container, user } = await open(w);
+    expect(await violations(container)).toEqual([]);
+    await user.click(within(panel()).getByRole('checkbox', { name: 'Let players appeal their sanctions' }));
+    await user.clear(within(panel()).getByLabelText('How many a player may file a week'));
+    await user.type(within(panel()).getByLabelText('How many a player may file a week'), '0');
+    await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
+    await within(panel()).findByText('Enter a whole number from 1 to 20.');
+    expect(await violations(container)).toEqual([]);
+    await user.clear(within(panel()).getByLabelText('How many a player may file a week'));
+    await user.type(within(panel()).getByLabelText('How many a player may file a week'), '4');
+    await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
+    expect(await violations(container)).toEqual([]);
+    await user.click(within(panel()).getByRole('button', { name: 'Mistakes by rule' }));
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the table of mistakes, a role that only reads, and the Reset question have none', async () => {
+    const w = await appealsHub({ role: 'senior', actor: 's@example.test' });
+    await w.appeal({ rule: 2 });
+    const { container, user } = await open(w);
+    await user.click(within(panel()).getByRole('button', { name: 'Mistakes by rule' }));
+    await within(panel()).findByRole('table');
+    expect(await violations(container)).toEqual([]);
+    cleanup();
+    const o = await appealsHub({ role: 'owner', actor: 'o@example.test' });
+    const state = await o.direct.policyProfile();
+    await o.direct.savePolicyProfile({ layer: { appeals: { perPlayerPerWeek: 6 } }, version: state.version, reason: 'x' });
+    const r = await open(o);
+    await r.user.click(screen.getByRole('button', { name: 'Reset appeals' }));
     expect(await violations(r.container)).toEqual([]);
   });
 });
