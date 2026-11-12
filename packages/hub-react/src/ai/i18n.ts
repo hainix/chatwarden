@@ -84,7 +84,7 @@ export const aiEn = {
   'hub.settings.ai.status.notSetUp.hint': 'The AI is set up in your server code, with a provider adapter. See the AI section of the Chatwarden docs.',
   'hub.settings.ai.advanced': 'Advanced',
   'hub.settings.ai.learn': 'Learn from our decisions',
-  'hub.settings.ai.learn.hint': 'Your own decisions are shown to the AI as examples. Off sends no examples.',
+  'hub.settings.ai.learn.hint': 'Your own decisions are shown to the AI as examples. Off sends no examples; examples already kept are deleted after 180 days.',
   'hub.settings.ai.reads': 'Reads today: {count} of {max}',
   'hub.settings.ai.spend': 'Spent today: {spent} of {cap}',
   'hub.settings.ai.cache': 'Cache hit rate',
@@ -100,7 +100,7 @@ export const aiEn = {
   'hub.settings.ai.col.agree': 'Agreed',
   'hub.settings.ai.col.override': 'Changed',
   'hub.settings.ai.col.falsePositives': 'False positives',
-  'hub.settings.ai.readonly': 'The daily limit and the adapter are set in your server code. A hub cannot raise them.',
+  'hub.settings.ai.readonly': 'The daily spending limit and the adapter are set in your server code. A hub cannot raise them.',
 } as const;
 
 type PluralForm = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other';

@@ -312,10 +312,12 @@ console.log(cw.ai.status()); // { available: true, level: 0, maxLevel: 2, state:
   tag. A line the word filter blocked is sent as typed unless you set `blockedLines: 'mask'`: the model needs the words to judge intent.
 - **What it costs.** `dailyBudgetMicros` (default $1.00 a UTC day) is set in code and a hub cannot raise it. The owner also sets a ceiling on
   calls a day (`profile.ai.dailyCalls`, default 5 000), so an adapter that reports no cost still cannot run unbounded. There are at most 30 calls
-  a minute and 2 at once, a hard deadline per call (`timeoutMs`) and a breaker that opens after repeated failures. At a limit, reads pause.
+  a minute and 2 at once, a hard deadline per call (`timeoutMs`) and a breaker that opens after repeated failures. At a limit, reads pause. A call that a shutdown aborts books nothing, so a restart loop around a slow provider can under-count the day's money; the call ceiling still bounds it.
+- **Learning.** With `profile.ai.learn` off no example is sent and no new example text is kept, but text already stored stays until its 180 days are up or
+  a senior marks the case "don't teach".
 - **It cannot get in the way.** A failing, slow, refusing or garbage-returning provider changes nothing else: the player's ack does not wait for
   the provider, the queue and the case page answer exactly as with the AI off, and a read that fails shows nothing.
-- **Your store needs the AI methods.** The SQLite store has them (it adds three tables in migration 20); the in-memory store has them only
+- **Your store needs the AI methods.** The SQLite store has them (it adds three tables in migration 20, which is one-way: back up the database before upgrading); the in-memory store has them only
   through `withMemoryAi(store)`. A store without them leaves the AI inert: `createChatwarden` logs `chatwarden.ai_store_unsupported` once and
   carries on (a bad `ai` option still throws).
 - **`cw.ai`** is always there: `level()`, `status()`, `read(reportId)`, `expected(reportId)` (whether a read of that report is on its way now: the level is 1 or 2, an adapter is set up, the breaker is closed, neither daily limit is reached and its read has not ended without an answer), `readAgain(reportId, actor)`, `stats()` (the casebook counts) and `idle()`.

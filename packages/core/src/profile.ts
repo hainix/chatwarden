@@ -1012,7 +1012,7 @@ export interface PolicyLayer {
   guidelines?: Array<{ outcome: string } | null>;
   /** The reporting settings: `flow` and `thanks` replace the profile's; `reasons` replaces the whole list. Each is optional; a reason needs only `id` and `label`. */
   reporting?: ReportingSettings;
-  /** The AI settings: `level` (0 off, 1 read, 2 recommend) and `learn`. Each is optional and merges onto the profile's. Levels 3 and 4 are refused. */
+  /** The AI settings: `level` (0 off, 1 read, 2 recommend), `learn` and `dailyCalls` (the owner's ceiling on calls in a UTC day, a whole number from 1 to 100 000). Each is optional and merges onto the profile's. Levels 3 and 4 are refused. */
   ai?: Partial<AISettings>;
 }
 

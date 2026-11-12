@@ -17,8 +17,8 @@ import { ErrorBlock, Fetched, Notice, Panel, Scroll } from '../ui.js';
 
 // Settings > AI. The level (Off, Read, Recommend), a status line, and one Advanced disclosure with the numbers. The level lives in the
 // policy layer beside the steps and the reporting section, so it is saved, versioned and audited the same way: a reason is asked for, a
-// conflict offers a reload, and only the owner can save. The daily limit and the adapter are set in the server's code and are read-only
-// here. Levels 3 and 4 do not exist yet and are not shown.
+// conflict offers a reload, and only the owner can save. The daily spending limit and the adapter are set in the server's code and are read-only
+// here (the ceiling on calls a day is the owner's). Levels 3 and 4 do not exist yet and are not shown.
 
 type Level = 0 | 1 | 2;
 

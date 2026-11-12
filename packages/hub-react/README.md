@@ -629,8 +629,9 @@ suggests. Nothing here decides: a moderator does, and every part is lazy, so a h
   read's pre-fill as it stood (`DecideInput.ai`).
 - **Settings > AI.** Off, Read or Recommend, a status line (Working, Paused, Unavailable, Not set up on this server) and one Advanced
   disclosure: reads and spend against the limits, the cache hit rate, "Learn from our decisions", agreement and one-click rates and a
-  per-rule table. Saving asks for a reason, like the steps and ladder; only the owner can save. The daily limit and the adapter are set in
-  your server code and are read-only here.
+  per-rule table. Saving asks for a reason, like the steps and ladder; only the owner can save. The daily spending limit and the adapter are set in
+  your server code and are read-only here; the ceiling on calls a day is the owner's, set in Advanced. "Learn from our decisions" off sends no examples
+  and keeps no new text, but example text already stored stays until its 180 days are up (or a senior marks the case "don't teach").
 
 The words of these parts are not in `en` (they load with the parts); `loadAiWords()` returns them, see "Words and languages". To see the whole
 flow with no key and no network, run `examples/tiny-chat` with `CW_DEMO_AI=1` (a scripted fake AI at level 2) and open `/mod`.
