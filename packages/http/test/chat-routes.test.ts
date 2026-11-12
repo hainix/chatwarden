@@ -80,12 +80,71 @@ describe('every route and status in the table', () => {
       expect(w.chat.stats().members).toBe(1);
     });
 
-    it('the second tab over the per-player limit is 429', async () => {
+    it('a tab over the per-player limit is 200: the oldest stream of that player is ended', async () => {
       const w = await routeWorld({ options: { maxStreamsPerMember: 1 } });
-      w.listen(await w.stream(ROOM, w.as('plenk')));
+      const old = w.listen(await w.stream(ROOM, w.as('plenk')));
       const res = await w.stream(ROOM, w.as('plenk'));
+      expect(res.status).toBe(200);
+      const fresh = w.listen(res);
+      expect(old.sink.ended).toBe(true);
+      expect(fresh.sink.ended).toBe(false);
+      expect(w.chat.stats().streams).toBe(1);
+    });
+
+    it('429 when the process is at maxStreams', async () => {
+      const w = await routeWorld({ options: { maxStreams: 1 } });
+      w.listen(await w.stream(ROOM, w.as('plenk')));
+      const res = await w.stream(ROOM, w.as('wumbo'));
       expect(res.status).toBe(429);
       expect(res.headers?.['retry-after']).toBe('5');
+    });
+
+    it('HEAD on the stream route does no identity work: no seat, no room, no open-limit hit', async () => {
+      const w = await routeWorld({ routes: { openRateLimit: { max: 1, windowMs: 60_000 } } });
+      for (let i = 0; i < 5; i += 1) {
+        const res = await w.call('HEAD', `/rooms/${ROOM}/stream`, { headers: w.as('plenk') });
+        expect(res.status).toBe(200);
+        expect(res.headers?.['content-type']).toBe('text/event-stream; charset=utf-8');
+        expect(res.headers?.['cache-control']).toBe('no-store, no-transform');
+      }
+      // even without credentials: a HEAD asks nothing of the player
+      expect((await w.call('HEAD', `/rooms/${ROOM}/stream`, { headers: {} })).status).toBe(200);
+      expect(w.seatCalls).toHaveLength(0);
+      expect(w.chat.stats()).toEqual({ rooms: 0, members: 0, streams: 0 });
+      expect(w.pending()).toBe(0);
+      // the one real open the limit allows is still there
+      expect((await w.stream(ROOM, w.as('plenk'))).status).toBe(200);
+      expect((await w.stream(ROOM, w.as('plenk'))).status).toBe(429);
+    });
+
+    it('a session() that fails inside is a 500, not a 429', async () => {
+      const w = await routeWorld({
+        wrap: (cw) => {
+          const f = Object.create(cw) as Chatwarden;
+          f.rooms = {
+            ...cw.rooms,
+            seat: () => {
+              throw new TypeError('store is down');
+            },
+          };
+          return f;
+        },
+      });
+      for (const res of [await w.stream(ROOM, w.as('plenk')), await w.post(ROOM, 'lines', w.as('plenk'), { text: 'hi' })]) {
+        expect(res.status).toBe(500);
+        expect(body(res)).toEqual({ error: 'internal' });
+        expectSafeHeaders(res);
+      }
+      expect(JSON.stringify(w.logs)).not.toContain('store is down');
+    });
+
+    it('429 with retry-after when the process holds the most rooms it is allowed; a room that exists still takes players', async () => {
+      const w = await routeWorld({ options: { maxRooms: 1 } });
+      expect((await w.post('room-a', 'lines', w.as('plenk'), { text: 'hi' })).status).toBe(200);
+      const res = await w.post('room-b', 'lines', w.as('wumbo'), { text: 'hi' });
+      expect(res.status).toBe(429);
+      expect(res.headers?.['retry-after']).toBe('5');
+      expect((await w.post('room-a', 'lines', w.as('glarn'), { text: 'hi' })).status).toBe(200);
     });
 
     it('every stream response, a banned one included, says no-store and no-transform so a body-rewriting middleware leaves it alone', async () => {

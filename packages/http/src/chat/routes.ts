@@ -181,6 +181,9 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
         return { banned: session.refused };
       case 'unauthorized':
         throw new HttpError('unauthorized');
+      case 'internal':
+        // A failure inside the broadcaster is the server's, not a capacity problem: 500 (it is logged, class only, where it happened).
+        throw new Error('chat session failed');
       default:
         throw new HttpError('rate_limited', { 'retry-after': String(FULL_RETRY_AFTER_S) });
     }
@@ -190,6 +193,8 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
 
   return {
     'GET /rooms/:room/stream': route(async (req, params) => {
+      // The router runs this for a HEAD too, and the adapter never starts the stream: no identity work, no seat, no open-limit hit.
+      if (req.method === 'HEAD') return { status: 200, headers: { ...STREAM_HEADERS }, body: undefined, stream: { start: () => () => undefined } };
       checkOrigin(req);
       const who = await caller(req, opens);
       const entered = await enter(req, params.room as string, who);

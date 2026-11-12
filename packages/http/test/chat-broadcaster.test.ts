@@ -90,7 +90,7 @@ describe('delivery', () => {
     const w = await chatWorld();
     const a = w.attend(ROOM, 'plenk');
     const hello = a.heard.of('hello')[0];
-    expect(Object.keys(hello ?? {}).sort()).toEqual(['epoch', 'lines', 'maxLength', 'muted', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
+    expect(Object.keys(hello ?? {}).sort()).toEqual(['epoch', 'heartbeatMs', 'lines', 'maxLength', 'muted', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
     expect(hello).toMatchObject({ type: 'hello', v: 1, room: ROOM, you: { name: 'plenk' }, restriction: null, lines: [], muted: [] });
     expect(hello?.maxLength).toBe(w.cw.limits.chatMaxLength);
     expect(hello?.maxLength).toBe(200);
@@ -410,7 +410,7 @@ describe('options', () => {
   };
 
   it('every invalid value is a RangeError that never echoes the value', async () => {
-    const keys = ['maxMembers', 'maxStreamsPerMember', 'maxStreams', 'heartbeatMs', 'seatGraceMs', 'maxBacklog'];
+    const keys = ['maxMembers', 'maxRooms', 'maxStreamsPerMember', 'maxStreams', 'heartbeatMs', 'seatGraceMs', 'maxBacklog'];
     const bad: unknown[] = [0, -987654, 7777.5, Number.NaN, Number.POSITIVE_INFINITY, 'vlemmo-7777', null, {}, [], true, 10 ** 12];
     for (const key of keys) {
       for (const value of bad) {
@@ -449,6 +449,7 @@ describe('options', () => {
       historyLines: 50,
       historyMaxAgeMs: EVIDENCE_MAX_AGE_MS,
       maxMembers: 500,
+      maxRooms: 10_000,
       maxStreamsPerMember: 3,
       maxStreams: 5000,
       heartbeatMs: 20_000,
@@ -466,7 +467,7 @@ describe('options', () => {
 
   it('a minimal valid set builds', async () => {
     await expect(
-      build({ history: { lines: 1, maxAgeMs: 1000 }, maxMembers: 1, maxStreamsPerMember: 1, maxStreams: 1, heartbeatMs: 1, seatGraceMs: 1, maxBacklog: 1, seatSalt: 'x', nameCheck: false })(),
+      build({ history: { lines: 1, maxAgeMs: 1000 }, maxMembers: 1, maxRooms: 1, maxStreamsPerMember: 1, maxStreams: 1, heartbeatMs: 1, seatGraceMs: 1, maxBacklog: 1, seatSalt: 'x', nameCheck: false })(),
     ).resolves.toBeDefined();
   });
 });

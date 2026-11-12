@@ -217,8 +217,23 @@ describe('the stream over real HTTP', () => {
     expect(w.chat.stats().streams).toBe(0);
   });
 
+  it('a fourth tab ends the oldest one: a player on a changed network is never locked out', async () => {
+    const w = await routeWorld({ options: { maxStreamsPerMember: 3 } });
+    const base = await serve(w);
+    const tabs: Array<Awaited<ReturnType<typeof connect>>> = [];
+    for (let i = 0; i < 4; i += 1) {
+      const c = await connect(base, w.as('plenk'));
+      await until(() => c.events().length >= 1, 'hello');
+      tabs.push(c);
+    }
+    await until(() => tabs[0]?.done() === true, 'the oldest response to end');
+    expect(tabs.map((t) => t.done())).toEqual([true, false, false, false]);
+    expect(w.chat.stats().streams).toBe(3);
+    for (const t of tabs) t.ctl.abort();
+  });
+
   it('401, 403 and 429 are plain JSON errors, not streams', async () => {
-    const w = await routeWorld({ options: { maxStreamsPerMember: 1 } });
+    const w = await routeWorld({ options: { maxStreams: 1 } });
     const base = await serve(w);
     const none = await fetch(`${base}/rooms/${ROOM}/stream`);
     expect(none.status).toBe(401);
@@ -228,7 +243,7 @@ describe('the stream over real HTTP', () => {
     expect(forbidden.status).toBe(403);
     const first = await connect(base, w.as('plenk'));
     await until(() => first.events().length >= 1, 'hello');
-    const second = await fetch(`${base}/rooms/${ROOM}/stream`, { headers: w.as('plenk') });
+    const second = await fetch(`${base}/rooms/${ROOM}/stream`, { headers: w.as('wumbo') });
     expect(second.status).toBe(429);
     expect(second.headers.get('retry-after')).toBe('5');
     expect(second.headers.get('cache-control')).toBe('no-store');

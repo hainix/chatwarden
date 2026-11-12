@@ -188,13 +188,20 @@ describe('seats', () => {
     expect(w.chat.stats().members).toBe(0);
   });
 
-  it('a session held past its seat release seats the player again on the next request', async () => {
+  it('a session held past its seat release has nothing to act with: it answers like an unseated player, and a new session() works', async () => {
     const w = await chatWorld();
     const a = w.attend(ROOM, 'plenk');
     a.stream.close();
     w.advance(GRACE);
     expect(w.chat.stats().members).toBe(0);
-    expect(say(w, a.session, 'back after a while').ok).toBe(true);
+    // the broadcaster kept no credential to seat them again with
+    expect(a.session.send({ text: 'back after a while' })).toEqual({ ok: false, refused: { reason: 'gate' } });
+    expect(a.session.canOpen()).toBe(false);
+    expect(a.session.open(spoken().sink)).toEqual({ refused: { reason: 'full' } });
+    expect(a.session.mute({ lineId: '1', on: true })).toBe(false);
+    expect(w.chat.stats().members).toBe(0);
+    const fresh = w.join(ROOM, 'plenk');
+    expect(say(w, fresh, 'back after a while').ok).toBe(true);
     expect(w.chat.stats().members).toBe(1);
     w.advance(GRACE);
     expect(w.chat.stats().members).toBe(0);
@@ -251,7 +258,7 @@ describe('storms', () => {
     expect(w.chat.stats()).toEqual({ rooms: 1, members: 1, streams: 0 });
   });
 
-  it('opening and closing many tabs at once never exceeds the per-player limit', async () => {
+  it('opening many tabs at once never holds more than the per-player limit', async () => {
     const w = await chatWorld();
     const s = w.join(ROOM, 'plenk');
     const open = [];
@@ -259,7 +266,7 @@ describe('storms', () => {
       const stream = s.open(spoken().sink);
       if ('close' in stream) open.push(stream);
     }
-    expect(open).toHaveLength(3);
+    expect(open).toHaveLength(10); // every open is admitted: each newest tab replaces the oldest
     expect(w.chat.stats().streams).toBe(3);
   });
 });
@@ -280,22 +287,48 @@ describe('limits', () => {
     expect('refused' in w.chat.session(ROOM, w.who('glarn'), { name: 'glarn' })).toBe(false);
   });
 
-  it('maxStreamsPerMember refuses the next open with full, for that player only', async () => {
+  it('maxStreamsPerMember: the newest stream wins, the oldest of that player is ended, nobody else is touched', async () => {
     const w = await chatWorld({ options: { maxStreamsPerMember: 2 } });
     const a = w.join(ROOM, 'plenk');
     const b = w.join(ROOM, 'wumbo');
-    const first = a.open(spoken().sink);
-    a.open(spoken().sink);
-    expect(a.open(spoken().sink)).toEqual({ refused: { reason: 'full' } });
-    expect('close' in b.open(spoken().sink)).toBe(true);
-    // a refused open writes nothing and counts nothing
+    const sinks = [spoken(), spoken(), spoken()] as const;
+    const first = a.open(sinks[0].sink);
+    a.open(sinks[1].sink);
+    const bs = spoken();
+    b.open(bs.sink);
+    const third = a.open(sinks[2].sink);
+    expect('close' in third).toBe(true);
+    // the oldest was ended (its sink told), the second and third stay, the other player is untouched
+    expect(sinks.map((s) => s.ended)).toEqual([1, 0, 0]);
+    expect(bs.ended).toBe(0);
     expect(w.chat.stats().streams).toBe(3);
-    // closing one makes room
+    // the evicted stream hears nothing more and its own close is harmless
+    say(w, a, 'a line');
+    expect(sinks[0].texts()).toEqual([]);
+    expect(sinks[1].texts()).toEqual(['a line']);
+    expect(sinks[2].texts()).toEqual(['a line']);
     if ('refused' in first) throw new Error('refused');
     first.close();
-    expect('close' in a.open(spoken().sink)).toBe(true);
+    expect(w.chat.stats().streams).toBe(3);
     // requests (a line) are never refused for having too many tabs
     expect(say(w, a, 'a line from a crowded player').ok).toBe(true);
+  });
+
+  it('three zombie streams (a phone that changed network) do not lock the player out: a fourth opens fine', async () => {
+    const w = await chatWorld();
+    const s = w.join(ROOM, 'plenk');
+    const zombies = [spoken(), spoken(), spoken()];
+    for (const z of zombies) expect('close' in s.open(z.sink)).toBe(true); // they accept writes into a dead socket: nothing tells the server
+    expect(s.canOpen()).toBe(true);
+    const fresh = spoken();
+    expect('close' in s.open(fresh.sink)).toBe(true);
+    expect(fresh.of('hello')).toHaveLength(1);
+    expect(zombies[0]?.ended).toBe(1);
+    // a fifth and a sixth keep working: always the newest three
+    s.open(spoken().sink);
+    s.open(spoken().sink);
+    expect(w.chat.stats().streams).toBe(3);
+    expect(zombies.map((z) => z.ended)).toEqual([1, 1, 1]);
   });
 
   it('maxStreams refuses the next open with full, across players and rooms', async () => {
@@ -353,8 +386,10 @@ describe('closeRoom and close', () => {
     const again = w.attend(ROOM, 'wumbo');
     expect(again.heard.of('hello')[0]?.lines).toEqual([]);
     expect(again.heard.of('hello')[0]?.epoch).not.toBe(epoch);
-    // a session held from before the close works again (re-seated), as a fresh member of the new room
-    expect(say(w, a.session, 'after the reopen').ok).toBe(true);
+    // a session held from before the close is over (the broadcaster kept no credential to seat it again); a new one works
+    expect(a.session.send({ text: 'after the close' })).toEqual({ ok: false, refused: { reason: 'gate' } });
+    const fresh = w.join(ROOM, 'plenk');
+    expect(say(w, fresh, 'after the reopen').ok).toBe(true);
     expect(again.heard.texts()).toEqual(['after the reopen']);
   });
 
@@ -482,15 +517,17 @@ describe('canOpen', () => {
     const c = w.join(ROOM, 'glarn');
     expect(a.canOpen()).toBe(true);
     const first = a.open(spoken().sink);
-    expect(a.canOpen()).toBe(false); // per-player limit
-    expect(a.open(spoken().sink)).toEqual({ refused: { reason: 'full' } });
+    expect(a.canOpen()).toBe(true); // at the per-player limit the oldest is evicted, so a new one is always welcome
+    expect('close' in a.open(spoken().sink)).toBe(true);
     expect(b.canOpen()).toBe(true);
     b.open(spoken().sink);
     expect(c.canOpen()).toBe(false); // process limit
     expect(c.open(spoken().sink)).toEqual({ refused: { reason: 'full' } });
     if ('refused' in first) throw new Error('refused');
-    first.close();
-    expect(c.canOpen()).toBe(true);
+    first.close(); // already evicted: nothing changes
+    expect(c.canOpen()).toBe(false);
+    a.open(spoken().sink); // the player's own newest stream replaces their oldest: the process count stays
+    expect(w.chat.stats().streams).toBe(2);
     w.chat.close();
     expect(c.canOpen()).toBe(false);
   });

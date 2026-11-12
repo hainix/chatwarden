@@ -79,6 +79,8 @@ export type ChatFrame =
       you: { name: string };
       /** The line length limit (`cw.limits.chatMaxLength`), for the input. */
       maxLength: number;
+      /** How often the server sends a heartbeat comment while a stream is idle (the broadcaster's `heartbeatMs`), so a client can size its liveness watchdog from it. */
+      heartbeatMs: number;
       /** `cw.summary`: the profile's one-line standard. */
       summary: string;
       restriction: WireRestriction | null;

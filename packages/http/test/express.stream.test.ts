@@ -135,7 +135,48 @@ describe('toExpress: a body-rewriting middleware in front of a stream', () => {
   });
 });
 
-describe('toExpress: sockets that cannot set no-delay', () => {
+describe('toExpress: a dead peer is noticed', () => {
+  it('turns on TCP keep-alive at 15 s on the stream socket, so a connection that vanished without a FIN is dropped in about a minute', async () => {
+    const calls: Array<[boolean | undefined, number | undefined]> = [];
+    const world = streamWorld();
+    const app = express();
+    app.use((req, _res, next) => {
+      const socket = req.socket;
+      const original = socket.setKeepAlive.bind(socket);
+      socket.setKeepAlive = ((enable?: boolean, delay?: number) => {
+        calls.push([enable, delay]);
+        return original(enable, delay);
+      }) as typeof socket.setKeepAlive;
+      next();
+    });
+    app.use(world.app);
+    const { base } = await listen(app);
+    const res = await fetch(`${base}/kit/s`);
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([[true, 15_000]]);
+    await res.body?.cancel();
+  });
+
+  it('a route that is not a stream does not touch the socket options', async () => {
+    const calls: unknown[] = [];
+    const world = streamWorld();
+    const app = express();
+    app.use((req, _res, next) => {
+      const socket = req.socket;
+      socket.setKeepAlive = ((...args: unknown[]) => {
+        calls.push(args);
+        return socket;
+      }) as typeof socket.setKeepAlive;
+      next();
+    });
+    app.use(world.app);
+    const { base } = await listen(app);
+    expect((await fetch(`${base}/kit/plain`)).status).toBe(200);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('toExpress: sockets that cannot set their options', () => {
   for (const [what, patch] of [
     [
       'setNoDelay throws',
@@ -151,12 +192,26 @@ describe('toExpress: sockets that cannot set no-delay', () => {
         socket.setNoDelay = undefined;
       },
     ],
+    [
+      'setKeepAlive throws',
+      (socket: { setKeepAlive: unknown }) => {
+        socket.setKeepAlive = () => {
+          throw new Error('ERR_HTTP2_NO_SOCKET_MANIPULATION');
+        };
+      },
+    ],
+    [
+      'setKeepAlive is missing',
+      (socket: { setKeepAlive: unknown }) => {
+        socket.setKeepAlive = undefined;
+      },
+    ],
   ] as const) {
     it(`a stream still starts when ${what}`, async () => {
       const world = streamWorld();
       const app = express();
       app.use((req, _res, next) => {
-        patch(req.socket as unknown as { setNoDelay: unknown });
+        (patch as (socket: unknown) => void)(req.socket);
         next();
       });
       app.use(world.app);

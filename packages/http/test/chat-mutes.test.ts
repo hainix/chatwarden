@@ -173,7 +173,7 @@ describe('a mute that does nothing returns false', () => {
     expect(muter.session.mute({ ref, on: true })).toBe(false);
   });
 
-  it('a token for a player who has left names nothing', async () => {
+  it('a token for a player who has left still undoes the mute; once undone, it names nothing', async () => {
     const w = await chatWorld({ options: { seatGraceMs: 10 * SEC } });
     const author = w.attend(ROOM, 'plenk');
     const muter = w.attend(ROOM, 'wumbo');
@@ -182,9 +182,11 @@ describe('a mute that does nothing returns false', () => {
     muter.session.mute({ lineId: line.line.id, on: true });
     const ref = muter.heard.of('state')[0]?.muted[0]?.ref as string;
     author.stream.close();
-    w.advance(10 * SEC); // the author's seat is released
-    expect(muter.session.mute({ ref, on: false })).toBe(false);
-    expect(muter.session.mute({ lineId: line.line.id, on: false })).toBe(false); // the line is still in the ring, its author is gone
+    w.advance(10 * SEC); // the author's seat is released from the room (kept for the muter's list)
+    expect(muter.session.mute({ ref, on: false })).toBe(true);
+    expect(muter.session.mute({ ref, on: false })).toBe(false); // stale now
+    // the author is gone for good: a line of theirs still in the ring cannot be muted (nobody is seated to mute)
+    expect(muter.session.mute({ lineId: line.line.id, on: true })).toBe(false);
   });
 
   it('muting yourself, an unknown line id and an aged-out line return false', async () => {

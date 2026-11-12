@@ -1,5 +1,5 @@
 import { createChatwarden } from '@chatwarden/core';
-import type { Chatwarden, ChatResult, Logger, ProfanityFilter, RawWho, SubjectId } from '@chatwarden/core';
+import type { Chatwarden, ChatResult, LimitsInput, Logger, ProfanityFilter, RawWho, SubjectId } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { MemoryTermStore, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MemoryStore } from '@chatwarden/store-memory';
@@ -75,6 +75,8 @@ export interface WorldOptions {
   options?: RoomBroadcasterOptions;
   profanity?: 'refuse' | 'star';
   gate?: (roomId: string, subject: SubjectId | null) => boolean;
+  /** Limits for the kit (for example a longer chat line). */
+  limits?: LimitsInput;
   /** Wrap the kit the broadcaster is given (a scripted facade). */
   wrap?: (cw: Chatwarden) => Chatwarden;
   /** Do not build the broadcaster (a test builds its own). */
@@ -106,6 +108,7 @@ export async function chatWorld(over: WorldOptions = {}) {
     profanity: filter,
     ...(over.profanity === 'refuse' ? { overrides: { profanity: { mode: 'refuse' as const } } } : {}),
     gate: over.gate ?? (() => gateState.open),
+    ...(over.limits === undefined ? {} : { limits: over.limits }),
   });
   const inner = over.wrap === undefined ? real : over.wrap(real);
   // A spy on `rooms.seat` so a test can learn the (secret) seat id of a player, by the display name they were seated under.

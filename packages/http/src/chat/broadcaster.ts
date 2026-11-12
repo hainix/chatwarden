@@ -5,7 +5,7 @@
 // Every failure is contained: a sink that throws loses only its own stream, a kit call that throws is an answer, never an exception.
 // Every log line is an event name and an error class (through `safeWarn`): never a line, a name, a room, a seat or a credential.
 import { errorClass, EVIDENCE_MAX_AGE_MS, makeHasher, safeWarn } from '@chatwarden/core';
-import type { Chatwarden, Logger, RawWho, SubjectId } from '@chatwarden/core';
+import type { Chatwarden, Logger, RawWho, RestrictedAnswer, SubjectId } from '@chatwarden/core';
 import { createRing, HISTORY_LINES_DEFAULT, resolveHistory } from './history.js';
 import type { Ring } from './history.js';
 import { randomHex, randomToken } from './random.js';
@@ -53,13 +53,18 @@ export interface ChatStream {
 
 /**
  * One player in one room. Cheap, idempotent to create; every method re-checks the player's state.
+ *
+ * A session holds no credential. While the player is seated it refreshes the seat's grace on every call; once the seat is released (the grace ran
+ * out, the room was closed, the broadcaster closed) it has nothing to seat the player with again and answers like an unseated player: `send` is
+ * refused `gate`, `open` is refused, `mute` is `false`. Make a new session from the next request (the routes do, per request).
  * @experimental
  */
 export interface ChatSession {
   readonly name: string;
   /**
-   * Start a stream: the `hello` frame is written before this returns, then lines as they come. `{ refused: { reason: 'full' } }` when this
-   * player already has `maxStreamsPerMember` streams open in the room, or the process is at `maxStreams`, or the broadcaster is closed.
+   * Start a stream: the `hello` frame is written before this returns, then lines as they come. At the player's `maxStreamsPerMember` their oldest
+   * stream is ended (its sink gets `end()`) and this one is admitted. `{ refused: { reason: 'full' } }` when the process is at `maxStreams`, the
+   * seat is gone, or the broadcaster is closed.
    */
   open(sink: ChatSink): ChatStream | { refused: WireRefusal };
   /** True when `open` would not be refused right now. For a caller (the HTTP route) that must say 429 before it has a sink. */
@@ -78,11 +83,16 @@ export interface RoomBroadcasterOptions {
   history?: { lines?: number; maxAgeMs?: number };
   /** Most players seated at once in one room. Default 500. A join over it is refused. */
   maxMembers?: number;
-  /** Most open streams for one player in one room (tabs). Default 3. */
+  /** Most rooms the process holds at once. Default 10 000. A join that would open one more is refused (`rooms_full`); rooms that exist still take players. */
+  maxRooms?: number;
+  /**
+   * Most open streams for one player in one room (tabs). Default 3. At the limit the player's OLDEST stream is ended (its sink gets `end()`) and
+   * the new one is admitted: a connection that died without a word (a phone changing network) must not lock the player out of their own chat.
+   */
   maxStreamsPerMember?: number;
   /** Most open streams in the process. Default 5000. */
   maxStreams?: number;
-  /** A comment line is written to every stream this often, so a proxy does not drop an idle one. Default 20 000. */
+  /** A comment line is written to every stream this often, so a proxy does not drop an idle one. Default 20 000, at most 60 000. The `hello` frame announces it. */
   heartbeatMs?: number;
   /** How long a seat with no stream and no request is kept before it is released. Default 120 000. */
   seatGraceMs?: number;
@@ -104,9 +114,10 @@ export interface RoomBroadcasterOptions {
 export interface RoomBroadcaster {
   /**
    * A session for this player in this room, seating them if needed. `{ refused }` when the door is shut to them (a ban: `reason`
-   * `banned`), the room is full (`full`), or `who` has neither an account nor a client key (`unauthorized`; an address alone is never a chat
-   * identity). The routes turn `unauthorized` into 401 and `full` into 429; they are not kit refusal reasons a line can get. Synchronous;
-   * never throws.
+   * `banned`), the room is full (`full`), the process holds `maxRooms` rooms (`rooms_full`), `who` has neither an account nor a client key
+   * (`unauthorized`; an address alone is never a chat identity), or something failed inside (`internal`, logged by class). The routes turn
+   * `unauthorized` into 401, `full` and `rooms_full` into 429 and `internal` into 500; they are not kit refusal reasons a line can get.
+   * The credential is hashed at once and kept nowhere: only the seat id (a keyed hash) is held. Synchronous; never throws.
    */
   session(roomId: string, who: RawWho, member: ChatMember): ChatSession | { refused: WireRefusal };
   /**
@@ -132,6 +143,7 @@ export const ROOM_BROADCASTER_DEFAULTS = {
   historyLines: HISTORY_LINES_DEFAULT,
   historyMaxAgeMs: EVIDENCE_MAX_AGE_MS,
   maxMembers: 500,
+  maxRooms: 10_000,
   maxStreamsPerMember: 3,
   maxStreams: 5000,
   heartbeatMs: 20_000,
@@ -141,6 +153,8 @@ export const ROOM_BROADCASTER_DEFAULTS = {
 const DEFAULTS = ROOM_BROADCASTER_DEFAULTS;
 
 const NAME_MAX = 32;
+/** The `hello` is trimmed (oldest lines first) to this many bytes of JSON: a client drops any frame over 64 KiB. */
+const HELLO_MAX_BYTES = 48 * 1024;
 const REF_LENGTH = 8;
 const LOG_THROTTLE_MS = 60_000;
 
@@ -188,8 +202,6 @@ interface StreamRec {
 
 interface MemberRec {
   readonly seat: string;
-  /** Kept in memory while seated, only so the player's own restriction can be re-read; never stored or logged. */
-  who: RawWho;
   name: string;
   /** The join number, for `Player N`. */
   readonly n: number;
@@ -205,6 +217,10 @@ interface RoomRec {
   readonly epoch: string;
   readonly ring: Ring;
   readonly members: Map<string, MemberRec>;
+  /** Players who left but are still muted by someone here: their kit seat is kept so the muter can still see and undo the mute. */
+  readonly ghosts: Map<string, string>;
+  /** target seat -> the seats of the present players who muted them. */
+  readonly holders: Map<string, Set<string>>;
   joins: number;
   /** Only for a line the kit gave no id (its evidence buffer failed): the wire id still has to be unique. */
   anonymous: number;
@@ -223,9 +239,10 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
   }
   const history = resolveHistory(options.history);
   const maxMembers = whole(options.maxMembers, 'maxMembers', DEFAULTS.maxMembers, 1, 100_000);
+  const maxRooms = whole(options.maxRooms, 'maxRooms', DEFAULTS.maxRooms, 1, 10_000_000);
   const maxStreamsPerMember = whole(options.maxStreamsPerMember, 'maxStreamsPerMember', DEFAULTS.maxStreamsPerMember, 1, 100);
   const maxStreams = whole(options.maxStreams, 'maxStreams', DEFAULTS.maxStreams, 1, 10_000_000);
-  const heartbeatMs = whole(options.heartbeatMs, 'heartbeatMs', DEFAULTS.heartbeatMs, 1, 3_600_000);
+  const heartbeatMs = whole(options.heartbeatMs, 'heartbeatMs', DEFAULTS.heartbeatMs, 1, 60_000);
   const seatGraceMs = whole(options.seatGraceMs, 'seatGraceMs', DEFAULTS.seatGraceMs, 1, 86_400_000);
   const maxBacklog = whole(options.maxBacklog, 'maxBacklog', DEFAULTS.maxBacklog, 1, 100_000);
   if (options.seatSalt !== undefined && (typeof options.seatSalt !== 'string' || options.seatSalt === '')) {
@@ -282,15 +299,6 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     if (hasText(w.accountId)) return `s${hasher.clientKey(`account\0${w.accountId}`)}`;
     if (hasText(w.clientKey)) return `s${hasher.clientKey(`key\0${w.clientKey}`)}`;
     return null;
-  }
-
-  /** The three fields the kit reads, copied so a later change to the caller's object changes nothing. */
-  function copyWho(who: RawWho): RawWho {
-    const out: RawWho = {};
-    if (hasText(who.accountId)) out.accountId = who.accountId;
-    if (hasText(who.clientKey)) out.clientKey = who.clientKey;
-    if (who.ip !== undefined) out.ip = who.ip;
-    return out;
   }
 
   /** A name the game chose, cleaned and checked; null when nothing usable is left. */
@@ -403,8 +411,9 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     try {
       return cw.chat.visibleTo(roomId, viewerSeat, senderSeat);
     } catch (err) {
+      // A mute is a promise to the muter: what cannot be checked is not shown.
       warn('chatwarden.chat_visibility_failed', err);
-      return true;
+      return false;
     }
   }
 
@@ -414,16 +423,26 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
 
   // ---- per-viewer state --------------------------------------------------------------------------------------------------------
 
-  function restrictionOf(room: RoomRec, member: MemberRec): WireRestriction | null {
+  /**
+   * The kit's answer for this seat's player, read by the SUBJECT the kit holds for the seat: the broadcaster keeps no client key, account
+   * or address to ask with. `null` when it cannot be read (a seat the kit does not know, or a failure).
+   */
+  function restrictionAnswer(room: RoomRec, member: MemberRec): RestrictedAnswer | null {
     try {
-      const answer = cw.chat.restricted(member.who, { roomId: room.id, seatId: member.seat });
-      if (!answer.restricted) return null;
-      // The kit says who set it only through `kind`: an automatic timeout is the filter's, everything else a moderator's.
-      return { until: answer.until, byModerator: answer.kind === 'chat' || answer.kind === 'ban' };
+      const subject = cw.rooms.subjectAt(room.id, member.seat);
+      if (subject === null) return null;
+      return cw.chat.restrictedBySubject(subject, { roomId: room.id, seatId: member.seat });
     } catch (err) {
       warn('chatwarden.chat_restriction_failed', err);
       return null;
     }
+  }
+
+  function restrictionOf(room: RoomRec, member: MemberRec): WireRestriction | null {
+    const answer = restrictionAnswer(room, member);
+    if (answer === null || !answer.restricted) return null;
+    // The kit says who set it only through `kind`: an automatic timeout is the filter's, everything else a moderator's.
+    return { until: answer.until, byModerator: answer.kind === 'chat' || answer.kind === 'ban' };
   }
 
   function refFor(member: MemberRec, targetSeat: string): string {
@@ -445,12 +464,41 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     }
   }
 
+  /** Note that `viewerSeat` mutes `targetSeat`, so that seat is kept for them if its player leaves. */
+  function hold(room: RoomRec, viewerSeat: string, targetSeat: string): void {
+    let set = room.holders.get(targetSeat);
+    if (set === undefined) {
+      set = new Set();
+      room.holders.set(targetSeat, set);
+    }
+    set.add(viewerSeat);
+  }
+
+  function unseatSeat(room: RoomRec, seat: string): void {
+    try {
+      cw.rooms.unseat(room.id, seat);
+    } catch (err) {
+      warn('chatwarden.chat_unseat_failed', err);
+    }
+  }
+
+  /** `viewerSeat` no longer mutes `targetSeat`: when nobody present does, a departed player's kept seat is let go. */
+  function release(room: RoomRec, viewerSeat: string, targetSeat: string): void {
+    const set = room.holders.get(targetSeat);
+    if (set === undefined) return;
+    set.delete(viewerSeat);
+    if (set.size > 0) return;
+    room.holders.delete(targetSeat);
+    if (room.ghosts.delete(targetSeat)) unseatSeat(room, targetSeat);
+  }
+
   function mutedOf(room: RoomRec, member: MemberRec): WireMuted[] {
     const out: WireMuted[] = [];
     for (const seat of mutedSeatsOf(room, member)) {
-      const target = room.members.get(seat);
-      if (target === undefined) continue;
-      out.push({ ref: refFor(member, seat), name: target.name });
+      const name = room.members.get(seat)?.name ?? room.ghosts.get(seat);
+      if (name === undefined) continue;
+      hold(room, member.seat, seat);
+      out.push({ ref: refFor(member, seat), name });
     }
     return out;
   }
@@ -467,18 +515,24 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       if (!visible(room.id, member.seat, line.seat)) continue;
       lines.push(wireLine(line, line.seat === member.seat));
     }
-    return {
+    const frame: ChatFrame = {
       type: 'hello',
       v: CHAT_WIRE_VERSION,
       epoch: room.epoch,
       room: room.id,
       you: { name: member.name },
       maxLength: cw.limits.chatMaxLength,
+      heartbeatMs,
       summary: cw.summary,
       restriction: restrictionOf(room, member),
       lines,
       muted: mutedOf(room, member),
     };
+    // A client drops any frame over 64 KiB, and then never gets a hello at all. A long line limit can make a full ring that big: keep the
+    // newest lines that fit, oldest dropped first.
+    const encoder = new TextEncoder();
+    while (lines.length > 0 && encoder.encode(JSON.stringify(frame)).length > HELLO_MAX_BYTES) lines.shift();
+    return frame;
   }
 
   function stateFor(room: RoomRec, member: MemberRec): ChatFrame {
@@ -507,22 +561,27 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     member.cancelGrace = null;
     room.members.delete(member.seat);
     memberRoom.delete(member);
-    try {
-      cw.rooms.unseat(room.id, member.seat);
-    } catch (err) {
-      warn('chatwarden.chat_unseat_failed', err);
+    // What this player was keeping for others (the seats they muted) is let go; what others keep for them decides whether their own seat stays.
+    for (const target of [...room.holders.keys()]) release(room, member.seat, target);
+    if (room.members.size > 0 && (room.holders.get(member.seat)?.size ?? 0) > 0) room.ghosts.set(member.seat, member.name);
+    else unseatSeat(room, member.seat);
+    if (room.members.size === 0) {
+      for (const seat of room.ghosts.keys()) unseatSeat(room, seat);
+      room.ghosts.clear();
+      room.holders.clear();
+      if (rooms.get(room.id) === room) rooms.delete(room.id);
     }
-    if (room.members.size === 0 && rooms.get(room.id) === room) rooms.delete(room.id);
   }
 
   /**
    * Find or make the room and the member, seat them in the kit, and refresh the grace of a member with no stream. `null` when the room is
    * full. `given` is the cleaned name the game chose, or null.
    */
-  function upsert(roomId: string, seat: string, who: RawWho, given: string | null, tags: Record<string, string> | undefined): { room: RoomRec; member: MemberRec } | null {
+  function upsert(roomId: string, seat: string, who: RawWho, given: string | null, tags: Record<string, string> | undefined): { room: RoomRec; member: MemberRec } | 'full' | 'rooms_full' | 'internal' {
     let room = rooms.get(roomId);
     let member = room?.members.get(seat);
-    if (member === undefined && room !== undefined && room.members.size >= maxMembers) return null;
+    if (room === undefined && rooms.size >= maxRooms) return 'rooms_full';
+    if (member === undefined && room !== undefined && room.members.size >= maxMembers) return 'full';
     const fresh = room === undefined;
     if (room === undefined) {
       epochs += 1;
@@ -531,6 +590,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         epoch: `${broadcasterId}${epochs.toString(36)}`,
         ring: createRing({ lines: history.lines, maxAgeMs: history.maxAgeMs, now }),
         members: new Map(),
+        ghosts: new Map(),
+        holders: new Map(),
         joins: 0,
         anonymous: 0,
       };
@@ -539,7 +600,6 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       room.joins += 1;
       member = {
         seat,
-        who: copyWho(who),
         name: given ?? `Player ${room.joins}`,
         n: room.joins,
         streams: new Set(),
@@ -547,21 +607,21 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         refByTarget: new Map(),
         targetByRef: new Map(),
       };
-    } else {
-      member.who = copyWho(who);
-      if (given !== null) member.name = given;
+    } else if (given !== null) {
+      member.name = given;
     }
     try {
       cw.rooms.seat(roomId, seat, who, member.name, tags);
     } catch (err) {
       warn('chatwarden.chat_seat_failed', err);
-      return null;
+      return 'internal';
     }
     // Only now is anything kept: a refused join leaves no trace.
     if (fresh) rooms.set(roomId, room);
     if (!room.members.has(seat)) {
       room.members.set(seat, member);
       memberRoom.set(member, room);
+      room.ghosts.delete(seat); // a player who comes back takes their seat over from the one kept for their muters
     }
     if (member.streams.size === 0) armGrace(room, member);
     return { room, member };
@@ -569,17 +629,24 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
 
   // ---- sessions ----------------------------------------------------------------------------------------------------------------
 
-  function makeSession(roomId: string, seat: string, who: RawWho, tags: Record<string, string> | undefined, name: string): ChatSession {
-    const held = copyWho(who);
-    /** The member again (re-seating them if the grace ran out or the room was closed under this session). */
-    const live = (): { room: RoomRec; member: MemberRec } | null => (closed ? null : upsert(roomId, seat, held, null, tags));
-
+  function makeSession(roomId: string, seat: string, name: string): ChatSession {
+    // The session holds no credential: once the seat is released (the grace ran out, the room closed) it has nothing to seat the player with
+    // again, and answers like an unseated player. The caller makes a new session from the next request.
+    /** The member again, with the grace of a player who has no stream refreshed. `null` when the seat is gone. */
+    const live = (): { room: RoomRec; member: MemberRec } | null => {
+      if (closed) return null;
+      const room = rooms.get(roomId);
+      const member = room?.members.get(seat);
+      if (room === undefined || member === undefined) return null;
+      if (member.streams.size === 0) armGrace(room, member);
+      return { room, member };
+    };
     return {
       name,
 
       canOpen() {
         const found = live();
-        return found !== null && found.member.streams.size < maxStreamsPerMember && streamCount < maxStreams;
+        return found !== null && (found.member.streams.size >= maxStreamsPerMember || streamCount < maxStreams);
       },
 
       open(sink) {
@@ -589,7 +656,11 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         if (typeof sink !== 'object' || sink === null || typeof sink.write !== 'function') {
           throw new TypeError('session.open: sink must have a write function');
         }
-        if (member.streams.size >= maxStreamsPerMember || streamCount >= maxStreams) return { refused: { reason: 'full' } };
+        // At the player's own limit the OLDEST stream goes (newest wins): a dead connection that nothing has told the server about must not
+        // lock them out. Otherwise the process-wide limit applies.
+        const oldest = member.streams.size >= maxStreamsPerMember ? member.streams.values().next().value : undefined;
+        if (oldest === undefined && streamCount >= maxStreams) return { refused: { reason: 'full' } };
+        if (oldest !== undefined) dropStream(oldest, false, true);
         const rec: StreamRec = { member, sink, closed: false, backlog: 0 };
         member.streams.add(rec);
         streamCount += 1;
@@ -647,7 +718,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
           // A token only ever names a seat this player has muted; anything else (another player's token, a stale one) does nothing.
           target = named !== undefined && mutedSeatsOf(room, member).includes(named) ? named : undefined;
         }
-        if (target === undefined || target === member.seat || !room.members.has(target)) return false;
+        if (target === undefined || target === member.seat || !(room.members.has(target) || room.ghosts.has(target))) return false;
         const before = mutedSeatsOf(room, member).includes(target);
         try {
           cw.mutes.set(room.id, member.seat, target, on);
@@ -657,6 +728,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         }
         const after = mutedSeatsOf(room, member).includes(target);
         if (after !== on) return false; // the kit did nothing (a seat with no person, or the viewer's list is full)
+        if (on) hold(room, member.seat, target);
+        else release(room, member.seat, target);
         if (before !== after) {
           if (on) {
             const ids = room.ring.bySeat(target).map((l) => l.id);
@@ -694,7 +767,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     };
   }
 
-  return {
+  const api: RoomBroadcaster = {
     session(roomId, who, member) {
       try {
         if (closed) return { refused: { reason: 'full' } };
@@ -705,27 +778,34 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
         const given = resolveName(typeof member === 'object' && member !== null ? member.name : undefined);
         const tags = typeof member === 'object' && member !== null ? member.tags : undefined;
         const found = upsert(roomId, seat, who, given, tags);
-        if (found === null) return { refused: { reason: 'full' } };
-        return makeSession(roomId, seat, who, tags, found.member.name);
+        if (typeof found === 'string') return { refused: { reason: found } };
+        return makeSession(roomId, seat, found.member.name);
       } catch (err) {
         warn('chatwarden.chat_session_failed', err);
-        return { refused: { reason: 'full' } };
+        return { refused: { reason: 'internal' } };
       }
     },
 
     noticePending(subject) {
       if (closed) return;
-      try {
-        for (const room of [...rooms.values()]) {
-          for (const member of [...room.members.values()]) {
+      for (const room of [...rooms.values()]) {
+        for (const member of [...room.members.values()]) {
+          // One bad member must not stop the others hearing it.
+          try {
             if (member.streams.size === 0) continue;
             if (cw.rooms.subjectAt(room.id, member.seat) !== subject) continue;
+            const answer = restrictionAnswer(room, member);
+            if (answer !== null && answer.restricted && answer.kind === 'ban') {
+              // A ban that lands while the player is connected ends their streams: the door refuses them from here on.
+              for (const rec of [...member.streams]) endStream(rec, { type: 'bye', reason: 'banned', until: answer.until });
+              continue;
+            }
             writeAll(member, () => ({ type: 'notices' }));
             writeAll(member, () => stateFor(room, member));
+          } catch (err) {
+            warn('chatwarden.chat_notice_failed', err);
           }
         }
-      } catch (err) {
-        warn('chatwarden.chat_notice_failed', err);
       }
     },
 
@@ -742,6 +822,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
           memberRoom.delete(member);
         }
         room.members.clear();
+        room.ghosts.clear();
+        room.holders.clear();
       }
       try {
         cw.rooms.close(roomId);
@@ -771,4 +853,17 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       return { rooms: rooms.size, members, streams: streamCount };
     },
   };
+  inspectors.set(api, () => ({ rooms, lastLogged }));
+  return api;
+}
+
+const inspectors = new WeakMap<RoomBroadcaster, () => unknown>();
+
+/**
+ * What the broadcaster holds, for a test to walk (every map and set, strings included). A seam for the test that proves it keeps no credential;
+ * not part of the public surface and not re-exported from the entry.
+ * @internal
+ */
+export function inspectBroadcaster(broadcaster: RoomBroadcaster): unknown {
+  return inspectors.get(broadcaster)?.();
 }

@@ -192,6 +192,12 @@ function sendStream(req: Request, res: Response, kit: KitResponse, stream: KitSt
   } catch {
     // Optional: a socket that cannot (an HTTP/2 compat proxy, a test double) still streams, only less eagerly.
   }
+  try {
+    // A peer that vanished without a FIN (a phone changing network) is noticed by the OS in about a minute, not after the default 2 hours.
+    req.socket.setKeepAlive(true, 15_000);
+  } catch {
+    // Optional, as above.
+  }
 
   let finished = false; // the client is gone or the response has ended: no more writes
   let cancelled = false;

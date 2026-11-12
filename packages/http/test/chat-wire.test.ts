@@ -14,6 +14,7 @@ const FRAMES: ChatFrame[] = [
     room: 'lobby',
     you: { name: 'snerp' },
     maxLength: 200,
+    heartbeatMs: 20_000,
     summary: 'Trash talk is part of the game.',
     restriction: null,
     lines: [line],
