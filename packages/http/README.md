@@ -356,6 +356,7 @@ error class only.
 | `already_appealed` | 409 | This sanction has had its appeal (one per sanction). |
 | `same_decider` | 409 | The moderator who made the decision cannot decide its appeal (`appeals.allowSelfReview` lifts this for a team of one). |
 | `gone` | 409 | The sanction an appeal was about is gone (revoked meanwhile); the appeal is closed as moot. |
+| `pending_rename` | 409 | `POST /people/:ref/rename` while an earlier request is still waiting for the game to release the player. |
 | `conflict` | 409 | The profile settings changed since the caller loaded them (`PUT` or `DELETE /policy/profile` with an old `version`). |
 | `claimed` | 409 | Another moderator holds the case. The body also has `by` (who) and `until` (when the claim lapses, epoch ms). |
 | `ai_off` | 409 | `POST /reports/:id/ai/read` while the AI is not reading (level 0, no adapter, or the report is decided). |

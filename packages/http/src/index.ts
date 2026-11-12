@@ -23,6 +23,7 @@ export {
   blockedRoutes,
   gapRoutes,
   meRoutes,
+  nameRoutes,
   policyRoutes,
   reportRoutes,
   sanctionRoutes,

@@ -37,6 +37,7 @@ const TABLE = {
   already_appealed: { status: 409, message: 'This has already been appealed.' },
   same_decider: { status: 409, message: 'The person who made the decision cannot decide its appeal.' },
   gone: { status: 409, message: 'The sanction this appeal was about is gone.' },
+  pending_rename: { status: 409, message: 'A rename is already waiting for this player.' },
   conflict: { status: 409, message: 'The settings changed since you loaded them.' },
   claimed: { status: 409, message: 'Another moderator is handling this case.' },
   ai_off: { status: 409, message: 'The AI is not reading reports.' },

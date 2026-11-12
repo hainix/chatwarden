@@ -112,6 +112,8 @@ describe('adminRoutes: shape', () => {
       'GET /people/:ref/history',
       'GET /reports',
       'GET /reports/:id',
+      // The rename route lives with the sanctions (its own checks are in admin.names.test.ts).
+      'POST /people/:ref/rename',
       'POST /reports/:id/ai/dont-teach',
       'POST /reports/:id/ai/read',
       'POST /reports/:id/decide',

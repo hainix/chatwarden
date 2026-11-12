@@ -4,7 +4,7 @@ import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { applySanction, checkDurationsOffered, needForSanction, parseSanction } from './apply.js';
 import { gateCase } from './claims.js';
-import { latestHandle } from './handles.js';
+import { flagKey, handleFlags, latestHandle } from './handles.js';
 import type { AdminContext } from './context.js';
 import { bodyObject, bodyTakeOver, bodyText, queryLimit } from './validate.js';
 
@@ -12,7 +12,8 @@ import { bodyObject, bodyTakeOver, bodyText, queryLimit } from './validate.js';
  * Sanctions outside a report (staff only; every route is audited after it succeeds, the list as a read):
  * - `GET /sanctions?cursor&limit&source`: every person's sanctions, newest first, `{ items, next }` (`history.read`). Each
  *   item is the group's `SanctionGroupView` plus `person`, the canonical subject (a staff ref), and `handle`, the reported
- *   person's handle on the latest report filed against them (null when there is none, or it recorded no handle). Built from the subject row
+ *   person's handle on the latest report filed against them (null when there is none, or it recorded no handle), and `handleFlagged: true`
+ *   when the matcher flags that handle and `names.maskInHub` is on (else the key is absent). Built from the subject row
  *   only: never an IP row, hash or stored value. `limit` 1..200 (default 50, clamped), `cursor` is the previous `next`,
  *   `source` one of the sanction sources. A bad cursor, limit or source is 400 `invalid_query`. Audits `history.view` with no target, once
  *   per successful read, as the other list reads are (the same data per person is `GET /people/:ref/history`, which audits it with the
@@ -46,7 +47,8 @@ export function sanctionRoutes(ctx: AdminContext): RouteTable {
         if (handles.has(person)) continue;
         handles.set(person, latestHandle(cw, person));
       }
-      const items = page.items.map((i) => ({ ...i, handle: handles.get(i.person) ?? null }));
+      const flagged = handleFlags(cw);
+      const items = page.items.map((i) => ({ ...i, handle: handles.get(i.person) ?? null, ...flagKey(flagged, 'handleFlagged', handles.get(i.person)) }));
       c.audit('history.view');
       return { status: 200, body: { items, next: page.next } };
     }),

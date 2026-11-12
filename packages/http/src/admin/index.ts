@@ -8,6 +8,7 @@ import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
 import { gapRoutes } from './gaps.js';
 import { meRoutes } from './me.js';
+import { nameRoutes } from './names.js';
 import { policyRoutes } from './policy.js';
 import { policyProfileRoutes } from './policyProfile.js';
 import type { PolicyOptions } from './policy.js';
@@ -26,6 +27,7 @@ export { auditRoutes } from './audit.js';
 export { blockedRoutes } from './blocked.js';
 export { gapRoutes } from './gaps.js';
 export { meRoutes } from './me.js';
+export { nameRoutes } from './names.js';
 export type { Me, MeFeatures } from './me.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
@@ -64,6 +66,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...teamRoutes(ctx),
     ...sanctionRoutes(ctx),
     ...appealRoutes(ctx),
+    ...nameRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
     ...(options.terms === undefined ? {} : termRoutes(ctx, options.terms, options.recentLines ?? (() => []))),

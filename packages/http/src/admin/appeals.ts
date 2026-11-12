@@ -3,14 +3,15 @@ import { roleAtLeast } from '../permissions.js';
 import type { RouteTable } from '../router.js';
 import { checkDurationsOffered } from './apply.js';
 import type { AdminContext } from './context.js';
-import { latestHandle } from './handles.js';
+import { flagKey, handleFlags, latestHandle } from './handles.js';
 import { bodyAppealDecision, bodyObject, queryAppealDays, queryAppealStatus, queryLimit } from './validate.js';
 
 /**
  * The staff appeal routes. Every one is 404 `not_found` while appeals are off (after authentication and the permission, so a caller who
  * could not use them learns nothing either way), and every answer is `no-store`. An appeal belongs to a person: `person` is a staff ref.
  * - `GET /appeals?status=open|decided|all&cursor&limit` (`appeals.read`): the inbox, oldest first, `{ items, next }`. Each item is the core's
- *   `AppealSummary` plus `handle`, the person's name as `GET /sanctions` shows it (null without `history.read`, or when no report recorded one).
+ *   `AppealSummary` plus `handle`, the person's name as `GET /sanctions` shows it (null without `history.read`, or when no report recorded one),
+ *   and `handleFlagged: true` when the matcher flags that handle and `names.maskInHub` is on (else the key is absent).
  *   `status` defaults to open; `limit` 1..200 (default 50); `cursor` is the previous `next`. A bad status, cursor or limit is 400 `invalid_query`.
  *   No statement is in a list. Audits `appeal.view` with no target; the row is required, so a read that cannot be recorded fails (500).
  * - `GET /appeals/stats?days=30|90|365` (`appeals.read`): the per-rule counts, `AppealStats`. `days` defaults to 90; any other value is 400
@@ -57,7 +58,8 @@ export function appealRoutes(ctx: AdminContext): RouteTable {
         if (!handles.has(person)) handles.set(person, latestHandle(cw, person));
         return handles.get(person) ?? null;
       };
-      const items = page.items.map((i) => ({ ...i, handle: handleOf(i.person) }));
+      const flagged = handleFlags(cw);
+      const items = page.items.map((i) => ({ ...i, handle: handleOf(i.person), ...flagKey(flagged, 'handleFlagged', handleOf(i.person)) }));
       c.audit('appeal.view');
       return { status: 200, body: { items, next: page.next } };
     }),

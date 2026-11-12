@@ -213,3 +213,24 @@ export function bodyAppealDecision(body: Record<string, unknown>): AppealDecisio
   }
   return { outcome: 'reduce', reason, to: { kind: kind as 'warning' | 'chat' | 'area' | 'ban', durationMs } };
 }
+
+/** What `POST /people/:ref/rename` takes, checked for shape. */
+export interface RenameBody {
+  reason: string;
+  rule?: number;
+  takeOver: boolean;
+}
+
+/**
+ * The body of `POST /people/:ref/rename`: `{ reason, rule?, takeOver? }`. `reason` is text that is not blank (the core keeps it to 500 characters); `rule`
+ * a whole number from 1 (the core checks that it is an active rule; `'uncovered'` is not one); `takeOver` a boolean. Anything else is 400.
+ */
+export function bodyRename(body: Record<string, unknown>): RenameBody {
+  const reason = bodyText(body.reason);
+  if (reason.trim() === '') throw new ValidationError();
+  const takeOver = bodyTakeOver(body);
+  if (!has(body, 'rule')) return { reason, takeOver };
+  const rule = body.rule;
+  if (typeof rule !== 'number' || !Number.isSafeInteger(rule) || rule < 1) throw new ValidationError();
+  return { reason, rule, takeOver };
+}
