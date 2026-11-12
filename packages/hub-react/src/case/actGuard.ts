@@ -21,8 +21,20 @@ export const isMoving = (root: Element | null): boolean => root !== null && root
 /** Whether no act key may act in the hub that `root` belongs to: it is moving to another case, or a window is asked for or open. */
 export const actsBlocked = (root: Element | null): boolean => root !== null && (root.hasAttribute(MOVING_ATTRIBUTE) || root.hasAttribute(WINDOW_ATTRIBUTE));
 
+/** The clock the guard reads: the machine's monotonic clock, unless a test has set its own (see `setGuardClock`). */
+let guardClock: () => number = () => performance.now();
+
+/**
+ * Tests only: gives the act guard its own clock (or, with `null`, the machine's again). The guard is the one place that reads it, so a
+ * test can age a case, or freeze time, without patching the global `performance.now()`. Not exported from the package.
+ * @internal
+ */
+export function setGuardClock(clock: (() => number) | null): void {
+  guardClock = clock ?? (() => performance.now());
+}
+
 /** The monotonic time, in milliseconds. */
-export const monotonicNow = (): number => performance.now();
+export const monotonicNow = (): number => guardClock();
 
 /** Whether a case that was drawn at `shownAt` (monotonic) is old enough to accept an act key. */
 export const hasAged = (shownAt: number | null): boolean => shownAt !== null && monotonicNow() - shownAt >= QUICK_ACT_COOLDOWN_MS;
