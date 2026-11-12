@@ -25,6 +25,7 @@ export function createInertSignals(logger: Logger | undefined, settings: () => R
     kinds: () => Object.entries(settings().kinds).map(([kind, k]) => ({ kind, label: k.label, polarity: k.polarity, weight: k.weight, builtin: Object.hasOwn(BUILTIN_SIGNAL_KINDS, kind) })),
     boosted: () => new Set(),
     forRecord: () => [],
+    forAi: () => [],
     ladderHits: () => [],
   };
 }

@@ -236,6 +236,7 @@ export function aiContract(name: string, make: () => Store): void {
             cacheReadTokens: null,
             cacheWriteTokens: null,
             exampleIds: [],
+            signals: null,
             costMicros: 0,
             latencyMs: null,
             createdAt: NOW,
@@ -494,6 +495,7 @@ export function aiContract(name: string, make: () => Store): void {
           cacheReadTokens: 900,
           cacheWriteTokens: 0,
           exampleIds: [],
+          signals: null,
           costMicros: 500,
           latencyMs: 640,
           createdAt: NOW,
@@ -520,6 +522,39 @@ export function aiContract(name: string, make: () => Store): void {
         expect(complete(s, id, done({ exampleIds: ['o1', 'o7'] }))).toBe(true);
         expect(s.loadAiRead('r2')?.exampleIds).toEqual(['o1', 'o7']);
         expect(s.loadAiReads(['r2'])[0]?.exampleIds).toEqual(['o1', 'o7']);
+      });
+
+      it('the signal counts a read was shown are stored with it exactly, null when none, and for every row that is not ok', () => {
+        const s = ai(make());
+        const shown = [
+          { label: 'Muted by other players', polarity: 'negative' as const, distinct: 5, windowDays: 14 },
+          { label: 'Commended by other players', polarity: 'positive' as const, distinct: 2, windowDays: 30 },
+        ];
+        okRead(s, 'r1', 'h1', NOW);
+        expect(s.loadAiRead('r1')?.signals).toBeNull();
+        const id = reserve(s, { reportId: 'r2' });
+        expect(complete(s, id, done({ signals: shown }))).toBe(true);
+        expect(s.loadAiRead('r2')?.signals).toEqual(shown);
+        expect(s.loadAiReads(['r2'])[0]?.signals).toEqual(shown);
+        expect(s.loadAiReadById(id)?.signals).toEqual(shown);
+        const empty = reserve(s, { reportId: 'r3' });
+        expect(complete(s, empty, done({ signals: [] }))).toBe(true);
+        expect(s.loadAiRead('r3')?.signals).toBeNull();
+        const failed = reserve(s, { reportId: 'r4' });
+        fail(s, failed, 'failed', 'retryable', NOW + MIN);
+        expect(s.loadAiReadById(failed)?.signals).toBeNull();
+      });
+
+      it('the stored signal counts are a copy: changing what was handed in, or what was read, changes nothing', () => {
+        const s = ai(make());
+        const shown = [{ label: 'Muted by other players', polarity: 'negative' as const, distinct: 5, windowDays: 14 }];
+        const id = reserve(s, { reportId: 'r2' });
+        complete(s, id, done({ signals: shown }));
+        shown[0]!.distinct = 99;
+        const got = s.loadAiRead('r2')?.signals;
+        expect(got?.[0]?.distinct).toBe(5);
+        if (got !== null && got !== undefined) (got[0] as { distinct: number }).distinct = 1;
+        expect(s.loadAiRead('r2')?.signals?.[0]?.distinct).toBe(5);
       });
 
       it('a null recommendation, an empty evidence list and a multi-digit rule round-trip', () => {

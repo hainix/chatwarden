@@ -1053,6 +1053,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           subscribe: bus.on,
           audit: (input) => audit.record(input),
           exampleRetentionMs: () => retentionPolicy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
+          // The counts about the reported person the feed allows (`feeds.ai`), as label, polarity, distinct and window: nothing else leaves.
+          signals: (subject) => signals.forAi(subject).map((c) => ({ label: c.label, polarity: c.polarity, distinct: c.distinct, windowDays: c.windowDays })),
         });
   aiRef.service = aiService;
   const ai: AiFacade = aiService ?? createInertAi();

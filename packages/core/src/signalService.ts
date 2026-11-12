@@ -74,6 +74,8 @@ export interface SignalRuntime {
   kinds(): SignalKindView[];
   boosted(people: readonly SubjectId[]): Set<SubjectId>;
   forRecord(subject: SubjectId): SignalCount[];
+  /** The counts the AI read may be shown (`feeds.ai`): the feed's kinds and window. `[]` when the feed is off. Never throws. */
+  forAi(subject: SubjectId): SignalCount[];
   ladderHits(subject: SubjectId): SignalHit[];
 }
 
@@ -336,11 +338,19 @@ export class SignalService implements SignalRuntime {
 
   /** The lines the Person page record shows: the `feeds.record` kinds and window. `[]` (and no store read) when the feed is off. Never throws. */
   forRecord(subject: SubjectId): SignalCount[] {
+    return this.forFeed(subject, this.deps.settings().feeds.record);
+  }
+
+  /** The counts the AI read may be shown: the `feeds.ai` kinds and window. `[]` (and no store read) when the feed is off. Never throws. */
+  forAi(subject: SubjectId): SignalCount[] {
+    return this.forFeed(subject, this.deps.settings().feeds.ai);
+  }
+
+  private forFeed(subject: SubjectId, feed: { kinds: readonly string[] | '*'; windowDays: number } | undefined): SignalCount[] {
     try {
-      const record = this.deps.settings().feeds.record;
-      if (record === undefined || !this.supported) return [];
-      const kinds = this.kindsFor(record.kinds === '*' ? undefined : record.kinds);
-      return this.countFor(subject, this.windowOf(record.windowDays), kinds);
+      if (feed === undefined || !this.supported) return [];
+      const kinds = this.kindsFor(feed.kinds === '*' ? undefined : feed.kinds);
+      return this.countFor(subject, this.windowOf(feed.windowDays), kinds);
     } catch {
       return [];
     }

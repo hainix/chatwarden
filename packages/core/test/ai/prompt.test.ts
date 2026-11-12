@@ -159,7 +159,7 @@ describe('buildAIInput', () => {
     }
     // Every line of the data block is structure we wrote: a key, or a chat line.
     for (const line of v.trimEnd().split('\n')) {
-      expect(line, line).toMatch(/^(<data>|<\/data>|reason: .+|note: .+|truncated: (true|false)|pointed: .+|people: .+|L\d+ \+\d+s P\d+( blocked| filtered)? ".*"|example: \{.*\})$/u);
+      expect(line, line).toMatch(/^(<data>|<\/data>|reason: .+|note: .+|truncated: (true|false)|pointed: .+|people: .+|L\d+ \+\d+s P\d+( blocked| filtered)? ".*"|example: \{.*\}|Context about P1, not evidence: .+)$/u);
     }
   });
 

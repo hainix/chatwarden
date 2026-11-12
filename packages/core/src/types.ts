@@ -1,7 +1,7 @@
 // Core types for @chatwarden/core. Organized by section; later tasks append
 // their own sections below.
 
-import type { AIExample, AIRead } from './ai/types.js';
+import type { AIExample, AIRead, AISignal } from './ai/types.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
@@ -270,6 +270,11 @@ export interface AiReadDone extends AiCallUsage {
    * hash, so the read records which ones it saw. Ids only; none by default.
    */
   exampleIds?: readonly string[];
+  /**
+   * The signal counts about the reported person the prompt carried (`feeds.ai`): exactly what was sent, label, polarity, distinct and window
+   * only. Stored with the read (`signals_json`); none (or an empty list) is stored as null.
+   */
+  signals?: readonly AISignal[];
 }
 
 /**
@@ -293,6 +298,8 @@ export interface AiReadRow {
   read: AIRead | null;
   /** The ids of the casebook examples this read saw (empty when none, and for every row but an `ok` one). */
   exampleIds: readonly string[];
+  /** The signal counts this read was shown (see {@link AiReadDone.signals}); null when none were sent, for every row but an `ok` one, and for a read made before signals existed. */
+  signals: readonly AISignal[] | null;
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;

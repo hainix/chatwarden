@@ -6,10 +6,22 @@ import type { ConductLevel } from '../types.js';
 
 /**
  * The prompt version. Bumped when the prompt or the output schema changes; part of the input hash, so a bump makes every stored
- * read stale.
+ * read stale. 2 added the full-stop spacing line; 3 added the stable paragraph about signal counts.
  * @experimental
  */
-export const AI_PROMPT_VERSION = 2;
+export const AI_PROMPT_VERSION = 3;
+
+/**
+ * One signal count about the reported person (P1), as the model is shown it: the adopter's own short label, whether it counts for or
+ * against, how many DIFFERENT players, and over how many days. Nothing else about a signal ever leaves the process.
+ * @experimental
+ */
+export interface AISignal {
+  label: string;
+  polarity: 'negative' | 'positive';
+  distinct: number;
+  windowDays: number;
+}
 
 /**
  * One speaker in a read: an alias (`P1` is the reported person, `P2` the reporter, the rest `P3...` in order of first appearance)
@@ -66,6 +78,11 @@ export interface AIReadInput {
   standard: string;
   /** Casebook, at most 2, pseudonymised. */
   examples: AIExample[];
+  /**
+   * Counts of signals about P1 (`feeds.ai`), a snapshot taken when the read is made; absent with the feed off or nothing to say. Rendered as
+   * the last row of `prompt.variable`; the input hash leaves it out.
+   */
+  signals?: AISignal[];
   /** The same content rendered by core. An adapter should use it as is. */
   prompt: { stable: string; variable: string; schema: object };
 }

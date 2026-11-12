@@ -6,8 +6,8 @@ import type { ConductLevel } from '../../src/types.js';
 import * as core from '../../src/index.js';
 
 describe('the AI contract', () => {
-  it('has prompt version 2 (1 plus the full-stop spacing line)', () => {
-    expect(AI_PROMPT_VERSION).toBe(2);
+  it('has prompt version 3 (1; 2 added the full-stop spacing line; 3 adds the paragraph about signal counts)', () => {
+    expect(AI_PROMPT_VERSION).toBe(3);
   });
 
   it('AIError carries a kind and is an Error', () => {
@@ -31,7 +31,7 @@ describe('the AI contract', () => {
   });
 
   it('is exported from the package index', () => {
-    expect(core.AI_PROMPT_VERSION).toBe(2);
+    expect(core.AI_PROMPT_VERSION).toBe(3);
     expect(core.AIError).toBe(AIError);
     expect(typeof core.validateAIOutput).toBe('function');
     expect(typeof core.assertWithinCeilings).toBe('function');

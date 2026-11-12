@@ -4,6 +4,7 @@ import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, CONDUCT_LEVELS, ROLES } from '@chatw
 import type {
   AIExample,
   AIRead,
+  AISignal,
   AiCallUsage,
   AiErrorKind,
   AiExampleRow,
@@ -249,6 +250,34 @@ function exampleIdsFromRow(v: unknown): string[] {
   }
 }
 
+/** The signal counts a read stores: only the four fields, and null for none. */
+function signalsToText(v: readonly AISignal[] | undefined): string | null {
+  const rows = (v ?? []).map((s) => ({
+    label: String(s.label),
+    polarity: s.polarity === 'positive' ? 'positive' : 'negative',
+    distinct: Math.max(0, Math.floor(Number(s.distinct))),
+    windowDays: Math.max(0, Math.floor(Number(s.windowDays))),
+  }));
+  return rows.length === 0 ? null : JSON.stringify(rows);
+}
+
+/** The counts stored with a read; null when the column is empty or damaged (a read made before signals existed has none). */
+function signalsFromRow(v: unknown): AISignal[] | null {
+  if (v === null || v === undefined) return null;
+  try {
+    const rows: unknown = JSON.parse(String(v));
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const out: AISignal[] = [];
+    for (const r of rows as Array<Record<string, unknown>>) {
+      if (typeof r?.label !== 'string' || (r.polarity !== 'negative' && r.polarity !== 'positive') || typeof r.distinct !== 'number' || typeof r.windowDays !== 'number') return null;
+      out.push({ label: r.label, polarity: r.polarity, distinct: r.distinct, windowDays: r.windowDays });
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 /** A read row; null for an `ok` row whose answer cannot be read (with `lenient`, that row comes back with `read: null` instead). */
 function aiReadFromRow(r: Record<string, unknown>, lenient = false): AiReadRow | null {
   const status = String(r.status);
@@ -270,6 +299,7 @@ function aiReadFromRow(r: Record<string, unknown>, lenient = false): AiReadRow |
     promptVersion: Number(r.prompt_version),
     read,
     exampleIds: status === 'ok' ? exampleIdsFromRow(r.example_ids) : [],
+    signals: status === 'ok' ? signalsFromRow(r.signals_json) : null,
     inputTokens: nullableNumber(r.input_tokens),
     outputTokens: nullableNumber(r.output_tokens),
     cacheReadTokens: nullableNumber(r.cache_read_tokens),
@@ -802,7 +832,7 @@ export class SqliteStore implements Store, TermStore {
           .prepare(
             `UPDATE kit_ai_reads
              SET status = 'ok', lease_until = NULL, retry_at = NULL, error_kind = NULL,
-                 severity = ?, rule = ?, summary = ?, evidence_json = ?, confidence = ?, injection = ?, rec_json = ?, example_ids = ?
+                 severity = ?, rule = ?, summary = ?, evidence_json = ?, confidence = ?, injection = ?, rec_json = ?, example_ids = ?, signals_json = ?
              WHERE id = ? AND status = 'pending' AND attempts = ?`,
           )
           .run(
@@ -814,6 +844,7 @@ export class SqliteStore implements Store, TermStore {
             read.injectionSuspected ? 1 : 0,
             read.recommendation === null ? null : JSON.stringify(read.recommendation),
             JSON.stringify(result.exampleIds ?? []),
+            signalsToText(result.signals),
             id,
             lease,
           ).changes,

@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { MemoryStore, withMemoryAi, withMemorySignals } from '@chatwarden/store-memory';
 import { HubProvider } from '../src/provider.js';
 import { usePolicy } from '../src/policyHooks.js';
 import { rulesCss } from './css.js';
@@ -281,6 +282,24 @@ describe('the status line', () => {
     expect(level('Read').checked).toBe(true);
     await user.click(within(alert).getByRole('button', { name: 'Try again' }));
     await screen.findByText('Working');
+  });
+});
+
+describe('the signal counts sentence (Advanced only)', () => {
+  const kinds = { muted_by_player: { label: 'Muted by other players', polarity: 'negative' as const } };
+  const SENTENCE = /Signal counts about the reported player .* Report counts, reporter accuracy and history are never sent\./;
+
+  it('is inside Advanced and only when the signal feed for the AI is set', async () => {
+    const on = await owner({ store: withMemorySignals(withMemoryAi(new MemoryStore())), overrides: { signals: { kinds, feeds: { ai: { kinds: ['muted_by_player'], windowDays: 14 } } } } as never });
+    const a = await open(on);
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    await a.user.click(screen.getByRole('button', { name: 'Advanced' }));
+    expect(screen.getByText(SENTENCE)).toBeInTheDocument();
+    cleanup();
+    const off = await owner({ store: withMemorySignals(withMemoryAi(new MemoryStore())), overrides: { signals: { kinds } } as never });
+    const b = await open(off);
+    await b.user.click(screen.getByRole('button', { name: 'Advanced' }));
+    expect(screen.queryByText(SENTENCE)).toBeNull();
   });
 });
 

@@ -312,7 +312,9 @@ console.log(cw.ai.status()); // { available: true, level: 0, maxLevel: 2, state:
   (`AI_MAX_PREFILL_MS`), and a suggestion to uphold or note needs a cited line by the reported person.
 - **What leaves your server.** Only the chosen lines of the report with the speakers replaced by `P1`, `P2`, ..., the reporter's reason and
   note (redacted), your Community Rules and the standard. Flags, mutes and report counts are never sent, nor any id, handle, IP, hash, room or
-  tag. A line the word filter blocked is sent as typed unless you set `blockedLines: 'mask'`: the model needs the words to judge intent.
+  tag. The one exception is the signal feed `feeds.ai` (`profile.signals`, off unless you set it): the counts you chose about the reported player
+  only are sent as one last row, a label, a number of players and a number of days, and the read records what it was shown (shown to moderators as
+  "Context included: N signal counts"). The prompt version is 3. A line the word filter blocked is sent as typed unless you set `blockedLines: 'mask'`: the model needs the words to judge intent.
 - **What it costs.** `dailyBudgetMicros` (default $1.00 a UTC day) is set in code and a hub cannot raise it. The owner also sets a ceiling on
   calls a day (`profile.ai.dailyCalls`, default 5 000), so an adapter that reports no cost still cannot run unbounded. There are at most 30 calls
   a minute and 2 at once, a hard deadline per call (`timeoutMs`) and a breaker that opens after repeated failures. At a limit, reads pause. A call that a shutdown aborts books nothing, so a restart loop around a slow provider can under-count the day's money; the call ceiling still bounds it.

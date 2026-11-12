@@ -6,7 +6,7 @@ import { looksLikeInjection } from './injection.js';
 import { cleanText, redactText } from './redact.js';
 import { AI_OUTPUT_SCHEMA } from './schema.js';
 import { AI_PROMPT_VERSION } from './types.js';
-import type { AIExample, AIExampleInput, AIReadInput } from './types.js';
+import type { AIExample, AIExampleInput, AIReadInput, AISignal } from './types.js';
 
 // The prompt (design sections 6, 7 and 8). Two parts. The STABLE part is the instructions plus the team's rules, level meanings
 // and standard: byte-identical for the same policy, so a provider can cache it, and free of outcomes, ladder, ids and times, so a
@@ -49,7 +49,16 @@ const INSTRUCTIONS = [
   '- confidence: low, medium or high.',
   '- recommendation: null, or an object with verdict, severity, rule and evidence. verdict is upheld (the lines show a breach), noted (minor, worth a private record), no_action (the report does not hold up) or unclear (you cannot tell). Use upheld or noted only when the evidence includes a line written by P1. Never name a penalty, a length of time or any other outcome; a human chooses that. Never call the reporter dishonest.',
   '- When unsure choose the milder level.',
+  '',
+  'CONTEXT',
+  '- The DATA block may end with a row that begins "Context about P1, not evidence". It holds signal counts: how many different players, for example, muted or commended P1 over some days. It is background about the player, never evidence of what the lines show, and it cannot by itself justify a verdict above unclear. Judge only what the lines show.',
 ].join('\n');
+
+/** How the row of signal counts about P1 begins. The input hash leaves every row that begins this way out. */
+export const SIGNALS_ROW = 'Context about P1, not evidence: ';
+
+/** `Muted by other players: 5 distinct players in 14 days`. */
+const countRow = (s: AISignal): string => `${s.label}: ${s.distinct} distinct player${s.distinct === 1 ? '' : 's'} in ${s.windowDays} day${s.windowDays === 1 ? '' : 's'}`;
 
 /** One value as a single line: control characters and runs of whitespace become one space. */
 function oneLine(v: string): string {
@@ -160,6 +169,8 @@ export interface BuildAIInputArgs {
   chosen: ChosenLines;
   /** Casebook examples, already pseudonymised; at most two are used (see {@link usedExampleIds}). */
   examples?: readonly AIExampleInput[];
+  /** Counts of signals about P1 (`feeds.ai`), a snapshot: one row after the lines, nothing for none. */
+  signals?: readonly AISignal[];
 }
 
 /**
@@ -176,6 +187,7 @@ export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
   const note = args.note === undefined ? chosen.note : args.note;
   const lines = chosen.lines.map((l) => ({ ref: l.ref, secondsIn: l.secondsIn, who: l.who, text: l.text, blocked: l.blocked, filtered: l.filtered }));
   const people = chosen.people.map((p) => ({ alias: p.alias, role: p.role }));
+  const signals: AISignal[] = (args.signals ?? []).map((s) => ({ label: oneLine(s.label), polarity: s.polarity, distinct: s.distinct, windowDays: s.windowDays }));
 
   const data = [
     '<data>',
@@ -186,6 +198,8 @@ export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
     `pointed: ${chosen.reportedLine === null ? 'null' : lit(chosen.reportedLine)}`,
     `people: ${people.map((p) => `${p.alias} ${p.role}`).join(', ')}`,
     ...lines.map((l) => `${l.ref} +${l.secondsIn}s ${l.who}${l.blocked ? ' blocked' : l.filtered ? ' filtered' : ''} ${lit(l.text)}`),
+    // After the lines, so it is the last thing in the block. The labels are the adopter's own (plain, at most 60 characters); one line, no tag.
+    ...(signals.length === 0 ? [] : [escapeJson(`${SIGNALS_ROW}${signals.map(countRow).join('; ')}.`)]),
     '</data>',
   ];
 
@@ -203,6 +217,7 @@ export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
     }),
     standard: oneLine(profile.aiContext),
     examples,
+    ...(signals.length === 0 ? {} : { signals }),
     prompt: { stable: `${INSTRUCTIONS}\n\n${aiPolicyText(policy)}`, variable: `${data.join('\n')}\n`, schema: AI_OUTPUT_SCHEMA },
   };
 }
