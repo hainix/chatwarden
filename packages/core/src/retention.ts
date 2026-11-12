@@ -40,6 +40,20 @@ export interface RetentionPolicy {
    * days: a counting window needs at least two weeks of rows. A feed window longer than this is refused.
    */
   signalsMs: number;
+  /**
+   * The statement of a decided (or closed) appeal is set to nothing this long after the decision. It is the one new free text a player
+   * writes, so it is the shortest of the three. An open appeal's statement is kept until it is decided. 0 clears it at the next purge
+   * (and at the decision itself); no floor.
+   */
+  appealStatementsMs: number;
+  /**
+   * A decided appeal row is deleted this long after its decision. At least 90 days: the per-rule counts and the false-positive rate read
+   * these rows over a 90 day window. An appeal on a permanent sanction that is still in force is kept regardless (it stops a second appeal
+   * against it), and an open appeal is never deleted.
+   */
+  appealsMs: number;
+  /** A blocked name kept as evidence (`names.keepBlocked`) is deleted once it is older than this. The same clock as strikes. No floor. */
+  blockedNamesMs: number;
 }
 
 export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
@@ -52,12 +66,15 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   aiOutcomesMs: 365 * DAY_MS,
   aiExamplesMs: 180 * DAY_MS,
   signalsMs: 90 * DAY_MS,
+  appealStatementsMs: 90 * DAY_MS,
+  appealsMs: 365 * DAY_MS,
+  blockedNamesMs: 30 * DAY_MS,
 };
 
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
-const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'signalsMs'] as const;
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs', 'signalsMs', 'appealStatementsMs', 'appealsMs', 'blockedNamesMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -69,6 +86,8 @@ const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'ba
  * - `aiOutcomesMs` at least 90 days: the agree-or-override record is the data the AI's later gates read
  * - `aiExamplesMs` at least 0 (0 keeps no example text at all)
  * - `signalsMs` at least 14 days: a counting window needs at least two weeks of rows
+ * - `appealsMs` at least 90 days: the per-rule appeal counts read that far back
+ * - `appealStatementsMs` and `blockedNamesMs` at least 0 (0 keeps the text only until the next purge)
  *
  * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
  *
@@ -106,6 +125,15 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   if (below(policy.signalsMs, 14 * DAY_MS)) {
     throw new ProfileError('retention.signalsMs', 'must be at least 14 days: a counting window needs at least two weeks of rows');
   }
+  if (below(policy.appealsMs, RECORD_FLOOR_MS)) {
+    throw new ProfileError('retention.appealsMs', 'must be at least 90 days: the per-rule appeal counts read that far back');
+  }
+  if (below(policy.appealStatementsMs, 0)) {
+    throw new ProfileError('retention.appealStatementsMs', 'must be 0 or more: 0 clears a statement as soon as its appeal is decided');
+  }
+  if (below(policy.blockedNamesMs, 0)) {
+    throw new ProfileError('retention.blockedNamesMs', 'must be 0 or more');
+  }
   if (below(policy.badFaithMs, suspendWindowMs)) {
     throw new ProfileError(
       'retention.badFaithMs',
@@ -130,6 +158,12 @@ export interface PurgeResult {
   aiOutcomes: number;
   /** Signal rows deleted (flood_triggered included). 0 for a store without the signal methods. */
   signals: number;
+  /** Decided appeal rows deleted. 0 for a store without the appeal methods. */
+  appeals: number;
+  /** Appeal statements set to nothing (the row stays). A statement counted here may belong to a row deleted in the same pass. 0 for a store without the appeal methods. */
+  appealStatements: number;
+  /** Kept blocked names deleted. 0 for a store without the blocked-name methods. */
+  blockedNames: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -154,6 +188,10 @@ function checkWindow(name: string, ms: number): void {
  *   record, no chat text): `decidedAt < now - aiOutcomesMs`; the pseudonymised example kept with an outcome:
  *   `decidedAt < now - aiExamplesMs`, the row stays with its counts. A store without the AI methods has none of these.
  * - signals: `at < now - signalsMs` (90 days by default, never less than 14); a store without the signal methods has none
+ * - appeals: the statement of an appeal decided (or closed) before `now - appealStatementsMs` is set to nothing, the row stays; then a
+ *   decided row with `decidedAt < now - appealsMs` is deleted (365 days by default, never less than 90), EXCEPT one whose sanction is
+ *   permanent and still in force. An open appeal is never touched. Blocked names: `at < now - blockedNamesMs` (30 days by default).
+ *   A store without the appeal or blocked-name methods has none of these.
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn.
@@ -176,6 +214,9 @@ export async function purge(
     aiOutcomesMs: policy.aiOutcomesMs ?? RETENTION_DEFAULTS.aiOutcomesMs,
     aiExamplesMs: policy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
     signalsMs: policy.signalsMs ?? RETENTION_DEFAULTS.signalsMs,
+    appealStatementsMs: policy.appealStatementsMs ?? RETENTION_DEFAULTS.appealStatementsMs,
+    appealsMs: policy.appealsMs ?? RETENTION_DEFAULTS.appealsMs,
+    blockedNamesMs: policy.blockedNamesMs ?? RETENTION_DEFAULTS.blockedNamesMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
@@ -187,6 +228,9 @@ export async function purge(
   checkWindow('aiOutcomesMs', p.aiOutcomesMs);
   checkWindow('aiExamplesMs', p.aiExamplesMs);
   checkWindow('signalsMs', p.signalsMs);
+  checkWindow('appealStatementsMs', p.appealStatementsMs);
+  checkWindow('appealsMs', p.appealsMs);
+  checkWindow('blockedNamesMs', p.blockedNamesMs);
   return store.transaction(() => {
     const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
     const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
@@ -201,6 +245,10 @@ export async function purge(
       aiReads: ai.reads,
       aiOutcomes: ai.outcomes,
       signals: store.purgeSignals?.(now - p.signalsMs) ?? 0,
+      // Statements first: a statement is player text and goes on its own, shorter clock even when its row stays (or goes in the next call).
+      appealStatements: store.clearAppealStatements?.(now - p.appealStatementsMs) ?? 0,
+      appeals: store.purgeAppeals?.(now - p.appealsMs) ?? 0,
+      blockedNames: store.purgeBlockedNames?.(now - p.blockedNamesMs) ?? 0,
     };
   });
 }

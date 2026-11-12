@@ -280,7 +280,7 @@ describe('SqliteStore purgeNotices', () => {
     const store = openStore({ db });
     store.insertNotice(notice('old', { kind: 'warning', until: null, createdAt: NOW - 200 * DAY, ackedAt: NOW - 199 * DAY }));
     store.insertNotice(notice('keep', { createdAt: NOW - DAY }));
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 1, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 1, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
     expect(ids(db)).toEqual(['keep']);
   });
 
