@@ -1,6 +1,10 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import type { PlayerNotice } from '@chatwarden/core';
+import type { PlayerAppeal, PlayerNotice } from '@chatwarden/core';
+import { AppealBody, leaveAppeal } from './AppealDialog.js';
+import type { AppealState } from './AppealDialog.js';
+import { AppealSlot, useAppeals } from './appeals.js';
+import type { AppealsView } from './appeals.js';
 import { toPlayerError } from './client.js';
 import type { PlayerClient, PlayerError } from './client.js';
 import { Dialog } from './Dialog.js';
@@ -16,8 +20,14 @@ export interface NoticeQueueProps extends PlayerUiProps, DialogHostProps {
    * the match is not missed. Default: `true`.
    */
   canShow?: boolean;
-  /** Where "Think this is a mistake?" goes: an `https` address or a relative one (`/appeal`). Left out when absent or unsafe. */
+  /** Where "Think this is a mistake?" goes: an `https` address or a relative one (`/appeal`). Left out when absent or unsafe. Not used with `appeals`. */
   appealUrl?: string;
+  /**
+   * @experimental Let the player appeal a sanction from here (the kit's appeals, `profile.appeals`, must be on). "Think this is a mistake?" is then
+   * a button that opens the appeal form in place of the notice, and `appealUrl` is not used; once an appeal is sent the same place reads
+   * "Appeal sent <date>", and later the outcome in words. Default false: the `appealUrl` link, exactly as before, and no extra request.
+   */
+  appeals?: boolean;
   /** Change it to ask the server again (for example when your own push channel says a notice is pending). */
   refreshKey?: number | string;
   /** Called once for each notice the player acknowledged. */
@@ -31,7 +41,7 @@ export interface NoticeQueueProps extends PlayerUiProps, DialogHostProps {
  * "Acknowledge", the others with "Got it"); the dialog closes after the last one and focus returns to where it was.
  */
 export function NoticeQueue(props: NoticeQueueProps) {
-  const { client, canShow = true, appealUrl, refreshKey, onAcknowledged, onPendingChange, theme, className, container, returnFocusTo } = props;
+  const { client, canShow = true, appealUrl, appeals: appealsProp = false, refreshKey, onAcknowledged, onPendingChange, theme, className, container, returnFocusTo } = props;
   const ui = useUi(props);
   const state = usePlayerData(() => client.notices(), refreshKey);
   // The ids acknowledged since this list arrived. A newer list replaces both, so the server stays the truth.
@@ -45,6 +55,20 @@ export function NoticeQueue(props: NoticeQueueProps) {
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const reload = state.reload;
+  const appeals = useAppeals(client, appealsProp, refreshKey);
+  // The notice whose appeal form is open (in place of the notice, inside the same dialog), and the notice whose appeal control takes focus
+  // when the notice comes back.
+  const [appealFor, setAppealFor] = useState<string | null>(null);
+  const [returned, setReturned] = useState<string | null>(null);
+  const appealState = useRef<AppealState>({ busy: false, sent: null });
+  const closeAppeal = useCallback(
+    (sent?: PlayerAppeal) => {
+      if (sent !== undefined) appeals.add(sent);
+      setReturned(appealFor);
+      setAppealFor(null);
+    },
+    [appeals.add, appealFor],
+  );
 
   // Releasing a hold asks the server once more: a warning that landed during the match must be seen before the next one.
   const wasShown = useRef(canShow);
@@ -87,19 +111,35 @@ export function NoticeQueue(props: NoticeQueueProps) {
     <Portal container={container}>
     <Root theme={theme} className={className}>
       {/* One dialog for the whole queue: it opens once and closes once, so focus comes back to where it was after the last notice. */}
-      <Dialog labelledBy={titleId} initialFocus={heading} {...(returnFocusTo === undefined ? {} : { returnFocusTo })}>
-        <NoticeCard
-          key={current.id}
-          ui={ui}
-          client={client}
-          notice={current}
-          total={count}
-          appealUrl={appealUrl}
-          titleId={titleId}
-          heading={heading}
-          onDone={acknowledged}
-          onLater={() => setLater(state.data)}
-        />
+      <Dialog
+        labelledBy={titleId}
+        initialFocus={heading}
+        {...(appealFor === null ? {} : { onEscape: () => leaveAppeal(appealState.current, closeAppeal) })}
+        {...(returnFocusTo === undefined ? {} : { returnFocusTo })}
+      >
+        {appealFor === current.id ? (
+          <AppealBody ui={ui} client={client} noticeId={current.id} titleId={titleId} heading={heading} state={appealState} onClose={closeAppeal} />
+        ) : (
+          <NoticeCard
+            key={current.id}
+            ui={ui}
+            client={client}
+            notice={current}
+            total={count}
+            appealUrl={appealUrl}
+            appeals={appealsProp ? appeals : null}
+            returned={returned === current.id}
+            onReturned={() => setReturned(null)}
+            onAppeal={() => {
+              appealState.current = { busy: false, sent: null };
+              setAppealFor(current.id);
+            }}
+            titleId={titleId}
+            heading={heading}
+            onDone={acknowledged}
+            onLater={() => setLater(state.data)}
+          />
+        )}
       </Dialog>
     </Root>
     </Portal>
@@ -112,6 +152,10 @@ function NoticeCard({
   notice,
   total,
   appealUrl,
+  appeals,
+  returned,
+  onReturned,
+  onAppeal,
   titleId,
   heading,
   onDone,
@@ -123,6 +167,12 @@ function NoticeCard({
   /** How many notices are waiting, this one included. It is always the first. */
   total: number;
   appealUrl: string | undefined;
+  /** The player's appeals when `appeals` is on; null when it is off (then the old link, if any). */
+  appeals: AppealsView | null;
+  /** The appeal form has just closed: focus goes to the appeal control, not the heading. */
+  returned: boolean;
+  onReturned: () => void;
+  onAppeal: () => void;
   titleId: string;
   heading: RefObject<HTMLHeadingElement | null>;
   onDone: (notice: PlayerNotice) => void;
@@ -135,7 +185,7 @@ function NoticeCard({
   const [failure, setFailure] = useState<PlayerError | null>(null);
 
   // Each notice, not only the first, takes focus at its heading: it is what a screen reader should read next.
-  useEffect(() => heading.current?.focus(), []);
+  useEffect(() => (returned ? undefined : heading.current?.focus()), []);
 
   const acknowledge = async (): Promise<void> => {
     // One request at a time: a second click, or a second Enter, while one is on its way does nothing.
@@ -174,7 +224,8 @@ function NoticeCard({
       <Facts ui={ui} notice={notice} />
       {notice.refCode !== null && <p className="cw-hint">{t('player.notice.refHint')}</p>}
       <Lines ui={ui} notice={notice} id={linesId} />
-      {isSanction(notice.kind) && <AppealLink ui={ui} href={appealUrl} />}
+      {isSanction(notice.kind) &&
+        (appeals === null ? <AppealLink ui={ui} href={appealUrl} /> : <AppealSlot ui={ui} notice={notice} appeals={appeals} onOpen={onAppeal} focus={returned} onFocused={onReturned} />)}
       {mustAck && <p className="cw-hint">{t('player.notice.todo.warning')}</p>}
       {failure !== null && (
         <div className="cw-error" role="alert">

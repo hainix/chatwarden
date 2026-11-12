@@ -6,7 +6,7 @@ import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
 // The package entry, bundled the way an adopter's bundler would see it: React and the kit stay outside (they are peers),
-// everything else of ours is in. Minified and gzipped, the JS must stay under 11 KB (lowered from 15 KB when the report dialog became one step, raised from 10 KB for the pace words, 0.1.8) and the stylesheet under 6 KB.
+// everything else of ours is in. Minified and gzipped, the JS must stay under 14 KB (lowered from 15 KB when the report dialog became one step, raised from 10 KB for the pace words, 0.1.8; raised to 14 KB for the appeal dialog, the appeal words and the new notice kinds, 0.1.9) and the stylesheet under 6 KB.
 //
 // Why so small: these components run inside a game, on the player's device, next to the game's own code, and a player waits for
 // them (a notice appears before the next match). The hub is a staff tool on an admin page and has a 72 KB budget; the player
@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 // generous. If the real size nears the budget, trim before raising it.
 
 const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-const JS_BUDGET = 11 * 1024;
+const JS_BUDGET = 14 * 1024;
 const CSS_BUDGET = 6 * 1024;
 
 async function bundle() {
@@ -37,7 +37,7 @@ async function bundle() {
 }
 
 describe('bundle size', () => {
-  it('is under 11 KB gzipped with React and the kit external', async () => {
+  it('is under 14 KB gzipped with React and the kit external', async () => {
     const { bytes, gzip } = await bundle();
     console.log(`player-react bundle: ${bytes} bytes minified, ${gzip} bytes gzipped (budget ${JS_BUDGET})`);
     expect(gzip).toBeLessThan(JS_BUDGET);

@@ -125,6 +125,10 @@ const TITLE: Readonly<Record<string, PlayerText>> = {
   area: 'player.notice.title.area',
   ban: 'player.notice.title.ban',
   report_outcome: 'player.notice.title.report_outcome',
+  rename_required: 'player.notice.title.rename_required',
+  appeal_upheld: 'player.notice.title.appeal_upheld',
+  appeal_reduced: 'player.notice.title.appeal_reduced',
+  appeal_revoked: 'player.notice.title.appeal_revoked',
 };
 const BODY: Readonly<Record<string, PlayerText>> = {
   warning: 'player.notice.body.warning',
@@ -132,6 +136,10 @@ const BODY: Readonly<Record<string, PlayerText>> = {
   area: 'player.notice.body.area',
   ban: 'player.notice.body.ban',
   report_outcome: 'player.notice.body.report_outcome',
+  rename_required: 'player.notice.body.rename_required',
+  appeal_upheld: 'player.notice.body.appeal_upheld',
+  appeal_reduced: 'player.notice.body.appeal_reduced',
+  appeal_revoked: 'player.notice.body.appeal_revoked',
 };
 const KIND: Readonly<Record<string, PlayerText>> = {
   warning: 'player.record.kind.warning',
@@ -144,7 +152,7 @@ export const titleKey = (kind: NoticeKind | string): PlayerText => (Object.hasOw
 export const bodyKey = (kind: NoticeKind | string): PlayerText => (Object.hasOwn(BODY, kind) ? (BODY[kind] as PlayerText) : 'player.notice.body.fallback');
 export const kindKey = (kind: NoticeKind | string): PlayerText => (Object.hasOwn(KIND, kind) ? (KIND[kind] as PlayerText) : 'player.record.kind.fallback');
 
-/** A sanction a player can contest (a thank-you for a report is not one). */
+/** A sanction a player can contest (a thank-you for a report, a required rename and the outcome of an appeal are not one). */
 export const isSanction = (kind: string): boolean => kind === 'warning' || kind === 'chat' || kind === 'area' || kind === 'ban';
 
 /** The facts of a notice, as a term list: the rule, when it was given (the record only), until when, and the reference code. */

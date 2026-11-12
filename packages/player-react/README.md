@@ -20,7 +20,7 @@ exist in 18.3 (`useId`, `useRef`). The unit and interaction tests run on React 1
 only: no run-time import of it, or of the HTTP package, is in the bundle. Node 22.13 or newer for the tooling; the components
 themselves run in a browser and import no `node:` module.
 
-Your server needs `@chatwarden/http` for the routes the components call (`playerRoutes`). The JavaScript is under 11 KB gzipped
+Your server needs `@chatwarden/http` for the routes the components call (`playerRoutes`). The JavaScript is under 14 KB gzipped
 with React external, and the stylesheet under 6 KB.
 
 ## Quick start
@@ -236,10 +236,11 @@ Theming).
 
 | Component | What it shows | Props besides the common ones |
 | --- | --- | --- |
-| `NoticeQueue` | The pending notices, oldest first, one at a time in a modal dialog. A warning has an Acknowledge button; every other notice has Got it. Both call `POST /notices/:id/ack`. Nothing is rendered when there is nothing to show. | `client`, `canShow` (default `true`), `appealUrl`, `refreshKey`, `onAcknowledged(notice)`, `onPendingChange(count)` |
-| `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `refreshKey` |
+| `NoticeQueue` | The pending notices, oldest first, one at a time in a modal dialog. A warning has an Acknowledge button; every other notice has Got it. Both call `POST /notices/:id/ack`. Nothing is rendered when there is nothing to show. | `client`, `canShow` (default `true`), `appealUrl`, `appeals` (`@experimental`, see [Appeals](#appeals)), `refreshKey`, `onAcknowledged(notice)`, `onPendingChange(count)` |
+| `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `appeals` (`@experimental`), `refreshKey` |
 | `RulesPage` | The summary and the numbered rules from `GET /rules`. The numbers are the kit's: a retired rule leaves a gap. | `client`, `refreshKey` |
 | `ReportDialog` | A one-step report: "Report this message?", the line, an optional "Why?" select (the studio's reasons in groups; required in the reason-required flow) and a note behind "Add a note". Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `line`, `targetName`, `extra` (experimental: your own controls in the form) (`onAddDetail` is deprecated and unused) |
+| `AppealDialog` | `@experimental`, new in 0.1.9. "Ask for a second look": one textarea with a live count against 1000 characters, Send and Cancel, an inline message for each refusal, and focus back on the button that opened it. `NoticeQueue` and `MyRecord` open it for you with `appeals`; render it yourself for your own screen. | `client`, `noticeId`, `onClose(sent?)`, `container`, `returnFocusTo` |
 | `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when; or, with `pace`, a pause (slow mode, too many lines, the same line again) and how long to wait, with no referee card. | `until` (epoch ms or `null`), `byModerator`, `refCode`; or `pace` (`{ reason: 'slow_mode' \| 'flood' \| 'duplicate', retryAfterMs }`, `@experimental`, new in 0.1.8: the refusal's own values; the end is worked out once on the first render, and the line is not a live countdown: it shows `player.pace.ready` only if the parent renders again after the wait) |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and
@@ -253,7 +254,7 @@ Theming).
   says why, inline; the main button tries again. If it keeps failing, **Close for now** closes the dialog without acknowledging: the
   notices stay pending and come back on the next refresh (`refreshKey`) or the next release of a hold. A 404 means it is already done,
   so the notice closes. A new notice that arrives while the dialog is open is announced to screen readers (`aria-live="polite"`).
-- **The appeal link.** `appealUrl` makes "Think this is a mistake?" a link on a warning, restriction or ban. It must be an `https:`
+- **The appeal link.** Without `appeals`, `appealUrl` makes "Think this is a mistake?" a link on a warning, restriction or ban. It must be an `https:`
   address or a relative one (`/appeal`); anything else (`http:`, `javascript:`, `//host`, spaces, control characters, a backslash, an
   entity) is left out. It is the same rule hub-react uses for links, and a test runs both on one table.
 - **The report dialog.** Render it when the player chooses to report, and unmount it in `onClose`. A refusal is a result, not an
@@ -267,7 +268,7 @@ Theming).
 
 ### `PlayerClient`
 
-`createPlayerClient({ transport })` gives four methods over the kit's player routes. They resolve with typed values and reject with a `PlayerError`
+`createPlayerClient({ transport })` gives six methods over the kit's player routes. They resolve with typed values and reject with a `PlayerError`
 (`status`, `code`, `retryAfter`). The types are the kit's own (`PlayerNotice`, `ReportResult`, `ReportRefusal`).
 
 | Method | Route |
@@ -276,6 +277,42 @@ Theming).
 | `ack(id)` | `POST /notices/:id/ack` (`true`, or `false` for a notice that is not the caller's or is gone) |
 | `record()` | `GET /record` |
 | `rules()` | `GET /rules` |
+| `appeals()` | `GET /appeals` (`@experimental`): the player's own appeals, only `id`, `noticeId`, `status`, `createdAt` and `decidedAt`. A 404 `PlayerError` while appeals are off. |
+| `fileAppeal(noticeId, statement)` | `POST /appeals` (`@experimental`): `{ ok: true, appeal }`, or `{ ok: false, refused, retryAfter? }` for a 400 (`statement_invalid`), 404 (`not_found`), 409 (`already_appealed`) or 429 (`rate`, `retryAfter` in whole seconds). Any other failure rejects with a `PlayerError`. The statement is sent as typed; the server cleans it. |
+
+### Appeals
+
+New in 0.1.9, `@experimental` until 0.2. Appeals are off until the studio turns them on (`profile.appeals.enabled`, or in the hub). Pass `appeals` to
+`NoticeQueue` and `MyRecord` and "Think this is a mistake?" becomes a button on each warning, restriction and ban: it opens the appeal
+form (in `NoticeQueue`, in place of the notice inside the same dialog; in `MyRecord`, `AppealDialog`). `appealUrl` is not used then. Without
+`appeals` (the default) the `appealUrl` link behaves exactly as in 0.1.7, and no request is made.
+
+```tsx
+<NoticeQueue client={client} appeals />
+<MyRecord client={client} appeals />
+```
+
+- **One appeal for each sanction.** Once one is sent, the same place reads "Appeal sent <date>", and when a moderator has decided it, the
+  outcome in words ("We kept the decision", "We made it lighter", "We removed it"). Change `refreshKey` to load the outcome.
+- **The form.** A textarea with a live count against 1000 characters (counted as the server counts them: trimmed, in characters, an emoji is
+  one). Send is off while it is empty or over the limit (the text is refused, never cut). The text is sent as typed; the server cleans it.
+- **Every refusal in words.** Already appealed, too many appeals for now, no longer appealable (the server gives one answer for "not yours", "gone" and
+  "appeals off"), and an empty or over-long statement; a failure to reach the server says so and keeps the text.
+- **Outcome notices.** `appeal_upheld`, `appeal_reduced` and `appeal_revoked` appear in `NoticeQueue` as plain messages with one "Got it": no
+  referee card, no appeal link, and they are not sanctions. So does `rename_required` ("Please choose a new name"); your own rename screen does the rest.
+  A kind this version does not know shows the generic "A message from the moderators".
+- **Names.** `nameReasonText(t, reason)` (`@experimental`) turns the reason of a refused name check (`name_not_allowed`, `name_profane`) into the
+  sentence to show beside your sign-up field. A key your catalog lacks falls back to the English words.
+
+```ts
+import { createT, en, nameReasonText } from '@chatwarden/player-react';
+import type { NameReason } from '@chatwarden/player-react';
+
+const t = createT(en, 'en');
+const res = await fetch('/player/names/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'big_snerp_99' }) });
+const checked = (await res.json()) as { ok: true } | { ok: false; reason: NameReason };
+if (!checked.ok) console.log(nameReasonText(t, checked.reason));
+```
 
 ### Transports
 
@@ -420,7 +457,7 @@ Colour is used only where it means something: the accent for the player's own na
 ### Size
 
 Measured with React, React DOM and the kit external, minified and gzipped: the chat adds about 8 KB to a page that already has the
-player components, the chat entry on its own is about 15 KB, and `chat.css` is about 2 KB. The main entry stays under its own 11 KB budget.
+player components, the chat entry on its own is about 15 KB, and `chat.css` is about 2 KB. The main entry stays under its own 14 KB budget (raised from 11 KB for the appeal dialog in 0.1.9).
 
 ### The chat names
 

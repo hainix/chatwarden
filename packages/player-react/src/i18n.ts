@@ -1,7 +1,7 @@
 // Every word the player components show is a key in this catalog; components never hold English.
 //
 // Key naming: `player.<area>.<thing>[.<detail>]`, lower camel case segments, for example `player.notice.title.warning`.
-// Areas: error, state, notice, notices, record, rules, restricted, report, chat. The `chat` words live in `chat/words.ts` (`enChat`), so
+// Areas: error, state, notice, notices, record, appeal, name, rules, restricted, report, chat. The `chat` words live in `chat/words.ts` (`enChat`), so
 // the main entry does not carry them; `PlayerText` names them all and the chat box falls back to them when a catalog lacks one.
 // Plural forms add the CLDR category as the last segment: `player.report.remaining.one`, `.other`. A caller asks for the base
 // key with a numeric `count` (`t('player.report.remaining', { count: 3 })`); `.zero` is used for 0 when it exists.
@@ -33,12 +33,20 @@ export const en = {
   'player.notice.title.area': 'You cannot join public rooms',
   'player.notice.title.ban': 'You are banned',
   'player.notice.title.report_outcome': 'Thanks for your report',
+  'player.notice.title.rename_required': 'Please choose a new name',
+  'player.notice.title.appeal_upheld': 'We looked again and kept the decision',
+  'player.notice.title.appeal_reduced': 'We looked again and changed the decision',
+  'player.notice.title.appeal_revoked': 'We looked again and removed the decision',
   'player.notice.title.fallback': 'A message from the moderators',
   'player.notice.body.warning': 'A moderator gave you a warning for something you wrote. You can keep playing.',
   'player.notice.body.chat': 'A moderator turned off your chat. You can still play.',
   'player.notice.body.area': 'A moderator stopped you joining public rooms and matchmaking. You can still play in private rooms.',
   'player.notice.body.ban': 'A moderator banned you from playing.',
   'player.notice.body.report_outcome': 'A moderator looked at your report and took action. We do not share what was done.',
+  'player.notice.body.rename_required': 'A moderator asked you to change your name because it breaks the community rules. Choose a new name to keep playing.',
+  'player.notice.body.appeal_upheld': 'A moderator read your appeal. The original decision stands.',
+  'player.notice.body.appeal_reduced': 'A moderator read your appeal and made the decision lighter. The new decision is on your record.',
+  'player.notice.body.appeal_revoked': 'A moderator read your appeal and took the decision off your record.',
   'player.notice.body.fallback': 'There is a new message about your account.',
   'player.notice.position': 'Notice {n} of {total}',
   'player.notice.rule': 'Rule',
@@ -68,6 +76,30 @@ export const en = {
   'player.record.kind.area': 'Public rooms restriction',
   'player.record.kind.ban': 'Ban',
   'player.record.kind.fallback': 'Notice',
+
+  // Appeals (0.1.9). {when} is a date written in the locale of the component.
+  'player.appeal.title': 'Ask for a second look',
+  'player.appeal.intro': 'Tell us what you think we got wrong. A moderator will read it and decide again.',
+  'player.appeal.label': 'What should we know?',
+  'player.appeal.hint': 'Up to {max} characters. Do not include passwords or personal details.',
+  'player.appeal.send': 'Send appeal',
+  'player.appeal.cancel': 'Cancel',
+  'player.appeal.close': 'Close',
+  'player.appeal.count': '{n} of {max}',
+  'player.appeal.sent': 'Appeal sent. You will get a message here when it has been decided.',
+  'player.appeal.status.open': 'Appeal sent {when}',
+  'player.appeal.status.upheld': 'We kept the decision',
+  'player.appeal.status.reduced': 'We made it lighter',
+  'player.appeal.status.revoked': 'We removed it',
+  'player.appeal.refused.already_appealed': 'This has already been looked at again.',
+  'player.appeal.refused.rate': 'You have sent as many appeals as are allowed for now. Try again later.',
+  'player.appeal.refused.not_found': 'This can no longer be appealed.',
+  'player.appeal.refused.invalid': 'Write a few words, up to {max} characters.',
+  'player.appeal.failed': 'We could not send your appeal. Try again.',
+
+  // The words a sign-up screen shows beside a name field the check refused (`nameReasonText`).
+  'player.name.not_allowed': 'That name is not allowed. Choose another.',
+  'player.name.profane': 'That name is not allowed here. Choose another.',
 
   'player.rules.title': 'Community rules',
   'player.rules.loading': 'Loading the rules',
