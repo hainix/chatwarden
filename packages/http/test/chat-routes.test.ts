@@ -29,7 +29,7 @@ describe('every route and status in the table', () => {
       expect(res.stream).toBeDefined();
       expect(res.headers).toMatchObject({
         'content-type': 'text/event-stream; charset=utf-8',
-        'cache-control': 'no-store',
+        'cache-control': 'no-store, no-transform',
         'x-content-type-options': 'nosniff',
         'x-accel-buffering': 'no',
       });
@@ -86,6 +86,57 @@ describe('every route and status in the table', () => {
       const res = await w.stream(ROOM, w.as('plenk'));
       expect(res.status).toBe(429);
       expect(res.headers?.['retry-after']).toBe('5');
+    });
+
+    it('every stream response, a banned one included, says no-store and no-transform so a body-rewriting middleware leaves it alone', async () => {
+      const w = await routeWorld();
+      const open = await w.stream(ROOM, w.as('plenk'));
+      expect(open.headers?.['cache-control']).toBe('no-store, no-transform');
+      w.join('elsewhere', 'wumbo');
+      await w.sanction('ban', 'elsewhere', 'wumbo', 3_600_000);
+      const banned = await w.stream(ROOM, w.as('wumbo'));
+      expect(banned.headers?.['cache-control']).toBe('no-store, no-transform');
+      // the JSON answers keep plain no-store
+      expect((await w.stream(ROOM, {})).headers?.['cache-control']).toBe('no-store');
+    });
+
+    it('a slow consumer that stays backed up is closed after maxBacklog writes and its response ended', async () => {
+      const w = await routeWorld({ options: { maxBacklog: 3 } });
+      const slow = w.listen(await w.stream(ROOM, w.as('plenk')));
+      const talker = w.listen(await w.stream(ROOM, w.as('wumbo')));
+      slow.sink.backedUp = true; // the connection stops draining
+      for (const text of ['one', 'two', 'three', 'four']) {
+        w.advance(2 * SEC);
+        await w.post(ROOM, 'lines', w.as('wumbo'), { text });
+      }
+      expect(slow.sink.ended).toBe(true);
+      expect(slow.text()).not.toContain('four'); // nothing written after it was dropped
+      expect(w.chat.stats().streams).toBe(1);
+      expect(talker.text()).toContain('four');
+      slow.cancel(); // the adapter's cancel after the end: harmless
+      expect(w.chat.stats().streams).toBe(1);
+    });
+
+    it('a sink that throws on the first frame leaves no stream, timer or slot behind', async () => {
+      const w = await routeWorld();
+      const res = await w.stream(ROOM, w.as('plenk'));
+      const stream = res.stream;
+      if (stream === undefined) throw new Error('not a stream');
+      let ended = false;
+      expect(() =>
+        stream.start({
+          write: () => {
+            throw new Error('socket gone');
+          },
+          end: () => {
+            ended = true;
+          },
+        }),
+      ).not.toThrow();
+      expect(ended).toBe(true);
+      expect(w.chat.stats().streams).toBe(0);
+      // only the seat's grace timer is left; the heartbeat was cancelled with the stream
+      expect(w.pending()).toBe(1);
     });
 
     it('a banned player gets 200 and one bye frame, then the response ends', async () => {

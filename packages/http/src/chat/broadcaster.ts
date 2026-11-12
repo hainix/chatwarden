@@ -387,6 +387,8 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
     heartbeat = null;
     if (closed) return;
     for (const room of [...rooms.values()]) {
+      // The idle-room sweep: a ring is pruned when it is touched, and a quiet room's is not, so the tick touches every one.
+      room.ring.size();
       for (const member of [...room.members.values()]) {
         for (const rec of [...member.streams]) {
           if (rec.sink.ping !== undefined) push(rec, null);

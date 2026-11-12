@@ -53,7 +53,8 @@ const known = (v: unknown): v is string => typeof v === 'string' && v !== '';
 
 const STREAM_HEADERS = {
   'content-type': 'text/event-stream; charset=utf-8',
-  'cache-control': 'no-store',
+  // `no-transform`: a body-rewriting middleware (`compression`) or a proxy holds the first frames back otherwise.
+  'cache-control': 'no-store, no-transform',
   'x-content-type-options': 'nosniff',
   'x-accel-buffering': 'no',
 } as const;
@@ -79,7 +80,9 @@ function optionalText(body: Record<string, unknown>, key: string, max: number): 
  * - `POST /rooms/:room/mute { lineId | ref, on }`: `200 { ok }`.
  * - `POST /rooms/:room/report { lineId, reason?, note? }`: `200 ReportOutcome`.
  * POST bodies must be `application/json`; any other content type is `400`, which is what stops a cross-site form from making a player speak.
- * Every response is `cache-control: no-store`. No route returns a seat, a subject, a report id or a moderator field.
+ * Every response is `cache-control: no-store` (the stream's is `no-store, no-transform`, so a body-rewriting middleware leaves it alone).
+ * No route returns a seat, a subject, a report id or a moderator field. A restriction in the `hello` and `state` frames reads a stored automatic
+ * timeout as a moderator's (`WireRestriction.byModerator`); the refusal of a line is exact.
  * @experimental
  */
 export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options: ChatRoutesOptions): RouteTable {
@@ -212,11 +215,19 @@ export function chatRoutes(cw: Chatwarden, broadcaster: RoomBroadcaster, options
         body: undefined,
         stream: {
           start(sink) {
-            const opened = entered.open({
-              write: (frame) => sink.write(encodeFrame(frame)),
-              ping: () => sink.write(HEARTBEAT),
-              end: () => sink.end(),
-            });
+            let opened: ReturnType<ChatSession['open']>;
+            try {
+              opened = entered.open({
+                write: (frame) => sink.write(encodeFrame(frame)),
+                ping: () => sink.write(HEARTBEAT),
+                end: () => sink.end(),
+              });
+            } catch (err) {
+              // Nothing this `start` took is left held (a throwing `start` gets no cancel): end the response and let the client retry.
+              safeWarn(logger, 'chatwarden.chat_stream_failed', { error: errorClass(err) });
+              sink.end();
+              return () => undefined;
+            }
             // Someone else took the last place between the check and now: end the response, the client backs off and retries.
             if ('refused' in opened) {
               sink.end();

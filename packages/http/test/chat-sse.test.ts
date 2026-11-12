@@ -85,13 +85,13 @@ describe('the stream over real HTTP', () => {
     c.ctl.abort();
   });
 
-  it('headers: text/event-stream, no-store, nosniff, x-accel-buffering no', async () => {
+  it('headers: text/event-stream, no-store and no-transform, nosniff, x-accel-buffering no', async () => {
     const w = await routeWorld();
     const base = await serve(w);
     const c = await connect(base, w.as('plenk'));
     expect(c.res.status).toBe(200);
     expect(c.res.headers.get('content-type')).toBe('text/event-stream; charset=utf-8');
-    expect(c.res.headers.get('cache-control')).toBe('no-store');
+    expect(c.res.headers.get('cache-control')).toBe('no-store, no-transform');
     expect(c.res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(c.res.headers.get('x-accel-buffering')).toBe('no');
     expect(c.res.headers.get('content-encoding')).toBeNull();

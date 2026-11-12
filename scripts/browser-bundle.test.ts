@@ -21,9 +21,12 @@ import { makeHasher } from '@chatwarden/core';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ENTRY = fileURLToPath(new URL('./browser-entry.ts', import.meta.url));
-// 109 KB: the bundle measured 100.4 KB gzip before the chat box's server side (`@chatwarden/http/chat`: broadcaster, routes, wire) joined the
-// entry, and 106.3 KB with it (it adds 5.9 KB). The headroom is about 2.7 KB for the hub controller work that shares this entry.
-const SIZE_BUDGET_GZIP = 109 * 1024;
+const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.url));
+// 103 KB: the bundle measured 98.0 KB gzip once the matcher stopped carrying obscenity (it was 104.2 KB with the English word list in it); the
+// headroom is about 5 KB for the hub controller work that shares this entry. The chat box's server side (`@chatwarden/http/chat`) is
+// browser-SAFE but not something a page ships by default, so it is NOT in this entry and not in this size: it has its own entry
+// (`browser-entry-chat.ts`), bundled below only to prove it stays free of Node imports and runs in a bare context.
+const SIZE_BUDGET_GZIP = 103 * 1024;
 
 const common: BuildOptions = {
   entryPoints: [ENTRY],
@@ -40,6 +43,10 @@ const common: BuildOptions = {
 let esm = '';
 let iife = '';
 let metafile: Metafile;
+// The same entry plus the chat server side (`@chatwarden/http/chat`), for the safety checks only.
+let chatEsm = '';
+let chatIife = '';
+let chatMetafile: Metafile;
 
 beforeAll(async () => {
   for (const pkg of ['core', 'matcher', 'store-memory', 'http']) {
@@ -51,6 +58,11 @@ beforeAll(async () => {
   const b = await build({ ...common, format: 'iife', globalName: 'CW', minify: true });
   iife = b.outputFiles[0]!.text;
   metafile = b.metafile;
+  const c = await build({ ...common, entryPoints: [CHAT_ENTRY], format: 'esm' });
+  chatEsm = c.outputFiles[0]!.text;
+  const d = await build({ ...common, entryPoints: [CHAT_ENTRY], format: 'iife', globalName: 'CW', minify: true });
+  chatIife = d.outputFiles[0]!.text;
+  chatMetafile = d.metafile;
 }, 60_000);
 
 describe('browser bundle: static scan', () => {
@@ -84,14 +96,55 @@ describe('browser bundle: static scan', () => {
     }
   });
 
-  it('bundles @chatwarden/http/chat from its own entry, and none of the Node-side http modules', () => {
+  it('the size entry does not carry the chat server side', () => {
     const inputs = Object.keys(metafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    expect(inputs.some((p) => p.startsWith('packages/http/dist/src/chat/'))).toBe(false);
+  });
+
+  it('bundles @chatwarden/http/chat from its own entry, and none of the Node-side http modules', () => {
+    const inputs = Object.keys(chatMetafile.inputs).map((p) => p.replaceAll('\\', '/'));
     for (const file of ['chat/index', 'chat/broadcaster', 'chat/routes', 'chat/sse', 'chat/wire', 'chat/history', 'chat/random', 'limiter']) {
       expect(inputs, file).toContain(`packages/http/dist/src/${file}.js`);
     }
     for (const nodeSide of ['index', 'player', 'express', 'health', 'webhooks/in', 'webhooks/out', 'webhooks/sign', 'webhooks/fingerprint']) {
       expect(inputs, nodeSide).not.toContain(`packages/http/dist/src/${nodeSide}.js`);
     }
+  });
+
+  it('chat entry: has no node: import or export specifier', () => {
+    expect(chatEsm).not.toMatch(/\b(?:from|import)\s*\(?\s*["']node:/);
+    expect(chatEsm).not.toMatch(/\bexport\s*\*?\s*(?:\{[^}]*\}\s*)?from\s*["']node:/);
+  });
+
+  it('chat entry: has no require, in either build', () => {
+    expect(chatEsm).not.toMatch(/\brequire\b/);
+    expect(chatIife).not.toMatch(/\brequire\b/);
+  });
+
+  it('chat entry: mentions node: only as the argument of the guarded process.getBuiltinModule lookup', () => {
+    const leftover = chatEsm.replaceAll(/\?\.getBuiltinModule\?\.\(\s*["']node:crypto["']\s*\)/g, '');
+    expect(leftover).not.toContain('node:');
+    expect(chatIife.replaceAll(/\?\.getBuiltinModule\?\.\(\s*["']node:crypto["']\s*\)/g, '')).not.toContain('node:');
+  });
+
+  it('chat entry: only ever calls getBuiltinModule through optional chaining, inside a try', () => {
+    const calls = [...chatEsm.matchAll(/getBuiltinModule/g)];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const m of calls) {
+      expect(chatEsm.slice(m.index! - 2, m.index! + 'getBuiltinModule?.('.length)).toBe('?.getBuiltinModule?.(');
+    }
+    const at = chatEsm.indexOf('getBuiltinModule');
+    const before = chatEsm.slice(Math.max(0, at - 600), at);
+    expect(before.lastIndexOf('try')).toBeGreaterThan(before.lastIndexOf('}\n'));
+  });
+
+  it('chat entry: has no bare reference to process, Buffer or module outside the guarded lookup', () => {
+    const code = chatEsm.replaceAll(/\/\/.*$/gm, '').replaceAll(/\/\*[\s\S]*?\*\//g, '');
+    expect(code).not.toMatch(/\bBuffer\b/);
+    expect(code).not.toMatch(/\bmodule\.exports\b/);
+    // The one reference is `globalThis.process`, read into a local that is then only used as `proc?.getBuiltinModule?.(...)`.
+    const procRefs = [...code.matchAll(/\bprocess\b/g)].filter((m) => !code.slice(m.index! - 11).startsWith('globalThis.process'));
+    expect(procRefs.map((m) => code.slice(m.index! - 40, m.index! + 40))).toEqual([]);
   });
 
   it('has no node: import or export specifier', () => {
@@ -378,7 +431,7 @@ describe('browser bundle: runs in a context with no Node globals', () => {
   it('loads the bundle with only browser globals', () => {
     const ctx = browserContext();
     run(ctx, iife);
-    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,httpChat,hubHeadless,matcher,storeMemory');
+    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,hubHeadless,matcher,storeMemory');
     expect(run(ctx, `typeof CW.core.createChatwarden + typeof CW.matcher.LiveTerms + typeof CW.storeMemory.MemoryStore`)).toBe('functionfunctionfunction');
   });
 
@@ -457,7 +510,7 @@ describe('browser bundle: runs in a context with no Node globals', () => {
 
   it('runs the chat broadcaster and routes (@chatwarden/http/chat) in the context: a send, a refusal to its author only, a cross-site post refused, no Buffer', async () => {
     const ctx = browserContext();
-    run(ctx, iife);
+    run(ctx, chatIife);
     const out = JSON.parse(await run<Promise<string>>(ctx, CHAT_SCENARIO)) as Record<string, unknown>;
     expect([out.buffer, out.process]).toEqual(['undefined', 'undefined']);
     expect(out.hello).toBe('event: hello');
