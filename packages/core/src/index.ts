@@ -332,6 +332,7 @@ export {
   SIGNAL_WINDOW_DAYS_MAX,
 } from './signals.js';
 export { countSignals, evaluateThreshold } from './signalCounts.js';
+export type { SignalRefusal } from './signalService.js';
 export type { CountContext, ThresholdResult } from './signalCounts.js';
 export type {
   ResolvedSignalGuards,
