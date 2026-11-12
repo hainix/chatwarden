@@ -17,6 +17,8 @@ import { historyOf, suggest } from './ladder.js';
 import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
 import { resolveLimits } from './limits.js';
 import type { Limits, LimitsInput } from './limits.js';
+import { dismissMany } from './dismissMany.js';
+import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { resolveProfile } from './profile.js';
@@ -295,6 +297,19 @@ export interface Chatwarden {
      * @experimental
      */
     reporterAccuracy(people: readonly SubjectId[]): Map<SubjectId, ReporterAccuracy>;
+    /**
+     * Dismiss ("nothing wrong here") every open report about one person (their case, merged aliases included) or filed by one
+     * reporter, in one call: at most `BULK_DISMISS_MAX` (200) reports, `more: true` when there are more. Each report is closed by the
+     * same path as `decide` (a `no_action` decision with no actions and the standard reason, source `moderator`, its own transaction,
+     * its own `report.closed` event), so a bulk never marks bad faith and never counts toward a suspension. A case another moderator
+     * holds is skipped and counted (`skipped.claimed`) unless `ignoreClaims` (for the staff layer, after it has checked who may take
+     * a case over). `dryRun` counts and writes nothing. Invalid input resolves `{ ok: false, error: 'invalid' }` with nothing written;
+     * a bad `actor` is a `RangeError`; a STORE failure rejects, the reports closed before it stay closed, and running it again
+     * finishes the rest. Writes no audit row: the staff layer records the sweep. Carries subject ids: staff channels only, never send
+     * to a player.
+     * @experimental
+     */
+    dismissMany(input: DismissManyInput): Promise<DismissManyResult>;
   };
   /**
    * Blocked chat lines, from the slur filter's strikes (purged after 30 days). Staff only: the lines are raw chat text
@@ -790,6 +805,36 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     (timer as { unref?: () => void }).unref?.();
   }
 
+  // The one place a decision is made AND announced: `decide` and `dismissMany` both go through it, so a report closed by a bulk
+  // emits exactly the events a single decision does.
+  const decideAnnounced: Chatwarden['decide'] = async (input) => {
+    const { result, committed } = await decisions.decideDetailed(input);
+    if (committed !== null) {
+      try {
+        bus.emit({ type: 'report.closed', reportId: committed.reportId, verdict: committed.verdict, at: committed.at });
+        for (const g of committed.applied) {
+          bus.emit({
+            type: 'sanction.applied',
+            groupId: g.groupId,
+            refCode: g.refCode,
+            kind: g.kind,
+            until: g.until,
+            rule: g.rule,
+            source: g.source,
+            automated: false,
+            target: g.target,
+          });
+        }
+        for (const g of committed.applied) {
+          if (g.gap) bus.emit({ type: 'gap.created', groupId: g.groupId, refCode: g.refCode, at: committed.at, subject: subjects.canonical(g.target) });
+        }
+      } catch (err) {
+        eventFailed(err);
+      }
+    }
+    return result;
+  };
+
   const audit = new AuditService({ store, clock, logger });
   const desk = new CaseDesk({ store, subjects, clock, reasons: () => policy.profileNow().reporting.reasons });
   const reasonBook = new ReasonBook(store);
@@ -847,6 +892,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       },
       reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
       reporterAccuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
+      dismissMany: (input) => dismissMany({ store, subjects, holders: (people) => desk.holders(people), decide: decideAnnounced }, input),
     },
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),
@@ -974,33 +1020,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
     },
-    decide: async (input) => {
-      const { result, committed } = await decisions.decideDetailed(input);
-      if (committed !== null) {
-        try {
-          bus.emit({ type: 'report.closed', reportId: committed.reportId, verdict: committed.verdict, at: committed.at });
-          for (const g of committed.applied) {
-            bus.emit({
-              type: 'sanction.applied',
-              groupId: g.groupId,
-              refCode: g.refCode,
-              kind: g.kind,
-              until: g.until,
-              rule: g.rule,
-              source: g.source,
-              automated: false,
-              target: g.target,
-            });
-          }
-          for (const g of committed.applied) {
-            if (g.gap) bus.emit({ type: 'gap.created', groupId: g.groupId, refCode: g.refCode, at: committed.at, subject: subjects.canonical(g.target) });
-          }
-        } catch (err) {
-          eventFailed(err);
-        }
-      }
-      return result;
-    },
+    decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
     suggest: (subject, level, rule, context) => {
       const now = clock.now();

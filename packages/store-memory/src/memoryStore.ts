@@ -681,10 +681,20 @@ export class MemoryStore implements Store {
   }
 
   listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
-    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const n = Math.min(201, Math.max(1, Math.floor(limit)));
     const wanted = new Set(subjects);
     return this.reports
       .filter((r) => r.status === 'open' && wanted.has(r.targetSubject))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, n)
+      .map((r) => structuredClone(r));
+  }
+
+  listOpenReportsByReporter(reporters: readonly SubjectId[], limit: number): ReportRecord[] {
+    const n = Math.min(201, Math.max(1, Math.floor(limit)));
+    const wanted = new Set(reporters);
+    return this.reports
+      .filter((r) => r.status === 'open' && wanted.has(r.reporterSubject))
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));

@@ -244,3 +244,35 @@ describe('reporterOutcomes on SQLite', () => {
     expect(store.reporterOutcomes(['s_dup', ...filler, 's_dup'], 0)).toEqual([{ reporter: 's_dup', actioned: 0, noAction: 1, badFaith: 0 }]);
   });
 });
+
+describe('listOpenReportsByReporter on SQLite', () => {
+  it('EXPLAIN QUERY PLAN uses a reporter index and does not SCAN kit_reports', () => {
+    const db = memDb();
+    const store = openStore({ db });
+    seed(store, 60);
+    for (const reporters of [['s_rep1'], ['s_rep1', 's_rep2', 's_rep3']]) {
+      const seen = record(db, () => void store.listOpenReportsByReporter(reporters, 50));
+      const hits = seen.filter((x) => /^\s*SELECT/i.test(x.sql) && x.sql.includes('kit_reports'));
+      expect(hits).toHaveLength(1);
+      const plan = planOf(db, hits[0] as Seen).join(' | ');
+      expect(plan).toMatch(/SEARCH kit_reports USING INDEX kit_reports_by_reporter_outcome/);
+      expect(plan).not.toMatch(/SCAN kit_reports/);
+    }
+  });
+
+  it('agrees with the memory store on a mixed set, for one reporter and for many', () => {
+    const db = memDb();
+    const sql = openStore({ db });
+    const mem = new MemoryStore();
+    seq = 0;
+    seed(sql, 80);
+    seq = 0;
+    seed(mem, 80);
+    for (const reporters of [['s_rep3'], ['s_rep3', 's_rep4', 's_rep9'], Array.from({ length: 80 }, (_, i) => `s_rep${i}`)]) {
+      for (const limit of [1, 7, 201]) {
+        const norm = (rows: Array<{ id: string }>) => rows.map((r) => r.id);
+        expect(norm(sql.listOpenReportsByReporter(reporters, limit))).toEqual(norm(mem.listOpenReportsByReporter(reporters, limit)));
+      }
+    }
+  });
+});

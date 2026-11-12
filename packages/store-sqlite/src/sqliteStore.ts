@@ -894,10 +894,22 @@ export class SqliteStore implements Store, TermStore {
 
   listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
     if (subjects.length === 0) return [];
-    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const n = Math.min(201, Math.max(1, Math.floor(limit)));
     const marks = subjects.map(() => '?').join(', ');
     const sql = `SELECT * FROM kit_reports WHERE status = 'open' AND target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+  }
+
+  listOpenReportsByReporter(reporters: readonly SubjectId[], limit: number): ReportRecord[] {
+    if (reporters.length === 0) return [];
+    const n = Math.min(201, Math.max(1, Math.floor(limit)));
+    const unique = [...new Set(reporters)];
+    const marks = unique.map(() => '?').join(', ');
+    // Served by kit_reports_by_reporter_outcome (migration 19): the reporter, then the filing time, with `status` read from the index
+    // before a row is fetched. Named, because without statistics the planner would walk the by-status index (every open report in the
+    // store) and filter by reporter, which is the wrong end of a sweep of one reporter's reports.
+    const sql = `SELECT * FROM kit_reports INDEXED BY kit_reports_by_reporter_outcome WHERE reporter_subject IN (${marks}) AND status = 'open' ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...unique, n).map(reportFromRow));
   }
 
   reporterTally(reporters: readonly SubjectId[]): ReporterTally {

@@ -35,6 +35,8 @@ export const AUDIT_ACTIONS = [
   'reason.toggle',
   'policy.update',
   'policy.reset',
+  'report.dismiss_case',
+  'report.dismiss_reporter',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

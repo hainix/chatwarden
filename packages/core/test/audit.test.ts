@@ -50,6 +50,8 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'reason.toggle',
       'policy.update',
       'policy.reset',
+      'report.dismiss_case',
+      'report.dismiss_reporter',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -94,6 +96,21 @@ describe('cw.audit.record and list', () => {
       expect(rec(cw, { target: { type, ref: 'x1' } })).toBe(true);
     }
     expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 6);
+  });
+
+  it('report.dismiss_case and report.dismiss_reporter take a person target, round-trip, filter, and refuse a detail', async () => {
+    const { cw } = await setup();
+    for (const action of ['report.dismiss_case', 'report.dismiss_reporter'] as const) {
+      expect(rec(cw, { actor: 'mod@example.test', role: 'moderator', action, target: { type: 'person', ref: 's_abc123' } })).toBe(true);
+      // A detail belongs to the policy rows only: the call is refused and nothing is stored for it.
+      const before = cw.audit.list({ limit: 50 }).items.length;
+      expect(rec(cw, { action, target: { type: 'person', ref: 's_abc123' }, detail: { sections: [] } })).toBe(false);
+      expect(cw.audit.list({ limit: 50 }).items).toHaveLength(before);
+      const found = cw.audit.list({ limit: 10, action }).items;
+      expect(found).toHaveLength(1);
+      expect(found[0]).toMatchObject({ action, role: 'moderator', target: { type: 'person', ref: 's_abc123' } });
+      expect('detail' in (found[0] as object)).toBe(false);
+    }
   });
 
   it('lists newest first', async () => {

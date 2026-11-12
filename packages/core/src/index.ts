@@ -159,6 +159,8 @@ export {
   isSanctionActive,
   sanctionGroupView,
 } from './staffViews.js';
+export { BULK_DISMISS_MAX, BULK_REPORTER_SCAN_MAX } from './dismissMany.js';
+export type { DismissManyInput, DismissManyResult, DismissScope } from './dismissMany.js';
 export {
   REPORTER_ACCURACY_BATCH_MAX,
   REPORTER_ACCURACY_MIN_DECIDED,

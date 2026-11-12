@@ -500,12 +500,84 @@ export function teamContract(name: string, make: () => Store): void {
         expect(s.listOpenReportsByPerson(['s_one', 's_two'], 10).map((r) => r.id)).toEqual([b.id, c.id, a.id]);
       });
 
-      it('an empty list matches nobody, the limit is clamped to 1..200', () => {
+      it('an empty list matches nobody, the limit is floored at 1 and capped (see the limit test below)', () => {
         const s = make();
         for (let i = 0; i < 3; i++) s.insertReport(report({ targetSubject: 's_one' }));
         expect(s.listOpenReportsByPerson([], 10)).toEqual([]);
         expect(s.listOpenReportsByPerson(['s_one'], 0)).toHaveLength(1);
         expect(s.listOpenReportsByPerson(['s_one'], 500)).toHaveLength(3);
+      });
+    });
+
+    describe('listOpenReportsByPerson: the limit', () => {
+      it('is clamped to 201, so a caller can ask for 200 and one more', () => {
+        const s = make();
+        for (let i = 0; i < 203; i++) s.insertReport(report({ targetSubject: 's_one' }));
+        expect(s.listOpenReportsByPerson(['s_one'], 201)).toHaveLength(201);
+        expect(s.listOpenReportsByPerson(['s_one'], 5000)).toHaveLength(201);
+        expect(s.listOpenReportsByPerson(['s_one'], 200)).toHaveLength(200);
+        expect(s.listOpenReportsByPerson(['s_one'], 200.9)).toHaveLength(200);
+      });
+    });
+
+    describe('listOpenReportsByReporter', () => {
+      const list = (s: Store, reporters: string[], limit: number) => {
+        if (s.listOpenReportsByReporter === undefined) throw new Error('this store has no listOpenReportsByReporter');
+        return s.listOpenReportsByReporter(reporters, limit);
+      };
+
+      it('returns only open reports of those reporters, newest first, ties by id descending', () => {
+        const s = make();
+        const a = report({ reporterSubject: 's_r1', createdAt: NOW + 1 });
+        const b = report({ reporterSubject: 's_r2', createdAt: NOW + 3 });
+        const c = report({ reporterSubject: 's_r1', createdAt: NOW + 2 });
+        const tie1 = report({ reporterSubject: 's_r1', createdAt: NOW + 7 });
+        const tie2 = report({ reporterSubject: 's_r1', createdAt: NOW + 7 });
+        const other = report({ reporterSubject: 's_r3', createdAt: NOW + 4 });
+        const gone = report({ reporterSubject: 's_r1', createdAt: NOW + 5 });
+        for (const r of [a, b, c, tie1, tie2, other, gone]) s.insertReport(r);
+        s.closeReport(gone.id, 'dismissed', false, 'mod', NOW + 9, 'n');
+        expect(list(s, ['s_r1'], 10).map((r) => r.id)).toEqual([tie2.id, tie1.id, c.id, a.id]);
+        expect(list(s, ['s_r1', 's_r2'], 10).map((r) => r.id)).toEqual([tie2.id, tie1.id, b.id, c.id, a.id]);
+      });
+
+      it('returns whole records and never a report filed AGAINST the reporter', () => {
+        const s = make();
+        const mine = report({ reporterSubject: 's_r1', note: 'rude', excerpt: [] });
+        const against = report({ reporterSubject: 's_other', targetSubject: 's_r1' });
+        s.insertReport(mine);
+        s.insertReport(against);
+        expect(list(s, ['s_r1'], 10)).toEqual([{ ...mine, reportedReason: null, detailAt: null, status: 'open', badFaith: false, actionedAt: null, actionedBy: null, modNote: null, badFaithEvidence: null }]);
+      });
+
+      it('an empty list matches nobody; unknown, similar and injection ids match nothing', () => {
+        const s = make();
+        s.insertReport(report({ reporterSubject: 's_r1' }));
+        expect(list(s, [], 10)).toEqual([]);
+        expect(list(s, ['s_zzz'], 10)).toEqual([]);
+        expect(list(s, ['s_r'], 10)).toEqual([]);
+        expect(list(s, ["s_r1' OR 1=1 --"], 10)).toEqual([]);
+      });
+
+      it('the limit is clamped to 1..201 and a fraction is floored; a repeated id does not repeat a report', () => {
+        const s = make();
+        for (let i = 0; i < 203; i++) s.insertReport(report({ reporterSubject: 's_r1' }));
+        expect(list(s, ['s_r1'], 0)).toHaveLength(1);
+        expect(list(s, ['s_r1'], -4)).toHaveLength(1);
+        expect(list(s, ['s_r1'], 2.9)).toHaveLength(2);
+        expect(list(s, ['s_r1'], 201)).toHaveLength(201);
+        expect(list(s, ['s_r1'], 9999)).toHaveLength(201);
+        expect(list(s, ['s_r1', 's_r1'], 5)).toHaveLength(5);
+        expect(new Set(list(s, ['s_r1', 's_r1'], 201).map((r) => r.id)).size).toBe(201);
+      });
+
+      it('a closed report is gone from the list at once', () => {
+        const s = make();
+        const a = report({ reporterSubject: 's_r1' });
+        s.insertReport(a);
+        expect(list(s, ['s_r1'], 10)).toHaveLength(1);
+        s.closeReport(a.id, 'actioned', false, 'mod', NOW + 9, 'n');
+        expect(list(s, ['s_r1'], 10)).toEqual([]);
       });
     });
 
