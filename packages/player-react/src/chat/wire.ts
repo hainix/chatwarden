@@ -65,6 +65,8 @@ export type ChatFrame =
       heartbeatMs: number;
       /** `cw.summary`: the profile's one-line standard. */
       summary: string;
+      /** The server's clock when this hello was written, epoch ms, so a client can read `restriction.until` (the server's time) against it whatever its own clock says. Absent from an older server. */
+      now?: number;
       restriction: WireRestriction | null;
       /** Recent lines the viewer may see, oldest first. */
       lines: WireLine[];
@@ -221,6 +223,7 @@ function readHello(o: Bag): ChatFrame | null {
   if (!isStr(epoch) || !isStr(room) || !isStr(youName) || !isStr(summary)) return null;
   if (!isNum(maxLength) || !Number.isInteger(maxLength) || maxLength < 1) return null;
   if (restriction === undefined || muted === undefined || !Array.isArray(lines)) return null;
+  const serverNow = own(o, 'now');
   return {
     type: 'hello',
     v: CHAT_WIRE_VERSION,
@@ -233,6 +236,7 @@ function readHello(o: Bag): ChatFrame | null {
     restriction,
     lines: (lines as unknown[]).map(readLine).filter((l): l is WireLine => l !== null),
     muted,
+    ...(isNum(serverNow) && serverNow >= 0 ? { now: serverNow } : {}),
   };
 }
 

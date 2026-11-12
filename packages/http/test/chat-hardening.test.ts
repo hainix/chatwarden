@@ -117,6 +117,17 @@ describe('hello', () => {
     expect(quick.attend(ROOM, 'plenk').heard.of('hello')[0]?.heartbeatMs).toBe(5000);
   });
 
+  it('carries now, the server clock in ms from the injected clock, so a client can read a restriction against it', async () => {
+    const w = await chatWorld();
+    const a = w.attend(ROOM, 'plenk');
+    expect(a.heard.of('hello')[0]?.now).toBe(NOW);
+    w.advance(90_000);
+    const b = w.attend(ROOM, 'vlemmo');
+    expect(b.heard.of('hello')[0]?.now).toBe(NOW + 90_000);
+    // `now` is a whole number of ms and nothing else about the server's clock leaks (no timezone, no offset)
+    expect(Number.isInteger(b.heard.of('hello')[0]?.now)).toBe(true);
+  });
+
   it('heartbeatMs is capped at 60 s: 60 000 builds, 60 001 is a RangeError that does not echo it', async () => {
     const w = await chatWorld({ noBroadcaster: true });
     expect(() => createRoomBroadcaster(w.cw, { heartbeatMs: 60_000 })).not.toThrow();

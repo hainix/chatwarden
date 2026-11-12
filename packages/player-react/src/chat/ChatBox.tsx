@@ -208,6 +208,8 @@ export function ChatBox(props: ChatBoxProps) {
         if (frame.type === 'hello' || frame.type === 'state') setRefusedRestriction(null);
         if (frame.type === 'notices') latest.current.onNoticePending?.();
         if (frame.type === 'line') skew.current = frame.line.at - now.current();
+        // The server says what time it is: that is the clock `until` is in (a hello from an older server has none, and skew stays as it was).
+        if (frame.type === 'hello' && frame.now !== undefined) skew.current = frame.now - now.current();
         dispatch({ type: 'frame', frame });
       },
       status: (status, why) => {

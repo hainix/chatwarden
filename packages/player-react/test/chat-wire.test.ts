@@ -179,6 +179,12 @@ describe('what a frame may carry', () => {
     expect(JSON.stringify(out)).not.toMatch(/extra|sneaky|seat|account/);
   });
 
+  it('now, the server clock, is kept when it is a finite number and left out otherwise', () => {
+    expect(readFrame({ ...hello(), now: 1_800_000_000_000 })).toEqual({ ...hello(), now: 1_800_000_000_000 });
+    for (const bad of ['soon', null, Number.NaN, Number.POSITIVE_INFINITY, -1, {}]) expect(readFrame({ ...hello(), now: bad }), String(bad)).toEqual(hello());
+    expect(readFrame(hello())).not.toHaveProperty('now');
+  });
+
   it('a hello with no heartbeatMs (an older server) gets the default 20 s', () => {
     const raw: Record<string, unknown> = { ...hello() };
     delete raw.heartbeatMs;

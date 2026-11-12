@@ -90,7 +90,7 @@ describe('delivery', () => {
     const w = await chatWorld();
     const a = w.attend(ROOM, 'plenk');
     const hello = a.heard.of('hello')[0];
-    expect(Object.keys(hello ?? {}).sort()).toEqual(['epoch', 'heartbeatMs', 'lines', 'maxLength', 'muted', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
+    expect(Object.keys(hello ?? {}).sort()).toEqual(['epoch', 'heartbeatMs', 'lines', 'maxLength', 'muted', 'now', 'restriction', 'room', 'summary', 'type', 'v', 'you']);
     expect(hello).toMatchObject({ type: 'hello', v: 1, room: ROOM, you: { name: 'plenk' }, restriction: null, lines: [], muted: [] });
     expect(hello?.maxLength).toBe(w.cw.limits.chatMaxLength);
     expect(hello?.maxLength).toBe(200);

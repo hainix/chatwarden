@@ -531,6 +531,7 @@ export function createRoomBroadcaster(cw: Chatwarden, options: RoomBroadcasterOp
       you: { name: member.name },
       maxLength: cw.limits.chatMaxLength,
       heartbeatMs,
+      now: now(),
       summary: cw.summary,
       restriction: restrictionOf(room, member),
       lines,

@@ -196,7 +196,7 @@ describe('a restriction with a client clock that is wrong', () => {
     expect(screen.queryByText('That message was not sent.')).toBeNull();
   });
 
-  it('after a live line, the server\'s clock is known: a restriction lands against it, not against the player\'s clock', async () => {
+  it("after a live line, the server's clock is known: a restriction lands against it, not against the player's clock", async () => {
     renderUi(box(w.transportFor('snerp'), { now: () => T0 + AHEAD }));
     await screen.findByRole('textbox', { name: 'Message' });
     await act(async () => {
@@ -210,7 +210,36 @@ describe('a restriction with a client clock that is wrong', () => {
     expect(screen.getByText(/in 1 minute|in 60 seconds/)).toBeInTheDocument();
   });
 
-  it('a restriction the player\'s clock agrees with is unchanged', async () => {
+  it('the hello carries the server clock: a restriction in the first hello is read against it, with no line seen yet', async () => {
+    await w.sanction('chat', 'lobby', 'snerp', 60_000);
+    renderUi(box(w.transportFor('snerp'), { now: () => T0 + AHEAD }));
+    expect(await screen.findByText(/A moderator turned off your chat until/)).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
+    expect(screen.getByText(/in 1 minute/)).toBeInTheDocument();
+  });
+
+  it("a hello without now (an older server) reads the player's own clock", async () => {
+    await w.sanction('chat', 'lobby', 'snerp', 60_000);
+    const inner = w.transportFor('snerp');
+    const stripped: ChatTransport = {
+      open: (room, events) =>
+        inner.open(room, {
+          status: events.status,
+          frame: (f) => {
+            if (f.type === 'hello') {
+              const copy: Record<string, unknown> = { ...f };
+              delete copy.now;
+              events.frame(copy as never);
+            } else events.frame(f);
+          },
+        }),
+    };
+    renderUi(box(stripped, { now: () => T0 + AHEAD }));
+    // the clock runs ahead and nothing says otherwise: the restriction looks over, so the input is offered
+    expect(await screen.findByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+  });
+
+  it("a restriction the player's clock agrees with is unchanged", async () => {
     await w.sanction('chat', 'lobby', 'snerp', 60_000);
     renderUi(box(w.transportFor('snerp')));
     expect(await screen.findByText(/A moderator turned off your chat until/)).toBeInTheDocument();

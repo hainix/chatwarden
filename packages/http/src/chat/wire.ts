@@ -83,6 +83,8 @@ export type ChatFrame =
       heartbeatMs: number;
       /** `cw.summary`: the profile's one-line standard. */
       summary: string;
+      /** The server's clock when this hello was written, epoch ms, so a client can read `restriction.until` (the server's time) against it whatever its own clock says. Absent from an older server. */
+      now?: number;
       restriction: WireRestriction | null;
       /** Recent lines the viewer may see, oldest first. */
       lines: WireLine[];
