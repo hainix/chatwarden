@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
@@ -55,5 +56,80 @@ describe('outside the browser-safe packages', () => {
     expect(await messages("import { DatabaseSync } from 'node:sqlite';\nexport const a = DatabaseSync;\n", 'packages/store-sqlite/src/x.ts')).toEqual([]);
     expect(await messages("import { createHash } from 'node:crypto';\nexport const a = createHash;\n", 'packages/core/test/x.ts')).toEqual([]);
     expect(await messages("export const a = await import('node:crypto');\n", 'packages/store-memory/test/x.ts')).toEqual([]);
+  });
+});
+
+// The AI never writes a sanction, a strike, a mute or a notice (design: the ceilings hold in code). The way that is kept by construction: nothing
+// under packages/core/src/ai imports the modules that write them. The same folder is still browser-safe (the override must keep that ban).
+const AI_SRC = ['packages/core/src/ai/x.ts', 'packages/core/src/ai/sub/x.ts'];
+const WRITERS = ['decide', 'sanctions', 'strikes', 'mutes', 'notices'];
+const imp = (from: string): string => `import { x } from '${from}';\nexport const a = x;\n`;
+
+describe.each(AI_SRC)('%s: the AI folder may not import what writes a sanction', (file) => {
+  const up = file.endsWith('sub/x.ts') ? '../../' : '../';
+
+  it.each(WRITERS)('the lint rule rejects an import of %s from the ai folder, with or without the extension', async (w) => {
+    expect(await messages(imp(`${up}${w}.js`), file)).toHaveLength(1);
+    expect(await messages(imp(`${up}${w}`), file)).toHaveLength(1);
+  });
+
+  it.each([
+    ["import type { X } from '../decide.js';\nexport type A = X;\n", 'a type-only import of decide'],
+    ["export { x } from '../sanctions.js';\n", 'a re-export from sanctions'],
+    ["export * from '../notices.js';\n", 'a star re-export from notices'],
+    ["export const a = await import('../strikes.js');\n", 'a dynamic import of strikes'],
+    ["export const a = await import('../mutes.js');\n", 'a dynamic import of mutes'],
+    ["export const a = await import('../../decide.js');\n", 'a dynamic import of decide by a deeper path'],
+    ["import { x } from '../../decide.js';\nexport const a = x;\n", 'a deeper relative path to decide'],
+  ])('refuses %s (%s)', async (code) => {
+    expect((await messages(code, file)).length).toBeGreaterThan(0);
+  });
+
+  it('says why', async () => {
+    expect((await messages(imp(`${up}decide.js`), file)).join('\n')).toMatch(/AI never writes/);
+  });
+
+  it.each([
+    ["import type { Store } from '../types.js';\nexport type A = Store;\n", 'the shared types'],
+    ["import { sha256Hex } from '../crypto.js';\nexport const a = sha256Hex;\n", 'the crypto helper'],
+    ["import { x } from './worker.js';\nexport const a = x;\n", 'a sibling in the AI folder'],
+    ["import { x } from '../audit.js';\nexport const a = x;\n", 'the audit trail (the AI writes its own audit rows)'],
+    ["import { x } from '../decideHelpers.js';\nexport const a = x;\n", 'a name that starts like decide'],
+    ["import { x } from '../noticesView.js';\nexport const a = x;\n", 'a name that starts like notices'],
+    ["import { x } from '../dismissMany.js';\nexport const a = x;\n", 'a module that is not in the list'],
+    ["export const a = await import('./lazy.js');\n", 'a dynamic relative import'],
+  ])('allows %s (%s)', async (code) => {
+    expect(await messages(code, file)).toEqual([]);
+  });
+
+  it('still refuses a Node builtin (the override keeps the browser-safe ban)', async () => {
+    expect((await messages("import { createHash } from 'node:crypto';\nexport const a = createHash;\n", file)).length).toBeGreaterThan(0);
+    expect((await messages("import { x } from 'fs';\nexport const a = x;\n", file)).length).toBeGreaterThan(0);
+    expect((await messages("export const a = await import('node:fs');\n", file)).length).toBeGreaterThan(0);
+    expect((await messages("export const a = await import('fs/promises');\n", file)).length).toBeGreaterThan(0);
+  });
+});
+
+describe('outside the AI folder the same imports are fine', () => {
+  it.each(['packages/core/src/x.ts', 'packages/core/src/chatwarden.ts', 'packages/core/test/ai/x.ts', 'packages/http/src/x.ts', 'packages/hub-react/src/x.ts'])(
+    '%s may import decide, sanctions, strikes, mutes and notices',
+    async (file) => {
+      for (const w of WRITERS) expect(await messages(imp(`../${w}.js`), file)).toEqual([]);
+    },
+  );
+
+  it('a sibling folder that merely starts like ai is not the AI folder', async () => {
+    expect(await messages(imp('../decide.js'), 'packages/core/src/aiding/x.ts')).toEqual([]);
+  });
+});
+
+describe('the rule names exactly the five modules', () => {
+  it('refuses the five and no sixth: every other module of core/src can be imported from the AI folder', async () => {
+    const names = readdirSync(`${root}packages/core/src`)
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => f.replace(/\.ts$/, ''));
+    const refused: string[] = [];
+    for (const n of names) if ((await messages(imp(`../${n}.js`), 'packages/core/src/ai/x.ts')).length > 0) refused.push(n);
+    expect(refused.sort()).toEqual([...WRITERS].sort());
   });
 });
