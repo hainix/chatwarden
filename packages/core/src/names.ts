@@ -61,3 +61,61 @@ export function resolveNames(input: NameSettings | undefined, path = 'names'): R
   }
   return out;
 }
+
+/** Most kept blocked names per person in an hour. */
+export const NAME_EVIDENCE_PER_PERSON_HOUR = 5;
+/** Most kept blocked names an hour, over everyone, in this process. */
+export const NAME_EVIDENCE_PER_HOUR = 200;
+/** The window both caps count over: a row leaves it exactly an hour after it was kept. */
+export const NAME_EVIDENCE_WINDOW_MS = 3_600_000;
+/** Most characters of a blocked name that are kept (a name is short; this bounds what a hostile caller can make the table hold). */
+export const NAME_EVIDENCE_MAX_LENGTH = 200;
+
+/** The name with underscores and digits turned into spaces: the second view the profanity filter reads (`big_snerp_99` is `big snerp  `). */
+export function profanityView(name: string): string {
+  return name.replace(/[_\p{Nd}]/gu, ' ');
+}
+
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * The copy of a blocked name that is kept: NUL removed, a lone surrogate (which a database would not round-trip) replaced by U+FFFD, cut to
+ * {@link NAME_EVIDENCE_MAX_LENGTH} characters without leaving half an emoji. Only the first `2 * MAX` characters are even looked at.
+ */
+export function evidenceName(name: string): string {
+  const head = name.slice(0, NAME_EVIDENCE_MAX_LENGTH * 2).replaceAll('\u0000', '').replace(LONE_SURROGATE, '\uFFFD');
+  if (head.length <= NAME_EVIDENCE_MAX_LENGTH) return head;
+  const cut = head.slice(0, NAME_EVIDENCE_MAX_LENGTH);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+/**
+ * The hourly caps on kept blocked names: {@link NAME_EVIDENCE_PER_PERSON_HOUR} per key and {@link NAME_EVIDENCE_PER_HOUR} overall, in memory,
+ * over a sliding window. A key is whatever the caller counts a person by. `allow` only asks; `record` counts a row that really was kept, so a
+ * failed write never uses the cap. Holds at most 200 timestamps, however many names are probed. A time in the future (the clock moved back)
+ * no longer counts.
+ */
+export class NameEvidenceLimiter {
+  private all: number[] = [];
+  private readonly by = new Map<string, number[]>();
+
+  allow(key: string, now: number): boolean {
+    this.all = this.all.filter((t) => live(t, now));
+    if (this.all.length >= NAME_EVIDENCE_PER_HOUR) return false;
+    const mine = (this.by.get(key) ?? []).filter((t) => live(t, now));
+    return mine.length < NAME_EVIDENCE_PER_PERSON_HOUR;
+  }
+
+  record(key: string, now: number): void {
+    this.all.push(now);
+    for (const [k, stamps] of this.by) {
+      const kept = stamps.filter((t) => live(t, now));
+      if (kept.length === 0) this.by.delete(k);
+      else this.by.set(k, kept);
+    }
+    this.by.set(key, [...(this.by.get(key) ?? []), now]);
+  }
+}
+
+const live = (t: number, now: number): boolean => t <= now && now - t < NAME_EVIDENCE_WINDOW_MS;

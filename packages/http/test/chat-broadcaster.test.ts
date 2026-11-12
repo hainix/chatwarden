@@ -389,6 +389,7 @@ describe('names', () => {
           check: () => {
             throw new RangeError('the matcher broke on zorbak');
           },
+          flagged: () => false,
         };
         return f;
       },

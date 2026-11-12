@@ -25,6 +25,8 @@ import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkPace, mergePace } from './pace.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
+import { NameService } from './nameService.js';
+import type { NameCheckResult } from './names.js';
 import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, PlayerAppeal } from './appeals.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
@@ -504,12 +506,24 @@ export interface Chatwarden {
   on: Subscribe;
   names: {
     /**
-     * May a player use this as a name (a handle, a table or deck name)? Reads it with the matcher's name rules
-     * (`Zorbak_99` is caught, not only `zorbak`). `rule` is the Community Rule the slur filter cites
-     * (`autoRestrictRule`). No matcher, and a matcher that fails (logged, class only), both let the name through.
-     * Throws a TypeError for a value that is not a string.
+     * May a player use this as a name (a handle, a table or deck name)? Synchronous, never echoes the name, never throws for a string (a
+     * non-string is still a TypeError). Reads it with the matcher's name rules (`Zorbak_99` is caught, not only `zorbak`); with
+     * `names.profanity` it also runs the profanity filter on the name and on the name with underscores and digits turned into spaces, and a
+     * hit is `name_profane` (a matcher hit wins). `rule` is the Community Rule the slur filter cites (`autoRestrictRule`) for both. No
+     * matcher, a matcher that fails (logged, class only) and a filter that fails (`chatwarden.names_filter_failed`) all let the name through.
+     *
+     * `opts.who` is the caller, as the doors take it. It is used ONLY to tie kept evidence to a person (found, never created); it never
+     * changes the answer. A blocked name is kept (`kit_blocked_names`) only when `names.keepBlocked` is on: at most 5 an hour per person
+     * (per `who`, or per name when there is none) and 200 an hour overall, in memory per process; past that the check still answers and
+     * nothing more is stored. An allowed name is never stored, and a name is never logged.
      */
-    check(text: string): { ok: true } | { ok: false; reason: 'name_not_allowed'; rule: number };
+    check(text: string, opts?: { who?: RawWho }): NameCheckResult;
+    /**
+     * Would the matcher refuse this as a name? The evidence-free read for staff screens and routes (a list of handles): the matcher only,
+     * no profanity pass, nothing stored whatever `names.keepBlocked` says, no person looked up. False for no matcher, for a non-string and
+     * when the matcher throws (logged once a minute, class only). Never throws.
+     */
+    flagged(text: string): boolean;
   };
   /**
    * The AI read and recommend service. Always present: without an `ai` option (or at level 0) it answers as if there were no AI. A
@@ -761,7 +775,12 @@ function buildProfanityFilter(opts: ChatwardenOptions, config: ProfanityConfig):
   if (config.mode === 'allow') return undefined;
   if (opts.profanity !== undefined) return opts.profanity;
   if (opts.profanityPackage === undefined) return undefined;
-  const built = opts.profanityPackage.createProfanityFilter(config);
+  return buildPackageFilter(opts.profanityPackage, config);
+}
+
+/** The filter a profanity package builds from the resolved config; a non-filter is a TypeError. */
+function buildPackageFilter(pkg: NonNullable<ChatwardenOptions['profanityPackage']>, config: ProfanityConfig): ProfanityFilter {
+  const built = pkg.createProfanityFilter(config);
   if (typeof built !== 'object' || built === null || typeof built.apply !== 'function') {
     throw new TypeError('profanityPackage.createProfanityFilter must return a filter with an apply(text) method');
   }
@@ -1128,6 +1147,34 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     onGranted: (appeal, outcome) => void (outcome === 'revoke' ? ai.markReversed(appeal.reportId as string, { corrective: true }) : ai.markReversed(appeal.reportId as string)),
   });
 
+  // Names. The profanity filter for a name is the kit's own when the profile has one; otherwise (a profile that allows swearing in chat) it is
+  // built from the package on first use, so `names.profanity` works whatever the chat profile does with swearing. A package that cannot build
+  // one fails once and is remembered: the name check lets names through and logs the class.
+  let nameFilter: { filter: ProfanityFilter | undefined } | { error: unknown } | undefined;
+  const filterForNames = (): ProfanityFilter | undefined => {
+    if (profanity !== undefined) return profanity;
+    if (nameFilter === undefined) {
+      try {
+        nameFilter = { filter: opts.profanity ?? (opts.profanityPackage === undefined ? undefined : buildPackageFilter(opts.profanityPackage, baseProfile.profanity)) };
+      } catch (error) {
+        nameFilter = { error };
+      }
+    }
+    if ('error' in nameFilter) throw nameFilter.error;
+    return nameFilter.filter;
+  };
+  const nameService = new NameService({
+    store,
+    clock,
+    logger,
+    hasher,
+    rule: autoRestrictRule,
+    matcher: opts.matcher,
+    settings: () => policy.profileNow().names,
+    filter: filterForNames,
+    personOf,
+  });
+
   return {
     ai,
     signals: {
@@ -1314,18 +1361,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     on: bus.on,
     names: {
-      check: (text) => {
-        if (typeof text !== 'string') throw new TypeError('names.check: the name must be a string');
-        const m = opts.matcher;
-        if (m === undefined) return { ok: true };
-        try {
-          const hit = typeof m.matchName === 'function' ? m.matchName(text) : m.match(text);
-          return hit === null ? { ok: true } : { ok: false, reason: 'name_not_allowed', rule: autoRestrictRule };
-        } catch (err) {
-          safeWarn(logger, 'chatwarden.names_matcher_failed', { error: err instanceof Error ? err.name : typeof err });
-          return { ok: true };
-        }
-      },
+      check: (text, o) => nameService.check(text, o),
+      flagged: (text) => nameService.flagged(text),
     },
     rules,
     get profile() {
