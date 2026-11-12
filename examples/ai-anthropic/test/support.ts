@@ -8,8 +8,8 @@ export const policy = { profile: PRESETS.standard, rules: defineRules(starterRul
 
 const chosen: ChosenLines = {
   lines: [
-    { ref: 'L1', lineId: 'line-1', secondsIn: 0, who: 'P2', text: 'please stop', blocked: false, byReported: false },
-    { ref: 'L2', lineId: 'line-2', secondsIn: 4, who: 'P1', text: 'go glarn yourself you useless drakkuun', blocked: false, byReported: true },
+    { ref: 'L1', lineId: 'line-1', secondsIn: 0, who: 'P2', text: 'please stop', blocked: false, filtered: false, byReported: false },
+    { ref: 'L2', lineId: 'line-2', secondsIn: 4, who: 'P1', text: 'go glarn yourself you useless drakkuun', blocked: false, filtered: false, byReported: true },
   ],
   truncated: false,
   people: [
