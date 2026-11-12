@@ -1001,7 +1001,8 @@ export class SqliteStore implements Store, TermStore {
         .prepare(
           `SELECT rule, COUNT(*) AS decided,
                   SUM(agreement = 'agree') AS agree, SUM(agreement = 'override') AS override, SUM(agreement = 'none') AS none,
-                  SUM(ai_verdict IN ('upheld', 'noted') AND (verdict = 'no_action' OR reversed = 1)) AS false_positives
+                  SUM(ai_verdict IN ('upheld', 'noted') AND (verdict = 'no_action' OR reversed = 1)) AS false_positives,
+                  SUM(CASE WHEN json_valid(detail_json) THEN COALESCE(json_extract(detail_json, '$.oneClick'), 0) = 1 ELSE 0 END) AS one_click
            FROM kit_ai_outcomes WHERE decided_at >= ? GROUP BY rule`,
         )
         .all(since),
@@ -1014,6 +1015,7 @@ export class SqliteStore implements Store, TermStore {
         override: Number(r.override),
         none: Number(r.none),
         falsePositives: Number(r.false_positives),
+        oneClick: Number(r.one_click),
       }))
       .sort((a, b) => compareRules(a.rule, b.rule));
   }

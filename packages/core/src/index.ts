@@ -289,6 +289,7 @@ export {
 } from './decide.js';
 export type {
   DecisionAction,
+  DecisionAiEcho,
   DecisionGroup,
   DecisionInput,
   DecisionResult,
@@ -370,3 +371,7 @@ export type {
 } from './ai/service.js';
 export { createFakeModerationAI, fakeRead, FAKE_USAGE } from './ai/fake.js';
 export type { FakeCallContext, FakeModerationAI, FakeScript, FakeStep } from './ai/fake.js';
+export { agreementOf, compareSteps } from './ai/agreement.js';
+export type { Agreement, HumanDecision, StepLike } from './ai/agreement.js';
+export { AI_EXAMPLES_MIN } from './ai/casebook.js';
+export type { AiOutcomeArgs, AiOutcomeHook } from './ai/casebook.js';

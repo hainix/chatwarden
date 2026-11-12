@@ -623,9 +623,10 @@ export class MemoryStore implements Store {
     const by = new Map<string | null, AiStatsRow>();
     for (const r of this.aiOutcomes.values()) {
       if (r.decidedAt < since) continue;
-      const row = by.get(r.rule) ?? { rule: r.rule, decided: 0, agree: 0, override: 0, none: 0, falsePositives: 0 };
+      const row = by.get(r.rule) ?? { rule: r.rule, decided: 0, agree: 0, override: 0, none: 0, falsePositives: 0, oneClick: 0 };
       row.decided += 1;
       row[r.agreement] += 1;
+      if (r.detail.oneClick) row.oneClick += 1;
       if ((r.aiVerdict === 'upheld' || r.aiVerdict === 'noted') && (r.verdict === 'no_action' || r.reversed)) row.falsePositives += 1;
       by.set(r.rule, row);
     }

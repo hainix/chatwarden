@@ -385,6 +385,8 @@ export interface AiStatsRow {
   override: number;
   none: number;
   falsePositives: number;
+  /** Decisions that were a one-click accept of the AI's pre-fill (the outcome detail's `oneClick`). */
+  oneClick: number;
 }
 
 /**

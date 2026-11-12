@@ -754,6 +754,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     limits: limits.reports,
   });
   const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
+  // The AI service is built after the audit trail it writes to; a decision reaches it through this late binding.
+  const aiRef: { service?: AiService } = {};
   const decisions = new DecisionService({
     store,
     subjects,
@@ -763,6 +765,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     index: sanctions,
     logger,
     reporterFeedback: limits.reporterFeedback,
+    aiOutcome: (args) => aiRef.service?.outcomeOf(args) ?? null,
   });
 
   // The person behind a player's connection details, FOUND and never created. An IP alone finds nobody.
@@ -854,6 +857,15 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       } catch (err) {
         eventFailed(err);
       }
+      // A decision recorded against an AI read leaves one audit row, written by the moderator (best effort: it never fails the decision).
+      const recorded = committed.aiOutcome;
+      if (recorded !== null && recorded.role !== null) {
+        try {
+          audit.record({ actor: recorded.actor, role: recorded.role, action: 'ai.outcome', target: { type: 'report', ref: committed.reportId } });
+        } catch (err) {
+          eventFailed(err);
+        }
+      }
     }
     return result;
   };
@@ -882,7 +894,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           suggest: (subject, level, rule, context) => suggest(policy.profileNow(), historyOf(store, subjects, subject, clock.now()), level, rule, clock.now(), context),
           subscribe: bus.on,
           audit: (input) => audit.record(input),
+          exampleRetentionMs: () => retentionPolicy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
         });
+  aiRef.service = aiService;
   const ai: AiFacade = aiService ?? createInertAi();
 
   return {

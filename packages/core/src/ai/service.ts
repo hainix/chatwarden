@@ -5,12 +5,17 @@ import { errorClass, safeWarn } from '../log.js';
 import type { ResolvedProfile } from '../profile.js';
 import { suggestedRule } from '../reporting.js';
 import type { CommunityRules, RuleRef } from '../rules.js';
-import type { Clock, ConductLevel, Logger, ReportRecord, SanctionKind, Store, SubjectId } from '../types.js';
+import { CONDUCT_LEVELS } from '../types.js';
+import type { AiOutcomeInsert, AiVerdict, Clock, ConductLevel, Logger, ReportRecord, SanctionKind, Store, SubjectId } from '../types.js';
+import { agreementOf } from './agreement.js';
+import type { StepLike } from './agreement.js';
 import { Breaker } from './breaker.js';
 import { CallWindow, startOfUtcDay, utcDayLabel } from './budget.js';
 import { prepareCase } from './case.js';
 import type { Prepared } from './case.js';
 import { assertWithinCeilings, AICeilingError } from './ceilings.js';
+import { actionsOnTarget, AI_EXAMPLES_MIN, pickExampleLines } from './casebook.js';
+import type { AiOutcomeArgs } from './casebook.js';
 import { aiPolicyText } from './prompt.js';
 import { sha256Hex } from '../crypto.js';
 import type { AIExampleInput, AIRead, ModerationAI } from './types.js';
@@ -125,6 +130,8 @@ export interface AiStatsRuleView {
   override: number;
   none: number;
   falsePositives: number;
+  /** Decisions that were a one-click accept of the AI's pre-fill. */
+  oneClick: number;
 }
 
 /** The casebook, overall and per rule. */
@@ -135,10 +142,13 @@ export interface AiStatsView {
   override: number;
   none: number;
   falsePositives: number;
+  oneClick: number;
   /** agree / (agree + override); null with neither. */
   agreementRate: number | null;
   /** falsePositives / (agree + override); null with neither. */
   falsePositiveRate: number | null;
+  /** oneClick / (agree + override): how often a shown recommendation was accepted as it stood; null with none shown. */
+  oneClickRate: number | null;
   rules: AiStatsRuleView[];
 }
 
@@ -165,6 +175,14 @@ export interface AiFacade {
   briefs(reportIds: readonly string[]): Map<string, AiBrief>;
   /** The casebook counts for decisions at or after `since` (default: the last 30 days). */
   stats(q?: { since?: number }): AiStatsView;
+  /**
+   * The one function the appeals inbox calls when a decision is reversed (a granted appeal, a take-back): the report's casebook row can
+   * never teach again, loses its example text, and counts as an AI false positive when the AI had recommended action. True when the
+   * report has a row.
+   */
+  markReversed(reportId: string): boolean;
+  /** A senior's "don't teach" mark on a decided case: the row can never teach again and loses its example text. True when the report has a row. */
+  dontTeach(reportId: string): boolean;
   /** Resolves when no read is queued or running (tests, graceful shutdown). */
   idle(): Promise<void>;
   /** Run the sweeper once. The timer does this every 60 seconds. */
@@ -261,6 +279,8 @@ export interface AiServiceDeps {
   subscribe: Subscribe;
   /** `cw.audit.record`. */
   audit: (input: AuditRecordInput) => boolean;
+  /** How long the text of a casebook example is kept (`retention.aiExamplesMs`); 0 keeps none. */
+  exampleRetentionMs: () => number;
 }
 
 /** The facade when no AI is configured: always off, never touches the store. */
@@ -273,13 +293,15 @@ export function createInertAi(): AiFacade {
     readAgain: () => Promise.resolve('off'),
     briefs: () => new Map(),
     stats: (q) => emptyStats(q?.since ?? 0),
+    markReversed: () => false,
+    dontTeach: () => false,
     idle: () => Promise.resolve(),
     sweep: () => Promise.resolve(),
     close: () => undefined,
   };
 }
 
-const emptyStats = (since: number): AiStatsView => ({ since, decided: 0, agree: 0, override: 0, none: 0, falsePositives: 0, agreementRate: null, falsePositiveRate: null, rules: [] });
+const emptyStats = (since: number): AiStatsView => ({ since, decided: 0, agree: 0, override: 0, none: 0, falsePositives: 0, oneClick: 0, agreementRate: null, falsePositiveRate: null, oneClickRate: null, rules: [] });
 
 const ruleOfText = (rule: string | null): number | 'uncovered' | null => (rule === null ? null : /^\d+$/.test(rule) ? Number(rule) : rule === 'uncovered' ? 'uncovered' : null);
 
@@ -452,15 +474,34 @@ export class AiService implements AiFacade {
         view.override += r.override;
         view.none += r.none;
         view.falsePositives += r.falsePositives;
-        view.rules.push({ rule: ruleOfText(r.rule), decided: r.decided, agree: r.agree, override: r.override, none: r.none, falsePositives: r.falsePositives });
+        view.oneClick += r.oneClick;
+        view.rules.push({ rule: ruleOfText(r.rule), decided: r.decided, agree: r.agree, override: r.override, none: r.none, falsePositives: r.falsePositives, oneClick: r.oneClick });
       }
       const shown = view.agree + view.override;
       view.agreementRate = shown === 0 ? null : view.agree / shown;
       view.falsePositiveRate = shown === 0 ? null : view.falsePositives / shown;
+      view.oneClickRate = shown === 0 ? null : view.oneClick / shown;
       return view;
     } catch (err) {
       this.warn('ai.stats_failed', err);
       return emptyStats(since);
+    }
+  }
+
+  markReversed(reportId: string): boolean {
+    return this.mark(reportId, { reversed: true });
+  }
+
+  dontTeach(reportId: string): boolean {
+    return this.mark(reportId, { dontTeach: true });
+  }
+
+  private mark(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean {
+    try {
+      return typeof reportId === 'string' && this.store.markAiOutcome(reportId, patch);
+    } catch (err) {
+      this.warn('ai.mark_failed', err);
+      return false;
     }
   }
 
@@ -703,11 +744,91 @@ export class AiService implements AiFacade {
     };
   }
 
-  /** Casebook examples for a read. The casebook (Task 9) fills this in; until it does there are none. */
+  /**
+   * Casebook examples for a read: none unless learning is on, example text is kept at all, the case names a reason that maps to a rule,
+   * and at least 30 teachable decisions exist. Then the two newest of that rule at the conduct level the AI gave this report before
+   * (or, for a first read, at any level), newest first. Each is pseudonymised already; the row's report id is its id.
+   */
   protected examplesFor(report: ReportRecord, prepared: Prepared): AIExampleInput[] {
-    void report;
     void prepared;
-    return [];
+    const profile = this.deps.profile();
+    const keepMs = this.deps.exampleRetentionMs();
+    if (!profile.ai.learn || !(keepMs > 0)) return [];
+    const rule = suggestedRule(profile.reporting.reasons, report.reportedReason ?? null, this.deps.rules);
+    if (typeof rule !== 'number') return [];
+    const since = this.clock.now() - keepMs;
+    if (this.store.aiTeachableCount(since) < AI_EXAMPLES_MIN) return [];
+    const known = this.store.loadAiRead(report.id)?.read?.severity;
+    const levels: readonly ConductLevel[] = known === undefined ? CONDUCT_LEVELS : [known];
+    return levels
+      .flatMap((level) => this.store.aiExamples(String(rule), level, 2, since))
+      .sort((a, b) => b.decidedAt - a.decidedAt || (a.reportId < b.reportId ? 1 : -1))
+      .slice(0, 2)
+      .map((row): AIExampleInput => ({ ...row.example, id: row.reportId }));
+  }
+
+  // --- the casebook ----------------------------------------------------------------------------------------------------------
+
+  /**
+   * The casebook row for a decision made with an AI echo (the hook `DecisionService` calls inside its transaction), computed here from
+   * the stored read and the decision. Null at level 0. Pure apart from reading the store; fenced by the caller.
+   */
+  outcomeOf(args: AiOutcomeArgs): AiOutcomeInsert | null {
+    const level = this.level();
+    if (level === 0) return null;
+    const { report, verdict, ai } = args;
+    // The store can load a report's newest finished read only, so an echo naming an older read (or another report's) lands on it too.
+    const row = this.store.loadAiRead(report.id);
+    const read = row?.read ?? null;
+    const rec = read?.recommendation ?? null;
+    const own = actionsOnTarget(args.actions, args.target);
+
+    // What the ladder would have pre-filled for the AI's conduct level: the step the human's is compared with.
+    let prefill: StepLike | null = null;
+    if (level >= 2 && rec !== null && (rec.verdict === 'upheld' || rec.verdict === 'noted')) {
+      const step = this.stepFor(report, this.prepare(report), rec).step;
+      prefill = step === null ? null : { kind: step.kind, durationMs: step.durationMs };
+    }
+    const verdictClass: AiVerdict = verdict === 'bad_faith' ? 'no_action' : verdict;
+    const result = agreementOf(
+      read,
+      { verdict, rule: own.rule, lineIds: own.lineIds, step: own.step, prefill, oneClick: ai.accepted },
+      level,
+    );
+
+    // The conduct level the human settled on: what their form said, else the AI's on an agreement, else banter for a dismissal.
+    const severity: ConductLevel | null =
+      ai.severity ?? (result.agreement === 'agree' && rec !== null ? rec.severity : verdictClass === 'no_action' && verdict !== 'bad_faith' ? 'banter' : null);
+    const badFaith = verdict === 'bad_faith';
+    const profile = this.deps.profile();
+    const teachable =
+      (result.agreement === 'agree' || result.agreement === 'override') &&
+      !badFaith &&
+      profile.ai.learn &&
+      this.deps.exampleRetentionMs() > 0 &&
+      severity !== null &&
+      own.rule !== null;
+    let example: AiOutcomeInsert['example'] = null;
+    if (teachable && severity !== null && own.rule !== null) {
+      const cited = new Set([...own.lineIds, ...(rec?.evidence ?? []), ...(read?.evidence ?? [])]);
+      const lines = pickExampleLines(this.prepare(report).chosen, cited);
+      if (lines.length > 0) example = { rule: own.rule, severity, verdict: verdictClass, lines };
+    }
+
+    return {
+      reportId: report.id,
+      readId: row?.id ?? null,
+      decidedAt: args.now,
+      level,
+      verdict: verdictClass,
+      rule: own.rule === null ? null : String(own.rule),
+      severity,
+      aiVerdict: result.aiVerdict,
+      agreement: result.agreement,
+      detail: result.detail,
+      badFaith,
+      example,
+    };
   }
 
   protected warn(event: string, err: unknown): void {

@@ -1,3 +1,6 @@
+import type { AiOutcomeHook } from './ai/casebook.js';
+import { ROLES } from './audit.js';
+import type { Role } from './audit.js';
 import { sha256Hex } from './crypto.js';
 import { safeWarn } from './log.js';
 import { ownLines } from './notices.js';
@@ -6,7 +9,8 @@ import type { CommunityRules, RuleRef } from './rules.js';
 import { SANCTION_KINDS, SANCTION_SOURCES, validateSanctionInput, writeSanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
-import type { Clock, Logger, ReportExcerptLine, ReportRecord, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
+import { CONDUCT_LEVELS } from './types.js';
+import type { AiOutcomeInsert, Clock, ConductLevel, Logger, ReportExcerptLine, ReportRecord, SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
 
 // The one path every moderator decision on a report takes. A decision closes the report, writes each sanction and
 // its player notice, and records itself, all in ONE store transaction: it lands whole or not at all. The same
@@ -82,6 +86,26 @@ export interface DecisionInput {
   reason?: string;
   /** Defaults to `'moderator'`. */
   source?: Source;
+  /**
+   * AI levels 1 and 2: which AI read the moderator was looking at, so the casebook can record how the decision compared with it. Optional;
+   * a decision without it records nothing against the AI. It never changes the decision, its key or its answer, and a value that is not
+   * well formed is ignored. Agreement is computed from the stored read and this decision, never from this echo.
+   * @experimental
+   */
+  ai?: DecisionAiEcho;
+}
+
+/**
+ * The AI echo of a decision: the id of the read the moderator saw (an unknown id falls back to the report's newest read), whether they
+ * accepted its pre-fill in one click (recorded as a fact, never used for agreement), the conduct level they settled on when their
+ * form had one, and their role, for the `ai.outcome` audit row (without a role no audit row is written).
+ * @experimental
+ */
+export interface DecisionAiEcho {
+  readId: string;
+  accepted: boolean;
+  severity?: ConductLevel;
+  role?: Role;
 }
 
 /**
@@ -120,6 +144,8 @@ export interface DecisionServiceDeps {
    * nothing, and the people acted on are still told.
    */
   reporterFeedback?: boolean;
+  /** AI casebook: the outcome row for a decision made with an AI echo. Fenced; null records nothing. */
+  aiOutcome?: AiOutcomeHook;
 }
 
 /**
@@ -146,7 +172,14 @@ export interface AppliedGroup {
  */
 export interface DecisionOutcome {
   result: DecisionResult;
-  committed: { reportId: string; verdict: DecisionInput['verdict']; at: number; applied: AppliedGroup[] } | null;
+  committed: {
+    reportId: string;
+    verdict: DecisionInput['verdict'];
+    at: number;
+    applied: AppliedGroup[];
+    /** The casebook recorded an outcome with this decision; `role` is the moderator's, for the audit row (null when the echo had none). */
+    aiOutcome: { agreement: AiOutcomeInsert['agreement']; role: Role | null; actor: string } | null;
+  } | null;
 }
 
 const VERDICTS: readonly DecisionInput['verdict'][] = ['upheld', 'noted', 'no_action', 'bad_faith'];
@@ -191,6 +224,23 @@ interface Normal {
   source: Source;
   /** Sorted by canonical subject, then kind. */
   actions: NormalAction[];
+  /** The AI echo, or null when absent or not well formed. Not part of the key. */
+  ai: { readId: string; accepted: boolean; severity: ConductLevel | null; role: Role | null } | null;
+}
+
+/** The longest read id an echo may carry. */
+const AI_READ_ID_MAX = 128;
+
+/** The AI echo of an input, or null: anything that is not well formed is ignored, never an error (the decision matters more). */
+function normalizeAi(v: unknown): Normal['ai'] {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = v as Record<string, unknown>;
+  const readId = o['readId'];
+  if (typeof readId !== 'string' || readId === '' || readId.length > AI_READ_ID_MAX) return null;
+  if (typeof o['accepted'] !== 'boolean') return null;
+  const severity = (CONDUCT_LEVELS as readonly unknown[]).includes(o['severity']) ? (o['severity'] as ConductLevel) : null;
+  const role = (ROLES as readonly unknown[]).includes(o['role']) ? (o['role'] as Role) : null;
+  return { readId, accepted: o['accepted'], severity, role };
 }
 
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -265,6 +315,7 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
     evidence,
     source: source as Source,
     actions,
+    ai: normalizeAi(input.ai),
   };
 }
 
@@ -330,6 +381,7 @@ export class DecisionService {
   private readonly index: SanctionIndex | undefined;
   private readonly logger: Logger | undefined;
   private readonly reporterFeedback: boolean;
+  private readonly aiOutcome: AiOutcomeHook | undefined;
 
   constructor(deps: DecisionServiceDeps) {
     this.store = deps.store;
@@ -340,6 +392,7 @@ export class DecisionService {
     this.index = deps.index;
     this.logger = deps.logger;
     this.reporterFeedback = deps.reporterFeedback ?? true;
+    this.aiOutcome = deps.aiOutcome;
   }
 
   /**
@@ -442,6 +495,7 @@ export class DecisionService {
     const pending = this.index !== undefined && !this.index.isEnabled();
     const reporter = this.subjects.canonical(report.reporterSubject);
     const status = isDismissal(norm.verdict) ? 'dismissed' : 'actioned';
+    const outcome = this.outcomeFor(norm, report, now);
 
     const done = this.store.transaction(() => {
       if (!this.store.closeReport(report.id, status, norm.verdict === 'bad_faith', norm.actor, now, norm.reason, norm.evidence)) {
@@ -491,7 +545,16 @@ export class DecisionService {
         told.add(reporter);
       }
       this.store.insertDecision(key, report.id, now, JSON.stringify({ groups }));
-      return { groups, applied, rows, told };
+      // The casebook row lands with the decision or not at all. A casebook that cannot be written never fails the decision.
+      let recorded: AiOutcomeInsert['agreement'] | null = null;
+      if (outcome !== null) {
+        try {
+          if (this.store.insertAiOutcome?.(outcome) === true) recorded = outcome.agreement;
+        } catch (err) {
+          this.warn('decide.ai_outcome_failed', { error: errName(err) });
+        }
+      }
+      return { groups, applied, rows, told, recorded };
     });
 
     if (done === null) {
@@ -515,8 +578,32 @@ export class DecisionService {
     }
     return {
       result: { ok: true, groups: done.groups, replay: false },
-      committed: { reportId: report.id, verdict: norm.verdict, at: now, applied: done.applied },
+      committed: {
+        reportId: report.id,
+        verdict: norm.verdict,
+        at: now,
+        applied: done.applied,
+        aiOutcome: done.recorded === null ? null : { agreement: done.recorded, role: norm.ai?.role ?? null, actor: norm.actor },
+      },
     };
+  }
+
+  /** The casebook row for this decision, or null: no echo, no hook, no AI store method, or the hook declines or fails. */
+  private outcomeFor(norm: Normal, report: ReportRecord, now: number): AiOutcomeInsert | null {
+    if (norm.ai === null || this.aiOutcome === undefined || typeof this.store.insertAiOutcome !== 'function') return null;
+    try {
+      return this.aiOutcome({
+        report,
+        target: this.subjects.canonical(report.targetSubject),
+        verdict: norm.verdict,
+        actions: norm.actions.map((a) => ({ subject: a.subject, kind: a.kind, durationMs: a.durationMs, rule: a.rule, lineIds: a.lineIds })),
+        ai: { readId: norm.ai.readId, accepted: norm.ai.accepted, severity: norm.ai.severity },
+        now,
+      });
+    } catch (err) {
+      this.warn('decide.ai_outcome_failed', { error: errName(err) });
+      return null;
+    }
   }
 
   private replayOf(resultJson: string): DecisionResult {

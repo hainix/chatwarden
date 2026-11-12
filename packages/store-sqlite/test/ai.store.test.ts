@@ -310,5 +310,7 @@ describe('rows damaged by hand never break a read', () => {
     db.prepare("UPDATE kit_ai_outcomes SET detail_json = '{{', example_json = '[1' WHERE report_id = 'o1'").run();
     expect(store.loadAiOutcome('o1')).toMatchObject({ detail: { verdict: false, rule: false, lines: 0, outcome: 'none', oneClick: false }, example: null, verdict: 'upheld' });
     expect(store.aiExamples('3', 'hostile', 5, 0)).toEqual([]);
+    // The stats still answer: a detail nobody can read is not a one-click accept.
+    expect(store.aiStats(0)).toEqual([{ rule: '3', decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 0 }]);
   });
 });

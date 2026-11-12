@@ -1017,9 +1017,9 @@ export function aiContract(name: string, make: () => Store): void {
         add('old', { decidedAt: NOW - 60 * DAY });
         const stats = s.aiStats(NOW - 30 * DAY);
         expect(stats).toEqual([
-          { rule: '3', decided: 8, agree: 4, override: 3, none: 1, falsePositives: 3 },
-          { rule: 'uncovered', decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0 },
-          { rule: null, decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0 },
+          { rule: '3', decided: 8, agree: 4, override: 3, none: 1, falsePositives: 3, oneClick: 8 },
+          { rule: 'uncovered', decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 1 },
+          { rule: null, decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 1 },
         ] satisfies AiStatsRow[]);
         expect(s.aiStats(NOW - 90 * DAY)[0]).toMatchObject({ rule: '3', decided: 9 });
         expect(s.aiStats(NOW + 1)).toEqual([]);
@@ -1031,10 +1031,25 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.aiStats(0).map((r) => r.rule)).toEqual(['1', '2', '10', 'uncovered', null]);
       });
 
+      it('counts the one-click accepts per rule, from the outcome detail', () => {
+        const s = ai(make());
+        const click = (reportId: string, oneClick: boolean, rule: string | null = '3') =>
+          s.insertAiOutcome(outcome({ reportId, rule, example: null, detail: { ...DETAIL, oneClick } }));
+        click('c1', true);
+        click('c2', true);
+        click('c3', false);
+        click('c4', false, '7');
+        click('c5', true, '7');
+        expect(s.aiStats(0)).toEqual([
+          { rule: '3', decided: 3, agree: 3, override: 0, none: 0, falsePositives: 0, oneClick: 2 },
+          { rule: '7', decided: 2, agree: 2, override: 0, none: 0, falsePositives: 0, oneClick: 1 },
+        ] satisfies AiStatsRow[]);
+      });
+
       it('counts a bad-faith dismissal as the override it is', () => {
         const s = ai(make());
         s.insertAiOutcome(outcome({ reportId: 'bf', verdict: 'no_action', agreement: 'override', badFaith: true, example: null }));
-        expect(s.aiStats(0)).toEqual([{ rule: '3', decided: 1, agree: 0, override: 1, none: 0, falsePositives: 1 }]);
+        expect(s.aiStats(0)).toEqual([{ rule: '3', decided: 1, agree: 0, override: 1, none: 0, falsePositives: 1, oneClick: 1 }]);
       });
     });
 
