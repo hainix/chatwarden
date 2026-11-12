@@ -30,9 +30,9 @@ async function type(user: User, name: string, value: string): Promise<void> {
   if (value !== '') await user.type(el, value);
 }
 async function save(user: User, why = 'A tournament night') {
-  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
   await user.type(screen.getByRole('textbox', { name: /Why are you changing this/ }), why);
-  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
 }
 
 const SLOW = 'Slow mode';
@@ -69,7 +69,7 @@ describe('the Advanced section', () => {
       expect(num(SLOW_S).value).toBe('4');
       for (const el of within(panel()).getAllByRole('checkbox')) expect(el).toBeDisabled();
       for (const el of within(panel()).getAllByRole('spinbutton')) expect(el).toBeDisabled();
-      expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+      expect(within(panel()).queryByRole('button', { name: 'Save changes' })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Use suggested values' })).toBeNull();
       expect(screen.getByText(/You can see these settings/i)).toBeInTheDocument();
     }
@@ -78,7 +78,7 @@ describe('the Advanced section', () => {
   it('only the owner can save', async () => {
     const w = await owner();
     await open(w);
-    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
+    expect(within(panel()).getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
   });
 });
 
@@ -88,7 +88,7 @@ describe('the form', () => {
     await open(w);
     for (const name of [SLOW, BURST, REPEAT]) expect(sw(name).checked).toBe(false);
     for (const name of [SLOW_S, BURST_N, BURST_S, REPEAT_S]) expect(num(name)).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Save changes' })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(panel()).getByRole('button', { name: 'Save changes' })).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('shows what is in force: seconds, converted back from milliseconds', async () => {
@@ -146,7 +146,7 @@ describe('the form', () => {
     if (toggle === BURST && field !== BURST_N) await type(user, BURST_N, '5');
     if (toggle === BURST && field !== BURST_S) await type(user, BURST_S, '10');
     await type(user, field, value);
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
     expect(await within(panel()).findByText(message)).toBeInTheDocument();
     expect(num(field)).toHaveAttribute('aria-invalid', 'true');
     expect(puts(w)).toHaveLength(0);
@@ -159,7 +159,7 @@ describe('the form', () => {
     await user.click(sw(BURST));
     await type(user, BURST_N, '2.5');
     await type(user, BURST_S, '10');
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
     expect(await within(panel()).findByText(/2 to 100/)).toBeInTheDocument();
     expect(puts(w)).toHaveLength(0);
   });
@@ -178,8 +178,8 @@ describe('suggested values', () => {
     expect(puts(w)).toHaveLength(0);
     expect((await w.client.policyProfile()).effective.pace).toEqual({ slowModeMs: null, burst: null, duplicateWindowMs: null });
     // It is a draft like any other: Save is now offered, and Discard puts the form back.
-    expect(screen.getByRole('button', { name: 'Save changes' })).toHaveAttribute('aria-disabled', 'false');
-    await user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(within(panel()).getByRole('button', { name: 'Save changes' })).toHaveAttribute('aria-disabled', 'false');
+    await user.click(within(panel()).getByRole('button', { name: 'Discard changes' }));
     expect(sw(BURST).checked).toBe(false);
   });
 

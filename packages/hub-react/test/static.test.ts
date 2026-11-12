@@ -243,8 +243,10 @@ describe('the stylesheet is a complete token contract', () => {
   // 7j: 112 KB raw, 18 KB gzipped (the size test). Every one of the 960 token reads now carries its private default,
   // `var(--cw-x, var(--cwd-x))`, which is what lets a page theme the hub from any element above it (owner-approved, 2026-11-10): +20 KB
   // of repeated text raw, about +1 KB gzipped. Gzip is the contract; the raw cap only keeps the file from growing without a look.
-  it('is under 112 KB raw (the size test holds it to 18 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(112 * 1024);
+  // 120 KB at 0.1.8 (flood control and signals): the maintainer's rule for the release is to raise budgets generously rather than trim; the Advanced
+  // settings forms and the Person page's signal lines add about 2 KB raw. The gzipped limit (the size test) is unchanged and holds.
+  it('is under 120 KB raw (the size test holds it to 18 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(120 * 1024);
   });
 });
 

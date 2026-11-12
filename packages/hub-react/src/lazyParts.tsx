@@ -55,6 +55,7 @@ export const partLoaders: {
   aiParts: () => Promise<ComponentType<AiPartsProps>>;
   signalLines: () => Promise<ComponentType<{ signals: readonly SignalCountView[] | undefined }>>;
   pacePanel: () => Promise<ComponentType<PanelProps>>;
+  signalPanel: () => Promise<ComponentType<PanelProps>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
@@ -63,6 +64,7 @@ export const partLoaders: {
   aiParts: () => import('./case/AiParts.js').then((m) => m.AiParts),
   signalLines: () => import('./person/SignalLines.js').then((m) => m.SignalLines),
   pacePanel: () => import('./screens/PaceSettings.js').then((m) => m.PaceSettings),
+  signalPanel: () => import('./screens/SignalSettings.js').then((m) => m.SignalSettings),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -121,6 +123,7 @@ const strip = lazyPart(() => partLoaders.strip(), true);
 const aiParts = lazyPart(() => partLoaders.aiParts(), true);
 const signalLines = lazyPart(() => partLoaders.signalLines(), true);
 const pacePanel = lazyPart(() => partLoaders.pacePanel());
+const signalPanel = lazyPart(() => partLoaders.signalPanel());
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
@@ -137,6 +140,9 @@ export const LazySignalLines = signalLines.Part;
 /** The "Slow mode and flooding" panel of Settings > Advanced: loaded when that screen is opened. */
 export const LazyPaceSettings = pacePanel.Part;
 
+/** The "Signals" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazySignalSettings = signalPanel.Part;
+
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
@@ -146,6 +152,7 @@ export function resetLazyParts(): void {
   aiParts.reset();
   signalLines.reset();
   pacePanel.reset();
+  signalPanel.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

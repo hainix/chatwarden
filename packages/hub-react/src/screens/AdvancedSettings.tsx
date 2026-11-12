@@ -1,5 +1,5 @@
 import { useHub } from '../context.js';
-import { LazyPaceSettings } from '../lazyParts.js';
+import { LazyPaceSettings, LazySignalSettings } from '../lazyParts.js';
 import { usePolicy } from '../policyHooks.js';
 import { Fetched } from '../ui.js';
 
@@ -19,7 +19,12 @@ export function AdvancedSettingsScreen() {
       </div>
       <p className="cw-hint">{t('hub.settings.advanced.intro')}</p>
       <Fetched state={{ data: policy.data, error: policy.error, loading: policy.loading, reload: policy.reload }} what={t('hub.state.what.settings')}>
-        {(state) => <LazyPaceSettings state={state} policy={policy} />}
+        {(state) => (
+          <>
+            <LazyPaceSettings state={state} policy={policy} />
+            <LazySignalSettings state={state} policy={policy} />
+          </>
+        )}
       </Fetched>
     </div>
   );

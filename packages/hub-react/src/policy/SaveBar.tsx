@@ -16,6 +16,7 @@ export function SaveBar({
   dirtyCount,
   refusedField,
   idBase,
+  label,
   onDiscard,
   onReload,
 }: {
@@ -25,13 +26,15 @@ export function SaveBar({
   dirtyCount: number;
   refusedField: boolean;
   idBase: string;
+  /** The save bar's name as a landmark; a screen with more than one bar gives each its own. */
+  label?: string;
   onDiscard: () => void;
   onReload: () => void;
 }) {
   const { t } = useHub();
   const err = save.saveError;
   return (
-    <section className="cw-savebar" aria-label={t('hub.settings.save.form')}>
+    <section className="cw-savebar" aria-label={label ?? t('hub.settings.save.form')}>
       {err !== null && err.code === 'conflict' && (
         <div className="cw-error" role="alert">
           <p>

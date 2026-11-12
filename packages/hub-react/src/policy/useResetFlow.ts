@@ -6,7 +6,7 @@ import type { PolicySection, PolicyState } from '../types.js';
 import { SECTION_ORDER } from './model.js';
 import type { Pending } from './useSaveFlow.js';
 
-export type ResetKey = 'lengths' | 'ladder' | 'first' | 'repeat' | 'rules' | 'guidelines' | 'reporting' | 'pace' | 'all';
+export type ResetKey = 'lengths' | 'ladder' | 'first' | 'repeat' | 'rules' | 'guidelines' | 'reporting' | 'pace' | 'signals' | 'all';
 
 /** What each Reset covers: the kit's sections (a panel can hold two), and the words for its button and its toast. */
 export const RESETS: Record<ResetKey, { sections: readonly PolicySection[]; what: HubText; done: HubText }> = {
@@ -18,6 +18,7 @@ export const RESETS: Record<ResetKey, { sections: readonly PolicySection[]; what
   guidelines: { sections: ['guidelines'], what: 'hub.settings.guidelines.what', done: 'hub.settings.guidelines.done' },
   reporting: { sections: ['reporting'], what: 'hub.reporting.what', done: 'hub.reporting.done' },
   pace: { sections: ['pace'], what: 'hub.settings.pace.what', done: 'hub.settings.pace.done' },
+  signals: { sections: ['signals'], what: 'hub.settings.signals.what', done: 'hub.settings.signals.done' },
   // Everything on the Steps and ladder screen. Reporting has its own screen and its own reset, so this leaves it alone.
   all: { sections: SECTION_ORDER, what: 'hub.settings.reset.all', done: 'hub.settings.reset.all.done' },
 };

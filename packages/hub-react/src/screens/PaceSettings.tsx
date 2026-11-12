@@ -225,9 +225,9 @@ export function PaceSettings({ state, policy }: { state: PolicyState; policy: Us
             </Row>
           </fieldset>
           <p className="cw-hint">{t('hub.settings.pace.scope')}</p>
+          {editable && <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={1} refusedField={refusedField} idBase={base} label={t('hub.settings.pace.save.form')} onDiscard={discard} onReload={reload} />}
         </div>
       </Panel>
-      {editable && <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={1} refusedField={refusedField} idBase={base} onDiscard={discard} onReload={reload} />}
       {guard}
     </div>
   );
