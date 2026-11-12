@@ -351,6 +351,7 @@ export class AiService implements AiFacade {
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   private unsubscribe: (() => void) | undefined;
   private waiters: Array<() => void> = [];
+  private policyText: { profile: ResolvedProfile; text: string } | null = null;
   private lastStable = '';
   private stableKey = '';
   private isClosed = false;
@@ -738,7 +739,14 @@ export class AiService implements AiFacade {
   protected prepare(report: ReportRecord): Prepared {
     const profile = this.deps.profile();
     const policy = { profile, rules: this.deps.rules };
-    const stable = aiPolicyText(policy);
+    // The text is rendered once per profile in force (the resolved profile is deep-frozen and replaced, never edited, on a change; the rules
+    // are fixed for the kit's life): a queue poll asks about 200 reports and each call would otherwise validate and render the policy again.
+    let stable: string;
+    if (this.policyText !== null && this.policyText.profile === profile) stable = this.policyText.text;
+    else {
+      stable = aiPolicyText(policy);
+      this.policyText = { profile, text: stable };
+    }
     if (stable !== this.lastStable) {
       // The rules, the level meanings or the standard changed: what was waiting for a retry may now read differently.
       this.lastStable = stable;
