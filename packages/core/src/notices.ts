@@ -358,6 +358,36 @@ export class NoticeService {
     return this.rowsOf(subject).find((r) => r.id === id) ?? null;
   }
 
+  /**
+   * Does the person have a required rename they have not been released from: a `rename_required` notice not withdrawn, seen or not, on any of
+   * their merged subjects. Staff-side; the game reads it through `names.pendingRename`.
+   */
+  renamePending(subject: SubjectId): boolean {
+    return this.rowsOf(subject).some((r) => r.kind === 'rename_required' && r.withdrawnAt === null);
+  }
+
+  /** Can this build's store withdraw one notice by id? Without it a rename could never be released. */
+  canWithdrawOne(): boolean {
+    return typeof this.store.withdrawNotice === 'function';
+  }
+
+  /**
+   * Withdraw every pending `rename_required` notice of the person, in one transaction, and tell their client the new count when any was.
+   * Returns how many it withdrew (0 when none was pending, or the store cannot withdraw one). Other kinds are never touched.
+   */
+  withdrawRenames(subject: SubjectId): number {
+    const withdraw = this.store.withdrawNotice;
+    if (typeof withdraw !== 'function') return 0;
+    const ids = this.rowsOf(subject)
+      .filter((r) => r.kind === 'rename_required' && r.withdrawnAt === null)
+      .map((r) => r.id);
+    if (ids.length === 0) return 0;
+    const at = this.clock.now();
+    const done = this.store.transaction(() => ids.filter((id) => withdraw.call(this.store, id, at)).length);
+    if (done > 0) this.announce(subject);
+    return done;
+  }
+
   /** Withdraw the notices of a sanction group (it was revoked). Returns how many were withdrawn. */
   withdrawGroup(groupId: string): number {
     if (!nonEmpty(groupId)) return 0;

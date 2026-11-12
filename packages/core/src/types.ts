@@ -1516,6 +1516,13 @@ export interface Store {
   withdrawNoticeGroup(groupId: string, at: number): number;
 
   /**
+   * OPTIONAL. Withdraw one notice by id at `at`, seen or not, whatever its group: for a notice that has no group (a required rename), which
+   * `withdrawNoticeGroup` cannot reach. True only for the call that did it (false for an unknown or an already withdrawn id; the first time
+   * is kept). Touches no other row. A kit over a store without it cannot release a rename, so `names.requireRename` answers `off`.
+   */
+  withdrawNotice?(id: string, at: number): boolean;
+
+  /**
    * The newest notice of a sanction group that is not withdrawn (newest by `createdAt`, then write order), or null
    * when the group has none. Seen or not. `subject` is the stored (possibly since merged) subject the notice is for,
    * so a caller can check it is the asking person's own. Private: never shown to a player.

@@ -524,6 +524,18 @@ export interface Chatwarden {
      * when the matcher throws (logged once a minute, class only). Never throws.
      */
     flagged(text: string): boolean;
+    /**
+     * Ask a player to choose a new name. Writes one notice of kind `rename_required` (it names no name, no excerpt, no reason) and, after
+     * the write, tells the player's client and emits `rename.required`. Staff only. `{ ok: false, error: 'off' }` while `names.renames` is
+     * false (or the store cannot release a rename); `invalid` for a reason that is not 1 to 500 characters or a rule that is not an active
+     * integer rule; `not_found` for a person the kit does not hold; `pending` while a request is already waiting. `rule` defaults to the
+     * slur filter's (`autoRestrictRule`) and is shown to the player as a rule label. A store failure is logged (class only) and thrown.
+     */
+    requireRename(input: { subject: SubjectId; actor: string; reason: string; rule?: number }): { ok: true; noticeId: string } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
+    /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. */
+    pendingRename(who: RawWho): boolean;
+    /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. */
+    renamed(who: RawWho): boolean;
   };
   /**
    * The AI read and recommend service. Always present: without an `ai` option (or at level 0) it answers as if there were no AI. A
@@ -738,6 +750,12 @@ export interface Chatwarden {
   people: {
     canonical(subject: SubjectId): SubjectId;
     aliases(subject: SubjectId): SubjectId[];
+    /**
+     * The account ids the kit holds for this person across their merged aliases, sorted: exactly the strings the game passed as
+     * `RawWho.accountId` (no client key, no IP, no hash). A guest has none; so does an unknown id. For the game to find the player to rename
+     * after `rename.required`. Server side only: never send to a player.
+     */
+    accountIds(subject: SubjectId): string[];
   };
   /**
    * The Discord feed's thread map (`@chatwarden/discord`): the forum thread kept per person (`kit_discord_threads`). A
@@ -1173,6 +1191,10 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     settings: () => policy.profileNow().names,
     filter: filterForNames,
     personOf,
+    notices,
+    subjects,
+    rules,
+    emit: (event) => bus.emit(event),
   });
 
   return {
@@ -1363,6 +1385,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     names: {
       check: (text, o) => nameService.check(text, o),
       flagged: (text) => nameService.flagged(text),
+      requireRename: (input) => nameService.requireRename(input),
+      pendingRename: (who) => nameService.pendingRename(who),
+      renamed: (who) => nameService.renamed(who),
     },
     rules,
     get profile() {
@@ -1441,6 +1466,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     people: {
       canonical: (subject) => subjects.canonical(subject),
       aliases: (subject) => subjects.aliasesOf(subject),
+      accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
     },
     discordThreads: {
       get: (subject) => store.transaction(() => store.getDiscordThread(subject)),

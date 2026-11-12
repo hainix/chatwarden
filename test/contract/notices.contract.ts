@@ -155,6 +155,70 @@ export function noticesContract(name: string, make: () => Store): void {
       });
     });
 
+    describe('withdrawNotice (one notice by id)', () => {
+      const one = (s: Store): NonNullable<Store['withdrawNotice']> => {
+        if (typeof s.withdrawNotice !== 'function') throw new Error('this store has no withdrawNotice');
+        return s.withdrawNotice.bind(s);
+      };
+
+      it('withdraws one notice, seen or not, group or not, and answers true only for the call that did it', () => {
+        const s = make();
+        const withdraw = one(s);
+        s.insertNotice(notice('msg', { groupId: null, kind: 'rename_required', rule: '1', excerpt: [] }));
+        s.insertNotice(notice('seen', { groupId: null, kind: 'rename_required', rule: '1', excerpt: [], ackedAt: T + 1 }));
+        s.insertNotice(notice('other', { groupId: null, kind: 'rename_required', rule: '1', excerpt: [] }));
+        expect(withdraw('msg', T + 5)).toBe(true);
+        expect(withdraw('msg', T + 9)).toBe(false);
+        expect(withdraw('seen', T + 6)).toBe(true);
+        expect(s.loadNotices(['s_a']).map((n) => [n.id, n.ackedAt, n.withdrawnAt])).toEqual([
+          ['msg', null, T + 5],
+          ['seen', T + 1, T + 6],
+          ['other', null, null],
+        ]);
+      });
+
+      it('an unknown id, an empty id and a different case withdraw nothing', () => {
+        const s = make();
+        const withdraw = one(s);
+        s.insertNotice(notice('n1'));
+        expect(withdraw('nope', T)).toBe(false);
+        expect(withdraw('', T)).toBe(false);
+        expect(withdraw('N1', T)).toBe(false);
+        expect(s.loadNotices(['s_a'])[0]?.withdrawnAt).toBeNull();
+      });
+
+      it('touches only that notice: the rest of its group and every other subject stay as they were', () => {
+        const s = make();
+        const withdraw = one(s);
+        s.insertNotice(notice('a1', { groupId: 'g1' }));
+        s.insertNotice(notice('a2', { groupId: 'g1' }));
+        s.insertNotice(notice('b1', { groupId: 'g1', subject: 's_b' }));
+        expect(withdraw('a1', T + 2)).toBe(true);
+        expect(s.loadNotices(['s_a', 's_b']).map((n) => [n.id, n.withdrawnAt])).toEqual([
+          ['a1', T + 2],
+          ['a2', null],
+          ['b1', null],
+        ]);
+      });
+
+      it('a withdrawn notice keeps its first time, and a withdraw is undone with its transaction', () => {
+        const s = make();
+        const withdraw = one(s);
+        s.insertNotice(notice('n1', { withdrawnAt: T + 3 }));
+        expect(withdraw('n1', T + 9)).toBe(false);
+        expect(s.loadNotices(['s_a'])[0]?.withdrawnAt).toBe(T + 3);
+        s.insertNotice(notice('n2'));
+        expect(() =>
+          s.transaction(() => {
+            expect(withdraw('n2', T + 5)).toBe(true);
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(s.loadNotices(['s_a']).find((n) => n.id === 'n2')?.withdrawnAt).toBeNull();
+        expect(withdraw('n2', T + 6)).toBe(true);
+      });
+    });
+
     describe('purgeNotices', () => {
       it('deletes a withdrawn notice older than the cutoff, and keeps a newer one', () => {
         const s = make();

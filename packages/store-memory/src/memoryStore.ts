@@ -997,6 +997,16 @@ export class MemoryStore implements Store {
     return touched.length;
   }
 
+  withdrawNotice(id: string, at: number): boolean {
+    const n = this.notices.find((x) => x.id === id);
+    if (n === undefined || n.withdrawnAt !== null) return false;
+    n.withdrawnAt = at;
+    this.undoWith(() => {
+      n.withdrawnAt = null;
+    });
+    return true;
+  }
+
   purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number {
     const snapshot = [...this.notices];
     // A seen notice of these kinds goes after the cutoff; the rest of the kinds follow their end time. An unseen message notice (an

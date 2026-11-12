@@ -2256,6 +2256,10 @@ export class SqliteStore implements Store, TermStore {
     );
   }
 
+  withdrawNotice(id: string, at: number): boolean {
+    return this.transaction(() => Number(this.db.prepare('UPDATE kit_notices SET withdrawn_at = ? WHERE id = ? AND withdrawn_at IS NULL').run(at, id).changes) > 0);
+  }
+
   // Terms, exceptions and the audit trail. These are SYNCHRONOUS on purpose (the TermStore contract): they
   // run inside `transaction`, which must never be given an async function.
 
