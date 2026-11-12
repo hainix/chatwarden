@@ -22,7 +22,8 @@ import { Decided } from './Decided.js';
 import { DecisionResult } from './DecisionResult.js';
 import { SuggestionCard } from './SuggestionCard.js';
 import { useCase } from './CaseContext.js';
-import { BulkDismiss } from './BulkDismiss.js';
+import { LazyBulkDismiss } from '../lazyParts.js';
+import { isMoving } from './actGuard.js';
 import { DetailedQuickKeys } from './QuickKeys.js';
 import { takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { UNDO_MS } from '../toasts.js';
@@ -164,8 +165,8 @@ export function DecisionBar() {
   };
   const decideRef = useRef(decide);
   decideRef.current = decide;
-  const stateRef = useRef({ editable: editable && !readOnly, setVerdict: draft.setVerdict, quickActive });
-  stateRef.current = { editable: editable && !readOnly, setVerdict: draft.setVerdict, quickActive };
+  const stateRef = useRef({ editable: editable && !readOnly, setVerdict: draft.setVerdict, quickActive, settled: c.settled });
+  stateRef.current = { editable: editable && !readOnly, setVerdict: draft.setVerdict, quickActive, settled: c.settled };
 
   // 1, 2 and 3 choose the verdict; Ctrl or Cmd with Enter decides and takes the next case. Neither fires while typing (except
   // Ctrl+Enter, which is made for the reason box), under a window, or when the adopter turned shortcuts off.
@@ -176,6 +177,9 @@ export function DecisionBar() {
       if (modalIn(hub) !== null) return;
       if (e.key === 'Enter' && (e.ctrlKey !== e.metaKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault();
+        // The same guards as every act key: a held key is one action, and a case that has just appeared (or a move to another one that
+        // is on its way) is not decided by a key meant for the one before.
+        if (e.repeat || !stateRef.current.settled() || isMoving(hub)) return;
         decideRef.current(true);
         return;
       }
@@ -512,10 +516,10 @@ export function DecisionBar() {
                   id={dismissId}
                   type="button"
                   className="cw-btn"
-                  aria-disabled={!lite.usable}
+                  aria-disabled={!lite.usable || !lite.cooled}
                   aria-describedby={`${dismissId}-hint`}
                   {...(quickActive ? { 'aria-keyshortcuts': '2' } : {})}
-                  onClick={lite.sendDismiss}
+                  onClick={(e) => lite.sendDismiss(e)}
                 >
                   {t('hub.quick.dismiss')}
                 </button>
@@ -528,7 +532,7 @@ export function DecisionBar() {
                 <p className="cw-hint">{t('hub.decide.undoHint', { seconds: SECONDS })}</p>
               </div>
             </fieldset>
-            <BulkDismiss />
+            {can('reports.decide.bulk') && <LazyBulkDismiss />}
           </form>
         )}
       </>

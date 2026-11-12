@@ -52,7 +52,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const all = useStore(store);
   // Quick decisions stack several held toasts. The newest shows in full with its Undo; the rest are one line (their timers run on, and
   // each comes back into view as the ones after it end or are undone).
-  const newestHeld = all.findLast((s) => s.held);
+  let newestHeld: ToastRecord | undefined;
+  for (let i = all.length - 1; i >= 0 && newestHeld === undefined; i -= 1) if (all[i]?.held === true) newestHeld = all[i];
   const shown = all.filter((s) => !s.held || s === newestHeld);
   const earlier = all.filter((s) => s.held).length - (newestHeld === undefined ? 0 : 1);
   const api = useMemo<Toasts>(() => ({ push: store.push, hold: store.hold, dismiss: store.dismiss }), [store]);
@@ -81,6 +82,8 @@ function ToastView({ toast, dismissLabel, store }: { toast: ToastRecord; dismiss
     if (paused) store.pause(toast.id);
     else store.resume(toast.id);
   }, [paused, store, toast.id]);
+  // A toast that is hidden while the pointer was on it (a newer held toast took its place) must not stay paused: its clock runs on.
+  useEffect(() => () => store.resume(toast.id), [store, toast.id]);
   const onDone = store.dismiss;
 
   const act = (): void => {

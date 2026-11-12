@@ -337,17 +337,17 @@ export function CaseCard() {
         {draft.status === 'ready' && (
           <div className="cw-scard-actions">
             {one !== null && (
-              <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh} {...(keyed ? { 'aria-keyshortcuts': '1' } : {})} onClick={q.sendPrimary}>
+              <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh || !q.cooled} {...(keyed ? { 'aria-keyshortcuts': '1' } : {})} onClick={(e) => q.sendPrimary(e)}>
                 <span>{stepLabel(t, locale, one.choice)}</span>
                 {kbd('1')}
               </button>
             )}
-            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(keyed ? { 'aria-keyshortcuts': '2' } : {})} onClick={q.sendDismiss}>
+            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh || !q.cooled} {...(keyed ? { 'aria-keyshortcuts': '2' } : {})} onClick={(e) => q.sendDismiss(e)}>
               <span>{t('hub.simple.noAction')}</span>
               {kbd('2')}
             </button>
             {quick !== null && (
-              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(keyed ? { 'aria-keyshortcuts': '3' } : {})} onClick={q.sendWarning}>
+              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh || !q.cooled} {...(keyed ? { 'aria-keyshortcuts': '3' } : {})} onClick={(e) => q.sendWarning(e)}>
                 <span>{stepLabel(t, locale, quick.choice)}</span>
                 {kbd('3')}
               </button>

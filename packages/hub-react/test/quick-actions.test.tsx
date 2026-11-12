@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { QUICK_ACT_COOLDOWN_MS } from '../src/case/useQuickActions.js';
 import { UNDO_MS } from '../src/toasts.js';
 import type { TransportRequest } from '../src/transport.js';
+import { advanceGuardTime } from './guardTime.js';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld, RichLine, WorldOptions } from './world.js';
@@ -192,7 +193,8 @@ describe('guards: a key is one action on one case that has been read', () => {
 
   it('the cooldown applies to Ctrl+Enter too', async () => {
     const s = await start({ cases: 2 });
-    s.w.clock.t -= QUICK_ACT_COOLDOWN_MS;
+    // Back to the moment the case appeared.
+    advanceGuardTime(-(QUICK_ACT_COOLDOWN_MS + 1));
     await s.user.keyboard('{Control>}{Enter}{/Control}');
     await pageHides();
     expect(decides(s.w)).toHaveLength(0);

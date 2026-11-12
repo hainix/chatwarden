@@ -34,6 +34,8 @@ async function open(w: HubWorld, id: string, options: Parameters<typeof renderHu
   const r = renderHub(w, { path: `/reports/${id}`, ...options });
   await screen.findByRole('heading', { level: 2, name: /report against/ });
   await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('radio', { name: 'Fair' });
+  // A case accepts an act key a moment after it appeared; the guard's clock moves with the world's.
+  w.clock.t += 400;
   return r;
 }
 

@@ -53,7 +53,10 @@ describe('windows and toasts are drawn inside the shadow root', () => {
     goTo(`/reports/${f.id}`);
     const el = mount({ mode: 'simple' }, { client: w.client });
     const q = inside(el);
-    (await q.findByRole('button', { name: /^Restrict chat, 24 hours/ }, { timeout: 5000 })).click();
+    const restrict = await q.findByRole('button', { name: /^Restrict chat, 24 hours/ }, { timeout: 5000 });
+    // A quick-action button accepts a click a moment after its case appeared.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    restrict.click();
     const undo = (await q.findAllByRole('button', { name: /^Undo/ }))[0] as HTMLElement;
     expect(root(el).contains(undo)).toBe(true);
     expect(document.body.textContent).not.toContain('Undo');

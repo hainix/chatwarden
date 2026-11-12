@@ -8,6 +8,7 @@ import { personName } from '../excerpt.js';
 import { noActionForm, oneClickOf } from '../simple.js';
 import type { OneClick } from '../simple.js';
 import type { Suggestion } from '../types.js';
+import { QUICK_ACT_COOLDOWN_MS, isRepeatClick } from './actGuard.js';
 import { useCase } from './CaseContext.js';
 import { useRulePick } from './useRulePick.js';
 import type { RulePick } from './useRulePick.js';
@@ -17,15 +18,10 @@ import type { RulePick } from './useRulePick.js';
 // moderator goes next. Every send hands a form to the same hold the decision bar uses (the five second Undo, the claim given back on
 // Undo) and then goes on to the person's next open report, else Take next, else the team view.
 
-/**
- * A case accepts a quick key only this long (on the hub's clock) after it became usable. The second tap of a double tap, meant for
- * the case just closed, then cannot act on the next one, and a case that rendered under the finger is not acted on unread.
- * @experimental
- */
-export const QUICK_ACT_COOLDOWN_MS = 300;
-
 /** The uid of the one action a one-click decision holds. */
 const UID = 'a1';
+
+export { QUICK_ACT_COOLDOWN_MS };
 
 export type QuickKind = 'primary' | 'none' | 'warning';
 
@@ -47,12 +43,14 @@ export interface QuickActions {
   primary: OneClick | null;
   /** A warning, when the ladder suggests something harsher. */
   warning: OneClick | null;
-  /** 1 and Ctrl+Enter: the suggested step, then the next case. */
-  sendPrimary: () => void;
+  /** The case is old enough (the quick-act cooldown) for a button to be drawn enabled. */
+  cooled: boolean;
+  /** 1 and Ctrl+Enter: the suggested step, then the next case. Given a click, a repeat click (the second of a double click) is ignored. */
+  sendPrimary: (click?: { detail?: number }) => void;
   /** 2 and the button: "nothing wrong here" with no reason, then the next case. */
-  sendDismiss: () => void;
+  sendDismiss: (click?: { detail?: number }) => void;
   /** 3: a warning, then the next case. */
-  sendWarning: () => void;
+  sendWarning: (click?: { detail?: number }) => void;
   /** The case's read is current (no newer report has arrived since). */
   fresh: boolean;
   /** Which rule the card works from, for the rule field and "Something else". */
@@ -138,8 +136,9 @@ export function useQuickActions({ enabled = true, paused = false, refresh = fals
   const name = target === undefined ? '' : personName(target, people, t);
 
   /** Hands a form to the hold and goes on. Nothing is sent unless the case is usable. */
-  const send = (form: DecisionForm, kind: QuickKind): void => {
-    if (!usable || report === undefined) return;
+  const send = (form: DecisionForm, kind: QuickKind, click?: { detail?: number }): void => {
+    // Keys and clicks alike: the case must have aged, and the second click of a double click is the first one's echo.
+    if (!usable || report === undefined || !c.settled() || isRepeatClick(click)) return;
     if (lastSent.size >= LAST_SENT_MAX) lastSent.clear();
     lastSent.set(report.id, kind);
     decisions.submit({ reportId: report.id, person: report.targetPerson, name, input: toInput(form), snapshot: form });
@@ -154,8 +153,9 @@ export function useQuickActions({ enabled = true, paused = false, refresh = fals
     pick,
     suggest,
     choice,
-    sendPrimary: () => primary !== null && send(primary.form, 'primary'),
-    sendDismiss: () => send(noActionForm(), 'none'),
-    sendWarning: () => warning !== null && send(warning.form, 'warning'),
+    cooled: c.cooled,
+    sendPrimary: (click) => primary !== null && send(primary.form, 'primary', click),
+    sendDismiss: (click) => send(noActionForm(), 'none', click),
+    sendWarning: (click) => warning !== null && send(warning.form, 'warning', click),
   };
 }

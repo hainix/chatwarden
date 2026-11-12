@@ -103,7 +103,9 @@ describe('a controller the provider made still answers its toasts through the ca
     const onOpenCase = vi.fn();
     const { user } = renderPieces(w, <CaseCard reportId={a.id} onOpenCase={onOpenCase} />);
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
-    await user.click(await within(card).findByRole('button', { name: /^No action needed/ }));
+    const dismiss = await within(card).findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
+    await user.click(dismiss);
     await user.click(await within(await screen.findByRole('region', { name: 'Notifications' })).findByRole('button', { name: 'Undo' }));
     await act(() => settle());
     expect(onOpenCase).not.toHaveBeenCalled();

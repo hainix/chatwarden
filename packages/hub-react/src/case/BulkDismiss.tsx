@@ -64,8 +64,11 @@ function Confirm({ ask, onClose, onConfirm }: { ask: Ask; onClose: () => void; o
   const count = open > 0 ? open : takeOver ? held : 0;
   const holder = group === null ? null : liveClaim(group.claim, now());
 
+  // A case someone else holds says so in its title (a question nobody here can confirm is not asked); a senior is offered the take over below.
+  const heldText = holder === null || holder.by === '' ? t('hub.bulk.confirm.claimed', { count: held }) : t('hub.bulk.confirm.heldBy', { name: actorName(holder.by) });
   let label: string;
   if (preview.status === 'counting') label = t('hub.bulk.confirm.counting');
+  else if (takeOver) label = heldText;
   else if (count > 0) label = t(`hub.bulk.confirm.title.${ask.scope}`, { count, name: ask.name });
   else label = t('hub.bulk.confirm.none');
 
@@ -86,12 +89,8 @@ function Confirm({ ask, onClose, onConfirm }: { ask: Ask; onClose: () => void; o
       {preview.status === 'failed' && <p role="alert">{errorText(t, preview.error)}</p>}
       {result !== null && count > 0 && (
         <div>
-          {takeOver ? (
-            <p>{holder === null || holder.by === '' ? t('hub.bulk.confirm.claimed', { count: held }) : t('hub.bulk.confirm.heldBy', { name: actorName(holder.by) })}</p>
-          ) : (
-            <p>{t('hub.bulk.confirm.body', { seconds: 5 })}</p>
-          )}
-          {takeOver && <p>{t('hub.bulk.confirm.body', { seconds: 5 })}</p>}
+          {takeOver ? can('claims.override') && <p>{t('hub.bulk.confirm.title.person', { count, name: ask.name })}</p> : <p>{t('hub.bulk.confirm.body', { seconds: 5 })}</p>}
+          {takeOver && can('claims.override') && <p>{t('hub.bulk.confirm.body', { seconds: 5 })}</p>}
           {!takeOver && held > 0 && <p>{t('hub.bulk.confirm.claimed', { count: held })}</p>}
           {result.more && <p className="cw-hint">{t('hub.bulk.more')}</p>}
         </div>

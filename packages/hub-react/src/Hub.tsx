@@ -4,7 +4,9 @@ import { CaseSession, useCaseActions } from './cases.js';
 import type { CommandTarget } from './commands.js';
 import { useHub } from './context.js';
 import { useOptionalDecisions } from './decisions.js';
-import { activeOf } from './dom.js';
+import { activeOf, modalIn } from './dom.js';
+import { MOVING_ATTRIBUTE } from './case/actGuard.js';
+import { LazyCommandBar, LazyShortcutSheet, preloadShellParts } from './lazyParts.js';
 import type { HubClient } from './client.js';
 import type { HubController, HubHost } from './headless/controller.js';
 import type { HubT } from './i18n.js';
@@ -21,10 +23,8 @@ import { screenFor } from './screens/index.js';
 import { ScreenShown, isFocusFree } from './screens/lazy.js';
 import { ConnectionBanner } from './shell/Banner.js';
 import { CasePanel } from './shell/CasePanel.js';
-import { CommandBar } from './shell/CommandBar.js';
 import { QueuePane } from './shell/QueuePane.js';
 import { Rail } from './shell/Rail.js';
-import { ShortcutSheet } from './shell/ShortcutSheet.js';
 import { TopBar } from './shell/TopBar.js';
 import { QUEUE_OPEN_DELAY_MS, shortcutFor } from './shortcuts.js';
 import { useToasts } from './toasts.js';
@@ -145,6 +145,9 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [dialog, setDialog] = useState<Dialogs>(null);
   const [announcement, setAnnouncement] = useState('');
+  // The command bar, the sheet and the sweep window are fetched just after the first paint, so the first Ctrl+K or ? is not waiting for code.
+  const mayCloseMany = can('reports.decide.bulk');
+  useEffect(() => preloadShellParts(mayCloseMany), [mayCloseMany]);
 
   // A screen is its route name, plus the id for a report or person. A query change (the status filter) keeps the same screen
   // mounted, so the control the person just used keeps keyboard focus.
@@ -245,7 +248,7 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
       </div>
       {shortcuts && <Shortcuts bodyRef={bodyRef} dialogOpen={dialog !== null} open={setDialog} />}
       {dialog === 'command' && <CommandWindow shortcuts={shortcuts} onClose={() => setDialog(null)} open={setDialog} />}
-      {dialog === 'shortcuts' && <ShortcutSheet onClose={() => setDialog(null)} />}
+      {dialog === 'shortcuts' && <LazyShortcutSheet onClose={() => setDialog(null)} />}
     </>
   );
 }
@@ -262,7 +265,7 @@ function CommandWindow({ shortcuts, onClose, open }: { shortcuts: boolean; onClo
     else if (target.type === 'undo') undo();
     else void actions.takeNext();
   };
-  return <CommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} />;
+  return <LazyCommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} />;
 }
 
 /**
@@ -296,14 +299,20 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
     // With Quick keys on, a move opens the case it ends on once the key has been still for a moment (a held key passes the rows in
     // between without claiming them). Another move, a click, Escape or the hub going away cancels it.
     let pending: ReturnType<typeof setTimeout> | null = null;
+    // While a move is pending the hub's root says so, and no act key acts (it would act on the case being left).
+    let moving: HTMLElement | null = null;
     const cancel = (): void => {
       if (pending !== null) clearTimeout(pending);
       pending = null;
+      moving?.removeAttribute(MOVING_ATTRIBUTE);
+      moving = null;
     };
     const body = bodyRef.current;
     body?.addEventListener('click', cancel, true);
     const rows = (): HTMLElement[] => [...(bodyRef.current?.querySelectorAll<HTMLElement>('.cw-queue .cw-case-link') ?? [])];
-    const onKeyDown = (e: KeyboardEvent): void => {
+    const onKeyDown = (e: KeyboardEvent, root: HTMLElement): void => {
+      // Behind any window of this hub (the command bar, the sheet, a confirmation, the unsaved-changes guard) no key acts on the page.
+      if (modalIn(root) !== null) return;
       const action = shortcutFor(e);
       if (action === null) return;
       const state = latest.current;
@@ -335,10 +344,13 @@ function Shortcuts({ bodyRef, dialogOpen, open }: { bodyRef: { current: HTMLDivE
         row?.focus();
         cancel();
         if (state.quickKeys && row !== undefined) {
+          moving = root;
+          root.setAttribute(MOVING_ATTRIBUTE, '');
           pending = setTimeout(() => {
-            pending = null;
+            const go = row.isConnected && activeOf(bodyRef.current) === row;
+            cancel();
             // Only the row the cursor is still on: a moderator who has gone elsewhere is not taken somewhere by a timer.
-            if (row.isConnected && activeOf(bodyRef.current) === row) row.click();
+            if (go) row.click();
           }, QUEUE_OPEN_DELAY_MS);
         }
       } else {

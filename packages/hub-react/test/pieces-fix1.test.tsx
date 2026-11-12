@@ -102,6 +102,7 @@ describe.each([
     await screen.findByRole('complementary', { name: 'About this case' });
     const bar = await screen.findByRole('region', { name: 'Decision' });
     await m.user.click(await within(bar).findByRole('radio', { name: /Not a problem/ }));
+    w.clock.t += 400;
     await m.user.type(within(bar).getByRole('textbox', { name: 'Reason' }), 'Fine.{Control>}{Enter}{/Control}');
     await waitFor(() => expect(onOpenReport).toHaveBeenCalledWith(second.id));
     expect(onOpenReport).toHaveBeenCalledTimes(1);
@@ -220,6 +221,7 @@ describe('one held case is said plainly', () => {
     const alpha = await screen.findByRole('region', { name: 'Case against Alpha' });
     await screen.findByRole('region', { name: 'Case against Bravo' });
     await act(() => settle());
+    w.clock.t += 400;
     // Bravo was shown last, so it is the held one: Alpha is the card that is not.
     await waitFor(() => expect(w.cw.cases.holder(b.person)?.by).toBe('ann@example.test'));
     await user.click(await within(alpha).findByRole('button', { name: /^No action needed/ }));

@@ -188,7 +188,9 @@ describe('CaseCard', () => {
     const w = await hubWorld();
     const f = await w.file({ target: 'Alpha' });
     const { user } = renderPieces(w, <CaseCard reportId={f.id} />);
-    await user.click(await screen.findByRole('button', { name: /^No action needed/ }));
+    const dismiss = await screen.findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
+    await user.click(dismiss);
     const toasts = await screen.findByRole('region', { name: 'Notifications' });
     await user.click(await within(toasts).findByRole('button', { name: 'Undo' }));
     expect(w.sent.filter((r) => /\/decide$/.test(r.path))).toHaveLength(0);
@@ -199,7 +201,9 @@ describe('CaseCard', () => {
     const w = await hubWorld();
     const f = await w.file({ target: 'Alpha' });
     const { user, unmount } = renderPieces(w, <CaseCard reportId={f.id} />);
-    await user.click(await screen.findByRole('button', { name: /^No action needed/ }));
+    const dismiss = await screen.findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
+    await user.click(dismiss);
     unmount();
     await waitFor(async () => expect((await w.client.getReport(f.id)).report.status).not.toBe('open'));
   });

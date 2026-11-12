@@ -366,6 +366,7 @@ describe('the keys', () => {
     const f = await w.fileRich({ lines: TALK });
     const { user } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}` });
     await user.click(await screen.findByRole('button', { name: /^Something else/ }));
+    w.clock.t += 400;
     await press(user, '1');
     await press(user, '2');
     await press(user, '{Control>}{Enter}{/Control}');
@@ -468,7 +469,9 @@ describe('what a case costs in audited reads, against Detailed', () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     const { user } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}`, stay: true });
-    await user.click(await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ }));
+    const go = await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ });
+    w.clock.t += 400;
+    await user.click(go);
     const before = counts(w);
     await pageHides();
     await waitFor(() => expect(decides(w)).toHaveLength(1));
@@ -513,6 +516,7 @@ describe('accessibility', () => {
       await user.click(await screen.findByRole('button', { name: /^Something else/ }));
       expect(await violations(container)).toEqual([]);
       await user.click(screen.getByRole('button', { name: 'Back to the suggestion' }));
+      w.clock.t += 400;
       await user.click(screen.getByRole('button', { name: /^Restrict chat/ }));
       expect(await violations(container)).toEqual([]);
       await user.click(within(screen.getByRole('region', { name: 'Decision' })).getByRole('button', { name: 'Undo' }));

@@ -27,7 +27,8 @@ async function setup(options: Parameters<typeof hubWorld>[0] = { actor: 'ann@exa
 }
 async function open(user: ReturnType<typeof renderHub>['user']) {
   await user.click(screen.getByRole('button', { name: /Search or jump to/ }));
-  return input();
+  // The bar's code is fetched the first time it is wanted: it opens a moment after the click.
+  return await screen.findByRole('combobox', { name: 'Search people, reports, terms or screens' });
 }
 
 describe('the command bar: opening and closing', () => {
@@ -252,7 +253,7 @@ describe('the command bar: the keyboard', () => {
     await open(user);
     await user.keyboard('shortcuts{Enter}');
     expect(bar()).toBeNull();
-    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
   });
 
   it('terms arriving late do not move the result the pointer or the arrows chose', async () => {
@@ -308,12 +309,12 @@ describe('the command bar and the single keys', () => {
   it('Ctrl+K opens the bar from the body, from a queue row and from the case card', async () => {
     const { user, a } = await setup();
     await user.keyboard('{Control>}k{/Control}');
-    expect(bar()).not.toBeNull();
+    expect(await screen.findByRole('dialog', { name: 'Command bar' })).toBeInTheDocument();
     await user.keyboard('{Escape}');
     const row = within(screen.getByRole('region', { name: 'Open cases' })).getAllByRole('link')[0] as HTMLElement;
     row.focus();
     await user.keyboard('{Control>}k{/Control}');
-    expect(bar()).not.toBeNull();
+    expect(await screen.findByRole('dialog', { name: 'Command bar' })).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(a.id).toBeDefined();
   });
@@ -321,6 +322,7 @@ describe('the command bar and the single keys', () => {
   it('while the bar is open, J, K, U and the digits type into its input and act on nothing', async () => {
     const { user, w } = await setup();
     await user.keyboard('{Control>}k{/Control}');
+    await screen.findByRole('dialog', { name: 'Command bar' });
     expect(input()).toHaveFocus();
     await user.keyboard('jku123');
     expect(input()).toHaveValue('jku123');
@@ -341,12 +343,16 @@ describe('the command bar and the single keys', () => {
   it('offers "Undo the last decision" only while a decision is waiting, and choosing it undoes it', async () => {
     const { user, w } = await setup();
     await user.keyboard('{Control>}k{/Control}');
+    await screen.findByRole('dialog', { name: 'Command bar' });
     expect(labels()).not.toContain('Undo the last decision');
     await user.keyboard('{Escape}');
     await user.click(within(screen.getByRole('region', { name: 'Open cases' })).getAllByRole('link')[0] as HTMLElement);
     const decision = await screen.findByRole('region', { name: 'Decision' });
-    await user.click(await within(decision).findByRole('button', { name: /^Nothing wrong here/ }));
+    const dismiss = await within(decision).findByRole('button', { name: /^Nothing wrong here/ });
+    w.clock.t += 400;
+    await user.click(dismiss);
     await user.keyboard('{Control>}k{/Control}');
+    await screen.findByRole('dialog', { name: 'Command bar' });
     expect(labels()).toContain('Undo the last decision');
     await user.click(options().find((o) => o.textContent?.includes('Undo the last decision')) as HTMLElement);
     expect(bar()).toBeNull();

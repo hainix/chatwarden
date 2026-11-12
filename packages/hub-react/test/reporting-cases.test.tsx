@@ -179,6 +179,7 @@ describe('Simple: what the card says it was reported for', () => {
     const r = renderHub(w, { path: `/reports/${id}`, mode: 'simple' });
     await screen.findByRole('heading', { level: 2, name });
     await screen.findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
     return r;
   }
 
@@ -212,6 +213,7 @@ describe('Simple: the rule behind a reason', () => {
     const r = renderHub(w, { path: `/reports/${id}`, mode: 'simple', ...options });
     await screen.findByRole('heading', { level: 2, name: 'Mallory' });
     await screen.findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
     return r;
   }
   const picker = () => within(decision()).getByRole('combobox', { name: 'Which rule does this break?' });

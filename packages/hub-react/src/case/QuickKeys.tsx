@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import { useHub } from '../context.js';
 import { isTypingTarget, modalIn } from '../dom.js';
 import { useKeyListener } from '../keyScope.js';
-import { QUICK_ACT_COOLDOWN_MS, useQuickActions } from './useQuickActions.js';
+import { isMoving } from './actGuard.js';
+import { useCase } from './CaseContext.js';
+import { useQuickActions } from './useQuickActions.js';
 import type { QuickActions } from './useQuickActions.js';
 
 // The keys that act on the open case: 1 the suggested step, 2 "nothing wrong here", 3 a warning (when offered), and, where `ctrlEnter`
@@ -11,18 +13,16 @@ import type { QuickActions } from './useQuickActions.js';
 //
 // A key acts only when the case is usable, once (a held key repeats and is ignored), not while typing (except Ctrl+Enter, made for
 // the reason box, and a digit on the rule field, a select that a digit cannot type into), not under a window, and not until
-// QUICK_ACT_COOLDOWN_MS after the case appeared.
+// QUICK_ACT_COOLDOWN_MS after the case appeared (see actGuard.ts).
 
 export function QuickKeys({ quick, ctrlEnter = true, digits = true }: { quick: QuickActions; ctrlEnter?: boolean; digits?: boolean }) {
-  const { shortcuts, now } = useHub();
+  const { shortcuts } = useHub();
+  const c = useCase();
   const listen = useKeyListener();
   const latest = useRef(quick);
   latest.current = quick;
-  const nowRef = useRef(now);
-  nowRef.current = now;
-  // When this case appeared (this part is drawn once the case is read), on the hub's clock. Re-reading the case does not start it over.
-  const since = useRef<number | null>(null);
-  if (since.current === null) since.current = now();
+  const settledRef = useRef(c.settled);
+  settledRef.current = c.settled;
 
   useEffect(() => {
     if (!shortcuts) return;
@@ -39,8 +39,8 @@ export function QuickKeys({ quick, ctrlEnter = true, digits = true }: { quick: Q
         const onRuleField = origin instanceof Element && origin.closest('.cw-scard-rule') !== null;
         if (isTypingTarget(e) && !onRuleField) return;
       }
-      const at = since.current;
-      if (at === null || nowRef.current() - at < QUICK_ACT_COOLDOWN_MS) return;
+      // Not until the case has aged (a double tap is for the case just closed), and not while a move to another case is on its way.
+      if (!settledRef.current() || isMoving(hub)) return;
       if (isCtrlEnter || e.key === '1') {
         if (q.primary === null) return;
         e.preventDefault();

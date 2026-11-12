@@ -148,7 +148,7 @@ describe('? shows the shortcuts', () => {
     const row = links()[0]!;
     row.focus();
     await user.keyboard('?');
-    const dialog = sheet();
+    const dialog = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
     expect(dialog).not.toBeNull();
     expect(dialog).toHaveAttribute('aria-modal', 'true');
     for (const text of [
@@ -207,7 +207,8 @@ describe('Ctrl or Cmd and K open the command bar', () => {
     const { user } = renderHub(w);
     await ready();
     await user.keyboard(keys);
-    expect(bar()).not.toBeNull();
+    // The bar's code is fetched the first time it is wanted: it opens a moment after the key.
+    expect(await screen.findByRole('dialog', { name: 'Command bar' })).toBeInTheDocument();
   });
 
   it('Escape closes it and focus goes back to where it was', async () => {

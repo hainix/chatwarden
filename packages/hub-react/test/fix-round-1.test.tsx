@@ -517,6 +517,8 @@ describe('12: the shortcut cap matches the keyboard', () => {
     expect(button).toHaveTextContent('⌘');
     expect(button).not.toHaveTextContent('Ctrl');
     fireEvent.keyDown(document.body, { key: '?' });
+    // The sheet's code is fetched the first time it is wanted (timers are the test's here): let the fetch settle.
+    for (let i = 0; i < 8; i += 1) await act(async () => Promise.resolve());
     const sheet = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
     expect(within(sheet).getAllByText('⌘').length).toBeGreaterThanOrEqual(2);
     expect(within(sheet).queryByText('Ctrl')).not.toBeInTheDocument();

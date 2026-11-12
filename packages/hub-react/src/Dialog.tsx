@@ -51,7 +51,8 @@ export function Dialog({
       return;
     }
     if (e.key !== 'Tab') return;
-    const items = [...(box.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
+    // What can take focus now: a hidden control cannot.
+    const items = [...(box.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter((x) => x.closest('[hidden]') === null);
     if (items.length === 0) {
       e.preventDefault();
       return;

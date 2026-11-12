@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { holderOf } from '../claims.js';
 import type { Holder } from '../claims.js';
@@ -13,6 +13,7 @@ import { useOptionalQueue } from '../liveQueue.js';
 import { nextOpenReport } from '../queue.js';
 import type { NextReport, QueueGroup } from '../queue.js';
 import type { PersonHistory, ReportDetail } from '../types.js';
+import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
 import { useDecisionForm } from './useDecisionForm.js';
 import type { DecisionDraft } from './useDecisionForm.js';
 
@@ -38,6 +39,10 @@ export interface CaseValue {
   left: boolean;
   /** The decision form, shared by the transcript's margin boxes and the decision bar. */
   draft: DecisionDraft;
+  /** The case was drawn long enough ago (the quick-act cooldown, on a monotonic clock) for an act key or a quick button to act on it. Read when a key is pressed. */
+  settled: () => boolean;
+  /** The same, as state, so a button can be drawn disabled for that moment. */
+  cooled: boolean;
   /** Blocked words are hidden until shown: for the whole case, or one line. */
   reveal: {
     all: boolean;
@@ -89,6 +94,18 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     });
   }, []);
 
+  // When the case was drawn (its read is in), on the monotonic clock: act keys and quick buttons wait a moment after it.
+  const shownAt = useRef<number | null>(null);
+  const hasData = detail.data !== undefined;
+  if (hasData && shownAt.current === null) shownAt.current = monotonicNow();
+  const [cooled, setCooled] = useState(false);
+  useEffect(() => {
+    if (!hasData) return undefined;
+    const id = setTimeout(() => setCooled(true), QUICK_ACT_COOLDOWN_MS);
+    return () => clearTimeout(id);
+  }, [hasData]);
+  const settled = useCallback(() => hasAged(shownAt.current), []);
+
   const claim = group !== null ? group.claim : (detail.data?.claim ?? null);
   const holder = holderOf(claim, me.actor, now());
   const entry = decisions.entry(reportId);
@@ -107,6 +124,8 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     entry,
     left,
     draft,
+    settled,
+    cooled,
     reveal: { all: revealAll, setAll: setRevealAll, shows: (id) => revealAll || revealed.has(id), toggle },
   };
   return <CaseContext.Provider value={value}>{children}</CaseContext.Provider>;

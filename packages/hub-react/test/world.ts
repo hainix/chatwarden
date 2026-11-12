@@ -8,6 +8,7 @@ import { adminRoutes, createRouter } from '@chatwarden/http/admin';
 import type { KitRequest, KitResponse, PermissionKey, RouteTable } from '@chatwarden/http/admin';
 import type { ReportCategory } from '@chatwarden/core';
 import { createHubClient } from '../src/client.js';
+import { advanceGuardTime } from './guardTime.js';
 import type { HubClient } from '../src/client.js';
 import { routerTransport } from '../src/transport.js';
 import type { Transport, TransportRequest } from '../src/transport.js';
@@ -67,7 +68,18 @@ export interface RichOptions extends FileOptions {
 }
 
 export async function hubWorld(opts: WorldOptions = {}) {
-  const clock = { t: T0, now: () => clock.t };
+  // Time passing in the world also passes on the monotonic clock the quick-key guard reads (see guardTime.ts).
+  let at = T0;
+  const clock = {
+    get t(): number {
+      return at;
+    },
+    set t(value: number) {
+      if (value > at) advanceGuardTime(value - at);
+      at = value;
+    },
+    now: () => at,
+  };
   // The term list is built first: the kit asks it to judge chat, and a kit with no matcher logs a warning on start.
   const live = new LiveTerms({ store: new MemoryTermStore(), pack: syntheticTermPack(), clock });
   live.loadSync();

@@ -125,6 +125,14 @@ describe('bundle size', () => {
     }
   });
 
+  it('keeps the sweep disclosure, the shortcut sheet and the command bar out of the entry: each is a chunk of its own', async () => {
+    const { entryInputs, chunkRoots } = await bundle();
+    for (const file of ['case/BulkDismiss.tsx', 'shell/ShortcutSheet.tsx', 'shell/CommandBar.tsx']) {
+      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
+      expect(chunkRoots.filter((i) => i.endsWith(`src/${file}`)), `${file} has no chunk`).toHaveLength(1);
+    }
+  });
+
   it('keeps the settings and admin screens out of the entry: each is a chunk of its own', async () => {
     const { entryInputs, chunkRoots } = await bundle();
     const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings'];
