@@ -65,9 +65,9 @@ export async function chatWorld(over: ChatWorldOptions = {}) {
   /** A transport for player `name`. */
   const transportFor = (name: string, options: LocalOptions = {}) => localChatTransport(chat, who(name), member(name), options);
 
-  /** `name` says something in `room` without a box (a bot at the other end). */
-  const say = (room: string, name: string, text: string): SendResult => {
-    const s = chat.session(room, who(name), member(name));
+  /** `name` says something in `room` without a box (a bot at the other end). `as` is the identity behind the name: two players may share a name. */
+  const say = (room: string, name: string, text: string, as: string = name): SendResult => {
+    const s = chat.session(room, who(as), member(name));
     if ('refused' in s) throw new Error(`session refused: ${s.refused.reason}`);
     return s.send({ text });
   };

@@ -6,8 +6,8 @@ import type { FetchTransportOptions } from '../transport.js';
 import { createSseParser } from './sse.js';
 import type { ChatClosedWhy, ChatStatus } from './status.js';
 import type { SseEvent } from './sse.js';
-import { MAX_FRAME_BYTES, readFrame, readLine, readRefusal } from './wire.js';
-import type { ChatFrame, MuteTarget, SendResult } from './wire.js';
+import { MAX_FRAME_BYTES, readFrame, readLine, readMuteResult, readRefusal } from './wire.js';
+import type { ChatFrame, MuteResult, MuteTarget, SendResult } from './wire.js';
 
 export type { ChatClosedWhy, ChatStatus } from './status.js';
 
@@ -22,8 +22,11 @@ export interface ChatTransportEvents {
 export interface ChatConnection {
   /** Send a line. Resolves with the kit's answer (delivered or refused); rejects with a `PlayerError` only when no answer arrived. */
   send(text: string): Promise<SendResult>;
-  /** Mute or unmute. Resolves `true` when it changed something. */
-  mute(target: MuteTarget, on: boolean): Promise<boolean>;
+  /**
+   * Mute or unmute. Resolves with `{ ok, hiddenIds }` (the lines the server hid, see `MuteResult`); a custom transport that cannot name
+   * them may resolve a plain boolean (`true` when it changed something), and then only the line that was clicked is hidden at once.
+   */
+  mute(target: MuteTarget, on: boolean): Promise<boolean | MuteResult>;
   /** File a report on a line. Resolves with the dialog's `ReportResult` shape. */
   report(lineId: string, draft: ReportDraft): Promise<ReportResult>;
   /** Stop, and do not reconnect. */
@@ -299,8 +302,9 @@ export function createSseTransport(options: SseTransportOptions, internals: SseT
         },
         mute: async (target, on) => {
           const body = await callRoute(rest, { method: 'POST', path: `${roomPath}/mute`, body: { ...target, on } });
-          if (!isObject(body) || typeof body.ok !== 'boolean') throw bad();
-          return body.ok;
+          const result = readMuteResult(body);
+          if (result === null) throw bad();
+          return result;
         },
         report: async (lineId, draft) => {
           const payload: Record<string, string> = { lineId };

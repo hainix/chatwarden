@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import { CHAT_WIRE_VERSION as HTTP_VERSION, encodeFrame } from '@chatwarden/http';
 import type {
   ChatFrame as HttpFrame,
+  MuteResult as HttpMuteResult,
   MuteTarget as HttpMuteTarget,
   ReportOutcome as HttpReportOutcome,
   SendResult as HttpSendResult,
@@ -11,7 +12,7 @@ import type {
   WireRestriction as HttpRestriction,
 } from '@chatwarden/http';
 import { CHAT_WIRE_VERSION, readFrame, readLine, readRefusal } from '../src/chat/wire.js';
-import type { ChatFrame, MuteTarget, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from '../src/chat/wire.js';
+import type { ChatFrame, MuteResult, MuteTarget, SendResult, WireLine, WireMuted, WireRefusal, WireRestriction } from '../src/chat/wire.js';
 import { createSseParser } from '../src/chat/sse.js';
 
 const line = (over: Partial<WireLine> = {}): WireLine => ({ id: '41', at: 1_800_000_001_000, name: 'tarvo', text: 'anyone for a round?', ...over });
@@ -51,6 +52,7 @@ describe('the client types and the http types are assignable in both directions 
     expectTypeOf<ChatFrame>().toEqualTypeOf<HttpFrame>();
     expectTypeOf<SendResult>().toEqualTypeOf<HttpSendResult>();
     expectTypeOf<MuteTarget>().toEqualTypeOf<HttpMuteTarget>();
+    expectTypeOf<MuteResult>().toEqualTypeOf<HttpMuteResult>();
     expectTypeOf<ChatFrame>().toExtend<HttpFrame>();
     expectTypeOf<HttpFrame>().toExtend<ChatFrame>();
     expectTypeOf<SendResult>().toExtend<HttpSendResult>();

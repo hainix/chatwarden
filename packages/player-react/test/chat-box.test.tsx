@@ -95,12 +95,15 @@ describe('the box shows the room', () => {
     expect((item.querySelector('.cw-chat-name')?.textContent ?? '') + (item.querySelector('.cw-chat-text')?.textContent ?? '')).toBe('tarvo: gg');
   });
 
-  it('the time of a line is on a <time> element, for those who hover', async () => {
+  it('the time of a line is on a <time> element and its title, and the message text is not inside the <time>', async () => {
     w.say('lobby', 'tarvo', 'gg');
     await join('snerp');
-    const time = within(log()).getByText('gg').closest('time') as HTMLTimeElement;
+    const item = within(log()).getByText('gg').closest('li') as HTMLElement;
+    const time = item.querySelector('time') as HTMLTimeElement;
     expect(time.dateTime).toBe(new Date(1_800_000_000_000).toISOString());
-    expect(time.title).not.toBe('');
+    expect(time.textContent).toBe('');
+    expect(item.title).not.toBe('');
+    expect(within(log()).getByText('gg').closest('time')).toBeNull();
   });
 
   it('a new room closes the connection and opens another', async () => {
@@ -118,13 +121,42 @@ describe('the box shows the room', () => {
     ]);
   });
 
-  it('a new transport closes the old connection too', async () => {
+  it('a new transport object on a re-render does not reopen the stream (an inline sseTransport({...}) is not a loop)', async () => {
     const a = w.transportFor('snerp');
     const b = w.transportFor('snerp');
     const { rerender } = renderUi(box(a));
     await screen.findByRole('textbox', { name: 'Message' });
     rerender(box(b));
-    await waitFor(() => expect(b.opened).toHaveLength(1));
+    rerender(box(w.transportFor('snerp')));
+    expect(a.opened).toHaveLength(1);
+    expect(a.opened[0]?.closed).toBe(false);
+    expect(b.opened).toHaveLength(0);
+  });
+
+  it('a status callback that sets state in the parent does not loop with an inline transport', async () => {
+    const { useState } = await import('react');
+    let renders = 0;
+    const opened: string[] = [];
+    function Parent() {
+      const [, set] = useState(0);
+      renders += 1;
+      const inline = { open: (room: string, events: Parameters<ChatTransport['open']>[1]) => { opened.push(room); return w.transportFor('snerp').open(room, events); } };
+      return <ChatBox transport={inline} room="lobby" {...FIXED} onStatus={() => set((n) => n + 1)} />;
+    }
+    renderUi(<Parent />);
+    await screen.findByRole('textbox', { name: 'Message' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(opened).toEqual(['lobby']);
+    expect(renders).toBeLessThan(10);
+  });
+
+  it('a new room opens the latest transport', async () => {
+    const a = w.transportFor('snerp');
+    const b = w.transportFor('snerp');
+    const { rerender } = renderUi(box(a));
+    await screen.findByRole('textbox', { name: 'Message' });
+    rerender(box(b, { room: 'arena' }));
+    await waitFor(() => expect(b.opened.map((o) => o.room)).toEqual(['arena']));
     expect(a.opened[0]?.closed).toBe(true);
   });
 

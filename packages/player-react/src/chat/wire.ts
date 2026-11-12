@@ -82,6 +82,11 @@ export type ChatFrame =
 
 export type SendResult = { ok: true; line: WireLine } | { ok: false; refused: WireRefusal };
 export type MuteTarget = { lineId: string } | { ref: string };
+/**
+ * The answer to a mute: `ok` is whether anything changed; `hiddenIds` are the ids of the muted player's lines still in the room history
+ * (oldest first, the same ids as the `hide` frame), so a client hides exactly those. `[]` for an unmute or a no-op.
+ */
+export type MuteResult = { ok: boolean; hiddenIds: string[] };
 export type ReportOutcome =
   | { ok: true; remaining: number }
   | { ok: false; refused: ReportRefusal | 'not_found'; remaining?: number };
@@ -98,6 +103,8 @@ const MAX_RETRY_AFTER_MS = 3_600_000;
 const MAX_HEARTBEAT_MS = 3_600_000;
 /** The broadcaster's default heartbeat, for a hello that does not carry a usable one. */
 export const DEFAULT_HEARTBEAT_MS = 20_000;
+/** The most ids one mute answer may name (the room's ring is at most 100). */
+const MAX_HIDDEN = 1000;
 /** A line id over this is not an id. */
 const MAX_ID = 64;
 
@@ -155,6 +162,19 @@ export function readLine(raw: unknown): WireLine | null {
     const line: WireLine = { id, at, name: cut(name, MAX_NAME), text: cut(text, MAX_TEXT) };
     if (own(o, 'mine') === true) line.mine = true;
     return line;
+  } catch {
+    return null;
+  }
+}
+
+/** The answer to a mute POST, or null when it is not one. A missing `hiddenIds` is none; ids that are not strings are dropped. */
+export function readMuteResult(raw: unknown): MuteResult | null {
+  try {
+    const o = bagOf(raw);
+    if (o === null || typeof own(o, 'ok') !== 'boolean') return null;
+    const ids = own(o, 'hiddenIds');
+    const hiddenIds = Array.isArray(ids) ? (ids as unknown[]).filter((id): id is string => isStr(id) && id !== '' && id.length <= MAX_ID).slice(0, MAX_HIDDEN) : [];
+    return { ok: own(o, 'ok') as boolean, hiddenIds };
   } catch {
     return null;
   }

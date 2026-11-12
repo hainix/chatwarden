@@ -243,7 +243,7 @@ describe('chat.css is a complete token contract', () => {
     expect(red.length).toBeGreaterThan(0);
     expect(red.filter((s) => !/cw-chat-(refusal|failure|connection)\b/.test(s))).toEqual([]);
     for (const token of ['--cw-accent', '--cw-accent-soft', '--cw-accent-ink']) {
-      const bad = rulesUsing(token).filter((s) => !/cw-chat-name--you$|cw-chat-send|:focus-visible$|cw-chat-jump|cw-chat-undo/.test(s));
+      const bad = rulesUsing(token).filter((s) => !/cw-chat-name--you$|cw-chat-send|:focus-visible$|cw-chat-jump|cw-chat-undo|cw-chat-retry/.test(s));
       expect(bad, token).toEqual([]);
     }
     expect(rulesUsing('--cw-yellow')).toEqual([]);
@@ -290,7 +290,7 @@ describe('the manifest', () => {
 
   it('the chat entry exports ChatBox, sseTransport and the experimental pure parts, and not the main entry\'s own names twice', () => {
     const entry = read(join(chatDir, 'index.ts'));
-    for (const name of ['ChatBox', 'sseTransport', 'chatReducer', 'readFrame']) expect(entry, name).toContain(name);
+    for (const name of ['ChatBox', 'sseTransport', 'chatReducer', 'readFrame', 'enChat']) expect(entry, name).toContain(name);
     expect(entry).toMatch(/@experimental/);
   });
 });

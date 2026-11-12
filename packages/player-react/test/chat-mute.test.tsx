@@ -181,7 +181,7 @@ describe('mute', () => {
     for (const region of theirBox.querySelectorAll('[role="status"]')) expect(region).toBeEmptyDOMElement();
   });
 
-  it('two lines by one name are hidden together; another name is not', async () => {
+  it('two lines by one author are hidden together (by the hide the server sends); another name is not', async () => {
     w.say('lobby', 'tarvo', 'a');
     w.say('lobby', 'tarvo', 'b');
     w.say('lobby', 'quissel', 'c');

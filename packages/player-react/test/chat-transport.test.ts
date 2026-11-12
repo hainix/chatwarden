@@ -1078,10 +1078,25 @@ describe('report maps the answer to ReportResult and never needs a report id', (
   });
 });
 
-describe('mute resolves true and false', () => {
+describe('mute resolves { ok, hiddenIds }', () => {
+  it('carries the ids the server hid, oldest first', async () => {
+    const { conn } = post({ json: { ok: true, hiddenIds: ['41', '57'] } });
+    await expect(conn.mute({ lineId: '41' }, true)).resolves.toEqual({ ok: true, hiddenIds: ['41', '57'] });
+    conn.close();
+  });
+
+  it('drops ids that are not strings, and a missing list is none', async () => {
+    const a = post({ json: { ok: true, hiddenIds: ['41', 7, null, '', { id: 1 }, 'x'.repeat(65)] } });
+    await expect(a.conn.mute({ lineId: '41' }, true)).resolves.toEqual({ ok: true, hiddenIds: ['41'] });
+    a.conn.close();
+    const b = post({ json: { ok: true, hiddenIds: 'not a list' } });
+    await expect(b.conn.mute({ lineId: '41' }, true)).resolves.toEqual({ ok: true, hiddenIds: [] });
+    b.conn.close();
+  });
+
   it('mute by line id', async () => {
     const { conn, calls } = post({ json: { ok: true } });
-    await expect(conn.mute({ lineId: '42' }, true)).resolves.toBe(true);
+    await expect(conn.mute({ lineId: '42' }, true)).resolves.toEqual({ ok: true, hiddenIds: [] });
     expect(calls[0]?.url).toBe('/chat/rooms/lobby/mute');
     expect(calls[0]?.init.method).toBe('POST');
     expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ lineId: '42', on: true });
@@ -1090,14 +1105,14 @@ describe('mute resolves true and false', () => {
 
   it('unmute by ref', async () => {
     const { conn, calls } = post({ json: { ok: true } });
-    await expect(conn.mute({ ref: 'm_1' }, false)).resolves.toBe(true);
+    await expect(conn.mute({ ref: 'm_1' }, false)).resolves.toEqual({ ok: true, hiddenIds: [] });
     expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ ref: 'm_1', on: false });
     conn.close();
   });
 
   it('ok false resolves false (nothing changed)', async () => {
     const { conn } = post({ json: { ok: false } });
-    await expect(conn.mute({ lineId: '1' }, true)).resolves.toBe(false);
+    await expect(conn.mute({ lineId: '1' }, true)).resolves.toEqual({ ok: false, hiddenIds: [] });
     conn.close();
   });
 

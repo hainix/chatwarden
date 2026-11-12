@@ -259,6 +259,17 @@
 .cw-player .cw-chat-failure {
   color: var(--cw-red, var(--cwd-red));
 }
+.cw-player .cw-chat-retry {
+  min-height: 2.25rem;
+  padding: 0 var(--cw-space-2, var(--cwd-space-2));
+  border: 0;
+  background: transparent;
+  color: var(--cw-accent, var(--cwd-accent));
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .cw-player .cw-chat-undo {
   min-height: 2.25rem;
   padding: 0 var(--cw-space-2, var(--cwd-space-2));

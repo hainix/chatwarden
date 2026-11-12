@@ -24,7 +24,11 @@ import type { WireLine, WireRefusal, WireRestriction } from './wire.js';
 export type ChatRefusal = WireRefusal;
 
 export interface ChatBoxProps extends PlayerUiProps, DialogHostProps {
-  /** How to reach the room: `sseTransport({ baseUrl: '/chat' })`, or your own. Keep it stable across renders (create it once). */
+  /**
+   * How to reach the room: `sseTransport({ baseUrl: '/chat' })`, or your own. The connection opens when the box mounts and when `room`
+   * changes, with the transport of that moment: a new transport object on a later render does not reopen it (an inline
+   * `sseTransport({...})` is safe). To reconnect with a changed transport (a renewed token), change the box's `key`.
+   */
   transport: ChatTransport;
   /** The room id the server's `join` hook understands. A new `room` closes the connection and opens another. */
   room: string;
@@ -55,6 +59,8 @@ const MUTE_NOTE_MS = 8000;
 const CLOSED = new Set<string>(['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'not_found', 'unsupported']);
 /** The longest a timer is set for (a larger delay fires at once). */
 const MAX_TIMER_MS = 2 ** 31 - 1;
+/** How long a `restricted` refusal holds the input back whatever the clocks say. */
+const HOLD_MS = 60_000;
 
 /** A failure as an error the components can word: anything that is not already a PlayerError is a dropped connection. */
 const failureOf = (e: unknown): PlayerError => (e instanceof PlayerError ? e : new PlayerError({ status: 0, code: 'network', message: 'Could not reach the server.' }));
@@ -108,7 +114,7 @@ const LineView = memo(function LineView({ line, first, you, t, locale, timeZone,
   const name = mine ? you : line.name;
   const when = timeOf(line.at, locale, timeZone);
   return (
-    <li className="cw-chat-line" data-mine={mine ? 'true' : undefined}>
+    <li className="cw-chat-line" data-mine={mine ? 'true' : undefined} title={when === null ? undefined : when.title}>
       {first ? (
         <span className={mine ? 'cw-chat-name cw-chat-name--you' : 'cw-chat-name'}>
           {name}
@@ -117,7 +123,8 @@ const LineView = memo(function LineView({ line, first, you, t, locale, timeZone,
       ) : (
         <span className="cw-chat-sr">{name}: </span>
       )}
-      <span className="cw-chat-text">{when === null ? line.text : <time dateTime={when.iso} title={when.title}>{line.text}</time>}</span>
+      <span className="cw-chat-text">{line.text}</span>
+      {when !== null && <time hidden dateTime={when.iso} />}
       {!mine && <LineOptions t={t} line={line} open={open} onToggle={onToggle} onReport={onReport} onMute={onMute} register={register} />}
     </li>
   );
@@ -159,7 +166,12 @@ export function ChatBox(props: ChatBoxProps) {
   // The log is live only after the first hello has rendered, so joining does not read the snapshot aloud.
   const [live, setLive] = useState(false);
   const [snapshots, setSnapshots] = useState(0);
-  const [refusedRestriction, setRefusedRestriction] = useState<WireRestriction | null>(null);
+  const [refusedRestriction, setRefusedRestriction] = useState<(WireRestriction & { hold?: number | null }) | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const transportRef = useRef(transport);
+  transportRef.current = transport;
+  // The server's clock minus the player's, as last seen on a live line: a restriction's `until` is the server's.
+  const skew = useRef(0);
   const [refusedClosed, setRefusedClosed] = useState<string | null>(null);
   const [, setTick] = useState(0);
   const [openLine, setOpenLine] = useState<string | null>(null);
@@ -184,7 +196,8 @@ export function ChatBox(props: ChatBoxProps) {
     setReportFor(null);
     setPanelOpen(false);
     setMuteNote(null);
-    const conn = transport.open(room, {
+    skew.current = 0;
+    const conn = transportRef.current.open(room, {
       frame: (raw) => {
         const frame = readFrame(raw);
         if (frame === null) return;
@@ -194,6 +207,7 @@ export function ChatBox(props: ChatBoxProps) {
         }
         if (frame.type === 'hello' || frame.type === 'state') setRefusedRestriction(null);
         if (frame.type === 'notices') latest.current.onNoticePending?.();
+        if (frame.type === 'line') skew.current = frame.line.at - now.current();
         dispatch({ type: 'frame', frame });
       },
       status: (status, why) => {
@@ -207,7 +221,7 @@ export function ChatBox(props: ChatBoxProps) {
       connection.current = null;
       clearTimeout(noteTimer.current);
     };
-  }, [transport, room]);
+  }, [room, attempt]);
 
   useEffect(() => {
     if (snapshots > 0) setLive(true);
@@ -235,18 +249,25 @@ export function ChatBox(props: ChatBoxProps) {
   // A restriction ends by itself: look again when it does.
   const restriction = state.restriction ?? refusedRestriction;
   const until = restriction === null ? null : restriction.until;
+  const hold = (restriction as { hold?: number | null } | null)?.hold ?? null;
+  // The server's time as the player's clock shows it: `until` is the server's, so it is read against the server's clock (as last seen).
+  const serverNow = ui.now() + skew.current;
   useEffect(() => {
-    if (until === null) return;
-    const ms = until - now.current();
-    if (ms <= 0) return;
-    const id = setTimeout(() => setTick((n) => n + 1), Math.min(ms, MAX_TIMER_MS));
+    // Look again when the restriction ends (by the server's clock), and when a hold ends.
+    const wait = [until === null ? null : until - (now.current() + skew.current), hold === null ? null : hold - now.current()].filter((ms): ms is number => ms !== null && ms > 0);
+    if (wait.length === 0) return;
+    const id = setTimeout(() => setTick((n) => n + 1), Math.min(Math.max(...wait), MAX_TIMER_MS));
     return () => clearTimeout(id);
-  }, [until]);
-  const active = restriction !== null && (restriction.until === null || restriction.until > ui.now()) ? restriction : null;
+  }, [until, hold, state.lines]);
+  // A restricted refusal is the server's word: it holds for a minute whatever the player's clock says (a clock that runs ahead must not
+  // hand the input back to a player the server just refused), and from then on the server's `until` decides.
+  const active = restriction !== null && (restriction.until === null || restriction.until > serverNow || (hold !== null && hold > ui.now())) ? restriction : null;
+  // What the countdown is read against: never past the end, so a held restriction says "in a minute", not "ended".
+  const lineNow = (): number => (active === null || active.until === null ? ui.now() : Math.min(ui.now() + skew.current, active.until - 1000));
   const closed = state.closed === null ? refusedClosed : state.closed.why;
 
   const onRefused = (refusal: WireRefusal): void => {
-    if (refusal.reason === 'restricted') setRefusedRestriction({ until: refusal.until ?? null, byModerator: refusal.byModerator === true });
+    if (refusal.reason === 'restricted') setRefusedRestriction({ until: refusal.until ?? null, byModerator: refusal.byModerator === true, hold: now.current() + HOLD_MS });
     if (refusal.reason === 'banned') setRefusedClosed('banned');
     if (refusal.noticeId !== undefined) latest.current.onNoticePending?.();
     latest.current.onRefused?.(refusal);
@@ -278,11 +299,13 @@ export function ChatBox(props: ChatBoxProps) {
     const before = new Set(current.current.muted.map((m) => m.ref));
     void (async () => {
       try {
-        const changed = await conn.mute({ lineId: line.id }, true);
+        const answer = await conn.mute({ lineId: line.id }, true);
+        const changed = typeof answer === 'boolean' ? answer : answer.ok;
         if (changed) {
-          // The server's `hide` frame follows; hiding at once covers the gap (and a reconnect in it). Lines are known by name only here.
-          const ids = current.current.lines.filter((l) => l.name === line.name && l.mine !== true).map((l) => l.id);
-          dispatch({ type: 'frame', frame: { type: 'hide', ids } });
+          // The clicked line goes at once, then exactly the lines the answer names (the same ids as the server's `hide` frame, which covers
+          // a reconnect in the gap). Never by name: names are not unique.
+          const named = typeof answer === 'boolean' || !Array.isArray(answer.hiddenIds) ? [] : answer.hiddenIds.filter((id) => typeof id === 'string');
+          dispatch({ type: 'frame', frame: { type: 'hide', ids: [line.id, ...named] } });
           showNoteRef.current({ name: line.name, before, error: null });
         }
       } catch (e) {
@@ -378,6 +401,14 @@ export function ChatBox(props: ChatBoxProps) {
         </div>
         <div role="status" className={closed === null ? 'cw-chat-conn' : 'cw-chat-conn cw-chat-conn--closed'}>
           {status}
+          {closed !== null && closed !== 'banned' && (
+            <>
+              {' '}
+              <button type="button" className="cw-chat-retry" onClick={() => setAttempt((n) => n + 1)}>
+                {t('player.state.retry')}
+              </button>
+            </>
+          )}
         </div>
         <div role="status" className="cw-chat-note">
           {muteNote !== null && muteNote.error !== null && <p className="cw-chat-failure">{errorText(t, muteNote.error)}</p>}
@@ -407,7 +438,7 @@ export function ChatBox(props: ChatBoxProps) {
                   <RestrictedChatLine
                     t={ui.t}
                     locale={ui.locale}
-                    now={ui.now}
+                    now={lineNow}
                     {...(ui.timeZone === undefined ? {} : { timeZone: ui.timeZone })}
                     {...(theme === undefined ? {} : { theme })}
                     until={active.until}
@@ -419,7 +450,10 @@ export function ChatBox(props: ChatBoxProps) {
                     maxLength={state.maxLength}
                     autoFocus={autoFocus}
                     send={(text) => (connection.current === null ? Promise.reject(new Error('closed')) : connection.current.send(text))}
-                    onDelivered={(line) => dispatch({ type: 'sent', line })}
+                    onDelivered={(line) => {
+                      skew.current = line.at - now.current();
+                      dispatch({ type: 'sent', line });
+                    }}
                     onRefused={onRefused}
                   />
                 ))}
