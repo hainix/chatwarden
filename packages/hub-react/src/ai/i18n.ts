@@ -13,6 +13,7 @@ import type { HubParams, HubText } from '../i18n.js';
 /** @experimental */
 export const aiEn = {
   'hub.ai.tag': 'AI',
+  'hub.ai.tick': 'Cited by the AI',
   'hub.ai.chip': 'AI read:',
   'hub.ai.cites.one': 'AI cited {count} line',
   'hub.ai.cites.other': 'AI cited {count} lines',

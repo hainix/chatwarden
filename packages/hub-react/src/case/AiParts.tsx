@@ -2,6 +2,8 @@ import { useId } from 'react';
 import { useAiT } from '../ai/i18n.js';
 import type { AiText } from '../ai/i18n.js';
 import { useAiHidden } from '../ai/hide.js';
+import { useAiLevel } from '../ai/level.js';
+import { AI_KEYS } from '../ai/offer.js';
 import type { AiWhy } from '../ai/offer.js';
 import { readsOf } from '../ai/rank.js';
 import { useHub } from '../context.js';
@@ -21,7 +23,9 @@ import { useCase } from './CaseContext.js';
 // go-on-to-the-next as the ladder's step); a button whose gate is shut does nothing.
 
 export interface AiPartsProps {
-  part: 'case' | 'bar' | 'suggest' | 'accept' | 'why' | 'chip' | 'tick';
+  part: 'case' | 'bar' | 'suggest' | 'accept' | 'why' | 'chip' | 'tick' | 'sheet';
+  /** Quick keys are on (the sheet's rows say so while they are off). */
+  quickOn?: boolean;
   /** The queue row's person (the chip). */
   group?: QueueGroup;
   /** The line (the tick). */
@@ -222,7 +226,34 @@ function Tick({ lineId }: { lineId: string }) {
   );
 }
 
-export function AiParts({ part, group, lineId }: AiPartsProps) {
+/** The shortcut sheet's rows for A and E, only at level 2, where a case can carry a suggestion. */
+function SheetRows({ quickOn }: { quickOn: boolean }) {
+  const t = useAiT();
+  const { t: hubT } = useHub();
+  if (useAiLevel() !== 2) return null;
+  return (
+    <>
+      {(
+        [
+          [AI_KEYS.accept, 'hub.ai.shortcuts.accept'],
+          [AI_KEYS.edit, 'hub.ai.shortcuts.edit'],
+        ] as const
+      ).map(([key, label]) => (
+        <div key={key} className="cw-sheet-row">
+          <dt>
+            <Kbd>{key.toUpperCase()}</Kbd>
+          </dt>
+          <dd>
+            {t(label)}
+            {!quickOn && <span className="cw-sheet-needs">{hubT('hub.shortcuts.quickKeys.only')}</span>}
+          </dd>
+        </div>
+      ))}
+    </>
+  );
+}
+
+export function AiParts({ part, group, lineId, quickOn }: AiPartsProps) {
   switch (part) {
     case 'case':
       return <AiCase />;
@@ -236,6 +267,8 @@ export function AiParts({ part, group, lineId }: AiPartsProps) {
       return <Why />;
     case 'chip':
       return group === undefined ? null : <Chip group={group} />;
+    case 'sheet':
+      return <SheetRows quickOn={quickOn === true} />;
     case 'tick':
       return lineId === undefined ? null : <Tick lineId={lineId} />;
   }
