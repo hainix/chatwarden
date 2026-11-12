@@ -18,8 +18,10 @@ const rec = (cw: Awaited<ReturnType<typeof setup>>['cw'], over: Record<string, u
   cw.audit.record({ actor: 'owner_ann', role: 'owner', action: 'policy.update', ...over } as never);
 
 describe('the policy audit actions', () => {
-  it('policy.update and policy.reset join the closed list, at the end', () => {
-    expect(AUDIT_ACTIONS.slice(-2)).toEqual(['policy.update', 'policy.reset']);
+  it('policy.update and policy.reset join the closed list after reason.toggle, and later actions only append after them', () => {
+    const at = AUDIT_ACTIONS.indexOf('policy.update');
+    expect(AUDIT_ACTIONS.slice(at - 1, at + 2)).toEqual(['reason.toggle', 'policy.update', 'policy.reset']);
+    expect(AUDIT_ACTIONS.indexOf('report.dismiss_case')).toBeGreaterThan(at + 1);
   });
 
   it('record a detail of the sections changed and the reason, and list it back', async () => {
