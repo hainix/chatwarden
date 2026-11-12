@@ -19,6 +19,7 @@ import type { TermsAdmin } from './terms.js';
 export { AuditFailedError, BadActorError, createAdminContext } from './context.js';
 export type { AdminCall, AdminContext, AdminOptions } from './context.js';
 export { aiRoutes } from './ai.js';
+export type { AiReadAgainBody, AiUnavailableBody } from './ai.js';
 export { auditRoutes } from './audit.js';
 export { blockedRoutes } from './blocked.js';
 export { gapRoutes } from './gaps.js';

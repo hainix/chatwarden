@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { fakeRead } from '@chatwarden/core';
+import { AIError, fakeRead } from '@chatwarden/core';
 import type { AIReadInput, FakeScript, FakeStep } from '@chatwarden/core';
 import type { KitResponse } from '@chatwarden/http';
-import { DAY, HOUR, IP_TARGET, KEY_TARGET, SECRET, errorOf, keysDeep, world } from './world.js';
+import { DAY, HOUR, IP_TARGET, KEY_TARGET, MIN, SECRET, errorOf, keysDeep, world } from './world.js';
 import type { WorldOptions } from './world.js';
 
 // The AI over HTTP: the queue brief, the read on the case page, read again, the status line, the decision echo and "don't teach".
@@ -317,14 +317,18 @@ describe('GET /ai/status', () => {
   it('answers the status, the learn setting and the casebook stats, and is audited as policy.view', async () => {
     const w = await aiWorld(2);
     const f = await readReport(w);
-    await w.call('POST', `/reports/${f.id}/decide`, { body: decideBody(f, { readId: body(await w.call('GET', `/reports/${f.id}`)).ai.id, accepted: true }) });
+    const page = body(await w.call('GET', `/reports/${f.id}`)).ai;
+    const step = page.recommendation.step;
+    await w.call('POST', `/reports/${f.id}/decide`, {
+      body: decideBody(f, { readId: page.id, accepted: true }, { actions: [{ subject: f.target, kind: step.kind, durationMs: step.durationMs, rule: 2 }] }),
+    });
     const before = w.routeAudit().filter((r) => r.action === 'policy.view').length;
     const res = await w.call('GET', '/ai/status');
     expect(res.status).toBe(200);
     expect(res.headers?.['cache-control']).toBe('no-store');
     const s = body(res);
-    expect(Object.keys(s).sort()).toEqual(['available', 'cacheHitRate', 'capMicros', 'day', 'invalid', 'learn', 'level', 'maxLevel', 'reads', 'spentMicros', 'state', 'stats']);
-    expect(s).toMatchObject({ available: true, level: 2, maxLevel: 2, state: 'ok', spentMicros: 1000, capMicros: 1_000_000, reads: 1, learn: true, invalid: {} });
+    expect(Object.keys(s).sort()).toEqual(['available', 'cacheHitRate', 'capCalls', 'capMicros', 'day', 'invalid', 'learn', 'level', 'maxLevel', 'reads', 'spentMicros', 'state', 'stats']);
+    expect(s).toMatchObject({ available: true, level: 2, maxLevel: 2, state: 'ok', spentMicros: 1000, capMicros: 1_000_000, capCalls: 5000, reads: 1, learn: true, invalid: {} });
     expect(s.day).toBe(new Date(w.clock.t).toISOString().slice(0, 10));
     expect(s.stats).toMatchObject({ decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 1, agreementRate: 1, oneClickRate: 1 });
     expect(s.stats.rules).toEqual([{ rule: 2, decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 1 }]);
@@ -334,7 +338,7 @@ describe('GET /ai/status', () => {
   it('when no adapter is configured, available is false and level is 0', async () => {
     const w = await world();
     const s = body(await w.call('GET', '/ai/status'));
-    expect(s).toMatchObject({ available: false, level: 0, maxLevel: 0, state: 'off', spentMicros: 0, capMicros: 0, reads: 0, cacheHitRate: null, learn: true });
+    expect(s).toMatchObject({ available: false, level: 0, maxLevel: 0, state: 'off', spentMicros: 0, capMicros: 0, capCalls: 0, reads: 0, cacheHitRate: null, learn: true });
     expect(s.stats).toMatchObject({ decided: 0, rules: [] });
   });
 
@@ -376,8 +380,9 @@ describe('the decision echo', () => {
     const shape = (res: KitResponse) => ({ ...body(res), groups: body(res).groups.map((g: { kind: string }) => g.kind) });
     expect(shape(withEcho)).toEqual(shape(without));
     expect(Object.keys(withEcho.body as object).sort()).toEqual(['groups', 'ok', 'replay']);
-    expect(w.cw.audit.list({ limit: 20, action: 'ai.outcome' }).items).toHaveLength(1);
-    expect(w.cw.ai.stats({ since: 0 })).toMatchObject({ decided: 1, agree: 1 });
+    // Both decisions are recorded against their reads, with or without the echo, and both leave the moderator's audit row.
+    expect(w.cw.audit.list({ limit: 20, action: 'ai.outcome' }).items).toHaveLength(2);
+    expect(w.cw.ai.stats({ since: 0 })).toMatchObject({ decided: 2, agree: 2 });
   });
 
   it('writes the ai.outcome audit row as the caller, with their role', async () => {
@@ -447,6 +452,42 @@ describe('the decision echo', () => {
     expect((w.store as unknown as { loadAiOutcome(id: string): { severity: string } | null }).loadAiOutcome(f.id)?.severity).toBe('hostile');
   });
 
+  it('a decision with no ai at all is recorded too, with the caller role in the audit row, no click and no example', async () => {
+    const w = await aiWorld();
+    const f = await readReport(w);
+    const res = await w.call('POST', `/reports/${f.id}/decide`, { role: 'senior', actor: 'sam', body: decideBody(f, undefined) });
+    expect(res.status).toBe(200);
+    const row = (w.store as unknown as { loadAiOutcome(id: string): { agreement: string; example: unknown; detail: { oneClick: boolean } } | null }).loadAiOutcome(f.id);
+    expect(row).toMatchObject({ agreement: 'agree', example: null, detail: { oneClick: false } });
+    expect(w.cw.audit.list({ limit: 20, action: 'ai.outcome' }).items[0]).toMatchObject({ actor: 'sam', role: 'senior' });
+  });
+
+  it('a forged accepted flag is not a one-click unless the decision is the pre-fill', async () => {
+    const w = await aiWorld();
+    const f = await readReport(w);
+    const page = body(await w.call('GET', `/reports/${f.id}`)).ai;
+    const step = page.recommendation.step;
+    const other = step.kind === 'note' ? 'warning' : 'note';
+    await w.call('POST', `/reports/${f.id}/decide`, {
+      body: decideBody(f, { readId: page.id, accepted: true }, { verdict: other === 'note' ? 'noted' : 'upheld', actions: [{ subject: f.target, kind: other, durationMs: null, rule: 2 }] }),
+    });
+    expect((w.store as unknown as { loadAiOutcome(id: string): { detail: { oneClick: boolean } } | null }).loadAiOutcome(f.id)?.detail.oneClick).toBe(false);
+    expect(body(await w.call('GET', '/ai/status')).stats).toMatchObject({ oneClick: 0, oneClickRate: 0 });
+  });
+
+  it('a forged severity is dropped: a dismissal with severe is filed as banter, an upheld action at banter teaches nothing', async () => {
+    const w = await aiWorld(2, reads('upheld', 'hostile'));
+    const a = await readReport(w);
+    const readId = body(await w.call('GET', `/reports/${a.id}`)).ai.id;
+    await w.call('POST', `/reports/${a.id}/decide`, { body: { verdict: 'no_action', actions: [], ai: { readId, accepted: false, severity: 'severe' } } });
+    const store = w.store as unknown as { loadAiOutcome(id: string): { severity: string | null; example: unknown } | null };
+    expect(store.loadAiOutcome(a.id)?.severity).toBe('banter');
+    const b = await readReport(w);
+    const bRead = body(await w.call('GET', `/reports/${b.id}`)).ai.id;
+    await w.call('POST', `/reports/${b.id}/decide`, { body: decideBody(b, { readId: bRead, accepted: false, severity: 'banter' }) });
+    expect(store.loadAiOutcome(b.id)?.severity).toBe('hostile');
+  });
+
   it('with the AI off, an echo is accepted and records nothing', async () => {
     const w = await world();
     const f = await w.file();
@@ -454,6 +495,113 @@ describe('the decision echo', () => {
     expect(res.status).toBe(200);
     expect(w.cw.audit.list({ limit: 20, action: 'ai.outcome' }).items).toHaveLength(0);
   });
+});
+
+describe('read again on a read that ended without an answer', () => {
+  it('a refusal is retaken once by an explicit ask (202), charged and audited; the second ask is 409 ai_final', async () => {
+    const w = await aiWorld(2, [{ error: new AIError('declined') }, { error: new AIError('declined') }]);
+    const f = await w.file();
+    await w.idle();
+    expect(body(await w.call('GET', `/reports/${f.id}`)).ai).toBeNull();
+    const first = await w.call('POST', `/reports/${f.id}/ai/read`);
+    expect(first.status).toBe(202);
+    expect(first.body).toEqual({ status: 'pending' });
+    await w.idle();
+    expect(w.adapter.callCount).toBe(2);
+    const second = await w.call('POST', `/reports/${f.id}/ai/read`);
+    expect(second.status).toBe(409);
+    expect(errorOf(second)).toBe('ai_final');
+    expect(second.body).toEqual({ error: 'ai_final', message: 'The AI has no more to try for this report.' });
+    await w.idle();
+    expect(w.adapter.callCount).toBe(2);
+    // Both asks are on the trail.
+    expect(w.cw.audit.list({ limit: 20, action: 'ai.rerun' }).items).toHaveLength(2);
+  });
+
+  it('a retake that gets an answer makes the read ready', async () => {
+    const w = await aiWorld(2, [{ error: new AIError('declined') }]);
+    const f = await w.file();
+    await w.idle();
+    expect((await w.call('POST', `/reports/${f.id}/ai/read`)).status).toBe(202);
+    await w.idle();
+    const ready = await w.call('POST', `/reports/${f.id}/ai/read`);
+    expect(ready.status).toBe(200);
+    expect(body(ready)).toMatchObject({ status: 'ready', ai: { summary: 'The reported player was rude in chat.' } });
+  });
+
+  it('an open breaker is 503 ai_unavailable with retryAfterMs in the body and retry-after in the header', async () => {
+    const w = await aiWorld(2, [{ error: new AIError('fatal') }]);
+    const f = await w.file();
+    await w.idle();
+    w.clock.t += 2 * MIN;
+    const res = await w.call('POST', `/reports/${f.id}/ai/read`);
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'ai_unavailable', message: 'The AI cannot be called right now.', retryAfterMs: 3 * MIN });
+    expect(res.headers?.['retry-after']).toBe('180');
+    expect(res.headers?.['cache-control']).toBe('no-store');
+    expect(w.adapter.callCount).toBe(1);
+    // After the wait a probe may go.
+    w.clock.t += 3 * MIN;
+    expect((await w.call('POST', `/reports/${f.id}/ai/read`)).status).toBe(202);
+  });
+
+  it('a full call window is 503 ai_unavailable until the first call leaves the minute', async () => {
+    const w = await aiWorld(2, reads('upheld'), { ai: { options: { perMinuteCalls: 1 } } });
+    await readReport(w);
+    const second = await w.file();
+    await w.idle();
+    const res = await w.call('POST', `/reports/${second.id}/ai/read`);
+    expect(res.status).toBe(503);
+    expect(body(res).retryAfterMs).toBeGreaterThan(0);
+    expect(body(res).retryAfterMs).toBeLessThanOrEqual(MIN);
+  });
+
+  it('the daily call ceiling answers 429 ai_budget like the money cap', async () => {
+    const w = await aiWorld(2, reads('upheld'), { overrides: { ai: { dailyCalls: 1 } } });
+    await readReport(w);
+    const second = await w.file();
+    await w.idle();
+    const res = await w.call('POST', `/reports/${second.id}/ai/read`);
+    expect(res.status).toBe(429);
+    expect(errorOf(res)).toBe('ai_budget');
+  });
+});
+
+describe('a failing AI over HTTP', () => {
+  const scrubbed = (v: unknown): unknown =>
+    JSON.parse(
+      JSON.stringify(v, (k, val) => (['id', 'createdAt', 'actionedAt', 'detailAt', 'ts', 'lineId', 'at'].includes(k) ? '#' : (val as unknown)))
+        .replace(/s_[A-Za-z0-9_-]{22}/g, '#subject'),
+    );
+  const without = (o: Record<string, unknown>, key: string): Record<string, unknown> => {
+    const { [key]: _drop, ...rest } = o;
+    void _drop;
+    return rest;
+  };
+
+  for (const [name, script] of [
+    ['throws', () => Promise.reject(new Error('provider down'))],
+    ['refuses', [{ error: new AIError('declined') }]],
+    ['returns garbage', [{ output: 12 }]],
+  ] as Array<[string, FakeScript]>) {
+    it(`with an adapter that ${name}, the queue, the case page and the decision answer exactly as with the AI off (ai: null aside)`, async () => {
+      const off = await world();
+      const bad = await aiWorld(2, script);
+      const run = async (w: typeof off | typeof bad) => {
+        const f = await w.file();
+        if ('idle' in w) await w.idle();
+        const list = body(await w.call('GET', '/reports', { query: { status: 'open' } })).items[0];
+        const page = body(await w.call('GET', `/reports/${f.id}`));
+        const decide = await w.call('POST', `/reports/${f.id}/decide`, { body: { verdict: 'no_action', actions: [], ai: { readId: 'a', accepted: false } } });
+        return { list, page, status: decide.status, decide: decide.body };
+      };
+      const a = await run(off);
+      const b = await run(bad);
+      expect(b.list.ai).toBeNull();
+      expect(b.page.ai).toBeNull();
+      expect(scrubbed({ ...b, list: without(b.list, 'ai'), page: without(b.page, 'ai') })).toEqual(scrubbed({ ...a, list: without(a.list, 'ai'), page: without(a.page, 'ai') }));
+    });
+  }
 });
 
 describe('dont-teach', () => {

@@ -145,8 +145,8 @@ const summarize = (
  *   left out (or blank) only for a `no_action` with no actions, a one-click dismissal: the core then stores `NO_ACTION_DEFAULT_REASON`.
  *   Every other decision needs a real reason (400 `invalid_request`). The body may carry `ai: { readId, accepted, severity? }`, the read the
  *   moderator saw, whether they accepted its pre-fill in one click and the conduct level their form settled on: it records an outcome against
- *   the AI read (the server computes agree or override itself) and never changes the answer; a malformed `ai` is 400, an unknown `readId`
- *   is ignored. Another
+ *   the AI read (the server computes agree or override itself; it records one for every decision on a report that has a read, with or without
+ *   this) and never changes the answer; a malformed `ai` is 400, an unknown `readId` is ignored. Another
  *   moderator's live claim on the reported person is 409 `claimed` unless `takeOver: true` and the caller holds
  *   `claims.override` (then the takeover is audited as `case.takeover`, first). Deciding the person's last open report releases the
  *   caller's claim; while they have other open reports it is kept (one case per person).
@@ -269,7 +269,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (person !== null) gateCase(ctx, c, person, takeOver);
 
       // Never from the body: the caller is who the auth hook says, and an admin route is always a moderator's.
-      const result = await applyDecision(cw, id, decision, c.authz.actor, echo === undefined ? undefined : { echo, role: c.authz.role });
+      const result = await applyDecision(cw, id, decision, c.authz.actor, { ...(echo === undefined ? {} : { echo }), role: c.authz.role });
       // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
       c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
       // Deciding the person's last open report ends the caller's own claim; while other reports about them are open the claim is

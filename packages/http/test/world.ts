@@ -53,7 +53,7 @@ export async function world(over: WorldOptions = {}) {
     ...(adapter === undefined ? {} : { ai: { adapter, ...(over.ai?.options ?? {}) } }),
     ...(adapter === undefined && over.overrides === undefined
       ? {}
-      : { overrides: { ...(over.overrides ?? {}), ...(adapter === undefined ? {} : { ai: { level: over.ai?.level ?? 1 } }) } }),
+      : { overrides: { ...(over.overrides ?? {}), ...(adapter === undefined ? {} : { ai: { ...(over.overrides?.ai ?? {}), level: over.ai?.level ?? 1 } }) } }),
   });
   const live = new LiveTerms({ store, pack: syntheticTermPack(), clock, logger });
   await live.load();

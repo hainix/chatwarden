@@ -100,7 +100,7 @@ export async function applyDecision(
   reportId: string,
   decision: ParsedDecision,
   actor: string,
-  ai?: { echo: AiEchoBody; role: Role },
+  ai?: { echo?: AiEchoBody; role: Role },
 ): Promise<DecisionOutcome> {
   const report = cw.reports.get(reportId);
   if (report === null) throw new NotFoundError();
@@ -121,7 +121,13 @@ export async function applyDecision(
     // The read the moderator saw, with the caller's role for the audit row. It never changes the decision or what is answered.
     ...(ai === undefined
       ? {}
-      : { ai: { readId: ai.echo.readId, accepted: ai.echo.accepted, role: ai.role, ...(ai.echo.severity === undefined ? {} : { severity: ai.echo.severity }) } }),
+      : {
+          ai: {
+            role: ai.role,
+            ...(ai.echo === undefined ? {} : { readId: ai.echo.readId, accepted: ai.echo.accepted }),
+            ...(ai.echo?.severity === undefined ? {} : { severity: ai.echo.severity }),
+          },
+        }),
   });
   if (!result.ok) {
     if (result.error === 'not_found') throw new NotFoundError();
