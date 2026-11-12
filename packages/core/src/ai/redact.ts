@@ -65,7 +65,7 @@ function isInvisible(c: number): boolean {
   );
 }
 
-function clean(text: string): string {
+export function cleanText(text: string): string {
   let out = '';
   for (const ch of text) {
     const c = ch.codePointAt(0) ?? 0;
@@ -83,7 +83,7 @@ function handlePattern(handles: readonly string[], aliasOf: (h: string) => strin
   const byText = new Map<string, string>();
   const alts: Array<{ re: string; len: number }> = [];
   for (const raw of handles) {
-    const h = clean(raw);
+    const h = cleanText(raw);
     if (h === '') continue;
     const alias = aliasOf(raw);
     if (alias === null) continue;
@@ -110,9 +110,9 @@ function handlePattern(handles: readonly string[], aliasOf: (h: string) => strin
  * @experimental
  */
 export function redactText(text: string, handles: readonly string[], aliasOf: (h: string) => string | null): string {
-  let out = clean(text);
+  let out = cleanText(text);
   const h = handlePattern(handles, aliasOf);
-  if (h) out = out.replace(h.re, (m) => h.byText.get(clean(m).toLowerCase()) ?? m);
+  if (h) out = out.replace(h.re, (m) => h.byText.get(cleanText(m).toLowerCase()) ?? m);
   return out
     .replace(EMAIL, '[email]')
     .replace(LINK, '[link]')

@@ -338,3 +338,7 @@ export { AI_MAX_KIND, AI_MAX_PREFILL_MS, AICeilingError, assertWithinCeilings, a
 export { redactNote, redactText } from './ai/redact.js';
 export { chooseLines, redactReportNote } from './ai/lines.js';
 export type { ChosenLine, ChosenLines } from './ai/lines.js';
+export { aiPolicyText, buildAIInput, PROMPT_VERSION } from './ai/prompt.js';
+export type { BuildAIInputArgs } from './ai/prompt.js';
+export { inputHash } from './ai/hash.js';
+export { looksLikeInjection } from './ai/injection.js';

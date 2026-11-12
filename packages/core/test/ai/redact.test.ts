@@ -129,20 +129,20 @@ describe('redactText: placeholders', () => {
   });
 
   it('redacts through obfuscation by zero-width characters', () => {
-    expect(r('5​5​5 123 4567', [])).toBe('[phone]');
-    expect(r('a​@b.co', [])).toBe('[email]');
-    expect(r('tar​vo', handles)).toBe('P1');
+    expect(r('5\u200B5\u200B5 123 4567', [])).toBe('[phone]');
+    expect(r('a\u200B@b.co', [])).toBe('[email]');
+    expect(r('tar\u200Bvo', handles)).toBe('P1');
   });
 });
 
 describe('redactText: characters', () => {
   it('strips zero-width and bidi characters', () => {
     const noisy = [
-      '​', '‌', '‍', '⁠', '﻿', '‎', '‏', '‪', '‫', '‬', '‭', '‮',
-      '⁦', '⁧', '⁨', '⁩', '؜', '­',
+      '\u200B', '\u200C', '\u200D', '\u2060', '\uFEFF', '\u200E', '\u200F', '\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
+      '\u2066', '\u2067', '\u2068', '\u2069', '\u061C', '\u00AD',
     ];
     for (const c of noisy) expect(r(`ab${c}cd`, []), JSON.stringify(c)).toBe('abcd');
-    expect(r('‮evil‬ text', [])).toBe('evil text');
+    expect(r('\u202Eevil\u202C text', [])).toBe('evil text');
   });
 
   it('strips control characters', () => {
@@ -151,7 +151,7 @@ describe('redactText: characters', () => {
 
   it('collapses whitespace', () => {
     expect(r('  a   b\t\tc\n\nd \r\n e  ', [])).toBe('a b c d e');
-    expect(r('a  b', [])).toBe('a b');
+    expect(r('a\u00A0\u2003b', [])).toBe('a b');
     expect(r('   ', [])).toBe('');
     expect(r('', [])).toBe('');
   });
@@ -187,7 +187,7 @@ describe('redactNote', () => {
     expect(redactNote('  hello   there ', [], aliasOf)).toBe('hello there');
     expect(redactNote('', [], aliasOf)).toBeNull();
     expect(redactNote('   ', [], aliasOf)).toBeNull();
-    expect(redactNote('​', [], aliasOf)).toBeNull();
+    expect(redactNote('\u200B', [], aliasOf)).toBeNull();
     expect(redactNote(null, [], aliasOf)).toBeNull();
   });
 
