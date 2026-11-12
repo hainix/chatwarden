@@ -53,7 +53,7 @@ export interface ModeratorGuideOptions {
 export interface PolicyJson {
   version: 1;
   /** With `durations` and `customDuration` filled in, so a profile written for 0.1.1 reads back with the two new keys. */
-  profile: ResolvedProfile;
+  profile: Omit<ResolvedProfile, 'ai'>;
   /** Every rule, retired ones included, in number order. */
   rules: CommunityRule[];
 }
@@ -705,7 +705,10 @@ export function agentBrief(policy: DocumentPolicy): string {
  */
 export function policyJson(policy: DocumentPolicy): PolicyJson {
   const snapshot = checkPolicy(policy);
-  return { version: 1, profile: structuredClone(snapshot.profile), rules: snapshot.rules.all() };
+  // The AI settings are the moderator's runtime switch, not policy text: the document tools never carry them.
+  const profile: Omit<ResolvedProfile, 'ai'> & { ai?: unknown } = structuredClone(snapshot.profile);
+  delete profile.ai;
+  return { version: 1, profile, rules: snapshot.rules.all() };
 }
 
 /** The four documents bound to one policy, as `cw.documents` exposes them. */

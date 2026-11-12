@@ -313,6 +313,7 @@ export type {
   GuidelineCover,
   GuidelineTier,
   LevelDescription,
+  AISettings,
   ModerationProfile,
   ModerationProfileBase,
   Outcome,

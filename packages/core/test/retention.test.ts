@@ -66,7 +66,7 @@ const strike = (id: string, at: number): StrikeRow => ({
 const ids = (rows: Array<{ id: string }>): string[] => rows.map((r) => r.id).sort();
 
 describe('defaults', () => {
-  it('are 90 d of reports, 90 d after a sanction ends, 30 d of strikes, 90 d of notices, 30 d of bad-faith marks, 365 d of audit entries', () => {
+  it('are 90 d of reports, 90 d after a sanction ends, 30 d of strikes, 90 d of notices, 30 d of bad-faith marks, 365 d of audit entries, 365 d of AI outcomes, 180 d of AI example text', () => {
     expect(RETENTION_DEFAULTS).toEqual({
       reportsMs: 90 * DAY,
       sanctionAfterEndMs: 90 * DAY,
@@ -74,6 +74,8 @@ describe('defaults', () => {
       noticesMs: 90 * DAY,
       badFaithMs: 30 * DAY,
       auditMs: 365 * DAY,
+      aiOutcomesMs: 365 * DAY,
+      aiExamplesMs: 180 * DAY,
     });
   });
 });
