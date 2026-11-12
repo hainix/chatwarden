@@ -34,20 +34,14 @@ function App() {
   const [reporting, setReporting] = useState<PlayerReporting | undefined>(undefined);
   const [refresh, setRefresh] = useState(0);
   const [rules, setRules] = useState(false);
-  // Appeals are the server's switch (CW_DEMO_APPEALS=1): the route answers 404 while they are off, and then the button stays the old link.
-  const [appeals, setAppeals] = useState(false);
+  // Appeals are the server's switch (CW_DEMO_APPEALS=1). It says so in a meta tag, so the page asks no route that would answer 404; without it the
+  // notices keep the old link.
+  const appeals = document.querySelector('meta[name="tiny-chat-appeals"]')?.getAttribute('content') === 'on';
 
   useEffect(() => {
     client.rules().then(
       (r) => setReporting(r.reporting),
       () => undefined,
-    );
-  }, [client]);
-
-  useEffect(() => {
-    client.appeals().then(
-      () => setAppeals(true),
-      () => setAppeals(false),
     );
   }, [client]);
 

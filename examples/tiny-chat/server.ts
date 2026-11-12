@@ -542,7 +542,9 @@ export async function startServer(opts: TinyChatOptions = {}): Promise<TinyChat>
       res.status(503).type('text').send('The chat page is not built: run npm start (or node web/build.mjs).');
     }
   };
-  app.get('/', (_req, res) => void res.status(200).set({ 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': CHAT_PAGE_CSP }).type('html').send(CHAT_PAGE));
+  // With CW_DEMO_APPEALS the page is told so (a meta tag), so it passes `appeals` to the notices without asking a route that answers 404 when they are off.
+  const chatPage = demoAppeals ? CHAT_PAGE.replace('</head>', '<meta name="tiny-chat-appeals" content="on">\n</head>') : CHAT_PAGE;
+  app.get('/', (_req, res) => void res.status(200).set({ 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': CHAT_PAGE_CSP }).type('html').send(chatPage));
   app.get('/chat.js', (_req, res) => void asset(res, 'chat.js', 'text/javascript; charset=utf-8'));
   app.get('/chat.css', (_req, res) => void asset(res, 'chat.css', 'text/css; charset=utf-8'));
 

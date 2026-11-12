@@ -221,9 +221,16 @@ describe('tiny-chat with CW_DEMO_APPEALS', () => {
     expect(lowered.chatwarden.names.renamesEnabled()).toBe(false);
   });
 
-  it('the page offers the appeal button only when the server has appeals on', () => {
+  it('the page offers the appeal button only when the server has appeals on: the server says so in the page, so the page asks nothing that would answer 404', async () => {
+    const on = await boot({ demoAppeals: true });
+    const off = await boot();
+    const html = async (server: TinyChat): Promise<string> => (await fetch(`http://127.0.0.1:${server.port}/`)).text();
+    expect(await html(on)).toContain('<meta name="tiny-chat-appeals" content="on">');
+    expect(await html(off)).not.toContain('tiny-chat-appeals');
     const page = readFileSync(new URL('./web/chat-page.tsx', import.meta.url), 'utf8');
-    expect(page).toMatch(/client\.appeals\(\)/);
-    expect(page).toMatch(/<NoticeQueue[^>]*\bappeals\b/);
+    expect(page).toContain('meta[name="tiny-chat-appeals"]');
+    expect(page).toMatch(/<NoticeQueue[^>]*\bappeals=\{appeals\}/);
+    // No request to /api/appeals is made just to find out.
+    expect(page).not.toMatch(/client\.appeals\(\)/);
   });
 });
