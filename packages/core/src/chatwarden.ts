@@ -23,7 +23,9 @@ import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
-import { resolveProfile } from './profile.js';
+import { mergePace, resolvePace } from './pace.js';
+import type { PaceSettings, ResolvedPace } from './pace.js';
+import { ProfileError, resolveProfile } from './profile.js';
 import type { ModerationProfile, PolicyLayer, PolicySection, PresetName, ProfanityConfig, ProfileOverrides, ResolvedProfile } from './profile.js';
 import { MuteService } from './mutes.js';
 import { NoticeService } from './notices.js';
@@ -226,6 +228,16 @@ export interface Chatwarden {
      * Carries subject ids: staff channels only, never send to a player.
      */
     subjectAt(roomId: string, seatId: string): SubjectId | null;
+    /**
+     * Pace this room differently from the defaults until it closes. Per field: absent inherits, `null` turns that check off, a value sets
+     * it. `null` instead of an object removes the override (`{}` is the same: nothing to override). Throws `ProfileError` for an invalid
+     * value (a setup mistake, not a hot-path call), and changes nothing when it does. In memory, this process only: `rooms.close(roomId)`
+     * drops it, and a game that runs several processes calls it in each process that serves the room. The override sits on top of the
+     * stored layer, which sits on top of the profile in code. @experimental
+     */
+    setPace(roomId: string, pace: PaceSettings | null): void;
+    /** The pace in force for the room: the profile's (code, then the stored layer) with the room's override applied. Every field filled, `null` is off. @experimental */
+    pace(roomId: string): ResolvedPace;
   };
   chat: {
     accept(roomId: string, seatId: string, text: string, opts?: { audience?: string[] }): ChatResult;
@@ -734,6 +746,16 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     notify: typeof platformNotify === 'function' ? (who, event) => platformNotify.call(platform, who, event) : undefined,
   });
 
+  // Room overrides of the pace: this process only, dropped by `rooms.close`. Each is the validated sparse override as given (a field
+  // left out inherits), kept as a frozen copy so the caller's object cannot change it later.
+  const paceOverrides = new Map<string, Readonly<PaceSettings>>();
+  /** The pace in force for a room: the override over the profile's (the layer over the code). Allocates only for a room with an override. */
+  const paceOf = (roomId: string): ResolvedPace => {
+    const base = policy.profileNow().pace;
+    const over = paceOverrides.get(roomId);
+    return over === undefined ? base : mergePace(base, over);
+  };
+
   const chat = new ChatService({
     roster,
     buffer,
@@ -755,6 +777,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     notices,
     autoRestrictRule,
     limits: { maxLength: limits.chatMaxLength, rate: limits.chatRate },
+    pace: { settings: paceOf, canonical: (subject) => subjects.canonical(subject) },
   });
   const reports = new ReportService({
     roster,
@@ -927,11 +950,30 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       close: (roomId) => {
         roster.close(roomId);
         buffer.drop(roomId);
+        paceOverrides.delete(roomId);
+        chat.dropPaceRoom(roomId);
       },
       subjectAt: (roomId, seatId) => {
         const subject = roster.occupant(roomId, seatId)?.subject ?? null;
         return subject === null ? null : subjects.canonical(subject);
       },
+      setPace: (roomId, pace) => {
+        if (typeof roomId !== 'string' || roomId === '') throw new ProfileError('roomId', 'must be a non-empty string');
+        if (pace === null) {
+          paceOverrides.delete(roomId);
+          return;
+        }
+        // Validated whole before anything changes. Only the fields given are kept (a field left out inherits); `burst` is copied.
+        if ((pace as unknown) === undefined) throw new ProfileError('pace', 'must be an object, or null to remove the override');
+        resolvePace(pace);
+        const kept: PaceSettings = {};
+        if (pace.slowModeMs !== undefined) kept.slowModeMs = pace.slowModeMs;
+        if (pace.burst !== undefined) kept.burst = pace.burst === null ? null : Object.freeze({ lines: pace.burst.lines, windowMs: pace.burst.windowMs });
+        if (pace.duplicateWindowMs !== undefined) kept.duplicateWindowMs = pace.duplicateWindowMs;
+        if (Object.keys(kept).length === 0) paceOverrides.delete(roomId);
+        else paceOverrides.set(roomId, Object.freeze(kept));
+      },
+      pace: (roomId) => paceOf(roomId),
     },
     chat: {
       accept: (roomId, seatId, text, o) => chat.accept(roomId, seatId, text, o),
