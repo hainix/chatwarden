@@ -38,7 +38,10 @@ const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.
 // headroom is about 5 KB for the hub controller work that shares this entry. Not raised for the AI: the server-only AI module is not in this build.
 // The chat box's server side (`@chatwarden/http/chat`) is browser-SAFE but not something a page ships by default, so it is NOT in this entry and
 // not in this size: it has its own entry (`browser-entry-chat.ts`), bundled below only to prove it stays free of Node imports and runs in a bare context.
-const SIZE_BUDGET_GZIP = 103 * 1024;
+// Raised to 125 KB at 0.1.8 on the maintainer's instruction ("size doesn't really matter, up the limit generously"): the slow-mode pacer runs
+// on every chat line (~2.4 KB) and signals validation and glue add ~3.8 KB (109.1 KB measured). The signal service itself still loads only for a
+// store that keeps signals. This guard now catches large accidental growth (a word list or a server module leaking in), not small features.
+const SIZE_BUDGET_GZIP = 125 * 1024;
 
 /**
  * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:
