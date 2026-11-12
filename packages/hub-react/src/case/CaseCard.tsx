@@ -19,6 +19,7 @@ import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
 import { useQuickKeys } from '../quickKeys.js';
 import { QuickKeys } from './QuickKeys.js';
+import { reporterRate } from './ReporterStanding.js';
 import { RuleField } from './RuleField.js';
 import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
@@ -115,13 +116,21 @@ function ReporterWarning({ report, people }: { report: StaffReport; people: Repo
   const ref = report.reporterPerson;
   const state = useHubData<ReporterRecord | null>(wants ? `reporter:${ref}` : 'reporter:idle', () => (wants ? session.reporter(ref) : Promise.resolve(null)));
   const record = state.data;
-  if (!wants || record === undefined || record === null || !reporterWarrants(record)) return null;
+  if (!wants || record === undefined || record === null) return null;
   const who = people.find((p) => p.ref === ref);
-  return (
-    <Notice tone="warn">
-      {t('hub.simple.reporterWarning', { name: who === undefined ? t('hub.person.unnamed', { tag: personTag(ref) }) : personName(who, people, t), upheld: record.actioned, count: reporterDecided(record) })}
-    </Notice>
-  );
+  const name = who === undefined ? t('hub.person.unnamed', { tag: personTag(ref) }) : personName(who, people, t);
+  // A kit that sends the recent figure decides on it (too few decided reports: no line). One that does not keeps the all-time rule.
+  if (record.accuracy !== undefined && record.accuracy !== null) {
+    const rate = reporterRate(t, record, name);
+    return rate === null ? null : (
+      <Notice tone="warn">
+        {rate.line}
+        {rate.ranked !== null && ` ${rate.ranked}`}
+      </Notice>
+    );
+  }
+  if (!reporterWarrants(record)) return null;
+  return <Notice tone="warn">{t('hub.simple.reporterWarning', { name, upheld: record.actioned, count: reporterDecided(record) })}</Notice>;
 }
 
 /** The card for a case. Read through `<CaseProvider>`, the one the hub wraps a case in. */

@@ -59,7 +59,10 @@ export function noActionForm(reason = ''): DecisionForm {
 /** How many of the reporter's reports have been decided. A report still open is neither upheld nor not upheld, so it is not counted. */
 export const reporterDecided = (record: ReporterRecord): number => record.actioned + record.dismissed;
 
-/** True when the reporter's record is worth a warning: three or more decided reports, and fewer than a third of them upheld. */
+/**
+ * True when the reporter's record is worth a warning: three or more decided reports, and fewer than a third of them upheld. The all-time rule,
+ * kept for a kit that sends no recent figure (`ReporterRecord.accuracy`); a kit that does decides on that instead (see `reporterRate`).
+ */
 export function reporterWarrants(record: ReporterRecord): boolean {
   const decided = reporterDecided(record);
   return decided >= 3 && record.actioned * 3 < decided;

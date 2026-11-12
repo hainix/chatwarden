@@ -246,6 +246,18 @@ describe('the reporter warning', () => {
     for (let i = 0; i < open; i += 1) await w.file({ reporter, target: `Pending${i}`, room: `open-${reporter}-${i}` });
   }
   const warning = (): HTMLElement | null => screen.queryByText(/past reports were mostly not upheld/);
+  // These are the all-time rule, which the card keeps for a kit that sends no recent figure (an older one): history answers without it.
+  const olderKit = (w: HubWorld): void => {
+    w.intercept.fn = async (req) => {
+      if (req.method === 'GET' && /^\/people\/[^/]+\/history$/.test(req.path)) {
+        const res = await w.direct.personHistory(req.path.split('/')[2] as string);
+        const { accuracy, ...asReporter } = res.asReporter;
+        void accuracy;
+        return { status: 200, headers: {}, body: { ...res, asReporter } };
+      }
+      return undefined;
+    };
+  };
   /** Waits until the reporter's record has been asked for and answered, so "no warning" is a result, not a race. */
   const settle = async (w: HubWorld, reporter: string): Promise<void> => {
     await within(await screen.findByRole('region', { name: 'Their record' })).findByText('Nothing in the last 90 days.');
@@ -269,6 +281,7 @@ describe('the reporter warning', () => {
   ] as const)('%s: warning shown: %s', async (_name, past, waiting, shown) => {
     const w = await hubWorld();
     await history(w, 'Saffron', [...past], waiting);
+    olderKit(w);
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     await open(w, f.id);
     await settle(w, f.reporter);
@@ -279,6 +292,7 @@ describe('the reporter warning', () => {
   it('is plain and does not accuse: it says what the numbers are, of the decided reports', async () => {
     const w = await hubWorld();
     await history(w, 'Saffron', ['upheld', 'dismissed', 'dismissed', 'dismissed'], 2);
+    olderKit(w);
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     await open(w, f.id);
     expect(await screen.findByText("Saffron's past reports were mostly not upheld (1 of 4).")).toBeInTheDocument();
