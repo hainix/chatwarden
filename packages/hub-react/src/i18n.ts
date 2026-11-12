@@ -807,6 +807,8 @@ export const en = {
   'hub.audit.label.report.view': 'Viewed a report',
   'hub.audit.label.report.list': 'Viewed the report list',
   'hub.audit.label.report.decide': 'Decided a report',
+  'hub.audit.label.report.dismissCase': 'Dismissed all open reports about a person',
+  'hub.audit.label.report.dismissReporter': 'Dismissed all open reports from a reporter',
   'hub.audit.label.sanction.apply': 'Applied a sanction',
   'hub.audit.label.sanction.revoke': 'Revoked a sanction',
   'hub.audit.label.gap.close': 'Closed a rule gap',

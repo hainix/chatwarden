@@ -277,8 +277,11 @@ describe('filters', () => {
     const { w, user } = await setup();
     const labels = [...action().options].map((o) => o.textContent);
     expect(labels[0]).toBe('Any action');
-    expect(labels).toHaveLength(1 + 21);
+    expect(labels).toHaveLength(1 + 23);
     expect(new Set(labels).size).toBe(labels.length);
+    // The two bulk dismissals (triage speed) are labelled in plain words, not shown as raw action names.
+    expect(labels).toContain('Dismissed all open reports about a person');
+    expect(labels).toContain('Dismissed all open reports from a reporter');
     fireEvent.change(action(), { target: { value: 'history.view' } });
     await user.click(screen.getByRole('button', { name: 'Filter' }));
     await waitFor(() => expect(reads(w).at(-1)?.query).toEqual({ limit: 50, action: 'history.view' }));
