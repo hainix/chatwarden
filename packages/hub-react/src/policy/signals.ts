@@ -43,6 +43,13 @@ export interface SignalsDraft {
 }
 
 export const DAYS_MAX = 90;
+const DAY_MS = 86_400_000;
+
+/** The longest window the kit will take: 90 days, or fewer when the game keeps signal rows for less (`limits.signalsMs`, from the server; an older server sends none). */
+export function daysCap(limits: { signalsMs?: number } | undefined): number {
+  const kept = limits?.signalsMs;
+  return typeof kept === 'number' && Number.isFinite(kept) ? Math.max(1, Math.min(DAYS_MAX, Math.floor(kept / DAY_MS))) : DAYS_MAX;
+}
 export const PLAYERS_MAX = 50;
 export const RULES_MAX = 20;
 type Kinds = Readonly<Record<string, ResolvedSignalKind>>;
@@ -71,7 +78,8 @@ function whole(s: string, lo: number, hi: number): number | null {
 }
 
 type ProblemKey = 'hub.settings.signals.error.days' | 'hub.settings.signals.error.players' | 'hub.settings.signals.error.kinds' | 'hub.settings.signals.error.negative' | 'hub.settings.signals.error.undeclared';
-const problem = (key: ProblemKey): { key: ProblemKey } => ({ key });
+type SignalProblem = { key: ProblemKey; params?: { max: string } };
+const problem = (key: ProblemKey, max?: number): SignalProblem => (max === undefined ? { key } : { key, params: { max: String(max) } });
 
 /** Does this kind exist and (when `negativeOnly`) count against? */
 function kindOk(kinds: Kinds, id: string, negativeOnly: boolean): 'ok' | 'undeclared' | 'negative' {
@@ -79,7 +87,7 @@ function kindOk(kinds: Kinds, id: string, negativeOnly: boolean): 'ok' | 'undecl
   return negativeOnly && kinds[id]!.polarity !== 'negative' ? 'negative' : 'ok';
 }
 
-function kindsProblem(chosen: readonly string[], kinds: Kinds, negativeOnly: boolean): { key: ProblemKey } | undefined {
+function kindsProblem(chosen: readonly string[], kinds: Kinds, negativeOnly: boolean): SignalProblem | undefined {
   if (chosen.length === 0) return problem('hub.settings.signals.error.kinds');
   const worst = chosen.map((k) => kindOk(kinds, k, negativeOnly));
   if (worst.includes('undeclared')) return problem('hub.settings.signals.error.undeclared');
@@ -88,11 +96,11 @@ function kindsProblem(chosen: readonly string[], kinds: Kinds, negativeOnly: boo
 }
 
 /** The fields that cannot be sent, by key (`record.days`, `queue.kinds`, `ladder.0.players`, ...); nothing for a form that is off. */
-export function signalsProblems(d: SignalsDraft, kinds: Kinds): Problems {
-  const out: Record<string, { key: ProblemKey }> = {};
+export function signalsProblems(d: SignalsDraft, kinds: Kinds, daysMax: number = DAYS_MAX): Problems {
+  const out: Record<string, SignalProblem> = {};
   const windowFeed = (name: 'record' | 'ai', f: WindowDraft): void => {
     if (!f.on) return;
-    if (whole(f.days, 1, DAYS_MAX) === null) out[`${name}.days`] = problem('hub.settings.signals.error.days');
+    if (whole(f.days, 1, daysMax) === null) out[`${name}.days`] = problem('hub.settings.signals.error.days', daysMax);
     if (!f.all) {
       const p = kindsProblem(f.kinds, kinds, false);
       if (p !== undefined) out[`${name}.kinds`] = p;
@@ -103,15 +111,15 @@ export function signalsProblems(d: SignalsDraft, kinds: Kinds): Problems {
   if (d.queue.on) {
     const p = kindsProblem(d.queue.kinds, kinds, true);
     if (p !== undefined) out['queue.kinds'] = p;
-    if (whole(d.queue.players, 1, PLAYERS_MAX) === null) out['queue.players'] = problem('hub.settings.signals.error.players');
-    if (whole(d.queue.days, 1, DAYS_MAX) === null) out['queue.days'] = problem('hub.settings.signals.error.days');
+    if (whole(d.queue.players, 1, PLAYERS_MAX) === null) out['queue.players'] = problem('hub.settings.signals.error.players', PLAYERS_MAX);
+    if (whole(d.queue.days, 1, daysMax) === null) out['queue.days'] = problem('hub.settings.signals.error.days', daysMax);
   }
   if (d.ladderOn) {
     d.rules.forEach((r, i) => {
       const p = kindsProblem(r.kinds, kinds, r.effect === 'raise');
       if (p !== undefined) out[`ladder.${i}.kinds`] = p;
-      if (whole(r.players, 1, PLAYERS_MAX) === null) out[`ladder.${i}.players`] = problem('hub.settings.signals.error.players');
-      if (whole(r.days, 1, DAYS_MAX) === null) out[`ladder.${i}.days`] = problem('hub.settings.signals.error.days');
+      if (whole(r.players, 1, PLAYERS_MAX) === null) out[`ladder.${i}.players`] = problem('hub.settings.signals.error.players', PLAYERS_MAX);
+      if (whole(r.days, 1, daysMax) === null) out[`ladder.${i}.days`] = problem('hub.settings.signals.error.days', daysMax);
     });
   }
   return out;
@@ -140,6 +148,9 @@ const meaning = (d: SignalsDraft): unknown => [
 ];
 
 export const signalsDirty = (d: SignalsDraft, effective: SignalFeeds | undefined): boolean => JSON.stringify(meaning(d)) !== JSON.stringify(meaning(signalsDraftOf(effective)));
+
+/** Does a refusal's layer path name a feed's window (`...windowDays`)? After the hub's own 1 to cap check, that can only be the retention. */
+export const isWindowPath = (path: string): boolean => /^layer\.signals\.feeds\.[a-z]+(?:\[\d+\])?\.windowDays$/.test(path);
 
 /** The field a refusal's layer path names, as the draft's key; null for a path that is not one of the fields. */
 export function signalsFieldKey(path: string): string | null {

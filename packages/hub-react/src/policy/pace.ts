@@ -20,8 +20,14 @@ const LINES = [2, 100] as const;
 const WINDOW_MS = [1000, 600_000] as const;
 const DUP_MS = [1000, 3_600_000] as const;
 
-/** The built-in chat limit the pacer sits behind: 3 messages per 5 seconds per player and room. */
+/** The built-in chat limit the pacer sits behind, when the server does not say (an older one): 3 messages per 5 seconds per player and room. */
 export const BUILTIN_RATE = { lines: 3, windowMs: 5000 } as const;
+
+/** The chat rate in force, from what the server reports (`limits.chatRate`), else the kit's default. */
+export function builtinRate(limits: { chatRate?: { count: number; windowMs: number } } | undefined): { lines: number; windowMs: number } {
+  const r = limits?.chatRate;
+  return r !== undefined && Number.isFinite(r.count) && r.count >= 1 && Number.isFinite(r.windowMs) && r.windowMs >= 1 ? { lines: r.count, windowMs: r.windowMs } : BUILTIN_RATE;
+}
 
 /** What the kit reports in force (`effective.pace`), with every field filled and null meaning off; an older server sends none: all off. */
 type Pace = Partial<{ slowModeMs: number | null; burst: { lines: number; windowMs: number } | null; duplicateWindowMs: number | null }> | undefined;
@@ -47,16 +53,24 @@ const ms = (s: string): number | null => {
 };
 const within = (v: number | null, [lo, hi]: readonly [number, number]): v is number => v !== null && Number.isFinite(v) && v >= lo && v <= hi;
 
+type PaceKey = 'hub.settings.pace.error.slow' | 'hub.settings.pace.error.lines' | 'hub.settings.pace.error.window' | 'hub.settings.pace.error.repeat';
+
+/** A problem with the range it was checked against, as text (so a thousand separator never splits 3600), from the same constants as the check. */
+const ranged = (key: PaceKey, [lo, hi]: readonly [number, number], inSeconds: boolean): { key: PaceKey; params: { min: string; max: string } } => ({
+  key,
+  params: inSeconds ? { min: String(lo / 1000), max: String(hi / 1000) } : { min: String(lo), max: String(hi) },
+});
+
 /** The fields that cannot be sent, by the field's key; nothing for a switched-off row. */
 export function paceProblems(d: PaceDraft): Problems {
-  const out: Record<string, { key: 'hub.settings.pace.error.slow' | 'hub.settings.pace.error.lines' | 'hub.settings.pace.error.window' | 'hub.settings.pace.error.repeat' }> = {};
-  if (d.slow && !within(ms(d.slowSec), SLOW_MS)) out['slowSec'] = { key: 'hub.settings.pace.error.slow' };
+  const out: Record<string, ReturnType<typeof ranged>> = {};
+  if (d.slow && !within(ms(d.slowSec), SLOW_MS)) out['slowSec'] = ranged('hub.settings.pace.error.slow', SLOW_MS, true);
   if (d.burst) {
     const lines = numberOf(d.burstLines);
-    if (lines === null || !Number.isInteger(lines) || !within(lines, LINES)) out['burstLines'] = { key: 'hub.settings.pace.error.lines' };
-    if (!within(ms(d.burstSec), WINDOW_MS)) out['burstSec'] = { key: 'hub.settings.pace.error.window' };
+    if (lines === null || !Number.isInteger(lines) || !within(lines, LINES)) out['burstLines'] = ranged('hub.settings.pace.error.lines', LINES, false);
+    if (!within(ms(d.burstSec), WINDOW_MS)) out['burstSec'] = ranged('hub.settings.pace.error.window', WINDOW_MS, true);
   }
-  if (d.dup && !within(ms(d.dupSec), DUP_MS)) out['dupSec'] = { key: 'hub.settings.pace.error.repeat' };
+  if (d.dup && !within(ms(d.dupSec), DUP_MS)) out['dupSec'] = ranged('hub.settings.pace.error.repeat', DUP_MS, true);
   return out;
 }
 
@@ -88,11 +102,11 @@ export function paceFieldKey(path: string): string | null {
 }
 
 /** Is the burst the owner typed looser than the built-in limit (so that limit answers first and the burst limit rarely does)? */
-export function burstLooserThanBuiltin(d: PaceDraft): boolean {
+export function burstLooserThanBuiltin(d: PaceDraft, rate: { lines: number; windowMs: number } = BUILTIN_RATE): boolean {
   if (!d.burst) return false;
   const lines = numberOf(d.burstLines);
   const window = ms(d.burstSec);
-  return lines !== null && window !== null && window > 0 && lines * BUILTIN_RATE.windowMs > BUILTIN_RATE.lines * window;
+  return lines !== null && window !== null && window > 0 && lines * rate.windowMs > rate.lines * window;
 }
 
 /** The suggested values for a preset, as a draft: only what the preset suggests is switched on. */

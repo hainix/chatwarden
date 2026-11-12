@@ -7,7 +7,7 @@ import { useHubData } from '../hooks.js';
 import type { HubText } from '../i18n.js';
 import { ResetConfirm } from '../policy/ResetConfirm.js';
 import { SaveBar } from '../policy/SaveBar.js';
-import { declaredKinds, nextRuleId, signalsDirty, signalsDraftOf, signalsFeeds, signalsFieldKey, signalsProblems, RULES_MAX } from '../policy/signals.js';
+import { daysCap, declaredKinds, isWindowPath, nextRuleId, signalsDirty, signalsDraftOf, signalsFeeds, signalsFieldKey, signalsProblems, RULES_MAX } from '../policy/signals.js';
 import type { Effect, QueueDraft, RuleDraft, SignalsDraft, WindowDraft } from '../policy/signals.js';
 import { RESETS, useResetFlow } from '../policy/useResetFlow.js';
 import { useDraftSync } from '../policy/useDraftSync.js';
@@ -183,19 +183,26 @@ const REASON_WORDS: Record<string, HubText> = {
   unknown_feed: 'hub.settings.signals.dropped.unknown_feed',
 };
 
-/** What the kit left out of the saved settings, and why, in words. Feed names and reason codes only; never a kind or a rule. */
-function Dropped({ dropped }: { dropped: NonNullable<PolicyState['dropped']> }) {
+/** The words for a name, only for one the table has itself: a name such as `constructor` or `toString` from a proxy or an old server is not a word. */
+const wordsFor = (table: Record<string, HubText>, name: unknown, fallback: HubText): HubText => (typeof name === 'string' && Object.hasOwn(table, name) ? (table[name] as HubText) : fallback);
+
+/**
+ * What the kit left out of the saved settings, and why, in words. Feed names and reason codes only; never a kind or a rule. An editor is told
+ * that saving removes them; a reader is told to ask the owner.
+ */
+function Dropped({ dropped, editable }: { dropped: NonNullable<PolicyState['dropped']>; editable: boolean }) {
   const { t } = useHub();
   return (
     <div className="cw-notice cw-signal-dropped" role="status" aria-label={t('hub.settings.signals.dropped.label')}>
-      <p>{t('hub.settings.signals.dropped')}</p>
-      <ul>
-        {dropped.map((d, i) => (
-          <li key={`${d.feed}-${i}`}>
-            {t('hub.settings.signals.dropped.item', { feed: t(FEED_WORDS[d.feed] ?? 'hub.settings.signals.dropped.feed'), why: t(REASON_WORDS[d.reason] ?? 'hub.settings.signals.dropped.invalid') })}
-          </li>
-        ))}
-      </ul>
+      <p>{t(editable ? 'hub.settings.signals.dropped' : 'hub.settings.signals.dropped.reader')}</p>
+      {dropped.map((d, i) => (
+        <p key={`${String(d.feed)}-${i}`}>
+          {t('hub.settings.signals.dropped.item', {
+            feed: t(wordsFor(FEED_WORDS, d.feed, 'hub.settings.signals.dropped.feed')),
+            why: t(wordsFor(REASON_WORDS, d.reason, 'hub.settings.signals.dropped.invalid')),
+          })}
+        </p>
+      ))}
     </div>
   );
 }
@@ -227,10 +234,19 @@ export function SignalSettings({ state, policy }: { state: PolicyState; policy: 
     },
   });
 
-  const local = useMemo(() => signalsProblems(draft, kindMap), [draft, kindMap]);
+  // The longest window the kit takes: 90 days, or fewer when the game keeps signals for less (from the server; an older one sends none).
+  const cap = daysCap(state.limits);
+  const local = useMemo(() => signalsProblems(draft, kindMap, cap), [draft, kindMap, cap]);
   const problems: Problems = { ...local, ...serverProblems };
-  const layer = useMemo((): PolicyLayer | null => (Object.keys(local).length > 0 ? null : { ...withoutSignals(state.layer), signals: { feeds: signalsFeeds(draft) } }), [draft, local, state.layer]);
-  const isDirty = useMemo(() => signalsDirty(draft, state.effective.signals?.feeds), [draft, state.effective]);
+  // With no kinds declared there is no form to save, but a stored feed the kit left out (the game removed every kind it declared) is still in the row:
+  // an editor can remove it with one save of the layer as read (the pruned one, which has no signals section left).
+  const dropped = state.dropped ?? [];
+  const repairOnly = kindList.length === 0 && dropped.length > 0;
+  const layer = useMemo(
+    (): PolicyLayer | null => (repairOnly ? state.layer : Object.keys(local).length > 0 ? null : { ...withoutSignals(state.layer), signals: { feeds: signalsFeeds(draft) } }),
+    [draft, local, state.layer, repairOnly],
+  );
+  const isDirty = useMemo(() => repairOnly || signalsDirty(draft, state.effective.signals?.feeds), [draft, state.effective, repairOnly]);
 
   const save = useSaveFlow({
     policy,
@@ -247,12 +263,14 @@ export function SignalSettings({ state, policy }: { state: PolicyState; policy: 
       setServerProblems({});
       toasts.push({ text: t('hub.settings.signals.saved') });
     },
-    onRefused: (key) => {
-      setServerProblems({ [key]: { key: 'hub.settings.field.refused' } });
+    onRefused: (key, error) => {
+      // A refused window that passed the hub's own 1 to cap check can only be the retention the kit holds: say so, not "isn't allowed".
+      setServerProblems({ [key]: { key: isWindowPath(error.path ?? '') ? 'hub.settings.signals.error.retention' : 'hub.settings.field.refused' } });
       queueMicrotask(() => focusField(root.current, key));
     },
   });
   const refusedField = save.saveError?.code === 'invalid_profile' && signalsFieldKey(save.saveError.path ?? '') !== null;
+  const reasonSaved = repairOnly ? t('hub.settings.signals.dropped.remove') : undefined;
 
   const discard = (): void => {
     setDraftState(signalsDraftOf(state.effective.signals?.feeds));
@@ -288,7 +306,7 @@ export function SignalSettings({ state, policy }: { state: PolicyState; policy: 
       <Panel title={t('hub.settings.signals.title')}>
         <div className="cw-form cw-panel-pad">
           <p className="cw-hint">{t('hub.settings.signals.intro')}</p>
-          {state.dropped !== undefined && state.dropped.length > 0 && <Dropped dropped={state.dropped} />}
+          {dropped.length > 0 && <Dropped dropped={dropped} editable={editable} />}
           {!state.canSave ? <Notice role="status">{t('hub.settings.signals.unsupported')}</Notice> : !editable && allKinds.length > 0 && <Notice role="status">{t('hub.settings.readOnly')}</Notice>}
           {allKinds.length === 0 ? (
             <p className="cw-hint">{t('hub.settings.signals.none')}</p>
@@ -326,7 +344,9 @@ export function SignalSettings({ state, policy }: { state: PolicyState; policy: 
               <p className="cw-hint">{t('hub.settings.signals.never')}</p>
             </>
           )}
-          {editable && allKinds.length > 0 && <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={1} refusedField={refusedField} idBase={base} label={t('hub.settings.signals.save.form')} onDiscard={discard} onReload={reload} />}
+          {editable && (allKinds.length > 0 || repairOnly) && (
+            <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={1} refusedField={refusedField} idBase={base} label={t('hub.settings.signals.save.form')} {...(reasonSaved === undefined ? {} : { saveLabel: reasonSaved, quiet: true })} onDiscard={discard} onReload={reload} />
+          )}
         </div>
       </Panel>
       {guard}

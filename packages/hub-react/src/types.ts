@@ -16,8 +16,9 @@ import type {
   GuideSection,
   PolicyLayer,
   PolicyPreview,
+  PolicyLimits,
   PolicySection,
-  PolicyState,
+  PolicyState as KitPolicyState,
   ReporterRecord,
   SignalCount,
   ReportCategory,
@@ -28,7 +29,14 @@ import type {
 } from '@chatwarden/core';
 import type { AiReadAgainBody, ExceptionListRow, Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role, TermListRow } from '@chatwarden/http/admin';
 
-export type { PolicyLayer, PolicySection, PolicyState };
+export type { PolicyLayer, PolicySection };
+
+/**
+ * The editable settings as the hub reads them: what is in force, what is saved, and what the kit left out. `limits` is the kit's chat rate and
+ * signals retention, read only; a server older than 0.1.8 does not send it, so the hub falls back to the kit's defaults.
+ * @experimental
+ */
+export type PolicyState = Omit<KitPolicyState, 'limits'> & { limits?: PolicyLimits };
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 export type { Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role };
 

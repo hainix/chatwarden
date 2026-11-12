@@ -1,5 +1,5 @@
 import { createChatwarden, createFakeModerationAI, defineRules, starterRules } from '@chatwarden/core';
-import type { AiOptions, Chatwarden, FakeModerationAI, FakeScript, RawWho, Role } from '@chatwarden/core';
+import type { AiOptions, Chatwarden, FakeModerationAI, FakeScript, LimitsInput, RawWho, Role } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { MemoryTermStore, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
@@ -40,6 +40,10 @@ export interface WorldOptions {
   overrides?: NonNullable<Parameters<typeof createChatwarden>[0]['overrides']>;
   /** Turn the AI on with the scripted fake (never a network): the level the hub has set, the fake's script, and the code-side options. */
   ai?: { level?: 0 | 1 | 2; script?: FakeScript; options?: Partial<AiOptions> };
+  /** The kit's own limits (chat length and rate, strikes, reports). */
+  limits?: LimitsInput;
+  /** How long signal rows are kept, ms (the automatic purge stays off in this world). */
+  signalsMs?: number;
 }
 
 export interface FileOptions {
@@ -103,7 +107,8 @@ export async function hubWorld(opts: WorldOptions = {}) {
       ...(adapter === undefined ? {} : { ai: { ...(opts.overrides?.ai ?? {}), level: opts.ai?.level ?? 1 } }),
     },
     ...(adapter === undefined ? {} : { ai: { adapter, ...(opts.ai?.options ?? {}) } }),
-    retention: false,
+    retention: opts.signalsMs === undefined ? false : { signalsMs: opts.signalsMs },
+    ...(opts.limits === undefined ? {} : { limits: opts.limits }),
   });
   // The caller is whoever `session` says: tests change it to see a role, or nobody (401).
   const session: { who: { actor: string; role: Role } | null } = {

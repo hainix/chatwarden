@@ -3,7 +3,7 @@ import { useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useHub } from '../context.js';
 import { byId, rootOf } from '../dom.js';
-import { burstLooserThanBuiltin, paceDirty, paceDraftOf, paceFieldKey, paceLayer, paceProblems, suggestedDraft } from '../policy/pace.js';
+import { builtinRate, burstLooserThanBuiltin, paceDirty, paceDraftOf, paceFieldKey, paceLayer, paceProblems, suggestedDraft } from '../policy/pace.js';
 import type { PaceDraft } from '../policy/pace.js';
 import { ResetConfirm } from '../policy/ResetConfirm.js';
 import { SaveBar } from '../policy/SaveBar.js';
@@ -190,7 +190,10 @@ export function PaceSettings({ state, policy }: { state: PolicyState; policy: Us
   const suggest = (): void => {
     setDraftState(suggestedDraft(PACE_SUGGESTIONS[presetOf(state.effective.name)]));
     setServerProblems({});
+    // The form fills silently: say so, for a screen reader (the hint under the button is static).
+    toasts.push({ text: t('hub.settings.pace.suggest.done') });
   };
+  const rate = builtinRate(state.limits);
 
   return (
     <div ref={root} className="cw-settings cw-pace">
@@ -218,7 +221,11 @@ export function PaceSettings({ state, policy }: { state: PolicyState; policy: Us
             <Row id={`${base}-burst`} label={t('hub.settings.pace.burst')} hint={t('hub.settings.pace.burst.hint')} on={draft.burst} onToggle={(burst) => set({ burst })}>
               <NumberField id={`${base}-burst-n`} field="burstLines" label={t('hub.settings.pace.burst.lines')} value={draft.burstLines} disabled={!draft.burst || !editable} problems={problems} step="1" onChange={(burstLines) => set({ burstLines })} />
               <NumberField id={`${base}-burst-s`} field="burstSec" label={t('hub.settings.pace.burst.seconds')} value={draft.burstSec} disabled={!draft.burst || !editable} problems={problems} onChange={(burstSec) => set({ burstSec })} />
-              {burstLooserThanBuiltin(draft) && <p className="cw-hint">{t('hub.settings.pace.builtin')}</p>}
+              {burstLooserThanBuiltin(draft, rate) && (
+                <p className="cw-hint">
+                  {t('hub.settings.pace.builtin', { limit: t('hub.settings.pace.builtin.limit', { count: rate.lines, window: t('hub.settings.pace.builtin.window', { count: rate.windowMs / 1000 }) }) })}
+                </p>
+              )}
             </Row>
             <Row id={`${base}-dup`} label={t('hub.settings.pace.repeat')} hint={t('hub.settings.pace.repeat.hint')} on={draft.dup} onToggle={(dup) => set({ dup })}>
               <NumberField id={`${base}-dup-s`} field="dupSec" label={t('hub.settings.pace.repeat.seconds')} value={draft.dupSec} disabled={!draft.dup || !editable} problems={problems} onChange={(dupSec) => set({ dupSec })} />

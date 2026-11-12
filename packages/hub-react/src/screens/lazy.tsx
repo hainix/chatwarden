@@ -164,5 +164,5 @@ export const LazyGuide = lazyScreen('hub.state.what.guide', () => import('./Guid
 export const LazyActions = lazyScreen('hub.state.what.allActions', () => import('./Actions.js').then((m) => m.Actions));
 export const LazyLadderSettings = lazyScreen('hub.state.what.settings', () => import('./LadderSettings.js').then((m) => m.LadderSettingsScreen));
 export const LazyAiSettings = lazyScreen('hub.state.what.settings', () => import('./AiSettings.js').then((m) => m.AiSettingsScreen));
-export const LazyAdvancedSettings = lazyScreen('hub.state.what.settings', () => import('./AdvancedSettings.js').then((m) => m.AdvancedSettingsScreen));
+export const LazyAdvancedSettings = lazyScreen('hub.state.what.advanced', () => import('./AdvancedSettings.js').then((m) => m.AdvancedSettingsScreen));
 export const LazyReportingSettings = lazyScreen('hub.state.what.reportingSettings', () => import('./ReportingSettings.js').then((m) => m.ReportingSettingsScreen));

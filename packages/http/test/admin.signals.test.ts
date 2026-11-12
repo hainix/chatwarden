@@ -184,7 +184,7 @@ describe('the ladder sentence needs history.read, the outcome does not', () => {
     for (const s of [viaPost, viaGet]) {
       expect('signals' in s).toBe(false);
       expect(s.why).not.toMatch(/Muted by other players|Also:|Raised one step|players? in \d+ days?/);
-      expect(s.why).toMatch(/^[A-Za-z]+ profile: .*.$/);
+      expect(s.why).toMatch(/^[A-Za-z]+ profile: .*\.$/);
     }
   });
 

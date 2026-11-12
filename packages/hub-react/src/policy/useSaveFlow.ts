@@ -53,7 +53,7 @@ export function useSaveFlow({
   pending: Pending;
   onBlocked: () => void;
   onSaved: () => void;
-  onRefused: (key: string) => void;
+  onRefused: (key: string, error: HubError) => void;
   /** The field a refusal's path names (the ladder's by default). */
   fieldOf?: (path: string) => string | null;
 }): SaveFlow {
@@ -96,7 +96,7 @@ export function useSaveFlow({
       // A field named: the form closes (the reason is kept) and the field is marked. None named: the form stays, with the sentence.
       if (key !== null) {
         setAsking(false);
-        onRefused(key);
+        onRefused(key, res.error);
       }
     } else if (res.error.code === 'conflict') setAsking(false);
   };
