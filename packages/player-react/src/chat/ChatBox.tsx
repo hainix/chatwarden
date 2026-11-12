@@ -376,7 +376,7 @@ export function ChatBox(props: ChatBoxProps) {
             </button>
           )}
         </div>
-        <div role="status" className="cw-chat-conn">
+        <div role="status" className={closed === null ? 'cw-chat-conn' : 'cw-chat-conn cw-chat-conn--closed'}>
           {status}
         </div>
         <div role="status" className="cw-chat-note">

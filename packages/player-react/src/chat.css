@@ -104,6 +104,12 @@
   font-size: var(--cw-text-s, var(--cwd-text-s));
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
 }
+/* A chat that is over says so in the box's own size and ink: it is the answer, not a footnote. */
+.cw-player .cw-chat-conn--closed {
+  padding: var(--cw-space-2, var(--cwd-space-2)) var(--cw-space-1, var(--cwd-space-1));
+  font-size: var(--cw-text-m, var(--cwd-text-m));
+  color: var(--cw-ink, var(--cwd-ink));
+}
 .cw-player .cw-chat-conn:empty,
 .cw-player .cw-chat-refusal:empty {
   height: 0;
