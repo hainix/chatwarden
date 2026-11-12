@@ -140,8 +140,8 @@ Spec 4.7. Store methods are synchronous. The SQLite side is Task 7.
   tests `packages/store-memory/test/appeals.store.test.ts`.
 - **Behaviour:** `insertAppeal` false when the group already has one. `decideAppeal` moves only from `open`. `countSanctionsByRule`
   counts distinct subject sanction groups of kind warning, chat, area or ban, **excluding a group that is some appeal's
-  `replacementGroupId`** (a reduction is one sanction, not two; see the hand-back); `appealCountsByRule` counts appealed and granted
-  (reduced or revoked) by the sanction's rule. `purgeAppeals(before)` deletes decided rows with `decided_at < before` **except a row whose
+  `replacementGroupId`** (a reduction is one sanction, not two; see the hand-back); `appealCountsByRule` counts, by the sanction's rule, appealed,
+  granted (**revoked only**) and lightened (reduced; owner ruling: a reduction is not a false positive, so it never counts as granted). `purgeAppeals(before)` deletes decided rows with `decided_at < before` **except a row whose
   sanction group is permanent and unrevoked** (otherwise the player could appeal a live permanent ban a second time). Every insert, decide and
   moot bumps `changeToken()`.
 - **Tests (names):**
@@ -252,7 +252,7 @@ Spec 4.3, 4.5. Needs Tasks 6 and 8. The heart of Part A.
   - `gone: deciding after the sanction was revoked answers gone and the appeal is moot` (Review Focus 3); `an appeal open while retention removes its sanction can still be decided without throwing (gone)`
   - `moot: revoking elsewhere closes the appeal with no outcome notice, no appeal.decided event and no granted count`
   - `events: appeal.decided once, after commit, never on a refusal; no statement or reason in it`; `a failing listener or announce cannot fail the decision`
-  - `appealStatementsMs 0 clears the statement in the decision`; `reason is required and private: it never appears in a player-facing value`
+  - `a reduce and a revoke both call the AI seam, and a reduce is reported as lightened, never granted`; `appealStatementsMs 0 clears the statement in the decision`; `reason is required and private: it never appears in a player-facing value`
 - **Run:** `npx vitest run packages/core/test/appeals-decide.test.ts packages/core/test/appeals-file.test.ts packages/core/test/sanction-plumbing.test.ts`
 
 ### Task 10: Staff reads and the false-positive stats
@@ -261,11 +261,11 @@ Spec 4.4 (rate), 4.6. Needs Task 9.
   `APPEAL_RATE_ELEVATED = 0.15`, `APPEAL_RATE_HIGH = 0.30`), `chatwarden.ts`, tests `packages/core/test/appeals-stats.test.ts`, `appeals-staff.test.ts`.
 - **Behaviour:** `statementFlagged = matcher.match(statement) !== null` computed on read; a throwing matcher reads false, logged by class.
   `shown` is the notice excerpt's lines as kept. `get` returns the detail with `statement` null once purged. `list` defaults to open,
-  oldest first, limit 1 to 200, opaque cursor. `stats` windows 30, 90 (default) or 365 days; `rate = granted / sanctions`, null below 10
+  oldest first, limit 1 to 200, opaque cursor. `stats` windows 30, 90 (default) or 365 days; `rate = granted / sanctions` where granted is **revoked only** (`AppealRuleStats` and `overall` gain `lightened`: reduced on appeal, shown beside the rate and never in it), null below 10
   sanctions; band `high` at or above 0.30, `elevated` at or above 0.15, else `normal`, null when rate is null; rules by number, `uncovered`
   last; `overall` sums.
 - **Tests (names):**
-  - `sanctions counted per rule (notes excluded, a reduction counted once); appealed; granted counts reduced and revoked only, never upheld or moot`
+  - `sanctions counted per rule (notes excluded, a reduction counted once); appealed; granted counts revoked only; lightened counts reduced only; upheld and moot count in neither; a reduce never moves the rate or its band`
   - `rate is null at 9 sanctions and exact at 10; bands at the exact edges 0.15 and 0.30; uncovered sorts last; window edges strict; an empty store gives zeros and null`
   - `list: open default oldest first, decided, all; cursor round trip; limit bounds; a bad cursor throws RangeError`
   - `get: statementFlagged reflects the matcher now (a term added tomorrow masks yesterday's text); a throwing matcher reads false; a purged statement is null; decided shows by, at, reason and replacementGroupId; unknown id is null`
@@ -284,17 +284,18 @@ and `store-sqlite/src/sqliteStore.ts` (the same methods), and the 0.1.7 amendmen
   exposed on `cw.ai` if it is not already), `core/src/types.ts` and both stores (`markAiOutcome` patch gains `corrective?: true`;
   `AiOutcomeRow.corrective`; `aiExamples` returns a corrective row when it still has `example_json`, at most one per call and only once
   `aiTeachableCount` is met, without counting toward it), `appealService.ts` (`onGranted` calls `cw.ai.markReversed` for reduce and revoke,
-  `{ corrective: true }` for **revoke only**, and passes the rule bands), the worker (fills `cautions` from `appeals.stats()` at the 90-day
+  `{ corrective: true }` for **revoke only**; the false-positive rate behind `cautions` counts revokes only, reduces are "lightened"), the worker (fills `cautions` from `appeals.stats()` at the 90-day
   window), tests `packages/core/test/ai/appeals-feed.test.ts` and additions to `core/test/contract/ai.contract.ts`.
 - **Behaviour:** no AI means every call is a no-op and nothing fails. A missing `reportId` (an old sanction) is skipped. A corrective
-  example's lines are the pseudonymised lines already stored; the statement is never an input. Reduce marks reversed and counts in the rate
-  but teaches no example (the casebook labels are upheld, noted, no_action and cannot say "too heavy"; plan ruling, see the hand-back).
+  example's lines are the pseudonymised lines already stored; the statement is never an input. Reduce marks the original decision reversed (kept out of
+  the casebook as a positive example) and teaches nothing; it is not counted in the false-positive rate (owner ruling; the casebook labels
+  cannot say "too heavy"). Only revoke adds the corrective example and counts toward the rate.
 - **Tests (names):**
-  - `revoke calls markReversed with corrective; reduce calls it without; uphold and moot do not call it`; `a missing report id is skipped; with no AI nothing fails`
-  - `a reversed row is excluded from standard examples and counts as an AI false positive in aiStats`
-  - `a corrective row is used at most once per read, only past 30 teachable rows, never counted toward them, with no example text teaches nothing but still counts in the rate`
+  - `revoke calls markReversed with corrective; reduce calls it without corrective and adds no example; uphold and moot do not call it`; `a missing report id is skipped; with no AI nothing fails`
+  - `a reversed row is excluded from standard examples; a revoked-on-appeal row counts as an AI false positive in aiStats and a reduced one does not`
+  - `a corrective row is used at most once per read, only past 30 teachable rows, never counted toward them, with no example text teaches nothing but a revoke still counts in the rate`
   - `AIExample.kind reaches the prompt with the fixed wording; a standard example is unchanged`
-  - `cautions lists only rules at elevated and high, carries bands and rule numbers only, no number, no person; an empty list renders nothing`
+  - `cautions is driven by the revoke-only rate (a rule with many reduces and no revokes is not cautioned); it lists only rules at elevated and high, carries bands and rule numbers only, no number, no person; an empty list renders nothing`
   - `the input hash is unchanged by cautions; Read again takes a fresh copy; the stable paragraph is present with and without cautions so the cache prefix is stable`
   - `the statement is absent from every AI input` (scan the rendered prompt); `prompt.stable stays under the 9 000 character guard under each preset`
   - `the ceilings are untouched` (the 0.1.6 ceilings suite stays green)
@@ -462,11 +463,11 @@ Spec 4.9 (Settings). Needs Tasks 1, 15, 19. Read first: the 0.1.7 `screens/Advan
   (`hub.settings.appeals.*`), tests `appeal-settings.test.tsx`, `a11y-settings.test.tsx`, `api.test.ts`, `lazy-screens.test.tsx`, `size.test.ts`.
 - **Behaviour:** switch on or off; "how many a player may file a week" (1 to 20); "Allow the moderator who made the decision to decide it" (off);
   the read-only statement limit; a "Mistakes by rule" disclosure (collapsed) with the per-rule table from `GET /appeals/stats` (sanctions,
-  appealed, granted, band in words "usually fine", "often reversed", "frequently reversed", and "not enough decisions yet" for a null rate).
+  appealed, revoked on appeal, "made lighter on appeal" beside it (never in the rate), band in words "usually fine", "often reversed", "frequently reversed", and "not enough decisions yet" for a null rate).
   Owner edits; seniors and moderators read. Saving needs a reason and handles 409 with a reload offer.
 - **Tests (names):**
   - `defaults to off`; `only the owner can save; others see values read-only`; `the weekly limit validates 1 to 20`; `saving sends the whole layer with appeals merged and a reason`; `a 409 offers to reload; reset restores the base`
-  - `Mistakes by rule is collapsed by default and shows the table with bands as words and no number outside the table`; `a null rate reads "not enough decisions yet"`
+  - `Mistakes by rule is collapsed by default and shows the table with bands as words and no number outside the table`; `a null rate reads "not enough decisions yet"`; `the made-lighter column shows reduces and does not change the band`
   - `no colour class carries a band`; `the panel is lazy`; `axe: no violations; 360 px no sideways scroll`; `size.test.ts holds`
 - **Run:** `npx vitest run packages/hub-react/test/appeal-settings.test.tsx packages/hub-react/test/a11y-settings.test.tsx packages/hub-react/test/lazy-screens.test.tsx packages/hub-react/test/api.test.ts packages/hub-react/test/size.test.ts`
 
