@@ -175,3 +175,42 @@ describe('the 0.1.3 notes (all ten CHANGELOGs)', () => {
     for (const dir of dirs) expect(section013(dir), dir).not.toMatch(/—/);
   });
 });
+
+// 0.1.5 (triage speed): published notes cannot be edited, so what an upgrading studio must know is pinned here (final review I1, I2).
+const section015 = (dir: string): string => {
+  const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+  const at = text.indexOf('## 0.1.5');
+  const end = text.indexOf('\n## 0.1.4', at);
+  return at < 0 ? '' : text.slice(at, end < 0 ? undefined : end).replace(/\s+/g, ' ');
+};
+
+// Packages with no 0.1.5 change say "No changes in this release." (as in 0.1.4); the notes live in the others, the same in each.
+const with015 = dirs.filter((d) => !section015(d).includes('No changes in this release'));
+
+describe('the 0.1.5 notes (every CHANGELOG that has them)', () => {
+  it('core and store-sqlite carry the notes', () => {
+    expect(with015).toEqual(expect.arrayContaining(['core', 'store-sqlite']));
+  });
+
+  it.each(with015)('%s: says migration 19 is one-way and to back up before upgrading', (dir) => {
+    const s = section015(dir);
+    expect(s).toContain('migration 19');
+    expect(s).toMatch(/one-way/i);
+    expect(s).toMatch(/back up/i);
+    expect(s).toMatch(/0\.1\.4 (will not|cannot) open/);
+  });
+
+  it.each(with015)('%s: names the contract changes a custom store, client or webhook sender meets', (dir) => {
+    const s = section015(dir);
+    expect(s).toContain('listOpenReportsByPerson');
+    expect(s).toContain('201');
+    expect(s).toContain('`HubClient`');
+    expect(s).toContain('dismissOpen');
+    expect(s).toMatch(/webhook/i);
+  });
+
+  it('the 0.1.5 notes are the same text in every CHANGELOG that has them', () => {
+    const first = section015(with015[0] as string);
+    for (const dir of with015) expect(section015(dir), dir).toBe(first);
+  });
+});

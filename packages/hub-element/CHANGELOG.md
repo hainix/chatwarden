@@ -32,12 +32,17 @@
     here, a warning), `U` undoes the newest waiting decision. A new "Quick keys" switch in the `?` sheet turns the acting on: on in
     Simple, off in Detailed (where `1` / `2` / `3` have always picked a verdict, so nothing changes by surprise). A held key is one
     action, and a case takes an act key only 300 ms after it appeared, so a double tap cannot close the next case.
-  - **SQLite migration 19** adds one index (`kit_reports_by_reporter_outcome`) and changes no table or row. It runs when the store opens.
+  - **SQLite migration 19** adds one index (`kit_reports_by_reporter_outcome`) and changes no table or row. It runs when the store opens. It is one-way: once 0.1.5 has opened a database, 0.1.4 will not open it
+    (it reports a schema version newer than it supports), so back up the database file before you upgrade if you might roll back.
   - **Type widenings and one new key.** `DecisionInput.reason` and `DecideInput.reason` are optional (every existing call still
     compiles). `PermissionKey` gains `reports.decide.bulk`, so a `Record<PermissionKey, ...>` you wrote by hand needs it. `AuditAction`
     gains the two sweep actions, `ReporterRecord` and the open rows of `GET /reports` gain an optional accuracy figure, and the store
     gains two optional methods (`reporterOutcomes`, `listOpenReportsByReporter`), so a custom store keeps working with these features
     off. New names are `@experimental`.
+  - **Three contract changes to check if you wrote your own pieces.** A custom store's `listOpenReportsByPerson` must accept a limit up to
+    201 (the bulk dismissal asks for one more than its 200 cap to know there are more; a store that clamps at 200 makes it under-report).
+    `HubClient` gains a required `dismissOpen` method, so a hand-written client or test double needs it. The signed incoming webhook's
+    `decide` action now accepts a dismissal (`no_action`, no actions) with no `reason`, as the staff route does.
   
   Upgrade notes:
   

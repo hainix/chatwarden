@@ -13,7 +13,7 @@ Updated 2026-11-12. The full roadmap and the reasoning behind it: [design/2026-1
 | K8a | Browser-ready core, store-memory; 0.1.1 published | PR #7 |
 | K8b | chatwarden.dev landing site with a live demo | PR #9, #11 |
 | K4 | Moderator hub (`hub-react`: team workbench, Simple mode, settings, four ways to adopt), `player-react`, `hub-element`; editable steps and ladder; configurable one-tap reporting; site demo on the real hub. Releases as 0.1.2 | PR #12 |
-| Triage speed | One-click "Nothing wrong here" with no typed reason, auto-advance with Undo after the move, bulk dismiss, reporter accuracy and the habitual-reporter ranking, keyboard queue mode. Releases as 0.1.5 | branch `triage-speed` (plan: [plans/2026-11-11-triage-speed.md](plans/2026-11-11-triage-speed.md)) |
+| Triage speed | One-click "Nothing wrong here" with no typed reason, auto-advance with Undo after the move, bulk dismiss, reporter accuracy and the habitual-reporter ranking, keyboard queue mode. Releases as 0.1.5 | PR #20 (plan: [plans/2026-11-11-triage-speed.md](plans/2026-11-11-triage-speed.md)) |
 
 ## Next
 - **K3c: AI levels 1-2** (read and recommend). Every human decision becomes a casebook example; granted appeals become corrective
