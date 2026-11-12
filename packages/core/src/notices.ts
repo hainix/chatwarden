@@ -32,6 +32,18 @@ export const MESSAGE_NOTICE_KINDS = ['rename_required', 'appeal_upheld', 'appeal
 export type MessageNoticeKind = (typeof MESSAGE_NOTICE_KINDS)[number];
 
 /** Every kind this build can show. A stored row of any other kind (written by a newer kit) is skipped, never thrown on. */
+/**
+ * Whether a notice row is on "My record" now: not withdrawn, one of the four sanction kinds, and either made within 90 days or (not a
+ * warning) permanent or still running. The one definition `record` uses and an appeal is filed against.
+ */
+export function appliesInRecord(r: Pick<NoticeRow, 'withdrawnAt' | 'kind' | 'createdAt' | 'until'>, now: number): boolean {
+  return (
+    r.withdrawnAt === null &&
+    SANCTION_NOTICE_KINDS.includes(r.kind) &&
+    (r.createdAt >= now - NOTICE_RECORD_WINDOW_MS || (r.kind !== 'warning' && (r.until === null || r.until > now)))
+  );
+}
+
 const KNOWN_KINDS: readonly string[] = [...SANCTION_NOTICE_KINDS, 'report_outcome', ...MESSAGE_NOTICE_KINDS];
 const isMessageKind = (kind: unknown): kind is MessageNoticeKind => (MESSAGE_NOTICE_KINDS as readonly unknown[]).includes(kind);
 
@@ -333,14 +345,17 @@ export class NoticeService {
   record(subject: SubjectId): PlayerNotice[] {
     const now = this.clock.now();
     return this.rowsOf(subject)
-      .filter(
-        (r) =>
-          r.withdrawnAt === null &&
-          SANCTION_NOTICE_KINDS.includes(r.kind) &&
-          (r.createdAt >= now - NOTICE_RECORD_WINDOW_MS ||
-            (r.kind !== 'warning' && (r.until === null || r.until > now))),
-      )
+      .filter((r) => appliesInRecord(r, now))
       .map((r) => this.toPlayer(r));
+  }
+
+  /**
+   * The stored notice `id` when it belongs to this person (across their merged aliases), whatever its kind or state; null otherwise.
+   * Staff-side: the row names its sanction group. For the appeals service, which decides from the row whether it can be appealed.
+   */
+  ownRow(subject: SubjectId, id: string): NoticeRow | null {
+    if (!nonEmpty(id)) return null;
+    return this.rowsOf(subject).find((r) => r.id === id) ?? null;
   }
 
   /** Withdraw the notices of a sanction group (it was revoked). Returns how many were withdrawn. */

@@ -1313,6 +1313,12 @@ export interface Store {
   countOpenAppeals?(): number;
 
   /**
+   * OPTIONAL. These subjects' (a person's canonical id and aliases) appeals, newest first (`createdAt` descending, then `id` descending),
+   * up to `limit` (floored, clamped to 1..200); a `moot` appeal is not listed. Returns copies. For "my appeals" on the player side.
+   */
+  listAppealsBy?(subjects: readonly SubjectId[], limit: number): AppealRow[];
+
+  /**
    * OPTIONAL. Decide an appeal, ONLY from `open`, as ONE atomic statement: false, and nothing changed, for an unknown id or an appeal that
    * is decided or moot. True when it moved. `clearStatement` also nulls the statement (retention with `appealStatementsMs` at 0).
    */

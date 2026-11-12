@@ -1224,6 +1224,29 @@ export class SqliteStore implements Store, TermStore {
     );
   }
 
+  listAppealsBy(subjects: readonly SubjectId[], limit: number): AppealRow[] {
+    const unique = [...new Set(subjects)];
+    const n = Math.floor(limit);
+    const size = Number.isFinite(n) ? Math.min(200, Math.max(1, n)) : 1;
+    const found: AppealRow[] = [];
+    this.transaction(() => {
+      for (let i = 0; i < unique.length; i += CLAIM_BATCH) {
+        const batch = unique.slice(i, i + CLAIM_BATCH);
+        // The newest `size` of each batch is enough: the merged newest `size` cannot need more from any one batch.
+        for (const r of this.db
+          .prepare(
+            `SELECT ${APPEAL_COLUMNS} FROM kit_appeals
+             WHERE subject_id IN (${batch.map(() => '?').join(', ')}) AND status <> 'moot'
+             ORDER BY created_at DESC, id DESC LIMIT ?`,
+          )
+          .all(...batch, size)) {
+          found.push(toAppealRow(r));
+        }
+      }
+    });
+    return found.sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)).slice(0, size);
+  }
+
   countAppealsBy(subjects: readonly SubjectId[], since: number): { count: number; oldestAt: number | null } {
     const unique = [...new Set(subjects)];
     let count = 0;

@@ -21,6 +21,7 @@ export type MemoryAppealMethods = Required<
     | 'clearAppealStatements'
     | 'purgeAppeals'
     | 'closeOrphanAppeals'
+    | 'listAppealsBy'
   >
 >;
 
@@ -83,6 +84,15 @@ class MemoryAppeals extends MemoryStore {
       })
       .sort((a, b) => a.createdAt - b.createdAt || compare(a.id, b.id))
       .slice(0, pageSize(q.limit))
+      .map((r) => structuredClone(r));
+  }
+
+  listAppealsBy(subjects: readonly SubjectId[], limit: number): AppealRow[] {
+    const wanted = new Set(subjects);
+    return [...this.appealState().rows.values()]
+      .filter((r) => r.status !== 'moot' && wanted.has(r.subject))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, pageSize(limit))
       .map((r) => structuredClone(r));
   }
 

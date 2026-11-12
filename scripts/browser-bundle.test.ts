@@ -296,7 +296,7 @@ describe('browser bundle: size', () => {
 // names that live only in the AI module: the prompt builder, the output schema and the scripted fake adapter.
 const AI_MARKERS = ['buildAIInput', 'AI_OUTPUT_SCHEMA', 'createFakeModerationAI'];
 // And the in-memory store's AI methods, which are opt-in (`withMemoryAi`) so a bundle that never calls it does not carry them.
-const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries', 'withMemoryAppeals', 'closeAppealsForGroup', 'withMemoryNames', 'insertBlockedName'];
+const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries', 'withMemoryAppeals', 'withMemoryNames', 'UNIQUE constraint failed: kit_blocked_names.id'];
 const inputsOf = (m: Metafile): string[] => Object.keys(m.inputs).map((p) => p.replaceAll('\\', '/'));
 
 describe('browser bundle: the server-only AI module', () => {

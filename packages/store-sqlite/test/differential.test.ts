@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS } from '@chatwarden/core';
+import { AUDIT_ACTIONS, normalizeStatement } from '@chatwarden/core';
 import type { AuditRow, SignalRow, Store, StoredReport } from '@chatwarden/core';
 import { MemoryStore, withMemoryAi, withMemoryAppeals, withMemoryNames, withMemorySignals } from '@chatwarden/store-memory';
 import { openStore } from '../src/index.js';
@@ -488,6 +488,24 @@ describe('the appeal and blocked-name methods: one script, the same answer from 
     expect(ids(b)).toEqual(ids(a));
     expect(b.purgeNotices(NOW, { appealBefore: NOW, renameBefore: NOW })).toBe(a.purgeNotices(NOW, { appealBefore: NOW, renameBefore: NOW }));
     expect(ids(b)).toEqual(ids(a));
+  });
+
+  it('a statement the service has normalized reads back identically from both stores (the stores differ only on text normalizeStatement removes)', () => {
+    const [a, b] = pair();
+    const inputs = ['plain', 'a\u0000b\uD800c\uDC00d', '\u{1F4AC}'.repeat(40) + '\uD83D', ' a\u200b\u202eb ', 'line\r\n\r\n\r\nline\u2028x', '\u0007'];
+    inputs.forEach((raw, i) => {
+      const statement = normalizeStatement(raw);
+      const row = { id: `nz${i}`, subject: 's_1', groupId: `gnz${i}`, noticeId: 'n', reportId: null, rule: '1', kind: 'chat' as const, statement, status: 'open' as const, createdAt: NOW, decidedAt: null, decidedBy: null, decisionReason: null, replacementGroupId: null };
+      expect(a.insertAppeal?.(row)).toBe(true);
+      expect(b.insertAppeal?.(row)).toBe(true);
+      expect(b.loadAppeal?.(`nz${i}`)?.statement, JSON.stringify(raw)).toBe(a.loadAppeal?.(`nz${i}`)?.statement);
+      expect(a.loadAppeal?.(`nz${i}`)?.statement).toBe(statement);
+    });
+    // what normalization removes is exactly what the stores disagree on: a lone surrogate (memory keeps it, SQLite writes U+FFFD) and a NUL
+    expect(normalizeStatement('a\uD800b')).toBe('ab');
+    expect(normalizeStatement('a\u0000b')).toBe('ab');
+    // eslint-disable-next-line no-control-regex
+    expect(normalizeStatement('a\u0000b\uD800c')).not.toMatch(/[\u0000\uD800-\uDFFF]/);
   });
 
   it('the blocked-name methods agree', () => {

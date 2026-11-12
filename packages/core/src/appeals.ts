@@ -83,3 +83,66 @@ export function resolveAppeals(input: AppealSettings | undefined, path = 'appeal
     allowSelfReview: self ?? false,
   };
 }
+
+/** What a player sees of an appeal. No staff field, no reason, no id of a sanction or a person. @experimental */
+export interface PlayerAppeal {
+  id: string;
+  /** The notice it was filed from. */
+  noticeId: string;
+  status: 'open' | 'upheld' | 'reduced' | 'revoked';
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+/**
+ * Why a filing was refused. `not_found` is one answer for "not yours", "no such notice" and "malformed", so notice ids cannot be probed.
+ * @experimental
+ */
+export type AppealRefusal =
+  | 'off' // appeals are not enabled
+  | 'not_found' // not the caller's notice, or no such notice (the same answer, so ids cannot be probed)
+  | 'not_appealable' // the caller's notice, but not a sanction in their record
+  | 'statement_invalid' // empty after cleaning, or over APPEAL_STATEMENT_MAX characters
+  | 'already_appealed' // this sanction has had its appeal
+  | 'rate'; // perPlayerPerWeek reached
+
+/** @experimental */
+export type AppealFileResult = { ok: true; appeal: PlayerAppeal } | { ok: false; refused: AppealRefusal; retryAfterMs?: number }; // retryAfterMs on 'rate'
+
+/** The most UTF-16 units of raw text the cleaner will look at: far past the cap, so a huge paste is refused without being worked through. */
+const STATEMENT_RAW_MAX = APPEAL_STATEMENT_MAX * 20;
+
+// Line and paragraph separators and the C1 next-line become a newline; a tab becomes a space.
+const NEWLINES = /\r\n|[\r\u0085\u2028\u2029]/g;
+// Control characters other than newline (tab is handled before), bidirectional controls and marks, zero-width and invisible format
+// characters, the soft hyphen, and the Mongolian vowel separator.
+// eslint-disable-next-line no-control-regex
+const STRIPPED = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
+// A surrogate with no partner: it cannot be stored as UTF-8 (SQLite writes U+FFFD, the memory store keeps it), so both are removed first.
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+
+/**
+ * Clean a statement before it is counted or stored: line and paragraph separators become newlines and tabs spaces; control, bidirectional
+ * and zero-width characters, the soft hyphen, NUL and lone surrogates are removed; every line loses its trailing space; runs of blank lines
+ * collapse to one; the whole is trimmed. Pure, idempotent, never throws; anything that is not a string, and a string longer than twenty times
+ * the cap, gives an empty string (which the filing refuses). Count the result in code points, not UTF-16 units.
+ * @experimental
+ */
+export function normalizeStatement(input: unknown): string {
+  if (typeof input !== 'string' || input.length > STATEMENT_RAW_MAX) return '';
+  return input
+    .replace(NEWLINES, '\n')
+    .replace(/\t/g, ' ')
+    .replace(LONE_SURROGATE, '')
+    .replace(STRIPPED, '')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** The length of a cleaned statement in characters (code points), the unit {@link APPEAL_STATEMENT_MAX} counts in. */
+export function statementLength(text: string): number {
+  return [...text].length;
+}

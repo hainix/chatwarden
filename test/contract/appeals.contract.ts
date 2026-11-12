@@ -22,6 +22,7 @@ type Appeals = Required<
     | 'clearAppealStatements'
     | 'purgeAppeals'
     | 'closeOrphanAppeals'
+    | 'listAppealsBy'
   >
 >;
 const METHODS: Array<keyof Appeals> = [
@@ -38,6 +39,7 @@ const METHODS: Array<keyof Appeals> = [
   'clearAppealStatements',
   'purgeAppeals',
   'closeOrphanAppeals',
+  'listAppealsBy',
 ];
 
 const H = 3_600_000;
@@ -119,7 +121,7 @@ export function appealsContract(name: string, make: () => Store): void {
       return s as Appeals & Store;
     };
 
-    it('has the thirteen methods', () => {
+    it('has the fourteen methods', () => {
       const s = make();
       for (const m of METHODS) expect(typeof s[m], m).toBe('function');
     });
@@ -241,6 +243,45 @@ export function appealsContract(name: string, make: () => Store): void {
         const [got] = s.listAppeals({ status: 'all', limit: 10 });
         (got as AppealRow).statement = 'changed';
         expect(s.loadAppeal(row.id)?.statement).toBe(row.statement);
+      });
+    });
+
+    describe('listAppealsBy', () => {
+      it('lists these subjects\' appeals newest first (then by id descending), without moot ones, up to the limit', () => {
+        const s = store();
+        const a = appeal({ subject: 's_a', createdAt: NOW + 10 });
+        const b = appeal({ subject: 's_alias', createdAt: NOW + 30 });
+        const c = appeal({ subject: 's_a', createdAt: NOW + 20 });
+        const other = appeal({ subject: 's_other', createdAt: NOW + 40 });
+        const moot = appeal({ subject: 's_a', createdAt: NOW + 50, groupId: 'g-moot' });
+        for (const r of [a, b, c, other, moot]) s.insertAppeal(r);
+        s.closeAppealsForGroup('g-moot', 'x', NOW);
+        s.decideAppeal(c.id, decide({ status: 'revoked' }));
+        expect(s.listAppealsBy(['s_a', 's_alias'], 10).map((r) => r.id)).toEqual([b.id, c.id, a.id]);
+        expect(s.listAppealsBy(['s_a', 's_alias', 's_a'], 2).map((r) => r.id)).toEqual([b.id, c.id]);
+        expect(s.listAppealsBy(['s_other'], 10).map((r) => r.id)).toEqual([other.id]);
+      });
+
+      it('a tie on createdAt is broken by id, descending; limit is floored and clamped to 1..200; nothing for no subjects or an unknown one', () => {
+        const s = store();
+        const rows = ['a', 'c', 'b'].map((id) => appeal({ id, subject: 's_a', createdAt: NOW }));
+        for (const r of rows) s.insertAppeal(r);
+        expect(s.listAppealsBy(['s_a'], 10).map((r) => r.id)).toEqual(['c', 'b', 'a']);
+        expect(s.listAppealsBy(['s_a'], 1.9)).toHaveLength(1);
+        expect(s.listAppealsBy(['s_a'], 0)).toHaveLength(1);
+        expect(s.listAppealsBy(['s_a'], 100000)).toHaveLength(3);
+        expect(s.listAppealsBy([], 10)).toEqual([]);
+        expect(s.listAppealsBy(['s_nobody'], 10)).toEqual([]);
+      });
+
+      it('answers across more subjects than one batch, newest first, and returns copies', () => {
+        const s = store();
+        const subjects = Array.from({ length: 1300 }, (_, i) => `s_${String(i).padStart(4, '0')}`);
+        subjects.forEach((subject, i) => s.insertAppeal(appeal({ subject, createdAt: NOW + i })));
+        const got = s.listAppealsBy(subjects, 3);
+        expect(got.map((r) => r.subject)).toEqual(['s_1299', 's_1298', 's_1297']);
+        (got[0] as AppealRow).statement = 'changed';
+        expect(s.listAppealsBy(['s_1299'], 1)[0]?.statement).not.toBe('changed');
       });
     });
 

@@ -24,6 +24,8 @@ import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkPace, mergePace } from './pace.js';
+import { AppealService, hasAppealMethods } from './appealService.js';
+import type { AppealFileResult, PlayerAppeal } from './appeals.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
@@ -607,6 +609,25 @@ export interface Chatwarden {
     pendingWarning(who: RawWho): boolean;
   };
   /**
+   * Appeals (0.1.9, `profile.appeals`, off until turned on). The player side takes the same `RawWho` as `notices` and FINDS the person
+   * (never creates one); every answer is a reason or a rule number, never an identifier, a staff ref or a reason a moderator gave.
+   * @experimental
+   */
+  appeals: {
+    /** Whether appeals are on right now: the profile in force says so (a live read) and the store can keep them. */
+    enabled(): boolean;
+    /**
+     * File an appeal from one of the caller's own sanction notices, with a statement of at most `APPEAL_STATEMENT_MAX` (1000) characters.
+     * Checks in this order: off, not_found, not_appealable, statement_invalid, already_appealed, rate. One store transaction; a refusal
+     * writes nothing. The statement is cleaned first (`normalizeStatement`) and refused, not cut, over the cap. Never throws for a bad
+     * input; a store failure is logged (`chatwarden.appeal_failed`, the error class only) and answers `not_found`. `appeal.created` is
+     * emitted after the commit.
+     */
+    file(who: RawWho, input: { noticeId: string; statement: string }): AppealFileResult;
+    /** The caller's own appeals, newest first, at most 50, without any that was made moot. Empty for an unknown person or with appeals off. */
+    mine(who: RawWho): PlayerAppeal[];
+  };
+  /**
    * Decide a report: close it, write each sanction and its notice, and tell the people involved, in one
    * transaction. Idempotent (the same decision again is a replay). A malformed or disallowed decision resolves
    * `{ ok: false, error: 'invalid' }`; a STORE failure REJECTS with the store's own error and writes nothing, so a
@@ -920,6 +941,20 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     const ids = hashWho(hasher, who);
     return subjects.lookup({ clientKey: ids.clientKey, accountId: ids.accountId, ipHash: null });
   };
+  // Appeals. Turning them on over a store that cannot keep them is a plain mistake, refused here before anything is started.
+  if (policy.profileNow().appeals.enabled && !hasAppealMethods(store)) {
+    throw new Error('createChatwarden: appeals are enabled, but this store has no appeal methods (SqliteStore has them from schema 22; the in-memory store needs its opt-in appeals wrapper)');
+  }
+  const appealService = new AppealService({
+    store,
+    subjects,
+    notices,
+    clock,
+    logger,
+    settings: () => policy.profileNow().appeals,
+    personOf,
+    emit: (event) => bus.emit(event),
+  });
   signalRef.service = signalModule === undefined ? createInertSignals(logger, () => policy.profileNow().signals) : new signalModule.SignalService({
     store,
     clock,
@@ -1285,6 +1320,11 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
       record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
+    },
+    appeals: {
+      enabled: () => appealService.enabled(),
+      file: (who, input) => appealService.file(who, input),
+      mine: (who) => appealService.mine(who),
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
