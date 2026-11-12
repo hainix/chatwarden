@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { isTypingTarget } from '../src/dom.js';
-import { SHORTCUTS, shortcutFor } from '../src/shortcuts.js';
+import { shortcutFor } from '../src/shortcuts.js';
 import type { KeyLike } from '../src/shortcuts.js';
-import { en } from '../src/i18n.js';
 
 const key = (k: string, over: Partial<KeyLike> = {}): KeyLike => ({
   key: k,
@@ -43,7 +42,7 @@ describe('shortcutFor: what each key means', () => {
   });
 
   it('other keys mean nothing', () => {
-    for (const k of ['a', 'x', '1', '2', '3', 'Enter', ' ', 'Tab', 'ArrowDown', 'F5', '/', 'm']) expect(shortcutFor(key(k)), k).toBeNull();
+    for (const k of ['a', 'x', '1', '2', '3', 'Enter', ' ', 'Tab', 'ArrowLeft', 'ArrowRight', 'F5', '/', 'm']) expect(shortcutFor(key(k)), k).toBeNull();
   });
 });
 
@@ -141,19 +140,5 @@ describe('shortcutFor: a held key', () => {
     expect(shortcutFor(key('n', { repeat: true }))).toBeNull();
     expect(shortcutFor(key('j', { repeat: true }))).toBe('next');
     expect(shortcutFor(key('k', { repeat: true }))).toBe('previous');
-  });
-});
-
-describe('the shortcut sheet table', () => {
-  it('lists every action once, with a word from the catalog', () => {
-    const actions = SHORTCUTS.map((s) => s.action);
-    expect(new Set(actions).size).toBe(actions.length);
-    for (const a of ['next', 'previous', 'takeNext', 'command', 'help', 'escape']) expect(actions).toContain(a);
-    for (const s of SHORTCUTS) expect(Object.keys(en)).toContain(s.label);
-  });
-
-  it('shows Ctrl and K as two keys for the command bar, and one key for the others', () => {
-    expect(SHORTCUTS.find((s) => s.action === 'command')?.keys).toEqual(['Ctrl', 'K']);
-    expect(SHORTCUTS.find((s) => s.action === 'next')?.keys).toEqual(['J']);
   });
 });

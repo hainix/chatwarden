@@ -285,6 +285,55 @@ describe('POST /cases/:ref/release', () => {
 });
 
 describe('POST /cases/next', () => {
+  it('serves an ordinary case before a habitual-reporter case (ranking is on for this route)', async () => {
+    const w = await world();
+    // A habitual reporter: five unfounded reports in the last days, then a fresh report from them.
+    w.cw.rooms.seat('hist-room', 'p1', { clientKey: 'habitual-key' }, 'Rep');
+    const reporter = w.cw.rooms.subjectAt('hist-room', 'p1') as string;
+    for (let i = 0; i < 5; i++) {
+      const id = `hist-${i}`;
+      w.store.insertReport({
+        id,
+        createdAt: w.clock.t - 3 * DAY,
+        roomId: `hr-${id}`,
+        tags: {},
+        reporterSubject: reporter,
+        reporterSeat: 'p1',
+        reporterHandle: 'Rep',
+        targetSubject: `s_old_${id}`,
+        targetSeat: 'p2',
+        targetHandle: 'Tgt',
+        category: 'harassment',
+        note: null,
+        lineId: null,
+        excerpt: [],
+        people: [],
+        status: 'open',
+      });
+      w.store.closeReport(id, 'dismissed', false, 'mod', w.clock.t - 2 * DAY, 'n');
+    }
+    w.cw.rooms.seat('fresh-room', 'p1', { clientKey: 'habitual-key' }, 'Rep');
+    w.cw.rooms.seat('fresh-room', 'p2', { clientKey: 'fresh-target' }, 'Tgt');
+    w.cw.chat.accept('fresh-room', 'p2', 'a line');
+    w.clock.t += 1000;
+    const sent = await w.cw.reports.submit({ roomId: 'fresh-room', reporterSeat: 'p1', targetSeat: 'p2', category: 'harassment' });
+    if (!sent.ok) throw new Error('refused');
+    const down = w.cw.reports.get(sent.reportId)!.targetPerson;
+    const ordinary = await w.file();
+    expect(body(await w.call('POST', '/cases/next', { actor: 'ann' })).case.person).toBe(ordinary.target);
+    // The ranked-down case is still served, after.
+    expect(body(await w.call('POST', '/cases/next', { actor: 'ann' })).case.person).toBe(down);
+    expect(body(await w.call('POST', '/cases/next', { actor: 'ann' }))).toEqual({ case: null });
+  });
+
+  it('a body rankDownHabitual is not read: the server decides', async () => {
+    const w = await world();
+    const a = await w.file();
+    const res = await w.call('POST', '/cases/next', { actor: 'ann', body: { rankDownHabitual: false } });
+    expect(res.status).toBe(200);
+    expect(body(res).case.person).toBe(a.target);
+  });
+
   it('is { case: null } when nothing is open, and claims nothing', async () => {
     const w = await world();
     const res = await w.call('POST', '/cases/next', { body: {} });
@@ -422,7 +471,7 @@ describe('GET /reports and GET /reports/:id: claim and viewing', () => {
     expect(item.claim).toBeNull();
     expect(item.viewing).toEqual([]);
     const keys = Object.keys(item);
-    expect(keys.slice(-4)).toEqual(['targetHandle', 'reporterHandle', 'claim', 'viewing']);
+    expect(keys.slice(-5)).toEqual(['targetHandle', 'reporterHandle', 'claim', 'viewing', 'reporterAccuracy']);
   });
 
   it('shows the claim { by, since, until } on every report of the claimed person, and only theirs', async () => {
@@ -485,12 +534,12 @@ describe('GET /reports and GET /reports/:id: claim and viewing', () => {
     expect(body(await w.call('GET', '/reports', { actor: 'zed' })).items[0].viewing).toEqual(['ann', 'bea', 'cy']);
   });
 
-  it('keeps the summary free of evidence: only claim and viewing were added', async () => {
+  it('keeps the summary free of evidence: only claim, viewing and the reporter figure were added', async () => {
     const w = await world();
     await w.file();
     const item = body(await w.call('GET', '/reports')).items[0];
     expect(Object.keys(item).sort()).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
   });
 });

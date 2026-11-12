@@ -152,7 +152,16 @@ export function serverVerdict(form: DecisionForm): DecideInput['verdict'] {
   return choices.length > 0 && choices.every((c) => c?.kind === 'note') ? 'noted' : 'upheld';
 }
 
-/** The body for `POST /reports/:id/decide`. Call it on a form that has passed {@link validate}. */
+/**
+ * True when the form is a plain dismissal: "Not a problem" and no action. The kit stores its standard reason for it
+ * (`NO_ACTION_DEFAULT_REASON`), so no reason has to be typed or sent. Any action, and every other verdict, needs a written one.
+ */
+const isPlainDismissal = (form: DecisionForm): boolean => form.verdict === 'not_a_problem' && form.actions.length === 0;
+
+/**
+ * The body for `POST /reports/:id/decide`. Call it on a form that has passed {@link validate}. A plain dismissal with a blank reason
+ * sends no `reason` at all (the kit stores its standard one); a typed reason is sent as written.
+ */
 export function toInput(form: DecisionForm): DecideInput {
   const actions = form.actions.map((d): DecisionAction => {
     const choice = resolveDraft(d) as Choice;
@@ -162,7 +171,9 @@ export function toInput(form: DecisionForm): DecideInput {
     if (choice.kind !== 'note' && d.lineIds.length > 0) action.lineIds = [...d.lineIds];
     return action;
   });
-  const input: DecideInput = { verdict: serverVerdict(form), reason: form.reason.trim(), actions };
+  const reason = form.reason.trim();
+  const input: DecideInput = { verdict: serverVerdict(form), actions };
+  if (reason !== '' || !isPlainDismissal(form)) input.reason = reason;
   if (form.verdict === 'bad_faith') input.evidence = form.evidence.trim();
   return input;
 }
@@ -223,8 +234,9 @@ export function validate(form: DecisionForm, ctx: ValidationContext): Problems {
     else if (evidence.length > EVIDENCE_MAX) out.evidence = problem('hub.decide.error.evidenceLong', { max: EVIDENCE_MAX });
   }
   const reason = form.reason.trim();
-  if (reason === '') out.reason = problem('hub.decide.error.reasonRequired');
-  else if (reason.length > REASON_MAX) out.reason = problem('hub.decide.error.reasonLong', { max: REASON_MAX });
+  if (reason === '') {
+    if (!isPlainDismissal(form)) out.reason = problem('hub.decide.error.reasonRequired');
+  } else if (reason.length > REASON_MAX) out.reason = problem('hub.decide.error.reasonLong', { max: REASON_MAX });
 
   if (form.actions.length > MAX_ACTIONS) out.list = problem('hub.decide.error.tooMany', { max: MAX_ACTIONS });
   else if (form.actions.length > 0 && !ctx.canApply) out.list = problem('hub.decide.error.cannotApply');

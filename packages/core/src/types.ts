@@ -219,6 +219,17 @@ export interface ReporterTally {
 }
 
 /**
+ * One reporter's decided reports (filed at or after `since`) by outcome, for {@link Store.reporterOutcomes}. `reporter` is the id
+ * as stored. `actioned` is `upheld` and `noted` alike; `noAction` is a dismissal without the bad-faith mark and `badFaith` one with it.
+ */
+export interface ReporterOutcomeRow {
+  reporter: SubjectId;
+  actioned: number;
+  noAction: number;
+  badFaith: number;
+}
+
+/**
  * One decided report a person filed that carried a reason, with what its decision did: for the reporter's accuracy. `reason` is
  * the report's stored `reportedReason`; `target` the reported subject as stored; `actions` one entry per sanction group the
  * decision wrote (its subject row: who, and the rule cited, `'uncovered'` included). A dismissal with no actions has an empty list.
@@ -705,9 +716,18 @@ export interface Store {
   /**
    * The OPEN reports filed AGAINST any of the given subjects (`targetSubject` as stored: pass the person's canonical id
    * and every alias merged into it), newest first (`createdAt` descending, then `id` descending), whole records. `limit` is
-   * clamped to 1..200 (a fraction is floored). An empty list matches nothing.
+   * clamped to 1..201 (a fraction is floored; 201 so a caller can ask for 200 and one more to learn whether there is more, as
+   * `dismissMany` does: a custom store that clamps at 200 only makes it under-report `more`). An empty list matches nothing.
    */
   listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[];
+
+  /**
+   * OPTIONAL. The OPEN reports FILED BY any of the given subjects (`reporterSubject` as stored: pass the person's canonical id
+   * and every alias merged into it), newest first (`createdAt` descending, then `id` descending), whole records. `limit` is
+   * clamped to 1..201 (a fraction is floored). An empty list matches nothing. The read behind a bulk dismissal of one reporter's
+   * reports; a store that leaves it out is scanned through `listOpenReports` instead (bounded).
+   */
+  listOpenReportsByReporter?(reporters: readonly SubjectId[], limit: number): ReportRecord[];
 
   /**
    * How the reports FILED BY any of the given subjects stand (`reporterSubject` as stored: pass the person's canonical id
@@ -724,6 +744,14 @@ export interface Store {
    * 200 (newest first). A decision row that cannot be read is a decision with no actions, never an error.
    */
   loadReporterDecisions?(reporters: readonly SubjectId[]): ReporterDecision[];
+
+  /**
+   * OPTIONAL. How the reports FILED BY any of the given subjects (`reporterSubject` as stored) that are no longer `open` and were
+   * filed (`createdAt`) at or after `since` turned out, one row per stored reporter id that has at least one: `actioned` (upheld
+   * or noted), `noAction` (dismissed, not marked bad faith) and `badFaith` (dismissed with the mark). The one grouped read behind
+   * reporter accuracy. An empty list gives `[]`; a repeated id counts once. A store that leaves it out shows no reporter accuracy.
+   */
+  reporterOutcomes?(reporters: readonly SubjectId[], since: number): ReporterOutcomeRow[];
 
   /**
    * OPTIONAL. Attach the reporter's one follow-up to an `open` report that has none yet: set `reportedReason` and `note` (the

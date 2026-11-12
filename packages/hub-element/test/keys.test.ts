@@ -305,3 +305,27 @@ describe('keys with nothing focused (the page after load)', () => {
     await inside(a).findByRole('dialog', { name: 'Keyboard shortcuts' });
   });
 });
+
+describe('the keyboard queue mode inside the element', () => {
+  it('J opens the case it moves to, 2 dismisses it, and U undoes it, each heard with the real target in the shadow root', async () => {
+    const w = await filed();
+    const el = mount({ mode: 'simple', router: 'memory' }, { client: w.client });
+    await ready(el);
+    const user = userEvent.setup();
+    skip(el).focus();
+    await user.keyboard('j');
+    expect(name(el.shadowRoot?.activeElement)).toBe('Alpha');
+    // Quick keys are on in Simple: the case opens once the key has been still.
+    await inside(el).findByRole('heading', { level: 2, name: 'Alpha' }, { timeout: 5000 });
+    // A case accepts a quick key a moment after it appeared (the hub's clock is the page's).
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    skip(el).focus();
+    await user.keyboard('2');
+    await inside(el).findByText('Dismissing Alpha in 5 s.');
+    skip(el).focus();
+    await user.keyboard('u');
+    await inside(el).findByText('Undid the decision on Alpha.');
+    await inside(el).findByRole('heading', { level: 2, name: 'Alpha' });
+    expect(w.sent.some((r) => r.method === 'POST' && /\/decide$/.test(r.path))).toBe(false);
+  });
+});

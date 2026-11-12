@@ -267,6 +267,8 @@ describe('keys belong to the piece they are pressed in', () => {
     const bravo = await screen.findByRole('region', { name: 'Case against Bravo' });
     await within(alpha).findByRole('button', { name: /^No action needed/ });
     await within(bravo).findByRole('button', { name: /^No action needed/ });
+    // A case accepts a quick key a moment after it appeared, on the hub's clock (the world's).
+    w.clock.t += 1000;
     return { w, a, b, controller, alpha, bravo, ...view };
   }
   const press = (el: HTMLElement, key: string, init: KeyboardEventInit = {}) =>

@@ -45,9 +45,12 @@ const advance = (ms: number): Promise<void> =>
   });
 
 async function open(w: HubWorld, id: string, options: Parameters<typeof renderHub>[1] = {}) {
-  const r = renderHub(w, { path: `/reports/${id}`, mode: 'simple', ...options });
+  // A quick action moves on from the case; these tests are about the decision on it, so the page stays (`stay`). The clock moves past
+  // the quick-key cooldown of a case that has just appeared.
+  const r = renderHub(w, { path: `/reports/${id}`, mode: 'simple', stay: true, ...options });
   await screen.findByRole('heading', { level: 2, name: 'Mallory' });
   await screen.findByRole('button', { name: /^No action needed/ });
+  w.clock.t += 400;
   return r;
 }
 
@@ -243,6 +246,18 @@ describe('the reporter warning', () => {
     for (let i = 0; i < open; i += 1) await w.file({ reporter, target: `Pending${i}`, room: `open-${reporter}-${i}` });
   }
   const warning = (): HTMLElement | null => screen.queryByText(/past reports were mostly not upheld/);
+  // These are the all-time rule, which the card keeps for a kit that sends no recent figure (an older one): history answers without it.
+  const olderKit = (w: HubWorld): void => {
+    w.intercept.fn = async (req) => {
+      if (req.method === 'GET' && /^\/people\/[^/]+\/history$/.test(req.path)) {
+        const res = await w.direct.personHistory(req.path.split('/')[2] as string);
+        const { accuracy, ...asReporter } = res.asReporter;
+        void accuracy;
+        return { status: 200, headers: {}, body: { ...res, asReporter } };
+      }
+      return undefined;
+    };
+  };
   /** Waits until the reporter's record has been asked for and answered, so "no warning" is a result, not a race. */
   const settle = async (w: HubWorld, reporter: string): Promise<void> => {
     await within(await screen.findByRole('region', { name: 'Their record' })).findByText('Nothing in the last 90 days.');
@@ -266,6 +281,7 @@ describe('the reporter warning', () => {
   ] as const)('%s: warning shown: %s', async (_name, past, waiting, shown) => {
     const w = await hubWorld();
     await history(w, 'Saffron', [...past], waiting);
+    olderKit(w);
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     await open(w, f.id);
     await settle(w, f.reporter);
@@ -276,6 +292,7 @@ describe('the reporter warning', () => {
   it('is plain and does not accuse: it says what the numbers are, of the decided reports', async () => {
     const w = await hubWorld();
     await history(w, 'Saffron', ['upheld', 'dismissed', 'dismissed', 'dismissed'], 2);
+    olderKit(w);
     const f = await w.fileRich({ lines: TALK, reporter: 'Saffron' });
     await open(w, f.id);
     expect(await screen.findByText("Saffron's past reports were mostly not upheld (1 of 4).")).toBeInTheDocument();
@@ -417,7 +434,7 @@ describe('when there is no suggestion', () => {
     await user.keyboard('2');
     await pageHides();
     expect(decides(w)).toHaveLength(1);
-    expect(decides(w)[0]!.body).toEqual({ verdict: 'no_action', reason: 'No rule was broken', actions: [] });
+    expect(decides(w)[0]!.body).toEqual({ verdict: 'no_action', actions: [] });
   });
 
   it('a role that cannot apply sanctions: no primary button, and it says why; No action needed still works', async () => {
@@ -496,7 +513,7 @@ describe('one click', () => {
     const before = w.sent.length;
     await user.click(primary());
     await pageHides();
-    const after = w.sent.slice(before).filter((r) => r.method === 'POST' && !/claim|viewing|release/.test(r.path));
+    const after = w.sent.slice(before).filter((r) => r.method === 'POST' && !/claim|viewing|release|\/cases\/next/.test(r.path));
     expect(after.map((r) => `${r.method} ${r.path}`)).toEqual([`POST /reports/${f.id}/decide`]);
     expect(after[0]).toMatchObject({ keepalive: true });
   });
@@ -589,14 +606,14 @@ describe('one click', () => {
     expect(decides(w)).toHaveLength(1);
   });
 
-  it('a click does not take the next case (that is Ctrl+Enter); the way on is offered', async () => {
+  it('a click goes on to the next case, as the keys do', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    await w.fileRich({ lines: TALK, target: 'Beta', reporter: 'Other', room: 'rb' });
-    const { user, router } = await open(w, f.id);
+    const g = await w.fileRich({ lines: TALK, target: 'Beta', reporter: 'Other', room: 'rb' });
+    const { user, router } = await open(w, f.id, { stay: false });
     await user.click(primary());
-    expect(router.path).toBe(`/reports/${f.id}`);
-    expect(w.sent.some((r) => r.path === '/cases/next')).toBe(false);
+    await waitFor(() => expect(router.path).toBe(`/reports/${g.id}`));
+    expect(w.sent.some((r) => r.path === '/cases/next')).toBe(true);
   });
 
   it('the queue row goes at once, as in Detailed, and comes back on Undo', async () => {
@@ -612,14 +629,14 @@ describe('one click', () => {
 });
 
 describe('No action needed', () => {
-  it('sends the Not-a-problem verdict with the reason "No rule was broken" and no actions', async () => {
+  it('sends the Not-a-problem verdict with no reason (the kit stores its standard one) and no actions', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
     const { user } = await open(w, f.id);
     await user.click(noAction());
     await pageHides();
     expect(decides(w)).toHaveLength(1);
-    expect(decides(w)[0]!.body).toEqual({ verdict: 'no_action', reason: 'No rule was broken', actions: [] });
+    expect(decides(w)[0]!.body).toEqual({ verdict: 'no_action', actions: [] });
     expect(w.cw.reports.get(f.id)?.status).toBe('dismissed');
     expect(w.cw.sanctions.forPerson(f.person)).toHaveLength(0);
   });
@@ -756,6 +773,16 @@ describe('the case someone else holds', () => {
     expect(decides(w)).toHaveLength(0);
   });
 
+  it('control: the same keys act on a case nobody else holds (so the test above is not passing for another reason)', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = renderHub(w, { path: `/reports/${f.id}`, mode: 'simple' });
+    await screen.findByRole('button', { name: /^No action needed/ });
+    await user.keyboard('2');
+    await pageHides();
+    expect(decides(w)).toHaveLength(1);
+  });
+
   it('a senior is offered Take over, and taking over brings the controls', async () => {
     const w = await hubWorld({ role: 'senior', actor: 'sen@example.test' });
     const f = await w.fileRich({ lines: TALK });
@@ -808,7 +835,7 @@ describe('the case someone else holds', () => {
   it('leaving the case lets it go', async () => {
     const w = await hubWorld({ actor: 'ann@example.test' });
     const f = await w.fileRich({ lines: TALK });
-    const { router } = await open(w, f.id);
+    const { router } = await open(w, f.id, { stay: false });
     await waitFor(() => expect(w.cw.cases.holder(f.person)?.by).toBe('ann@example.test'));
     act(() => router.navigate('/terms'));
     await waitFor(() => expect(w.cw.cases.holder(f.person)).toBeNull());
@@ -893,7 +920,7 @@ describe('when the decision fails', () => {
     await user.click(noAction());
     await pageHides();
     await within(decision()).findByText('Decided. The report is closed.', { selector: 'strong' });
-    expect(decides(w)[1]!.body).toEqual({ verdict: 'no_action', reason: 'No rule was broken', actions: [] });
+    expect(decides(w)[1]!.body).toEqual({ verdict: 'no_action', actions: [] });
   });
 
   it('someone else decided it first: says so', async () => {

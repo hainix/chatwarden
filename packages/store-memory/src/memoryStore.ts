@@ -14,6 +14,7 @@ import type {
   ReportListQuery,
   ReportRecord,
   ReporterDecision,
+  ReporterOutcomeRow,
   ReporterTally,
   SanctionListQuery,
   SanctionRow,
@@ -680,10 +681,20 @@ export class MemoryStore implements Store {
   }
 
   listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
-    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const n = Math.min(201, Math.max(1, Math.floor(limit)));
     const wanted = new Set(subjects);
     return this.reports
       .filter((r) => r.status === 'open' && wanted.has(r.targetSubject))
+      .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
+      .slice(0, n)
+      .map((r) => structuredClone(r));
+  }
+
+  listOpenReportsByReporter(reporters: readonly SubjectId[], limit: number): ReportRecord[] {
+    const n = Math.min(201, Math.max(1, Math.floor(limit)));
+    const wanted = new Set(reporters);
+    return this.reports
+      .filter((r) => r.status === 'open' && wanted.has(r.reporterSubject))
       .sort((a, b) => b.createdAt - a.createdAt || compare(b.id, a.id))
       .slice(0, n)
       .map((r) => structuredClone(r));
@@ -698,6 +709,20 @@ export class MemoryStore implements Store {
       if (r.badFaith) tally.badFaith += 1;
     }
     return tally;
+  }
+
+  reporterOutcomes(reporters: readonly SubjectId[], since: number): ReporterOutcomeRow[] {
+    const wanted = new Set(reporters);
+    const by = new Map<SubjectId, ReporterOutcomeRow>();
+    for (const r of this.reports) {
+      if (!wanted.has(r.reporterSubject) || r.status === 'open' || r.createdAt < since) continue;
+      const row = by.get(r.reporterSubject) ?? { reporter: r.reporterSubject, actioned: 0, noAction: 0, badFaith: 0 };
+      if (r.status === 'actioned') row.actioned += 1;
+      else if (r.badFaith) row.badFaith += 1;
+      else row.noAction += 1;
+      by.set(r.reporterSubject, row);
+    }
+    return [...by.values()];
   }
 
   listReports(q: ReportListQuery): ReportRecord[] {

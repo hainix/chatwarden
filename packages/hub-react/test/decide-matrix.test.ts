@@ -267,10 +267,19 @@ describe('the form and the server agree on the rest', () => {
     await agree(c, form('fair', [draft(c, { what: 'note:null', lineIds: c.lines.reporter })]), 'ok');
   });
 
-  it('the reason: 1 to 500 characters after trimming', async () => {
-    for (const [reason, ok] of [['', false], ['   ', false], ['r', true], [` ${'r'.repeat(500)} `, true], ['r'.repeat(501), false]] as const) {
+  it('the reason: 1 to 500 characters after trimming (a plain dismissal may leave it blank: the kit stores its standard one)', async () => {
+    for (const [reason, ok] of [['', true], ['   ', true], ['r', true], [` ${'r'.repeat(500)} `, true], ['r'.repeat(501), false]] as const) {
       const c = await setup(w, 'moderator');
       await agree(c, form('not_a_problem', [], { reason }), ok ? 'ok' : 'invalid_request');
+    }
+  });
+
+  it('every other verdict still needs a reason: blank is refused by the form and by the server', async () => {
+    for (const verdict of ['fair', 'bad_faith'] as const) {
+      for (const reason of ['', '   ']) {
+        const c = await setup(w, 'moderator');
+        await agree(c, form(verdict, [], { reason }), 'invalid_request');
+      }
     }
   });
 

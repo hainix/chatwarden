@@ -71,13 +71,13 @@ describe('GET /reports: reportedReason and reportedReasonLabel', () => {
     expect(items(await w.call('GET', '/reports')).find((i) => i.id === a.id)).toMatchObject({ reportedReason: 'afk', reportedReasonLabel: 'afk' });
   });
 
-  it('adds exactly the two keys to the summary, and still no note, excerpt or chat text', async () => {
+  it('adds exactly the reason keys (and the reporter figure) to the summary, and still no note, excerpt or chat text', async () => {
     const w = await world();
     await fileWith(w, { reason: 'hate', note: 'planted-reporter-note-7731' });
     const res = await w.call('GET', '/reports');
     const keys = Object.keys(items(res)[0] as object).sort();
     expect(keys).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterHandle', 'reporterPerson', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'reporterHandle', 'reporterPerson', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
     expect(JSON.stringify(res.body)).not.toContain('planted-reporter-note-7731');
     expect(JSON.stringify(res.body)).not.toContain('a line from the target');
@@ -231,7 +231,7 @@ describe('the reporter record: reasonMatched and reasonDecided on GET /people/:r
     const res = await w.call('GET', `/people/${a.reporter}/history`);
     const asReporter = (res.body as { asReporter: Record<string, unknown> }).asReporter;
     expect(asReporter).toMatchObject({ reports: 5, open: 1, reasonDecided: 3, reasonMatched: 1 });
-    expect(Object.keys(asReporter).sort()).toEqual(['actioned', 'badFaith', 'dismissed', 'open', 'reasonDecided', 'reasonMatched', 'reports', 'suspendedUntil']);
+    expect(Object.keys(asReporter).sort()).toEqual(['accuracy', 'actioned', 'badFaith', 'dismissed', 'open', 'reasonDecided', 'reasonMatched', 'reports', 'suspendedUntil']);
   });
 
   it('a corrupted decision row never fails the history route: the report counts as decided, unmatched', async () => {

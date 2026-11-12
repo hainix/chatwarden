@@ -49,6 +49,7 @@ const SPECS: Spec[] = [
   { name: 'PUT /policy/profile', method: 'PUT', path: () => '/policy/profile', body: { layer: { customDuration: true }, version: 0, reason: 'tune' }, lock: { 'policy.write': 'owner' }, min: 'owner' },
   { name: 'POST /policy/profile/preview', method: 'POST', path: () => '/policy/profile/preview', body: { layer: {} }, lock: { 'policy.read': 'owner' }, min: 'moderator' },
   { name: 'DELETE /policy/profile', method: 'DELETE', path: () => '/policy/profile', body: { reason: 'reset' }, lock: { 'policy.write': 'owner' }, min: 'owner' },
+  { name: 'POST /reports/dismiss-open', method: 'POST', path: () => '/reports/dismiss-open', body: { scope: 'person', ref: 'SUBJ' }, lock: { 'reports.decide.bulk': 'owner' }, min: 'moderator' },
   { name: 'POST /cases/next', method: 'POST', path: () => '/cases/next', body: {}, lock: { 'reports.decide': 'owner' }, min: 'moderator' },
   { name: 'POST /cases/:ref/claim', method: 'POST', path: (i) => `/cases/${i.person}/claim`, body: {}, lock: { 'reports.decide': 'owner' }, min: 'moderator' },
   { name: 'POST /cases/:ref/release', method: 'POST', path: (i) => `/cases/${i.person}/release`, body: {}, lock: { 'reports.decide': 'owner' }, min: 'moderator' },

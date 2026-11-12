@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HubContext } from '../src/context.js';
 import type { HubContextValue } from '../src/context.js';
 import { createT, en } from '../src/i18n.js';
-import { TOAST_ERROR_MS, TOAST_MAX, TOAST_MS, ToastProvider, UNDO_MS, useToasts } from '../src/toasts.js';
+import { TOAST_ERROR_MS, TOAST_HELD_MAX, TOAST_MAX, TOAST_MS, ToastProvider, UNDO_MS, useToasts } from '../src/toasts.js';
 import type { Toasts } from '../src/toasts.js';
 
 // The toast plumbing on its own: plain news, an action button, and the held action with Undo that decisions will use.
@@ -15,7 +15,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const context = { t: createT(en, 'en') } as unknown as HubContextValue;
+const context = { t: createT(en, 'en'), shortcuts: true } as unknown as HubContextValue;
 
 function mount() {
   const ref: { api: Toasts | null } = { api: null };
@@ -244,7 +244,7 @@ describe('a held action with Undo', () => {
     const undone = vi.fn();
     act(() => void view.api().hold({ text: 'Kept.', run: kept }));
     act(() => void view.api().hold({ text: 'Undone.', run: undone }));
-    fireEvent.click(screen.getAllByRole('button', { name: 'Undo' })[1] as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     await act(async () => setVisibility('visible'));
     expect(kept).not.toHaveBeenCalled();
     await act(async () => setVisibility('hidden'));
@@ -292,13 +292,19 @@ describe('a held action with Undo', () => {
     expect(b).toHaveBeenCalledTimes(1);
   });
 
-  it('an action pushed off the screen by newer toasts is still sent, not lost', async () => {
+  it('an action pushed off the screen by newer held toasts is still sent, not lost; news toasts do not push it off', async () => {
     const { api } = mount();
     const run = vi.fn();
     act(() => void api().hold({ text: 'Held.', run }));
-    // Newer toasts that also carry a button: with every slot an Undo, the oldest has to go, and its action is still sent.
     act(() => {
-      for (const text of ['A', 'B', 'C']) api().push({ text, action: { label: 'Open', run: () => undefined } });
+      for (const text of ['A', 'B', 'C', 'D']) api().push({ text, action: { label: 'Open', run: () => undefined } });
+    });
+    await tick(0);
+    expect(run).not.toHaveBeenCalled();
+    expect(screen.getByText('Held.')).toBeInTheDocument();
+    // Past the held cap the oldest hold is sent early, not lost.
+    act(() => {
+      for (let i = 0; i < TOAST_HELD_MAX; i += 1) api().hold({ text: `More ${i}`, run: () => undefined });
     });
     await tick(0);
     expect(run).toHaveBeenCalledTimes(1);
@@ -319,3 +325,144 @@ describe('a held action with Undo', () => {
     expect(screen.getByRole('button', { name: 'Take back' })).toBeInTheDocument();
   });
 });
+
+describe('several held decisions', () => {
+  it('shows the newest held toast in full with Undo, and one line for the earlier ones', async () => {
+    const { api } = mount();
+    act(() => {
+      for (const text of ['Dismissing A.', 'Dismissing B.', 'Dismissing C.']) api().hold({ text, run: () => undefined });
+    });
+    expect(screen.getByText('Dismissing C.')).toBeInTheDocument();
+    expect(screen.queryByText('Dismissing A.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dismissing B.')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Undo' })).toHaveLength(1);
+    expect(document.querySelector('.cw-toast-waiting')).toHaveTextContent('2 earlier decisions waiting.');
+  });
+
+  it('says "1 earlier decision waiting." for one, and nothing at all for a single held decision', async () => {
+    const { api } = mount();
+    act(() => void api().hold({ text: 'Dismissing A.', run: () => undefined }));
+    expect(screen.queryByText(/earlier decision/)).not.toBeInTheDocument();
+    act(() => void api().hold({ text: 'Dismissing B.', run: () => undefined }));
+    expect(document.querySelector('.cw-toast-waiting')).toHaveTextContent('1 earlier decision waiting.');
+  });
+
+  it('their timers keep running: the earlier decisions are sent on time though they are not drawn', async () => {
+    const { api } = mount();
+    const first = vi.fn();
+    const second = vi.fn();
+    act(() => void api().hold({ text: 'Dismissing A.', run: first }));
+    await tick(1_000);
+    act(() => void api().hold({ text: 'Dismissing B.', run: second }));
+    await tick(UNDO_MS - 1_000);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+    expect(screen.queryByText(/earlier decision/)).not.toBeInTheDocument();
+    expect(screen.getByText('Dismissing B.')).toBeInTheDocument();
+  });
+
+  it('Undo on the newest brings the next one back into view, and the count follows', async () => {
+    const { api } = mount();
+    act(() => {
+      for (const text of ['Dismissing A.', 'Dismissing B.', 'Dismissing C.']) api().hold({ text, run: () => undefined });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(screen.getByText('Dismissing B.')).toBeInTheDocument();
+    expect(document.querySelector('.cw-toast-waiting')).toHaveTextContent('1 earlier decision waiting.');
+  });
+
+  it('news toasts show beside the held one, whatever order they came', async () => {
+    const { api } = mount();
+    act(() => {
+      api().hold({ text: 'Dismissing A.', run: () => undefined });
+      api().push({ text: 'You took the case.' });
+      api().hold({ text: 'Dismissing B.', run: () => undefined });
+    });
+    expect(screen.getByText('You took the case.')).toBeInTheDocument();
+    expect(screen.getByText('Dismissing B.')).toBeInTheDocument();
+    expect(document.querySelector('.cw-toast-waiting')).toHaveTextContent('1 earlier decision waiting.');
+  });
+});
+
+describe('what a screen reader hears while decisions stack (M3)', () => {
+  const live = (): HTMLElement => document.querySelector('[data-cw-waiting-live]') as HTMLElement;
+  const line = (): HTMLElement | null => document.querySelector('.cw-toast-waiting');
+  const hold = (api: () => Toasts, text: string, run: () => void = () => undefined) => act(() => void api().hold({ text, run }));
+
+  it('one live region is always there, empty until a decision is waiting behind the newest', async () => {
+    const { api } = mount();
+    expect(live()).toBeInTheDocument();
+    expect(live()).toHaveAttribute('aria-live', 'polite');
+    expect(live()).toHaveTextContent('');
+    hold(api, 'Dismissing A.');
+    expect(live()).toHaveTextContent('');
+    hold(api, 'Dismissing B.');
+    expect(live()).toHaveTextContent('1 earlier decision waiting.');
+  });
+
+  it('announces when the count rises, and says nothing when it falls as timers end', async () => {
+    const { api } = mount();
+    hold(api, 'Dismissing A.');
+    await tick(1_000);
+    hold(api, 'Dismissing B.');
+    await tick(1_000);
+    hold(api, 'Dismissing C.');
+    expect(live()).toHaveTextContent('2 earlier decisions waiting.');
+    // A's timer ends (5 s after it was held): the count falls to 1, the region is not rewritten.
+    await tick(UNDO_MS - 2_000 + 100);
+    expect(line()).toHaveTextContent('1 earlier decision waiting.');
+    expect(live()).toHaveTextContent('2 earlier decisions waiting.');
+  });
+
+  it('the visible line is hidden from assistive technology (the live region says it once)', async () => {
+    const { api } = mount();
+    hold(api, 'Dismissing A.');
+    hold(api, 'Dismissing B.');
+    expect(line()).toHaveAttribute('aria-hidden', 'true');
+    expect(line()).not.toHaveAttribute('role');
+  });
+
+  it('a new rise after a fall is announced again, and the region empties when nothing waits', async () => {
+    const { api } = mount();
+    hold(api, 'Dismissing A.');
+    hold(api, 'Dismissing B.');
+    expect(live()).toHaveTextContent('1 earlier decision waiting.');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(live()).toHaveTextContent('');
+    hold(api, 'Dismissing C.');
+    expect(live()).toHaveTextContent('1 earlier decision waiting.');
+  });
+
+  it('the Undo button on a held decision names its key (U) when shortcuts are on', async () => {
+    const { api } = mount();
+    hold(api, 'Dismissing A.');
+    expect(screen.getByRole('button', { name: 'Undo' })).toHaveAttribute('aria-keyshortcuts', 'u');
+  });
+
+  it('control: an Undo that is not a held decision names no key', async () => {
+    const { api } = mount();
+    act(() => void api().push({ text: 'Released.', action: { label: 'Take back', run: () => undefined } }));
+    expect(screen.getByRole('button', { name: 'Take back' })).not.toHaveAttribute('aria-keyshortcuts');
+  });
+});
+
+describe('shortcuts off', () => {
+  it('Undo names no key when the adopter turned the shortcuts off', async () => {
+    const off = { t: createT(en, 'en'), shortcuts: false } as unknown as HubContextValue;
+    const ref: { api: Toasts | null } = { api: null };
+    function Grab() {
+      ref.api = useToasts();
+      return null;
+    }
+    render(
+      <HubContext.Provider value={off}>
+        <ToastProvider>
+          <Grab />
+        </ToastProvider>
+      </HubContext.Provider>,
+    );
+    act(() => void ref.api!.hold({ text: 'Dismissing A.', run: () => undefined }));
+    expect(screen.getByRole('button', { name: 'Undo' })).not.toHaveAttribute('aria-keyshortcuts');
+  });
+});
+

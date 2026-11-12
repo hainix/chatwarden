@@ -3,6 +3,7 @@ import axe from 'axe-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TransportRequest } from '../src/transport.js';
 import { focusedIn, hubInShadow, removeShadowHosts, shadowRootIn } from './shadow.js';
+import { stayingRouter } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld, RichLine } from './world.js';
 
@@ -269,8 +270,9 @@ describe('the decision keys in a shadow root', () => {
   it('in Simple mode 2 sends the no-action decision', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    const s = hubInShadow(w, { mode: 'simple', path: `/reports/${f.id}` });
+    const s = hubInShadow(w, { mode: 'simple', router: stayingRouter(`/reports/${f.id}`) });
     await s.q.findByRole('button', { name: /^Restrict chat, 24 hours/ });
+    w.clock.t += 1000;
     focusIn(s);
     await s.user.keyboard('2');
     expect(await s.q.findByText('Decision queued.')).toBeInTheDocument();

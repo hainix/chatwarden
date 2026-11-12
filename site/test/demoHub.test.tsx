@@ -518,3 +518,26 @@ describe('the page nudges the hub to read the queue without flushing a decision 
     await within(modPane()).findByRole('button', { name: /new case/i }, { timeout: 2000 });
   });
 });
+
+describe('the keyboard clears the queue: key 2 is "Nothing wrong here" with no reason typed', () => {
+  it('key 2 on the open card dismisses the report with the kit’s standard reason, and tells the player nothing', async () => {
+    const { user, engine } = await setup();
+    await oneTapReport(user);
+    await closeReport(user);
+    const card = await openCase(user);
+    await pickRule(user);
+    const dismiss = within(card).getByRole('button', { name: /^no action needed/i });
+    dismiss.focus();
+    fireEvent.keyDown(dismiss, { key: '2' });
+    await sendHeldDecision();
+    const kit = await engine.kit();
+    await waitFor(() => expect(kit.reports.list({ status: 'open' }).items).toHaveLength(0));
+    const closed = kit.reports.list({ status: 'dismissed' }).items;
+    expect(closed).toHaveLength(1);
+    const record = kit.reports.get(closed[0]!.id) as unknown as { status: string; badFaith: boolean; modNote?: string | null };
+    expect(record.status).toBe('dismissed');
+    expect(record.badFaith).toBe(false);
+    expect(record.modNote).toBe('No action needed');
+    expect(await engine.notices.pending('bo')).toEqual([]);
+  });
+});

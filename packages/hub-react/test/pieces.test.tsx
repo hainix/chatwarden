@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditLog } from '../src/pieces/AuditLog.js';
 import { BlockedList } from '../src/pieces/BlockedList.js';
@@ -188,7 +188,9 @@ describe('CaseCard', () => {
     const w = await hubWorld();
     const f = await w.file({ target: 'Alpha' });
     const { user } = renderPieces(w, <CaseCard reportId={f.id} />);
-    await user.click(await screen.findByRole('button', { name: /^No action needed/ }));
+    const dismiss = await screen.findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
+    await user.click(dismiss);
     const toasts = await screen.findByRole('region', { name: 'Notifications' });
     await user.click(await within(toasts).findByRole('button', { name: 'Undo' }));
     expect(w.sent.filter((r) => /\/decide$/.test(r.path))).toHaveLength(0);
@@ -199,7 +201,9 @@ describe('CaseCard', () => {
     const w = await hubWorld();
     const f = await w.file({ target: 'Alpha' });
     const { user, unmount } = renderPieces(w, <CaseCard reportId={f.id} />);
-    await user.click(await screen.findByRole('button', { name: /^No action needed/ }));
+    const dismiss = await screen.findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
+    await user.click(dismiss);
     unmount();
     await waitFor(async () => expect((await w.client.getReport(f.id)).report.status).not.toBe('open'));
   });
@@ -238,6 +242,7 @@ describe('CaseCard', () => {
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
     await within(card).findByRole('button', { name: /^No action needed/ });
     within(card).getByRole('button', { name: /^No action needed/ }).focus();
+    w.clock.t += 1000;
     await user.keyboard('{Control>}{Enter}{/Control}');
     await waitFor(() => expect(onOpenReport).toHaveBeenCalledWith(second.id));
     noRouterLinks(container);
@@ -251,9 +256,50 @@ describe('CaseCard', () => {
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
     await within(card).findByRole('button', { name: /^No action needed/ });
     within(card).getByRole('button', { name: /^No action needed/ }).focus();
+    w.clock.t += 1000;
     await user.keyboard('{Control>}{Enter}{/Control}');
     expect(await screen.findAllByRole('button', { name: 'Undo' })).not.toHaveLength(0);
     noRouterLinks(container);
+  });
+
+  it('2 dismisses with no reason and, with nowhere to show a next case, takes none (nothing is claimed that nothing would show)', async () => {
+    const w = await hubWorld();
+    const first = await w.file({ target: 'Alpha', room: 'room-a' });
+    await w.file({ target: 'Bravo', room: 'room-b' });
+    const { container, user } = renderPieces(w, <CaseCard reportId={first.id} />);
+    const card = await screen.findByRole('region', { name: 'Case against Alpha' });
+    const dismiss = await within(card).findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 1000;
+    dismiss.focus();
+    await user.keyboard('2');
+    expect(await screen.findAllByRole('button', { name: 'Undo' })).not.toHaveLength(0);
+    expect(w.sent.some((r) => r.path === '/cases/next')).toBe(false);
+    noRouterLinks(container);
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+      await Promise.resolve();
+    });
+    const sent = w.sent.find((r) => r.method === 'POST' && /\/decide$/.test(r.path));
+    expect(sent?.body).toEqual({ verdict: 'no_action', actions: [] });
+  });
+
+  it('keys work only with focus inside the card: with focus elsewhere on the page, 2 does nothing', async () => {
+    const w = await hubWorld();
+    const first = await w.file({ target: 'Alpha', room: 'room-a' });
+    const { user } = renderPieces(
+      w,
+      <>
+        <button type="button">outside</button>
+        <CaseCard reportId={first.id} />
+      </>,
+    );
+    const card = await screen.findByRole('region', { name: 'Case against Alpha' });
+    await within(card).findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 1000;
+    screen.getByRole('button', { name: 'outside' }).focus();
+    await user.keyboard('2');
+    expect(w.sent.some((r) => r.method === 'POST' && /\/decide$/.test(r.path))).toBe(false);
+    expect(screen.queryAllByRole('button', { name: 'Undo' })).toHaveLength(0);
   });
 
   it('a role that cannot read reports gets a plain message and no read of the report', async () => {

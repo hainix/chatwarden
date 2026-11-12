@@ -20,9 +20,11 @@ import { renderPieces } from './pieces-kit.js';
 // will see; one held case is said plainly and warned about; the queue is started and stopped only by whoever started it.
 
 const posts = (w: HubWorld, re: RegExp): TransportRequest[] => w.sent.filter((r) => r.method === 'POST' && re.test(r.path));
-const ctrlEnter = async (user: ReturnType<typeof userEvent.setup>, within_: HTMLElement) => {
+const ctrlEnter = async (user: ReturnType<typeof userEvent.setup>, within_: HTMLElement, w: HubWorld) => {
   const button = await within(within_).findByRole('button', { name: /^No action needed/ });
   button.focus();
+  // The quick-key cooldown of a card that has just appeared runs on the hub's clock (the world's).
+  w.clock.t += 1000;
   await user.keyboard('{Control>}{Enter}{/Control}');
 };
 
@@ -68,7 +70,7 @@ describe.each([
     const onOpenReport = vi.fn();
     const m = mount(w, <CaseCard reportId={first.id} onOpenReport={onOpenReport} />);
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
-    await ctrlEnter(m.user, card);
+    await ctrlEnter(m.user, card, w);
     await waitFor(() => expect(onOpenReport).toHaveBeenCalledWith(second.id));
     await act(() => settle());
     expect(onOpenReport).toHaveBeenCalledTimes(1);
@@ -83,7 +85,7 @@ describe.each([
     const onOpenCase = vi.fn();
     const m = mount(w, <CaseCard reportId={a.id} onOpenCase={onOpenCase} />);
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
-    await ctrlEnter(m.user, card);
+    await ctrlEnter(m.user, card, w);
     await waitFor(() => expect(onOpenCase).toHaveBeenCalledWith(b.person, b.id));
     await act(() => settle());
     expect(onOpenCase).toHaveBeenCalledTimes(1);
@@ -100,6 +102,7 @@ describe.each([
     await screen.findByRole('complementary', { name: 'About this case' });
     const bar = await screen.findByRole('region', { name: 'Decision' });
     await m.user.click(await within(bar).findByRole('radio', { name: /Not a problem/ }));
+    w.clock.t += 400;
     await m.user.type(within(bar).getByRole('textbox', { name: 'Reason' }), 'Fine.{Control>}{Enter}{/Control}');
     await waitFor(() => expect(onOpenReport).toHaveBeenCalledWith(second.id));
     expect(onOpenReport).toHaveBeenCalledTimes(1);
@@ -113,7 +116,7 @@ describe.each([
     const b = await w.file({ target: 'Bravo' });
     const m = mount(w, <CaseCard reportId={a.id} />);
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
-    await ctrlEnter(m.user, card);
+    await ctrlEnter(m.user, card, w);
     expect(await screen.findAllByRole('button', { name: 'Undo' })).not.toHaveLength(0);
     await act(() => settle());
     expect(posts(w, /^\/cases\/next$/)).toHaveLength(0);
@@ -129,7 +132,7 @@ describe.each([
     const onOpenReport = vi.fn();
     const m = mount(w, <CaseCard reportId={a.id} onOpenReport={onOpenReport} />);
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
-    await ctrlEnter(m.user, card);
+    await ctrlEnter(m.user, card, w);
     await waitFor(() => expect(onOpenReport).toHaveBeenCalledWith(b.id));
     m.controller?.dispose();
   });
@@ -218,6 +221,7 @@ describe('one held case is said plainly', () => {
     const alpha = await screen.findByRole('region', { name: 'Case against Alpha' });
     await screen.findByRole('region', { name: 'Case against Bravo' });
     await act(() => settle());
+    w.clock.t += 400;
     // Bravo was shown last, so it is the held one: Alpha is the card that is not.
     await waitFor(() => expect(w.cw.cases.holder(b.person)?.by).toBe('ann@example.test'));
     await user.click(await within(alpha).findByRole('button', { name: /^No action needed/ }));

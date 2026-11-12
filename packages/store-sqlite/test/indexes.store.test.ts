@@ -125,14 +125,15 @@ const indexNames = (db: DatabaseSync): string[] =>
   db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all().map((r) => String(r.name));
 
 describe('migration 18: indexes for sanctions by start time and strikes by time', () => {
-  it('is the latest migration and creates only the two new indexes', () => {
+  it('migration 18 is the 18th migration and creates only the two new indexes', () => {
     expect(M18).toBeDefined();
-    expect(MIGRATIONS.at(-1)?.version).toBe(18);
+    expect(MIGRATIONS[17]?.version).toBe(18);
     const db = memDb();
     const before = openAt17(db, false);
     const had = indexNames(db);
     before.close();
-    const store = openStore({ db });
+    // Pinned at 18: later migrations add their own indexes, which have their own tests.
+    const store = openStore({ db, migrations: MIGRATIONS.slice(0, 18) });
     expect(store.schemaVersion()).toBe(18);
     expect(indexNames(db).filter((n) => !had.includes(n))).toEqual([...NEW_INDEXES].sort());
     // Only indexes: no table, column or row was added or removed.
@@ -157,7 +158,7 @@ describe('migration 18: indexes for sanctions by start time and strikes by time'
     expect(before[1]).toHaveLength(300);
     old.close();
 
-    const store = openStore({ db });
+    const store = openStore({ db, migrations: MIGRATIONS.slice(0, 18) });
     expect(store.schemaVersion()).toBe(18);
     expect(tables.map((t) => dump(db, t, order[t as keyof typeof order]))).toEqual(before);
     expect({
@@ -176,7 +177,7 @@ describe('migration 18: indexes for sanctions by start time and strikes by time'
     const seeded = new DatabaseSync(path);
     dbs.push(seeded);
     openAt17(seeded).close();
-    openStore({ path }).close();
+    openStore({ path, migrations: MIGRATIONS.slice(0, 18) }).close();
     const snapshot = (): unknown => {
       const raw = new DatabaseSync(path);
       try {
@@ -186,10 +187,10 @@ describe('migration 18: indexes for sanctions by start time and strikes by time'
       }
     };
     const once = snapshot();
-    const b = openStore({ path });
+    const b = openStore({ path, migrations: MIGRATIONS.slice(0, 18) });
     expect(b.schemaVersion()).toBe(18);
     b.close();
-    const c = openStore({ path });
+    const c = openStore({ path, migrations: MIGRATIONS.slice(0, 18) });
     expect(c.schemaVersion()).toBe(18);
     c.close();
     expect(snapshot()).toEqual(once);
@@ -214,7 +215,7 @@ describe('migration 18: indexes for sanctions by start time and strikes by time'
     expect(openStore({ db, migrations: MIGRATIONS.slice(0, 17) }).schemaVersion()).toBe(17);
     expect(indexNames(db).filter((n) => NEW_INDEXES.includes(n))).toHaveLength(0);
     expect(dump(db, 'kit_sanctions', 'rowid')).toEqual(rows);
-    expect(openStore({ db }).schemaVersion()).toBe(18);
+    expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(indexNames(db).filter((n) => NEW_INDEXES.includes(n))).toHaveLength(2);
   });
 });

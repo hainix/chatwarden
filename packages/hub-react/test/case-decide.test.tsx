@@ -34,6 +34,8 @@ async function open(w: HubWorld, id: string, options: Parameters<typeof renderHu
   const r = renderHub(w, { path: `/reports/${id}`, ...options });
   await screen.findByRole('heading', { level: 2, name: /report against/ });
   await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('radio', { name: 'Fair' });
+  // A case accepts an act key a moment after it appeared; the guard's clock moves with the world's.
+  w.clock.t += 400;
   return r;
 }
 
@@ -372,6 +374,15 @@ describe('a case someone else holds', () => {
     expect(within(panel()).getByRole('radio', { name: 'Fair' })).not.toBeChecked();
     await user.keyboard('{Control>}{Enter}{/Control}');
     expect(decides(w)).toHaveLength(0);
+  });
+
+  it('control: on a case nobody holds the same key selects Fair', async () => {
+    const w = await hubWorld({ actor: 'ann@example.test' });
+    const f = await w.fileRich({ lines: TALK });
+    const { user } = await open(w, f.id);
+    await within(panel()).findByRole('radio', { name: 'Fair' });
+    await user.keyboard('1');
+    expect(within(panel()).getByRole('radio', { name: 'Fair' })).toBeChecked();
   });
 
   it('a senior sees Take over, and taking over makes the case theirs and the bar usable', async () => {

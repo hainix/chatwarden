@@ -48,3 +48,18 @@ Found writing the copy rewrite (`docs/design/2026-11-11-site-copy-rewrite.md`, b
   check it is only the screenshot and not a visible seam.
 - **Contrast.** Measure the hero fine print (small muted text on the lavender light background) against 4.5:1. The phone tour bar sets its
   title in the display face, all caps, over three lines; consider a shorter title there.
+
+## Triage speed (0.1.5), parked
+
+Found building the triage-speed plan (2026-11-11). Left for later:
+
+- **Server-side reopen** of a dismissed report. The bulk Undo is held on the client before the send; after it there is no undo.
+- **Drop `kit_reports_by_reporter`** in a minor: it is now a prefix of `kit_reports_by_reporter_outcome` (migration 19).
+- **Tune the accuracy thresholds**: the window (30 days), the minimum sample (5) and the 0.6 and 0.8 rates could move into `limits.reports`.
+- **An owner view of reporter accuracy** (a per-reporter list) is deliberately not built: the workbench note forbids per-person leaderboards.
+- **Bulk by room, by reason, or by a selection of cases.**
+- **J/K open-on-move in the `CaseList` piece** (it has no router, so pieces keep focus-only movement).
+- **A keyup arm for the act keys.** Some remote-desktop hosts send repeated keydowns with `repeat: false`; ignoring digits until one `keyup` has been seen after a case mounts would close that.
+- **Held-toast progress bar** restarts from full when an older held toast comes back into view (it needs a start time on `ToastRecord`).
+- **A cache-busting retry** (`?retry=`) for a lazy window that failed to load; today the README says to reload the page.
+

@@ -2,7 +2,7 @@ import { useId } from 'react';
 import type { ReactNode } from 'react';
 import { Masked } from '../case/Transcript.js';
 import { RecordItem } from '../case/Record.js';
-import { ReporterStanding, ReporterTotals } from '../case/ReporterStanding.js';
+import { ReporterRate, ReporterStanding, ReporterTotals } from '../case/ReporterStanding.js';
 import { useCase } from '../case/CaseContext.js';
 import { useHub } from '../context.js';
 import { personName, recordSummary } from '../excerpt.js';
@@ -123,6 +123,7 @@ function Reporter({ refId, name }: { refId: string; name: string }) {
         {r !== undefined && <ReporterTotals record={r} />}
       </div>
       {r === undefined ? state.error === null ? <Skeleton lines={1} /> : <p className="cw-hint">{t('hub.report.reporter.unavailable')}</p> : <ReporterStanding record={r} />}
+      {r !== undefined && <ReporterRate record={r} name={name} />}
     </li>
   );
 }

@@ -1,4 +1,4 @@
-export const VERSION = '0.1.4';
+export const VERSION = '0.1.5';
 export { ROLES } from '@chatwarden/core';
 export type { Role } from '@chatwarden/core';
 export type { Authz, KitRequest, KitResponse, RouteParams } from './types.js';
@@ -35,6 +35,7 @@ export type {
   ExceptionListRow,
   Me,
   PolicyOptions,
+  ReporterAccuracySummary,
   ReportSummary,
   TermListRow,
   TermMetadata,

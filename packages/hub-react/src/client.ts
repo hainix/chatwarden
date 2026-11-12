@@ -5,6 +5,8 @@ import type {
   CloseGapInput,
   DecideInput,
   DecideResult,
+  DismissOpenInput,
+  DismissOpenResult,
   ExceptionInput,
   ExceptionPatch,
   GapRow,
@@ -134,6 +136,12 @@ export interface HubClient {
   suggest(id: string, input: SuggestInput): Promise<Suggestion>;
   /** `POST /reports/:id/decide`: decide the report. A replay of the same decision applies nothing twice. */
   decide(id: string, input: DecideInput, options?: { keepalive?: boolean }): Promise<DecideResult>;
+  /**
+   * `POST /reports/dismiss-open` (needs `reports.decide.bulk`): dismiss every open report about one person, or from one reporter, as "nothing
+   * wrong here" (the kit's standard reason; a sweep never takes one). Retrying is safe: a closed report counts as `replayed`.
+   * @experimental
+   */
+  dismissOpen(input: DismissOpenInput, options?: { keepalive?: boolean }): Promise<DismissOpenResult>;
 
   // People and sanctions
   /** `GET /people/:ref/history`. */
@@ -237,6 +245,7 @@ export function createHubClient(transport: Transport): HubClient {
     getReport: (id, options = {}) => get<ReportDetail>(`/reports/${enc(id)}`, q({ level: options.level })),
     suggest: (id, input) => post<Suggestion>(`/reports/${enc(id)}/suggest`, input),
     decide: (id, input, options = {}) => post<DecideResult>(`/reports/${enc(id)}/decide`, input, options),
+    dismissOpen: (input, options = {}) => post<DismissOpenResult>('/reports/dismiss-open', input, options),
 
     personHistory: (ref, options = {}) => get<PersonHistory>(`/people/${enc(ref)}/history`, q({ limit: options.limit })),
     listSanctions: (query = {}) => get<Page<SanctionRow>>('/sanctions', q({ cursor: query.cursor, limit: query.limit, source: query.source })),

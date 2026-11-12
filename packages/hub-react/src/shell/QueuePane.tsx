@@ -234,6 +234,7 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
         <span className="cw-case-facts">
           {t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}
           {row.gone && <span className="cw-case-closed"> {t('hub.queue.row.gone')}</span>}
+          {g.rankedLow === true && <span className="cw-sr"> {t('hub.queue.row.rankedLow')}</span>}
         </span>
       </span>
       <span className="cw-case-side">
@@ -293,7 +294,14 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
   };
 
   return (
-    <li className="cw-case" data-wait={overdue ? 'overdue' : 'ok'} data-claim={holder.kind} data-selected={selected ? 'true' : undefined} data-gone={row.gone ? 'true' : undefined}>
+    <li
+      className="cw-case"
+      data-wait={overdue ? 'overdue' : 'ok'}
+      data-claim={holder.kind}
+      data-selected={selected ? 'true' : undefined}
+      data-gone={row.gone ? 'true' : undefined}
+      data-ranked={g.rankedLow === true ? 'low' : undefined}
+    >
       {rowFor(inner)}
       {!simple && holder.kind === 'you' && (
         <button type="button" className="cw-case-release" aria-label={t('hub.queue.row.releaseLabel', { who: name })} onClick={onRelease}>

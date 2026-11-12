@@ -10,6 +10,8 @@ import type { Problem, UiVerdict } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
 import { useHubData } from '../hooks.js';
 import { useKeyListener } from '../keyScope.js';
+import { useMode } from '../mode.js';
+import { useQuickKeys } from '../quickKeys.js';
 import { decideErrorText } from '../labels.js';
 import { modKey, keyLabel } from '../shortcuts.js';
 import type { Reason, ReportDetail } from '../types.js';
@@ -20,6 +22,10 @@ import { Decided } from './Decided.js';
 import { DecisionResult } from './DecisionResult.js';
 import { SuggestionCard } from './SuggestionCard.js';
 import { useCase } from './CaseContext.js';
+import { LazyBulkDismiss } from '../lazyParts.js';
+import { actsBlocked, isRepeatClick } from './actGuard.js';
+import { DetailedQuickKeys } from './QuickKeys.js';
+import { takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { UNDO_MS } from '../toasts.js';
 
 // The decision bar, docked under the evidence. It opens pre-filled: the ladder's suggestion as the reported person's action,
@@ -60,6 +66,13 @@ export function DecisionBar() {
   const actions = useCaseActions();
   const { detail, entry, holder, people, left: gone } = c;
   const draft = c.draft;
+  // "Nothing wrong here" is one button in the bar in every mode. The digits act at once only in Detailed, and only when the moderator
+  // turned Quick keys on (otherwise they choose a verdict, as they always did).
+  const lite = useQuickActions({ enabled: false });
+  const { mode } = useMode();
+  const quickKeys = useQuickKeys();
+  const quickActive = shortcuts && mode === 'detailed' && quickKeys.on;
+  const dismissId = `${useId()}-dismiss`;
   const report = detail.data?.report;
   const base = useId();
   const bodyId = `${base}-body`;
@@ -95,6 +108,7 @@ export function DecisionBar() {
   const nameOfTarget = targetPerson === undefined ? '' : personName(targetPerson, people, t);
   const form = draft.form;
   const dismissal = form.verdict === 'not_a_problem' || form.verdict === 'bad_faith';
+  const plainDismissal = form.verdict === 'not_a_problem' && form.actions.length === 0;
   const shown = attempted ? draft.problems : { actions: {}, count: 0 };
   const sendError = status === 'failed' && entry?.state.status === 'failed' ? entry.state.error : null;
   const addId = `${base}-add`;
@@ -126,7 +140,7 @@ export function DecisionBar() {
     } else if (status === 'undone') {
       // Undone: the case is back and the sheet with it, with focus on the button that sends it again.
       setSheet(true);
-      setFocusId(submitId);
+      setFocusId(report !== undefined && takeLastQuick(report.id) === 'none' ? dismissId : submitId);
     } else if (status === 'conflict') {
       draft.announce(t('hub.decide.already'));
       queueMicrotask(() => conflictRef.current?.focus());
@@ -138,8 +152,10 @@ export function DecisionBar() {
   // The same words, said twice, must be heard twice: the live region is keyed by the announcement's number.
   const live = draft.announcement;
 
-  const decide = (andNext: boolean): void => {
+  /** `click` is the click that asked, if one did: a click obeys the same guards as every act key (the case has aged; the second click of a double click is the first one's echo). */
+  const decide = (andNext: boolean, click?: { detail?: number }): void => {
     if (!editable || readOnly || report === undefined) return;
+    if (click !== undefined && (isRepeatClick(click) || !c.settled())) return;
     setAttempted(true);
     if (draft.problems.count > 0) {
       setFailedTries((n) => n + 1);
@@ -151,8 +167,8 @@ export function DecisionBar() {
   };
   const decideRef = useRef(decide);
   decideRef.current = decide;
-  const stateRef = useRef({ editable: editable && !readOnly, setVerdict: draft.setVerdict });
-  stateRef.current = { editable: editable && !readOnly, setVerdict: draft.setVerdict };
+  const stateRef = useRef({ editable: editable && !readOnly, setVerdict: draft.setVerdict, quickActive, settled: c.settled });
+  stateRef.current = { editable: editable && !readOnly, setVerdict: draft.setVerdict, quickActive, settled: c.settled };
 
   // 1, 2 and 3 choose the verdict; Ctrl or Cmd with Enter decides and takes the next case. Neither fires while typing (except
   // Ctrl+Enter, which is made for the reason box), under a window, or when the adopter turned shortcuts off.
@@ -163,10 +179,15 @@ export function DecisionBar() {
       if (modalIn(hub) !== null) return;
       if (e.key === 'Enter' && (e.ctrlKey !== e.metaKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault();
+        // The same guards as every act key: a held key is one action, and a case that has just appeared (or a move to another one that
+        // is on its way) is not decided by a key meant for the one before.
+        if (e.repeat || !stateRef.current.settled() || actsBlocked(hub)) return;
         decideRef.current(true);
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e)) return;
+      // With Quick keys on the digits act at once (QuickKeys): they no longer choose a verdict, and are never both.
+      if (stateRef.current.quickActive) return;
       const hit = VERDICTS.find((v) => v.key === e.key);
       if (hit !== undefined) {
         e.preventDefault();
@@ -448,7 +469,7 @@ export function DecisionBar() {
               <Field
                 id={`${base}-reason`}
                 label={t('hub.decide.reason.label')}
-                hint={t('hub.decide.reason.hint')}
+                hint={plainDismissal ? `${t('hub.decide.reason.hint.dismissal')} ${t('hub.decide.reason.hint')}` : t('hub.decide.reason.hint')}
                 counter={t('hub.decide.counter', { count: form.reason.trim().length, max: REASON_MAX })}
                 problem={shown.reason}
               >
@@ -484,7 +505,7 @@ export function DecisionBar() {
               )}
 
               <div className="cw-submit">
-                <button id={submitId} type="button" className="cw-btn cw-btn--primary" aria-disabled={readOnly} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+Enter Meta+Enter' } : {})} onClick={() => decide(true)}>
+                <button id={submitId} type="button" className="cw-btn cw-btn--primary" aria-disabled={readOnly || !c.cooled} {...(!readOnly && !c.cooled ? { 'data-cooling': 'true' } : {})} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+Enter Meta+Enter' } : {})} onClick={(e) => decide(true, e)}>
                   <span>{t('hub.decide.submitNext')}</span>
                   {shortcuts && (
                     <span className="cw-submit-keys" aria-hidden="true">
@@ -493,12 +514,28 @@ export function DecisionBar() {
                     </span>
                   )}
                 </button>
-                <button type="button" className="cw-btn" aria-disabled={readOnly} onClick={() => decide(false)}>
+                <button
+                  id={dismissId}
+                  type="button"
+                  className="cw-btn"
+                  aria-disabled={!lite.usable || !lite.cooled}
+                  {...(lite.usable && !lite.cooled ? { 'data-cooling': 'true' } : {})}
+                  aria-describedby={`${dismissId}-hint`}
+                  {...(quickActive ? { 'aria-keyshortcuts': '2' } : {})}
+                  onClick={(e) => lite.sendDismiss(e)}
+                >
+                  {t('hub.quick.dismiss')}
+                </button>
+                <p id={`${dismissId}-hint`} className="cw-sr">
+                  {t('hub.quick.dismiss.hint')}
+                </p>
+                <button type="button" className="cw-btn" aria-disabled={readOnly || !c.cooled} {...(!readOnly && !c.cooled ? { 'data-cooling': 'true' } : {})} onClick={(e) => decide(false, e)}>
                   {t('hub.decide.submit')}
                 </button>
                 <p className="cw-hint">{t('hub.decide.undoHint', { seconds: SECONDS })}</p>
               </div>
             </fieldset>
+            {can('reports.decide.bulk') && <LazyBulkDismiss />}
           </form>
         )}
       </>
@@ -523,6 +560,7 @@ export function DecisionBar() {
         </button>
       </div>
       <div className="cw-dock-body" id={bodyId}>
+        {quickActive && <DetailedQuickKeys />}
         <div className="cw-sr" role="status" aria-label={t('hub.decide.live')}>
           <span key={live.n}>{live.text}</span>
         </div>

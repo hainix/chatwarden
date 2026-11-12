@@ -181,6 +181,11 @@ describe('every staff route has a client method', () => {
       ['updateReason', () => c.updateReason(reasonId, { label: 'Slur attempt' }), { method: 'PATCH', path: `/reasons/${reasonId}`, body: { label: 'Slur attempt' } }],
       ['setReasonActive', () => c.setReasonActive(reasonId, false), { method: 'POST', path: `/reasons/${reasonId}/active`, body: { active: false } }],
       [
+        'dismissOpen preview',
+        () => c.dismissOpen({ scope: 'person', ref: person, dryRun: true }),
+        { method: 'POST', path: '/reports/dismiss-open', body: { scope: 'person', ref: person, dryRun: true } },
+      ],
+      [
         'decide',
         () => c.decide(id, { verdict: 'upheld', reason: 'clear', actions: [{ subject: person, kind: 'warning', durationMs: null, rule: 1 }] }),
         { method: 'POST', path: `/reports/${id}/decide`, body: { verdict: 'upheld', reason: 'clear', actions: [{ subject: person, kind: 'warning', durationMs: null, rule: 1 }] } },
@@ -362,5 +367,77 @@ describe('fetchAll (cursor helper)', () => {
     expect(all.items).toHaveLength(3);
     expect(all.next).toBeNull();
     expect(new Set(all.items.map((r) => r.id)).size).toBe(3);
+  });
+});
+
+describe('dismissOpen (POST /reports/dismiss-open)', () => {
+  it('posts JSON and returns the typed result', async () => {
+    const seen: Array<{ method: string; path: string; body: unknown }> = [];
+    const answer = { ok: true, dryRun: false, open: 3, dismissed: 3, replayed: 0, skipped: { claimed: 0, decided: 0 }, more: false };
+    const spy: Transport = (req) => {
+      seen.push({ method: req.method, path: req.path, body: req.body });
+      return Promise.resolve({ status: 200, headers: {}, body: answer });
+    };
+    const result = await createHubClient(spy).dismissOpen({ scope: 'reporter', ref: 'rep-ref', takeOver: false });
+    expect(result).toEqual(answer);
+    expect(seen).toEqual([{ method: 'POST', path: '/reports/dismiss-open', body: { scope: 'reporter', ref: 'rep-ref', takeOver: false } }]);
+  });
+
+  it('sends exactly the fields it was given: no reason key, ever', async () => {
+    const bodies: unknown[] = [];
+    const spy: Transport = (req) => {
+      bodies.push(req.body);
+      return Promise.resolve({ status: 200, headers: {}, body: { ok: true } });
+    };
+    const c = createHubClient(spy);
+    await c.dismissOpen({ scope: 'person', ref: 'a' });
+    await c.dismissOpen({ scope: 'person', ref: 'a', takeOver: true, dryRun: true });
+    expect(bodies).toEqual([{ scope: 'person', ref: 'a' }, { scope: 'person', ref: 'a', takeOver: true, dryRun: true }]);
+    expect(JSON.stringify(bodies)).not.toContain('reason');
+  });
+
+  it('really dismisses the open reports of a person through the real route', async () => {
+    const w = await hubWorld({ role: 'moderator' });
+    const a = await w.file({ target: 'Mallory', reporter: 'Rita' });
+    const b = await w.file({ target: 'Mallory', reporter: 'Sam' });
+    const preview = await w.client.dismissOpen({ scope: 'person', ref: a.person, dryRun: true });
+    expect(preview).toMatchObject({ ok: true, dryRun: true, open: 2, dismissed: 0 });
+    expect((await w.client.getReport(a.id)).report.status).toBe('open');
+    const done = await w.client.dismissOpen({ scope: 'person', ref: a.person });
+    expect(done).toMatchObject({ ok: true, dryRun: false, open: 2, dismissed: 2, more: false });
+    for (const id of [a.id, b.id]) expect((await w.client.getReport(id)).report.status).toBe('dismissed');
+  });
+
+  it('a server refusal is a HubError with its code (403 below the permission, 409 claimed)', async () => {
+    const w = await hubWorld({ role: 'moderator', actor: 'ann@example.test', permissions: { 'reports.decide.bulk': 'senior' } });
+    const { person } = await w.file({ target: 'Mallory' });
+    expect(await w.client.dismissOpen({ scope: 'person', ref: person }).catch((e: unknown) => e)).toMatchObject({ status: 403, code: 'forbidden' });
+    const open = await hubWorld({ role: 'moderator', actor: 'ann@example.test' });
+    const held = await open.file({ target: 'Mallory' });
+    await open.clientFor('maya@example.test', 'moderator').claimCase(held.person);
+    const err = (await open.client.dismissOpen({ scope: 'person', ref: held.person }).catch((e: unknown) => e)) as HubError;
+    expect(err).toBeInstanceOf(HubError);
+    expect(err).toMatchObject({ status: 409, code: 'claimed', heldBy: 'maya@example.test' });
+  });
+});
+
+describe('listReports passes reporterAccuracy through', () => {
+  it('an open row carries reporterAccuracy as the server sent it, and a row from an older server has none', async () => {
+    const accuracy = { decided: 6, unfounded: 5, falseRate: 5 / 6, habitual: true };
+    const row = { id: 'r1', status: 'open', reporterAccuracy: accuracy };
+    const older = { id: 'r2', status: 'open' };
+    const spy: Transport = () => Promise.resolve({ status: 200, headers: {}, body: { items: [row, older], next: null } });
+    const page = await createHubClient(spy).listReports({ status: 'open' });
+    expect(page.items[0]?.reporterAccuracy).toEqual(accuracy);
+    expect(page.items[1]?.reporterAccuracy).toBeUndefined();
+  });
+
+  it('against the real route: a moderator (history.read) gets the figure for a reporter with decided reports, else null', async () => {
+    const w = await hubWorld({ role: 'moderator' });
+    const open = await w.file({ target: 'Mallory', reporter: 'Rita' });
+    const page = await w.client.listReports({ status: 'open' });
+    const row = page.items.find((i) => i.id === open.id);
+    expect(row).toBeDefined();
+    expect(row?.reporterAccuracy ?? null).toBeNull();
   });
 });

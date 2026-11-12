@@ -48,15 +48,21 @@ export function oneClickOf(
   return { form, choice, rule, lineCount: action.lineIds.length };
 }
 
-/** The decision "No action needed" makes: the Not-a-problem verdict, a reason, and no actions. */
-export function noActionForm(reason: string): DecisionForm {
+/**
+ * The decision "Nothing wrong here" makes: the Not-a-problem verdict and no actions. With no reason (the default) none is sent and the
+ * kit stores its standard one; a reason given is sent as written.
+ */
+export function noActionForm(reason = ''): DecisionForm {
   return { ...emptyForm(), verdict: 'not_a_problem', reason };
 }
 
 /** How many of the reporter's reports have been decided. A report still open is neither upheld nor not upheld, so it is not counted. */
 export const reporterDecided = (record: ReporterRecord): number => record.actioned + record.dismissed;
 
-/** True when the reporter's record is worth a warning: three or more decided reports, and fewer than a third of them upheld. */
+/**
+ * True when the reporter's record is worth a warning: three or more decided reports, and fewer than a third of them upheld. The all-time rule,
+ * kept for a kit that sends no recent figure (`ReporterRecord.accuracy`); a kit that does decides on that instead (see `reporterRate`).
+ */
 export function reporterWarrants(record: ReporterRecord): boolean {
   const decided = reporterDecided(record);
   return decided >= 3 && record.actioned * 3 < decided;

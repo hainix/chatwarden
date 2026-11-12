@@ -29,9 +29,10 @@ const pageHides = (): Promise<void> =>
 async function card(options: WorldOptions = {}, props: Parameters<typeof renderHub>[1] = {}) {
   const w = await hubWorld(options);
   const f = await w.fileRich({ lines: TALK });
-  const r = renderHub(w, { path: `/reports/${f.id}`, mode: 'simple', ...props });
+  const r = renderHub(w, { path: `/reports/${f.id}`, mode: 'simple', stay: true, ...props });
   await screen.findByRole('heading', { level: 2, name: 'Mallory' });
   await screen.findByRole('button', { name: /^No action needed/ });
+  w.clock.t += 400;
   return { w, f, ...r };
 }
 
@@ -152,6 +153,10 @@ describe('key 3', () => {
     await pageHides();
     expect(decides(w)).toHaveLength(0);
     input.remove();
+    // Control: with the field gone the same key sends the warning.
+    press('3');
+    await pageHides();
+    await waitFor(() => expect(decides(w)).toHaveLength(1));
   });
 
   it('not when Something else is open, nor with a modifier', async () => {

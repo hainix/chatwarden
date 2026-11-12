@@ -341,7 +341,10 @@ describe('B4: no toast for what the screen already says', () => {
     const a = await w.fileRich({ lines: TALK, target: 'Alpha' });
     renderHub(w, { path: `/reports/${a.id}` });
     await screen.findByRole('heading', { level: 2, name: /report against Alpha/ });
-    expect(screen.getByRole('region', { name: 'Notifications' })).toBeEmptyDOMElement();
+    // No toast, and nothing waiting; the region's screen-reader line (always in the page, so a change is spoken) says nothing.
+    const region = screen.getByRole('region', { name: 'Notifications' });
+    expect(region.querySelector('.cw-toast, .cw-toast-waiting')).toBeNull();
+    expect(region.textContent).toBe('');
   });
 });
 

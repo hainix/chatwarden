@@ -1,3 +1,4 @@
+import { REPORTER_RANK_LAPSE_MS } from '@chatwarden/core';
 import { liveClaim } from './claims.js';
 import type { Claim, ReportCategory, ReportSummary } from './types.js';
 
@@ -42,6 +43,11 @@ export interface QueueGroup {
   claim: Claim | null;
   /** The other staff who have the case open, sorted. A hint, never a lock. */
   viewing: string[];
+  /**
+   * Set only when `groupQueue` was given `rankDown`: true when the case is listed lower because every open report on it came from a
+   * habitual false reporter and none has waited a day. It only re-orders; the case is still listed and counted.
+   */
+  rankedLow?: boolean;
 }
 
 /** What a reporter said a report was for: a reason id and its label now, or both null for a report that gave none. */
@@ -53,6 +59,9 @@ export interface ReportedReason {
 /** @experimental */
 export type QueueSort = 'latest' | 'oldest' | 'reports';
 
+/** A case with more open reports than this is never ranked lower: a mass report is not buried (core's take-next draws the same line). */
+const RANK_DOWN_OPEN_MAX = 200;
+
 const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
 /**
@@ -62,9 +71,13 @@ const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt 
  * - `oldest`: the longest-waiting first (by the oldest open report; a group with none open uses its oldest report).
  * - `reports`: the most reports first.
  * A tie is broken by the person ref, so the order is stable.
+ *
+ * With `rankDown: { now }` a case is listed after the others (each part keeping the chosen sort) when it has an open report, EVERY open
+ * report on it carries `reporterAccuracy.habitual`, none has waited `REPORTER_RANK_LAPSE_MS` (24 hours, at `now`) and it has at most
+ * 200 open reports. Nothing is removed. A server that sends no accuracy ranks nobody lower. The same rule as core's take-next.
  * @experimental
  */
-export function groupQueue(items: readonly ReportSummary[], options: { sort?: QueueSort } = {}): QueueGroup[] {
+export function groupQueue(items: readonly ReportSummary[], options: { sort?: QueueSort; rankDown?: { now: number } } = {}): QueueGroup[] {
   const byId = new Map<string, ReportSummary>();
   for (const item of items) if (!byId.has(item.id)) byId.set(item.id, item);
   const byPerson = new Map<string, ReportSummary[]>();
@@ -74,6 +87,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     else list.push(item);
   }
 
+  const { rankDown } = options;
   const groups: QueueGroup[] = [];
   for (const [person, list] of byPerson) {
     const handles: string[] = [];
@@ -88,6 +102,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     let actioned = 0;
     let dismissed = 0;
     let oldestOpenAt: number | null = null;
+    let habitualOpen = 0;
     let claim: Claim | null = null;
     const viewing = new Set<string>();
     for (const r of list) {
@@ -109,6 +124,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) reporterHandles[r.reporterPerson] = reporterHandle;
       if (r.status === 'open') {
         open += 1;
+        if (r.reporterAccuracy?.habitual === true) habitualOpen += 1;
         oldestOpenAt = oldestOpenAt === null ? r.createdAt : Math.min(oldestOpenAt, r.createdAt);
       } else if (r.status === 'actioned') actioned += 1;
       else dismissed += 1;
@@ -134,6 +150,9 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       entries: list.map((r) => ({ id: r.id, category: r.category, reason: r.reportedReason ?? null, reasonLabel: r.reportedReason == null ? null : (r.reportedReasonLabel ?? r.reportedReason), createdAt: r.createdAt })),
       claim,
       viewing: [...viewing].sort(),
+      ...(rankDown === undefined
+        ? {}
+        : { rankedLow: open > 0 && open <= RANK_DOWN_OPEN_MAX && habitualOpen === open && rankDown.now - (oldestOpenAt as number) < REPORTER_RANK_LAPSE_MS }),
     });
   }
 
@@ -144,7 +163,10 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     oldest: (a, b) => waitStart(a) - waitStart(b),
     reports: (a, b) => b.reports - a.reports || b.latestAt - a.latestAt,
   };
-  return groups.sort((a, b) => order[sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+  const sorted = groups.sort((a, b) => order[sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+  if (rankDown === undefined) return sorted;
+  // A stable partition of the chosen order: ordinary cases first, ranked-low ones after, each part keeping its order.
+  return [...sorted.filter((g) => g.rankedLow !== true), ...sorted.filter((g) => g.rankedLow === true)];
 }
 
 const NONE: ReadonlySet<string> = new Set();

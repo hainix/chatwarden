@@ -25,7 +25,7 @@ export type { Me } from './me.js';
 export { DEFAULT_GAME_NAME, policyRoutes } from './policy.js';
 export type { PolicyOptions } from './policy.js';
 export { reportRoutes } from './reports.js';
-export type { ReportSummary } from './reports.js';
+export type { ReporterAccuracySummary, ReportSummary } from './reports.js';
 export { sanctionRoutes } from './sanctions.js';
 export { teamRoutes } from './team.js';
 export { termRoutes } from './terms.js';

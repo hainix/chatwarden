@@ -1,4 +1,4 @@
-export const VERSION = '0.1.4';
+export const VERSION = '0.1.5';
 
 export type {
   Clock,
@@ -25,6 +25,7 @@ export type {
   SanctionRow,
   SanctionTargetType,
   ReporterDecision,
+  ReporterOutcomeRow,
   ReporterTally,
   ClaimAttempt,
   ClaimMode,
@@ -158,6 +159,20 @@ export {
   isSanctionActive,
   sanctionGroupView,
 } from './staffViews.js';
+export { BULK_DISMISS_MAX, BULK_REPORTER_SCAN_MAX } from './dismissMany.js';
+export type { DismissManyInput, DismissManyResult, DismissScope } from './dismissMany.js';
+export {
+  RANK_DOWN_SCAN_MAX,
+  REPORTER_ACCURACY_BATCH_MAX,
+  REPORTER_ACCURACY_MIN_DECIDED,
+  REPORTER_ACCURACY_WINDOW_MS,
+  REPORTER_FALSE_RATE_HABITUAL,
+  REPORTER_FALSE_RATE_NOTICEABLE,
+  REPORTER_RANK_LAPSE_MS,
+  reporterAccuracyFor,
+  summarizeOutcomes,
+} from './reporterAccuracy.js';
+export type { ReporterAccuracy } from './reporterAccuracy.js';
 export type {
   BlockedDays,
   BlockedItem,
@@ -250,7 +265,15 @@ export {
   suggest,
 } from './ladder.js';
 export type { ActionRecord, LadderCell, LadderRow, LadderStep, Suggestion, SuggestContext } from './ladder.js';
-export { DECISION_EVIDENCE_MAX, DECISION_REASON_MAX, DecisionService, decisionKey, revokeAndWithdraw } from './decide.js';
+export {
+  DECISION_EVIDENCE_MAX,
+  DECISION_REASON_MAX,
+  DecisionService,
+  NO_ACTION_DEFAULT_REASON,
+  decisionKey,
+  isDefaultNoActionReason,
+  revokeAndWithdraw,
+} from './decide.js';
 export type {
   DecisionAction,
   DecisionGroup,

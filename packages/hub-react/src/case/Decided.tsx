@@ -1,3 +1,4 @@
+import { isDefaultNoActionReason } from '@chatwarden/core';
 import { useHub } from '../context.js';
 import { absoluteTime, relativeTime } from '../format.js';
 import type { ReportDetail } from '../types.js';
@@ -20,7 +21,7 @@ export function Decided({ detail }: { detail: ReportDetail }) {
         {r.modNote !== null && (
           <>
             <dt>{t('hub.decide.decided.reason')}</dt>
-            <dd>{r.modNote}</dd>
+            <dd>{isDefaultNoActionReason(r.modNote) ? t('hub.decided.reason.default') : r.modNote}</dd>
           </>
         )}
         {r.badFaithEvidence !== null && (

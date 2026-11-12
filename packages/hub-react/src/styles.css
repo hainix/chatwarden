@@ -363,8 +363,12 @@
   color: var(--cw-red, var(--cwd-red));
 }
 .cw-hub .cw-btn:disabled,
-.cw-hub .cw-btn[aria-disabled='true'] {
+.cw-hub .cw-btn[aria-disabled='true']:not([data-cooling]) {
   opacity: 0.6;
+  cursor: default;
+}
+/* A button that only waits out the quick-act cooldown (a moment after a case appears) is not dimmed: a run of quick actions would flicker. */
+.cw-hub .cw-btn[data-cooling] {
   cursor: default;
 }
 .cw-hub .cw-link {
@@ -2332,6 +2336,14 @@
 .cw-hub .cw-toast button:focus-visible {
   outline-color: var(--cw-surface, var(--cwd-surface));
 }
+/* Several held decisions: the newest has its toast, the earlier ones are this one line. */
+.cw-hub .cw-toast-waiting {
+  padding: 0.25rem 0.7rem;
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-ink, var(--cwd-ink));
+  color: var(--cw-surface, var(--cwd-surface));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
 /* The Undo window: a bar that runs down over the 5 seconds the action is held. */
 .cw-hub .cw-toast-bar {
   position: absolute;
@@ -2474,6 +2486,127 @@
 .cw-hub .cw-sheet-plus {
   margin: 0 0.25rem;
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+
+.cw-hub .cw-sheet-group {
+  margin-top: var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-sheet-group h3 {
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-sheet-or {
+  margin: 0 0.35rem;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-sheet-needs {
+  display: block;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-sheet-quick {
+  margin-top: var(--cw-space-3, var(--cwd-space-3));
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+  background: var(--cw-surface-sunken, var(--cwd-surface-sunken));
+}
+/* The Quick keys switch: a labelled track that is filled when on. The state is also in aria-checked. */
+.cw-hub .cw-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  cursor: pointer;
+}
+.cw-hub .cw-switch-track {
+  display: inline-flex;
+  align-items: center;
+  width: 2.5rem;
+  height: 1.4rem;
+  padding: 0.15rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: 999px;
+  background: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-switch-thumb {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: currentColor;
+  transition: transform 0.12s ease;
+}
+.cw-hub .cw-switch[aria-checked='true'] .cw-switch-track {
+  background: var(--cw-accent, var(--cwd-accent));
+  border-color: var(--cw-accent, var(--cwd-accent));
+  color: var(--cw-surface, var(--cwd-surface));
+}
+.cw-hub .cw-switch[aria-checked='true'] .cw-switch-thumb {
+  transform: translateX(1.1rem);
+}
+.cw-hub .cw-switch:focus-visible {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-hub .cw-switch-thumb {
+    transition: none;
+  }
+}
+
+/* ---- Close more reports at once ---------------------------------------------------------------------------------------- */
+/* One collapsed disclosure at the bottom of the decision bar: nothing is added to the always-visible bar. Neutral, no signal colour. */
+.cw-hub .cw-bulk {
+  min-width: 0;
+  padding-top: var(--cw-space-2, var(--cwd-space-2));
+  border-top: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+}
+.cw-hub .cw-bulk > summary {
+  cursor: pointer;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+.cw-hub .cw-bulk > summary:focus-visible {
+  outline: 2px solid var(--cw-accent, var(--cwd-accent));
+  outline-offset: 2px;
+}
+.cw-hub .cw-bulk-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  margin-top: var(--cw-space-2, var(--cwd-space-2));
+}
+.cw-hub .cw-bulk-rows .cw-btn {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.cw-hub .cw-bulk-row {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
+  max-width: 100%;
+}
+.cw-hub .cw-bulk-dialog {
+  max-width: 100%;
+}
+/* The bar is a stacking context (z-index 2): while its confirm window is open it rises above the top bar and the panes. */
+.cw-hub .cw-dock:has(.cw-bulk-dialog) {
+  z-index: 40;
+}
+.cw-hub .cw-bulk-title {
+  font-size: var(--cw-text-l, var(--cwd-text-l));
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-bulk-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
 }
 
 /* ---- Terms, Blocked, Rule gaps, Audit and the Guide ---------------------------------------------------------------------- */

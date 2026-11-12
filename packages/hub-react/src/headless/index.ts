@@ -27,10 +27,21 @@ export type { CaseStore, CaseStoreOptions, ContinueOutcome, OpenCase, TakeOutcom
 
 // Decisions
 export { createDecisionStore, hasLeft, isWaiting } from './decisions.js';
-export type { DecideOptions, DecisionEntry, DecisionHost, DecisionOutcome, DecisionState, DecisionStore, DecisionStoreOptions, SubmitDecision } from './decisions.js';
+export type {
+  DecideOptions,
+  DecisionEntry,
+  DecisionHost,
+  DecisionOutcome,
+  DecisionState,
+  DecisionStore,
+  DecisionStoreOptions,
+  DismissOpenOutcome,
+  DismissOpenRequest,
+  SubmitDecision,
+} from './decisions.js';
 
 // Toasts
-export { TOAST_ERROR_MS, TOAST_MAX, TOAST_MS, UNDO_MS, createToastStore } from './toasts.js';
+export { TOAST_ERROR_MS, TOAST_HELD_MAX, TOAST_MAX, TOAST_MS, UNDO_MS, createToastStore } from './toasts.js';
 export type { Hold, HoldInput, ToastInput, ToastRecord, ToastStore, ToastStoreOptions, Toasts } from './toasts.js';
 
 // The session cache, and reads, writes and paged lists

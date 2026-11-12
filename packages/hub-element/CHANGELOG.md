@@ -1,5 +1,73 @@
 # @chatwarden/hub-element
 
+## 0.1.5
+
+### Patch Changes
+
+- Faster report triage: a moderator can clear hundreds of reports without typing a reason and without the mouse.
+  
+  What changes for a game studio and its moderators:
+  
+  - **One-click dismiss, in every mode.** "Nothing wrong here" closes a report with no action and no typed reason. Nobody is told and
+    nobody is marked. Simple has it as "No action needed" (key `2`); Detailed gets one new button, "Nothing wrong here", in the decision
+    bar. The kit stores one standard reason, "No action needed" (core: `NO_ACTION_DEFAULT_REASON`, `isDefaultNoActionReason`), so a
+    dismissal nobody wrote about is easy to tell from a considered note. A reason is now optional only for a "Not a problem" decision
+    that acts on nobody; every other decision still needs a real one.
+  - **Auto-advance.** Every quick action (the suggested step, a warning, a dismissal) moves straight on to the next case. Undo still works
+    after the move, for the same five seconds, and several decisions can wait at once: the newest shows with its Undo button and the
+    rest collapse into one line ("2 earlier decisions waiting").
+  - **Bulk dismiss.** One confirmed action closes every open report about one person, or every open report from one reporter
+    (`cw.reports.dismissMany`, `POST /reports/dismiss-open`). It sits behind "Close more reports at once" under the decision bar, shows
+    a live count, can be undone for five seconds, and never marks bad faith. At most 200 reports a call; another moderator's claim is
+    respected (a senior can take over). New permission `reports.decide.bulk`, moderator by default (raise it to `senior` to keep sweeps
+    for seniors). The audit log gets one summary row per sweep (`report.dismiss_case` or `report.dismiss_reporter`) and one
+    `report.decide` row for every report closed.
+  - **Reporter accuracy and the habitual-reporter ranking.** `cw.reports.reporterAccuracy` is the share of a reporter's decided
+    reports from the last 30 days that were dismissed (at least 5 decided reports). The case says so ("most of their recent reports were
+    dismissed, 6 of 6 in the last 30 days"), and reporters whose reports are dismissed 80% of the time or more are listed lower in the
+    queue and in Take next. It is on by default in take-next (`POST /cases/next`); in core it is `cases.next(actor, { rankDownHabitual:
+    true })`, off unless you ask. Nothing is ever hidden or refused, a report older than 24 hours ranks as usual, a person with more
+    than 200 open reports is never pushed down, and the figure is for staff only (`history.read`): it never reaches a player.
+  - **Keyboard queue mode.** `J` / `K` and the arrow keys move between cases, `1` / `2` / `3` act (the suggested step, nothing wrong
+    here, a warning), `U` undoes the newest waiting decision. A new "Quick keys" switch in the `?` sheet turns the acting on: on in
+    Simple, off in Detailed (where `1` / `2` / `3` have always picked a verdict, so nothing changes by surprise). A held key is one
+    action, and a case takes an act key only 300 ms after it appeared, so a double tap cannot close the next case.
+  - **SQLite migration 19** adds one index (`kit_reports_by_reporter_outcome`) and changes no table or row. It runs when the store opens. It is one-way: once 0.1.5 has opened a database, 0.1.4 will not open it
+    (it reports a schema version newer than it supports), so back up the database file before you upgrade if you might roll back.
+  - **Type widenings and one new key.** `DecisionInput.reason` and `DecideInput.reason` are optional (every existing call still
+    compiles). `PermissionKey` gains `reports.decide.bulk`, so a `Record<PermissionKey, ...>` you wrote by hand needs it. `AuditAction`
+    gains the two sweep actions, `ReporterRecord` and the open rows of `GET /reports` gain an optional accuracy figure, and the store
+    gains two optional methods (`reporterOutcomes`, `listOpenReportsByReporter`), so a custom store keeps working with these features
+    off. New names are `@experimental`.
+  - **Three contract changes to check if you wrote your own pieces.** A custom store's `listOpenReportsByPerson` must accept a limit up to
+    201 (the bulk dismissal asks for one more than its 200 cap to know there are more; a store that clamps at 200 makes it under-report).
+    `HubClient` gains a required `dismissOpen` method, so a hand-written client or test double needs it. The signed incoming webhook's
+    `decide` action now accepts a dismissal (`no_action`, no actions) with no `reason`, as the staff route does.
+  
+  Upgrade notes:
+  
+  - Peer floors rise. `store-memory`, `store-sqlite`, `http` and `hub-react` now need `@chatwarden/core` 0.1.5 (they use `dismissMany`,
+    `reporterAccuracy`, the standard reason and the new store types); `hub-react` also needs `@chatwarden/http` 0.1.5 (the sweep route
+    and the dismissal with no reason: a hub 0.1.5 against an older `http` is refused 400 on a dismissal with no reason, and has no bulk
+    dismiss), and `hub-element`'s optional `hub-react` peer is `^0.1.5` to match. `player-react`, `discord`, `matcher` and `profanity`
+    keep their floors.
+  - `POST /cases/next` now serves reports from habitual false reporters last. Nothing else about take-next changed.
+  - The hub's first load is still under its size budget (the command bar, the shortcut sheet and the bulk window load on demand).
+  - Translators: add these words (a key you leave out shows English). Plural pairs need `.one` and `.other`. `hub.quick.dismiss`,
+    `hub.quick.dismiss.hint`, `hub.quick.held`, `hub.decided.reason.default`, `hub.decide.reason.hint.dismissal`, `hub.toast.undone`,
+    `hub.toast.waiting` (plural), `hub.window.failed`, `hub.key.up`, `hub.key.down`, `hub.command.undo`, `hub.shortcuts.group.move`,
+    `hub.shortcuts.group.act`, `hub.shortcuts.group.general`, `hub.shortcuts.primary`, `hub.shortcuts.dismiss`,
+    `hub.shortcuts.warning`, `hub.shortcuts.decide`, `hub.shortcuts.or`, `hub.shortcuts.undo`, `hub.shortcuts.quickKeys.label`,
+    `hub.shortcuts.quickKeys.hint`, `hub.shortcuts.quickKeys.on`, `hub.shortcuts.quickKeys.off`, `hub.shortcuts.quickKeys.only`,
+    `hub.bulk.open`, `hub.bulk.person` (plural), `hub.bulk.reporter`, `hub.bulk.reporter.habitual`, `hub.bulk.confirm.counting`,
+    `hub.bulk.confirm.title.person` (plural), `hub.bulk.confirm.title.reporter` (plural), `hub.bulk.confirm.body`,
+    `hub.bulk.confirm.claimed` (plural), `hub.bulk.confirm.heldBy`, `hub.bulk.confirm.takeOver` (plural), `hub.bulk.confirm.none`,
+    `hub.bulk.confirm.go` (plural), `hub.bulk.confirm.cancel`, `hub.bulk.confirm.close`, `hub.bulk.held` (plural), `hub.bulk.done`
+    (plural), `hub.bulk.skipped.claimed` (plural), `hub.bulk.more`, `hub.bulk.more.again`, `hub.bulk.failed`,
+    `hub.bulk.failed.claimed`, `hub.reporter.rate.line`, `hub.reporter.rate.ranked`, `hub.queue.row.rankedLow`,
+    `hub.audit.label.report.dismissCase`, `hub.audit.label.report.dismissReporter`. `hub.simple.noAction.reason` stays in the
+    catalogue, deprecated and no longer sent.
+
 ## 0.1.4
 
 ### Patch Changes

@@ -21,6 +21,7 @@ import type {
   ReportListQuery,
   ReportRecord,
   ReporterDecision,
+  ReporterOutcomeRow,
   ReporterTally,
   SanctionKind,
   SanctionListQuery,
@@ -893,10 +894,23 @@ export class SqliteStore implements Store, TermStore {
 
   listOpenReportsByPerson(subjects: readonly SubjectId[], limit: number): ReportRecord[] {
     if (subjects.length === 0) return [];
-    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const n = Math.min(201, Math.max(1, Math.floor(limit)));
     const marks = subjects.map(() => '?').join(', ');
     const sql = `SELECT * FROM kit_reports WHERE status = 'open' AND target_subject IN (${marks}) ORDER BY created_at DESC, id DESC LIMIT ?`;
     return this.transaction(() => this.db.prepare(sql).all(...subjects, n).map(reportFromRow));
+  }
+
+  listOpenReportsByReporter(reporters: readonly SubjectId[], limit: number): ReportRecord[] {
+    if (reporters.length === 0) return [];
+    const n = Math.min(201, Math.max(1, Math.floor(limit)));
+    const unique = [...new Set(reporters)];
+    const marks = unique.map(() => '?').join(', ');
+    // Served by kit_reports_by_reporter_outcome (migration 19): the reporter, then the filing time, with `status` read from the index
+    // before a row is fetched. Named, because without statistics the planner would walk the by-status index (every open report in the
+    // store) and filter by reporter, which is the wrong end of a sweep of one reporter's reports. Any migration that drops or renames
+    // this index MUST change this SQL: a named index that is gone is a runtime error ("no such index"), not a slower plan.
+    const sql = `SELECT * FROM kit_reports INDEXED BY kit_reports_by_reporter_outcome WHERE reporter_subject IN (${marks}) AND status = 'open' ORDER BY created_at DESC, id DESC LIMIT ?`;
+    return this.transaction(() => this.db.prepare(sql).all(...unique, n).map(reportFromRow));
   }
 
   reporterTally(reporters: readonly SubjectId[]): ReporterTally {
@@ -911,6 +925,33 @@ export class SqliteStore implements Store, TermStore {
       if (Number(r.bad_faith) === 1) tally.badFaith += n;
     }
     return tally;
+  }
+
+  reporterOutcomes(reporters: readonly SubjectId[], since: number): ReporterOutcomeRow[] {
+    // A repeated id would be counted once per chunk it lands in: ask for each reporter once.
+    const unique = [...new Set(reporters)];
+    if (unique.length === 0) return [];
+    // SQLite caps the variables of one statement, so a long list is asked for in chunks. The columns after `reporter_subject` are
+    // all in kit_reports_by_reporter_outcome (migration 19), so each chunk is answered from that index alone.
+    const CHUNK = 500;
+    return this.transaction(() => {
+      const out: ReporterOutcomeRow[] = [];
+      for (let i = 0; i < unique.length; i += CHUNK) {
+        const part = unique.slice(i, i + CHUNK);
+        const marks = part.map(() => '?').join(', ');
+        const sql = `SELECT reporter_subject AS reporter,
+                SUM(status = 'actioned') AS actioned,
+                SUM(status = 'dismissed' AND bad_faith = 0) AS no_action,
+                SUM(status = 'dismissed' AND bad_faith = 1) AS bad_faith
+         FROM kit_reports
+         WHERE reporter_subject IN (${marks}) AND created_at >= ? AND status != 'open'
+         GROUP BY reporter_subject`;
+        for (const r of this.db.prepare(sql).all(...part, since)) {
+          out.push({ reporter: String(r.reporter), actioned: Number(r.actioned), noAction: Number(r.no_action), badFaith: Number(r.bad_faith) });
+        }
+      }
+      return out;
+    });
   }
 
   listReports(q: ReportListQuery): ReportRecord[] {

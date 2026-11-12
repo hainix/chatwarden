@@ -5,6 +5,7 @@ import type { Role } from '@chatwarden/core';
 export const PERMISSION_KEYS = [
   'reports.read',
   'reports.decide',
+  'reports.decide.bulk',
   'sanctions.apply',
   'sanctions.apply.ban_permanent',
   'sanctions.revoke',
@@ -31,10 +32,13 @@ export type Permissions = Readonly<Record<PermissionKey, Role>>;
 /**
  * The minimum role for each action. `terms.write` is `moderator` on purpose (the Moxgate decision). `policy.write` (edit the
  * moderation profile: the lengths offered, the ladder, the repeat rule) is `owner`: it changes what every moderator is suggested.
+ * `reports.decide.bulk` (dismiss all open reports about one person, or from one reporter, in one confirmed action) is `moderator`: the
+ * same people may already dismiss each report one by one. An adopter who wants a sweep to be a senior's can raise it.
  */
 export const PERMISSIONS: Permissions = Object.freeze({
   'reports.read': 'moderator',
   'reports.decide': 'moderator',
+  'reports.decide.bulk': 'moderator',
   'sanctions.apply': 'moderator',
   'sanctions.apply.ban_permanent': 'senior',
   'sanctions.revoke': 'moderator',

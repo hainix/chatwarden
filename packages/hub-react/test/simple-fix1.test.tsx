@@ -129,8 +129,10 @@ describe('the keys stay quiet in three more places', () => {
   async function card() {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    const r = renderHub(w, { mode: 'simple', path: `/reports/${f.id}` });
+    // The page stays where it is (a quick action would move on): these are about the decision on this case.
+    const r = renderHub(w, { mode: 'simple', path: `/reports/${f.id}`, stay: true });
     await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ });
+    w.clock.t += 400;
     return { w, f, ...r };
   }
 
@@ -144,7 +146,6 @@ describe('the keys stay quiet in three more places', () => {
     await pageHides();
     expect(decides(w)).toHaveLength(1);
     expect(decides(w)[0]!.body).toMatchObject({ verdict: 'upheld' });
-    expect(w.sent.some((r) => r.path === '/cases/next')).toBe(false);
   });
 
   it('while typing in a field: 1 and 2 are characters, not decisions', async () => {
@@ -160,6 +161,10 @@ describe('the keys stay quiet in three more places', () => {
     } finally {
       field.remove();
     }
+    // Control: with the field gone the same key acts, so the zero above was the field's doing.
+    await user.keyboard('2');
+    await pageHides();
+    expect(decides(w)).toHaveLength(1);
   });
 
   it('inside the command bar: typing 1 or 2, or Ctrl+Enter, decides nothing', async () => {

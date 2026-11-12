@@ -2,7 +2,8 @@ import { createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useController, useStore } from './controllerContext.js';
 import { hasLeft, isWaiting } from './headless/decisions.js';
-import type { DecisionEntry, DecisionState, SubmitDecision } from './headless/decisions.js';
+import type { DecideOptions, DecisionEntry, DecisionState, DismissOpenOutcome, DismissOpenRequest, SubmitDecision } from './headless/decisions.js';
+import type { DismissOpenInput, DismissOpenResult } from './types.js';
 
 // A decision is not sent the moment Decide is pressed. It is held for UNDO_MS (the Undo toast), then sent. The case leaves the
 // queue at once; if the send fails it comes back, with the error and what was typed. The hold, the send and the rules around them are
@@ -10,7 +11,7 @@ import type { DecisionEntry, DecisionState, SubmitDecision } from './headless/de
 // "Decide and take next" leaves the case (and the form) behind while the decision is still waiting.
 
 export { hasLeft, isWaiting };
-export type { DecisionEntry, DecisionState, SubmitDecision };
+export type { DecisionEntry, DecisionState, DismissOpenOutcome, DismissOpenRequest, SubmitDecision };
 
 export interface Decisions {
   /** What is going on with a report's decision, or undefined. */
@@ -29,6 +30,14 @@ export interface Decisions {
   retry: (reportId: string) => void;
   /** Forget a finished, failed or undone entry (its form has been taken back). */
   dismiss: (reportId: string) => void;
+  /** A decision or sweep is in its Undo window now (so Undo has something to take back). */
+  canUndo: boolean;
+  /** Undo the newest decision or sweep still in its Undo window and answer the report to show again, or null when nothing is waiting. */
+  undoLatest: () => string | null;
+  /** Dismiss all open reports about a person or from a reporter: held for the Undo window, then sent once. Answers how it ended. */
+  dismissOpen: (request: DismissOpenRequest, options?: DecideOptions) => Promise<DismissOpenOutcome>;
+  /** A dry run of a sweep: the counts, with nothing held or changed. Rejects with a `HubError`. */
+  previewDismiss: (scope: DismissOpenInput['scope'], ref: string) => Promise<DismissOpenResult>;
 }
 
 const DecisionContext = createContext<Decisions | null>(null);
@@ -58,6 +67,10 @@ export function DecisionProvider({ children }: { children: ReactNode }) {
       undo: d.undo,
       retry: (id) => void d.retry(id),
       dismiss: d.dismiss,
+      canUndo: [...entries.values()].some((e) => e.state.status === 'held'),
+      undoLatest: d.undoLatest,
+      dismissOpen: d.dismissOpen,
+      previewDismiss: d.previewDismiss,
     }),
     [entries, d],
   );

@@ -19,6 +19,8 @@ export const AUDIT_PAGE = 50;
 const LABEL: Record<AuditAction, HubText> = {
   'report.view': 'hub.audit.label.report.view',
   'report.decide': 'hub.audit.label.report.decide',
+  'report.dismiss_case': 'hub.audit.label.report.dismissCase',
+  'report.dismiss_reporter': 'hub.audit.label.report.dismissReporter',
   'sanction.apply': 'hub.audit.label.sanction.apply',
   'sanction.revoke': 'hub.audit.label.sanction.revoke',
   'gap.close': 'hub.audit.label.gap.close',

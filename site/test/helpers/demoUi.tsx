@@ -110,7 +110,14 @@ export async function openCase(user: User): Promise<HTMLElement> {
 export async function pickRule(user: User, rule = '2'): Promise<void> {
   await user.selectOptions(await within(modPane()).findByRole('combobox', { name: /which rule does this break/i }), rule);
   await within(modPane()).findByText(/the ladder suggests/i);
+  await cardSettles();
 }
+
+/**
+ * A card accepts a click or an act key only a moment (300 ms, on the real clock) after it appeared, so the second tap of a double
+ * tap cannot land on the next case. A person reading the card is slower than that; the test waits it out.
+ */
+export const cardSettles = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 350));
 
 /** The Undo hold passes at once (the hub sends a held decision when the page hides). */
 export async function sendHeldDecision(): Promise<void> {

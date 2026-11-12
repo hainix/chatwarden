@@ -221,8 +221,9 @@ describe('a decision waiting for its Undo survives a switch', () => {
   it('is neither sent nor dropped when the mode changes, and still sent when the window ends', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    renderHub(w, { mode: undefined, path: `/reports/${f.id}` });
+    renderHub(w, { mode: undefined, path: `/reports/${f.id}`, stay: true });
     const go = await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ });
+    w.clock.t += 400;
     vi.useFakeTimers({ toFake: [...FAKE] });
     fireEvent.click(go);
     expect(within(toasts()).getByText('Sending the decision on Mallory in 5 s.')).toBeInTheDocument();
@@ -244,8 +245,10 @@ describe('a decision waiting for its Undo survives a switch', () => {
   it('can still be undone after a switch, and nothing is ever sent', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    const { user } = renderHub(w, { mode: undefined, path: `/reports/${f.id}` });
-    await user.click(await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ }));
+    const { user } = renderHub(w, { mode: undefined, path: `/reports/${f.id}`, stay: true });
+    const go = await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ });
+    w.clock.t += 400;
+    await user.click(go);
     await user.click(within(view()).getByRole('button', { name: 'Detailed' }));
     await user.click(within(screen.getByRole('region', { name: 'Decision' })).getByRole('button', { name: 'Undo' }));
     await act(async () => {

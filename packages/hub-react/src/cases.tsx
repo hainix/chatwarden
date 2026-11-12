@@ -38,7 +38,7 @@ export interface CaseActions {
    * `/cases/next` is not asked), and only when there is none take the next case, or open the team view when nobody is waiting.
    * The one place that rule lives. Answers `same` for the first, else how Take next went.
    */
-  continueFrom: (decided: { reportId: string; person: string }) => Promise<'same' | TakeResult>;
+  continueFrom: (decided: { reportId: string; person: string }, options?: { quick?: boolean }) => Promise<'same' | TakeResult>;
   /** Claim a free case (after you let it go). */
   claim: (person: string) => Promise<void>;
   /** A senior or owner moving another moderator's live claim to themselves. The server audits it. */
@@ -66,10 +66,10 @@ export function useCaseActions(): CaseActions {
     if (out.status === 'taken' && nav !== null) showNext(nav.current, out.person, out.reportId);
     return out.status;
   };
-  const continueFrom = async (decided: { reportId: string; person: string }): Promise<'same' | TakeResult> => {
+  const continueFrom = async (decided: { reportId: string; person: string }, opts: { quick?: boolean } = {}): Promise<'same' | TakeResult> => {
     // In a piece with nowhere to show a next case, "and next" decides only: no case is taken for nobody to see.
     if (nav !== null && !canShowNext(nav.current)) return 'none';
-    const out = await calm(() => controller.continueFrom(decided));
+    const out = await calm(() => controller.continueFrom(decided, opts));
     if (nav !== null) {
       if (out.status === 'same') showNext(nav.current, decided.person, out.reportId);
       else if (out.status === 'taken') showNext(nav.current, out.person, out.reportId);

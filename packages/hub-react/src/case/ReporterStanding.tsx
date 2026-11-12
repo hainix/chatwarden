@@ -1,4 +1,5 @@
 import { useHub } from '../context.js';
+import type { HubT } from '../i18n.js';
 import { absoluteTime } from '../format.js';
 import { reasonAccuracy } from '../simple.js';
 import type { ReporterRecord } from '../types.js';
@@ -25,6 +26,35 @@ export function ReporterStanding({ record: r }: { record: ReporterRecord }) {
         </p>
       )}
     </>
+  );
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * What the case says about how a reporter's recent reports turned out, or null when it says nothing: the kit sent no figure (an older
+ * kit, or a store that cannot tell), they have too few decided reports, or most of them held up. `ranked` is the second sentence,
+ * for a habitual reporter: their reports are listed lower, and none is hidden.
+ */
+export function reporterRate(t: HubT, record: ReporterRecord, name: string): { line: string; ranked: string | null } | null {
+  const a = record.accuracy;
+  if (a === undefined || a === null || !a.noticeable) return null;
+  return {
+    line: t('hub.reporter.rate.line', { name, unfounded: a.unfounded, decided: a.decided, days: Math.round(a.windowMs / DAY_MS) }),
+    ranked: a.habitual ? t('hub.reporter.rate.ranked') : null,
+  };
+}
+
+/** The reporter's recent figure on a case they are part of, in plain words. Staff only, and never a list of reporters by rate. */
+export function ReporterRate({ record, name }: { record: ReporterRecord; name: string }) {
+  const { t } = useHub();
+  const rate = reporterRate(t, record, name);
+  if (rate === null) return null;
+  return (
+    <p className="cw-hint cw-reporter-rate">
+      {rate.line}
+      {rate.ranked !== null && ` ${rate.ranked}`}
+    </p>
   );
 }
 

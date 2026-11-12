@@ -17,6 +17,8 @@ import { historyOf, suggest } from './ladder.js';
 import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
 import { resolveLimits } from './limits.js';
 import type { Limits, LimitsInput } from './limits.js';
+import { dismissMany } from './dismissMany.js';
+import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { resolveProfile } from './profile.js';
@@ -40,6 +42,8 @@ import {
   reporterRecord,
   sanctionsOfPerson,
 } from './staffViews.js';
+import { reporterAccuracyFor } from './reporterAccuracy.js';
+import type { ReporterAccuracy } from './reporterAccuracy.js';
 import type {
   BlockedDays,
   BlockedItem,
@@ -284,6 +288,28 @@ export interface Chatwarden {
      * never send to a player (a player is not told who reported or how often).
      */
     reporterRecord(subject: SubjectId): ReporterRecord;
+    /**
+     * How each person's reports filed in the last 30 days turned out, keyed by canonical person (merged aliases folded in): one
+     * grouped store read for up to `REPORTER_ACCURACY_BATCH_MAX` (200) people, more is a `RangeError`. A person with no decided
+     * report in the window is absent; a store without `reporterOutcomes` gives an empty map. `falseRate` is null below
+     * `REPORTER_ACCURACY_MIN_DECIDED` decided reports. A ranking hint and a line on the case: it never refuses a report and never
+     * counts toward a suspension. Staff only: never send to a player.
+     * @experimental
+     */
+    reporterAccuracy(people: readonly SubjectId[]): Map<SubjectId, ReporterAccuracy>;
+    /**
+     * Dismiss ("nothing wrong here") every open report about one person (their case, merged aliases included) or filed by one
+     * reporter, in one call: at most `BULK_DISMISS_MAX` (200) reports, `more: true` when there are more. Each report is closed by the
+     * same path as `decide` (a `no_action` decision with no actions and the standard reason, source `moderator`, its own transaction,
+     * its own `report.closed` event), so a bulk never marks bad faith and never counts toward a suspension. A case another moderator
+     * holds is skipped and counted (`skipped.claimed`) unless `ignoreClaims` (for the staff layer, after it has checked who may take
+     * a case over). `dryRun` counts and writes nothing. Invalid input resolves `{ ok: false, error: 'invalid' }` with nothing written;
+     * a bad `actor` is a `RangeError`; a STORE failure rejects, the reports closed before it stay closed, and running it again
+     * finishes the rest. Writes no audit row: the staff layer records the sweep. Carries subject ids: staff channels only, never send
+     * to a player.
+     * @experimental
+     */
+    dismissMany(input: DismissManyInput): Promise<DismissManyResult>;
   };
   /**
    * Blocked chat lines, from the slur filter's strikes (purged after 30 days). Staff only: the lines are raw chat text
@@ -332,8 +358,14 @@ export interface Chatwarden {
      * malformed id), or null. A case is a person, ranked by their oldest open report and opened on
      * their newest. A case anyone holds is skipped without a write (held cases are read once per page of reports). `category` and
      * `reason` are the only filters: the order is already oldest first. A candidate lost to a rival in between is retried like `claim`.
+     *
+     * With `rankDownHabitual` (default false: behaviour unchanged), a case whose open reports ALL come from habitual false reporters
+     * (see `cw.reports.reporterAccuracy`) and none of which has waited 24 hours (`REPORTER_RANK_LAPSE_MS`) is served after the ordinary
+     * ones, oldest first; it is never skipped, so a queue holding only such cases still serves them. One ordinary reporter, or no
+     * accuracy data (a store without `reporterOutcomes`), keeps a case normal. A non-boolean value is a `RangeError`.
+     * @experimental (the `rankDownHabitual` filter)
      */
-    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null }): NextCase | null;
+    next(actor: string, filter?: { category?: ReportCategory; reason?: string | null; rankDownHabitual?: boolean }): NextCase | null;
     /**
      * `actor` has the person's case open now. A hint for 30 seconds (`VIEWING_TTL_MS`), in this process's memory only.
      * Only a person with an open report is tracked (false otherwise, nothing recorded); one actor keeps at most 20 cases
@@ -486,6 +518,10 @@ export interface Chatwarden {
    * `{ ok: false, error: 'invalid' }`; a STORE failure REJECTS with the store's own error and writes nothing, so a
    * route handler should catch it. Moderator-side: the result carries subject ids, so never forward it to a player.
    * Carries subject ids: staff channels only, never send to a player.
+   *
+   * `reason` is required, except for a `no_action` decision with no actions (a one-click "nothing wrong here"): an absent or
+   * blank reason is then stored as `NO_ACTION_DEFAULT_REASON`. A `no_action` that acts on someone, and every other verdict,
+   * still needs a real reason.
    */
   decide(input: DecisionInput): Promise<DecisionResult>;
   /**
@@ -775,8 +811,44 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     (timer as { unref?: () => void }).unref?.();
   }
 
+  // The one place a decision is made AND announced: `decide` and `dismissMany` both go through it, so a report closed by a bulk
+  // emits exactly the events a single decision does.
+  const decideAnnounced: Chatwarden['decide'] = async (input) => {
+    const { result, committed } = await decisions.decideDetailed(input);
+    if (committed !== null) {
+      try {
+        bus.emit({ type: 'report.closed', reportId: committed.reportId, verdict: committed.verdict, at: committed.at });
+        for (const g of committed.applied) {
+          bus.emit({
+            type: 'sanction.applied',
+            groupId: g.groupId,
+            refCode: g.refCode,
+            kind: g.kind,
+            until: g.until,
+            rule: g.rule,
+            source: g.source,
+            automated: false,
+            target: g.target,
+          });
+        }
+        for (const g of committed.applied) {
+          if (g.gap) bus.emit({ type: 'gap.created', groupId: g.groupId, refCode: g.refCode, at: committed.at, subject: subjects.canonical(g.target) });
+        }
+      } catch (err) {
+        eventFailed(err);
+      }
+    }
+    return result;
+  };
+
   const audit = new AuditService({ store, clock, logger });
-  const desk = new CaseDesk({ store, subjects, clock, reasons: () => policy.profileNow().reporting.reasons });
+  const desk = new CaseDesk({
+    store,
+    subjects,
+    clock,
+    reasons: () => policy.profileNow().reporting.reasons,
+    accuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
+  });
   const reasonBook = new ReasonBook(store);
 
   return {
@@ -831,6 +903,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         return record === null ? null : staffReport(record, subjects);
       },
       reporterRecord: (subject) => reporterRecord(store, subjects, limits.reports, subject, clock.now(), policy.profileNow().reporting.reasons),
+      reporterAccuracy: (people) => reporterAccuracyFor(store, subjects, people, clock.now()),
+      dismissMany: (input) => dismissMany({ store, subjects, holders: (people) => desk.holders(people), decide: decideAnnounced }, input),
     },
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),
@@ -958,33 +1032,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
     },
-    decide: async (input) => {
-      const { result, committed } = await decisions.decideDetailed(input);
-      if (committed !== null) {
-        try {
-          bus.emit({ type: 'report.closed', reportId: committed.reportId, verdict: committed.verdict, at: committed.at });
-          for (const g of committed.applied) {
-            bus.emit({
-              type: 'sanction.applied',
-              groupId: g.groupId,
-              refCode: g.refCode,
-              kind: g.kind,
-              until: g.until,
-              rule: g.rule,
-              source: g.source,
-              automated: false,
-              target: g.target,
-            });
-          }
-          for (const g of committed.applied) {
-            if (g.gap) bus.emit({ type: 'gap.created', groupId: g.groupId, refCode: g.refCode, at: committed.at, subject: subjects.canonical(g.target) });
-          }
-        } catch (err) {
-          eventFailed(err);
-        }
-      }
-      return result;
-    },
+    decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
     suggest: (subject, level, rule, context) => {
       const now = clock.now();

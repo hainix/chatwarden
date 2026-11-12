@@ -26,6 +26,12 @@ export const TOAST_ERROR_MS = 7_000;
  * @experimental
  */
 export const TOAST_MAX = 3;
+/**
+ * The most held (Undo) toasts at once, counted apart from {@link TOAST_MAX}: quick decisions stack several, each with its own Undo, and
+ * news must not push one off. Past this the oldest is sent early (its Undo ends).
+ * @experimental
+ */
+export const TOAST_HELD_MAX = 10;
 
 /** @experimental */
 export interface ToastInput {
@@ -96,14 +102,18 @@ export interface ToastStoreOptions {
   page?: PageSource;
 }
 
-/** Keeps at most TOAST_MAX: the oldest news goes first, and a toast with an Undo is only pushed off when every toast has one. */
+/**
+ * Keeps at most TOAST_MAX news toasts (the oldest without an action goes first, and one with an action is only pushed off when every
+ * news toast has one) and, apart from those, at most TOAST_HELD_MAX held ones (the oldest goes first). The order on screen is kept.
+ */
 function capped(list: ToastRecord[]): ToastRecord[] {
-  const out = [...list];
-  while (out.length > TOAST_MAX) {
-    const at = out.findIndex((s) => s.action === null);
-    out.splice(at < 0 ? 0 : at, 1);
+  const news = list.filter((s) => !s.held);
+  while (news.length > TOAST_MAX) {
+    const at = news.findIndex((s) => s.action === null);
+    news.splice(at < 0 ? 0 : at, 1);
   }
-  return out;
+  const held = list.filter((s) => s.held).slice(-TOAST_HELD_MAX);
+  return list.filter((s) => news.includes(s) || held.includes(s));
 }
 
 interface Clock {

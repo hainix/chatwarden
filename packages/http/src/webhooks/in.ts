@@ -59,9 +59,10 @@ function idempotencyKey(v: unknown): string {
  * exact `rawBody` the signature covers) or any adapter that does.
  *
  * Send `x-chatwarden-timestamp` and `x-chatwarden-signature` as `webhooksOut` does (see `sign`) and a JSON body of
- * - `{ action: 'decide', input: { reportId, verdict, actions, reason, evidence? } }`: decide a report, exactly as
+ * - `{ action: 'decide', input: { reportId, verdict, actions, reason?, evidence? } }`: decide a report, exactly as
  *   `POST /reports/:id/decide`, except that it never checks a moderator's claim, and once it has decided (not on a replay) it
- *   releases whoever held a claim on the reported person. A decision is idempotent in the core, so a repeat is a replay and applies nothing more.
+ *   releases whoever held a claim on the reported person. `reason` may be left out only for a dismissal (`no_action` with no
+ *   actions), which stores the standard reason, as the staff route does. A decision is idempotent in the core, so a repeat is a replay and applies nothing more.
  *   An `idempotencyKey` is optional for it (validated if present, and not used).
  * - `{ action: 'sanction', input: { subject, kind, durationMs, rule, reason?, gapNote?, includeIp?, idempotencyKey } }`:
  *   apply one sanction, exactly as `POST /sanctions`. `idempotencyKey` is REQUIRED: 1..64 characters of

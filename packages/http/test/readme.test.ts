@@ -172,7 +172,7 @@ describe('packages/http/README.md', () => {
     expect(find('POST /sanctions`')).toMatch(/\{ subject, kind, durationMs, rule, reason\?, gapNote\?, includeIp\? \}/);
     expect(find('/revoke')).toMatch(/\{ reason \}/);
     expect(find('/revoke')).toMatch(/non-empty/);
-    expect(find('/decide')).toMatch(/\{ verdict, reason, actions, evidence\? \}/);
+    expect(find('/decide')).toMatch(/\{ verdict, actions, reason\?, evidence\? \}/);
     expect(find('/suggest')).toMatch(/\{ level, rule\?, person\? \}/);
     expect(find('/gaps/:groupId/close')).toMatch(/\{ status, ref \}/);
     expect(find('POST /terms`')).toMatch(/\{ term, language, note\? \}/);

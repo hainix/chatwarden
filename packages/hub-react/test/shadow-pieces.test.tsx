@@ -32,6 +32,7 @@ describe('CaseCard in a shadow root', () => {
     const s = piecesInShadow(w, <CaseCard reportId={f.id} onOpenReport={onOpenReport} />);
     const region = await s.q.findByRole('region', { name: 'Case against Alpha' });
     await within(region).findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 1000;
     return { w, f, s, region, onOpenReport };
   }
 
@@ -134,6 +135,7 @@ describe('two pieces in two shadow roots', () => {
     const regionB = await two.q.findByRole('region', { name: 'Case against Bravo' });
     await within(regionA).findByRole('button', { name: /^No action needed/ });
     await within(regionB).findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 1000;
     within(regionB).getByRole('button', { name: /^No action needed/ }).focus();
     await two.user.keyboard('2');
     pageHides();

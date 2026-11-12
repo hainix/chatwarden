@@ -1,10 +1,11 @@
 import { toHubError } from '../client.js';
 import type { HubClient, HubError } from '../client.js';
 import { CLAIM_TTL_MS, actorName } from '../claims.js';
+import { emptyForm } from '../decision.js';
 import type { DecisionForm } from '../decision.js';
 import type { HubT } from '../i18n.js';
 import { nextOpenReport } from '../queue.js';
-import type { Claim, DecideInput, DecideResult } from '../types.js';
+import type { Claim, DecideInput, DecideResult, DismissOpenInput, DismissOpenResult } from '../types.js';
 import type { LiveQueueStore } from './liveQueue.js';
 import { createStore } from './store.js';
 import type { Store } from './store.js';
@@ -90,6 +91,38 @@ export interface DecideOptions {
   hold?: boolean | number;
 }
 
+/**
+ * A sweep: dismiss every open report about one person (`scope: 'person'`, their case) or from one reporter (`'reporter'`). `reportIds`
+ * are the open reports the moderator was shown (for a person, they leave the queue at once and Undo brings them back; for a reporter
+ * nothing is hidden in advance). The server decides on the live set when it is sent.
+ * @experimental
+ */
+export interface DismissOpenRequest {
+  scope: 'person' | 'reporter';
+  /** The staff ref of the person (`person` scope) or the reporter (`reporter` scope). */
+  ref: string;
+  /** The case the moderator is on: the person whose claim is given back by Undo. */
+  person: string;
+  /** How the person or reporter is named in a toast. */
+  name: string;
+  reportIds: readonly string[];
+  /** How many reports the moderator was told it would close (their confirmation); for the toast. Default: `reportIds.length`. */
+  count?: number;
+  /** A senior or owner moving another moderator's live claim on a person's case. */
+  takeOver?: boolean;
+}
+
+/**
+ * How a sweep ended. A sweep that is held or being sent has not ended: its promise waits.
+ * @experimental
+ */
+export type DismissOpenOutcome =
+  | { status: 'done'; result: DismissOpenResult }
+  /** The server did not take it (a 409 `claimed` says who holds the case). Nothing was changed. */
+  | { status: 'failed'; error: HubError }
+  /** Undone during the hold: nothing was sent. */
+  | { status: 'undone' };
+
 /** @experimental */
 export interface DecisionStore extends Store<ReadonlyMap<string, DecisionEntry>> {
   /** What is going on with a report's decision, or undefined. */
@@ -111,6 +144,23 @@ export interface DecisionStore extends Store<ReadonlyMap<string, DecisionEntry>>
   retry: (reportId: string) => Promise<DecisionOutcome | { status: 'none' }>;
   /** Forget a finished, failed or undone entry (its form has been taken back). */
   dismiss: (reportId: string) => void;
+  /**
+   * Undo the newest decision or sweep that is still in its Undo window, wherever the moderator is now. Answers the report id of the case
+   * to show again (the moderator is taken back to it, as Undo does), or null when nothing is waiting.
+   * @experimental
+   */
+  undoLatest: () => string | null;
+  /**
+   * Dismiss every open report about a person or from a reporter as "nothing wrong here": held for the Undo window, then sent once. For a
+   * person the case leaves the queue at once. The same sweep asked again while one waits answers what the first answers.
+   * @experimental
+   */
+  dismissOpen: (request: DismissOpenRequest, options?: DecideOptions) => Promise<DismissOpenOutcome>;
+  /**
+   * A dry run of a sweep: how many reports it would close and how many another moderator holds. Sends nothing that changes anything and holds nothing.
+   * @experimental
+   */
+  previewDismiss: (scope: DismissOpenInput['scope'], ref: string) => Promise<DismissOpenResult>;
 }
 
 /**
@@ -156,6 +206,14 @@ export function createDecisionStore(options: DecisionStoreOptions): DecisionStor
   // The same map, readable at once (the claim is released on leaving a case and must see a decision that was queued a moment before).
   const live = new Map<string, DecisionEntry>();
   const holds = new Map<string, Hold>();
+  // Every decision or sweep still in its Undo window, oldest first; `ids[0]` is the report to show again on Undo.
+  const stack: Array<{ ids: readonly string[]; hold: Hold }> = [];
+  const unstack = (hold: Hold): void => {
+    const at = stack.findIndex((s) => s.hold === hold);
+    if (at >= 0) stack.splice(at, 1);
+  };
+  // Sweeps waiting or being sent, by `scope:ref`: a second confirm of the same one answers the first.
+  const sweeping = new Map<string, Promise<DismissOpenOutcome>>();
   // The claim the person held when Decide was pressed. The case looks released at once; Undo or a failure gives it back.
   const claims = new Map<string, Claim | null>();
   const waiters = new Map<string, Array<(outcome: DecisionOutcome) => void>>();
@@ -269,19 +327,19 @@ export function createDecisionStore(options: DecisionStoreOptions): DecisionStor
       return outcome;
     }
     const ms = hold === true ? UNDO_MS : hold;
-    holds.set(
-      d.reportId,
-      toasts.hold({
-        text: words('hub.decide.held', { who: d.name, seconds: ms / 1000 }),
+    const held: Hold = toasts.hold({
+        text: words(d.input.verdict === 'no_action' && d.input.actions.length === 0 && d.input.reason === undefined ? 'hub.quick.held' : 'hub.decide.held', { who: d.name, seconds: ms / 1000 }),
         ms,
         run: () => {
           holds.delete(d.reportId);
+          unstack(held);
           const current = live.get(d.reportId);
           if (current !== undefined && current.state.status === 'held') return send(current);
           return undefined;
         },
         onUndo: () => {
           holds.delete(d.reportId);
+          unstack(held);
           const current = live.get(d.reportId);
           if (current === undefined) return;
           stateOf(current, { status: 'undone' });
@@ -293,9 +351,140 @@ export function createDecisionStore(options: DecisionStoreOptions): DecisionStor
           // Undo brings the case back: if the moderator has gone on to another one, they are taken back to it.
           if (!isOpen(d.reportId)) host.show(d.reportId);
         },
-      }),
-    );
+      });
+    holds.set(d.reportId, held);
+    stack.push({ ids: [d.reportId], hold: held });
     return outcome;
+  };
+
+  /** A sweep is `scope:ref`. A reporter's sweep hides no case, so one entry with no person stands for it (kept until the next sweep of that reporter replaces it). */
+  const sweepKey = (scope: DismissOpenRequest['scope'], ref: string): string => `${scope}:${ref}`;
+
+  const dismissOpen = (request: DismissOpenRequest, options2: DecideOptions = {}): Promise<DismissOpenOutcome> => {
+    const key = sweepKey(request.scope, request.ref);
+    const running = sweeping.get(key);
+    if (running !== undefined) return running;
+    const words = options.words();
+    const queue = options.queue();
+    const person = request.person;
+    // A person's sweep takes their case off the screen: each open report becomes a held entry, like one decision, so the queue and
+    // Undo treat it the same. A report with a decision already waiting keeps that entry. A reporter's sweep hides nothing in advance.
+    const fresh = request.scope === 'person' ? request.reportIds.filter((id) => !isWaiting(live.get(id))) : [];
+    const hides = fresh.length > 0;
+    const ids = hides ? fresh : [`bulk:${key}`];
+    const count = Math.max(1, request.count ?? request.reportIds.length);
+    const input: DecideInput = { verdict: 'no_action', actions: [] };
+
+    let finish!: (outcome: DismissOpenOutcome) => void;
+    const outcome = new Promise<DismissOpenOutcome>((resolve) => {
+      finish = (o) => {
+        sweeping.delete(key);
+        resolve(o);
+      };
+    });
+    sweeping.set(key, outcome);
+
+    const entries = ids.map((id): DecisionEntry => ({ reportId: id, person: hides ? person : '', name: request.name, input, snapshot: emptyForm(), keepsCase: false, state: { status: 'held' } }));
+    for (const e of entries) {
+      live.delete(e.reportId);
+      put(e);
+    }
+    const claim = hides ? (queue?.getSnapshot().groups.find((g) => g.person === person)?.claim ?? null) : null;
+    if (hides) {
+      queue?.setPending(person, true);
+      for (const id of ids) claims.set(id, claim);
+      queue?.patchClaim(person, null);
+    }
+    const setAll = (state: DecisionState): void => {
+      for (const id of ids) {
+        const current = live.get(id);
+        if (current !== undefined) stateOf(current, state);
+      }
+    };
+
+    const sendSweep = async (): Promise<void> => {
+      const w = options.words();
+      const q = options.queue();
+      setAll({ status: 'sending' });
+      const body: DismissOpenInput = { scope: request.scope, ref: request.ref, ...(request.takeOver === true ? { takeOver: true } : {}) };
+      try {
+        const result = await client.dismissOpen(body, { keepalive: true });
+        setAll({ status: 'done', replay: false, groups: [] });
+        if (result.dismissed > 0) toasts.push({ text: w('hub.bulk.done', { count: result.dismissed }) });
+        if (result.skipped.claimed > 0) toasts.push({ text: w('hub.bulk.skipped.claimed', { count: result.skipped.claimed }) });
+        // "Dismiss more" only when this run closed something: with held cases filling the window it would close nothing again.
+        if (result.more && result.dismissed > 0) {
+          toasts.push({
+            text: w('hub.bulk.more'),
+            action: { label: w('hub.bulk.more.again'), run: () => void dismissOpen(request, { hold: false }) },
+          });
+        }
+        if (result.dismissed === 0 && result.skipped.claimed === 0) toasts.push({ text: w('hub.bulk.confirm.none') });
+        // The reports are closed now: read the queue again so the case is gone, and only then let it show (it must not flash back).
+        if (q !== null) await q.reload();
+        finish({ status: 'done', result });
+      } catch (e) {
+        const error = toHubError(e);
+        setAll({ status: 'failed', error });
+        if (hides) {
+          if (error.code === 'claimed' && error.heldBy !== undefined) {
+            const until = error.heldUntil ?? 0;
+            q?.patchClaim(person, { by: error.heldBy, since: until - CLAIM_TTL_MS, until });
+          } else q?.patchClaim(person, claim);
+        }
+        const text = error.code === 'claimed' && error.heldBy !== undefined ? w('hub.bulk.failed.claimed', { name: actorName(error.heldBy) }) : w('hub.bulk.failed');
+        const first = ids[0] as string;
+        const away = hides && !isOpen(first);
+        toasts.push({ text, tone: 'bad', ...(away ? { action: { label: w('hub.decide.failedAway.open'), run: () => host.show(first) } } : {}) });
+        finish({ status: 'failed', error });
+      } finally {
+        if (hides) options.queue()?.setPending(person, false);
+      }
+    };
+
+    const hold = options2.hold ?? true;
+    if (hold === false) {
+      void sendSweep();
+      return outcome;
+    }
+    const ms = hold === true ? UNDO_MS : hold;
+    const held: Hold = toasts.hold({
+      text: words('hub.bulk.held', { count, seconds: ms / 1000 }),
+      ms,
+      run: () => {
+        for (const id of ids) holds.delete(id);
+        unstack(held);
+        return live.get(ids[0] as string)?.state.status === 'held' ? sendSweep() : undefined;
+      },
+      onUndo: () => {
+        for (const id of ids) holds.delete(id);
+        unstack(held);
+        setAll({ status: 'undone' });
+        if (hides) {
+          const latest = options.queue();
+          latest?.setPending(person, false);
+          latest?.patchClaim(person, claim);
+        }
+        const first = ids[0] as string;
+        finish({ status: 'undone' });
+        // Undo brings the case back: if the moderator has gone on to another one, they are taken back to it.
+        if (hides && !isOpen(first)) host.show(first);
+      },
+    });
+    for (const id of ids) holds.set(id, held);
+    stack.push({ ids, hold: held });
+    return outcome;
+  };
+
+  const undoLatest = (): string | null => {
+    for (let i = stack.length - 1; i >= 0; i -= 1) {
+      const top = stack[i] as (typeof stack)[number];
+      if (live.get(top.ids[0] as string)?.state.status !== 'held') continue;
+      const id = top.ids[0] as string;
+      top.hold.undo();
+      return id;
+    }
+    return null;
   };
 
   return {
@@ -316,5 +505,8 @@ export function createDecisionStore(options: DecisionStoreOptions): DecisionStor
       return next;
     },
     dismiss: drop,
+    undoLatest,
+    dismissOpen,
+    previewDismiss: (scope, ref) => client.dismissOpen({ scope, ref, dryRun: true }),
   };
 }

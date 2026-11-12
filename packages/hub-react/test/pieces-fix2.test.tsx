@@ -103,7 +103,9 @@ describe('a controller the provider made still answers its toasts through the ca
     const onOpenCase = vi.fn();
     const { user } = renderPieces(w, <CaseCard reportId={a.id} onOpenCase={onOpenCase} />);
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
-    await user.click(await within(card).findByRole('button', { name: /^No action needed/ }));
+    const dismiss = await within(card).findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
+    await user.click(dismiss);
     await user.click(await within(await screen.findByRole('region', { name: 'Notifications' })).findByRole('button', { name: 'Undo' }));
     await act(() => settle());
     expect(onOpenCase).not.toHaveBeenCalled();
@@ -154,6 +156,7 @@ describe('a controller the provider made still answers its toasts through the ca
     const { user } = renderPieces(w, <CaseCard reportId={first.id} onOpenReport={onOpenReport} />);
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
     (await within(card).findByRole('button', { name: /^No action needed/ })).focus();
+    w.clock.t += 1000;
     await user.keyboard('{Control>}{Enter}{/Control}');
     await waitFor(() => expect(onOpenReport).toHaveBeenCalledWith(second.id));
     await act(() => settle());

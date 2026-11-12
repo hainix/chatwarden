@@ -43,6 +43,8 @@ async function openCase(w: HubWorld, id: string) {
   const r = renderHub(w, { path: `/reports/${id}` });
   await screen.findByRole('heading', { level: 2, name: /report against/ });
   await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('radio', { name: 'Fair' });
+  // A case accepts an act key a moment after it appeared; the guard's clock moves with the world's.
+  w.clock.t += 400;
   return r;
 }
 async function fillAnd(user: ReturnType<typeof renderHub>['user'], button: string | RegExp) {

@@ -1,11 +1,12 @@
-import { reasonLabel, safeWarn, suggestedRule } from '@chatwarden/core';
-import type { CaseClaim, Chatwarden, ReportQuery, StaffReport } from '@chatwarden/core';
+import { BULK_DISMISS_MAX, reasonLabel, safeWarn, suggestedRule } from '@chatwarden/core';
+import type { CaseClaim, Chatwarden, ReporterAccuracy, ReportQuery, StaffReport } from '@chatwarden/core';
 import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
+import { roleAtLeast } from '../permissions.js';
 import { applyDecision, checkDurationsOffered, needForDecision, parseDecision, peopleOf } from './apply.js';
 import type { AdminContext } from './context.js';
 import { gateCase } from './claims.js';
-import { bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
+import { bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
 
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
 const HISTORY_REPORTS_DEFAULT = 20;
@@ -56,13 +57,45 @@ export interface ReportSummary {
   claim: { by: string; since: number; until: number } | null;
   /** The other staff actors who have this person's case open right now (the caller left out), sorted. In-memory per process, a hint. */
   viewing: string[];
+  /**
+   * How the reporter's reports of the last 30 days turned out, on OPEN rows and only for a caller whose role holds `history.read`;
+   * null on a decided row, for a caller without that permission, when the reporter has no decided report in the window, and when
+   * the store cannot tell. Optional on the type (a client reads an older server's rows), always set by this server. `falseRate` is null below 5 decided reports. A ranking hint and a line on the case: never a reason to
+   * hide a report. Staff only.
+   */
+  reporterAccuracy?: ReporterAccuracySummary | null;
 }
+
+/** The part of a reporter's accuracy a queue row carries. */
+export interface ReporterAccuracySummary {
+  decided: number;
+  unfounded: number;
+  falseRate: number | null;
+  habitual: boolean;
+}
+
+/** What a bulk dismissal answers: counts only. Never a report id, a subject id or a reporter ref. */
+const counts = (res: Extract<Awaited<ReturnType<Chatwarden['reports']['dismissMany']>>, { ok: true }>) => ({
+  ok: true,
+  dryRun: res.dryRun,
+  open: res.open,
+  dismissed: res.dismissed,
+  replayed: res.replayed,
+  skipped: { claimed: res.skipped.claimed, decided: res.skipped.decided },
+  more: res.more,
+});
 
 /** The claim as the API shows it: exactly `{ by, since, until }`. */
 const claimView = (c: CaseClaim | undefined): ReportSummary['claim'] => (c === undefined ? null : { by: c.by, since: c.since, until: c.until });
 
 /** Project a report to its queue summary. Lists each field by name, so a field added to the record never leaks in. */
-const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string[] | undefined, label: string | null): ReportSummary => ({
+const summarize = (
+  r: StaffReport,
+  claim: CaseClaim | undefined,
+  viewing: string[] | undefined,
+  label: string | null,
+  accuracy: ReporterAccuracy | undefined,
+): ReportSummary => ({
   id: r.id,
   createdAt: r.createdAt,
   roomId: r.roomId,
@@ -80,6 +113,8 @@ const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string
   reporterHandle: r.reporterHandle === '' ? null : r.reporterHandle,
   claim: claimView(claim),
   viewing: viewing === undefined ? [] : [...viewing],
+  reporterAccuracy:
+    accuracy === undefined ? null : { decided: accuracy.decided, unfounded: accuracy.unfounded, falseRate: accuracy.falseRate, habitual: accuracy.habitual },
 });
 
 /**
@@ -92,10 +127,20 @@ const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string
  *   suggestion for the reported person (`rule` is the first rule of the reported reason, `'uncovered'` with none), and the
  *   `claim` on the reported person's case (`{ by, since, until }` or null) (`report.view`)
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
- * - `POST /reports/:id/decide { verdict, actions, reason, evidence?, takeOver? }`: decide (`report.decide`, replays too). Another
+ * - `POST /reports/:id/decide { verdict, actions, reason?, evidence?, takeOver? }`: decide (`report.decide`, replays too). `reason` may be
+ *   left out (or blank) only for a `no_action` with no actions, a one-click dismissal: the core then stores `NO_ACTION_DEFAULT_REASON`.
+ *   Every other decision needs a real reason (400 `invalid_request`). Another
  *   moderator's live claim on the reported person is 409 `claimed` unless `takeOver: true` and the caller holds
  *   `claims.override` (then the takeover is audited as `case.takeover`, first). Deciding the person's last open report releases the
  *   caller's claim; while they have other open reports it is kept (one case per person).
+ * - `POST /reports/dismiss-open { scope: 'person' | 'reporter', ref, takeOver?, dryRun? }`: "nothing wrong here" for every open report about a person
+ *   (their case) or from a reporter, in one call (`reports.decide.bulk`, and `reports.decide`): at most 200, `more: true` when there are
+ *   more. 200 `{ ok, dryRun, open, dismissed, replayed, skipped: { claimed, decided }, more }`: counts only, no ids. Each report is
+ *   closed like a single `no_action` with the standard reason; a sweep never marks bad faith. Person scope behaves like `decide`: another
+ *   moderator's live claim is 409 `claimed` unless `takeOver: true` and the caller holds `claims.override` (audited `case.takeover`,
+ *   first). Reporter scope never takes a case over: cases held by others are skipped and counted. Audited: one `report.dismiss_case` or
+ *   `report.dismiss_reporter` row first (required: a sweep that cannot be recorded does not happen), then one `report.decide` row per
+ *   report closed (best effort). `dryRun` counts and writes nothing. An unknown ref is 200 with zeros. `reason` is not accepted.
  * - `GET /people/:ref/history?limit`: a person's actions, recent reports against them, their sanctions as
  *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
  *   filed stand, `asReporter` (with `reasonMatched` of `reasonDecided`: how often their reported reason was borne out by the decision), and `handle`, their handle on the newest report filed against them that recorded one, or null (`history.view`)
@@ -131,9 +176,24 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const open = [...new Set(page.items.filter((r) => r.status === 'open').map((r) => r.targetPerson))];
       const claims = cw.cases.holders(open);
       const viewers = cw.cases.viewersOf(open, c.authz.actor);
+      // The reporters' false-report figures: one batch for the page, for a caller who may read people's histories only. A failure
+      // here must not take the queue down: the rows then carry null.
+      let accuracy = new Map<string, ReporterAccuracy>();
+      if (roleAtLeast(c.authz.role, ctx.permissions['history.read'])) {
+        const reporters = [...new Set(page.items.filter((r) => r.status === 'open').map((r) => r.reporterPerson))];
+        if (reporters.length > 0) {
+          try {
+            accuracy = cw.reports.reporterAccuracy(reporters);
+          } catch {
+            safeWarn(ctx.logger, 'chatwarden.http_accuracy_failed');
+          }
+        }
+      }
       c.audit('report.view');
       const items = page.items.map((r) =>
-        r.status === 'open' ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r)) : summarize(r, undefined, undefined, labelOf(r)),
+        r.status === 'open'
+          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), accuracy.get(r.reporterPerson))
+          : summarize(r, undefined, undefined, labelOf(r), undefined),
       );
       return { status: 200, body: { items, next: page.next } };
     }),
@@ -201,6 +261,48 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         }
       }
       return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups } };
+    }),
+
+    'POST /reports/dismiss-open': ctx.secure('reports.decide.bulk', async (c) => {
+      // A sweep is a lot of dismissals: it also needs the right to dismiss one (lowering one permission never bypasses the other).
+      c.need('reports.decide');
+      const { scope, ref, takeOver, dryRun } = bodyDismissOpen(bodyObject(c.req));
+      const actor = c.authz.actor;
+      const canonical = cw.people.canonical(ref);
+
+      if (dryRun) {
+        // Counts only: nothing is written, no case is taken over, no audit row. The claims are counted, not honoured, so the
+        // preview shows how many reports are held by someone else.
+        const res = await cw.reports.dismissMany({ scope: scope === 'person' ? { person: ref } : { reporter: ref }, actor, dryRun: true });
+        if (!res.ok) throw new ValidationError();
+        return { status: 200, body: counts(res) };
+      }
+
+      // A person's case is claimed by one moderator at a time: another's live claim is 409 unless a senior takes it over (audited
+      // `case.takeover`, first). A reporter's sweep spans many cases and never takes one over: held cases are skipped and counted.
+      if (scope === 'person') gateCase(ctx, c, ref, takeOver);
+      // The summary row first, in `required` mode: a sweep that cannot be recorded does not happen.
+      c.audit(scope === 'person' ? 'report.dismiss_case' : 'report.dismiss_reporter', { type: 'person', ref: canonical }, 'required');
+      const res = await cw.reports.dismissMany({
+        scope: scope === 'person' ? { person: ref } : { reporter: ref },
+        actor,
+        ignoreClaims: scope === 'person',
+        limit: BULK_DISMISS_MAX,
+        // One `report.decide` row per report closed (a replay included, like the single route), written the moment it is closed, so a
+        // store failure later in the sweep still leaves a row for every report already closed. The reports are closed: an audit
+        // failure is logged, never turned into an error (and a throw here never stops the sweep).
+        onClosed: (id) => c.audit('report.decide', { type: 'report', ref: id }, 'best-effort'),
+      });
+      if (!res.ok) throw new ValidationError();
+      // The caller's own claim ends on a case with nothing left open; while other reports about the person are open it is kept.
+      for (const person of res.targets) {
+        try {
+          cw.cases.releaseWhenDone(person, actor);
+        } catch {
+          safeWarn(ctx.logger, 'chatwarden.http_release_failed');
+        }
+      }
+      return { status: 200, body: counts(res) };
     }),
 
     'GET /people/:ref/history': ctx.secure('history.read', (c) => {

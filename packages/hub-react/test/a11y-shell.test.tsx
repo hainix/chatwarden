@@ -85,7 +85,7 @@ describe.each(['light', 'dark'] as const)('axe on the workbench, %s theme', (the
     const { container, user } = renderHub(w, { theme });
     await ready();
     await user.keyboard('?');
-    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
     expect(await violations(container)).toEqual([]);
   });
 

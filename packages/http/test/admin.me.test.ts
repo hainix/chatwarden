@@ -25,6 +25,15 @@ describe('GET /me', () => {
     });
   }
 
+  it('reports.decide.bulk is in .can: a moderator by default, a senior only when raised', async () => {
+    const w = await world();
+    expect(((await w.call('GET', '/me', { role: 'moderator' })).body as { can: Record<string, boolean> }).can['reports.decide.bulk']).toBe(true);
+    expect(PERMISSIONS['reports.decide.bulk']).toBe('moderator');
+    const raised = await world({ permissions: { 'reports.decide.bulk': 'senior' } });
+    expect(((await raised.call('GET', '/me', { role: 'moderator' })).body as { can: Record<string, boolean> }).can['reports.decide.bulk']).toBe(false);
+    expect(((await raised.call('GET', '/me', { role: 'senior' })).body as { can: Record<string, boolean> }).can['reports.decide.bulk']).toBe(true);
+  });
+
   it('the default table gives the documented answers at the edges', async () => {
     const w = await world();
     const mod = (await w.call('GET', '/me', { role: 'moderator' })).body as { can: Record<string, boolean> };

@@ -6,7 +6,8 @@ import { rulesCss } from './css.js';
 
 const css = rulesCss();
 const start = css.indexOf('.cw-hub .cw-nowrap {');
-const end = css.indexOf('@media (prefers-reduced-motion');
+// (The first such query after the block starts: an earlier one, in the older rules, is not its end.)
+const end = css.indexOf('@media (prefers-reduced-motion', start);
 const block = css.slice(start, end);
 
 describe('the new screens block uses tokens for radius and space', () => {

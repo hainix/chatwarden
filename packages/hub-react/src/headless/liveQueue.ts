@@ -122,7 +122,7 @@ export interface LiveQueueStore extends Store<LiveQueueState> {
   isHeldOff: (person: string) => boolean;
   /** One Take-next guard for the whole hub (button, shortcut, command bar): false while one is running or cooling down. */
   beginTake: () => boolean;
-  /** Ends a Take next; the guard stays shut for `cooldownMs` more. */
+  /** Ends a Take next; the guard stays shut for `cooldownMs` more (none at 0). */
   endTake: (cooldownMs: number) => void;
 }
 
@@ -213,7 +213,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     // The token is taken before the list: a change in between shows up at the next poll instead of being lost.
     const at = knownToken ?? (await client.changes()).token;
     const all = await fetchAllOpen(client);
-    const groups = groupQueue(all.items, { sort: 'oldest' });
+    const groups = groupQueue(all.items, { sort: 'oldest', rankDown: { now: now() } });
     if (mine !== seq) return groups;
     token = at;
     commit((prev) => {
@@ -460,7 +460,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     },
     endTake(cooldownMs) {
       timers.clearTimeout(takeTimer);
-      if (disposed) {
+      if (disposed || cooldownMs <= 0) {
         takeBusy = false;
         return;
       }
