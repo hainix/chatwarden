@@ -444,4 +444,74 @@ CREATE INDEX kit_strikes_by_at ON kit_strikes (at);
 CREATE INDEX kit_reports_by_reporter_outcome ON kit_reports (reporter_subject, created_at, status, bad_faith);
 `,
   },
+  {
+    version: 20,
+    // AI levels 1 and 2 (0.1.6). Two new tables and their indexes; no existing table, column or row is touched, and the runner wraps
+    // this in one savepoint with the version bump, so a failure leaves version 19 and neither table.
+    //   kit_ai_reads holds one row per (report, input hash): the model's validated read, the usage and cost of the call, and the state
+    //     of the call while it runs. `lease_until` makes "I am about to call the model" visible to every process on the database
+    //     (a pending row is owned until then); UNIQUE (report_id, input_hash) is the guard that lets exactly one process win.
+    //     `retry_at` is when the sweeper may take a failed (or budget-skipped) row again. It holds no chat text but the one-line
+    //     `summary` and no identity (no subject, handle, seat or hash of a person). It goes with its report (purgeReports) and is
+    //     swept by age as a backstop (purgeAi).
+    //       kit_ai_reads_by_report (report_id, created_at): the newest read of a report, and a queue page's reads (loadAiReads).
+    //       kit_ai_reads_by_time (created_at): today's spend and the retention sweep.
+    //       kit_ai_reads_retry (status, retry_at): the sweeper's "failed and due" and "pending and lapsed" scans.
+    //   kit_ai_outcomes is the casebook: one row per decided report that had an AI read, written in the transaction of the decision.
+    //     Ids, counts and the human's final choices, so it keeps for `retention.aiOutcomesMs` (365 days) after the report is gone.
+    //     `example_json` (up to 6 pseudonymised lines, aliases only) is the only chat text that outlives a report; it is set to
+    //     NULL on its own shorter clock (`retention.aiExamplesMs`, 180 days) and the row stays with its counts.
+    //       kit_ai_outcomes_by_rule (rule, decided_at): the examples query and the per-rule stats.
+    sql: `
+CREATE TABLE kit_ai_reads (
+  id             TEXT PRIMARY KEY,
+  report_id      TEXT NOT NULL,
+  input_hash     TEXT NOT NULL,
+  status         TEXT NOT NULL CHECK (status IN ('pending', 'ok', 'declined', 'invalid', 'failed', 'skipped')),
+  attempts       INTEGER NOT NULL DEFAULT 0,
+  retry_at       INTEGER,
+  lease_until    INTEGER,
+  error_kind     TEXT,
+  adapter        TEXT,
+  model          TEXT,
+  prompt_version INTEGER NOT NULL,
+  severity       TEXT,
+  rule           TEXT,
+  summary        TEXT,
+  evidence_json  TEXT,
+  confidence     TEXT,
+  injection      INTEGER NOT NULL DEFAULT 0,
+  rec_json       TEXT,
+  input_tokens   INTEGER,
+  output_tokens  INTEGER,
+  cache_read_tokens  INTEGER,
+  cache_write_tokens INTEGER,
+  cost_micros    INTEGER NOT NULL DEFAULT 0,
+  latency_ms     INTEGER,
+  created_at     INTEGER NOT NULL,
+  UNIQUE (report_id, input_hash)
+);
+CREATE INDEX kit_ai_reads_by_report ON kit_ai_reads (report_id, created_at);
+CREATE INDEX kit_ai_reads_by_time ON kit_ai_reads (created_at);
+CREATE INDEX kit_ai_reads_retry ON kit_ai_reads (status, retry_at);
+
+CREATE TABLE kit_ai_outcomes (
+  report_id   TEXT PRIMARY KEY,
+  read_id     TEXT,
+  decided_at  INTEGER NOT NULL,
+  level       INTEGER NOT NULL,
+  verdict     TEXT NOT NULL,
+  rule        TEXT,
+  severity    TEXT,
+  ai_verdict  TEXT,
+  agreement   TEXT NOT NULL CHECK (agreement IN ('agree', 'override', 'none')),
+  detail_json TEXT NOT NULL,
+  reversed    INTEGER NOT NULL DEFAULT 0,
+  dont_teach  INTEGER NOT NULL DEFAULT 0,
+  bad_faith   INTEGER NOT NULL DEFAULT 0,
+  example_json TEXT
+);
+CREATE INDEX kit_ai_outcomes_by_rule ON kit_ai_outcomes (rule, decided_at);
+`,
+  },
 ];

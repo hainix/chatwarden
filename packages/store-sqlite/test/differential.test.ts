@@ -166,3 +166,119 @@ describe('reports: listReportsByPerson', () => {
     }
   });
 });
+
+describe('the AI methods: reads, outcomes, spend, examples, stats and purge', () => {
+  const MIN = 60_000;
+  const DAY = 86_400_000;
+  const MIDNIGHT = Math.floor(NOW / DAY) * DAY;
+
+  /** Everything one store answers for a fixed script; the random read ids are replaced by the order they were issued in. */
+  function run(s: Store): unknown[] {
+    const out: unknown[] = [];
+    const issued: string[] = [];
+    const label = (id: string): string => `#${issued.indexOf(id)}`;
+    const scrub = (value: unknown): unknown =>
+      JSON.parse(JSON.stringify(value, (k, v: unknown) => (k === 'id' && typeof v === 'string' ? label(v) : v)));
+    const log = (name: string, value: unknown) => out.push([name, scrub(value)]);
+    const reserve = (reportId: string, inputHash: string, lease: number, now: number) => {
+      const r = s.reserveAiRead!({ reportId, inputHash, promptVersion: 1, adapter: 'fake:one' }, lease, now);
+      if (r.reserved) issued.push(r.id);
+      return r.reserved ? { reserved: true, id: r.id } : r;
+    };
+    const readOf = (n: number) => ({
+      severity: (['banter', 'rude', 'hostile', 'severe'] as const)[n % 4]!,
+      rule: n % 5 === 0 ? ('uncovered' as const) : n % 7 === 0 ? null : (n % 4) + 1,
+      summary: `read ${n}`,
+      evidence: [`L${n % 9}`],
+      confidence: (['low', 'medium', 'high'] as const)[n % 3]!,
+      injectionSuspected: n % 6 === 0,
+      recommendation: n % 2 === 0 ? { verdict: 'upheld' as const, severity: 'hostile' as const, rule: 1, evidence: ['L1'] } : null,
+    });
+    const usageOf = (n: number) => ({ model: 'm', inputTokens: n, outputTokens: n + 1, cacheReadTokens: 0, cacheWriteTokens: n % 3, costMicros: 100 + n, latencyMs: 10 + n });
+
+    // Reads at distinct times either side of midnight.
+    for (let i = 0; i < 24; i++) {
+      const at = MIDNIGHT - 6 * 3600_000 + i * 30 * MIN;
+      log(`reserve ${i}`, reserve(`rep${i % 8}`, `h${i % 3}`, at + 5 * MIN, at));
+    }
+    log('reserve again', reserve('rep0', 'h0', NOW, MIDNIGHT - 6 * 3600_000 + 1));
+    for (let i = 0; i < issued.length; i++) {
+      const id = issued[i]!;
+      if (i % 4 === 0) log(`complete ${i}`, s.completeAiRead!(id, { ...usageOf(i), read: readOf(i) }));
+      else if (i % 4 === 1) log(`fail ${i}`, s.failAiRead!(id, 'failed', 'retryable', MIDNIGHT + i * MIN, NOW));
+      else if (i % 8 === 2) log(`invalid ${i}`, s.failAiRead!(id, 'invalid', 'invalid', null, NOW, usageOf(i)));
+      else if (i % 8 === 6) log(`skip ${i}`, s.failAiRead!(id, 'skipped', 'budget', MIDNIGHT + DAY, NOW));
+    }
+    log('complete twice', s.completeAiRead!(issued[0]!, { ...usageOf(0), read: readOf(99) }));
+    log('retake due', reserve('rep1', 'h1', MIDNIGHT + 9 * MIN, MIDNIGHT + 8 * MIN));
+    log('retake not due', reserve('rep5', 'h2', MIDNIGHT + 9 * MIN, MIDNIGHT + 1));
+    log('token', s.changeToken() === s.changeToken());
+
+    for (let r = 0; r < 9; r++) log(`loadAiRead rep${r}`, s.loadAiRead!(`rep${r}`));
+    log('loadAiReads', s.loadAiReads!(['rep0', 'rep1', 'rep2', 'rep3', 'rep4', 'rep5', 'rep6', 'rep7', 'rep0', 'nobody']));
+    for (const since of [0, MIDNIGHT - 3 * 3600_000, MIDNIGHT, MIDNIGHT + 1, MIDNIGHT + DAY]) log(`spend ${since}`, s.aiSpendSince!(since));
+    for (const [t, n] of [[MIDNIGHT, 3], [MIDNIGHT + 2 * 3600_000, 50], [MIDNIGHT + DAY, 5], [MIDNIGHT - DAY, 100]] as const) {
+      log(`retries ${t} ${n}`, s.listAiRetries!(t, n));
+    }
+
+    // Outcomes.
+    const verdicts = ['upheld', 'noted', 'no_action'] as const;
+    for (let i = 0; i < 30; i++) {
+      const v = verdicts[i % 3]!;
+      const aiV = i % 5 === 0 ? null : verdicts[(i + (i % 4 === 0 ? 1 : 0)) % 3]!;
+      const agreement = aiV === null ? 'none' : (aiV === 'no_action') === (v === 'no_action') ? 'agree' : 'override';
+      log(
+        `outcome ${i}`,
+        s.insertAiOutcome!({
+          reportId: `o${i}`,
+          readId: i % 2 === 0 ? `read${i}` : null,
+          decidedAt: NOW - i * 7 * DAY,
+          level: i % 4 === 0 ? 1 : 2,
+          verdict: v,
+          rule: i % 9 === 0 ? null : i % 7 === 0 ? 'uncovered' : String((i % 12) + 1),
+          severity: i % 6 === 0 ? null : (['rude', 'hostile'] as const)[i % 2]!,
+          aiVerdict: aiV,
+          agreement,
+          detail: { verdict: agreement === 'agree', outcome: 'same', oneClick: i % 2 === 0 },
+          badFaith: i % 11 === 0,
+          example: i % 4 === 3 ? null : { rule: (i % 12) + 1, severity: 'hostile', verdict: v, lines: [{ who: 'P1', text: `zorbak ${i}` }] },
+        }),
+      );
+    }
+    log('outcome twice', s.insertAiOutcome!({ ...(s.loadAiOutcome!('o3') as object), reportId: 'o3' } as never));
+    for (const [id, patch] of [['o1', { reversed: true }], ['o2', { dontTeach: true }], ['o5', { reversed: true, dontTeach: true }], ['nope', { reversed: true }]] as const) {
+      log(`mark ${id}`, s.markAiOutcome!(id, patch));
+    }
+    log('token moved', s.changeToken().length > 0);
+    for (const id of ['o0', 'o1', 'o2', 'o3', 'o5', 'o9', 'nope']) log(`loadAiOutcome ${id}`, s.loadAiOutcome!(id));
+    for (const [rule, sev] of [['1', 'hostile'], ['2', 'rude'], ['2', 'hostile'], ['3', 'rude'], ['uncovered', 'hostile'], ['99', 'rude']] as const) {
+      for (const [limit, since] of [[2, 0], [10, NOW - 100 * DAY], [1, NOW - 10 * DAY], [0, 0]] as const) {
+        log(`examples ${rule} ${sev} ${limit} ${since}`, s.aiExamples!(rule, sev, limit, since));
+      }
+    }
+    for (const since of [0, NOW - 30 * DAY, NOW - 100 * DAY, NOW - 400 * DAY, NOW + 1]) {
+      log(`teachable ${since}`, s.aiTeachableCount!(since));
+      log(`stats ${since}`, s.aiStats!(since));
+    }
+
+    // Purge: reports with reads first, then the AI clocks.
+    for (let i = 0; i < 4; i++) s.insertReport({ ...report({ id: `rep${i}`, createdAt: MIDNIGHT - (i % 2 === 0 ? 100 : 10) * DAY, reporterSubject: `s_p${i}`, roomId: `R${i}` }) });
+    log('purgeReports', s.purgeReports(MIDNIGHT - 90 * DAY, MIDNIGHT - 30 * DAY));
+    for (let r = 0; r < 9; r++) log(`after purgeReports rep${r}`, s.loadAiRead!(`rep${r}`));
+    log('spend after', s.aiSpendSince!(0));
+    log('purgeAi', s.purgeAi!(MIDNIGHT - 2 * DAY, NOW - 150 * DAY, NOW - 60 * DAY));
+    log('stats after purge', s.aiStats!(0));
+    log('teachable after purge', s.aiTeachableCount!(0));
+    log('examples after purge', s.aiExamples!('1', 'hostile', 20, 0));
+    for (let i = 0; i < 30; i += 3) log(`outcome after ${i}`, s.loadAiOutcome!(`o${i}`));
+    log('retries after', s.listAiRetries!(NOW + DAY, 100));
+    return out;
+  }
+
+  it('give the same answer to every call of the same script, read ids aside', () => {
+    const a = run(mem());
+    const b = run(sql());
+    expect(a.length).toBeGreaterThan(150);
+    expect(b).toEqual(a);
+  });
+});
