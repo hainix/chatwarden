@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createChatwarden } from '@chatwarden/core';
 import type { DiscordThreadRow, KitEvent, Logger, RawWho } from '@chatwarden/core';
 import { MemoryStore, withMemoryAppeals } from '@chatwarden/store-memory';
@@ -432,5 +432,47 @@ describe('a moot closure posts nothing', () => {
     expect(await cw.appeals.decide({ appealId: filed.appeal.id, outcome: 'bogus' as never, actor: 'senior_bea', reason: REASON })).toEqual({ ok: false, error: 'invalid' });
     await idle();
     expect(contents(d.calls).filter((t) => t.includes('Appeal decided'))).toEqual([]);
+  });
+});
+
+describe('the feed never holds statement text: it reads the sanction of an appeal and nothing else', () => {
+  it('FeedKit.appeals.get is typed to answer the sanction only, so a kit has no statement to hand the feed', () => {
+    type Read = NonNullable<ReturnType<NonNullable<FeedKit['appeals']>['get']>>;
+    expectTypeOf<keyof Read>().toEqualTypeOf<'sanction'>();
+    expectTypeOf<keyof Read['sanction']>().toEqualTypeOf<'kind' | 'startsAt' | 'endsAt'>();
+    // a kit that answers only the sanction satisfies the type; a real Chatwarden (which answers more) still does
+    const narrow: NonNullable<FeedKit['appeals']> = { get: () => ({ sanction: { kind: 'chat', startsAt: 1, endsAt: 2 } }) };
+    expect(narrow.get('x')).toEqual({ sanction: { kind: 'chat', startsAt: 1, endsAt: 2 } });
+    expectTypeOf<Awaited<ReturnType<typeof createChatwarden>>['appeals']>().toMatchTypeOf<NonNullable<FeedKit['appeals']>>();
+  });
+
+  it('at run time the feed reads only sanction.kind, startsAt and endsAt: the statement, the decision and the ids are never touched', async () => {
+    const k = fakeKit();
+    const e = created(sid());
+    const touched: string[] = [];
+    const watch = <T extends object>(label: string, target: T): T =>
+      new Proxy(target, {
+        get: (t, key, r) => {
+          touched.push(`${label}.${String(key)}`);
+          if (key === 'statement' || key === 'decided') throw new Error('the feed read what it must never read');
+          return Reflect.get(t, key, r);
+        },
+      });
+    k.kit.appeals = {
+      get: () =>
+        watch('appeal', {
+          sanction: watch('sanction', { groupId: id22(), kind: 'chat', startsAt: NOW, endsAt: NOW + DAY, decidedBy: 'mod_ann' }),
+          statement: STATEMENT,
+          decided: { by: 'senior_bea', reason: REASON },
+        }) as never,
+    };
+    const { d, logged } = start(k);
+    await k.emit(e);
+    await k.emit(decided(sid(), 'reduce'));
+    await settle();
+    expect(contents(d.calls)[0]).toContain('Appeal filed against a 24-hour chat restriction, Rule 2.');
+    expect(new Set(touched)).toEqual(new Set(['appeal.sanction', 'sanction.endsAt', 'sanction.startsAt']));
+    expect(logged).toEqual([]);
+    expect(leaks(JSON.stringify(d.calls), [STATEMENT, REASON, 'mod_ann', 'senior_bea']), 'no post').toEqual([]);
   });
 });

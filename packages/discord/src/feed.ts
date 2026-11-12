@@ -41,9 +41,15 @@ export interface FeedKit {
   discordThreads: Chatwarden['discordThreads'];
   /**
    * The staff read of one appeal, used only to say how long the sanction was ("a 24-hour chat restriction"). Optional: without it, or when it fails
-   * or finds nothing, the post names the kind and no length. Only the sanction's kind and times are read; the statement it also holds is never used.
+   * or finds nothing, the post names the kind and no length. The type answers the sanction's kind and times and nothing else, so the feed never
+   * holds an appeal's statement (a real `Chatwarden` answers more and still satisfies it; the feed copies the two times out and drops the rest).
    */
-  appeals?: Pick<Chatwarden['appeals'], 'get'>;
+  appeals?: { get(appealId: string): FeedAppealRead | null };
+}
+
+/** What the feed reads of one appeal: its sanction's kind and times. */
+export interface FeedAppealRead {
+  sanction: { kind: string; startsAt: number; endsAt: number | null };
 }
 
 export interface DiscordFeedOptions {
@@ -513,9 +519,11 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
   const sanctionLength = (op: string, appealId: unknown): number | null | undefined => {
     if (cw.appeals === undefined || !isString(appealId)) return undefined;
     try {
+      // Only the two times leave this line; whatever else the kit's read holds is dropped here.
       const sanction = cw.appeals.get(appealId)?.sanction;
       if (sanction === undefined) return undefined;
-      return sanction.endsAt === null ? null : sanction.endsAt - sanction.startsAt;
+      const { startsAt, endsAt } = sanction;
+      return endsAt === null ? null : endsAt - startsAt;
     } catch (err) {
       fail(op, err);
       return undefined;
