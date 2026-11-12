@@ -27,7 +27,7 @@ import { checkPace, mergePace } from './pace.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
 import { NameService } from './nameService.js';
 import type { NameCheckResult } from './names.js';
-import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, PlayerAppeal } from './appeals.js';
+import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
@@ -536,6 +536,13 @@ export interface Chatwarden {
     pendingRename(who: RawWho): boolean;
     /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. */
     renamed(who: RawWho): boolean;
+    /**
+     * Whether `requireRename` can work right now: `names.renames` is on AND the store can release a rename (the test `requireRename` applies
+     * first). A live read. For a staff screen, so it never offers a rename that always answers `off`.
+     */
+    renamesEnabled(): boolean;
+    /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. */
+    renamesOf(subject: SubjectId): Array<{ at: number; pending: boolean }>;
   };
   /**
    * The AI read and recommend service. Always present: without an `ai` option (or at level 0) it answers as if there were no AI. A
@@ -675,6 +682,11 @@ export interface Chatwarden {
      * sanctions; a reduction is `lightened`, shown beside the rate and never in it. `RangeError` for another window.
      */
     stats(q?: { days?: 30 | 90 | 365 }): AppealStats;
+    /**
+     * One person's appeals (across their merged subjects) as summaries, newest first, at most 50; a moot appeal is left out. For the person's
+     * page. Empty with appeals off or for a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
+     */
+    forPerson(subject: SubjectId): AppealSummary[];
   };
   /**
    * Decide a report: close it, write each sanction and its notice, and tell the people involved, in one
@@ -1388,6 +1400,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       requireRename: (input) => nameService.requireRename(input),
       pendingRename: (who) => nameService.pendingRename(who),
       renamed: (who) => nameService.renamed(who),
+      renamesEnabled: () => nameService.renamesEnabled(),
+      renamesOf: (subject) => nameService.renamesOf(subject),
     },
     rules,
     get profile() {
@@ -1425,6 +1439,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       get: (id) => appealService.get(id),
       openCount: () => appealService.openCount(),
       stats: (q) => appealService.stats(q),
+      forPerson: (subject) => appealService.forPerson(subject),
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),

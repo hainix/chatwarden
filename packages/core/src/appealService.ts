@@ -413,6 +413,18 @@ export class AppealService {
     }
   }
 
+  /** One person's appeals as summaries, newest first, at most 50, a moot one left out. Empty with appeals off, for an unknown person and on a store failure. Staff only. */
+  forPerson(subject: SubjectId): AppealSummary[] {
+    if (!this.enabled() || typeof subject !== 'string' || subject === '') return [];
+    try {
+      const person = this.d.subjects.canonical(subject);
+      return (this.d.store.listAppealsBy?.(this.d.subjects.aliasesOf(person), MINE_MAX) ?? []).filter((r) => r.status !== 'moot').map((r) => this.summaryOf(r));
+    } catch (err) {
+      this.warn(err);
+      return [];
+    }
+  }
+
   /** One appeal in full (the statement included), or null for an unknown id, a store failure, or with appeals off. */
   get(id: string): AppealDetail | null {
     if (!this.enabled() || typeof id !== 'string' || id === '') return null;

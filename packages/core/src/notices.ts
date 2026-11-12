@@ -366,6 +366,13 @@ export class NoticeService {
     return this.rowsOf(subject).some((r) => r.kind === 'rename_required' && r.withdrawnAt === null);
   }
 
+  /** A person's `rename_required` notices, newest first, withdrawn ones included, across their merged subjects. Staff-side. */
+  renameRows(subject: SubjectId): NoticeRow[] {
+    return this.rowsOf(subject)
+      .filter((r) => r.kind === 'rename_required')
+      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
+  }
+
   /** Can this build's store withdraw one notice by id? Without it a rename could never be released. */
   canWithdrawOne(): boolean {
     return typeof this.store.withdrawNotice === 'function';

@@ -46,6 +46,9 @@ interface CheckedRename {
   rule: number;
 }
 
+/** The most rename requests `renamesOf` lists. */
+const RENAMES_OF_MAX = 20;
+
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
 
 /** Why a name is refused, and the matcher's term id for a `name_not_allowed`. */
@@ -188,6 +191,25 @@ export class NameService {
       safeWarn(d.logger, 'chatwarden.event_failed', { error: errName(err) });
     }
     return { ok: true, noticeId };
+  }
+
+  /** May a moderator require a rename now: the setting is on and the store can release one (the test `requireRename` applies first). */
+  renamesEnabled(): boolean {
+    return this.d.settings().renames && this.d.notices.canWithdrawOne();
+  }
+
+  /** A person's rename requests, newest first (at most {@link RENAMES_OF_MAX}): when, and whether one still waits. No reason, actor or rule. Staff only. */
+  renamesOf(subject: SubjectId): Array<{ at: number; pending: boolean }> {
+    if (typeof subject !== 'string' || subject === '') return [];
+    try {
+      return this.d.notices
+        .renameRows(subject)
+        .slice(0, RENAMES_OF_MAX)
+        .map((r) => ({ at: r.createdAt, pending: r.withdrawnAt === null }));
+    } catch (err) {
+      safeWarn(this.d.logger, 'chatwarden.rename_failed', { error: errName(err) });
+      return [];
+    }
   }
 
   /** True while the person has a required rename they have not been released from. False for anyone the kit cannot find (never creates one). */
