@@ -1,5 +1,5 @@
-import { AiService, checkAiSetup, createInertAi } from './ai/service.js';
-import type { AiFacade, AiOptions } from './ai/service.js';
+import { createInertAi } from './ai/inert.js';
+import type { AiFacade, AiOptions, AiService } from './ai/service.js';
 import { AuditService } from './audit.js';
 import type { AuditPage, AuditQuery, AuditRecordInput } from './audit.js';
 import { ChatService } from './chat.js';
@@ -679,7 +679,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (opts.retention !== false && purgeEveryMs > MAX_PURGE_EVERY_MS) {
     throw new RangeError(`retention.everyMs must be at most ${MAX_PURGE_EVERY_MS}`);
   }
-  if (opts.ai !== undefined) checkAiSetup(store, opts.ai);
+  // The AI service is loaded only when an adapter is given, so a bundler can leave it (about 40 KB minified) out of a build that never passes one.
+  const aiModule = opts.ai === undefined ? undefined : await import('./ai/service.js');
+  if (opts.ai !== undefined && aiModule !== undefined) aiModule.checkAiSetup(store, opts.ai);
   const rules = opts.rules ?? defineRules(starterRules(baseProfile.rules));
   const autoRestrictRule = opts.autoRestrictRule ?? 1;
   const autoRule = rules.get(autoRestrictRule);
@@ -882,9 +884,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
 
   // The AI read service. It listens for new reports and only enqueues; with no adapter it is a facade that is always off.
   const aiService =
-    opts.ai === undefined
+    opts.ai === undefined || aiModule === undefined
       ? undefined
-      : new AiService({
+      : new aiModule.AiService({
           options: opts.ai,
           store,
           clock,
