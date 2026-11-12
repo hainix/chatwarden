@@ -20,7 +20,7 @@ exist in 18.3 (`useId`, `useRef`). The unit and interaction tests run on React 1
 only: no run-time import of it, or of the HTTP package, is in the bundle. Node 22.13 or newer for the tooling; the components
 themselves run in a browser and import no `node:` module.
 
-Your server needs `@chatwarden/http` for the routes the components call (`playerRoutes`). The JavaScript is under 10 KB gzipped
+Your server needs `@chatwarden/http` for the routes the components call (`playerRoutes`). The JavaScript is under 11 KB gzipped
 with React external, and the stylesheet under 6 KB.
 
 ## Quick start
@@ -240,7 +240,7 @@ Theming).
 | `MyRecord` | What is on the player's record now, newest first, from `GET /record`; or "Your record is clear". | `client`, `appealUrl`, `refreshKey` |
 | `RulesPage` | The summary and the numbered rules from `GET /rules`. The numbers are the kit's: a retired rule leaves a gap. | `client`, `refreshKey` |
 | `ReportDialog` | A one-step report: "Report this message?", the line, an optional "Why?" select (the studio's reasons in groups; required in the reason-required flow) and a note behind "Add a note". Maps every refusal the kit has to its own plain message and shows how many reports are left today. | `onSubmit(draft)` returning a `ReportResult`, `onClose`, `reporting` (from `GET /rules`), `line`, `targetName`, `extra` (experimental: your own controls in the form) (`onAddDetail` is deprecated and unused) |
-| `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when. | `until` (epoch ms or `null`), `byModerator`, `refCode` |
+| `RestrictedChatLine` | One line for where a chat box would be: why the player cannot type and until when; or, with `pace`, a pause (slow mode, too many lines, the same line again) and how long to wait, with no referee card. | `until` (epoch ms or `null`), `byModerator`, `refCode`; or `pace` (`{ reason: 'slow_mode' \| 'flood' \| 'duplicate', retryAfterMs }`, `@experimental`, new in 0.1.8: the refusal's own values; the end is worked out once on the first render) |
 
 - **The hold.** `canShow={false}` keeps notices and shows nothing, so a notice never interrupts a match. They are kept, not dropped and
   not acknowledged, and appear in order when `canShow` turns `true`. The list is asked for once more at that moment, so a warning that
@@ -420,7 +420,7 @@ Colour is used only where it means something: the accent for the player's own na
 ### Size
 
 Measured with React, React DOM and the kit external, minified and gzipped: the chat adds about 8 KB to a page that already has the
-player components, the chat entry on its own is about 15 KB, and `chat.css` is about 2 KB. The main entry stays under its own 10 KB budget.
+player components, the chat entry on its own is about 15 KB, and `chat.css` is about 2 KB. The main entry stays under its own 11 KB budget.
 
 ### The chat names
 

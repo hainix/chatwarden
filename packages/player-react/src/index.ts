@@ -27,6 +27,6 @@ export type {
 export { createT, en } from './i18n.js';
 export type { PlayerCatalog, PlayerParams, PlayerT, PlayerText } from './i18n.js';
 export type { PlayerUiProps } from './ui.js';
-export { dayText, timeLeft, untilText } from './format.js';
+export { dayText, secondsLeft, timeLeft, untilText } from './format.js';
 
 export type { NoticeKind, PlayerNotice, PlayerReporting, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';

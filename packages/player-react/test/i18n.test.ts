@@ -209,3 +209,37 @@ describe('the 0.1.2 catalogue stays whole in a patch release', () => {
   });
   // That each one carries the @deprecated mark is checked on the source in static.test.ts (this file runs in jsdom, with no file URLs).
 });
+
+describe('the pace words', () => {
+  const REASONS = ['slow_mode', 'flood', 'duplicate'] as const;
+
+  it('each reason has a sentence with the wait, and the wait carries its own "in" (no literal "in" before it)', () => {
+    for (const reason of REASONS) {
+      const words = text(`player.pace.${reason}`);
+      expect(words, reason).toContain('{left}');
+      expect(words, reason).not.toMatch(/\bin \{left\}/);
+      expect(words, reason).toMatch(/^[A-Z]/);
+      expect(words, reason).toMatch(/\.$/);
+    }
+    expect(text('player.pace.ready')).toMatch(/^[A-Z].*\.$/);
+  });
+
+  it('never shames and holds no id: plain second person, no accusation, no number but the wait', () => {
+    for (const key of ['player.pace.slow_mode', 'player.pace.flood', 'player.pace.duplicate', 'player.pace.ready']) {
+      const words = text(key);
+      expect(words, key).not.toMatch(/spam|flood(ing)? the|abus|violat|offen|punish|ban\b|warn|moderator|rule|report|your (id|account|name)|cheat|stupid|annoy/i);
+      expect(words, key).not.toMatch(/\d/);
+      expect(words, key).toMatch(/\byou\b/i);
+    }
+  });
+
+  it('fills {left}, and a translation that leaves one key out falls back to English for it', () => {
+    const t = createT({ ...en, 'player.pace.flood': 'Zu schnell: {left}.' }, 'de');
+    expect(t('player.pace.flood', { left: 'in 3 Sekunden' })).toBe('Zu schnell: in 3 Sekunden.');
+    expect(t('player.pace.duplicate', { left: 'in 3 seconds' })).toBe('You already sent that. Say something different, or try again in 3 seconds.');
+  });
+
+  it('are in the English catalogue the main entry carries, not in the chat words', () => {
+    for (const key of REASONS.map((r) => `player.pace.${r}`)) expect(Object.keys(en)).toContain(key);
+  });
+});

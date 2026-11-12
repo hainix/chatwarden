@@ -51,3 +51,15 @@ export function timeLeft(at: number, now: number, locale: string): string | null
   if (left < 2 * DAY) return rtf.format(Math.round(left / HOUR), 'hour');
   return rtf.format(Math.round(left / DAY), 'day');
 }
+
+/**
+ * A short wait (`ms` left, not an end time), as the locale says it ("in 3 seconds"): whole seconds, a part of a second counting as a whole
+ * one, up to 120 seconds; longer waits are {@link timeLeft}'s ("in 3 minutes"). Null for zero, a negative or a value that is not a finite
+ * number. The words carry their own "in": a sentence puts the value where the wait goes.
+ * @experimental
+ */
+export function secondsLeft(ms: number, locale: string): string | null {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || !(ms > 0)) return null;
+  if (ms > 120_000) return timeLeft(ms, 0, locale);
+  return new Intl.RelativeTimeFormat(safeLocale(locale), { numeric: 'always' }).format(Math.ceil(ms / 1000), 'second');
+}

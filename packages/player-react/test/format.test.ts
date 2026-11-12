@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayText, timeLeft, untilText } from '../src/format.js';
+import { dayText, secondsLeft, timeLeft, untilText } from '../src/format.js';
 import { DAY, HOUR, MINUTE, T0 } from './world.js';
 
 describe('dayText', () => {
@@ -52,5 +52,32 @@ describe('timeLeft', () => {
   });
   it('follows the locale', () => {
     expect(timeLeft(now + 2 * DAY, now, 'de')).toBe('in 2 Tagen');
+  });
+});
+
+describe('secondsLeft', () => {
+  it('is whole seconds, rounded up, in the locale words', () => {
+    expect(secondsLeft(500, 'en')).toBe('in 1 second');
+    expect(secondsLeft(1, 'en')).toBe('in 1 second');
+    expect(secondsLeft(1000, 'en')).toBe('in 1 second');
+    expect(secondsLeft(1001, 'en')).toBe('in 2 seconds');
+    expect(secondsLeft(3000, 'en')).toBe('in 3 seconds');
+    expect(secondsLeft(59_999, 'en')).toBe('in 60 seconds');
+  });
+  it('reads in seconds up to 120 and then defers to timeLeft', () => {
+    expect(secondsLeft(119_000, 'en')).toBe('in 119 seconds');
+    expect(secondsLeft(120_000, 'en')).toBe('in 120 seconds');
+    expect(secondsLeft(120_001, 'en')).toBe('in 3 minutes');
+    expect(secondsLeft(125_000, 'en')).toBe('in 3 minutes');
+    expect(secondsLeft(125_000, 'en')).toBe(timeLeft(125_000, 0, 'en'));
+    expect(secondsLeft(3 * 3_600_000, 'en')).toBe('in 3 hours');
+  });
+  it('says nothing for zero, a negative or a value that is not a finite number', () => {
+    for (const bad of [0, -1, -86_400_000, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) expect(secondsLeft(bad, 'en'), String(bad)).toBeNull();
+    expect(secondsLeft('3000' as never, 'en')).toBeNull();
+  });
+  it('follows the locale, and survives one the runtime does not know', () => {
+    expect(secondsLeft(3000, 'de')).toBe('in 3 Sekunden');
+    expect(secondsLeft(3000, 'not a locale')).toBe('in 3 seconds');
   });
 });

@@ -81,3 +81,82 @@ describe('RestrictedChatLine', () => {
     expect(screen.getByRole('status')).toHaveTextContent('(in 3 hours)');
   });
 });
+
+describe('RestrictedChatLine: a pace refusal (a pause, not a sanction)', () => {
+  const pause = (reason: 'slow_mode' | 'flood' | 'duplicate', retryAfterMs: number) => ({ reason, retryAfterMs });
+
+  it.each([
+    ['slow_mode', 'Slow mode is on. You can send another message in 3 seconds.'],
+    ['flood', 'You are sending messages too fast. Try again in 3 seconds.'],
+    ['duplicate', 'You already sent that. Say something different, or try again in 3 seconds.'],
+  ] as const)('%s renders its sentence with the wait, no referee card, role="status"', (reason, sentence) => {
+    const { container } = render(<RestrictedChatLine {...common} pace={pause(reason, 3000)} />);
+    const line = screen.getByRole('status');
+    expect(line).toHaveTextContent(sentence);
+    expect(container.querySelector('.cw-card')).toBeNull();
+    expect(line).not.toHaveTextContent(/moderator|filter|restriction|until/i);
+  });
+
+  it('the old until and byModerator props render exactly as before, with or without a refCode', () => {
+    const until = T0 + 3 * HOUR;
+    const { container } = render(<RestrictedChatLine {...common} until={until} byModerator refCode="M-1" />);
+    expect(container.querySelector('.cw-card')).not.toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('A moderator turned off your chat until Jan 15, 2027, 11:00 AM (in 3 hours). Reference M-1');
+  });
+
+  it('pace replaces until and byModerator when both are given', () => {
+    render(<RestrictedChatLine {...common} until={T0 + HOUR} byModerator pace={pause('flood', 5000)} />);
+    const line = screen.getByRole('status');
+    expect(line).toHaveTextContent('Try again in 5 seconds.');
+    expect(line).not.toHaveTextContent('moderator');
+  });
+
+  it('500 ms reads as 1 second, 119 000 in seconds, 125 000 in minutes', () => {
+    const a = render(<RestrictedChatLine {...common} pace={pause('flood', 500)} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Try again in 1 second.');
+    a.unmount();
+    const b = render(<RestrictedChatLine {...common} pace={pause('flood', 119_000)} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Try again in 119 seconds.');
+    b.unmount();
+    render(<RestrictedChatLine {...common} pace={pause('flood', 125_000)} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Try again in 3 minutes.');
+  });
+
+  it('a wait of 0 or less still renders a line, with no "in 0 seconds"', () => {
+    for (const retryAfterMs of [0, -5, Number.NaN]) {
+      const { unmount } = render(<RestrictedChatLine {...common} pace={pause('slow_mode', retryAfterMs)} />);
+      const line = screen.getByRole('status');
+      expect(line.textContent?.length).toBeGreaterThan(5);
+      expect(line).not.toHaveTextContent(/in 0|NaN|undefined|\{left\}/);
+      unmount();
+    }
+  });
+
+  it('a re-render does not restart the wait: the end is worked out once, on the first render', () => {
+    let t = T0;
+    const props = { locale: 'en', timeZone: 'UTC', now: () => t } as const;
+    const { rerender } = render(<RestrictedChatLine {...props} pace={pause('flood', 10_000)} />);
+    expect(screen.getByRole('status')).toHaveTextContent('in 10 seconds');
+    t += 4000;
+    rerender(<RestrictedChatLine {...props} pace={pause('flood', 10_000)} />);
+    expect(screen.getByRole('status')).toHaveTextContent('in 6 seconds');
+    // A new value for the same mounted line is ignored too: a line is one refusal.
+    t += 1000;
+    rerender(<RestrictedChatLine {...props} pace={pause('flood', 60_000)} />);
+    expect(screen.getByRole('status')).toHaveTextContent('in 5 seconds');
+  });
+
+  it('the words follow the translation, and a missing key falls back to English', () => {
+    const t = createT({ ...en, 'player.pace.flood': 'Zu schnell. Nochmal {left}.' }, 'de');
+    const a = render(<RestrictedChatLine {...common} t={t} locale="de" pace={pause('flood', 3000)} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Zu schnell. Nochmal in 3 Sekunden.');
+    a.unmount();
+    render(<RestrictedChatLine {...common} t={t} locale="de" pace={pause('slow_mode', 3000)} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Slow mode is on.');
+  });
+
+  it('shows no refCode for a pause', () => {
+    render(<RestrictedChatLine {...common} refCode="M-9" pace={pause('duplicate', 4000)} />);
+    expect(screen.getByRole('status')).not.toHaveTextContent('M-9');
+  });
+});
