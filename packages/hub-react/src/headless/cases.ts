@@ -80,9 +80,11 @@ export interface CaseStore {
   takeNext: () => Promise<TakeOutcome>;
   /**
    * What to do once `decided` is on its way: go on to the same person's next open report (they are one case: the claim is kept and
-   * `/cases/next` is not asked), and only when there is none take the next case.
+   * `/cases/next` is not asked), and only when there is none take the next case. With `quick: true` (the move after a quick action,
+   * which has its own guards) taking the next case is not held back by the double-click cooldown, so a fast run of quick actions
+   * advances every time; a take that is still running still answers `busy`.
    */
-  continueFrom: (decided: { reportId: string; person: string }) => Promise<ContinueOutcome>;
+  continueFrom: (decided: { reportId: string; person: string }, options?: { quick?: boolean }) => Promise<ContinueOutcome>;
   /** Claim a free case (after you let it go). */
   claim: (person: string) => Promise<ActionResult<Claim>>;
   /** A senior or owner moving another moderator's live claim to themselves. The server audits it. */
@@ -309,7 +311,7 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
     return true;
   };
 
-  const takeNext = async (): Promise<TakeOutcome> => {
+  const take = async (cooldownMs: number): Promise<TakeOutcome> => {
     const q = options.queue();
     if (q === null || !q.beginTake()) return { status: 'busy' };
     const words = options.words();
@@ -338,23 +340,24 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
     } finally {
       // A short cooldown, not just "while it runs": a double click is two clicks 100 ms apart, and a fast server has answered
       // the first by then. The guard is the queue's, so a click, the N key and the command bar share it.
-      q.endTake(TAKE_COOLDOWN_MS);
+      q.endTake(cooldownMs);
     }
   };
+  const takeNext = (): Promise<TakeOutcome> => take(TAKE_COOLDOWN_MS);
 
   return {
     opened: { subscribe: opened.subscribe, getSnapshot: opened.getSnapshot },
     open,
     leave,
     takeNext,
-    async continueFrom(decided) {
+    async continueFrom(decided, opts = {}) {
       const q = options.queue();
       const next = q === null ? null : nextOpenReport(q.getSnapshot().groups, decided.person, decided.reportId, decisions.decidedIds());
       if (next !== null) {
         options.show(next.id);
         return { status: 'same', reportId: next.id };
       }
-      return takeNext();
+      return take(opts.quick === true ? 0 : TAKE_COOLDOWN_MS);
     },
     async claim(person) {
       const q = options.queue();

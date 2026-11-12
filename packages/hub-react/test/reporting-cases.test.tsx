@@ -441,6 +441,7 @@ describe('Simple: the rule behind a reason', () => {
       await user.selectOptions(picker(), '2');
       await step();
       expect(picker()).toHaveFocus();
+      w.clock.t += 1000;
       await user.keyboard('1');
       await pageHides();
       expect(decides(w)).toHaveLength(1);

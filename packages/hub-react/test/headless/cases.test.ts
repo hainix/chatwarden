@@ -440,6 +440,48 @@ describe('one case per person', () => {
   });
 });
 
+describe('continueFrom after a quick action', () => {
+  const three = async () => {
+    const r = await rig();
+    const files = [await r.w.file({ target: 'Alpha' }), await r.w.file({ target: 'Bravo' }), await r.w.file({ target: 'Charlie' })];
+    await r.controller.start();
+    await settle();
+    return { r, files };
+  };
+
+  it('keeps the double-click guard by default: a second continueFrom within the take cooldown is busy', async () => {
+    const { r, files } = await three();
+    const [a, b] = files;
+    void r.controller.decide({ reportId: a!.id, person: a!.person, input: OK });
+    expect((await r.controller.continueFrom({ reportId: a!.id, person: a!.person })).status).toBe('taken');
+    void r.controller.decide({ reportId: b!.id, person: b!.person, input: OK });
+    expect((await r.controller.continueFrom({ reportId: b!.id, person: b!.person })).status).toBe('busy');
+  });
+
+  it('{ quick: true } is not held up by the cooldown, so a fast run of quick actions advances every time', async () => {
+    const { r, files } = await three();
+    const [a, b] = files;
+    void r.controller.decide({ reportId: a!.id, person: a!.person, input: OK });
+    expect((await r.controller.continueFrom({ reportId: a!.id, person: a!.person }, { quick: true })).status).toBe('taken');
+    await settle();
+    void r.controller.decide({ reportId: b!.id, person: b!.person, input: OK });
+    const second = await r.controller.continueFrom({ reportId: b!.id, person: b!.person }, { quick: true });
+    expect(second.status).toBe('taken');
+    expect(r.count('POST', '/cases/next')).toBe(2);
+  });
+
+  it('{ quick: true } still refuses a take that is running (never two at once)', async () => {
+    const { r, files } = await three();
+    const [a, b] = files;
+    void r.controller.decide({ reportId: a!.id, person: a!.person, input: OK });
+    void r.controller.decide({ reportId: b!.id, person: b!.person, input: OK });
+    const first = r.controller.continueFrom({ reportId: a!.id, person: a!.person }, { quick: true });
+    const second = r.controller.continueFrom({ reportId: b!.id, person: b!.person }, { quick: true });
+    const outcomes = (await Promise.all([first, second])).map((o) => o.status).sort();
+    expect(outcomes).toEqual(['busy', 'taken']);
+  });
+});
+
 describe('take next', () => {
   it('claims the longest-waiting unclaimed case, says which report to open, and shows it', async () => {
     const shown: string[] = [];

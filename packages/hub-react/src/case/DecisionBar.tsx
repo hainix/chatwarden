@@ -10,6 +10,8 @@ import type { Problem, UiVerdict } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
 import { useHubData } from '../hooks.js';
 import { useKeyListener } from '../keyScope.js';
+import { useMode } from '../mode.js';
+import { useQuickKeys } from '../quickKeys.js';
 import { decideErrorText } from '../labels.js';
 import { modKey, keyLabel } from '../shortcuts.js';
 import type { Reason, ReportDetail } from '../types.js';
@@ -20,6 +22,8 @@ import { Decided } from './Decided.js';
 import { DecisionResult } from './DecisionResult.js';
 import { SuggestionCard } from './SuggestionCard.js';
 import { useCase } from './CaseContext.js';
+import { DetailedQuickKeys } from './QuickKeys.js';
+import { takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { UNDO_MS } from '../toasts.js';
 
 // The decision bar, docked under the evidence. It opens pre-filled: the ladder's suggestion as the reported person's action,
@@ -60,6 +64,13 @@ export function DecisionBar() {
   const actions = useCaseActions();
   const { detail, entry, holder, people, left: gone } = c;
   const draft = c.draft;
+  // "Nothing wrong here" is one button in the bar in every mode. The digits act at once only in Detailed, and only when the moderator
+  // turned Quick keys on (otherwise they choose a verdict, as they always did).
+  const lite = useQuickActions({ enabled: false });
+  const { mode } = useMode();
+  const quickKeys = useQuickKeys();
+  const quickActive = shortcuts && mode === 'detailed' && quickKeys.on;
+  const dismissId = `${useId()}-dismiss`;
   const report = detail.data?.report;
   const base = useId();
   const bodyId = `${base}-body`;
@@ -95,6 +106,7 @@ export function DecisionBar() {
   const nameOfTarget = targetPerson === undefined ? '' : personName(targetPerson, people, t);
   const form = draft.form;
   const dismissal = form.verdict === 'not_a_problem' || form.verdict === 'bad_faith';
+  const plainDismissal = form.verdict === 'not_a_problem' && form.actions.length === 0;
   const shown = attempted ? draft.problems : { actions: {}, count: 0 };
   const sendError = status === 'failed' && entry?.state.status === 'failed' ? entry.state.error : null;
   const addId = `${base}-add`;
@@ -126,7 +138,7 @@ export function DecisionBar() {
     } else if (status === 'undone') {
       // Undone: the case is back and the sheet with it, with focus on the button that sends it again.
       setSheet(true);
-      setFocusId(submitId);
+      setFocusId(report !== undefined && takeLastQuick(report.id) === 'none' ? dismissId : submitId);
     } else if (status === 'conflict') {
       draft.announce(t('hub.decide.already'));
       queueMicrotask(() => conflictRef.current?.focus());
@@ -151,8 +163,8 @@ export function DecisionBar() {
   };
   const decideRef = useRef(decide);
   decideRef.current = decide;
-  const stateRef = useRef({ editable: editable && !readOnly, setVerdict: draft.setVerdict });
-  stateRef.current = { editable: editable && !readOnly, setVerdict: draft.setVerdict };
+  const stateRef = useRef({ editable: editable && !readOnly, setVerdict: draft.setVerdict, quickActive });
+  stateRef.current = { editable: editable && !readOnly, setVerdict: draft.setVerdict, quickActive };
 
   // 1, 2 and 3 choose the verdict; Ctrl or Cmd with Enter decides and takes the next case. Neither fires while typing (except
   // Ctrl+Enter, which is made for the reason box), under a window, or when the adopter turned shortcuts off.
@@ -167,6 +179,8 @@ export function DecisionBar() {
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e)) return;
+      // With Quick keys on the digits act at once (QuickKeys): they no longer choose a verdict, and are never both.
+      if (stateRef.current.quickActive) return;
       const hit = VERDICTS.find((v) => v.key === e.key);
       if (hit !== undefined) {
         e.preventDefault();
@@ -448,7 +462,7 @@ export function DecisionBar() {
               <Field
                 id={`${base}-reason`}
                 label={t('hub.decide.reason.label')}
-                hint={t('hub.decide.reason.hint')}
+                hint={plainDismissal ? `${t('hub.decide.reason.hint.dismissal')} ${t('hub.decide.reason.hint')}` : t('hub.decide.reason.hint')}
                 counter={t('hub.decide.counter', { count: form.reason.trim().length, max: REASON_MAX })}
                 problem={shown.reason}
               >
@@ -493,6 +507,20 @@ export function DecisionBar() {
                     </span>
                   )}
                 </button>
+                <button
+                  id={dismissId}
+                  type="button"
+                  className="cw-btn"
+                  aria-disabled={!lite.usable}
+                  aria-describedby={`${dismissId}-hint`}
+                  {...(quickActive ? { 'aria-keyshortcuts': '2' } : {})}
+                  onClick={lite.sendDismiss}
+                >
+                  {t('hub.quick.dismiss')}
+                </button>
+                <p id={`${dismissId}-hint`} className="cw-sr">
+                  {t('hub.quick.dismiss.hint')}
+                </p>
                 <button type="button" className="cw-btn" aria-disabled={readOnly} onClick={() => decide(false)}>
                   {t('hub.decide.submit')}
                 </button>
@@ -523,6 +551,7 @@ export function DecisionBar() {
         </button>
       </div>
       <div className="cw-dock-body" id={bodyId}>
+        {quickActive && <DetailedQuickKeys />}
         <div className="cw-sr" role="status" aria-label={t('hub.decide.live')}>
           <span key={live.n}>{live.text}</span>
         </div>

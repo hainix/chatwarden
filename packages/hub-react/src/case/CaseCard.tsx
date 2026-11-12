@@ -3,26 +3,23 @@ import type { ReactNode } from 'react';
 import { actorName } from '../claims.js';
 import { useCaseActions } from '../cases.js';
 import { useHub } from '../context.js';
-import { isWaiting, useDecisions } from '../decisions.js';
-import { initialForm, outcomeChoice, toInput } from '../decision.js';
-import type { DecisionForm } from '../decision.js';
+import { useDecisions } from '../decisions.js';
+import { initialForm } from '../decision.js';
 import { excerptLines, personName } from '../excerpt.js';
 import type { ReportPerson } from '../excerpt.js';
 import { personTag, relativeTime } from '../format.js';
 import { useHubData } from '../hooks.js';
 import { decideErrorText, outcomeLabel } from '../labels.js';
-import { useKeyListener } from '../keyScope.js';
-import { isTypingTarget, modalIn } from '../dom.js';
-import { needsSenior, noActionForm, oneClickOf, ownLinesOf, recordLine, reporterDecided, reporterWarrants, stepLabel } from '../simple.js';
-import type { OneClick } from '../simple.js';
+import { needsSenior, ownLinesOf, recordLine, reporterDecided, reporterWarrants, stepLabel } from '../simple.js';
 import { UNDO_MS } from '../toasts.js';
 import type { QueueGroup } from '../queue.js';
 import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
+import { QuickKeys } from './QuickKeys.js';
 import { RuleField } from './RuleField.js';
-import { useRulePick } from './useRulePick.js';
+import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
 
 // The Simple case view: one card per case. Who, why, what they said, their record, the ladder's suggestion and three ways to
@@ -30,8 +27,6 @@ import { Line } from './Transcript.js';
 // second Undo, sent at once when the page goes). One click and "No action needed" hand a form to `decisions.submit`, the call the
 // decision bar makes; "Something else…" opens the decision bar itself, in place.
 
-/** The uid of the one action a one-click decision holds. */
-const UID = 'a1';
 /** The card names the writer by the handle on the line. */
 const noName = (): string => '';
 const SECONDS = UNDO_MS / 1000;
@@ -128,16 +123,13 @@ function ReporterWarning({ report, people }: { report: StaffReport; people: Repo
   );
 }
 
-/** A form without its action ids, to tell whether the moderator has changed it. */
-const shape = (form: DecisionForm): string => JSON.stringify({ verdict: form.verdict, reason: form.reason, actions: form.actions.map((a) => ({ ...a, uid: '' })) });
-
 /** The card for a case. Read through `<CaseProvider>`, the one the hub wraps a case in. */
 export function CaseCard() {
   const { t, locale, can, shortcuts, now } = useHub();
   const c = useCase();
   const decisions = useDecisions();
   const actions = useCaseActions();
-  const { detail, entry, holder, people, group, left, draft } = c;
+  const { reportId, detail, entry, holder, people, group, left, draft } = c;
   const report = detail.data?.report;
   const [elseOpen, setElseOpen] = useState(false);
   const root = useRef<HTMLElement>(null);
@@ -145,11 +137,9 @@ export function CaseCard() {
   const noActionRef = useRef<HTMLButtonElement>(null);
   const elseRef = useRef<HTMLButtonElement>(null);
   const failedRef = useRef<HTMLDivElement>(null);
-  const lastUsed = useRef<'primary' | 'none' | 'quick'>('primary');
   const quickRef = useRef<HTMLButtonElement>(null);
   const titleFocused = useRef(false);
   const base = useId();
-  const listen = useKeyListener();
 
   // The loading title and the card's own are different elements: when the title had keyboard focus (the hub puts it there on
   // arrival), the new one takes it.
@@ -164,50 +154,16 @@ export function CaseCard() {
   const status = entry?.state.status;
   const open = report?.status === 'open';
   const canDecide = can('reports.decide');
-  const waiting = isWaiting(entry);
   const readOnly = holder.kind === 'other';
-  const editable = open && canDecide && draft.status === 'ready' && !waiting && status !== 'done' && status !== 'conflict';
-  // Which rule the card works from: the reason's one rule (preselected), or the one the moderator picks when none is clear.
-  const pick = useRulePick({
-    detail: detail.data,
-    reasons: draft.reportReasons,
-    active: draft.rules.map((r) => r.number),
-    enabled: draft.rulesState === 'ok' && can('sanctions.apply'),
-  });
-  // The suggestion and the rule come from the read of the case. A newer report about the person means the ladder may have moved
-  // (and the case with it), so the case is read again, and until that read is in, one click offers nothing it could send stale.
-  // A decision of your own that is on its way changes the count too: that is not news, so it reads nothing.
-  const count = group?.reports ?? null;
-  const readAt = useRef<number | null>(count);
-  const behind = readAt.current !== null && count !== null && readAt.current !== count;
-  const fresh = !behind && !detail.loading;
-  const settled = useRef(left);
-  settled.current = left;
-  useEffect(() => {
-    if (count === null) return;
-    const before = readAt.current;
-    readAt.current = count;
-    if (before !== null && before !== count && !settled.current) detail.reload();
-  }, [count]);
-  const usable = editable && !readOnly && !elseOpen && fresh;
+  // What the card offers as one tap, and when it may be sent (the case is open, read, fresh, and nothing is waiting). The same rule the
+  // Detailed bar uses; the card sends each through the hold and goes on to the next case.
+  const q = useQuickActions({ paused: elseOpen, refresh: true });
+  const { pick, fresh, suggest, choice } = q;
+  const one = q.primary;
+  const quick = q.warning;
 
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
-  const suggest = pick.mode === 'none' ? detail.data?.suggest : (pick.suggestion ?? undefined);
-  const ruleCited = pick.mode === 'none' ? detail.data?.rule : pick.picked;
-  const choice = suggest === undefined ? null : outcomeChoice(suggest.outcome);
-  const one: OneClick | null = useMemo(
-    () => (suggest === undefined || detail.data === undefined || ruleCited === undefined || ruleCited === null ? null : oneClickOf(draft.ctx, draft.rules, suggest.outcome, ruleCited, detail.data.report.lineId, UID)),
-    [draft.ctx, draft.rules, suggest, detail.data, ruleCited],
-  );
-  // The light tap: when the ladder suggests more than a warning, a warning is one click too (same hold, same Undo, the rule's title as the reason).
-  const quick: OneClick | null = useMemo(
-    () =>
-      detail.data === undefined || choice === null || choice.kind === 'warning' || choice.kind === 'note' || ruleCited === undefined || ruleCited === null
-        ? null
-        : oneClickOf(draft.ctx, draft.rules, 'warning', ruleCited, detail.data.report.lineId, UID),
-    [draft.ctx, draft.rules, choice, detail.data, ruleCited],
-  );
   const sendError = status === 'failed' && entry?.state.status === 'failed' ? entry.state.error : null;
 
   /**
@@ -219,82 +175,32 @@ export function CaseCard() {
     const suggestion = pick.suggestion;
     if (pick.mode !== 'none' && pick.picked !== null && suggestion !== null && detail.data !== undefined) {
       const first = initialForm(draft.ctx, detail.data.suggest.outcome, detail.data.rule, detail.data.report.lineId, 'a0');
-      const untouched = shape(draft.form) === shape(first) || shape(draft.form) === seeded.current;
+      const untouched = shapeOf(draft.form) === shapeOf(first) || shapeOf(draft.form) === seeded.current;
       if (untouched) {
         const next = initialForm(draft.ctx, suggestion.outcome, pick.picked, detail.data.report.lineId, 'a0');
-        seeded.current = shape(next);
+        seeded.current = shapeOf(next);
         draft.setForm(() => next);
       }
     }
     setElseOpen(true);
   };
 
-  /** Hands a form to the hold the decision bar uses; `andNext` goes on to the person's next report or the next case. */
-  const send = (form: DecisionForm, andNext: boolean): void => {
-    if (!usable || report === undefined) return;
-    decisions.submit({ reportId: report.id, person: report.targetPerson, name, input: toInput(form), snapshot: form });
-    if (andNext) void actions.continueFrom({ reportId: report.id, person: report.targetPerson });
-  };
-  const sendPrimary = (andNext: boolean): void => {
-    if (one === null) return;
-    lastUsed.current = 'primary';
-    send(one.form, andNext);
-  };
-  const sendQuick = (): void => {
-    if (quick === null) return;
-    lastUsed.current = 'quick';
-    send(quick.form, false);
-  };
-  const sendNoAction = (): void => {
-    lastUsed.current = 'none';
-    send(noActionForm(t('hub.simple.noAction.reason')), false);
-  };
-
-  const latest = useRef({ usable, one, quick, sendPrimary, sendNoAction, sendQuick });
-  latest.current = { usable, one, quick, sendPrimary, sendNoAction, sendQuick };
-  // 1 is the primary button, 2 is No action needed, 3 is Send a warning (when it is offered), Ctrl or Cmd with Enter is the primary button and then the next case. Not while
-  // typing, under a window, or when the adopter turned shortcuts off. (With Something else open the decision bar's own keys apply.)
-  useEffect(() => {
-    if (!shortcuts) return;
-    const onKeyDown = (e: KeyboardEvent, hub: HTMLElement): void => {
-      const s = latest.current;
-      if (e.defaultPrevented || e.isComposing || !s.usable) return;
-      if (modalIn(hub) !== null) return;
-      if (e.key === 'Enter' && e.ctrlKey !== e.metaKey && !e.altKey && !e.shiftKey) {
-        if (s.one === null) return;
-        e.preventDefault();
-        s.sendPrimary(true);
-        return;
-      }
-      // The rule field is a select: a digit cannot type into it, so 1, 2 and 3 keep working while it has focus (after picking a rule by keyboard).
-      const origin = e.composedPath()[0] ?? e.target;
-      const onRuleField = origin instanceof Element && origin.closest('.cw-scard-rule') !== null;
-      if (e.ctrlKey || e.metaKey || e.altKey || (isTypingTarget(e) && !onRuleField)) return;
-      if (e.key === '1' && s.one !== null) {
-        e.preventDefault();
-        s.sendPrimary(false);
-      } else if (e.key === '2') {
-        e.preventDefault();
-        s.sendNoAction();
-      } else if (e.key === '3' && s.quick !== null) {
-        e.preventDefault();
-        s.sendQuick();
-      }
-    };
-    // Heard on the hub's root in the shell, and on the piece's own root in a piece (see `keyScope.ts`).
-    return listen(onKeyDown);
-  }, [shortcuts]);
-
-  // Undone: the card is back, with keyboard focus on the button that sent it. Failed: on the message.
+  // Undone: the card is back (a new view, when the moderator had gone on, whose buttons come with the read), with keyboard focus on the
+  // button that sent it, as soon as it is there. Failed: on the message.
   // (In a microtask: the decision store can change from a page event or a timer, and that commit runs its effects at once.)
+  const refocus = useRef<'primary' | 'none' | 'warning' | null>(null);
   useEffect(() => {
-    if (status === 'undone') {
-      queueMicrotask(() => {
-        const back = lastUsed.current === 'quick' ? quickRef.current : lastUsed.current === 'primary' ? primaryRef.current : noActionRef.current;
-        (back ?? noActionRef.current)?.focus();
-      });
-    } else if (status === 'failed') queueMicrotask(() => failedRef.current?.focus());
+    if (status === 'undone') refocus.current = takeLastQuick(reportId) ?? 'primary';
+    else if (status === 'failed') queueMicrotask(() => failedRef.current?.focus());
   }, [status]);
+  useEffect(() => {
+    if (refocus.current === null) return;
+    const back = refocus.current === 'warning' ? quickRef.current : refocus.current === 'none' ? noActionRef.current : primaryRef.current;
+    const target = back ?? noActionRef.current;
+    if (target === null) return;
+    refocus.current = null;
+    queueMicrotask(() => target.focus());
+  });
 
   // Something else opens the bar in place, with focus on its first control.
   const opened = useRef(false);
@@ -418,17 +324,17 @@ export function CaseCard() {
         {draft.status === 'ready' && (
           <div className="cw-scard-actions">
             {one !== null && (
-              <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '1' } : {})} onClick={() => sendPrimary(false)}>
+              <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '1' } : {})} onClick={q.sendPrimary}>
                 <span>{stepLabel(t, locale, one.choice)}</span>
                 {kbd('1')}
               </button>
             )}
-            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '2' } : {})} onClick={sendNoAction}>
+            <button ref={noActionRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '2' } : {})} onClick={q.sendDismiss}>
               <span>{t('hub.simple.noAction')}</span>
               {kbd('2')}
             </button>
             {quick !== null && (
-              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '3' } : {})} onClick={sendQuick}>
+              <button ref={quickRef} type="button" className="cw-btn" aria-disabled={!fresh} {...(shortcuts ? { 'aria-keyshortcuts': '3' } : {})} onClick={q.sendWarning}>
                 <span>{stepLabel(t, locale, quick.choice)}</span>
                 {kbd('3')}
               </button>
@@ -451,6 +357,7 @@ export function CaseCard() {
 
   return (
     <section className="cw-scard" ref={root} aria-label={t('hub.simple.case.label', { who: name })} {...(left ? { 'data-gone': 'true' } : {})}>
+      <QuickKeys quick={q} />
       {!left && (
         <>
           <header className="cw-scard-head">

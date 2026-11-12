@@ -154,6 +154,7 @@ describe('a controller the provider made still answers its toasts through the ca
     const { user } = renderPieces(w, <CaseCard reportId={first.id} onOpenReport={onOpenReport} />);
     const card = await screen.findByRole('region', { name: 'Case against Alpha' });
     (await within(card).findByRole('button', { name: /^No action needed/ })).focus();
+    w.clock.t += 1000;
     await user.keyboard('{Control>}{Enter}{/Control}');
     await waitFor(() => expect(onOpenReport).toHaveBeenCalledWith(second.id));
     await act(() => settle());

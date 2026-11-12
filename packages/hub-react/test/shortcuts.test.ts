@@ -43,7 +43,7 @@ describe('shortcutFor: what each key means', () => {
   });
 
   it('other keys mean nothing', () => {
-    for (const k of ['a', 'x', '1', '2', '3', 'Enter', ' ', 'Tab', 'ArrowDown', 'F5', '/', 'm']) expect(shortcutFor(key(k)), k).toBeNull();
+    for (const k of ['a', 'x', '1', '2', '3', 'Enter', ' ', 'Tab', 'ArrowLeft', 'ArrowRight', 'F5', '/', 'm']) expect(shortcutFor(key(k)), k).toBeNull();
   });
 });
 

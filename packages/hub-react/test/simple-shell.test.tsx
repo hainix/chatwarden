@@ -291,8 +291,9 @@ describe('the keys', () => {
   it('1 sends the primary button\'s decision (after the hold)', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    const { user } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}` });
+    const { user } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}`, stay: true });
     await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ });
+    w.clock.t += 400;
     await press(user, '1');
     expect(decides(w)).toHaveLength(0);
     expect(await screen.findByText('Decision queued.')).toBeInTheDocument();
@@ -304,11 +305,12 @@ describe('the keys', () => {
   it('2 is No action needed', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    const { user } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}` });
+    const { user } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}`, stay: true });
     await screen.findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 400;
     await press(user, '2');
     await pageHides();
-    expect(decides(w)[0]!.body).toEqual({ verdict: 'no_action', reason: 'No rule was broken', actions: [] });
+    expect(decides(w)[0]!.body).toEqual({ verdict: 'no_action', actions: [] });
   });
 
   it('Ctrl+Enter is the primary button and then the next case', async () => {
@@ -317,6 +319,7 @@ describe('the keys', () => {
     const g = await w.fileRich({ lines: TALK, target: 'Beta', reporter: 'Other', room: 'rb' });
     const { user, router } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}` });
     await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ });
+    w.clock.t += 400;
     await press(user, '{Control>}{Enter}{/Control}');
     await waitFor(() => expect(router.path).toBe(`/reports/${g.id}`));
     expect(await screen.findByRole('heading', { level: 2, name: 'Beta' })).toBeInTheDocument();
@@ -331,6 +334,7 @@ describe('the keys', () => {
     const g = await w.fileRich({ lines: TALK, target: 'Beta', reporter: 'Other', room: 'rb' });
     const { user, router } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}` });
     await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ });
+    w.clock.t += 400;
     await press(user, '{Meta>}{Enter}{/Meta}');
     await waitFor(() => expect(router.path).toBe(`/reports/${g.id}`));
   });
@@ -463,7 +467,7 @@ describe('what a case costs in audited reads, against Detailed', () => {
   it('a decision reads nothing more about the case', async () => {
     const w = await hubWorld();
     const f = await w.fileRich({ lines: TALK });
-    const { user } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}` });
+    const { user } = renderHub(w, { mode: 'simple', path: `/reports/${f.id}`, stay: true });
     await user.click(await screen.findByRole('button', { name: /^Restrict chat, 24 hours/ }));
     const before = counts(w);
     await pageHides();
@@ -505,7 +509,7 @@ describe('accessibility', () => {
     it('Something else open, queued with Undo, and failed', async () => {
       const w = await hubWorld();
       const f = await w.fileRich({ lines: TALK });
-      const { container, user } = renderHub(w, { mode: 'simple', theme, path: `/reports/${f.id}` });
+      const { container, user } = renderHub(w, { mode: 'simple', theme, path: `/reports/${f.id}`, stay: true });
       await user.click(await screen.findByRole('button', { name: /^Something else/ }));
       expect(await violations(container)).toEqual([]);
       await user.click(screen.getByRole('button', { name: 'Back to the suggestion' }));

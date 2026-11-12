@@ -20,7 +20,7 @@ npm install @chatwarden/hub-react @chatwarden/core @chatwarden/http react react-
 `@types/react` 18 and renders the hub and the headless entry on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` and
 `@chatwarden/http` are peers too: the hub imports types from both, and these values from core (constants and defaults, so the hub
 and the kit cannot drift apart): `LADDER_TABLE`, `DEFAULT_DURATIONS`, `DEFAULT_AREA_RULES`, `DEFAULT_SEVERE_RULES`, `AUDIT_ACTIONS`,
-`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES` and `REPORTER_RANK_LAPSE_MS`. Its own type declarations name
+`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES`, `REPORTER_RANK_LAPSE_MS` and `isDefaultNoActionReason`. Its own type declarations name
 both packages. Node 22.13 or newer
 for the tooling; the hub itself runs in a browser and imports no `node:` module.
 

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Hub } from '../src/Hub.js';
 import { memoryRouter } from '../src/router.js';
 import { focusedIn, hubInShadow, removeShadowHosts } from './shadow.js';
+import { stayingRouter } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
 
@@ -171,10 +172,11 @@ describe('an open window holds the keys of its own hub only', () => {
     const f = await w.fileRich({ lines: [{ who: 'reporter', text: 'hello' }, { who: 'target', text: 'a line from the target' }], target: 'Alpha' });
     const user = userEvent.setup();
     const make = () =>
-      render(<Hub client={w.client} router={memoryRouter(`/reports/${f.id}`)} now={w.now} mode="simple" />, { container: document.body.appendChild(document.createElement('div')) });
+      render(<Hub client={w.client} router={stayingRouter(`/reports/${f.id}`)} now={w.now} mode="simple" />, { container: document.body.appendChild(document.createElement('div')) });
     const a = make();
     const b = make();
     for (const v of [a, b]) await within(v.container).findByRole('button', { name: /^No action needed/ });
+    w.clock.t += 1000;
     a.container.querySelector<HTMLElement>('.cw-skip')?.focus();
     await user.keyboard('{Control>}k{/Control}');
     await within(a.container).findByRole('dialog', { name: 'Command bar' });

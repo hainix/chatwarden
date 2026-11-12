@@ -326,7 +326,7 @@ export function createDecisionStore(options: DecisionStoreOptions): DecisionStor
     }
     const ms = hold === true ? UNDO_MS : hold;
     const held: Hold = toasts.hold({
-        text: words('hub.decide.held', { who: d.name, seconds: ms / 1000 }),
+        text: words(d.input.verdict === 'no_action' && d.input.actions.length === 0 && d.input.reason === undefined ? 'hub.quick.held' : 'hub.decide.held', { who: d.name, seconds: ms / 1000 }),
         ms,
         run: () => {
           holds.delete(d.reportId);

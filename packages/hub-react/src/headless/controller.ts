@@ -108,7 +108,7 @@ export interface HubController {
   /** Claim and open the oldest unclaimed case that matches the queue's category filter. Never throws; says how it went. */
   takeNext(): Promise<TakeOutcome>;
   /** After a decision: the same person's next open report (the claim is kept), else Take next. */
-  continueFrom(decided: { reportId: string; person: string }): Promise<ContinueOutcome>;
+  continueFrom(decided: { reportId: string; person: string }, options?: { quick?: boolean }): Promise<ContinueOutcome>;
   /** Claim a free case. */
   claim(person: string): Promise<ActionResult<Claim>>;
   /** A senior or owner moving another moderator's live claim to themselves. */
