@@ -38,7 +38,7 @@ const kit = async (path: string, perPlayerPerWeek = 3): Promise<Chatwarden> => {
 };
 
 /** Sanction `key` through a real decision on the first kit and return the notice ids. */
-async function sanction(cw: Chatwarden, key: string, room: string): Promise<{ noticeId: string }> {
+async function sanction(cw: Chatwarden, key: string, room: string): Promise<{ noticeId: string; groupId: string }> {
   cw.rooms.seat(room, 'p1', { clientKey: 'reporter' }, 'Rep');
   cw.rooms.seat(room, 'p2', { clientKey: key }, 'Tgt');
   const reported = await cw.reports.submit({ roomId: room, reporterSeat: 'p1', targetSeat: 'p2' });
@@ -46,7 +46,7 @@ async function sanction(cw: Chatwarden, key: string, room: string): Promise<{ no
   const target = cw.rooms.subjectAt(room, 'p2') as string;
   const res = await cw.decide({ reportId: reported.reportId, verdict: 'upheld', actor: 'mod_ann', reason: 'r', actions: [{ subject: target, kind: 'chat', durationMs: HOUR, rule: 2, lineIds: [] }] });
   if (!res.ok) throw new Error('decision refused');
-  return { noticeId: res.groups[0]?.noticeId as string };
+  return { noticeId: res.groups[0]?.noticeId as string, groupId: res.groups[0]?.groupId as string };
 }
 
 describe('filing from two connections', () => {
@@ -95,5 +95,55 @@ describe('filing from two connections', () => {
     expect(a.appeals.file(who, { noticeId: two.noticeId, statement: '2' })).toMatchObject({ refused: 'rate' });
     expect(a.changes.token()).toBe(token);
     expect(a.appeals.mine(who)).toHaveLength(1);
+  });
+});
+
+/** Run `act` (what another process does) once, right after this kit first reads a sanction's row: the read is then stale for the write that follows. */
+function afterFirstSanctionRead(store: SqliteStore, act: () => void): void {
+  const real = store.loadSanctionSubjectRow.bind(store);
+  let done = false;
+  (store as unknown as { loadSanctionSubjectRow: unknown }).loadSanctionSubjectRow = (groupId: string) => {
+    const row = real(groupId);
+    if (!done) {
+      done = true;
+      act();
+    }
+    return row;
+  };
+}
+
+describe('a revoke or a decision by the other connection, between this one\'s read and its write', () => {
+  it('filing: a revoke committed by the other kit leaves no open appeal; the filer is told not_appealable', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-appfile-'));
+    dirs.push(dir);
+    const path = join(dir, 'kit.db');
+    const a = await kit(path);
+    const { noticeId, groupId } = await sanction(a, 'key-target', 'room-1');
+    const storeA = stores[stores.length - 1] as SqliteStore;
+    const b = await kit(path);
+    const who: RawWho = { clientKey: 'key-target' };
+    afterFirstSanctionRead(storeA, () => void b.sanctions.revoke(groupId, 'mod_bo', 'lifted'));
+    expect(a.appeals.file(who, { noticeId, statement: 'late' })).toEqual({ ok: false, refused: 'not_appealable' });
+    expect(a.appeals.openCount()).toBe(0);
+    expect(b.appeals.openCount()).toBe(0);
+    expect(a.appeals.mine(who)).toEqual([]);
+  });
+
+  it('deciding: the other kit decided first, so the loser answers already_decided (never gone) and changes nothing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-appfile-'));
+    dirs.push(dir);
+    const path = join(dir, 'kit.db');
+    const a = await kit(path);
+    const { noticeId } = await sanction(a, 'key-target', 'room-1');
+    const who: RawWho = { clientKey: 'key-target' };
+    const filed = a.appeals.file(who, { noticeId, statement: 'not me' });
+    const appealId = (filed as { appeal: { id: string } }).appeal.id;
+    const storeA = stores[stores.length - 1] as SqliteStore;
+    const b = await kit(path);
+    afterFirstSanctionRead(storeA, () => void b.appeals.decide({ appealId, outcome: 'revoke', actor: 'owner_bo', reason: 'b first' }));
+    const res = await a.appeals.decide({ appealId, outcome: 'revoke', actor: 'owner_cy', reason: 'a second' });
+    expect(res).toEqual({ ok: false, error: 'already_decided' });
+    expect(b.appeals.get(appealId)).toMatchObject({ status: 'revoked', decided: { by: 'owner_bo', reason: 'b first' } });
+    expect(a.appeals.get(appealId)).toMatchObject({ status: 'revoked', decided: { by: 'owner_bo' } });
   });
 });
