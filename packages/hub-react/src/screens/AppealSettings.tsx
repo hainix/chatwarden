@@ -33,7 +33,7 @@ const withoutAppeals = (layer: PolicyLayer): PolicyLayer => {
 
 /** The panel. `state` and `policy` come from the Advanced screen, which reads the policy once for all its panels. */
 export function AppealSettings({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
-  const { t } = useHub();
+  const { t, can } = useHub();
   const toasts = useToasts();
   const root = useRef<HTMLDivElement>(null);
   const base = useId();
@@ -54,7 +54,7 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
 
   const local = useMemo(() => appealsProblems(draft), [draft]);
   const problems: Problems = { ...local, ...serverProblems };
-  const layer = useMemo((): PolicyLayer | null => (Object.keys(local).length > 0 ? null : { ...withoutAppeals(state.layer), appeals: appealsLayer(draft) }), [draft, local, state.layer]);
+  const layer = useMemo((): PolicyLayer | null => (Object.keys(local).length > 0 ? null : { ...withoutAppeals(state.layer), appeals: appealsLayer(draft, state.effective.appeals) }), [draft, local, state.layer, state.effective.appeals]);
   const isDirty = useMemo(() => appealsDirty(draft, state.effective.appeals), [draft, state.effective.appeals]);
 
   const save = useSaveFlow({
@@ -175,7 +175,7 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
           </fieldset>
           <p className="cw-hint">{t('hub.settings.appeals.statement', { max: APPEAL_STATEMENT_MAX })}</p>
           {editable && <SaveBar policy={policy} save={save} isDirty={isDirty} dirtyCount={1} refusedField={refusedField} idBase={base} label={t('hub.settings.appeals.save.form')} onDiscard={discard} onReload={reload} />}
-          <Mistakes on={state.effective.appeals?.enabled === true} />
+          {can('appeals.read') && <Mistakes on={state.effective.appeals?.enabled === true} />}
         </div>
       </Panel>
       {guard}
@@ -183,12 +183,12 @@ export function AppealSettings({ state, policy }: { state: PolicyState; policy: 
   );
 }
 
-/** "Mistakes by rule": collapsed until asked for, and nothing is read from the server before that. */
+/** "Mistakes by rule": collapsed until asked for, and nothing is read from the server before that. Drawn only for a role that may read appeals (the panel decides). */
 function Mistakes({ on }: { on: boolean }) {
-  const { t, client, can } = useHub();
+  const { t, client } = useHub();
   const id = useId();
   const [open, setOpen] = useState(false);
-  const wants = open && on && can('appeals.read');
+  const wants = open && on;
   const stats = useHubData<AppealStats | null>(wants ? 'appeal-stats' : 'appeal-stats:idle', () => (wants ? client.appealStats() : Promise.resolve(null)));
   return (
     <div className="cw-appeal-mistakes">

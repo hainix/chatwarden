@@ -33,20 +33,30 @@ export function weeklyLimit(text: string): number | null {
   return n >= WEEK[0] && n <= WEEK[1] ? n : null;
 }
 
-/** The fields that cannot be sent, by the field's key. */
+/** The limit in force (or the default), for a draft whose typed limit is no use. */
+const keptLimit = (effective: Appeals): number => {
+  const n = effective?.perPlayerPerWeek;
+  return typeof n === 'number' && n >= WEEK[0] && n <= WEEK[1] ? n : WEEK_DEFAULT;
+};
+
+/**
+ * The fields that cannot be sent, by the field's key. The limit is checked only while appeals are on: with them off its field is disabled, so a bad value
+ * typed before the switch was turned off must not hold the form (the limit in force is kept instead).
+ */
 export function appealsProblems(d: AppealsDraft): Problems {
-  return weeklyLimit(d.perWeek) === null ? { perWeek: { key: 'hub.settings.appeals.error.limit', params: { min: WEEK[0], max: WEEK[1] } } } : {};
+  return d.enabled && weeklyLimit(d.perWeek) === null ? { perWeek: { key: 'hub.settings.appeals.error.limit', params: { min: WEEK[0], max: WEEK[1] } } } : {};
 }
 
-/** The appeals section to save: every field named, so a setting the owner left alone is still the same after a change in the code. Only for a draft with no problems. */
-export function appealsLayer(d: AppealsDraft): AppealSettings {
-  return { enabled: d.enabled, perPlayerPerWeek: weeklyLimit(d.perWeek) as number, allowSelfReview: d.self };
+/** The appeals section to save: every field named, so a setting the owner left alone is still the same after a change in the code. Only for a draft with no problems; with appeals off and a bad limit typed, the limit in force is kept. */
+export function appealsLayer(d: AppealsDraft, effective?: Appeals): AppealSettings {
+  return { enabled: d.enabled, perPlayerPerWeek: weeklyLimit(d.perWeek) ?? keptLimit(effective), allowSelfReview: d.self };
 }
 
 /** Is the draft different from what is in force? (A typed `03` is the same limit as 3.) */
 export const appealsDirty = (d: AppealsDraft, effective: Appeals): boolean => {
   const saved = appealsDraftOf(effective);
-  const same = (x: AppealsDraft): string => JSON.stringify([x.enabled, weeklyLimit(x.perWeek) ?? x.perWeek.trim(), x.self]);
+  // With appeals off a bad limit is not a change (the limit in force is what would be saved).
+  const same = (x: AppealsDraft): string => JSON.stringify([x.enabled, weeklyLimit(x.perWeek) ?? (x.enabled ? x.perWeek.trim() : keptLimit(effective)), x.self]);
   return same(d) !== same(saved);
 };
 

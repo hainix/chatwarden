@@ -134,6 +134,45 @@ describe('the form', () => {
     expect(screen.queryByRole('textbox', { name: /Why are you changing this/ })).toBeNull();
   });
 
+  it.each(['99', '0', '', 'three', '2.5'])('a bad weekly limit (%j) does not hold the form once appeals are switched off: it saves enabled false with the limit in force', async (value) => {
+    const w = await owner({ appeals: { enabled: true, perPlayerPerWeek: 5, allowSelfReview: true } });
+    const { user } = await open(w);
+    await typeLimit(user, value);
+    await user.click(sw(ON));
+    expect(sw(ON).checked).toBe(false);
+    expect(limit()).toBeDisabled();
+    // the field is disabled, so it must not be a dead end: no error, and Save goes through
+    expect(within(panel()).queryByText('Enter a whole number from 1 to 20.')).toBeNull();
+    expect(limit()).not.toHaveAttribute('aria-invalid');
+    await save(user);
+    await waitFor(() => expect(puts(w)).toHaveLength(1));
+    expect((puts(w)[0]!.body as { layer: { appeals: unknown } }).layer.appeals).toEqual({ enabled: false, perPlayerPerWeek: 5, allowSelfReview: true });
+    expect((await w.client.policyProfile()).effective.appeals).toEqual({ enabled: false, perPlayerPerWeek: 5, allowSelfReview: true });
+  });
+
+  it('switching appeals back on brings the error back, and Save is held again', async () => {
+    const w = await owner({ appeals: { enabled: true, perPlayerPerWeek: 5 } });
+    const { user } = await open(w);
+    await typeLimit(user, '99');
+    await user.click(sw(ON));
+    await user.click(sw(ON));
+    expect(sw(ON).checked).toBe(true);
+    await user.click(within(panel()).getByRole('button', { name: 'Save changes' }));
+    expect(await within(panel()).findByText('Enter a whole number from 1 to 20.')).toBeInTheDocument();
+    expect(puts(w)).toHaveLength(0);
+  });
+
+  it('a limit that is already off and untouched saves nothing new, and an untouched bad draft with appeals off is not dirty', async () => {
+    const w = await owner({ appeals: { enabled: true, perPlayerPerWeek: 5 } });
+    const { user } = await open(w);
+    await typeLimit(user, '99');
+    await user.click(sw(ON));
+    await user.click(sw(ON));
+    await typeLimit(user, '5');
+    // back to what is in force: nothing to save
+    expect(within(panel()).getByRole('button', { name: 'Save changes' })).toHaveAttribute('aria-disabled', 'true');
+  });
+
   it.each(['1', '20', '10'])('%s is accepted', async (value) => {
     const w = await owner({ appeals: { enabled: true, perPlayerPerWeek: 5 } });
     const { user } = await open(w);
@@ -289,6 +328,25 @@ describe('Mistakes by rule', () => {
     await within(panel()).findByRole('table');
     const region = disclosure().closest('.cw-appeal-mistakes') as HTMLElement;
     expect(region.querySelectorAll('[class*="--bad"], [class*="--warn"], [class*="--good"], [class*="--accent"], .cw-tag').length).toBe(0);
+  });
+
+  it('a role that holds policy.read but not appeals.read sees the panel without the disclosure: no endless Loading, nothing asked', async () => {
+    const w = await appealsHub({ role: 'senior', actor: 'bea@example.test', permissions: { 'appeals.read': 'owner' } });
+    await open(w);
+    expect(within(panel()).queryByRole('button', { name: 'Mistakes by rule' })).toBeNull();
+    expect(within(panel()).queryByText(/Loading/)).toBeNull();
+    expect(w.sent.filter((r) => r.path === '/appeals/stats')).toEqual([]);
+    // the rest of the panel is there, read-only
+    expect(sw(ON).checked).toBe(true);
+  });
+
+  it('with appeals.read the disclosure is there, for the owner and for a senior', async () => {
+    for (const role of ['owner', 'senior'] as const) {
+      cleanup();
+      const w = await appealsHub({ role, actor: `${role}@example.test` });
+      await open(w);
+      expect(disclosure()).toBeInTheDocument();
+    }
   });
 
   it('with appeals off it says so and asks for nothing', async () => {
