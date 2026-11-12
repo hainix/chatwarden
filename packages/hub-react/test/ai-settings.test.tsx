@@ -197,7 +197,7 @@ describe('who can see and who can save', () => {
     renderHub(w, { path: '/settings/ladder' });
     await screen.findByRole('heading', { level: 2, name: 'Steps and ladder' });
     const nav = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Steps and ladder', 'Reporting', 'AI']);
+    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Steps and ladder', 'Reporting', 'AI', 'Advanced']);
     cleanup();
     // A role the server does not let read the settings has no Settings, and so no AI section to reach.
     const closed = await hubWorld({ role: 'moderator', permissions: { 'policy.read': 'owner' }, ai: { level: 0 } });

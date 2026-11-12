@@ -151,3 +151,42 @@ describe.each(['light', 'dark'] as const)('axe on Settings > AI, %s theme', (the
     expect(await violations(r.container)).toEqual([]);
   });
 });
+
+describe.each(['light', 'dark'] as const)('axe on Settings > Advanced > Slow mode and flooding, %s theme', (theme) => {
+  async function open(w: HubWorld) {
+    const r = renderHub(w, { theme, path: '/settings/advanced' });
+    await screen.findByRole('region', { name: 'Slow mode and flooding' });
+    return r;
+  }
+
+  it('axe: no violations: off, switched on, with field errors, with the save question, and the built-in limit hint', async () => {
+    const w = await hubWorld({ role: 'owner', actor: 'owen@example.test' });
+    const { container, user } = await open(w);
+    expect(await violations(container)).toEqual([]);
+    await user.click(screen.getByRole('checkbox', { name: 'Burst limit' }));
+    await user.type(screen.getByLabelText('Messages'), '10');
+    await user.type(screen.getByLabelText('Within seconds'), '10');
+    expect(await screen.findByText(/built-in limit of 3 messages per 5 seconds/)).toBeInTheDocument();
+    expect(await violations(container)).toEqual([]);
+    await user.clear(screen.getByLabelText('Messages'));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText(/whole number of messages/);
+    expect(await violations(container)).toEqual([]);
+    await user.type(screen.getByLabelText('Messages'), '5');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('a role that only reads has none, and the Reset question has none', async () => {
+    const w = await hubWorld({ role: 'senior', actor: 's@example.test' });
+    const { container } = await open(w);
+    expect(await violations(container)).toEqual([]);
+    cleanup();
+    const o = await hubWorld({ role: 'owner', actor: 'o@example.test', overrides: { pace: { slowModeMs: 2000 } } });
+    const state = await o.direct.policyProfile();
+    await o.direct.savePolicyProfile({ layer: { pace: { slowModeMs: 3000 } }, version: state.version, reason: 'x' });
+    const r = await open(o);
+    await r.user.click(screen.getByRole('button', { name: 'Reset slow mode and flooding' }));
+    expect(await violations(r.container)).toEqual([]);
+  });
+});

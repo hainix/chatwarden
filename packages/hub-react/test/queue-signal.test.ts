@@ -131,7 +131,7 @@ describe('what does not change', () => {
     report('person-c', { createdAt: NOW - HOUR }),
   ];
   const items = (): ReportSummary[] => once;
-  const unmarked = (): ReportSummary[] => once.map((r) => without(r, ['boosted']) as ReportSummary);
+  const unmarked = (): ReportSummary[] => once.map((r) => without(r, ['boosted']) as unknown as ReportSummary);
 
   it('the default sort orders (latest, oldest, reports) are the same with and without the mark', () => {
     for (const sort of ['latest', 'oldest', 'reports'] as const) {

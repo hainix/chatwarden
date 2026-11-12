@@ -4,7 +4,7 @@ import type { HubText } from '../i18n.js';
 import type { Route, SettingsSection } from '../router.js';
 import type { PermissionKey } from '../types.js';
 import { Link } from '../ui.js';
-import { LazyAiSettings, LazyLadderSettings, LazyReportingSettings } from './lazy.js';
+import { LazyAdvancedSettings, LazyAiSettings, LazyLadderSettings, LazyReportingSettings } from './lazy.js';
 
 // The settings screen is a list of sections, each its own address (`#/settings/ladder`) and its own component. A new section
 // is one more entry here and one more value of `SettingsSection` in the router: nothing else is restructured. The section list shows
@@ -21,6 +21,7 @@ const SECTIONS: readonly Section[] = [
   { id: 'ladder', label: 'hub.settings.ladder.nav', need: 'policy.read', render: () => <LazyLadderSettings /> },
   { id: 'reporting', label: 'hub.settings.reporting.nav', need: 'policy.read', render: () => <LazyReportingSettings /> },
   { id: 'ai', label: 'hub.settings.ai.nav', need: 'policy.read', render: () => <LazyAiSettings /> },
+  { id: 'advanced', label: 'hub.settings.advanced.nav', need: 'policy.read', render: () => <LazyAdvancedSettings /> },
 ];
 
 export function Settings({ section }: { section: SettingsSection }) {

@@ -32,6 +32,8 @@ export interface WorldOptions {
   retire?: number[];
   /** The adopter's own ladder (six rows, steps 0 to 5): replaces the profile's. */
   ladder?: NonNullable<Parameters<typeof createChatwarden>[0]['overrides']>['ladder'];
+  /** The preset the profile in code starts from (default `standard`). */
+  profile?: 'relaxed' | 'standard' | 'strict';
   /** The store the kit runs on (default: a MemoryStore). A store without the policy methods cannot save settings. */
   store?: Store;
   /** More overrides on the profile in code (the base the stored layer is merged onto). */
@@ -92,7 +94,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     secret: 'hub-react-test-secret-0000-not-real',
     platform: { identify: (ctx) => ctx as RawWho },
     clock,
-    profile: 'standard',
+    profile: opts.profile ?? 'standard',
     rules: defineRules(starterRules('standard').map((r) => (opts.retire?.includes(r.number) ? { ...r, retired: true } : r))),
     overrides: {
       profanity: { mode: 'allow' },

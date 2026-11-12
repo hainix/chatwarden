@@ -45,7 +45,7 @@ describe('the screen', () => {
     const { user } = renderHub(w, { path: '/settings/ladder' });
     await screen.findByRole('heading', { level: 2, name: 'Steps and ladder' });
     const nav = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Steps and ladder', 'Reporting', 'AI']);
+    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Steps and ladder', 'Reporting', 'AI', 'Advanced']);
     expect(within(nav).getByRole('link', { name: 'Steps and ladder' })).toHaveAttribute('aria-current', 'page');
     await user.click(within(nav).getByRole('link', { name: 'Reporting' }));
     await screen.findByRole('heading', { level: 2, name: 'Reporting' });

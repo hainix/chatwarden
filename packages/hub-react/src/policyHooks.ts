@@ -64,7 +64,7 @@ export function usePolicy(): UsePolicy {
 
   const after = (res: PolicySaved): void => {
     session.invalidatePolicy();
-    if (hasState(res)) setKept({ source: read.data, state: { effective: res.effective, base: res.base, layer: res.layer, version: res.version, canSave: res.canSave, ...(res.layerError === undefined ? {} : { layerError: res.layerError }) } });
+    if (hasState(res)) setKept({ source: read.data, state: { effective: res.effective, base: res.base, layer: res.layer, version: res.version, canSave: res.canSave, ...(res.layerError === undefined ? {} : { layerError: res.layerError }), ...(res.dropped === undefined ? {} : { dropped: res.dropped }) } });
     else read.reload();
   };
 
