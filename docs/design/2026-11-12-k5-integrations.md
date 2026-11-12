@@ -824,3 +824,7 @@ Each has a recommendation; the controller rules.
 ## 18. Rulings
 
 *(To be filled by the controller when the questions above are answered.)*
+
+## Rulings (2026-11-12, controller, under the owner's "go" on the roadmap order)
+All fifteen open questions take the recommendation, with one change: (7) the AI read now exists (0.1.7, AI levels 1 and 2, merged), so the Coop signal route may use the stored read's severity from the start; the number also rides in the item. The rest as recommended: the bot at `@chatwarden/http/discord` with a `components` hook in the feed and an application-owned webhook (a bot-token transport only if live check 1 fails); "Nothing wrong here" and "Apply suggestion" with a confirm step on by default plus an "Open report" link; `lookup` takes reference codes only; Coop jobs the hub closed first are left and a late callback is acknowledged without applying; the Coop plugin is a copy-in example; EOS reports for players not in a room are skipped and counted; warnings and automatic timeouts are not pushed to EOS by default; EOS justification carries reference code and rule only; `cw.links` gets its own additive migration (numbered at build time after the migrations already shipped); a 5-minute Discord timestamp window; no pull of portal-made EOS sanctions yet; refused Discord attempts are logged by reason code, not audited; `@chatwarden/discord`'s core floor stays.
+Each integration ships independently; the owner's one-time setup per platform is listed above and none blocks building and testing against fakes.
