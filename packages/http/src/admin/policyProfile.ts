@@ -45,7 +45,8 @@ function answer(cw: Chatwarden, res: PolicySaveResult, onOk: (changed: PolicySec
  * adopter's store, and what is in force is the base with the layer on top (`cw.policy`). All JSON, all no-store.
  *
  * - `GET /policy/profile` (`policy.read`, audited as `policy.view`): `{ effective, base, layer, version, canSave }`, plus
- *   `layerError` (`{ path }`) when the stored layer cannot be used and is being ignored. It looks at the store first, so it is
+ *   `layerError` (`{ path }`) when the stored layer cannot be used and is being ignored, and `dropped` (`[{ feed, reason }]`, codes only)
+ *   when a stored signal feed could no longer be used: `layer` is then the layer in force, without it. It looks at the store first, so it is
  *   never up to 10 seconds behind. `canSave` false means the store cannot save settings (the profile stays code-only).
  * - `PUT /policy/profile { layer, version, reason }` (`policy.write`, owner only by default): replace the stored layer, the WHOLE
  *   layer (a section left out is reset). 200 `{ ok, changed, effective, base, layer, version, canSave }` (the fresh state, as GET answers it); 409 `conflict` when `version` is no longer the stored

@@ -340,6 +340,7 @@ export type {
   ResolvedSignalKind,
   ResolvedSignals,
   SignalCount,
+  SignalDropReason,
   SignalFeeds,
   SignalGuards,
   SignalInput,
@@ -352,6 +353,7 @@ export type {
 } from './signals.js';
 export { POLICY_REFRESH_MS, PREVIEW_SAMPLES } from './policy.js';
 export type {
+  PolicyDropped,
   PolicyPreview,
   PolicySaveContext,
   PolicySaveResult,

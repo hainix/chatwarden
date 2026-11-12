@@ -1,3 +1,4 @@
+import { deepFreeze } from './freeze.js';
 import { ProfileError } from './profileError.js';
 import type { RawWho, SubjectId } from './types.js';
 
@@ -142,8 +143,8 @@ export interface SignalKindView {
  * Kinds the kit declares itself. An adopter may relabel or re-weight one by declaring the same key; the polarity must stay negative.
  * @experimental
  */
-export const BUILTIN_SIGNAL_KINDS: Readonly<Record<'flood_triggered', Readonly<SignalKindSpec>>> = Object.freeze({
-  flood_triggered: Object.freeze({ label: 'Flooded the chat', polarity: 'negative' as const }),
+export const BUILTIN_SIGNAL_KINDS: Readonly<Record<'flood_triggered', Readonly<SignalKindSpec>>> = deepFreeze({
+  flood_triggered: { label: 'Flooded the chat', polarity: 'negative' as const },
 });
 
 /** A kind id: a lower-case slug. */
@@ -236,7 +237,8 @@ function kindSpec(id: string, v: unknown, path: string): ResolvedSignalKind {
 }
 
 function resolveKinds(v: unknown, path: string): Record<string, ResolvedSignalKind> {
-  const out: Record<string, ResolvedSignalKind> = {};
+  // No prototype, so a plain `kinds['constructor']` finds nothing unless a game declared it.
+  const out: Record<string, ResolvedSignalKind> = Object.create(null) as Record<string, ResolvedSignalKind>;
   for (const id of BUILTIN_IDS) {
     const b = BUILTIN_SIGNAL_KINDS[id as 'flood_triggered'];
     setOwn(out, id, { label: b.label, polarity: b.polarity, weight: 1 });
@@ -382,63 +384,76 @@ export function checkSignalFeeds(
   }
 }
 
+/** Why a stored feed was dropped: a code, never a value. */
+export type SignalDropReason = 'unknown_feed' | 'unknown_kind' | 'positive_kind' | 'window' | 'invalid';
+
+/** The code for a failed check, from the rule it broke (the messages above; they never carry a value). */
+function dropReason(err: unknown): SignalDropReason {
+  const r = err instanceof ProfileError ? err.reason : '';
+  return /not a kind/.test(r) ? 'unknown_kind' : /positive/.test(r) ? 'positive_kind' : /longer|days/.test(r) ? 'window' : 'invalid';
+}
+
 /**
  * The feeds minus anything that can no longer be used: a feed (or a ladder rule) naming a kind the code stopped declaring, a positive
  * kind where only negative ones are allowed, a window longer than `opts.signalsMs` or 90 days, or any other shape the checks refuse.
  * Applied to a STORED layer at start-up, so one stale feed is dropped on its own and the rest of the layer (the ladder edits too) stays
- * in force. Never throws: garbage in gives `{}`. `opts.onDrop` is told the name of each feed that lost something, once per feed (a name
- * that is not one of the four feeds is passed as it was stored: do not log it). The result passes {@link checkSignalFeeds}.
+ * in force. Never throws: garbage in gives `{}`. `opts.onDrop` is told the name of each feed that lost something, once per feed, with
+ * the reason code of the first thing lost (a name that is not one of the four feeds is passed as it was stored, with `unknown_feed`: do
+ * not log it). The result passes {@link checkSignalFeeds}.
  * @experimental
  */
 export function pruneSignalFeeds(
   feeds: unknown,
   kinds: Readonly<Record<string, ResolvedSignalKind>>,
-  opts: { signalsMs: number; onDrop?: (feed: string) => void },
+  opts: { signalsMs: number; onDrop?: (feed: string, reason: SignalDropReason) => void },
 ): SignalFeeds {
   const out: Record<string, unknown> = {};
   if (!isPlain(feeds)) return out as SignalFeeds;
   const ctx = { signalsMs: opts.signalsMs };
-  const drop = (name: string): void => {
+  const drop = (name: string, reason: SignalDropReason): void => {
     try {
-      opts.onDrop?.(name);
+      opts.onDrop?.(name, reason);
     } catch {
       // A broken callback must not stop the prune.
     }
   };
-  const usable = (name: string, value: unknown): boolean => {
+  /** Null when the feed is usable, else the reason it is not. */
+  const unusable = (name: string, value: unknown): SignalDropReason | null => {
     try {
       checkSignalFeeds({ [name]: value } as SignalFeeds, kinds, ctx, 'feeds');
-      return true;
-    } catch {
-      return false;
+      return null;
+    } catch (err) {
+      return dropReason(err);
     }
   };
   for (const name of Object.keys(feeds)) {
     const value = feeds[name];
     if (!SIGNAL_FEED_NAMES.includes(name)) {
-      drop(name);
+      drop(name, 'unknown_feed');
       continue;
     }
     if (name !== 'ladder') {
-      if (usable(name, value)) setOwn(out, name, JSON.parse(JSON.stringify(value)));
-      else drop(name);
+      const why = unusable(name, value);
+      if (why === null) setOwn(out, name, JSON.parse(JSON.stringify(value)));
+      else drop(name, why);
       continue;
     }
     if (!Array.isArray(value)) {
-      drop(name);
+      drop(name, 'invalid');
       continue;
     }
     const kept: unknown[] = [];
     const ids = new Set<string>();
-    let lost = value.length > LADDER_RULES_MAX;
+    let lost: SignalDropReason | null = value.length > LADDER_RULES_MAX ? 'invalid' : null;
     for (const rule of value.slice(0, LADDER_RULES_MAX)) {
       const id = isPlain(rule) && typeof rule['id'] === 'string' ? rule['id'] : null;
-      if (id !== null && !ids.has(id) && usable(name, [rule])) {
-        ids.add(id);
+      const why = id === null || ids.has(id) ? 'invalid' : unusable(name, [rule]);
+      if (why === null) {
+        ids.add(id!);
         kept.push(JSON.parse(JSON.stringify(rule)));
-      } else lost = true;
+      } else lost ??= why;
     }
-    if (lost) drop(name);
+    if (lost !== null) drop(name, lost);
     if (kept.length > 0) setOwn(out, name, kept);
   }
   return out as SignalFeeds;

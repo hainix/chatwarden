@@ -900,3 +900,14 @@ All accepted as the plan states them:
 10-11. The plan rebases on main after 0.1.5 (merged, fbbaebc) and 0.1.6; Tasks 7, 12, 14 and 16 wait for 0.1.6.
 12. Peer floors: store-memory, store-sqlite and http on core `^0.1.7`; hub-react on core and http `^0.1.7`; player-react only if it imports a new core name; hub-element by `peerRangeOf`.
 13. The hub first-load budget is the number in `packages/hub-react/test/size.test.ts` on main at build time (76,800 B as of 0.1.5); fix a stale header comment if found.
+
+### Size and review rulings (2026-11-12, controller, after the rebase onto 0.1.7)
+1. The browser bundle budget is not raised for this release. The signal service and counting are server-only like the AI: the kit loads
+   them with a dynamic `import()` only for a store that has the three signal methods, and `cw.signals` is inert otherwise. The in-memory
+   store's signal methods are opt-in, `withMemorySignals(store)` (`@experimental`), as `withMemoryAi` is for the AI. The pacer stays in the
+   chat path.
+2. The layer the owner and the hub read (`cw.policy.get().layer`, the http body) is the layer in force: stale signal feeds are out of it.
+   `PolicyState.dropped` (`[{ feed, reason }]`, codes only, no ids) says what was dropped. A save that sends the pruned layer back succeeds;
+   a save that names a stale feed is still refused.
+3. With `signalBoost`, a case a moderator was handed and let lapse is served to that moderator after every other free case for one claim
+   window; it is still served when it is all that is left.

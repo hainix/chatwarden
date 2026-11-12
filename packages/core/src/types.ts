@@ -313,11 +313,6 @@ export interface AiReadRow {
 }
 
 /**
- * The answer to a reserve: this caller owns the read now (`id`), or a row already exists for that report and input. `lease` is the
- * caller's fence token (the row's `attempts` after this reserve): `completeAiRead` and `failAiRead` must be given it, and do nothing
- * once another caller has taken the row over.
- */
-/**
  * One signal a game recorded about a player (flood control and signals, design 5.8). Staff-side data: it holds ids and numbers only, no
  * text, handle or seat. `sourceKey` is `b:<canonical by>`, `r:<roomId>` or `d:<UTC day>`; `(kind, subject, sourceKey, capBucket)` is unique,
  * which is the per-source cap.
@@ -354,6 +349,11 @@ export interface SignalSourceRow {
   lastAt: number;
 }
 
+/**
+ * The answer to a reserve: this caller owns the read now (`id`), or a row already exists for that report and input. `lease` is the
+ * caller's fence token (the row's `attempts` after this reserve): `completeAiRead` and `failAiRead` must be given it, and do nothing
+ * once another caller has taken the row over.
+ */
 export type AiReserveResult = { reserved: true; id: string; lease: number } | { reserved: false; existing: AiReadRow };
 
 /** The human's verdict, and the AI's recommendation, in the casebook's three classes. */

@@ -190,6 +190,9 @@ cw.policy.reset('durations'); // put one section back to the base; reset() puts 
   cannot be used: it is then ignored, the base stays in force, and one `chatwarden.policy_layer_invalid` line is logged. `kind` is `'unreadable'`
   when the stored text could not be read at all (corrupted, not JSON, not an object), so the owner's edits are gone until they save again, and
   `'invalid'` when it was read but a setting is not valid (a field from a newer kit, say). A save or a full `reset()` repairs either.
+  `layer` is the layer in force: a stored signal feed that can no longer be used (its kind is no longer declared in code, or its window is longer
+  than `retention.signalsMs` now allows) is dropped alone, the rest of the layer stays, and `dropped` (`[{ feed, reason }]`, a feed name and a reason
+  code, never a kind or a rule id; `@experimental`) says what went. Send `layer` back to `save` and it is accepted and repairs the stored row.
 - **`save(layer, { version, actor, reason })`** stores the whole layer: a section you leave out goes back to the base. It answers
   `{ ok: true, version, changed }`, `{ ok: false, error: 'conflict' }` for a stale `version` (nothing is written),
   `{ ok: false, error: 'invalid', path }` for a layer that touches a setting that is not editable or would make the profile invalid
@@ -397,6 +400,7 @@ in a browser.
 | `rules` | The numbered Community Rules, from `defineRules`. Defaults to the preset's starter set. |
 | `autoRestrictRule` | The rule number the automatic slur filter cites (default 1). Must be an active rule. |
 | `ai` | `{ adapter, maxLevel?, dailyBudgetMicros?, ... }`: turns on AI reads (levels 1 and 2). Off without it. See "The AI (levels 1 and 2)" below. |
+| `signals` | `{ accountAgeDays? }`: the one hook the profile cannot hold (how old a player's account is, for the new-account guard). The kinds, guards and feeds are in `profile.signals`. Needs a store with the signal methods (SQLite; `withMemorySignals(store)` for the in-memory store). `@experimental`. |
 
 Bad options throw at creation (`ProfileError`, `RangeError`), before the store is touched.
 

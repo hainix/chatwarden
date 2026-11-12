@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MemoryStore, withMemorySignals } from '@chatwarden/store-memory';
 import { CaseDesk, SIGNAL_BOOST_SCAN_MAX } from '../src/team.js';
 import { REPORTER_ACCURACY_MIN_DECIDED, REPORTER_RANK_LAPSE_MS } from '../src/index.js';
+import { CLAIM_TTL_MS } from '../src/types.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { StoredReport, SubjectId } from '../src/types.js';
 import { DAY, sworld } from './signalsWorld.js';
@@ -362,5 +363,100 @@ describe('the dependency', () => {
     t.cw.cases.next('mod-a', BOOST);
     expect(spy).not.toHaveBeenCalled();
     void b;
+  });
+});
+
+// A claim this moderator let lapse (fc-report): the boosted case is claimed ahead of everything, so a moderator who lets it lapse would be
+// handed the same case again and again. The rule: for one claim window after the claim lapsed, that case is served to that moderator after
+// every other free case. Nothing is skipped for good (it is still served when it is all that is left), and other moderators are not affected.
+describe('a claim this moderator let lapse', () => {
+  const lapse = (t: { clock: { t: number } }): void => {
+    t.clock.t += CLAIM_TTL_MS + SEC;
+  };
+
+  it('is served after the other free cases: the boosted case does not come straight back', async () => {
+    const t = await setup();
+    const old = await t.file();
+    const newer = await t.file();
+    t.boost(newer.person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    lapse(t);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: old.person });
+    // Nothing else is free for mod-a now (its own claim on the old case is live): the lapsed one is served, not skipped for good.
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+  });
+
+  it('is only about that moderator: another one is handed the boosted case at once', async () => {
+    const t = await setup();
+    await t.file();
+    const newer = await t.file();
+    t.boost(newer.person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    lapse(t);
+    expect(t.cw.cases.next('mod-b', BOOST)).toMatchObject({ person: newer.person });
+  });
+
+  it('wears off after one claim window: the boosted case is first again', async () => {
+    const t = await setup();
+    const old = await t.file();
+    const newer = await t.file();
+    t.boost(newer.person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    lapse(t);
+    t.clock.t += CLAIM_TTL_MS;
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    void old;
+  });
+
+  it('a case still held (not lapsed) is skipped as before; the lapsed rule adds nothing to it', async () => {
+    const t = await setup();
+    const old = await t.file();
+    const newer = await t.file();
+    t.boost(newer.person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    t.clock.t += SEC;
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: old.person });
+    expect(t.cw.cases.next('mod-a', BOOST)).toBeNull();
+  });
+
+  it('holds for an overdue case too: an old case this moderator let lapse goes behind a newer ordinary one', async () => {
+    const t = await setup();
+    const old = await t.file();
+    t.clock.t += REPORTER_RANK_LAPSE_MS;
+    const newer = await t.file();
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: old.person });
+    lapse(t);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: newer.person });
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: old.person });
+  });
+
+  it('a lapse two windows old no longer counts: the boosted case is first again', async () => {
+    const t = await setup();
+    const a = await t.file();
+    const boosted = await t.file();
+    t.boost(boosted.person);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: boosted.person });
+    lapse(t);
+    lapse(t);
+    expect(t.cw.cases.next('mod-a', BOOST)).toMatchObject({ person: boosted.person });
+    void a;
+  });
+
+  it('without signalBoost nothing changes: the same oldest case is handed back after a lapse', async () => {
+    const t = await setup();
+    const old = await t.file();
+    await t.file();
+    expect(t.cw.cases.next('mod-a')).toMatchObject({ person: old.person });
+    lapse(t);
+    expect(t.cw.cases.next('mod-a')).toMatchObject({ person: old.person });
+  });
+
+  it('many claims by many moderators do not break take-next (the markers stay bounded)', async () => {
+    const t = await setup();
+    const cases = [];
+    for (let i = 0; i < 30; i += 1) cases.push(await t.file());
+    for (let i = 0; i < 30; i += 1) expect(t.cw.cases.next(`mod-${i}`, BOOST)).not.toBeNull();
+    lapse(t);
+    expect(t.cw.cases.next('mod-0', BOOST)).not.toBeNull();
   });
 });

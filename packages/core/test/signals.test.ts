@@ -51,6 +51,35 @@ describe('constants', () => {
   });
 });
 
+describe('the resolved kinds hold own keys only (review FB, M3)', () => {
+  it('a plain lookup of constructor, toString or __proto__ finds nothing, with or without declared kinds', () => {
+    for (const r of [resolveSignals(undefined), resolveSignals(declare({ muted_by_player: { label: 'Muted', polarity: 'negative' } }))]) {
+      const kinds = r.kinds as Record<string, unknown>;
+      for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) expect(kinds[name], name).toBeUndefined();
+    }
+  });
+
+  it('a game may still declare a kind named constructor, and it is found as an own key', () => {
+    const r = resolveSignals(declare({ constructor: { label: 'Odd', polarity: 'negative' } }));
+    expect((r.kinds as Record<string, { label: string }>)['constructor']?.label).toBe('Odd');
+    expect(Object.keys(r.kinds)).toEqual(['flood_triggered', 'constructor']);
+  });
+
+  it('resolving a resolved section again gives the same value, and the kinds still come out in order', () => {
+    const once = resolveSignals(declare({ muted_by_player: { label: 'Muted', polarity: 'negative', weight: 2 } }));
+    expect(resolveSignals(once)).toEqual(once);
+    expect(Object.keys(resolveSignals(once).kinds)).toEqual(['flood_triggered', 'muted_by_player']);
+  });
+
+  it('the kit profile in force has the same property, for the base and after a saved layer', async () => {
+    const { cw } = await world({ overrides: { signals: { kinds: { muted_by_player: { label: 'Muted', polarity: 'negative' } } } } });
+    expect((cw.profile.signals.kinds as Record<string, unknown>)['constructor']).toBeUndefined();
+    expect(cw.policy.save({ signals: { feeds: { record: { kinds: '*', windowDays: 7 } } } }, { version: 0, actor: 'owner_ann', reason: 'tuning' })).toMatchObject({ ok: true });
+    expect((cw.profile.signals.kinds as Record<string, unknown>)['constructor']).toBeUndefined();
+    expect((cw.policy.get().base.signals.kinds as Record<string, unknown>)['toString']).toBeUndefined();
+  });
+});
+
 describe('resolveSignals', () => {
   it('nothing given resolves to the built-in kind, default guards and no feeds', () => {
     const r = resolveSignals(undefined);

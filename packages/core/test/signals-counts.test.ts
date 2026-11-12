@@ -153,6 +153,65 @@ describe('countSignals: kinds and times', () => {
   });
 });
 
+describe('float sums (review FB, M1)', () => {
+  const tenths = (n: number) => Array.from({ length: n }, (_, i) => from(i + 1, { weight: 0.1 }));
+  const t = (over: Record<string, unknown> = {}) => ({ kinds: ['muted_by_player'], minDistinct: 1, windowDays: 14, ...over });
+
+  it('ten sources of weight 0.1 meet minWeight 1, and the weight reads 1, not 0.9999999999999999', () => {
+    expect(evaluateThreshold(tenths(10), ctx, t({ minWeight: 1 }))).toMatchObject({ met: true, distinct: 10, weight: 1 });
+    expect(countSignals(tenths(10), ctx)[0]).toMatchObject({ distinct: 10, weight: 1 });
+  });
+
+  it('nine sources of 0.1 do not meet minWeight 1', () => {
+    expect(evaluateThreshold(tenths(9), ctx, t({ minWeight: 1 }))).toMatchObject({ met: false, weight: 0.9 });
+  });
+
+  it('weights of 0.3 and 0.7 mixed, and 0.2 x 6 against 1.2, all meet exactly', () => {
+    expect(evaluateThreshold([from(1, { weight: 0.3 }), from(2, { weight: 0.7 })], ctx, t({ minWeight: 1 })).met).toBe(true);
+    const six = Array.from({ length: 6 }, (_, i) => from(i + 1, { weight: 0.2 }));
+    expect(evaluateThreshold(six, ctx, t({ minWeight: 1.2 })).met).toBe(true);
+    expect(evaluateThreshold(six, ctx, t({ minWeight: 1.21 })).met).toBe(false);
+  });
+
+  it('the sum across kinds is rounded the same way', () => {
+    const rows = [...tenths(5), ...Array.from({ length: 5 }, (_, i) => from(i + 1, { kind: 'blocked_by_player', weight: 0.1 }))];
+    expect(evaluateThreshold(rows, ctx, t({ kinds: ['muted_by_player', 'blocked_by_player'], minWeight: 1 }))).toMatchObject({ met: true, weight: 1 });
+  });
+
+  it('a real shortfall is not forgiven: 0.999 is below 1', () => {
+    expect(evaluateThreshold([from(1, { weight: 0.999 })], ctx, t({ minWeight: 1 })).met).toBe(false);
+  });
+});
+
+describe('a source merged into the subject (review FB, M2)', () => {
+  const merged = (s: SubjectId): SubjectId => (s === 's_alt' ? 's_target' : s);
+  const mctx = { kinds, canonical: merged, windowDays: 14 };
+
+  it('an alt account that muted the main account, once the two are linked, no longer counts', () => {
+    const rows = [from(1), row({ sourceKey: 'b:s_alt', bySubject: 's_alt' })];
+    expect(countSignals(rows, mctx)[0]).toMatchObject({ distinct: 1 });
+    expect(evaluateThreshold(rows, mctx, { kinds: ['muted_by_player'], minDistinct: 2, windowDays: 14 })).toMatchObject({ met: false, distinct: 1 });
+  });
+
+  it('only that source is dropped: others keep counting, and a source that is not merged is untouched', () => {
+    const rows = [from(1), from(2), row({ sourceKey: 'b:s_alt', bySubject: 's_alt', weight: 5 })];
+    expect(countSignals(rows, mctx)[0]).toMatchObject({ distinct: 2, weight: 2 });
+  });
+
+  it('a row about the alias (subject) by the main account is dropped the same way', () => {
+    const rows = [row({ subject: 's_alt', sourceKey: 'b:s_target', bySubject: 's_target' })];
+    expect(countSignals(rows, mctx)).toEqual([]);
+  });
+
+  it('a bySubject-less b: key folds through the id in the key before the comparison', () => {
+    expect(countSignals([row({ sourceKey: 'b:s_alt', bySubject: null })], mctx)).toEqual([]);
+  });
+
+  it('room and day sources are never the subject', () => {
+    expect(countSignals([row({ sourceKey: 'r:room-1', bySubject: null }), row({ sourceKey: 'd:2026-11-12', bySubject: null })], mctx)[0]).toMatchObject({ distinct: 2 });
+  });
+});
+
 describe('evaluateThreshold', () => {
   const t = (over: Record<string, unknown> = {}) => ({ kinds: ['muted_by_player'], minDistinct: 3, windowDays: 14, ...over });
 

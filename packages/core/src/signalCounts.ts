@@ -50,6 +50,8 @@ function countKind(rows: readonly SignalSourceRow[], canonical: (s: SubjectId) =
     const w = row.weight;
     if (!(typeof w === 'number' && w > 0 && Number.isFinite(w))) continue;
     const key = sourceOf(row, canonical);
+    // A source that is the subject itself (an alt account linked to the main one after it signalled) is not a second opinion.
+    if (key === `b:${canonical(row.subject)}`) continue;
     const s = sources.get(key);
     if (s === undefined) sources.set(key, { distinct: 1, weight: w, firstAt: row.firstAt, lastAt: row.lastAt });
     else {
@@ -67,8 +69,11 @@ function countKind(rows: readonly SignalSourceRow[], canonical: (s: SubjectId) =
     if (s.firstAt < firstAt) firstAt = s.firstAt;
     if (s.lastAt > lastAt) lastAt = s.lastAt;
   }
-  return { distinct: sources.size, weight, firstAt, lastAt };
+  return { distinct: sources.size, weight: round(weight), firstAt, lastAt };
 }
+
+/** Weights are floats: ten sources of 0.1 sum to 0.9999999999999999. Sums are rounded to 6 places and compared with a tolerance of 1e-9. */
+const round = (n: number): number => Math.round(n * 1e6) / 1e6;
 
 /** Rows by kind, for the kinds in the request only (own keys: a row of an undeclared or prototype-named kind is ignored). */
 function byKind(rows: readonly SignalSourceRow[], kinds: CountContext['kinds'], only?: readonly string[]): Map<string, SignalSourceRow[]> {
@@ -119,10 +124,10 @@ export function evaluateThreshold(rows: readonly SignalSourceRow[], ctx: Omit<Co
     const counted = countKind(list, ctx.canonical);
     if (counted === null) continue;
     distinct += counted.distinct;
-    weight += counted.weight;
+    weight = round(weight + counted.weight);
     if (firstAt === null || counted.firstAt < firstAt) firstAt = counted.firstAt;
     if (lastAt === null || counted.lastAt > lastAt) lastAt = counted.lastAt;
   }
-  const met = distinct >= t.minDistinct && (t.minWeight === undefined || weight >= t.minWeight);
+  const met = distinct >= t.minDistinct && (t.minWeight === undefined || weight >= t.minWeight - 1e-9);
   return { met, distinct, weight, firstAt, lastAt };
 }
