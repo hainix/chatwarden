@@ -176,14 +176,19 @@ describe('the AI methods: reads, outcomes, spend, examples, stats and purge', ()
   function run(s: Store): unknown[] {
     const out: unknown[] = [];
     const issued: string[] = [];
+    const leases = new Map<string, number>();
+    const lease = (id: string): number => leases.get(id) ?? 0;
     const label = (id: string): string => `#${issued.indexOf(id)}`;
     const scrub = (value: unknown): unknown =>
       JSON.parse(JSON.stringify(value, (k, v: unknown) => (k === 'id' && typeof v === 'string' ? label(v) : v)));
     const log = (name: string, value: unknown) => out.push([name, scrub(value)]);
     const reserve = (reportId: string, inputHash: string, lease: number, now: number) => {
       const r = s.reserveAiRead!({ reportId, inputHash, promptVersion: 1, adapter: 'fake:one' }, lease, now);
-      if (r.reserved) issued.push(r.id);
-      return r.reserved ? { reserved: true, id: r.id } : r;
+      if (r.reserved) {
+        issued.push(r.id);
+        leases.set(r.id, r.lease);
+      }
+      return r;
     };
     const readOf = (n: number) => ({
       severity: (['banter', 'rude', 'hostile', 'severe'] as const)[n % 4]!,
@@ -204,12 +209,12 @@ describe('the AI methods: reads, outcomes, spend, examples, stats and purge', ()
     log('reserve again', reserve('rep0', 'h0', NOW, MIDNIGHT - 6 * 3600_000 + 1));
     for (let i = 0; i < issued.length; i++) {
       const id = issued[i]!;
-      if (i % 4 === 0) log(`complete ${i}`, s.completeAiRead!(id, { ...usageOf(i), read: readOf(i) }));
-      else if (i % 4 === 1) log(`fail ${i}`, s.failAiRead!(id, 'failed', 'retryable', MIDNIGHT + i * MIN, NOW));
-      else if (i % 8 === 2) log(`invalid ${i}`, s.failAiRead!(id, 'invalid', 'invalid', null, NOW, usageOf(i)));
-      else if (i % 8 === 6) log(`skip ${i}`, s.failAiRead!(id, 'skipped', 'budget', MIDNIGHT + DAY, NOW));
+      if (i % 4 === 0) log(`complete ${i}`, s.completeAiRead!(id, lease(id), { ...usageOf(i), read: readOf(i), exampleIds: i % 3 === 0 ? [`o${i}`] : [] }));
+      else if (i % 4 === 1) log(`fail ${i}`, s.failAiRead!(id, lease(id), 'failed', 'retryable', MIDNIGHT + i * MIN, i % 5 === 1 ? usageOf(i) : undefined));
+      else if (i % 8 === 2) log(`invalid ${i}`, s.failAiRead!(id, lease(id), 'invalid', 'invalid', null, usageOf(i)));
+      else if (i % 8 === 6) log(`skip ${i}`, s.failAiRead!(id, lease(id), 'skipped', 'budget', MIDNIGHT + DAY));
     }
-    log('complete twice', s.completeAiRead!(issued[0]!, { ...usageOf(0), read: readOf(99) }));
+    log('complete twice', s.completeAiRead!(issued[0]!, lease(issued[0]!), { ...usageOf(0), read: readOf(99) }));
     log('retake due', reserve('rep1', 'h1', MIDNIGHT + 9 * MIN, MIDNIGHT + 8 * MIN));
     log('retake not due', reserve('rep5', 'h2', MIDNIGHT + 9 * MIN, MIDNIGHT + 1));
     log('token', s.changeToken() === s.changeToken());
@@ -239,7 +244,7 @@ describe('the AI methods: reads, outcomes, spend, examples, stats and purge', ()
           severity: i % 6 === 0 ? null : (['rude', 'hostile'] as const)[i % 2]!,
           aiVerdict: aiV,
           agreement,
-          detail: { verdict: agreement === 'agree', outcome: 'same', oneClick: i % 2 === 0 },
+          detail: { verdict: agreement === 'agree', rule: i % 3 === 0, lines: i % 4, outcome: (['same', 'milder', 'harsher', 'none'] as const)[i % 4]!, oneClick: i % 2 === 0 },
           badFaith: i % 11 === 0,
           example: i % 4 === 3 ? null : { rule: (i % 12) + 1, severity: 'hostile', verdict: v, lines: [{ who: 'P1', text: `zorbak ${i}` }] },
         }),

@@ -65,11 +65,15 @@ const done = (r: AIRead = read()): AiReadDone => ({
   costMicros: 10,
   latencyMs: 5,
 });
+/** The lease token of every row reserved here, by row id (what completeAiRead and failAiRead must be given). */
+const leases = new Map<string, number>();
 const reserve = (s: SqliteStore, over: Partial<AiReadPending> = {}, now = NOW, lease = now + 5 * MIN): string => {
   const r = s.reserveAiRead(pending(over), lease, now);
   if (!r.reserved) throw new Error('expected a reservation');
+  leases.set(r.id, r.lease);
   return r.id;
 };
+const complete = (s: SqliteStore, id: string, d: AiReadDone): boolean => s.completeAiRead(id, leases.get(id) ?? 0, d);
 
 /** The statements the store prepares while `run` executes: SQL text plus the arguments it was run with. */
 type Seen = { sql: string; args: SQLInputValue[] };
@@ -108,18 +112,18 @@ function seeded(): { db: DatabaseSync; store: SqliteStore } {
   stores.push(store);
   for (let i = 0; i < 300; i++) {
     const id = reserve(store, { reportId: `rep${i % 120}`, inputHash: `h${i}` }, NOW - (i % 50) * 3600_000);
-    if (i % 3 === 0) store.completeAiRead(id, done());
-    else if (i % 3 === 1) store.failAiRead(id, 'failed', 'retryable', NOW + i * MIN, NOW);
+    if (i % 3 === 0) complete(store, id, done());
+    else if (i % 3 === 1) store.failAiRead(id, leases.get(id) ?? 0, 'failed', 'retryable', NOW + i * MIN);
   }
   return { db, store };
 }
 
 describe('query plans use the indexes of migration 20', () => {
-  it("EXPLAIN QUERY PLAN: today's spend uses kit_ai_reads_by_time", () => {
+  it("EXPLAIN QUERY PLAN: today's spend uses kit_ai_spend_by_time (the per-attempt ledger)", () => {
     const { db, store } = seeded();
-    const hit = find(record(db, () => store.aiSpendSince(NOW - DAY)), 'kit_ai_reads');
-    expect(planOf(db, hit).join('\n')).toMatch(/USING (COVERING )?INDEX kit_ai_reads_by_time/);
-    expect(planOf(db, hit).join('\n')).not.toMatch(/SCAN kit_ai_reads(?! USING)/);
+    const hit = find(record(db, () => store.aiSpendSince(NOW - DAY)), 'kit_ai_spend');
+    expect(planOf(db, hit).join('\n')).toMatch(/USING (COVERING )?INDEX kit_ai_spend_by_time/);
+    expect(planOf(db, hit).join('\n')).not.toMatch(/SCAN kit_ai_spend(?! USING)/);
   });
 
   it('the sweeper query uses kit_ai_reads_retry', () => {
@@ -152,10 +156,16 @@ describe('query plans use the indexes of migration 20', () => {
     }
   });
 
-  it('the retention purge of reads is answered from kit_ai_reads_by_time', () => {
+  it('the retention purge of reads is answered from kit_ai_reads_by_time (and the ledger from kit_ai_spend_by_time)', () => {
     const { db, store } = seeded();
     const hit = find(record(db, () => store.purgeAi(NOW - 90 * DAY, NOW - 365 * DAY, NOW - 180 * DAY)), 'DELETE FROM kit_ai_reads');
     expect(planOf(db, hit).join('\n')).toMatch(/INDEX kit_ai_reads_by_time/);
+  });
+
+  it('the ledger sweep of the purge is answered from kit_ai_spend_by_time', () => {
+    const { db, store } = seeded();
+    const hit = find(record(db, () => store.purgeAi(NOW - 90 * DAY, NOW - 365 * DAY, NOW - 180 * DAY)), 'DELETE FROM kit_ai_spend');
+    expect(planOf(db, hit).join('\n')).toMatch(/INDEX kit_ai_spend_by_time/);
   });
 
   it('the examples query uses kit_ai_outcomes_by_rule', () => {
@@ -173,7 +183,7 @@ describe('query plans use the indexes of migration 20', () => {
         severity: 'hostile',
         aiVerdict: 'upheld',
         agreement: 'agree',
-        detail: {},
+        detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false },
         badFaith: false,
         example: { rule: i % 12, severity: 'hostile', verdict: 'upheld', lines: [{ who: 'P1', text: 'zorbak' }] },
       });
@@ -183,8 +193,11 @@ describe('query plans use the indexes of migration 20', () => {
   });
 });
 
-describe('two connections on one file', () => {
-  it('two connections reserve the same report and hash: exactly one wins', () => {
+// node:sqlite is synchronous and these tests run in one process, so the calls below happen one after the other: they prove that two
+// connections on one file see each other's writes and that the UNIQUE index and the conditional UPDATE leave exactly one winner, not
+// a true interleaving. (The reserve statements run in one savepoint that starts with a write, which is what holds the lock.)
+describe('two connections on one file, one call after the other', () => {
+  it('two connections reserving the same report and hash in turn: exactly one wins', () => {
     const path = fileDb();
     const a = open(path);
     const b = open(path);
@@ -197,7 +210,7 @@ describe('two connections on one file', () => {
     expect(b.aiSpendSince(0).calls).toBe(1);
   });
 
-  it('of two connections racing for an expired lease, exactly one takes it', () => {
+  it('two connections trying an expired lease in turn: exactly one takes it', () => {
     const path = fileDb();
     const a = open(path);
     const b = open(path);
@@ -207,7 +220,7 @@ describe('two connections on one file', () => {
     const rb = b.reserveAiRead(pending(), later + 5 * MIN, later + 1);
     expect([ra.reserved, rb.reserved].filter(Boolean)).toHaveLength(1);
     const winner = ra.reserved ? ra : rb;
-    expect(winner).toEqual({ reserved: true, id });
+    expect(winner).toEqual({ reserved: true, id, lease: 2 });
     expect(a.listAiRetries(later + 2, 10)).toEqual([]);
   });
 
@@ -217,11 +230,11 @@ describe('two connections on one file', () => {
     const b = open(path);
     const id = reserve(a);
     const before = b.changeToken();
-    expect(a.completeAiRead(id, done())).toBe(true);
+    expect(complete(a, id, done())).toBe(true);
     expect(b.changeToken()).not.toBe(before);
     expect(b.loadAiRead('r1')?.id).toBe(id);
     // The other process cannot complete it a second time.
-    expect(b.completeAiRead(id, done(read({ summary: 'again' })))).toBe(false);
+    expect(b.completeAiRead(id, 1, done(read({ summary: 'again' })))).toBe(false);
     expect(b.loadAiRead('r1')?.read?.summary).toBe('P1 was rude to P2.');
   });
 
@@ -229,8 +242,8 @@ describe('two connections on one file', () => {
     const path = fileDb();
     const a = open(path);
     const b = open(path);
-    a.completeAiRead(reserve(a, { reportId: 'x' }), done());
-    b.completeAiRead(reserve(b, { reportId: 'y' }), done());
+    complete(a, reserve(a, { reportId: 'x' }), done());
+    complete(b, reserve(b, { reportId: 'y' }), done());
     expect(a.aiSpendSince(NOW - 1)).toEqual({ micros: 20, calls: 2 });
   });
 });
@@ -241,9 +254,9 @@ describe('rows damaged by hand never break a read', () => {
     const store = openStore({ db });
     stores.push(store);
     const good = reserve(store, { inputHash: 'good' }, NOW);
-    store.completeAiRead(good, done());
+    complete(store, good, done());
     const bad = reserve(store, { inputHash: 'bad' }, NOW + MIN);
-    store.completeAiRead(bad, done());
+    complete(store, bad, done());
     db.prepare('UPDATE kit_ai_reads SET evidence_json = ? WHERE id = ?').run('not json', bad);
     expect(store.loadAiRead('r1')?.id).toBe(good);
     expect(store.loadAiReads(['r1']).map((r) => r.id)).toEqual([good]);
@@ -254,11 +267,26 @@ describe('rows damaged by hand never break a read', () => {
     const store = openStore({ db });
     stores.push(store);
     const id = reserve(store);
-    store.completeAiRead(id, done());
+    complete(store, id, done());
     db.prepare("UPDATE kit_ai_reads SET rule = 'banana' WHERE id = ?").run(id);
     expect(store.loadAiRead('r1')).toBeNull();
     db.prepare("UPDATE kit_ai_reads SET rule = '2', severity = 'nuclear' WHERE id = ?").run(id);
     expect(store.loadAiRead('r1')).toBeNull();
+  });
+
+  it('reserve on a hand-damaged ok row does not throw: the row is taken over for a fresh read', () => {
+    const db = memDb();
+    const store = openStore({ db });
+    stores.push(store);
+    const id = reserve(store);
+    complete(store, id, done());
+    db.prepare("UPDATE kit_ai_reads SET evidence_json = 'not json' WHERE id = ?").run(id);
+    expect(store.loadAiRead('r1')).toBeNull();
+    const again = store.reserveAiRead(pending(), NOW + 9 * MIN, NOW + MIN);
+    expect(again).toEqual({ reserved: true, id, lease: 2 });
+    expect(store.completeAiRead(id, 2, done(read({ summary: 'fresh' })))).toBe(true);
+    expect(store.loadAiRead('r1')?.read?.summary).toBe('fresh');
+    expect(store.aiSpendSince(0).calls).toBe(2);
   });
 
   it('an outcome with unreadable detail still loads (empty detail) and an unreadable example is not an example', () => {
@@ -275,12 +303,12 @@ describe('rows damaged by hand never break a read', () => {
       severity: 'hostile',
       aiVerdict: 'upheld',
       agreement: 'agree',
-      detail: { verdict: true },
+      detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false },
       badFaith: false,
       example: { rule: 3, severity: 'hostile', verdict: 'upheld', lines: [{ who: 'P1', text: 'zorbak' }] },
     });
     db.prepare("UPDATE kit_ai_outcomes SET detail_json = '{{', example_json = '[1' WHERE report_id = 'o1'").run();
-    expect(store.loadAiOutcome('o1')).toMatchObject({ detail: {}, example: null, verdict: 'upheld' });
+    expect(store.loadAiOutcome('o1')).toMatchObject({ detail: { verdict: false, rule: false, lines: 0, outcome: 'none', oneClick: false }, example: null, verdict: 'upheld' });
     expect(store.aiExamples('3', 'hostile', 5, 0)).toEqual([]);
   });
 });

@@ -265,6 +265,11 @@ export interface AiCallUsage {
 /** The validated answer and the usage of the call that produced it. */
 export interface AiReadDone extends AiCallUsage {
   read: AIRead;
+  /**
+   * The ids of the casebook examples that were in the prompt (`AIStoredRead.exampleIds`): the examples are not part of the input
+   * hash, so the read records which ones it saw. Ids only; none by default.
+   */
+  exampleIds?: readonly string[];
 }
 
 /**
@@ -286,24 +291,41 @@ export interface AiReadRow {
   model: string | null;
   promptVersion: number;
   read: AIRead | null;
+  /** The ids of the casebook examples this read saw (empty when none, and for every row but an `ok` one). */
+  exampleIds: readonly string[];
   inputTokens: number | null;
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
+  /** The cost of every attempt so far, summed. Tokens are summed too; `model` and `latencyMs` are the latest attempt's. */
   costMicros: number;
   latencyMs: number | null;
-  /** When the call was reserved; moved to the time of a take-over, so spend lands on the day of the call. */
+  /** When the row was first reserved (a take-over keeps it). Spend is booked per attempt, not by this. */
   createdAt: number;
 }
 
-/** The answer to a reserve: this caller owns the read now (`id`), or a row already exists for that report and input. */
-export type AiReserveResult = { reserved: true; id: string } | { reserved: false; existing: AiReadRow };
+/**
+ * The answer to a reserve: this caller owns the read now (`id`), or a row already exists for that report and input. `lease` is the
+ * caller's fence token (the row's `attempts` after this reserve): `completeAiRead` and `failAiRead` must be given it, and do nothing
+ * once another caller has taken the row over.
+ */
+export type AiReserveResult = { reserved: true; id: string; lease: number } | { reserved: false; existing: AiReadRow };
 
 /** The human's verdict, and the AI's recommendation, in the casebook's three classes. */
 export type AiVerdict = 'upheld' | 'noted' | 'no_action';
 
-/** The finer facts of one outcome (design section 11): scalars only, e.g. `verdict` and `rule` matched, `lines`, `outcome`, `oneClick`. */
-export type AiOutcomeDetail = Readonly<Record<string, string | number | boolean | null>>;
+/**
+ * The finer facts of one outcome (design section 11): whether the verdict and the rule matched the AI, how many cited lines
+ * matched, whether the human step was the same, milder or harsher than the pre-fill (`none` when there was no pre-fill), and
+ * whether it was a one-click accept. Booleans, a count and a word: no text can be written into a row that outlives its report.
+ */
+export interface AiOutcomeDetail {
+  verdict: boolean;
+  rule: boolean;
+  lines: number;
+  outcome: 'same' | 'milder' | 'harsher' | 'none';
+  oneClick: boolean;
+}
 
 /**
  * One casebook row to insert: a decided report that had an AI read, computed by the server in the transaction of the decision.
@@ -321,20 +343,20 @@ export interface AiOutcomeInsert {
   /** The human's final rule on the reported person (`'3'`, `'uncovered'`), or null. */
   rule: string | null;
   /** The conduct level the human settled on, when the form had one. */
-  severity: string | null;
+  severity: ConductLevel | null;
   /** What the AI recommended, or null (level 1, or `unclear`). */
   aiVerdict: AiVerdict | null;
   agreement: 'agree' | 'override' | 'none';
   detail: AiOutcomeDetail;
   /** The report was dismissed as bad faith: excludes the row from examples. */
   badFaith: boolean;
-  /** Up to 6 pseudonymised lines, or null for none. */
+  /** Up to 6 pseudonymised lines, or null for none. A store stores null for a `badFaith` row: it can never teach. */
   example: AIExample | null;
 }
 
 /** A stored outcome: what was inserted, and the two marks a later action sets. */
 export interface AiOutcomeRow extends AiOutcomeInsert {
-  /** Set by a granted appeal or a take-back. Excludes the row from examples; counts as an AI false positive. */
+  /** Set by a granted appeal or a take-back. Excludes the row from examples (and drops its example text); counts as an AI false positive. */
   reversed: boolean;
   /** A senior's mark. Excludes the row from examples. */
   dontTeach: boolean;
@@ -842,7 +864,7 @@ export interface Store {
    * Reports that are still `open`, OLDEST first (`createdAt` ascending, then `id` ascending, so a tie is stable), whole
    * records. `category` filters; `after` keeps only reports newer than that instant (exclusive), and with `afterId` also
    * the ones filed AT that instant whose id sorts above it (keyset paging: pass the last row's `createdAt` and `id`).
-   * `limit` is clamped to 1..200 (a fraction is floored). The scan behind "take next".
+   * `limit` is clamped to 1..200 (a fraction is floored); a limit that is not finite, or is below 1, counts as 1. The scan behind "take next".
    */
   listOpenReports(q: OpenReportQuery): ReportRecord[];
 
@@ -997,32 +1019,37 @@ export interface Store {
   /**
    * OPTIONAL. Take the right to make one read, as ONE atomic conditional write: of two callers (two processes on one database
    * included) for the same `reportId` and `inputHash`, exactly one gets `{ reserved: true }`; the other gets the existing row. A new
-   * row is `pending`, owned until `leaseUntil`, with `attempts` 1 and `createdAt` = `now`. An existing row is taken over (same id,
-   * `attempts` + 1, `createdAt` = `now`, a new lease, `retryAt` and `errorKind` cleared) only when it is `pending` and its lease has
-   * ended (`leaseUntil <= now`), or `failed` or `skipped` with a `retryAt` that has come (`retryAt <= now`). An `ok`, `declined` or
-   * `invalid` row, a `failed` or `skipped` one with no `retryAt`, and a live lease are returned as `existing` (a copy). Does not
-   * move the change token.
+   * row is `pending`, owned until `leaseUntil`, with `attempts` 1. An existing row is taken over (same id, `attempts` + 1, a new
+   * lease, `retryAt` and `errorKind` cleared, `createdAt` kept) only when it is `pending` and its lease has ended (`leaseUntil <= now`),
+   * or `failed` or `skipped` with a `retryAt` that has come (`retryAt <= now`), or `ok` with a stored answer that cannot be read. An
+   * `ok` (readable), `declined` or `invalid` row, a `failed` or `skipped` one with no `retryAt`, and a live lease are returned as
+   * `existing` (a copy). A win carries the fence token `lease` (= `attempts`), and opens one spend-ledger entry at `now` (one call
+   * started); `aiSpendSince` reads that ledger, so every attempt is booked to the time it was made. Does not move the change token.
    */
   reserveAiRead?(row: AiReadPending, leaseUntil: number, now: number): AiReserveResult;
 
   /**
-   * OPTIONAL. Store the validated read and the usage on a `pending` row: status `ok`, the lease cleared. True when this call did it;
-   * false (nothing changed) for an unknown row or one that is not `pending`. Moves the change token.
+   * OPTIONAL. Store the validated read and the usage on a `pending` row: status `ok`, the lease cleared; cost and tokens are added to
+   * the row, and the cost to this attempt's ledger entry. `lease` is the token `reserveAiRead` returned. True only when this call did
+   * it; false (nothing changed) for an unknown row, one that is not `pending`, or one whose `attempts` is no longer `lease` (another
+   * caller took it over: a stale owner can neither finish nor fail the new owner's row). Moves the change token.
    */
-  completeAiRead?(id: string, result: AiReadDone): boolean;
+  completeAiRead?(id: string, lease: number, result: AiReadDone): boolean;
 
   /**
    * OPTIONAL. End a `pending` row without a read: `failed`, `declined`, `invalid` or `skipped`, with the kind of failure and, for
    * a retry, the time it may be taken again (`retryAt`; null is final). The lease is cleared. `usage`, when the provider still
-   * charged for the call (a refusal, an invalid answer), is stored and counts toward `aiSpendSince`. True when this call did it;
-   * false for an unknown row or one that is not `pending`. Does not move the change token. `now` is the caller's clock reading.
+   * charged for the call (a refusal, an invalid answer, a failure after tokens were billed), is added to the row and to this attempt's
+   * ledger entry, so it counts toward `aiSpendSince`. A `skipped` read was never a call: its ledger entry is removed. `lease` fences as
+   * in `completeAiRead`. True when this call did it; false for an unknown row, one that is not `pending`, or a stale `lease`. Does not
+   * move the change token.
    */
   failAiRead?(
     id: string,
+    lease: number,
     status: 'failed' | 'declined' | 'invalid' | 'skipped',
     errorKind: AiErrorKind,
     retryAt: number | null,
-    now: number,
     usage?: AiCallUsage,
   ): boolean;
 
@@ -1042,19 +1069,21 @@ export interface Store {
   /**
    * OPTIONAL. The rows the sweeper should pick up at `now`, oldest first (`createdAt`, then `id`), at most `limit` (clamped to
    * 1..200): `failed` or `skipped` rows whose `retryAt` has come (`retryAt <= now`), and `pending` rows whose lease has ended
-   * (`leaseUntil <= now`: the process that held them died).
+   * (`leaseUntil <= now`: the process that held them died). `limit` as for `aiExamples`.
    */
   listAiRetries?(now: number, limit: number): AiReadRow[];
 
   /**
-   * OPTIONAL. What the reads created at or after `since` cost: the sum of `costMicros` (a failed read with usage included), and the
-   * number of calls (every row but `skipped`, a `pending` one included). The daily cap is this with `since` = the UTC midnight.
+   * OPTIONAL. What the attempts made at or after `since` cost: the sum of their `costMicros` (a failed attempt with usage included),
+   * and the number of calls (every attempt but a skipped one, a `pending` one included). Each attempt counts at the time it was
+   * reserved, so a retry that crosses UTC midnight books each attempt to its own day. The daily cap is this with `since` = the UTC
+   * midnight.
    */
   aiSpendSince?(since: number): { micros: number; calls: number };
 
   /**
-   * OPTIONAL. Record the outcome of a decided report. False, nothing written, when the report already has one. Does not move the
-   * change token (the decision it belongs to does).
+   * OPTIONAL. Record the outcome of a decided report. False, nothing written, when the report already has one. A `badFaith` row is
+   * stored without its example (it can never teach). Does not move the change token (the decision it belongs to does).
    */
   insertAiOutcome?(row: AiOutcomeInsert): boolean;
 
@@ -1062,8 +1091,8 @@ export interface Store {
   loadAiOutcome?(reportId: string): AiOutcomeRow | null;
 
   /**
-   * OPTIONAL. Set the marks on an outcome (a mark is never cleared). False for an unknown report. Moves the change token when the
-   * report has an outcome.
+   * OPTIONAL. Set the marks on an outcome (a mark is never cleared) and drop its example text in the same write: a reversed or marked
+   * row can never teach, so its chat text goes now. False for an unknown report. Moves the change token when the report has an outcome.
    */
   markAiOutcome?(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean;
 
@@ -1086,8 +1115,8 @@ export interface Store {
 
   /**
    * OPTIONAL. Retention for the AI rows, all strict (`<`): reads created before `readsBefore` (any status), outcomes decided before
-   * `outcomesBefore`, and the example of every outcome decided before `examplesBefore` (set to none; the counts stay). Returns how
-   * many reads and outcomes were deleted. `purgeReports` deletes the reads of the reports it deletes itself.
+   * `outcomesBefore`, and the example of every outcome decided before `examplesBefore` (set to none; the counts stay); spend-ledger
+   * entries made before `readsBefore` go with the reads. Returns how many reads and outcomes were deleted. `purgeReports` deletes the reads of the reports it deletes itself.
    */
   purgeAi?(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number };
 

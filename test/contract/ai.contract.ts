@@ -4,11 +4,13 @@ import type {
   AIRead,
   AiCallUsage,
   AiExampleRow,
+  AiOutcomeDetail,
   AiOutcomeInsert,
   AiOutcomeRow,
   AiReadDone,
   AiReadPending,
   AiReadRow,
+  AiReserveResult,
   AiStatsRow,
   Store,
   StoredReport,
@@ -98,16 +100,33 @@ const read = (over: Partial<AIRead> = {}): AIRead => ({
 
 const done = (over: Partial<AiReadDone> = {}): AiReadDone => ({ ...usage(), read: read(), ...over });
 
+/** The lease token of every row this suite reserved, by row id: what `completeAiRead` and `failAiRead` must be given. */
+const leases = new Map<string, number>();
+function rsv(s: Store & Ai, row: AiReadPending, leaseUntil: number, now: number): AiReserveResult {
+  const r = s.reserveAiRead(row, leaseUntil, now);
+  if (r.reserved) leases.set(r.id, r.lease);
+  return r;
+}
+const complete = (s: Store & Ai, id: string, result: AiReadDone): boolean => s.completeAiRead(id, leases.get(id) ?? 0, result);
+const fail = (
+  s: Store & Ai,
+  id: string,
+  status: 'failed' | 'declined' | 'invalid' | 'skipped',
+  kind: Parameters<Ai['failAiRead']>[3],
+  retryAt: number | null,
+  u?: AiCallUsage,
+): boolean => s.failAiRead(id, leases.get(id) ?? 0, status, kind, retryAt, u);
+
 /** Reserve a row and return its id (the row is `pending`). */
 function reserve(s: Store & Ai, over: Partial<AiReadPending> = {}, now = NOW, lease = now + 5 * MIN): string {
-  const r = s.reserveAiRead(pending(over), lease, now);
+  const r = rsv(s, pending(over), lease, now);
   if (!r.reserved) throw new Error('expected a reservation');
   return r.id;
 }
 /** An `ok` read for a report, reserved at `now`. */
 function okRead(s: Store & Ai, reportId: string, hash: string, now: number, r: AIRead = read(), cost = 500): string {
   const id = reserve(s, { reportId, inputHash: hash }, now);
-  expect(s.completeAiRead(id, done({ read: r, costMicros: cost }))).toBe(true);
+  expect(complete(s, id, done({ read: r, costMicros: cost }))).toBe(true);
   return id;
 }
 
@@ -122,6 +141,8 @@ const example = (over: Partial<AIExample> = {}): AIExample => ({
   ...over,
 });
 
+const DETAIL: AiOutcomeDetail = { verdict: true, rule: true, lines: 2, outcome: 'same', oneClick: true };
+
 let oseq = 0;
 const outcome = (over: Partial<AiOutcomeInsert> = {}): AiOutcomeInsert => {
   oseq += 1;
@@ -135,7 +156,7 @@ const outcome = (over: Partial<AiOutcomeInsert> = {}): AiOutcomeInsert => {
     severity: 'hostile',
     aiVerdict: 'upheld',
     agreement: 'agree',
-    detail: { verdict: true, rule: true, lines: 2, outcome: 'same', oneClick: true },
+    detail: DETAIL,
     badFaith: false,
     example: example(),
     ...over,
@@ -175,9 +196,9 @@ export function aiContract(name: string, make: () => Store): void {
     describe('reserveAiRead', () => {
       it('reserve is exclusive for the same report and hash', () => {
         const s = ai(make());
-        const first = s.reserveAiRead(pending(), NOW + 5 * MIN, NOW);
-        expect(first).toEqual({ reserved: true, id: expect.any(String) });
-        const second = s.reserveAiRead(pending(), NOW + 5 * MIN, NOW + 1);
+        const first = rsv(s, pending(), NOW + 5 * MIN, NOW);
+        expect(first).toEqual({ reserved: true, id: expect.any(String), lease: 1 });
+        const second = rsv(s, pending(), NOW + 5 * MIN, NOW + 1);
         expect(second.reserved).toBe(false);
         if (first.reserved && !second.reserved) expect(second.existing.id).toBe(first.id);
       });
@@ -186,7 +207,7 @@ export function aiContract(name: string, make: () => Store): void {
         const s = ai(make());
         const id = reserve(s, {}, NOW, NOW + 5 * MIN);
         expect(s.loadAiReads(['r1'])).toEqual([]); // not ok yet
-        const dup = s.reserveAiRead(pending(), NOW + 9 * MIN, NOW);
+        const dup = rsv(s, pending(), NOW + 9 * MIN, NOW);
         expect(dup).toEqual({
           reserved: false,
           existing: {
@@ -206,6 +227,7 @@ export function aiContract(name: string, make: () => Store): void {
             outputTokens: null,
             cacheReadTokens: null,
             cacheWriteTokens: null,
+            exampleIds: [],
             costMicros: 0,
             latencyMs: null,
             createdAt: NOW,
@@ -216,7 +238,7 @@ export function aiContract(name: string, make: () => Store): void {
       it('a second reserve returns the existing row, whatever state it is in', () => {
         const s = ai(make());
         const id = okRead(s, 'r1', 'h1', NOW);
-        const again = s.reserveAiRead(pending(), NOW + DAY, NOW + 10 * DAY);
+        const again = rsv(s, pending(), NOW + DAY, NOW + 10 * DAY);
         expect(again.reserved).toBe(false);
         if (!again.reserved) {
           expect(again.existing.id).toBe(id);
@@ -241,35 +263,31 @@ export function aiContract(name: string, make: () => Store): void {
         const s = ai(make());
         const id = reserve(s, {}, NOW, NOW + MIN);
         // Live strictly before lease_until.
-        expect(s.reserveAiRead(pending(), NOW + 10 * MIN, NOW + MIN - 1).reserved).toBe(false);
-        const taken = s.reserveAiRead(pending(), NOW + 11 * MIN, NOW + MIN);
-        expect(taken).toEqual({ reserved: true, id }); // the same row, taken over
-        const next = s.reserveAiRead(pending(), NOW + 20 * MIN, NOW + MIN + 1);
+        expect(rsv(s, pending(), NOW + 10 * MIN, NOW + MIN - 1).reserved).toBe(false);
+        const taken = rsv(s, pending(), NOW + 11 * MIN, NOW + MIN);
+        expect(taken).toEqual({ reserved: true, id, lease: 2 }); // the same row, taken over, with the next fence
+        const next = rsv(s, pending(), NOW + 20 * MIN, NOW + MIN + 1);
         expect(next.reserved).toBe(false);
         if (!next.reserved) {
-          expect(next.existing).toMatchObject({ id, status: 'pending', attempts: 2, leaseUntil: NOW + 11 * MIN, retryAt: null, createdAt: NOW + MIN });
+          expect(next.existing).toMatchObject({ id, status: 'pending', attempts: 2, leaseUntil: NOW + 11 * MIN, retryAt: null, createdAt: NOW });
         }
       });
 
-      it('taking a lease over moves created_at to now, so the spend lands on the day of the call', () => {
+      it('a take-over keeps created_at (spend has its own per-attempt ledger)', () => {
         const s = ai(make());
-        const late = MIDNIGHT + DAY - 30_000; // 23:59:30 on day 1
-        const id = reserve(s, {}, late, late + MIN);
-        const nextDay = MIDNIGHT + DAY + 30_000; // 00:00:30 on day 2
-        expect(s.reserveAiRead(pending(), nextDay + MIN, nextDay)).toEqual({ reserved: true, id });
-        expect(s.completeAiRead(id, done({ costMicros: 700 }))).toBe(true);
-        expect(s.aiSpendSince(MIDNIGHT + DAY)).toEqual({ micros: 700, calls: 1 });
-        expect(s.aiSpendSince(MIDNIGHT)).toEqual({ micros: 700, calls: 1 });
-        expect(s.aiSpendSince(nextDay + 1)).toEqual({ micros: 0, calls: 0 });
+        const id = reserve(s, {}, NOW, NOW + MIN);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 2 * MIN)).toEqual({ reserved: true, id, lease: 2 });
+        expect(complete(s, id, done())).toBe(true);
+        expect(s.loadAiRead('r1')?.createdAt).toBe(NOW);
       });
 
       it('a failed read can be taken again once its retry time has come, not before', () => {
         const s = ai(make());
         const id = reserve(s);
-        expect(s.failAiRead(id, 'failed', 'retryable', NOW + MIN, NOW)).toBe(true);
-        expect(s.reserveAiRead(pending(), NOW + 9 * MIN, NOW + MIN - 1).reserved).toBe(false);
-        expect(s.reserveAiRead(pending(), NOW + 9 * MIN, NOW + MIN)).toEqual({ reserved: true, id });
-        const row = s.reserveAiRead(pending(), NOW + 9 * MIN, NOW + MIN + 1);
+        expect(fail(s, id, 'failed', 'retryable', NOW + MIN)).toBe(true);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + MIN - 1).reserved).toBe(false);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + MIN)).toEqual({ reserved: true, id, lease: 2 });
+        const row = rsv(s, pending(), NOW + 9 * MIN, NOW + MIN + 1);
         expect(row.reserved).toBe(false);
         if (!row.reserved) {
           expect(row.existing).toMatchObject({ status: 'pending', attempts: 2, retryAt: null, errorKind: null, leaseUntil: NOW + 9 * MIN });
@@ -280,11 +298,11 @@ export function aiContract(name: string, make: () => Store): void {
         const s = ai(make());
         const a = reserve(s, { reportId: 'a' });
         const b = reserve(s, { reportId: 'b' });
-        expect(s.failAiRead(a, 'skipped', 'budget', MIDNIGHT + DAY, NOW)).toBe(true);
-        expect(s.failAiRead(b, 'skipped', 'budget', null, NOW)).toBe(true);
-        expect(s.reserveAiRead(pending({ reportId: 'a' }), NOW + 9 * MIN, MIDNIGHT + DAY - 1).reserved).toBe(false);
-        expect(s.reserveAiRead(pending({ reportId: 'a' }), MIDNIGHT + DAY + 9 * MIN, MIDNIGHT + DAY)).toEqual({ reserved: true, id: a });
-        expect(s.reserveAiRead(pending({ reportId: 'b' }), MIDNIGHT + 9 * DAY, MIDNIGHT + 8 * DAY).reserved).toBe(false);
+        expect(fail(s, a, 'skipped', 'budget', MIDNIGHT + DAY)).toBe(true);
+        expect(fail(s, b, 'skipped', 'budget', null)).toBe(true);
+        expect(rsv(s, pending({ reportId: 'a' }), NOW + 9 * MIN, MIDNIGHT + DAY - 1).reserved).toBe(false);
+        expect(rsv(s, pending({ reportId: 'a' }), MIDNIGHT + DAY + 9 * MIN, MIDNIGHT + DAY)).toEqual({ reserved: true, id: a, lease: 2 });
+        expect(rsv(s, pending({ reportId: 'b' }), MIDNIGHT + 9 * DAY, MIDNIGHT + 8 * DAY).reserved).toBe(false);
       });
 
       it.each([
@@ -294,8 +312,8 @@ export function aiContract(name: string, make: () => Store): void {
       ] as const)('a %s read with no retry time is final (control)', (status, kind) => {
         const s = ai(make());
         const id = reserve(s);
-        expect(s.failAiRead(id, status, kind, null, NOW)).toBe(true);
-        const again = s.reserveAiRead(pending(), NOW + 9 * DAY, NOW + 8 * DAY);
+        expect(fail(s, id, status, kind, null)).toBe(true);
+        const again = rsv(s, pending(), NOW + 9 * DAY, NOW + 8 * DAY);
         expect(again.reserved).toBe(false);
         if (!again.reserved) expect(again.existing).toMatchObject({ id, status, errorKind: kind, retryAt: null });
       });
@@ -303,7 +321,7 @@ export function aiContract(name: string, make: () => Store): void {
       it('an ok read is never retaken, however old its lease', () => {
         const s = ai(make());
         okRead(s, 'r1', 'h1', NOW);
-        expect(s.reserveAiRead(pending(), NOW + 99 * DAY, NOW + 98 * DAY).reserved).toBe(false);
+        expect(rsv(s, pending(), NOW + 99 * DAY, NOW + 98 * DAY).reserved).toBe(false);
       });
 
       it('does not move the change token', () => {
@@ -321,7 +339,7 @@ export function aiContract(name: string, make: () => Store): void {
             throw new Error('boom');
           }),
         ).toThrow('boom');
-        expect(s.reserveAiRead(pending(), NOW + MIN, NOW).reserved).toBe(true);
+        expect(rsv(s, pending(), NOW + MIN, NOW).reserved).toBe(true);
       });
     });
 
@@ -331,7 +349,7 @@ export function aiContract(name: string, make: () => Store): void {
         const id = reserve(s);
         const before = s.changeToken();
         const r = read({ rule: 'uncovered', injectionSuspected: true, confidence: 'low' });
-        expect(s.completeAiRead(id, done({ read: r }))).toBe(true);
+        expect(complete(s, id, done({ read: r }))).toBe(true);
         expect(s.changeToken()).not.toBe(before);
         expect(s.loadAiRead('r1')).toEqual({
           id,
@@ -350,6 +368,7 @@ export function aiContract(name: string, make: () => Store): void {
           outputTokens: 80,
           cacheReadTokens: 900,
           cacheWriteTokens: 0,
+          exampleIds: [],
           costMicros: 500,
           latencyMs: 640,
           createdAt: NOW,
@@ -367,6 +386,16 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.loadAiRead('r1')?.read).toEqual(r);
       });
 
+      it('the ids of the casebook examples a read saw are stored with it, and default to none', () => {
+        const s = ai(make());
+        okRead(s, 'r1', 'h1', NOW);
+        expect(s.loadAiRead('r1')?.exampleIds).toEqual([]);
+        const id = reserve(s, { reportId: 'r2' });
+        expect(complete(s, id, done({ exampleIds: ['o1', 'o7'] }))).toBe(true);
+        expect(s.loadAiRead('r2')?.exampleIds).toEqual(['o1', 'o7']);
+        expect(s.loadAiReads(['r2'])[0]?.exampleIds).toEqual(['o1', 'o7']);
+      });
+
       it('a null recommendation, an empty evidence list and a multi-digit rule round-trip', () => {
         const s = ai(make());
         const r = read({ rule: 12, evidence: [], recommendation: null });
@@ -378,14 +407,14 @@ export function aiContract(name: string, make: () => Store): void {
         const s = ai(make());
         const ok = okRead(s, 'r1', 'h1', NOW);
         const bad = reserve(s, { reportId: 'r2' });
-        s.failAiRead(bad, 'failed', 'retryable', NOW + MIN, NOW);
+        fail(s, bad, 'failed', 'retryable', NOW + MIN);
         const dec = reserve(s, { reportId: 'r3' });
-        s.failAiRead(dec, 'declined', 'declined', null, NOW);
+        fail(s, dec, 'declined', 'declined', null);
         const before = s.changeToken();
-        expect(s.completeAiRead(ok, done({ read: read({ summary: 'other' }) }))).toBe(false);
-        expect(s.completeAiRead(bad, done())).toBe(false);
-        expect(s.completeAiRead(dec, done())).toBe(false);
-        expect(s.completeAiRead('nope', done())).toBe(false);
+        expect(complete(s, ok, done({ read: read({ summary: 'other' }) }))).toBe(false);
+        expect(complete(s, bad, done())).toBe(false);
+        expect(complete(s, dec, done())).toBe(false);
+        expect(complete(s, 'nope', done())).toBe(false);
         expect(s.changeToken()).toBe(before);
         expect(s.loadAiRead('r1')?.read?.summary).toBe(read().summary);
       });
@@ -396,20 +425,20 @@ export function aiContract(name: string, make: () => Store): void {
         const before = s.changeToken();
         expect(() =>
           s.transaction(() => {
-            s.completeAiRead(id, done());
+            complete(s, id, done());
             throw new Error('boom');
           }),
         ).toThrow('boom');
         expect(s.changeToken()).toBe(before);
         expect(s.loadAiRead('r1')).toBeNull();
-        expect(s.completeAiRead(id, done())).toBe(true);
+        expect(complete(s, id, done())).toBe(true);
       });
 
       it('fail records the kind and the retry time', () => {
         const s = ai(make());
         const id = reserve(s);
-        expect(s.failAiRead(id, 'failed', 'timeout', NOW + 10 * MIN, NOW + 30_000)).toBe(true);
-        const row = s.reserveAiRead(pending(), NOW + 99 * MIN, NOW + 31_000);
+        expect(fail(s, id, 'failed', 'timeout', NOW + 10 * MIN)).toBe(true);
+        const row = rsv(s, pending(), NOW + 99 * MIN, NOW + 31_000);
         expect(row.reserved).toBe(false);
         if (!row.reserved) {
           expect(row.existing).toMatchObject({
@@ -429,20 +458,20 @@ export function aiContract(name: string, make: () => Store): void {
         const s = ai(make());
         const id = reserve(s);
         const before = s.changeToken();
-        expect(s.failAiRead(id, 'failed', 'retryable', NOW + MIN, NOW)).toBe(true);
+        expect(fail(s, id, 'failed', 'retryable', NOW + MIN)).toBe(true);
         expect(s.changeToken()).toBe(before);
-        expect(s.failAiRead(id, 'invalid', 'invalid', null, NOW)).toBe(false); // already failed
-        expect(s.failAiRead('nope', 'failed', 'fatal', null, NOW)).toBe(false);
+        expect(fail(s, id, 'invalid', 'invalid', null)).toBe(false); // already failed
+        expect(fail(s, 'nope', 'failed', 'fatal', null)).toBe(false);
         const ok = okRead(s, 'r2', 'h1', NOW);
-        expect(s.failAiRead(ok, 'failed', 'fatal', null, NOW)).toBe(false);
+        expect(fail(s, ok, 'failed', 'fatal', null)).toBe(false);
         expect(s.loadAiRead('r2')?.status).toBe('ok');
       });
 
       it('a failure that carries usage records the model, tokens, cost and latency', () => {
         const s = ai(make());
         const id = reserve(s);
-        expect(s.failAiRead(id, 'invalid', 'invalid', null, NOW, usage({ costMicros: 321, latencyMs: 77, model: 'm2' }))).toBe(true);
-        const row = s.reserveAiRead(pending(), NOW + MIN, NOW + 1);
+        expect(fail(s, id, 'invalid', 'invalid', null, usage({ costMicros: 321, latencyMs: 77, model: 'm2' }))).toBe(true);
+        const row = rsv(s, pending(), NOW + MIN, NOW + 1);
         if (!row.reserved) {
           expect(row.existing).toMatchObject({ status: 'invalid', model: 'm2', costMicros: 321, latencyMs: 77, inputTokens: 1200, outputTokens: 80, read: null });
         } else {
@@ -474,13 +503,13 @@ export function aiContract(name: string, make: () => Store): void {
         const good = okRead(s, 'r1', 'good', NOW);
         reserve(s, { inputHash: 'p' }, NOW + 1 * MIN);
         const f = reserve(s, { inputHash: 'f' }, NOW + 2 * MIN);
-        s.failAiRead(f, 'failed', 'retryable', NOW + 99 * MIN, NOW);
+        fail(s, f, 'failed', 'retryable', NOW + 99 * MIN);
         const d = reserve(s, { inputHash: 'd' }, NOW + 3 * MIN);
-        s.failAiRead(d, 'declined', 'declined', null, NOW);
+        fail(s, d, 'declined', 'declined', null);
         const i = reserve(s, { inputHash: 'i' }, NOW + 4 * MIN);
-        s.failAiRead(i, 'invalid', 'invalid', null, NOW);
+        fail(s, i, 'invalid', 'invalid', null);
         const k = reserve(s, { inputHash: 'k' }, NOW + 5 * MIN);
-        s.failAiRead(k, 'skipped', 'budget', null, NOW);
+        fail(s, k, 'skipped', 'budget', null);
         expect(s.loadAiRead('r1')?.id).toBe(good);
         expect(s.loadAiRead('r1')?.status).toBe('ok');
       });
@@ -537,18 +566,18 @@ export function aiContract(name: string, make: () => Store): void {
       it('a failed read with cost counts', () => {
         const s = ai(make());
         const a = reserve(s, { reportId: 'a' }, MIDNIGHT + H);
-        s.failAiRead(a, 'invalid', 'invalid', null, NOW, usage({ costMicros: 420 }));
+        fail(s, a, 'invalid', 'invalid', null, usage({ costMicros: 420 }));
         const b = reserve(s, { reportId: 'b' }, MIDNIGHT + H);
-        s.failAiRead(b, 'declined', 'declined', null, NOW, usage({ costMicros: 30 }));
+        fail(s, b, 'declined', 'declined', null, usage({ costMicros: 30 }));
         const c = reserve(s, { reportId: 'c' }, MIDNIGHT + H);
-        s.failAiRead(c, 'failed', 'retryable', NOW, NOW);
+        fail(s, c, 'failed', 'retryable', NOW);
         expect(s.aiSpendSince(MIDNIGHT)).toEqual({ micros: 450, calls: 3 });
       });
 
       it('a skipped read costs nothing and is not a call; a pending one is a call that has not cost yet', () => {
         const s = ai(make());
         const k = reserve(s, { reportId: 'k' }, MIDNIGHT + H);
-        s.failAiRead(k, 'skipped', 'budget', null, NOW);
+        fail(s, k, 'skipped', 'budget', null);
         expect(s.aiSpendSince(MIDNIGHT)).toEqual({ micros: 0, calls: 0 });
         reserve(s, { reportId: 'p' }, MIDNIGHT + H);
         expect(s.aiSpendSince(MIDNIGHT)).toEqual({ micros: 0, calls: 1 });
@@ -563,16 +592,117 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.aiSpendSince(MIDNIGHT)).toEqual({ micros: 1, calls: 1 });
         expect(s.aiSpendSince(MIDNIGHT - DAY).micros).toBe(1_000_000);
       });
+
+      it('spend accumulates per attempt: a failed attempt that cost 500, then a retry that cost 700, is 1200 micros and 2 calls', () => {
+        const s = ai(make());
+        const id = reserve(s, {}, NOW);
+        expect(fail(s, id, 'failed', 'retryable', NOW + MIN, usage({ costMicros: 500 }))).toBe(true);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + MIN)).toEqual({ reserved: true, id, lease: 2 });
+        expect(complete(s, id, done({ costMicros: 700 }))).toBe(true);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 1200, calls: 2 });
+        expect(s.loadAiRead('r1')).toMatchObject({ attempts: 2, costMicros: 1200 });
+      });
+
+      it('a take-over across midnight books each attempt to the day it was made', () => {
+        const s = ai(make());
+        const late = MIDNIGHT + DAY - 30_000; // 23:59:30 on day 1
+        const id = reserve(s, {}, late, late + MIN);
+        expect(fail(s, id, 'failed', 'retryable', late + MIN, usage({ costMicros: 500 }))).toBe(true);
+        const nextDay = MIDNIGHT + DAY + 30_000; // 00:00:30 on day 2
+        expect(rsv(s, pending(), nextDay + MIN, nextDay)).toEqual({ reserved: true, id, lease: 2 });
+        expect(complete(s, id, done({ costMicros: 700 }))).toBe(true);
+        expect(s.aiSpendSince(MIDNIGHT + DAY)).toEqual({ micros: 700, calls: 1 }); // day 2
+        expect(s.aiSpendSince(MIDNIGHT)).toEqual({ micros: 1200, calls: 2 }); // day 1 and day 2
+        expect(s.aiSpendSince(nextDay + 1)).toEqual({ micros: 0, calls: 0 });
+      });
+
+      it('an abandoned attempt (its lease lapsed) is still one call; the retry is a second', () => {
+        const s = ai(make());
+        const id = reserve(s, {}, NOW, NOW + MIN);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 2 * MIN).reserved).toBe(true);
+        expect(complete(s, id, done({ costMicros: 40 }))).toBe(true);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 40, calls: 2 });
+        expect(s.aiSpendSince(NOW + MIN)).toEqual({ micros: 40, calls: 1 });
+      });
+
+      it('a skipped attempt was never a call: it leaves the ledger, an earlier attempt stays', () => {
+        const s = ai(make());
+        const id = reserve(s, {}, NOW);
+        fail(s, id, 'failed', 'retryable', NOW + MIN, usage({ costMicros: 10 }));
+        rsv(s, pending(), NOW + 9 * MIN, NOW + MIN);
+        expect(fail(s, id, 'skipped', 'budget', null)).toBe(true);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 10, calls: 1 });
+      });
+    });
+
+
+    describe('the lease fence', () => {
+      /** A reserves, stalls; B takes the lease over at the next attempt. Returns both tokens. */
+      function takeOver(s: Store & Ai): { id: string; a: number; b: number } {
+        const r1 = s.reserveAiRead(pending(), NOW + MIN, NOW);
+        const r2 = s.reserveAiRead(pending(), NOW + 9 * MIN, NOW + 2 * MIN);
+        if (!r1.reserved || !r2.reserved) throw new Error('expected two reservations');
+        expect(r2.id).toBe(r1.id);
+        return { id: r1.id, a: r1.lease, b: r2.lease };
+      }
+
+      it('each take-over issues a larger token', () => {
+        const s = ai(make());
+        const { a, b } = takeOver(s);
+        expect(a).toBe(1);
+        expect(b).toBe(2);
+      });
+
+      it('a stale owner cannot complete a row that was taken over, and the new owner still can (its spend is booked)', () => {
+        const s = ai(make());
+        const { id, a, b } = takeOver(s);
+        const token = s.changeToken();
+        expect(s.completeAiRead(id, a, done({ costMicros: 300, read: read({ summary: 'stale' }) }))).toBe(false);
+        expect(s.changeToken()).toBe(token);
+        expect(s.loadAiRead('r1')).toBeNull();
+        expect(s.completeAiRead(id, b, done({ costMicros: 400, read: read({ summary: 'fresh' }) }))).toBe(true);
+        expect(s.loadAiRead('r1')).toMatchObject({ status: 'ok', costMicros: 400, read: { summary: 'fresh' } });
+        expect(s.aiSpendSince(0)).toEqual({ micros: 400, calls: 2 });
+      });
+
+      it('a stale owner cannot fail a row the new owner is working on', () => {
+        const s = ai(make());
+        const { id, a, b } = takeOver(s);
+        expect(s.failAiRead(id, a, 'failed', 'fatal', null, usage({ costMicros: 999 }))).toBe(false);
+        const row = s.listAiRetries(NOW + 3 * MIN, 10);
+        expect(row).toEqual([]); // still pending under B's live lease
+        expect(s.completeAiRead(id, b, done({ costMicros: 5 }))).toBe(true);
+        expect(s.aiSpendSince(0).micros).toBe(5);
+      });
+
+      it('a stale owner cannot touch the row after the new owner has finished it either', () => {
+        const s = ai(make());
+        const { id, a, b } = takeOver(s);
+        expect(s.failAiRead(id, b, 'failed', 'retryable', NOW + 10 * MIN)).toBe(true);
+        expect(s.completeAiRead(id, a, done())).toBe(false);
+        expect(s.failAiRead(id, a, 'invalid', 'invalid', null)).toBe(false);
+        expect(s.listAiRetries(NOW + 11 * MIN, 10)).toHaveLength(1);
+      });
+
+      it('a token from the future, zero or a non-integer matches nothing', () => {
+        const s = ai(make());
+        const id = reserve(s);
+        expect(s.completeAiRead(id, 2, done())).toBe(false);
+        expect(s.completeAiRead(id, 0, done())).toBe(false);
+        expect(s.completeAiRead(id, 1.5, done())).toBe(false);
+        expect(s.failAiRead(id, 2, 'failed', 'fatal', null)).toBe(false);
+        expect(complete(s, id, done())).toBe(true);
+      });
     });
 
     describe('listAiRetries', () => {
       it('returns due failed reads and expired leases, oldest first, bounded', () => {
         const s = ai(make());
         const late = reserve(s, { reportId: 'late' }, NOW + 4 * MIN, NOW + 99 * MIN);
-        s.failAiRead(late, 'failed', 'retryable', NOW + 10 * MIN, NOW);
+        fail(s, late, 'failed', 'retryable', NOW + 10 * MIN);
         const expired = reserve(s, { reportId: 'expired' }, NOW + 2 * MIN, NOW + 3 * MIN);
         const due = reserve(s, { reportId: 'due' }, NOW + 1 * MIN, NOW + 99 * MIN);
-        s.failAiRead(due, 'failed', 'timeout', NOW + 5 * MIN, NOW);
+        fail(s, due, 'failed', 'timeout', NOW + 5 * MIN);
         const asOf = NOW + 20 * MIN;
         expect(ids(s.listAiRetries(asOf, 10))).toEqual([due, expired, late]);
         expect(ids(s.listAiRetries(asOf, 2))).toEqual([due, expired]);
@@ -582,14 +712,14 @@ export function aiContract(name: string, make: () => Store): void {
       it('leaves out reads not yet due, live leases, final rows and ok reads', () => {
         const s = ai(make());
         const notYet = reserve(s, { reportId: 'notyet' });
-        s.failAiRead(notYet, 'failed', 'retryable', NOW + 50 * MIN, NOW);
+        fail(s, notYet, 'failed', 'retryable', NOW + 50 * MIN);
         const live = reserve(s, { reportId: 'live' }, NOW, NOW + 50 * MIN);
         const fatal = reserve(s, { reportId: 'fatal' });
-        s.failAiRead(fatal, 'failed', 'fatal', null, NOW);
+        fail(s, fatal, 'failed', 'fatal', null);
         const dec = reserve(s, { reportId: 'dec' });
-        s.failAiRead(dec, 'declined', 'declined', null, NOW);
+        fail(s, dec, 'declined', 'declined', null);
         const inv = reserve(s, { reportId: 'inv' });
-        s.failAiRead(inv, 'invalid', 'invalid', null, NOW);
+        fail(s, inv, 'invalid', 'invalid', null);
         okRead(s, 'ok', 'h', NOW);
         expect(s.listAiRetries(NOW + 10 * MIN, 50)).toEqual([]);
         // The boundaries are inclusive for a retry time and for a lease end (a lease is live strictly before its end).
@@ -599,7 +729,7 @@ export function aiContract(name: string, make: () => Store): void {
       it('includes a skipped read once its retry time has come', () => {
         const s = ai(make());
         const k = reserve(s, { reportId: 'k' });
-        s.failAiRead(k, 'skipped', 'budget', MIDNIGHT + DAY, NOW);
+        fail(s, k, 'skipped', 'budget', MIDNIGHT + DAY);
         expect(s.listAiRetries(MIDNIGHT + DAY - 1, 10)).toEqual([]);
         expect(ids(s.listAiRetries(MIDNIGHT + DAY, 10))).toEqual([k]);
       });
@@ -609,7 +739,7 @@ export function aiContract(name: string, make: () => Store): void {
         const id = reserve(s, {}, NOW, NOW + MIN);
         const [row] = s.listAiRetries(NOW + 2 * MIN, 5);
         expect(row).toMatchObject({ id, reportId: 'r1', status: 'pending', attempts: 1, read: null });
-        s.reserveAiRead(pending(), NOW + 9 * MIN, NOW + 2 * MIN);
+        rsv(s, pending(), NOW + 9 * MIN, NOW + 2 * MIN);
         expect(s.listAiRetries(NOW + 3 * MIN, 5)).toEqual([]);
       });
 
@@ -696,6 +826,26 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.insertAiOutcome(outcome({ reportId: 'gone' }))).toBe(true);
       });
 
+
+      it('a mark that stops a row teaching also drops its example text; the counts stay', () => {
+        const s = ai(make());
+        s.insertAiOutcome(outcome({ reportId: 'a' }));
+        s.insertAiOutcome(outcome({ reportId: 'b' }));
+        s.insertAiOutcome(outcome({ reportId: 'c' }));
+        s.markAiOutcome('a', { reversed: true });
+        s.markAiOutcome('b', { dontTeach: true });
+        expect(s.loadAiOutcome('a')).toMatchObject({ reversed: true, example: null, verdict: 'upheld', agreement: 'agree' });
+        expect(s.loadAiOutcome('b')).toMatchObject({ dontTeach: true, example: null });
+        expect(s.loadAiOutcome('c')?.example).toEqual(example()); // control: an unmarked row keeps its text
+        expect(s.aiStats(0)[0]).toMatchObject({ decided: 3 });
+      });
+
+      it('a bad-faith outcome is stored without example text', () => {
+        const s = ai(make());
+        s.insertAiOutcome(outcome({ reportId: 'bf', badFaith: true, verdict: 'no_action', agreement: 'override' }));
+        expect(s.loadAiOutcome('bf')).toMatchObject({ badFaith: true, example: null, agreement: 'override' });
+      });
+
       it('returns copies', () => {
         const s = ai(make());
         s.insertAiOutcome(outcome({ reportId: 'c' }));
@@ -750,6 +900,17 @@ export function aiContract(name: string, make: () => Store): void {
         s.insertAiOutcome(outcome({ reportId: 'b' }));
         expect(s.aiExamples('3', 'hostile', 0, 0)).toHaveLength(1);
         expect(s.aiExamples('3', 'hostile', -3, 0)).toHaveLength(1);
+      });
+
+
+      it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -3, 0.4])('a limit of %s counts as 1, the same in every store', (limit) => {
+        const s = ai(make());
+        s.insertAiOutcome(outcome({ reportId: 'a' }));
+        s.insertAiOutcome(outcome({ reportId: 'b' }));
+        expect(s.aiExamples('3', 'hostile', limit, 0)).toHaveLength(1);
+        reserve(s, { reportId: 'x' }, NOW, NOW + MIN);
+        reserve(s, { reportId: 'y' }, NOW, NOW + MIN);
+        expect(s.listAiRetries(NOW + 9 * MIN, limit)).toHaveLength(1);
       });
 
       it('aiTeachableCount counts every teachable example across rules, within the window', () => {
@@ -829,7 +990,7 @@ export function aiContract(name: string, make: () => Store): void {
         expect(res).toEqual({ reads: 2, outcomes: 1 });
         expect(s.loadAiRead('oldRead')).toBeNull();
         expect(s.loadAiRead('newRead')).not.toBeNull();
-        expect(s.reserveAiRead(pending({ reportId: 'oldPending' }), NOW + MIN, NOW).reserved).toBe(true);
+        expect(rsv(s, pending({ reportId: 'oldPending' }), NOW + MIN, NOW).reserved).toBe(true);
         expect(s.loadAiOutcome('ancient')).toBeNull();
         // The row that outlives the examples clock keeps its counts but loses its text.
         expect(s.loadAiOutcome('mid')).toMatchObject({ reportId: 'mid', verdict: 'upheld', example: null });
@@ -849,6 +1010,15 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.loadAiOutcome('e')?.example).not.toBeNull();
         expect(s.purgeAi(NOW - 90 * DAY + 1, NOW - 365 * DAY + 1, NOW - 180 * DAY + 1)).toEqual({ reads: 1, outcomes: 1 });
         expect(s.loadAiOutcome('e')?.example).toBeNull();
+      });
+
+      it('the retention sweep of reads also drops the spend ledger it covers (the spend cap only reads today)', () => {
+        const s = ai(make());
+        okRead(s, 'old', 'h', NOW - 100 * DAY, read(), 77);
+        okRead(s, 'new', 'h', NOW - DAY, read(), 5);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 82, calls: 2 });
+        s.purgeAi(NOW - 90 * DAY, 0, 0);
+        expect(s.aiSpendSince(0)).toEqual({ micros: 5, calls: 1 });
       });
 
       it('an examples window of "now" (0 days kept) strips every example older than now and keeps the counts', () => {
@@ -897,7 +1067,7 @@ export function aiContract(name: string, make: () => Store): void {
 
         expect(s.purgeReports(NOW - 90 * DAY, NOW - 30 * DAY)).toBe(1);
         expect(s.loadAiRead('old')).toBeNull();
-        expect(s.reserveAiRead(pending({ reportId: 'old', inputHash: 'h3' }), NOW, NOW - 1).reserved).toBe(true); // the pending row went too
+        expect(rsv(s, pending({ reportId: 'old', inputHash: 'h3' }), NOW, NOW - 1).reserved).toBe(true); // the pending row went too
         expect(s.loadAiRead('new')).not.toBeNull();
         expect(s.loadAiRead('unfiled')).not.toBeNull();
         expect(s.loadAiOutcome('old')).not.toBeNull();

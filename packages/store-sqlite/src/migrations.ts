@@ -446,8 +446,8 @@ CREATE INDEX kit_reports_by_reporter_outcome ON kit_reports (reporter_subject, c
   },
   {
     version: 20,
-    // AI levels 1 and 2 (0.1.6). Two new tables and their indexes; no existing table, column or row is touched, and the runner wraps
-    // this in one savepoint with the version bump, so a failure leaves version 19 and neither table.
+    // AI levels 1 and 2 (0.1.6). Three new tables and their indexes; no existing table, column or row is touched, and the runner wraps
+    // this in one savepoint with the version bump, so a failure leaves version 19 and no new table.
     //   kit_ai_reads holds one row per (report, input hash): the model's validated read, the usage and cost of the call, and the state
     //     of the call while it runs. `lease_until` makes "I am about to call the model" visible to every process on the database
     //     (a pending row is owned until then); UNIQUE (report_id, input_hash) is the guard that lets exactly one process win.
@@ -457,6 +457,12 @@ CREATE INDEX kit_reports_by_reporter_outcome ON kit_reports (reporter_subject, c
     //       kit_ai_reads_by_report (report_id, created_at): the newest read of a report, and a queue page's reads (loadAiReads).
     //       kit_ai_reads_by_time (created_at): today's spend and the retention sweep.
     //       kit_ai_reads_retry (status, retry_at): the sweeper's "failed and due" and "pending and lapsed" scans.
+    //     `attempts` is also the fence of a lease: a take-over adds one, and only the holder of the current number may finish or fail
+    //     the row. `example_ids` is a JSON array of the casebook example ids the read saw (they are not part of the input hash).
+    //   kit_ai_spend is the spend ledger the daily cap reads: one row per (read, attempt) written when the call is reserved, so a retry
+    //     that crosses UTC midnight books each attempt to its own day and a later attempt never overwrites an earlier one's cost. Counts
+    //     and micro-dollars only; swept with the reads (purgeAi).
+    //       kit_ai_spend_by_time (at): today's spend and calls.
     //   kit_ai_outcomes is the casebook: one row per decided report that had an AI read, written in the transaction of the decision.
     //     Ids, counts and the human's final choices, so it keeps for `retention.aiOutcomesMs` (365 days) after the report is gone.
     //     `example_json` (up to 6 pseudonymised lines, aliases only) is the only chat text that outlives a report; it is set to
@@ -488,12 +494,22 @@ CREATE TABLE kit_ai_reads (
   cache_write_tokens INTEGER,
   cost_micros    INTEGER NOT NULL DEFAULT 0,
   latency_ms     INTEGER,
+  example_ids    TEXT,
   created_at     INTEGER NOT NULL,
   UNIQUE (report_id, input_hash)
 );
 CREATE INDEX kit_ai_reads_by_report ON kit_ai_reads (report_id, created_at);
 CREATE INDEX kit_ai_reads_by_time ON kit_ai_reads (created_at);
 CREATE INDEX kit_ai_reads_retry ON kit_ai_reads (status, retry_at);
+
+CREATE TABLE kit_ai_spend (
+  read_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  at      INTEGER NOT NULL,
+  micros  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (read_id, attempt)
+);
+CREATE INDEX kit_ai_spend_by_time ON kit_ai_spend (at);
 
 CREATE TABLE kit_ai_outcomes (
   report_id   TEXT PRIMARY KEY,

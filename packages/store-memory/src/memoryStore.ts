@@ -110,6 +110,8 @@ export class MemoryStore implements Store {
   protected policy: { layer: PolicyLayer; version: number } | null = null;
   /** AI reads in insertion order (one row per report and input hash). */
   protected aiReads: AiReadRow[] = [];
+  /** The AI spend ledger: one entry per attempt (a call started), booked at the time it was reserved. */
+  protected aiSpend: Array<{ readId: string; attempt: number; at: number; micros: number }> = [];
   /** AI casebook outcomes by report. */
   protected aiOutcomes = new Map<string, AiOutcomeRow>();
   /** The change token's counter (see `changeToken`). */
@@ -415,6 +417,7 @@ export class MemoryStore implements Store {
         model: null,
         promptVersion: row.promptVersion,
         read: null,
+        exampleIds: [],
         inputTokens: null,
         outputTokens: null,
         cacheReadTokens: null,
@@ -427,7 +430,8 @@ export class MemoryStore implements Store {
       this.undoWith(() => {
         this.aiReads = this.aiReads.filter((r) => r !== fresh);
       });
-      return { reserved: true, id: fresh.id };
+      this.openAttempt(fresh.id, 1, now);
+      return { reserved: true, id: fresh.id, lease: 1 };
     }
     const lapsed = existing.status === 'pending' && existing.leaseUntil !== null && existing.leaseUntil <= now;
     const due = (existing.status === 'failed' || existing.status === 'skipped') && existing.retryAt !== null && existing.retryAt <= now;
@@ -438,14 +442,44 @@ export class MemoryStore implements Store {
     existing.retryAt = null;
     existing.leaseUntil = leaseUntil;
     existing.errorKind = null;
-    existing.createdAt = now;
     this.undoWith(() => Object.assign(existing, before));
-    return { reserved: true, id: existing.id };
+    this.openAttempt(existing.id, existing.attempts, now);
+    return { reserved: true, id: existing.id, lease: existing.attempts };
   }
 
-  completeAiRead(id: string, result: AiReadDone): boolean {
+  /** One call started: a ledger entry at `now`. */
+  private openAttempt(readId: string, attempt: number, at: number): void {
+    const entry = { readId, attempt, at, micros: 0 };
+    this.aiSpend.push(entry);
+    this.undoWith(() => {
+      this.aiSpend = this.aiSpend.filter((e) => e !== entry);
+    });
+  }
+
+  /** Add what a call cost to its row and to its ledger entry (journaled by the caller through `before`). */
+  private addUsage(row: AiReadRow, u: AiCallUsage): void {
+    const add = (a: number | null, b: number): number => (a ?? 0) + b;
+    Object.assign(row, {
+      model: u.model,
+      inputTokens: add(row.inputTokens, u.inputTokens),
+      outputTokens: add(row.outputTokens, u.outputTokens),
+      cacheReadTokens: add(row.cacheReadTokens, u.cacheReadTokens),
+      cacheWriteTokens: add(row.cacheWriteTokens, u.cacheWriteTokens),
+      costMicros: row.costMicros + u.costMicros,
+      latencyMs: u.latencyMs,
+    });
+    const entry = this.aiSpend.find((e) => e.readId === row.id && e.attempt === row.attempts);
+    if (entry !== undefined) {
+      entry.micros += u.costMicros;
+      this.undoWith(() => {
+        entry.micros -= u.costMicros;
+      });
+    }
+  }
+
+  completeAiRead(id: string, lease: number, result: AiReadDone): boolean {
     const row = this.aiReads.find((r) => r.id === id);
-    if (row === undefined || row.status !== 'pending') return false;
+    if (row === undefined || row.status !== 'pending' || row.attempts !== lease) return false;
     const before = { ...row };
     Object.assign(row, {
       status: 'ok',
@@ -453,26 +487,36 @@ export class MemoryStore implements Store {
       retryAt: null,
       errorKind: null,
       read: structuredClone(result.read),
-      ...usageColumns(result),
+      exampleIds: [...(result.exampleIds ?? [])],
     });
     this.undoWith(() => Object.assign(row, before));
+    this.addUsage(row, result);
     this.bump();
     return true;
   }
 
   failAiRead(
     id: string,
+    lease: number,
     status: 'failed' | 'declined' | 'invalid' | 'skipped',
     errorKind: AiErrorKind,
     retryAt: number | null,
-    _now: number,
     usage?: AiCallUsage,
   ): boolean {
     const row = this.aiReads.find((r) => r.id === id);
-    if (row === undefined || row.status !== 'pending') return false;
+    if (row === undefined || row.status !== 'pending' || row.attempts !== lease) return false;
     const before = { ...row };
-    Object.assign(row, { status, errorKind, retryAt, leaseUntil: null, ...(usage === undefined ? {} : usageColumns(usage)) });
+    Object.assign(row, { status, errorKind, retryAt, leaseUntil: null });
     this.undoWith(() => Object.assign(row, before));
+    if (usage !== undefined) this.addUsage(row, usage);
+    if (status === 'skipped') {
+      // A skipped read was never a call: its attempt leaves the ledger.
+      const ledger = this.aiSpend;
+      this.aiSpend = ledger.filter((e) => !(e.readId === id && e.attempt === lease));
+      this.undoWith(() => {
+        this.aiSpend = ledger;
+      });
+    }
     return true;
   }
 
@@ -491,7 +535,6 @@ export class MemoryStore implements Store {
   }
 
   listAiRetries(now: number, limit: number): AiReadRow[] {
-    const n = Math.min(200, Math.max(1, Math.floor(limit)));
     return this.aiReads
       .filter(
         (r) =>
@@ -499,24 +542,25 @@ export class MemoryStore implements Store {
           (r.status === 'pending' && r.leaseUntil !== null && r.leaseUntil <= now),
       )
       .sort((a, b) => a.createdAt - b.createdAt || compare(a.id, b.id))
-      .slice(0, n)
+      .slice(0, clampLimit(limit))
       .map((r) => structuredClone(r));
   }
 
   aiSpendSince(since: number): { micros: number; calls: number } {
     let micros = 0;
     let calls = 0;
-    for (const r of this.aiReads) {
-      if (r.createdAt < since) continue;
-      micros += r.costMicros;
-      if (r.status !== 'skipped') calls += 1;
+    for (const e of this.aiSpend) {
+      if (e.at < since) continue;
+      micros += e.micros;
+      calls += 1;
     }
     return { micros, calls };
   }
 
   insertAiOutcome(row: AiOutcomeInsert): boolean {
     if (this.aiOutcomes.has(row.reportId)) return false;
-    this.aiOutcomes.set(row.reportId, { ...structuredClone(row), reversed: false, dontTeach: false });
+    // A bad-faith row can never teach, so its chat text is not kept.
+    this.aiOutcomes.set(row.reportId, { ...structuredClone(row), example: row.badFaith ? null : structuredClone(row.example), reversed: false, dontTeach: false });
     this.undoWith(() => this.aiOutcomes.delete(row.reportId));
     return true;
   }
@@ -529,16 +573,18 @@ export class MemoryStore implements Store {
   markAiOutcome(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean {
     const row = this.aiOutcomes.get(reportId);
     if (row === undefined) return false;
-    const before = { reversed: row.reversed, dontTeach: row.dontTeach };
+    const before = { reversed: row.reversed, dontTeach: row.dontTeach, example: row.example };
     if (patch.reversed === true) row.reversed = true;
     if (patch.dontTeach === true) row.dontTeach = true;
+    // A row that can no longer teach does not keep its chat text.
+    if (row.reversed || row.dontTeach) row.example = null;
     this.undoWith(() => Object.assign(row, before));
     this.bump();
     return true;
   }
 
   aiExamples(rule: string, severity: string, limit: number, since: number): AiExampleRow[] {
-    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const n = clampLimit(limit);
     const out: AiExampleRow[] = [];
     for (const r of [...this.aiOutcomes.values()].sort((a, b) => b.decidedAt - a.decidedAt || compare(b.reportId, a.reportId))) {
       if (out.length >= n) break;
@@ -571,6 +617,8 @@ export class MemoryStore implements Store {
     const reads = this.aiReads;
     const outcomes = new Map(this.aiOutcomes);
     const keptReads = reads.filter((r) => r.createdAt >= readsBefore);
+    const ledger = this.aiSpend;
+    this.aiSpend = ledger.filter((e) => e.at >= readsBefore);
     const stripped: Array<[AiOutcomeRow, AiOutcomeRow['example']]> = [];
     let gone = 0;
     for (const [id, r] of outcomes) {
@@ -585,6 +633,7 @@ export class MemoryStore implements Store {
     this.aiReads = keptReads;
     this.undoWith(() => {
       this.aiReads = reads;
+      this.aiSpend = ledger;
       this.aiOutcomes = outcomes;
       for (const [r, example] of stripped) r.example = example;
     });
@@ -1273,17 +1322,9 @@ export function createMemoryStore(): MemoryStore {
   return new MemoryStore();
 }
 
-/** The columns a finished call fills on a read row. */
-function usageColumns(u: AiCallUsage): Pick<AiReadRow, 'model' | 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'costMicros' | 'latencyMs'> {
-  return {
-    model: u.model,
-    inputTokens: u.inputTokens,
-    outputTokens: u.outputTokens,
-    cacheReadTokens: u.cacheReadTokens,
-    cacheWriteTokens: u.cacheWriteTokens,
-    costMicros: u.costMicros,
-    latencyMs: u.latencyMs,
-  };
+/** A page size: a limit that is not finite or is below 1 counts as 1; at most 200. */
+function clampLimit(limit: number): number {
+  return Number.isFinite(limit) && limit >= 1 ? Math.min(200, Math.floor(limit)) : 1;
 }
 
 /** The newest `ok` row (`createdAt`, then `id`, both descending), as a copy; null when there is none. */

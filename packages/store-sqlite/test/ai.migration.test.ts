@@ -37,8 +37,8 @@ const filePath = (): string => {
 };
 
 const M20 = MIGRATIONS.find((m) => m.version === 20);
-const NEW_TABLES = ['kit_ai_outcomes', 'kit_ai_reads'];
-const NEW_INDEXES = ['kit_ai_outcomes_by_rule', 'kit_ai_reads_by_report', 'kit_ai_reads_by_time', 'kit_ai_reads_retry'];
+const NEW_TABLES = ['kit_ai_outcomes', 'kit_ai_reads', 'kit_ai_spend'];
+const NEW_INDEXES = ['kit_ai_outcomes_by_rule', 'kit_ai_reads_by_report', 'kit_ai_reads_by_time', 'kit_ai_reads_retry', 'kit_ai_spend_by_time'];
 
 const names = (db: DatabaseSync, type: 'table' | 'index'): string[] =>
   db
@@ -100,7 +100,7 @@ describe('migration 20: AI reads and outcomes', () => {
     expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
   });
 
-  it('migration 20 on a fresh database creates both tables and the indexes', () => {
+  it('migration 20 on a fresh database creates the three tables and the indexes', () => {
     const db = memDb();
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(20);
@@ -109,8 +109,9 @@ describe('migration 20: AI reads and outcomes', () => {
     expect(columns(db, 'kit_ai_reads')).toEqual([
       'id', 'report_id', 'input_hash', 'status', 'attempts', 'retry_at', 'lease_until', 'error_kind', 'adapter', 'model', 'prompt_version',
       'severity', 'rule', 'summary', 'evidence_json', 'confidence', 'injection', 'rec_json', 'input_tokens', 'output_tokens',
-      'cache_read_tokens', 'cache_write_tokens', 'cost_micros', 'latency_ms', 'created_at',
+      'cache_read_tokens', 'cache_write_tokens', 'cost_micros', 'latency_ms', 'example_ids', 'created_at',
     ]);
+    expect(columns(db, 'kit_ai_spend')).toEqual(['read_id', 'attempt', 'at', 'micros']);
     expect(columns(db, 'kit_ai_outcomes')).toEqual([
       'report_id', 'read_id', 'decided_at', 'level', 'verdict', 'rule', 'severity', 'ai_verdict', 'agreement', 'detail_json', 'reversed',
       'dont_teach', 'bad_faith', 'example_json',
@@ -132,6 +133,7 @@ describe('migration 20: AI reads and outcomes', () => {
     expect(names(db, 'index').filter((n) => !indexes.includes(n) && !n.startsWith('sqlite_autoindex'))).toEqual(NEW_INDEXES);
     for (const t of OLD_TABLES) expect(columns(db, t)).toEqual(cols[t]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM kit_ai_reads').get()).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM kit_ai_spend').get()).toEqual({ n: 0 });
     store.close();
 
     // Reopening runs nothing again and changes nothing.
@@ -195,7 +197,7 @@ describe('migration 20: AI reads and outcomes', () => {
     expect(names(fresh, 'index')).toEqual(names(upgraded, 'index'));
   });
 
-  it('a failing migration 20 rolls back whole: version 19, neither table, rows intact, and it still upgrades afterwards', () => {
+  it('a failing migration 20 rolls back whole: version 19, no new table, rows intact, and it still upgrades afterwards', () => {
     const db = memDb();
     openAt(db, 19, 10).close();
     const before = snapshot(db);
@@ -253,6 +255,16 @@ describe('the schema guards what the store relies on', () => {
     for (const a of ['agree', 'override', 'none']) expect(() => insertOutcome(db, `o-${a}`, { agreement: a })).not.toThrow();
     expect(() => insertOutcome(db, 'o-bad', { agreement: 'maybe' })).toThrow(/CHECK/);
     expect(() => insertOutcome(db, 'o-agree')).toThrow(/UNIQUE|PRIMARY/);
+  });
+
+  it('one ledger row per read and attempt', () => {
+    const db = memDb();
+    openStore({ db });
+    const ins = (read: string, attempt: number) => db.prepare('INSERT INTO kit_ai_spend (read_id, attempt, at, micros) VALUES (?, ?, ?, 0)').run(read, attempt, NOW);
+    ins('a', 1);
+    expect(() => ins('a', 1)).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => ins('a', 2)).not.toThrow();
+    expect(() => ins('b', 1)).not.toThrow();
   });
 
   it('the defaults: attempts, injection and cost start at 0; reversed, the marks and the example start empty', () => {

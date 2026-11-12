@@ -37,7 +37,7 @@ const outcomeRow = (): AiOutcomeInsert => ({
   severity: 'rude',
   aiVerdict: 'noted',
   agreement: 'agree',
-  detail: { verdict: true, outcome: 'same' },
+  detail: { verdict: true, rule: true, lines: 1, outcome: 'same', oneClick: false },
   badFaith: false,
   example: { rule: 2, severity: 'rude', verdict: 'noted', lines: [{ who: 'P1', text: 'zorbak' }] },
 });
@@ -48,7 +48,7 @@ describe('MemoryStore AI rows are copies', () => {
     const r = s.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
     if (!r.reserved) throw new Error('expected a reservation');
     const read = aiRead();
-    expect(s.completeAiRead(r.id, doneOf(read))).toBe(true);
+    expect(s.completeAiRead(r.id, r.lease, doneOf(read))).toBe(true);
     read.summary = 'changed';
     read.evidence.push('L9');
     if (read.recommendation) read.recommendation.evidence.push('L9');
@@ -59,7 +59,7 @@ describe('MemoryStore AI rows are copies', () => {
     const s = new MemoryStore();
     const r = s.reserveAiRead({ reportId: 'r1', inputHash: 'h', promptVersion: 1, adapter: 'a' }, NOW + MIN, NOW);
     if (!r.reserved) throw new Error('expected a reservation');
-    s.completeAiRead(r.id, doneOf(aiRead()));
+    s.completeAiRead(r.id, r.lease, doneOf(aiRead()));
     const loaded = s.loadAiRead('r1');
     if (loaded?.read) loaded.read.evidence.length = 0;
     const many = s.loadAiReads(['r1']);
@@ -95,7 +95,7 @@ describe('MemoryStore AI methods can be overridden on an instance, like every ot
     s.completeAiRead = () => {
       throw new Error('disk full');
     };
-    expect(() => s.completeAiRead(r.id, doneOf(aiRead()))).toThrow('disk full');
+    expect(() => s.completeAiRead(r.id, r.lease, doneOf(aiRead()))).toThrow('disk full');
     expect(s.loadAiRead('r1')).toBeNull();
   });
 });
