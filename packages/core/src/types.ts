@@ -1357,7 +1357,8 @@ export interface Store {
 
   /**
    * OPTIONAL. The SUBJECT row of a sanction group (kind, actor, source, automated, start, end, rule, room, `reportId`), revoked or not, as
-   * a copy; null for an unknown group or one with only an IP row.
+   * a copy; null for an unknown group or one with only an IP row. `reportId` and `revokedAt` (when the group was revoked) are present only
+   * when set: this is the one read that carries them.
    */
   loadSanctionSubjectRow?(groupId: string): SanctionRow | null;
 

@@ -197,8 +197,9 @@ class MemoryAppeals extends MemoryStore {
   loadSanctionSubjectRow(groupId: string): SanctionRow | null {
     const row = this.sanctions.find((r) => r.groupId === groupId && r.targetType === 'subject');
     if (row === undefined) return null;
-    // The one read that carries the report id: only a row written with one has the key, so every other load keeps the shape it had.
-    return { ...this.sanctionRow(row), ...(row.reportId == null ? {} : { reportId: row.reportId }) };
+    // The one read that carries the report id and the revocation time: only a row written with a report id, and only a revoked group, has the
+    // key, so every other load keeps the shape it had.
+    return { ...this.sanctionRow(row), ...(row.reportId == null ? {} : { reportId: row.reportId }), ...(row.revokedAt === null ? {} : { revokedAt: row.revokedAt }) };
   }
 
   clearAppealStatements(before: number): number {

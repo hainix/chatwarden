@@ -1367,12 +1367,12 @@ export class SqliteStore implements Store, TermStore {
   loadSanctionSubjectRow(groupId: string): SanctionRow | null {
     const r = this.transaction(() =>
       this.db
-        .prepare(`SELECT ${SANCTION_COLUMNS}, report_id FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' ORDER BY rowid LIMIT 1`)
+        .prepare(`SELECT ${SANCTION_COLUMNS}, report_id, revoked_at AS rv FROM kit_sanctions WHERE group_id = ? AND target_type = 'subject' ORDER BY rowid LIMIT 1`)
         .get(groupId),
     );
     if (r === undefined) return null;
-    // The one read that carries the report id (omitted when there is none, so every other load keeps the shape it had).
-    return { ...toSanctionRow(r), ...(r.report_id === null ? {} : { reportId: String(r.report_id) }) };
+    // The one read that carries the report id and the revocation time (each omitted when there is none, so every other load keeps the shape it had).
+    return { ...toSanctionRow(r), ...(r.report_id === null ? {} : { reportId: String(r.report_id) }), ...(r.rv === null ? {} : { revokedAt: Number(r.rv) }) };
   }
 
   clearAppealStatements(before: number): number {

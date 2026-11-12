@@ -346,11 +346,14 @@ describe('sanction rows and the report id', () => {
     }
   });
 
-  it('loadSanctionSubjectRow carries no revoked key, like the shape of the generic loads', () => {
+  it('loadSanctionSubjectRow carries revokedAt once revoked and no other revocation bookkeeping', () => {
     const store = memStore();
     store.insertSanctionGroup([sanction({ groupId: 'g1', refCode: 'M-11111' })]);
-    store.revokeSanctionGroup('g1', 'mod', NOW, 'x');
     expect(Object.keys(store.loadSanctionSubjectRow('g1') ?? {})).not.toContain('revokedAt');
+    store.revokeSanctionGroup('g1', 'mod', NOW, 'x');
+    const row = store.loadSanctionSubjectRow('g1') ?? ({} as Record<string, unknown>);
+    expect(row.revokedAt).toBe(NOW);
+    for (const k of ['revokedBy', 'revokeReason']) expect(Object.keys(row), k).not.toContain(k);
   });
 });
 

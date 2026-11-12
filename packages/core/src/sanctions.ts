@@ -194,6 +194,11 @@ function validate(input: SanctionInput, now?: number): Checked {
   const note: unknown = input.gapNote;
   if (ref === 'uncovered' && input.source === 'moderator') {
     const trimmed = typeof note === 'string' ? note.trim() : '';
+    // The kit's own writers (the decision, the appeals service: `token`) may leave the note out: a replacement under no rule has its gap
+    // recorded on the sanction it replaces, so it does not open a second one.
+    if (trimmed === '' && token === APPEALS_START_TOKEN && note === undefined) {
+      return { rule: 'uncovered', gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
+    }
     if (trimmed === '') throw new SanctionError('applySanction: a rule-gap note is required when no rule is cited');
     if (trimmed.length > GAP_NOTE_MAX) throw new SanctionError('applySanction: the rule-gap note is too long');
     return { rule: 'uncovered', gapNote: trimmed, start: start as number | undefined, reportId: report as string | undefined };

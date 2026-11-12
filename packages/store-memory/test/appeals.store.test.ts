@@ -176,12 +176,13 @@ describe('MemoryStore appeals', () => {
     expect(s.loadSanctionSubjectRow('g1')?.reportId ?? null).toBeNull();
   });
 
-  it('loadSanctionSubjectRow carries no revocation or gap bookkeeping, just the row', () => {
+  it('loadSanctionSubjectRow carries revokedAt once revoked and no other revocation or gap bookkeeping', () => {
     const s = withMemoryAppeals(new MemoryStore());
     s.insertSanctionGroup([sanction({ gapNote: 'n', gapStatus: 'open' })]);
     s.revokeSanctionGroup('g1', 'mod_ann', NOW, 'oops');
     const keys = Object.keys(s.loadSanctionSubjectRow('g1') ?? {});
-    for (const k of ['gapRef', 'gapClosedBy', 'gapClosedAt', 'revokedBy', 'revokedAt', 'revokeReason']) expect(keys, k).not.toContain(k);
+    for (const k of ['gapRef', 'gapClosedBy', 'gapClosedAt', 'revokedBy', 'revokeReason']) expect(keys, k).not.toContain(k);
+    expect(s.loadSanctionSubjectRow('g1')?.revokedAt).toBe(NOW);
   });
 
   it('purges many appeals of many groups and keeps the by-group index in step', () => {

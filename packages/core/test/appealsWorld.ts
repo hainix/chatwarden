@@ -39,7 +39,7 @@ export async function appealsKit(over: Partial<ChatwardenOptions> = {}, appeals:
     const g = res.groups[0];
     if (g === undefined || g.noticeId === null) throw new Error('expected a group and a notice');
     const who: RawWho = { clientKey: key };
-    return { who, subject: f.target as SubjectId, groupId: g.groupId, refCode: g.refCode, noticeId: g.noticeId, reportId: f.id, key };
+    return { who, subject: f.target as SubjectId, groupId: g.groupId, refCode: g.refCode, noticeId: g.noticeId, reportId: f.id, key, room: f.room };
   };
 
   const rows = (): AppealRow[] => (w.store as unknown as AppealsStore).listAppeals({ status: 'all', limit: 200 });

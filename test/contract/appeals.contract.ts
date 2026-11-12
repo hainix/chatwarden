@@ -651,11 +651,15 @@ export function appealsContract(name: string, make: () => Store): void {
         expect(s.loadSanctionSubjectRow('')).toBeNull();
       });
 
-      it('still answers for a revoked group (the appeal reads what was decided)', () => {
+      it('still answers for a revoked group, and says so: revokedAt is there once it was revoked and absent before', () => {
         const s = store();
         s.insertSanctionGroup(subjectAndIp('sg-rev', 'M-60004'));
-        s.revokeSanctionGroup('sg-rev', 'mod_ann', NOW, 'oops');
-        expect(s.loadSanctionSubjectRow('sg-rev')).toMatchObject({ groupId: 'sg-rev', kind: 'chat' });
+        expect(Object.keys(s.loadSanctionSubjectRow('sg-rev') ?? {})).not.toContain('revokedAt');
+        s.revokeSanctionGroup('sg-rev', 'mod_ann', NOW + 7, 'oops');
+        expect(s.loadSanctionSubjectRow('sg-rev')).toMatchObject({ groupId: 'sg-rev', kind: 'chat', revokedAt: NOW + 7 });
+        // the first revoke wins
+        s.revokeSanctionGroup('sg-rev', 'mod_bea', NOW + 99, 'again');
+        expect(s.loadSanctionSubjectRow('sg-rev')?.revokedAt).toBe(NOW + 7);
       });
 
       it('returns a copy', () => {

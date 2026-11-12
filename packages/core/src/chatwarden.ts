@@ -25,7 +25,7 @@ import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkPace, mergePace } from './pace.js';
 import { AppealService, hasAppealMethods } from './appealService.js';
-import type { AppealFileResult, PlayerAppeal } from './appeals.js';
+import type { AppealDecideResult, AppealDecision, AppealFileResult, PlayerAppeal } from './appeals.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
@@ -626,6 +626,14 @@ export interface Chatwarden {
     file(who: RawWho, input: { noticeId: string; statement: string }): AppealFileResult;
     /** The caller's own appeals, newest first, at most 50, without any that was made moot. Empty for an unknown person or with appeals off. */
     mine(who: RawWho): PlayerAppeal[];
+    /**
+     * Decide an open appeal: `uphold` (the sanction stands), `reduce` (to a lighter kind, or the same kind and shorter, keeping the original
+     * start so the ladder does not restart, never ending later than the original) or `revoke`. A moderator may not decide an appeal of
+     * their own decision unless `appeals.allowSelfReview` is on (`same_decider`); an automatic sanction has no such decider. `reason` is
+     * private (1 to 500 characters). One transaction; the player is told through a notice; `appeal.decided` is emitted after the commit.
+     * Staff-side: the permission and the audit row belong to the route. A store failure rejects and writes nothing.
+     */
+    decide(input: AppealDecision): Promise<AppealDecideResult>;
   };
   /**
    * Decide a report: close it, write each sanction and its notice, and tell the people involved, in one
@@ -945,16 +953,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (policy.profileNow().appeals.enabled && !hasAppealMethods(store)) {
     throw new Error('createChatwarden: appeals are enabled, but this store has no appeal methods (SqliteStore has them from schema 22; the in-memory store needs its opt-in appeals wrapper)');
   }
-  const appealService = new AppealService({
-    store,
-    subjects,
-    notices,
-    clock,
-    logger,
-    settings: () => policy.profileNow().appeals,
-    personOf,
-    emit: (event) => bus.emit(event),
-  });
+  /** The one answer to "does a moot or a decision clear the statement at once": the retention the kit was created with. */
+  const clearAppealStatements = (): boolean => (retentionPolicy.appealStatementsMs ?? RETENTION_DEFAULTS.appealStatementsMs) === 0;
   signalRef.service = signalModule === undefined ? createInertSignals(logger, () => policy.profileNow().signals) : new signalModule.SignalService({
     store,
     clock,
@@ -1094,6 +1094,20 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         });
   aiRef.service = aiService;
   const ai: AiFacade = aiService ?? createInertAi();
+  const appealService = new AppealService({
+    store,
+    subjects,
+    notices,
+    clock,
+    logger,
+    settings: () => policy.profileNow().appeals,
+    personOf,
+    emit: (event) => bus.emit(event),
+    index: sanctions,
+    clearStatements: clearAppealStatements,
+    // A granted appeal marks the original decision reversed in the casebook; with no AI this is the inert facade and does nothing.
+    onGranted: (appeal) => void ai.markReversed(appeal.reportId as string),
+  });
 
   return {
     ai,
@@ -1247,7 +1261,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           notices,
           clock: { now: () => at },
           index: sanctions,
-          clearAppealStatements: () => (retentionPolicy.appealStatementsMs ?? RETENTION_DEFAULTS.appealStatementsMs) === 0,
+          clearAppealStatements,
         });
         if (revoked) {
           try {
@@ -1325,6 +1339,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       enabled: () => appealService.enabled(),
       file: (who, input) => appealService.file(who, input),
       mine: (who) => appealService.mine(who),
+      decide: (input) => appealService.decide(input),
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),

@@ -146,3 +146,26 @@ export function normalizeStatement(input: unknown): string {
 export function statementLength(text: string): number {
   return [...text].length;
 }
+
+/** The four sanction kinds an appeal can concern, lightest first: a reduction must go to a lower kind, or to the same kind and shorter. */
+export const SANCTION_KIND_ORDER = ['warning', 'chat', 'area', 'ban'] as const;
+
+/**
+ * A moderator's ruling on an appeal.
+ * @experimental
+ */
+export interface AppealDecision {
+  appealId: string;
+  outcome: AppealOutcome;
+  /** A staff ref the audit trail accepts. */
+  actor: string;
+  /** Private, 1 to 500 characters after trimming. Never shown to the player. */
+  reason: string;
+  /** `reduce` only: the lighter outcome that replaces the sanction. A warning has no length (`null`). */
+  to?: { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null };
+}
+
+/** @experimental */
+export type AppealDecideResult =
+  | { ok: true; status: 'upheld' | 'reduced' | 'revoked'; replacementGroupId?: string }
+  | { ok: false; error: 'not_found' | 'already_decided' | 'invalid' | 'same_decider' | 'gone' };
