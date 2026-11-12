@@ -3,6 +3,7 @@
 // not just observed. SqliteStore is the reference: when the suites disagree, the other store is wrong.
 // This directory is test-only and never published. It imports `vitest` and `@chatwarden/core` types and nothing else.
 import type { Store } from '@chatwarden/core';
+import { aiContract } from './ai.contract.js';
 import { auditContract } from './audit.contract.js';
 import { discordThreadsContract } from './discordThreads.contract.js';
 import { mutesContract } from './mutes.contract.js';
@@ -20,6 +21,7 @@ import { viewsContract } from './views.contract.js';
 import { webhookKeysContract } from './webhookKeys.contract.js';
 
 export {
+  aiContract,
   auditContract,
   discordThreadsContract,
   mutesContract,
@@ -54,6 +56,7 @@ export const CONTRACT_AREAS = [
   'team',
   'policy',
   'report reasons',
+  'ai',
 ] as const;
 
 /** Registers every area suite against the stores `make` builds (a fresh, empty store on each call). */
@@ -73,4 +76,5 @@ export function storeContract(name: string, make: () => Store): void {
   teamContract(name, make);
   policyContract(name, make);
   reportReasonsContract(name, make);
+  aiContract(name, make);
 }

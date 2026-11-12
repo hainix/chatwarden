@@ -114,6 +114,10 @@ export interface PurgeResult {
   notices: number;
   audit: number;
   webhookKeys: number;
+  /** AI reads deleted by the retention pass (a read also goes with its report). 0 for a store without the AI methods. */
+  aiReads: number;
+  /** AI casebook outcomes deleted. 0 for a store without the AI methods. */
+  aiOutcomes: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -134,6 +138,9 @@ function checkWindow(name: string, ms: number): void {
  *   term-editor rows written before the trail existed
  * - webhook keys: `createdAt < now - 24 h` (incoming-webhook idempotency keys, pending or done)
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)
+ * - AI reads: `createdAt < now - reportsMs` (a read also goes with its report, in `purgeReports`); AI outcomes (agree-or-override
+ *   record, no chat text): `decidedAt < now - aiOutcomesMs`; the pseudonymised example kept with an outcome:
+ *   `decidedAt < now - aiExamplesMs`, the row stays with its counts. A store without the AI methods has none of these.
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn.
@@ -165,13 +172,19 @@ export async function purge(
   checkWindow('auditMs', p.auditMs);
   checkWindow('aiOutcomesMs', p.aiOutcomesMs);
   checkWindow('aiExamplesMs', p.aiExamplesMs);
-  return store.transaction(() => ({
-    reports: store.purgeReports(now - p.reportsMs, now - p.badFaithMs),
-    sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
-    strikes: store.purgeStrikes(now - p.strikesMs),
-    mutes: store.purgeMutes(now - MUTE_TTL_MS),
-    notices: store.purgeNotices(now - p.noticesMs),
-    audit: store.purgeAudit(now - p.auditMs),
-    webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
-  }));
+  return store.transaction(() => {
+    const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
+    const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
+    return {
+      reports,
+      sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
+      strikes: store.purgeStrikes(now - p.strikesMs),
+      mutes: store.purgeMutes(now - MUTE_TTL_MS),
+      notices: store.purgeNotices(now - p.noticesMs),
+      audit: store.purgeAudit(now - p.auditMs),
+      webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
+      aiReads: ai.reads,
+      aiOutcomes: ai.outcomes,
+    };
+  });
 }

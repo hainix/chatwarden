@@ -1,6 +1,7 @@
 // Core types for @chatwarden/core. Organized by section; later tasks append
 // their own sections below.
 
+import type { AIExample, AIRead } from './ai/types.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
@@ -227,6 +228,138 @@ export interface ReporterOutcomeRow {
   actioned: number;
   noAction: number;
   badFaith: number;
+}
+
+// ---------------------------------------------------------------------------
+// AI reads and the casebook (AI levels 1 and 2). Rows of the optional AI Store methods.
+// ---------------------------------------------------------------------------
+
+/** Where an AI read stands. `pending` is owned by a lease; `skipped` means the daily limit (or the breaker) kept the call from being made. */
+export type AiReadStatus = 'pending' | 'ok' | 'declined' | 'invalid' | 'failed' | 'skipped';
+
+/** Why a read did not finish. `budget` belongs to a `skipped` read; `declined` and `invalid` to the statuses of the same name. */
+export type AiErrorKind = 'retryable' | 'fatal' | 'declined' | 'timeout' | 'invalid' | 'budget';
+
+/** A read about to be made: the input the lease is taken for. The store adds the id, the attempt count and the time. */
+export interface AiReadPending {
+  reportId: string;
+  /** The input hash (design section 6); with `reportId` it is the UNIQUE key. */
+  inputHash: string;
+  promptVersion: number;
+  /** `ModerationAI.id` (never a key). */
+  adapter: string;
+}
+
+/** What one provider call used and cost: stored on a finished read, and on a failed one that still cost something. */
+export interface AiCallUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Integer micro-dollars. */
+  costMicros: number;
+  latencyMs: number;
+}
+
+/** The validated answer and the usage of the call that produced it. */
+export interface AiReadDone extends AiCallUsage {
+  read: AIRead;
+}
+
+/**
+ * One stored read, whatever its state. `read` is the validated answer, set only for `ok`; `leaseUntil` only while `pending`;
+ * `retryAt` for a `failed` or `skipped` read that may be tried again. It holds no chat text but the one-line summary and no
+ * identity.
+ */
+export interface AiReadRow {
+  id: string;
+  reportId: string;
+  inputHash: string;
+  status: AiReadStatus;
+  /** Calls started for this row: 1 when reserved, +1 each time a lease or a retry is taken over. */
+  attempts: number;
+  retryAt: number | null;
+  leaseUntil: number | null;
+  errorKind: AiErrorKind | null;
+  adapter: string;
+  model: string | null;
+  promptVersion: number;
+  read: AIRead | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  costMicros: number;
+  latencyMs: number | null;
+  /** When the call was reserved; moved to the time of a take-over, so spend lands on the day of the call. */
+  createdAt: number;
+}
+
+/** The answer to a reserve: this caller owns the read now (`id`), or a row already exists for that report and input. */
+export type AiReserveResult = { reserved: true; id: string } | { reserved: false; existing: AiReadRow };
+
+/** The human's verdict, and the AI's recommendation, in the casebook's three classes. */
+export type AiVerdict = 'upheld' | 'noted' | 'no_action';
+
+/** The finer facts of one outcome (design section 11): scalars only, e.g. `verdict` and `rule` matched, `lines`, `outcome`, `oneClick`. */
+export type AiOutcomeDetail = Readonly<Record<string, string | number | boolean | null>>;
+
+/**
+ * One casebook row to insert: a decided report that had an AI read, computed by the server in the transaction of the decision.
+ * Ids, counts and the human's final choices; the only chat text is `example`, pseudonymised, kept on its own shorter clock.
+ */
+export interface AiOutcomeInsert {
+  reportId: string;
+  /** The read the moderator was shown, or null when there was none. */
+  readId: string | null;
+  decidedAt: number;
+  /** The AI level in force when decided (1 or 2). */
+  level: number;
+  /** The human's final verdict. */
+  verdict: AiVerdict;
+  /** The human's final rule on the reported person (`'3'`, `'uncovered'`), or null. */
+  rule: string | null;
+  /** The conduct level the human settled on, when the form had one. */
+  severity: string | null;
+  /** What the AI recommended, or null (level 1, or `unclear`). */
+  aiVerdict: AiVerdict | null;
+  agreement: 'agree' | 'override' | 'none';
+  detail: AiOutcomeDetail;
+  /** The report was dismissed as bad faith: excludes the row from examples. */
+  badFaith: boolean;
+  /** Up to 6 pseudonymised lines, or null for none. */
+  example: AIExample | null;
+}
+
+/** A stored outcome: what was inserted, and the two marks a later action sets. */
+export interface AiOutcomeRow extends AiOutcomeInsert {
+  /** Set by a granted appeal or a take-back. Excludes the row from examples; counts as an AI false positive. */
+  reversed: boolean;
+  /** A senior's mark. Excludes the row from examples. */
+  dontTeach: boolean;
+}
+
+/** One teachable casebook example, newest first from {@link Store.aiExamples}. The human's final decision is the label. */
+export interface AiExampleRow {
+  reportId: string;
+  decidedAt: number;
+  agreement: 'agree' | 'override';
+  example: AIExample;
+}
+
+/**
+ * The casebook counts for one rule (the human's final rule; `null` for none), for decisions at or after a time. `decided` is every
+ * outcome; `falsePositives` those where the AI recommended `upheld` or `noted` and the human settled on `no_action`, or the
+ * decision was later reversed.
+ */
+export interface AiStatsRow {
+  rule: string | null;
+  decided: number;
+  agree: number;
+  override: number;
+  none: number;
+  falsePositives: number;
 }
 
 /**
@@ -858,6 +991,106 @@ export interface Store {
    */
   savePolicyLayer?(layer: PolicyLayer, expectedVersion: number): number | null;
 
+  // AI reads and the casebook (AI levels 1 and 2, design section 5). OPTIONAL: a store without them works as before, and
+  // `createChatwarden({ ai })` refuses to start with one. SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
+
+  /**
+   * OPTIONAL. Take the right to make one read, as ONE atomic conditional write: of two callers (two processes on one database
+   * included) for the same `reportId` and `inputHash`, exactly one gets `{ reserved: true }`; the other gets the existing row. A new
+   * row is `pending`, owned until `leaseUntil`, with `attempts` 1 and `createdAt` = `now`. An existing row is taken over (same id,
+   * `attempts` + 1, `createdAt` = `now`, a new lease, `retryAt` and `errorKind` cleared) only when it is `pending` and its lease has
+   * ended (`leaseUntil <= now`), or `failed` or `skipped` with a `retryAt` that has come (`retryAt <= now`). An `ok`, `declined` or
+   * `invalid` row, a `failed` or `skipped` one with no `retryAt`, and a live lease are returned as `existing` (a copy). Does not
+   * move the change token.
+   */
+  reserveAiRead?(row: AiReadPending, leaseUntil: number, now: number): AiReserveResult;
+
+  /**
+   * OPTIONAL. Store the validated read and the usage on a `pending` row: status `ok`, the lease cleared. True when this call did it;
+   * false (nothing changed) for an unknown row or one that is not `pending`. Moves the change token.
+   */
+  completeAiRead?(id: string, result: AiReadDone): boolean;
+
+  /**
+   * OPTIONAL. End a `pending` row without a read: `failed`, `declined`, `invalid` or `skipped`, with the kind of failure and, for
+   * a retry, the time it may be taken again (`retryAt`; null is final). The lease is cleared. `usage`, when the provider still
+   * charged for the call (a refusal, an invalid answer), is stored and counts toward `aiSpendSince`. True when this call did it;
+   * false for an unknown row or one that is not `pending`. Does not move the change token. `now` is the caller's clock reading.
+   */
+  failAiRead?(
+    id: string,
+    status: 'failed' | 'declined' | 'invalid' | 'skipped',
+    errorKind: AiErrorKind,
+    retryAt: number | null,
+    now: number,
+    usage?: AiCallUsage,
+  ): boolean;
+
+  /**
+   * OPTIONAL. The newest `ok` read of the report (`createdAt` descending, then `id` descending), whatever its input hash; null
+   * when there is none. A row whose stored answer cannot be read is skipped. Pending, failed, declined, invalid and skipped rows
+   * are never returned.
+   */
+  loadAiRead?(reportId: string): AiReadRow | null;
+
+  /**
+   * OPTIONAL. The newest `ok` read of each of these reports (one row per report that has one), in the order the ids first appear.
+   * At most the first 200 distinct ids are looked at; unknown ids give nothing.
+   */
+  loadAiReads?(reportIds: readonly string[]): AiReadRow[];
+
+  /**
+   * OPTIONAL. The rows the sweeper should pick up at `now`, oldest first (`createdAt`, then `id`), at most `limit` (clamped to
+   * 1..200): `failed` or `skipped` rows whose `retryAt` has come (`retryAt <= now`), and `pending` rows whose lease has ended
+   * (`leaseUntil <= now`: the process that held them died).
+   */
+  listAiRetries?(now: number, limit: number): AiReadRow[];
+
+  /**
+   * OPTIONAL. What the reads created at or after `since` cost: the sum of `costMicros` (a failed read with usage included), and the
+   * number of calls (every row but `skipped`, a `pending` one included). The daily cap is this with `since` = the UTC midnight.
+   */
+  aiSpendSince?(since: number): { micros: number; calls: number };
+
+  /**
+   * OPTIONAL. Record the outcome of a decided report. False, nothing written, when the report already has one. Does not move the
+   * change token (the decision it belongs to does).
+   */
+  insertAiOutcome?(row: AiOutcomeInsert): boolean;
+
+  /** OPTIONAL. The report's outcome, or null. Returns a copy; an unreadable `detail` reads as `{}` and an unreadable example as null. */
+  loadAiOutcome?(reportId: string): AiOutcomeRow | null;
+
+  /**
+   * OPTIONAL. Set the marks on an outcome (a mark is never cleared). False for an unknown report. Moves the change token when the
+   * report has an outcome.
+   */
+  markAiOutcome?(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean;
+
+  /**
+   * OPTIONAL. Teachable examples with this human rule (`'3'`, `'uncovered'`) and conduct level, decided at or after `since`, newest
+   * first (`decidedAt` descending, then `reportId` descending), at most `limit`. Teachable: an example is
+   * stored, the AI recommended something (`agree` or `override`, not `none`), and the row is not `reversed`, `dontTeach` or `badFaith`.
+   * `limit` is clamped to 1..200 (a fraction is floored).
+   */
+  aiExamples?(rule: string, severity: string, limit: number, since: number): AiExampleRow[];
+
+  /** OPTIONAL. How many teachable examples (see `aiExamples`) were decided at or after `since`. */
+  aiTeachableCount?(since: number): number;
+
+  /**
+   * OPTIONAL. The casebook counts per rule for decisions at or after `since`: numbered rules in number order, then `'uncovered'`,
+   * then no rule. A rule with no decision is left out.
+   */
+  aiStats?(since: number): AiStatsRow[];
+
+  /**
+   * OPTIONAL. Retention for the AI rows, all strict (`<`): reads created before `readsBefore` (any status), outcomes decided before
+   * `outcomesBefore`, and the example of every outcome decided before `examplesBefore` (set to none; the counts stay). Returns how
+   * many reads and outcomes were deleted. `purgeReports` deletes the reads of the reports it deletes itself.
+   */
+  purgeAi?(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number };
+
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).
 
@@ -890,7 +1123,8 @@ export interface Store {
   /**
    * Delete reports with `createdAt < before`, except a bad-faith dismissal still inside its window
    * (`bad_faith = 1` and `actionedAt >= keepBadFaithSince`): the reporter's suspension reads it. Also deletes the
-   * recorded decisions of reports that no longer exist. Returns how many reports it deleted.
+   * recorded decisions of reports that no longer exist, and the AI reads of the reports it deletes (not their casebook outcomes: those
+   * have their own clock, see `purgeAi`). Returns how many reports it deleted.
    */
   purgeReports(before: number, keepBadFaithSince: number): number;
 

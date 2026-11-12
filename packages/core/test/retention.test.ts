@@ -389,15 +389,15 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
     t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
-    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0 });
+    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
   });
 
   it('on an empty store, or run twice, deletes nothing', async () => {
     const { store } = setup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
     store.insertReport(report('r1', NOW - 100 * DAY));
     await purge(store, NOW);
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
   });
 
   it('a custom policy overrides the defaults, field by field', async () => {
@@ -406,9 +406,9 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 10 * DAY));
     await t.sanction(t.subject('k1'), NOW - 20 * DAY, DAY); // ended 19 d ago
     const res = await purge(t.store, NOW, { reportsMs: 5 * DAY });
-    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0 });
+    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
     const res2 = await purge(t.store, NOW, { strikesMs: 5 * DAY, sanctionAfterEndMs: 5 * DAY });
-    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0 });
+    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
   });
 
   it('a zero window purges everything already past', async () => {
@@ -441,7 +441,7 @@ describe('purge: result, policy and scope', () => {
 
   it('a finite now (zero, negative) is accepted (control)', async () => {
     const t = setup();
-    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0 });
+    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0 });
     await expect(purge(t.store, -5)).resolves.toBeDefined();
   });
 

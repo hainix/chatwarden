@@ -1,4 +1,14 @@
 import type {
+  AiCallUsage,
+  AiErrorKind,
+  AiExampleRow,
+  AiOutcomeInsert,
+  AiOutcomeRow,
+  AiReadDone,
+  AiReadPending,
+  AiReadRow,
+  AiReserveResult,
+  AiStatsRow,
   AuditListQuery,
   AuditRow,
   ClaimAttempt,
@@ -98,6 +108,10 @@ export class MemoryStore implements Store {
   protected reasons: ReasonRow[] = [];
   /** The stored policy layer and its version, or null when none was ever saved. */
   protected policy: { layer: PolicyLayer; version: number } | null = null;
+  /** AI reads in insertion order (one row per report and input hash). */
+  protected aiReads: AiReadRow[] = [];
+  /** AI casebook outcomes by report. */
+  protected aiOutcomes = new Map<string, AiOutcomeRow>();
   /** The change token's counter (see `changeToken`). */
   private changes = 0;
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -380,6 +394,201 @@ export class MemoryStore implements Store {
       if (c !== undefined && c.until > now) out.push({ ...c });
     }
     return out.sort((a, b) => compare(a.person, b.person));
+  }
+
+  // AI reads and the casebook (AI levels 1 and 2). Synchronous like claims; each write is journaled, so an undone transaction
+  // undoes it. Rows go in and come out as copies.
+
+  reserveAiRead(row: AiReadPending, leaseUntil: number, now: number): AiReserveResult {
+    const existing = this.aiReads.find((r) => r.reportId === row.reportId && r.inputHash === row.inputHash);
+    if (existing === undefined) {
+      const fresh: AiReadRow = {
+        id: newId(),
+        reportId: row.reportId,
+        inputHash: row.inputHash,
+        status: 'pending',
+        attempts: 1,
+        retryAt: null,
+        leaseUntil,
+        errorKind: null,
+        adapter: row.adapter,
+        model: null,
+        promptVersion: row.promptVersion,
+        read: null,
+        inputTokens: null,
+        outputTokens: null,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        costMicros: 0,
+        latencyMs: null,
+        createdAt: now,
+      };
+      this.aiReads.push(fresh);
+      this.undoWith(() => {
+        this.aiReads = this.aiReads.filter((r) => r !== fresh);
+      });
+      return { reserved: true, id: fresh.id };
+    }
+    const lapsed = existing.status === 'pending' && existing.leaseUntil !== null && existing.leaseUntil <= now;
+    const due = (existing.status === 'failed' || existing.status === 'skipped') && existing.retryAt !== null && existing.retryAt <= now;
+    if (!lapsed && !due) return { reserved: false, existing: structuredClone(existing) };
+    const before = { ...existing };
+    existing.status = 'pending';
+    existing.attempts += 1;
+    existing.retryAt = null;
+    existing.leaseUntil = leaseUntil;
+    existing.errorKind = null;
+    existing.createdAt = now;
+    this.undoWith(() => Object.assign(existing, before));
+    return { reserved: true, id: existing.id };
+  }
+
+  completeAiRead(id: string, result: AiReadDone): boolean {
+    const row = this.aiReads.find((r) => r.id === id);
+    if (row === undefined || row.status !== 'pending') return false;
+    const before = { ...row };
+    Object.assign(row, {
+      status: 'ok',
+      leaseUntil: null,
+      retryAt: null,
+      errorKind: null,
+      read: structuredClone(result.read),
+      ...usageColumns(result),
+    });
+    this.undoWith(() => Object.assign(row, before));
+    this.bump();
+    return true;
+  }
+
+  failAiRead(
+    id: string,
+    status: 'failed' | 'declined' | 'invalid' | 'skipped',
+    errorKind: AiErrorKind,
+    retryAt: number | null,
+    _now: number,
+    usage?: AiCallUsage,
+  ): boolean {
+    const row = this.aiReads.find((r) => r.id === id);
+    if (row === undefined || row.status !== 'pending') return false;
+    const before = { ...row };
+    Object.assign(row, { status, errorKind, retryAt, leaseUntil: null, ...(usage === undefined ? {} : usageColumns(usage)) });
+    this.undoWith(() => Object.assign(row, before));
+    return true;
+  }
+
+  loadAiRead(reportId: string): AiReadRow | null {
+    return newestOk(this.aiReads.filter((r) => r.reportId === reportId));
+  }
+
+  loadAiReads(reportIds: readonly string[]): AiReadRow[] {
+    const wanted = [...new Set(reportIds)].slice(0, 200);
+    const out: AiReadRow[] = [];
+    for (const reportId of wanted) {
+      const row = this.loadAiRead(reportId);
+      if (row !== null) out.push(row);
+    }
+    return out;
+  }
+
+  listAiRetries(now: number, limit: number): AiReadRow[] {
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    return this.aiReads
+      .filter(
+        (r) =>
+          ((r.status === 'failed' || r.status === 'skipped') && r.retryAt !== null && r.retryAt <= now) ||
+          (r.status === 'pending' && r.leaseUntil !== null && r.leaseUntil <= now),
+      )
+      .sort((a, b) => a.createdAt - b.createdAt || compare(a.id, b.id))
+      .slice(0, n)
+      .map((r) => structuredClone(r));
+  }
+
+  aiSpendSince(since: number): { micros: number; calls: number } {
+    let micros = 0;
+    let calls = 0;
+    for (const r of this.aiReads) {
+      if (r.createdAt < since) continue;
+      micros += r.costMicros;
+      if (r.status !== 'skipped') calls += 1;
+    }
+    return { micros, calls };
+  }
+
+  insertAiOutcome(row: AiOutcomeInsert): boolean {
+    if (this.aiOutcomes.has(row.reportId)) return false;
+    this.aiOutcomes.set(row.reportId, { ...structuredClone(row), reversed: false, dontTeach: false });
+    this.undoWith(() => this.aiOutcomes.delete(row.reportId));
+    return true;
+  }
+
+  loadAiOutcome(reportId: string): AiOutcomeRow | null {
+    const row = this.aiOutcomes.get(reportId);
+    return row === undefined ? null : structuredClone(row);
+  }
+
+  markAiOutcome(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean {
+    const row = this.aiOutcomes.get(reportId);
+    if (row === undefined) return false;
+    const before = { reversed: row.reversed, dontTeach: row.dontTeach };
+    if (patch.reversed === true) row.reversed = true;
+    if (patch.dontTeach === true) row.dontTeach = true;
+    this.undoWith(() => Object.assign(row, before));
+    this.bump();
+    return true;
+  }
+
+  aiExamples(rule: string, severity: string, limit: number, since: number): AiExampleRow[] {
+    const n = Math.min(200, Math.max(1, Math.floor(limit)));
+    const out: AiExampleRow[] = [];
+    for (const r of [...this.aiOutcomes.values()].sort((a, b) => b.decidedAt - a.decidedAt || compare(b.reportId, a.reportId))) {
+      if (out.length >= n) break;
+      if (r.rule !== rule || r.severity !== severity || !teachable(r, since)) continue;
+      out.push({ reportId: r.reportId, decidedAt: r.decidedAt, agreement: r.agreement as 'agree' | 'override', example: structuredClone(r.example!) });
+    }
+    return out;
+  }
+
+  aiTeachableCount(since: number): number {
+    let n = 0;
+    for (const r of this.aiOutcomes.values()) if (teachable(r, since)) n += 1;
+    return n;
+  }
+
+  aiStats(since: number): AiStatsRow[] {
+    const by = new Map<string | null, AiStatsRow>();
+    for (const r of this.aiOutcomes.values()) {
+      if (r.decidedAt < since) continue;
+      const row = by.get(r.rule) ?? { rule: r.rule, decided: 0, agree: 0, override: 0, none: 0, falsePositives: 0 };
+      row.decided += 1;
+      row[r.agreement] += 1;
+      if ((r.aiVerdict === 'upheld' || r.aiVerdict === 'noted') && (r.verdict === 'no_action' || r.reversed)) row.falsePositives += 1;
+      by.set(r.rule, row);
+    }
+    return [...by.values()].sort((a, b) => ruleRank(a.rule) - ruleRank(b.rule) || ruleOrder(a.rule, b.rule));
+  }
+
+  purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
+    const reads = this.aiReads;
+    const outcomes = new Map(this.aiOutcomes);
+    const keptReads = reads.filter((r) => r.createdAt >= readsBefore);
+    const stripped: Array<[AiOutcomeRow, AiOutcomeRow['example']]> = [];
+    let gone = 0;
+    for (const [id, r] of outcomes) {
+      if (r.decidedAt < outcomesBefore) {
+        this.aiOutcomes.delete(id);
+        gone += 1;
+      } else if (r.decidedAt < examplesBefore && r.example !== null) {
+        stripped.push([r, r.example]);
+        r.example = null;
+      }
+    }
+    this.aiReads = keptReads;
+    this.undoWith(() => {
+      this.aiReads = reads;
+      this.aiOutcomes = outcomes;
+      for (const [r, example] of stripped) r.example = example;
+    });
+    return { reads: reads.length - keptReads.length, outcomes: gone };
   }
 
   listReasons(): ReasonRow[] {
@@ -880,8 +1089,13 @@ export class MemoryStore implements Store {
       const alive = new Set(kept.map((r) => r.id));
       const dropped = [...this.decisions.values()].filter((d) => !alive.has(d.reportId));
       for (const d of dropped) this.decisions.delete(d.key);
+      // An AI read is a view of its report and goes with it. The casebook outcome has its own clock (`purgeAi`).
+      const reads = this.aiReads;
+      const gone = new Set(snapshot.filter((r) => !alive.has(r.id)).map((r) => r.id));
+      this.aiReads = reads.filter((r) => !gone.has(r.reportId));
       this.undoWith(() => {
         this.reports = snapshot;
+        this.aiReads = reads;
         for (const d of dropped) this.decisions.set(d.key, d);
       });
     }
@@ -1057,4 +1271,44 @@ function compare(a: string, b: string): number {
 /** A new, empty {@link MemoryStore}. */
 export function createMemoryStore(): MemoryStore {
   return new MemoryStore();
+}
+
+/** The columns a finished call fills on a read row. */
+function usageColumns(u: AiCallUsage): Pick<AiReadRow, 'model' | 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'costMicros' | 'latencyMs'> {
+  return {
+    model: u.model,
+    inputTokens: u.inputTokens,
+    outputTokens: u.outputTokens,
+    cacheReadTokens: u.cacheReadTokens,
+    cacheWriteTokens: u.cacheWriteTokens,
+    costMicros: u.costMicros,
+    latencyMs: u.latencyMs,
+  };
+}
+
+/** The newest `ok` row (`createdAt`, then `id`, both descending), as a copy; null when there is none. */
+function newestOk(rows: readonly AiReadRow[]): AiReadRow | null {
+  let best: AiReadRow | null = null;
+  for (const r of rows) {
+    if (r.status !== 'ok') continue;
+    if (best === null || r.createdAt > best.createdAt || (r.createdAt === best.createdAt && compare(r.id, best.id) > 0)) best = r;
+  }
+  return best === null ? null : structuredClone(best);
+}
+
+/** An outcome that may teach: it has an example, the AI recommended something, and it is not reversed, marked or bad faith. */
+function teachable(r: AiOutcomeRow, since: number): boolean {
+  return r.decidedAt >= since && r.example !== null && r.agreement !== 'none' && !r.reversed && !r.dontTeach && !r.badFaith;
+}
+
+/** Numbered rules first (by number), then `uncovered`, then any other text, then no rule: the order of `aiStats`. */
+function ruleRank(rule: string | null): number {
+  if (rule === null) return 3;
+  if (/^\d+$/.test(rule)) return 0;
+  return rule === 'uncovered' ? 1 : 2;
+}
+function ruleOrder(a: string | null, b: string | null): number {
+  if (a === null || b === null) return 0;
+  if (/^\d+$/.test(a) && /^\d+$/.test(b)) return Number(a) - Number(b);
+  return compare(a, b);
 }
