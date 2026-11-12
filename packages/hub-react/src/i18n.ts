@@ -321,6 +321,7 @@ export const en = {
   'hub.bulk.confirm.takeOver.other': 'Take over and dismiss {count} reports',
   'hub.bulk.confirm.cancel': 'Cancel',
   'hub.bulk.confirm.close': 'Close',
+  'hub.window.failed': 'Could not open this window. Try again.',
   'hub.toast.waiting.one': '{count} earlier decision waiting.',
   'hub.toast.waiting.other': '{count} earlier decisions waiting.',
 

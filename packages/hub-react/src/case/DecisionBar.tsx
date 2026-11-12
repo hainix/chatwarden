@@ -23,7 +23,7 @@ import { DecisionResult } from './DecisionResult.js';
 import { SuggestionCard } from './SuggestionCard.js';
 import { useCase } from './CaseContext.js';
 import { LazyBulkDismiss } from '../lazyParts.js';
-import { isMoving } from './actGuard.js';
+import { actsBlocked, isRepeatClick } from './actGuard.js';
 import { DetailedQuickKeys } from './QuickKeys.js';
 import { takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { UNDO_MS } from '../toasts.js';
@@ -152,8 +152,10 @@ export function DecisionBar() {
   // The same words, said twice, must be heard twice: the live region is keyed by the announcement's number.
   const live = draft.announcement;
 
-  const decide = (andNext: boolean): void => {
+  /** `click` is the click that asked, if one did: a click obeys the same guards as every act key (the case has aged; the second click of a double click is the first one's echo). */
+  const decide = (andNext: boolean, click?: { detail?: number }): void => {
     if (!editable || readOnly || report === undefined) return;
+    if (click !== undefined && (isRepeatClick(click) || !c.settled())) return;
     setAttempted(true);
     if (draft.problems.count > 0) {
       setFailedTries((n) => n + 1);
@@ -179,7 +181,7 @@ export function DecisionBar() {
         e.preventDefault();
         // The same guards as every act key: a held key is one action, and a case that has just appeared (or a move to another one that
         // is on its way) is not decided by a key meant for the one before.
-        if (e.repeat || !stateRef.current.settled() || isMoving(hub)) return;
+        if (e.repeat || !stateRef.current.settled() || actsBlocked(hub)) return;
         decideRef.current(true);
         return;
       }
@@ -503,7 +505,7 @@ export function DecisionBar() {
               )}
 
               <div className="cw-submit">
-                <button id={submitId} type="button" className="cw-btn cw-btn--primary" aria-disabled={readOnly} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+Enter Meta+Enter' } : {})} onClick={() => decide(true)}>
+                <button id={submitId} type="button" className="cw-btn cw-btn--primary" aria-disabled={readOnly || !c.cooled} {...(!readOnly && !c.cooled ? { 'data-cooling': 'true' } : {})} {...(shortcuts ? { 'aria-keyshortcuts': 'Control+Enter Meta+Enter' } : {})} onClick={(e) => decide(true, e)}>
                   <span>{t('hub.decide.submitNext')}</span>
                   {shortcuts && (
                     <span className="cw-submit-keys" aria-hidden="true">
@@ -517,6 +519,7 @@ export function DecisionBar() {
                   type="button"
                   className="cw-btn"
                   aria-disabled={!lite.usable || !lite.cooled}
+                  {...(lite.usable && !lite.cooled ? { 'data-cooling': 'true' } : {})}
                   aria-describedby={`${dismissId}-hint`}
                   {...(quickActive ? { 'aria-keyshortcuts': '2' } : {})}
                   onClick={(e) => lite.sendDismiss(e)}
@@ -526,7 +529,7 @@ export function DecisionBar() {
                 <p id={`${dismissId}-hint`} className="cw-sr">
                   {t('hub.quick.dismiss.hint')}
                 </p>
-                <button type="button" className="cw-btn" aria-disabled={readOnly} onClick={() => decide(false)}>
+                <button type="button" className="cw-btn" aria-disabled={readOnly || !c.cooled} {...(!readOnly && !c.cooled ? { 'data-cooling': 'true' } : {})} onClick={(e) => decide(false, e)}>
                   {t('hub.decide.submit')}
                 </button>
                 <p className="cw-hint">{t('hub.decide.undoHint', { seconds: SECONDS })}</p>

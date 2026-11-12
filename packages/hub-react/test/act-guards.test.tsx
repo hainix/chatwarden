@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dialog } from '../src/Dialog.js';
 import { QUICK_ACT_COOLDOWN_MS } from '../src/case/useQuickActions.js';
 import { resetQuickKeysVisit } from '../src/quickKeys.js';
+import { partLoaders, resetLazyParts } from '../src/lazyParts.js';
 import { QUEUE_OPEN_DELAY_MS } from '../src/shortcuts.js';
 import type { TransportRequest } from '../src/transport.js';
-import { advanceGuardTime } from './guardTime.js';
+import { advanceGuardTime, useExactGuardClock } from './guardTime.js';
+import { rulesCss } from './css.js';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld } from './world.js';
@@ -13,6 +15,9 @@ import type { HubWorld } from './world.js';
 // Review fix round 1: every act key and button obeys the same two guards (a held key is one action; a case accepts an act key only a
 // moment after it appeared, on a monotonic clock), and nothing acts behind a window or while a move to another case is pending.
 // The guard clock is frozen in tests and moves only with `advanceGuardTime` (or the world's clock), so "100 ms" and "301 ms" are exact.
+
+// This file is about the guard: its clock stands still until a test moves it.
+useExactGuardClock();
 
 const isDecide = (r: TransportRequest): boolean => r.method === 'POST' && /^\/reports\/[^/]+\/decide$/.test(r.path);
 const decides = (w: HubWorld): TransportRequest[] => w.sent.filter(isDecide);
@@ -118,11 +123,189 @@ describe('Detailed Ctrl+Enter obeys the act-key guards', () => {
     expect(decides(w)).toHaveLength(0);
   });
 
-  it('the Decide button is unaffected: it is a deliberate click on the form in front of you', async () => {
+});
+
+describe('the Detailed Decide buttons obey the same guards as every act', () => {
+  const decideNext = (): HTMLElement => within(decision()).getByRole('button', { name: /^Decide and take next/ });
+  const decideHere = (): HTMLElement => within(decision()).getByRole('button', { name: 'Decide' });
+
+  it('a click on a case that has just appeared does nothing and is drawn aria-disabled; after 301 ms it decides', async () => {
+    for (const pick of [decideNext, decideHere]) {
+      const s = await detailed();
+      fireEvent.click(pick());
+      await pageHides();
+      expect(decides(s.w)).toHaveLength(0);
+      expect(pick()).toHaveAttribute('aria-disabled', 'true');
+      advanceGuardTime(QUICK_ACT_COOLDOWN_MS + 1);
+      fireEvent.click(pick());
+      await pageHides();
+      expect(decides(s.w)).toHaveLength(1);
+    }
+  });
+
+  it('the second click of a double click (detail 2) is ignored, even on an aged case', async () => {
     const s = await detailed();
-    await s.user.click(within(decision()).getByRole('button', { name: 'Decide' }));
+    advanceGuardTime(QUICK_ACT_COOLDOWN_MS + 1);
+    fireEvent.click(decideNext(), { detail: 2 });
+    await pageHides();
+    expect(decides(s.w)).toHaveLength(0);
+    fireEvent.click(decideNext(), { detail: 1 });
     await pageHides();
     expect(decides(s.w)).toHaveLength(1);
+  });
+
+  it('the second click of a double click lands on the next case within 300 ms and decides nothing', async () => {
+    const s = await detailed();
+    advanceGuardTime(QUICK_ACT_COOLDOWN_MS + 1);
+    fireEvent.click(decideNext());
+    await waitFor(() => expect(s.router.path).toBe(`/reports/${s.filed[1]!.id}`));
+    await s.user.click(await within(decision()).findByRole('radio', { name: /Not a problem/ }));
+    advanceGuardTime(100);
+    fireEvent.click(decideNext());
+    await pageHides();
+    expect(decides(s.w)).toHaveLength(1);
+    advanceGuardTime(QUICK_ACT_COOLDOWN_MS);
+    fireEvent.click(decideNext());
+    await pageHides();
+    expect(decides(s.w)).toHaveLength(2);
+  });
+
+  it('an ignored click does not reach the validation: no error summary appears until the click can act', async () => {
+    cleanup();
+    const { w, filed } = await cases(['Alpha']);
+    const r = renderHub(w, { path: `/reports/${filed[0]!.id}`, mode: 'detailed' });
+    await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('button', { name: /^Nothing wrong here/ });
+    fireEvent.click(decideNext());
+    expect(screen.queryByText(/Fix \d things? before deciding/)).toBeNull();
+    advanceGuardTime(QUICK_ACT_COOLDOWN_MS + 1);
+    fireEvent.click(decideNext());
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Fix \d things? before deciding/);
+    expect(r.router.path).toBe(`/reports/${filed[0]!.id}`);
+  });
+});
+
+describe('while the buttons wait out the cooldown they are not dimmed', () => {
+  it('the cooling buttons are aria-disabled and marked data-cooling, and the stylesheet dims only the other disabled buttons', async () => {
+    cleanup();
+    const { w, filed } = await cases(['Alpha']);
+    renderHub(w, { path: `/reports/${filed[0]!.id}`, mode: 'simple' });
+    const button = await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('button', { name: /^No action needed/ });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAttribute('data-cooling', 'true');
+    const css = rulesCss();
+    expect(css).toContain(".cw-hub .cw-btn[aria-disabled='true']:not([data-cooling])");
+    expect(css).not.toMatch(/\.cw-hub \.cw-btn\[aria-disabled='true'\]\s*\{/);
+  });
+
+  it('a button that is disabled for another reason (the case is held by someone else) is not marked cooling', async () => {
+    cleanup();
+    const { w, filed } = await cases(['Alpha']);
+    await w.clientFor('maya@example.test', 'moderator').claimCase(filed[0]!.person);
+    renderHub(w, { path: `/reports/${filed[0]!.id}`, mode: 'detailed' });
+    const bar = await screen.findByRole('region', { name: 'Decision' });
+    await within(bar).findByText(/maya/);
+    const button = within(bar).getByRole('button', { name: /^Decide and take next/ });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).not.toHaveAttribute('data-cooling');
+  });
+});
+
+describe('a window that is slow or fails to load never leaves the hub stuck', () => {
+  const real = { ...partLoaders };
+  beforeEach(() => {
+    resetLazyParts();
+  });
+  afterEach(() => {
+    Object.assign(partLoaders, real);
+    resetLazyParts();
+  });
+  const key = (k: string, init: KeyboardEventInit = {}): void => {
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: k, ...init });
+  };
+  const blur = (): void => (document.activeElement as HTMLElement | null)?.blur();
+
+  it('a code fetch that fails closes the window, says so, and the keys and the next opening work', async () => {
+    partLoaders.bar = () => Promise.reject(new Error('offline'));
+    cleanup();
+    const { w, filed } = await cases(['Alpha', 'Bravo']);
+    const r = renderHub(w, { path: `/reports/${filed[0]!.id}`, mode: 'detailed' });
+    await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('button', { name: /^Nothing wrong here/ });
+    blur();
+    key('k', { ctrlKey: true });
+    expect(await screen.findByText('Could not open this window. Try again.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // The hub answers its keys again: the sheet opens (its code is fine).
+    blur();
+    key('?');
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+    key('Escape');
+    // And the next opening of the bar asks for the code again.
+    Object.assign(partLoaders, real);
+    blur();
+    key('k', { ctrlKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Command bar' })).toBeInTheDocument();
+    expect(r.router.path).toBe(`/reports/${filed[0]!.id}`);
+  });
+
+  it('a failing sheet is handled the same way', async () => {
+    partLoaders.sheet = () => Promise.reject(new Error('offline'));
+    cleanup();
+    const { w, filed } = await cases(['Alpha', 'Bravo']);
+    renderHub(w, { path: `/reports/${filed[0]!.id}`, mode: 'detailed' });
+    await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('button', { name: /^Nothing wrong here/ });
+    blur();
+    key('?');
+    expect(await screen.findByText('Could not open this window. Try again.')).toBeInTheDocument();
+    Object.assign(partLoaders, real);
+    blur();
+    key('?');
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+  });
+
+  it('while the code is on its way no act key acts: a digit typed for the search box does not dismiss the case', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    partLoaders.bar = async () => {
+      await gate;
+      return real.bar();
+    };
+    cleanup();
+    const { w, filed } = await cases(['Alpha', 'Bravo']);
+    const r = renderHub(w, { path: `/reports/${filed[0]!.id}`, mode: 'simple' });
+    await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('button', { name: /^No action needed/ });
+    advanceGuardTime(QUICK_ACT_COOLDOWN_MS + 1);
+    blur();
+    key('k', { ctrlKey: true });
+    await waitFor(() => expect(document.querySelector('.cw-hub')).toHaveAttribute('data-cw-window'));
+    key('2');
+    key('1');
+    key('Enter', { ctrlKey: true });
+    await pageHides();
+    expect(decides(w)).toHaveLength(0);
+    release();
+    const dialog = await screen.findByRole('dialog', { name: 'Command bar' });
+    await r.user.keyboard('{Escape}');
+    expect(dialog).not.toBeInTheDocument();
+    expect(document.querySelector('.cw-hub')).not.toHaveAttribute('data-cw-window');
+    // Closed: the act keys work again.
+    blur();
+    key('2');
+    await pageHides();
+    expect(decides(w)).toHaveLength(1);
+  });
+
+  it('the flag is there while a window is open and gone when it closes', async () => {
+    cleanup();
+    const { w, filed } = await cases(['Alpha', 'Bravo']);
+    renderHub(w, { path: `/reports/${filed[0]!.id}`, mode: 'detailed' });
+    await within(await screen.findByRole('region', { name: 'Decision' })).findByRole('button', { name: /^Nothing wrong here/ });
+    expect(document.querySelector('.cw-hub')).not.toHaveAttribute('data-cw-window');
+    blur();
+    key('?');
+    await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(document.querySelector('.cw-hub')).toHaveAttribute('data-cw-window');
+    key('Escape');
+    await waitFor(() => expect(document.querySelector('.cw-hub')).not.toHaveAttribute('data-cw-window'));
   });
 });
 

@@ -12,8 +12,14 @@ export const QUICK_ACT_COOLDOWN_MS = 300;
 /** Set on the hub's root from a move with J, K or an arrow key until the case it opens is on screen: no act key acts meanwhile. */
 export const MOVING_ATTRIBUTE = 'data-cw-moving';
 
+/** Set on the hub's root from the moment a window (the command bar, the shortcut sheet) is asked for until it is closed, so a window whose code is still on its way already holds the keys. */
+export const WINDOW_ATTRIBUTE = 'data-cw-window';
+
 /** Whether the hub that `root` belongs to is moving to another case. */
 export const isMoving = (root: Element | null): boolean => root !== null && root.hasAttribute(MOVING_ATTRIBUTE);
+
+/** Whether no act key may act in the hub that `root` belongs to: it is moving to another case, or a window is asked for or open. */
+export const actsBlocked = (root: Element | null): boolean => root !== null && (root.hasAttribute(MOVING_ATTRIBUTE) || root.hasAttribute(WINDOW_ATTRIBUTE));
 
 /** The monotonic time, in milliseconds. */
 export const monotonicNow = (): number => performance.now();

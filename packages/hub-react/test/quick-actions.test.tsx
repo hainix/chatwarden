@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { QUICK_ACT_COOLDOWN_MS } from '../src/case/useQuickActions.js';
 import { UNDO_MS } from '../src/toasts.js';
 import type { TransportRequest } from '../src/transport.js';
-import { advanceGuardTime } from './guardTime.js';
+import { advanceGuardTime, useExactGuardClock } from './guardTime.js';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld, RichLine, WorldOptions } from './world.js';
@@ -18,6 +18,9 @@ const TALK: RichLine[] = [
   { who: 'bystander', text: 'what is going on' },
   { who: 'target', text: 'another line from the target' },
 ];
+// This file is about the guard: its clock stands still until a test moves it.
+useExactGuardClock();
+
 const isDecide = (r: TransportRequest): boolean => r.method === 'POST' && /^\/reports\/[^/]+\/decide$/.test(r.path);
 const decides = (w: HubWorld): TransportRequest[] => w.sent.filter(isDecide);
 const decision = (): HTMLElement => screen.getByRole('region', { name: 'Decision' });

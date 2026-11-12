@@ -363,8 +363,12 @@
   color: var(--cw-red, var(--cwd-red));
 }
 .cw-hub .cw-btn:disabled,
-.cw-hub .cw-btn[aria-disabled='true'] {
+.cw-hub .cw-btn[aria-disabled='true']:not([data-cooling]) {
   opacity: 0.6;
+  cursor: default;
+}
+/* A button that only waits out the quick-act cooldown (a moment after a case appears) is not dimmed: a run of quick actions would flicker. */
+.cw-hub .cw-btn[data-cooling] {
   cursor: default;
 }
 .cw-hub .cw-link {

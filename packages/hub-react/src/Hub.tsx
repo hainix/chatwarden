@@ -5,7 +5,7 @@ import type { CommandTarget } from './commands.js';
 import { useHub } from './context.js';
 import { useOptionalDecisions } from './decisions.js';
 import { activeOf, modalIn } from './dom.js';
-import { MOVING_ATTRIBUTE } from './case/actGuard.js';
+import { MOVING_ATTRIBUTE, WINDOW_ATTRIBUTE } from './case/actGuard.js';
 import { LazyCommandBar, LazyShortcutSheet, preloadShellParts } from './lazyParts.js';
 import type { HubClient } from './client.js';
 import type { HubController, HubHost } from './headless/controller.js';
@@ -148,6 +148,18 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
   // The command bar, the sheet and the sweep window are fetched just after the first paint, so the first Ctrl+K or ? is not waiting for code.
   const mayCloseMany = can('reports.decide.bulk');
   useEffect(() => preloadShellParts(mayCloseMany), [mayCloseMany]);
+  // From the moment a window is asked for until it is closed the hub's root says so: no act key acts while its code is still on its way.
+  useEffect(() => {
+    const root = dialog === null ? null : (bodyRef.current?.closest('.cw-hub') ?? null);
+    root?.setAttribute(WINDOW_ATTRIBUTE, '');
+    return () => root?.removeAttribute(WINDOW_ATTRIBUTE);
+  }, [dialog]);
+  const toasts = useToasts();
+  // A window whose code could not be fetched closes (the hub is not left waiting for it) and says so; the next opening asks again.
+  const windowFailed = useCallback((): void => {
+    setDialog(null);
+    toasts.push({ text: t('hub.window.failed'), tone: 'bad' });
+  }, [toasts, t]);
 
   // A screen is its route name, plus the id for a report or person. A query change (the status filter) keeps the same screen
   // mounted, so the control the person just used keeps keyboard focus.
@@ -247,14 +259,14 @@ function Shell({ route, gameName, shortcuts }: { route: Route; gameName: string 
         {announcement}
       </div>
       {shortcuts && <Shortcuts bodyRef={bodyRef} dialogOpen={dialog !== null} open={setDialog} />}
-      {dialog === 'command' && <CommandWindow shortcuts={shortcuts} onClose={() => setDialog(null)} open={setDialog} />}
-      {dialog === 'shortcuts' && <LazyShortcutSheet onClose={() => setDialog(null)} />}
+      {dialog === 'command' && <CommandWindow shortcuts={shortcuts} onClose={() => setDialog(null)} onFailed={windowFailed} open={setDialog} />}
+      {dialog === 'shortcuts' && <LazyShortcutSheet onClose={() => setDialog(null)} onFailed={windowFailed} />}
     </>
   );
 }
 
 /** Runs what the command bar chose, after the bar has closed. */
-function CommandWindow({ shortcuts, onClose, open }: { shortcuts: boolean; onClose: () => void; open: (d: Dialogs) => void }) {
+function CommandWindow({ shortcuts, onClose, onFailed, open }: { shortcuts: boolean; onClose: () => void; onFailed: () => void; open: (d: Dialogs) => void }) {
   const { go } = useHub();
   const actions = useCaseActions();
   const undo = useUndo();
@@ -265,7 +277,7 @@ function CommandWindow({ shortcuts, onClose, open }: { shortcuts: boolean; onClo
     else if (target.type === 'undo') undo();
     else void actions.takeNext();
   };
-  return <LazyCommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} />;
+  return <LazyCommandBar shortcuts={shortcuts} onClose={onClose} onChoose={choose} onFailed={onFailed} />;
 }
 
 /**

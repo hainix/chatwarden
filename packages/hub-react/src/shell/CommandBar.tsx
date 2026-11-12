@@ -26,7 +26,13 @@ const KIND_LABEL = {
  * two actions that have shortcuts. Arrow keys choose, Enter goes, Escape closes. It is a combobox over a listbox, so a screen
  * reader hears the results and the one chosen.
  */
-export function CommandBar({ shortcuts, onClose, onChoose }: { shortcuts: boolean; onClose: () => void; onChoose: (target: CommandTarget) => void }) {
+export interface CommandBarProps {
+  shortcuts: boolean;
+  onClose: () => void;
+  onChoose: (target: CommandTarget) => void;
+}
+
+export function CommandBar({ shortcuts, onClose, onChoose }: CommandBarProps) {
   const { t, can, client } = useHub();
   const queue = useOptionalQueue();
   const canUndo = useOptionalDecisions()?.canUndo === true;

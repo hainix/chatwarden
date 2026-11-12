@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useHub } from '../context.js';
 import { isTypingTarget, modalIn } from '../dom.js';
 import { useKeyListener } from '../keyScope.js';
-import { isMoving } from './actGuard.js';
+import { actsBlocked } from './actGuard.js';
 import { useCase } from './CaseContext.js';
 import { useQuickActions } from './useQuickActions.js';
 import type { QuickActions } from './useQuickActions.js';
@@ -40,7 +40,7 @@ export function QuickKeys({ quick, ctrlEnter = true, digits = true }: { quick: Q
         if (isTypingTarget(e) && !onRuleField) return;
       }
       // Not until the case has aged (a double tap is for the case just closed), and not while a move to another case is on its way.
-      if (!settledRef.current() || isMoving(hub)) return;
+      if (!settledRef.current() || actsBlocked(hub)) return;
       if (isCtrlEnter || e.key === '1') {
         if (q.primary === null) return;
         e.preventDefault();
