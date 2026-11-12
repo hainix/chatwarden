@@ -297,7 +297,10 @@ export interface AiReadRow {
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
-  /** The cost of every attempt so far, summed. Tokens are summed too; `model` and `latencyMs` are the latest attempt's. */
+  /**
+   * The cost of the attempts that finished as this row's owner, summed. Tokens are summed too; `model` and `latencyMs` are the latest
+   * attempt's. A stale owner's paid call is booked only to the spend ledger, so this can be lower than the ledger: the daily cap reads the ledger.
+   */
   costMicros: number;
   latencyMs: number | null;
   /** When the row was first reserved (a take-over keeps it). Spend is booked per attempt, not by this. */
@@ -864,7 +867,7 @@ export interface Store {
    * Reports that are still `open`, OLDEST first (`createdAt` ascending, then `id` ascending, so a tie is stable), whole
    * records. `category` filters; `after` keeps only reports newer than that instant (exclusive), and with `afterId` also
    * the ones filed AT that instant whose id sorts above it (keyset paging: pass the last row's `createdAt` and `id`).
-   * `limit` is clamped to 1..200 (a fraction is floored); a limit that is omitted, not finite or below 1 is the default of 2 (the prompt takes at most two examples). The scan behind "take next".
+   * `limit` is clamped to 1..200 (a fraction is floored); a limit that is not finite, or is below 1, counts as 1. The scan behind "take next".
    */
   listOpenReports(q: OpenReportQuery): ReportRecord[];
 
@@ -1101,7 +1104,8 @@ export interface Store {
    * OPTIONAL. Teachable examples with this human rule (`'3'`, `'uncovered'`) and conduct level, decided at or after `since`, newest
    * first (`decidedAt` descending, then `reportId` descending), at most `limit`. Teachable: an example is
    * stored, the AI recommended something (`agree` or `override`, not `none`), and the row is not `reversed`, `dontTeach` or `badFaith`.
-   * `limit` is clamped to 1..200 (a fraction is floored).
+   * `limit` is clamped to 1..200 (a fraction is floored); one that is omitted, not finite or below 1 is the default of 2 (the prompt takes at most two
+   * examples).
    */
   aiExamples?(rule: string, severity: string, limit: number | undefined, since: number): AiExampleRow[];
 
