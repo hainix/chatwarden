@@ -92,6 +92,12 @@ describe('every new admin route: 401 without authz, 403 below the needed role', 
     expect(Object.keys(routes).map((k) => k.replace('~ref', '')).sort()).toEqual(
       [
         'GET /me',
+        // The appeal routes (their own checks are in admin.appeals.test.ts: they need a world with appeals on).
+        'GET /appeals',
+        'GET /appeals/stats',
+        'GET /appeals/:id',
+        'POST /appeals/:id/decide',
+        'POST /people/:ref/rename',
         'GET /people/:ref/history',
         'GET /reports',
         'GET /reports/:id',

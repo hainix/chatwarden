@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { toHubError } from '../client.js';
 import { useHub } from '../context.js';
-import { LazyPaceSettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
+import { LazyAppealSettings, LazyNameSettings, LazyPaceSettings, LazySignalSettings, resetLazyParts } from '../lazyParts.js';
 import { usePolicy } from '../policyHooks.js';
 import { ErrorBlock, Fetched } from '../ui.js';
 
@@ -37,6 +37,8 @@ export function AdvancedSettingsScreen() {
             <>
               <LazyPaceSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
               <LazySignalSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
+              <LazyAppealSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
+              <LazyNameSettings state={state} policy={policy} onFailed={() => setFailed(true)} />
             </>
           )
         )}

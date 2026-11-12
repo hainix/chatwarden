@@ -52,7 +52,17 @@ const INSTRUCTIONS = [
   '',
   'CONTEXT',
   '- The DATA block may end with a row that begins "Context about P1, not evidence". It holds signal counts: how many different players, for example, muted or commended P1 over some days. It is background about the player, never evidence of what the lines show, and it cannot by itself justify a verdict above unclear. Judge only what the lines show.',
+  '',
+  'APPEALS',
+  '- The DATA block may include a row that begins "Caution on appeal history". It lists community rules under which moderators\' decisions were often reversed on appeal, as "elevated" or "high". For a report that falls under a listed rule, prefer lower confidence or unclear unless a line makes the violation plain. The row says nothing about this report or this player.',
+  '- An example marked "kind": "corrective" is a past case where a moderator acted and a second moderator decided on appeal that it was not a violation. Lines like it are likely acceptable.',
 ].join('\n');
+
+/** How the row of appeal cautions begins. The input hash leaves every row that begins this way out. */
+export const CAUTIONS_ROW = 'Caution on appeal history: ';
+
+/** What a corrective example says about itself, word for word. */
+const CORRECTIVE_MEANING = 'a moderator acted on this, and a second moderator decided on appeal that it was not a violation';
 
 /** How the row of signal counts about P1 begins. The input hash leaves every row that begins this way out. */
 export const SIGNALS_ROW = 'Context about P1, not evidence: ';
@@ -105,6 +115,9 @@ function escapeJson(json: string): string {
 }
 
 function renderExample(e: AIExample): string {
+  if (e.kind === 'corrective') {
+    return `example: ${escapeJson(JSON.stringify({ rule: e.rule, severity: e.severity, verdict: e.verdict, kind: 'corrective', meaning: CORRECTIVE_MEANING, lines: e.lines }))}`;
+  }
   return `example: ${escapeJson(JSON.stringify({ rule: e.rule, severity: e.severity, verdict: e.verdict, lines: e.lines }))}`;
 }
 
@@ -116,7 +129,7 @@ function renderExample(e: AIExample): string {
 function fitExample(e: AIExample): AIExample | null {
   // The tripwire runs on example text too: a stored line that tries to instruct the AI never reaches a later prompt (design layer 5).
   if (e.lines.some((l) => looksLikeInjection(String(l.text)))) return null;
-  const out: AIExample = { rule: e.rule, severity: e.severity, verdict: e.verdict, lines: [] };
+  const out: AIExample = { ...(e.kind === 'corrective' ? { kind: 'corrective' as const } : {}), rule: e.rule, severity: e.severity, verdict: e.verdict, lines: [] };
   for (const l of e.lines.slice(0, EXAMPLE_LINES)) {
     const line = { who: oneLine(String(l.who)), text: redactText(String(l.text), [], () => null) };
     const withLine = (text: string): AIExample => ({ ...out, lines: [...out.lines, { who: line.who, text }] });
@@ -171,6 +184,8 @@ export interface BuildAIInputArgs {
   examples?: readonly AIExampleInput[];
   /** Counts of signals about P1 (`feeds.ai`), a snapshot: one row after the lines, nothing for none. */
   signals?: readonly AISignal[];
+  /** The rules with an elevated or high revoke-on-appeal rate, a snapshot: one row after the signal counts, nothing for none. Anything else is dropped. */
+  cautions?: ReadonlyArray<{ rule: number; band: 'elevated' | 'high' }>;
 }
 
 /**
@@ -188,6 +203,11 @@ export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
   const lines = chosen.lines.map((l) => ({ ref: l.ref, secondsIn: l.secondsIn, who: l.who, text: l.text, blocked: l.blocked, filtered: l.filtered }));
   const people = chosen.people.map((p) => ({ alias: p.alias, role: p.role }));
   const signals: AISignal[] = (args.signals ?? []).map((s) => ({ label: oneLine(s.label), polarity: s.polarity, distinct: s.distinct, windowDays: s.windowDays }));
+  // A caution is a rule number and one of two words, copied value by value: nothing else a caller passes can reach the prompt.
+  const cautions: Array<{ rule: number; band: 'elevated' | 'high' }> = [];
+  for (const c of args.cautions ?? []) {
+    if (Number.isSafeInteger(c.rule) && c.rule >= 1 && (c.band === 'elevated' || c.band === 'high')) cautions.push({ rule: c.rule, band: c.band });
+  }
 
   const data = [
     '<data>',
@@ -200,6 +220,7 @@ export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
     ...lines.map((l) => `${l.ref} +${l.secondsIn}s ${l.who}${l.blocked ? ' blocked' : l.filtered ? ' filtered' : ''} ${lit(l.text)}`),
     // After the lines, so it is the last thing in the block. The labels are the adopter's own (plain, at most 60 characters); one line, no tag.
     ...(signals.length === 0 ? [] : [escapeJson(`${SIGNALS_ROW}${signals.map(countRow).join('; ')}.`)]),
+    ...(cautions.length === 0 ? [] : [`${CAUTIONS_ROW}${cautions.map((c) => `CR ${c.rule} ${c.band}`).join('; ')}.`]),
     '</data>',
   ];
 
@@ -218,6 +239,7 @@ export function buildAIInput(args: BuildAIInputArgs): AIReadInput {
     standard: oneLine(profile.aiContext),
     examples,
     ...(signals.length === 0 ? {} : { signals }),
+    ...(cautions.length === 0 ? {} : { cautions }),
     prompt: { stable: `${INSTRUCTIONS}\n\n${aiPolicyText(policy)}`, variable: `${data.join('\n')}\n`, schema: AI_OUTPUT_SCHEMA },
   };
 }

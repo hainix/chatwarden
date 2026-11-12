@@ -567,3 +567,65 @@ describe('player-facing copy', () => {
     for (const [key, text] of entries) for (const w of SYNTHETIC) expect(text.toLowerCase(), key).not.toContain(w);
   });
 });
+
+describe('the public exports of the main entry are locked', () => {
+  const index = read(join(src, 'index.ts'));
+  const names = (kind: 'value' | 'type'): string[] => {
+    const re = kind === 'value' ? /^export \{([^}]*)\} from/gm : /^export type \{([^}]*)\} from/gm;
+    return [...index.matchAll(re)]
+      .flatMap((m) => (m[1] as string).split(','))
+      .map((n) => n.trim())
+      .filter((n) => n !== '')
+      .sort();
+  };
+
+  it('values: the components, the client, the transports, the words and the date helpers (and VERSION)', () => {
+    expect(names('value')).toEqual(
+      [
+        'AppealDialog',
+        'MyRecord',
+        'NoticeQueue',
+        'ReportDialog',
+        'RestrictedChatLine',
+        'RulesPage',
+        'PlayerError',
+        'createPlayerClient',
+        'toPlayerError',
+        'fetchTransport',
+        'routerTransport',
+        'createT',
+        'en',
+        'dayText',
+        'secondsLeft',
+        'timeLeft',
+        'untilText',
+        'nameReasonText',
+      ].sort(),
+    );
+    expect(index).toMatch(/export const VERSION = /);
+  });
+
+  it('types: the new ones are there, nothing was taken away', () => {
+    const types = names('type');
+    for (const added of ['AppealDialogProps', 'FileAppealOutcome', 'PlayerAppeal', 'AppealRefusal', 'NameReason']) expect(types, added).toContain(added);
+    for (const kept of ['NoticeQueueProps', 'MyRecordProps', 'RulesPageProps', 'ReportDialogProps', 'RestrictedChatLineProps', 'PlayerClient', 'PlayerClientOptions', 'PlayerRule', 'PlayerRules', 'Transport', 'PlayerCatalog', 'PlayerT', 'PlayerText', 'PlayerUiProps', 'NoticeKind', 'PlayerNotice']) {
+      expect(types, kept).toContain(kept);
+    }
+  });
+
+  it('the new exports are marked @experimental where they are written, and the internals stay out', () => {
+    for (const [file, name] of [['AppealDialog.tsx', 'AppealDialog'], ['names.ts', 'nameReasonText'], ['client.ts', 'FileAppealOutcome']] as const) {
+      const source = read(join(src, file));
+      const at = source.indexOf(`export function ${name}`) >= 0 ? source.indexOf(`export function ${name}`) : source.indexOf(`export type ${name}`);
+      expect(at, name).toBeGreaterThan(0);
+      expect(source.slice(Math.max(0, at - 1200), at), name).toMatch(/@experimental/);
+    }
+    for (const internal of ['AppealBody', 'AppealSlot', 'useAppeals', 'leaveAppeal', 'dateText', 'APPEAL_MAX']) expect(index, internal).not.toContain(internal);
+  });
+
+  it('the appeal limit is the kit one', async () => {
+    const { APPEAL_STATEMENT_MAX } = await import('@chatwarden/core');
+    const { APPEAL_MAX } = await import('../src/constants.js');
+    expect(APPEAL_MAX).toBe(APPEAL_STATEMENT_MAX);
+  });
+});

@@ -103,3 +103,27 @@ Decided in [design/2026-11-11-ai-levels-1-2.md](../design/2026-11-11-ai-levels-1
   the `POST /cases/next` case body would also pin values and order.
 - **A countdown in the pace line.** `RestrictedChatLine` fixes the end once and shows `player.pace.ready` only if the parent renders again; a live
   countdown is the host's to add (it owns the timer).
+
+## Appeals and names (0.1.9), parked
+
+Decided in [design/2026-11-12-appeals-and-names.md](../design/2026-11-12-appeals-and-names.md), section 9, and found in review.
+
+- **Appeals by reporters**, appeals of notes, or of anything without a notice.
+- **A free-text reply to the player**, or a second appeal after a decision.
+- **Claims on appeals** (the conditional decide is the guard), and keys for the appeal card.
+- **A per-actor or per-role self-review exemption**, routing appeals to a named moderator, and an SLA clock.
+- **Auto-expiry of an old open appeal.**
+- **The kit holding or checking a player's current name**, automatic renames, and checking names already in the game (a batch scan).
+- **A webhook that carries a statement or a name**, and the AI reading a statement or a name.
+- **Gates for AI levels 3 and 4.** They will read `cw.appeals.stats()`.
+- **A locale other than English** for the new words (the keys are flat, so translations are additive).
+- **Site copy.** The public site flips a promise only after the release is on npm and has run in Moxgate.
+- **The statement in the kit's process.** `FeedKit.appeals.get` (Discord) copies out two times and drops the rest, but a real kit's `cw.appeals.get` still loads the
+  statement in memory first. A narrower core read (the sanction only) would remove that.
+- **Casebook marks are per report.** A decision can sanction several people; a revoke of one appeal marks the whole report's casebook row corrective, and a reduced
+  replacement carries no `reportId`, so revoking the replacement later cannot upgrade the earlier mark.
+- **The gap-note exemption is keyed on the decide token** (`sanctions.ts`, the same token that lets `reportId` through). Internal only, safe today.
+- **The appeal card in Detailed shows no name.** `GET /appeals/:id` carries no handle, so Detailed shows the rule chip and the record link and Simple reads the person's
+  history once. Adding a `handle` to the detail would let both show it.
+- **Settings panels repeat a block.** Four Advanced panels share a discard, reload and reset flow; a `usePanelFlow` would hold it once.
+- **A lone U+FE0F statement** cleans to empty and is refused. Intended, listed so nobody reads it as a bug.

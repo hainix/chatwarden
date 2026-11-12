@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createHubClient, fetchAll, HubError, toHubError } from '../src/client.js';
 import type { Transport, TransportResponse } from '../src/transport.js';
+import { appealsHub } from './appealsWorld.js';
+import type { AppealsHub } from './appealsWorld.js';
 import { hubWorld } from './world.js';
-import type { HubWorld } from './world.js';
 
 const fake = (res: Partial<TransportResponse> | Error): Transport => () =>
   res instanceof Error ? Promise.reject(res) : Promise.resolve({ status: 200, headers: {}, body: null, ...res });
@@ -121,7 +122,10 @@ describe('every staff route has a client method', () => {
     return { method, re: new RegExp(`^${source}$`) };
   };
 
-  async function exercise(w: HubWorld) {
+  /** The world every route is exercised in: appeals and renames are on, so their routes answer instead of 404. */
+  const world = () => appealsHub({ role: 'owner', ai: { level: 2 }, names: { renames: true } });
+
+  async function exercise(w: AppealsHub) {
     const { id, person } = await w.file({ target: 'Mallory', reporter: 'Rita' });
     await w.aiIdle();
     const aiRead = (await w.client.getReport(id)).ai;
@@ -132,6 +136,9 @@ describe('every staff route has a client method', () => {
     const newTerm = await c.addTerm({ term: 'quibblex', language: 'en', note: 'n' });
     const newExc = await c.addException({ phrase: 'quibblexes', language: 'en' });
     const reasonId = (await w.direct.addReason({ label: 'Repeat', text: 'Again after a warning.' })).reason.id;
+    // An appeal filed by a player against a moderator's decision (another moderator than the signed-in owner), and a person to ask for a new name.
+    const filed = await w.appeal({ target: 'Appellant' });
+    const renamed = await w.file({ target: 'Mallory2', reporter: 'Rita2' });
 
     type Expect = { method: string; path: string; query?: Record<string, string | number>; body?: unknown };
     const calls: Array<[string, () => Promise<unknown>, Expect]> = [
@@ -199,6 +206,20 @@ describe('every staff route has a client method', () => {
         () => c.dontTeach(id),
         { method: 'POST', path: `/reports/${id}/ai/dont-teach` },
       ],
+      ['appeals', () => c.appeals({ status: 'open', limit: 5 }), { method: 'GET', path: '/appeals', query: { status: 'open', limit: 5 } }],
+      ['appeals no filter', () => c.appeals(), { method: 'GET', path: '/appeals' }],
+      ['appealStats', () => c.appealStats({ days: 30 }), { method: 'GET', path: '/appeals/stats', query: { days: 30 } }],
+      ['appeal', () => c.appeal(filed.appealId), { method: 'GET', path: `/appeals/${filed.appealId}` }],
+      [
+        'decideAppeal',
+        () => c.decideAppeal(filed.appealId, { outcome: 'uphold', reason: 'It stands.' }),
+        { method: 'POST', path: `/appeals/${filed.appealId}/decide`, body: { outcome: 'uphold', reason: 'It stands.' } },
+      ],
+      [
+        'rename',
+        () => c.rename(renamed.person, { reason: 'Please choose another name.' }),
+        { method: 'POST', path: `/people/${renamed.person}/rename`, body: { reason: 'Please choose another name.' } },
+      ],
     ];
     expect(aiRead).not.toBeNull();
     const results: unknown[] = [];
@@ -215,14 +236,14 @@ describe('every staff route has a client method', () => {
   }
 
   it('sends the right method, path, query and body for each method, and each succeeds against the real routes', async () => {
-    const w = await hubWorld({ role: 'owner', ai: { level: 2 } });
+    const w = await world();
     const { results } = await exercise(w);
     // exercise() turns a thrown error into a string naming the call, so any string here is a failed call.
     expect(results.filter((r) => typeof r === 'string')).toEqual([]);
   });
 
   it('covers every route the staff API mounts', async () => {
-    const w = await hubWorld({ role: 'owner', ai: { level: 2 } });
+    const w = await world();
     await exercise(w);
     const keys = Object.keys(w.routes);
     expect(keys.length).toBeGreaterThanOrEqual(26);

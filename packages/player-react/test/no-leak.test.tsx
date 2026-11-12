@@ -1,5 +1,6 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { AppealDialog } from '../src/AppealDialog.js';
 import { MyRecord } from '../src/MyRecord.js';
 import { NoticeQueue } from '../src/NoticeQueue.js';
 import { ReportDialog } from '../src/ReportDialog.js';
@@ -196,5 +197,108 @@ describe('no identifier leaks into the page', () => {
     for (const el of [d, ...d.querySelectorAll('*')]) for (const a of el.getAttributeNames()) attrs.add(a);
     expect([...attrs].filter((a) => a.startsWith('data-') && a !== 'data-cw-theme' && a !== 'data-kind').sort()).toEqual([]);
     expect(within(d).getAllByRole('heading').length).toBeGreaterThan(0);
+  });
+});
+
+// Appeals (0.1.9): an appeal is filed from a notice id and answered with an appeal id, a statement goes up and a decision comes down.
+// None of that, and nothing a moderator wrote, may stand in the markup: the only things on the page are words.
+describe('appeals: no identifier appears in any answer', () => {
+  const SERVER_FIELDS = { reason: 'private moderator reason', decidedBy: 'ann@example.test', groupId: 'grp-secret-77', subject: 's_aaaaaaaaaaaaaaaaaaaaaa', statement: 'a statement the player wrote', sanction: { kind: 'ban' }, roomId: 'room-77', ip: '203.0.113.9' };
+  const SERVER_STRINGS = Object.values(SERVER_FIELDS).filter((v): v is string => typeof v === 'string');
+
+  async function appealWorld() {
+    const w = await playerWorld({ appeals: { perPlayerPerWeek: 20 } });
+    await w.warn(ALICE, { rule: 2, lines: ['you play like a snerp'] });
+    w.clock.t += DAY;
+    await w.sanction(ALICE, 'chat', { rule: 1, durationMs: DAY, lines: ['glarn'] });
+    await w.sanction(CARA, 'warning', { rule: 1, lines: ['cara line tarvo'] });
+    return w;
+  }
+  const appealSecrets = (w: PlayerWorld, ids: string[]): string[] => [...secrets(w), ...ids, ...SERVER_STRINGS, 'private appeal reason', 'bea@example.test'];
+
+  it('MyRecord with appeals on, in every state of an appeal: none, sent, and decided; then the outcome notice', async () => {
+    const w = await appealWorld();
+    const codes = w.record(ALICE).map((n) => n.refCode as string);
+    const first = w.noticeOf(ALICE, 0);
+    const ids: string[] = [first, w.noticeOf(ALICE, 1)];
+    const view = (key: number) => <MyRecord client={w.client} now={w.now} {...FIXED} appeals appealUrl="https://game.test/appeal" refreshKey={key} />;
+    const r = renderUi(view(1));
+    await screen.findAllByRole('button', { name: 'Think this is a mistake?' });
+    expectClean(document.body.innerHTML, w, codes);
+    const sent = await w.client.fileAppeal(first, 'a statement the player wrote');
+    if (!sent.ok) throw new Error('refused');
+    ids.push(sent.appeal.id);
+    r.rerender(view(2));
+    await screen.findByText(/^Appeal sent /);
+    for (const s of appealSecrets(w, ids)) expect(document.body.innerHTML, s).not.toContain(s);
+    expectClean(document.body.innerHTML, w, codes);
+    await w.decideAppeal(ALICE, 'uphold');
+    r.rerender(view(3));
+    await screen.findByText('We kept the decision');
+    for (const s of appealSecrets(w, ids)) expect(document.body.innerHTML, s).not.toContain(s);
+    expectClean(document.body.innerHTML, w, codes);
+    r.unmount();
+    renderUi(<NoticeQueue client={w.client} now={w.now} {...FIXED} appeals />);
+    await screen.findByRole('dialog');
+    for (const s of appealSecrets(w, ids)) expect(document.body.innerHTML, s).not.toContain(s);
+  });
+
+  it('the dialog: not while typing, not after sending, not after a refusal', async () => {
+    const w = await appealWorld();
+    const noticeId = w.noticeOf(ALICE, 0);
+    const codes = w.record(ALICE).map((n) => n.refCode as string);
+    const { user, rerender } = renderUi(<AppealDialog client={w.client} noticeId={noticeId} onClose={() => undefined} {...FIXED} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'a statement the player wrote' } });
+    // What the player types is in the field's value, not in the markup; nothing else of ours is.
+    expect(document.body.innerHTML).not.toContain(noticeId);
+    await user.click(screen.getByRole('button', { name: 'Send appeal' }));
+    await screen.findByText(/^Appeal sent\./);
+    const [mine] = await w.client.appeals();
+    const ids = [noticeId, mine?.id as string];
+    for (const s of appealSecrets(w, ids)) expect(document.body.innerHTML, s).not.toContain(s);
+    expectClean(document.body.innerHTML, w, codes);
+    rerender(<AppealDialog key="again" client={w.client} noticeId={noticeId} onClose={() => undefined} {...FIXED} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'again' } });
+    await user.click(screen.getByRole('button', { name: 'Send appeal' }));
+    await screen.findByRole('alert');
+    for (const s of appealSecrets(w, ids)) expect(document.body.innerHTML, s).not.toContain(s);
+  });
+
+  it('an answer that carries more than the documented fields never puts the rest on the page', async () => {
+    const w = await appealWorld();
+    const id = w.noticeOf(ALICE, 0);
+    w.intercept.fn = (req) =>
+      req.path === '/appeals' && req.method === 'GET'
+        ? { status: 200, body: { appeals: [{ id: 'appeal-secret-id', noticeId: id, status: 'upheld', createdAt: 5, decidedAt: 6, ...SERVER_FIELDS }] } }
+        : req.path === '/appeals'
+          ? { status: 200, body: { appeal: { id: 'appeal-secret-id', noticeId: id, status: 'open', createdAt: 5, decidedAt: null, ...SERVER_FIELDS } } }
+          : undefined;
+    renderUi(<MyRecord client={w.client} now={w.now} {...FIXED} appeals />);
+    await screen.findByText('We kept the decision');
+    for (const s of ['appeal-secret-id', ...SERVER_STRINGS]) expect(document.body.innerHTML, s).not.toContain(s);
+    // And what the client hands a host is the five fields, so a host that logs it leaks nothing either.
+    const filed = await w.client.fileAppeal(id, 'x');
+    expect(JSON.stringify(filed)).not.toMatch(/ann@example|203\.0\.113|s_aaaa|room-77|grp-secret|private moderator/);
+  });
+
+  it('a notice that is not yours is refused with the same answer as one that does not exist (no probing)', async () => {
+    const w = await appealWorld();
+    const carasNotice = w.noticeOf(CARA, 0);
+    const notMine = await w.client.fileAppeal(carasNotice, 'it is not mine');
+    const none = await w.client.fileAppeal('not-a-notice', 'it is not mine');
+    expect(notMine).toEqual(none);
+    expect(JSON.stringify(notMine)).not.toContain(carasNotice);
+  });
+
+  it('the outcome notice carries no id, no reason and no moderator: the page holds the words only', async () => {
+    const w = await appealWorld();
+    await w.client.fileAppeal(w.noticeOf(ALICE, 0), 'please');
+    await w.decideAppeal(ALICE, 'uphold');
+    renderUi(<NoticeQueue client={w.client} now={w.now} {...FIXED} />);
+    const d = await screen.findByRole('dialog');
+    const pending = w.pending(ALICE).map((n) => n.id);
+    for (const s of [...appealSecrets(w, pending), 'Mallory', 'bea']) expect(d.innerHTML, s).not.toContain(s);
+    expect(d.innerHTML).not.toMatch(/\bs_[A-Za-z0-9_-]{22}\b/);
+    expect(d.innerHTML).not.toMatch(/\b[0-9a-f]{24,}\b/i);
   });
 });

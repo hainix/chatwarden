@@ -210,7 +210,7 @@ describe('a visitor who trips the real automatic timeout', () => {
   it('her next line says so with the end time and points at Reset; the line stays in the box', async () => {
     const { user } = await spam();
     await say(user, 'hello?');
-    await waitFor(() => expect(document.querySelector('.composer-note')?.textContent).toMatch(/automatic filter has put you on a chat timeout until \d.*community rule 1.*press start over/i));
+    await waitFor(() => expect(document.querySelector('.composer-note')?.textContent).toMatch(/automatic filter has put you on a chat timeout until (?:[A-Z][a-z]{2} )?\d.*community rule 1.*press start over/i));
     expect(live().textContent).toMatch(/chat timeout until/i);
     expect(composer().value).toBe('hello?');
   });

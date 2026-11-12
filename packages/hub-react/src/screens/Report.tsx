@@ -10,6 +10,7 @@ import { Transcript } from '../case/Transcript.js';
 import type { LinePicks } from '../case/Transcript.js';
 import { useHub } from '../context.js';
 import { LINES_MAX } from '../decision.js';
+import { NameToggle, NameValue } from '../names.js';
 import { personName } from '../excerpt.js';
 import { absoluteTime, relativeTime } from '../format.js';
 import { reasonSaid } from '../labels.js';
@@ -35,11 +36,12 @@ function Header({ detail }: { detail: ReportDetail }) {
       <div className="cw-casehead-row">
         <h2 className="cw-screen-title" tabIndex={-1}>
           <span aria-hidden="true" className="cw-casename">
-            {name}
+            {target === undefined ? name : <NameValue text={personName(target, people, t, true)} flagged={target.handleFlagged} place="head" />}
           </span>
           <span className="cw-sr">{label === null ? t('hub.report.title.none', { who: name }) : t('hub.report.title', { category: label, who: name })}</span>
         </h2>
         {target !== undefined && <PersonChip person={target.ref} />}
+        {target !== undefined && <NameToggle flagged={target.handleFlagged} place="head" />}
         <span className="cw-casecats">
           {reasons.map((r) => (
             <Tag key={r.id ?? 'none'}>{reasonSaid(t, r.label)}</Tag>

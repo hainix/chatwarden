@@ -1,4 +1,4 @@
-export const VERSION = '0.1.8';
+export const VERSION = '0.1.9';
 
 export type {
   Clock,
@@ -47,6 +47,8 @@ export type {
   ReasonRow,
   SignalRow,
   SignalSourceRow,
+  AppealRow,
+  BlockedNameRow,
   ConductLevel,
   Source,
   Store,
@@ -192,6 +194,7 @@ export type { ReporterAccuracy } from './reporterAccuracy.js';
 export type {
   BlockedDays,
   BlockedItem,
+  BlockedNameItem,
   PersonSanctionView,
   ReporterRecord,
   SanctionGroupView,
@@ -228,6 +231,7 @@ export { WEBHOOK_KEY_TTL_MS } from './types.js';
 export type { PurgeResult, RetentionPolicy } from './retention.js';
 export {
   ExcerptError,
+  MESSAGE_NOTICE_KINDS,
   NOTICE_EXCERPT_MAX,
   NOTICE_RECORD_WINDOW_MS,
   NoticeService,
@@ -236,6 +240,8 @@ export {
 } from './notices.js';
 export type {
   ExcerptErrorCode,
+  MessageNoticeKind,
+  MessageNoticeOptions,
   NoticeCreateOptions,
   NoticeServiceDeps,
   PlayerNotice,
@@ -321,6 +327,11 @@ export {
 // Pace settings (@experimental): slow mode, burst limit and repeat refusal, all off until set.
 export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
 export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
+// Appeals and names settings (@experimental): off until set (names masking in the hub is the one default-on setting).
+export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
+export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
+export { resolveNames } from './names.js';
+export type { NameCheckResult, NameReason, NameSettings, ResolvedNames } from './names.js';
 // Signals (@experimental): kinds a game declares, the guards, and the feeds that say where counts may be read.
 export {
   BUILTIN_SIGNAL_KINDS,

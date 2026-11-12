@@ -73,8 +73,8 @@ The three are public packages with provenance, like the others (`publishConfig.a
    `npm install` once more so `package-lock.json` follows.
    The `peerDependencies` ranges stay where they are through a compatible release: `.changeset/config.json` sets
    `onlyUpdatePeerDependentsWhenOutOfRange`, so changesets only raises a peer range when the new version falls outside it.
-   `scripts/manifests.test.ts` fails CI if a range moves unexpectedly (it holds each package's floor: `^0.1.0` for `core`, `matcher`,
-   `profanity` and `discord`, `^0.1.2` for `player-react`, and `^0.1.8` for `store-memory`, `store-sqlite`, `http` and `hub-react` (0.1.8 is flood control and signals: the optional signal `Store` methods and the `SignalRow` and `SignalSourceRow` types, `cw.signals.boosted` and `forRecord`, `signalBoost` and `PolicyState.limits` in `http`, `BUILTIN_SIGNAL_KINDS`, `PACE_SUGGESTIONS` and the `pace` and `signals` profile sections in `hub-react`; the 0.1.7 floor, AI levels 1 and 2, is folded into it), with `hub-react`'s peer on `http` at `^0.1.8` and `hub-element`'s on `hub-react` at `^0.1.5`). The exact `devDependencies` pins and the tiny-chat versions do move with the
+   `scripts/manifests.test.ts` fails CI if a range moves unexpectedly (it holds each package's floor: `^0.1.0` for `core`, `matcher` and
+   `profanity`, and `^0.1.9` for `store-memory`, `store-sqlite`, `http`, `discord`, `hub-react` and `player-react` (0.1.9 is appeals and names: the optional appeal and blocked-name `Store` methods, `withdrawNotice` and the `AppealRow` and `BlockedNameRow` types, `cw.appeals`, `cw.names`, `cw.people.accountIds` and the three new events in `http`, the two appeal events in `discord`, `APPEAL_STATEMENT_MAX` and the `appeals` and `names` profile sections in `hub-react`, and the types `AppealRefusal`, `PlayerAppeal` and `NameReason` in `player-react`; the 0.1.8 floor, flood control and signals, is folded into it), with `hub-react`'s peer on `http` at `^0.1.9` and `hub-element`'s on `hub-react` at `^0.1.5`). The exact `devDependencies` pins and the tiny-chat versions do move with the
    release.
 
    ### When a peer floor must rise

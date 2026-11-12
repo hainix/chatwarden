@@ -10,6 +10,8 @@ import type { ReportPerson } from '../excerpt.js';
 import { absoluteTime, listOf, personTag, timeOfDay } from '../format.js';
 import { useHubData } from '../hooks.js';
 import type { HubText } from '../i18n.js';
+import { displayName } from '../labels.js';
+import { NameToggle, NameValue } from '../names.js';
 import type { ActionRecord, BlockedLine, SanctionKind } from '../types.js';
 import { Empty, Fetched, Link, PersonChip, Skeleton, Tag } from '../ui.js';
 
@@ -112,14 +114,14 @@ function Blocked({ target, people }: { target: ReportPerson; people: ReportPerso
 }
 
 /** One reporter's track record: how many reports they filed and how many held up, as a plain bar and the words. */
-function Reporter({ refId, name }: { refId: string; name: string }) {
+function Reporter({ refId, name, shown }: { refId: string; name: string; shown: ReactNode }) {
   const { t, session } = useHub();
   const state = useHubData(`reporter:${refId}`, () => session.reporter(refId));
   const r = state.data;
   return (
     <li className="cw-reporter">
       <div className="cw-reporter-head">
-        <span className="cw-reporter-name">{name}</span>
+        <span className="cw-reporter-name">{shown}</span>
         {r !== undefined && <ReporterTotals record={r} />}
       </div>
       {r === undefined ? state.error === null ? <Skeleton lines={1} /> : <p className="cw-hint">{t('hub.report.reporter.unavailable')}</p> : <ReporterStanding record={r} />}
@@ -138,17 +140,33 @@ function Reporters({ people }: { people: ReportPerson[] }) {
   const refs = [...new Set([report.reporterPerson, ...(group?.reporterPersons ?? [])])];
   const shown = refs.slice(0, REPORTERS_SHOWN);
   // A reporter on this report is named from it; one from an earlier report by the handle that report recorded; else by their tag.
-  const nameOf = (ref: string): string => {
+  // `revealed` is for the place that has a Show control; every sentence built from the name keeps it hidden.
+  const nameOf = (ref: string, revealed = false): string => {
     const p = people.find((x) => x.ref === ref);
-    if (p !== undefined) return personName(p, people, t);
+    if (p !== undefined) return personName(p, people, t, revealed);
     const recorded = group?.reporterHandles[ref];
-    return recorded ?? t('hub.person.unnamed', { tag: personTag(ref) });
+    return recorded === undefined ? t('hub.person.unnamed', { tag: personTag(ref) }) : displayName(t, { handle: recorded, flagged: group?.reporterHandlesFlagged?.[ref], revealed });
+  };
+  const flaggedOf = (ref: string): boolean => {
+    const p = people.find((x) => x.ref === ref);
+    return p !== undefined ? p.handleFlagged : group?.reporterHandlesFlagged?.[ref] === true;
   };
   return (
     <Section title={t('hub.reporters.title')}>
       <ul className="cw-reporters" aria-label={t('hub.reporters.label')}>
         {shown.map((ref) => (
-          <Reporter key={ref} refId={ref} name={nameOf(ref)} />
+          <Reporter
+            key={ref}
+            refId={ref}
+            name={nameOf(ref)}
+            shown={
+              <>
+                <NameValue text={nameOf(ref, true)} flagged={flaggedOf(ref)} place={`reporter:${ref}`} />
+                {flaggedOf(ref) && ' '}
+                <NameToggle flagged={flaggedOf(ref)} place={`reporter:${ref}`} />
+              </>
+            }
+          />
         ))}
       </ul>
       {refs.length > shown.length && <p className="cw-hint">{t('hub.reporters.more', { count: refs.length - shown.length })}</p>}
@@ -182,7 +200,11 @@ function People({ people }: { people: ReportPerson[] }) {
           return (
             <li key={p.ref} className="cw-person">
               <div className="cw-person-head">
-                <span className="cw-person-name">{name}</span>
+                <span className="cw-person-name">
+                  <NameValue text={personName(p, people, t, true)} flagged={p.handleFlagged} place={`people:${p.ref}`} />
+                  {p.handleFlagged && ' '}
+                  <NameToggle flagged={p.handleFlagged} place={`people:${p.ref}`} />
+                </span>
                 <PersonChip person={p.ref} />
                 {p.role === 'target' && <Tag tone="bad">{t('hub.report.role.target')}</Tag>}
                 {p.role === 'reporter' && <Tag>{t('hub.report.role.reporter')}</Tag>}

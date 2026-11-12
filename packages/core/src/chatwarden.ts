@@ -24,6 +24,10 @@ import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkPace, mergePace } from './pace.js';
+import { AppealService, hasAppealMethods } from './appealService.js';
+import { NameService } from './nameService.js';
+import type { NameCheckResult } from './names.js';
+import type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealPage, AppealStats, AppealSummary, PlayerAppeal } from './appeals.js';
 import { createInertSignals } from './signalInert.js';
 import type { SignalRuntime } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
@@ -46,6 +50,7 @@ import { StrikeService } from './strikes.js';
 import {
   blockedCountsByTerm,
   blockedItems,
+  blockedNameItems,
   listSanctionGroups,
   reporterRecord,
   sanctionsOfPerson,
@@ -55,6 +60,7 @@ import type { ReporterAccuracy } from './reporterAccuracy.js';
 import type {
   BlockedDays,
   BlockedItem,
+  BlockedNameItem,
   ReporterRecord,
   SanctionGroupView,
   SanctionListInput,
@@ -159,7 +165,8 @@ export interface ChatwardenOptions {
    *
    * Floors, checked at creation (and on every `purge(policy)`), each a `ProfileError` naming the field:
    * `sanctionAfterEndMs` and `noticesMs` at least 90 days (the ladder and "My record" reach back that far),
-   * `auditMs` at least 90 days (default 365), `badFaithMs` at least `limits.reports.suspendWindowMs`. Every field
+   * `auditMs` at least 90 days (default 365), `appealsMs` at least 90 days (default 365), `badFaithMs` at least
+   * `limits.reports.suspendWindowMs`. `appealStatementsMs` (default 90 days) and `blockedNamesMs` (default 30 days) may be 0. Every field
    * must be a finite number (Infinity and NaN are refused). Not enforced, but `strikesMs` should be at least
    * `limits.strikes.windowMs`, or strikes are deleted before the window that counts them closes. When you leave
    * `badFaithMs` out it follows a longer suspension window.
@@ -372,6 +379,13 @@ export interface Chatwarden {
     list(q: { days: BlockedDays }): BlockedItem[];
     /** Strikes per term id over the same window; a term with none is absent. */
     countsByTerm(q: { days: BlockedDays }): Record<string, number>;
+    /**
+     * The blocked NAMES kept as evidence (`names.keepBlocked`) over the last `days` days (1, 7 or 30, else `RangeError`), newest first, at most
+     * 200: `{ id, at, person, name, termId, reason }`, the person a staff ref or null. Empty when none was kept, or the store keeps none. A name
+     * is a player's text and `person` a subject id: staff channels only, never send either to a player.
+     * @experimental
+     */
+    names(q: { days: BlockedDays }): BlockedNameItem[];
   };
   /**
    * The team workbench: soft claims on a person's case, take next, and who has a case open. Staff only; every `person` is
@@ -501,12 +515,45 @@ export interface Chatwarden {
   on: Subscribe;
   names: {
     /**
-     * May a player use this as a name (a handle, a table or deck name)? Reads it with the matcher's name rules
-     * (`Zorbak_99` is caught, not only `zorbak`). `rule` is the Community Rule the slur filter cites
-     * (`autoRestrictRule`). No matcher, and a matcher that fails (logged, class only), both let the name through.
-     * Throws a TypeError for a value that is not a string.
+     * May a player use this as a name (a handle, a table or deck name)? Synchronous, never echoes the name, never throws for a string (a
+     * non-string is still a TypeError). Reads it with the matcher's name rules (`Zorbak_99` is caught, not only `zorbak`); with
+     * `names.profanity` it also runs the profanity filter on the name and on the name with underscores and digits turned into spaces, and a
+     * hit is `name_profane` (a matcher hit wins). `rule` is the Community Rule the slur filter cites (`autoRestrictRule`) for both. No
+     * matcher, a matcher that fails (logged, class only) and a filter that fails (`chatwarden.names_filter_failed`) all let the name through.
+     *
+     * `opts.who` is the caller, as the doors take it. It is used ONLY to tie kept evidence to a person (found, never created); it never
+     * changes the answer. A blocked name is kept (`kit_blocked_names`) only when `names.keepBlocked` is on: at most 5 an hour per person
+     * (per `who`, or per name when there is none) and 200 an hour overall, in memory per process; past that the check still answers and
+     * nothing more is stored. An allowed name is never stored, and a name is never logged.
      */
-    check(text: string): { ok: true } | { ok: false; reason: 'name_not_allowed'; rule: number };
+    check(text: string, opts?: { who?: RawWho }): NameCheckResult;
+    /**
+     * Would the matcher refuse this as a name? The evidence-free read for staff screens and routes (a list of handles): the matcher only,
+     * no profanity pass, nothing stored whatever `names.keepBlocked` says, no person looked up. False for no matcher, for a non-string and
+     * when the matcher throws (logged once a minute, class only). Never throws.
+     */
+    flagged(text: string): boolean;
+    /**
+     * Ask a player to choose a new name. Writes one notice of kind `rename_required` (it names no name, no excerpt, no reason) and, after
+     * the write, tells the player's client and emits `rename.required`. Staff only. `{ ok: false, error: 'off' }` while `names.renames` is
+     * false (or the store cannot release a rename); `invalid` for a reason that is not 1 to 500 characters or a rule that is not an active
+     * integer rule; `not_found` for a person the kit does not hold; `pending` while a request is already waiting. `rule` defaults to the
+     * slur filter's (`autoRestrictRule`) and is shown to the player as a rule label. A store failure is logged (class only) and thrown.
+     * @experimental
+     */
+    requireRename(input: { subject: SubjectId; actor: string; reason: string; rule?: number }): { ok: true; noticeId: string } | { ok: false; error: 'off' | 'not_found' | 'pending' | 'invalid' };
+    /** True while the person has a rename request they have not been released from. For the game, to hold a player at a rename screen. Never creates a person. @experimental */
+    pendingRename(who: RawWho): boolean;
+    /** The game calls this once the player has a new name. Withdraws their pending rename notices. True when it withdrew one. The kit never learns the name. @experimental */
+    renamed(who: RawWho): boolean;
+    /**
+     * Whether `requireRename` can work right now: `names.renames` is on AND the store can release a rename (the test `requireRename` applies
+     * first). A live read. For a staff screen, so it never offers a rename that always answers `off`.
+     * @experimental
+     */
+    renamesEnabled(): boolean;
+    /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. @experimental */
+    renamesOf(subject: SubjectId): Array<{ at: number; pending: boolean }>;
   };
   /**
    * The AI read and recommend service. Always present: without an `ai` option (or at level 0) it answers as if there were no AI. A
@@ -606,6 +653,55 @@ export interface Chatwarden {
     pendingWarning(who: RawWho): boolean;
   };
   /**
+   * Appeals (0.1.9, `profile.appeals`, off until turned on). The player side takes the same `RawWho` as `notices` and FINDS the person
+   * (never creates one); every answer is a reason or a rule number, never an identifier, a staff ref or a reason a moderator gave.
+   * @experimental
+   */
+  appeals: {
+    /** Whether appeals are on right now: the profile in force says so (a live read) and the store can keep them. */
+    enabled(): boolean;
+    /**
+     * File an appeal from one of the caller's own sanction notices, with a statement of at most `APPEAL_STATEMENT_MAX` (1000) characters.
+     * Checks in this order: off, not_found, not_appealable, statement_invalid, already_appealed, rate. One store transaction; a refusal
+     * writes nothing. The statement is cleaned first (`normalizeStatement`) and refused, not cut, over the cap. Never throws for a bad
+     * input; a store failure is logged (`chatwarden.appeal_failed`, the error class only) and answers `not_found`. `appeal.created` is
+     * emitted after the commit.
+     */
+    file(who: RawWho, input: { noticeId: string; statement: string }): AppealFileResult;
+    /** The caller's own appeals, newest first, at most 50, without any that was made moot. Empty for an unknown person or with appeals off. */
+    mine(who: RawWho): PlayerAppeal[];
+    /**
+     * Decide an open appeal: `uphold` (the sanction stands), `reduce` (to a lighter kind, or the same kind and shorter, keeping the original
+     * start so the ladder does not restart, never ending later than the original) or `revoke`. A moderator may not decide an appeal of
+     * their own decision unless `appeals.allowSelfReview` is on (`same_decider`); an automatic sanction has no such decider. `reason` is
+     * private (1 to 500 characters). One transaction; the player is told through a notice; `appeal.decided` is emitted after the commit.
+     * Staff-side: the permission and the audit row belong to the route. A store failure rejects and writes nothing.
+     */
+    decide(input: AppealDecision): Promise<AppealDecideResult>;
+    /**
+     * The inbox, oldest first: `open` (default), `decided` or `all`; `limit` 1 to 200 (default 50); an opaque `cursor`. A summary carries a
+     * staff ref and never the statement (`statementFlagged` says whether it trips the term filter). `RangeError` for a bad query. Empty with
+     * appeals off. Carries subject ids: staff channels only, never send to a player.
+     */
+    list(q: { status?: 'open' | 'decided' | 'all'; limit?: number; cursor?: string | null }): AppealPage;
+    /** One appeal in full, the statement included (null once purged), or null for an unknown id. The route audits this read. Staff only. */
+    get(id: string): AppealDetail | null;
+    /** How many appeals are waiting. */
+    openCount(): number;
+    /**
+     * The per-rule counts over the last 30, 90 (default) or 365 days. The rate is revoked appeals over sanctions given, null below 10
+     * sanctions; a reduction is `lightened`, shown beside the rate and never in it. `RangeError` for another window.
+     */
+    stats(q?: { days?: 30 | 90 | 365 }): AppealStats;
+    /**
+     * One person's appeals (across their merged subjects) as summaries, newest first, at most 50; a moot appeal is left out. For the person's
+     * page. Still listed after appeals are switched off (what was filed stays visible until retention removes it); empty for a store that cannot keep
+     * appeals or a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
+     * @experimental
+     */
+    forPerson(subject: SubjectId): AppealSummary[];
+  };
+  /**
    * Decide a report: close it, write each sanction and its notice, and tell the people involved, in one
    * transaction. Idempotent (the same decision again is a replay). A malformed or disallowed decision resolves
    * `{ ok: false, error: 'invalid' }`; a STORE failure REJECTS with the store's own error and writes nothing, so a
@@ -679,6 +775,13 @@ export interface Chatwarden {
   people: {
     canonical(subject: SubjectId): SubjectId;
     aliases(subject: SubjectId): SubjectId[];
+    /**
+     * The account ids the kit holds for this person across their merged aliases, sorted: exactly the strings the game passed as
+     * `RawWho.accountId` (no client key, no IP, no hash). A guest has none; so does an unknown id. For the game to find the player to rename
+     * after `rename.required`. Server side only: never send to a player.
+     * @experimental
+     */
+    accountIds(subject: SubjectId): string[];
   };
   /**
    * The Discord feed's thread map (`@chatwarden/discord`): the forum thread kept per person (`kit_discord_threads`). A
@@ -716,7 +819,12 @@ function buildProfanityFilter(opts: ChatwardenOptions, config: ProfanityConfig):
   if (config.mode === 'allow') return undefined;
   if (opts.profanity !== undefined) return opts.profanity;
   if (opts.profanityPackage === undefined) return undefined;
-  const built = opts.profanityPackage.createProfanityFilter(config);
+  return buildPackageFilter(opts.profanityPackage, config);
+}
+
+/** The filter a profanity package builds from the resolved config; a non-filter is a TypeError. */
+function buildPackageFilter(pkg: NonNullable<ChatwardenOptions['profanityPackage']>, config: ProfanityConfig): ProfanityFilter {
+  const built = pkg.createProfanityFilter(config);
   if (typeof built !== 'object' || built === null || typeof built.apply !== 'function') {
     throw new TypeError('profanityPackage.createProfanityFilter must return a filter with an apply(text) method');
   }
@@ -810,7 +918,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   await mutes.load();
   await strikes.load();
   // The stored edits to the profile. Read last, so a store that fails here has not left anything half built.
-  const policy = new PolicyService({ store, clock, logger, base: baseProfile, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate });
+  const policy = new PolicyService({ store, clock, logger, base: baseProfile, signalsMs: () => retentionPolicy.signalsMs ?? RETENTION_DEFAULTS.signalsMs, chatRate: limits.chatRate, appealsKept: hasAppealMethods(store) });
   policy.load();
 
   // ONE notice service for the whole kit: chat (the automatic timeout), the doors (the refusal's pointer) and
@@ -919,6 +1027,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     const ids = hashWho(hasher, who);
     return subjects.lookup({ clientKey: ids.clientKey, accountId: ids.accountId, ipHash: null });
   };
+  // Appeals. Turning them on in code (the profile or its overrides) over a store that cannot keep them is a plain mistake, refused here
+  // before anything is started. A stored layer that does it is data, not code: the policy keeps appeals off and warns (see PolicyService).
+  if (baseProfile.appeals.enabled && !hasAppealMethods(store)) {
+    throw new Error('createChatwarden: appeals are enabled, but this store has no appeal methods (SqliteStore has them from schema 22; the in-memory store needs its opt-in appeals wrapper)');
+  }
+  /** The one answer to "does a moot or a decision clear the statement at once": the retention the kit was created with. */
+  const clearAppealStatements = (): boolean => (retentionPolicy.appealStatementsMs ?? RETENTION_DEFAULTS.appealStatementsMs) === 0;
   signalRef.service = signalModule === undefined ? createInertSignals(logger, () => policy.profileNow().signals) : new signalModule.SignalService({
     store,
     clock,
@@ -1054,10 +1169,60 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
           audit: (input) => audit.record(input),
           exampleRetentionMs: () => retentionPolicy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
           // The counts about the reported person the feed allows (`feeds.ai`), as label, polarity, distinct and window: nothing else leaves.
+          // The rules cautioned for by the appeals the moderators lost (revokes only), as bands and rule numbers: never a rate, a count or a person.
+          cautions: () => appealService.cautions(),
           signals: (subject) => signals.forAi(subject).map((c) => ({ label: c.label, polarity: c.polarity, distinct: c.distinct, windowDays: c.windowDays })),
         });
   aiRef.service = aiService;
   const ai: AiFacade = aiService ?? createInertAi();
+  const appealService = new AppealService({
+    store,
+    subjects,
+    notices,
+    clock,
+    logger,
+    settings: () => policy.profileNow().appeals,
+    personOf,
+    emit: (event) => bus.emit(event),
+    matcher: opts.matcher,
+    index: sanctions,
+    clearStatements: clearAppealStatements,
+    // A granted appeal marks the original decision reversed in the casebook; with no AI this is the inert facade and does nothing.
+    // A REVOKE teaches the opposite sign and counts as a false positive; a REDUCE only keeps the decision from teaching (the rule applied).
+    onGranted: (appeal, outcome) => void (outcome === 'revoke' ? ai.markReversed(appeal.reportId as string, { corrective: true }) : ai.markReversed(appeal.reportId as string)),
+  });
+
+  // Names. The profanity filter for a name is the kit's own when the profile has one; otherwise (a profile that allows swearing in chat) it is
+  // built from the package on first use, so `names.profanity` works whatever the chat profile does with swearing. A package that cannot build
+  // one fails once and is remembered: the name check lets names through and logs the class.
+  let nameFilter: { filter: ProfanityFilter | undefined } | { error: unknown } | undefined;
+  const filterForNames = (): ProfanityFilter | undefined => {
+    if (profanity !== undefined) return profanity;
+    if (nameFilter === undefined) {
+      try {
+        nameFilter = { filter: opts.profanity ?? (opts.profanityPackage === undefined ? undefined : buildPackageFilter(opts.profanityPackage, baseProfile.profanity)) };
+      } catch (error) {
+        nameFilter = { error };
+      }
+    }
+    if ('error' in nameFilter) throw nameFilter.error;
+    return nameFilter.filter;
+  };
+  const nameService = new NameService({
+    store,
+    clock,
+    logger,
+    hasher,
+    rule: autoRestrictRule,
+    matcher: opts.matcher,
+    settings: () => policy.profileNow().names,
+    filter: filterForNames,
+    personOf,
+    notices,
+    subjects,
+    rules,
+    emit: (event) => bus.emit(event),
+  });
 
   return {
     ai,
@@ -1157,6 +1322,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),
       countsByTerm: (q) => blockedCountsByTerm(store, q?.days, clock.now()),
+      names: (q) => blockedNameItems(store, subjects, q?.days, clock.now()),
     },
     cases: {
       holder: (person) => desk.holder(person),
@@ -1207,7 +1373,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       revoke: async (groupId, actor, reason) => {
         // One instant for the stored revokedAt and the event, so a consumer correlating the two sees the same time.
         const at = clock.now();
-        const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock: { now: () => at }, index: sanctions });
+        const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, {
+          notices,
+          clock: { now: () => at },
+          index: sanctions,
+          clearAppealStatements,
+        });
         if (revoked) {
           try {
             const code = store.sanctionRefCode(groupId);
@@ -1240,18 +1411,13 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     },
     on: bus.on,
     names: {
-      check: (text) => {
-        if (typeof text !== 'string') throw new TypeError('names.check: the name must be a string');
-        const m = opts.matcher;
-        if (m === undefined) return { ok: true };
-        try {
-          const hit = typeof m.matchName === 'function' ? m.matchName(text) : m.match(text);
-          return hit === null ? { ok: true } : { ok: false, reason: 'name_not_allowed', rule: autoRestrictRule };
-        } catch (err) {
-          safeWarn(logger, 'chatwarden.names_matcher_failed', { error: err instanceof Error ? err.name : typeof err });
-          return { ok: true };
-        }
-      },
+      check: (text, o) => nameService.check(text, o),
+      flagged: (text) => nameService.flagged(text),
+      requireRename: (input) => nameService.requireRename(input),
+      pendingRename: (who) => nameService.pendingRename(who),
+      renamed: (who) => nameService.renamed(who),
+      renamesEnabled: () => nameService.renamesEnabled(),
+      renamesOf: (subject) => nameService.renamesOf(subject),
     },
     rules,
     get profile() {
@@ -1279,6 +1445,17 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       ack: (who, id) => forPlayer(who, false, (s) => notices.ack(s, id)),
       record: (who) => forPlayer<PlayerNotice[]>(who, [], (s) => notices.record(s)),
       pendingWarning: (who) => forPlayer(who, false, (s) => notices.pendingWarning(s)),
+    },
+    appeals: {
+      enabled: () => appealService.enabled(),
+      file: (who, input) => appealService.file(who, input),
+      mine: (who) => appealService.mine(who),
+      decide: (input) => appealService.decide(input),
+      list: (q) => appealService.list(q),
+      get: (id) => appealService.get(id),
+      openCount: () => appealService.openCount(),
+      stats: (q) => appealService.stats(q),
+      forPerson: (subject) => appealService.forPerson(subject),
     },
     decide: (input) => decideAnnounced(input),
     history: (subject) => historyOf(store, subjects, subject, clock.now()),
@@ -1320,6 +1497,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     people: {
       canonical: (subject) => subjects.canonical(subject),
       aliases: (subject) => subjects.aliasesOf(subject),
+      accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
     },
     discordThreads: {
       get: (subject) => store.transaction(() => store.getDiscordThread(subject)),

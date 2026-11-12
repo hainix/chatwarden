@@ -23,6 +23,31 @@ export const NOTICE_LOOKUP_CACHE_MAX = 10_000;
 const SANCTION_NOTICE_KINDS: readonly NoticeKind[] = ['warning', 'chat', 'area', 'ban'];
 
 /**
+ * The four notices that are messages, not sanctions: a rename is required, an appeal was upheld, reduced or revoked. They have no
+ * group, no end and no excerpt, show in `pending` and `announce` and never on "My record", and never need an acknowledgement. Made by
+ * {@link NoticeService.createMessage}. A seen one is purged like a seen report outcome; an unseen one is kept until seen or withdrawn.
+ * @experimental
+ */
+export const MESSAGE_NOTICE_KINDS = ['rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'] as const;
+export type MessageNoticeKind = (typeof MESSAGE_NOTICE_KINDS)[number];
+
+/** Every kind this build can show. A stored row of any other kind (written by a newer kit) is skipped, never thrown on. */
+/**
+ * Whether a notice row is on "My record" now: not withdrawn, one of the four sanction kinds, and either made within 90 days or (not a
+ * warning) permanent or still running. The one definition `record` uses and an appeal is filed against.
+ */
+export function appliesInRecord(r: Pick<NoticeRow, 'withdrawnAt' | 'kind' | 'createdAt' | 'until'>, now: number): boolean {
+  return (
+    r.withdrawnAt === null &&
+    SANCTION_NOTICE_KINDS.includes(r.kind) &&
+    (r.createdAt >= now - NOTICE_RECORD_WINDOW_MS || (r.kind !== 'warning' && (r.until === null || r.until > now)))
+  );
+}
+
+const KNOWN_KINDS: readonly string[] = [...SANCTION_NOTICE_KINDS, 'report_outcome', ...MESSAGE_NOTICE_KINDS];
+const isMessageKind = (kind: unknown): kind is MessageNoticeKind => (MESSAGE_NOTICE_KINDS as readonly unknown[]).includes(kind);
+
+/**
  * What a player is shown about a sanction taken against them, or about a report they filed. The ONLY shape that
  * leaves the kit for a player. It carries no subject, key, hash, room, seat or handle, no moderator reason or
  * identity, and (in `excerpt`) only lines the player wrote themselves, as a day and text.
@@ -31,13 +56,13 @@ export interface PlayerNotice {
   /** Random; the handle for `ack`. */
   id: string;
   kind: NoticeKind;
-  /** The Community Rule cited; null for a report outcome. */
+  /** The Community Rule cited; null for a report outcome (and for a message that cites none). */
   rule: RuleRef | null;
   /** The player-facing name of the rule. */
   ruleLabel: string | null;
-  /** Epoch ms the sanction ends; null = no end (permanent, a warning, or a report outcome). */
+  /** Epoch ms the sanction ends; null = no end (permanent, a warning, a report outcome or a message). */
   until: number | null;
-  /** The reference code to quote to a moderator; null for a report outcome. */
+  /** The reference code to quote to a moderator; null for a report outcome (a message carries the original sanction's, or none). */
   refCode: string | null;
   /** At most five of the player's own lines. `day` is UTC `YYYY-MM-DD`. A blocked line has its matched terms masked. */
   excerpt: Array<{ text: string; day: string }>;
@@ -132,6 +157,14 @@ export function ownLines(
 export interface NoticeCreateOptions {
   /** Default true. False skips the push; call `announce` after the surrounding transaction commits. */
   notify?: boolean;
+}
+
+/** What a message notice may cite: the rule and the reference code of the decision it is about. Never a name, a reason or an excerpt. */
+export interface MessageNoticeOptions extends NoticeCreateOptions {
+  /** The Community Rule the original decision cited. Default null. */
+  rule?: RuleRef | null;
+  /** The reference code of the original sanction, to quote to a moderator. Default null. */
+  refCode?: string | null;
 }
 
 /** What a notice is told about a sanction. `excerptLines` come through {@link ownLines}. */
@@ -241,6 +274,28 @@ export class NoticeService {
     );
   }
 
+  /**
+   * Write a message notice (a rename is required, an appeal was upheld, reduced or revoked) for a person and tell their client.
+   * Returns the notice id. It carries the kind, an optional rule and reference code and the time, and nothing else: no excerpt, no name,
+   * no reason. It has no sanction group, so `withdrawGroup` never touches it. Throws for any other kind, a malformed rule or code, or a
+   * bad subject (nothing is written). Pass `{ notify: false }` inside a larger transaction, then call {@link announce} after the commit.
+   * @experimental
+   */
+  createMessage(subject: SubjectId, kind: MessageNoticeKind, opts: MessageNoticeOptions = {}): string {
+    if (!isMessageKind(kind)) throw new Error('createMessage: invalid kind');
+    if (!nonEmpty(subject)) throw new Error('createMessage: invalid subject');
+    const rule = opts.rule ?? null;
+    const refCode = opts.refCode ?? null;
+    if (refCode !== null && typeof refCode !== 'string') throw new Error('createMessage: invalid code');
+    if (rule !== null) parseRuleRef(String(rule)); // refuses a value the store could not read back
+    const canonical = this.subjects.canonical(subject);
+    return this.insert(
+      { subject: canonical, groupId: null, kind, rule: rule === null ? null : String(rule), until: null, refCode, excerpt: [] },
+      canonical,
+      opts.notify !== false,
+    );
+  }
+
   /** Tell a reporter that their report led to action. No rule, code, end or excerpt: nothing about the other player. */
   createReportOutcome(reporter: SubjectId, opts: NoticeCreateOptions = {}): string {
     if (!nonEmpty(reporter)) throw new Error('createReportOutcome: invalid subject');
@@ -284,20 +339,60 @@ export class NoticeService {
   /**
    * "My record": the person's sanction notices (seen or not) that are not withdrawn and still apply. A warning
    * applies for 90 days from when it was made (the ladder lookback). Any other kind applies while it is permanent
-   * (until it is withdrawn), still running, or made within 90 days. Report outcomes are never included. Decided from
+   * (until it is withdrawn), still running, or made within 90 days. Report outcomes and the four message kinds are never included. Decided from
    * the notice row alone; `purgeNotices` agrees with this, so a row that applies is never purged.
    */
   record(subject: SubjectId): PlayerNotice[] {
     const now = this.clock.now();
     return this.rowsOf(subject)
-      .filter(
-        (r) =>
-          r.withdrawnAt === null &&
-          r.kind !== 'report_outcome' &&
-          (r.createdAt >= now - NOTICE_RECORD_WINDOW_MS ||
-            (r.kind !== 'warning' && (r.until === null || r.until > now))),
-      )
+      .filter((r) => appliesInRecord(r, now))
       .map((r) => this.toPlayer(r));
+  }
+
+  /**
+   * The stored notice `id` when it belongs to this person (across their merged aliases), whatever its kind or state; null otherwise.
+   * Staff-side: the row names its sanction group. For the appeals service, which decides from the row whether it can be appealed.
+   */
+  ownRow(subject: SubjectId, id: string): NoticeRow | null {
+    if (!nonEmpty(id)) return null;
+    return this.rowsOf(subject).find((r) => r.id === id) ?? null;
+  }
+
+  /**
+   * Does the person have a required rename they have not been released from: a `rename_required` notice not withdrawn, seen or not, on any of
+   * their merged subjects. Staff-side; the game reads it through `names.pendingRename`.
+   */
+  renamePending(subject: SubjectId): boolean {
+    return this.rowsOf(subject).some((r) => r.kind === 'rename_required' && r.withdrawnAt === null);
+  }
+
+  /** A person's `rename_required` notices, newest first, withdrawn ones included, across their merged subjects. Staff-side. */
+  renameRows(subject: SubjectId): NoticeRow[] {
+    return this.rowsOf(subject)
+      .filter((r) => r.kind === 'rename_required')
+      .sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
+  }
+
+  /** Can this build's store withdraw one notice by id? Without it a rename could never be released. */
+  canWithdrawOne(): boolean {
+    return typeof this.store.withdrawNotice === 'function';
+  }
+
+  /**
+   * Withdraw every pending `rename_required` notice of the person, in one transaction, and tell their client the new count when any was.
+   * Returns how many it withdrew (0 when none was pending, or the store cannot withdraw one). Other kinds are never touched.
+   */
+  withdrawRenames(subject: SubjectId): number {
+    const withdraw = this.store.withdrawNotice;
+    if (typeof withdraw !== 'function') return 0;
+    const ids = this.rowsOf(subject)
+      .filter((r) => r.kind === 'rename_required' && r.withdrawnAt === null)
+      .map((r) => r.id);
+    if (ids.length === 0) return 0;
+    const at = this.clock.now();
+    const done = this.store.transaction(() => ids.filter((id) => withdraw.call(this.store, id, at)).length);
+    if (done > 0) this.announce(subject);
+    return done;
   }
 
   /** Withdraw the notices of a sanction group (it was revoked). Returns how many were withdrawn. */
@@ -385,13 +480,16 @@ export class NoticeService {
   private rowsOf(subject: SubjectId): NoticeRow[] {
     if (!nonEmpty(subject)) return [];
     const person = this.subjects.canonical(subject);
-    return this.store.loadNotices(this.subjects.aliasesOf(person)).filter((r) => this.subjects.canonical(r.subject) === person);
+    return this.store
+      .loadNotices(this.subjects.aliasesOf(person))
+      .filter((r) => KNOWN_KINDS.includes(r.kind) && this.subjects.canonical(r.subject) === person);
   }
 
   private toPlayer(r: NoticeRow): PlayerNotice {
     if (r.kind === 'report_outcome') {
       return { id: r.id, kind: r.kind, rule: null, ruleLabel: null, until: null, refCode: null, excerpt: [], createdAt: r.createdAt, mustAcknowledge: false };
     }
+    const message = isMessageKind(r.kind);
     let rule: RuleRef | null = null;
     if (r.rule !== null) {
       try {
@@ -405,9 +503,9 @@ export class NoticeService {
       kind: r.kind,
       rule,
       ruleLabel: rule === null ? null : this.rules.label(rule),
-      until: r.until,
+      until: message ? null : r.until,
       refCode: r.refCode,
-      excerpt: r.excerpt.map((l) => ({ text: l.text, day: l.day })),
+      excerpt: message ? [] : r.excerpt.map((l) => ({ text: l.text, day: l.day })),
       createdAt: r.createdAt,
       mustAcknowledge: r.kind === 'warning',
     };

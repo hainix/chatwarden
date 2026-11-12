@@ -9,6 +9,7 @@ import { parseRuleRef } from './rules.js';
 import type { RuleRef } from './rules.js';
 import { SANCTION_SOURCES } from './sanctions.js';
 import { b64urlDecode, b64urlEncode } from './staffReports.js';
+import type { NameReason } from './names.js';
 import type { SubjectIndex } from './subjects.js';
 import type { SanctionKind, SanctionRow, Source, Store, SubjectId } from './types.js';
 
@@ -290,6 +291,8 @@ export function reporterRecord(
 
 /** The most blocked messages one call lists. */
 export const BLOCKED_MAX = 500;
+/** The most kept blocked names `blocked.names` lists: what the store will return in one read (a store clamps its limit to 200). */
+export const BLOCKED_NAMES_MAX = 200;
 
 /** The look-back windows of the blocked list, in days. */
 export const BLOCKED_DAYS = [1, 7, 30] as const;
@@ -335,4 +338,31 @@ export function blockedCountsByTerm(store: Store, days: unknown, now: number): R
   const out: Record<string, number> = Object.create(null) as Record<string, number>;
   for (const r of store.countStrikesByTerm(sinceOf(days, now))) out[r.termId] = r.count;
   return out;
+}
+
+/**
+ * One kept blocked name (`names.keepBlocked`): the name as it was typed, the term the matcher reported (null for a profanity hit), why it was
+ * refused, and the person when the caller was found (a staff ref; null for a caller the kit did not hold). Carries a name and a subject id: staff
+ * channels only, never send to a player.
+ */
+export interface BlockedNameItem {
+  id: string;
+  at: number;
+  person: SubjectId | null;
+  name: string;
+  termId: string | null;
+  reason: NameReason;
+}
+
+/** The kept blocked names of the last `days` days (1, 7 or 30; `RangeError` otherwise), newest first, at most {@link BLOCKED_NAMES_MAX}. Empty for a store that keeps none. */
+export function blockedNameItems(store: Store, subjects: SubjectIndex, days: unknown, now: number): BlockedNameItem[] {
+  const since = sinceOf(days, now);
+  return (store.listBlockedNames?.(since, BLOCKED_NAMES_MAX) ?? []).map((r) => ({
+    id: r.id,
+    at: r.at,
+    person: r.subject === null ? null : subjects.canonical(r.subject),
+    name: r.name,
+    termId: r.termId,
+    reason: r.reason,
+  }));
 }

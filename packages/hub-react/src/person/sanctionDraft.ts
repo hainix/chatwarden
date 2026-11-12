@@ -1,4 +1,4 @@
-import { DURATIONS, hasLength, resolveDraft, validate } from '../decision.js';
+import { DURATIONS, REASON_MAX, hasLength, resolveDraft, validate } from '../decision.js';
 import type { DecisionForm, Problem } from '../decision.js';
 import { lengthValue } from '../policy/length.js';
 import type { LengthPolicy } from '../policy/lengths.js';
@@ -137,4 +137,24 @@ export function toSanctionInput(subject: string, d: SanctionDraft, mode: Sanctio
   if (uncovered) input.gapNote = d.gapNote.trim();
   if (options.takeOver === true) input.takeOver = true;
   return input;
+}
+
+/**
+ * What "Ask for a new name (no sanction)" refuses before anything is sent: only the reason (required, at most 500 characters). The rule is optional (the server
+ * has its own), and there is no length, IP or gap note.
+ */
+export function renameProblems(d: SanctionDraft): SanctionProblems {
+  const reason = d.reason.trim();
+  if (reason === '') return { reason: { key: 'hub.decide.error.reasonRequired' }, count: 1 };
+  if (reason.length > REASON_MAX) return { reason: { key: 'hub.decide.error.reasonLong', params: { max: REASON_MAX } }, count: 1 };
+  return { count: 0 };
+}
+
+/** The body for `POST /people/:ref/rename`: the reason and, when a numbered rule was chosen, the rule (anything else leaves it to the server). */
+export function toRenameInput(d: SanctionDraft, options: { takeOver?: boolean } = {}): { reason: string; rule?: number; takeOver?: boolean } {
+  return {
+    reason: d.reason.trim(),
+    ...(/^[1-9]\d*$/.test(d.rule) ? { rule: Number(d.rule) } : {}),
+    ...(options.takeOver === true ? { takeOver: true } : {}),
+  };
 }

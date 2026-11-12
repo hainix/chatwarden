@@ -1,4 +1,4 @@
-export const VERSION = '0.1.8';
+export const VERSION = '0.1.9';
 
 export { NoticeQueue } from './NoticeQueue.js';
 export type { NoticeQueueProps } from './NoticeQueue.js';
@@ -10,9 +10,12 @@ export { ReportDialog } from './ReportDialog.js';
 export type { ReportFollowUp, ReportDialogProps, ReportDraft } from './ReportDialog.js';
 export { RestrictedChatLine } from './RestrictedChatLine.js';
 export type { RestrictedChatLineProps } from './RestrictedChatLine.js';
+export { AppealDialog } from './AppealDialog.js';
+export type { AppealDialogProps } from './AppealDialog.js';
+export { nameReasonText } from './names.js';
 
 export { createPlayerClient, PlayerError, toPlayerError } from './client.js';
-export type { PlayerClient, PlayerClientOptions, PlayerRule, PlayerRules } from './client.js';
+export type { FileAppealOutcome, PlayerClient, PlayerClientOptions, PlayerRule, PlayerRules } from './client.js';
 export { fetchTransport, routerTransport } from './transport.js';
 export type {
   FetchTransportOptions,
@@ -29,4 +32,4 @@ export type { PlayerCatalog, PlayerParams, PlayerT, PlayerText } from './i18n.js
 export type { PlayerUiProps } from './ui.js';
 export { dayText, secondsLeft, timeLeft, untilText } from './format.js';
 
-export type { NoticeKind, PlayerNotice, PlayerReporting, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';
+export type { AppealRefusal, NameReason, NoticeKind, PlayerAppeal, PlayerNotice, PlayerReporting, ReportDetailResult, ReportFlow, ReportRefusal, ReportResult } from '@chatwarden/core';

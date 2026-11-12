@@ -720,7 +720,7 @@ describe('the flood control and signals docs (0.1.8)', () => {
 
   it('core and every CHANGELOG say the AI prompt version 3 changes the hash and re-reads open reports against the daily caps', () => {
     const ai = flat(section(readme('core'), 'The AI (levels 1 and 2)'));
-    for (const needle of ['prompt version is 3 for everyone', 'changes the input hash', 'marked stale and read again, once per open report', 'daily call and money caps']) expect(ai, needle).toContain(needle);
+    for (const needle of ['prompt version is 4 for everyone (3 in 0.1.8)', 'changes the input hash', 'marked stale and read again, once per open report', 'daily call and money caps']) expect(ai, needle).toContain(needle);
     for (const dir of published) {
       const log = flat(read('packages', dir, 'CHANGELOG.md'));
       const at = log.indexOf('## 0.1.8');
@@ -729,5 +729,180 @@ describe('the flood control and signals docs (0.1.8)', () => {
       expect(text, dir).toContain('count against your daily call and money caps');
       expect(text, dir).toContain('`AiReadRow`');
     }
+  });
+});
+
+describe('the appeals and names docs (0.1.9)', () => {
+  const coreDoc = readme('core');
+  const core = flat(coreDoc);
+  const httpDoc = flat(readme('http'));
+  const playerDoc = readme('player-react');
+  const hubDoc = readme('hub-react');
+
+  it('core: appeals says how to turn them on, what can be appealed, the statement rules, the order of refusals and who may decide', () => {
+    const doc = flat(section(coreDoc, 'Appeals'));
+    for (const needle of [
+      '`overrides.appeals`', '`perPlayerPerWeek`', '`allowSelfReview`', '`appealUrl`', '`APPEAL_STATEMENT_MAX`', 'refused when over and never cut', '`normalizeStatement`',
+      '`retention.appealStatementsMs`', '`retention.appealsMs`', '`cw.appeals.file(who, { noticeId, statement })`', '`not_found` (one answer', '`already_appealed`',
+      '`same_decider`', '`already_decided`', '`gone`', '`moot`', 'keeps the original start time', 'One login per person', 'shares one login', 'no human decider',
+      '`cw.appeals.stats({ days })`', '**A reduction is not a false positive**', '`lightened`', '`APPEAL_STATS_MIN_SANCTIONS`', '`APPEAL_RATE_ELEVATED`', '`APPEAL_RATE_HIGH`',
+      'corrective example', '(version 4)', '`appeal.created`', '`appeal.decided`', 'never the statement', 'migration 22', 'one-way', 'back up the database', '`withMemoryAppeals(store)`',
+      '`closeOrphanAppeals`', '`clearStatement`', '`purgeNotices(before, unseen?)`',
+    ]) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('core: names says the check is stateless, what keeps evidence, that a game must act on rename.required and call renamed, and that masking in the hub is on by default', () => {
+    const doc = flat(section(coreDoc, 'Names'));
+    for (const needle of [
+      '`overrides.names`', '`maskInHub` (default `true`)', '`name_profane`', '`assertNever`', '`cw.names.flagged(text)`', '`names.keepBlocked`', '5 an hour per person', '200 an hour',
+      '`retention.blockedNamesMs`', '`cw.blocked.names({ days })`', '`requireRename`', '`rename_required`', 'names no name', '`rename.required`',
+      'A game must act on `rename.required` and call `renamed`', '`cw.people.accountIds(event.target)`', '`cw.names.pendingRename(who)`', '`cw.names.renamed(who)`',
+      'never learns the new name', 'default-on display change', 'set `overrides.names.maskInHub: false`', '`handleFlagged`', '`withdrawNotice(id, at)`', 'cannot release a rename', '`renamesEnabled()` is `false`',
+      '`withMemoryNames(store)`',
+    ]) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('core: the experimental list, the table rows, the retention defaults and the upgrade notes are there', () => {
+    const list = flat(section(coreDoc, 'What is experimental in 0.1.9'));
+    for (const needle of ['`cw.appeals`', '`AppealSettings`', '`NameSettings`', '`cw.names.requireRename`', '`cw.people.accountIds`', '`rename.required`', '`withMemoryAppeals`', '`withMemoryNames`', '`AppealDialog`', '`nameReasonText`', '`appealsRateLimit`', '`includeAccounts`']) {
+      expect(list, needle).toContain(needle);
+    }
+    for (const row of ['| `cw.appeals` |', '| `cw.names` |', '| `cw.people` |']) expect(core, row).toContain(row);
+    expect(core).toContain('appeal statements 90 (`appealStatementsMs`, may be 0), appeals 365 (`appealsMs`, never less than 90), kept blocked names 30 (`blockedNamesMs`, may be 0)');
+    const up = flat(section(coreDoc, 'Upgrading to 0.1.9'));
+    for (const needle of ['one-way', 'Back it up first', '`NoticeKind` gains `rename_required`, `appeal_upheld`, `appeal_reduced` and `appeal_revoked`', '`NameReason` gains `name_profane`', '`AUDIT_ACTIONS` gains `appeal.view`, `appeal.decide` and `name.rename_required`', '`KIT_EVENT_TYPES` gains', '`PurgeResult` gains `appeals`, `appealStatements`, `blockedNames` and `appealsClosed`', 'A reduction on appeal is not a false positive', 'The prompt version is now 4', 'once per open report', '`purgeNotices` has an optional second argument']) {
+      expect(up, needle).toContain(needle);
+    }
+  });
+
+  it('core: the AI section says prompt version 4 changes the hash and re-reads open reports against the daily caps, appeals on or off', () => {
+    const ai = flat(section(coreDoc, 'The AI (levels 1 and 2)'));
+    for (const needle of ['prompt version is 4 for everyone', 'changes the input hash', 'marked stale and read again, once per open report', 'daily call and money caps', 'appeal cautions and corrective examples']) expect(ai, needle).toContain(needle);
+    expect(ai).not.toContain('prompt version is 3 for everyone');
+  });
+
+  it('core: the security notes name the two new kinds of player text', () => {
+    expect(section(coreDoc, 'Security notes')).toMatch(/Two more kinds of player text, both opt-in/);
+  });
+
+  it('http: the appeal and name routes, the new bodies, the limiter and the webhook option are described', () => {
+    for (const needle of [
+      '| `GET /appeals?status&cursor&limit` |', '| `GET /appeals/:id` |', '| `POST /appeals/:id/decide` |', '| `POST /people/:ref/rename` |', '| `GET /appeals` |', '| `POST /appeals { noticeId, statement }` |',
+      '**No statement is in a list.**', '`granted` counts revoked appeals only', '`appealsRateLimit`', '10 an hour per identity', '`features` (`@experimental`, new in 0.1.9) is `{ appeals, renames, keepBlocked }`',
+      'With all three off the body is what 0.1.8 sent.', '`source=name`', '`handleFlagged: true`', '`targetHandleFlagged`', 'It is a display flag, not a redaction', '`includeAccounts: true`',
+      '`appeal.created`, `appeal.decided` and `rename.required`', '`permissions: { \'appeals.decide\': \'moderator\' }`', 'give each moderator their own login', 'peer range on core is `^0.1.9`',
+      '`name_profane`', 'Also `POST /people/:ref/rename`.',
+    ]) {
+      expect(httpDoc, needle).toContain(needle);
+    }
+  });
+
+  it('http: every route the appeal and name tables name exists in the route sources', () => {
+    const sources = read('packages/http/src/admin/appeals.ts') + read('packages/http/src/admin/names.ts') + read('packages/http/src/player.ts');
+    for (const route of ["'GET /appeals'", "'GET /appeals/stats'", "'GET /appeals/:id'", "'POST /appeals/:id/decide'", "'POST /people/:ref/rename'", "'POST /appeals'"]) expect(sources, route).toContain(route);
+  });
+
+  it('player-react: the appeals section says what the prop does, the new words to translate (counted from the catalog), and the older version', () => {
+    const doc = flat(section(playerDoc, 'Install') + playerDoc.slice(playerDoc.indexOf('### Appeals'), playerDoc.indexOf('### Transports')));
+    for (const needle of ['`appeals`', '`AppealDialog`', '`appealUrl` is not used then', 'older than 0.1.9', '`nameReasonText(t, reason)`', '`@chatwarden/core` is a peer too (`^0.1.9`)', '`AppealRefusal`, `PlayerAppeal` and `NameReason`']) {
+      expect(doc, needle).toContain(needle);
+    }
+    const catalog = read('packages/player-react/src/i18n.ts');
+    const count = (prefix: string): number => [...catalog.matchAll(new RegExp(`^ {2}'${prefix.replaceAll('.', '\\.')}[a-zA-Z_.]*'`, 'gm'))].length;
+    expect(count('player.appeal.')).toBe(18);
+    expect(count('player.name.')).toBe(2);
+    expect(doc).toContain('28 keys to `en`: 18 `player.appeal.*`, 2 `player.name.*`');
+    for (const kind of ['rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked']) {
+      expect(catalog, `title ${kind}`).toContain(`'player.notice.title.${kind}'`);
+      expect(catalog, `body ${kind}`).toContain(`'player.notice.body.${kind}'`);
+    }
+  });
+
+  it('hub-react: the Advanced panels read in the order the screen mounts them, the lighter picker offers no custom length, and Simple\'s Person page has the rename choice', () => {
+    const row = flat(hubDoc.slice(hubDoc.indexOf('| `#/settings/advanced` |'), hubDoc.indexOf('\n', hubDoc.indexOf('| `#/settings/advanced` |'))));
+    const at = (name: string): number => row.indexOf(`**${name}**`);
+    expect(at('Slow mode and flooding')).toBeGreaterThan(0);
+    expect(at('Signals')).toBeGreaterThan(at('Slow mode and flooding'));
+    expect(at('Appeals')).toBeGreaterThan(at('Signals'));
+    expect(at('Names')).toBeGreaterThan(at('Appeals'));
+    const advanced = read('packages/hub-react/src/screens/AdvancedSettings.tsx');
+    const mounted = ['LazyPaceSettings', 'LazySignalSettings', 'LazyAppealSettings', 'LazyNameSettings'].map((n) => advanced.indexOf(`<${n} `));
+    expect([...mounted].sort((a, b) => a - b)).toEqual(mounted);
+    const doc = flat(hubDoc);
+    for (const needle of ['a custom length is never offered', 'shows on the Person page in Simple too', '`^0.1.9` for both', 'Translators: words new in 0.1.9', '`displayName(t, { handle, flagged, revealed })`']) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('discord: the two appeal posts, what they never carry, severeOnly and the peer floor', () => {
+    const doc = flat(readme('discord'));
+    for (const needle of ['Appeal filed against a 24-hour chat restriction, Rule 2.', 'Appeal decided: lighter.', 'never carries the statement', '`rename.required`', 'only appeals under a severe rule post', '`^0.1.9`', 'no appeal statement']) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('store-memory and store-sqlite: the opt-in wrappers, and migration 22 one-way with a back-up note', () => {
+    const memory = flat(readme('store-memory'));
+    for (const needle of ['`withMemoryAppeals(store)`', '`withMemoryNames(store)`', '`withdrawNotice`', 'refused when it is created']) expect(memory, needle).toContain(needle);
+    const sqlite = flat(readme('store-sqlite'));
+    for (const needle of ['Migration 22 adds two tables: `kit_appeals`', '`kit_blocked_names`', '`kit_sanctions.report_id`', '`corrective` column on `kit_ai_outcomes`', 'rebuilds `kit_notices`', 'a 0.1.8 or older store refuses a database at version 22', 'back up the file before upgrading', '`retention.appealStatementsMs`']) {
+      expect(sqlite, needle).toContain(needle);
+    }
+  });
+
+  it('tiny-chat: the appeals demo switch is documented and the server honours the name it documents', () => {
+    const doc = flat(read('examples/tiny-chat/README.md'));
+    for (const needle of ['## Appeals and renames (demo, optional)', '`CW_DEMO_APPEALS=1`', '`startServer({ demoAppeals })`', 'same_decider']) expect(doc, needle).toContain(needle);
+    expect(read('examples/tiny-chat/server.ts')).toContain("process.env.CW_DEMO_APPEALS === '1'");
+  });
+
+  it('the project docs say it exists: status and the parked list', () => {
+    const status = read('docs/status.md');
+    expect(status).toMatch(/K7b: appeals and offensive names/);
+    expect(flat(status)).toContain('names the word list flags are hidden in the hub until shown, on by default');
+    expect(flat(status)).toContain('a reduction on appeal is not a false positive');
+    expect(status).not.toMatch(/- offensive names\n/);
+    const follow = flat(read('docs/plans/follow-ups.md'));
+    for (const needle of ['## Appeals and names (0.1.9), parked', 'Appeals by reporters', 'A free-text reply to the player', 'Claims on appeals', 'Auto-expiry of an old open appeal', 'Gates for AI levels 3 and 4', 'Casebook marks are per report']) {
+      expect(follow, needle).toContain(needle);
+    }
+  });
+
+  it('every CHANGELOG says in its first line that 0.1.9 adds notice kinds and a one-way migration, and carries the upgrade notes', () => {
+    for (const dir of published) {
+      const log = flat(read('packages', dir, 'CHANGELOG.md'));
+      const at = log.indexOf('## 0.1.9');
+      expect(at, dir).toBeGreaterThanOrEqual(0);
+      const text = log.slice(at, log.indexOf('## 0.1.8', at));
+      expect(text.slice(0, 400), `${dir} first line`).toContain('Adds notice kinds and a one-way migration');
+      for (const needle of [
+        '`rename_required`, `appeal_upheld`, `appeal_reduced` and `appeal_revoked` join `NoticeKind`', '`assertNever`', 'SQLite migration 22 is one-way', 'Take a backup',
+        'cannot be opened by 0.1.8 or older', '**A reduction on appeal is not a false positive**', '`names.maskInHub` (default `true`)', 'the one default-on display change',
+        '`overrides.names.maskInHub: false`', '`appeals.read` (default `moderator`', '`appeals.decide` (default `senior`', 'An older player-react shows the generic title',
+        '28 keys', 'from 11 KB to 14 KB', 'from 82 KB to 88 KB', 'The AI prompt version is now 4 for everyone', 'count against your daily call and money caps',
+        '`PurgeResult` gains `appeals`, `appealStatements`, `blockedNames` and `appealsClosed`', '`withdrawNotice(id, at)` is new and optional', 'a custom store without it has renames off',
+        '`closeOrphanAppeals`', '`clearStatement`', '`purgeNotices(before, unseen?)`', '`@experimental` until 0.2', 'No new package is published',
+      ]) {
+        expect(text, `${dir}: ${needle}`).toContain(needle);
+      }
+      // Every raised floor is named with the API that forced it.
+      for (const pkg of ['store-memory', 'store-sqlite', 'http', 'discord', 'hub-react', 'player-react']) expect(text, `${dir} names ${pkg}`).toContain(`\`@chatwarden/${pkg}\``);
+      for (const api of ['`AppealRow` and `BlockedNameRow`', '`cw.appeals`', '`APPEAL_STATEMENT_MAX`', '`AppealRefusal`, `PlayerAppeal` and `NameReason`', 'the two appeal events']) expect(text, `${dir}: ${api}`).toContain(api);
+    }
+  });
+
+  it('the 0.1.8 CHANGELOG text is unchanged by 0.1.9 (the control: it does not mention migration 22)', () => {
+    const log = flat(read('packages', 'core', 'CHANGELOG.md'));
+    const at = log.indexOf('## 0.1.8');
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(log.slice(at, log.indexOf('## 0.1.7', at))).not.toContain('migration 22');
+  });
+
+  it('the control: a feature the docs do not have is not found', () => {
+    expect(core).not.toContain('`definitelyNotAnAppealSetting`');
   });
 });

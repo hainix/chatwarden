@@ -39,6 +39,19 @@ export function auditContract(name: string, make: () => Store): void {
       expect(got.map((r) => r.action).sort()).toEqual([...AUDIT_ACTIONS].sort());
     });
 
+    it('the appeal and name rows round-trip: an appeal target, no target on appeal.view, a person target on name.rename_required', () => {
+      const s = make();
+      const view = row('v1', NOW, { action: 'appeal.view', target: { type: 'appeal', ref: 'ap_1' } });
+      const list = row('v2', NOW + 1, { action: 'appeal.view', target: null });
+      const decide = row('v3', NOW + 2, { role: 'senior', action: 'appeal.decide', target: { type: 'appeal', ref: 'ap_1' } });
+      const rename = row('v4', NOW + 3, { role: 'senior', action: 'name.rename_required', target: { type: 'person', ref: 's_abc' } });
+      for (const r of [view, list, decide, rename]) s.insertAudit(r);
+      expect(s.listAudit({ limit: 10 })).toEqual([rename, decide, list, view]);
+      expect(s.listAudit({ limit: 10, action: 'appeal.decide' })).toEqual([decide]);
+      expect(s.listAudit({ limit: 10, action: 'appeal.view' })).toEqual([list, view]);
+      expect(s.listAudit({ limit: 10, action: 'name.rename_required' })).toEqual([rename]);
+    });
+
     it('an ai.read row (an ai: actor, no role, a report target) round-trips and filters by action and actor', () => {
       const s = make();
       const ai = row('a1', NOW, { actor: 'ai:anthropic:claude-haiku-5-5', role: null, action: 'ai.read', target: { type: 'report', ref: 'rep_1' } });

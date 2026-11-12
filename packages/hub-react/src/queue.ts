@@ -14,6 +14,10 @@ export interface QueueGroup {
   handle: string | null;
   /** Every handle the reports recorded, newest first. */
   handles: string[];
+  /** True when the server flags `handle` (`names.maskInHub`): the hub hides it until shown. Absent when it is not, and from an older server. */
+  handleFlagged?: true;
+  /** The handles among `handles` the server flags. Absent when there are none. */
+  flaggedHandles?: string[];
   /** Distinct categories, in the order the newest reports first gave them. */
   categories: ReportCategory[];
   /** Distinct reasons the reporters gave, in the order the newest reports first gave them (`id` null: no reason given). A hint, never the truth. */
@@ -30,6 +34,8 @@ export interface QueueGroup {
   reporterPersons: string[];
   /** The newest handle a report recorded for each of those reporters; a reporter none recorded one for has no entry (name them by their tag). */
   reporterHandles: Record<string, string>;
+  /** The reporters (by staff ref) whose handle in `reporterHandles` the server flags. Absent when there are none. */
+  reporterHandlesFlagged?: Record<string, true>;
   /** When the oldest report in the group was filed, and the newest. */
   firstAt: number;
   latestAt: number;
@@ -171,6 +177,8 @@ export function groupQueue(
     const reporterPersons: string[] = [];
     // No prototype: a reporter's ref is an opaque string, and `__proto__` or `constructor` must be a key like any other.
     const reporterHandles: Record<string, string> = Object.create(null) as Record<string, string>;
+    const flaggedHandles: string[] = [];
+    const reporterFlagged: Record<string, true> = Object.create(null) as Record<string, true>;
     let open = 0;
     let actioned = 0;
     let dismissed = 0;
@@ -186,6 +194,7 @@ export function groupQueue(
         for (const v of r.viewing ?? []) viewing.add(v);
       }
       if (r.targetHandle !== null && !handles.includes(r.targetHandle)) handles.push(r.targetHandle);
+      if (r.targetHandle !== null && r.targetHandleFlagged === true && !flaggedHandles.includes(r.targetHandle)) flaggedHandles.push(r.targetHandle);
       if (!categories.includes(r.category)) categories.push(r.category);
       // A server from before reasons sends none at all: that reads as no reason.
       const reason = r.reportedReason ?? null;
@@ -195,7 +204,10 @@ export function groupQueue(
       if (!reporterPersons.includes(r.reporterPerson)) reporterPersons.push(r.reporterPerson);
       // Newest first, so the first handle seen for a reporter is their latest. An older server sends none at all.
       const reporterHandle = r.reporterHandle ?? null;
-      if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) reporterHandles[r.reporterPerson] = reporterHandle;
+      if (reporterHandle !== null && !Object.hasOwn(reporterHandles, r.reporterPerson)) {
+        reporterHandles[r.reporterPerson] = reporterHandle;
+        if (r.reporterHandleFlagged === true) reporterFlagged[r.reporterPerson] = true;
+      }
       if (r.status === 'open') {
         if (r.boosted === true) boosted = true;
         open += 1;
@@ -208,6 +220,8 @@ export function groupQueue(
       person,
       handle: handles[0] ?? null,
       handles,
+      ...(handles[0] !== undefined && flaggedHandles.includes(handles[0]) ? { handleFlagged: true as const } : {}),
+      ...(flaggedHandles.length > 0 ? { flaggedHandles } : {}),
       categories,
       reasons,
       reports: list.length,
@@ -218,6 +232,7 @@ export function groupQueue(
       reporters: reporters.size,
       reporterPersons,
       reporterHandles,
+      ...(Object.keys(reporterFlagged).length > 0 ? { reporterHandlesFlagged: { ...reporterFlagged } } : {}),
       firstAt: (list[list.length - 1] as ReportSummary).createdAt,
       latestAt: (list[0] as ReportSummary).createdAt,
       oldestOpenAt,

@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import * as root from '../src/index.js';
 import * as admin from '../src/admin-entry.js';
+import type { Me as AdminMe, MeFeatures as AdminMeFeatures } from '../src/admin-entry.js';
+import type { Me, MeFeatures } from '../src/index.js';
 
 // `@chatwarden/http/admin` is the entry a browser bundles. It carries the staff API and what it needs, and nothing that
 // imports a Node builtin: no player routes, no webhooks, no Express adapter.
@@ -59,6 +61,16 @@ describe('@chatwarden/http/admin entry', () => {
     ]) {
       expect(name in admin, name).toBe(true);
     }
+  });
+
+  it('exports MeFeatures (the shape of GET /me features) as a type, the same one the root gives, so a browser hub can name it', () => {
+    expectTypeOf<AdminMeFeatures>().toEqualTypeOf<MeFeatures>();
+    expectTypeOf<AdminMe['features']>().toEqualTypeOf<Me['features']>();
+    expectTypeOf<AdminMeFeatures>().toEqualTypeOf<{ appeals: boolean; renames: boolean; keepBlocked: boolean }>();
+    // A type has no run-time binding in either entry; the entry file says it by name.
+    expect('MeFeatures' in admin).toBe(false);
+    const text = readFileSync(join(SRC, 'admin-entry.ts'), 'utf8');
+    expect(text).toMatch(/export type \{[^}]*\bMeFeatures\b[^}]*\} from '\.\/admin\/index\.js'/);
   });
 
   it('shares identity with the root export: the same functions and classes, not copies', () => {

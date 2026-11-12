@@ -64,6 +64,7 @@ describe('the outcome row', () => {
       agreement: 'agree',
       badFaith: false,
       reversed: false,
+      corrective: false,
       dontTeach: false,
     });
     expect(row?.detail).toMatchObject({ verdict: true, rule: true, lines: 1, oneClick: false });

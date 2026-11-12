@@ -34,6 +34,9 @@ export function permissionFor(route: Route): PermissionKey | null {
       return 'gaps.read';
     case 'audit':
       return 'audit.read';
+    case 'appeals':
+    case 'appeal':
+      return 'appeals.read';
     case 'guide':
     case 'settings':
       return 'policy.read';

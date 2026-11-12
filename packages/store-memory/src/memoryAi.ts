@@ -256,7 +256,7 @@ class MemoryAi extends MemoryStore {
   insertAiOutcome(row: AiOutcomeInsert): boolean {
     if (this.aiOutcomes.has(row.reportId)) return false;
     // A bad-faith row can never teach, so its chat text is not kept.
-    this.aiOutcomes.set(row.reportId, { ...structuredClone(row), example: row.badFaith ? null : structuredClone(row.example), reversed: false, dontTeach: false });
+    this.aiOutcomes.set(row.reportId, { ...structuredClone(row), example: row.badFaith ? null : structuredClone(row.example), reversed: false, corrective: false, dontTeach: false });
     this.undoWith(() => this.aiOutcomes.delete(row.reportId));
     return true;
   }
@@ -266,14 +266,15 @@ class MemoryAi extends MemoryStore {
     return row === undefined ? null : structuredClone(row);
   }
 
-  markAiOutcome(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean {
+  markAiOutcome(reportId: string, patch: { reversed?: true; dontTeach?: true; corrective?: true }): boolean {
     const row = this.aiOutcomes.get(reportId);
     if (row === undefined) return false;
-    const before = { reversed: row.reversed, dontTeach: row.dontTeach, example: row.example };
+    const before = { reversed: row.reversed, corrective: row.corrective, dontTeach: row.dontTeach, example: row.example };
     if (patch.reversed === true) row.reversed = true;
+    if (patch.corrective === true) row.corrective = true;
     if (patch.dontTeach === true) row.dontTeach = true;
-    // A row that can no longer teach does not keep its chat text.
-    if (row.reversed || row.dontTeach) row.example = null;
+    // A row that can no longer teach does not keep its chat text; a corrective one (a revoked appeal) keeps it to teach the opposite sign.
+    if (row.dontTeach || (row.reversed && !row.corrective)) row.example = null;
     this.undoWith(() => Object.assign(row, before));
     this.bump();
     return true;
@@ -287,6 +288,11 @@ class MemoryAi extends MemoryStore {
       if (r.rule !== rule || r.severity !== severity || !teachable(r, since)) continue;
       out.push({ reportId: r.reportId, decidedAt: r.decidedAt, agreement: r.agreement as 'agree' | 'override', example: structuredClone(r.example!) });
     }
+    // At most one corrective row (the newest) beside them; it is not counted by `aiTeachableCount`.
+    const cor = [...this.aiOutcomes.values()]
+      .filter((r) => r.corrective && r.rule === rule && r.severity === severity && r.decidedAt >= since && r.example !== null && r.agreement !== 'none' && !r.dontTeach && !r.badFaith)
+      .sort((a, b) => b.decidedAt - a.decidedAt || compare(b.reportId, a.reportId))[0];
+    if (cor !== undefined) out.push({ kind: 'corrective', reportId: cor.reportId, decidedAt: cor.decidedAt, agreement: cor.agreement as 'agree' | 'override', example: structuredClone(cor.example!) });
     return out;
   }
 
@@ -305,7 +311,7 @@ class MemoryAi extends MemoryStore {
       row[r.agreement] += 1;
       // A one-click is an agreement accepted as it stood; a flag on any other row is not counted.
       if (r.detail.oneClick && r.agreement === 'agree') row.oneClick += 1;
-      if ((r.aiVerdict === 'upheld' || r.aiVerdict === 'noted') && (r.verdict === 'no_action' || r.reversed)) row.falsePositives += 1;
+      if ((r.aiVerdict === 'upheld' || r.aiVerdict === 'noted') && (r.verdict === 'no_action' || r.corrective)) row.falsePositives += 1;
       by.set(r.rule, row);
     }
     return [...by.values()].sort((a, b) => ruleRank(a.rule) - ruleRank(b.rule) || ruleOrder(a.rule, b.rule));

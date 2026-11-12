@@ -101,6 +101,11 @@ export function choiceLabel(t: HubT, locale: string, choice: Choice): string {
   return t('hub.decide.choice.timed', { kind: kindLabel(t, choice.kind), length: lengthPhrase(t, locale, choice.durationMs) });
 }
 
+/** What a sanction was, in words: "Chat restriction, 24 hours", "Ban, permanent", "Warning" (a warning and a note have no length). Shared by the appeals list and the appeal card. */
+export function sanctionWhat(t: HubT, locale: string, s: { kind: SanctionKind; startsAt: number; endsAt: number | null }): string {
+  return choiceLabel(t, locale, { kind: s.kind, durationMs: !hasLength(s.kind) || s.endsAt === null ? null : s.endsAt - s.startsAt });
+}
+
 /** The ladder's suggested outcome, in words. */
 export function outcomeLabel(t: HubT, locale: string, outcome: Suggestion['outcome']): string {
   const choice = outcomeChoice(outcome);
@@ -130,13 +135,36 @@ export function decideErrorText(t: HubT, error: HubError): string {
   return errorText(t, error);
 }
 
+/**
+ * Why a ruling on an appeal did not go through, in words from the catalog: the kit's own words are never shown. Each of the three 409s says what it means; a length
+ * the profile does not offer is the decision form's sentence.
+ */
+export function appealErrorText(t: HubT, error: HubError): string {
+  if (error.code === 'same_decider') return t('hub.appeals.fail.sameDecider');
+  if (error.code === 'already_decided') return t('hub.appeals.fail.alreadyDecided');
+  if (error.code === 'gone') return t('hub.appeals.fail.gone');
+  if (error.status === 400) return error.code === 'duration_not_offered' ? t('hub.error.durationNotOffered') : t('hub.appeals.fail.invalid');
+  return errorText(t, error);
+}
+
 /** Why a term change did not go through. A flat 400 `invalid_term` names no field and no reason, so one sentence says what it may be. */
 export function termErrorText(t: HubT, error: HubError): string {
   if (error.status === 400) return error.code === 'invalid_term' ? t('hub.terms.refused') : t('hub.terms.form.fail.invalid');
   return errorText(t, error);
 }
 
-/** How a reported person is named in a queue or a toast: their handle, or "Person" and the short tag. */
-export function groupName(t: HubT, g: { handle: string | null; person: string }): string {
-  return g.handle ?? t('hub.person.unnamed', { tag: personTag(g.person) });
+/**
+ * A handle as text, and the only way one becomes text (names, design 5.5). A handle the server flags (`names.maskInHub`) is the same "hidden" label a blocked line
+ * has until a moderator shows it; a handle that is not flagged, or from a server that flags nothing, is as typed. No handle is the empty string: a caller that
+ * must say something else (the tag) says it. The label holds no part of the name, not even its length.
+ * @experimental
+ */
+export function displayName(t: HubT, name: { handle: string | null; flagged?: boolean | undefined; revealed?: boolean | undefined }): string {
+  if (name.handle === null) return '';
+  return name.flagged === true && name.revealed !== true ? t('hub.mask.label') : name.handle;
+}
+
+/** How a reported person is named in a queue or a toast: their handle (hidden when flagged), or "Person" and the short tag. */
+export function groupName(t: HubT, g: { handle: string | null; person: string; handleFlagged?: boolean | undefined }, revealed = false): string {
+  return g.handle === null ? t('hub.person.unnamed', { tag: personTag(g.person) }) : displayName(t, { handle: g.handle, flagged: g.handleFlagged, revealed });
 }

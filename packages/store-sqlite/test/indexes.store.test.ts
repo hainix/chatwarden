@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { SanctionRow, StrikeRow } from '@chatwarden/core';
 import { MIGRATIONS, openStore } from '../src/index.js';
 import type { SqliteStore } from '../src/index.js';
+import { insertOldSanction } from './oldRows.js';
 
 // Migration 18: indexes for the hot read queries on sanctions (by start time) and strikes (by time). Every plan check runs the
 // query exactly as the store issues it: the test records the SQL and arguments the store method prepares, then asks SQLite for the
@@ -69,10 +70,11 @@ function strike(i: number): StrikeRow {
 }
 
 /** Rows on the version 17 schema: a few hundred of each, a mix of kinds, sources, targets (subject and ip), times and revocations. */
-function seed(store: SqliteStore): void {
+function seed(store: SqliteStore, db: DatabaseSync): void {
+  // Raw inserts: the store's own insertSanctionGroup writes the report_id column that only exists from migration 22.
   for (let i = 0; i < 300; i++) {
-    store.insertSanctionGroup([sanction(i)]);
-    if (i % 5 === 0) store.insertSanctionGroup([sanction(1000 + i, { groupId: `g${i}`, refCode: `M-${String(i).padStart(5, '0')}`, targetType: 'ip', value: `h_${i}` })]);
+    insertOldSanction(db, sanction(i));
+    if (i % 5 === 0) insertOldSanction(db, sanction(1000 + i, { groupId: `g${i}`, refCode: `M-${String(i).padStart(5, '0')}`, targetType: 'ip', value: `h_${i}` }));
     store.insertStrike(strike(i));
   }
   store.revokeSanctionGroup('g3', 'mod', NOW, 'synthetic');
@@ -113,7 +115,7 @@ function planOf(db: DatabaseSync, seen: Seen[], table: 'kit_sanctions' | 'kit_st
 function openAt17(db: DatabaseSync, seedRows = true): SqliteStore {
   const store = openStore({ db, migrations: MIGRATIONS.slice(0, 17) });
   expect(store.schemaVersion()).toBe(17);
-  if (seedRows) seed(store);
+  if (seedRows) seed(store, db);
   return store;
 }
 

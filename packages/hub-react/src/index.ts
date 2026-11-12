@@ -1,4 +1,4 @@
-export const VERSION = '0.1.8';
+export const VERSION = '0.1.9';
 
 export { Hub } from './Hub.js';
 export type { HubProps } from './Hub.js';
@@ -75,5 +75,6 @@ export { useHubAction, useHubData, usePagedList } from './hooks.js';
 export type { ActionResult, HubAction, HubData, PagedList } from './hooks.js';
 
 export { absoluteTime, formatDuration, personTag, relativeTime, waitTone } from './format.js';
+export { displayName } from './labels.js';
 
 export type * from './types.js';

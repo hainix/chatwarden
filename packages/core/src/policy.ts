@@ -6,7 +6,7 @@ import type { PolicyLayer, PolicySection, ResolvedProfile } from './profile.js';
 import { playerReporting } from './reporting.js';
 import type { PlayerReporting } from './reporting.js';
 import type { RuleRef } from './rules.js';
-import { errorClass, safeWarn } from './log.js';
+import { errorClass, safeWarn, ThrottledWarn } from './log.js';
 import { RETENTION_DEFAULTS } from './retention.js';
 import { checkSignalFeeds, pruneSignalFeeds, SIGNAL_FEED_NAMES } from './signals.js';
 import type { SignalDropReason } from './signals.js';
@@ -141,8 +141,13 @@ export class PolicyService {
   private readonly signalsMs: () => number;
   /** The chat rate in force (`limits.chatRate`), for `get().limits`. */
   private readonly chatRate: { count: number; windowMs: number };
+  /** Whether the store has the appeal methods. Without them a layer cannot turn appeals on: it is refused when saved, and kept off when read. */
+  private readonly appealsKept: boolean;
+  private readonly appealsWarn: ThrottledWarn;
 
-  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number } }) {
+  constructor(deps: { store: Store; clock: Clock; logger: Logger | undefined; base: ResolvedProfile; signalsMs?: () => number; chatRate?: { count: number; windowMs: number }; appealsKept?: boolean }) {
+    this.appealsKept = deps.appealsKept ?? true;
+    this.appealsWarn = new ThrottledWarn(deps.logger, deps.clock);
     this.signalsMs = deps.signalsMs ?? (() => RETENTION_DEFAULTS.signalsMs);
     this.chatRate = Object.freeze({ count: deps.chatRate?.count ?? RATE_LIMIT, windowMs: deps.chatRate?.windowMs ?? RATE_WINDOW_MS });
     this.store = deps.store;
@@ -163,6 +168,16 @@ export class PolicyService {
     this.adopt(this.store.loadPolicyLayer?.() ?? null);
   }
 
+  /**
+   * The profile as the store can serve it: a layer that turned appeals on over a store without the appeal methods leaves them off
+   * (a code profile that asked for them is refused at creation, never here). Warned by class only, throttled.
+   */
+  private served(effective: ResolvedProfile): ResolvedProfile {
+    if (this.appealsKept || !effective.appeals.enabled || this.base.appeals.enabled) return effective;
+    this.appealsWarn.warn('chatwarden.appeals_unsupported_store', {});
+    return Object.freeze({ ...effective, appeals: Object.freeze({ ...effective.appeals, enabled: false }) });
+  }
+
   /** Make `stored` the layer in force: the effective profile is rebuilt, or the base kept when the layer cannot be used. */
   private adopt(stored: { layer: PolicyLayer; version: number } | null): void {
     const version = stored?.version ?? 0;
@@ -173,7 +188,7 @@ export class PolicyService {
       // What is read and shown is the layer in force: the stale feeds are out of it, so a save that sends it back is never refused for them.
       const { layer: inForce, dropped } = this.withoutStaleFeeds(layer);
       const shown = dropped.length === 0 ? layer : frozenCopy(inForce);
-      this.state = { effective: applyPolicyLayer(this.base, shown), layer: shown, version, ...(dropped.length === 0 ? {} : { dropped: Object.freeze(dropped.map((d) => Object.freeze(d))) }) };
+      this.state = { effective: this.served(applyPolicyLayer(this.base, shown)), layer: shown, version, ...(dropped.length === 0 ? {} : { dropped: Object.freeze(dropped.map((d) => Object.freeze(d))) }) };
     } catch (err) {
       if (!(err instanceof ProfileError)) throw err;
       // What `get()` shows is always an object: an unreadable layer reads as empty, with the error beside it.
@@ -311,6 +326,8 @@ export class PolicyService {
       const effective = applyPolicyLayer(this.base, layer);
       // The windows are checked against the retention here, where it is known: a window longer than it could never be met.
       checkSignalFeeds(effective.signals.feeds, effective.signals.kinds, { signalsMs: this.signalsMs() }, 'layer.signals.feeds');
+      // A switch that would do nothing is refused, so the owner is not shown "on" over a store that cannot keep appeals.
+      if (!this.appealsKept && effective.appeals.enabled && !this.base.appeals.enabled) return { ok: false, error: 'invalid', path: 'layer.appeals.enabled' };
     } catch (err) {
       if (err instanceof ProfileError) return { ok: false, error: 'invalid', path: err.path };
       throw err;

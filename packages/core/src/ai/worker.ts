@@ -96,6 +96,8 @@ export interface WorkerEnv {
   examplesFor(report: ReportRecord, prepared: Prepared): AIExampleInput[];
   /** The signal counts about the reported person (`feeds.ai`): a snapshot for this read; empty when the feed is off or nothing qualifies. Fenced by the caller. */
   signalsFor(report: ReportRecord): AISignal[];
+  /** The rules with an elevated or high revoke-on-appeal rate: a snapshot for this read; empty with appeals off or nothing to say. Fenced by the caller. */
+  cautionsFor(): Array<{ rule: number; band: 'elevated' | 'high' }>;
   track(controller: Abortable): void;
   untrack(controller: Abortable): void;
   /** The `ai.read` audit row for a terminal outcome. Fenced by the caller. */
@@ -252,11 +254,17 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
   } catch (err) {
     env.warn('ai.signals_failed', { error: errName(err) });
   }
+  let cautions: Array<{ rule: number; band: 'elevated' | 'high' }> = [];
+  try {
+    cautions = env.cautionsFor();
+  } catch (err) {
+    env.warn('ai.cautions_failed', { error: errName(err) });
+  }
   let input: AIReadInput = prepared.input;
   let exampleIds: string[] = [];
   try {
-    if (examples.length > 0 || signals.length > 0) {
-      input = prepared.build(examples, signals);
+    if (examples.length > 0 || signals.length > 0 || cautions.length > 0) {
+      input = prepared.build(examples, signals, cautions);
       exampleIds = usedExampleIds(examples);
     }
   } catch (err) {

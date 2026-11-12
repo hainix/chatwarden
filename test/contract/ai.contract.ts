@@ -1065,7 +1065,7 @@ export function aiContract(name: string, make: () => Store): void {
         const first = outcome({ reportId: 'x1' });
         expect(s.insertAiOutcome(first)).toBe(true);
         expect(s.insertAiOutcome(outcome({ reportId: 'x1', verdict: 'no_action', agreement: 'override' }))).toBe(false);
-        expect(s.loadAiOutcome('x1')).toEqual({ ...first, reversed: false, dontTeach: false } satisfies AiOutcomeRow);
+        expect(s.loadAiOutcome('x1')).toEqual({ ...first, reversed: false, corrective: false, dontTeach: false } satisfies AiOutcomeRow);
         for (const id of ['x2', 'x3']) s.insertAiOutcome(outcome({ reportId: id, decidedAt: NOW + (id === 'x2' ? 1 : 2) }));
         expect(reportIds(s.aiExamples('3', 'hostile', 10, 0)).sort()).toEqual(['x1', 'x2', 'x3']);
         expect(s.markAiOutcome('x2', { reversed: true })).toBe(true);
@@ -1081,7 +1081,7 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.loadAiOutcome('nope')).toBeNull();
         const bare = outcome({ reportId: 'bare', readId: null, rule: null, severity: null, aiVerdict: null, agreement: 'none', level: 1, example: null });
         s.insertAiOutcome(bare);
-        expect(s.loadAiOutcome('bare')).toEqual({ ...bare, reversed: false, dontTeach: false });
+        expect(s.loadAiOutcome('bare')).toEqual({ ...bare, reversed: false, corrective: false, dontTeach: false });
       });
 
       it('a bad-faith dismissal keeps its flag on the row', () => {
@@ -1146,6 +1146,37 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.aiStats(0)[0]).toMatchObject({ decided: 3 });
       });
 
+      it('corrective defaults to false; markAiOutcome with corrective persists it, keeps the example text, and is never cleared', () => {
+        const s = ai(make());
+        s.insertAiOutcome(outcome({ reportId: 'k' }));
+        s.insertAiOutcome(outcome({ reportId: 'plain' }));
+        expect(s.loadAiOutcome('k')).toMatchObject({ reversed: false, corrective: false });
+        expect(s.markAiOutcome('k', { reversed: true, corrective: true })).toBe(true);
+        expect(s.loadAiOutcome('k')).toMatchObject({ reversed: true, corrective: true, example: example() });
+        // a plain reversal (a reduced appeal) still drops the text and is not corrective
+        expect(s.markAiOutcome('plain', { reversed: true })).toBe(true);
+        expect(s.loadAiOutcome('plain')).toMatchObject({ reversed: true, corrective: false, example: null });
+        // never cleared, and a later plain mark does not clear it or drop the text
+        expect(s.markAiOutcome('k', { reversed: true })).toBe(true);
+        expect(s.loadAiOutcome('k')).toMatchObject({ corrective: true, example: example() });
+        // a dont-teach mark still drops the text of a corrective row
+        expect(s.markAiOutcome('k', { dontTeach: true })).toBe(true);
+        expect(s.loadAiOutcome('k')).toMatchObject({ corrective: true, dontTeach: true, example: null });
+        expect(s.markAiOutcome('nope', { reversed: true, corrective: true })).toBe(false);
+      });
+
+      it('a corrective mark is undone with its transaction', () => {
+        const s = ai(make());
+        s.insertAiOutcome(outcome({ reportId: 'k' }));
+        expect(() =>
+          s.transaction(() => {
+            s.markAiOutcome('k', { reversed: true, corrective: true });
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(s.loadAiOutcome('k')).toMatchObject({ reversed: false, corrective: false, example: example() });
+      });
+
       it('a bad-faith outcome is stored without example text', () => {
         const s = ai(make());
         s.insertAiOutcome(outcome({ reportId: 'bf', badFaith: true, verdict: 'no_action', agreement: 'override' }));
@@ -1160,6 +1191,53 @@ export function aiContract(name: string, make: () => Store): void {
         if (row) row.reversed = true;
         expect(s.loadAiOutcome('c')?.example?.lines).toHaveLength(2);
         expect(s.loadAiOutcome('c')?.reversed).toBe(false);
+      });
+    });
+
+    describe('aiExamples: the corrective example', () => {
+      it('returns at most one corrective row (the newest) of the same rule and level beside the ordinary rows, flagged, and aiTeachableCount does not count it', () => {
+        const s = ai(make());
+        for (const id of ['n1', 'n2']) s.insertAiOutcome(outcome({ reportId: id, decidedAt: NOW - 5 * DAY }));
+        for (const [id, at] of [['c-old', NOW - 3 * DAY], ['c-new', NOW - 1 * DAY]] as const) {
+          s.insertAiOutcome(outcome({ reportId: id, decidedAt: at }));
+          s.markAiOutcome(id, { reversed: true, corrective: true });
+        }
+        s.insertAiOutcome(outcome({ reportId: 'c-other-rule', rule: '4' }));
+        s.markAiOutcome('c-other-rule', { reversed: true, corrective: true });
+        const rows = s.aiExamples('3', 'hostile', 10, 0);
+        expect(reportIds(rows)).toEqual(['n2', 'n1', 'c-new']);
+        expect(rows.map((r) => r.kind)).toEqual([undefined, undefined, 'corrective']);
+        expect(rows[2]).toEqual({ kind: 'corrective', reportId: 'c-new', decidedAt: NOW - DAY, agreement: 'agree', example: example() } satisfies AiExampleRow);
+        // the ordinary rows are cut to the limit, the corrective one is on top of that
+        expect(reportIds(s.aiExamples('3', 'hostile', 1, 0)).length).toBe(2);
+        expect(s.aiTeachableCount(0)).toBe(2);
+        // other level, other rule, a window past it: none
+        expect(s.aiExamples('3', 'rude', 10, 0)).toEqual([]);
+        expect(reportIds(s.aiExamples('4', 'hostile', 10, 0))).toEqual(['c-other-rule']);
+        expect(s.aiExamples('3', 'hostile', 10, NOW - DAY + 1).map((r) => r.kind)).toEqual([]);
+      });
+
+      it('a corrective row with no text, a dont-teach mark, a bad-faith row or no recommendation teaches nothing', () => {
+        const s = ai(make());
+        s.insertAiOutcome(outcome({ reportId: 'no-text', example: null }));
+        s.markAiOutcome('no-text', { reversed: true, corrective: true });
+        s.insertAiOutcome(outcome({ reportId: 'dont' }));
+        s.markAiOutcome('dont', { reversed: true, corrective: true, dontTeach: true });
+        s.insertAiOutcome(outcome({ reportId: 'none', agreement: 'none', aiVerdict: null }));
+        s.markAiOutcome('none', { reversed: true, corrective: true });
+        s.insertAiOutcome(outcome({ reportId: 'bf', badFaith: true, verdict: 'no_action', agreement: 'override' }));
+        s.markAiOutcome('bf', { reversed: true, corrective: true });
+        expect(s.aiExamples('3', 'hostile', 10, 0)).toEqual([]);
+      });
+
+      it('a revoked appeal (corrective) counts as a false positive, a reduced one (reversed only) does not', () => {
+        const s = ai(make());
+        s.insertAiOutcome(outcome({ reportId: 'rev' }));
+        s.insertAiOutcome(outcome({ reportId: 'red' }));
+        s.insertAiOutcome(outcome({ reportId: 'plain' }));
+        s.markAiOutcome('rev', { reversed: true, corrective: true });
+        s.markAiOutcome('red', { reversed: true });
+        expect(s.aiStats(0)[0]).toMatchObject({ rule: '3', decided: 3, falsePositives: 1 });
       });
     });
 
@@ -1244,10 +1322,12 @@ export function aiContract(name: string, make: () => Store): void {
         add('a4', { aiVerdict: 'noted', verdict: 'no_action', agreement: 'override' }); // override and false positive
         add('a5', { aiVerdict: 'no_action', verdict: 'upheld', agreement: 'override' }); // override, not a false positive
         add('a6', { aiVerdict: null, agreement: 'none', level: 1 }); // none
-        add('a7', {}); // agree, later reversed: a false positive
-        s.markAiOutcome('a7', { reversed: true });
+        add('a7', {}); // agree, later revoked on appeal (reversed and corrective): a false positive
+        s.markAiOutcome('a7', { reversed: true, corrective: true });
         add('a8', { aiVerdict: 'no_action', verdict: 'no_action' }); // agree; reversed no_action is not a false positive
         s.markAiOutcome('a8', { reversed: true });
+        add('a9', {}); // agree, later REDUCED on appeal (reversed only): the rule applied, so not a false positive
+        s.markAiOutcome('a9', { reversed: true });
         // uncovered
         add('u1', { rule: 'uncovered', severity: null });
         // no rule
@@ -1256,11 +1336,11 @@ export function aiContract(name: string, make: () => Store): void {
         add('old', { decidedAt: NOW - 60 * DAY });
         const stats = s.aiStats(NOW - 30 * DAY);
         expect(stats).toEqual([
-          { rule: '3', decided: 8, agree: 4, override: 3, none: 1, falsePositives: 3, oneClick: 4 },
+          { rule: '3', decided: 9, agree: 5, override: 3, none: 1, falsePositives: 3, oneClick: 5 },
           { rule: 'uncovered', decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 1 },
           { rule: null, decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 1 },
         ] satisfies AiStatsRow[]);
-        expect(s.aiStats(NOW - 90 * DAY)[0]).toMatchObject({ rule: '3', decided: 9 });
+        expect(s.aiStats(NOW - 90 * DAY)[0]).toMatchObject({ rule: '3', decided: 10 });
         expect(s.aiStats(NOW + 1)).toEqual([]);
       });
 

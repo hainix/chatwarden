@@ -31,7 +31,6 @@ const PEER_RANGE = '^0.1.0';
 // the take-next reason, detailUntil and the store policy, claim, reason and report-detail methods (a store's own types name them, and
 // the staff routes and both React packages call them). That floor is raised on purpose, which overrides changesets'
 // onlyUpdatePeerDependentsWhenOutOfRange (see RELEASING.md, "When a peer floor must rise"). discord, matcher and profanity use none of it.
-const NEW_KIT_RANGE = '^0.1.2';
 // ...and, for 0.1.7 (AI levels 1 and 2), what is new in core and http: the optional AI `Store` methods and the `Ai*` row types that
 // store-memory and store-sqlite name in their signatures, `cw.ai` (which http's queue and case routes call: core 0.1.6 has none), and
 // `assertWithinCeilings` plus the new core types in hub-react, which also names http's `AiReadAgainBody`. It sits above the floors the 0.1.5
@@ -43,11 +42,17 @@ const NEW_KIT_RANGE = '^0.1.2';
 // `signals` profile sections in hub-react, which also reads http's new wire fields. It sits above the 0.1.7 floor, so that set is folded into this one.
 // player-react's `pace` prop uses its own literal union and still imports nothing new from core; hub-element's optional hub-react peer is for types
 // that did not change. discord, matcher and profanity stay at ^0.1.0.
-const NEW_KIT_RANGE_0_1_8 = '^0.1.8';
-const NEEDS_NEW_KIT_0_1_8 = new Set(['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/http', '@chatwarden/hub-react']);
+// ...and, for 0.1.9 (appeals and names), what is new in core and http, which sits above the 0.1.8 floor (so the 0.1.8 set is folded into this one) and, for
+// player-react, above its old ^0.1.2: the optional appeal and blocked-name `Store` methods and `withdrawNotice`, and the `AppealRow` and `BlockedNameRow` types, that
+// store-memory and store-sqlite name in their signatures; `cw.appeals`, the `cw.names` and `cw.people.accountIds` additions, `cw.blocked.names` and the three
+// new event types in http; the two appeal events in discord; `APPEAL_STATEMENT_MAX`, the `appeals` and `names` profile sections and the new types in hub-react, which
+// also reads http's new routes and wire fields; and the TYPES `AppealRefusal`, `PlayerAppeal` and `NameReason` that player-react imports. Each of the six was
+// confirmed with a grep of its source (see "peer floors" below). hub-element's optional peer on hub-react stays at ^0.1.5 (it bundles what it needs and its types
+// are unchanged); core, matcher and profanity keep ^0.1.0.
+const NEW_KIT_RANGE_0_1_9 = '^0.1.9';
+const NEEDS_NEW_KIT = new Set(['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/http', '@chatwarden/discord', '@chatwarden/hub-react', '@chatwarden/player-react']);
 // hub-element's optional peer on hub-react stays at ^0.1.5: it imports only what hub-react has had since then, and its types are unchanged.
 const HUB_REACT_RANGE_FOR_ELEMENT = '^0.1.5';
-const NEEDS_NEW_KIT = new Set(['@chatwarden/player-react']);
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
 const UI_PACKAGES = new Set(['@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/hub-element']);
 // hub-element bundles React, hub-react and the little of core it needs into its own script, so it peers on none of them (hub-react is an
@@ -56,10 +61,10 @@ const BUNDLED = new Set(['@chatwarden/hub-element']);
 /** The range `pkgName` must declare for its peer `peerName`. */
 const peerRangeOf = (pkgName: string, peerName: string): string => {
   if (peerName === '@chatwarden/core') {
-    return NEEDS_NEW_KIT_0_1_8.has(pkgName) ? NEW_KIT_RANGE_0_1_8 : NEEDS_NEW_KIT.has(pkgName) ? NEW_KIT_RANGE : PEER_RANGE;
+    return NEEDS_NEW_KIT.has(pkgName) ? NEW_KIT_RANGE_0_1_9 : PEER_RANGE;
   }
-  // hub-react names http's `AiReadAgainBody` (0.1.7) and reads the `ai` wire fields, and since 0.1.8 `boosted`, `signals` and `limits`; hub-element's types are hub-react's, unchanged.
-  if (peerName === '@chatwarden/http') return NEW_KIT_RANGE_0_1_8;
+  // hub-react names http's `AiReadAgainBody` (0.1.7) and reads the `ai` wire fields, since 0.1.8 `boosted`, `signals` and `limits`, and since 0.1.9 the appeal and rename routes, `features` and `MeFeatures`; hub-element's types are hub-react's, unchanged.
+  if (peerName === '@chatwarden/http') return NEW_KIT_RANGE_0_1_9;
   if (peerName === '@chatwarden/hub-react') return HUB_REACT_RANGE_FOR_ELEMENT;
   return PEER_RANGE;
 };
@@ -122,7 +127,7 @@ describe('core is a peer, never a dependency', () => {
     expect(Object.keys(core.devDependencies ?? {}).filter(ownScope)).toEqual(['@chatwarden/store-memory']);
   });
   it.each(dependents.map((p) => [p.pkg.name, p.pkg] as const))(
-    '%s peers on core at its floor (^0.1.0, ^0.1.2 where it needs the 0.1.2 kit, ^0.1.8 where it needs the 0.1.8 kit) and dev-depends on core at the group version',
+    '%s peers on core at its floor (^0.1.0, ^0.1.9 where it needs the 0.1.9 kit) and dev-depends on core at the group version',
     (_n, pkg) => {
       expect(pkg.peerDependencies?.['@chatwarden/core']).toBe(peerRangeOf(pkg.name, '@chatwarden/core'));
       expect(pkg.devDependencies?.['@chatwarden/core']).toBe(VERSION);
@@ -164,28 +169,35 @@ describe('store-memory', () => {
 
 describe('peer floors', () => {
   const byName = (n: string): Manifest => published.find((p) => p.pkg.name === n)!.pkg;
-  it.each([...NEEDS_NEW_KIT])('%s needs core ^0.1.2 (nothing since touches it)', (name) => {
-    expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.2');
+  it.each([...NEEDS_NEW_KIT])('%s needs core ^0.1.9 (appeals and names: the optional Store methods and row types, cw.appeals, cw.names, cw.people.accountIds, the new events and types)', (name) => {
+    expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.9');
   });
-  it.each([...NEEDS_NEW_KIT_0_1_8])('%s needs core ^0.1.8 (the signal Store methods and row types, cw.signals, signalBoost, PolicyState.limits, the pace and signals profile sections)', (name) => {
-    expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.8');
-  });
-  it('the new floors are the ones in NEEDS_NEW_KIT: store-memory, store-sqlite, http and hub-react, and no other package', () => {
-    expect([...NEEDS_NEW_KIT_0_1_8].sort()).toEqual(['@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/store-memory', '@chatwarden/store-sqlite']);
-  });
-  it('the two sets are disjoint and together are exactly the packages that peer on a new core', () => {
-    for (const n of NEEDS_NEW_KIT_0_1_8) expect(NEEDS_NEW_KIT.has(n)).toBe(false);
+  it('the new floors are the ones in NEEDS_NEW_KIT: store-memory, store-sqlite, http, discord, hub-react and player-react, and no other package', () => {
+    expect([...NEEDS_NEW_KIT].sort()).toEqual(['@chatwarden/discord', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/store-memory', '@chatwarden/store-sqlite']);
     const peering = published.filter((p) => (p.pkg.peerDependencies?.['@chatwarden/core'] ?? '') !== '' && p.pkg.peerDependencies?.['@chatwarden/core'] !== PEER_RANGE).map((p) => p.pkg.name).sort();
-    expect(peering).toEqual([...NEEDS_NEW_KIT, ...NEEDS_NEW_KIT_0_1_8].sort());
+    expect(peering).toEqual([...NEEDS_NEW_KIT].sort());
   });
-  it('player-react does not follow the floor up: its chat imports only what core 0.1.2 has', () => {
-    expect(byName('@chatwarden/player-react').peerDependencies?.['@chatwarden/core']).toBe('^0.1.2');
+  it.each([
+    ['@chatwarden/store-memory', /\bAppealRow\b|\bBlockedNameRow\b/],
+    ['@chatwarden/store-sqlite', /\bAppealRow\b|\bBlockedNameRow\b/],
+    ['@chatwarden/http', /\bcw\.appeals\b|APPEAL_OUTCOMES/],
+    ['@chatwarden/discord', /appeal\.created/],
+    ['@chatwarden/hub-react', /APPEAL_STATEMENT_MAX/],
+    ['@chatwarden/player-react', /\bAppealRefusal\b/],
+  ] as const)('%s really uses a name that is new in 0.1.9 (the floor is not raised for nothing)', (name, pattern) => {
+    const dir = join(root, 'packages', name.replace('@chatwarden/', ''), 'src');
+    const files = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(d, e.name)) : /\.tsx?$/.test(e.name) ? [join(d, e.name)] : []));
+    expect(files(dir).some((f) => pattern.test(readFileSync(f, 'utf8'))), name).toBe(true);
   });
-  it.each(['@chatwarden/discord', '@chatwarden/matcher', '@chatwarden/profanity'])('%s uses nothing new in core and keeps ^0.1.0', (name) => {
+  it('a package outside the set uses none of it: hub-element, core, matcher and profanity keep their floors', () => {
+    for (const name of ['@chatwarden/core', '@chatwarden/matcher', '@chatwarden/profanity']) expect(NEEDS_NEW_KIT.has(name), name).toBe(false);
+    expect(NEEDS_NEW_KIT.has('@chatwarden/hub-element')).toBe(false);
+  });
+  it.each(['@chatwarden/matcher', '@chatwarden/profanity'])('%s uses nothing new in core and keeps ^0.1.0', (name) => {
     expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.0');
   });
-  it('hub-react peers on http ^0.1.8 (boosted, signals, limits) and hub-element on hub-react ^0.1.5 (it uses nothing newer)', () => {
-    expect(byName('@chatwarden/hub-react').peerDependencies?.['@chatwarden/http']).toBe('^0.1.8');
+  it('hub-react peers on http ^0.1.9 (the appeal and rename routes, features) and hub-element on hub-react ^0.1.5 (it uses nothing newer)', () => {
+    expect(byName('@chatwarden/hub-react').peerDependencies?.['@chatwarden/http']).toBe('^0.1.9');
     expect(byName('@chatwarden/hub-element').peerDependencies?.['@chatwarden/hub-react']).toBe('^0.1.5');
   });
   it('every @chatwarden floor is a caret range the group version satisfies, so each can be installed', () => {
@@ -253,7 +265,7 @@ describe('hub-react', () => {
     expect(Object.keys(hub().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', '@chatwarden/http', 'react', 'react-dom']);
     expect(hub().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
     expect(hub().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
-    expect(hub().peerDependencies?.['@chatwarden/http']).toBe(NEW_KIT_RANGE_0_1_8);
+    expect(hub().peerDependencies?.['@chatwarden/http']).toBe(NEW_KIT_RANGE_0_1_9);
     expect(hub().dependencies).toBeUndefined();
   });
   it('ships the stylesheet as ./styles.css and the optional font as ./font.css, and lists only those under sideEffects', () => {
@@ -292,7 +304,7 @@ describe('player-react', () => {
     expect(Object.keys(player().peerDependencies ?? {}).sort()).toEqual(['@chatwarden/core', 'react', 'react-dom']);
     expect(player().peerDependencies?.react).toBe('^18.3.0 || ^19.0.0');
     expect(player().peerDependencies?.['react-dom']).toBe('^18.3.0 || ^19.0.0');
-    expect(player().peerDependencies?.['@chatwarden/core']).toBe(NEW_KIT_RANGE);
+    expect(player().peerDependencies?.['@chatwarden/core']).toBe(NEW_KIT_RANGE_0_1_9);
     expect(player().dependencies).toBeUndefined();
   });
   it('ships the stylesheets as ./styles.css and ./chat.css and lists only those two under sideEffects', () => {

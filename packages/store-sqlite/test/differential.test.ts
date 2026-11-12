@@ -1,8 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { AUDIT_ACTIONS } from '@chatwarden/core';
+import { AUDIT_ACTIONS, normalizeStatement } from '@chatwarden/core';
 import type { AuditRow, SignalRow, Store, StoredReport } from '@chatwarden/core';
-import { MemoryStore, withMemoryAi, withMemorySignals } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi, withMemoryAppeals, withMemoryNames, withMemorySignals } from '@chatwarden/store-memory';
 import { openStore } from '../src/index.js';
 
 // Differential tests: the same writes go to SqliteStore (the reference) and MemoryStore, and every combined query and cursor
@@ -11,7 +11,7 @@ import { openStore } from '../src/index.js';
 
 const NOW = 1_800_000_000_000;
 const sql = (): Store => openStore({ db: new DatabaseSync(':memory:') });
-const mem = (): Store => withMemorySignals(withMemoryAi(new MemoryStore()));
+const mem = (): Store => withMemoryNames(withMemoryAppeals(withMemorySignals(withMemoryAi(new MemoryStore()))));
 
 const report = (over: Partial<StoredReport> = {}): StoredReport => ({
   id: 'r1',
@@ -362,5 +362,163 @@ describe('the signal methods: insert, grouped listing and purge', () => {
     }
     const subjects = Array.from({ length: 13 }, (_, i) => `s_${i}`);
     expect(b.listSignalSources?.(subjects, 0)).toEqual(a.listSignalSources?.(subjects, 0));
+  });
+});
+
+describe('the appeal and blocked-name methods: one script, the same answer from both stores', () => {
+  const DAY = 86_400_000;
+  type Pair = [Store, Store];
+  const pair = (): Pair => [mem(), sql()];
+
+  /** Every read the stores answer, as one comparable value. */
+  const reads = (s: Store): unknown => ({
+    open: s.countOpenAppeals?.(),
+    all: s.listAppeals?.({ status: 'all', limit: 200 }),
+    decided: s.listAppeals?.({ status: 'decided', limit: 50 }),
+    pageOne: s.listAppeals?.({ status: 'all', limit: 7 }),
+    pageTwo: s.listAppeals?.({ status: 'all', limit: 7, after: { createdAt: NOW - 20 * DAY, id: 'ap10' } }),
+    open7: s.listAppeals?.({ status: 'open', limit: 7 }),
+    by: [0, 3, 10].map((k) => s.countAppealsBy?.([`s_${k}`, `s_${k + 1}`, `s_${k + 1}`], NOW - 40 * DAY)),
+    none: s.countAppealsBy?.([], 0),
+    rules: [NOW - 90 * DAY, NOW - 30 * DAY, NOW].map((t) => [...(s.appealCountsByRule?.(t) ?? [])].sort((a, b) => String(a.rule).localeCompare(String(b.rule)))),
+    sanctions: [0, NOW - 60 * DAY, NOW - 10 * DAY].map((t) => [...(s.countSanctionsByRule?.(t) ?? [])].sort((a, b) => String(a.rule).localeCompare(String(b.rule)))),
+    subjectRows: ['sg0', 'sg5', 'sg9', 'sg-nope'].map((g) => s.loadSanctionSubjectRow?.(g)),
+  });
+
+  const script = (s: Store, log: unknown[]): void => {
+    const rules = ['1', '2', '2', null, 'uncovered', '3'];
+    for (let i = 0; i < 12; i++) {
+      s.insertSanctionGroup([
+        {
+          id: `sr${i}`, groupId: `sg${i}`, refCode: `M-${String(i).padStart(5, '0')}`, kind: (['chat', 'ban', 'warning', 'area'] as const)[i % 4] ?? 'chat', targetType: 'subject', value: `s_${i % 4}`,
+          startsAt: NOW - i * 9 * DAY, endsAt: i % 4 === 1 ? null : NOW - i * 9 * DAY + 5 * DAY, reason: 'r', rule: rules[i % 6] ?? null, gapNote: null, gapStatus: null,
+          roomId: null, actor: 'mod', source: i % 3 === 0 ? 'auto_filter' : 'moderator', automated: i % 3 === 0, pending: false, ...(i % 2 === 0 ? { reportId: `rep${i}` } : {}),
+        },
+        { id: `ip${i}`, groupId: `sg${i}`, refCode: `M-${String(i).padStart(5, '0')}`, kind: 'chat', targetType: 'ip', value: `h${i}`, startsAt: NOW, endsAt: NOW + DAY, reason: 'r', rule: '1', gapNote: null, gapStatus: null, roomId: null, actor: 'mod', source: 'moderator', automated: false, pending: false },
+      ]);
+    }
+    s.insertSanctionGroup([{ id: 'note', groupId: 'sg-note', refCode: 'M-99999', kind: 'note', targetType: 'subject', value: 's_1', startsAt: NOW, endsAt: NOW, reason: 'r', rule: '1', gapNote: null, gapStatus: null, roomId: null, actor: 'mod', source: 'moderator', automated: false, pending: false }]);
+    for (let i = 0; i < 24; i++) {
+      const row = {
+        id: `ap${String(i).padStart(2, '0')}`, subject: `s_${i % 12}`, groupId: i < 12 ? `sg${i}` : `gx${i}`, noticeId: `n${i}`, reportId: i % 2 === 0 ? `rep${i}` : null, rule: rules[i % 6] ?? null,
+        kind: (['chat', 'ban', 'warning', 'area'] as const)[i % 4] ?? 'chat', statement: `s${i}`, status: 'open' as const, createdAt: NOW - (i % 11) * 4 * DAY, decidedAt: null, decidedBy: null, decisionReason: null, replacementGroupId: null,
+      };
+      log.push(s.insertAppeal?.(row));
+    }
+    log.push(s.insertAppeal?.({ id: 'dup-group', subject: 's_1', groupId: 'sg3', noticeId: 'x', reportId: null, rule: null, kind: 'chat', statement: null, status: 'open', createdAt: NOW, decidedAt: null, decidedBy: null, decisionReason: null, replacementGroupId: null }));
+    const out = ['upheld', 'reduced', 'revoked'] as const;
+    for (let i = 0; i < 24; i += 2) {
+      log.push(s.decideAppeal?.(`ap${String(i).padStart(2, '0')}`, { status: out[(i / 2) % 3] as 'upheld', at: NOW - (i % 7) * DAY, by: 'bea', reason: 'r', replacementGroupId: (i / 2) % 3 === 1 ? `sg${(i + 5) % 12}` : null, ...(i % 4 === 0 ? { clearStatement: true } : {}) }));
+    }
+    log.push(s.decideAppeal?.('ap00', { status: 'revoked', at: NOW, by: 'x', reason: 'again', replacementGroupId: null }));
+    log.push(s.closeAppealsForGroup?.('sg5', 'cy', NOW - DAY), s.closeAppealsForGroup?.('sg4', 'cy', NOW - DAY), s.closeAppealsForGroup?.('nothing', 'cy', NOW));
+    s.revokeSanctionGroup('sg9', 'mod', NOW - 3 * DAY, 'x');
+  };
+
+  it('give identical answers after the same writes, and after each purge', () => {
+    const [a, b] = pair();
+    const la: unknown[] = [];
+    const lb: unknown[] = [];
+    script(a, la);
+    script(b, lb);
+    expect(lb).toEqual(la);
+    expect(la.includes(false)).toBe(true);
+    expect(la.includes(true)).toBe(true);
+    expect(reads(b)).toEqual(reads(a));
+    for (const [method, arg] of [
+      ['clearAppealStatements', NOW - 50 * DAY],
+      ['clearAppealStatements', NOW + DAY],
+      ['purgeAppeals', NOW - 30 * DAY],
+      ['purgeAppeals', NOW - 3 * DAY],
+      ['purgeAppeals', NOW + 100 * DAY],
+    ] as const) {
+      expect(b[method]?.(arg), `${method} ${arg}`).toBe(a[method]?.(arg));
+      expect(reads(b), `${method} ${arg}`).toEqual(reads(a));
+    }
+  });
+
+  it('the orphan close agrees, once a purge of sanctions has removed rows', () => {
+    const [a, b] = pair();
+    script(a, []);
+    script(b, []);
+    for (const s of [a, b]) s.purgeSanctions(NOW - 20 * DAY);
+    expect(b.closeOrphanAppeals?.('retention', NOW, true)).toBe(a.closeOrphanAppeals?.('retention', NOW, true));
+    expect(reads(b)).toEqual(reads(a));
+    expect(b.closeOrphanAppeals?.('retention', NOW)).toBe(a.closeOrphanAppeals?.('retention', NOW));
+  });
+
+  it('agree inside a transaction that is undone, change token included', () => {
+    const [a, b] = pair();
+    for (const s of [a, b]) {
+      script(s, []);
+      const token = s.changeToken();
+      expect(() =>
+        s.transaction(() => {
+          s.insertAppeal?.({ id: 'tx', subject: 's_1', groupId: 'g-tx', noticeId: 'n', reportId: null, rule: '1', kind: 'chat', statement: 'x', status: 'open', createdAt: NOW, decidedAt: null, decidedBy: null, decisionReason: null, replacementGroupId: null });
+          s.closeOrphanAppeals?.('retention', NOW);
+          s.purgeAppeals?.(NOW + 1000 * DAY);
+          s.clearAppealStatements?.(NOW + 1000 * DAY);
+          throw new Error('undo');
+        }),
+      ).toThrow('undo');
+      expect(s.changeToken()).toBe(token);
+    }
+    expect(reads(b)).toEqual(reads(a));
+  });
+
+  it('the notice purge agrees for the four message kinds, seen and unseen, with and without the ceilings', () => {
+    const [a, b] = pair();
+    const kinds = ['rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked', 'warning', 'report_outcome', 'chat'] as const;
+    for (const s of [a, b]) {
+      kinds.forEach((kind, i) => {
+        for (const [j, age] of [10, 100, 300, 400, 500].entries()) {
+          s.insertNotice({
+            id: `n-${kind}-${j}`, subject: 's_a', groupId: kind === 'warning' || kind === 'chat' ? `g-${kind}-${j}` : null, kind, rule: null, until: kind === 'chat' ? NOW + DAY : null, refCode: null,
+            excerpt: [], createdAt: NOW - age * DAY + i, ackedAt: j % 2 === 0 ? NOW : null, withdrawnAt: null,
+          });
+        }
+      });
+    }
+    const ids = (s: Store): string[] => s.loadNotices(['s_a']).map((r) => r.id).sort();
+    expect(ids(b)).toEqual(ids(a));
+    expect(b.purgeNotices(NOW - 90 * DAY)).toBe(a.purgeNotices(NOW - 90 * DAY));
+    expect(ids(b)).toEqual(ids(a));
+    const ceilings = { appealBefore: NOW - 365 * DAY, renameBefore: NOW - 450 * DAY };
+    expect(b.purgeNotices(NOW - 90 * DAY, ceilings)).toBe(a.purgeNotices(NOW - 90 * DAY, ceilings));
+    expect(ids(b)).toEqual(ids(a));
+    expect(b.purgeNotices(NOW, { appealBefore: NOW, renameBefore: NOW })).toBe(a.purgeNotices(NOW, { appealBefore: NOW, renameBefore: NOW }));
+    expect(ids(b)).toEqual(ids(a));
+  });
+
+  it('a statement the service has normalized reads back identically from both stores (the stores differ only on text normalizeStatement removes)', () => {
+    const [a, b] = pair();
+    const inputs = ['plain', 'a\u0000b\uD800c\uDC00d', '\u{1F4AC}'.repeat(40) + '\uD83D', ' a\u200b\u202eb ', 'line\r\n\r\n\r\nline\u2028x', '\u0007'];
+    inputs.forEach((raw, i) => {
+      const statement = normalizeStatement(raw);
+      const row = { id: `nz${i}`, subject: 's_1', groupId: `gnz${i}`, noticeId: 'n', reportId: null, rule: '1', kind: 'chat' as const, statement, status: 'open' as const, createdAt: NOW, decidedAt: null, decidedBy: null, decisionReason: null, replacementGroupId: null };
+      expect(a.insertAppeal?.(row)).toBe(true);
+      expect(b.insertAppeal?.(row)).toBe(true);
+      expect(b.loadAppeal?.(`nz${i}`)?.statement, JSON.stringify(raw)).toBe(a.loadAppeal?.(`nz${i}`)?.statement);
+      expect(a.loadAppeal?.(`nz${i}`)?.statement).toBe(statement);
+    });
+    // what normalization removes is exactly what the stores disagree on: a lone surrogate (memory keeps it, SQLite writes U+FFFD) and a NUL
+    expect(normalizeStatement('a\uD800b')).toBe('ab');
+    expect(normalizeStatement('a\u0000b')).toBe('ab');
+    // eslint-disable-next-line no-control-regex
+    expect(normalizeStatement('a\u0000b\uD800c')).not.toMatch(/[\u0000\uD800-\uDFFF]/);
+  });
+
+  it('the blocked-name methods agree', () => {
+    const [a, b] = pair();
+    for (const s of [a, b]) {
+      for (let i = 0; i < 30; i++) s.insertBlockedName?.({ id: `b${String(i).padStart(2, '0')}`, subject: i % 4 === 0 ? null : `s_${i % 5}`, name: `quissel${i}`, termId: i % 3 === 0 ? null : 'syn:quissel', reason: i % 2 === 0 ? 'name_not_allowed' : 'name_profane', at: NOW - (i % 10) * DAY });
+    }
+    for (const [since, limit] of [[0, 200], [NOW - 5 * DAY, 200], [NOW - 5 * DAY, 4], [NOW + 1, 10], [0, 0], [0, 1000]] as const) {
+      expect(b.listBlockedNames?.(since, limit), `${since} ${limit}`).toEqual(a.listBlockedNames?.(since, limit));
+    }
+    for (const before of [NOW - 8 * DAY, NOW - 8 * DAY, NOW - 3 * DAY, NOW + 1]) {
+      expect(b.purgeBlockedNames?.(before)).toBe(a.purgeBlockedNames?.(before));
+      expect(b.listBlockedNames?.(0, 200)).toEqual(a.listBlockedNames?.(0, 200));
+    }
   });
 });

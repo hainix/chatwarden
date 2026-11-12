@@ -3,6 +3,12 @@
 import type {
   ActionRecord,
   AiBrief,
+  AppealDetail as KitAppealDetail,
+  AppealOutcome as KitAppealOutcome,
+  AppealRuleStats as KitAppealRuleStats,
+  AppealStats as KitAppealStats,
+  AppealStatus as KitAppealStatus,
+  AppealSummary as KitAppealSummary,
   AiReadView,
   AiStatsView,
   AiStatus,
@@ -39,6 +45,32 @@ export type { PolicyLayer, PolicySection };
 export type PolicyState = Omit<KitPolicyState, 'limits'> & { limits?: PolicyLimits };
 export type { ActionRecord, AuditAction, AuditItem, CommunityRule, ConductLevel, DecisionAction, GapRow, GuideSection, ReporterRecord, ReportCategory, SanctionGroupView, SanctionKind, StaffReport, Suggestion };
 export type { Me, PermissionKey, ReporterAccuracySummary, ReportSummary, Role };
+
+/**
+ * Which of the optional features are on, from `GET /me` (`Me.features`): `appeals` (appeals are on) and `renames` (a moderator may ask for a new name, and the store can
+ * keep one) and `keepBlocked` (blocked names are kept as evidence, so Blocked offers the Names list). `Me` has none with all off, as 0.1.7 sent it.
+ * @experimental
+ */
+export type MeFeatures = NonNullable<Me['features']>;
+
+/**
+ * Where an appeal stands: `open`, then `upheld`, `reduced` or `revoked` once decided, or `moot` when the sanction was revoked by someone else first.
+ * @experimental
+ */
+export type AppealStatus = KitAppealStatus;
+/** What a moderator rules on an appeal: keep the decision (`uphold`), make it lighter (`reduce`) or remove it (`revoke`). @experimental */
+export type AppealOutcome = KitAppealOutcome;
+/**
+ * One appeal as staff see it in a list: who, the sanction (kind, rule, times, who gave it) and whether the statement trips the term filter. No statement.
+ * @experimental
+ */
+export type AppealSummary = KitAppealSummary;
+/** One appeal in full: the summary, the player's statement (staff only), the decision once made, the report and the lines the player was shown. @experimental */
+export type AppealDetail = KitAppealDetail;
+/** The appeal counts of one rule over a window: sanctions, appealed, revoked (`granted`), made lighter (`lightened`, never in the rate), the rate and its band. @experimental */
+export type AppealRuleStats = KitAppealRuleStats;
+/** `GET /appeals/stats`: the per-rule counts and the totals. @experimental */
+export type AppealStats = KitAppealStats;
 
 /**
  * What the AI read of a report, as the queue shows it (`ReportSummary.ai`): the level, how sure, the rule, and two marks. No summary and no line ids.
@@ -99,12 +131,24 @@ export interface Claim {
 }
 
 /**
+ * A report as the hub reads it: the kit's, plus the label of the reason given and the server's word on which handles are flagged (`names.maskInHub`).
+ * A flag is `true` or absent, and an older server sends none: every name then reads as typed.
+ * @experimental
+ */
+export type FlaggedReport = Omit<StaffReport, 'excerpt'> & {
+  reportedReasonLabel?: string | null;
+  targetHandleFlagged?: boolean;
+  reporterHandleFlagged?: boolean;
+  excerpt: Array<StaffReport['excerpt'][number] & { handleFlagged?: boolean }>;
+};
+
+/**
  * `GET /reports/:id`: the report with each named person's counted history and the ladder's suggestion for the reported person.
  * @experimental
  */
 export interface ReportDetail {
   /** The report, with the label of the reason the reporter gave as it is now (`null`: none given, or an older server). */
-  report: StaffReport & { reportedReasonLabel?: string | null };
+  report: FlaggedReport;
   history: Record<string, ActionRecord[]>;
   suggest: Suggestion;
   /** The Community Rule the category maps to, or `"uncovered"`. */
@@ -147,6 +191,11 @@ export interface NextCase {
 export interface Changes {
   token: string;
   changed: boolean;
+  /**
+   * The appeals waiting, only for a caller who may read appeals while appeals are on. Absent from an older server and for everyone else.
+   * @experimental
+   */
+  appeals?: number;
 }
 
 /**
@@ -242,6 +291,18 @@ export interface PersonHistory {
   asReporter: ReporterRecord;
   /** Their handle on the newest report filed against them, or null: the name to show for the person. */
   handle: string | null;
+  /** True when the server flags that handle (`names.maskInHub`): the hub hides it until shown. Absent otherwise, and from an older server. */
+  handleFlagged?: boolean;
+  /**
+   * Their appeals, newest first, without the statement. Present only for a caller who may read appeals, while appeals are on or there are some.
+   * @experimental
+   */
+  appeals?: KitAppealSummary[];
+  /**
+   * The times a moderator asked them for a new name, newest first. Present while renames are on or there are some.
+   * @experimental
+   */
+  renames?: Array<{ at: number; pending: boolean }>;
 }
 
 /**
@@ -255,7 +316,7 @@ export type SignalCountView = SignalCount;
  * A sanction group with the person it is on and the name to show for them (`GET /sanctions`). `handle` is null when no report recorded one.
  * @experimental
  */
-export type SanctionRow = SanctionGroupView & { person: string; handle: string | null };
+export type SanctionRow = SanctionGroupView & { person: string; handle: string | null; handleFlagged?: boolean };
 
 /** @experimental */
 export type SanctionSource = 'moderator' | 'auto_filter' | 'coop' | 'api' | 'ai';
@@ -352,7 +413,64 @@ export interface BlockedLine {
   person: string;
   /** The name to show for the person (the newest non-blank handle on a report against them), or null. */
   handle: string | null;
+  /** True when the server flags that handle: hidden until shown. */
+  handleFlagged?: boolean;
   text: string;
+}
+
+/**
+ * One blocked name kept as evidence (`GET /blocked?source=name`, with `names.keepBlocked`): `text` is the name as it was typed (staff only), `person` is null for a
+ * player the kit did not hold, and `term` and `language` are null for a swear word the profanity pass caught or without `terms.read`.
+ * @experimental
+ */
+export interface BlockedName {
+  id: string;
+  at: number;
+  roomId: null;
+  termId: string | null;
+  term: string | null;
+  language: string | null;
+  person: string | null;
+  handle: string | null;
+  handleFlagged?: boolean;
+  /** The name as typed. */
+  text: string;
+  reason: 'name_not_allowed' | 'name_profane';
+}
+
+/**
+ * An appeal in the inbox (`GET /appeals`): the kit's summary and the name to show for the person (null without `history.read`, or when no report recorded
+ * one). No statement is in a list.
+ * @experimental
+ */
+export type AppealRow = KitAppealSummary & { handle: string | null; handleFlagged?: boolean };
+
+/** @experimental */
+export interface ListAppealsQuery {
+  /** Default `open`. */
+  status?: 'open' | 'decided' | 'all';
+  cursor?: string;
+  limit?: number;
+}
+
+/**
+ * A ruling on an appeal. `to` is the lighter outcome and goes with `reduce` only: a kind below the original, or the same kind and shorter (a warning has no length).
+ * @experimental
+ */
+export interface AppealDecisionInput {
+  outcome: AppealOutcome;
+  /** Private: 1 to 500 characters, never shown to the player. */
+  reason: string;
+  to?: { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null };
+}
+
+/**
+ * `POST /appeals/:id/decide`.
+ * @experimental
+ */
+export interface AppealDecided {
+  status: 'upheld' | 'reduced' | 'revoked';
+  replacementGroupId?: string;
 }
 
 /**

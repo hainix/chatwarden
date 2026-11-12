@@ -1,0 +1,458 @@
+{
+  "me.moderator": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "actor": "ann",
+      "role": "moderator",
+      "can": {
+        "reports.read": true,
+        "reports.decide": true,
+        "reports.decide.bulk": true,
+        "sanctions.apply": true,
+        "sanctions.apply.ban_permanent": false,
+        "sanctions.revoke": true,
+        "history.read": true,
+        "blocked.read": true,
+        "gaps.read": true,
+        "gaps.close": false,
+        "terms.read": true,
+        "terms.write": true,
+        "policy.read": true,
+        "policy.write": false,
+        "audit.read": false,
+        "claims.override": false,
+        "reasons.read": true,
+        "reasons.write": false,
+        "settings": false
+      }
+    }
+  },
+  "me.senior": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "actor": "ann",
+      "role": "senior",
+      "can": {
+        "reports.read": true,
+        "reports.decide": true,
+        "reports.decide.bulk": true,
+        "sanctions.apply": true,
+        "sanctions.apply.ban_permanent": true,
+        "sanctions.revoke": true,
+        "history.read": true,
+        "blocked.read": true,
+        "gaps.read": true,
+        "gaps.close": false,
+        "terms.read": true,
+        "terms.write": true,
+        "policy.read": true,
+        "policy.write": false,
+        "audit.read": true,
+        "claims.override": true,
+        "reasons.read": true,
+        "reasons.write": true,
+        "settings": false
+      }
+    }
+  },
+  "me.owner": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "actor": "ann",
+      "role": "owner",
+      "can": {
+        "reports.read": true,
+        "reports.decide": true,
+        "reports.decide.bulk": true,
+        "sanctions.apply": true,
+        "sanctions.apply.ban_permanent": true,
+        "sanctions.revoke": true,
+        "history.read": true,
+        "blocked.read": true,
+        "gaps.read": true,
+        "gaps.close": true,
+        "terms.read": true,
+        "terms.write": true,
+        "policy.read": true,
+        "policy.write": true,
+        "audit.read": true,
+        "claims.override": true,
+        "reasons.read": true,
+        "reasons.write": true,
+        "settings": true
+      }
+    }
+  },
+  "changes": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "token": "6",
+      "changed": true
+    }
+  },
+  "history": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "history": [
+        {
+          "kind": "chat",
+          "durationMs": 3600000,
+          "startsAt": 1800000004000,
+          "revoked": false,
+          "automated": false,
+          "roomId": "frozen-room-1"
+        },
+        {
+          "kind": "warning",
+          "durationMs": 0,
+          "startsAt": 1800000005000,
+          "revoked": false,
+          "automated": false,
+          "roomId": null
+        }
+      ],
+      "reports": [
+        {
+          "id": "QNddIZRiWdl1196rDPLrSw",
+          "createdAt": 1800000003000,
+          "category": "harassment"
+        },
+        {
+          "id": "HbKWOgco0ByY1W3DrD8dYg",
+          "createdAt": 1800000002000,
+          "category": "harassment"
+        },
+        {
+          "id": "0jx1OSdjciT0l4B1b65Ydg",
+          "createdAt": 1800000001000,
+          "category": "harassment"
+        }
+      ],
+      "sanctions": [
+        {
+          "groupId": "7z3pqD7T_8z_vZZtRvceyQ",
+          "refCode": "M-5PJNF",
+          "kind": "warning",
+          "rule": 2,
+          "startsAt": 1800000005000,
+          "endsAt": null,
+          "reason": "private reason",
+          "actor": "ann",
+          "source": "moderator",
+          "automated": false,
+          "active": true,
+          "pending": false,
+          "revokedAt": null,
+          "revokedBy": null,
+          "revokeReason": null
+        },
+        {
+          "groupId": "QpBlNFoDVajJyxtDdRnFRw",
+          "refCode": "M-HEAU6",
+          "kind": "chat",
+          "rule": 2,
+          "startsAt": 1800000004000,
+          "endsAt": 1800003604000,
+          "reason": "private moderator reason",
+          "actor": "mod_ann",
+          "source": "moderator",
+          "automated": false,
+          "active": true,
+          "pending": false,
+          "revokedAt": null,
+          "revokedBy": null,
+          "revokeReason": null
+        }
+      ],
+      "asReporter": {
+        "reports": 0,
+        "open": 0,
+        "actioned": 0,
+        "dismissed": 0,
+        "badFaith": 0,
+        "suspendedUntil": null,
+        "reasonMatched": 0,
+        "reasonDecided": 0,
+        "accuracy": {
+          "decided": 0,
+          "noAction": 0,
+          "badFaith": 0,
+          "unfounded": 0,
+          "falseRate": null,
+          "noticeable": false,
+          "habitual": false,
+          "windowMs": 2592000000
+        }
+      },
+      "handle": "FriendlyFox"
+    }
+  },
+  "reports": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "items": [
+        {
+          "id": "QNddIZRiWdl1196rDPLrSw",
+          "createdAt": 1800000003000,
+          "roomId": "frozen-room-3",
+          "tags": {},
+          "category": "harassment",
+          "reportedReason": "harassment",
+          "reportedReasonLabel": "Insults or harassment",
+          "status": "open",
+          "badFaith": false,
+          "targetPerson": "s_3vQMDYlqTCHHCPR8UguIkQ",
+          "reporterPerson": "s_tfMnZXGXsCxy8sNfEA-irw",
+          "actionedAt": null,
+          "actionedBy": null,
+          "targetHandle": "FriendlyFox",
+          "reporterHandle": "Quiet_Owl",
+          "claim": null,
+          "viewing": [],
+          "reporterAccuracy": null,
+          "ai": null
+        },
+        {
+          "id": "HbKWOgco0ByY1W3DrD8dYg",
+          "createdAt": 1800000002000,
+          "roomId": "frozen-room-2",
+          "tags": {},
+          "category": "harassment",
+          "reportedReason": "harassment",
+          "reportedReasonLabel": "Insults or harassment",
+          "status": "open",
+          "badFaith": false,
+          "targetPerson": "s_3vQMDYlqTCHHCPR8UguIkQ",
+          "reporterPerson": "s_fVfwCbi2pyFXjKCPzpBpuw",
+          "actionedAt": null,
+          "actionedBy": null,
+          "targetHandle": "Zorbak_Fan",
+          "reporterHandle": "Zorbak_Reporter",
+          "claim": null,
+          "viewing": [],
+          "reporterAccuracy": null,
+          "ai": null
+        },
+        {
+          "id": "0jx1OSdjciT0l4B1b65Ydg",
+          "createdAt": 1800000001000,
+          "roomId": "frozen-room-1",
+          "tags": {},
+          "category": "harassment",
+          "reportedReason": "harassment",
+          "reportedReasonLabel": "Insults or harassment",
+          "status": "actioned",
+          "badFaith": false,
+          "targetPerson": "s_3vQMDYlqTCHHCPR8UguIkQ",
+          "reporterPerson": "s_jgLeywgggCj909bUL5LHWQ",
+          "actionedAt": 1800000004000,
+          "actionedBy": "mod_ann",
+          "targetHandle": "Zorbak_Fan",
+          "reporterHandle": "FriendlyFox",
+          "claim": null,
+          "viewing": [],
+          "reporterAccuracy": null,
+          "ai": null
+        }
+      ],
+      "next": null
+    }
+  },
+  "report": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "report": {
+        "id": "HbKWOgco0ByY1W3DrD8dYg",
+        "createdAt": 1800000002000,
+        "roomId": "frozen-room-2",
+        "tags": {},
+        "reporterSubject": "s_fVfwCbi2pyFXjKCPzpBpuw",
+        "reporterSeat": "p1",
+        "reporterHandle": "Zorbak_Reporter",
+        "targetSubject": "s_3vQMDYlqTCHHCPR8UguIkQ",
+        "targetSeat": "p2",
+        "targetHandle": "Zorbak_Fan",
+        "category": "harassment",
+        "reportedReason": "harassment",
+        "detailAt": null,
+        "note": null,
+        "lineId": null,
+        "excerpt": [
+          {
+            "lineId": "1",
+            "ts": 1800000001000,
+            "seatId": "p2",
+            "handle": "Zorbak_Fan",
+            "raw": "a line from the target 2",
+            "delivered": "a line from the target 2",
+            "blocked": false,
+            "audience": null,
+            "p": 0
+          },
+          {
+            "lineId": "2",
+            "ts": 1800000001000,
+            "seatId": "p1",
+            "handle": "Zorbak_Reporter",
+            "raw": "a line from the reporter 2",
+            "delivered": "a line from the reporter 2",
+            "blocked": false,
+            "audience": null,
+            "p": 1
+          }
+        ],
+        "people": [
+          "s_3vQMDYlqTCHHCPR8UguIkQ",
+          "s_fVfwCbi2pyFXjKCPzpBpuw"
+        ],
+        "status": "open",
+        "badFaith": false,
+        "actionedAt": null,
+        "actionedBy": null,
+        "modNote": null,
+        "badFaithEvidence": null,
+        "targetPerson": "s_3vQMDYlqTCHHCPR8UguIkQ",
+        "reporterPerson": "s_fVfwCbi2pyFXjKCPzpBpuw",
+        "ownLineIds": {
+          "s_3vQMDYlqTCHHCPR8UguIkQ": [
+            "1"
+          ],
+          "s_fVfwCbi2pyFXjKCPzpBpuw": [
+            "2"
+          ]
+        },
+        "reportedReasonLabel": "Insults or harassment"
+      },
+      "history": {
+        "s_3vQMDYlqTCHHCPR8UguIkQ": [
+          {
+            "kind": "chat",
+            "durationMs": 3600000,
+            "startsAt": 1800000004000,
+            "revoked": false,
+            "automated": false,
+            "roomId": "frozen-room-1"
+          },
+          {
+            "kind": "warning",
+            "durationMs": 0,
+            "startsAt": 1800000005000,
+            "revoked": false,
+            "automated": false,
+            "roomId": null
+          }
+        ],
+        "s_fVfwCbi2pyFXjKCPzpBpuw": []
+      },
+      "suggest": {
+        "outcome": {
+          "kind": "ban",
+          "durationMs": 604800000
+        },
+        "label": "Full ban 7 days",
+        "why": "Standard profile: the record already holds a warning or a restriction, so the ladder's next step applies: full ban 7 days."
+      },
+      "rule": 2,
+      "claim": null,
+      "ai": null
+    }
+  },
+  "reports.decided": {
+    "status": 400,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "error": "invalid_query",
+      "message": "The query is not valid."
+    }
+  },
+  "sanctions": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "items": [
+        {
+          "groupId": "7z3pqD7T_8z_vZZtRvceyQ",
+          "refCode": "M-5PJNF",
+          "kind": "warning",
+          "rule": 2,
+          "startsAt": 1800000005000,
+          "endsAt": null,
+          "reason": "private reason",
+          "actor": "ann",
+          "source": "moderator",
+          "automated": false,
+          "active": true,
+          "pending": false,
+          "revokedAt": null,
+          "revokedBy": null,
+          "revokeReason": null,
+          "person": "s_3vQMDYlqTCHHCPR8UguIkQ",
+          "handle": "FriendlyFox"
+        },
+        {
+          "groupId": "QpBlNFoDVajJyxtDdRnFRw",
+          "refCode": "M-HEAU6",
+          "kind": "chat",
+          "rule": 2,
+          "startsAt": 1800000004000,
+          "endsAt": 1800003604000,
+          "reason": "private moderator reason",
+          "actor": "mod_ann",
+          "source": "moderator",
+          "automated": false,
+          "active": true,
+          "pending": false,
+          "revokedAt": null,
+          "revokedBy": null,
+          "revokeReason": null,
+          "person": "s_3vQMDYlqTCHHCPR8UguIkQ",
+          "handle": "FriendlyFox"
+        }
+      ],
+      "next": null
+    }
+  },
+  "blocked": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "items": []
+    }
+  },
+  "blocked.30": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "items": []
+    }
+  }
+}

@@ -6,10 +6,11 @@ import type { ConductLevel } from '../types.js';
 
 /**
  * The prompt version. Bumped when the prompt or the output schema changes; part of the input hash, so a bump makes every stored
- * read stale. 2 added the full-stop spacing line; 3 added the stable paragraph about signal counts.
+ * read stale. 2 added the full-stop spacing line; 3 added the stable paragraph about signal counts; 4 added the stable paragraph about
+ * appeal cautions and corrective examples.
  * @experimental
  */
-export const AI_PROMPT_VERSION = 3;
+export const AI_PROMPT_VERSION = 4;
 
 /**
  * One signal count about the reported person (P1), as the model is shown it: the adopter's own short label, whether it counts for or
@@ -39,6 +40,11 @@ export interface AIPerson {
  * @experimental
  */
 export interface AIExample {
+  /**
+   * `'corrective'` for a decision a second moderator found wrong on appeal (revoked): shown with fixed wording, as an example of what is
+   * NOT a violation. Absent (or `'standard'`) for every other example, and then the example reads exactly as before.
+   */
+  kind?: 'standard' | 'corrective';
   rule: number | 'uncovered' | null;
   severity: ConductLevel;
   /** What the human settled on. */
@@ -83,6 +89,12 @@ export interface AIReadInput {
    * the last row of `prompt.variable`; the input hash leaves it out.
    */
   signals?: AISignal[];
+  /**
+   * The rules under which moderators' decisions were often reversed on appeal (the revoke-only rate at the `elevated` or `high` band, over
+   * 90 days): rule numbers and bands only, never a number or a person. A snapshot taken when the read is made, rendered as the row after
+   * the signal counts; the input hash leaves it out. Absent when appeals are off or no rule qualifies.
+   */
+  cautions?: Array<{ rule: number; band: 'elevated' | 'high' }>;
   /** The same content rendered by core. An adapter should use it as is. */
   prompt: { stable: string; variable: string; schema: object };
 }

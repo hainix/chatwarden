@@ -201,9 +201,11 @@ describe('what opening it costs', () => {
     expect(audits(w, 'blocked.view')).toHaveLength(2);
   });
 
-  it('opening reads no other audited thing (no report, record or rules)', async () => {
+  it('opening reads no other audited thing (no report, record or settings)', async () => {
     const { w } = await openBlocked({}, seed);
-    for (const other of ['policy.view', 'history.view']) expect(audits(w, other), other).toHaveLength(0);
+    expect(audits(w, 'history.view')).toHaveLength(0);
+    expect(audits(w, 'policy.view')).toHaveLength(0);
+    expect(w.sent.filter((r) => r.method === 'GET' && r.path.startsWith('/policy'))).toEqual([]);
     expect(audits(w, 'report.view').filter((r) => (r as { target?: unknown }).target !== undefined)).toHaveLength(0);
   });
 });

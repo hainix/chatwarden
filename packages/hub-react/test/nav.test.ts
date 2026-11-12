@@ -12,6 +12,8 @@ describe('permissionFor', () => {
     [{ name: 'person', ref: 'p' }, 'history.read'],
     [{ name: 'actions' }, 'history.read'],
     [{ name: 'audit' }, 'audit.read'],
+    [{ name: 'appeals' }, 'appeals.read'],
+    [{ name: 'appeal', id: 'a' }, 'appeals.read'],
   ])('%j needs %s', (route, permission) => {
     expect(permissionFor(route)).toBe(permission);
   });

@@ -3,6 +3,7 @@ import type { AiBrief, CaseClaim, Chatwarden, ReporterAccuracy, ReportQuery, Sta
 import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { roleAtLeast } from '../permissions.js';
+import { flagKey, handleFlags } from './handles.js';
 import { applyDecision, checkDurationsOffered, needForDecision, parseDecision, peopleOf } from './apply.js';
 import type { AdminCall, AdminContext } from './context.js';
 import { gateCase } from './claims.js';
@@ -77,6 +78,10 @@ export interface ReportSummary {
    * sort adds a capped amount): never a reason to hide a report, and it names no signal. Staff only. @experimental
    */
   boosted?: true;
+  /** Present (true) only when the reported person's handle is one the matcher flags and `names.maskInHub` is on: the hub masks it until shown. Staff only. */
+  targetHandleFlagged?: true;
+  /** The same for the reporter's handle. */
+  reporterHandleFlagged?: true;
 }
 
 /** The part of a reporter's accuracy a queue row carries. */
@@ -174,6 +179,13 @@ const summarize = (
  *   `SanctionGroupView`s (the last 90 days and every unrevoked permanent one, newest first) and how the reports they
  *   filed stand, `asReporter` (with `reasonMatched` of `reasonDecided`: how often their reported reason was borne out by the decision), and `handle`, their handle on the newest report filed against them that recorded one, or null (`history.view`). With the record signal feed (`feeds.record`) on it also carries `signals`: the chosen kinds' counts over the chosen window
  *   (`SignalCount[]`, `[]` when none qualifies); with the feed off the key is absent.
+ *   Two more keys, each only while its feature is on or there is something to show (else the body is what 0.1.7 sent): `appeals`, the
+ *   person's appeals as the core's `AppealSummary`s, newest first, with no statement (only for a caller who holds `appeals.read`), and `renames`,
+ *   `{ at, pending }` for each time a rename was required (no reason, no actor).
+ * - Handle flags: beside a handle the matcher flags, while `names.maskInHub` is on (the default), a body carries `true` under `targetHandleFlagged` /
+ *   `reporterHandleFlagged` (a queue row, and the report in `GET /reports/:id`), `handleFlagged` on each excerpt line of that report and on the
+ *   history's `handle`. Otherwise the key is absent, so an unflagged body is what 0.1.7 sent. It is the matcher's reading only
+ *   (`cw.names.flagged`): nothing is stored, and a matcher that fails reads as not flagged.
  */
 export function reportRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
@@ -229,11 +241,14 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // The AI's brief of each open report: one batch for the page. The AI can never take the queue down; it answers an empty map.
       const briefs = cw.ai.briefs(page.items.filter((r) => r.status === 'open').map((r) => r.id));
       c.audit('report.view');
-      const items = page.items.map((r) =>
-        r.status === 'open'
+      const flagged = handleFlags(cw);
+      const items = page.items.map((r) => ({
+        ...(r.status === 'open'
           ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), accuracy.get(r.reporterPerson), briefs.get(r.id), boosted.has(r.targetPerson))
-          : summarize(r, undefined, undefined, labelOf(r), undefined, undefined),
-      );
+          : summarize(r, undefined, undefined, labelOf(r), undefined, undefined)),
+        ...flagKey(flagged, 'targetHandleFlagged', r.targetHandle),
+        ...flagKey(flagged, 'reporterHandleFlagged', r.reporterHandle),
+      }));
       return { status: 200, body: { items, next: page.next } };
     }),
 
@@ -252,9 +267,18 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       // without an answer).
       const aiExpected = cw.ai.level() === 0 ? undefined : cw.ai.expected(id);
       c.audit('report.view', { type: 'report', ref: id });
+      // The handles the matcher flags (the report's two, and each excerpt line's): the hub masks them until shown. Absent when none is.
+      const flagged = handleFlags(cw);
+      const shown = {
+        ...report,
+        reportedReasonLabel: labelOf(report),
+        ...flagKey(flagged, 'targetHandleFlagged', report.targetHandle),
+        ...flagKey(flagged, 'reporterHandleFlagged', report.reporterHandle),
+        excerpt: report.excerpt.map((l) => (flagged(l.handle) ? { ...l, handleFlagged: true as const } : l)),
+      };
       return {
         status: 200,
-        body: { report: { ...report, reportedReasonLabel: labelOf(report) }, history, suggest, rule, claim, ai, ...(aiExpected === undefined ? {} : { aiExpected }) },
+        body: { report: shown, history, suggest, rule, claim, ai, ...(aiExpected === undefined ? {} : { aiExpected }) },
       };
     }),
 
@@ -371,8 +395,28 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const asReporter = cw.reports.reporterRecord(ref);
       // The Person page record (`feeds.record`): the chosen kinds and window, counted by distinct source. Absent with the feed off.
       const signals = cw.profile.signals.feeds.record === undefined ? undefined : cw.signals.forRecord(ref);
+      // Their appeals (summaries, no statement) for a caller who may read appeals, and their rename requests: each present only while its feature is
+      // on or there is something to show, so with both off the body is what 0.1.7 sent.
+      const mayReadAppeals = roleAtLeast(c.authz.role, ctx.permissions['appeals.read']);
+      const appeals = mayReadAppeals ? cw.appeals.forPerson(ref) : [];
+      const showAppeals = mayReadAppeals && (appeals.length > 0 || cw.appeals.enabled());
+      const renames = cw.names.renamesOf(ref);
+      const showRenames = renames.length > 0 || cw.names.renamesEnabled();
       c.audit('history.view', { type: 'person', ref });
-      return { status: 200, body: { history, reports, sanctions, asReporter, handle, ...(signals === undefined ? {} : { signals }) } };
+      return {
+        status: 200,
+        body: {
+          history,
+          reports,
+          sanctions,
+          asReporter,
+          handle,
+          ...flagKey(handleFlags(cw), 'handleFlagged', handle),
+          ...(signals === undefined ? {} : { signals }),
+          ...(showAppeals ? { appeals } : {}),
+          ...(showRenames ? { renames } : {}),
+        },
+      };
     }),
   };
 }

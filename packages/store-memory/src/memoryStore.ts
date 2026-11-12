@@ -266,7 +266,7 @@ export class MemoryStore implements Store {
       .map((r) => ({ ...this.sanctionRow(r), revokedAt: r.revokedAt }));
   }
 
-  private sanctionRow(r: StoredSanction): SanctionRow {
+  protected sanctionRow(r: StoredSanction): SanctionRow {
     return {
       id: r.id,
       groupId: r.groupId,
@@ -997,13 +997,33 @@ export class MemoryStore implements Store {
     return touched.length;
   }
 
-  purgeNotices(before: number): number {
+  withdrawNotice(id: string, at: number): boolean {
+    const n = this.notices.find((x) => x.id === id);
+    if (n === undefined || n.withdrawnAt !== null) return false;
+    n.withdrawnAt = at;
+    this.undoWith(() => {
+      n.withdrawnAt = null;
+    });
+    return true;
+  }
+
+  purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number {
     const snapshot = [...this.notices];
+    // A seen notice of these kinds goes after the cutoff; the rest of the kinds follow their end time. An unseen message notice (an
+    // appeal outcome, a required rename) stays until it is seen or withdrawn. Spelled out here, not imported: this package links to old cores.
+    const seenGoes = ['warning', 'report_outcome', 'rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'];
+    // An unseen message notice has a ceiling, given by the caller (an older caller gives none: it is kept).
+    const appealKinds = ['appeal_upheld', 'appeal_reduced', 'appeal_revoked'];
+    const pastCeiling = (n: NoticeRow): boolean =>
+      unseen !== undefined &&
+      n.ackedAt === null &&
+      ((appealKinds.includes(n.kind) && n.createdAt < unseen.appealBefore) || (n.kind === 'rename_required' && n.createdAt < unseen.renameBefore));
     const kept = snapshot.filter(
       (n) =>
         !(
           (n.withdrawnAt !== null && n.createdAt < before) ||
-          (n.ackedAt !== null && (n.kind === 'warning' || n.kind === 'report_outcome') && n.createdAt < before) ||
+          (n.ackedAt !== null && seenGoes.includes(n.kind) && n.createdAt < before) ||
+          pastCeiling(n) ||
           (n.until !== null && n.until < before)
         ),
     );

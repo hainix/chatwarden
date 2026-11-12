@@ -386,6 +386,7 @@ describe('names', () => {
       wrap: (cw) => {
         const f = Object.create(cw) as Chatwarden;
         f.names = {
+          ...cw.names,
           check: () => {
             throw new RangeError('the matcher broke on zorbak');
           },

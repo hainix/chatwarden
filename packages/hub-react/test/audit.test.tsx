@@ -84,6 +84,25 @@ describe('the trail', () => {
     expect(container.innerHTML.toLowerCase()).not.toContain('zorbak');
   });
 
+  it('the three appeals and names actions read in words, an appeal is "Appeal" and a short tag with no link, and a rename points at a person', async () => {
+    const appeal = 'ap_1234567890abcdef';
+    const person = 's_abcdef1234567890';
+    await openAudit({}, async (x) => {
+      x.cw.audit.record({ actor: 'bea@example.test', role: 'senior', action: 'appeal.view', target: { type: 'appeal', ref: appeal } });
+      x.cw.audit.record({ actor: 'bea@example.test', role: 'senior', action: 'appeal.view' });
+      x.cw.audit.record({ actor: 'bea@example.test', role: 'senior', action: 'appeal.decide', target: { type: 'appeal', ref: appeal } });
+      x.cw.audit.record({ actor: 'bea@example.test', role: 'senior', action: 'name.rename_required', target: { type: 'person', ref: person } });
+    });
+    const decided = bodyRows().find((r) => r.textContent?.includes('Decided an appeal'))!;
+    expect(decided).toHaveTextContent(/Appeal [A-Za-z0-9_-]{8}/);
+    expect(within(decided).queryByRole('link')).toBeNull();
+    expect(list().textContent).not.toContain(appeal);
+    expect(bodyRows().filter((r) => r.textContent?.includes('Viewed appeals'))).toHaveLength(2);
+    const rename = bodyRows().find((r) => r.textContent?.includes('Asked a player to choose a new name'))!;
+    expect(rename).toHaveTextContent(`Person ${personTag(person)}`);
+    expect(list().textContent).not.toContain(person);
+  });
+
   it('a sanction is "Sanction" and a short tag; an entry with no target says None', async () => {
     const { w } = await openAudit({}, async (x) => {
       const f = await x.file({ target: 'Vantablob' });
@@ -277,7 +296,7 @@ describe('filters', () => {
     const { w, user } = await setup();
     const labels = [...action().options].map((o) => o.textContent);
     expect(labels[0]).toBe('Any action');
-    expect(labels).toHaveLength(1 + 26);
+    expect(labels).toHaveLength(1 + 29);
     expect(new Set(labels).size).toBe(labels.length);
     // The two bulk dismissals (triage speed) are labelled in plain words, not shown as raw action names.
     expect(labels).toContain('Dismissed all open reports about a person');
@@ -286,6 +305,10 @@ describe('filters', () => {
     expect(labels).toContain('The AI read a report');
     expect(labels).toContain('Asked the AI to read a report again');
     expect(labels).toContain('Recorded a decision against the AI read');
+    // And the three of appeals and names.
+    expect(labels).toContain('Viewed appeals');
+    expect(labels).toContain('Decided an appeal');
+    expect(labels).toContain('Asked a player to choose a new name');
     fireEvent.change(action(), { target: { value: 'history.view' } });
     await user.click(screen.getByRole('button', { name: 'Filter' }));
     await waitFor(() => expect(reads(w).at(-1)?.query).toEqual({ limit: 50, action: 'history.view' }));

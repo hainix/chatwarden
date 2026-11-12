@@ -4,6 +4,7 @@ import { actorName } from '../claims.js';
 import { useHub } from '../context.js';
 import { byId, rootOf } from '../dom.js';
 import { GAP_NOTE_MAX, REASON_MAX, hasLength } from '../decision.js';
+import { useFeatures } from '../features.js';
 import { useHubAction, useHubData } from '../hooks.js';
 import { choiceLabel, errorText, kindLabel } from '../labels.js';
 import { LengthField } from '../policy/LengthField.js';
@@ -11,7 +12,7 @@ import { lengthsOf, menuOf, snapLength } from '../policy/lengths.js';
 import { useToasts } from '../toasts.js';
 import type { PolicyDocs, SanctionKind } from '../types.js';
 import { ErrorBlock, Panel } from '../ui.js';
-import { emptySanction, sanctionProblems, toSanctionInput } from './sanctionDraft.js';
+import { emptySanction, renameProblems, sanctionProblems, toRenameInput, toSanctionInput } from './sanctionDraft.js';
 import type { SanctionDraft, SanctionMode, SanctionProblems } from './sanctionDraft.js';
 
 const NO_PROBLEMS: SanctionProblems = { count: 0 };
@@ -31,6 +32,9 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   const id = (field: string): string => `${base}-${field}`;
   const [draft, setDraft] = useState<SanctionDraft>(() => emptySanction(mode));
   const [attempted, setAttempted] = useState(false);
+  // "Ask for a new name (no sanction)": the last choice of "What happens", only with renames on and sanctions.apply. It sends no sanction, so no length, no IP.
+  const [renaming, setRenaming] = useState(false);
+  const canRename = useFeatures().renames && mode === 'sanction';
 
   // The rules are read when the form opens (once per session: `session.policy()` remembers them), never when the page opens.
   const wantsRules = can('policy.read');
@@ -42,13 +46,13 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   const canPermanent = can('sanctions.apply.ban_permanent');
   // The lengths are the profile's. A form starts on 24 hours, which the profile may not list: it moves to a length that is.
   const lengths = useMemo(() => lengthsOf(policy.data?.profile), [policy.data]);
-  const timedKind = draft.kind !== '' && hasLength(draft.kind);
+  const timedKind = !renaming && draft.kind !== '' && hasLength(draft.kind);
   const menu = menuOf(lengths, draft.kind, canPermanent);
   const snapped = snapLength(draft.duration, menu);
   useEffect(() => {
     if (timedKind && snapped !== draft.duration) setDraft((d) => ({ ...d, duration: snapped }));
   }, [timedKind, snapped, draft.duration]);
-  const problems = sanctionProblems(draft, mode, { rules: rules.map((r) => r.number), canApply: can('sanctions.apply'), canPermanent });
+  const problems = renaming ? renameProblems(draft) : sanctionProblems(draft, mode, { rules: rules.map((r) => r.number), canApply: can('sanctions.apply'), canPermanent });
   const shown = attempted ? problems : NO_PROBLEMS;
 
   // The first field takes focus when the form opens: the kind of a sanction, the note itself for a note.
@@ -62,9 +66,13 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   // A second click while the first is on its way does nothing: only the first call carries on to the toast and the reload.
   const sending = useRef(false);
   const apply = useHubAction(async (takeOver: boolean) => {
+    if (renaming) {
+      await client.rename(person, toRenameInput(draft, takeOver ? { takeOver: true } : {}));
+      return { renamed: true as const };
+    }
     const input = toSanctionInput(person, draft, mode, takeOver ? { takeOver: true } : {});
     const done = await client.applySanction(input);
-    return { ...done, input };
+    return { renamed: false as const, ...done, input };
   });
 
   const submit = async (takeOver: boolean): Promise<void> => {
@@ -81,6 +89,11 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
       sending.current = false;
     });
     if (!result.ok) return;
+    if (result.value.renamed) {
+      toasts.push({ text: t('hub.person.renameAsked', { name }) });
+      onDone();
+      return;
+    }
     const { input, refCode } = { input: result.value.input, refCode: result.value.refCode };
     toasts.push({
       text: input.kind === 'note' ? t('hub.person.noteAdded') : t('hub.person.applied', { what: choiceLabel(t, locale, { kind: input.kind, durationMs: input.durationMs }), code: refCode }),
@@ -89,7 +102,10 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
   };
 
   // The IP only goes with a timed kind; a length the new kind may not have is moved by the menu check above.
-  const setKind = (kind: SanctionKind | ''): void => setDraft((d) => ({ ...d, kind, includeIp: kind !== '' && hasLength(kind) ? d.includeIp : false }));
+  const setKind = (kind: SanctionKind | ''): void => {
+    setRenaming(false);
+    setDraft((d) => ({ ...d, kind, includeIp: kind !== '' && hasLength(kind) ? d.includeIp : false }));
+  };
   const set = (patch: Partial<SanctionDraft>): void => setDraft((d) => ({ ...d, ...patch }));
 
   const failed = apply.error;
@@ -99,6 +115,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
     if (failed === null) return '';
     if (failed.code === 'claimed') return failed.heldBy === undefined ? t('hub.person.fail.claimedUnknown') : t('hub.person.fail.claimed', { name: actorName(failed.heldBy) });
     if (failed.code === 'duration_not_offered') return t('hub.error.durationNotOffered');
+    if (failed.code === 'pending_rename') return t('hub.person.fail.pendingRename');
     if (failed.status === 400) return t('hub.person.fail.invalid');
     return errorText(t, failed);
   };
@@ -121,13 +138,24 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
             {mode === 'sanction' && (
               <Field id={id('what')} label={t('hub.decide.action.what')} problem={shown.kind}>
                 {(a) => (
-                  <select {...a} ref={whatRef} value={draft.kind} onChange={(e) => setKind(e.target.value as SanctionKind | '')}>
+                  <select
+                    {...a}
+                    ref={whatRef}
+                    value={renaming ? 'rename' : draft.kind}
+                    onChange={(e) => {
+                      if (e.target.value === 'rename') {
+                        setRenaming(true);
+                        setDraft((d) => ({ ...d, kind: '', includeIp: false }));
+                      } else setKind(e.target.value as SanctionKind | '');
+                    }}
+                  >
                     <option value="">{t('hub.decide.action.what.choose')}</option>
                     {KINDS.map((k) => (
                       <option key={k} value={k}>
                         {kindLabel(t, k)}
                       </option>
                     ))}
+                    {canRename && <option value="rename">{t('hub.person.form.rename')}</option>}
                   </select>
                 )}
               </Field>
@@ -155,7 +183,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
               )}
             </Field>
           </div>
-          {draft.rule === 'uncovered' && (
+          {draft.rule === 'uncovered' && !renaming && (
             <Field
               id={id('gap')}
               label={t('hub.decide.action.gap')}
@@ -194,7 +222,7 @@ export function SanctionForm({ person, name, mode, onDone, onCancel }: { person:
               </p>
             </div>
           )}
-          {mode === 'sanction' && <p className="cw-hint">{t('hub.person.form.noNotice')}</p>}
+          {mode === 'sanction' && <p className="cw-hint">{t(renaming ? 'hub.person.form.rename.hint' : 'hub.person.form.noNotice')}</p>}
           {failed !== null && (
             <div className="cw-error" role="alert">
               <p>{failure()}</p>

@@ -56,6 +56,9 @@ export const partLoaders: {
   signalLines: () => Promise<ComponentType<{ signals: readonly SignalCountView[] | undefined }>>;
   pacePanel: () => Promise<ComponentType<PanelProps>>;
   signalPanel: () => Promise<ComponentType<PanelProps>>;
+  appealPanel: () => Promise<ComponentType<PanelProps>>;
+  namePanel: () => Promise<ComponentType<PanelProps>>;
+  appealList: () => Promise<ComponentType<{ selected: string | null }>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
@@ -65,6 +68,9 @@ export const partLoaders: {
   signalLines: () => import('./person/SignalLines.js').then((m) => m.SignalLines),
   pacePanel: () => import('./screens/PaceSettings.js').then((m) => m.PaceSettings),
   signalPanel: () => import('./screens/SignalSettings.js').then((m) => m.SignalSettings),
+  appealPanel: () => import('./screens/AppealSettings.js').then((m) => m.AppealSettings),
+  namePanel: () => import('./screens/NameSettings.js').then((m) => m.NameSettings),
+  appealList: () => import('./appeals/AppealList.js').then((m) => m.AppealList),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -124,6 +130,9 @@ const aiParts = lazyPart(() => partLoaders.aiParts(), true);
 const signalLines = lazyPart(() => partLoaders.signalLines(), true);
 const pacePanel = lazyPart(() => partLoaders.pacePanel());
 const signalPanel = lazyPart(() => partLoaders.signalPanel());
+const appealPanel = lazyPart(() => partLoaders.appealPanel());
+const namePanel = lazyPart(() => partLoaders.namePanel());
+const appealList = lazyPart(() => partLoaders.appealList());
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
@@ -143,6 +152,15 @@ export const LazyPaceSettings = pacePanel.Part;
 /** The "Signals" panel of Settings > Advanced: loaded when that screen is opened. */
 export const LazySignalSettings = signalPanel.Part;
 
+/** The "Appeals" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazyAppealSettings = appealPanel.Part;
+
+/** The "Names" panel of Settings > Advanced: loaded when that screen is opened. */
+export const LazyNameSettings = namePanel.Part;
+
+/** The list of open appeals in the queue pane (the Appeals view): loaded when that view is first opened. */
+export const LazyAppealList = appealList.Part;
+
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
@@ -153,6 +171,9 @@ export function resetLazyParts(): void {
   signalLines.reset();
   pacePanel.reset();
   signalPanel.reset();
+  appealPanel.reset();
+  namePanel.reset();
+  appealList.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

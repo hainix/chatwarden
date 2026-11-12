@@ -43,7 +43,7 @@ const VERDICTS: ReadonlyArray<{ verdict: UiVerdict; key: string }> = [
 const SECONDS = UNDO_MS / 1000;
 
 /** The saved reasons, as chips: one press puts the text in the reason box. */
-function ReasonChips({ reasons, onPick }: { reasons: readonly Reason[]; onPick: (r: Reason) => void }) {
+export function ReasonChips({ reasons, onPick }: { reasons: readonly Reason[]; onPick: (r: Reason) => void }) {
   const { t } = useHub();
   if (reasons.length === 0) return null;
   return (

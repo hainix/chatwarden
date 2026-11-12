@@ -51,6 +51,23 @@ describe('ACTION_LABEL', () => {
     expect(en['hub.audit.label.ai.outcome']).toBe('Recorded a decision against the AI read');
   });
 
+  it('the hub labels the three actions of the appeals and names release, in plain words', () => {
+    expect(ACTION_LABEL['appeal.view']).toBe('hub.audit.label.appeal.view');
+    expect(ACTION_LABEL['appeal.decide']).toBe('hub.audit.label.appeal.decide');
+    expect(ACTION_LABEL['name.rename_required']).toBe('hub.audit.label.name.renameRequired');
+    expect(en['hub.audit.label.appeal.view']).toBe('Viewed appeals');
+    expect(en['hub.audit.label.appeal.decide']).toBe('Decided an appeal');
+    expect(en['hub.audit.label.name.renameRequired']).toBe('Asked a player to choose a new name');
+    // the words never carry the statement or a reason, and never a raw action name
+    for (const key of ['hub.audit.label.appeal.view', 'hub.audit.label.appeal.decide', 'hub.audit.label.name.renameRequired'] as const) {
+      expect(en[key]).not.toMatch(/appeal\.|name\./);
+    }
+  });
+
+  it('an appeal target has words of its own', () => {
+    expect(en['hub.audit.target.appeal']).toBe('Appeal {tag}');
+  });
+
   it('every action the kit records has plain words', () => {
     for (const action of AUDIT_ACTIONS) {
       const key = ACTION_LABEL[action];

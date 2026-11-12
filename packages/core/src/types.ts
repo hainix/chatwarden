@@ -2,7 +2,9 @@
 // their own sections below.
 
 import type { AIExample, AIRead, AISignal } from './ai/types.js';
+import type { AppealStatus } from './appeals.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
+import type { NameReason } from './names.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
 
@@ -182,6 +184,13 @@ export interface SanctionRow {
    */
   revokedBy?: string | null;
   revokeReason?: string | null;
+  /**
+   * The report whose decision made this sanction (a moderator decision from 0.1.9 stores the decided report's id), so a granted appeal can
+   * mark that decision reversed. Absent or null for a sanction that did not come from a report decision (an automatic timeout, a direct
+   * `sanctions.apply`, and every row written before 0.1.9 that could not be linked). Optional so a store written for an older kit still
+   * type-checks; read an absent value as null. Private.
+   */
+  reportId?: string | null;
 }
 
 /**
@@ -341,6 +350,52 @@ export interface SignalRow {
 }
 
 /**
+ * One appeal, as the store keeps it (appeals inbox, design 4.7). `statement` is the player's own text, capped at APPEAL_STATEMENT_MAX
+ * characters: the only new player free text, kept here and nowhere else, nulled by retention. Private: a player sees `PlayerAppeal`, never
+ * this. `rule` is the sanction's rule as TEXT (`'1'`.. or `'uncovered'`), like a sanction row.
+ * @experimental
+ */
+export interface AppealRow {
+  /** Random, never derived. */
+  id: string;
+  /** The canonical subject at filing time. */
+  subject: SubjectId;
+  /** The sanction group appealed; one appeal per group. */
+  groupId: string;
+  /** The notice the player filed it from. */
+  noticeId: string;
+  /** The report whose decision made the sanction, when known (so a granted appeal can mark that decision reversed). */
+  reportId: string | null;
+  rule: string | null;
+  kind: SanctionKind;
+  /** The player's statement; null once retention cleared it (or it was cleared at decision). */
+  statement: string | null;
+  status: AppealStatus;
+  createdAt: number;
+  decidedAt: number | null;
+  /** The staff ref that decided it (or revoked the sanction, for a moot one). */
+  decidedBy: string | null;
+  /** Private; never shown to the player. */
+  decisionReason: string | null;
+  /** The group written in place of a reduced sanction. */
+  replacementGroupId: string | null;
+}
+
+/**
+ * One blocked name kept as evidence (only when `names.keepBlocked` is on). `subject` is null when the check could not tie the name to a
+ * person; `termId` is the matcher's term id for a `name_not_allowed` hit and null for `name_profane`. Private staff data on a short clock.
+ * @experimental
+ */
+export interface BlockedNameRow {
+  id: string;
+  subject: SubjectId | null;
+  name: string;
+  termId: string | null;
+  reason: NameReason;
+  at: number;
+}
+
+/**
  * What `listSignalSources` answers: one row per source of a kind about a subject. Rows are bounded by distinct sources, not by volume.
  * @experimental
  */
@@ -408,14 +463,21 @@ export interface AiOutcomeInsert {
 
 /** A stored outcome: what was inserted, and the two marks a later action sets. */
 export interface AiOutcomeRow extends AiOutcomeInsert {
-  /** Set by a granted appeal or a take-back. Excludes the row from examples (and drops its example text); counts as an AI false positive. */
+  /** Set by a granted appeal. Excludes the row from standard examples; drops its example text unless the row is `corrective`. */
   reversed: boolean;
+  /**
+   * Set by a REVOKED appeal (a second moderator found the decision wrong): the example text is kept and teaches the opposite sign, and the
+   * row counts as an AI false positive when the AI had recommended action. A reduced appeal sets `reversed` only. Never cleared.
+   */
+  corrective: boolean;
   /** A senior's mark. Excludes the row from examples. */
   dontTeach: boolean;
 }
 
 /** One teachable casebook example, newest first from {@link Store.aiExamples}. The human's final decision is the label. */
 export interface AiExampleRow {
+  /** `'corrective'` for a decision a granted (revoked) appeal found wrong; absent for an ordinary example. */
+  kind?: 'corrective';
   reportId: string;
   decidedAt: number;
   agreement: 'agree' | 'override';
@@ -709,8 +771,21 @@ export interface ReportActivity {
 // Notices (storage shape)
 // ---------------------------------------------------------------------------
 
-/** What a player notice is about: a sanction of that kind, or the outcome of a report the player filed. */
-export type NoticeKind = 'warning' | 'chat' | 'area' | 'ban' | 'report_outcome';
+/**
+ * What a player notice is about: a sanction of that kind, the outcome of a report the player filed, or one of four messages (a rename
+ * is required, an appeal was upheld, reduced or revoked). The messages are not sanctions: they have no group, no end and no excerpt,
+ * never appear on "My record" and never need an acknowledgement.
+ */
+export type NoticeKind =
+  | 'warning'
+  | 'chat'
+  | 'area'
+  | 'ban'
+  | 'report_outcome'
+  | 'rename_required'
+  | 'appeal_upheld'
+  | 'appeal_reduced'
+  | 'appeal_revoked';
 
 /**
  * One stored player notice. `subject` is the CANONICAL subject at write time (a later merge is resolved at query
@@ -722,7 +797,7 @@ export interface NoticeRow {
   /** Random, never derived. */
   id: string;
   subject: SubjectId;
-  /** The sanction group this notice is about; null for a report outcome. */
+  /** The sanction group this notice is about; null for a report outcome and for the four message kinds. */
   groupId: string | null;
   kind: NoticeKind;
   rule: string | null;
@@ -1164,14 +1239,17 @@ export interface Store {
 
   /**
    * OPTIONAL. Set the marks on an outcome (a mark is never cleared) and drop its example text in the same write: a reversed or marked
-   * row can never teach, so its chat text goes now. False for an unknown report. Moves the change token when the report has an outcome.
+   * row can never teach, so its chat text goes now, EXCEPT a `corrective` one (a revoked appeal), which keeps its text to teach the opposite
+   * sign (a `dontTeach` mark still drops it). False for an unknown report. Moves the change token when the report has an outcome.
    */
-  markAiOutcome?(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean;
+  markAiOutcome?(reportId: string, patch: { reversed?: true; dontTeach?: true; corrective?: true }): boolean;
 
   /**
    * OPTIONAL. Teachable examples with this human rule (`'3'`, `'uncovered'`) and conduct level, decided at or after `since`, newest
    * first (`decidedAt` descending, then `reportId` descending), at most `limit`. Teachable: an example is
    * stored, the AI recommended something (`agree` or `override`, not `none`), and the row is not `reversed`, `dontTeach` or `badFaith`.
+   * Besides these the answer may hold ONE corrective row (`kind: 'corrective'`: still has its example, not `dontTeach` or `badFaith`) of the
+   * same rule and level, the newest; it comes after the ordinary rows are cut to `limit` and is not counted by `aiTeachableCount`.
    * `limit` is clamped to 1..200 (a fraction is floored); one that is omitted, not finite or below 1 is the default of 2 (the prompt takes at most two
    * examples).
    */
@@ -1212,6 +1290,113 @@ export interface Store {
 
   /** OPTIONAL. Delete rows with `at < before` (a row exactly on the line is kept); returns how many. */
   purgeSignals?(before: number): number;
+
+  // Appeals (appeals inbox, design 4.7). OPTIONAL: a store without them cannot keep appeals, and `createChatwarden` refuses a profile with
+  // `appeals.enabled` for one. SYNCHRONOUS on purpose (like claims and notices); they run inside `transaction`. Every insert, decide and moot
+  // moves the change token. Only `loadAppeal` and `listAppeals` return a statement (staff reads); `AppealRow` is private and never reaches
+  // a player.
+
+  /**
+   * OPTIONAL. Insert one appeal as ONE atomic statement: false, and nothing written, when an appeal for the group already exists (one
+   * appeal per sanction for its lifetime, whatever its status) or the id is taken. True when a row was written.
+   */
+  insertAppeal?(row: AppealRow): boolean;
+
+  /** OPTIONAL. One appeal by id, a copy, or null. A `moot` one is returned too. */
+  loadAppeal?(id: string): AppealRow | null;
+
+  /**
+   * OPTIONAL. Appeals oldest first (`createdAt` ascending, then `id`): `open` is the ones waiting, `decided` the upheld, reduced and
+   * revoked ones, `all` (the default) both. A `moot` appeal (nobody ruled on it) is never listed. `after` is the keyset cursor: the
+   * `createdAt` and `id` of the last row of the previous page, and the row it names is not repeated. `limit` is floored and clamped to
+   * 1..200. Returns copies.
+   */
+  listAppeals?(q: { status?: 'open' | 'decided' | 'all'; limit: number; after?: { createdAt: number; id: string } }): AppealRow[];
+
+  /**
+   * OPTIONAL. How many appeals these subjects (a person's canonical id and its aliases) filed at or after `since`, whatever their status
+   * (a moot or decided one still counts against the weekly cap), and the oldest `createdAt` among them. None: `{ count: 0, oldestAt: null }`.
+   */
+  countAppealsBy?(subjects: readonly SubjectId[], since: number): { count: number; oldestAt: number | null };
+
+  /** OPTIONAL. How many appeals are `open`. */
+  countOpenAppeals?(): number;
+
+  /**
+   * OPTIONAL. These subjects' (a person's canonical id and aliases) appeals, newest first (`createdAt` descending, then `id` descending),
+   * up to `limit` (floored, clamped to 1..200); a `moot` appeal is not listed. Returns copies. For "my appeals" on the player side.
+   */
+  listAppealsBy?(subjects: readonly SubjectId[], limit: number): AppealRow[];
+
+  /**
+   * OPTIONAL. Decide an appeal, ONLY from `open`, as ONE atomic statement: false, and nothing changed, for an unknown id or an appeal that
+   * is decided or moot. True when it moved. `clearStatement` also nulls the statement (retention with `appealStatementsMs` at 0).
+   */
+  decideAppeal?(
+    id: string,
+    patch: { status: 'upheld' | 'reduced' | 'revoked'; at: number; by: string; reason: string; replacementGroupId: string | null; clearStatement?: boolean },
+  ): boolean;
+
+  /**
+   * OPTIONAL. The sanction group was revoked by someone else: move its appeal, if still `open`, to `moot` (`decidedAt` and `decidedBy`
+   * set, no reason). Returns how many moved (0 or 1); a decided or moot appeal is untouched.
+   */
+  closeAppealsForGroup?(groupId: string, by: string, at: number, clearStatement?: boolean): number;
+
+  /**
+   * OPTIONAL. Retention removed the sanction rows of a group that still has an `open` appeal (or the group never had a subject row): move
+   * each such appeal to `moot` (`decidedAt` = `at`, `decidedBy` = `by`, no reason), so it leaves the inbox and its statement goes on
+   * the decided clock. A group that is only REVOKED still has its row and is not an orphan. `clearStatement` also nulls the statement
+   * (retention with `appealStatementsMs` at 0). Returns how many moved; moves the change token when it is above 0.
+   */
+  closeOrphanAppeals?(by: string, at: number, clearStatement?: boolean): number;
+
+  /**
+   * OPTIONAL. Per rule, the appeals FILED at or after `since`: `appealed` (every status, a moot one included), `granted` (revoked ONLY) and
+   * `lightened` (reduced: a reduction is not a false positive, so it is never counted as granted). `'uncovered'` and a null rule read as
+   * one null rule. A rule with no appeal has no row. In no promised order.
+   */
+  appealCountsByRule?(since: number): Array<{ rule: string | null; appealed: number; granted: number; lightened: number }>;
+
+  /**
+   * OPTIONAL. Per rule, the distinct sanction GROUPS whose subject row is a warning, chat, area or ban (never a note, never an IP row)
+   * starting at or after `since`, revoked ones included, EXCLUDING a group that is some appeal's `replacementGroupId` (a reduction is one
+   * sanction, not two). `'uncovered'` and a null rule read as one null rule. In no promised order.
+   */
+  countSanctionsByRule?(since: number): Array<{ rule: string | null; count: number }>;
+
+  /**
+   * OPTIONAL. The SUBJECT row of a sanction group (kind, actor, source, automated, start, end, rule, room, `reportId`), revoked or not, as
+   * a copy; null for an unknown group or one with only an IP row. `reportId` and `revokedAt` (when the group was revoked) are present only
+   * when set: this is the one read that carries them.
+   */
+  loadSanctionSubjectRow?(groupId: string): SanctionRow | null;
+
+  /**
+   * OPTIONAL. Null the statement of every appeal decided (or closed) before `before` (strict: one exactly on the line keeps it). The row
+   * stays. Returns how many statements were cleared. An open appeal is never touched.
+   */
+  clearAppealStatements?(before: number): number;
+
+  /**
+   * OPTIONAL. Delete appeals decided (or closed) before `before` (strict), EXCEPT one whose sanction group is still in force: a chat, area or
+   * ban, not revoked, that has no end or whose end is after `before` (`before` stands for "now less the retention": a sanction that ended
+   * before it is over). That row is what stops the player appealing a live sanction a second time. An open appeal is never deleted.
+   * Returns how many were deleted.
+   */
+  purgeAppeals?(before: number): number;
+
+  // Blocked names (offensive names, design 5.2 and 6.3). OPTIONAL: a kit with `names.keepBlocked` needs them. Synchronous. They do not move
+  // the change token: a kept name is evidence on a short clock, not a queue item.
+
+  /** OPTIONAL. Keep one blocked name. */
+  insertBlockedName?(row: BlockedNameRow): void;
+
+  /** OPTIONAL. Kept names at or after `since`, newest first (ties newest-inserted first), at most `limit` (floored, clamped to 1..200). Copies. */
+  listBlockedNames?(since: number, limit: number): BlockedNameRow[];
+
+  /** OPTIONAL. Delete names with `at < before` (a row exactly on the line is kept); returns how many. */
+  purgeBlockedNames?(before: number): number;
 
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).
@@ -1268,8 +1453,19 @@ export interface Store {
    * `report_outcome`, and has `createdAt < before`; or its end is past (`until` set and `< before`). A notice for a
    * permanent or still-running sanction is never deleted while it applies, and an unseen warning is kept until it
    * is seen or withdrawn.
+   *
+   * The four message kinds (`rename_required`, `appeal_upheld`, `appeal_reduced`, `appeal_revoked`) follow the `report_outcome`
+   * rule when seen (deleted with `createdAt < before`). An UNSEEN one is kept, but not for ever: `unseen`, when given, is a ceiling.
+   * An unseen appeal outcome goes with `createdAt < unseen.appealBefore`, an unseen `rename_required` with
+   * `createdAt < unseen.renameBefore`. Without `unseen` (an older caller) an unseen message notice is kept. A warning and a report
+   * outcome are not affected by it.
+   *
+   * A store written outside this repo that ignores the second argument simply has no ceiling (an unseen message notice is then kept until
+   * it is seen); that is the safe direction, and the release notes say so. The same goes for the optional `closeOrphanAppeals` and for the
+   * trailing `clearStatement` argument of `closeAppealsForGroup`: a store without them keeps an orphaned appeal open and clears a moot
+   * statement on the next purge instead of at once.
    */
-  purgeNotices(before: number): number;
+  purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number;
 
   // Webhook idempotency keys (K3b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
 
@@ -1318,6 +1514,13 @@ export interface Store {
 
   /** Withdraw every not-yet-withdrawn notice of the group at `at`. Returns how many this call withdrew. */
   withdrawNoticeGroup(groupId: string, at: number): number;
+
+  /**
+   * OPTIONAL. Withdraw one notice by id at `at`, seen or not, whatever its group: for a notice that has no group (a required rename), which
+   * `withdrawNoticeGroup` cannot reach. True only for the call that did it (false for an unknown or an already withdrawn id; the first time
+   * is kept). Touches no other row. A kit over a store without it cannot release a rename, so `names.requireRename` answers `off`.
+   */
+  withdrawNotice?(id: string, at: number): boolean;
 
   /**
    * The newest notice of a sanction group that is not withdrawn (newest by `createdAt`, then write order), or null

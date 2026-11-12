@@ -4,9 +4,11 @@
 // This directory is test-only and never published. It imports `vitest` and `@chatwarden/core` types and nothing else.
 import type { Store } from '@chatwarden/core';
 import { aiContract } from './ai.contract.js';
+import { appealsContract } from './appeals.contract.js';
 import { auditContract } from './audit.contract.js';
 import { discordThreadsContract } from './discordThreads.contract.js';
 import { mutesContract } from './mutes.contract.js';
+import { namesContract } from './names.contract.js';
 import { noticesContract } from './notices.contract.js';
 import { policyContract } from './policy.contract.js';
 import { reportReasonsContract } from './reportReasons.contract.js';
@@ -23,9 +25,11 @@ import { webhookKeysContract } from './webhookKeys.contract.js';
 
 export {
   aiContract,
+  appealsContract,
   auditContract,
   discordThreadsContract,
   mutesContract,
+  namesContract,
   noticesContract,
   policyContract,
   reportReasonsContract,
@@ -60,6 +64,8 @@ export const CONTRACT_AREAS = [
   'report reasons',
   'ai',
   'signals',
+  'appeals',
+  'names',
 ] as const;
 
 /** Registers every area suite against the stores `make` builds (a fresh, empty store on each call). */
@@ -81,4 +87,6 @@ export function storeContract(name: string, make: () => Store): void {
   reportReasonsContract(name, make);
   aiContract(name, make);
   signalsContract(name, make);
+  appealsContract(name, make);
+  namesContract(name, make);
 }

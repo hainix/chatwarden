@@ -48,6 +48,8 @@ function Target({ item }: { item: AuditItem }) {
       return <span>{t('hub.audit.target.exception')}</span>;
     case 'reason':
       return <span>{t('hub.audit.target.reason')}</span>;
+    case 'appeal':
+      return <span>{t('hub.audit.target.appeal', { tag })}</span>;
     default:
       return <span className="cw-hint">{t('hub.audit.target.none')}</span>;
   }

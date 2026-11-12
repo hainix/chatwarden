@@ -21,7 +21,10 @@ const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 // Raised to 82 KB at 0.1.8 (flood control and signals): the maintainer's rule for this release is to raise budgets generously rather than trim. The first
 // load gains the plug-in points only (the queue's conduct seam, the Advanced settings entry and the lazy parts); the pace and signal panels and the Person
 // page's signal lines are chunks loaded when opened: 77,959 -> about 79,100.
-const BUDGET = 82 * 1024;
+// Raised to 88 KB at 0.1.9 (appeals and names), by the owner's rule to raise generously and never trim code for bytes: the first load gains the wire types and
+// client methods, the hidden-name helpers (`displayName`, the Show control), the Appeals switch and route plumbing, and Person's appeal entries: 79,100 -> about
+// 83,300. The appeal card, the appeals list, the Appeals screen and the Settings panels are chunks loaded when used.
+const BUDGET = 88 * 1024;
 const ENTRY_BUDGET = 52 * 1024;
 
 async function bundle() {
@@ -120,8 +123,9 @@ describe('bundle size', () => {
     const peers = new Set(['react', 'react/jsx-runtime', '@chatwarden/core']);
     // `import ... from "x"` only: a catalog phrase that happens to end in "from" is not an import. A `./chunk-...` import is the bundle's own.
     const importsOf = (text: string): string[] => [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1] as string).filter((i) => !i.startsWith('./'));
-    // The entry uses all three; no chunk (a screen loaded on demand, or code they share) reaches for anything outside them.
-    expect(new Set(importsOf(all.find((o) => o.name === 'entry.js')?.text ?? ''))).toEqual(peers);
+    // The entry and its chunks together use all three (which file holds the kit import moves with how the bundler splits shared code); none reaches for
+    // anything outside them.
+    expect(new Set(all.flatMap((o) => importsOf(o.text)))).toEqual(peers);
     for (const out of all) for (const i of importsOf(out.text)) expect(peers, `${out.name} imports ${i}`).toContain(i);
   });
 
@@ -159,7 +163,7 @@ describe('bundle size', () => {
 
   it('keeps the settings and admin screens out of the entry: each is a chunk of its own', async () => {
     const { entryInputs, chunkRoots } = await bundle();
-    const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings', 'AiSettings', 'AdvancedSettings', 'PaceSettings', 'SignalSettings'];
+    const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings', 'AiSettings', 'AdvancedSettings', 'PaceSettings', 'SignalSettings', 'AppealSettings', 'NameSettings'];
     for (const name of lazy) {
       expect(entryInputs.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} is in the entry`).toEqual([]);
       expect(chunkRoots.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} has no chunk`).toHaveLength(1);
@@ -175,6 +179,15 @@ describe('bundle size', () => {
     expect(entryInputs.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toEqual([]);
     expect(eagerInputs.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toEqual([]);
     expect(chunkRoots.filter((i) => i.endsWith('src/person/SignalLines.tsx'))).toHaveLength(1);
+  });
+
+  it('keeps the appeal card, the appeals list and the Appeals screen out of the first load: each a chunk of its own, loaded when appeals are used (0.1.9)', async () => {
+    const { entryInputs, eagerInputs, chunkRoots } = await bundle();
+    for (const file of ['case/AppealCard.tsx', 'appeals/AppealList.tsx', 'screens/Appeals.tsx']) {
+      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
+      expect(eagerInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the first load`).toEqual([]);
+      expect(chunkRoots.filter((i) => i.endsWith(`src/${file}`)), `${file} has no chunk`).toHaveLength(1);
+    }
   });
 
   it('the stylesheet is small too', async () => {

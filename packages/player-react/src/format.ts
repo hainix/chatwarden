@@ -39,6 +39,16 @@ export function untilText(at: number, locale: string, timeZone?: string): string
   }
 }
 
+/** A date with no time (`Jan 15, 2027`). Pass a time zone for a fixed one; the default is the viewer's. An unknown zone is ignored. */
+export function dateText(at: number, locale: string, timeZone?: string): string {
+  const options: Intl.DateTimeFormatOptions = { dateStyle: 'medium' };
+  try {
+    return new Intl.DateTimeFormat(safeLocale(locale), { ...options, ...(timeZone === undefined ? {} : { timeZone }) }).format(at);
+  } catch {
+    return new Intl.DateTimeFormat(safeLocale(locale), options).format(at);
+  }
+}
+
 /**
  * How long is left until `at`, as the locale says it ("in 3 hours"): minutes under an hour (a part of a minute counts as a whole
  * one, so a live restriction never reads "in 0 minutes"), hours under two days, then days. Null when `at` is now or has passed.

@@ -29,9 +29,9 @@ const SERVER_500 = { status: 500, body: { error: 'internal', message: 'x' } };
 describe('the page', () => {
   it('is titled by the handle on their latest report, with the short tag beside it', async () => {
     const w = await hubWorld();
-    const f = await w.file({ target: 'Vlemmo' });
+    const f = await w.file({ target: 'Velmora' });
     await open(w, f.person);
-    expect(screen.getByRole('heading', { level: 2, name: 'Vlemmo' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Velmora' })).toBeInTheDocument();
     expect(within(screen.getByRole('main')).getByText(personTag(f.person), { selector: '.cw-pid' })).toBeInTheDocument();
   });
 
@@ -55,7 +55,7 @@ describe('the page', () => {
 
   it('opening it writes history.view once for this person, and nothing else audited (no report, rules or blocked-line read)', async () => {
     const w = await hubWorld({ role: 'senior' });
-    const f = await w.file({ target: 'Snerp' });
+    const f = await w.file({ target: 'Snorlo' });
     await w.sanction(f.person, 'chat', 1);
     await open(w, f.person);
     const mine = audits(w, 'history.view').filter((r) => r.target?.ref === f.person);
@@ -105,7 +105,7 @@ describe('the page', () => {
 });
 
 describe('a very long handle', () => {
-  const LONG = 'Zorbak'.repeat(10);
+  const LONG = 'Zephyr'.repeat(10);
 
   it('renders whole in the person title and in the Recent actions row (the stylesheet breaks it; jsdom cannot measure)', async () => {
     const w = await hubWorld();

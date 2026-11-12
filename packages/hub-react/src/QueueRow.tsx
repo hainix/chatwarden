@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useHub } from './context.js';
-import { absoluteTime, formatDuration, personTag, relativeTime, waitTone } from './format.js';
-import { reasonChip } from './labels.js';
+import { absoluteTime, formatDuration, relativeTime, waitTone } from './format.js';
+import { displayName, groupName, reasonChip } from './labels.js';
 import { LazyAiParts } from './lazyParts.js';
 import { hasAiRead } from './queue.js';
 import type { QueueGroup } from './queue.js';
@@ -18,8 +18,10 @@ export const EARLIER_SHOWN = 10;
 export function QueueRow({ group, showStatus = false, earlier = true }: { group: QueueGroup; showStatus?: boolean; earlier?: boolean }) {
   const { t, locale, now } = useHub();
   const [expanded, setExpanded] = useState(false);
-  const name = group.handle ?? t('hub.reports.row.unnamed');
-  const who = group.handle ?? t('hub.person.unnamed', { tag: personTag(group.person) });
+  // A flagged handle is the hidden label here, as in every list: the name is a click away, in the case.
+  const name = group.handle === null ? t('hub.reports.row.unnamed') : groupName(t, group);
+  const who = groupName(t, group);
+  const seenAs = group.handles.slice(1).map((h) => displayName(t, { handle: h, flagged: group.flaggedHandles?.includes(h) }));
   const waiting = group.oldestOpenAt === null ? null : Math.max(0, now() - group.oldestOpenAt);
   const older = group.entries.slice(1);
   const shown = older.slice(0, EARLIER_SHOWN);
@@ -43,7 +45,7 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
           <span>{t('hub.reports.row.reports', { count: group.reports })}</span>
           <span>{t('hub.reports.row.rooms', { count: group.rooms.length })}</span>
           <span>{t('hub.reports.row.reporters', { count: group.reporters })}</span>
-          {group.handles.length > 1 && <span>{t('hub.reports.row.alsoSeenAs', { names: group.handles.slice(1).join(', ') })}</span>}
+          {group.handles.length > 1 && <span>{t('hub.reports.row.alsoSeenAs', { names: seenAs.join(', ') })}</span>}
         </div>
         {earlier && older.length > 0 && (
           <div className="cw-earlier">

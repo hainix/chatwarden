@@ -21,6 +21,10 @@ export const LINK_MAX = 512;
 const UNATTRIBUTED = { key: '__unattributed__', label: 'Unattributed reports' } as const;
 type Shared = typeof UNATTRIBUTED;
 
+const H_MS = 3_600_000;
+/** An appeal's outcome in a word staff read at a glance. */
+const APPEAL_OUTCOME_WORDS: Readonly<Record<string, string>> = Object.freeze({ uphold: 'upheld', reduce: 'lighter', revoke: 'revoked' });
+
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 /** `Case <5 Crockford base32 characters>`, random: it names no one and is derived from nothing. */
@@ -35,6 +39,17 @@ export interface FeedKit {
   limits: { strikes: Pick<Limits['strikes'], 'firstMs' | 'repeatMs'> };
   people: Chatwarden['people'];
   discordThreads: Chatwarden['discordThreads'];
+  /**
+   * The staff read of one appeal, used only to say how long the sanction was ("a 24-hour chat restriction"). Optional: without it, or when it fails
+   * or finds nothing, the post names the kind and no length. The type answers the sanction's kind and times and nothing else, so the feed never
+   * holds an appeal's statement (a real `Chatwarden` answers more and still satisfies it; the feed copies the two times out and drops the rest).
+   */
+  appeals?: { get(appealId: string): FeedAppealRead | null };
+}
+
+/** What the feed reads of one appeal: its sanction's kind and times. */
+export interface FeedAppealRead {
+  sanction: { kind: string; startsAt: number; endsAt: number | null };
 }
 
 export interface DiscordFeedOptions {
@@ -102,11 +117,16 @@ interface Job {
  *   ref code and a person link. Every event is placed by its own `subject` (canonical), so nothing is remembered between
  *   events and a restart changes nothing. Plain staff text: no chat text, handle, reporter note, reason or evidence, and
  *   no id except inside `hubLink` URLs.
+ * - `appeal.created`: "Appeal filed against a 24-hour chat restriction, Rule 2." and a link into the hub on the person (the length from the
+ *   appeal's sanction when `cw.appeals` can say; no length otherwise). `appeal.decided`: "Appeal decided: lighter." (`upheld`, `lighter` for a
+ *   reduction, `revoked`) and the same link. Both go to the person's thread, ping no one, and never carry the statement, the reason, a handle or an
+ *   id except inside the hub link. An appeal made moot announces nothing (the kit raises no event for it). `rename.required` is not posted: it is
+ *   for the game, not for staff.
  * - Severe means category `hate`, or the rule (the report's default rule, or the sanction's) is in
  *   `cw.profile.severeRules` (default Community Rule 1). Only a severe report or sanction pings `mentionRoleId`;
  *   `allowed_mentions` is `{ parse: [] }` on every other post, so no adopter or rule text can ping `@everyone`.
  *   `severeOnly` posts only severe reports, their closing, a severe sanction and the lift of a sanction under a severe
- *   rule (the `rule` the `sanction.revoked` event carries); auto timeouts and rule gaps are skipped.
+ *   rule (the `rule` the `sanction.revoked` event carries), and the appeals on a severe rule; auto timeouts and rule gaps are skipped.
  * - Delivery: one queue, one request at a time (a webhook's rate limit is shared), so a thread is created exactly once
  *   and a person's posts stay in order. A 429 waits the `retry_after` it names (0.5 to 60 s); a 5xx or network error backs
  *   off 1, 2, 4, 8, 16 s; at most 5 retries; 10 s per request. The queue is in memory, bounded at 1000 waiting events
@@ -479,6 +499,64 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     toPerson(e.type, person, UNATTRIBUTED, message);
   };
 
+  /** `a 24-hour chat restriction`, `a permanent ban`, `an area ban`, `a warning`: the sanction an appeal is against, in words (no length when it is not known). */
+  const sanctionPhrase = (kind: unknown, lengthMs: number | null | undefined): string => {
+    const noun = (labelOf(KIND_LABELS, kind) ?? 'Sanction').toLowerCase();
+    const timed = kind !== 'warning' && kind !== 'note';
+    let text = noun;
+    if (timed && lengthMs === null) text = `permanent ${noun}`;
+    else if (timed && typeof lengthMs === 'number' && lengthMs > 0) {
+      const hours = lengthMs / H_MS;
+      const days = lengthMs / (24 * H_MS);
+      if (Number.isInteger(days) && hours >= 48) text = `${days}-day ${noun}`;
+      else if (Number.isInteger(hours) && hours < 48) text = `${hours}-hour ${noun}`;
+      else text = `${noun} of ${humanDuration(lengthMs)}`;
+    }
+    return `${/^(?:[aeiou]|8|11|18)/i.test(text) ? 'an' : 'a'} ${text}`;
+  };
+
+  /** How long the appeal's sanction was: its length in ms, null for a permanent one, undefined when the kit cannot say. Never throws, never reads the statement out. */
+  const sanctionLength = (op: string, appealId: unknown): number | null | undefined => {
+    if (cw.appeals === undefined || !isString(appealId)) return undefined;
+    try {
+      // Only the two times leave this line; whatever else the kit's read holds is dropped here.
+      const sanction = cw.appeals.get(appealId)?.sanction;
+      if (sanction === undefined) return undefined;
+      const { startsAt, endsAt } = sanction;
+      return endsAt === null ? null : endsAt - startsAt;
+    } catch (err) {
+      fail(op, err);
+      return undefined;
+    }
+  };
+
+  const ruleNumber = (rule: unknown): string | undefined => (typeof rule === 'number' ? `Rule ${rule}` : undefined);
+
+  const onAppealCreated = (e: KitEventOf<'appeal.created'>): void => {
+    if (onlySevere && !isSevereRule(e.rule)) return;
+    const person = personOf(e.target);
+    const rule = ruleNumber(e.rule);
+    const message = compose(
+      `Appeal filed against ${sanctionPhrase(e.kind, sanctionLength(e.type, e.appealId))}${rule === undefined ? '' : `, ${rule}`}.`,
+      [],
+      [person === null ? null : link('person', person, 'Open in the hub')],
+      false,
+    );
+    toPerson(e.type, person, UNATTRIBUTED, message);
+  };
+
+  const onAppealDecided = (e: KitEventOf<'appeal.decided'>): void => {
+    if (onlySevere && !isSevereRule(e.rule)) return;
+    const person = personOf(e.target);
+    const message = compose(
+      `Appeal decided: ${labelOf(APPEAL_OUTCOME_WORDS, e.outcome) ?? 'decided'}.`,
+      [],
+      [person === null ? null : link('person', person, 'Open in the hub')],
+      false,
+    );
+    toPerson(e.type, person, UNATTRIBUTED, message);
+  };
+
   /** Fence a handler: a sync throw is logged by class and goes no further. It returns at once; delivery is queued. */
   const fenced =
     <E extends KitEvent>(handler: (e: E) => void) =>
@@ -498,6 +576,8 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     cw.on('sanction.revoked', fenced(onRevoked)),
     cw.on('gap.created', fenced(onGap)),
     cw.on('auto.restricted', fenced(onAuto)),
+    cw.on('appeal.created', fenced(onAppealCreated)),
+    cw.on('appeal.decided', fenced(onAppealDecided)),
   );
 
   return {

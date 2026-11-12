@@ -18,6 +18,7 @@ import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
 import { LazyAiParts } from '../lazyParts.js';
+import { NameToggle, NameValue } from '../names.js';
 import { useQuickKeys } from '../quickKeys.js';
 import { QuickKeys } from './QuickKeys.js';
 import { reporterRate } from './ReporterStanding.js';
@@ -384,8 +385,9 @@ export function CaseCard() {
         <>
           <header className="cw-scard-head">
             <h2 className="cw-screen-title" tabIndex={-1}>
-              {name}
+              <NameValue text={personName(target, people, t, true)} flagged={target.handleFlagged} place="head" />
             </h2>
+            <NameToggle flagged={target.handleFlagged} place="head" />
             <p className="cw-scard-sub">
               {reportedLine(t, locale, report, people, now(), group === null ? null : { reports: group.reports, reasons: group.reasons })}
             </p>

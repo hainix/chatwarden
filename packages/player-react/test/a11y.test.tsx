@@ -1,6 +1,7 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import axe from 'axe-core';
 import { describe, expect, it } from 'vitest';
+import { AppealDialog } from '../src/AppealDialog.js';
 import { MyRecord } from '../src/MyRecord.js';
 import { NoticeQueue } from '../src/NoticeQueue.js';
 import { ReportDialog } from '../src/ReportDialog.js';
@@ -243,5 +244,72 @@ describe.each(['light', 'dark'] as const)('axe, %s theme', (theme) => {
       await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
       expect(await violations(c.container)).toEqual([]);
     });
+  });
+});
+
+describe.each(['light', 'dark'] as const)('axe, appeals, %s theme', (theme) => {
+  const base = (w: PlayerWorld) => ({ client: w.client, now: w.now, theme, ...FIXED });
+  const asked = async () => {
+    const w = await playerWorld({ appeals: {} });
+    await w.warn(ALICE, { rule: 2 });
+    return w;
+  };
+
+  it('AppealDialog: the form, with a count over the limit, after a refusal, and after a send', async () => {
+    const w = await asked();
+    const noticeId = w.noticeOf(ALICE);
+    const a = renderUi(<AppealDialog {...base(w)} noticeId={noticeId} onClose={() => undefined} />);
+    expect(await violations(a.container)).toEqual([]);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'a'.repeat(1001) } });
+    await screen.findByRole('alert');
+    expect(await violations(a.container)).toEqual([]);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'it was a joke' } });
+    w.intercept.fn = fail(404);
+    await a.user.click(screen.getByRole('button', { name: 'Send appeal' }));
+    await screen.findByRole('alert');
+    expect(await violations(a.container)).toEqual([]);
+    w.intercept.fn = null;
+    await a.user.click(screen.getByRole('button', { name: 'Send appeal' }));
+    await screen.findByText(/^Appeal sent\./);
+    expect(await violations(a.container)).toEqual([]);
+  });
+
+  it('NoticeQueue with appeals: the button, the form in place of the notice, and "Appeal sent"', async () => {
+    const w = await asked();
+    const q = renderUi(<NoticeQueue {...base(w)} appeals />);
+    await q.user.click(await screen.findByRole('button', { name: 'Think this is a mistake?' }));
+    expect(await violations(q.container)).toEqual([]);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'it was a joke' } });
+    await q.user.click(screen.getByRole('button', { name: 'Send appeal' }));
+    await screen.findByText(/^Appeal sent\./);
+    await q.user.click(screen.getByRole('button', { name: 'Close' }));
+    await screen.findByText(/^Appeal sent /);
+    expect(await violations(q.container)).toEqual([]);
+  });
+
+  it('MyRecord with appeals: the button and the outcome words', async () => {
+    const w = await asked();
+    const r = renderUi(<MyRecord {...base(w)} appeals />);
+    await screen.findByRole('button', { name: 'Think this is a mistake?' });
+    expect(await violations(r.container)).toEqual([]);
+    await w.client.fileAppeal(w.noticeOf(ALICE), 'please');
+    await w.decideAppeal(ALICE, 'uphold');
+    r.rerender(<MyRecord {...base(w)} appeals refreshKey={2} />);
+    await screen.findByText('We kept the decision');
+    expect(await violations(r.container)).toEqual([]);
+  });
+
+  it('NoticeQueue: an outcome notice and a rename notice', async () => {
+    const w = await asked();
+    for (const kind of ['appeal_revoked', 'rename_required']) {
+      w.intercept.fn = (req) =>
+        req.path === '/notices'
+          ? { status: 200, body: { notices: [{ id: 'm1', kind, rule: null, ruleLabel: null, until: null, refCode: null, excerpt: [], createdAt: 1, mustAcknowledge: false }] }, headers: {} }
+          : undefined;
+      const q = renderUi(<NoticeQueue {...base(w)} appeals />);
+      await screen.findByRole('dialog');
+      expect(await violations(q.container)).toEqual([]);
+      q.unmount();
+    }
   });
 });

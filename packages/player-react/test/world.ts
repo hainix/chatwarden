@@ -1,6 +1,6 @@
 import { createChatwarden, defineRules, starterRules } from '@chatwarden/core';
-import type { Chatwarden, ProfileOverrides, RawWho, ReportCategory } from '@chatwarden/core';
-import { MemoryStore } from '@chatwarden/store-memory';
+import type { AppealSettings, Chatwarden, ProfileOverrides, RawWho, ReportCategory } from '@chatwarden/core';
+import { MemoryStore, withMemoryAppeals } from '@chatwarden/store-memory';
 import { createRouter, playerRoutes } from '@chatwarden/http';
 import type { KitResponse } from '@chatwarden/http';
 import { createPlayerClient } from '../src/client.js';
@@ -37,12 +37,14 @@ export interface WorldOptions {
   retire?: number[];
   /** The studio's reporting settings in code (the flow, the reasons, the thank-you). */
   reporting?: NonNullable<ProfileOverrides['reporting']>;
+  /** Switch appeals on (the in-memory store gets its opt-in appeal methods); the settings are the profile's `appeals`. */
+  appeals?: AppealSettings;
 }
 
 export async function playerWorld(opts: WorldOptions = {}) {
   const clock = { t: T0, now: () => clock.t };
   const cw: Chatwarden = await createChatwarden({
-    store: new MemoryStore(),
+    store: opts.appeals === undefined ? new MemoryStore() : withMemoryAppeals(new MemoryStore()),
     // A matcher that blocks the synthetic term, so a blocked line can be masked in a notice.
     matcher: {
       match: (t) => (t.toLowerCase().includes(BLOCKED) ? { termId: `syn:${BLOCKED}` } : null),
@@ -56,7 +58,11 @@ export async function playerWorld(opts: WorldOptions = {}) {
     clock,
     profile: 'standard',
     rules: defineRules(starterRules('standard').map((r) => (opts.retire?.includes(r.number) ? { ...r, retired: true } : r))),
-    overrides: { profanity: { mode: 'allow' }, ...(opts.reporting === undefined ? {} : { reporting: opts.reporting }) },
+    overrides: {
+      profanity: { mode: 'allow' },
+      ...(opts.reporting === undefined ? {} : { reporting: opts.reporting }),
+      ...(opts.appeals === undefined ? {} : { appeals: { enabled: true, perPlayerPerWeek: 20, ...opts.appeals } }),
+    },
     retention: false,
   });
   /** Who is calling: the key the transport sends. `null` sends none (the kit treats nobody as an empty answer). */
@@ -138,7 +144,23 @@ export async function playerWorld(opts: WorldOptions = {}) {
   const pending = (who: Player = ALICE) => cw.notices.pending({ clientKey: who.key });
   const record = (who: Player = ALICE) => cw.notices.record({ clientKey: who.key });
 
-  return { cw, clock, caller, routes, handle, transport, client, sent, intercept, sanction, warn, pending, record, now: () => clock.t };
+  /** The id of the notice that shows `who` their `n`th live sanction on the record (oldest first). */
+  const noticeOf = (who: Player = ALICE, n = 0): string => {
+    const row = [...record(who)].sort((a, b) => a.createdAt - b.createdAt)[n];
+    if (row === undefined) throw new Error('no such notice');
+    return row.id;
+  };
+  /** A moderator other than the one who decided (`ann@example.test`) rules on `who`'s appeal, as the hub would. */
+  const decideAppeal = async (who: Player, outcome: 'uphold' | 'revoke' | 'reduce', to?: { kind: 'warning' | 'chat' | 'area' | 'ban'; durationMs: number | null }) => {
+    const mine = cw.appeals.mine({ clientKey: who.key });
+    const open = mine.find((a) => a.status === 'open');
+    if (open === undefined) throw new Error('no open appeal');
+    const res = await cw.appeals.decide({ appealId: open.id, outcome, actor: 'bea@example.test', reason: 'private appeal reason', ...(to === undefined ? {} : { to }) });
+    if (!res.ok) throw new Error(`decide refused: ${res.error}`);
+    return res;
+  };
+
+  return { cw, clock, caller, routes, handle, transport, client, sent, intercept, sanction, warn, pending, record, noticeOf, decideAppeal, now: () => clock.t };
 }
 
 export type PlayerWorld = Awaited<ReturnType<typeof playerWorld>>;

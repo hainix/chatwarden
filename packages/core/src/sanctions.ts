@@ -49,6 +49,13 @@ const REF_ATTEMPTS = 5;
 /** No I, L, O, 0 or 1: a player reads the code aloud or types it from a screenshot. */
 const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
+/**
+ * The key to `SanctionInput.startsAt`. It is exported from this module only, never from the package index, so only code inside the kit (the
+ * appeals service) can hold it; a public caller passing a start time is refused with a `RangeError`.
+ * @internal
+ */
+export const APPEALS_START_TOKEN: unique symbol = Symbol('chatwarden.appeals.startsAt');
+
 export interface SanctionInput {
   kind: SanctionKind;
   /** The person to sanction; stored as its canonical (surviving) subject. */
@@ -77,6 +84,22 @@ export interface SanctionInput {
    * otherwise. Private; the ladder reads it to count notes from distinct games.
    */
   roomId?: string | null;
+  /**
+   * The report whose decision made this sanction: a non-empty string, kept on the subject row so a granted appeal can mark that decision
+   * reversed. Absent stores nothing (an automatic or direct sanction). Private. For the kit's own decision path only, like `startsAt`: it
+   * is accepted only with `startsAtToken`, because a wrong id would corrupt the casebook; any other caller passing it gets a `RangeError`.
+   * @internal
+   */
+  reportId?: string;
+  /**
+   * The start time to write instead of "now", epoch ms, never after "now". For the appeals service only, so a reduced sanction keeps the
+   * original start (the ladder reads sanctions by start). The end is `startsAt + durationMs`. Honoured only with `startsAtToken`; any other
+   * caller passing it gets a `RangeError`.
+   * @internal
+   */
+  startsAt?: number;
+  /** @internal The key to `startsAt` and `reportId`: {@link APPEALS_START_TOKEN}. */
+  startsAtToken?: symbol;
 }
 
 /** What `active` tells the chat path. No reason, rule, actor or identifier. */
@@ -108,10 +131,16 @@ export function refCode(): string {
   return out;
 }
 
-/** What `validate` settles: the rule as stored text, and the trimmed gap note (null when there is none). */
+/**
+ * What `validate` settles: the rule as stored text, the trimmed gap note (null when there is none), and the two internal values it read
+ * ONCE (`start` and `reportId`, undefined when not given). The writer uses these, never a second read of the input, so what was checked
+ * is what is stored even for an object with getters or an inherited property.
+ */
 interface Checked {
   rule: string;
   gapNote: string | null;
+  start: number | undefined;
+  reportId: string | undefined;
 }
 
 /**
@@ -123,7 +152,21 @@ export function validateSanctionInput(input: SanctionInput): void {
   validate(input);
 }
 
-function validate(input: SanctionInput): Checked {
+function validate(input: SanctionInput, now?: number): Checked {
+  // A start time and a report id are the kit's own (the appeals service and the decision): refused for everyone else before any other
+  // check, naming nothing of the input. Each is read ONCE, as an ordinary property read (an inherited value counts, so a prototype cannot
+  // smuggle one past the guard), and the writer uses this read.
+  const start: unknown = input.startsAt;
+  const report: unknown = input.reportId;
+  const token: unknown = input.startsAtToken;
+  if ((start !== undefined || report !== undefined) && token !== APPEALS_START_TOKEN) {
+    throw new RangeError('applySanction: startsAt and reportId are not accepted');
+  }
+  if (start !== undefined) {
+    if (typeof start !== 'number' || !Number.isSafeInteger(start) || start < 0) throw new SanctionError('applySanction: invalid start');
+    if (now !== undefined && start > now) throw new SanctionError('applySanction: a start cannot be in the future');
+  }
+  if (report !== undefined && (typeof report !== 'string' || report === '')) throw new SanctionError('applySanction: invalid report id');
   const d = input.durationMs;
   if (isRecordKind(input.kind)) {
     // A warning or a note has no end and no IP: it is a record, not a restriction.
@@ -151,12 +194,17 @@ function validate(input: SanctionInput): Checked {
   const note: unknown = input.gapNote;
   if (ref === 'uncovered' && input.source === 'moderator') {
     const trimmed = typeof note === 'string' ? note.trim() : '';
+    // The kit's own writers (the decision, the appeals service: `token`) may leave the note out: a replacement under no rule has its gap
+    // recorded on the sanction it replaces, so it does not open a second one.
+    if (trimmed === '' && token === APPEALS_START_TOKEN && note === undefined) {
+      return { rule: 'uncovered', gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
+    }
     if (trimmed === '') throw new SanctionError('applySanction: a rule-gap note is required when no rule is cited');
     if (trimmed.length > GAP_NOTE_MAX) throw new SanctionError('applySanction: the rule-gap note is too long');
-    return { rule: 'uncovered', gapNote: trimmed };
+    return { rule: 'uncovered', gapNote: trimmed, start: start as number | undefined, reportId: report as string | undefined };
   }
   if (note !== undefined) throw new SanctionError('applySanction: a rule-gap note is only for an uncovered moderator sanction');
-  return { rule: String(ref), gapNote: null };
+  return { rule: String(ref), gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
 }
 
 /** What {@link writeSanction} wrote: the group's handle and the rows, for the caller to hand to the index. */
@@ -175,11 +223,13 @@ function applyNow(
   now: number,
   pending: boolean,
 ): WrittenSanction {
-  const { rule, gapNote } = validate(input);
+  const { rule, gapNote, start: given, reportId } = validate(input, now);
   const subject = subjects.canonical(input.subject);
+  // The start is "now" unless the appeals service gave the original one (validate has refused anyone else).
+  const start = given ?? now;
   // A warning or note has no end: it ends where it starts, so it is never "still running".
-  const endsAt = isRecordKind(input.kind) ? now : input.durationMs === null ? null : now + input.durationMs;
-  const ipEndsAt = endsAt === null ? now + IP_MAX_MS : Math.min(endsAt, now + IP_MAX_MS);
+  const endsAt = isRecordKind(input.kind) ? start : input.durationMs === null ? null : start + input.durationMs;
+  const ipEndsAt = endsAt === null ? start + IP_MAX_MS : Math.min(endsAt, start + IP_MAX_MS);
   const ip = input.includeIp ? subjects.latestIp(subject) : null;
   const groupId = newId();
 
@@ -188,7 +238,7 @@ function applyNow(
       groupId,
       refCode: code,
       kind: input.kind,
-      startsAt: now,
+      startsAt: start,
       reason: input.reason,
       rule,
       roomId: input.roomId ?? null,
@@ -206,6 +256,8 @@ function applyNow(
       endsAt,
       gapNote,
       gapStatus: gapNote === null ? null : 'open',
+      // Only a sanction a report decision made carries one; the key is absent otherwise, so every other row keeps its shape.
+      ...(reportId === undefined ? {} : { reportId }),
     };
     const rows: SanctionRow[] = [subjectRow];
     if (ip !== null) {
@@ -271,6 +323,10 @@ export function writeSanction(
  * when given, the index are updated before the promise is returned. Resolves
  * true when this call revoked something, false for an unknown or already
  * revoked group.
+ *
+ * An appeal still open against the group is made moot in the same transaction. `opts.clearStatement` also clears that appeal's statement
+ * (what `retention.appealStatementsMs: 0` asks for); `cw.sanctions.revoke` passes it from the retention options the kit was CREATED with,
+ * so a one-off `cw.purge(policy)` with another `appealStatementsMs` does not change it, and the text then waits for the next purge.
  */
 export function revokeSanction(
   store: Store,
@@ -279,9 +335,16 @@ export function revokeSanction(
   now: number,
   reason: string,
   index?: SanctionIndex,
+  opts: { clearStatement?: boolean } = {},
 ): Promise<boolean> {
   try {
-    const n = store.transaction(() => store.revokeSanctionGroup(groupId, actor, now, reason));
+    const n = store.transaction(() => {
+      const revoked = store.revokeSanctionGroup(groupId, actor, now, reason);
+      // An appeal still open against this group is moot now: nobody ruled on it. In the same transaction, so both land or neither.
+      // `clearStatement` (retention.appealStatementsMs 0) clears its text at once, as a decision would.
+      if (revoked > 0) store.closeAppealsForGroup?.(groupId, actor, now, opts.clearStatement === true);
+      return revoked;
+    });
     index?.remove(groupId);
     return Promise.resolve(n > 0);
   } catch (err) {

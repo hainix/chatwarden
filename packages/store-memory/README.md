@@ -106,6 +106,34 @@ const cw = await createChatwarden({
 A kit that declares signal kinds or feeds over a store without the methods is refused when it is created. A kit that declares none starts, and
 `cw.signals.record` answers false and logs `chatwarden.signals_store_unsupported` once.
 
+## The appeal and name methods (opt-in)
+
+Appeals need optional store methods (`insertAppeal`, `loadAppeal`, `listAppeals`, `decideAppeal`, the counts the weekly cap and the mistake rate read, the
+purges and a few more). Blocked names kept as evidence (`names.keepBlocked`) need three (`insertBlockedName`, `listBlockedNames`, `purgeBlockedNames`).
+`createMemoryStore()` carries neither, so an app that uses neither does not bundle them. To use appeals over the in-memory store, add them with
+`withMemoryAppeals(store)`, and for kept names `withMemoryNames(store)` (both `@experimental`, new in 0.1.9). Each returns the same store; a method the store
+already has is kept, and calling one twice changes nothing. The SQLite store has them built in. `withdrawNotice`, which lets a game release a required
+rename, is already on `MemoryStore`.
+
+```ts
+import { createChatwarden, type Platform } from '@chatwarden/core';
+import { createMemoryStore, withMemoryAppeals, withMemoryNames } from '@chatwarden/store-memory';
+
+declare const platform: Platform;
+
+const store = withMemoryNames(withMemoryAppeals(createMemoryStore()));
+const cw = await createChatwarden({
+  store,
+  secret: 'a-long-random-secret-for-this-run',
+  platform,
+  retention: false,
+  overrides: { appeals: { enabled: true }, names: { renames: true, keepBlocked: true } },
+});
+```
+
+A kit created with `appeals.enabled` in its profile over a store without the appeal methods is refused when it is created (an owner's saved setting is refused when saved, or left off with a warning if it was stored before). Kept names over a store without the name
+methods are simply not kept.
+
 ## Options
 
 `createMemoryStore()` and `new MemoryStore()` take no options. The inspection helpers below return copies, so changing what they

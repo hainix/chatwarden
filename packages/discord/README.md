@@ -15,7 +15,7 @@ Status: pre-release, as-is, no support promise.
 npm install @chatwarden/discord @chatwarden/core
 ```
 
-Node 22.13 or newer. No other dependencies; it uses the global `fetch`.
+Node 22.13 or newer. No other dependencies; it uses the global `fetch`. The peer range on `@chatwarden/core` is `^0.1.9`: the feed listens for the two appeal events, which core 0.1.8 does not have.
 
 ## Set up
 
@@ -63,13 +63,19 @@ and subscribes nothing.
 | `webhookUrl` | `string` | The forum channel's webhook. `https:` on `discord.com` or `discordapp.com` (also the `ptb.` and `canary.` hosts), path `/api/webhooks/<id>/<token>`, no port or credentials. Required. |
 | `hubLink` | `(kind: 'report' \| 'person', id: string) => string` | Builds the links in each post. Required. The id is the only place an id appears in a post (see below). A result that is not an `http(s)` URL, one over 512 characters, or a throw drops that one link and keeps the post. |
 | `mentionRoleId` | `string` | A Discord role id (17 to 20 digits) to ping on a severe report or a severe sanction. Nothing else ever pings anyone. |
-| `severeOnly` | `boolean` | Post only severe reports, their closing, severe sanctions and the lift of a sanction under a severe rule. Skips automatic timeouts and rule gaps. Default `false`. |
+| `severeOnly` | `boolean` | Post only severe reports, their closing, severe sanctions, the lift of a sanction under a severe rule and appeals under a severe rule. Skips automatic timeouts and rule gaps. Default `false`. |
 | `fetch` | `typeof fetch` | The `fetch` to post with. Default: the global one. For tests. |
 | `logger` | `{ warn(event, detail?) }` | Where failures are logged. Default `console.warn`. |
 | `clock`, `random` | | Time source and retry jitter. For tests. |
 
 **What counts as severe.** A report in category `hate`, or a report or sanction whose Community Rule is in
 `cw.profile.severeRules` (by default Community Rule 1). Only severe posts carry the role ping.
+
+**Appeals (0.1.9, `@experimental`).** With appeals on (`profile.appeals.enabled`), two more posts go into the person's thread, and ping no one: `Appeal filed
+against a 24-hour chat restriction, Rule 2.` when a player files, and `Appeal decided: lighter.` when a moderator decides (the word is `upheld`, `lighter`
+or `revoked`), each with an "Open in the hub" link on the person. The length comes from the appeal's sanction (`cw.appeals.get`, read for the two times only); without it
+the post names the kind and no length. An appeal made moot by someone else's revoke posts nothing, and neither does `rename.required`, which is for your game. With
+`severeOnly`, only appeals under a severe rule post. A post never carries the statement, the moderator's reason or a handle.
 
 **What a post says.** Plain staff text: the kind of event, the category, the Community Rule (number and title), the conduct level
 when the report carries one, the reference code, the length of a sanction, and the links. Examples: `**New report**`,
@@ -85,7 +91,7 @@ for each). A restart loses what is queued.
 
 ## Security notes
 
-- **No chat text, ever.** A post holds no chat line, handle, reporter note, moderator reason or evidence, and no AI output.
+- **No chat text, ever.** A post holds no chat line, handle, reporter note, moderator reason or evidence, no appeal statement, and no AI output.
   Rule titles are the only adopter text; they are cut, put on one line and escaped so they cannot format a post or ping anyone.
 - **Subject ids appear only inside the hub links.** The visible words of a post name no one. A thread is named `Case XXXXX`
   with 5 random characters that are not derived from any id, hash or handle. A link's URL carries the id, so anyone who can see

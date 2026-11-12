@@ -135,13 +135,15 @@ const noticeId = async (call: Call, who: RawWho) =>
 afterEach(() => vi.restoreAllMocks());
 
 describe('playerRoutes: the route table', () => {
-  it('has exactly the six player routes', async () => {
+  it('has exactly the eight player routes', async () => {
     const { routes } = await setup();
     expect(Object.keys(routes).sort()).toEqual([
+      'GET /appeals',
       'GET /code-of-conduct',
       'GET /notices',
       'GET /record',
       'GET /rules',
+      'POST /appeals',
       'POST /names/check',
       'POST /notices/:id/ack',
     ]);

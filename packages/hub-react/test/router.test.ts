@@ -190,3 +190,30 @@ describe('hashRouter', () => {
     expect(fn.mock.calls.length).toBe(calls);
   });
 });
+
+describe('the Appeals routes', () => {
+  it.each<[string, Route]>([
+    ['/appeals', { name: 'appeals' }],
+    ['#/appeals', { name: 'appeals' }],
+    ['/appeals/', { name: 'appeals' }],
+    ['/appeals/abc123', { name: 'appeal', id: 'abc123' }],
+    ['/appeals/AbC_-9', { name: 'appeal', id: 'AbC_-9' }],
+  ])('parses %j', (path, route) => {
+    expect(parseRoute(path)).toEqual(route);
+  });
+
+  it.each(['/appeals/a/b', '/appeals/has space', '/appeals/a%2Fb', '/appeals/a.b', `/appeals/${'a'.repeat(65)}`, '/appeal/abc'])('sends %j to notFound', (path) => {
+    expect(parseRoute(path).name).toBe('notFound');
+  });
+
+  it('builds and parses back, and an id is encoded', () => {
+    for (const route of [{ name: 'appeals' }, { name: 'appeal', id: 'abc_-1' }] as Route[]) expect(parseRoute(buildPath(route))).toEqual(route);
+    expect(buildPath({ name: 'appeal', id: 'abc' })).toBe('/appeals/abc');
+    expect(buildPath({ name: 'appeals' })).toBe('/appeals');
+  });
+
+  it('belongs to the Reports tab, with the queue', () => {
+    expect(tabOf({ name: 'appeals' })).toBe('reports');
+    expect(tabOf({ name: 'appeal', id: 'abc' })).toBe('reports');
+  });
+});

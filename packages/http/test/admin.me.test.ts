@@ -25,6 +25,18 @@ describe('GET /me', () => {
     });
   }
 
+  it('GET /me can[] has both appeals keys: a moderator reads, a senior decides, a lowered kit lets a moderator decide', async () => {
+    const w = await world();
+    const can = async (role: Role, world_ = w) => ((await world_.call('GET', '/me', { role })).body as { can: Record<string, boolean> }).can;
+    expect(await can('moderator')).toMatchObject({ 'appeals.read': true, 'appeals.decide': false });
+    expect(await can('senior')).toMatchObject({ 'appeals.read': true, 'appeals.decide': true });
+    expect(await can('owner')).toMatchObject({ 'appeals.read': true, 'appeals.decide': true });
+    const small = await world({ permissions: { 'appeals.decide': 'moderator' } });
+    expect(await can('moderator', small)).toMatchObject({ 'appeals.read': true, 'appeals.decide': true });
+    const closed = await world({ permissions: { 'appeals.read': 'senior' } });
+    expect(await can('moderator', closed)).toMatchObject({ 'appeals.read': false, 'appeals.decide': false });
+  });
+
   it('reports.decide.bulk is in .can: a moderator by default, a senior only when raised', async () => {
     const w = await world();
     expect(((await w.call('GET', '/me', { role: 'moderator' })).body as { can: Record<string, boolean> }).can['reports.decide.bulk']).toBe(true);

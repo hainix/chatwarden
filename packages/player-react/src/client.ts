@@ -1,4 +1,4 @@
-import type { PlayerNotice, PlayerReporting } from '@chatwarden/core';
+import type { AppealRefusal, PlayerAppeal, PlayerNotice, PlayerReporting } from '@chatwarden/core';
 import { readReporting } from './reporting.js';
 import type { Transport, TransportRequest, TransportResponse } from './transport.js';
 
@@ -79,6 +79,32 @@ function noticesOf(body: unknown, key: 'notices' | 'record'): PlayerNotice[] {
   return (body[key] as unknown[]).map(noticeOf).filter((n): n is PlayerNotice => n !== null);
 }
 
+const APPEAL_STATUSES: readonly string[] = ['open', 'upheld', 'reduced', 'revoked'];
+
+/** One appeal, keeping only the five fields the kit documents for a player; null for anything that is not one (a `moot` row is not shown). */
+function appealOf(raw: unknown): PlayerAppeal | null {
+  if (!isObject(raw) || !text(raw.id) || !text(raw.noticeId) || !text(raw.status) || !APPEAL_STATUSES.includes(raw.status)) return null;
+  if (typeof raw.createdAt !== 'number' || !Number.isFinite(raw.createdAt)) return null;
+  if (raw.decidedAt !== null && (typeof raw.decidedAt !== 'number' || !Number.isFinite(raw.decidedAt))) return null;
+  return { id: raw.id, noticeId: raw.noticeId, status: raw.status as PlayerAppeal['status'], createdAt: raw.createdAt, decidedAt: raw.decidedAt };
+}
+
+/**
+ * What filing an appeal came to: the appeal, or the refusal the route gave (`statement_invalid` 400, `not_found` 404, `already_appealed` 409,
+ * `rate` 429 with `retryAfter` in whole seconds when the server said). Any other failure rejects with a `PlayerError`.
+ * @experimental
+ */
+export type FileAppealOutcome = { ok: true; appeal: PlayerAppeal } | { ok: false; refused: AppealRefusal; retryAfter?: number };
+
+/** The refusal an error answer stands for, or null when it is a failure. */
+function refusalOf(e: PlayerError): FileAppealOutcome | null {
+  if (e.status === 400 && e.code === 'invalid_statement') return { ok: false, refused: 'statement_invalid' };
+  if (e.status === 404 && e.code === 'not_found') return { ok: false, refused: 'not_found' };
+  if (e.status === 409 && e.code === 'already_appealed') return { ok: false, refused: 'already_appealed' };
+  if (e.status === 429) return { ok: false, refused: 'rate', ...(e.retryAfter === undefined ? {} : { retryAfter: e.retryAfter }) };
+  return null;
+}
+
 /** One rule as `GET /rules` gives it. */
 export interface PlayerRule {
   number: number;
@@ -103,6 +129,17 @@ export interface PlayerClient {
   record(): Promise<PlayerNotice[]>;
   /** `GET /rules`: the summary, the numbered rules and the reporting settings. */
   rules(): Promise<PlayerRules>;
+  /**
+   * `GET /appeals`: the player's own appeals, with only the fields the kit documents. Rejects with a 404 `PlayerError` while appeals are off.
+   * @experimental
+   */
+  appeals(): Promise<PlayerAppeal[]>;
+  /**
+   * `POST /appeals`: appeal the sanction a notice told the player about. `statement` is sent as typed (the server cleans it and counts it
+   * in characters against 1000). A refusal is a value; a failure to get an answer rejects.
+   * @experimental
+   */
+  fileAppeal(noticeId: string, statement: string): Promise<FileAppealOutcome>;
 }
 
 export interface PlayerClientOptions {
@@ -129,6 +166,25 @@ export function createPlayerClient({ transport }: PlayerClientOptions): PlayerCl
         .map((r) => ({ number: r.number as number, title: r.title as string, text: r.text as string }));
       const reporting = readReporting(body.reporting);
       return { summary: body.summary, rules, ...(reporting === undefined ? {} : { reporting }) };
+    },
+    appeals: async () => {
+      const body = await send(transport, { method: 'GET', path: '/appeals' });
+      if (!isObject(body) || !Array.isArray(body.appeals)) throw bad();
+      return (body.appeals as unknown[]).map(appealOf).filter((a): a is PlayerAppeal => a !== null);
+    },
+    fileAppeal: async (noticeId, statement) => {
+      let body: unknown;
+      try {
+        body = await send(transport, { method: 'POST', path: '/appeals', body: { noticeId, statement } });
+      } catch (e) {
+        const refusal = e instanceof PlayerError ? refusalOf(e) : null;
+        if (refusal !== null) return refusal;
+        throw e;
+      }
+      const appeal = isObject(body) ? appealOf(body.appeal) : null;
+      // A filed appeal is open: an answer that says otherwise is not one this client understands.
+      if (appeal === null || appeal.status !== 'open') throw bad();
+      return { ok: true, appeal };
     },
   };
 }

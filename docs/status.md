@@ -34,17 +34,29 @@ Not yet: the site demo adopting the box, and the site headline (after the releas
   state is per process; a signal is a fact a game reports, so several real accounts that agree can still count. `examples/tiny-chat` shows slow mode
   with `CW_DEMO_PACE=1`. The site wording waits until the release is on npm and has run in Moxgate.
 
+- **K7b: appeals and offensive names** (0.1.9), built and reviewed on branch `appeals-names`; version prepared, not merged or published (the owner tags it: see
+  [RELEASING.md](../RELEASING.md)). Design: [design/2026-11-12-appeals-and-names.md](design/2026-11-12-appeals-and-names.md). **Appeals**, off until turned on
+  (`profile.appeals`, or the hub: Settings, Advanced): a player asks for a second look from a sanction notice (up to 1000 characters, one appeal for each
+  sanction), a different moderator keeps it, makes it lighter or removes it (`appeals.decide`, a senior by default; `same_decider` is enforced in the core, with
+  `allowSelfReview` for a team of one), and the player gets a plain message. In the hub it is a view of the Cases queue, not a second tab. A revoke feeds the AI as a
+  corrective example, and a per-rule mistake rate (revokes only: a reduction is not a false positive) sits behind Settings, Advanced, "Mistakes by rule". **Names**:
+  a profanity pass on the name check, blocked names kept as evidence (opt-in, 30 days), a moderator can ask for a new name (`rename.required`, `pendingRename`,
+  `renamed`: the game must act on it), and **names the word list flags are hidden in the hub until shown, on by default (`names.maskInHub`), the one default-on
+  display change**. SQLite migration 22 (one-way: back up first); the in-memory store opts in with `withMemoryAppeals` and `withMemoryNames`. The AI prompt
+  version is 4, so every AI-enabled kit re-reads its open reports once after upgrading. New events `appeal.created`, `appeal.decided` and `rename.required`
+  (webhooks, the Discord feed for the first two). Known limits, written in the READMEs: a team that shares one login cannot be told apart from a team of one;
+  the kit never learns a player's new name. `examples/tiny-chat` shows both with `CW_DEMO_APPEALS=1`. Size budgets raised for it: `player-react` 11 to 14 KB and the
+  hub's first load 82 to 88 KB (gzipped). The site wording waits until the release is on npm and has run in Moxgate.
+
 ## Next
 - **K3c: AI levels 1-2** (read and recommend), **done**: merged as 0.1.7 (PR #26; tag and publish are the owner's). The AI reads a report after the
   player's ack, shows a strip in the hub and, at level 2, pre-fills a mild decision the moderator accepts or edits; it never writes a sanction. Off by
-  default, per instance, with a daily money cap in code and an owner-set call ceiling. Every human decision becomes a casebook example; granted appeals
-  become corrective false-positive examples and feed a per-rule false-positive rate. The site wording that says it is available is prepared and not
+  default, per instance, with a daily money cap in code and an owner-set call ceiling. Every human decision becomes a casebook example; revoked appeals
+  become corrective examples and feed a per-rule false-positive rate (0.1.9; a reduction on appeal is not a false positive). The site wording that says it is available is prepared and not
   published (see [plans/follow-ups.md](plans/follow-ups.md)).
 - **K6b-d: Moxgate adopts the hub and player UI.**
-- **Roadmap items** chosen 2026-11-10 (slow mode and flood control and generic game signals have shipped as 0.1.8, above), each to be designed before
-  it is built:
-  - offensive names
-  - an appeals inbox (0.1.8's successor: appeals and names)
+- **Roadmap items** chosen 2026-11-10: slow mode, flood control and generic game signals shipped as 0.1.8, and an appeals inbox and offensive names as 0.1.9
+  (both above). Nothing from that list is left to build.
 
   Sketches: [design/2026-11-10-editable-ladder-and-roadmap.md](design/2026-11-10-editable-ladder-and-roadmap.md), Part 2.
 - **Later phases:** K4b fast adoption (init, recipes, test kit), K7 the shared term corpus, K5 integrations (Discord bot, Coop, EOS), and AI levels 3 and 4 (acting on clear cases, and watching); each has a design note and a plan under `docs/`.

@@ -39,6 +39,7 @@ export type {
   AdminRoutesOptions,
   ExceptionListRow,
   Me,
+  MeFeatures,
   PolicyOptions,
   ReporterAccuracySummary,
   ReportSummary,

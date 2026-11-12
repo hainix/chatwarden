@@ -390,10 +390,10 @@ describe('CaseWorkbench', () => {
 describe('PersonRecord', () => {
   it('shows one person: what is in force, the timeline, how their reports went', async () => {
     const w = await hubWorld({ role: 'senior' });
-    const f = await w.file({ target: 'Vlemmo' });
+    const f = await w.file({ target: 'Velmora' });
     await w.sanction(f.person, 'chat', 1);
     renderPieces(w, <PersonRecord person={f.person} />);
-    expect(await screen.findByRole('heading', { level: 2, name: 'Vlemmo' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 2, name: 'Velmora' })).toBeInTheDocument();
     expect(await screen.findByRole('region', { name: 'In force now' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Timeline' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'As a reporter' })).toBeInTheDocument();
@@ -401,7 +401,7 @@ describe('PersonRecord', () => {
 
   it('a Revoke works on the real routes', async () => {
     const w = await hubWorld({ role: 'senior' });
-    const f = await w.file({ target: 'Vlemmo' });
+    const f = await w.file({ target: 'Velmora' });
     await w.sanction(f.person, 'chat', 1);
     const { user } = renderPieces(w, <PersonRecord person={f.person} />);
     await user.click(await screen.findByRole('button', { name: /^Revoke/ }));
@@ -413,7 +413,7 @@ describe('PersonRecord', () => {
 
   it('a report in the timeline is text without onOpenReport, and a button that tells it the id with one', async () => {
     const w = await hubWorld();
-    const f = await w.file({ target: 'Vlemmo' });
+    const f = await w.file({ target: 'Velmora' });
     const plain = renderPieces(w, <PersonRecord person={f.person} />);
     await screen.findByRole('region', { name: 'Timeline' });
     expect(screen.queryByRole('button', { name: /View the .* report/ })).toBeNull();
@@ -554,25 +554,25 @@ describe('Guide', () => {
 describe('RecentActions', () => {
   it('lists the actions, each naming the person', async () => {
     const w = await hubWorld({ role: 'senior' });
-    const f = await w.file({ target: 'Zorbak-fan' });
+    const f = await w.file({ target: 'Zephyr-fan' });
     await w.sanction(f.person, 'chat', 1);
     renderPieces(w, <RecentActions />);
     expect(await screen.findByRole('heading', { level: 2, name: 'All actions' })).toBeInTheDocument();
-    expect(await screen.findByText('Zorbak-fan')).toBeInTheDocument();
+    expect(await screen.findByText('Zephyr-fan')).toBeInTheDocument();
   });
 
   it('a person is text without onOpenPerson, and a button with it', async () => {
     const w = await hubWorld({ role: 'senior' });
-    const f = await w.file({ target: 'Zorbak-fan' });
+    const f = await w.file({ target: 'Zephyr-fan' });
     await w.sanction(f.person, 'chat', 1);
     const plain = renderPieces(w, <RecentActions />);
-    await screen.findByText('Zorbak-fan');
-    expect(screen.queryByRole('button', { name: /Zorbak-fan/ })).toBeNull();
+    await screen.findByText('Zephyr-fan');
+    expect(screen.queryByRole('button', { name: /Zephyr-fan/ })).toBeNull();
     noRouterLinks(plain.container);
     plain.unmount();
     const onOpenPerson = vi.fn();
     const wired = renderPieces(w, <RecentActions onOpenPerson={onOpenPerson} />);
-    await wired.user.click(await screen.findByRole('button', { name: /Zorbak-fan/ }));
+    await wired.user.click(await screen.findByRole('button', { name: /Zephyr-fan/ }));
     expect(onOpenPerson).toHaveBeenCalledWith(f.person);
     noRouterLinks(wired.container);
   });

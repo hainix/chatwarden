@@ -36,6 +36,7 @@ const filePath = (): string => {
   return join(d, 'kit.db');
 };
 
+const UP_TO_21 = MIGRATIONS.slice(0, 21);
 const M21 = MIGRATIONS.find((m) => m.version === 21);
 const NEW_INDEXES = ['kit_signals_by_at', 'kit_signals_by_subject', 'kit_signals_cap'];
 const AI_COLUMNS_20 = [
@@ -100,13 +101,12 @@ describe('migration 21: signal rows', () => {
   it('is the 21st migration and the last one', () => {
     expect(M21).toBeDefined();
     expect(MIGRATIONS[20]?.version).toBe(21);
-    expect(MIGRATIONS.at(-1)?.version).toBe(21);
-    expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 21 }, (_, i) => i + 1));
+    expect(MIGRATIONS.map((m) => m.version).slice(0, 21)).toEqual(Array.from({ length: 21 }, (_, i) => i + 1));
   });
 
   it('from an empty database creates kit_signals and its three indexes, and kit_ai_reads gains signals_json', () => {
     const db = memDb();
-    const store = openStore({ db });
+    const store = openStore({ db, migrations: UP_TO_21 });
     expect(store.schemaVersion()).toBe(21);
     expect(names(db, 'table')).toContain('kit_signals');
     for (const i of NEW_INDEXES) expect(names(db, 'index')).toContain(i);
@@ -123,7 +123,7 @@ describe('migration 21: signal rows', () => {
     const indexes = names(db, 'index');
     const cols = Object.fromEntries(OLD_TABLES.filter((t) => t !== 'kit_ai_reads').map((t) => [t, columns(db, t)]));
 
-    const store = openStore({ db });
+    const store = openStore({ db, migrations: UP_TO_21 });
     expect(store.schemaVersion()).toBe(21);
     expect(snapshot(db)).toEqual(before);
     expect(names(db, 'table').filter((x) => !tables.includes(x))).toEqual(['kit_signals']);
@@ -132,7 +132,7 @@ describe('migration 21: signal rows', () => {
     store.close();
 
     // Reopening runs nothing again and changes nothing.
-    const again = openStore({ db });
+    const again = openStore({ db, migrations: UP_TO_21 });
     expect(again.schemaVersion()).toBe(21);
     expect(snapshot(db)).toEqual(before);
     expect(db.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
@@ -144,7 +144,7 @@ describe('migration 21: signal rows', () => {
     const readsBefore = Array.from({ length: 15 }, (_, i) => old.loadAiRead(`m${String(i).padStart(4, '0')}`));
     expect(db.prepare('SELECT COUNT(*) AS n FROM kit_ai_reads').get()).toEqual({ n: 15 });
     old.close();
-    const store = openStore({ db });
+    const store = openStore({ db, migrations: UP_TO_21 });
     const readsAfter = Array.from({ length: 15 }, (_, i) => store.loadAiRead(`m${String(i).padStart(4, '0')}`));
     expect(readsAfter).toEqual(readsBefore);
     expect(db.prepare('SELECT COUNT(*) AS n, COUNT(signals_json) AS set_n FROM kit_ai_reads').get()).toEqual({ n: 15, set_n: 0 });
@@ -158,21 +158,21 @@ describe('migration 21: signal rows', () => {
     for (let i = 0; i < 10; i++) s.insertReport(report(i));
     s.close();
     const before = dump(db, 'kit_reports', 'rowid');
-    const store = openStore({ db });
+    const store = openStore({ db, migrations: UP_TO_21 });
     expect(store.schemaVersion()).toBe(21);
     expect(dump(db, 'kit_reports', 'rowid')).toEqual(before);
   });
 
   it('a rerun of the migration is refused (it is one-way: the table and the column exist)', () => {
     const db = memDb();
-    openStore({ db }).close();
+    openStore({ db, migrations: UP_TO_21 }).close();
     expect(() => db.exec(M21?.sql ?? '')).toThrow();
     expect(names(db, 'index').filter((x) => x === 'kit_signals_cap')).toHaveLength(1);
   });
 
   it('the weight CHECK refuses a negative weight', () => {
     const db = memDb();
-    openStore({ db }).close();
+    openStore({ db, migrations: UP_TO_21 }).close();
     let bucket = 0;
     const put = (w: number) => db.prepare("INSERT INTO kit_signals (id, kind, subject_id, source_key, at, weight, cap_bucket) VALUES (?, 'k', 's', 'd:1', 1, ?, ?)").run(`id${w}`, w, (bucket += 1));
     expect(() => put(-0.01)).toThrow(/CHECK/);
@@ -185,7 +185,7 @@ describe('migration 21: signal rows', () => {
     const seeded = new DatabaseSync(path);
     dbs.push(seeded);
     openAt20(seeded).close();
-    openStore({ path }).close();
+    openStore({ path, migrations: UP_TO_21 }).close();
     const shot = (): unknown => {
       const raw = new DatabaseSync(path);
       try {
@@ -195,17 +195,17 @@ describe('migration 21: signal rows', () => {
       }
     };
     const once = shot();
-    openStore({ path }).close();
-    openStore({ path }).close();
+    openStore({ path, migrations: UP_TO_21 }).close();
+    openStore({ path, migrations: UP_TO_21 }).close();
     expect(shot()).toEqual(once);
   });
 
   it('a fresh database lands on the same tables, indexes and columns as an upgraded one', () => {
     const fresh = memDb();
-    openStore({ db: fresh });
+    openStore({ db: fresh, migrations: UP_TO_21 });
     const upgraded = memDb();
     openAt20(upgraded).close();
-    openStore({ db: upgraded });
+    openStore({ db: upgraded, migrations: UP_TO_21 });
     expect(names(fresh, 'table')).toEqual(names(upgraded, 'table'));
     expect(names(fresh, 'index')).toEqual(names(upgraded, 'index'));
     for (const t of ['kit_signals', 'kit_ai_reads']) expect(columns(fresh, t)).toEqual(columns(upgraded, t));
@@ -222,20 +222,20 @@ describe('migration 21: signal rows', () => {
     for (const i of NEW_INDEXES) expect(names(db, 'index')).not.toContain(i);
     expect(columns(db, 'kit_ai_reads')).toEqual(AI_COLUMNS_20);
     expect(snapshot(db)).toEqual(before);
-    expect(openStore({ db }).schemaVersion()).toBe(21);
+    expect(openStore({ db, migrations: UP_TO_21 }).schemaVersion()).toBe(21);
     expect(names(db, 'table')).toContain('kit_signals');
   });
 
   it('an older kit refuses a database at version 21', () => {
     const db = memDb();
-    openStore({ db }).close();
+    openStore({ db, migrations: UP_TO_21 }).close();
     expect(() => openStore({ db, migrations: MIGRATIONS.slice(0, 20) })).toThrow(/newer than this kit supports/);
   });
 
   it('the shared contract works on an upgraded database too', () => {
     const db = memDb();
     openAt20(db).close();
-    const store = openStore({ db });
+    const store = openStore({ db, migrations: UP_TO_21 });
     const row = { id: 's1', kind: 'muted_by_player', subject: 's_t', sourceKey: 'b:s_f', bySubject: 's_f', roomId: null, at: NOW, weight: 1, capBucket: 1 };
     expect(store.insertSignal(row)).toBe(true);
     expect(store.insertSignal({ ...row, id: 's2' })).toBe(false);

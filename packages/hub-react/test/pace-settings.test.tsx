@@ -71,7 +71,7 @@ describe('the Advanced section', () => {
       for (const el of within(panel()).getAllByRole('spinbutton')) expect(el).toBeDisabled();
       expect(within(panel()).queryByRole('button', { name: 'Save changes' })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Use suggested values' })).toBeNull();
-      expect(screen.getByText(/You can see these settings/i)).toBeInTheDocument();
+      expect(within(panel()).getByText(/You can see these settings/i)).toBeInTheDocument();
     }
   });
 
