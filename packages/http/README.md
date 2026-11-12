@@ -468,9 +468,9 @@ io.on('connection', (socket) => {
 - **`byModerator` on a restriction.** The refusal from `accept` says exactly who set a restriction. The restriction in `hello` and `state`
   is read from the stored sanction, and a stored automatic chat timeout reads as a moderator's there, so the box words it as a moderator's
   until the player's next refused line. A core change (`byModerator` on the answer of `cw.chat.restricted`) would make it exact.
-- **Needs a newer core.** The broadcaster re-reads a player's restriction with `cw.chat.restrictedBySubject`, which is in the core release that ships it
+- **Needs a newer core.** The broadcaster re-reads a player's restriction with `cw.chat.restrictedBySubject`, which is new in core 0.1.6
   (`cw.chat.restrictedBySubject` is new with the chat box; `createRoomBroadcaster` throws a `TypeError` with a core that lacks it): install
-  `@chatwarden/http` and `@chatwarden/core` from the same release. The package's peer range on core is raised to that release.
+  `@chatwarden/http` and `@chatwarden/core` from the same release. The package's peer range on core is `^0.1.6`.
 - **Experimental names** (listed so until 0.2): `createRoomBroadcaster`, `chatRoutes`, `encodeFrame`, `HEARTBEAT`, `CHAT_WIRE_VERSION`,
   `refusalOf`, `ROOM_BROADCASTER_DEFAULTS`, and the types `ChatMember`, `ChatSession`, `ChatSink`, `ChatStream`, `RoomBroadcaster`,
   `RoomBroadcasterOptions`, `ChatRoutesOptions`, `ChatFrame`, `WireLine`, `WireRestriction`, `WireMuted`, `WireRefusal`, `SendResult`,

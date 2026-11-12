@@ -1,5 +1,18 @@
 # @chatwarden/http
 
+## 0.1.6
+
+### Patch Changes
+
+- Adds a chat box and a room broadcaster: a game with no chat can add moderated chat in minutes.
+  
+  - **`@chatwarden/http/chat`** (also exported from `@chatwarden/http`): `createRoomBroadcaster` keeps a bounded in-memory history for late joiners and writes frames to the players' streams, and `chatRoutes` mounts four routes (a Server-Sent Events stream down, `POST` lines, mutes and reports up). Every line goes through `cw.chat.accept` and nothing else decides delivery; a refusal is shown only to its author, a mute is silent to the muted player, and no seat, subject, key, address or hash is ever sent or logged. The subpath imports no `node:` module, so it runs in a browser tab too. `KitResponse` gains an optional `stream` (`KitStream`) that `toExpress` handles; an adapter author for another framework may implement it. A player may have 3 streams (tabs) open in a room (`maxStreamsPerMember`): a fourth ends the oldest, with a `replaced` goodbye, so a connection that died without a word never locks them out.
+  - **`@chatwarden/player-react/chat`** and **`@chatwarden/player-react/chat.css`**: `<ChatBox>` (the list, one input and Send, with Report and Mute behind one small control per line and a single Chat options door), `sseTransport` (reads the stream with `fetch`, so your header-based auth works, and reconnects with back-off), and `enChat`, the English words (every string goes through `t()`). It is a separate lazy entry: the main entry and its size are unchanged.
+  - **`@chatwarden/core`**: `cw.chat.restrictedBySubject(subject, opts)` (`@experimental`) reads `cw.chat.restricted` from a subject id, so a server that keeps a connection open does not have to keep the player's client key or address to ask again.
+  - **One upgrade note: `@chatwarden/http` now needs `@chatwarden/core` `^0.1.6`.** The broadcaster uses `cw.chat.restrictedBySubject`, so the peer range on core moves from `^0.1.5` to `^0.1.6` and `createRoomBroadcaster` throws a `TypeError` on an older core. Install `@chatwarden/http` and `@chatwarden/core` from the same release. `@chatwarden/player-react`, `hub-react` and `hub-element` keep their ranges.
+  - **More than one process.** Route a room's connections, and its posts, to one process (sticky rooms); the history, the rate limits and the roster are per process. A pub/sub hook between processes is not shipped.
+  - Every new name is `@experimental` until 0.2. There is no migration and no store change.
+
 ## 0.1.5
 
 ### Patch Changes

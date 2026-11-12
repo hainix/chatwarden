@@ -38,7 +38,12 @@ const NEW_KIT_RANGE = '^0.1.2';
 // POST /reports/dismiss-open), and, in hub-react, POST /reports/dismiss-open and a dismissal with no reason (an older http refuses it with
 // 400). player-react uses none of it and stays at ^0.1.2; discord, matcher and profanity stay at ^0.1.0.
 const NEW_KIT_RANGE_0_1_5 = '^0.1.5';
-const NEEDS_NEW_KIT_0_1_5 = new Set(['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/http', '@chatwarden/hub-react']);
+const NEEDS_NEW_KIT_0_1_5 = new Set(['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/hub-react']);
+// ...and, for 0.1.6 (the chat box), what is new in core: cw.chat.restrictedBySubject, which the room broadcaster in http reads a player's restriction
+// with (it throws a TypeError on an older core). Only http uses it. player-react's chat imports types core 0.1.2 has and stays at ^0.1.2; the other
+// packages are unchanged. http's own range as a peer of hub-react and hub-element stays at ^0.1.5: the routes they call are unchanged.
+const NEW_KIT_RANGE_0_1_6 = '^0.1.6';
+const NEEDS_NEW_KIT_0_1_6 = new Set(['@chatwarden/http']);
 const NEEDS_NEW_KIT = new Set(['@chatwarden/player-react']);
 const ownScope = (n: string): boolean => n.startsWith('@chatwarden/');
 const UI_PACKAGES = new Set(['@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/hub-element']);
@@ -47,7 +52,9 @@ const UI_PACKAGES = new Set(['@chatwarden/hub-react', '@chatwarden/player-react'
 const BUNDLED = new Set(['@chatwarden/hub-element']);
 /** The range `pkgName` must declare for its peer `peerName`. */
 const peerRangeOf = (pkgName: string, peerName: string): string => {
-  if (peerName === '@chatwarden/core') return NEEDS_NEW_KIT_0_1_5.has(pkgName) ? NEW_KIT_RANGE_0_1_5 : NEEDS_NEW_KIT.has(pkgName) ? NEW_KIT_RANGE : PEER_RANGE;
+  if (peerName === '@chatwarden/core') {
+    return NEEDS_NEW_KIT_0_1_6.has(pkgName) ? NEW_KIT_RANGE_0_1_6 : NEEDS_NEW_KIT_0_1_5.has(pkgName) ? NEW_KIT_RANGE_0_1_5 : NEEDS_NEW_KIT.has(pkgName) ? NEW_KIT_RANGE : PEER_RANGE;
+  }
   // hub-react calls POST /reports/dismiss-open and sends a dismissal with no reason, both new in http 0.1.5; hub-element's types are hub-react's.
   if (peerName === '@chatwarden/http' || peerName === '@chatwarden/hub-react') return NEW_KIT_RANGE_0_1_5;
   return PEER_RANGE;
@@ -159,10 +166,17 @@ describe('peer floors', () => {
   it.each([...NEEDS_NEW_KIT_0_1_5])('%s needs core ^0.1.5 (dismissMany, reporterAccuracy, the standard reason and the new store methods)', (name) => {
     expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.5');
   });
-  it('the two sets are disjoint and together are exactly the packages that peer on a new core', () => {
+  it.each([...NEEDS_NEW_KIT_0_1_6])('%s needs core ^0.1.6 (cw.chat.restrictedBySubject, which the room broadcaster reads restrictions with)', (name) => {
+    expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.6');
+  });
+  it('the three sets are disjoint and together are exactly the packages that peer on a new core', () => {
     for (const n of NEEDS_NEW_KIT_0_1_5) expect(NEEDS_NEW_KIT.has(n)).toBe(false);
+    for (const n of NEEDS_NEW_KIT_0_1_6) expect(NEEDS_NEW_KIT.has(n) || NEEDS_NEW_KIT_0_1_5.has(n)).toBe(false);
     const peering = published.filter((p) => (p.pkg.peerDependencies?.['@chatwarden/core'] ?? '') !== '' && p.pkg.peerDependencies?.['@chatwarden/core'] !== PEER_RANGE).map((p) => p.pkg.name).sort();
-    expect(peering).toEqual([...NEEDS_NEW_KIT, ...NEEDS_NEW_KIT_0_1_5].sort());
+    expect(peering).toEqual([...NEEDS_NEW_KIT, ...NEEDS_NEW_KIT_0_1_5, ...NEEDS_NEW_KIT_0_1_6].sort());
+  });
+  it('player-react does not follow the floor up: its chat imports only what core 0.1.2 has', () => {
+    expect(byName('@chatwarden/player-react').peerDependencies?.['@chatwarden/core']).toBe('^0.1.2');
   });
   it.each(['@chatwarden/discord', '@chatwarden/matcher', '@chatwarden/profanity'])('%s uses nothing new in core and keeps ^0.1.0', (name) => {
     expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.0');
