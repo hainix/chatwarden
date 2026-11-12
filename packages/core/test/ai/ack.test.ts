@@ -55,11 +55,17 @@ describe('the ack path', () => {
   });
 });
 
-/** Everything about the queue, the case page and a decision that does not depend on random ids. */
-let shapes = 0;
+/** Random ids and clock-dependent times, the only things that differ between two worlds that did the same thing. */
+const VARIES = new Set(['id', 'reportId', 'lineId', 'createdAt', 'ts', 'actionedAt', 'detailAt', 'detailUntil', 'at', 'since', 'until']);
+const scrub = (v: unknown): unknown =>
+  JSON.parse(JSON.stringify(v, (k, val) => (VARIES.has(k) ? '#' : (val as unknown))).replace(/s_[A-Za-z0-9_-]{22}/g, '#subject'));
+
+/**
+ * Everything the player, the queue, the case page and a decision show, by value (ids and times aside): the ack, the queue row, the
+ * report page and the decision's answer. The people, room and report are the same in every world, so two worlds can be compared.
+ */
 async function shape(w: Awaited<ReturnType<typeof world>>) {
-  shapes += 1;
-  const t = w.table({ reporter: `key-shape-reporter-${shapes}` });
+  const t = w.table({ reporter: 'key-shape-reporter', target: 'key-shape-target', room: 'shape-room' });
   w.cw.chat.accept(t.room, 'p2', 'rude words');
   const res = await w.submit(t.room);
   if (!res.ok) throw new Error('refused');
@@ -68,17 +74,11 @@ async function shape(w: Awaited<ReturnType<typeof world>>) {
   const page = w.cw.reports.get(res.reportId);
   const decided = await w.cw.decide({ reportId: res.reportId, verdict: 'no_action', actions: [], actor: 'mod_ann' });
   const after = mine(w.cw.reports.list({ status: 'open' }).items);
-  return {
-    res: Object.keys(res).sort(),
-    list: list.map((i) => Object.keys(i).sort()),
-    page: page === null ? null : Object.keys(page).sort(),
-    decided: decided.ok ? { ok: true, replay: decided.replay, groups: decided.groups } : decided,
-    after: after.length,
-  };
+  const closed = mine(w.cw.reports.list({ status: 'dismissed' }).items);
+  return scrub({ res, list, page, decided: decided.ok ? { ok: true, replay: decided.replay, groups: decided.groups } : decided, after, closed });
 }
 
 describe('fail-soft: the AI misbehaves and nothing else notices', () => {
-  const off = world();
   const cases: Array<[string, FakeScript, Record<string, unknown>?]> = [
     ['throws an AIError', () => Promise.reject(new AIError('retryable'))],
     ['throws something else', () => Promise.reject(new TypeError('boom'))],
@@ -90,14 +90,13 @@ describe('fail-soft: the AI misbehaves and nothing else notices', () => {
     ['returns garbage', [{ output: { totally: 'wrong' } }]],
     ['returns a non-object', [{ output: null }]],
     ['returns a huge garbage string', [{ output: 'x'.repeat(200_000) }]],
-    ['hangs', [{ hang: true }], { timeoutMs: 20 }],
     ['has a cap of zero', [], { dailyBudgetMicros: 0 }],
     ['is limited to no calls a minute', [], { perMinuteCalls: 1 }],
   ];
 
   for (const [name, script, ai] of cases) {
     it(`with an adapter that ${name}, submit, the queue, the case page and decide are as with the AI off`, async () => {
-      const baseline = await shape(await off);
+      const baseline = await shape(await world());
       const w = await aiWorld({ level: 2, script, ai: ai as never });
       // A few reports first, so a per-minute cap is exceeded and a breaker may open.
       for (let i = 0; i < 3; i += 1) await w.report();
@@ -112,8 +111,28 @@ describe('fail-soft: the AI misbehaves and nothing else notices', () => {
     });
   }
 
+  it('with an adapter that hangs (on fake timers), everything is as with the AI off and the call is aborted at its deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    try {
+      const baseline = await shape(await world());
+      const w = await aiWorld({ level: 2, script: [{ hang: true }], ai: { timeoutMs: 20_000 } });
+      for (let i = 0; i < 3; i += 1) await w.report();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(w.adapter.callCount).toBeGreaterThanOrEqual(1);
+      const got = await shape(w);
+      // Nothing waited for the model: only now does the deadline pass.
+      await vi.advanceTimersByTimeAsync(20_001);
+      await w.cw.ai.idle();
+      expect(w.adapter.signals[0]?.aborted).toBe(true);
+      expect(got).toEqual(baseline);
+      await w.cw.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('an AI store method that throws changes nothing for the player or the moderator', async () => {
-    const baseline = await shape(await off);
+    const baseline = await shape(await world());
     const w = await aiWorld({ level: 2 });
     const store = w.store as MemoryStore;
     for (const name of ['reserveAiRead', 'completeAiRead', 'failAiRead', 'loadAiRead', 'loadAiReads', 'listAiRetries', 'aiSpendSince', 'aiTeachableCount', 'insertAiOutcome', 'loadAiOutcome'] as const) {

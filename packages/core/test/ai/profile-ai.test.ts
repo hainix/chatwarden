@@ -44,7 +44,7 @@ function reasonOf(fn: () => unknown): string {
 describe('the ai section of a profile', () => {
   it('the presets default ai.level to 0', () => {
     for (const n of NAMES) {
-      expect(PRESETS[n].ai).toEqual({ level: 0, learn: true });
+      expect(PRESETS[n].ai).toEqual({ level: 0, learn: true, dailyCalls: 5000 });
       expect(Object.isFrozen(PRESETS[n].ai)).toBe(true);
     }
   });
@@ -52,15 +52,15 @@ describe('the ai section of a profile', () => {
   it('a profile written before 0.1.6 (no ai) gets the default', () => {
     const { ai: _ai, ...without } = PRESETS.standard as ModerationProfile & { ai?: unknown };
     void _ai;
-    expect(defineProfile(without as ModerationProfile).ai).toEqual({ level: 0, learn: true });
-    expect(resolveProfile('relaxed').ai).toEqual({ level: 0, learn: true });
+    expect(defineProfile(without as ModerationProfile).ai).toEqual({ level: 0, learn: true, dailyCalls: 5000 });
+    expect(resolveProfile('relaxed').ai).toEqual({ level: 0, learn: true, dailyCalls: 5000 });
   });
 
   it('a profile may set the level and learn, each alone', () => {
-    expect(defineProfile({ ...PRESETS.standard, ai: { level: 2, learn: false } }).ai).toEqual({ level: 2, learn: false });
-    expect(defineProfile({ ...PRESETS.standard, ai: { level: 1 } }).ai).toEqual({ level: 1, learn: true });
-    expect(defineProfile({ ...PRESETS.standard, ai: { learn: false } }).ai).toEqual({ level: 0, learn: false });
-    expect(resolveProfile('strict', { ai: { level: 1 } }).ai).toEqual({ level: 1, learn: true });
+    expect(defineProfile({ ...PRESETS.standard, ai: { level: 2, learn: false } }).ai).toEqual({ level: 2, learn: false, dailyCalls: 5000 });
+    expect(defineProfile({ ...PRESETS.standard, ai: { level: 1 } }).ai).toEqual({ level: 1, learn: true, dailyCalls: 5000 });
+    expect(defineProfile({ ...PRESETS.standard, ai: { learn: false } }).ai).toEqual({ level: 0, learn: false, dailyCalls: 5000 });
+    expect(resolveProfile('strict', { ai: { level: 1 } }).ai).toEqual({ level: 1, learn: true, dailyCalls: 5000 });
   });
 
   it('validateProfile accepts the section as written', () => {
@@ -108,15 +108,15 @@ describe('the ai section of a policy layer', () => {
   it('a layer may set level 1 and 2', () => {
     for (const level of [1, 2] as const) {
       const p = applyPolicyLayer(PRESETS.standard, { ai: { level } });
-      expect(p.ai).toEqual({ level, learn: true });
+      expect(p.ai).toEqual({ level, learn: true, dailyCalls: 5000 });
     }
     expect(applyPolicyLayer(PRESETS.standard, { ai: { level: 0 } }).ai.level).toBe(0);
   });
 
   it('a layer merges key by key: learn alone keeps the base level', () => {
     const base = resolveProfile('standard', { ai: { level: 1 } });
-    expect(applyPolicyLayer(base, { ai: { learn: false } }).ai).toEqual({ level: 1, learn: false });
-    expect(applyPolicyLayer(base, {}).ai).toEqual({ level: 1, learn: true });
+    expect(applyPolicyLayer(base, { ai: { learn: false } }).ai).toEqual({ level: 1, learn: false, dailyCalls: 5000 });
+    expect(applyPolicyLayer(base, {}).ai).toEqual({ level: 1, learn: true, dailyCalls: 5000 });
   });
 
   it('changes nothing else in the profile', () => {
@@ -141,8 +141,8 @@ describe('the ai section of a policy layer', () => {
 describe('cw.policy and the ai section', () => {
   it('starts off', async () => {
     const { cw } = await world();
-    expect(cw.profile.ai).toEqual({ level: 0, learn: true });
-    expect(cw.policy.get().base.ai).toEqual({ level: 0, learn: true });
+    expect(cw.profile.ai).toEqual({ level: 0, learn: true, dailyCalls: 5000 });
+    expect(cw.policy.get().base.ai).toEqual({ level: 0, learn: true, dailyCalls: 5000 });
   });
 
   it('a layer may set level 1 and 2, and cw.profile follows at once', async () => {
@@ -150,7 +150,7 @@ describe('cw.policy and the ai section', () => {
     expect(cw.policy.save({ ai: { level: 1 } }, { version: 0, ...OWNER })).toEqual({ ok: true, version: 1, changed: ['ai'] });
     expect(cw.profile.ai.level).toBe(1);
     expect(cw.policy.save({ ai: { level: 2, learn: false } }, { version: 1, ...OWNER })).toEqual({ ok: true, version: 2, changed: ['ai'] });
-    expect(cw.profile.ai).toEqual({ level: 2, learn: false });
+    expect(cw.profile.ai).toEqual({ level: 2, learn: false, dailyCalls: 5000 });
     expect(cw.policy.get().base.ai.level).toBe(0);
   });
 
@@ -292,5 +292,41 @@ describe('retention fields for the AI', () => {
     const store = new MemoryStore();
     await expect(purge(store, 1, { aiExamplesMs: -1 })).rejects.toThrow(/invalid aiExamplesMs/);
     await expect(purge(store, 1, { aiOutcomesMs: Number.NaN })).rejects.toThrow(/invalid aiOutcomesMs/);
+  });
+});
+
+describe('the daily call ceiling (ai.dailyCalls)', () => {
+  const pathOf = (fn: () => unknown): string | undefined => {
+    try {
+      fn();
+    } catch (e) {
+      return (e as { path?: string }).path;
+    }
+    return undefined;
+  };
+
+  it('defaults to 5000 calls a day, for every preset', () => {
+    for (const n of ['relaxed', 'standard', 'strict'] as const) expect(resolveProfile(n).ai.dailyCalls).toBe(5000);
+  });
+
+  it.each([1, 30, 5000, 100_000])('accepts %i', (n) => {
+    expect(resolveProfile('standard', { ai: { dailyCalls: n } }).ai.dailyCalls).toBe(n);
+    expect(applyPolicyLayer(PRESETS.standard, { ai: { dailyCalls: n } }).ai.dailyCalls).toBe(n);
+  });
+
+  it.each([0, -1, 1.5, 100_001, Number.NaN, Number.POSITIVE_INFINITY, '5000', null, true, []])('refuses %j, naming the field and not the value', (n) => {
+    expect(pathOf(() => defineProfile({ ...PRESETS.standard, ai: { dailyCalls: n } } as never))).toBe('profile.ai.dailyCalls');
+    expect(pathOf(() => applyPolicyLayer(PRESETS.standard, { ai: { dailyCalls: n } } as never))).toBe('layer.ai.dailyCalls');
+  });
+
+  it('a layer merges it key by key, and the owner can save it', async () => {
+    const base = resolveProfile('standard', { ai: { level: 1, dailyCalls: 200 } });
+    expect(applyPolicyLayer(base, { ai: { learn: false } }).ai).toEqual({ level: 1, learn: false, dailyCalls: 200 });
+    expect(applyPolicyLayer(base, { ai: { dailyCalls: 300 } }).ai).toEqual({ level: 1, learn: true, dailyCalls: 300 });
+    const { world } = await import('../reportingWorld.js');
+    const w = await world();
+    expect(w.cw.policy.save({ ai: { dailyCalls: 10 } }, { version: 0, actor: 'owner_ann', reason: 'tighter' })).toEqual({ ok: true, version: 1, changed: ['ai'] });
+    expect(w.cw.profile.ai.dailyCalls).toBe(10);
+    expect(w.cw.policy.save({ ai: { dailyCalls: 0 } }, { version: 1, actor: 'owner_ann', reason: 'x' })).toEqual({ ok: false, error: 'invalid', path: 'layer.ai.dailyCalls' });
   });
 });

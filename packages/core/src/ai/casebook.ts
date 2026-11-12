@@ -64,7 +64,8 @@ export interface AiOutcomeArgs {
   target: SubjectId;
   verdict: 'upheld' | 'noted' | 'no_action' | 'bad_faith';
   actions: ReadonlyArray<{ subject: SubjectId; kind: SanctionKind; durationMs: number | null; rule: RuleRef; lineIds: readonly string[] }>;
-  ai: { readId: string; accepted: boolean; severity: ConductLevel | null };
+  /** The echo of the decision, or all-empty (`readId` null, not accepted, no severity) when it carried none. */
+  ai: { readId: string | null; accepted: boolean; severity: ConductLevel | null };
   now: number;
 }
 

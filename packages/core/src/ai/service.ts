@@ -3,9 +3,11 @@ import type { Subscribe } from '../events.js';
 import type { Suggestion } from '../ladder.js';
 import { errorClass, safeWarn } from '../log.js';
 import type { ResolvedProfile } from '../profile.js';
+import { AI_DAILY_CALLS_DEFAULT } from '../profile.js';
 import { suggestedRule } from '../reporting.js';
 import type { CommunityRules, RuleRef } from '../rules.js';
 import { CONDUCT_LEVELS } from '../types.js';
+import type { AiReadRow } from '../types.js';
 import type { AiOutcomeInsert, AiVerdict, Clock, ConductLevel, Logger, ReportRecord, SanctionKind, Store, SubjectId } from '../types.js';
 import { agreementOf } from './agreement.js';
 import type { StepLike } from './agreement.js';
@@ -20,7 +22,7 @@ import { aiPolicyText } from './prompt.js';
 import { sha256Hex } from '../crypto.js';
 import type { AIExampleInput, AIRead, ModerationAI } from './types.js';
 import { Meter, runRead } from './worker.js';
-import type { AiStore, WorkerEnv } from './worker.js';
+import type { AiStore, ReadEnd, WorkerEnv } from './worker.js';
 
 // The AI service (design sections 4 and 6): listens for new reports and only enqueues; a small worker pool reads them off the ack
 // path; a sweeper fills the gaps; the facade (`cw.ai`) answers the hub. Everything fails soft: any error here is logged by class and
@@ -64,6 +66,8 @@ export interface AiStatus {
   /** Today's spend (UTC), in micro-dollars, from the store. */
   spentMicros: number;
   capMicros: number;
+  /** The owner's ceiling on calls in a UTC day (`profile.ai.dailyCalls`); `reads` is counted against it. */
+  capCalls: number;
   /** The UTC day the spend is for, `YYYY-MM-DD`. */
   day: string;
   /** Calls made today (UTC), from the store. */
@@ -153,7 +157,16 @@ export interface AiStatsView {
 }
 
 /** What `cw.ai.readAgain` answers. */
-export type AiReadAgain = AiReadView | 'pending' | 'budget' | 'off' | 'rate';
+export type AiReadAgain =
+  | AiReadView
+  | 'pending'
+  | 'budget'
+  | 'off'
+  | 'rate'
+  /** The read for this input ended without an answer and a moderator already retook it once: there is nothing more to ask. */
+  | 'final'
+  /** The breaker is open or the call window is full: nothing can be called for `retryAfterMs`. */
+  | { unavailable: { retryAfterMs: number } };
 
 /**
  * `cw.ai`. Every method is safe to call at any time: with the AI off, without an adapter or with a failing provider or store it
@@ -171,8 +184,11 @@ export interface AiFacade {
   read(reportId: string, opts?: { open?: boolean }): AiReadView | null;
   /**
    * "Read again": the stored read when the input has not changed (no call), else a call is queued and the answer is `'pending'`.
-   * `'off'` at level 0 or for a report that is gone or decided, `'budget'` at the daily cap, and `'rate'` once `actor` has asked 10
-   * times in a minute.
+   * `'off'` at level 0 or for a report that is gone or decided, `'budget'` at the daily money or call cap, `'rate'` once `actor` has
+   * asked 10 times in a minute (counted in this process; every answer below uses an ask), `{ unavailable }` while the breaker is open or
+   * the call window is full, and `'final'` when the read for this input ended without an answer (declined, invalid twice, fatal, given
+   * up) and an explicit ask has already retaken it once. The first explicit ask on such a row retakes it (`'pending'`): it is charged
+   * to the spend and audited like any other read.
    */
   readAgain(reportId: string, actor: string): Promise<AiReadAgain>;
   /** The queue's brief of each report that has a read. Reports without one are absent. */
@@ -203,6 +219,8 @@ export const SWEEP_BATCH = 20;
 export const STALE_PER_SWEEP = 5;
 /** How many times one moderator may ask for a read again in a minute. */
 export const READ_AGAIN_PER_MINUTE = 10;
+/** The most reports the sweeper remembers as not to be queued (and the most final reads it remembers). */
+export const PARKED_MAX = 2000;
 /** How many recent open reports a sweep looks at. */
 const SWEEP_SCAN = 200;
 /** The audit trail takes an actor of at most 128 characters of `A-Za-z0-9_.:@+-`. */
@@ -224,6 +242,7 @@ const REQUIRED_STORE_METHODS = [
   'failAiRead',
   'loadAiRead',
   'loadAiReads',
+  'loadAiReadById',
   'listAiRetries',
   'aiSpendSince',
   'insertAiOutcome',
@@ -291,7 +310,7 @@ export interface AiServiceDeps {
 
 /** The facade when no AI is configured: always off, never touches the store. */
 export function createInertAi(): AiFacade {
-  const status: AiStatus = { available: false, level: 0, maxLevel: 0, state: 'off', spentMicros: 0, capMicros: 0, day: '', reads: 0, cacheHitRate: null, invalid: {} };
+  const status: AiStatus = { available: false, level: 0, maxLevel: 0, state: 'off', spentMicros: 0, capMicros: 0, capCalls: 0, day: '', reads: 0, cacheHitRate: null, invalid: {} };
   return {
     level: () => 0,
     status: () => ({ ...status, invalid: {} }),
@@ -333,6 +352,8 @@ export class AiService implements AiFacade {
   private readonly queued = new Set<string>();
   private readonly running = new Map<string, { dirty: boolean }>();
   private readonly parked = new Map<string, number>();
+  private readonly finals = new Map<string, { hash: string; rowId: string; retaken: boolean }>();
+  private readonly retakes = new Set<string>();
   private readonly controllers = new Set<AbortController>();
   private readonly cache = new Map<string, Prepared>();
   private readonly asked = new Map<string, number[]>();
@@ -383,10 +404,11 @@ export class AiService implements AiFacade {
       this.warn('ai.status_failed', err);
     }
     const cap = this.opts.dailyBudgetMicros;
+    const capCalls = this.dailyCalls();
     let state: AiStatus['state'] = 'ok';
     if (level === 0) state = 'off';
     else if (this.breaker.state() !== 'closed') state = 'unavailable';
-    else if (spent.micros >= cap) state = 'paused_budget';
+    else if (spent.micros >= cap || spent.calls >= capCalls) state = 'paused_budget';
     return {
       available: true,
       level,
@@ -394,6 +416,7 @@ export class AiService implements AiFacade {
       state,
       spentMicros: spent.micros,
       capMicros: cap,
+      capCalls,
       day: utcDayLabel(this.clock.now()),
       reads: spent.calls,
       cacheHitRate: this.meter.cacheHitRate(),
@@ -433,8 +456,22 @@ export class AiService implements AiFacade {
       const prepared = this.prepare(report);
       const row = this.store.loadAiRead(reportId);
       if (row !== null && row.read !== null && row.inputHash === prepared.hash) return Promise.resolve(this.view(row, report, prepared, level));
-      const spent = this.store.aiSpendSince(startOfUtcDay(this.clock.now())).micros;
-      if (spent >= this.opts.dailyBudgetMicros) return Promise.resolve('budget');
+      const now = this.clock.now();
+      const today = this.store.aiSpendSince(startOfUtcDay(now));
+      if (today.micros >= this.opts.dailyBudgetMicros || today.calls >= this.dailyCalls()) return Promise.resolve('budget');
+      // Nothing can be called now: say so, with the wait, rather than queue a job that cannot run.
+      if (!this.breaker.available()) {
+        const reopens = this.breaker.reopensAt() ?? now;
+        return Promise.resolve({ unavailable: { retryAfterMs: Math.max(1000, reopens - now) } });
+      }
+      if (!this.window.peek(now)) return Promise.resolve({ unavailable: { retryAfterMs: Math.max(1000, this.window.nextFree(now) - now) } });
+      const final = this.finals.get(reportId);
+      if (final !== undefined && final.hash === prepared.hash) {
+        // A moderator's explicit ask retakes a final read once; asking again for the same row has nothing left to try.
+        if (final.retaken) return Promise.resolve('final');
+        final.retaken = true;
+      }
+      this.retakes.add(reportId);
       this.enqueue(reportId, { force: true });
       return Promise.resolve('pending');
     } catch (err) {
@@ -599,9 +636,11 @@ export class AiService implements AiFacade {
 
   private async runOne(id: string): Promise<void> {
     try {
-      const park = await runRead(this.env(), id);
-      if (park !== null) this.parked.set(id, park);
+      const retake = this.retakes.delete(id);
+      const end: ReadEnd = await runRead(this.env(), id, retake ? { retake: true } : undefined);
+      if (end.park !== null) this.park(id, end.park);
       else this.parked.delete(id);
+      this.noteFinal(id, end);
     } catch (err) {
       this.warn('ai.job_failed', err);
     } finally {
@@ -610,6 +649,30 @@ export class AiService implements AiFacade {
       if (job?.dirty === true && !this.isClosed) this.enqueue(id, { force: true });
       this.pump();
     }
+  }
+
+  /** Remember not to queue `reportId` before `until`. Bounded: the oldest entry goes when the list is full. */
+  private park(reportId: string, until: number): void {
+    this.parked.delete(reportId);
+    if (this.parked.size >= PARKED_MAX) this.parked.delete(this.parked.keys().next().value as string);
+    this.parked.set(reportId, until);
+  }
+
+  /** Keep what is known of a read that ended without an answer (so an explicit ask can tell a first retake from a second). */
+  private noteFinal(reportId: string, end: ReadEnd): void {
+    const prior = this.finals.get(reportId);
+    if (end.final === null) {
+      this.finals.delete(reportId);
+      return;
+    }
+    this.finals.delete(reportId);
+    if (this.finals.size >= PARKED_MAX) this.finals.delete(this.finals.keys().next().value as string);
+    this.finals.set(reportId, { hash: end.final.hash, rowId: end.final.rowId, retaken: prior !== undefined && prior.rowId === end.final.rowId && prior.retaken });
+  }
+
+  /** How many reports the sweeper is holding back (tests). */
+  parkedSize(): number {
+    return this.parked.size;
   }
 
   private isIdle(): boolean {
@@ -627,7 +690,7 @@ export class AiService implements AiFacade {
 
   async sweep(): Promise<void> {
     try {
-      if (this.isClosed || this.level() === 0 || this.breaker.state() === 'open') return;
+      if (this.isClosed || this.level() === 0 || !this.breaker.available()) return;
       const now = this.clock.now();
       const quiet = this.isIdle();
       let added = 0;
@@ -645,6 +708,10 @@ export class AiService implements AiFacade {
       const page = this.store.listReports({ status: 'open', limit: SWEEP_SCAN });
       const ids = page.map((r) => r.id);
       const read = new Map(this.store.loadAiReads(ids).map((r) => [r.reportId, r]));
+      // Forget what is held back for reports that are decided or no longer open: the list only keeps the live ones.
+      const open = new Set(ids);
+      for (const id of [...this.parked.keys()]) if (!open.has(id)) this.parked.delete(id);
+      for (const id of [...this.finals.keys()]) if (!open.has(id)) this.finals.delete(id);
       for (const report of page) {
         if (room() <= 0) break;
         if (read.has(report.id) || this.isParked(report.id, now)) continue;
@@ -683,6 +750,7 @@ export class AiService implements AiFacade {
       this.lastStable = stable;
       this.stableKey = sha256Hex(stable);
       this.parked.clear();
+      this.finals.clear();
     }
     const reasons = profile.reporting.reasons;
     const label = report.reportedReason === null || report.reportedReason === undefined ? '' : (reasons.find((r) => r.id === report.reportedReason)?.label ?? '');
@@ -750,6 +818,7 @@ export class AiService implements AiFacade {
       window: this.window,
       meter: this.meter,
       level: () => this.level(),
+      dailyCalls: () => this.dailyCalls(),
       closed: () => this.isClosed,
       prepare: (report) => this.prepare(report),
       examplesFor: (report, prepared) => this.examplesFor(report, prepared),
@@ -792,16 +861,21 @@ export class AiService implements AiFacade {
   // --- the casebook ----------------------------------------------------------------------------------------------------------
 
   /**
-   * The casebook row for a decision made with an AI echo (the hook `DecisionService` calls inside its transaction), computed here from
-   * the stored read and the decision. Null at level 0. Pure apart from reading the store; fenced by the caller.
+   * The casebook row for a decision (the hook `DecisionService` calls inside its transaction), computed here from the stored read and
+   * the decision. The server always records it when a read exists at level 1 or 2, whichever way the decision came (the hub, `cw.decide`,
+   * a webhook, a bulk dismissal); the echo, when there is one, only names the read the moderator saw, says whether they clicked accept
+   * (kept only when the decision is the pre-fill) and gives the conduct level of their form (kept only when it fits the verdict).
+   * With no echo there is no example text. Null at level 0 and when the report has no read. Fenced by the caller.
    */
   outcomeOf(args: AiOutcomeArgs): AiOutcomeInsert | null {
     const level = this.level();
     if (level === 0) return null;
     const { report, verdict, ai } = args;
-    // The store can load a report's newest finished read only, so an echo naming an older read (or another report's) lands on it too.
-    const row = this.store.loadAiRead(report.id);
-    const read = row?.read ?? null;
+    // The read the moderator saw when the echo names one of this report's finished reads, else the newest.
+    const named = ai.readId === null ? null : this.store.loadAiReadById(ai.readId);
+    const row: AiReadRow | null = named !== null && named.reportId === report.id && named.status === 'ok' && named.read !== null ? named : this.store.loadAiRead(report.id);
+    if (row === null) return null;
+    const read = row.read;
     const rec = read?.recommendation ?? null;
     const own = actionsOnTarget(args.actions, args.target);
 
@@ -818,12 +892,20 @@ export class AiService implements AiFacade {
       level,
     );
 
-    // The conduct level the human settled on: what their form said, else the AI's on an agreement, else banter for a dismissal.
+    // The conduct level the human settled on: their form's when it fits the verdict (a dismissal carries none; an action is not
+    // banter), else the AI's on an agreement, else banter for a dismissal.
+    const claimed = verdict === 'upheld' || verdict === 'noted' ? (ai.severity !== null && ai.severity !== 'banter' ? ai.severity : null) : null;
     const severity: ConductLevel | null =
-      ai.severity ?? (result.agreement === 'agree' && rec !== null ? rec.severity : verdictClass === 'no_action' && verdict !== 'bad_faith' ? 'banter' : null);
+      claimed ?? (result.agreement === 'agree' && rec !== null ? rec.severity : verdict === 'no_action' ? 'banter' : null);
     const badFaith = verdict === 'bad_faith';
+    // The row is filed under the rule the human cited; a dismissal cites none, so it goes under the rule the AI cited (that is where its
+    // false positive belongs), else the rule of the reporter's reason.
+    const reasonRule = suggestedRule(this.deps.profile().reporting.reasons, report.reportedReason ?? null, this.deps.rules);
+    const filedUnder: number | 'uncovered' | null = own.rule ?? rec?.rule ?? read?.rule ?? (typeof reasonRule === 'number' ? reasonRule : null);
+
     const profile = this.deps.profile();
     const teachable =
+      ai.readId !== null &&
       (result.agreement === 'agree' || result.agreement === 'override') &&
       !badFaith &&
       profile.ai.learn &&
@@ -839,11 +921,11 @@ export class AiService implements AiFacade {
 
     return {
       reportId: report.id,
-      readId: row?.id ?? null,
+      readId: row.id,
       decidedAt: args.now,
       level,
       verdict: verdictClass,
-      rule: own.rule === null ? null : String(own.rule),
+      rule: filedUnder === null ? null : String(filedUnder),
       severity,
       aiVerdict: result.aiVerdict,
       agreement: result.agreement,
@@ -851,6 +933,16 @@ export class AiService implements AiFacade {
       badFaith,
       example,
     };
+  }
+
+  /** The owner's most calls in a UTC day, read live from the profile. */
+  private dailyCalls(): number {
+    try {
+      return this.deps.profile().ai.dailyCalls;
+    } catch (err) {
+      this.warn('ai.level_failed', err);
+      return AI_DAILY_CALLS_DEFAULT;
+    }
   }
 
   protected warn(event: string, err: unknown): void {

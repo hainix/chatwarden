@@ -33,6 +33,7 @@ export type AiStore = Store &
       | 'failAiRead'
       | 'loadAiRead'
       | 'loadAiReads'
+      | 'loadAiReadById'
       | 'listAiRetries'
       | 'aiSpendSince'
       | 'insertAiOutcome'
@@ -86,6 +87,8 @@ export interface WorkerEnv {
   readonly window: CallWindow;
   readonly meter: Meter;
   level(): number;
+  /** The owner's most calls in a UTC day (`profile.ai.dailyCalls`), read live. */
+  dailyCalls(): number;
   closed(): boolean;
   prepare(report: ReportRecord): Prepared;
   /** Casebook examples for this case, newest first; empty when there are none, learning is off or something fails. */
@@ -171,33 +174,51 @@ export function parkOf(row: AiReadRow, now: number): number | null {
 }
 
 /**
- * Read one report. Resolves to the time (epoch ms, possibly Infinity) before which the sweeper should not queue the report again, or
- * null when there is nothing to wait for. Throws only on a store failure; the caller fences it.
+ * How a job ended. `park` is the time (epoch ms, possibly Infinity) before which the sweeper should not queue the report again, or
+ * null when there is nothing to wait for. `final` names the row when the report's read for this input has ended without an answer and
+ * will not be tried again by itself (declined, invalid twice, fatal, given up): a moderator's explicit "read again" may retake it once.
  */
-export async function runRead(env: WorkerEnv, reportId: string): Promise<number | null> {
-  if (env.level() === 0 || env.closed()) return null;
-  const report = env.store.loadReport(reportId);
-  if (report === null || report.status !== 'open') return null;
+export interface ReadEnd {
+  park: number | null;
+  final: { hash: string; rowId: string } | null;
+}
 
-  // Cheap refusals first, before anything is written: an open breaker or a full minute leaves no row behind.
+const NOTHING: ReadEnd = { park: null, final: null };
+
+/**
+ * Read one report. `opts.retake` is a moderator's explicit ask: a row that ended without an answer is taken over once more (and the
+ * call is charged and audited like any other). Throws only on a store failure; the caller fences it.
+ */
+export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?: boolean }): Promise<ReadEnd> {
+  if (env.level() === 0 || env.closed()) return NOTHING;
+  const report = env.store.loadReport(reportId);
+  if (report === null || report.status !== 'open') return NOTHING;
+
+  // Cheap refusals first, before anything is written: an unavailable breaker (open, or half-open with its probe out) or a full
+  // minute leaves no row behind.
   const now = env.clock.now();
-  if (env.breaker.state() === 'open' || !env.window.peek(now)) return null;
+  if (!env.breaker.available() || !env.window.peek(now)) return NOTHING;
 
   const prepared = env.prepare(report);
   const reserved = env.store.reserveAiRead(
     { reportId, inputHash: prepared.hash, promptVersion: prepared.input.promptVersion, adapter: env.adapter.id },
     now + env.timeoutMs + LEASE_SLACK_MS,
     now,
+    opts?.retake === true ? { retake: true } : undefined,
   );
-  if (!reserved.reserved) return parkOf(reserved.existing, now);
+  if (!reserved.reserved) {
+    const park = parkOf(reserved.existing, now);
+    return { park, final: park === Number.POSITIVE_INFINITY ? { hash: prepared.hash, rowId: reserved.existing.id } : null };
+  }
   const { id, lease } = reserved;
 
-  // The daily cap: what is stored for today, plus what the calls in flight here are estimated to cost.
-  const spent = env.store.aiSpendSince(startOfUtcDay(now)).micros;
-  if (spent + env.meter.inflight * env.meter.estimate() >= env.capMicros) {
+  // The daily caps. Money: what is stored for today, plus what the calls in flight here are estimated to cost. Calls: the owner's
+  // ceiling, which holds even for an adapter that reports no cost (the count includes this reservation).
+  const today = env.store.aiSpendSince(startOfUtcDay(now));
+  if (today.micros + env.meter.inflight * env.meter.estimate() >= env.capMicros || today.calls > env.dailyCalls()) {
     const resume = nextUtcMidnight(now);
     env.store.failAiRead(id, lease, 'skipped', 'budget', resume);
-    return resume;
+    return { park: resume, final: null };
   }
 
   const gate = env.breaker.gate();
@@ -205,7 +226,7 @@ export async function runRead(env: WorkerEnv, reportId: string): Promise<number 
     if (gate === 'probe') env.breaker.release();
     const again = now + RACE_RETRY_MS;
     env.store.failAiRead(id, lease, 'skipped', 'retryable', again);
-    return again;
+    return { park: again, final: null };
   }
 
   let examples: AIExampleInput[] = [];
@@ -250,10 +271,10 @@ export async function runRead(env: WorkerEnv, reportId: string): Promise<number 
     env.meter.inflight -= 1;
   }
   // The service is closing: the store may already be going away. The lease runs out and the read is taken up later.
-  if (env.closed()) return null;
+  if (env.closed()) return NOTHING;
   const latency = env.clock.now() - startedAt;
 
-  if (failed) return settleFailure(env, { id, lease, reportId, kind: kindOf(thrown, timedOut) });
+  if (failed) return settleFailure(env, { id, lease, reportId, hash: prepared.hash, kind: kindOf(thrown, timedOut) });
 
   const usage = safeUsage((result as { usage?: Partial<AIUsage> } | null)?.usage, latency);
   env.meter.usage(usage);
@@ -269,11 +290,17 @@ export async function runRead(env: WorkerEnv, reportId: string): Promise<number 
     verdict = { ok: false, code: 'unreadable' };
   }
   if (!verdict.ok) {
-    // Paid for, and counted in the spend, although there is no read.
+    // Paid for, and counted in the spend, although there is no read. A model's malformed or truncated answer is not deterministic,
+    // so the first one is tried again once (a minute later); a second is final.
     env.meter.invalidCode(verdict.code);
     env.breaker.success();
+    if (lease < 2) {
+      const retryAt = env.clock.now() + (RETRY_AFTER_MS[0] ?? RACE_RETRY_MS);
+      env.store.failAiRead(id, lease, 'failed', 'invalid', retryAt, usage);
+      return { park: retryAt, final: null };
+    }
     if (env.store.failAiRead(id, lease, 'invalid', 'invalid', null, usage)) env.auditRead(reportId);
-    return Number.POSITIVE_INFINITY;
+    return { park: Number.POSITIVE_INFINITY, final: { hash: prepared.hash, rowId: id } };
   }
 
   const toIds = (refs: readonly string[]): string[] => refs.flatMap((ref) => {
@@ -294,34 +321,35 @@ export async function runRead(env: WorkerEnv, reportId: string): Promise<number 
   const stored = env.store.completeAiRead(id, lease, { ...usage, read, exampleIds });
   if (!stored) {
     env.warn('ai.read_superseded');
-    return null;
+    return NOTHING;
   }
   env.auditRead(reportId);
-  return null;
+  return NOTHING;
 }
 
-/** An adapter failure: retry on the schedule, or give up (and say so once). Returns the park time. */
-function settleFailure(env: WorkerEnv, f: { id: string; lease: number; reportId: string; kind: CallKind }): number {
+/** An adapter failure: retry on the schedule, or give up (and say so once). */
+function settleFailure(env: WorkerEnv, f: { id: string; lease: number; reportId: string; hash: string; kind: CallKind }): ReadEnd {
   const { id, lease, reportId, kind } = f;
+  const final: ReadEnd = { park: Number.POSITIVE_INFINITY, final: { hash: f.hash, rowId: id } };
   if (kind === 'declined') {
     // A refusal is an answer: stored, not retried, and the provider is up.
     env.breaker.success();
     if (env.store.failAiRead(id, lease, 'declined', 'declined', null)) env.auditRead(reportId);
-    return Number.POSITIVE_INFINITY;
+    return final;
   }
   const errorKind: AiErrorKind = kind;
   if (kind === 'fatal') {
     env.breaker.failure(true);
     if (env.store.failAiRead(id, lease, 'failed', errorKind, null)) env.auditRead(reportId);
-    return Number.POSITIVE_INFINITY;
+    return final;
   }
   env.breaker.failure();
   if (lease >= MAX_ATTEMPTS) {
     // Three calls in all: given up.
     if (env.store.failAiRead(id, lease, 'failed', errorKind, null)) env.auditRead(reportId);
-    return Number.POSITIVE_INFINITY;
+    return final;
   }
   const retryAt = env.clock.now() + (RETRY_AFTER_MS[lease - 1] ?? RETRY_AFTER_MS[RETRY_AFTER_MS.length - 1] ?? RACE_RETRY_MS);
   env.store.failAiRead(id, lease, 'failed', errorKind, retryAt);
-  return retryAt;
+  return { park: retryAt, final: null };
 }

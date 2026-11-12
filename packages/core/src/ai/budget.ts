@@ -47,6 +47,12 @@ export class CallWindow {
     return this.at.length < this.limit;
   }
 
+  /** When a slot is free: `now` if one is, else the moment the oldest call leaves the window. */
+  nextFree(now: number): number {
+    this.trim(now);
+    return this.at.length < this.limit ? now : (this.at[0] as number) + this.windowMs;
+  }
+
   /** Give back the slot taken at `now` (the call was not made after all). */
   giveBack(now: number): void {
     const i = this.at.lastIndexOf(now);

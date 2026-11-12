@@ -307,6 +307,8 @@ export {
   MAX_GUIDELINE_OUTCOME,
   MAX_RULE_LIST,
   MAX_WINDOW_DAYS,
+  AI_DAILY_CALLS_DEFAULT,
+  AI_DAILY_CALLS_MAX,
   POLICY_SECTIONS,
   PRESETS,
   ProfileError,
@@ -357,7 +359,7 @@ export { aiPolicyText, buildAIInput, PROMPT_VERSION, usedExampleIds } from './ai
 export type { BuildAIInputArgs } from './ai/prompt.js';
 export { inputHash } from './ai/hash.js';
 export { looksLikeInjection } from './ai/injection.js';
-export { aiActorOf, createInertAi, AiService, SWEEP_BATCH, SWEEP_EVERY_MS } from './ai/service.js';
+export { aiActorOf, createInertAi, AiService, READ_AGAIN_PER_MINUTE, SWEEP_BATCH, SWEEP_EVERY_MS } from './ai/service.js';
 export type {
   AiBrief,
   AiFacade,

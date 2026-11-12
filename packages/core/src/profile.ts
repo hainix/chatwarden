@@ -162,7 +162,16 @@ export interface AISettings {
   level: 0 | 1 | 2;
   /** Whether decided cases may be kept as pseudonymised examples for later reads. Default true. */
   learn: boolean;
+  /**
+   * The most provider calls the AI may make in a UTC day, a second guard beside the spend cap in code (an adapter that reports no cost
+   * cannot run unbounded). A whole number from 1 to 100 000; default 5 000.
+   */
+  dailyCalls: number;
 }
+
+/** The default and the largest value of {@link AISettings.dailyCalls}. */
+export const AI_DAILY_CALLS_DEFAULT = 5000;
+export const AI_DAILY_CALLS_MAX = 100_000;
 
 /**
  * What `defineProfile`, `resolveProfile`, `applyPolicyLayer`, `cw.profile` and `cw.policy.get()` return: a validated, deep-frozen
@@ -238,7 +247,7 @@ const TOP_KEYS = [
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
 const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai'];
-const AI_KEYS = ['level', 'learn'] as const;
+const AI_KEYS = ['level', 'learn', 'dailyCalls'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
 const REPEAT_KEYS = ['windowDays', 'notes', 'distinctGames', 'outcome'] as const;
@@ -427,6 +436,12 @@ function validateAI(v: unknown, path: string): void {
     if (level !== 0 && level !== 1 && level !== 2) fail(`${path}.level`, 'must be 0 (off), 1 (read) or 2 (recommend)');
   }
   if (Object.hasOwn(ai, 'learn') && typeof ai['learn'] !== 'boolean') fail(`${path}.learn`, 'must be true or false');
+  if (Object.hasOwn(ai, 'dailyCalls')) {
+    const n = ai['dailyCalls'];
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > AI_DAILY_CALLS_MAX) {
+      fail(`${path}.dailyCalls`, `must be a whole number of calls from 1 to ${AI_DAILY_CALLS_MAX}`);
+    }
+  }
 }
 
 /** The `reporting` section, in input shape (every field optional, a reason needing only an id and a label). */
@@ -608,8 +623,8 @@ function dedupeReasonRules(copy: Record<string, unknown>): void {
 
 /** The AI settings with every field filled in; a value of the wrong shape is returned as it is, for the validator to name. */
 function fillAI(value: unknown): unknown {
-  if (value === undefined) return { level: 0, learn: true };
-  return isPlain(value) ? { level: 0, learn: true, ...value } : value;
+  if (value === undefined) return { level: 0, learn: true, dailyCalls: AI_DAILY_CALLS_DEFAULT };
+  return isPlain(value) ? { level: 0, learn: true, dailyCalls: AI_DAILY_CALLS_DEFAULT, ...value } : value;
 }
 
 /** A profile written before `durations`, `customDuration`, `reporting` and `ai` existed gets their defaults. */
@@ -642,7 +657,7 @@ export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
     durations: p.durations ?? [...DEFAULT_DURATIONS],
     customDuration: p.customDuration ?? true,
     reporting: resolveReporting(p.reporting),
-    ai: { level: 0, learn: true, ...p.ai },
+    ai: { level: 0, learn: true, dailyCalls: AI_DAILY_CALLS_DEFAULT, ...p.ai },
   };
 }
 

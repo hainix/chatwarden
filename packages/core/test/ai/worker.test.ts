@@ -121,20 +121,45 @@ describe('the answer is checked in core', () => {
     expect(w.cw.ai.status().invalid).toEqual({ bad_evidence: 1 });
   });
 
-  it('an invalid answer is stored once as invalid with a code, is paid for, and is not retried', async () => {
-    const w = await aiWorld({ script: [{ output: { nonsense: true }, usage: { costMicros: 4200 } }] });
+  it('an invalid answer is retried once, then stored as invalid with its code; both calls are paid for and counted', async () => {
+    const w = await aiWorld({ script: [{ output: { nonsense: true }, usage: { costMicros: 4200 } }, { output: { nonsense: 2 }, usage: { costMicros: 4200 } }] });
     const r = await w.report();
     await w.idle();
     expect(w.adapter.callCount).toBe(1);
     expect(w.cw.ai.status().invalid).toEqual({ extra_key: 1 });
-    // Counted in the spend although there is no read.
-    expect(w.cw.ai.status().spentMicros).toBe(4200);
-    w.clock.t += 20 * MIN;
+    // Not terminal yet: no audit row, no read, the retry is due in a minute.
+    expect(w.cw.audit.list({ limit: 20, action: 'ai.read' }).items).toHaveLength(0);
+    w.clock.t += MIN - 1;
     await w.cw.ai.sweep();
     await w.idle();
     expect(w.adapter.callCount).toBe(1);
+    w.clock.t += 1;
+    await w.cw.ai.sweep();
+    await w.idle();
+    expect(w.adapter.callCount).toBe(2);
+    expect(w.cw.ai.status().invalid).toEqual({ extra_key: 2 });
+    // Counted in the spend although there is no read.
+    expect(w.cw.ai.status().spentMicros).toBe(8400);
+    expect(w.cw.audit.list({ limit: 20, action: 'ai.read' }).items).toHaveLength(1);
+    expect((w.store as MemoryStore).aiSpendSince(0).calls).toBe(2);
+    // Final now: never a third.
+    w.clock.t += 20 * MIN;
+    await w.cw.ai.sweep();
+    await w.idle();
+    expect(w.adapter.callCount).toBe(2);
     expect(w.cw.ai.read(r.id)).toBeNull();
-    expect((w.store as MemoryStore).aiSpendSince(0).calls).toBe(1);
+  });
+
+  it('an invalid answer followed by a good one gives the read, with one audit row', async () => {
+    const w = await aiWorld({ script: [{ output: { nonsense: true } }] });
+    const r = await w.report();
+    await w.idle();
+    w.clock.t += MIN;
+    await w.cw.ai.sweep();
+    await w.idle();
+    expect(w.adapter.callCount).toBe(2);
+    expect(w.cw.ai.read(r.id)).not.toBeNull();
+    expect(w.cw.audit.list({ limit: 20, action: 'ai.read' }).items).toHaveLength(1);
   });
 
   it('a summary that is rejected (a link) is stored invalid, paid for, and counted by its code', async () => {
@@ -358,11 +383,16 @@ describe('the audit row', () => {
   });
 
   it('writes a row for a refusal, an invalid answer and a fatal error', async () => {
-    const w = await aiWorld({ script: [{ error: new AIError('declined') }, { output: 1 }, { error: new AIError('fatal') }] });
+    const w = await aiWorld({ script: [{ error: new AIError('declined') }, { output: 1 }, { error: new AIError('fatal') }, { output: 2 }] });
     for (let i = 0; i < 3; i += 1) {
       await w.report();
       await w.idle();
     }
+    // The invalid answer is retried once before it is final.
+    expect(w.cw.audit.list({ limit: 50, action: 'ai.read' }).items).toHaveLength(2);
+    w.clock.t += 5 * MIN;
+    await w.cw.ai.sweep();
+    await w.idle();
     expect(w.cw.audit.list({ limit: 50, action: 'ai.read' }).items).toHaveLength(3);
   });
 

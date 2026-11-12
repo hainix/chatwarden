@@ -61,6 +61,15 @@ describe('the call window', () => {
     expect(w.peek(60_000)).toBe(true);
   });
 
+  it('nextFree is now when a slot is free, else when the oldest call leaves the minute', () => {
+    const w = new CallWindow(2);
+    expect(w.nextFree(1000)).toBe(1000);
+    w.tryTake(1000);
+    w.tryTake(5000);
+    expect(w.nextFree(6000)).toBe(61_000);
+    expect(w.nextFree(61_000)).toBe(61_000);
+  });
+
   it('a limit of 0 never allows a call', () => {
     expect(new CallWindow(0).tryTake(0)).toBe(false);
   });

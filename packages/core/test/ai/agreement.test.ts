@@ -60,6 +60,12 @@ describe('agree', () => {
     });
   });
 
+  it('for a no_action the rule means nothing: it is true whatever rule the AI named', () => {
+    const r = read({ verdict: 'no_action', severity: 'banter', rule: 2, evidence: [] });
+    expect(agreementOf(r, human({ verdict: 'no_action', rule: null, lineIds: [], step: null, prefill: null })).detail.rule).toBe(true);
+    expect(agreementOf(r, human({ verdict: 'upheld', rule: 5 })).detail.rule).toBe(true);
+  });
+
   it('upheld and noted are one class: a noted AI against an upheld human agrees, and the reverse', () => {
     expect(agreementOf(read({ verdict: 'noted' }), human()).agreement).toBe('agree');
     expect(agreementOf(read({ verdict: 'upheld' }), human({ verdict: 'noted', step: { kind: 'note', durationMs: null } })).agreement).toBe('agree');
@@ -121,7 +127,7 @@ describe('none', () => {
     expect(a).toEqual({
       agreement: 'none',
       aiVerdict: null,
-      detail: { verdict: false, rule: false, lines: 0, outcome: 'none', oneClick: true },
+      detail: { verdict: false, rule: false, lines: 0, outcome: 'none', oneClick: false },
     });
   });
 
@@ -153,6 +159,44 @@ describe('what it does not use', () => {
     expect(b.detail).toEqual({ ...a.detail, oneClick: true });
     const c = agreementOf(read({ verdict: 'no_action' }), human({ oneClick: true }));
     expect(c.agreement).toBe('override');
+    expect(c.detail.oneClick).toBe(false);
+  });
+
+  describe('oneClick is the server verdict on whether the pre-fill was accepted as it stood', () => {
+    const accept = (h: Partial<HumanDecision>, r: AIRead = read(), level: 0 | 1 | 2 = 2) => agreementOf(r, human({ oneClick: true, ...h }), level).detail.oneClick;
+
+    it('true: the same verdict, rule, kind and length', () => {
+      expect(accept({})).toBe(true);
+    });
+    it('true: the same kind with a shorter length (the moderator trimmed it)', () => {
+      expect(accept({ step: { kind: 'chat', durationMs: HOUR } })).toBe(true);
+    });
+    it('false: a longer length', () => {
+      expect(accept({ step: { kind: 'chat', durationMs: 48 * HOUR } })).toBe(false);
+    });
+    it('false: another kind, milder or harsher', () => {
+      expect(accept({ step: { kind: 'warning', durationMs: null } })).toBe(false);
+      expect(accept({ step: { kind: 'ban', durationMs: HOUR } })).toBe(false);
+    });
+    it('false: another rule', () => {
+      expect(accept({ rule: 5 })).toBe(false);
+    });
+    it('false: noted against an upheld pre-fill, though both are agreements', () => {
+      expect(accept({ verdict: 'noted', step: { kind: 'note', durationMs: null } })).toBe(false);
+    });
+    it('true: a no_action accepted as a no_action', () => {
+      const r = read({ verdict: 'no_action', severity: 'banter', rule: null, evidence: [] });
+      expect(accept({ verdict: 'no_action', rule: null, lineIds: [], step: null, prefill: null }, r)).toBe(true);
+    });
+    it('false: accepted on an override, a none, and below level 2', () => {
+      expect(accept({ verdict: 'no_action', rule: null, step: null })).toBe(false);
+      expect(accept({}, read({ verdict: 'unclear' }))).toBe(false);
+      expect(accept({}, read(null))).toBe(false);
+      expect(accept({}, read(), 1)).toBe(false);
+    });
+    it('false when the client did not claim it, even for the same decision', () => {
+      expect(agreementOf(read(), human({ oneClick: false })).detail.oneClick).toBe(false);
+    });
   });
 
   it('is pure: the inputs are not changed and the same inputs give the same answer', () => {

@@ -87,23 +87,26 @@ export interface DecisionInput {
   /** Defaults to `'moderator'`. */
   source?: Source;
   /**
-   * AI levels 1 and 2: which AI read the moderator was looking at, so the casebook can record how the decision compared with it. Optional;
-   * a decision without it records nothing against the AI. It never changes the decision, its key or its answer, and a value that is not
-   * well formed is ignored. Agreement is computed from the stored read and this decision, never from this echo.
+   * AI levels 1 and 2. Optional: the casebook records how every decision compared with the report's AI read whether or not this is
+   * given (the server decides, from the stored read and the decision). It only tells the casebook which read the moderator saw, whether
+   * they clicked accept, the conduct level of their form and their role. It never changes the decision, its key or its answer, and a
+   * part that is not well formed is ignored. Agreement is computed from the stored read and the decision, never from this echo.
    * @experimental
    */
   ai?: DecisionAiEcho;
 }
 
 /**
- * The AI echo of a decision: the id of the read the moderator saw (an unknown id falls back to the report's newest read), whether they
- * accepted its pre-fill in one click (recorded as a fact, never used for agreement), the conduct level they settled on when their
- * form had one, and their role, for the `ai.outcome` audit row (without a role no audit row is written).
+ * What a decision tells the casebook about the AI. `readId` (with `accepted`) is the echo of the read the moderator saw: an id that is
+ * not one of this report's finished reads falls back to the newest. `accepted` is a claim that they accepted the pre-fill in one click:
+ * it counts only when the decision is the pre-fill. `severity` is the conduct level their form settled on: it counts only when it fits
+ * the verdict. Without the echo no example text is kept. `role` is the moderator's, for the `ai.outcome` audit row (without it none is
+ * written).
  * @experimental
  */
 export interface DecisionAiEcho {
-  readId: string;
-  accepted: boolean;
+  readId?: string;
+  accepted?: boolean;
   severity?: ConductLevel;
   role?: Role;
 }
@@ -225,21 +228,24 @@ interface Normal {
   /** Sorted by canonical subject, then kind. */
   actions: NormalAction[];
   /** The AI echo, or null when absent or not well formed. Not part of the key. */
-  ai: { readId: string; accepted: boolean; severity: ConductLevel | null; role: Role | null } | null;
+  ai: { readId: string | null; accepted: boolean; severity: ConductLevel | null; role: Role | null };
 }
 
 /** The longest read id an echo may carry. */
 const AI_READ_ID_MAX = 128;
 
-/** The AI echo of an input, or null: anything that is not well formed is ignored, never an error (the decision matters more). */
+/**
+ * The AI echo of an input. Anything that is not well formed is ignored, never an error (the decision matters more): a malformed echo
+ * (a bad read id, or an `accepted` that is not a boolean) is as if there were none, but a good role is kept for the audit row.
+ */
 function normalizeAi(v: unknown): Normal['ai'] {
-  if (typeof v !== 'object' || v === null) return null;
+  const none: Normal['ai'] = { readId: null, accepted: false, severity: null, role: null };
+  if (typeof v !== 'object' || v === null) return none;
   const o = v as Record<string, unknown>;
-  const readId = o['readId'];
-  if (typeof readId !== 'string' || readId === '' || readId.length > AI_READ_ID_MAX) return null;
-  if (typeof o['accepted'] !== 'boolean') return null;
-  const severity = (CONDUCT_LEVELS as readonly unknown[]).includes(o['severity']) ? (o['severity'] as ConductLevel) : null;
   const role = (ROLES as readonly unknown[]).includes(o['role']) ? (o['role'] as Role) : null;
+  const readId = o['readId'];
+  if (typeof readId !== 'string' || readId === '' || readId.length > AI_READ_ID_MAX || typeof o['accepted'] !== 'boolean') return { ...none, role };
+  const severity = (CONDUCT_LEVELS as readonly unknown[]).includes(o['severity']) ? (o['severity'] as ConductLevel) : null;
   return { readId, accepted: o['accepted'], severity, role };
 }
 
@@ -583,14 +589,14 @@ export class DecisionService {
         verdict: norm.verdict,
         at: now,
         applied: done.applied,
-        aiOutcome: done.recorded === null ? null : { agreement: done.recorded, role: norm.ai?.role ?? null, actor: norm.actor },
+        aiOutcome: done.recorded === null ? null : { agreement: done.recorded, role: norm.ai.role, actor: norm.actor },
       },
     };
   }
 
   /** The casebook row for this decision, or null: no echo, no hook, no AI store method, or the hook declines or fails. */
   private outcomeFor(norm: Normal, report: ReportRecord, now: number): AiOutcomeInsert | null {
-    if (norm.ai === null || this.aiOutcome === undefined || typeof this.store.insertAiOutcome !== 'function') return null;
+    if (this.aiOutcome === undefined || typeof this.store.insertAiOutcome !== 'function') return null;
     try {
       return this.aiOutcome({
         report,

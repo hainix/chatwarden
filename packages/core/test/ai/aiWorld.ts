@@ -14,6 +14,8 @@ export const DAY = 24 * 3_600_000;
 
 export interface AiWorldOptions {
   level?: 0 | 1 | 2;
+  /** The owner's daily call ceiling (profile.ai.dailyCalls). */
+  dailyCalls?: number;
   script?: FakeScript;
   adapter?: FakeModerationAI;
   ai?: Partial<AiOptions>;
@@ -27,7 +29,7 @@ export async function aiWorld(o: AiWorldOptions = {}) {
   const w = await world(
     {
       ai: { adapter, ...(o.ai ?? {}) },
-      overrides: { ai: { level } },
+      overrides: { ai: { level, ...(o.dailyCalls === undefined ? {} : { dailyCalls: o.dailyCalls }) } },
       ...(o.over ?? {}),
     },
     o.store ?? new MemoryStore(),

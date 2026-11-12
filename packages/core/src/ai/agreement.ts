@@ -21,7 +21,7 @@ export interface HumanDecision {
   step: StepLike | null;
   /** The step the ladder gives for the AI's conduct level: what the pre-fill would have been; null when there was none. */
   prefill: StepLike | null;
-  /** The moderator accepted the pre-fill in one click (the client's echo; a fact about the click, not about agreement). */
+  /** The client says the moderator accepted the pre-fill in one click. A claim: the server counts it only when the decision is the pre-fill (see {@link agreementOf}). */
   oneClick: boolean;
 }
 
@@ -55,18 +55,31 @@ export function compareSteps(a: StepLike | null, b: StepLike | null): number {
   return x < y ? -1 : x > y ? 1 : 0;
 }
 
-const NO_DETAIL = (oneClick: boolean): AiOutcomeDetail => ({ verdict: false, rule: false, lines: 0, outcome: 'none', oneClick });
+const NO_DETAIL: AiOutcomeDetail = { verdict: false, rule: false, lines: 0, outcome: 'none', oneClick: false };
+
+/**
+ * The decision is the pre-fill as it stood: the same kind of step, no longer than the pre-fill (a moderator may trim a length and it is
+ * still their one click), or both without a step (a dismissal accepted as one).
+ */
+function stepAccepted(step: StepLike | null, prefill: StepLike | null): boolean {
+  if (step === null || prefill === null) return step === null && prefill === null;
+  if (step.kind !== prefill.kind) return false;
+  if (step.durationMs === prefill.durationMs) return true;
+  return step.durationMs !== null && prefill.durationMs !== null && step.durationMs <= prefill.durationMs;
+}
 
 /**
  * Compare the AI's recommendation in `read` with `decision`. `level` is the AI level in force: below 2 the recommendation was not
  * shown, so there is nothing to agree with (`none`). `upheld` and `noted` are one class (the AI wanted to act, or to record);
  * `no_action` is the other; a `bad_faith` verdict is always an override of a recommendation (the AI can never call a report bad faith).
- * A rule that differs is not a disagreement: it is `rule: false` in the detail.
+ * A rule that differs is not a disagreement: it is `rule: false` in the detail (and for a `no_action` the rule means nothing: `true`).
+ * `detail.oneClick` is the server's verdict, not the client's claim: true only when the client said so AND the decision is an
+ * agreement that equals the pre-fill (the same verdict, the same rule, the same kind of step and no longer).
  */
 export function agreementOf(read: AIRead | null, decision: HumanDecision, level: 0 | 1 | 2 = 2): Agreement {
   const rec = read?.recommendation ?? null;
   if (level < 2 || rec === null || rec.verdict === 'unclear') {
-    return { agreement: 'none', aiVerdict: null, detail: NO_DETAIL(decision.oneClick) };
+    return { agreement: 'none', aiVerdict: null, detail: { ...NO_DETAIL } };
   }
   const aiVerdict: AiVerdict = rec.verdict;
   const aiActs = aiVerdict === 'upheld' || aiVerdict === 'noted';
@@ -75,15 +88,16 @@ export function agreementOf(read: AIRead | null, decision: HumanDecision, level:
   const cited = new Set(rec.evidence);
   const lines = new Set(decision.lineIds.filter((id) => cited.has(id))).size;
   const cmp = compareSteps(decision.step, decision.prefill);
+  const ruleMatches = aiVerdict === 'no_action' || rec.rule === decision.rule;
   return {
     agreement: same ? 'agree' : 'override',
     aiVerdict,
     detail: {
       verdict: same,
-      rule: rec.rule === decision.rule,
+      rule: ruleMatches,
       lines,
       outcome: cmp === 0 ? 'same' : cmp < 0 ? 'milder' : 'harsher',
-      oneClick: decision.oneClick,
+      oneClick: decision.oneClick && same && rec.verdict === decision.verdict && ruleMatches && stepAccepted(decision.step, decision.prefill),
     },
   };
 }

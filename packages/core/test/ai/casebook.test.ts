@@ -48,10 +48,12 @@ async function decided(w: AiWorld, o: { verdict?: 'upheld' | 'no_action'; accept
   const view = w.cw.ai.read(r.id);
   const lineIds = view?.recommendation?.evidenceLineIds ?? [];
   const verdict = o.verdict ?? 'upheld';
+  // The step the AI pre-filled: a one-click accepts exactly this.
+  const step = view?.recommendation?.step;
   await w.cw.decide({
     reportId: r.id,
     verdict,
-    actions: verdict === 'upheld' ? [{ subject: r.target, kind: 'warning', durationMs: null, rule: 2, lineIds }] : [],
+    actions: verdict === 'upheld' ? [{ subject: r.target, kind: step?.kind ?? 'warning', durationMs: step?.durationMs ?? null, rule: 2, lineIds }] : [],
     reason: verdict === 'upheld' ? 'rude' : undefined,
     actor: 'mod_ann',
     ai: { readId: view?.id ?? 'x', accepted: o.accepted ?? false, role: 'moderator', ...(o.severity === undefined ? {} : { severity: o.severity }) },
@@ -133,6 +135,17 @@ describe('what a decision teaches', () => {
     expect(w.cw.ai.dontTeach('no-such-report')).toBe(false);
   });
 
+  it('the one-click rate cannot exceed 1: a forged accepted flag on overrides and nones adds nothing', async () => {
+    const w = await aiWorld({ level: 2, script: rudeUpheld });
+    await decided(w, { verdict: 'no_action', accepted: true });
+    await decided(w, { verdict: 'no_action', accepted: true });
+    await decided(w, { accepted: true });
+    const stats = w.cw.ai.stats({ since: 0 });
+    expect(stats.oneClick).toBe(1);
+    expect(stats.oneClickRate).toBeLessThanOrEqual(1);
+    expect(stats.oneClickRate).toBeCloseTo(1 / 3, 5);
+  });
+
   it('a none (no recommendation shown) teaches nothing', async () => {
     const w = await aiWorld({ level: 1, script: rudeUpheld });
     const r = await decided(w);
@@ -150,10 +163,46 @@ describe('what a decision teaches', () => {
     expect(row?.example).toMatchObject({ rule: 2, severity: 'rude', verdict: 'upheld' });
   });
 
-  it('a dismissal names no rule, so it cannot be filed under one: no example', async () => {
+  it('a dismissal names no rule of its own: the row is filed under the rule the AI cited, and teaches nothing', async () => {
     const w = await aiWorld({ level: 2, script: rudeUpheld });
     const r = await decided(w, { verdict: 'no_action' });
-    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'override', verdict: 'no_action', severity: 'banter', rule: null, example: null });
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'override', verdict: 'no_action', severity: 'banter', rule: '2', example: null });
+  });
+
+  it('a false positive lands on the rule the AI cited, the AI rule null falls back to the reason, then to none, and uncovered stays', async () => {
+    const stats = async (script: (i: AIReadInput) => FakeStep, reason: string | null) => {
+      const w = await aiWorld({ level: 2, script });
+      const r = await w.report(['you are trash'], reason === null ? {} : { reason });
+      await w.idle();
+      await w.cw.decide({ reportId: r.id, verdict: 'no_action', actions: [], actor: 'mod_ann', ai: { readId: w.cw.ai.read(r.id)?.id ?? 'x', accepted: false, role: 'moderator' } });
+      return w.cw.ai.stats({ since: 0 }).rules;
+    };
+    const upheldUnder = (rule: number | 'uncovered' | null) => (input: AIReadInput): FakeStep => ({
+      output: fakeRead(input, { severity: 'rude', rule, evidence: [ownRef(input)], recommendation: { verdict: 'upheld', severity: 'rude', rule, evidence: [ownRef(input)] } }),
+    });
+    expect(await stats(upheldUnder(2), 'harassment')).toEqual([{ rule: 2, decided: 1, agree: 0, override: 1, none: 0, falsePositives: 1, oneClick: 0 }]);
+    // The AI named no rule: the reason's first rule (harassment is rule 2).
+    expect(await stats(upheldUnder(null), 'harassment')).toMatchObject([{ rule: 2, falsePositives: 1 }]);
+    // The AI named no rule and the reason maps to none: no rule.
+    expect(await stats(upheldUnder(null), null)).toMatchObject([{ rule: null, falsePositives: 1 }]);
+    expect(await stats(upheldUnder('uncovered'), 'harassment')).toMatchObject([{ rule: 'uncovered', falsePositives: 1 }]);
+  });
+
+  it('with no echo a decision teaches nothing, even when it agrees', async () => {
+    const w = await aiWorld({ level: 2, script: rudeUpheld });
+    const r = await w.report(['you are trash'], { reason: 'harassment' });
+    await w.idle();
+    const view = w.cw.ai.read(r.id);
+    const step = view?.recommendation?.step;
+    await w.cw.decide({
+      reportId: r.id,
+      verdict: 'upheld',
+      actions: [{ subject: r.target, kind: step?.kind ?? 'warning', durationMs: step?.durationMs ?? null, rule: 2, lineIds: view?.recommendation?.evidenceLineIds ?? [] }],
+      reason: 'rude',
+      actor: 'mod_ann',
+    });
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'agree', example: null });
+    expect(store(w).aiTeachableCount(0)).toBe(0);
   });
 
   it('learn off: no example text is stored or sent', async () => {
@@ -264,10 +313,8 @@ describe('stats', () => {
     expect(stats.agreementRate).toBeCloseTo(2 / 3, 5);
     expect(stats.oneClickRate).toBeCloseTo(1 / 3, 5);
     expect(stats.falsePositiveRate).toBeCloseTo(1 / 3, 5);
-    expect(stats.rules).toEqual([
-      { rule: 2, decided: 2, agree: 2, override: 0, none: 0, falsePositives: 0, oneClick: 1 },
-      { rule: null, decided: 1, agree: 0, override: 1, none: 0, falsePositives: 1, oneClick: 0 },
-    ]);
+    // The dismissal is filed under the rule the AI cited, so the false positive is on rule 2.
+    expect(stats.rules).toEqual([{ rule: 2, decided: 3, agree: 2, override: 1, none: 0, falsePositives: 1, oneClick: 1 }]);
   });
 
   it('has no rates before any decision, and respects the window', async () => {

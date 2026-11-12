@@ -149,7 +149,8 @@ describe('the outcome row', () => {
     const y = await without.cw.decide({ ...decision(without, b), ai: undefined });
     const shape = (res: typeof x) => (res.ok ? { ok: true, replay: res.replay, groups: res.groups.map((g) => [g.kind, g.noticeId === null]) } : res);
     expect(shape(x)).toEqual(shape(y));
-    expect(store(without).loadAiOutcome(b.id)).toBeNull();
+    // The row exists either way (the server decides); without an echo it carries no click and no example.
+    expect(store(without).loadAiOutcome(b.id)).toMatchObject({ agreement: 'agree', example: null, detail: { oneClick: false } });
   });
 });
 
@@ -194,20 +195,74 @@ describe('agreement is computed on the server', () => {
     await w.cw.decide(decision(w, r, { ai: { readId: w.cw.ai.read(r.id)?.id ?? 'x', accepted: true, role: 'moderator' } }));
     const row = store(w).loadAiOutcome(r.id);
     expect(row?.agreement).toBe('override');
-    expect(row?.detail.oneClick).toBe(true);
+    // Accepted is a claim about the click: a decision that is not the pre-fill was not accepted as it stood.
+    expect(row?.detail.oneClick).toBe(false);
   });
 
-  it('an unknown or other-report readId falls back to the newest read', async () => {
+  it('accepted: true counts as a one-click only when the decision is the pre-fill: not another kind, not another rule', async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld') });
+    const a = await w.report();
+    await w.idle();
+    const step = w.cw.ai.read(a.id)?.recommendation?.step;
+    expect(step).toBeTruthy();
+    const echo = (r: { id: string }) => ({ readId: w.cw.ai.read(r.id)?.id ?? 'x', accepted: true, role: 'moderator' as const });
+    // As filled: a one-click.
+    await w.cw.decide(decision(w, a, { actions: [{ subject: a.target, kind: step!.kind, durationMs: step!.durationMs, rule: RULE }], ai: echo(a) }));
+    expect(store(w).loadAiOutcome(a.id)?.detail).toMatchObject({ outcome: 'same', oneClick: true });
+    // Another kind: not.
+    const b = await w.report();
+    await w.idle();
+    const other = step!.kind === 'note' ? 'warning' : 'note';
+    await w.cw.decide(decision(w, b, { verdict: other === 'note' ? 'noted' : 'upheld', actions: [{ subject: b.target, kind: other, durationMs: null, rule: RULE }], ai: echo(b) }));
+    expect(store(w).loadAiOutcome(b.id)?.detail.oneClick).toBe(false);
+    // Another rule: not.
+    const c = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, c, { actions: [{ subject: c.target, kind: step!.kind, durationMs: step!.durationMs, rule: 3 }], ai: echo(c) }));
+    expect(store(w).loadAiOutcome(c.id)?.detail.oneClick).toBe(false);
+  });
+
+  it('accepted: true at level 1 (a none) is not a one-click either', async () => {
+    const w = await aiWorld({ level: 1, script: recommends('upheld') });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r, { ai: { readId: w.cw.ai.read(r.id)?.id ?? 'x', accepted: true, role: 'moderator' } }));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'none', detail: { oneClick: false } });
+  });
+
+  it('the echo names the read the moderator saw, even when a newer read has arrived since', async () => {
+    let call = 0;
+    const w = await aiWorld({
+      level: 2,
+      script: (input) => (call++ === 0 ? recommends('upheld')(input) : recommends('no_action', 'banter')(input)),
+    });
+    const r = await w.report();
+    await w.idle();
+    const seen = w.cw.ai.read(r.id);
+    expect(seen?.recommendation?.verdict).toBe('upheld');
+    // The reporter adds their follow-up: a second read arrives and says no action.
+    w.clock.t += 60_000;
+    await w.cw.reports.addDetail(r.id, 'p1', { note: 'it went on' });
+    await w.idle();
+    w.clock.t += 60_000;
+    const newest = w.cw.ai.read(r.id);
+    expect(newest?.id).not.toBe(seen?.id);
+    expect(newest?.recommendation?.verdict).toBe('no_action');
+    // The moderator accepted the first one's pre-fill: that is an agreement with the read they saw.
+    await w.cw.decide(decision(w, r, { ai: { readId: seen?.id ?? 'x', accepted: false, role: 'moderator' } }));
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ readId: seen?.id, agreement: 'agree', aiVerdict: 'upheld' });
+  });
+
+  it('an unknown readId, or the id of another report is read, falls back to the newest read', async () => {
     const w = await aiWorld({ level: 2, script: recommends('upheld') });
     const a = await w.report();
     const b = await w.report();
     await w.idle();
-    const aRead = w.cw.ai.read(a.id)?.id;
-    const bRead = w.cw.ai.read(b.id)?.id;
+    const aRead = w.cw.ai.read(a.id)?.id as string;
+    const bRead = w.cw.ai.read(b.id)?.id as string;
     await w.cw.decide(decision(w, a, { ai: { readId: 'no-such-read', accepted: false, role: 'moderator' } }));
     expect(store(w).loadAiOutcome(a.id)?.readId).toBe(aRead);
-    // The id of another report's read does not let a decision borrow that read.
-    await w.cw.decide(decision(w, b, { ai: { readId: aRead as string, accepted: false, role: 'moderator' } }));
+    await w.cw.decide(decision(w, b, { ai: { readId: aRead, accepted: false, role: 'moderator' } }));
     expect(store(w).loadAiOutcome(b.id)?.readId).toBe(bRead);
   });
 
@@ -216,7 +271,8 @@ describe('agreement is computed on the server', () => {
     const r = await w.report();
     await w.idle();
     await w.cw.decide(decision(w, r, { verdict: 'no_action', actions: [], reason: undefined }));
-    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'override', aiVerdict: 'upheld', verdict: 'no_action', rule: null });
+    // Filed under the rule the AI cited (see I3).
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'override', aiVerdict: 'upheld', verdict: 'no_action', rule: String(RULE) });
   });
 
   it('a bad_faith verdict sets bad_faith and is an override', async () => {
@@ -241,26 +297,41 @@ describe('agreement is computed on the server', () => {
 });
 
 describe('when there is nothing to record', () => {
-  it('no echo, no outcome (a bulk dismissal or a webhook decision is not a look at the read)', async () => {
+  it('with no echo the server still records the outcome: no click, no example', async () => {
     const w = await aiWorld({ level: 2, script: recommends('upheld') });
     const r = await w.report();
     await w.idle();
     await w.cw.decide({ ...decision(w, r), ai: undefined });
-    expect(store(w).loadAiOutcome(r.id)).toBeNull();
-    const second = await w.report();
-    await w.idle();
-    await w.cw.reports.dismissMany({ scope: { person: second.target }, actor: 'mod_ann' });
-    expect(store(w).loadAiOutcome(second.id)).toBeNull();
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'agree', aiVerdict: 'upheld', readId: w.cw.ai.read(r.id)?.id, example: null, detail: { oneClick: false } });
+    // No echo, no role: no audit row.
+    expect(w.cw.audit.list({ limit: 20, action: 'ai.outcome' }).items).toHaveLength(0);
   });
 
-  it('a malformed echo is ignored: the decision still lands', async () => {
+  it('a bulk dismissal records an honest override for each report it closes, and teaches nothing', async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld') });
+    const r = await w.report();
+    await w.idle();
+    const res = await w.cw.reports.dismissMany({ scope: { person: r.target }, actor: 'mod_ann' });
+    expect(res.ok).toBe(true);
+    expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'override', aiVerdict: 'upheld', verdict: 'no_action', example: null, detail: { oneClick: false } });
+  });
+
+  it('a decision with no read at all records nothing', async () => {
+    const w = await aiWorld({ level: 2, script: [{ hang: true }], ai: { timeoutMs: 30 } });
+    const r = await w.report();
+    await w.idle();
+    await w.cw.decide(decision(w, r, { ai: { readId: 'whatever', accepted: false, role: 'moderator' } }));
+    expect(store(w).loadAiOutcome(r.id)).toBeNull();
+  });
+
+  it('a malformed echo is ignored: the decision lands and the outcome is recorded as if there were none', async () => {
     const w = await aiWorld({ level: 2, script: recommends('upheld') });
     for (const ai of [null, 5, 'x', {}, { readId: 5, accepted: true }, { readId: '', accepted: true }, { readId: 'a', accepted: 'yes' }, { readId: 'x'.repeat(500), accepted: true }]) {
       const r = await w.report();
       await w.idle();
       const res = await w.cw.decide(decision(w, r, { ai: ai as never }));
       expect(res).toMatchObject({ ok: true });
-      expect(store(w).loadAiOutcome(r.id)).toBeNull();
+      expect(store(w).loadAiOutcome(r.id)).toMatchObject({ example: null, detail: { oneClick: false } });
     }
   });
 
@@ -280,18 +351,12 @@ describe('when there is nothing to record', () => {
     expect(store(w).loadAiOutcome(r.id)).toMatchObject({ level: 1, agreement: 'none', aiVerdict: null });
   });
 
-  it('an unclear recommendation, or no read yet, records a none', async () => {
+  it('an unclear recommendation records a none', async () => {
     const w = await aiWorld({ level: 2, script: recommends('unclear') });
     const r = await w.report();
     await w.idle();
     await w.cw.decide(decision(w, r));
     expect(store(w).loadAiOutcome(r.id)).toMatchObject({ agreement: 'none', aiVerdict: null });
-
-    const w2 = await aiWorld({ level: 2, script: [{ hang: true }], ai: { timeoutMs: 30 } });
-    const r2 = await w2.report();
-    await w2.idle();
-    await w2.cw.decide(decision(w2, r2, { ai: { readId: 'whatever', accepted: false, role: 'moderator' } }));
-    expect(store(w2).loadAiOutcome(r2.id)).toMatchObject({ agreement: 'none', readId: null });
   });
 
   it('an insertAiOutcome that throws does not fail the decision', async () => {
@@ -344,6 +409,29 @@ describe('severity', () => {
     await override.idle();
     await override.cw.decide(decision(override, c));
     expect(store(override).loadAiOutcome(c.id)?.severity).toBeNull();
+  });
+
+  it('a severity that does not fit the verdict is dropped: a dismissal carries none, an upheld action is never banter', async () => {
+    const dismiss = await aiWorld({ level: 2, script: recommends('upheld', 'hostile') });
+    const a = await dismiss.report();
+    await dismiss.idle();
+    await dismiss.cw.decide(decision(dismiss, a, { verdict: 'no_action', actions: [], reason: undefined, ai: { readId: dismiss.cw.ai.read(a.id)?.id ?? 'x', accepted: false, role: 'moderator', severity: 'severe' } }));
+    expect(store(dismiss).loadAiOutcome(a.id)?.severity).toBe('banter');
+
+    const upheld = await aiWorld({ level: 2, script: recommends('upheld', 'hostile') });
+    const b = await upheld.report();
+    await upheld.idle();
+    await upheld.cw.decide(decision(upheld, b, { ai: { readId: upheld.cw.ai.read(b.id)?.id ?? 'x', accepted: false, role: 'moderator', severity: 'banter' } }));
+    // Dropped, so it follows the AI on an agreement.
+    expect(store(upheld).loadAiOutcome(b.id)?.severity).toBe('hostile');
+    expect(store(upheld).loadAiOutcome(b.id)?.example?.severity).toBe('hostile');
+
+    const override = await aiWorld({ level: 2, script: recommends('no_action', 'banter') });
+    const c = await override.report();
+    await override.idle();
+    await override.cw.decide(decision(override, c, { ai: { readId: override.cw.ai.read(c.id)?.id ?? 'x', accepted: false, role: 'moderator', severity: 'banter' } }));
+    // An upheld action at banter is not a label to teach: no severity, no example.
+    expect(store(override).loadAiOutcome(c.id)).toMatchObject({ severity: null, example: null });
   });
 
   it('an echo with a severity that is not a conduct level is treated as having none', async () => {

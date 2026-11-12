@@ -85,4 +85,23 @@ describe('the breaker', () => {
     b.release();
     expect(b.gate()).toBe('probe');
   });
+
+  it('available says whether a call could go out, and takes nothing', () => {
+    const c = clockAt();
+    const b = new Breaker(c);
+    expect(b.available()).toBe(true);
+    b.failure(true);
+    expect(b.available()).toBe(false);
+    c.t += BREAKER_OPEN_MS;
+    // Half-open with the probe free: yes, and asking again changes nothing.
+    expect(b.available()).toBe(true);
+    expect(b.available()).toBe(true);
+    expect(b.gate()).toBe('probe');
+    // The probe is out: no one else may go.
+    expect(b.available()).toBe(false);
+    b.release();
+    expect(b.available()).toBe(true);
+    b.success();
+    expect(b.available()).toBe(true);
+  });
 });

@@ -33,6 +33,12 @@ export class Breaker {
     return 'probe';
   }
 
+  /** Whether a call could go out now: closed, or half-open with the probe free. Takes nothing (see {@link gate}). */
+  available(): boolean {
+    if (this.openUntil === null) return true;
+    return this.clock.now() >= this.openUntil && !this.probing;
+  }
+
   state(): BreakerState {
     if (this.openUntil === null) return 'closed';
     return this.clock.now() < this.openUntil ? 'open' : 'half_open';
