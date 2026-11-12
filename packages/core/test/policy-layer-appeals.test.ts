@@ -10,6 +10,7 @@ import {
   type ModerationProfile,
   type PolicyLayer,
 } from '../src/profile.js';
+import { MemoryStore, withMemoryAppeals, withMemoryNames } from '@chatwarden/store-memory';
 import { OWNER, world } from './reportingWorld.js';
 
 // The `appeals` and `names` sections in the layer (the owner's edits), through cw.policy and cw.profile.
@@ -138,7 +139,8 @@ describe('cw.policy and the appeals and names sections', () => {
   });
 
   it('a saved layer survives a second kit over the same store (another process)', async () => {
-    const { cw, store } = await world();
+    // The second kit starts with appeals on, so its store must carry the appeal methods (the startup check refuses one without).
+    const { cw, store } = await world({}, withMemoryNames(withMemoryAppeals(new MemoryStore())));
     cw.policy.save({ appeals: { enabled: true }, names: { renames: true } }, { version: 0, ...OWNER });
     const { cw: other } = await world({}, store);
     expect(other.profile.appeals.enabled).toBe(true);
