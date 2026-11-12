@@ -16,8 +16,13 @@ afterEach(() => {
 
 const FAKE: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] };
 const tick = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+// The AI parts are lazy chunks: a dynamic import settles on real I/O, not on the fake clock, so a loaded CI runner can still be
+// importing after eight zero-ticks (Node 24, 2026-11-12). Wait for every pending import, then let React render what arrived.
 const flush = async () => {
-  for (let i = 0; i < 8; i += 1) await tick(0);
+  for (let i = 0; i < 8; i += 1) {
+    await vi.dynamicImportSettled();
+    await tick(0);
+  }
 };
 const posts = (w: HubWorld): number => w.sent.filter((r) => r.method === 'POST' && r.path.endsWith('/ai/read')).length;
 
