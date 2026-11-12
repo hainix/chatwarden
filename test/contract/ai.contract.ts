@@ -39,6 +39,7 @@ type Ai = Required<
     | 'completeAiRead'
     | 'failAiRead'
     | 'loadAiRead'
+    | 'loadAiReadById'
     | 'loadAiReads'
     | 'listAiRetries'
     | 'aiSpendSince'
@@ -56,6 +57,7 @@ const METHODS: Array<keyof Ai> = [
   'completeAiRead',
   'failAiRead',
   'loadAiRead',
+  'loadAiReadById',
   'loadAiReads',
   'listAiRetries',
   'aiSpendSince',
@@ -106,8 +108,8 @@ const done = (over: Partial<AiReadDone> = {}): AiReadDone => ({ ...usage(), read
 
 /** The lease token of every row this suite reserved, by row id: what `completeAiRead` and `failAiRead` must be given. */
 const leases = new Map<string, number>();
-function rsv(s: Store & Ai, row: AiReadPending, leaseUntil: number, now: number): AiReserveResult {
-  const r = s.reserveAiRead(row, leaseUntil, now);
+function rsv(s: Store & Ai, row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult {
+  const r = s.reserveAiRead(row, leaseUntil, now, opts);
   if (r.reserved) leases.set(r.id, r.lease);
   return r;
 }
@@ -305,7 +307,7 @@ export function aiContract(name: string, make: () => Store): void {
         expect(fail(s, a, 'skipped', 'budget', MIDNIGHT + DAY)).toBe(true);
         expect(fail(s, b, 'skipped', 'budget', null)).toBe(true);
         expect(rsv(s, pending({ reportId: 'a' }), NOW + 9 * MIN, MIDNIGHT + DAY - 1).reserved).toBe(false);
-        expect(rsv(s, pending({ reportId: 'a' }), MIDNIGHT + DAY + 9 * MIN, MIDNIGHT + DAY)).toEqual({ reserved: true, id: a, lease: 2 });
+        expect(rsv(s, pending({ reportId: 'a' }), MIDNIGHT + DAY + 9 * MIN, MIDNIGHT + DAY)).toEqual({ reserved: true, id: a, lease: 1 });
         expect(rsv(s, pending({ reportId: 'b' }), MIDNIGHT + 9 * DAY, MIDNIGHT + 8 * DAY).reserved).toBe(false);
       });
 
@@ -320,6 +322,40 @@ export function aiContract(name: string, make: () => Store): void {
         const again = rsv(s, pending(), NOW + 9 * DAY, NOW + 8 * DAY);
         expect(again.reserved).toBe(false);
         if (!again.reserved) expect(again.existing).toMatchObject({ id, status, errorKind: kind, retryAt: null });
+      });
+
+      it.each([
+        ['declined', 'declined'],
+        ['invalid', 'invalid'],
+        ['failed', 'fatal'],
+        ['failed', 'retryable'],
+      ] as const)('an explicit retake takes a final %s (%s) row over once more: a new attempt, the same row', (status, kind) => {
+        const s = ai(make());
+        const id = reserve(s);
+        fail(s, id, status, kind, null, usage({ costMicros: 40 }));
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + MIN).reserved).toBe(false);
+        const again = rsv(s, pending(), NOW + 9 * MIN, NOW + MIN, { retake: true });
+        expect(again).toEqual({ reserved: true, id, lease: 2 });
+        // The new attempt is a call: it is in the ledger beside the first.
+        expect(s.aiSpendSince(0)).toEqual({ micros: 40, calls: 2 });
+        // It is pending and owned now: a second retake loses.
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 2 * MIN, { retake: true }).reserved).toBe(false);
+      });
+
+      it('a retake never takes an ok read or a live lease, and takes a failed read before its retry time', () => {
+        const s = ai(make());
+        okRead(s, 'ok', 'h', NOW);
+        expect(rsv(s, pending({ reportId: 'ok', inputHash: 'h' }), NOW + 9 * MIN, NOW + MIN, { retake: true }).reserved).toBe(false);
+        reserve(s, { reportId: 'live' }, NOW, NOW + 50 * MIN);
+        expect(rsv(s, pending({ reportId: 'live' }), NOW + 90 * MIN, NOW + MIN, { retake: true }).reserved).toBe(false);
+        const soon = reserve(s, { reportId: 'soon' });
+        fail(s, soon, 'failed', 'retryable', NOW + 50 * MIN);
+        expect(rsv(s, pending({ reportId: 'soon' }), NOW + 90 * MIN, NOW + MIN, { retake: true })).toEqual({ reserved: true, id: soon, lease: 2 });
+      });
+
+      it('a retake of a row that does not exist reserves it like any other call', () => {
+        const s = ai(make());
+        expect(rsv(s, pending(), NOW + MIN, NOW, { retake: true }).reserved).toBe(true);
       });
 
       it('an ok read is never retaken, however old its lease', () => {
@@ -637,8 +673,45 @@ export function aiContract(name: string, make: () => Store): void {
         expect(fail(s, id, 'skipped', 'budget', null)).toBe(true);
         expect(s.aiSpendSince(0)).toEqual({ micros: 10, calls: 1 });
       });
+
+      it('a skipped attempt does not use up the attempt budget: the next call is the same attempt number again', () => {
+        const s = ai(make());
+        const id = reserve(s, {}, NOW);
+        expect(fail(s, id, 'skipped', 'budget', NOW + MIN)).toBe(true);
+        expect(s.listAiRetries(NOW + MIN, 5)[0]).toMatchObject({ id, status: 'skipped', attempts: 0 });
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + MIN)).toEqual({ reserved: true, id, lease: 1 });
+        // A real failure then counts as the first.
+        fail(s, id, 'failed', 'retryable', NOW + 2 * MIN);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 2 * MIN)).toEqual({ reserved: true, id, lease: 2 });
+      });
     });
 
+
+    describe('loadAiReadById', () => {
+      it('loads a row by its id, whatever its state, as a copy; null for an unknown id', () => {
+        const s = ai(make());
+        const ok = okRead(s, 'r1', 'h1', NOW);
+        const bad = reserve(s, { reportId: 'r1', inputHash: 'h2' }, NOW + MIN);
+        fail(s, bad, 'declined', 'declined', null);
+        const pendingId = reserve(s, { reportId: 'r2' });
+        expect(s.loadAiReadById(ok)).toMatchObject({ id: ok, reportId: 'r1', status: 'ok', read: read() });
+        expect(s.loadAiReadById(bad)).toMatchObject({ id: bad, status: 'declined', read: null });
+        expect(s.loadAiReadById(pendingId)).toMatchObject({ status: 'pending' });
+        expect(s.loadAiReadById('no-such-row')).toBeNull();
+        expect(s.loadAiReadById('')).toBeNull();
+        const row = s.loadAiReadById(ok);
+        if (row !== null) row.read = null;
+        expect(s.loadAiReadById(ok)?.read).toEqual(read());
+      });
+
+      it('finds an older ok read that loadAiRead does not return', () => {
+        const s = ai(make());
+        const older = okRead(s, 'r1', 'h1', NOW);
+        const newer = okRead(s, 'r1', 'h2', NOW + MIN);
+        expect(s.loadAiRead('r1')?.id).toBe(newer);
+        expect(s.loadAiReadById(older)?.id).toBe(older);
+      });
+    });
 
     describe('the lease fence', () => {
       /** A reserves, stalls; B takes the lease over at the next attempt. Returns both tokens. */
@@ -782,6 +855,20 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.listAiRetries(NOW + 10 * MIN, 50)).toEqual([]);
         // The boundaries are inclusive for a retry time and for a lease end (a lease is live strictly before its end).
         expect(ids(s.listAiRetries(NOW + 50 * MIN, 50)).sort()).toEqual([notYet, live].sort());
+      });
+
+      it('leaves out reads of reports that have been decided, and keeps those of open or unknown reports', () => {
+        const s = ai(make());
+        s.insertReport(report('open', NOW));
+        s.insertReport(report('closed', NOW));
+        s.closeReport('closed', 'dismissed', false, 'mod', NOW + MIN, 'n');
+        const a = reserve(s, { reportId: 'open' });
+        fail(s, a, 'failed', 'retryable', NOW + MIN);
+        const b = reserve(s, { reportId: 'closed' });
+        fail(s, b, 'failed', 'retryable', NOW + MIN);
+        const c = reserve(s, { reportId: 'unknown' });
+        fail(s, c, 'failed', 'retryable', NOW + MIN);
+        expect(ids(s.listAiRetries(NOW + 5 * MIN, 50)).sort()).toEqual([a, c].sort());
       });
 
       it('includes a skipped read once its retry time has come', () => {
@@ -1017,7 +1104,7 @@ export function aiContract(name: string, make: () => Store): void {
         add('old', { decidedAt: NOW - 60 * DAY });
         const stats = s.aiStats(NOW - 30 * DAY);
         expect(stats).toEqual([
-          { rule: '3', decided: 8, agree: 4, override: 3, none: 1, falsePositives: 3, oneClick: 8 },
+          { rule: '3', decided: 8, agree: 4, override: 3, none: 1, falsePositives: 3, oneClick: 4 },
           { rule: 'uncovered', decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 1 },
           { rule: null, decided: 1, agree: 1, override: 0, none: 0, falsePositives: 0, oneClick: 1 },
         ] satisfies AiStatsRow[]);
@@ -1046,10 +1133,21 @@ export function aiContract(name: string, make: () => Store): void {
         ] satisfies AiStatsRow[]);
       });
 
+      it('counts a one-click only on an agreement: a forged flag on an override or a none adds nothing', () => {
+        const s = ai(make());
+        const row = (reportId: string, agreement: 'agree' | 'override' | 'none', oneClick: boolean) =>
+          s.insertAiOutcome(outcome({ reportId, agreement, example: null, detail: { ...DETAIL, oneClick } }));
+        row('x1', 'agree', true);
+        row('x2', 'override', true);
+        row('x3', 'none', true);
+        row('x4', 'agree', false);
+        expect(s.aiStats(0)).toMatchObject([{ rule: '3', decided: 4, agree: 2, override: 1, none: 1, oneClick: 1 }]);
+      });
+
       it('counts a bad-faith dismissal as the override it is', () => {
         const s = ai(make());
         s.insertAiOutcome(outcome({ reportId: 'bf', verdict: 'no_action', agreement: 'override', badFaith: true, example: null }));
-        expect(s.aiStats(0)).toEqual([{ rule: '3', decided: 1, agree: 0, override: 1, none: 0, falsePositives: 1, oneClick: 1 }]);
+        expect(s.aiStats(0)).toEqual([{ rule: '3', decided: 1, agree: 0, override: 1, none: 0, falsePositives: 1, oneClick: 0 }]);
       });
     });
 

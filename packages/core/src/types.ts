@@ -1030,8 +1030,10 @@ export interface Store {
    * `ok` (readable), `declined` or `invalid` row, a `failed` or `skipped` one with no `retryAt`, and a live lease are returned as
    * `existing` (a copy). A win carries the fence token `lease` (= `attempts`), and opens one spend-ledger entry at `now` (one call
    * started); `aiSpendSince` reads that ledger, so every attempt is booked to the time it was made. Does not move the change token.
+   * With `opts.retake` (a moderator's explicit "read again") a row that finished without a read (`declined`, `invalid`, `failed`, or
+   * `skipped`, whatever its `retryAt`) is taken over too; an `ok` read and a live lease never are.
    */
-  reserveAiRead?(row: AiReadPending, leaseUntil: number, now: number): AiReserveResult;
+  reserveAiRead?(row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult;
 
   /**
    * OPTIONAL. Store the validated read and the usage on a `pending` row: status `ok`, the lease cleared; cost and tokens are added to
@@ -1046,7 +1048,7 @@ export interface Store {
    * OPTIONAL. End a `pending` row without a read: `failed`, `declined`, `invalid` or `skipped`, with the kind of failure and, for
    * a retry, the time it may be taken again (`retryAt`; null is final). The lease is cleared. `usage`, when the provider still
    * charged for the call (a refusal, an invalid answer, a failure after tokens were billed), is added to the row and to this attempt's
-   * ledger entry, so it counts toward `aiSpendSince`. A `skipped` read was never a call: its ledger entry is removed. `lease` fences as
+   * ledger entry, so it counts toward `aiSpendSince`. A `skipped` read was never a call: its ledger entry is removed and the attempt is given back (a skip does not use up the three-attempt budget). `lease` fences as
    * in `completeAiRead`, including the booking of a stale owner's `usage`. True when this call did it; false for an unknown row, one that
    * is not `pending`, or a stale `lease`. Does not move the change token.
    */
@@ -1073,9 +1075,15 @@ export interface Store {
   loadAiReads?(reportIds: readonly string[]): AiReadRow[];
 
   /**
+   * OPTIONAL. One read by its id, whatever its state (a copy), or null for an unknown id. The decision's echo names the read the
+   * moderator was shown; the caller checks that it belongs to the report and is `ok`.
+   */
+  loadAiReadById?(id: string): AiReadRow | null;
+
+  /**
    * OPTIONAL. The rows the sweeper should pick up at `now`, oldest first (`createdAt`, then `id`), at most `limit` (clamped to
    * 1..200): `failed` or `skipped` rows whose `retryAt` has come (`retryAt <= now`), and `pending` rows whose lease has ended
-   * (`leaseUntil <= now`: the process that held them died). `limit` is clamped to 1..200 (a fraction is floored); one that is omitted, not finite or below 1 is the default of 20 (what the sweeper enqueues at a time).
+   * (`leaseUntil <= now`: the process that held them died). Rows of reports that have been decided are left out: nobody will read them. `limit` is clamped to 1..200 (a fraction is floored); one that is omitted, not finite or below 1 is the default of 20 (what the sweeper enqueues at a time).
    */
   listAiRetries?(now: number, limit: number | undefined): AiReadRow[];
 

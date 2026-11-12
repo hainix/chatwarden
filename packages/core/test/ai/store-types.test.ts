@@ -24,6 +24,7 @@ const AI_METHODS = [
   'aiExamples',
   'aiTeachableCount',
   'aiStats',
+  'loadAiReadById',
   'purgeAi',
 ] as const;
 

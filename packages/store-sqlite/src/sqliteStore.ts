@@ -707,7 +707,7 @@ export class SqliteStore implements Store, TermStore {
 
   // AI reads and the casebook (AI levels 1 and 2, migration 20). SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
 
-  reserveAiRead(row: AiReadPending, leaseUntil: number, now: number): AiReserveResult {
+  reserveAiRead(row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult {
     return this.transaction((): AiReserveResult => {
       // The UNIQUE (report_id, input_hash) index decides who inserts: of two connections, one gets a row back, the other none.
       const fresh = this.db
@@ -727,10 +727,11 @@ export class SqliteStore implements Store, TermStore {
            SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL
            WHERE report_id = ? AND input_hash = ?
              AND ((status = 'pending' AND lease_until <= ?)
-               OR (status IN ('failed', 'skipped') AND retry_at IS NOT NULL AND retry_at <= ?))
+               OR (status IN ('failed', 'skipped') AND retry_at IS NOT NULL AND retry_at <= ?)
+               OR (? = 1 AND status IN ('declined', 'invalid', 'failed', 'skipped')))
            RETURNING id, attempts`,
         )
-        .get(leaseUntil, row.reportId, row.inputHash, now, now);
+        .get(leaseUntil, row.reportId, row.inputHash, now, now, opts?.retake === true ? 1 : 0);
       if (taken !== undefined) return this.openAttempt(String(taken.id), Number(taken.attempts), now);
       const existing = this.db.prepare('SELECT * FROM kit_ai_reads WHERE report_id = ? AND input_hash = ?').get(row.reportId, row.inputHash);
       const mapped = existing === undefined ? null : aiReadFromRow(existing, true);
@@ -831,10 +832,13 @@ export class SqliteStore implements Store, TermStore {
       const changed = Number(
         this.db
           .prepare(
-            `UPDATE kit_ai_reads SET status = ?, error_kind = ?, retry_at = ?, lease_until = NULL
+            // A skipped read was never a call: the attempt is given back, so it does not use up the three-attempt budget.
+            `UPDATE kit_ai_reads
+             SET status = ?, error_kind = ?, retry_at = ?, lease_until = NULL,
+                 attempts = CASE WHEN ? = 'skipped' THEN MAX(0, attempts - 1) ELSE attempts END
              WHERE id = ? AND status = 'pending' AND attempts = ?`,
           )
-          .run(status, errorKind, retryAt, id, lease).changes,
+          .run(status, errorKind, retryAt, status, id, lease).changes,
       );
       if (changed === 0) {
         this.bookStale(id, lease, usage);
@@ -863,6 +867,13 @@ export class SqliteStore implements Store, TermStore {
         if (mapped !== null) return mapped;
       }
       return null;
+    });
+  }
+
+  loadAiReadById(id: string): AiReadRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT * FROM kit_ai_reads WHERE id = ?').get(id);
+      return r === undefined ? null : aiReadFromRow(r);
     });
   }
 
@@ -896,7 +907,8 @@ export class SqliteStore implements Store, TermStore {
              SELECT * FROM kit_ai_reads WHERE status IN ('failed', 'skipped') AND retry_at <= ?
              UNION ALL
              SELECT * FROM kit_ai_reads WHERE status = 'pending' AND lease_until <= ?
-           ) ORDER BY created_at, id LIMIT ?`,
+           ) WHERE NOT EXISTS (SELECT 1 FROM kit_reports p WHERE p.id = report_id AND p.status <> 'open')
+           ORDER BY created_at, id LIMIT ?`,
         )
         .all(now, now, n)
         .flatMap((r) => aiReadFromRow(r) ?? []),
@@ -1002,7 +1014,7 @@ export class SqliteStore implements Store, TermStore {
           `SELECT rule, COUNT(*) AS decided,
                   SUM(agreement = 'agree') AS agree, SUM(agreement = 'override') AS override, SUM(agreement = 'none') AS none,
                   SUM(ai_verdict IN ('upheld', 'noted') AND (verdict = 'no_action' OR reversed = 1)) AS false_positives,
-                  SUM(CASE WHEN json_valid(detail_json) THEN COALESCE(json_extract(detail_json, '$.oneClick'), 0) = 1 ELSE 0 END) AS one_click
+                  SUM(CASE WHEN agreement = 'agree' AND json_valid(detail_json) THEN COALESCE(json_extract(detail_json, '$.oneClick'), 0) = 1 ELSE 0 END) AS one_click
            FROM kit_ai_outcomes WHERE decided_at >= ? GROUP BY rule`,
         )
         .all(since),

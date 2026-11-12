@@ -401,7 +401,7 @@ export class MemoryStore implements Store {
   // AI reads and the casebook (AI levels 1 and 2). Synchronous like claims; each write is journaled, so an undone transaction
   // undoes it. Rows go in and come out as copies.
 
-  reserveAiRead(row: AiReadPending, leaseUntil: number, now: number): AiReserveResult {
+  reserveAiRead(row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult {
     const existing = this.aiReads.find((r) => r.reportId === row.reportId && r.inputHash === row.inputHash);
     if (existing === undefined) {
       const fresh: AiReadRow = {
@@ -435,7 +435,9 @@ export class MemoryStore implements Store {
     }
     const lapsed = existing.status === 'pending' && existing.leaseUntil !== null && existing.leaseUntil <= now;
     const due = (existing.status === 'failed' || existing.status === 'skipped') && existing.retryAt !== null && existing.retryAt <= now;
-    if (!lapsed && !due) return { reserved: false, existing: structuredClone(existing) };
+    // An explicit retake (a moderator's read again) also takes a row that finished without a read; never an ok read or a live lease.
+    const retaken = opts?.retake === true && existing.status !== 'ok' && existing.status !== 'pending';
+    if (!lapsed && !due && !retaken) return { reserved: false, existing: structuredClone(existing) };
     const before = { ...existing };
     existing.status = 'pending';
     existing.attempts += 1;
@@ -525,7 +527,8 @@ export class MemoryStore implements Store {
       return false;
     }
     const before = { ...row };
-    Object.assign(row, { status, errorKind, retryAt, leaseUntil: null });
+    // A skipped read was never a call: the attempt is given back, so it does not use up the three-attempt budget.
+    Object.assign(row, { status, errorKind, retryAt, leaseUntil: null, ...(status === 'skipped' ? { attempts: Math.max(0, row.attempts - 1) } : {}) });
     this.undoWith(() => Object.assign(row, before));
     if (usage !== undefined) this.addUsage(row, usage);
     if (status === 'skipped') {
@@ -543,6 +546,11 @@ export class MemoryStore implements Store {
     return newestOk(this.aiReads.filter((r) => r.reportId === reportId));
   }
 
+  loadAiReadById(id: string): AiReadRow | null {
+    const row = this.aiReads.find((r) => r.id === id);
+    return row === undefined ? null : structuredClone(row);
+  }
+
   loadAiReads(reportIds: readonly string[]): AiReadRow[] {
     const wanted = [...new Set(reportIds)].slice(0, 200);
     const out: AiReadRow[] = [];
@@ -554,11 +562,14 @@ export class MemoryStore implements Store {
   }
 
   listAiRetries(now: number, limit: number | undefined): AiReadRow[] {
+    // Reads of reports that have been decided are dead: nobody will read them, so they are not listed.
+    const decided = new Set(this.reports.filter((p) => p.status !== 'open').map((p) => p.id));
     return this.aiReads
       .filter(
         (r) =>
-          ((r.status === 'failed' || r.status === 'skipped') && r.retryAt !== null && r.retryAt <= now) ||
-          (r.status === 'pending' && r.leaseUntil !== null && r.leaseUntil <= now),
+          !decided.has(r.reportId) &&
+          (((r.status === 'failed' || r.status === 'skipped') && r.retryAt !== null && r.retryAt <= now) ||
+            (r.status === 'pending' && r.leaseUntil !== null && r.leaseUntil <= now)),
       )
       .sort((a, b) => a.createdAt - b.createdAt || compare(a.id, b.id))
       .slice(0, pageSize(limit, RETRIES_DEFAULT_LIMIT))
@@ -626,7 +637,8 @@ export class MemoryStore implements Store {
       const row = by.get(r.rule) ?? { rule: r.rule, decided: 0, agree: 0, override: 0, none: 0, falsePositives: 0, oneClick: 0 };
       row.decided += 1;
       row[r.agreement] += 1;
-      if (r.detail.oneClick) row.oneClick += 1;
+      // A one-click is an agreement accepted as it stood; a flag on any other row is not counted.
+      if (r.detail.oneClick && r.agreement === 'agree') row.oneClick += 1;
       if ((r.aiVerdict === 'upheld' || r.aiVerdict === 'noted') && (r.verdict === 'no_action' || r.reversed)) row.falsePositives += 1;
       by.set(r.rule, row);
     }
