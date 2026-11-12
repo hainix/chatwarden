@@ -429,9 +429,13 @@ export class AppealService {
     }
   }
 
-  /** One person's appeals as summaries, newest first, at most 50, a moot one left out. Empty with appeals off, for an unknown person and on a store failure. Staff only. */
+  /**
+   * One person's appeals as summaries, newest first, at most 50, a moot one left out. Listed while appeals are off too (what was filed stays
+   * visible on the person's page until retention removes it, as with `renamesOf`); empty for a store that cannot keep appeals, an unknown
+   * person and on a store failure. Staff only.
+   */
   forPerson(subject: SubjectId): AppealSummary[] {
-    if (!this.enabled() || typeof subject !== 'string' || subject === '') return [];
+    if (!hasAppealMethods(this.d.store) || typeof subject !== 'string' || subject === '') return [];
     try {
       const person = this.d.subjects.canonical(subject);
       return (this.d.store.listAppealsBy?.(this.d.subjects.aliasesOf(person), MINE_MAX) ?? []).filter((r) => r.status !== 'moot').map((r) => this.summaryOf(r));

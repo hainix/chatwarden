@@ -695,7 +695,8 @@ export interface Chatwarden {
     stats(q?: { days?: 30 | 90 | 365 }): AppealStats;
     /**
      * One person's appeals (across their merged subjects) as summaries, newest first, at most 50; a moot appeal is left out. For the person's
-     * page. Empty with appeals off or for a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
+     * page. Still listed after appeals are switched off (what was filed stays visible until retention removes it); empty for a store that cannot keep
+     * appeals or a person the kit does not hold. Carries a staff ref and never the statement: staff channels only.
      * @experimental
      */
     forPerson(subject: SubjectId): AppealSummary[];

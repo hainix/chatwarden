@@ -117,6 +117,22 @@ describe('appeals.forPerson', () => {
     expect(off.cw.appeals.forPerson('s_nobody')).toEqual([]);
   });
 
+  it('keeps listing the appeals that exist after appeals are switched off (like renamesOf), and stays empty for a person with none', async () => {
+    const k = await appealsKit({}, { perPlayerPerWeek: 20 });
+    const a = await k.sanction({ key: 'ka' });
+    const b = await k.sanction({ key: 'kb' });
+    const filed = k.cw.appeals.file(a.who, { noticeId: a.noticeId, statement: 'not me' });
+    if (!filed.ok) throw new Error('filing refused');
+    k.cw.policy.save({ appeals: { enabled: false } }, { version: 0, actor: 'owner', reason: 'off' });
+    expect(k.cw.appeals.enabled()).toBe(false);
+    expect(k.cw.appeals.forPerson(a.subject).map((x) => x.id)).toEqual([filed.appeal.id]);
+    expect(k.cw.appeals.forPerson(b.subject)).toEqual([]);
+    // the other reads still say nothing while off
+    expect(k.cw.appeals.list({}).items).toEqual([]);
+    expect(k.cw.appeals.get(filed.appeal.id)).toBeNull();
+    expect(k.cw.appeals.openCount()).toBe(0);
+  });
+
   it('lists the person\'s appeals as summaries, newest first, and only theirs; the statement is not in them', async () => {
     const k = await appealsKit({}, { perPlayerPerWeek: 20 });
     const a = await k.sanction({ key: 'key-a', kind: 'chat', durationMs: 6 * HOUR });

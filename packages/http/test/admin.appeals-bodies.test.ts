@@ -137,6 +137,40 @@ describe('history carries appeals and renames entries with dates and outcomes an
     expect((await history(closed, c.subject, 'senior')).appeals).toHaveLength(1);
   });
 
+  it('appeals and renames follow ONE rule: shown while the feature is on OR the person has entries; after switching a setting off, existing entries stay and a person with none loses the key', async () => {
+    const w = await appealsWorld({ names: { renames: true } });
+    const a = await w.appeal();
+    const none = await w.file();
+    const t = w.clock.now();
+    expect(w.cw.names.requireRename({ subject: a.subject, actor: 'mod_ann', reason: 'private reason for the rename' })).toMatchObject({ ok: true });
+    // on: both keys for the person with entries, both present and empty for the one without
+    let h = await history(w, a.subject);
+    expect(h.appeals).toHaveLength(1);
+    expect(h.renames).toEqual([{ at: t, pending: true }]);
+    h = await history(w, none.target);
+    expect(h.appeals).toEqual([]);
+    expect(h.renames).toEqual([]);
+    // off: the entries that exist are still shown, for both keys; the person with none has neither
+    w.cw.policy.save({ appeals: { enabled: false }, names: { renames: false } }, { version: 0, actor: 'owner', reason: 'off' });
+    expect(w.cw.appeals.enabled()).toBe(false);
+    expect(w.cw.names.renamesEnabled()).toBe(false);
+    h = await history(w, a.subject);
+    expect(h.appeals).toHaveLength(1);
+    expect(h.appeals?.[0]).toMatchObject({ id: a.appealId, status: 'open' });
+    expect(h.renames).toEqual([{ at: t, pending: true }]);
+    h = await history(w, none.target);
+    expect(Object.keys(h)).not.toContain('appeals');
+    expect(Object.keys(h)).not.toContain('renames');
+  });
+
+  it('appeals still need appeals.read after the setting is switched off: a caller without it never sees the key', async () => {
+    const w = await appealsWorld({ permissions: { 'appeals.read': 'senior' } });
+    const a = await w.appeal();
+    w.cw.policy.save({ appeals: { enabled: false } }, { version: 0, actor: 'owner', reason: 'off' });
+    expect(Object.keys(await history(w, a.subject, 'moderator'))).not.toContain('appeals');
+    expect((await history(w, a.subject, 'senior')).appeals).toHaveLength(1);
+  });
+
   it('renames: { at, pending } per request, pending until the game says the player renamed; present and empty while on; absent while off', async () => {
     const w = await appealsWorld({ appeals: { enabled: false }, names: { renames: true } });
     const f = await w.file();
