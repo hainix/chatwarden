@@ -92,7 +92,9 @@ const summarize = (r: StaffReport, claim: CaseClaim | undefined, viewing: string
  *   suggestion for the reported person (`rule` is the first rule of the reported reason, `'uncovered'` with none), and the
  *   `claim` on the reported person's case (`{ by, since, until }` or null) (`report.view`)
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
- * - `POST /reports/:id/decide { verdict, actions, reason, evidence?, takeOver? }`: decide (`report.decide`, replays too). Another
+ * - `POST /reports/:id/decide { verdict, actions, reason?, evidence?, takeOver? }`: decide (`report.decide`, replays too). `reason` may be
+ *   left out (or blank) only for a `no_action` with no actions, a one-click dismissal: the core then stores `NO_ACTION_DEFAULT_REASON`.
+ *   Every other decision needs a real reason (400 `invalid_request`). Another
  *   moderator's live claim on the reported person is 409 `claimed` unless `takeOver: true` and the caller holds
  *   `claims.override` (then the takeover is audited as `case.takeover`, first). Deciding the person's last open report releases the
  *   caller's claim; while they have other open reports it is kept (one case per person).

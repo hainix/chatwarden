@@ -486,6 +486,10 @@ export interface Chatwarden {
    * `{ ok: false, error: 'invalid' }`; a STORE failure REJECTS with the store's own error and writes nothing, so a
    * route handler should catch it. Moderator-side: the result carries subject ids, so never forward it to a player.
    * Carries subject ids: staff channels only, never send to a player.
+   *
+   * `reason` is required, except for a `no_action` decision with no actions (a one-click "nothing wrong here"): an absent or
+   * blank reason is then stored as `NO_ACTION_DEFAULT_REASON`. A `no_action` that acts on someone, and every other verdict,
+   * still needs a real reason.
    */
   decide(input: DecisionInput): Promise<DecisionResult>;
   /**

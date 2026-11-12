@@ -16,6 +16,21 @@ import type { Clock, Logger, ReportExcerptLine, ReportRecord, SanctionKind, Sanc
 /** The longest moderator reason, after trimming. */
 export const DECISION_REASON_MAX = 500;
 
+/**
+ * The reason stored for a `no_action` decision that has no actions and no typed reason (a one-click "nothing wrong
+ * here"). One recognisable value, so "a human dismissed it and gave no reason" is told apart from a considered note.
+ * @experimental
+ */
+export const NO_ACTION_DEFAULT_REASON = 'No action needed';
+
+/**
+ * True for the standard dismissal reason (trimmed); false for anything else, including null.
+ * @experimental
+ */
+export function isDefaultNoActionReason(reason: string | null | undefined): boolean {
+  return typeof reason === 'string' && reason.trim() === NO_ACTION_DEFAULT_REASON;
+}
+
 /** The longest bad-faith evidence note, after trimming. */
 export const DECISION_EVIDENCE_MAX = 500;
 
@@ -60,8 +75,11 @@ export interface DecisionInput {
   evidence?: string;
   actions: DecisionAction[];
   actor: string;
-  /** Private; required, at most 500 characters after trimming. Never shown to a player. */
-  reason: string;
+  /**
+   * Private; at most 500 characters after trimming. Never shown to a player. Required, except for a `no_action`
+   * decision with NO actions, where an absent or blank reason is stored as {@link NO_ACTION_DEFAULT_REASON}.
+   */
+  reason?: string;
   /** Defaults to `'moderator'`. */
   source?: Source;
 }
@@ -187,8 +205,11 @@ function normalize(subjects: SubjectIndex, input: DecisionInput): Normal {
   if (!VERDICTS.includes(input.verdict)) return bad();
   if (!Array.isArray(input.actions)) return bad();
   if (typeof input.actor !== 'string' || input.actor.trim() === '') return bad();
-  if (typeof input.reason !== 'string') return bad();
-  const reason = input.reason.trim();
+  // A reason that is neither absent nor a string is malformed for every verdict.
+  if (input.reason !== undefined && typeof input.reason !== 'string') return bad();
+  let reason = input.reason === undefined ? '' : input.reason.trim();
+  // The one-click dismissal: a no_action that acts on nobody may leave the reason out.
+  if (reason === '' && input.verdict === 'no_action' && input.actions.length === 0) reason = NO_ACTION_DEFAULT_REASON;
   if (reason === '' || reason.length > DECISION_REASON_MAX) return bad();
   // Evidence is required for bad_faith and forbidden otherwise (even an empty string): the verdict says what it is for.
   let evidence: string | null = null;

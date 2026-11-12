@@ -22,19 +22,29 @@ export function peopleOf(report: StaffReport): string[] {
 export interface ParsedDecision {
   verdict: DecisionInput['verdict'];
   actions: DecisionAction[];
-  reason: string;
+  /** Absent when the body has none: the core stores the standard reason, and only for a `no_action` with no actions. */
+  reason?: string;
   evidence?: string;
 }
 
-/** Check a decision body's shape (`verdict`, `actions`, `reason`, `evidence?`). Rules and limits stay with the facade. */
+/**
+ * Check a decision body's shape (`verdict`, `actions`, `reason?`, `evidence?`). A `reason` that is given must be a string of a sane
+ * length; whether one is REQUIRED (every verdict but a `no_action` with no actions) is the facade's rule, so the staff route, the
+ * incoming webhook and every other caller cannot disagree. Rules and limits stay with the facade.
+ */
 export function parseDecision(body: Record<string, unknown>): ParsedDecision {
   const verdict = body.verdict;
   if (typeof verdict !== 'string' || !(VERDICTS as readonly string[]).includes(verdict)) throw new ValidationError();
   if (!Array.isArray(body.actions) || body.actions.length > MAX_ACTIONS) throw new ValidationError();
   const actions = body.actions.map(parseAction);
-  const reason = bodyText(body.reason);
+  const reason = has(body, 'reason') ? bodyText(body.reason) : undefined;
   const evidence = has(body, 'evidence') ? bodyText(body.evidence) : undefined;
-  return { verdict: verdict as DecisionInput['verdict'], actions, reason, ...(evidence === undefined ? {} : { evidence }) };
+  return {
+    verdict: verdict as DecisionInput['verdict'],
+    actions,
+    ...(reason === undefined ? {} : { reason }),
+    ...(evidence === undefined ? {} : { evidence }),
+  };
 }
 
 /**
@@ -104,7 +114,7 @@ export async function applyDecision(
     actions: decision.actions,
     // Never from the body: the caller is who the auth hook says (or the webhook's configured actor), always a moderator's.
     actor,
-    reason: decision.reason,
+    ...(decision.reason === undefined ? {} : { reason: decision.reason }),
     source: 'moderator',
   });
   if (!result.ok) {
