@@ -385,6 +385,66 @@ describe('errors', () => {
     expect(await kindFor(null)).toBe('retryable');
   });
 
+  describe('a missing API key (the real SDK client, no network)', () => {
+    const noKey = () => {
+      vi.stubEnv('ANTHROPIC_API_KEY', undefined as unknown as string);
+      vi.stubEnv('ANTHROPIC_AUTH_TOKEN', undefined as unknown as string);
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
+    };
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    });
+
+    it('is fatal, and no request is made (a fetch that throws is never called)', async () => {
+      noKey();
+      const fetchSpy = vi.fn(() => {
+        throw new Error('NETWORK');
+      });
+      vi.stubGlobal('fetch', fetchSpy);
+      const e = await failure(createAnthropicAI({}));
+      expect(e.kind).toBe('fatal');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('an empty key string counts as no key', async () => {
+      noKey();
+      const fetchSpy = vi.fn(() => {
+        throw new Error('NETWORK');
+      });
+      vi.stubGlobal('fetch', fetchSpy);
+      expect((await failure(createAnthropicAI({ apiKey: '' }))).kind).toBe('fatal');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("the SDK's plain 'Could not resolve authentication method' Error is fatal too", async () => {
+      const plain = new Error('Could not resolve authentication method. Expected one of apiKey, authToken, credentials, config, or profile to be set.');
+      const ai = createAnthropicAI({ client: fakeClient(() => { throw plain; }).client });
+      expect((await failure(ai)).kind).toBe('fatal');
+    });
+
+    it('control: with a key (option or environment) the request goes to the stubbed fetch and the read succeeds', async () => {
+      noKey();
+      const body = JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-haiku-5-5', content: [{ type: 'text', text: JSON.stringify(GOOD_OUTPUT) }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+      const fetchSpy = vi.fn(() => Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })));
+      vi.stubGlobal('fetch', fetchSpy);
+      const viaOption = await createAnthropicAI({ apiKey: 'sk-ant-test-option' }).read(makeInput(), { signal: signal() });
+      expect(viaOption.output).toEqual(GOOD_OUTPUT);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test-env');
+      const viaEnv = await createAnthropicAI({}).read(makeInput(), { signal: signal() });
+      expect(viaEnv.output).toEqual(GOOD_OUTPUT);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('an injected client needs no key', async () => {
+      noKey();
+      const r = await createAnthropicAI({ client: fakeClient().client }).read(makeInput(), { signal: signal() });
+      expect(r.output).toEqual(GOOD_OUTPUT);
+    });
+  });
+
   it('an AIError thrown by the client is passed through unchanged', async () => {
     const original = new AIError('declined', 'declined');
     const ai = createAnthropicAI({ client: fakeClient(() => { throw original; }).client });

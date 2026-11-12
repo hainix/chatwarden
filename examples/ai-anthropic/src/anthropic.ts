@@ -81,9 +81,16 @@ function toAIError(e: unknown, signal: AbortSignal): AIError {
     if (s === undefined || s === 409 || s === 429 || s >= 500) return fail('retryable', `provider error (${String(s)})`);
     return fail('fatal', `rejected (${s})`);
   }
-  // Any other SDK error is a setup problem (no key, bad option): retrying cannot fix it.
-  if (e instanceof AnthropicError) return fail('fatal', 'client setup error');
+  // Any other SDK error is a setup problem (no key, bad option): retrying cannot fix it. With no credentials the SDK throws a plain
+  // Error (not an AnthropicError) before any request is made.
+  if (e instanceof AnthropicError || (e instanceof Error && e.message.startsWith('Could not resolve authentication'))) return fail('fatal', 'client setup error');
   return fail('retryable', 'unexpected error');
+}
+
+/** True when a key can be found the way the SDK finds it: the option, or `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` in the environment. */
+function hasCredentials(apiKey: string | undefined): boolean {
+  const env = typeof process === 'undefined' ? {} : process.env;
+  return [apiKey, env.ANTHROPIC_API_KEY, env.ANTHROPIC_AUTH_TOKEN].some((v) => typeof v === 'string' && v.trim() !== '');
 }
 
 const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
@@ -133,6 +140,9 @@ export function createAnthropicAI(opts: AnthropicAIOptions = {}): ModerationAI {
     async read(input: AIReadInput, options: { signal: AbortSignal }): Promise<AIReadResult> {
       const { signal } = options;
       if (signal.aborted) throw fail('timeout', 'timeout');
+      // No key anywhere is a setup mistake: fatal at once, before a client or a request exists. (Credential profiles and config files the
+      // SDK can also read are not looked for here; build the client yourself and pass it as `client`.)
+      if (client === undefined && !hasCredentials(opts.apiKey)) throw fail('fatal', 'no API key');
       let response: AnthropicResponseLike;
       try {
         client ??= buildClient(opts);
