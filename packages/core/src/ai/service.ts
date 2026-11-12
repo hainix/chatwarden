@@ -886,7 +886,9 @@ export class AiService implements AiFacade {
       severity !== null &&
       own.rule !== null;
     let example: AiOutcomeInsert['example'] = null;
-    if (teachable && severity !== null && own.rule !== null) {
+    // A case whose read flagged an injection, or whose chat tripped the tripwire, is never taught: its lines would be replayed into later prompts.
+    const injected = read?.injectionSuspected === true || this.prepare(report).injection;
+    if (teachable && !injected && severity !== null && own.rule !== null) {
       const cited = new Set([...own.lineIds, ...(rec?.evidence ?? []), ...(read?.evidence ?? [])]);
       const lines = pickExampleLines(this.prepare(report).chosen, cited);
       if (lines.length > 0) example = { rule: own.rule, severity, verdict: verdictClass, lines };

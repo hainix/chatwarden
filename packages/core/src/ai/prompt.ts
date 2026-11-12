@@ -2,6 +2,7 @@ import type { DocumentPolicy } from '../documents.js';
 import { validateProfile } from '../profile.js';
 import { CONDUCT_LEVELS } from '../types.js';
 import type { ChosenLines } from './lines.js';
+import { looksLikeInjection } from './injection.js';
 import { cleanText, redactText } from './redact.js';
 import { AI_OUTPUT_SCHEMA } from './schema.js';
 import { AI_PROMPT_VERSION } from './types.js';
@@ -101,9 +102,11 @@ function renderExample(e: AIExample): string {
 /**
  * Cut an example to six lines and to the character budget: whole lines while they fit, then the next line's text shortened. The text
  * goes through the same redaction as a chat line (defence in depth: the store pseudonymises, this is idempotent on what it kept).
- * Null when no line fits at all: an example with no lines teaches nothing.
+ * Null when no line fits at all (an example with no lines teaches nothing) and when any line reads like an instruction to the AI.
  */
 function fitExample(e: AIExample): AIExample | null {
+  // The tripwire runs on example text too: a stored line that tries to instruct the AI never reaches a later prompt (design layer 5).
+  if (e.lines.some((l) => looksLikeInjection(String(l.text)))) return null;
   const out: AIExample = { rule: e.rule, severity: e.severity, verdict: e.verdict, lines: [] };
   for (const l of e.lines.slice(0, EXAMPLE_LINES)) {
     const line = { who: oneLine(String(l.who)), text: redactText(String(l.text), [], () => null) };
