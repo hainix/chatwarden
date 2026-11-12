@@ -73,7 +73,7 @@ describe('DemoSlot lazy loading', () => {
   it('keeps the section heading and the lead while it loads, and announces the loading politely', () => {
     stubIO();
     render(<DemoSlot />);
-    expect(screen.getByRole('heading', { level: 2, name: /play both sides/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: /try it: you're the player and the moderator/i })).toBeTruthy();
     expect(screen.getByRole('status').textContent).toMatch(/loading the demo/i);
   });
 });

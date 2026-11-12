@@ -12,16 +12,15 @@ const flat = (s: string) => s.replace(/\s+/g, ' ');
 
 describe('claims the site makes about itself', () => {
   const files = ['src/content.ts', 'src/sections/OpenSource.tsx', 'src/sections/Footer.tsx', 'index.html', 'public/llms.txt'];
-  it('never says "Used by Moxgate" (Moxgate has not shipped on the kit yet)', () => {
-    for (const f of files) expect(text(site, f), f).not.toMatch(/used by moxgate/i);
-    expect(text(site, 'src/sections/OpenSource.tsx')).toContain('Built for Moxgate, now being adopted');
+  it('says nothing about Moxgate at all, and never "Used by Moxgate" (cut until it ships on the kit; ruling 8 of the copy rewrite)', () => {
+    for (const f of files) expect(text(site, f), f).not.toMatch(/moxgate/i);
   });
   it('never promises "forever" and never says "No strings"', () => {
     for (const f of files) {
       expect(text(site, f), f).not.toMatch(/free forever/i);
       expect(text(site, f), f).not.toMatch(/no strings/i);
     }
-    expect(text(site, 'src/sections/Footer.tsx')).toContain('Free and open source (Apache-2.0)');
+    expect(text(site, 'src/sections/Footer.tsx')).toContain('Apache-2.0. Pre-release, provided as is. Not a child-safety tool.');
   });
   it('does not pin a version that will be stale: no "0.1.0" on the page', () => {
     expect(text(site, 'src/sections/OpenSource.tsx')).not.toMatch(/0\.1\.0/);
@@ -68,9 +67,18 @@ describe('the no-JavaScript fallback', () => {
   it('has a <noscript> in the body with the pitch, the GitHub link and the npm link', () => {
     const n = noscript();
     expect(html().indexOf('<noscript>')).toBeGreaterThan(html().indexOf('<body>'));
-    expect(n).toMatch(/chat moderation kit for games/i);
+    expect(n).toMatch(/free, open-source chat moderation for games/i);
     expect(n).toContain('href="https://github.com/hainix/chatwarden"');
     expect(n).toContain('href="https://www.npmjs.com/package/@chatwarden/core"');
+  });
+  it('has the proposal’s words: blocks slurs, one-tap reports, a moderator hub, your own Node server, and that the demo needs JavaScript', () => {
+    const n = flat(noscript().replace(/<[^>]+>/g, ' '));
+    expect(n).toContain('Chatwarden is free, open-source chat moderation for games. It blocks slurs before they');
+    expect(n).toContain('lets players report a message in one tap');
+    expect(n).toContain('gives your team a moderator hub to handle each report in one click');
+    expect(n).toContain('It runs on your own Node server.');
+    expect(n).toContain('The live demo needs JavaScript.');
+    expect(n).not.toMatch(/refus|fair ladder|dodge simple filters/i);
   });
   it('is one paragraph styled by a class from the stylesheet (the CSP forbids inline style)', () => {
     const n = noscript();

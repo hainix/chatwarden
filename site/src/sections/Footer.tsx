@@ -7,7 +7,7 @@ export function Footer() {
       <div className="wrap footer-row">
         <div className="footer-brand">
           <Logo height={30} />
-          <p>Free chat moderation for games.</p>
+          <p>Chat moderation for games. Free and open source.</p>
         </div>
         <nav aria-label="Footer" className="footer-links">
           <a href={REPO_URL} target="_blank" rel="noopener noreferrer">
@@ -25,7 +25,7 @@ export function Footer() {
         </nav>
       </div>
       <div className="wrap footer-fine">
-        <p>Free and open source (Apache-2.0), with no SLA and no support promise. Not a child-safety tool.</p>
+        <p>Apache-2.0. Pre-release, provided as is. Not a child-safety tool.</p>
       </div>
     </footer>
   );

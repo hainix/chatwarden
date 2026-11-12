@@ -33,6 +33,29 @@ describe('document head', () => {
     expect(d.length).toBeGreaterThan(70);
     expect(d.length).toBeLessThanOrEqual(200);
   });
+  it('says what you get: chat moderation for games, with a moderator hub (the proposal’s meta copy)', () => {
+    expect(/<title>([^<]+)<\/title>/.exec(html())?.[1]).toBe('Chatwarden: chat moderation for games, with a moderator hub');
+    expect(meta('description')).toBe(
+      'Block slurs, let players report in one tap, and handle every report from a moderator hub. Free, open-source packages for your Node game server.',
+    );
+    expect((meta('description') ?? '').length).toBeLessThanOrEqual(155);
+    expect(meta('og:title')).toBe('Chatwarden: chat moderation for games');
+    expect(meta('twitter:title')).toBe('Chatwarden: chat moderation for games');
+    const short = 'A word filter, in-game reporting and a moderator hub for the chat your game already has. Free and open source.';
+    expect(meta('og:description')).toBe(short);
+    expect(meta('twitter:description')).toBe(short);
+    for (const key of ['og:image:alt', 'twitter:image:alt']) {
+      // The OG image is the warden shield and a struck-through chat line (scripts/og.svg), so the alt describes that, with "BLOCKED".
+      expect(meta(key), key).toBe('Chatwarden: a teal warden shield, and a chat line struck through with a BLOCKED stamp.');
+    }
+    const ogSvg = readFileSync(join(site, 'scripts', 'og.svg'), 'utf8');
+    expect(ogSvg).toMatch(/BLOCKED/);
+    expect(ogSvg).not.toMatch(/REFUSED/i);
+  });
+  it('uses none of the words the proposal retired in any meta tag', () => {
+    const tags = [...html().matchAll(/<meta\s+[^>]*content="([^"]*)"/g)].map((m) => m[1]).join('\n');
+    expect(tags).not.toMatch(/refus|fair ladder|dodge simple filters|REFUSED/i);
+  });
   it('has the canonical URL', () => {
     expect(html()).toMatch(/<link\s+rel="canonical"\s+href="https:\/\/chatwarden\.dev\/"\s*\/?>/);
   });
@@ -165,6 +188,13 @@ describe('llms.txt', () => {
       expect(u, p).toContain(`https://www.npmjs.com/package/@chatwarden/${p}`);
     }
     expect(txt()).toMatch(/<chatwarden-hub>/);
+  });
+  it('has the proposal’s summary: what it is, that it moderates an existing chat, and what it is not', () => {
+    expect(txt()).toContain(
+      '> Chatwarden is free, open-source chat moderation for games: a check for every chat message (slurs from your word list, optional swearing filter), in-game reporting with evidence, player notices, and a moderator hub (one card per report by default). TypeScript for Node 22.13 or newer. Pre-release (0.1.x), Apache-2.0, provided as-is. It moderates an existing chat; it is not a chat system. Not a child-safety tool.',
+    );
+    expect(txt()).toContain('one card per report by default');
+    expect(txt()).not.toMatch(/Simple mode of one card per case|fair ladder|dodge simple filters|\brefuses?\b/i);
   });
   it('is honest: pre-release, and no promises the site would not make', () => {
     expect(txt()).toMatch(/pre-release/i);

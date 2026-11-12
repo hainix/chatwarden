@@ -14,9 +14,9 @@ describe('DemoSlot when the chunk fails', () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const { DemoSlot } = await import('../src/sections/DemoSlot');
     render(<DemoSlot />);
-    expect(await screen.findByText(/could not load the demo/i)).toBeTruthy();
-    expect(screen.getByRole('heading', { level: 2, name: /play both sides/i })).toBeTruthy();
-    expect(screen.getByRole('link', { name: /steps|add it/i }).getAttribute('href')).toBe('#add-it');
+    expect(await screen.findByText(/the demo didn't load. reload the page/i)).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: /try it: you're the player and the moderator/i })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /skip to the setup steps/i }).getAttribute('href')).toBe('#add-it');
     vi.unstubAllGlobals();
   });
 });

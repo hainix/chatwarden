@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { FAQ, FEATURES } from '../src/content';
+import { FAQ, HOW_PANELS } from '../src/content';
 import { Faq } from '../src/sections/Faq';
 import { Hero } from '../src/sections/Hero';
 
@@ -13,36 +13,33 @@ const site = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(site, p), 'utf8');
 
 describe('no overclaim about dodged filters', () => {
-  it('the hero lead says "simple filters"', () => {
+  it('the hero lead promises blocking, not catching every dodge', () => {
     render(<Hero />);
-    expect(document.querySelector('.lead')?.textContent).toMatch(/refuses slurs that dodge simple filters/i);
+    const lead = document.querySelector('.lead')?.textContent ?? '';
+    expect(lead).toMatch(/blocks slurs before they're posted/);
+    expect(lead).not.toMatch(/every|all slurs|any slur|never|dodge/i);
   });
-  it('the meta description, og:description and twitter:description say "simple filters"', () => {
+  it('no meta tag, llms.txt, content or hero file promises a bare "slurs that dodge filters" or "every" dodge', () => {
     const html = read('index.html');
     const contents = [...html.matchAll(/(?:name|property)="(?:description|og:description|twitter:description)"\s+content="([^"]*)"/g)].map((m) => m[1] as string);
     expect(contents).toHaveLength(3);
-    for (const c of contents) expect(c).toMatch(/dodge simple filters/i);
+    const everything = [html, read('public/llms.txt'), read('src/content.ts'), read('src/sections/Hero.tsx')].join('\n');
+    expect(everything).not.toMatch(/dodge filters|catches? every|all dodges/i);
   });
-  it('llms.txt says "simple filters" too', () => {
-    expect(read('public/llms.txt')).toMatch(/dodge simple filters/i);
-  });
-  it('no page text anywhere promises a bare "slurs that dodge filters"', () => {
-    const everything = [read('index.html'), read('public/llms.txt'), read('src/content.ts'), read('src/sections/Hero.tsx')].join('\n');
-    expect(everything).not.toMatch(/dodge filters/i);
-  });
-  it('the matching feature card says "simple filters"', () => {
-    expect(FEATURES.find((f) => f.id === 'match')?.title).toMatch(/dodge simple filters/i);
+  it('the chat panel names the tricks it reads through (a list, not a blanket claim) and says the word list is yours', () => {
+    const chat = HOW_PANELS.find((p) => p.id === 'chat')?.body ?? '';
+    expect(chat).toMatch(/Slurs on your word list are blocked, even written with leetspeak, look-alike letters, accents or repeated letters\./);
+    expect(chat).not.toMatch(/catches? every|any dodge|all dodges|any way|all (the )?ways/i);
   });
 });
 
 describe('the FAQ states the spaced-letters limit', () => {
-  it('has a question about spaced or hyphenated letters, answered "no, on purpose", with the reason and the report path', () => {
-    const item = FAQ.find((f) => /spaced|hyphen/i.test(f.q));
-    expect(item).toBeTruthy();
-    expect(item?.a).toMatch(/^No/);
-    expect(item?.a).toMatch(/on purpose|deliberate/i);
-    expect(item?.a).toMatch(/innocent/i);
-    expect(item?.a).toMatch(/report/i);
+  const item = () => FAQ.find((f) => f.id === 'words');
+  it('the word-list answer says spaced letters are not caught, on purpose, with the reason and the report path', () => {
+    expect(item()?.q).toBe('Which words does it block?');
+    expect(item()?.a).toMatch(/Words with spaces between the letters are not caught, on purpose/);
+    expect(item()?.a).toMatch(/innocent/i);
+    expect(item()?.a).toMatch(/Players can report those\./);
   });
   it('matches the matcher README, which says the same', () => {
     const readme = readFileSync(join(site, '..', 'packages', 'matcher', 'README.md'), 'utf8').replace(/\s+/g, ' ');
@@ -51,6 +48,13 @@ describe('the FAQ states the spaced-letters limit', () => {
   });
   it('is on the page, in the FAQ list', () => {
     render(<Faq />);
-    expect(screen.getByText(/spaced or hyphenated letters/i)).toBeTruthy();
+    expect(screen.getByText(/Words with spaces between the letters are not caught, on purpose/)).toBeTruthy();
+  });
+  it('the profanity filter is described the way its README does: allow, star or block, with an English list built in', () => {
+    const a = item()?.a ?? '';
+    expect(a).toMatch(/built-in English list that you can allow, star or block/);
+    const readme = readFileSync(join(site, '..', 'packages', 'profanity', 'README.md'), 'utf8');
+    expect(readme).toMatch(/allow/i);
+    expect(readme).toMatch(/star/i);
   });
 });

@@ -1,9 +1,8 @@
 import { useRef, useState, type PointerEvent } from 'react';
-import { CopyButton } from '../components/CopyButton';
 import { ReplayIcon } from '../components/Icons';
-import { HERO_CHAT, INSTALL_KIT } from '../content';
+import { HERO, HERO_CHAT } from '../content';
 
-// Delays (seconds) for the one orchestrated moment: lines arrive, the invented slur is refused with a stamp.
+// Delays (seconds) for the one orchestrated moment: lines arrive, the invented slur is blocked with a stamp.
 const DELAYS = [0.5, 1.7, 3.1, 5.4];
 
 function ChatSnippet() {
@@ -12,7 +11,7 @@ function ChatSnippet() {
     <div className="hud" data-run={run}>
       <div className="hud-bar">
         <span className="hud-title">lobby</span>
-        <span className="hud-tag">standard preset</span>
+        <span className="hud-tag">{HERO.tag}</span>
         <button type="button" className="hud-replay" onClick={() => setRun((n) => n + 1)}>
           <ReplayIcon />
           <span>Replay</span>
@@ -35,11 +34,7 @@ function ChatSnippet() {
               <div className="bubble">
                 <span className="who">{m.who}</span>
                 <span className="said">{m.text}</span>
-                {refused && (
-                  <span className="stamp">
-                    Refused!
-                  </span>
-                )}
+                {refused && <span className="stamp">{HERO.stamp}</span>}
               </div>
               {refused && m.notice && <p className="msg-notice">{m.notice}</p>}
             </div>
@@ -47,21 +42,6 @@ function ChatSnippet() {
         })}
       </div>
     </div>
-  );
-}
-
-/** The install command, one nowrap chunk per word, so a phone wraps between words and never inside a package name. */
-function InstallText({ text }: { text: string }) {
-  const words = text.split(' ');
-  return (
-    <>
-      {words.map((w, i) => (
-        <span key={i}>
-          <span className="nw">{w}</span>
-          {i < words.length - 1 ? ' ' : ''}
-        </span>
-      ))}
-    </>
   );
 }
 
@@ -88,24 +68,23 @@ export function Hero() {
       <div className="wrap hero-grid">
         <div className="hero-copy">
           <h1 id="hero-title">
-            <span className="h1-line">Your game has chat.</span> <span className="h1-line">Give it a warden.</span>
+            {HERO.title.map((line, i) => (
+              <span key={line}>
+                {i > 0 ? ' ' : ''}
+                <span className="h1-line">{line}</span>
+              </span>
+            ))}
           </h1>
-          <p className="lead">
-            Chatwarden is a free, open-source moderation kit for games. It refuses slurs that dodge simple filters, keeps the
-            evidence when players report, and lets trash talk be trash talk.
-          </p>
+          <p className="lead">{HERO.lead}</p>
           <div className="hero-actions">
             <a className="btn btn-primary" href="#demo">
-              Try the demo
+              {HERO.primary}
             </a>
-            <div className="cmd">
-              <code>
-                <InstallText text={INSTALL_KIT} />
-              </code>
-              <CopyButton text={INSTALL_KIT} label="Copy install command" />
-            </div>
+            <a className="btn btn-ghost" href="#add-it">
+              {HERO.secondary}
+            </a>
           </div>
-          <p className="hero-note">Made for indie developers and the coding agents that help them.</p>
+          <p className="hero-note">{HERO.proof}</p>
         </div>
         <ChatSnippet />
       </div>

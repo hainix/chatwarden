@@ -1,12 +1,9 @@
-// The small delights (konami code, hero glow, level meter) and the polish fixes that jsdom can see.
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+// The small delights (konami code, hero glow) and the polish fixes that jsdom can see.
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GoldWarden } from '../src/components/GoldWarden';
 import { KONAMI } from '../src/lib/konami';
-import { AiLevels } from '../src/sections/AiLevels';
 import { Hero } from '../src/sections/Hero';
-import { OpenSource } from '../src/sections/OpenSource';
-import { INSTALL_KIT } from '../src/content';
 
 function stubMatchMedia(opts: { reduced?: boolean; finePointer?: boolean } = {}) {
   window.matchMedia = ((q: string) => ({
@@ -96,19 +93,11 @@ describe('konami code', () => {
 });
 
 describe('hero', () => {
-  it('keeps the exact headline text, set as two balanced sentences', () => {
+  it('keeps the exact headline text, set as two sentences, each its own block', () => {
     render(<Hero />);
     const h1 = screen.getByRole('heading', { level: 1 });
-    expect(h1.textContent).toBe('Your game has chat. Give it a warden.');
+    expect(h1.textContent).toBe('Chat moderation for your game. Moderator hub included.');
     expect(h1.querySelectorAll('.h1-line')).toHaveLength(2);
-  });
-  it('shows the install command with its text intact and no break inside a package name', () => {
-    render(<Hero />);
-    const code = document.querySelector('.cmd code') as HTMLElement;
-    expect(code.textContent).toBe(INSTALL_KIT);
-    const parts = [...code.querySelectorAll('.nw')].map((e) => e.textContent);
-    expect(parts.join(' ')).toBe(INSTALL_KIT);
-    expect(parts.some((p) => p?.includes('@chatwarden/store-sqlite'))).toBe(true);
   });
   it('moves a glow with the pointer on a fine pointer', () => {
     render(<Hero />);
@@ -130,39 +119,5 @@ describe('hero', () => {
     const hero = document.getElementById('hero') as HTMLElement;
     fireEvent.pointerMove(hero, { clientX: 500, clientY: 250, pointerType: 'touch' });
     expect(hero.style.getPropertyValue('--mx')).toBe('');
-  });
-});
-
-describe('AI level meter', () => {
-  it('states plainly that only level 0 exists, with no invented numbers', () => {
-    render(<AiLevels />);
-    const meter = screen.getByTestId('level-meter');
-    expect(meter.textContent).toMatch(/level 0 is live/i);
-    expect(meter.textContent).toMatch(/shipped: 0 of 4/i);
-    expect(meter.textContent).toMatch(/levels 1 to 4/i);
-    expect(meter.textContent).toMatch(/coming/i);
-  });
-  it('shows four pips, one per AI level 1 to 4, all unlit (matching "0 of 4"), hidden from assistive tech', () => {
-    render(<AiLevels />);
-    const meter = screen.getByTestId('level-meter');
-    expect(meter.querySelectorAll('.pip')).toHaveLength(4);
-    expect(meter.querySelectorAll('.pip.is-live')).toHaveLength(0);
-    expect(meter.querySelector('.pips')?.getAttribute('aria-hidden')).toBe('true');
-  });
-  it('still lists every level, with 1 to 4 marked coming soon', () => {
-    render(<AiLevels />);
-    expect(document.querySelectorAll('.level .pill-soon')).toHaveLength(4);
-    expect(document.querySelectorAll('.level .pill-live')).toHaveLength(1);
-  });
-});
-
-describe('open-source badges', () => {
-  it('use their own class names, so the demo stylesheet (which styles .badge as a count chip) cannot restyle them', () => {
-    const { container } = render(<OpenSource />);
-    const list = container.querySelector('ul.open-badges') as HTMLElement;
-    for (const li of within(list).getAllByRole('listitem')) {
-      expect(li.className).toContain('open-badge');
-      expect(li.classList.contains('badge')).toBe(false);
-    }
   });
 });

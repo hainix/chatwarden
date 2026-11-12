@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { DEMO_SECTION } from '../content';
 
 // The demo is a separate chunk, and it is the heavy one: the real moderator hub, the staff routes it runs over, the player components
 // and the kit (about 180 KB gzip). It loads when this section nears the viewport (IntersectionObserver, 200px ahead, so a phone's
@@ -11,7 +12,7 @@ function Placeholder({ onWake }: { onWake: () => void }) {
   return (
     <div className="demo-slot" data-demo-slot onPointerEnter={onWake} onFocusCapture={onWake}>
       <div className="demo-pane">
-        <h3>The game</h3>
+        <h3>Your game</h3>
         <div className="ghost-lines" aria-hidden="true">
           <i />
           <i />
@@ -20,7 +21,7 @@ function Placeholder({ onWake }: { onWake: () => void }) {
         </div>
       </div>
       <div className="demo-pane">
-        <h3>Your moderator</h3>
+        <h3>Moderator hub</h3>
         <div className="ghost-lines" aria-hidden="true">
           <i />
           <i />
@@ -46,7 +47,7 @@ class LoadGuard extends Component<{ children: ReactNode }, { failed: boolean }> 
     return (
       <div className="demo-slot demo-failed" data-demo-slot>
         <p className="demo-status" role="status">
-          Could not load the demo. Reload the page to try again, or follow the <a href="#add-it">steps below</a> to run the kit yourself.
+          The demo didn't load. Reload the page, or <a href="#add-it">skip to the setup steps</a>.
         </p>
       </div>
     );
@@ -82,10 +83,8 @@ export function DemoSlot() {
     <section id="demo" aria-labelledby="demo-title" className="section demo">
       <div className="wrap">
         <div className="section-head">
-          <h2 id="demo-title">Play both sides</h2>
-          <p className="section-lead">
-            Chat as a player, report a line, then decide as the moderator. No sign-up, no API key.
-          </p>
+          <h2 id="demo-title">{DEMO_SECTION.title}</h2>
+          <p className="section-lead">{DEMO_SECTION.lead}</p>
         </div>
         <div ref={section}>
           {wake ? (

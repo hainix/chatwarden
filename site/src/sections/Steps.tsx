@@ -1,13 +1,26 @@
 import { CodeBlock } from '../components/CodeBlock';
-import { HUB_STEP, PLAYER_REACT_URL, STEPS } from '../content';
+import { ExternalIcon } from '../components/Icons';
+import { Tabs } from '../components/Tabs';
+import { ADD_IT, HUB_STEP, PLAYER_STEP, STEPS } from '../content';
 
 export function Steps() {
+  const hubTabs = HUB_STEP.tabs.map((t) => ({
+    id: t.id,
+    label: t.label,
+    panel: (
+      <>
+        {t.snippets.map((s) => (
+          <CodeBlock key={s.file} code={s.code} lang={s.lang} title={s.file} copyLabel={s.copyLabel} />
+        ))}
+      </>
+    ),
+  }));
   return (
     <section id="add-it" aria-labelledby="add-it-title" className="section section-alt">
       <div className="wrap">
         <div className="section-head">
-          <h2 id="add-it-title">Add it in 3 steps</h2>
-          <p className="section-lead">Real code from the READMEs. Copy it, then point identify at your own connections.</p>
+          <h2 id="add-it-title">{ADD_IT.title}</h2>
+          <p className="section-lead">{ADD_IT.lead}</p>
         </div>
         <ol className="steps">
           {STEPS.map((s, i) => (
@@ -19,35 +32,34 @@ export function Steps() {
                 <h3>{s.title}</h3>
                 <p>{s.body}</p>
               </div>
-              <CodeBlock code={s.code} lang={s.lang} title={s.file} copyLabel={s.copyLabel} />
+              <CodeBlock code={s.code} lang={s.lang} title={s.file} copyLabel={s.copyLabel} collapsedLines={s.collapsedLines} />
             </li>
           ))}
-        </ol>
-        <div className="hub-step" data-hub-step>
-          <h3>{HUB_STEP.title}</h3>
-          <p>
-            {HUB_STEP.body} Your players get their notices and a report dialog from{' '}
-            <a href={PLAYER_REACT_URL} target="_blank" rel="noopener noreferrer">
-              @chatwarden/player-react
-            </a>
-            .
-          </p>
-          <CodeBlock code={HUB_STEP.install.code} lang={HUB_STEP.install.lang} title={HUB_STEP.install.file} copyLabel={HUB_STEP.install.copyLabel} />
-          <div className="hub-step-code">
-            <CodeBlock code={HUB_STEP.dropIn.code} lang={HUB_STEP.dropIn.lang} title={HUB_STEP.dropIn.file} copyLabel={HUB_STEP.dropIn.copyLabel} />
-            <div className="hub-alt">
-              <p>Or, with no React and no build step, one script tag and one element:</p>
-              <CodeBlock code={HUB_STEP.element.code} lang={HUB_STEP.element.lang} title={HUB_STEP.element.file} copyLabel={HUB_STEP.element.copyLabel} />
+          <li className="step" data-hub-step>
+            <div className="step-text">
+              <span className="step-num" aria-hidden="true">
+                {STEPS.length + 1}
+              </span>
+              <h3>{HUB_STEP.title}</h3>
+              <p>{HUB_STEP.body}</p>
             </div>
-          </div>
-        </div>
-        <p className="steps-more">
-          Want routes for moderators and players? Add <code>@chatwarden/http</code> and mount the Express adapter. The{' '}
-          <a href="https://github.com/hainix/chatwarden/tree/main/packages/http" target="_blank" rel="noopener noreferrer">
-            http README
-          </a>{' '}
-          has the setup.
-        </p>
+            <Tabs label="Ways to put the hub on a page" items={hubTabs} />
+          </li>
+          <li className="step step-optional">
+            <div className="step-text">
+              <span className="step-num" aria-hidden="true">
+                {STEPS.length + 2}
+              </span>
+              <h3>{PLAYER_STEP.title}</h3>
+              <span className="pill pill-opt">Optional</span>
+              <p>{PLAYER_STEP.body}</p>
+              <a className="card-link" href={PLAYER_STEP.link.href} target="_blank" rel="noopener noreferrer">
+                {PLAYER_STEP.link.label} <ExternalIcon />
+              </a>
+            </div>
+          </li>
+        </ol>
+        <p className="steps-more">{ADD_IT.closing}</p>
       </div>
     </section>
   );

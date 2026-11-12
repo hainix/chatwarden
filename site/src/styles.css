@@ -510,34 +510,6 @@ li {
   gap: 16px 20px;
   max-width: 100%;
 }
-.cmd {
-  display: inline-flex;
-  flex-wrap: wrap; /* on a very narrow phone the Copy button drops under the command instead of widening the column */
-  align-items: center;
-  gap: 12px;
-  max-width: 100%;
-  padding: 8px 8px 8px 16px;
-  background: var(--screen);
-  color: var(--screen-text);
-  border: 2px solid var(--screen-edge);
-  border-radius: var(--radius);
-  box-shadow: 4px 4px 0 var(--edge-shadow);
-}
-.cmd code {
-  font-size: 0.9375rem;
-}
-.nw {
-  white-space: nowrap; /* a phone wraps between words, never inside @chatwarden/store-sqlite */
-}
-@media (max-width: 420px) {
-  .cmd code {
-    font-size: 0.875rem;
-  }
-}
-.cmd code::before {
-  content: '$ ';
-  color: var(--tok-comment);
-}
 .hero-note {
   color: var(--muted);
   font-size: var(--fs-small);
@@ -994,38 +966,6 @@ li {
   font-size: 0.9em;
   color: var(--text);
 }
-/* After the three steps: the moderator hub, as the drop-in component and, beside or under it, the one-script-tag element. The
-   README's own lines stay verbatim, so a long one (the CDN address) wraps inside the block instead of being cut off. */
-.hub-step {
-  display: grid;
-  gap: 14px;
-  margin-top: 44px;
-  min-width: 0;
-}
-.hub-step > p,
-.hub-alt > p {
-  color: var(--muted);
-}
-.hub-step-code {
-  display: grid;
-  gap: 20px;
-  min-width: 0;
-}
-.hub-alt {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-@media (min-width: 1000px) {
-  .hub-step-code {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: start;
-  }
-}
-.hub-step pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .code {
   min-width: 0;
   background: var(--screen);
@@ -1099,167 +1039,125 @@ li {
   color: var(--tok-flag);
 }
 
-/* ---------- AI levels ---------- */
-.levels-layout {
-  display: grid;
-  gap: 28px;
-  align-items: start;
+/* ---------- how it works ---------- */
+.panels {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
 }
-@media (min-width: 960px) {
-  .levels-layout {
-    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
-  }
+.card .card-aside {
+  margin-top: 4px;
+  padding-top: 12px;
+  font-size: var(--fs-small);
+  border-top: 2px dashed var(--edge);
 }
-.levels {
+.rules-strip {
   display: grid;
-  gap: 14px;
-}
-.level {
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
-  gap: 6px 16px;
-  align-items: start;
-  padding: 18px;
-  background: var(--panel);
-  border: 2px solid var(--edge);
+  gap: 6px;
+  margin-top: 28px;
+  padding: 18px 22px;
+  background: color-mix(in srgb, var(--warden) 10%, var(--panel));
+  border: 2px solid color-mix(in srgb, var(--warden) 55%, var(--edge));
   border-radius: var(--radius);
 }
-.level[data-status='available'] {
-  border-color: var(--warden);
-  box-shadow: 5px 5px 0 var(--edge-shadow);
-}
-.level[data-status='coming'] {
-  border-style: dashed;
-  border-color: color-mix(in srgb, var(--edge) 55%, var(--bg)); /* not here yet: quieter than a live card */
-}
-.level-num {
-  grid-row: span 2;
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  font-family: var(--font-display);
-  font-size: 1.7rem;
-  border-radius: 8px;
-  color: var(--muted);
-  background: var(--panel-hi);
-  border: 2px solid var(--edge);
-}
-.level[data-status='available'] .level-num {
-  color: #0a0d1a;
-  background: var(--warden);
-  border-color: var(--logo-edge);
-}
-.level-body {
-  display: grid;
-  gap: 4px;
-}
-.level-body p {
+.rules-strip p {
+  max-width: 60em;
   color: var(--muted);
 }
-.level .pill {
-  grid-column: 2;
-  margin-top: 4px;
+
+/* ---------- add it: step 2 collapsed, the hub step's tabs, the optional step ---------- */
+.code pre[data-collapsed] {
+  max-height: calc(var(--lines, 10) * 1.65em + 32px);
+  overflow-y: hidden;
+  -webkit-mask-image: linear-gradient(#000 78%, transparent);
+  mask-image: linear-gradient(#000 78%, transparent);
 }
-.ceilings {
+.code-more {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: 800;
+  color: var(--screen-text);
+  text-align: left;
+  background: #121935;
+  border: 0;
+  border-top: 2px solid var(--screen-edge);
+  cursor: pointer;
+}
+.code-more:hover {
+  background: #19214a;
+}
+.code-more:focus-visible {
+  outline: 3px solid #ffc83d;
+  outline-offset: -3px;
+}
+.tabs {
   display: grid;
   gap: 12px;
-  padding: 22px;
-  background: var(--panel);
-  border: 2px solid var(--accent);
-  border-radius: var(--radius);
-  box-shadow: 5px 5px 0 var(--accent-deep);
+  min-width: 0;
 }
-.ceilings h3 {
+.tablist {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
-.ceilings h3 svg {
-  flex: none;
-  color: var(--accent);
+.tab {
+  min-height: 44px;
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 800;
+  color: var(--text);
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
 }
-.ceilings > p {
-  color: var(--muted);
+.tab:hover {
+  background: var(--panel-hi);
 }
-.ceilings ul {
+.tab[aria-selected='true'] {
+  color: #07251f;
+  background: var(--warden);
+  box-shadow: 3px 3px 0 var(--edge-shadow);
+}
+.tabpanel {
   display: grid;
-  gap: 10px;
+  gap: 16px;
+  min-width: 0;
 }
-.ceilings li {
-  padding-left: 18px;
-  position: relative;
+/* The README's own lines stay verbatim, so a long one (the CDN address, the Express mount) wraps instead of being cut off. */
+.tabpanel pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-.ceilings li::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0.62em;
-  width: 8px;
-  height: 8px;
-  background: var(--accent);
-  rotate: 45deg;
+.pill-opt {
+  color: var(--muted);
+  border-style: dashed;
 }
 
 /* ---------- open source ---------- */
-.open-panel {
+.open-band {
   display: grid;
-  gap: 28px;
+  gap: 18px;
+  max-width: 48em;
   padding: clamp(22px, 4vw, 40px);
   background: var(--panel);
   border: 2px solid var(--edge);
   border-radius: 10px;
   box-shadow: 6px 6px 0 var(--edge-shadow);
 }
-@media (min-width: 900px) {
-  .open-panel {
-    grid-template-columns: auto 1fr;
-    align-items: center;
-    column-gap: 48px;
-  }
-  .open-links {
-    grid-column: 1 / -1;
-  }
-}
-.open-big {
-  font-family: var(--font-display);
-  font-size: clamp(1.9rem, 1.2rem + 3vw, 3.2rem);
-  line-height: 1.05;
-}
-.open-license p:last-child {
-  color: var(--muted);
-}
-.open-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.open-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  font-weight: 700;
-  background: var(--panel-hi);
-  border: 2px solid var(--edge);
-  border-radius: 999px;
-}
-.open-badge svg {
-  color: var(--warden-text);
+.open-body {
+  font-size: 1.125rem;
 }
 .open-links {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
 }
-.open-npm {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 20px;
-  grid-column: 1 / -1;
-}
-.open-npm a {
-  color: var(--warden-text);
+.open-small {
+  color: var(--muted);
+  font-size: var(--fs-small);
 }
 
 /* ---------- FAQ ---------- */
@@ -1363,70 +1261,6 @@ li {
   margin-top: 20px;
   color: var(--muted);
   font-size: var(--fs-small);
-}
-
-/* ---------- AI level meter ---------- */
-.level-meter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  width: fit-content;
-  max-width: 100%;
-  margin-bottom: 24px;
-  padding: 10px 16px;
-  color: var(--screen-text);
-  background: var(--screen);
-  border: 2px solid var(--screen-edge);
-  border-radius: var(--radius);
-  box-shadow: 4px 4px 0 var(--edge-shadow);
-  font-size: var(--fs-small);
-}
-.pips {
-  display: flex;
-  gap: 6px;
-}
-.pip {
-  width: 30px;
-  height: 12px;
-  border: 2px dashed var(--screen-muted);
-  border-radius: 3px;
-}
-.pip.is-live {
-  background: var(--warden);
-  border: 2px solid var(--warden);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--warden) 60%, transparent);
-}
-/* One scan when the meter scrolls into view. Without 'idle' or 'seen' (no JS, reduced motion) the pips are simply final. */
-.level-meter[data-phase='idle'] .pip,
-.level-meter[data-phase='seen'] .pip {
-  animation: pip-scan 0.55s ease-out both;
-}
-.level-meter[data-phase='idle'] .pip {
-  animation-play-state: paused;
-}
-.pip:nth-child(2) {
-  animation-delay: 0.12s;
-}
-.pip:nth-child(3) {
-  animation-delay: 0.24s;
-}
-.pip:nth-child(4) {
-  animation-delay: 0.36s;
-}
-.pip:nth-child(5) {
-  animation-delay: 0.48s;
-}
-@keyframes pip-scan {
-  from {
-    opacity: 0.15;
-    transform: scaleX(0.4);
-  }
-  60% {
-    opacity: 1;
-    transform: scaleX(1.18);
-    border-color: var(--gold-bright);
-  }
 }
 
 /* ---------- easter egg: the warden goes gold (konami code) ---------- */
