@@ -121,8 +121,14 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
         {canTake && (
           <button type="button" className="cw-take" onClick={() => void actions.takeNext()} {...(shortcuts ? { 'aria-keyshortcuts': 'N' } : {})}>
             <span className="cw-take-text">
-              {t('hub.queue.takeNext')}
-              <small>{t('hub.queue.takeNextHint')}</small>
+              {queue.ranked ? (
+                t('hub.queue.takeNext.priority')
+              ) : (
+                <>
+                  {t('hub.queue.takeNext')}
+                  <small>{t('hub.queue.takeNextHint')}</small>
+                </>
+              )}
             </span>
             {shortcuts && <Kbd>N</Kbd>}
           </button>

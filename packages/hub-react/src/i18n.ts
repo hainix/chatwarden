@@ -177,6 +177,7 @@ export const en = {
   'hub.queue.people.other': '{count} people',
   'hub.queue.takeNext': 'Take next case',
   'hub.queue.takeNextHint': 'oldest unclaimed',
+  'hub.queue.takeNext.priority': 'Take next: highest priority',
   'hub.queue.filter.claim': 'Show',
   'hub.queue.claim.all': 'All',
   'hub.queue.claim.unclaimed': 'Unclaimed',

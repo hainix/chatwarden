@@ -1,10 +1,10 @@
 import { toHubError } from '../client.js';
 import type { HubClient, HubError } from '../client.js';
-import { CLAIM_TTL_MS, actorName, holderOf } from '../claims.js';
+import { CLAIM_TTL_MS, actorName, holderOf, liveClaim } from '../claims.js';
 import type { HubT } from '../i18n.js';
 import { errorText, groupName } from '../labels.js';
 import { nextOpenReport } from '../queue.js';
-import type { Claim, Me } from '../types.js';
+import type { Claim, Me, NextCase } from '../types.js';
 import { hasLeft } from './decisions.js';
 import type { DecisionStore } from './decisions.js';
 import type { ActionResult, PageSource, Timers } from './env.js';
@@ -311,17 +311,48 @@ export function createCaseStore(options: CaseStoreOptions): CaseStore {
     return true;
   };
 
+  /**
+   * Take next when the list is in the AI's order: the top case of the list as shown that nobody holds, claimed like a click on its row. A case someone
+   * else claimed a moment ago (the list had not heard yet) or that has closed is passed over silently for the one under it. Resolves undefined when
+   * none on the list could be had: the server's take-next is then asked (it may know of a case this list does not show).
+   */
+  const takeTop = async (q: LiveQueueStore): Promise<NextCase | undefined> => {
+    const free = q
+      .getSnapshot()
+      .visible.map((row) => row.group)
+      .filter((g) => g.open > 0 && liveClaim(g.claim, now()) === null);
+    for (const g of free) {
+      const reportId = g.summaries?.find((r) => r.status === 'open')?.id ?? g.entries[0]?.id;
+      if (reportId === undefined) continue;
+      try {
+        const { claim } = await client.claimCase(g.person);
+        return { person: g.person, reportId, claim };
+      } catch (e) {
+        const err = toHubError(e);
+        if (err.code === 'claimed' && err.heldBy !== undefined) q.patchClaim(g.person, { by: err.heldBy, since: (err.heldUntil ?? 0) - CLAIM_TTL_MS, until: err.heldUntil ?? 0 });
+        else if (err.code !== 'claimed' && err.status !== 404) throw e;
+      }
+    }
+    return undefined;
+  };
+
   const take = async (cooldownMs: number): Promise<TakeOutcome> => {
     const q = options.queue();
     if (q === null || !q.beginTake()) return { status: 'busy' };
     const words = options.words();
     try {
       const { category, reason } = q.getSnapshot().filter;
-      // Take next asks the kit for the same cases the rows show: the reason the filter is on (`none`: gave none), and a category if an embedder set one.
-      const { case: next } = await client.takeNext({
-        ...(category === 'all' ? {} : { category }),
-        ...(reason === undefined || reason === 'all' ? {} : { reason: reason === 'none' ? null : reason }),
-      });
+      // In the AI's order the top of the list is what is taken (so the button and the list agree); else, and when nothing on the list could be had,
+      // the kit is asked for the longest-waiting case, filtered like the rows: the reason the filter is on (`none`: gave none), and a category if an embedder set one.
+      const top = q.getSnapshot().ranked ? await takeTop(q) : undefined;
+      const next =
+        top ??
+        (
+          await client.takeNext({
+            ...(category === 'all' ? {} : { category }),
+            ...(reason === undefined || reason === 'all' ? {} : { reason: reason === 'none' ? null : reason }),
+          })
+        ).case;
       if (next === null) {
         toasts.push({ text: words('hub.toast.nothing') });
         return { status: 'none' };

@@ -78,13 +78,30 @@ export function setRanker(fn: Ranker | null): void {
   ranker = fn;
 }
 
+/** Whether the AI's ranking code is here, so the `priority` sort is the AI's order and not the longest wait. */
+export const hasRanker = (): boolean => ranker !== null;
+
+/** What the AI's ranking code gives to code that ranks on its own (`loadAiRank`). */
+export interface AiRank {
+  priorityScore: typeof import('./ai/rank.js').priorityScore;
+  RANK_WEIGHTS: typeof import('./ai/rank.js').RANK_WEIGHTS;
+  reporterSignal: typeof import('./ai/rank.js').reporterSignal;
+}
+
 let rankLoader: (() => Promise<unknown>) | null = null;
-/** Called once by the React hub (`provider.tsx`): how to fetch the AI's ranking code. The headless entry carries none of it unless it is told. */
+/** Called once by the React hub (`provider.tsx`): how to fetch the AI's code (the ranking is part of it). Without one, `loadRanker` fetches the ranking alone. */
 export function setRankLoader(fn: (() => Promise<unknown>) | null): void {
   rankLoader = fn;
 }
-/** Fetches the AI's ranking code if the hub can (it never fails: a hub without it sorts by the longest wait). */
-export const loadRanker = (): Promise<unknown> => (rankLoader === null ? Promise.resolve() : rankLoader().catch(() => undefined));
+/** Fetches the AI's ranking code (it never fails: a queue without it sorts by the longest wait). Headless adopters get it too, with no setup. */
+export const loadRanker = (): Promise<unknown> => (rankLoader ?? (() => import('./ai/rank.js')))().catch(() => undefined);
+
+/**
+ * The AI's queue ranking: `priorityScore`, `RANK_WEIGHTS` and `reporterSignal`, and, once loaded, the `priority` sort of `groupQueue`. Both hubs (React and
+ * headless) load it by themselves when their queue holds a read; this is for code that calls `groupQueue(items, { sort: 'priority' })` on its own.
+ * @experimental
+ */
+export const loadAiRank = (): Promise<AiRank> => import('./ai/rank.js').then(({ priorityScore, RANK_WEIGHTS, reporterSignal }) => ({ priorityScore, RANK_WEIGHTS, reporterSignal }));
 
 /** What a reporter said a report was for: a reason id and its label now, or both null for a report that gave none. */
 export interface ReportedReason {

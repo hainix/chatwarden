@@ -379,7 +379,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
     `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
 - the `<Hub>` prop `HubProps.onController`
-- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`, `loadAiWords` (the English of the AI's parts, see "Words and languages") and `loadAiRank` (the AI's queue ranking: `priorityScore`, `RANK_WEIGHTS`, `reporterSignal`, and the `priority` sort of `groupQueue`)
+- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`, `loadAiWords` (the English of the AI's parts, see "Words and languages") and `loadAiRank` (the AI's queue ranking: `priorityScore`, `RANK_WEIGHTS`, `reporterSignal`, and the `priority` sort of `groupQueue`; also exported from `/headless`)
 
 ## Options
 
@@ -611,10 +611,15 @@ suggests. Nothing here decides: a moderator does, and every part is lazy, so a h
   tag, the conduct level in words, the rule and a one-line summary, shown as plain text. The lines the AI cited carry a small tick. One
   `⋯` menu holds the model, when it read, how sure it was, the two plain notes (older rules; a line that tried to instruct the AI), Read
   again and Hide the AI on this case (kept for this browser session, per moderator). While a read is expected a skeleton holds for up to
-  20 seconds, then nothing: no error is ever shown on a case. The queue gets one neutral chip with the level word, and orders cases by the
+  20 seconds and reads the case again at about 5 and 15 seconds (at most three audited reads of the case per open); then it leaves one
+  quiet line, "The AI has not answered yet", with a Check again action, and never an error banner. Read again that is not answered can be
+  asked again after the wait. A case that is closed shows no strip. The queue gets one neutral chip with the level word, and orders cases by the
   `priority` sort when the server sends reads: wait, open reports, the read and the reporter's record, as a weight and never a filter. Its code
-  loads on its own then; for `groupQueue(items, { sort: 'priority', signals })` on your own, `await loadAiRank()` first (it also returns `priorityScore`,
-  `RANK_WEIGHTS` and `reporterSignal`), or the sort is the longest wait.
+  loads on its own then, in the React hub and in the headless controller alike. While the queue is in that order the top of the list is what Take
+  next takes (its button says "Take next: highest priority" and `controller.takeNext()` and `continueFrom()` claim the first case on the list as shown
+  that nobody holds, passing over one that was claimed a moment before; `queue.getSnapshot().ranked` says which order it is in), and in the
+  longest-wait order it is the server's oldest unclaimed case as before. For `groupQueue(items, { sort: 'priority', signals })` on your own,
+  `await loadAiRank()` first (from the main entry or `/headless`; it returns `priorityScore`, `RANK_WEIGHTS` and `reporterSignal`), or the sort is the longest wait.
 - **Level 2, Recommend.** The decision bar opens pre-filled from the recommendation, labelled "Suggested by AI" (it says "Edited" once
   anything changes). `A` accepts it into the usual five-second Undo hold and goes on to the next case; `E` opens the editor. Both act where
   Quick keys act (on in Simple, off in Detailed), through the same act guard as `1`, `2` and `3`, and never while typing. In Simple mode the

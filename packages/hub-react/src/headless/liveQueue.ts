@@ -3,7 +3,7 @@ import type { HubClient, HubError } from '../client.js';
 import type { HubT } from '../i18n.js';
 import { BANNER_AFTER_FAILURES, adopt, pollDelay, reconcile } from '../live.js';
 import type { ShownRow } from '../live.js';
-import { filterGroups, groupQueue, loadRanker } from '../queue.js';
+import { filterGroups, groupQueue, hasRanker, loadRanker } from '../queue.js';
 import type { QueueFilter, QueueGroup } from '../queue.js';
 import type { Claim } from '../types.js';
 import type { PageSource, Timers } from './env.js';
@@ -41,6 +41,8 @@ export interface LiveQueueState {
   groups: QueueGroup[];
   /** The list on screen, in a fixed order. */
   rows: ShownRow[];
+  /** True when the list is in the AI's `priority` order (the server sent reads and the ranking is loaded): then the top of the list is what Take next takes. */
+  ranked: boolean;
   /** The rows that pass the filters (and whose decision is not on its way), as of the last change. */
   visible: ShownRow[];
   /** Cases that are in `groups` but not yet on screen. */
@@ -158,6 +160,7 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     error: null,
     groups: [],
     rows: [],
+    ranked: false,
     visible: [],
     incoming: 0,
     partial: false,
@@ -216,12 +219,13 @@ export function createLiveQueue(options: LiveQueueOptions): LiveQueueStore {
     // Longest wait first, unless the server sends AI reads: then the `priority` sort (wait, open reports, the read, the reporter's record).
     const reads = all.items.some((r) => r.ai != null);
     if (reads) await loadRanker();
+    const ranked = reads && hasRanker();
     const groups = groupQueue(all.items, { sort: reads ? 'priority' : 'oldest', now: now(), rankDown: { now: now() } });
     if (mine !== seq) return groups;
     token = at;
     commit((prev) => {
       const shown = mode === 'adopt' || prev.status !== 'ready' ? { rows: adopt(groups), incoming: 0 } : reconcile(prev.rows, groups, keep);
-      return { ...prev, status: 'ready', error: null, groups, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: all.items.length, updatedAt: now(), revision: prev.revision + 1 };
+      return { ...prev, status: 'ready', error: null, groups, ranked, rows: shown.rows, incoming: shown.incoming, partial: all.next !== null, reports: all.items.length, updatedAt: now(), revision: prev.revision + 1 };
     });
     return groups;
   };

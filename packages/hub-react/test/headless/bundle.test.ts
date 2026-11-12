@@ -34,12 +34,38 @@ async function bundle(entry: string) {
     // Our own peers stay outside, as for any adopter. React is not listed: it is not installed.
     external: ['@chatwarden/*'],
     plugins: [noReact],
+    // Split, as an adopter's bundler splits at a dynamic `import()`: the AI's ranking (`loadAiRank`, and the queue's own load of it when it holds a
+    // read) is a chunk loaded when asked for, not part of what the entry carries. The figures are the entry and every chunk it imports statically.
+    splitting: true,
+    outdir: fileURLToPath(new URL('../../.size-out-headless', import.meta.url)),
+    entryNames: 'entry',
+    chunkNames: 'chunk-[name]-[hash]',
     metafile: true,
     logLevel: 'silent',
   });
-  const out = result.outputFiles[0];
-  if (out === undefined) throw new Error('esbuild produced no output');
-  return { text: out.text, bytes: out.contents.byteLength, gzip: gzipSync(out.contents, { level: 9 }).byteLength, inputs: Object.keys(result.metafile.inputs).map((p) => p.replaceAll('\\', '/')) };
+  const meta = Object.entries(result.metafile.outputs);
+  const nameOf = (key: string): string => key.split(/[\\/]/).pop() ?? key;
+  const eagerNames = new Set<string>();
+  const visit = (key: string): void => {
+    if (eagerNames.has(nameOf(key))) return;
+    eagerNames.add(nameOf(key));
+    for (const imp of meta.find(([k]) => k === key)?.[1].imports ?? []) if (imp.kind === 'import-statement' && !imp.external) visit(imp.path);
+  };
+  const entryKey = meta.find(([, o]) => o.entryPoint !== undefined)?.[0];
+  if (entryKey === undefined) throw new Error('esbuild produced no output');
+  visit(entryKey);
+  const eager = result.outputFiles.filter((o) => eagerNames.has(nameOf(o.path)));
+  const joined = Buffer.concat(eager.map((o) => Buffer.from(o.contents)));
+  const eagerInputs = [...new Set(meta.filter(([k]) => eagerNames.has(nameOf(k))).flatMap(([, o]) => Object.keys(o.inputs)))].map((p) => p.replaceAll('\\', '/'));
+  return {
+    /** Every file's text, the chunks loaded on demand too. */
+    texts: result.outputFiles.map((o) => o.text),
+    /** What a first load fetches: the entry and the chunks it imports statically. */
+    bytes: joined.byteLength,
+    gzip: gzipSync(joined, { level: 9 }).byteLength,
+    inputs: Object.keys(result.metafile.inputs).map((p) => p.replaceAll('\\', '/')),
+    eagerInputs,
+  };
 }
 
 describe('@chatwarden/hub-react/headless bundles without React', () => {
@@ -60,11 +86,19 @@ describe('@chatwarden/hub-react/headless bundles without React', () => {
   });
 
   it('imports only the kit core (for the ladder table), and no Node builtin and no eval', async () => {
-    const { text } = await bundle(headless);
-    const imports = [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1]);
+    const { texts } = await bundle(headless);
+    const text = texts.join('\n');
+    // A `./chunk-...` import is the bundle's own.
+    const imports = [...text.matchAll(/\bimport\b[^;"]*?\bfrom\s*"([^"]+)"/g)].map((m) => m[1] as string).filter((i) => !i.startsWith('./'));
     expect(new Set(imports)).toEqual(new Set(['@chatwarden/core']));
     expect(text).not.toMatch(/from\s*"node:/);
     expect(text).not.toMatch(/\beval\(|new Function\(/);
+  });
+
+  it('carries none of the AI in what it fetches first: the ranking is a chunk of its own, loaded when the queue holds a read or loadAiRank is called', async () => {
+    const { eagerInputs, inputs } = await bundle(headless);
+    expect(eagerInputs.filter((i) => /src\/ai\//.test(i))).toEqual([]);
+    expect(inputs.some((i) => i.endsWith('src/ai/rank.ts'))).toBe(true);
   });
 
   it('is small: under 28 KB gzipped, core external', async () => {
