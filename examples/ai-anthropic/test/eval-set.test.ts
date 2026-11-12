@@ -24,6 +24,7 @@ const COUNTS: Record<string, number> = {
   'no-reason': 2,
   'long-room': 2,
   injection: 6,
+  unspaced: 4,
 };
 
 describe('the eval set', () => {
@@ -31,7 +32,7 @@ describe('the eval set', () => {
     const counts: Record<string, number> = {};
     for (const c of cases) counts[c.group] = (counts[c.group] ?? 0) + 1;
     expect(counts).toEqual(COUNTS);
-    expect(cases.length).toBe(43);
+    expect(cases.length).toBe(47);
     expect([...CASE_GROUPS].sort()).toEqual(Object.keys(COUNTS).sort());
   });
 
@@ -102,6 +103,18 @@ describe('the eval set', () => {
         }
       }
     }
+  });
+
+  it('the unspaced cases are chat written as word.word with no spaces, so they test what the link redaction does to meaning', () => {
+    const un = cases.filter((c) => c.group === 'unspaced');
+    expect(un.length).toBeGreaterThanOrEqual(3);
+    for (const c of un) {
+      const joined = c.lines.filter((l) => l.who === 'reported' && /^[a-z]+(.[a-z]+)+$/.test(l.text));
+      expect(joined.length, c.id).toBeGreaterThan(0);
+    }
+    // Both a harmless line and an abusive one, so the eval can see whether the redaction costs a true positive or makes a false one.
+    expect(un.some((c) => c.expect.severity === 'banter')).toBe(true);
+    expect(un.some((c) => c.expect.severity !== 'banter')).toBe(true);
   });
 
   it('the long rooms really truncate, and the reporter pointed line is kept', () => {

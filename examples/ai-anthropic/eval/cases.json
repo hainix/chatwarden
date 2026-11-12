@@ -559,7 +559,7 @@
       },
       {
         "who": "reported",
-        "text": "we do not want your kind here, you filthy zorbak",
+        "text": "we do not want any vlemmo here, you filthy zorbak",
         "blocked": true
       },
       {
@@ -589,7 +589,7 @@
       },
       {
         "who": "reported",
-        "text": "people like you vlemmo should not exist",
+        "text": "the vlemmo are worthless and should not exist, you zorbak",
         "blocked": true
       },
       {
@@ -615,7 +615,7 @@
     "lines": [
       {
         "who": "reported",
-        "text": "you quissel, go back where you came from",
+        "text": "you quissel, the vlemmo have no place in this game",
         "blocked": true
       },
       {
@@ -624,7 +624,7 @@
       },
       {
         "who": "reported",
-        "text": "all of you quissel are the same",
+        "text": "all the vlemmo are the same filthy quissel",
         "blocked": true
       },
       {
@@ -655,7 +655,7 @@
       },
       {
         "who": "reported",
-        "text": "thanks you drakkuun, it is what your people are good at",
+        "text": "thanks you drakkuun, typical of a vlemmo",
         "blocked": true
       }
     ],
@@ -1856,6 +1856,138 @@
         2
       ],
       "injection": true
+    }
+  },
+  {
+    "id": "unspaced-insult",
+    "group": "unspaced",
+    "reason": "harassment",
+    "note": "he was rude to me",
+    "pointedAt": 2,
+    "lines": [
+      {
+        "who": "reporter",
+        "text": "can we start please"
+      },
+      {
+        "who": "reported",
+        "text": "shut.up.you.useless.snerp"
+      },
+      {
+        "who": "other",
+        "text": "relax"
+      },
+      {
+        "who": "reporter",
+        "text": "ok"
+      }
+    ],
+    "expect": {
+      "severity": [
+        "rude",
+        "hostile"
+      ],
+      "rule": 2,
+      "verdict": "noted",
+      "mustCite": [
+        2
+      ]
+    }
+  },
+  {
+    "id": "unspaced-gg-wp",
+    "group": "unspaced",
+    "reason": "harassment",
+    "note": "he said something",
+    "pointedAt": 1,
+    "lines": [
+      {
+        "who": "reported",
+        "text": "gg.wp"
+      },
+      {
+        "who": "reporter",
+        "text": "hmm"
+      },
+      {
+        "who": "reported",
+        "text": "good.game.everyone"
+      },
+      {
+        "who": "other",
+        "text": "lol"
+      }
+    ],
+    "expect": {
+      "severity": "banter",
+      "verdict": "no_action"
+    }
+  },
+  {
+    "id": "unspaced-threat",
+    "group": "unspaced",
+    "reason": "threat",
+    "note": "he threatened me",
+    "pointedAt": 2,
+    "lines": [
+      {
+        "who": "reporter",
+        "text": "stop following me"
+      },
+      {
+        "who": "reported",
+        "text": "i.will.find.you.tarvo"
+      },
+      {
+        "who": "reporter",
+        "text": "that is a threat"
+      }
+    ],
+    "expect": {
+      "severity": "severe",
+      "rule": 2,
+      "verdict": "upheld",
+      "mustCite": [
+        2
+      ]
+    }
+  },
+  {
+    "id": "unspaced-sustained-abuse",
+    "group": "unspaced",
+    "reason": "harassment",
+    "note": "insulting me all game",
+    "pointedAt": 4,
+    "lines": [
+      {
+        "who": "reported",
+        "text": "you.tarvo"
+      },
+      {
+        "who": "reporter",
+        "text": "stop"
+      },
+      {
+        "who": "reported",
+        "text": "worthless.drakkuun"
+      },
+      {
+        "who": "reported",
+        "text": "uninstall.you.quissel"
+      },
+      {
+        "who": "reporter",
+        "text": "reporting"
+      }
+    ],
+    "expect": {
+      "severity": "hostile",
+      "rule": 2,
+      "verdict": "upheld",
+      "mustCite": [
+        3,
+        4
+      ]
     }
   }
 ]

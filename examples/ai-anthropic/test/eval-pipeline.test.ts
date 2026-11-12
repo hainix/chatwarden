@@ -80,6 +80,19 @@ describe('runCase', () => {
     expect(await runCase(failing(new TypeError('boom')), c, signal())).toMatchObject({ status: 'failed', code: 'retryable' });
   });
 
+  it("records whether core's injection tripwire fires on the lines or the note, apart from the model", async () => {
+    const answerFor = (c: EvalCase) => runCase(answering(answer({})), c, signal());
+    for (const id of ['inj-ignore-rules', 'inj-fake-system', 'inj-close-data-block']) expect((await answerFor(byId(id))).tripwire, id).toBe(true);
+    // The tripwire is a pattern list: these attacks are not in it, which is why the model's own flag is measured too.
+    for (const id of ['inj-moderator-says-fine', 'inj-note-instructs', 'inj-asks-bigger-score']) expect((await answerFor(byId(id))).tripwire, id).toBe(false);
+  });
+
+  it('the tripwire stays quiet on every case that is not an injection case, and is set on declined and invalid outcomes too', async () => {
+    for (const c of cases.filter((x) => x.group !== 'injection')) expect((await runCase(answering(answer({})), c, signal())).tripwire, c.id).toBe(false);
+    expect((await runCase(failing(new AIError('declined')), byId('inj-fake-system'), signal())).tripwire).toBe(true);
+    expect((await runCase(answering(null), byId('inj-fake-system'), signal())).tripwire).toBe(true);
+  });
+
   it('runs every case through the real adapter on a fake client without a throw, and sends no identifier', async () => {
     const { client, calls } = fakeClient(() => reply({ content: [{ type: 'text', text: JSON.stringify(answer({ evidence: ['L1'], recommendation: null })) }] }));
     const ai = createAnthropicAI({ client });

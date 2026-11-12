@@ -1,6 +1,6 @@
 # ai-anthropic
 
-A reference `ModerationAI` for the Anthropic API, on Claude Haiku 5.5 (`claude-haiku-5-5`). It is about 150 lines, private to this
+A reference `ModerationAI` for the Anthropic API, on Claude Haiku 5.5 (`claude-haiku-5-5`). It is under 200 lines, private to this
 repo and never published: **copy `src/anthropic.ts` and `src/prices.ts` into your server** and own them.
 
 Core does the hard part once, for every provider: it chooses and redacts the lines, renders the prompt, and validates the answer.
@@ -12,7 +12,7 @@ This adapter only sends the rendered prompt and maps what comes back. It never e
 1. Copy `src/anthropic.ts` and `src/prices.ts` into your server (for example `src/ai/`). Keep the `.ts` import between them, or change
    it to `.js` to match your build.
 2. Add the SDK to your own `package.json`: `npm install @anthropic-ai/sdk` (this example pins 1.8.0, the version it was tested on).
-3. Put the key in the server's environment, never in code or in the repo: `ANTHROPIC_API_KEY=...`. Set a spend limit with the provider
+3. Put the key in the server's environment, never in code or in the repo: `ANTHROPIC_API_KEY=...`. With no key (option or environment) every read fails as `fatal`, which opens the kit's breaker at once and shows "bad key" in Settings. (Credential profiles and config files that the SDK can also read are not looked for: build the client yourself and pass it as `client`.) Set a spend limit with the provider
    too; the kit's daily cap is the first guard, the provider's limit is the second.
 4. Pass the adapter to the kit:
 
@@ -88,15 +88,16 @@ the docs do not say whether `cache_control` is honoured together with `output_co
 
 `eval/cases.json` holds 43 synthetic cases (banter to severe, threats, a complaint that quotes a term, a lying note, long rooms, six
 prompt-injection attacks). The script runs them through core's real pipeline and this adapter, then prints severity agreement, rule
-and verdict agreement, over-escalation of banter, refusal rate, injection resistance, ceiling violations, cache hit rate, mean cost
+and verdict agreement, over-escalation of banter, refusal rate, injection handling (the model's own flag and core's pattern tripwire, reported apart and together), ceiling violations, cache hit rate, mean cost
 and a table of failures.
 
 ```sh
+npm run build   # once, from the repo root: the eval imports @chatwarden/core from its build
 ANTHROPIC_API_KEY=... npm run eval:ai --workspace @chatwarden/example-ai-anthropic
 ANTHROPIC_API_KEY=... npm run eval:ai --workspace @chatwarden/example-ai-anthropic -- --thinking off   # the cost experiment
 ```
 
-With no key it prints `skipped: ANTHROPIC_API_KEY is not set` and exits 0. It prints the case count and the expected spend (about
+With no key it prints `skipped: ANTHROPIC_API_KEY is not set` and exits 0 (the build is not needed for that). It prints the case count and the expected spend (about
 one cent for 40 cases) before the first call. It is never part of `npm test` and never runs in CI.
 
 ## Promote it to a package

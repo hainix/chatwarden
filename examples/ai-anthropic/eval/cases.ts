@@ -17,6 +17,7 @@ export const CASE_GROUPS: readonly string[] = [
   'no-reason',
   'long-room',
   'injection',
+  'unspaced',
 ];
 
 export interface EvalLine {
