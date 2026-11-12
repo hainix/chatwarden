@@ -12,8 +12,6 @@ import type {
   OpenReportQuery,
   PolicyLayer,
   ReasonRow,
-  SignalRow,
-  SignalSourceRow,
   ReportActivity,
   ReportListQuery,
   ReportRecord,
@@ -65,9 +63,6 @@ export interface StoredSanction extends SanctionRow {
   revokeReason: string | null;
 }
 
-/** Order two strings by code unit, the way the signal listing sorts. */
-const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
 /**
  * In-memory {@link Store}: everything lives in this object and is lost when it is garbage collected or the process ends.
  * For tests, demos and single-process prototypes; use `@chatwarden/store-sqlite` for anything that must survive a
@@ -111,10 +106,6 @@ export class MemoryStore implements Store {
   protected aiSpend: Array<{ readId: string; attempt: number; at: number; micros: number }> = [];
   /** AI casebook outcomes by report. */
   protected aiOutcomes = new Map<string, AiOutcomeRow>();
-  /** Signal rows by their unique tuple (kind, subject, source, cap bucket), and the tuples of each subject. */
-  protected signalRows = new Map<string, SignalRow>();
-  private signalIds = new Set<string>();
-  private signalsBySubject = new Map<SubjectId, Set<string>>();
   /** The change token's counter (see `changeToken`). */
   private changes = 0;
   /** Undo steps of the innermost open transaction, or null outside one. */
@@ -436,81 +427,6 @@ export class MemoryStore implements Store {
     });
     this.bump();
     return true;
-  }
-
-  // Signals (synchronous, see the Store interface). Not a queue change: they do not move the change token.
-
-  insertSignal(row: SignalRow): boolean {
-    // SQLite's CHECK (weight >= 0) is the reference; NaN fails it too.
-    if (!(row.weight >= 0)) throw new Error('insertSignal: weight must be 0 or more');
-    const key = JSON.stringify([row.kind, row.subject, row.sourceKey, row.capBucket]);
-    if (this.signalRows.has(key) || this.signalIds.has(row.id)) return false;
-    const copy = structuredClone(row);
-    this.signalRows.set(key, copy);
-    this.signalIds.add(copy.id);
-    let mine = this.signalsBySubject.get(copy.subject);
-    if (mine === undefined) {
-      mine = new Set();
-      this.signalsBySubject.set(copy.subject, mine);
-    }
-    mine.add(key);
-    this.undoWith(() => this.dropSignal(key));
-    return true;
-  }
-
-  /** Remove one signal row and its index entries; returns the row. */
-  private dropSignal(key: string): SignalRow | undefined {
-    const row = this.signalRows.get(key);
-    if (row === undefined) return undefined;
-    this.signalRows.delete(key);
-    this.signalIds.delete(row.id);
-    const mine = this.signalsBySubject.get(row.subject);
-    mine?.delete(key);
-    if (mine?.size === 0) this.signalsBySubject.delete(row.subject);
-    return row;
-  }
-
-  listSignalSources(subjects: readonly SubjectId[], since: number): SignalSourceRow[] {
-    const groups = new Map<string, SignalSourceRow>();
-    for (const subject of new Set(subjects)) {
-      for (const key of this.signalsBySubject.get(subject) ?? []) {
-        const r = this.signalRows.get(key);
-        if (r === undefined || r.at < since) continue;
-        const group = JSON.stringify([r.subject, r.kind, r.sourceKey]);
-        const g = groups.get(group);
-        if (g === undefined) {
-          groups.set(group, { subject: r.subject, kind: r.kind, sourceKey: r.sourceKey, bySubject: r.bySubject, weight: r.weight, firstAt: r.at, lastAt: r.at });
-          continue;
-        }
-        if (r.weight > g.weight) g.weight = r.weight;
-        if (r.at < g.firstAt) g.firstAt = r.at;
-        if (r.at > g.lastAt) g.lastAt = r.at;
-        // The smallest `by`, as SQL's MIN does; a null (a room or day source) is skipped by MIN, so it only shows when every row is null.
-        if (r.bySubject !== null && (g.bySubject === null || r.bySubject < g.bySubject)) g.bySubject = r.bySubject;
-      }
-    }
-    // Sorted by subject, kind and source, as the SQLite store answers.
-    return [...groups.values()].sort((a, b) => cmp(a.subject, b.subject) || cmp(a.kind, b.kind) || cmp(a.sourceKey, b.sourceKey));
-  }
-
-  purgeSignals(before: number): number {
-    let n = 0;
-    for (const [key, row] of [...this.signalRows]) {
-      if (row.at >= before) continue;
-      this.dropSignal(key);
-      this.undoWith(() => {
-        this.signalRows.set(key, row);
-        this.signalIds.add(row.id);
-        let mine = this.signalsBySubject.get(row.subject);
-        if (mine === undefined) {
-          mine = new Set();
-          this.signalsBySubject.set(row.subject, mine);
-        }
-        mine.add(key);
-      });
-      n += 1;
-    }
-    return n;
   }
 
   // The editable profile's stored layer (synchronous, see the Store interface). Not a queue change: it does not move the token.

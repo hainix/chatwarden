@@ -24,7 +24,8 @@ import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
 import type { PolicyPreview, PolicySaveContext, PolicySaveResult, PolicyState } from './policy.js';
 import { checkPace, mergePace } from './pace.js';
-import { isSignalRoomId, SignalService } from './signalService.js';
+import { createInertSignals } from './signalInert.js';
+import type { SignalRuntime } from './signalService.js';
 import { BUILTIN_SIGNAL_KINDS, checkSignalFeeds } from './signals.js';
 import type { SignalCount, SignalInput, SignalKindView } from './signals.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
@@ -211,7 +212,9 @@ export interface ChatwardenOptions {
   ai?: AiOptions;
   /**
    * Signals: what the game records about a player. The kinds, the guards and the feeds are in the profile (`profile.signals`); this
-   * holds the one hook the profile cannot.
+   * holds the one hook the profile cannot. Signals need a store with the three signal methods (SQLite has them; the in-memory store has them
+   * through `withMemorySignals`): declaring kinds or feeds over a store without them is refused at creation, and the kit loads its signal
+   * service only for a store that has them.
    * @experimental
    */
   signals?: {
@@ -706,6 +709,9 @@ export interface Chatwarden {
  * The profanity filter for the profile, or undefined. Mode `allow` builds nothing; a ready filter wins over the
  * package; a package that throws fails creation and one that returns a non-filter is a TypeError.
  */
+/** Does the store keep signals (all three optional methods)? */
+const storeKeepsSignals = (s: Store): boolean => typeof s.insertSignal === 'function' && typeof s.listSignalSources === 'function' && typeof s.purgeSignals === 'function';
+
 function buildProfanityFilter(opts: ChatwardenOptions, config: ProfanityConfig): ProfanityFilter | undefined {
   if (config.mode === 'allow') return undefined;
   if (opts.profanity !== undefined) return opts.profanity;
@@ -757,7 +763,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       const builtin = Object.hasOwn(BUILTIN_SIGNAL_KINDS, id) ? BUILTIN_SIGNAL_KINDS[id as 'flood_triggered'] : undefined;
       return builtin === undefined || builtin.label !== k.label || k.weight !== 1;
     });
-  if (declaresSignals && !(typeof opts.store.insertSignal === 'function' && typeof opts.store.listSignalSources === 'function' && typeof opts.store.purgeSignals === 'function')) {
+  if (declaresSignals && !storeKeepsSignals(opts.store)) {
     throw new Error(
       'createChatwarden: the profile declares signal kinds or feeds, but the store has no signal methods (insertSignal, listSignalSources, purgeSignals); use the memory or SQLite store, or leave "signals" out of the profile',
     );
@@ -765,6 +771,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (opts.signals?.accountAgeDays !== undefined && typeof opts.signals.accountAgeDays !== 'function') {
     throw new TypeError('createChatwarden: signals.accountAgeDays must be a function');
   }
+  // The signal service (and the counting under it) is loaded only for a store that can keep signals, so a bundler can leave it out of a build
+  // that never has one (the in-memory store has the methods only through `withMemorySignals`). Without it `cw.signals` is inert.
+  const signalModule = storeKeepsSignals(opts.store) ? await import('./signalService.js') : undefined;
   const purgeEveryMs = everyMs ?? DEFAULT_PURGE_EVERY_MS;
   if (opts.retention !== false && (!Number.isFinite(purgeEveryMs) || purgeEveryMs <= 0)) {
     throw new Error('createChatwarden: retention.everyMs must be a positive finite number');
@@ -818,7 +827,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   });
 
   /** The signal service, set once `personOf` exists (the chat path above it only calls it later, never during creation). */
-  const signalRef: { service?: SignalService } = {};
+  const signalRef: { service?: SignalRuntime } = {};
 
   // Room overrides of the pace: this process only, dropped by `rooms.close`. Each is the validated sparse override as given (a field
   // left out inherits), kept as a frozen copy so the caller's object cannot change it later.
@@ -865,12 +874,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     pace: {
       settings: paceOf,
       canonical: (subject) => subjects.canonical(subject),
-      // A flood trip records the built-in kind, deferred so the verdict is returned first. `record` never throws and logs its own
+      // A flood trip records the built-in kind, deferred so the verdict is returned first. `flood` never throws and logs its own
       // refusals; a room id the signal rules do not accept is left out (the trip is then a day source, not dropped).
       onFlood: ({ roomId, subject }) => {
         queueMicrotask(() => {
           try {
-            signalRef.service?.record({ kind: 'flood_triggered', subject, ...(isSignalRoomId(roomId) ? { roomId } : {}) });
+            signalRef.service?.flood(subject, roomId);
           } catch (err) {
             safeWarn(logger, 'chatwarden.pace_failed', { error: err instanceof Error ? err.name : typeof err });
           }
@@ -910,7 +919,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     const ids = hashWho(hasher, who);
     return subjects.lookup({ clientKey: ids.clientKey, accountId: ids.accountId, ipHash: null });
   };
-  signalRef.service = new SignalService({
+  signalRef.service = signalModule === undefined ? createInertSignals(logger, () => policy.profileNow().signals) : new signalModule.SignalService({
     store,
     clock,
     logger,

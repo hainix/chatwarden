@@ -1,3 +1,4 @@
+import { deepFreeze } from './freeze.js';
 import { ProfileError } from './profileError.js';
 
 // The pace settings: how a room paces a player's lines (a gap, a burst limit, no repeats). Pure data and validation, no state and no
@@ -41,22 +42,24 @@ export const DUPLICATE_RECENT = 8;
  */
 export const PACE_KEYS_MAX = 50_000;
 
-const SLOW_MODE_RANGE = [500, 600_000] as const;
-const BURST_LINES_RANGE = [2, 100] as const;
-const BURST_WINDOW_RANGE = [1000, 600_000] as const;
-const DUPLICATE_RANGE = [1000, 3_600_000] as const;
-
-const PACE_KEYS: readonly string[] = ['slowModeMs', 'burst', 'duplicateWindowMs'];
-const BURST_KEYS: readonly string[] = ['lines', 'windowMs'];
+/** The allowed whole-number range of each number setting. */
+const RANGES: Readonly<Record<string, readonly [number, number]>> = {
+  slowModeMs: [500, 600_000],
+  lines: [2, 100],
+  windowMs: [1000, 600_000],
+  duplicateWindowMs: [1000, 3_600_000],
+};
+const BURST_KEYS = ['lines', 'windowMs'] as const;
+const PACE_KEYS = ['slowModeMs', 'burst', 'duplicateWindowMs'] as const;
 
 /**
  * Values the hub offers behind "Use suggested values". Never applied by themselves.
  * @experimental
  */
-export const PACE_SUGGESTIONS: Readonly<Record<'relaxed' | 'standard' | 'strict', ResolvedPace>> = Object.freeze({
-  relaxed: Object.freeze({ slowModeMs: null, burst: Object.freeze({ lines: 10, windowMs: 10_000 }), duplicateWindowMs: 10_000 }),
-  standard: Object.freeze({ slowModeMs: null, burst: Object.freeze({ lines: 6, windowMs: 10_000 }), duplicateWindowMs: 15_000 }),
-  strict: Object.freeze({ slowModeMs: 2000, burst: Object.freeze({ lines: 5, windowMs: 10_000 }), duplicateWindowMs: 30_000 }),
+export const PACE_SUGGESTIONS: Readonly<Record<'relaxed' | 'standard' | 'strict', ResolvedPace>> = deepFreeze({
+  relaxed: { slowModeMs: null, burst: { lines: 10, windowMs: 10_000 }, duplicateWindowMs: 10_000 },
+  standard: { slowModeMs: null, burst: { lines: 6, windowMs: 10_000 }, duplicateWindowMs: 15_000 },
+  strict: { slowModeMs: 2000, burst: { lines: 5, windowMs: 10_000 }, duplicateWindowMs: 30_000 },
 });
 
 function isPlain(v: unknown): v is Record<string, unknown> {
@@ -70,21 +73,23 @@ function given(o: Record<string, unknown>, key: string): unknown {
   return Object.hasOwn(o, key) ? o[key] : undefined;
 }
 
-function whole(v: unknown, range: readonly [number, number], path: string): number {
-  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < range[0] || v > range[1]) {
-    throw new ProfileError(path, `must be a whole number from ${range[0]} to ${range[1]}`);
-  }
+/** `o` must be a plain object with no key outside `allowed`; a refusal names the key. */
+function plain(o: unknown, allowed: readonly string[], path: string, what: string): Record<string, unknown> {
+  if (!isPlain(o)) throw new ProfileError(path, what);
+  for (const k of Object.keys(o)) if (!allowed.includes(k)) throw new ProfileError(`${path}.${k}`, 'is not a known setting');
+  return o;
+}
+
+function whole(v: unknown, key: string, path: string): number {
+  const [lo, hi] = RANGES[key]!;
+  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < lo || v > hi) throw new ProfileError(path, `must be a whole number from ${lo} to ${hi}`);
   return v;
 }
 
 function checkBurst(v: unknown, path: string): { lines: number; windowMs: number } {
-  if (!isPlain(v)) throw new ProfileError(path, 'must be an object with lines and windowMs, or null');
-  for (const k of Object.keys(v)) if (!BURST_KEYS.includes(k)) throw new ProfileError(`${path}.${k}`, 'is not a known setting');
-  const lines = given(v, 'lines');
-  if (lines === undefined) throw new ProfileError(`${path}.lines`, 'is required');
-  const windowMs = given(v, 'windowMs');
-  if (windowMs === undefined) throw new ProfileError(`${path}.windowMs`, 'is required');
-  return { lines: whole(lines, BURST_LINES_RANGE, `${path}.lines`), windowMs: whole(windowMs, BURST_WINDOW_RANGE, `${path}.windowMs`) };
+  const o = plain(v, BURST_KEYS, path, 'must be an object with lines and windowMs, or null');
+  for (const k of BURST_KEYS) if (given(o, k) === undefined) throw new ProfileError(`${path}.${k}`, 'is required');
+  return { lines: whole(o['lines'], 'lines', `${path}.lines`), windowMs: whole(o['windowMs'], 'windowMs', `${path}.windowMs`) };
 }
 
 /**
@@ -99,16 +104,13 @@ export function checkPace(input: PaceSettings, path = 'pace'): PaceSettings {
 }
 
 function checked(input: unknown, path: string): PaceSettings {
-  if (!isPlain(input)) throw new ProfileError(path, 'must be an object');
-  for (const k of Object.keys(input)) if (!PACE_KEYS.includes(k)) throw new ProfileError(`${path}.${k}`, 'is not a known setting');
-  const out: PaceSettings = {};
-  const slow = given(input, 'slowModeMs');
-  if (slow !== undefined) out.slowModeMs = slow === null ? null : whole(slow, SLOW_MODE_RANGE, `${path}.slowModeMs`);
-  const burst = given(input, 'burst');
-  if (burst !== undefined) out.burst = burst === null ? null : checkBurst(burst, `${path}.burst`);
-  const dup = given(input, 'duplicateWindowMs');
-  if (dup !== undefined) out.duplicateWindowMs = dup === null ? null : whole(dup, DUPLICATE_RANGE, `${path}.duplicateWindowMs`);
-  return out;
+  const o = plain(input, PACE_KEYS, path, 'must be an object');
+  const out: Record<string, unknown> = {};
+  for (const k of PACE_KEYS) {
+    const v = given(o, k);
+    if (v !== undefined) out[k] = v === null ? null : k === 'burst' ? checkBurst(v, `${path}.${k}`) : whole(v, k, `${path}.${k}`);
+  }
+  return out as PaceSettings;
 }
 
 /**

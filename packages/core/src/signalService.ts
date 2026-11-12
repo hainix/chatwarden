@@ -64,7 +64,20 @@ function isPlainObject(v: unknown): v is object {
   return proto === Object.prototype || proto === null;
 }
 
-export class SignalService {
+/** What the kit asks of the signal service: the real one, or the inert one (`./signalInert.js`) for a store that cannot keep signals. */
+export interface SignalRuntime {
+  /** Record one signal; false for any refusal. Never throws. */
+  record(input: SignalInput): boolean;
+  /** The built-in `flood_triggered` for a person, with the room only when the signal rules accept its id. Never throws. */
+  flood(subject: SubjectId, roomId: string): void;
+  counts(subject: SubjectId, opts?: { windowDays?: number; kinds?: readonly string[] }): SignalCount[];
+  kinds(): SignalKindView[];
+  boosted(people: readonly SubjectId[]): Set<SubjectId>;
+  forRecord(subject: SubjectId): SignalCount[];
+  ladderHits(subject: SubjectId): SignalHit[];
+}
+
+export class SignalService implements SignalRuntime {
   private readonly deps: SignalServiceDeps;
   private readonly refusedWarn: ThrottledWarn;
   private readonly ageWarn: ThrottledWarn;
@@ -108,6 +121,10 @@ export class SignalService {
       }
       return false;
     }
+  }
+
+  flood(subject: SubjectId, roomId: string): void {
+    this.record({ kind: 'flood_triggered', subject, ...(isSignalRoomId(roomId) ? { roomId } : {}) });
   }
 
   private recordRow(input: unknown): boolean {

@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemorySignals } from '@chatwarden/store-memory';
 import { checkSignalFeeds, pruneSignalFeeds, resolveSignals } from '../src/signals.js';
 import type { SignalFeeds } from '../src/signals.js';
 import { applyPolicyLayer, changedSections, layerSections, POLICY_SECTIONS, PRESETS, ProfileError, resolveProfile } from '../src/profile.js';
 import type { ModerationProfile, PolicyLayer } from '../src/profile.js';
-import { NOW, OWNER, world } from './reportingWorld.js';
+import { NOW, OWNER, world as plainWorld } from './reportingWorld.js';
+import type { Store } from '../src/types.js';
+
+/** A kit over an in-memory store that keeps signals (a kit that declares kinds or feeds needs one). */
+const world = (over: Parameters<typeof plainWorld>[0] = {}, store: Store = withMemorySignals(new MemoryStore())) => plainWorld(over, store);
 
 // The `feeds` of the signals section: shape and kind checks, the window cross-checks, the layer (feeds only, replacing wholesale), and the
 // start-up rule that drops one unusable feed instead of the whole stored layer.
@@ -346,7 +350,7 @@ describe('pruneSignalFeeds (a stored layer made invalid later)', () => {
     const ladderEdit = { firstOffense: { rude: { kind: 'chat' as const, durationMs: 3_600_000 } } };
 
     it('a stored feed naming a kind the code no longer declares is dropped alone: the ladder edit stays in force', async () => {
-      const store = new MemoryStore();
+      const store = withMemorySignals(new MemoryStore());
       store.savePolicyLayer?.(
         { ...ladderEdit, signals: { feeds: { record: { kinds: '*', windowDays: 14 }, queue: { kinds: ['removed_kind'], minDistinct: 3, windowDays: 7 } } } },
         0,
@@ -361,7 +365,7 @@ describe('pruneSignalFeeds (a stored layer made invalid later)', () => {
     });
 
     it('a window above a lowered signalsMs is dropped alone; the other feeds and the ladder section survive', async () => {
-      const store = new MemoryStore();
+      const store = withMemorySignals(new MemoryStore());
       store.savePolicyLayer?.(
         { ...ladderEdit, signals: { feeds: { record: { kinds: '*', windowDays: 60 }, ai: { kinds: ['muted_by_player'], windowDays: 14 } } } },
         0,
@@ -373,7 +377,7 @@ describe('pruneSignalFeeds (a stored layer made invalid later)', () => {
     });
 
     it('a layer that is bad in some other way is still ignored whole, as before', async () => {
-      const store = new MemoryStore();
+      const store = withMemorySignals(new MemoryStore());
       store.savePolicyLayer?.({ ...ladderEdit, signals: { kinds: { x_kind: {} } } } as never, 0);
       const { cw, logged } = await world({ overrides: { signals: { kinds: kindsInCode } } }, store);
       expect(cw.policy.get().layerError?.path).toBe('layer.signals.kinds');
@@ -381,7 +385,7 @@ describe('pruneSignalFeeds (a stored layer made invalid later)', () => {
     });
 
     it('nothing is logged and nothing is dropped when every stored feed is usable', async () => {
-      const store = new MemoryStore();
+      const store = withMemorySignals(new MemoryStore());
       store.savePolicyLayer?.({ signals: { feeds: { record: { kinds: '*', windowDays: 14 } } } }, 0);
       const { cw, logged } = await world({ overrides: { signals: { kinds: kindsInCode } } }, store);
       expect(Object.keys(cw.profile.signals.feeds)).toEqual(['record']);

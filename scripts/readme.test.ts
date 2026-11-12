@@ -566,6 +566,14 @@ describe('the AI sections', () => {
     expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemoryAi[^}]*\} from '@chatwarden\/store-memory';/);
   });
 
+  it('store-memory: the signal methods are opt-in through withMemorySignals, said plainly, with a snippet that compiles (it starts with an import)', () => {
+    const doc = flat(readme('store-memory'));
+    expect(doc).toContain('## The signal methods (opt-in)');
+    for (const needle of ['`withMemorySignals(store)`', '@experimental', '`createMemoryStore()`', '`chatwarden.signals_store_unsupported`', 'SQLite store has them', 'refused when it is created']) expect(doc, needle).toContain(needle);
+    expect(doc).toMatch(/does not carry them/i);
+    expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemorySignals[^}]*\} from '@chatwarden\/store-memory';/);
+  });
+
   it('core: a store without the AI methods leaves the AI inert and says so once; it does not throw', () => {
     const doc = flat(section(readme('core'), 'The AI (levels 1 and 2)'));
     expect(doc).toContain('`chatwarden.ai_store_unsupported`');

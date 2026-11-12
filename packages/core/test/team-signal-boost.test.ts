@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemorySignals } from '@chatwarden/store-memory';
 import { CaseDesk, SIGNAL_BOOST_SCAN_MAX } from '../src/team.js';
 import { REPORTER_ACCURACY_MIN_DECIDED, REPORTER_RANK_LAPSE_MS } from '../src/index.js';
 import { SubjectIndex } from '../src/subjects.js';
@@ -358,7 +358,7 @@ describe('the dependency', () => {
     const t = await setup(null);
     await t.file();
     const b = await t.file();
-    const spy = vi.spyOn(t.store as MemoryStore, 'listSignalSources');
+    const spy = vi.spyOn(t.store as ReturnType<typeof withMemorySignals<MemoryStore>>, 'listSignalSources');
     t.cw.cases.next('mod-a', BOOST);
     expect(spy).not.toHaveBeenCalled();
     void b;

@@ -80,6 +80,32 @@ const cw = await createChatwarden({ store, secret: 'a-long-random-secret-for-thi
 
 Without `withMemoryAi`, a kit created with `ai` leaves the AI inert and logs `chatwarden.ai_store_unsupported` once; nothing else changes.
 
+## The signal methods (opt-in)
+
+Signals (what a game records about a player: muted by others, kicked, `flood_triggered`) need three optional store methods
+(`insertSignal`, `listSignalSources`, `purgeSignals`). `createMemoryStore()` does not carry them, so an app that never records a signal
+does not bundle them. To use signals over the in-memory store, add them with `withMemorySignals(store)` (`@experimental`, new in 0.1.8). It
+returns the same store; a method the store already has is kept, and calling it twice changes nothing. The SQLite store has them built in.
+
+```ts
+import { createChatwarden, type Platform } from '@chatwarden/core';
+import { createMemoryStore, withMemorySignals } from '@chatwarden/store-memory';
+
+declare const platform: Platform;
+
+const store = withMemorySignals(createMemoryStore());
+const cw = await createChatwarden({
+  store,
+  secret: 'a-long-random-secret-for-this-run',
+  platform,
+  retention: false,
+  overrides: { signals: { kinds: { muted_by_player: { label: 'Muted by other players', polarity: 'negative' } } } },
+});
+```
+
+A kit that declares signal kinds or feeds over a store without the methods is refused when it is created. A kit that declares none starts, and
+`cw.signals.record` answers false and logs `chatwarden.signals_store_unsupported` once.
+
 ## Options
 
 `createMemoryStore()` and `new MemoryStore()` take no options. The inspection helpers below return copies, so changing what they

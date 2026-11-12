@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MemoryStore } from '@chatwarden/store-memory';
 import { createChatwarden } from '../src/chatwarden.js';
 import type { RawWho, SubjectId } from '../src/types.js';
-import { DAY, sworld } from './signalsWorld.js';
+import { DAY, signalRowsOf, sworld } from './signalsWorld.js';
 import type { SignalWorld } from './signalsWorld.js';
 
 // flood_triggered: a flood trip records the built-in kind once per burst window per player per room, deferred out of the verdict.
@@ -14,7 +14,7 @@ const flush = async (): Promise<void> => {
 };
 
 type Row = { kind: string; subject: string; sourceKey: string; bySubject: string | null; roomId: string | null; weight: number; at: number };
-const rows = (w: SignalWorld): Row[] => [...(w.store as unknown as { signalRows: Map<string, Row> }).signalRows.values()];
+const rows = (w: SignalWorld): Row[] => signalRowsOf(w.store);
 
 async function world(over: Parameters<typeof sworld>[0] = {}) {
   const w = await sworld({ overrides: { pace: BURST }, ...over });

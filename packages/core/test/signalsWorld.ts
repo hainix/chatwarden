@@ -1,6 +1,7 @@
+import { MemoryStore, withMemorySignals } from '@chatwarden/store-memory';
 import type { ChatwardenOptions } from '../src/chatwarden.js';
 import type { SignalFeeds, SignalGuards, SignalKindSpec } from '../src/signals.js';
-import type { RawWho, Store, SubjectId } from '../src/types.js';
+import type { RawWho, SignalRow, Store, SubjectId } from '../src/types.js';
 import { world } from './reportingWorld.js';
 
 // A kit with signal kinds declared, for the signal service, flood and feed tests: people are seated by key and found again by key.
@@ -22,7 +23,10 @@ export interface SignalWorldOptions extends Partial<ChatwardenOptions> {
   feeds?: SignalFeeds;
 }
 
-export async function sworld(opts: SignalWorldOptions = {}, store?: Store) {
+/** The rows an in-memory store with `withMemorySignals` holds, for tests that look at what was written (not part of the Store contract). */
+export const signalRowsOf = (store: Store): SignalRow[] => [...((store as unknown as { sig?: { rows: Map<string, SignalRow> } }).sig?.rows.values() ?? [])];
+
+export async function sworld(opts: SignalWorldOptions = {}, store: Store = withMemorySignals(new MemoryStore())) {
   const { kinds = KINDS, guards, feeds, overrides, ...rest } = opts;
   const w = await world(
     {

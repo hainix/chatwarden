@@ -18,6 +18,7 @@ import {
   resolveReporting,
 } from './reporting.js';
 import type { ReportingSettings, ResolvedReporting } from './reporting.js';
+import { deepFreeze } from './freeze.js';
 import { mergePace, resolvePace } from './pace.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
 import { checkSignalFeeds, resolveSignals } from './signals.js';
@@ -601,14 +602,6 @@ function merge(base: unknown, over: unknown, depth = 0): unknown {
     return out;
   }
   return clone(over, depth);
-}
-
-function deepFreeze<T>(v: T): T {
-  if (typeof v === 'object' && v !== null && !Object.isFrozen(v)) {
-    Object.freeze(v);
-    for (const item of Object.values(v)) deepFreeze(item);
-  }
-  return v;
 }
 
 /** Drop repeated numbers from `areaRules` and `severeRules` (first one wins, order kept) before they are validated. */

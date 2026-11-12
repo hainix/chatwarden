@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { AUDIT_ACTIONS } from '@chatwarden/core';
 import type { AuditRow, SignalRow, Store, StoredReport } from '@chatwarden/core';
-import { MemoryStore, withMemoryAi } from '@chatwarden/store-memory';
+import { MemoryStore, withMemoryAi, withMemorySignals } from '@chatwarden/store-memory';
 import { openStore } from '../src/index.js';
 
 // Differential tests: the same writes go to SqliteStore (the reference) and MemoryStore, and every combined query and cursor
@@ -11,7 +11,7 @@ import { openStore } from '../src/index.js';
 
 const NOW = 1_800_000_000_000;
 const sql = (): Store => openStore({ db: new DatabaseSync(':memory:') });
-const mem = (): Store => withMemoryAi(new MemoryStore());
+const mem = (): Store => withMemorySignals(withMemoryAi(new MemoryStore()));
 
 const report = (over: Partial<StoredReport> = {}): StoredReport => ({
   id: 'r1',

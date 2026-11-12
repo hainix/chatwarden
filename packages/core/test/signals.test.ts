@@ -10,7 +10,12 @@ import {
 import type { SignalSettings } from '../src/signals.js';
 import { applyPolicyLayer, defineProfile, PRESETS, ProfileError, resolveProfile, validateProfile } from '../src/profile.js';
 import type { ModerationProfile } from '../src/profile.js';
-import { world } from './reportingWorld.js';
+import { MemoryStore, withMemorySignals } from '@chatwarden/store-memory';
+import { world as plainWorld } from './reportingWorld.js';
+import type { Store } from '../src/types.js';
+
+/** A kit over an in-memory store that keeps signals (a kit that declares kinds or feeds needs one). */
+const world = (over: Parameters<typeof plainWorld>[0] = {}, store: Store = withMemorySignals(new MemoryStore())) => plainWorld(over, store);
 
 // Signal declarations: the kinds a game declares, the guards, and the `signals` section of the profile.
 

@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { PACE_KEYS_MAX } from '../src/pace.js';
 import type { ResolvedPace } from '../src/pace.js';
-import { __pacerState, createPacer, normalizeForRepeat } from '../src/pacing.js';
-import type { PaceKey, PaceVerdict } from '../src/pacing.js';
+import { createPacer as makePacer, normalizeForRepeat } from '../src/pacing.js';
+import type { KeyState, PaceKey, Pacer, PaceVerdict } from '../src/pacing.js';
+
+type Rooms = ReadonlyMap<string, ReadonlyMap<string, Readonly<KeyState>>>;
+const held = new WeakMap<Pacer, Rooms>();
+/** `createPacer`, remembering the state it hands to the `tap` seam so a test can look at what the pacer holds. */
+const createPacer: typeof makePacer = (opts) => {
+  let rooms: Rooms | undefined;
+  const pacer = makePacer({ ...opts, tap: (r) => void (rooms = r) });
+  if (rooms !== undefined) held.set(pacer, rooms);
+  return pacer;
+};
+/** A plain snapshot of what a pacer holds. */
+const __pacerState = (pacer: Pacer): unknown =>
+  [...(held.get(pacer) ?? [])].flatMap(([roomId, room]) => [...room].map(([who, s]) => ({ roomId, who, lastAt: s.lastAt, stamps: [...s.stamps], recent: s.recent.map((e) => ({ h: e.h, at: e.at })), floodSignalAt: s.floodSignalAt })));
 
 const T0 = 1_800_000_000_000;
 const OFF: ResolvedPace = { slowModeMs: null, burst: null, duplicateWindowMs: null };

@@ -4,7 +4,7 @@ import { ProfileError } from '../src/profile.js';
 import { applySanction, revokeSanction } from '../src/sanctions.js';
 import { SubjectIndex } from '../src/subjects.js';
 import type { NoticeRow, SanctionKind, SignalRow, StoredReport, StrikeRow, SubjectId } from '../src/types.js';
-import { MemoryStore } from '@chatwarden/store-memory';
+import { MemoryStore, withMemorySignals } from '@chatwarden/store-memory';
 import { markReportBadFaith } from './markBadFaith.js';
 
 const H = 3_600_000;
@@ -12,7 +12,7 @@ const DAY = 24 * H;
 const NOW = 1_800_000_000_000;
 
 function setup() {
-  const store = new MemoryStore();
+  const store = withMemorySignals(new MemoryStore());
   const clock = { now: () => NOW };
   const subjects = new SubjectIndex(store, clock, { logger: { warn() {} } });
   const subject = (key: string): SubjectId => {
@@ -634,7 +634,7 @@ describe('signals retention', () => {
     weight: 1,
     capBucket: Math.floor(at / DAY),
   });
-  const kept = (store: MemoryStore): string[] =>
+  const kept = (store: ReturnType<typeof withMemorySignals<MemoryStore>>): string[] =>
     store
       .listSignalSources(['s_x'], 0)
       .map((r) => r.sourceKey.slice(2))

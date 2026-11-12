@@ -40,7 +40,8 @@ export interface Pacer {
   size(): number;
 }
 
-interface KeyState {
+/** What the pacer keeps for one player in one room. @internal */
+export interface KeyState {
   /** When the last committed line was accepted. */
   lastAt: number;
   /** The times of the last committed lines, oldest first (at most the burst's `lines`). */
@@ -81,15 +82,14 @@ function longestWindow(p: ResolvedPace): number {
 
 const touchedAt = (s: KeyState): number => (s.floodSignalAt !== null && s.floodSignalAt > s.lastAt ? s.floodSignalAt : s.lastAt);
 
-/** Test seam: a plain snapshot of what a pacer holds, so a test can look at it. Not exported from the package. @internal */
-const snapshots = new WeakMap<Pacer, () => unknown>();
-export function __pacerState(pacer: Pacer): unknown {
-  return snapshots.get(pacer)?.();
-}
-
-export function createPacer(opts: { clock: Clock; settings: (roomId: string) => ResolvedPace }): Pacer {
+/**
+ * `tap` is a test seam: it is handed the state (rooms by key) once, so a test can look at what a pacer holds. Nothing in the kit passes it.
+ * @internal
+ */
+export function createPacer(opts: { clock: Clock; settings: (roomId: string) => ResolvedPace; tap?: (rooms: ReadonlyMap<string, ReadonlyMap<string, Readonly<KeyState>>>) => void }): Pacer {
   const { clock, settings } = opts;
   const rooms = new Map<string, Map<string, KeyState>>();
+  opts.tap?.(rooms);
   let keys = 0;
   let calls = 0;
 
@@ -228,6 +228,5 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
     size: () => keys,
   };
 
-  snapshots.set(pacer, () => [...rooms].flatMap(([roomId, room]) => [...room].map(([who, s]) => ({ roomId, who, lastAt: s.lastAt, stamps: [...s.stamps], recent: s.recent.map((e) => ({ h: e.h, at: e.at })), floodSignalAt: s.floodSignalAt }))));
   return pacer;
 }

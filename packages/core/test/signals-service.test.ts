@@ -4,7 +4,7 @@ import { createChatwarden } from '../src/chatwarden.js';
 import { BUILTIN_SIGNAL_KINDS } from '../src/signals.js';
 import type { SignalInput } from '../src/signals.js';
 import type { RawWho, SubjectId } from '../src/types.js';
-import { DAY, KINDS, MIN, sworld } from './signalsWorld.js';
+import { DAY, KINDS, MIN, signalRowsOf, sworld } from './signalsWorld.js';
 
 // cw.signals: record, counts, kinds, boosted and forRecord, through the facade on the memory store.
 
@@ -569,9 +569,9 @@ describe('the stored row', () => {
     const by = w.person('by-key');
     rec(w, { kind: 'muted_by_player', subject: target, by, roomId: 'room-1' });
     rec(w, { kind: 'left_mid_game', subject: target, roomId: 'room-9' });
-    const dump = JSON.stringify([...(w.store as unknown as { signalRows: Map<string, unknown> }).signalRows.values()]);
+    const dump = JSON.stringify(signalRowsOf(w.store));
     for (const secret of ['target-key', 'by-key', 'H-target', 'Muted by']) expect(dump).not.toContain(secret);
-    const rows = [...(w.store as unknown as { signalRows: Map<string, { sourceKey: string; subject: string; bySubject: string | null; roomId: string | null }> }).signalRows.values()];
+    const rows = signalRowsOf(w.store);
     expect(rows.map((r) => r.sourceKey).sort()).toEqual([`b:${by}`, 'r:room-9']);
     expect(rows.every((r) => r.subject === target)).toBe(true);
   });
@@ -580,7 +580,7 @@ describe('the stored row', () => {
     const w = await sworld();
     const target = w.person('target');
     rec(w, { kind: 'left_mid_game', subject: target });
-    const [row] = [...(w.store as unknown as { signalRows: Map<string, { sourceKey: string; capBucket: number }> }).signalRows.values()];
+    const [row] = signalRowsOf(w.store);
     expect(row?.sourceKey).toBe(`d:${new Date(w.clock.t).toISOString().slice(0, 10)}`);
     expect(row?.capBucket).toBe(Math.floor(w.clock.t / DAY));
   });
