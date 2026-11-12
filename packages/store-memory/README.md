@@ -61,6 +61,25 @@ const store = new FullDisk();
 console.log(store.rawReports().length); // 0: a copy of every stored report, for assertions
 ```
 
+## The AI methods (opt-in)
+
+The kit's AI needs optional store methods (the reads, the spend ledger and the casebook). `createMemoryStore()` does not carry them, so an
+app that never turns the AI on does not bundle them. To use the AI over the in-memory store, add them with `withMemoryAi(store)`
+(`@experimental`, new in 0.1.7). It returns the same store; a method the store already has (a subclass's override) is kept, and calling it
+twice changes nothing. The SQLite store has them built in.
+
+```ts
+import { createChatwarden, createFakeModerationAI, type Platform } from '@chatwarden/core';
+import { createMemoryStore, withMemoryAi } from '@chatwarden/store-memory';
+
+declare const platform: Platform;
+
+const store = withMemoryAi(createMemoryStore());
+const cw = await createChatwarden({ store, secret: 'a-long-random-secret-for-this-run', platform, retention: false, ai: { adapter: createFakeModerationAI() } });
+```
+
+Without `withMemoryAi`, a kit created with `ai` leaves the AI inert and logs `chatwarden.ai_store_unsupported` once; nothing else changes.
+
 ## Options
 
 `createMemoryStore()` and `new MemoryStore()` take no options. The inspection helpers below return copies, so changing what they

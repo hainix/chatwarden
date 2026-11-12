@@ -103,6 +103,29 @@ export function bodyId(v: unknown): string {
   return v;
 }
 
+/** What a decision body's `ai` echo carries: the read the moderator saw, whether they accepted its pre-fill in one click, and the form's conduct level. */
+export interface AiEchoBody {
+  readId: string;
+  accepted: boolean;
+  severity?: ConductLevel;
+}
+
+/**
+ * The `ai` of a decision body: exactly `{ readId, accepted }` and optionally `severity` (a conduct level). `readId` is an id
+ * (1..64 characters of `A-Z a-z 0-9 _ -`); an id that names no read is not an error here (the facade ignores it). Anything else
+ * malformed, or any other key, is 400.
+ */
+export function bodyAiEcho(v: unknown): AiEchoBody {
+  const o = asObject(v);
+  if (o === undefined) throw new ValidationError();
+  if (Object.keys(o).some((k) => k !== 'readId' && k !== 'accepted' && k !== 'severity')) throw new ValidationError();
+  const readId = bodyId(o.readId);
+  if (typeof o.accepted !== 'boolean') throw new ValidationError();
+  if (!has(o, 'severity')) return { readId, accepted: o.accepted };
+  if (!isLevel(o.severity)) throw new ValidationError();
+  return { readId, accepted: o.accepted, severity: o.severity };
+}
+
 /** The longest free text a staff request may carry (a reason, an evidence note, a gap note before the core's own cap). */
 export const MAX_TEXT = 2000;
 /** The most excerpt lines a notice may quote per action (the facade's own cap). */

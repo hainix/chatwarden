@@ -35,11 +35,15 @@ const TABLE = {
   already_decided: { status: 409, message: 'The report has already been decided.' },
   conflict: { status: 409, message: 'The settings changed since you loaded them.' },
   claimed: { status: 409, message: 'Another moderator is handling this case.' },
+  ai_off: { status: 409, message: 'The AI is not reading reports.' },
+  ai_final: { status: 409, message: 'The AI has no more to try for this report.' },
   in_progress: { status: 409, message: 'A request with this idempotency key is still being processed.' },
   idempotency_mismatch: { status: 409, message: 'This idempotency key was used with a different request.' },
   payload_too_large: { status: 413, message: 'The request body is too large.' },
   rate_limited: { status: 429, message: 'Too many requests. Try again later.' },
+  ai_budget: { status: 429, message: 'The AI has reached its limit for today.' },
   not_supported: { status: 501, message: 'This store cannot save settings.' },
+  ai_unavailable: { status: 503, message: 'The AI cannot be called right now.' },
 } as const;
 
 export type ErrorCode = keyof typeof TABLE;
@@ -77,6 +81,19 @@ export class LayerInvalidError extends HttpError {
     super('invalid_profile');
     this.name = 'LayerInvalidError';
     this.path = path;
+  }
+}
+
+/**
+ * The AI cannot be called right now (its breaker is open, or the minute's calls are used). 503 `ai_unavailable`; the body also carries
+ * `retryAfterMs`, how long to wait, and the `retry-after` header the same in whole seconds.
+ */
+export class AiUnavailableError extends HttpError {
+  readonly retryAfterMs: number;
+  constructor(retryAfterMs: number) {
+    super('ai_unavailable');
+    this.name = 'AiUnavailableError';
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -146,6 +163,9 @@ export function withErrors<A extends unknown[]>(
       const code = codeFor(err);
       if (err instanceof ClaimedError) return errorResponse('claimed', undefined, { by: err.by, until: err.until });
       if (err instanceof LayerInvalidError) return errorResponse('invalid_profile', undefined, { path: err.path });
+      if (err instanceof AiUnavailableError) {
+        return errorResponse('ai_unavailable', { 'retry-after': String(Math.max(1, Math.ceil(err.retryAfterMs / 1000))) }, { retryAfterMs: err.retryAfterMs });
+      }
       if (err instanceof HttpError) return errorResponse(err.code, err.headers === undefined ? undefined : { ...err.headers });
       if (code !== null) {
         // A RangeError is a 400 by contract, but an engine RangeError (stack overflow, invalid array length) looks the

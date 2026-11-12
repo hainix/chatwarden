@@ -1,12 +1,12 @@
 import { BULK_DISMISS_MAX, reasonLabel, safeWarn, suggestedRule } from '@chatwarden/core';
-import type { CaseClaim, Chatwarden, ReporterAccuracy, ReportQuery, StaffReport } from '@chatwarden/core';
+import type { AiBrief, CaseClaim, Chatwarden, ReporterAccuracy, ReportQuery, StaffReport } from '@chatwarden/core';
 import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { roleAtLeast } from '../permissions.js';
 import { applyDecision, checkDurationsOffered, needForDecision, parseDecision, peopleOf } from './apply.js';
 import type { AdminContext } from './context.js';
 import { gateCase } from './claims.js';
-import { bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
+import { bodyAiEcho, bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
 
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
 const HISTORY_REPORTS_DEFAULT = 20;
@@ -64,6 +64,13 @@ export interface ReportSummary {
    * hide a report. Staff only.
    */
   reporterAccuracy?: ReporterAccuracySummary | null;
+  /**
+   * What the AI read of an OPEN report, as a brief: `{ severity, confidence, rule, stale, injectionSuspected, hasRecommendation }`. Null on
+   * a decided row, when the AI is off, and when the report has no read yet. No summary, no line ids, no model: the queue carries nothing of
+   * the evidence. `hasRecommendation` is true at level 2 only. Always set by this server; optional on the type (a client reads an older
+   * server's rows). Staff only.
+   */
+  ai?: AiBrief | null;
 }
 
 /** The part of a reporter's accuracy a queue row carries. */
@@ -95,6 +102,7 @@ const summarize = (
   viewing: string[] | undefined,
   label: string | null,
   accuracy: ReporterAccuracy | undefined,
+  ai: AiBrief | undefined,
 ): ReportSummary => ({
   id: r.id,
   createdAt: r.createdAt,
@@ -115,6 +123,7 @@ const summarize = (
   viewing: viewing === undefined ? [] : [...viewing],
   reporterAccuracy:
     accuracy === undefined ? null : { decided: accuracy.decided, unfounded: accuracy.unfounded, falseRate: accuracy.falseRate, habitual: accuracy.habitual },
+  ai: ai === undefined ? null : { ...ai },
 });
 
 /**
@@ -123,13 +132,21 @@ const summarize = (
  *   the reports that gave no reason; a malformed one is 400 `invalid_query`), no evidence beyond the `targetHandle` and `reporterHandle`
  *   (`report.view`, no target)
  *   Each item also carries `claim` and `viewing` for its open cases (see {@link ReportSummary}).
+ *   An open item also carries `ai` (the AI's brief, see {@link ReportSummary.ai}), or null.
  * - `GET /reports/:id?level`: one report (with `reportedReasonLabel` beside its `reportedReason`) with each person's history and the
  *   suggestion for the reported person (`rule` is the first rule of the reported reason, `'uncovered'` with none), and the
- *   `claim` on the reported person's case (`{ by, since, until }` or null) (`report.view`)
+ *   `claim` on the reported person's case (`{ by, since, until }` or null) (`report.view`). It also carries `ai`: null, or the AI's read
+ *   `{ id, severity, rule, summary, evidenceLineIds, confidence, stale, injectionSuspected, model, at, recommendation }` where
+ *   `recommendation` is null at level 1 and otherwise `{ verdict, severity, rule, evidenceLineIds, step, stepWithinCeiling }` (`step` is
+ *   the ladder's suggestion for the AI's conduct level, computed now; `stepWithinCeiling` says a one-key accept may fill it). Opening a
+ *   case with no read, or a stale one, queues a read. Never an error: with the AI off, broken or over budget it is null.
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`)
  * - `POST /reports/:id/decide { verdict, actions, reason?, evidence?, takeOver? }`: decide (`report.decide`, replays too). `reason` may be
  *   left out (or blank) only for a `no_action` with no actions, a one-click dismissal: the core then stores `NO_ACTION_DEFAULT_REASON`.
- *   Every other decision needs a real reason (400 `invalid_request`). Another
+ *   Every other decision needs a real reason (400 `invalid_request`). The body may carry `ai: { readId, accepted, severity? }`, the read the
+ *   moderator saw, whether they accepted its pre-fill in one click and the conduct level their form settled on: it records an outcome against
+ *   the AI read (the server computes agree or override itself; it records one for every decision on a report that has a read, with or without
+ *   this) and never changes the answer; a malformed `ai` is 400, an unknown `readId` is ignored. Another
  *   moderator's live claim on the reported person is 409 `claimed` unless `takeOver: true` and the caller holds
  *   `claims.override` (then the takeover is audited as `case.takeover`, first). Deciding the person's last open report releases the
  *   caller's claim; while they have other open reports it is kept (one case per person).
@@ -189,11 +206,13 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
           }
         }
       }
+      // The AI's brief of each open report: one batch for the page. The AI can never take the queue down; it answers an empty map.
+      const briefs = cw.ai.briefs(page.items.filter((r) => r.status === 'open').map((r) => r.id));
       c.audit('report.view');
       const items = page.items.map((r) =>
         r.status === 'open'
-          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), accuracy.get(r.reporterPerson))
-          : summarize(r, undefined, undefined, labelOf(r), undefined),
+          ? summarize(r, claims.get(r.targetPerson), viewers.get(r.targetPerson), labelOf(r), accuracy.get(r.reporterPerson), briefs.get(r.id))
+          : summarize(r, undefined, undefined, labelOf(r), undefined, undefined),
       );
       return { status: 200, body: { items, next: page.next } };
     }),
@@ -206,8 +225,17 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const history = Object.fromEntries(peopleOf(report).map((p) => [p, cw.history(p)]));
       const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report) });
       const claim = claimView(claimOf(report));
+      // Opening a case is when a missing or stale read is asked for; the answer is whatever is stored now.
+      const ai = cw.ai.read(id, { open: true });
+      // Whether a read is on its way, so the hub waits only when one is: present when the AI is on (level 1 or 2), absent when it is off, so a
+      // server with the AI off answers exactly as before. False in a degraded mode (breaker open, a daily cap reached, a read that ended
+      // without an answer).
+      const aiExpected = cw.ai.level() === 0 ? undefined : cw.ai.expected(id);
       c.audit('report.view', { type: 'report', ref: id });
-      return { status: 200, body: { report: { ...report, reportedReasonLabel: labelOf(report) }, history, suggest, rule, claim } };
+      return {
+        status: 200,
+        body: { report: { ...report, reportedReasonLabel: labelOf(report) }, history, suggest, rule, claim, ai, ...(aiExpected === undefined ? {} : { aiExpected }) },
+      };
     }),
 
     'POST /reports/:id/suggest': ctx.secure('reports.read', (c) => {
@@ -233,6 +261,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const body = bodyObject(c.req);
       const decision = parseDecision(body);
       const takeOver = bodyTakeOver(body);
+      const echo = has(body, 'ai') ? bodyAiEcho(body.ai) : undefined;
 
       // Authorization for what the decision DOES, before anything is read or written.
       needForDecision(decision.actions, c.need);
@@ -247,7 +276,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (person !== null) gateCase(ctx, c, person, takeOver);
 
       // Never from the body: the caller is who the auth hook says, and an admin route is always a moderator's.
-      const result = await applyDecision(cw, id, decision, c.authz.actor);
+      const result = await applyDecision(cw, id, decision, c.authz.actor, { ...(echo === undefined ? {} : { echo }), role: c.authz.role });
       // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
       c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
       // Deciding the person's last open report ends the caller's own claim; while other reports about them are open the claim is

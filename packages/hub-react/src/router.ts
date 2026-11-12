@@ -18,9 +18,9 @@ export type Route =
   | { name: 'actions' }
   | { name: 'notFound'; path: string };
 
-/** The sections of the settings screen (`#/settings/ladder`, `#/settings/reporting`). A later section is another entry here and another section component on the screen. */
-export type SettingsSection = 'ladder' | 'reporting';
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['ladder', 'reporting'];
+/** The sections of the settings screen (`#/settings/ladder`, `#/settings/reporting`, `#/settings/ai`). A later section is another entry here and another section component on the screen. */
+export type SettingsSection = 'ladder' | 'reporting' | 'ai';
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['ladder', 'reporting', 'ai'];
 
 /** The tabs. A report and a person live under Reports. */
 export type TabName = 'overview' | 'reports' | 'blocked' | 'terms' | 'gaps' | 'audit' | 'guide' | 'settings';

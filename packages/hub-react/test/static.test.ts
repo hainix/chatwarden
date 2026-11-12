@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import { aiEn } from '../src/ai/i18n.js';
 import { en } from '../src/i18n.js';
 import { UNDO_MS } from '../src/toasts.js';
 
@@ -66,7 +67,8 @@ describe('no words outside the catalog', () => {
   });
 
   it('every t("...") key written out in the source is in the English catalog', () => {
-    const keys = new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
+    // The AI's parts keep their words apart (src/ai/i18n.ts), so the first load does not carry them: their keys are known too.
+    const keys = new Set([...Object.keys(en), ...Object.keys(aiEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
     const used: Array<[string, string]> = [];
     for (const f of appCode) for (const m of read(f).matchAll(/\bt\(\s*'(hub\.[A-Za-z0-9_.]+)'/g)) used.push([rel(f), m[1] as string]);
     expect(used.length).toBeGreaterThan(40);
@@ -75,7 +77,7 @@ describe('no words outside the catalog', () => {
   });
 
   it('every key in a label table (nav, labels, screens) is in the catalog', () => {
-    const keys = new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
+    const keys = new Set([...Object.keys(en), ...Object.keys(aiEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')));
     const used: Array<[string, string]> = [];
     for (const f of appCode) for (const m of read(f).matchAll(/'(hub\.[A-Za-z0-9_.]+)'/g)) used.push([rel(f), m[1] as string]);
     const unknown = used.filter(([, k]) => !keys.has(k));
@@ -572,7 +574,8 @@ describe('fix round 1: hygiene', () => {
     const text = appCode.map(read).join('\n');
     const literals = new Set([...text.matchAll(/'(hub\.[A-Za-z0-9_.]+)'/g)].map((m) => m[1] as string));
     const prefixes = [...text.matchAll(/`(hub\.[A-Za-z0-9_.]*\.)\$\{/g)].map((m) => m[1] as string);
-    const bases = [...new Set(Object.keys(en).map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
+    // The AI's own catalog (src/ai/i18n.ts) is held to the same rule: no word nobody asks for.
+    const bases = [...new Set([...Object.keys(en), ...Object.keys(aiEn)].map((k) => k.replace(/\.(zero|one|two|few|many|other)$/, '')))];
     const dead = bases.filter((k) => !literals.has(k) && !prefixes.some((p) => k.startsWith(p)));
     // The words the screens stopped using stay in the exported catalogue for a patch release, marked `@deprecated unused since 0.1.3`
     // (see 'words kept for compatibility'). The dead words are exactly the marked ones.

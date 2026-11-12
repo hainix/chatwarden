@@ -3,6 +3,7 @@ import { useHub } from '../context.js';
 import { excerptLines, filterLines, personName } from '../excerpt.js';
 import type { ExcerptLine, ReportPerson } from '../excerpt.js';
 import { timeOfDay } from '../format.js';
+import { LazyAiParts } from '../lazyParts.js';
 import type { StaffReport } from '../types.js';
 import { Empty, Notice, Segmented, Tag } from '../ui.js';
 import { useCase } from './CaseContext.js';
@@ -43,7 +44,9 @@ export interface SimpleLine {
  */
 export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: LinePicks | null; name: (ref: string | null) => string; simple?: SimpleLine }) {
   const { t, locale } = useHub();
-  const { reveal } = useCase();
+  const { reveal, aiRead } = useCase();
+  // A line the AI cited carries a small tick (a lazy part, drawn only when the case has a read).
+  const tick = aiRead === null ? null : <LazyAiParts part="tick" lineId={line.id} />;
   const showDelivered = line.delivered !== null && line.delivered !== line.raw;
   const shown = reveal.shows(line.id);
   const hidden = line.blocked && !shown;
@@ -76,7 +79,7 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
           {time}
         </time>
         {simple.whole && <span className="cw-line-who">{line.handle}</span>}
-        <span className="cw-line-text">{hidden ? <Masked /> : line.raw}</span>
+        <span className="cw-line-text">{hidden ? <Masked /> : line.raw}{tick}</span>
         {(line.reported || reveals) && (
           <span className="cw-line-meta">
             {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}
@@ -108,7 +111,7 @@ export function Line({ line, picks, name, simple }: { line: ExcerptLine; picks: 
         {time}
       </time>
       <span className="cw-line-who">{line.handle}</span>
-      <span className="cw-line-text">{hidden ? <Masked /> : line.raw}</span>
+      <span className="cw-line-text">{hidden ? <Masked /> : line.raw}{tick}</span>
       {(line.reported || line.blocked || line.audience !== null || showDelivered) && (
         <span className="cw-line-meta">
           {line.reported && <Tag tone="bad">{t('hub.report.line.reported')}</Tag>}

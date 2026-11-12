@@ -77,7 +77,7 @@ describe('GET /reports: reportedReason and reportedReasonLabel', () => {
     const res = await w.call('GET', '/reports');
     const keys = Object.keys(items(res)[0] as object).sort();
     expect(keys).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'reporterHandle', 'reporterPerson', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'ai', 'reporterHandle', 'reporterPerson', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
     expect(JSON.stringify(res.body)).not.toContain('planted-reporter-note-7731');
     expect(JSON.stringify(res.body)).not.toContain('a line from the target');

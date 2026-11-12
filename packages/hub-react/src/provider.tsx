@@ -8,7 +8,9 @@ import { DecisionProvider } from './decisions.js';
 import { createHubController } from './headless/controller.js';
 import type { HubController, HubHost } from './headless/controller.js';
 import { useHubData } from './hooks.js';
+import { ensureAi } from './ai/load.js';
 import { createT, en } from './i18n.js';
+import { setRankLoader } from './queue.js';
 import { registerHub } from './dom.js';
 import { KeyScope, useKeyBus } from './keyScope.js';
 import { LeaveGuardContext } from './leaveGuard.js';
@@ -254,6 +256,9 @@ export function HubRoot({ client: clientProp, controller: given, mode: modeProp,
     </div>
   );
 }
+
+// The hub can fetch the AI's ranking when its queue holds a read; the headless entry carries none of it (see queue.ts).
+setRankLoader(ensureAi);
 
 /**
  * The one thing a piece needs above it. Give it a `client` and it makes, owns and disposes the controller (the live queue, claims,

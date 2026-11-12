@@ -1,4 +1,4 @@
-export const VERSION = '0.1.6';
+export const VERSION = '0.1.7';
 
 export { Hub } from './Hub.js';
 export type { HubProps } from './Hub.js';
@@ -44,12 +44,21 @@ export type { FetchTransportOptions, RouterTransportOptions, Transport, Transpor
 
 export { createT, en } from './i18n.js';
 export type { HubCatalog, HubParams, HubT, HubText } from './i18n.js';
+import type { HubCatalog as AiCatalog } from './i18n.js';
+
+/**
+ * The English of the AI's parts (the strip on a case, its menu, the pre-filled decision, Settings > AI). They are loaded when first
+ * needed, not with the hub, so they are not in `en`. To translate them, spread this under your own words with `en`:
+ * `createT({ ...en, ...(await loadAiWords()), ...de }, 'de')`. A key you leave out reads in English.
+ * @experimental
+ */
+export const loadAiWords = (): Promise<AiCatalog> => import('./ai/i18n.js').then((m) => m.aiEn);
 
 export { buildPath, hashRouter, memoryRouter, normalizePath, parseRoute, tabOf } from './router.js';
 export type { HubRouter, MemoryRouter, ObservableRouter, QueueStatus, Route, SettingsSection, TabName } from './router.js';
 
-export { filterGroups, groupQueue, queueStats } from './queue.js';
-export type { QueueFilter, QueueGroup, QueueSort, QueueStats } from './queue.js';
+export { filterGroups, groupQueue, loadAiRank, queueStats } from './queue.js';
+export type { QueueFilter, QueueGroup, QueueSort, QueueStats, RankSignals } from './queue.js';
 
 export { actorInitial, actorName, holderOf, liveClaim, teamOf } from './claims.js';
 export type { Holder, TeamMember } from './claims.js';

@@ -1,5 +1,19 @@
 # @chatwarden/store-sqlite
 
+## 0.1.7
+
+### Patch Changes
+
+- Adds optional AI help, levels 1 and 2 (read, then recommend). It is off by default and `@experimental`. It never writes a sanction, a strike, a mute or a notice: a moderator still decides, and a one-key accept never fills in a ban, an area ban or anything longer than 24 hours.
+  
+    - **`@chatwarden/core`**: `createChatwarden({ ai: { adapter, maxLevel, dailyBudgetMicros } })` and `cw.ai` (`level`, `status`, `read`, `expected`, `readAgain`, `briefs`, `stats`, `dontTeach`, `idle`), the `ModerationAI` adapter contract with `AIError`, `createFakeModerationAI`, `validateAIOutput` and `assertWithinCeilings` with `AI_MAX_PREFILL_MS`. The profile gets an `ai` section (`level`, `learn`, `dailyCalls`) that the owner edits in the hub (`POLICY_SECTIONS` gains `'ai'`). Retention gains `aiOutcomesMs` and `aiExamplesMs`, and the audit trail gains `ai.read`, `ai.rerun` and `ai.outcome`. The model is told only the chosen chat lines with aliases, the reason, a redacted note and your rules: never an id, a handle, an IP, a hash or a history. The reads fail soft: a slow, refusing or broken provider changes nothing else.
+    - **`@chatwarden/store-memory`** and **`@chatwarden/store-sqlite`**: optional AI methods on `Store`. SQLite migration 20 adds three tables (`kit_ai_reads`, `kit_ai_spend`, `kit_ai_outcomes`) and five indexes and touches no existing table. **Migration 20 is one-way: a 0.1.6 build refuses a version 20 database, so back up the database before you upgrade.** The plain in-memory store has no AI methods; `withMemoryAi(store)` adds them, and a kit given `ai` over a store without them stays inert and logs `chatwarden.ai_store_unsupported`.
+    - **`@chatwarden/http`**: `GET /ai/status`, `POST /reports/:id/ai/read` and `POST /reports/:id/ai/dont-teach`; an `ai` brief on each open queue row; `ai` and `aiExpected` on `GET /reports/:id`; an optional `ai` echo on `POST /reports/:id/decide`; the error codes `ai_off`, `ai_final`, `ai_budget` and `ai_unavailable` (with `AiUnavailableError`).
+    - **`@chatwarden/hub-react`** and **`@chatwarden/hub-element`**: the read on the case card, the pre-filled decision with a one-key accept (A, with E to edit), a queue chip and a `priority` order, Settings > AI, `HubClient.readAgain`, `aiStatus` and `dontTeach`, `loadAiWords` and `loadAiRank`. The AI code is loaded only when the AI is on. The first load budget is 77 KB, and the `hub-element` script is 202 KB because it holds the lazy AI code too.
+    - **Upgrade notes, peer floors raised on purpose.** `@chatwarden/store-memory` and `@chatwarden/store-sqlite` now need `@chatwarden/core` `^0.1.7` (the new optional `Store` methods and `Ai*` row types), `@chatwarden/http` needs core `^0.1.7` (`cw.ai`; the queue and the case page call it), and `@chatwarden/hub-react` needs core `^0.1.7` (`assertWithinCeilings`) and `@chatwarden/http` `^0.1.7` (the `AiReadAgainBody` type). `@chatwarden/hub-element` stays on `@chatwarden/hub-react` `^0.1.5`; the other packages keep their floors.
+    - **Upgrade notes, types and one behaviour change.** `ResolvedProfile.ai` is a new required field; `RetentionPolicy` gains two required fields and `PurgeResult` two; `AUDIT_ACTIONS`, `POLICY_SECTIONS`, `SettingsSection`, `ErrorCode` and `QueueSort` each gain members, so a `switch` over them needs a new case. The `ai:` actor prefix is reserved: `audit.record` now refuses any actor that starts with `ai:` (and any `ai.read` row from another actor), so an http auth hook that returns a staff actor starting with `ai:` makes its requests fail their audit.
+    - **No new package is published.** The Anthropic adapter is the private example `examples/ai-anthropic`: copy it into your server as `docs/adoption/moxgate.md` section 9 describes. The default model is `claude-haiku-5-5`.
+
 ## 0.1.6
 
 No changes in this release.

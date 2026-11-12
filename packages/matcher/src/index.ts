@@ -1,4 +1,4 @@
-export const VERSION = '0.1.6';
+export const VERSION = '0.1.7';
 
 export type { TermRow, ExceptionRow, Matcher, Span } from './matcher.js';
 export { MatcherBuildError, buildMatcher } from './matcher.js';

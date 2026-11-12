@@ -1,6 +1,8 @@
 import { Component, Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { CommandBarProps } from './shell/CommandBar.js';
+import type { AiPartsProps } from './case/AiParts.js';
+import type { AiReadView } from './types.js';
 
 // Parts of the hub that few moderators open often are loaded the first time they are shown, so the hub's first load carries only
 // what every moderator uses: the sweep disclosure and its window (behind a closed disclosure), the shortcut sheet (opened by `?`) and the
@@ -18,7 +20,7 @@ class LoadFailure extends Error {
   }
 }
 
-class Boundary extends Component<{ children: ReactNode; onFail: () => void }, { error: unknown }> {
+class Boundary extends Component<{ children: ReactNode; onFail: () => void; hide: boolean }, { error: unknown }> {
   override state: { error: unknown } = { error: null };
 
   static getDerivedStateFromError(error: unknown): { error: unknown } {
@@ -26,12 +28,13 @@ class Boundary extends Component<{ children: ReactNode; onFail: () => void }, { 
   }
 
   override componentDidCatch(error: unknown): void {
-    if (error instanceof LoadFailure) this.props.onFail();
+    if (error instanceof LoadFailure || this.props.hide) this.props.onFail();
   }
 
   override render(): ReactNode {
     const { error } = this.state;
-    if (error !== null && !(error instanceof LoadFailure)) throw error;
+    // A part that breaks while it renders is not ours to catch, except the AI's: those hide themselves (the case is never taken down by advice).
+    if (error !== null && !(error instanceof LoadFailure) && !this.props.hide) throw error;
     return error === null ? this.props.children : null;
   }
 }
@@ -41,10 +44,14 @@ export const partLoaders: {
   bulk: () => Promise<ComponentType<Record<string, never>>>;
   sheet: () => Promise<ComponentType<{ onClose: () => void }>>;
   bar: () => Promise<ComponentType<CommandBarProps>>;
+  strip: () => Promise<ComponentType<{ read: AiReadView | null; expected: boolean }>>;
+  aiParts: () => Promise<ComponentType<AiPartsProps>>;
 } = {
   bulk: () => import('./case/BulkDismiss.js').then((m) => m.BulkDismiss),
   sheet: () => import('./shell/ShortcutSheet.js').then((m) => m.ShortcutSheet),
   bar: () => import('./shell/CommandBar.js').then((m) => m.CommandBar),
+  strip: () => import('./case/AiStrip.js').then((m) => m.AiStrip),
+  aiParts: () => import('./case/AiParts.js').then((m) => m.AiParts),
 };
 
 /** A part that is asked for by the moderator (a window) is told when its code could not be fetched, so it can close and say so. */
@@ -52,7 +59,7 @@ export interface FailureAware {
   onFailed?: () => void;
 }
 
-function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>): { Part: ComponentType<P & FailureAware>; preload: () => void; reset: () => void } {
+function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>, hide = false): { Part: ComponentType<P & FailureAware>; preload: () => void; reset: () => void } {
   const make = () =>
     lazy(() =>
       load().then(
@@ -72,6 +79,7 @@ function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>): { Pa
     }
     return (
       <Boundary
+        hide={hide}
         onFail={() => {
           failed = true;
           onFailed?.();
@@ -98,17 +106,25 @@ function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>): { Pa
 const bulk = lazyPart(() => partLoaders.bulk());
 const sheet = lazyPart(() => partLoaders.sheet());
 const bar = lazyPart(() => partLoaders.bar());
+const strip = lazyPart(() => partLoaders.strip(), true);
+const aiParts = lazyPart(() => partLoaders.aiParts(), true);
 
 /** "Close more reports at once": the disclosure at the bottom of the decision bar. */
 export const LazyBulkDismiss: ComponentType<Record<string, never>> = bulk.Part as ComponentType<Record<string, never>>;
 export const LazyShortcutSheet = sheet.Part;
 export const LazyCommandBar = bar.Part;
+/** The AI's read on the case (the strip and its menu): loaded when a case has a read or expects one. */
+export const LazyAiStrip = strip.Part;
+/** The AI's suggestion on a case (level 2): the bar's header, and the Simple card's suggestion, Accept button and reason. */
+export const LazyAiParts = aiParts.Part;
 
 /** Forgets what was fetched, so the next drawing of each part asks again (tests). */
 export function resetLazyParts(): void {
   bulk.reset();
   sheet.reset();
   bar.reset();
+  strip.reset();
+  aiParts.reset();
 }
 
 /** Asks for the code of all three (the sweep disclosure only for a role that may sweep), once, just after the hub's first paint. */

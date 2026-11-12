@@ -25,6 +25,10 @@ const browserSafeSyntax = [
   { selector: `ImportExpression[source.value=/^(${builtins.join('|')})(\\x2f.*)?$/]`, message: BROWSER_SAFE_MESSAGE },
 ];
 
+// The modules that write a sanction, a strike, a mute or a notice. The AI folder may import none of them (see the block at the end).
+const AI_WRITERS = ['decide', 'sanctions', 'strikes', 'mutes', 'notices'];
+const AI_MESSAGE = 'the AI never writes a sanction, a strike, a mute or a notice: packages/core/src/ai may not import decide, sanctions, strikes, mutes or notices.';
+
 export default tseslint.config(
   { ignores: ['**/dist/**', '**/node_modules/**', '.superpowers/**', '**/*.tsbuildinfo', '.smoke/**'] },
   js.configs.recommended,
@@ -50,5 +54,25 @@ export default tseslint.config(
       'packages/hub-element/src/**/*.{ts,tsx}',
     ],
     rules: { 'no-restricted-imports': browserSafeImports, 'no-restricted-syntax': browserSafeSyntax },
+  },
+  {
+    // The AI never writes a sanction, a strike, a mute or a notice: nothing under core/src/ai may import the modules that do. A flat-config rule
+    // replaces the one above for these files, so the browser-safe ban is repeated here and the AI's is added to it. scripts/eslint-ban.test.ts
+    // proves it fires (type-only imports, re-exports and dynamic imports included).
+    files: ['packages/core/src/ai/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: browserSafeImports[1].paths,
+          patterns: [...browserSafeImports[1].patterns, { group: AI_WRITERS.flatMap((m) => [`**/${m}`, `**/${m}.js`]), message: AI_MESSAGE }],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        ...browserSafeSyntax.slice(1),
+        { selector: `ImportExpression[source.value=/^(\\.{1,2}\\x2f)+(${AI_WRITERS.join('|')})(\\.js)?$/]`, message: AI_MESSAGE },
+      ],
+    },
   },
 );

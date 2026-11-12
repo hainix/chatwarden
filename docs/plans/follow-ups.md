@@ -63,3 +63,26 @@ Found building the triage-speed plan (2026-11-11). Left for later:
 - **Held-toast progress bar** restarts from full when an older held toast comes back into view (it needs a start time on `ToastRecord`).
 - **A cache-busting retry** (`?retry=`) for a lazy window that failed to load; today the README says to reload the page.
 
+## AI levels 1 and 2 (0.1.7), parked
+
+Decided in [design/2026-11-11-ai-levels-1-2.md](../design/2026-11-11-ai-levels-1-2.md) to come later, as compatible additions:
+
+- **Site wording.** The text that says levels 1 and 2 are available (and the FAQ "Does an AI read my players' chat?") is written in
+  `site/src/content.ts` behind `AI_LEVELS_AVAILABLE`, which stays `false`. Flip it, and the "coming" tests with it, only after 0.1.7 is on npm
+  and Moxgate has run it (design question 10). The site is deployed by hand, so nothing shows until then.
+- **Batch backfill.** The Batch API halves the price but is not live; it is the right tool for reading the reports already open the day the AI
+  is switched on.
+- **Blind sampling.** Hiding the AI on a few percent of cases to measure automation bias. Not yet: the agreement and one-click rates are recorded,
+  so decide with real numbers.
+- **`byTag` scope.** The level is per kit instance. If one instance runs several games, a `byTag` map in the `ai` profile section is a compatible
+  addition.
+- **Signals as AI context.** Flags, mutes and report counts are never sent to the model. If they are ever passed as context, the evidence rule (a
+  recommendation to uphold or note needs a cited line by the reported person) still stands. The ranking already uses the reporter's record, as a
+  capped weight in the queue and never in the read.
+- **"Do not automate".** The mark belongs to level 3 (acting). `automationAllowed(person)` exists and returns true; level 3 backs it with the mark.
+- **Levels 3 and 4.** Acting on clear cases and watching are separate designs; the seams are in section 12 of the design note.
+- **Done: the memory store's AI methods are opt-in.** `createMemoryStore()` no longer carries them; `withMemoryAi(store)` (`@experimental`) adds
+  them, so a browser bundle that never opts in does not either. `scripts/browser-bundle.test.ts` measures the browser build without the AI service,
+  its names, the hub's ranking and `withMemoryAi`, and holds its 103 KB budget (102.8 KB). A kit given `ai` over a store without the methods stays
+  inert and logs `chatwarden.ai_store_unsupported` once.
+

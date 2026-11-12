@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { policyAuditKey } from '../src/auditLabel.js';
+import { AUDIT_ACTIONS } from '@chatwarden/core';
+import { ACTION_LABEL, policyAuditKey } from '../src/auditLabel.js';
+import { en } from '../src/i18n.js';
 
 // A settings change is one audit action for two screens; its words follow the sections the row says it changed.
 
@@ -36,5 +38,33 @@ describe('policyAuditKey', () => {
 
   it('is only for the two settings actions', () => {
     expect(policyAuditKey('report.view', { sections: ['reporting'] })).toBeNull();
+  });
+});
+
+describe('ACTION_LABEL', () => {
+  it('the hub labels the three new actions', () => {
+    expect(ACTION_LABEL['ai.read']).toBe('hub.audit.label.ai.read');
+    expect(ACTION_LABEL['ai.rerun']).toBe('hub.audit.label.ai.rerun');
+    expect(ACTION_LABEL['ai.outcome']).toBe('hub.audit.label.ai.outcome');
+    expect(en['hub.audit.label.ai.read']).toBe('The AI read a report');
+    expect(en['hub.audit.label.ai.rerun']).toBe('Asked the AI to read a report again');
+    expect(en['hub.audit.label.ai.outcome']).toBe('Recorded a decision against the AI read');
+  });
+
+  it('every action the kit records has plain words', () => {
+    for (const action of AUDIT_ACTIONS) {
+      const key = ACTION_LABEL[action];
+      const words = (en as Record<string, string>)[key];
+      expect(words, action).toBeTypeOf('string');
+      expect((words ?? '').length, action).toBeGreaterThan(5);
+      // A label is words, never the raw action name.
+      expect(words, action).not.toBe(action);
+    }
+  });
+
+  it('keeps the labels it had', () => {
+    expect(ACTION_LABEL['report.dismiss_case']).toBe('hub.audit.label.report.dismissCase');
+    expect(ACTION_LABEL['policy.update']).toBe('hub.audit.label.policy.update');
+    expect(ACTION_LABEL.suggest).toBe('hub.audit.label.suggest');
   });
 });

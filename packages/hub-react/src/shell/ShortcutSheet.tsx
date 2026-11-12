@@ -1,4 +1,5 @@
 import { Fragment, useId, useRef, useState } from 'react';
+import { LazyAiParts } from '../lazyParts.js';
 import { useHub } from '../context.js';
 import { Dialog } from '../Dialog.js';
 import { useQuickKeys } from '../quickKeys.js';
@@ -79,6 +80,7 @@ export function ShortcutSheet({ onClose }: { onClose: () => void }) {
                 </dd>
               </div>
             ))}
+            {g.group === 'act' && <LazyAiParts part="sheet" quickOn={quick.on} />}
           </dl>
         </section>
       ))}

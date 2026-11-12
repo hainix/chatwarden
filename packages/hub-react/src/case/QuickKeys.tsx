@@ -42,7 +42,7 @@ export function QuickKeys({ quick, ctrlEnter = true, digits = true }: { quick: Q
       // Not until the case has aged (a double tap is for the case just closed), and not while a move to another case is on its way.
       if (!settledRef.current() || actsBlocked(hub)) return;
       if (isCtrlEnter || e.key === '1') {
-        if (q.primary === null) return;
+        if (q.primary === null && !q.aiOk) return;
         e.preventDefault();
         q.sendPrimary();
       } else if (e.key === '2') {

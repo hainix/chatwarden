@@ -1,4 +1,4 @@
-export const VERSION = '0.1.6';
+export const VERSION = '0.1.7';
 
 export type {
   Clock,
@@ -26,6 +26,19 @@ export type {
   SanctionTargetType,
   ReporterDecision,
   ReporterOutcomeRow,
+  AiCallUsage,
+  AiErrorKind,
+  AiExampleRow,
+  AiOutcomeDetail,
+  AiOutcomeInsert,
+  AiOutcomeRow,
+  AiReadDone,
+  AiReadPending,
+  AiReadRow,
+  AiReadStatus,
+  AiReserveResult,
+  AiStatsRow,
+  AiVerdict,
   ReporterTally,
   ClaimAttempt,
   ClaimMode,
@@ -276,6 +289,7 @@ export {
 } from './decide.js';
 export type {
   DecisionAction,
+  DecisionAiEcho,
   DecisionGroup,
   DecisionInput,
   DecisionResult,
@@ -293,6 +307,8 @@ export {
   MAX_GUIDELINE_OUTCOME,
   MAX_RULE_LIST,
   MAX_WINDOW_DAYS,
+  AI_DAILY_CALLS_DEFAULT,
+  AI_DAILY_CALLS_MAX,
   POLICY_SECTIONS,
   PRESETS,
   ProfileError,
@@ -313,6 +329,7 @@ export type {
   GuidelineCover,
   GuidelineTier,
   LevelDescription,
+  AISettings,
   ModerationProfile,
   ModerationProfileBase,
   Outcome,
@@ -327,3 +344,37 @@ export type {
   ResolvedProfile,
   RulesFlavour,
 } from './profile.js';
+
+// AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
+export { AI_PROMPT_VERSION, AIError } from './ai/types.js';
+export type { AbortSignalLike, AIExample, AIExampleInput, AIPerson, AIRead, AIReadInput, AIReadResult, AIStoredRead, AIUsage, ModerationAI } from './ai/types.js';
+export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
+export { validateAIOutput } from './ai/validate.js';
+export type { AIValidation, AIValidationContext } from './ai/validate.js';
+export { AI_MAX_KIND, AI_MAX_PREFILL_MS, AICeilingError, assertWithinCeilings, automationAllowed, isAllowedKind } from './ai/ceilings.js';
+export { redactNote, redactText } from './ai/redact.js';
+export { chooseLines, redactReportNote } from './ai/lines.js';
+export type { ChosenLine, ChosenLines } from './ai/lines.js';
+export { aiPolicyText, buildAIInput, PROMPT_VERSION, usedExampleIds } from './ai/prompt.js';
+export type { BuildAIInputArgs } from './ai/prompt.js';
+export { inputHash } from './ai/hash.js';
+export { looksLikeInjection } from './ai/injection.js';
+export { aiActorOf, AiService, READ_AGAIN_PER_MINUTE, SWEEP_BATCH, SWEEP_EVERY_MS } from './ai/service.js';
+export { createInertAi } from './ai/inert.js';
+export type {
+  AiBrief,
+  AiFacade,
+  AiOptions,
+  AiReadAgain,
+  AiReadView,
+  AiStatsRuleView,
+  AiStatsView,
+  AiStatus,
+  SuggestionStep,
+} from './ai/service.js';
+export { createFakeModerationAI, fakeRead, FAKE_USAGE } from './ai/fake.js';
+export type { FakeCallContext, FakeModerationAI, FakeScript, FakeStep } from './ai/fake.js';
+export { agreementOf, compareSteps } from './ai/agreement.js';
+export type { Agreement, HumanDecision, StepLike } from './ai/agreement.js';
+export { AI_EXAMPLES_MIN } from './ai/casebook.js';
+export type { AiOutcomeArgs, AiOutcomeHook } from './ai/casebook.js';

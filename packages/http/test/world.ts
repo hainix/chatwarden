@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { createChatwarden } from '@chatwarden/core';
-import type { Chatwarden, Logger, RawWho, ReportCategory } from '@chatwarden/core';
+import { createChatwarden, createFakeModerationAI } from '@chatwarden/core';
+import type { AiOptions, Chatwarden, FakeModerationAI, FakeScript, Logger, ProfileOverrides, RawWho, ReportCategory } from '@chatwarden/core';
 import { LiveTerms } from '@chatwarden/matcher';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { openStore } from '@chatwarden/store-sqlite';
@@ -30,6 +30,10 @@ export interface WorldOptions {
   recentLines?: () => readonly string[];
   gameName?: string;
   contactUrl?: string;
+  /** Turn the AI on with the scripted fake (never a network): the level the hub has set, the fake's script, and the code-side options. */
+  ai?: { level?: 0 | 1 | 2; script?: FakeScript; options?: Partial<AiOptions> };
+  /** Profile overrides (merged with the AI level). */
+  overrides?: ProfileOverrides;
 }
 
 export async function world(over: WorldOptions = {}) {
@@ -38,6 +42,7 @@ export async function world(over: WorldOptions = {}) {
   const clock = { t: NOW, now: () => clock.t };
   const logged: Logged = [];
   const logger: Logger = { warn: (event, detail) => void logged.push([event, detail]) };
+  const adapter: FakeModerationAI | undefined = over.ai === undefined ? undefined : createFakeModerationAI(over.ai.script ?? []);
   const real = await createChatwarden({
     store,
     secret: SECRET,
@@ -45,6 +50,10 @@ export async function world(over: WorldOptions = {}) {
     clock,
     logger,
     retention: false,
+    ...(adapter === undefined ? {} : { ai: { adapter, ...(over.ai?.options ?? {}) } }),
+    ...(adapter === undefined && over.overrides === undefined
+      ? {}
+      : { overrides: { ...(over.overrides ?? {}), ...(adapter === undefined ? {} : { ai: { ...(over.overrides?.ai ?? {}), level: over.ai?.level ?? 1 } }) } }),
   });
   const live = new LiveTerms({ store, pack: syntheticTermPack(), clock, logger });
   await live.load();
@@ -128,7 +137,7 @@ export async function world(over: WorldOptions = {}) {
   };
   /** A second open report against the same person as `prev`, from another reporter in another room. */
   const fileAgainst = (prev: { key: string }, _reporter: string, category: ReportCategory = 'harassment') => file(category, prev.key);
-  return { cw: real, live, routes, router, call, audit, routeAudit, clock, logged, store, db, person, gap, file, fileAgainst };
+  return { cw: real, live, routes, router, call, audit, routeAudit, clock, logged, store, db, person, gap, file, fileAgainst, adapter };
 }
 
 export const errorOf = (res: KitResponse): string => (res.body as { error: string }).error;

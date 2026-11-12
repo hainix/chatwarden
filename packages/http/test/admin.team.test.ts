@@ -471,7 +471,7 @@ describe('GET /reports and GET /reports/:id: claim and viewing', () => {
     expect(item.claim).toBeNull();
     expect(item.viewing).toEqual([]);
     const keys = Object.keys(item);
-    expect(keys.slice(-5)).toEqual(['targetHandle', 'reporterHandle', 'claim', 'viewing', 'reporterAccuracy']);
+    expect(keys.slice(-6)).toEqual(['targetHandle', 'reporterHandle', 'claim', 'viewing', 'reporterAccuracy', 'ai']);
   });
 
   it('shows the claim { by, since, until } on every report of the claimed person, and only theirs', async () => {
@@ -518,7 +518,7 @@ describe('GET /reports and GET /reports/:id: claim and viewing', () => {
     const w = await world();
     const r = await w.file();
     const none = body(await w.call('GET', `/reports/${r.id}`));
-    expect(Object.keys(none)).toEqual(['report', 'history', 'suggest', 'rule', 'claim']);
+    expect(Object.keys(none)).toEqual(['report', 'history', 'suggest', 'rule', 'claim', 'ai']);
     expect(none.claim).toBeNull();
     await w.call('POST', `/cases/${r.target}/claim`, { actor: 'ann' });
     expect(body(await w.call('GET', `/reports/${r.id}`)).claim).toEqual({ by: 'ann', since: expect.any(Number), until: expect.any(Number) });
@@ -539,7 +539,7 @@ describe('GET /reports and GET /reports/:id: claim and viewing', () => {
     await w.file();
     const item = body(await w.call('GET', '/reports')).items[0];
     expect(Object.keys(item).sort()).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'ai', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
   });
 });

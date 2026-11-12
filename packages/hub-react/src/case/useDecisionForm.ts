@@ -79,13 +79,38 @@ export interface DecisionDraft {
   announce: (text: string) => void;
   /** The action whose lines the transcript's margin boxes edit: the reported person's first action that shows lines. */
   primary: Draft | null;
+  /** The AI level the hub is set to (0 off, 1 read, 2 recommend), from the policy; 0 when the role cannot read it. A hint that a read is on its way, nothing more. */
+  aiLevel: number;
+  /** The read carries a recommendation: the form waits for the AI's part of the case (case/AiCase.tsx) to say what it opens with. */
+  wantsAi: boolean;
+  /** The AI's part of the case: replace the form (no edit is meant), ask the ladder for a conduct level (and rule), make a new action id. */
+  adopt: (form: DecisionForm) => void;
+  askLevel: (level: ConductLevel, rule: number | null) => void;
+  newUid: () => string;
+  /** The rule and the lines to add the ladder's step with, when the form came from the AI (its rule, the lines it cited), else null. */
+  addHint: { rule: number; lines: string[] } | null;
+  setAddHint: (hint: { rule: number; lines: string[] } | null) => void;
 }
 
 /**
  * The form for the open report. `enabled` is false for a closed report or a role that cannot decide: then nothing is read, and
  * `status` stays `loading` (the bar shows its own message).
  */
-export function useDecisionForm({ detail, people, enabled }: { detail: ReportDetail | undefined; people: ReportPerson[]; enabled: boolean }): DecisionDraft {
+export function useDecisionForm({
+  detail,
+  people,
+  enabled,
+  aiFirst = null,
+  aiDecided = true,
+}: {
+  detail: ReportDetail | undefined;
+  people: ReportPerson[];
+  enabled: boolean;
+  /** The form the AI's part opened the case with (its suggestion), if it made one. */
+  aiFirst?: DecisionForm | null;
+  /** The AI's part of the case has decided what to open with (or could not be loaded). */
+  aiDecided?: boolean;
+}): DecisionDraft {
   const { t, locale, can, session, client } = useHub();
   const decisions = useDecisions();
   const report = detail?.report;
@@ -137,8 +162,11 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
   const current = suggestion ?? detail?.suggest;
   const reportedLine = report?.lineId ?? null;
 
-  // The form, once the rules are known (or known to be unavailable). After an Undo or a failed send, the form as it was.
-  const ready = enabled && report !== undefined && detail !== undefined && rulesState !== 'loading';
+  // The form, once the rules are known (or known to be unavailable) and, for a case that carries a recommendation, the AI's part has said what it opens
+  // with. After an Undo or a failed send, the form as it was.
+  const wantsAi = enabled && detail?.ai?.recommendation != null;
+  const [addHint, setAddHint] = useState<{ rule: number; lines: string[] } | null>(null);
+  const ready = enabled && report !== undefined && detail !== undefined && rulesState !== 'loading' && (!wantsAi || aiDecided);
   useEffect(() => {
     if (!ready || formState !== null || detail === undefined) return;
     const before = decisions.entry(detail.report.id);
@@ -148,7 +176,7 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
       if (before.state.status === 'undone') decisions.dismiss(before.reportId);
       return;
     }
-    setFormState(initialForm(ctx, detail.suggest.outcome, detail.rule, reportedLine, nextUid()));
+    setFormState(aiFirst ?? initialForm(ctx, detail.suggest.outcome, detail.rule, reportedLine, nextUid()));
   }, [ready]);
 
   // The entry for this report: after an Undo the snapshot has been taken back (nothing stale is left to be restored over newer
@@ -301,12 +329,13 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
 
   const useSuggestion = useCallback((): void => {
     if (formState === null || current === undefined || detail === undefined) return;
-    const lines = defaultLines(ctx.ownLineIds[target] ?? [], reportedLine);
-    const next = withSuggestion(formState, ctx, current.outcome, detail.rule, nextUid(), lines);
+    // Added from an AI suggestion, the step is the ladder's but the rule and the lines are the AI's.
+    const lines = addHint?.lines ?? defaultLines(ctx.ownLineIds[target] ?? [], reportedLine);
+    const next = withSuggestion(formState, ctx, current.outcome, addHint?.rule ?? detail.rule, nextUid(), lines);
     if (next === null) return;
     setFormState(next);
     announce(formState.verdict === null ? t('hub.decide.announce.addedFair', { n: next.actions.length }) : t('hub.decide.announce.added', { n: next.actions.length }));
-  }, [announce, ctx, current, detail, formState, nextUid, reportedLine, t, target]);
+  }, [addHint, announce, ctx, current, detail, formState, nextUid, reportedLine, t, target]);
 
   const pickLevel = useCallback(
     (picked: ConductLevel): void => ask(picked, primary !== null && /^[1-9]\d*$/.test(primary.rule) ? Number(primary.rule) : null),
@@ -342,5 +371,12 @@ export function useDecisionForm({ detail, people, enabled }: { detail: ReportDet
     announcement,
     announce,
     primary,
+    aiLevel: (policy.data?.profile as { ai?: { level?: number } } | undefined)?.ai?.level ?? 0,
+    wantsAi,
+    adopt: setFormState,
+    askLevel: ask,
+    newUid: nextUid,
+    addHint,
+    setAddHint,
   };
 }

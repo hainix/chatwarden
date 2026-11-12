@@ -263,8 +263,9 @@ describe('validation: the reasons list', () => {
 });
 
 describe('the policy layer carries reporting', () => {
-  it("'reporting' is an editable section, listed last", () => {
-    expect(POLICY_SECTIONS.at(-1)).toBe('reporting');
+  it("'reporting' is an editable section, listed before 'ai'", () => {
+    expect(POLICY_SECTIONS.at(-2)).toBe('reporting');
+    expect(POLICY_SECTIONS.at(-1)).toBe('ai');
     expect(POLICY_SECTIONS).toContain('reporting');
   });
 

@@ -25,6 +25,16 @@ export interface RetentionPolicy {
   badFaithMs: number;
   /** A staff audit entry is deleted once it is older than this. */
   auditMs: number;
+  /**
+   * An AI outcome row (the agree-or-override record: ids and counts, no chat text) is kept this long. At least 90 days. A read
+   * itself goes with its report (`reportsMs`).
+   */
+  aiOutcomesMs: number;
+  /**
+   * The pseudonymised example text kept with an AI outcome is deleted once it is older than this. It is the only chat text that
+   * outlives a report, so it is the shortest of the three; 0 keeps no text at all.
+   */
+  aiExamplesMs: number;
 }
 
 export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
@@ -34,12 +44,14 @@ export const RETENTION_DEFAULTS: Readonly<RetentionPolicy> = {
   noticesMs: 90 * DAY_MS,
   badFaithMs: 30 * DAY_MS,
   auditMs: 365 * DAY_MS,
+  aiOutcomesMs: 365 * DAY_MS,
+  aiExamplesMs: 180 * DAY_MS,
 };
 
 /** The ladder looks back 90 days and "My record" shows 90 days, so the rows behind them must outlive that. */
 const RECORD_FLOOR_MS = 90 * DAY_MS;
 
-const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs'] as const;
+const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'badFaithMs', 'auditMs', 'aiOutcomesMs', 'aiExamplesMs'] as const;
 
 /**
  * Refuse a retention policy that would delete rows the kit still reads. Only the fields present are checked (an
@@ -48,6 +60,8 @@ const FIELDS = ['reportsMs', 'sanctionAfterEndMs', 'strikesMs', 'noticesMs', 'ba
  * - `noticesMs` at least 90 days: "My record" shows that far back
  * - `badFaithMs` at least `suspendWindowMs`: a bad-faith dismissal weighs against its reporter for that long
  * - `auditMs` at least 90 days: the staff trail is how a community answers "who did that"
+ * - `aiOutcomesMs` at least 90 days: the agree-or-override record is the data the AI's later gates read
+ * - `aiExamplesMs` at least 0 (0 keeps no example text at all)
  *
  * Every field present must also be a finite number (`reportsMs` and `strikesMs` have no floor, only this).
  *
@@ -76,6 +90,12 @@ export function checkRetentionFloors(policy: Partial<RetentionPolicy>, suspendWi
   if (below(policy.auditMs, RECORD_FLOOR_MS)) {
     throw new ProfileError('retention.auditMs', 'must be at least 90 days: the audit trail answers who did what, and when');
   }
+  if (below(policy.aiOutcomesMs, RECORD_FLOOR_MS)) {
+    throw new ProfileError('retention.aiOutcomesMs', 'must be at least 90 days: it is the record of how often the AI and the moderators agreed');
+  }
+  if (below(policy.aiExamplesMs, 0)) {
+    throw new ProfileError('retention.aiExamplesMs', 'must be 0 or more: 0 keeps no example text at all');
+  }
   if (below(policy.badFaithMs, suspendWindowMs)) {
     throw new ProfileError(
       'retention.badFaithMs',
@@ -94,6 +114,10 @@ export interface PurgeResult {
   notices: number;
   audit: number;
   webhookKeys: number;
+  /** AI reads deleted by the retention pass (a read also goes with its report). 0 for a store without the AI methods. */
+  aiReads: number;
+  /** AI casebook outcomes deleted. 0 for a store without the AI methods. */
+  aiOutcomes: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -114,6 +138,9 @@ function checkWindow(name: string, ms: number): void {
  *   term-editor rows written before the trail existed
  * - webhook keys: `createdAt < now - 24 h` (incoming-webhook idempotency keys, pending or done)
  * - mutes: `createdAt < now - 180 days`, the mute TTL (a mute past it is already ignored)
+ * - AI reads: `createdAt < now - reportsMs` (a read also goes with its report, in `purgeReports`); AI outcomes (agree-or-override
+ *   record, no chat text): `decidedAt < now - aiOutcomesMs`; the pseudonymised example kept with an outcome:
+ *   `decidedAt < now - aiExamplesMs`, the row stays with its counts. A store without the AI methods has none of these.
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn.
@@ -133,6 +160,8 @@ export async function purge(
     noticesMs: policy.noticesMs ?? RETENTION_DEFAULTS.noticesMs,
     badFaithMs: policy.badFaithMs ?? RETENTION_DEFAULTS.badFaithMs,
     auditMs: policy.auditMs ?? RETENTION_DEFAULTS.auditMs,
+    aiOutcomesMs: policy.aiOutcomesMs ?? RETENTION_DEFAULTS.aiOutcomesMs,
+    aiExamplesMs: policy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
   };
   if (!Number.isFinite(now)) throw new Error('purge: invalid now');
   checkWindow('reportsMs', p.reportsMs);
@@ -141,13 +170,21 @@ export async function purge(
   checkWindow('noticesMs', p.noticesMs);
   checkWindow('badFaithMs', p.badFaithMs);
   checkWindow('auditMs', p.auditMs);
-  return store.transaction(() => ({
-    reports: store.purgeReports(now - p.reportsMs, now - p.badFaithMs),
-    sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
-    strikes: store.purgeStrikes(now - p.strikesMs),
-    mutes: store.purgeMutes(now - MUTE_TTL_MS),
-    notices: store.purgeNotices(now - p.noticesMs),
-    audit: store.purgeAudit(now - p.auditMs),
-    webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
-  }));
+  checkWindow('aiOutcomesMs', p.aiOutcomesMs);
+  checkWindow('aiExamplesMs', p.aiExamplesMs);
+  return store.transaction(() => {
+    const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
+    const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
+    return {
+      reports,
+      sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
+      strikes: store.purgeStrikes(now - p.strikesMs),
+      mutes: store.purgeMutes(now - MUTE_TTL_MS),
+      notices: store.purgeNotices(now - p.noticesMs),
+      audit: store.purgeAudit(now - p.auditMs),
+      webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
+      aiReads: ai.reads,
+      aiOutcomes: ai.outcomes,
+    };
+  });
 }

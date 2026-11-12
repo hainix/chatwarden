@@ -33,6 +33,11 @@ const advance = (ms: number): Promise<void> =>
   act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
   });
+/** Real time passes (the guard clock does not move with it). */
+const realTime = (ms: number): Promise<void> =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  });
 const ctrlEnter = (init: KeyboardEventInit = {}): void => {
   fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Enter', ctrlKey: true, ...init });
 };
@@ -135,12 +140,43 @@ describe('the Detailed Decide buttons obey the same guards as every act', () => 
       fireEvent.click(pick());
       await pageHides();
       expect(decides(s.w)).toHaveLength(0);
+      // The button is drawn from the guard clock, which is frozen: however slow the machine, no real 300 ms can enable it early.
+      await realTime(350);
       expect(pick()).toHaveAttribute('aria-disabled', 'true');
       advanceGuardTime(QUICK_ACT_COOLDOWN_MS + 1);
       fireEvent.click(pick());
       await pageHides();
       expect(decides(s.w)).toHaveLength(1);
     }
+  });
+
+  it('the button and the guard cannot disagree: with the guard clock still, no timer enables the button, and the next tick after the clock has aged does', async () => {
+    const s = await detailed();
+    // Real time passes (the cooling timer has fired more than once) with a guard clock that has not moved: the guard still refuses,
+    // so the button still says so.
+    await realTime(700);
+    fireEvent.click(decideHere());
+    await pageHides();
+    expect(decides(s.w)).toHaveLength(0);
+    expect(decideHere()).toHaveAttribute('aria-disabled', 'true');
+    // The guard clock ages: the very next tick draws the button enabled, and by then a click decides.
+    advanceGuardTime(QUICK_ACT_COOLDOWN_MS + 1);
+    await waitFor(() => expect(decideHere()).not.toHaveAttribute('aria-disabled', 'true'));
+    fireEvent.click(decideHere());
+    await pageHides();
+    expect(decides(s.w)).toHaveLength(1);
+  });
+
+  it('a button never reads enabled while the guard still refuses (just short of 300 ms, then past it)', async () => {
+    const s = await detailed();
+    advanceGuardTime(QUICK_ACT_COOLDOWN_MS - 1);
+    await realTime(400);
+    expect(decideHere()).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(decideHere());
+    await pageHides();
+    expect(decides(s.w)).toHaveLength(0);
+    advanceGuardTime(1);
+    await waitFor(() => expect(decideHere()).not.toHaveAttribute('aria-disabled', 'true'));
   });
 
   it('the second click of a double click (detail 2) is ignored, even on an aged case', async () => {

@@ -868,6 +868,18 @@
   font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
   line-height: 1.5;
 }
+/* The AI's one chip in the queue: neutral, with the dashed outline that says "machine-written". No hue. */
+.cw-hub .cw-aichip {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: 4px;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: 0.71875rem;
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: 1.5;
+  white-space: nowrap;
+}
 .cw-hub .cw-case-facts {
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
   font-size: var(--cw-text-s, var(--cwd-text-s));
@@ -1463,14 +1475,90 @@
 .cw-hub .cw-ai {
   display: grid;
   gap: var(--cw-space-1, var(--cwd-space-1));
+  min-width: 0;
   padding: var(--cw-space-3, var(--cwd-space-3)) var(--cw-space-4, var(--cwd-space-4));
   border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border-strong, var(--cwd-border-strong));
   border-radius: var(--cw-radius-m, var(--cwd-radius-m));
 }
-.cw-hub .cw-ai h3 {
+.cw-hub .cw-ai-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-aitag {
+  padding: 0 0.4rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
   color: var(--cw-ink-muted, var(--cwd-ink-muted));
   font-size: var(--cw-text-s, var(--cwd-text-s));
-  font-weight: var(--cw-weight-medium, var(--cwd-weight-medium));
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+  line-height: 1.5;
+}
+.cw-hub .cw-ai-level {
+  font-weight: var(--cw-weight-strong, var(--cwd-weight-strong));
+}
+.cw-hub .cw-ai-summary {
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-ai-rule,
+.cw-hub .cw-ai-count {
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+}
+/* The menu takes no box of its own: its button joins the strip's row and its panel takes a row under it (in the flow, never floating). */
+.cw-hub .cw-ai-menu {
+  display: contents;
+  min-width: 0;
+}
+.cw-hub .cw-ai-more {
+  margin-inline-start: auto;
+  min-height: 0;
+  padding-block: 0;
+  line-height: 1.5;
+}
+.cw-hub .cw-ai-panel {
+  display: grid;
+  flex-basis: 100%;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+  padding: var(--cw-space-3, var(--cwd-space-3));
+  border: var(--cw-border-width, var(--cwd-border-width)) solid var(--cw-border, var(--cwd-border));
+  border-radius: var(--cw-radius-m, var(--cwd-radius-m));
+}
+.cw-hub .cw-ai-facts {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: 0;
+}
+.cw-hub .cw-ai-facts > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+}
+.cw-hub .cw-ai-facts dt {
+  min-width: 6rem;
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+}
+.cw-hub .cw-ai-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cw-hub .cw-ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+}
+/* The mark on a line the AI cited: a tick in a dashed box, no hue. */
+.cw-hub .cw-aitick {
+  display: inline-block;
+  padding: 0 0.3rem;
+  border: var(--cw-border-width, var(--cwd-border-width)) dashed var(--cw-border-strong, var(--cwd-border-strong));
+  border-radius: var(--cw-radius-s, var(--cwd-radius-s));
+  color: var(--cw-ink-muted, var(--cwd-ink-muted));
+  font-size: var(--cw-text-s, var(--cwd-text-s));
+  line-height: 1.4;
 }
 
 /* The reports in the case, and the person's record */
@@ -3458,4 +3546,51 @@
   .cw-hub .cw-avatar {
     border: 1px solid CanvasText;
   }
+}
+
+/* Settings > AI: the level, the status line and one Advanced disclosure. Neutral tokens only: nothing here means danger or a next step. */
+.cw-hub .cw-ai-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--cw-space-1, var(--cwd-space-1)) var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-ai-advanced,
+.cw-hub .cw-ai-numbers {
+  display: grid;
+  gap: var(--cw-space-3, var(--cwd-space-3));
+  min-width: 0;
+}
+.cw-hub .cw-ai-advanced {
+  justify-items: start;
+}
+.cw-hub .cw-ai-advanced > div {
+  justify-self: stretch;
+}
+.cw-hub .cw-ai-facts-list {
+  display: grid;
+  gap: var(--cw-space-1, var(--cwd-space-1));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cw-hub .cw-aibar {
+  display: grid;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
+}
+.cw-hub .cw-aibar p,
+.cw-hub .cw-ai-hidden,
+.cw-hub .cw-ai-panel p,
+.cw-hub .cw-ai-numbers p,
+.cw-hub .cw-ai-summary {
+  margin: 0;
+}
+.cw-hub .cw-aibar-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cw-space-2, var(--cwd-space-2));
+  min-width: 0;
 }

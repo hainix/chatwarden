@@ -68,7 +68,7 @@ describe('the menu: Cases, Words, Blocked and More', () => {
     expect(within(sections()).getByRole('link', { name: 'Cases' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('More is a menu of Recent actions, Audit, Rule gaps, Guide, Steps and ladder and Reporting, closed until opened', async () => {
+  it('More is a menu of Recent actions, Audit, Rule gaps, Guide, Steps and ladder, Reporting and AI, closed until opened', async () => {
     const w = await hubWorld({ role: 'owner' });
     const { user } = renderHub(w, { mode: 'simple' });
     await screen.findByRole('region', { name: 'Open cases' });
@@ -77,7 +77,7 @@ describe('the menu: Cases, Words, Blocked and More', () => {
     expect(within(sections()).queryByRole('link', { name: 'Audit' })).toBeNull();
     await user.click(more);
     expect(more).toHaveAttribute('aria-expanded', 'true');
-    expect([...sections().querySelectorAll('.cw-snav-menu a')].map((a) => a.textContent)).toEqual(['Recent actions', 'Audit', 'Rule gaps', 'Guide', 'Steps and ladder', 'Reporting']);
+    expect([...sections().querySelectorAll('.cw-snav-menu a')].map((a) => a.textContent)).toEqual(['Recent actions', 'Audit', 'Rule gaps', 'Guide', 'Steps and ladder', 'Reporting', 'AI']);
   });
 
   it.each(MORE)('%s opens its screen from More, and More closes', async (name, _permission, path) => {

@@ -12,7 +12,10 @@ import type { HubData } from '../hooks.js';
 import { useOptionalQueue } from '../liveQueue.js';
 import { nextOpenReport } from '../queue.js';
 import type { NextReport, QueueGroup } from '../queue.js';
-import type { PersonHistory, ReportDetail } from '../types.js';
+import type { AiBus, AiCaseApi } from '../ai/api.js';
+import type { DecisionForm } from '../decision.js';
+import { LazyAiParts } from '../lazyParts.js';
+import type { AiReadView, DecideInput, PersonHistory, ReportDetail } from '../types.js';
 import { QUICK_ACT_COOLDOWN_MS, hasAged, monotonicNow } from './actGuard.js';
 import { useDecisionForm } from './useDecisionForm.js';
 import type { DecisionDraft } from './useDecisionForm.js';
@@ -39,6 +42,14 @@ export interface CaseValue {
   left: boolean;
   /** The decision form, shared by the transcript's margin boxes and the decision bar. */
   draft: DecisionDraft;
+  /** What the AI read of this report, or null (the AI is off, or no read yet). Advice, never a decision. */
+  aiRead: AiReadView | null;
+  /** What the AI's part of the case published (case/AiCase.tsx): its suggestion, whether it can be accepted, and how. Null until it has, and for a case with no recommendation. */
+  aiCase: AiCaseApi | null;
+  /** How the AI's part of the case talks to the case: what the form opens with, that it has decided, what it publishes, and the way to the editor. */
+  aiBus: AiBus;
+  /** What a decision says about the AI read that was shown (the server checks it against the decision), or undefined when none was shown. */
+  echo: (accepted: boolean | undefined, form: DecisionForm) => NonNullable<DecideInput['ai']> | undefined;
   /** The case was drawn long enough ago (the quick-act cooldown, on a monotonic clock) for an act key or a quick button to act on it. Read when a key is pressed. */
   settled: () => boolean;
   /** The same, as state, so a button can be drawn disabled for that moment. */
@@ -55,7 +66,6 @@ export interface CaseValue {
 
 const CaseContext = createContext<CaseValue | null>(null);
 
-/** The open case. Throws outside `<CaseProvider>`. */
 export function useCase(): CaseValue {
   const value = useContext(CaseContext);
   if (value === null) throw new Error('useCase must be used inside <CaseProvider>');
@@ -95,15 +105,33 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   }, []);
 
   // When the case was drawn (its read is in), on the monotonic clock: act keys and quick buttons wait a moment after it.
+  const [aiCase, setAiCase] = useState<AiCaseApi | null>(null);
+  const aiOk = aiCase?.gate?.ok === true;
   const shownAt = useRef<number | null>(null);
   const hasData = detail.data !== undefined;
   if (hasData && shownAt.current === null) shownAt.current = monotonicNow();
+  // The AI's suggestion appearing or leaving changes what 1, A and Ctrl+Enter send: the quick-act wait starts again, as for a new case.
+  const armedFor = useRef(aiOk);
+  if (armedFor.current !== aiOk) {
+    armedFor.current = aiOk;
+    if (shownAt.current !== null) shownAt.current = monotonicNow();
+  }
+  // What the buttons are drawn from: set by a timer that re-reads the same guard clock `settled()` reads, never by the timer alone, so a
+  // button can only read enabled when the guard would let the click through (they cannot disagree, on a slow machine or in a test that
+  // holds the clock). A tick that finds the case not yet old enough waits for what is left.
   const [cooled, setCooled] = useState(false);
   useEffect(() => {
     if (!hasData) return undefined;
-    const id = setTimeout(() => setCooled(true), QUICK_ACT_COOLDOWN_MS);
+    setCooled(false);
+    let id: ReturnType<typeof setTimeout>;
+    const tick = (): void => {
+      const shown = shownAt.current;
+      if (shown !== null && hasAged(shown)) setCooled(true);
+      else id = setTimeout(tick, Math.max(1, shown === null ? QUICK_ACT_COOLDOWN_MS : QUICK_ACT_COOLDOWN_MS - (monotonicNow() - shown)));
+    };
+    id = setTimeout(tick, QUICK_ACT_COOLDOWN_MS);
     return () => clearTimeout(id);
-  }, [hasData]);
+  }, [hasData, aiOk]);
   const settled = useCallback(() => hasAged(shownAt.current), []);
 
   const claim = group !== null ? group.claim : (detail.data?.claim ?? null);
@@ -111,7 +139,20 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
   const entry = decisions.entry(reportId);
   // Until the report is loaded it counts as open (the entry then decides); once loaded as closed, a sent decision no longer hides it.
   const left = hasLeft(entry, report === undefined || report.status === 'open');
-  const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide') });
+  // The AI's part of the case (case/AiCase.tsx, a lazy part) tells the form what to open with and publishes what the keys and the buttons need.
+  const aiRead = detail.data?.ai ?? null;
+  const [aiFirst, setAiFirst] = useState<DecisionForm | null>(null);
+  const [aiDecided, setAiDecided] = useState(false);
+  const aiBus = useMemo<AiBus>(() => ({ first: setAiFirst, decided: setAiDecided, publish: setAiCase, edit: { current: null }, hidden: { current: false } }), []);
+  // A part chunk that never arrives must not hold the form: after a few seconds it opens as the ladder's (a read that lands later takes over, see AiCase).
+  const waitsForAi = aiRead?.recommendation != null && !aiDecided;
+  useEffect(() => {
+    if (!waitsForAi) return undefined;
+    const id = setTimeout(() => setAiDecided(true), 4_000);
+    return () => clearTimeout(id);
+  }, [waitsForAi]);
+
+  const draft = useDecisionForm({ detail: detail.data, people, enabled: report?.status === 'open' && can('reports.decide'), aiFirst, aiDecided });
 
   const value: CaseValue = {
     reportId,
@@ -124,9 +165,18 @@ export function CaseProvider({ reportId, children }: { reportId: string; childre
     entry,
     left,
     draft,
+    aiRead,
+    aiCase,
+    aiBus,
+    echo: (accepted, form) => (aiCase !== null ? aiCase.echo(accepted, form) : aiRead === null || aiBus.hidden.current ? undefined : { readId: aiRead.id, accepted: false }),
     settled,
     cooled,
     reveal: { all: revealAll, setAll: setRevealAll, shows: (id) => revealAll || revealed.has(id), toggle },
   };
-  return <CaseContext.Provider value={value}>{children}</CaseContext.Provider>;
+  return (
+    <CaseContext.Provider value={value}>
+      {children}
+      {aiRead?.recommendation != null && <LazyAiParts part="case" onFailed={() => setAiDecided(true)} />}
+    </CaseContext.Provider>
+  );
 }

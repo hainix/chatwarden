@@ -1,0 +1,391 @@
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AIError } from '@chatwarden/core';
+import { forgetHiddenAi } from '../src/ai/hide.js';
+import { aiCase, aiWorld, noStrip, open, openPlain, pageReads, reads, settle, strip, TALK } from './aiHub.js';
+import { renderHub } from './render.js';
+
+// Level 1: the AI's read on the case card. Over the real routes with the scripted fake behind them: what the strip says, what it never
+// says, the skeleton that waits for a read, and the tick on the lines it cited.
+
+const SUMMARY = 'The reported player was rude in chat.';
+
+afterEach(() => {
+  vi.useRealTimers();
+  forgetHiddenAi();
+  cleanup();
+});
+
+describe('the strip: nothing when there is nothing to say', () => {
+  it('renders nothing at level 0 or with no read', async () => {
+    // Level 0: no adapter, no setting. Nothing is drawn and nothing is asked for.
+    const { container, w, f } = await aiCase({ level: 0 });
+    await settle();
+    expect(noStrip()).toBeNull();
+    expect(container.querySelector('.cw-ai')).toBeNull();
+    expect(pageReads(w, f.id)).toBe(1);
+  });
+
+  it('a closed case shows no strip, whatever the AI read', async () => {
+    const { w, f } = await aiWorld({ level: 1 });
+    await w.client.decide(f.id, { verdict: 'no_action', actions: [] });
+    const { container } = await openPlain(w, f.id);
+    await settle();
+    expect(container.querySelector('.cw-ai')).toBeNull();
+  });
+
+  it('the Simple mode card shows no strip at level 0 either', async () => {
+    const { container } = await aiCase({ level: 0, mode: 'simple' });
+    await settle();
+    expect(container.querySelector('.cw-ai')).toBeNull();
+  });
+});
+
+describe('the strip: what it says', () => {
+  it('renders the tag, level word, rule and summary', async () => {
+    await aiCase({ level: 1 });
+    const region = await strip();
+    expect(within(region).getByText('AI')).toBeInTheDocument();
+    expect(region.querySelector('.cw-ai-level')?.textContent).toBe('Rude');
+    expect(within(region).getByText('Rule 1')).toBeInTheDocument();
+    expect(within(region).getByText(SUMMARY)).toBeInTheDocument();
+    // The count of lines it cited, as the strip says it.
+    expect(within(region).getByText('AI cited 1 line')).toBeInTheDocument();
+  });
+
+  it('says how many lines it cited, in the right plural', async () => {
+    const { w } = await aiCase({
+      level: 1,
+      script: (input) => reads({ evidence: input.lines.filter((l) => l.who === 'P1').map((l) => l.ref) })(input),
+    });
+    expect(w.adapter?.callCount).toBe(1);
+    const region = await strip();
+    expect(within(region).getByText('AI cited 2 lines')).toBeInTheDocument();
+  });
+
+  it('names each conduct level in words and a rule that no rule fits', async () => {
+    await aiCase({ level: 1, script: reads({ severity: 'severe', rule: 'uncovered' }) });
+    const region = await strip();
+    expect(region.querySelector('.cw-ai-level')?.textContent).toBe('Severe');
+    expect(within(region).getByText('No rule fits yet')).toBeInTheDocument();
+  });
+
+  it('draws no rule chip when the AI named none', async () => {
+    await aiCase({
+      level: 1,
+      script: reads({ severity: 'banter', rule: null, evidence: [], recommendation: { verdict: 'no_action', severity: 'banter', rule: null, evidence: [] } }),
+    });
+    const region = await strip();
+    expect(region.querySelector('.cw-ai-level')?.textContent).toBe('Banter');
+    expect(within(region).queryByText(/^Rule /)).toBeNull();
+    expect(within(region).queryByText(/AI cited/)).toBeNull();
+  });
+
+  it('the summary is text: a <b> and a markdown link are shown literally', async () => {
+    const { w, f } = await aiWorld({ level: 1 });
+    const odd = 'a <b>bold</b> claim and a [link](https://x.test) and **stars**';
+    w.intercept.fn = async (req) => {
+      if (req.method !== 'GET' || req.path !== `/reports/${f.id}`) return undefined;
+      const res = await w.raw({ method: 'GET', path: req.path });
+      const body = res.body as { ai: { summary: string } };
+      return { ...res, body: { ...body, ai: { ...body.ai, summary: odd } } };
+    };
+    await open(w, f.id);
+    const region = await strip();
+    expect(within(region).getByText(odd)).toBeInTheDocument();
+    expect(region.querySelector('b, a, strong:not(.cw-ai-level), em')).toBeNull();
+    expect(region.innerHTML).toContain('&lt;b&gt;bold&lt;/b&gt;');
+  });
+
+  it('is the same on the Simple mode card, where a level 1 case gets the read and no new button', async () => {
+    await aiCase({ level: 1, mode: 'simple' });
+    const region = await strip();
+    expect(within(region).getByText(SUMMARY)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Accept/ })).toBeNull();
+    // The card still has its own buttons only: the step, nothing wrong here, something else.
+    expect(screen.getByRole('button', { name: 'No action needed' })).toBeInTheDocument();
+  });
+
+  it('the strip is neutral and dashed: it uses no tone class of its own', async () => {
+    await aiCase({ level: 1 });
+    const region = await strip();
+    expect(region.className).toBe('cw-ai');
+    expect(region.querySelector('[class*="--bad"], [class*="--warn"], [class*="--accent"]')).toBeNull();
+  });
+
+  it('a read that is stale or flagged says nothing alarming in the strip', async () => {
+    await aiCase({ level: 1, script: reads({ injectionSuspected: true }) });
+    const region = await strip();
+    expect(region.textContent).not.toMatch(/instruct|injection|older|stale|warning|suspicious|attack/i);
+    expect(region.querySelector('.cw-tag--bad, .cw-tag--warn, .cw-notice')).toBeNull();
+  });
+});
+
+describe('the skeleton while a read is expected', () => {
+  const FAKE: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] };
+  const tick = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+  const settleAll = async () => {
+    for (let i = 0; i < 8; i += 1) await tick(0);
+  };
+
+  it('pending shows a skeleton and then, after 20 seconds, only a quiet Check again (fake timers)', async () => {
+    const { w, f } = await aiWorld({ level: 1, script: [{ hang: true }], noRead: true });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
+    await settleAll();
+    const region = screen.getByRole('region', { name: 'AI read' });
+    expect(region).toHaveAttribute('aria-busy', 'true');
+    expect(within(region).getByText('The AI is reading this case.')).toBeInTheDocument();
+    expect(region.querySelector('.cw-skel')).not.toBeNull();
+    await tick(19_000);
+    expect(screen.getByRole('region', { name: 'AI read' })).toHaveAttribute('aria-busy', 'true');
+    await tick(2_000);
+    // The skeleton is gone; a quiet line is left, with the one way to look again. No error is ever shown on the case.
+    const quiet = screen.getByRole('region', { name: 'AI read' });
+    expect(quiet).not.toHaveAttribute('aria-busy', 'true');
+    expect(quiet.querySelector('.cw-skel')).toBeNull();
+    expect(within(quiet).getByText('The AI has not answered yet.')).toBeInTheDocument();
+    expect(within(quiet).getByRole('button', { name: 'Check again' })).toBeInTheDocument();
+    expect(quiet.querySelector('[role="alert"], .cw-error, .cw-notice')).toBeNull();
+    expect(screen.queryByText(/AI.*(failed|could not|error)/i)).toBeNull();
+  });
+
+  it('while it waits the case is read again twice (about 5 and 15 seconds), then Check again reads it once per click', async () => {
+    const { w, f } = await aiWorld({ level: 1, script: [{ hang: true }], noRead: true });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
+    await settleAll();
+    const first = pageReads(w, f.id);
+    await tick(4_900);
+    expect(pageReads(w, f.id) - first).toBe(0);
+    await tick(200);
+    expect(pageReads(w, f.id) - first).toBe(1);
+    await tick(9_800);
+    expect(pageReads(w, f.id) - first).toBe(1);
+    await tick(200);
+    expect(pageReads(w, f.id) - first).toBe(2);
+    // Nothing more is asked by itself once the 20 seconds are over: at most three audited reads of the case per open.
+    await tick(60_000);
+    expect(pageReads(w, f.id) - first).toBe(2);
+    expect(first).toBe(1);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    });
+    await settleAll();
+    expect(pageReads(w, f.id) - first).toBe(3);
+    await tick(60_000);
+    expect(pageReads(w, f.id) - first).toBe(3);
+  });
+
+  it('Check again brings the read in when it has arrived meanwhile', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { w, f } = await aiWorld({ level: 1, script: async () => (await gate, { usage: {} }), noRead: true });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
+    await settleAll();
+    await tick(21_000);
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument();
+    release();
+    await tick(10);
+    await settleAll();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    });
+    await settleAll();
+    const region = screen.getByRole('region', { name: 'AI read' });
+    expect(within(region).getByText(SUMMARY)).toBeInTheDocument();
+    expect(within(region).queryByRole('button', { name: 'Check again' })).toBeNull();
+  });
+
+  it('a read that arrives while the skeleton shows replaces it', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { w, f } = await aiWorld({ level: 1, script: async () => (await gate, { usage: {} }), noRead: true });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
+    await settleAll();
+    expect(screen.getByRole('region', { name: 'AI read' })).toHaveAttribute('aria-busy', 'true');
+    release();
+    await tick(10);
+    await settleAll();
+    await tick(5_000);
+    await settleAll();
+    const region = screen.getByRole('region', { name: 'AI read' });
+    expect(region).not.toHaveAttribute('aria-busy', 'true');
+    expect(within(region).getByText(SUMMARY)).toBeInTheDocument();
+  });
+
+  it('no skeleton on a case where the AI is off', async () => {
+    const { w, f } = await aiWorld({ level: 0 });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
+    await settleAll();
+    expect(noStrip()).toBeNull();
+  });
+});
+
+describe('degraded modes: no read is expected, so the case renders exactly as with the AI off', () => {
+  const FAKE: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] };
+  const tick = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+  const settleAll = async () => {
+    for (let i = 0; i < 8; i += 1) await tick(0);
+  };
+  /** Opens the case under fake timers, lets a minute pass, and shows that nothing was drawn and the case was read once. */
+  const quiet = async (w: Awaited<ReturnType<typeof aiWorld>>['w'], id: string) => {
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${id}`, mode: 'detailed' });
+    await settleAll();
+    expect(noStrip()).toBeNull();
+    await tick(60_000);
+    await settleAll();
+    expect(noStrip()).toBeNull();
+    expect(document.querySelector('.cw-ai, .cw-skel')).toBeNull();
+    expect(screen.queryByText(/The AI/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Check again' })).toBeNull();
+    expect(pageReads(w, id)).toBe(1);
+  };
+
+  it('control: with the AI on and healthy the skeleton shows and the case is read again', async () => {
+    const { w, f } = await aiWorld({ level: 1, script: [{ hang: true }], noRead: true });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
+    await settleAll();
+    expect(screen.getByRole('region', { name: 'AI read' })).toHaveAttribute('aria-busy', 'true');
+    await tick(16_000);
+    expect(pageReads(w, f.id)).toBe(3);
+  });
+
+  it('the daily money cap is reached: no skeleton, no extra reads of the case', async () => {
+    const { w, f } = await aiWorld({ level: 1, noRead: true, world: { ai: { level: 1, options: { dailyBudgetMicros: 0 } } } });
+    await quiet(w, f.id);
+  });
+
+  it('the daily call ceiling is reached: no skeleton, no extra reads of the case', async () => {
+    const { w } = await aiWorld({ level: 1, world: { overrides: { ai: { dailyCalls: 1 } } } });
+    const second = await w.fileRich({ lines: TALK, note: 'Again.' });
+    await w.aiIdle();
+    expect(w.cw.ai.status().state).toBe('paused_budget');
+    await quiet(w, second.id);
+  });
+
+  it('the breaker is open (the provider failed fatally): no skeleton for the next case', async () => {
+    const { w } = await aiWorld({ level: 1, script: [{ error: new AIError('fatal') }] });
+    expect(w.cw.ai.status().state).toBe('unavailable');
+    const next = await w.fileRich({ lines: TALK, note: 'Again.' });
+    await quiet(w, next.id);
+  });
+
+  it('a read that ended without an answer (declined): no skeleton, no waiting line', async () => {
+    const { w, f } = await aiWorld({ level: 1, script: [{ error: new AIError('declined') }] });
+    expect(w.cw.ai.status().state).toBe('ok');
+    await quiet(w, f.id);
+  });
+
+  it('the profile says level 2 but the server has no adapter: nothing is drawn', async () => {
+    const { w, f } = await aiWorld({ level: 0, world: { overrides: { ai: { level: 2 } } } });
+    await quiet(w, f.id);
+  });
+
+  it('a server that does not say a read is expected (an older one) gets no skeleton, whatever the policy level', async () => {
+    const { w, f } = await aiWorld({ level: 1, script: [{ hang: true }], noRead: true });
+    w.intercept.fn = async (req) => {
+      if (req.method !== 'GET' || req.path !== `/reports/${f.id}`) return undefined;
+      const res = await w.raw({ method: 'GET', path: req.path });
+      const { aiExpected: _drop, ...rest } = res.body as Record<string, unknown>;
+      void _drop;
+      return { ...res, body: rest };
+    };
+    await quiet(w, f.id);
+  });
+
+  it('the skeleton goes when the server stops expecting a read mid-wait', async () => {
+    const { w, f } = await aiWorld({ level: 1, script: [{ hang: true }], noRead: true });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
+    await settleAll();
+    expect(screen.getByRole('region', { name: 'AI read' })).toHaveAttribute('aria-busy', 'true');
+    w.intercept.fn = async (req) => {
+      if (req.method !== 'GET' || req.path !== `/reports/${f.id}`) return undefined;
+      const res = await w.raw({ method: 'GET', path: req.path });
+      return { ...res, body: { ...(res.body as Record<string, unknown>), aiExpected: false } };
+    };
+    await tick(5_100);
+    await settleAll();
+    expect(noStrip()).toBeNull();
+  });
+
+  it('the Simple mode card draws nothing either', async () => {
+    const { w, f } = await aiWorld({ level: 1, noRead: true, world: { ai: { level: 1, options: { dailyBudgetMicros: 0 } } } });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'simple' });
+    await settleAll();
+    await tick(30_000);
+    expect(document.querySelector('.cw-ai, .cw-skel')).toBeNull();
+    expect(pageReads(w, f.id)).toBe(1);
+  });
+});
+
+describe('the lines the AI cited', () => {
+  it('the cited lines carry a tick and a text alternative', async () => {
+    await aiCase({ level: 1 });
+    await strip();
+    const lines = [...document.querySelectorAll<HTMLElement>('.cw-lines .cw-line')];
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    const cited = lines.filter((l) => l.querySelector('.cw-aitick') !== null);
+    expect(cited).toHaveLength(1);
+    expect(cited[0]).toHaveTextContent('you are trash');
+    expect(within(cited[0] as HTMLElement).getByText('Cited by the AI')).toBeInTheDocument();
+    // Not on the other lines, the reporter's or the bystander's.
+    for (const l of lines.filter((x) => x !== cited[0])) expect(l.querySelector('.cw-aitick')).toBeNull();
+  });
+
+  it('the tick is a mark, not a control: the line is still picked by its own box', async () => {
+    await aiCase({ level: 1 });
+    await strip();
+    const tick = document.querySelector('.cw-aitick') as HTMLElement;
+    expect(tick.querySelector('button, input, a')).toBeNull();
+    expect(tick.closest('.cw-line')?.querySelector('input[type="checkbox"]')).not.toBeNull();
+  });
+
+  it('the Simple mode card shows the tick on the lines it lists', async () => {
+    await aiCase({ level: 1, mode: 'simple' });
+    await strip();
+    expect(document.querySelectorAll('.cw-aitick')).toHaveLength(1);
+  });
+
+  it('with no read there is no tick', async () => {
+    await aiCase({ level: 0 });
+    await settle();
+    expect(document.querySelector('.cw-aitick')).toBeNull();
+  });
+});
+
+describe('the words come from the catalog', () => {
+  it('a translation of the strip\'s words is used where an adopter supplies one, and English fills the gaps', async () => {
+    const { createT, en } = await import('../src/i18n.js');
+    const t = createT({ ...en, 'hub.ai.label': 'Lecture IA', 'hub.ai.tag': 'IA', 'hub.ai.cites.one': 'IA : {count} ligne citée', 'hub.ai.cites.other': 'IA : {count} lignes citées' } as never, 'fr');
+    await aiCase({ level: 1, t });
+    const region = await screen.findByRole('region', { name: 'Lecture IA' });
+    expect(within(region).getByText('IA')).toBeInTheDocument();
+    expect(within(region).getByText('IA : 1 ligne citée')).toBeInTheDocument();
+    // A word the adopter did not translate comes from the strip's own English.
+    expect(within(region).getByRole('button', { name: 'AI details' })).toBeInTheDocument();
+  });
+});
+
+describe('the case page stays what it was', () => {
+  it('the strip sits between the header and the transcript', async () => {
+    await aiCase({ level: 1 });
+    const region = await strip();
+    const note = document.querySelector('.cw-note') as HTMLElement;
+    const transcript = document.querySelector('.cw-transcript') as HTMLElement;
+    expect(region.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(region.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(TALK.length).toBe(4);
+  });
+});

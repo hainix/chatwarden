@@ -1,8 +1,9 @@
 import { validateSanctionInput } from '@chatwarden/core';
-import type { Chatwarden, DecisionAction, DecisionInput, SanctionInput, SanctionKind, StaffReport } from '@chatwarden/core';
+import type { Chatwarden, DecisionAction, DecisionInput, Role, SanctionInput, SanctionKind, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { PermissionKey } from '../permissions.js';
 import { bodyText, has, parseAction } from './validate.js';
+import type { AiEchoBody } from './validate.js';
 
 // What a decision and a direct sanction check and do. The staff routes (`POST /reports/:id/decide`, `POST /sanctions`)
 // and the signed incoming webhook (`webhookIn`) all run THESE functions, so the three cannot disagree on what is valid or
@@ -99,6 +100,7 @@ export async function applyDecision(
   reportId: string,
   decision: ParsedDecision,
   actor: string,
+  ai?: { echo?: AiEchoBody; role: Role },
 ): Promise<DecisionOutcome> {
   const report = cw.reports.get(reportId);
   if (report === null) throw new NotFoundError();
@@ -116,6 +118,16 @@ export async function applyDecision(
     actor,
     ...(decision.reason === undefined ? {} : { reason: decision.reason }),
     source: 'moderator',
+    // The read the moderator saw, with the caller's role for the audit row. It never changes the decision or what is answered.
+    ...(ai === undefined
+      ? {}
+      : {
+          ai: {
+            role: ai.role,
+            ...(ai.echo === undefined ? {} : { readId: ai.echo.readId, accepted: ai.echo.accepted }),
+            ...(ai.echo?.severity === undefined ? {} : { severity: ai.echo.severity }),
+          },
+        }),
   });
   if (!result.ok) {
     if (result.error === 'not_found') throw new NotFoundError();

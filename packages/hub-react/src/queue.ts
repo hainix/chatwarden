@@ -1,6 +1,6 @@
 import { REPORTER_RANK_LAPSE_MS } from '@chatwarden/core';
 import { liveClaim } from './claims.js';
-import type { Claim, ReportCategory, ReportSummary } from './types.js';
+import type { AiBrief, Claim, ReportCategory, ReportSummary } from './types.js';
 
 /**
  * Everything waiting on one reported person. The unit of work in the queue is a person, not a report: the kit's queue is a flat,
@@ -48,7 +48,68 @@ export interface QueueGroup {
    * habitual false reporter and none has waited a day. It only re-orders; the case is still listed and counted.
    */
   rankedLow?: boolean;
+  /** The person's open and decided reports as the queue sent them, newest first: what the AI's chip and the `priority` sort read. */
+  summaries?: ReportSummary[];
+  /** Set by the `priority` sort (it needs the AI's ranking code loaded, see `loadAiRank`): the worst AI read among the person's open reports. */
+  ai?: AiBrief | null;
+  /** Set by the `priority` sort: how many open reports have no AI read. */
+  aiUnread?: number;
+  /** Set by the `priority` sort: the mean false-report rate of the reporters on the person's open reports, or null. */
+  reporterFalseRate?: number | null;
 }
+
+/**
+ * Pure functions that add to the `priority` score. They take a group and answer a number; one that answers NaN, Infinity, anything but a number, or
+ * throws is ignored. The answer is clamped to plus or minus half a point, so it can reorder close calls but never override severity.
+ * @experimental
+ */
+export interface RankSignals {
+  reporter?: (g: QueueGroup) => number;
+}
+
+/** The person has an open or decided report with an AI read: the queue shows the AI's chip. */
+export const hasAiRead = (g: QueueGroup): boolean => g.summaries?.some((r) => r.ai != null) === true;
+
+/** What the AI's ranking code does for `groupQueue` once it is loaded: set the AI fields on the groups and sort them by priority. */
+type Ranker = (groups: QueueGroup[], options: { signals?: RankSignals; now?: number }) => void;
+let ranker: Ranker | null = null;
+/** Called by the AI's ranking code when it loads (`ai/rank.ts`). Not exported from the package. */
+export function setRanker(fn: Ranker | null): void {
+  ranker = fn;
+}
+
+/** Whether the AI's ranking code is here, so the `priority` sort is the AI's order and not the longest wait. */
+export const hasRanker = (): boolean => ranker !== null;
+
+/** What the AI's ranking code gives to code that ranks on its own (`loadAiRank`). */
+export interface AiRank {
+  priorityScore: typeof import('./ai/rank.js').priorityScore;
+  RANK_WEIGHTS: typeof import('./ai/rank.js').RANK_WEIGHTS;
+  reporterSignal: typeof import('./ai/rank.js').reporterSignal;
+}
+
+let rankLoader: (() => Promise<unknown>) | null = null;
+/** Called once by the React hub (`provider.tsx`): how to fetch the AI's code (the ranking is part of it). Without one, `loadRanker` fetches the ranking alone. */
+export function setRankLoader(fn: (() => Promise<unknown>) | null): void {
+  rankLoader = fn;
+}
+/** Fetches the AI's ranking code (it never fails: a queue without it sorts by the longest wait). Headless adopters get it too, with no setup. */
+export const loadRanker = (): Promise<unknown> =>
+  (rankLoader ?? (() => import('./ai/rank.js')))()
+    // A loader that gave nothing (the fetch failed) installs nothing; otherwise the ranking installs itself, not as a side effect of loading.
+    .then((loaded) => (loaded == null ? undefined : import('./ai/rank.js').then((m) => m.installRanker())))
+    .catch(() => undefined);
+
+/**
+ * The AI's queue ranking: `priorityScore`, `RANK_WEIGHTS` and `reporterSignal`, and, once loaded, the `priority` sort of `groupQueue`. Both hubs (React and
+ * headless) load it by themselves when their queue holds a read; this is for code that calls `groupQueue(items, { sort: 'priority' })` on its own.
+ * @experimental
+ */
+export const loadAiRank = (): Promise<AiRank> =>
+  import('./ai/rank.js').then(({ installRanker, priorityScore, RANK_WEIGHTS, reporterSignal }) => {
+    installRanker();
+    return { priorityScore, RANK_WEIGHTS, reporterSignal };
+  });
 
 /** What a reporter said a report was for: a reason id and its label now, or both null for a report that gave none. */
 export interface ReportedReason {
@@ -70,6 +131,8 @@ const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt 
  * - `latest` (default): the group with the newest report first.
  * - `oldest`: the longest-waiting first (by the oldest open report; a group with none open uses its oldest report).
  * - `reports`: the most reports first.
+ * - `priority`: the AI's ranking (wait, open reports, the AI's read, `signals`, see `priorityScore`). It needs the AI's ranking code, which loads on
+ *   its own when the hub's queue holds a read and with `loadAiRank()` for anyone else; until it is loaded this is `oldest`.
  * A tie is broken by the person ref, so the order is stable.
  *
  * With `rankDown: { now }` a case is listed after the others (each part keeping the chosen sort) when it has an open report, EVERY open
@@ -77,7 +140,10 @@ const newestFirst = (a: ReportSummary, b: ReportSummary): number => b.createdAt 
  * 200 open reports. Nothing is removed. A server that sends no accuracy ranks nobody lower. The same rule as core's take-next.
  * @experimental
  */
-export function groupQueue(items: readonly ReportSummary[], options: { sort?: QueueSort; rankDown?: { now: number } } = {}): QueueGroup[] {
+export function groupQueue(
+  items: readonly ReportSummary[],
+  options: { sort?: QueueSort | 'priority'; rankDown?: { now: number }; signals?: RankSignals; now?: number } = {},
+): QueueGroup[] {
   const byId = new Map<string, ReportSummary>();
   for (const item of items) if (!byId.has(item.id)) byId.set(item.id, item);
   const byPerson = new Map<string, ReportSummary[]>();
@@ -150,6 +216,7 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
       entries: list.map((r) => ({ id: r.id, category: r.category, reason: r.reportedReason ?? null, reasonLabel: r.reportedReason == null ? null : (r.reportedReasonLabel ?? r.reportedReason), createdAt: r.createdAt })),
       claim,
       viewing: [...viewing].sort(),
+      summaries: list,
       ...(rankDown === undefined
         ? {}
         : { rankedLow: open > 0 && open <= RANK_DOWN_OPEN_MAX && habitualOpen === open && rankDown.now - (oldestOpenAt as number) < REPORTER_RANK_LAPSE_MS }),
@@ -163,7 +230,9 @@ export function groupQueue(items: readonly ReportSummary[], options: { sort?: Qu
     oldest: (a, b) => waitStart(a) - waitStart(b),
     reports: (a, b) => b.reports - a.reports || b.latestAt - a.latestAt,
   };
-  const sorted = groups.sort((a, b) => order[sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+  if (sort === 'priority' && ranker !== null) ranker(groups, options);
+  else groups.sort((a, b) => order[sort === 'priority' ? 'oldest' : sort](a, b) || (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+  const sorted = groups;
   if (rankDown === undefined) return sorted;
   // A stable partition of the chosen order: ordinary cases first, ranked-low ones after, each part keeping its order.
   return [...sorted.filter((g) => g.rankedLow !== true), ...sorted.filter((g) => g.rankedLow === true)];

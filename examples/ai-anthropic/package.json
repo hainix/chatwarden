@@ -1,0 +1,20 @@
+{
+  "name": "@chatwarden/example-ai-anthropic",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A reference ModerationAI adapter for the Anthropic API (Claude Haiku 5.5). Copy it into your server.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "eval:ai": "node --experimental-strip-types --no-warnings eval/run.ts"
+  },
+  "devDependencies": {
+    "@chatwarden/core": "0.1.7"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.8.0"
+  }
+}

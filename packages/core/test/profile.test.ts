@@ -486,7 +486,7 @@ describe('defineProfile', () => {
   it('round-trips a custom profile', () => {
     const d = defineProfile(custom);
     // A profile with no reporting section gets the default reporting settings.
-    expect(d).toEqual({ ...custom, reporting: defaultReporting() });
+    expect(d).toEqual({ ...custom, reporting: defaultReporting(), ai: { level: 0, learn: true, dailyCalls: 5000 } });
     expect(d.id).toBe('mygame');
     expect(resolveProfile(d, { name: 'Renamed' }).name).toBe('Renamed');
     expect(resolveProfile(d)).toEqual(d);

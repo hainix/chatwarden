@@ -52,6 +52,9 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'policy.reset',
       'report.dismiss_case',
       'report.dismiss_reporter',
+      'ai.read',
+      'ai.rerun',
+      'ai.outcome',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -89,7 +92,10 @@ describe('cw.audit.record and list', () => {
     for (const action of AUDIT_ACTIONS) {
       // A policy row must say what it changed (see audit-policy.test.ts); every other row carries ids only.
       const detail = action === 'policy.update' || action === 'policy.reset' ? { detail: { sections: [] } } : {};
-      expect(rec(cw, { action, ...detail })).toBe(true);
+      // The AI rows point at a report; ai.read is the AI's own, with no role (see ai/audit-ai.test.ts).
+      const ai = action.startsWith('ai.') ? { target: { type: 'report', ref: 'r1' } } : {};
+      const who = action === 'ai.read' ? { actor: 'ai:test:model', role: null } : {};
+      expect(rec(cw, { action, ...detail, ...ai, ...who })).toBe(true);
     }
     for (const role of ROLES) expect(rec(cw, { role })).toBe(true);
     for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason']) {

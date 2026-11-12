@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useHub } from './context.js';
 import { absoluteTime, formatDuration, personTag, relativeTime, waitTone } from './format.js';
 import { reasonChip } from './labels.js';
+import { LazyAiParts } from './lazyParts.js';
+import { hasAiRead } from './queue.js';
 import type { QueueGroup } from './queue.js';
 import { Link, PersonChip, Tag } from './ui.js';
 
@@ -32,6 +34,7 @@ export function QueueRow({ group, showStatus = false, earlier = true }: { group:
           {group.reasons.map((r) => (
             <Tag key={r.id ?? 'none'}>{reasonChip(t, r.label)}</Tag>
           ))}
+          {hasAiRead(group) && <LazyAiParts part="chip" group={group} />}
           {showStatus && group.open > 0 && <Tag>{t('hub.reports.tag.open')}</Tag>}
           {showStatus && group.actioned > 0 && <Tag>{t('hub.reports.tag.actioned')}</Tag>}
           {showStatus && group.dismissed > 0 && <Tag>{t('hub.reports.tag.dismissed')}</Tag>}

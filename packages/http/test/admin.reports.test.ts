@@ -106,12 +106,14 @@ function keysDeep(value: unknown, out: Set<string> = new Set()): Set<string> {
 }
 
 describe('adminRoutes: shape', () => {
-  it('includes exactly the six report/decision/history routes (the other groups have their own files)', async () => {
+  it('includes exactly the report/decision/history routes and the two AI report routes (the other groups have their own files)', async () => {
     const { routes } = await world();
     expect(Object.keys(routes).filter((k) => /\/(reports|people)/.test(k)).sort()).toEqual([
       'GET /people/:ref/history',
       'GET /reports',
       'GET /reports/:id',
+      'POST /reports/:id/ai/dont-teach',
+      'POST /reports/:id/ai/read',
       'POST /reports/:id/decide',
       'POST /reports/:id/suggest',
       'POST /reports/dismiss-open',
@@ -148,7 +150,7 @@ describe('GET /reports', () => {
     const res = await call('GET', '/reports');
     const item = (res.body as { items: Array<Record<string, unknown>> }).items[0] as Record<string, unknown>;
     expect(Object.keys(item).sort()).toEqual(
-      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
+      ['actionedAt', 'actionedBy', 'badFaith', 'category', 'claim', 'createdAt', 'id', 'reportedReason', 'reportedReasonLabel', 'reporterAccuracy', 'ai', 'reporterPerson', 'reporterHandle', 'roomId', 'status', 'tags', 'targetHandle', 'targetPerson', 'viewing'].sort(),
     );
     expect(item).toMatchObject({ id: r.id, category: 'harassment', status: 'open', roomId: r.room, targetPerson: r.target, reporterPerson: r.reporter, badFaith: false, actionedAt: null, actionedBy: null });
     // Keys are the same on a decided report, and the decision shows through status / badFaith / actioned*.

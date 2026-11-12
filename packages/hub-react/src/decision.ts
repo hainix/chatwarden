@@ -3,7 +3,7 @@ import type { LadderRow } from '@chatwarden/core';
 import type { HubParams, HubText } from './i18n.js';
 import { MAX_LENGTH_MS, resolveLength } from './policy/length.js';
 import type { LengthUnit } from './policy/length.js';
-import type { DecideInput, DecisionAction, SanctionKind, Suggestion } from './types.js';
+import type { ConductLevel, DecideInput, DecisionAction, SanctionKind, Suggestion } from './types.js';
 
 // The decision form as plain data and pure functions: what it holds, what it refuses before sending, and the body it sends.
 // The rules here mirror the server's (core `decide`, http `parseDecision`) so the form never offers what the server refuses.
@@ -302,7 +302,7 @@ export function dropTargetActions(form: DecisionForm, target: string): { form: D
 }
 
 /** The draft fields that say `choice`, or null when the form cannot say it (a length over 365 days). */
-function draftFor(choice: Choice): Pick<Draft, 'what' | 'customKind' | 'customDuration'> | null {
+export function draftFor(choice: Choice): Pick<Draft, 'what' | 'customKind' | 'customDuration'> | null {
   const key = choiceKey(choice);
   return parseChoiceKey(key) === null ? null : { what: key, customKind: 'chat', customDuration: '24h' };
 }
@@ -375,4 +375,38 @@ export function initialForm(ctx: ValidationContext, outcome: Suggestion['outcome
   const lines = defaultLines(ctx.ownLineIds[ctx.target] ?? [], reportedLine);
   const form = withSuggestion(emptyForm(), ctx, outcome, reportRule, uid, lines);
   return form === null ? emptyForm() : { ...form, verdict: null };
+}
+
+/**
+ * Where the form in the bar came from: the ladder's pre-fill (as always), the AI's recommendation as it stands, or the AI's after the
+ * moderator changed anything (a key counts: pressing 1, 2 or 3 by hand is an edit, not an accept).
+ * @experimental
+ */
+export type FormSource = 'ladder' | 'ai' | 'edited';
+
+/**
+ * What a recommendation fills in: the form, and how much of the AI's step is in it. `step` means the form carries the AI's step (a warning, a
+ * note or a chat restriction of at most 24 hours); `verdict` means it carries the verdict and the reason only (the AI named no step, or one the
+ * hub never fills: a ban, an area ban, anything over 24 hours, or one the role cannot apply, which is then in `held`); `dismiss` is a plain
+ * "Not a problem".
+ */
+export interface AiPrefill {
+  form: DecisionForm;
+  kind: 'dismiss' | 'step' | 'verdict';
+  /** The step the form carries, or null. */
+  choice: Choice | null;
+  /** The AI's step that was left out of the form, or null. */
+  held: Choice | null;
+  /** The Community Rule the form cites ('' for a dismissal). */
+  rule: number | '';
+  /** The reported person's own lines the AI cited and the form shows the player (at most five). */
+  lines: string[];
+}
+
+/** A pre-fill kept with the read it came from, and the shape of the form at that moment (to tell later whether it was changed). */
+export interface AiFromState extends AiPrefill {
+  readId: string;
+  /** The conduct level the AI gave; the level the decision is filed under until the moderator picks another. */
+  severity: ConductLevel;
+  shape: string;
 }

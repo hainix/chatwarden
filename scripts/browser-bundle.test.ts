@@ -9,13 +9,20 @@
 //   - IIFE (global name `CW`), minified: what runs in the vm, and what the size is measured on. An ES module would need
 //     `vm.SourceTextModule`, which needs `node --experimental-vm-modules` on the vitest worker (a repo-wide config change
 //     for one test); a classic script runs cleanly on Node 22.13 and 24 with no flag and is the same code in a different wrapper.
+//
+// The AI module (core/src/ai, the fake adapter, the hub's ranking) is SERVER-ONLY: a page that shows the hub or runs the kit with no AI does not
+// carry it. So the size build leaves it out the way an adopter's bundler would: the kit loads the AI service with a dynamic `import()` only when
+// it is given an adapter, and the hub loads its ranking the same way; the plugin below keeps those as dynamic imports outside the bundle, and
+// leaves the AI module's names out of `export * as core`. The same entry is built a second time WITH the AI module in it (no plugin), to prove
+// that module is still browser-safe: no Node import, and it runs in the bare context. The size budget is measured on the first build only.
 import { existsSync, readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { createRequire } from 'node:module';
 import { gzipSync } from 'node:zlib';
 import { webcrypto } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createContext, runInContext } from 'node:vm';
-import { build, type BuildOptions, type Metafile } from 'esbuild';
+import { build, type BuildOptions, type Metafile, type Plugin } from 'esbuild';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { makeHasher } from '@chatwarden/core';
 
@@ -23,10 +30,37 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ENTRY = fileURLToPath(new URL('./browser-entry.ts', import.meta.url));
 const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.url));
 // 103 KB: the bundle measured 98.0 KB gzip once the matcher stopped carrying obscenity (it was 104.2 KB with the English word list in it); the
-// headroom is about 5 KB for the hub controller work that shares this entry. The chat box's server side (`@chatwarden/http/chat`) is
-// browser-SAFE but not something a page ships by default, so it is NOT in this entry and not in this size: it has its own entry
-// (`browser-entry-chat.ts`), bundled below only to prove it stays free of Node imports and runs in a bare context.
+// headroom is about 5 KB for the hub controller work that shares this entry. Not raised for the AI: the server-only AI module is not in this build.
+// The chat box's server side (`@chatwarden/http/chat`) is browser-SAFE but not something a page ships by default, so it is NOT in this entry and
+// not in this size: it has its own entry (`browser-entry-chat.ts`), bundled below only to prove it stays free of Node imports and runs in a bare context.
 const SIZE_BUDGET_GZIP = 103 * 1024;
+
+/**
+ * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:
+ * `export * as core` leaves out the AI module's names (the kit's index re-exports them from `./ai/*`), and the two places that load AI code on
+ * demand (the kit's AI service, the hub's ranking) are dynamic imports left out of the bundle. The inert facade (`./ai/inert`, a few lines) stays.
+ */
+const LEFT_OUT = 'ai-left-out';
+const withoutServerOnlyAi: Plugin = {
+  name: 'without-server-only-ai',
+  setup(b) {
+    b.onLoad({ filter: /packages[\\/]core[\\/]dist[\\/]src[\\/]index\.js$/ }, (args) => ({
+      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*(?:\*|\{[^}]*\})\s*from\s*['"]\.\/ai\/(?!inert\.js)[^'"]*['"];?[ \t]*$/gm, ''),
+      loader: 'js',
+      resolveDir: dirname(args.path),
+    }));
+    // `withMemoryAi` is the in-memory store's opt-in AI methods: its name is left out of `export * as storeMemory` like the core ones.
+    b.onLoad({ filter: /packages[\\/]store-memory[\\/]dist[\\/]src[\\/]index\.js$/ }, (args) => ({
+      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*\{[^}]*\}\s*from\s*['"]\.\/memoryAi\.js['"];?[ \t]*$/gm, ''),
+      loader: 'js',
+      resolveDir: dirname(args.path),
+    }));
+    // The two places that load AI code on demand are left out: the import() resolves to an empty stub (a bundler that splits would make it a
+    // chunk nobody asks for; a stub keeps this one a single script that runs in the vm, with no `require` shim).
+    b.onResolve({ filter: /^\.\/ai\/(service|rank)\.js$/ }, (args) => (args.kind === 'dynamic-import' ? { path: args.path, namespace: LEFT_OUT } : undefined));
+    b.onLoad({ filter: /.*/, namespace: LEFT_OUT }, () => ({ contents: 'export const leftOut = true;', loader: 'js' }));
+  },
+};
 
 const common: BuildOptions = {
   entryPoints: [ENTRY],
@@ -43,6 +77,10 @@ const common: BuildOptions = {
 let esm = '';
 let iife = '';
 let metafile: Metafile;
+// The same entry with the AI module in it (no plugin), for the safety checks only.
+let aiEsm = '';
+let aiIife = '';
+let aiMetafile: Metafile;
 // The same entry plus the chat server side (`@chatwarden/http/chat`), for the safety checks only.
 let chatEsm = '';
 let chatIife = '';
@@ -53,16 +91,21 @@ beforeAll(async () => {
     if (!existsSync(`${ROOT}packages/${pkg}/dist/src/index.js`)) throw new Error(`packages/${pkg} is not built: run \`npm run build\` first`);
   }
   if (!existsSync(`${ROOT}packages/hub-react/dist/src/headless/index.js`)) throw new Error('packages/hub-react is not built: run `npm run build` first');
-  const a = await build({ ...common, format: 'esm' });
+  const a = await build({ ...common, format: 'esm', plugins: [withoutServerOnlyAi] });
   esm = a.outputFiles[0]!.text;
-  const b = await build({ ...common, format: 'iife', globalName: 'CW', minify: true });
+  const b = await build({ ...common, format: 'iife', globalName: 'CW', minify: true, plugins: [withoutServerOnlyAi] });
   iife = b.outputFiles[0]!.text;
   metafile = b.metafile;
-  const c = await build({ ...common, entryPoints: [CHAT_ENTRY], format: 'esm' });
-  chatEsm = c.outputFiles[0]!.text;
-  const d = await build({ ...common, entryPoints: [CHAT_ENTRY], format: 'iife', globalName: 'CW', minify: true });
-  chatIife = d.outputFiles[0]!.text;
-  chatMetafile = d.metafile;
+  const c = await build({ ...common, format: 'esm' });
+  aiEsm = c.outputFiles[0]!.text;
+  const d = await build({ ...common, format: 'iife', globalName: 'CW', minify: true });
+  aiIife = d.outputFiles[0]!.text;
+  aiMetafile = d.metafile;
+  const e = await build({ ...common, entryPoints: [CHAT_ENTRY], format: 'esm' });
+  chatEsm = e.outputFiles[0]!.text;
+  const f = await build({ ...common, entryPoints: [CHAT_ENTRY], format: 'iife', globalName: 'CW', minify: true });
+  chatIife = f.outputFiles[0]!.text;
+  chatMetafile = f.metafile;
 }, 60_000);
 
 describe('browser bundle: static scan', () => {
@@ -146,24 +189,34 @@ describe('browser bundle: static scan', () => {
     const procRefs = [...code.matchAll(/\bprocess\b/g)].filter((m) => !code.slice(m.index! - 11).startsWith('globalThis.process'));
     expect(procRefs.map((m) => code.slice(m.index! - 40, m.index! + 40))).toEqual([]);
   });
+});
 
+// Node-free, with and without the AI module: the build the size is measured on, and the same entry with the server-only module in it.
+describe.each([
+  ['size build', () => ({ esm, iife })],
+  ['build with the AI module', () => ({ esm: aiEsm, iife: aiIife })],
+] as const)('browser bundle: %s is free of Node', (_label, get) => {
   it('has no node: import or export specifier', () => {
+    const { esm } = get();
     expect(esm).not.toMatch(/\b(?:from|import)\s*\(?\s*["']node:/);
     expect(esm).not.toMatch(/\bexport\s*\*?\s*(?:\{[^}]*\}\s*)?from\s*["']node:/);
   });
 
   it('has no require, in either build', () => {
+    const { esm, iife } = get();
     expect(esm).not.toMatch(/\brequire\b/);
     expect(iife).not.toMatch(/\brequire\b/);
   });
 
   it('mentions node: only as the argument of the guarded process.getBuiltinModule lookup', () => {
+    const { esm, iife } = get();
     const leftover = esm.replaceAll(/\?\.getBuiltinModule\?\.\(\s*["']node:crypto["']\s*\)/g, '');
     expect(leftover).not.toContain('node:');
     expect(iife.replaceAll(/\?\.getBuiltinModule\?\.\(\s*["']node:crypto["']\s*\)/g, '')).not.toContain('node:');
   });
 
   it('only ever calls getBuiltinModule through optional chaining, inside a try', () => {
+    const { esm } = get();
     const calls = [...esm.matchAll(/getBuiltinModule/g)];
     expect(calls.length).toBeGreaterThan(0);
     for (const m of calls) {
@@ -175,6 +228,7 @@ describe('browser bundle: static scan', () => {
   });
 
   it('has no bare reference to process, Buffer or module outside the guarded lookup', () => {
+    const { esm } = get();
     const code = esm.replaceAll(/\/\/.*$/gm, '').replaceAll(/\/\*[\s\S]*?\*\//g, '');
     expect(code).not.toMatch(/\bBuffer\b/);
     expect(code).not.toMatch(/\bmodule\.exports\b/);
@@ -227,6 +281,80 @@ describe('browser bundle: size', () => {
   });
 });
 
+// The AI module is server-only (design: the adapter runs on the server), so the hub's browser bundle must not hold any of it. The markers are
+// names that live only in the AI module: the prompt builder, the output schema and the scripted fake adapter.
+const AI_MARKERS = ['buildAIInput', 'AI_OUTPUT_SCHEMA', 'createFakeModerationAI'];
+// And the in-memory store's AI methods, which are opt-in (`withMemoryAi`) so a bundle that never calls it does not carry them.
+const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries'];
+const inputsOf = (m: Metafile): string[] => Object.keys(m.inputs).map((p) => p.replaceAll('\\', '/'));
+
+describe('browser bundle: the server-only AI module', () => {
+  it('the browser bundle holds no AI module', () => {
+    for (const marker of AI_MARKERS) {
+      // Booleans, so a failure never prints the bundle.
+      expect(esm.includes(marker), `${marker} in the ESM build`).toBe(false);
+      expect(iife.includes(marker), `${marker} in the IIFE build`).toBe(false);
+    }
+    for (const marker of MEMORY_AI_MARKERS) {
+      expect(esm.includes(marker), `${marker} in the ESM build`).toBe(false);
+      expect(iife.includes(marker), `${marker} in the IIFE build`).toBe(false);
+    }
+    const inputs = inputsOf(metafile);
+    expect(inputs.filter((p) => /packages\/store-memory\/dist\/src\//.test(p)).sort()).toEqual(['packages/store-memory/dist/src/index.js', 'packages/store-memory/dist/src/memoryStore.js']);
+    // Only the inert facade (a few lines) is there: nothing of the service, the worker, the prompt, the validator, the fake or the ranking.
+    expect(inputs.filter((p) => /packages\/core\/dist\/src\/ai\//.test(p))).toEqual(['packages/core/dist/src/ai/inert.js']);
+    expect(inputs.filter((p) => /packages\/hub-react\/dist\/src\/ai\//.test(p))).toEqual([]);
+    expect(Object.keys(metafile.outputs)).toHaveLength(1);
+  });
+
+  it('is loaded on demand: the kit reaches its service through a dynamic import() only, never a static one', () => {
+    const imports = (file: string) => metafile.inputs[file]?.imports ?? [];
+    const toService = imports('packages/core/dist/src/chatwarden.js').filter((i) => i.path.endsWith('/ai/service.js'));
+    expect(toService).toMatchObject([{ path: `${LEFT_OUT}:./ai/service.js`, kind: 'dynamic-import', original: './ai/service.js' }]);
+    // And nothing else in the build imports the service or reaches into the folder, however it is loaded.
+    const all = Object.entries(metafile.inputs).flatMap(([file, v]) => v.imports.map((i) => ({ file, ...i })));
+    expect(all.filter((i) => /\/ai\/(?!inert\.js)/.test(i.path) && i.kind !== 'dynamic-import')).toEqual([]);
+    expect(esm).not.toMatch(/\bfrom\s*["']\.\/ai\/service\.js["']/);
+    // A page that never passes an adapter never reaches the import: the inert facade answers (the scenarios below).
+  });
+
+  it('the guard is not vacuous: the same entry built WITH the AI module holds every marker and the module files', () => {
+    for (const marker of AI_MARKERS) {
+      expect(aiEsm.includes(marker), `${marker} in the ESM build with the AI module`).toBe(true);
+      expect(aiIife.includes(marker), `${marker} in the IIFE build with the AI module`).toBe(true);
+    }
+    const inputs = inputsOf(aiMetafile);
+    for (const file of ['service', 'worker', 'prompt', 'schema', 'validate', 'fake', 'ceilings']) {
+      expect(inputs, file).toContain(`packages/core/dist/src/ai/${file}.js`);
+    }
+    expect(inputs).toContain('packages/hub-react/dist/src/ai/rank.js');
+    expect(inputs).toContain('packages/store-memory/dist/src/memoryAi.js');
+    for (const marker of MEMORY_AI_MARKERS) expect(aiEsm.includes(marker), `${marker} in the ESM build with the AI module`).toBe(true);
+  });
+
+  it('is browser-safe: the build with the AI module imports no Node module (the scans above run on it too)', () => {
+    expect(inputsOf(aiMetafile).filter((p) => /packages\/core\/dist\/src\/ai\//.test(p)).length).toBeGreaterThan(10);
+    for (const input of Object.values(aiMetafile.inputs)) {
+      for (const imp of input.imports) expect(imp.external === true || imp.path.startsWith('node:'), imp.path).toBe(false);
+    }
+  });
+
+  it('runs in the bare context with the fake adapter: a report gets a read, with no Node global', async () => {
+    const ctx = browserContext();
+    run(ctx, aiIife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, AI_SCENARIO)) as { level: number; ok: boolean; hasRead: boolean; calls: number; summary: string | null };
+    expect(out).toMatchObject({ level: 1, ok: true, hasRead: true, calls: 1 });
+    expect(typeof out.summary).toBe('string');
+  });
+
+  it('the size build runs the same scenario with no adapter: the AI is off and nothing is loaded', async () => {
+    const ctx = browserContext();
+    run(ctx, iife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, AI_OFF_SCENARIO)) as { level: number; available: boolean; read: unknown };
+    expect(out).toEqual({ level: 0, available: false, read: null });
+  });
+});
+
 /** A fresh context with browser-like globals only. */
 function browserContext(): Record<string, unknown> {
   const logs: string[] = [];
@@ -242,6 +370,8 @@ function browserContext(): Record<string, unknown> {
     clearInterval,
     queueMicrotask,
     structuredClone,
+    // What a browser has and the AI module's calls under a deadline need.
+    AbortController,
   };
   return createContext(sandbox) as Record<string, unknown>;
 }
@@ -416,6 +546,37 @@ const HUB_SCENARIO = `(async () => {
   controller.dispose();
   out.disposed = controller.disposed;
   out.open = (await cw.reports.get(res.reportId)).status;
+  return JSON.stringify(out);
+})()`;
+
+// The AI module in the bare context: the kit with the scripted fake adapter at level 1, a report filed, the read made after the ack.
+const AI_SCENARIO = `(async () => {
+  const { createChatwarden, createFakeModerationAI } = CW.core;
+  const { MemoryStore, withMemoryAi } = CW.storeMemory;
+  const R = 'room';
+  const clock = { now: () => Date.now() };
+  const adapter = createFakeModerationAI([]);
+  const cw = await createChatwarden({ store: withMemoryAi(new MemoryStore()), secret: 'ai-secret', platform: { identify: (ctx) => ctx }, clock, retention: false, ai: { adapter }, overrides: { ai: { level: 1 } } });
+  cw.rooms.seat(R, 'a', { clientKey: 'key-alice', ip: '198.51.100.1' }, 'Alice');
+  cw.rooms.seat(R, 'b', { clientKey: 'key-bob', ip: '198.51.100.2' }, 'Bob');
+  cw.chat.accept(R, 'a', 'hello there');
+  cw.chat.accept(R, 'a', 'you are trash');
+  const res = await cw.reports.submit({ roomId: R, reporterSeat: 'b', targetSeat: 'a', category: 'harassment' });
+  await cw.ai.idle();
+  const read = cw.ai.read(res.reportId);
+  const out = { level: cw.ai.level(), ok: res.ok === true, hasRead: read !== null, calls: adapter.callCount, summary: read === null ? null : read.summary };
+  cw.close();
+  return JSON.stringify(out);
+})()`;
+
+// The same kit with no adapter: the inert facade, and no AI code needed.
+const AI_OFF_SCENARIO = `(async () => {
+  const { createChatwarden } = CW.core;
+  const { MemoryStore } = CW.storeMemory;
+  const clock = { now: () => Date.now() };
+  const cw = await createChatwarden({ store: new MemoryStore(), secret: 'ai-off', platform: { identify: (ctx) => ctx }, clock, retention: false });
+  const out = { level: cw.ai.level(), available: cw.ai.status().available, read: cw.ai.read('nope') };
+  cw.close();
   return JSON.stringify(out);
 })()`;
 

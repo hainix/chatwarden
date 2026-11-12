@@ -7,6 +7,8 @@ import { absoluteTime, formatDuration, listOf, waitTone } from '../format.js';
 import { Icon } from '../icons.js';
 import { errorText, groupName, reasonChip } from '../labels.js';
 import { useQueue } from '../liveQueue.js';
+import { LazyAiParts } from '../lazyParts.js';
+import { hasAiRead } from '../queue.js';
 import { useMode } from '../mode.js';
 import type { ShownRow } from '../live.js';
 import type { Route } from '../router.js';
@@ -119,8 +121,14 @@ export function QueuePane({ route, shortcuts, piece }: { route: Route | null; sh
         {canTake && (
           <button type="button" className="cw-take" onClick={() => void actions.takeNext()} {...(shortcuts ? { 'aria-keyshortcuts': 'N' } : {})}>
             <span className="cw-take-text">
-              {t('hub.queue.takeNext')}
-              <small>{t('hub.queue.takeNextHint')}</small>
+              {queue.ranked ? (
+                t('hub.queue.takeNext.priority')
+              ) : (
+                <>
+                  {t('hub.queue.takeNext')}
+                  <small>{t('hub.queue.takeNextHint')}</small>
+                </>
+              )}
             </span>
             {shortcuts && <Kbd>N</Kbd>}
           </button>
@@ -230,6 +238,7 @@ function CaseRow({ row, simple, selected, piece, onRelease }: { row: ShownRow; s
               {reasonChip(t, r.label)}
             </span>
           ))}
+          {!simple && hasAiRead(g) && <LazyAiParts part="chip" group={g} />}
         </span>
         <span className="cw-case-facts">
           {t('hub.queue.reports', { count: g.reports, reporters: t('hub.queue.reporters', { count: g.reporters }) })}

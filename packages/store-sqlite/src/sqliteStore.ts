@@ -1,7 +1,20 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, ROLES } from '@chatwarden/core';
+import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, CONDUCT_LEVELS, ROLES } from '@chatwarden/core';
 import type {
+  AIExample,
+  AIRead,
+  AiCallUsage,
+  AiErrorKind,
+  AiExampleRow,
+  AiOutcomeInsert,
+  AiOutcomeRow,
+  AiReadDone,
+  AiReadPending,
+  AiReadRow,
+  AiReadStatus,
+  AiReserveResult,
+  AiStatsRow,
   AuditDetail,
   AuditListQuery,
   AuditRow,
@@ -165,6 +178,183 @@ function toListedSanctionRow(r: Record<string, unknown>): SanctionRow {
 function toClaimRow(r: Record<string, unknown>): ClaimRow {
   return { person: String(r.person), by: String(r.claimed_by), since: Number(r.since), until: Number(r.until) };
 }
+
+// --- AI reads and the casebook (migration 20) ---
+
+const AI_READ_STATUSES: readonly string[] = ['pending', 'ok', 'declined', 'invalid', 'failed', 'skipped'];
+const AI_ERROR_KINDS: readonly string[] = ['retryable', 'fatal', 'declined', 'timeout', 'invalid', 'budget'];
+const AI_VERDICTS: readonly string[] = ['upheld', 'noted', 'no_action', 'unclear'];
+
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
+const nullableText = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
+const nullableNumber = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+
+/** A stored rule text back to a rule: `'3'` is 3, `'uncovered'` itself, NULL none; anything else is undefined (a damaged row). */
+function ruleFromText(v: unknown): number | 'uncovered' | null | undefined {
+  if (v === null || v === undefined) return null;
+  const t = String(v);
+  if (t === 'uncovered') return t;
+  return /^\d+$/.test(t) ? Number(t) : undefined;
+}
+
+/** The validated read stored on an `ok` row, or null when any column of it cannot be read (one damaged row never breaks a page). */
+function readFromRow(r: Record<string, unknown>): AIRead | null {
+  try {
+    const severity = String(r.severity);
+    const confidence = String(r.confidence);
+    const rule = ruleFromText(r.rule);
+    const evidence: unknown = JSON.parse(String(r.evidence_json));
+    const recJson: unknown = r.rec_json === null || r.rec_json === undefined ? null : JSON.parse(String(r.rec_json));
+    if (!(CONDUCT_LEVELS as readonly string[]).includes(severity) || !['low', 'medium', 'high'].includes(confidence)) return null;
+    if (rule === undefined || typeof r.summary !== 'string' || !isStrings(evidence)) return null;
+    let recommendation: AIRead['recommendation'] = null;
+    if (recJson !== null) {
+      const rec = recJson as { verdict?: unknown; severity?: unknown; rule?: unknown; evidence?: unknown };
+      const recRule = rec.rule === null ? null : rec.rule === 'uncovered' ? 'uncovered' : typeof rec.rule === 'number' ? rec.rule : undefined;
+      if (
+        typeof rec !== 'object' ||
+        !AI_VERDICTS.includes(String(rec.verdict)) ||
+        !(CONDUCT_LEVELS as readonly string[]).includes(String(rec.severity)) ||
+        recRule === undefined ||
+        !isStrings(rec.evidence)
+      ) {
+        return null;
+      }
+      recommendation = { verdict: rec.verdict as 'upheld', severity: rec.severity as AIRead['severity'], rule: recRule, evidence: rec.evidence };
+    }
+    return {
+      severity: severity as AIRead['severity'],
+      rule,
+      summary: r.summary,
+      evidence,
+      confidence: confidence as AIRead['confidence'],
+      injectionSuspected: Number(r.injection) === 1,
+      recommendation,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The ids stored with a read; none when the column is empty or damaged. */
+function exampleIdsFromRow(v: unknown): string[] {
+  if (v === null || v === undefined) return [];
+  try {
+    const ids: unknown = JSON.parse(String(v));
+    return isStrings(ids) ? ids : [];
+  } catch {
+    return [];
+  }
+}
+
+/** A read row; null for an `ok` row whose answer cannot be read (with `lenient`, that row comes back with `read: null` instead). */
+function aiReadFromRow(r: Record<string, unknown>, lenient = false): AiReadRow | null {
+  const status = String(r.status);
+  if (!AI_READ_STATUSES.includes(status)) return null;
+  const read = status === 'ok' ? readFromRow(r) : null;
+  if (status === 'ok' && read === null && !lenient) return null;
+  const kind = nullableText(r.error_kind);
+  return {
+    id: String(r.id),
+    reportId: String(r.report_id),
+    inputHash: String(r.input_hash),
+    status: status as AiReadStatus,
+    attempts: Number(r.attempts),
+    retryAt: nullableNumber(r.retry_at),
+    leaseUntil: nullableNumber(r.lease_until),
+    errorKind: kind !== null && AI_ERROR_KINDS.includes(kind) ? (kind as AiErrorKind) : null,
+    adapter: nullableText(r.adapter) ?? '',
+    model: nullableText(r.model),
+    promptVersion: Number(r.prompt_version),
+    read,
+    exampleIds: status === 'ok' ? exampleIdsFromRow(r.example_ids) : [],
+    inputTokens: nullableNumber(r.input_tokens),
+    outputTokens: nullableNumber(r.output_tokens),
+    cacheReadTokens: nullableNumber(r.cache_read_tokens),
+    cacheWriteTokens: nullableNumber(r.cache_write_tokens),
+    costMicros: Number(r.cost_micros),
+    latencyMs: nullableNumber(r.latency_ms),
+    createdAt: Number(r.created_at),
+    retaken: Number(r.retaken) === 1,
+  };
+}
+
+const parseExample = (json: unknown): AIExample | null => {
+  if (json === null || json === undefined) return null;
+  try {
+    const e = JSON.parse(String(json)) as AIExample | null;
+    return typeof e === 'object' && e !== null && Array.isArray(e.lines) ? e : null;
+  } catch {
+    return null;
+  }
+};
+
+/** What an unreadable detail reads as: nothing matched, no step. */
+const EMPTY_DETAIL: AiOutcomeRow['detail'] = { verdict: false, rule: false, lines: 0, outcome: 'none', oneClick: false };
+
+function detailFromRow(json: unknown): AiOutcomeRow['detail'] {
+  try {
+    const d = JSON.parse(String(json)) as Partial<AiOutcomeRow['detail']> | null;
+    if (
+      typeof d === 'object' &&
+      d !== null &&
+      typeof d.verdict === 'boolean' &&
+      typeof d.rule === 'boolean' &&
+      typeof d.lines === 'number' &&
+      typeof d.oneClick === 'boolean' &&
+      (d.outcome === 'same' || d.outcome === 'milder' || d.outcome === 'harsher' || d.outcome === 'none')
+    ) {
+      return { verdict: d.verdict, rule: d.rule, lines: d.lines, outcome: d.outcome, oneClick: d.oneClick };
+    }
+  } catch {
+    /* an unreadable detail reads as empty */
+  }
+  return { ...EMPTY_DETAIL };
+}
+
+/** The page sizes used when a limit is omitted, not finite or below 1 (the memory store keeps the same two numbers). */
+const EXAMPLES_DEFAULT_LIMIT = 2;
+const RETRIES_DEFAULT_LIMIT = 20;
+
+/** A page size: the limit floored and capped at 200, or `fallback` when it is omitted, not finite or below 1. */
+const pageSize = (limit: number | undefined, fallback: number): number =>
+  limit !== undefined && Number.isFinite(limit) && limit >= 1 ? Math.min(200, Math.floor(limit)) : fallback;
+
+function aiOutcomeFromRow(r: Record<string, unknown>): AiOutcomeRow {
+  const detail = detailFromRow(r.detail_json);
+  return {
+    reportId: String(r.report_id),
+    readId: nullableText(r.read_id),
+    decidedAt: Number(r.decided_at),
+    level: Number(r.level),
+    verdict: String(r.verdict) as AiOutcomeRow['verdict'],
+    rule: nullableText(r.rule),
+    severity: nullableText(r.severity) as AiOutcomeRow['severity'],
+    aiVerdict: nullableText(r.ai_verdict) as AiOutcomeRow['aiVerdict'],
+    agreement: String(r.agreement) as AiOutcomeRow['agreement'],
+    detail,
+    badFaith: Number(r.bad_faith) === 1,
+    example: parseExample(r.example_json),
+    reversed: Number(r.reversed) === 1,
+    dontTeach: Number(r.dont_teach) === 1,
+  };
+}
+
+/** The order of `aiStats`: numbered rules by number, then `uncovered`, then any other text, then no rule. */
+function ruleRank(rule: string | null): number {
+  if (rule === null) return 3;
+  if (/^\d+$/.test(rule)) return 0;
+  return rule === 'uncovered' ? 1 : 2;
+}
+function compareRules(a: string | null, b: string | null): number {
+  const rank = ruleRank(a) - ruleRank(b);
+  if (rank !== 0 || a === null || b === null) return rank;
+  if (/^\d+$/.test(a) && /^\d+$/.test(b)) return Number(a) - Number(b);
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** What makes an outcome a teachable example (everything but the rule, severity and time). One text, used by two queries. */
+const AI_TEACHABLE_SQL = "example_json IS NOT NULL AND agreement <> 'none' AND reversed = 0 AND dont_teach = 0 AND bad_faith = 0";
 
 /** The kit_meta key of the change token's counter. */
 const CHANGE_TOKEN_KEY = 'change_token';
@@ -513,6 +703,353 @@ export class SqliteStore implements Store, TermStore {
         out.push(...rows.map(toClaimRow));
       }
       return out.sort((a, b) => (a.person < b.person ? -1 : a.person > b.person ? 1 : 0));
+    });
+  }
+
+  // AI reads and the casebook (AI levels 1 and 2, migration 20). SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
+
+  reserveAiRead(row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult {
+    const retake = opts?.retake === true ? 1 : 0;
+    return this.transaction((): AiReserveResult => {
+      // The UNIQUE (report_id, input_hash) index decides who inserts: of two connections, one gets a row back, the other none.
+      const fresh = this.db
+        .prepare(
+          `INSERT INTO kit_ai_reads (id, report_id, input_hash, status, attempts, lease_until, adapter, prompt_version, created_at)
+           VALUES (?, ?, ?, 'pending', 1, ?, ?, ?, ?)
+           ON CONFLICT (report_id, input_hash) DO NOTHING
+           RETURNING id, attempts`,
+        )
+        .get(randomBytes(16).toString('base64url'), row.reportId, row.inputHash, leaseUntil, row.adapter, row.promptVersion, now);
+      if (fresh !== undefined) return this.openAttempt(String(fresh.id), Number(fresh.attempts), now);
+      // The row exists. Take it over only when its lease has lapsed or its retry time has come: one conditional write, so of two
+      // callers racing for it exactly one changes it and the other's WHERE is false. `attempts` is the fence the winner holds.
+      const taken = this.db
+        .prepare(
+          `UPDATE kit_ai_reads
+           SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL,
+               retaken = CASE WHEN ? = 1 AND retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed') THEN 1 ELSE retaken END
+           WHERE report_id = ? AND input_hash = ?
+             AND ((status = 'pending' AND lease_until <= ?)
+               OR (status IN ('failed', 'skipped') AND retry_at IS NOT NULL AND retry_at <= ?)
+               OR (? = 1 AND ((retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed')) OR status = 'skipped')))
+           RETURNING id, attempts`,
+        )
+        .get(leaseUntil, retake, row.reportId, row.inputHash, now, now, retake);
+      if (taken !== undefined) return this.openAttempt(String(taken.id), Number(taken.attempts), now);
+      const existing = this.db.prepare('SELECT * FROM kit_ai_reads WHERE report_id = ? AND input_hash = ?').get(row.reportId, row.inputHash);
+      const mapped = existing === undefined ? null : aiReadFromRow(existing, true);
+      if (mapped === null) throw new Error('reserveAiRead: the stored read has an unknown status');
+      // An `ok` row whose answer cannot be read (damaged by hand) is no read at all: take it over and read again rather than throw.
+      if (mapped.status === 'ok' && mapped.read === null) {
+        const retaken = this.db
+          .prepare(
+            `UPDATE kit_ai_reads
+             SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL
+             WHERE id = ? AND status = 'ok' RETURNING id, attempts`,
+          )
+          .get(leaseUntil, mapped.id);
+        if (retaken !== undefined) return this.openAttempt(String(retaken.id), Number(retaken.attempts), now);
+      }
+      return { reserved: false, existing: mapped };
+    });
+  }
+
+  /** One call started: a ledger entry for (read, attempt) at `now`; the fence token is the attempt number. */
+  private openAttempt(readId: string, attempt: number, now: number): AiReserveResult {
+    this.db.prepare('INSERT INTO kit_ai_spend (read_id, attempt, at, micros) VALUES (?, ?, ?, 0)').run(readId, attempt, now);
+    return { reserved: true, id: readId, lease: attempt };
+  }
+
+  /**
+   * A stale owner's call was still paid for: book its cost to its own attempt's ledger entry, once (only an entry still at 0 takes
+   * it). The read row is not touched. Only an attempt that has been superseded (`lease` below the row's `attempts`) is booked.
+   */
+  private bookStale(id: string, lease: number, usage: AiCallUsage | undefined): void {
+    if (usage === undefined) return;
+    this.db
+      .prepare(
+        `UPDATE kit_ai_spend SET micros = ?
+         WHERE read_id = ? AND attempt = ? AND micros = 0 AND attempt < (SELECT attempts FROM kit_ai_reads WHERE id = ?)`,
+      )
+      .run(usage.costMicros, id, lease, id);
+  }
+
+  /** Add what a call cost to its read row (cost and tokens summed over attempts) and to its ledger entry. */
+  private addUsage(id: string, attempt: number, u: AiCallUsage): void {
+    this.db
+      .prepare(
+        `UPDATE kit_ai_reads
+         SET model = ?, input_tokens = COALESCE(input_tokens, 0) + ?, output_tokens = COALESCE(output_tokens, 0) + ?,
+             cache_read_tokens = COALESCE(cache_read_tokens, 0) + ?, cache_write_tokens = COALESCE(cache_write_tokens, 0) + ?,
+             cost_micros = cost_micros + ?, latency_ms = ?
+         WHERE id = ?`,
+      )
+      .run(u.model, u.inputTokens, u.outputTokens, u.cacheReadTokens, u.cacheWriteTokens, u.costMicros, u.latencyMs, id);
+    this.db.prepare('UPDATE kit_ai_spend SET micros = micros + ? WHERE read_id = ? AND attempt = ?').run(u.costMicros, id, attempt);
+  }
+
+  completeAiRead(id: string, lease: number, result: AiReadDone): boolean {
+    return this.transaction(() => {
+      const read = result.read;
+      // The fence: only the holder of the current attempt can finish the row.
+      const changed = Number(
+        this.db
+          .prepare(
+            `UPDATE kit_ai_reads
+             SET status = 'ok', lease_until = NULL, retry_at = NULL, error_kind = NULL,
+                 severity = ?, rule = ?, summary = ?, evidence_json = ?, confidence = ?, injection = ?, rec_json = ?, example_ids = ?
+             WHERE id = ? AND status = 'pending' AND attempts = ?`,
+          )
+          .run(
+            read.severity,
+            read.rule === null ? null : String(read.rule),
+            read.summary,
+            JSON.stringify(read.evidence),
+            read.confidence,
+            read.injectionSuspected ? 1 : 0,
+            read.recommendation === null ? null : JSON.stringify(read.recommendation),
+            JSON.stringify(result.exampleIds ?? []),
+            id,
+            lease,
+          ).changes,
+      );
+      if (changed === 0) {
+        this.bookStale(id, lease, result);
+        return false;
+      }
+      this.addUsage(id, lease, result);
+      this.bump();
+      return true;
+    });
+  }
+
+  failAiRead(
+    id: string,
+    lease: number,
+    status: 'failed' | 'declined' | 'invalid' | 'skipped',
+    errorKind: AiErrorKind,
+    retryAt: number | null,
+    usage?: AiCallUsage,
+  ): boolean {
+    return this.transaction(() => {
+      const changed = Number(
+        this.db
+          .prepare(
+            // A skipped read was never a call: the attempt is given back, so it does not use up the three-attempt budget.
+            `UPDATE kit_ai_reads
+             SET status = ?, error_kind = ?, retry_at = ?, lease_until = NULL,
+                 attempts = CASE WHEN ? = 'skipped' THEN MAX(0, attempts - 1) ELSE attempts END
+             WHERE id = ? AND status = 'pending' AND attempts = ?`,
+          )
+          .run(status, errorKind, retryAt, status, id, lease).changes,
+      );
+      if (changed === 0) {
+        this.bookStale(id, lease, usage);
+        return false;
+      }
+      if (usage !== undefined) this.addUsage(id, lease, usage);
+      // A skipped read was never a call: its attempt leaves the ledger.
+      if (status === 'skipped') this.db.prepare('DELETE FROM kit_ai_spend WHERE read_id = ? AND attempt = ?').run(id, lease);
+      return true;
+    });
+  }
+
+  loadAiRead(reportId: string): AiReadRow | null {
+    return this.transaction(() => {
+      // A few rows, newest first: an unreadable one is skipped in favour of the next. The index is named, because `status = 'ok'`
+      // would otherwise draw the planner to kit_ai_reads_retry; any migration that drops or renames kit_ai_reads_by_report MUST change
+      // this SQL and loadAiReads (a named index that is gone is a runtime error, not a slower plan).
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM kit_ai_reads INDEXED BY kit_ai_reads_by_report
+           WHERE report_id = ? AND status = 'ok' ORDER BY created_at DESC, id DESC LIMIT 20`,
+        )
+        .all(reportId);
+      for (const r of rows) {
+        const mapped = aiReadFromRow(r);
+        if (mapped !== null) return mapped;
+      }
+      return null;
+    });
+  }
+
+  loadAiReadFor(reportId: string, inputHash: string): AiReadRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT * FROM kit_ai_reads WHERE report_id = ? AND input_hash = ?').get(reportId, inputHash);
+      return r === undefined ? null : aiReadFromRow(r, true);
+    });
+  }
+
+  loadAiReadById(id: string): AiReadRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT * FROM kit_ai_reads WHERE id = ?').get(id);
+      return r === undefined ? null : aiReadFromRow(r);
+    });
+  }
+
+  loadAiReads(reportIds: readonly string[]): AiReadRow[] {
+    const wanted = [...new Set(reportIds)].slice(0, 200);
+    if (wanted.length === 0) return [];
+    return this.transaction(() => {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM kit_ai_reads INDEXED BY kit_ai_reads_by_report
+           WHERE status = 'ok' AND report_id IN (${wanted.map(() => '?').join(', ')})
+           ORDER BY report_id, created_at DESC, id DESC`,
+        )
+        .all(...wanted);
+      const newest = new Map<string, AiReadRow>();
+      for (const r of rows) {
+        if (newest.has(String(r.report_id))) continue;
+        const mapped = aiReadFromRow(r);
+        if (mapped !== null) newest.set(mapped.reportId, mapped);
+      }
+      return wanted.flatMap((id) => newest.get(id) ?? []);
+    });
+  }
+
+  listAiRetries(now: number, limit: number | undefined): AiReadRow[] {
+    const n = pageSize(limit, RETRIES_DEFAULT_LIMIT);
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT * FROM (
+             SELECT * FROM kit_ai_reads WHERE status IN ('failed', 'skipped') AND retry_at <= ?
+             UNION ALL
+             SELECT * FROM kit_ai_reads WHERE status = 'pending' AND lease_until <= ?
+           ) WHERE NOT EXISTS (SELECT 1 FROM kit_reports p WHERE p.id = report_id AND p.status <> 'open')
+           ORDER BY created_at, id LIMIT ?`,
+        )
+        .all(now, now, n)
+        .flatMap((r) => aiReadFromRow(r) ?? []),
+    );
+  }
+
+  aiSpendSince(since: number): { micros: number; calls: number } {
+    const r = this.transaction(() =>
+      this.db.prepare('SELECT COALESCE(SUM(micros), 0) AS micros, COUNT(*) AS calls FROM kit_ai_spend WHERE at >= ?').get(since),
+    );
+    return { micros: Number(r?.micros ?? 0), calls: Number(r?.calls ?? 0) };
+  }
+
+  insertAiOutcome(row: AiOutcomeInsert): boolean {
+    return this.transaction(
+      () =>
+        Number(
+          this.db
+            .prepare(
+              `INSERT INTO kit_ai_outcomes
+                 (report_id, read_id, decided_at, level, verdict, rule, severity, ai_verdict, agreement, detail_json, bad_faith, example_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (report_id) DO NOTHING`,
+            )
+            .run(
+              row.reportId,
+              row.readId,
+              row.decidedAt,
+              row.level,
+              row.verdict,
+              row.rule,
+              row.severity,
+              row.aiVerdict,
+              row.agreement,
+              JSON.stringify(row.detail),
+              row.badFaith ? 1 : 0,
+              // A bad-faith row can never teach, so its chat text is not kept.
+              row.example === null || row.badFaith ? null : JSON.stringify(row.example),
+            ).changes,
+        ) > 0,
+    );
+  }
+
+  loadAiOutcome(reportId: string): AiOutcomeRow | null {
+    const r = this.transaction(() => this.db.prepare('SELECT * FROM kit_ai_outcomes WHERE report_id = ?').get(reportId));
+    return r === undefined ? null : aiOutcomeFromRow(r);
+  }
+
+  markAiOutcome(reportId: string, patch: { reversed?: true; dontTeach?: true }): boolean {
+    return this.transaction(() => {
+      const changed = Number(
+        this.db
+          .prepare(
+            `UPDATE kit_ai_outcomes
+             SET reversed = CASE WHEN ? = 1 THEN 1 ELSE reversed END, dont_teach = CASE WHEN ? = 1 THEN 1 ELSE dont_teach END,
+                 example_json = CASE WHEN ? = 1 OR ? = 1 THEN NULL ELSE example_json END
+             WHERE report_id = ?`,
+          )
+          .run(
+            patch.reversed === true ? 1 : 0,
+            patch.dontTeach === true ? 1 : 0,
+            patch.reversed === true ? 1 : 0,
+            patch.dontTeach === true ? 1 : 0,
+            reportId,
+          ).changes,
+      );
+      if (changed === 0) return false;
+      this.bump();
+      return true;
+    });
+  }
+
+  aiExamples(rule: string, severity: string, limit: number | undefined, since: number): AiExampleRow[] {
+    const n = pageSize(limit, EXAMPLES_DEFAULT_LIMIT);
+    return this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT report_id, decided_at, agreement, example_json FROM kit_ai_outcomes
+           WHERE rule = ? AND severity = ? AND decided_at >= ? AND ${AI_TEACHABLE_SQL}
+           ORDER BY decided_at DESC, report_id DESC LIMIT ?`,
+        )
+        .all(rule, severity, since, n)
+        .flatMap((r): AiExampleRow[] => {
+          const example = parseExample(r.example_json);
+          return example === null
+            ? []
+            : [{ reportId: String(r.report_id), decidedAt: Number(r.decided_at), agreement: String(r.agreement) as 'agree' | 'override', example }];
+        }),
+    );
+  }
+
+  aiTeachableCount(since: number): number {
+    const r = this.transaction(() =>
+      this.db.prepare(`SELECT COUNT(*) AS n FROM kit_ai_outcomes WHERE decided_at >= ? AND ${AI_TEACHABLE_SQL}`).get(since),
+    );
+    return Number(r?.n ?? 0);
+  }
+
+  aiStats(since: number): AiStatsRow[] {
+    const rows = this.transaction(() =>
+      this.db
+        .prepare(
+          `SELECT rule, COUNT(*) AS decided,
+                  SUM(agreement = 'agree') AS agree, SUM(agreement = 'override') AS override, SUM(agreement = 'none') AS none,
+                  SUM(ai_verdict IN ('upheld', 'noted') AND (verdict = 'no_action' OR reversed = 1)) AS false_positives,
+                  SUM(CASE WHEN agreement = 'agree' AND json_valid(detail_json) THEN COALESCE(json_extract(detail_json, '$.oneClick'), 0) = 1 ELSE 0 END) AS one_click
+           FROM kit_ai_outcomes WHERE decided_at >= ? GROUP BY rule`,
+        )
+        .all(since),
+    );
+    return rows
+      .map((r) => ({
+        rule: nullableText(r.rule),
+        decided: Number(r.decided),
+        agree: Number(r.agree),
+        override: Number(r.override),
+        none: Number(r.none),
+        falsePositives: Number(r.false_positives),
+        oneClick: Number(r.one_click),
+      }))
+      .sort((a, b) => compareRules(a.rule, b.rule));
+  }
+
+  purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {
+    return this.transaction(() => {
+      const reads = Number(this.db.prepare('DELETE FROM kit_ai_reads WHERE created_at < ?').run(readsBefore).changes);
+      this.db.prepare('DELETE FROM kit_ai_spend WHERE at < ?').run(readsBefore);
+      const outcomes = Number(this.db.prepare('DELETE FROM kit_ai_outcomes WHERE decided_at < ?').run(outcomesBefore).changes);
+      // The only chat text that outlives a report goes on its own, shorter clock; the row keeps its counts.
+      this.db.prepare('UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL').run(examplesBefore);
+      return { reads, outcomes };
     });
   }
 
@@ -1166,6 +1703,14 @@ export class SqliteStore implements Store, TermStore {
 
   purgeReports(before: number, keepBadFaithSince: number): number {
     return this.transaction(() => {
+      // An AI read is a view of its report and goes with it, in the same transaction (its casebook outcome has its own clock).
+      this.db
+        .prepare(
+          `DELETE FROM kit_ai_reads WHERE report_id IN (
+             SELECT id FROM kit_reports
+             WHERE created_at < ? AND NOT (bad_faith = 1 AND actioned_at IS NOT NULL AND actioned_at >= ?))`,
+        )
+        .run(before, keepBadFaithSince);
       const n = Number(
         this.db
           .prepare(

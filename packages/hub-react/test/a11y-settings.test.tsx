@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import axe from 'axe-core';
 import { describe, expect, it } from 'vitest';
 import { renderHub } from './render.js';
@@ -115,5 +115,39 @@ describe.each(['light', 'dark'] as const)('axe on the pickers and the quick warn
     await user.selectOptions(screen.getByLabelText('What happens'), 'chat');
     await user.selectOptions(screen.getByLabelText('How long'), 'Custom length');
     expect(await violations(container)).toEqual([]);
+  });
+});
+
+describe.each(['light', 'dark'] as const)('axe on Settings > AI, %s theme', (theme) => {
+  async function open(w: HubWorld) {
+    const r = renderHub(w, { theme, path: '/settings/ai' });
+    await screen.findByRole('heading', { level: 2, name: 'AI' });
+    await screen.findByText('Working');
+    return r;
+  }
+
+  it('axe: no violations: the screen, Advanced open, and the save question', async () => {
+    const w = await hubWorld({ role: 'owner', ai: { level: 1 } });
+    const f = await w.file();
+    await w.aiIdle();
+    await w.client.decide(f.id, { verdict: 'no_action', actions: [] });
+    const { container, user } = await open(w);
+    expect(await violations(container)).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Advanced' }));
+    expect(await violations(container)).toEqual([]);
+    await user.click(screen.getByRole('radio', { name: /^Recommend/ }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('a role that only reads, a server with no adapter and a status that failed have none', async () => {
+    const w = await hubWorld({ role: 'senior', actor: 's@example.test', ai: { level: 1 } });
+    const { container } = await open(w);
+    expect(await violations(container)).toEqual([]);
+    cleanup();
+    const none = await hubWorld({ role: 'owner' });
+    const r = renderHub(none, { theme, path: '/settings/ai' });
+    await screen.findByText('Not set up on this server');
+    expect(await violations(r.container)).toEqual([]);
   });
 });

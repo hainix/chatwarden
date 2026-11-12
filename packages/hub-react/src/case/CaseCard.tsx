@@ -17,9 +17,11 @@ import type { ReporterRecord, StaffReport } from '../types.js';
 import { Card, ErrorBlock, Fetched, Kbd, Notice, Skeleton } from '../ui.js';
 import { useCase } from './CaseContext.js';
 import { DecisionBar } from './DecisionBar.js';
+import { LazyAiParts } from '../lazyParts.js';
 import { useQuickKeys } from '../quickKeys.js';
 import { QuickKeys } from './QuickKeys.js';
 import { reporterRate } from './ReporterStanding.js';
+import { AiReadSlot } from './AiRead.js';
 import { RuleField } from './RuleField.js';
 import { shapeOf, takeLastQuick, useQuickActions } from './useQuickActions.js';
 import { Line } from './Transcript.js';
@@ -174,6 +176,8 @@ export function CaseCard() {
   const { pick, fresh, suggest, choice } = q;
   const one = q.primary;
   const quick = q.warning;
+  // The AI's suggestion stands in for the ladder's step when it can be accepted: the same button, the same keys, the same hold.
+  const aiOk = q.aiOk;
 
   const target = people.find((p) => p.role === 'target');
   const name = target === undefined ? '' : personName(target, people, t);
@@ -184,6 +188,7 @@ export function CaseCard() {
    * for it, unless the moderator has already changed the bar's form (what was filled in from the case, or from an earlier pick, is replaced).
    */
   const seeded = useRef<string | null>(null);
+  c.aiBus.edit.current = () => openElse();
   const openElse = (): void => {
     const suggestion = pick.suggestion;
     if (pick.mode !== 'none' && pick.picked !== null && suggestion !== null && detail.data !== undefined) {
@@ -208,7 +213,7 @@ export function CaseCard() {
   }, [status]);
   useEffect(() => {
     if (refocus.current === null) return;
-    const back = refocus.current === 'warning' ? quickRef.current : refocus.current === 'none' ? noActionRef.current : primaryRef.current;
+    const back = refocus.current === 'warning' ? quickRef.current : refocus.current === 'none' ? noActionRef.current : (primaryRef.current ?? root.current?.querySelector<HTMLElement>('.cw-ai-accept') ?? null);
     const target = back ?? noActionRef.current;
     if (target === null) return;
     refocus.current = null;
@@ -286,6 +291,8 @@ export function CaseCard() {
       suggestion = <p className="cw-hint">{t('hub.decide.rules.denied')}</p>;
     } else if (!can('sanctions.apply')) {
       suggestion = <p className="cw-hint">{t('hub.decide.noApply')}</p>;
+    } else if (aiOk) {
+      suggestion = <LazyAiParts part="suggest" />;
     } else if (pick.mode !== 'none' && (pick.picked === null || pick.error !== null)) {
       // Asking which rule: the field below is the whole card until a rule is picked.
       suggestion = null;
@@ -322,7 +329,7 @@ export function CaseCard() {
       );
     decision = (
       <section className="cw-scard-decision" aria-label={t('hub.decide.title')}>
-        {pick.mode !== 'none' && draft.status === 'ready' && <RuleField pick={pick} rules={draft.rules} report={report} />}
+        {pick.mode !== 'none' && !aiOk && draft.status === 'ready' && <RuleField pick={pick} rules={draft.rules} report={report} />}
         {suggestion}
         {sendError !== null && (
           <div className="cw-error" role="alert" tabIndex={-1} ref={failedRef}>
@@ -336,7 +343,8 @@ export function CaseCard() {
         )}
         {draft.status === 'ready' && (
           <div className="cw-scard-actions">
-            {one !== null && (
+            {aiOk && <LazyAiParts part="accept" />}
+            {!aiOk && one !== null && (
               <button ref={primaryRef} type="button" className="cw-btn cw-btn--primary" aria-disabled={!fresh || !q.cooled} {...(fresh && !q.cooled ? { 'data-cooling': 'true' } : {})} {...(keyed ? { 'aria-keyshortcuts': '1' } : {})} onClick={(e) => q.sendPrimary(e)}>
                 <span>{stepLabel(t, locale, one.choice)}</span>
                 {kbd('1')}
@@ -357,7 +365,8 @@ export function CaseCard() {
             </button>
           </div>
         )}
-        {one !== null && (
+        {c.aiCase?.from != null && !aiOk && draft.status === 'ready' && <LazyAiParts part="why" />}
+        {!aiOk && one !== null && (
           <p className="cw-hint cw-scard-fine">
             {one.choice.kind === 'note'
               ? t('hub.simple.sees.note', { name, seconds: SECONDS })
@@ -382,6 +391,7 @@ export function CaseCard() {
             </p>
           </header>
           <ReporterWarning report={report} people={people} />
+          <AiReadSlot read={c.aiRead} />
           <Said report={report} target={target} people={people} />
           <RecordSection />
         </>

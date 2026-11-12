@@ -339,3 +339,42 @@ Principles: every step lands on LOCAL main and is released by the owner (`ci:rel
 | later | 9 chat UI and translation (K4c), 10 hub and AI (K4/K3c), 11 cleanup | — | kit K3c/K4/K4c |
 
 Every Moxgate change lands on LOCAL main only. The owner pushes, because a push is the production deploy.
+
+## 9. Turning on AI reads (0.1.7)
+
+AI levels 1 and 2 (read, then recommend) arrive with kit 0.1.7. They are off until the owner switches them on in the hub, and they never decide:
+a moderator still clicks, and the AI cannot write a sanction, a strike, a mute or a notice. The reference adapter is `examples/ai-anthropic`
+(Anthropic, Claude Haiku 5.5); Moxgate copies it, the kit publishes no provider package.
+
+**Steps**
+
+1. Back up the SQLite database file, then raise the kit packages to 0.1.7 the way section 6 says. Migration 20 (three new tables, no existing
+   table touched) runs on the first start against the SQLite store; nothing else needs doing by hand. **The migration is one-way:** a 0.1.6 build
+   refuses a database at schema version 20 ("database schema version 20 is newer than this kit supports"), so rolling the packages back later means
+   restoring the backup.
+2. Copy `src/anthropic.ts` and `src/prices.ts` from `examples/ai-anthropic` into the Moxgate server (for example `src/ai/`). Keep the file as
+   Moxgate's own: the kit's tests and the eval set (`examples/ai-anthropic/eval`) are how a change to it is checked.
+3. Install the SDK in Moxgate: `npm install @anthropic-ai/sdk` (the example pins the version it was tested on).
+4. Set the environment variable `ANTHROPIC_API_KEY` in the server's secret store, never in the repository. With no key every read fails as
+   `fatal`, the kit's breaker opens and Settings > AI says so; chat and reports are unaffected. Set a spend limit at the provider too.
+5. Pass the adapter when the kit is created: `createChatwarden({ ..., ai: { adapter: createAnthropicAI(), maxLevel: 2 } })`. Without the `ai`
+   option nothing in the kit changes and the hub shows "Not set up on this server".
+6. The owner chooses the level in the hub: Settings > AI, Off, Read or Recommend (the default is Off; only the owner role can save, and the save
+   asks for a reason). Start with Read for a week and compare with the moderators' own calls before moving to Recommend.
+
+**The daily limits.** Three, all counted from the store so every process shares them: the money cap `dailyBudgetMicros` (code only, default
+$1.00 a UTC day; a hub cannot raise it), the call ceiling `profile.ai.dailyCalls` (the owner's, whole number 1 to 100 000, default 5 000, so an
+adapter that reports no cost still cannot run unbounded) and at most 30 calls a minute and 2 at once. At a limit reads pause and resume the next
+UTC day; reports, chat and decisions go on as if the AI were off.
+
+**What is sent to the provider**, per read: the chosen chat lines (at most 40) with aliases `P1`, `P2`, ... for the speakers, the reporter's reason
+label and note (redacted, 300 characters), Moxgate's Community Rules and the profile's standard, and at most two pseudonymised casebook examples.
+Never sent: subject ids, staff refs, client keys, account ids, IPs, hashes, handles, seat ids, room ids or tags, anyone's history, flags, mutes or
+counts. **A line the word filter blocked is sent as typed**, because the model needs the words to judge intent; set `blockedLines: 'mask'` in the
+`ai` options to send it starred. Tell players what happens to a report (the privacy page) and check the provider's data terms before the first
+live read.
+
+**Rolling back.** Switch the level to Off in the hub: it takes effect at once and stops the calls. Removing the `ai` option from the code removes
+the rest. There is no schema rollback, and downgrading the packages to 0.1.6 does not work on a migrated database (restore the backup taken in step 1): the three tables stay, empty or not, and age out under the retention settings (read rows with their
+reports, casebook example text after 180 days, counts after 365).
+

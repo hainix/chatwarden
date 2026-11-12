@@ -26,7 +26,7 @@ npm install @chatwarden/http express @types/express
 `@types/react` 18 and renders the hub and the headless entry on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` and
 `@chatwarden/http` are peers too: the hub imports types from both, and these values from core (constants and defaults, so the hub
 and the kit cannot drift apart): `LADDER_TABLE`, `DEFAULT_DURATIONS`, `DEFAULT_AREA_RULES`, `DEFAULT_SEVERE_RULES`, `AUDIT_ACTIONS`,
-`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES`, `REPORTER_RANK_LAPSE_MS` and `isDefaultNoActionReason`. Its own type declarations name
+`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES`, `REPORTER_RANK_LAPSE_MS`, `isDefaultNoActionReason` and `assertWithinCeilings` (the one check the AI's pre-fill is held to, from the kit itself). Its own type declarations name
 both packages. Node 22.13 or newer
 for the tooling; the hub itself runs in a browser and imports no `node:` module.
 
@@ -352,7 +352,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
   includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`,
-  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss` and `ReporterRecord.accuracy`. The names are the same declarations the main entry re-exports (`createHubClient`,
+  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy` and the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.dontTeach`. The names are the same declarations the main entry re-exports (`createHubClient`,
   `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
   (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
   - functions, values and classes:
@@ -365,7 +365,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `CLAIM_BEAT_MS`, `QUEUE_MAX_PAGES`, `QUEUE_PAGE`, `SESSION_REPORTERS_MAX`, `SESSION_TTL_MS`, `TAKE_COOLDOWN_MS`,
     `TOAST_ERROR_MS`, `TOAST_HELD_MAX`, `TOAST_MAX`, `TOAST_MS`, `UNDO_MS`, `VIEWING_BEAT_MS`
   - types:
-    `ActionResult`, `ActionState`, `ActionStore`, `BlockedDays`, `BlockedLine`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
+    `ActionResult`, `ActionState`, `ActionStore`, `AiReadAgainResult`, `AiStatusView`, `BlockedDays`, `BlockedLine`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
     `ClaimResult`, `CloseGapInput`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
     `DecisionEntry`, `DecisionForm`, `DecisionHost`, `DecisionOutcome`, `DecisionState`, `DecisionStore`, `DecisionStoreOptions`,
     `DismissOpenInput`, `DismissOpenOutcome`, `DismissOpenRequest`, `DismissOpenResult`,
@@ -373,13 +373,13 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `HubCatalog`, `HubClient`, `HubController`, `HubControllerOptions`, `HubControllerSettings`, `HubHost`, `HubParams`, `HubT`,
     `HubText`, `ListAuditQuery`, `ListReportsQuery`, `ListSanctionsQuery`, `LiveQueueOptions`, `LiveQueueState`, `LiveQueueStore`,
     `NextCase`, `NextReport`, `OpenCase`, `Page`, `PageSource`, `PagedListStore`, `PagedState`, `PersonHistory`, `PolicyDocs`,
-    `PolicyFormat`, `PolicySamples`, `PolicySaved`, `QueueFilter`, `QueueGroup`, `QueueHold`, `QueueSort`, `QueueStats`, `Reason`,
+    `PolicyFormat`, `PolicySamples`, `PolicySaved`, `QueueFilter`, `QueueGroup`, `QueueHold`, `QueueSort`, `QueueStats`, `RankSignals`, `Reason`,
     `ReportDetail`, `ReportStatus`, `ResourceState`, `ResourceStore`, `RouterTransportOptions`, `SanctionInput`, `SanctionRow`,
     `SanctionSource`, `Session`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermInput`,
     `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
     `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
 - the `<Hub>` prop `HubProps.onController`
-- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`
+- in the main entry, the helpers it keeps for the hub's own screens: `tabOf`, `shortcutFor`, `normalizePath`, `buildPath` and `parseRoute`, `loadAiWords` (the English of the AI's parts, see "Words and languages") and `loadAiRank` (the AI's queue ranking: `priorityScore`, `RANK_WEIGHTS`, `reporterSignal`, and the `priority` sort of `groupQueue`; also exported from `/headless`)
 
 ## Options
 
@@ -602,6 +602,40 @@ Deciding writes `report.decide` and nothing else about the case. The queue list 
 
 **What the Overview and All actions cost in audited reads.** `GET /sanctions` writes one `history.view` row with no target each time it is read. The Overview's Recent actions is read once when the Overview opens and not again by itself: it does not follow the live queue, so a teammate's decision shows there the next time the Overview is opened, or in "See all". All actions reads when it opens, once for each page a moderator asks for with "Load more", and once more when the filter changes. Nothing reads on a timer: the only repeating call is `GET /changes`, which is not audited.
 
+### The AI (levels 1 and 2)
+
+When the server runs the kit's AI (`ai` option, a provider adapter in your code) the hub shows what it read and, at level 2, what it
+suggests. Nothing here decides: a moderator does, and every part is lazy, so a hub with the AI off loads none of it.
+
+- **Level 1, Read.** A neutral strip with a dashed outline (it is machine-written) sits between the case header and the transcript: an `AI`
+  tag, the conduct level in words, the rule and a one-line summary, shown as plain text. The lines the AI cited carry a small tick. One
+  `⋯` menu holds the model, when it read, how sure it was, the two plain notes (older rules; a line that tried to instruct the AI), Read
+  again and Hide the AI on this case (kept for this browser session, per moderator). While the server says a read is expected (`aiExpected` on the case answer: the AI is on, an adapter is set up, the breaker is closed, neither daily limit is reached and the read has not ended without an answer) a skeleton holds for up to
+  20 seconds and reads the case again at about 5 and 15 seconds (at most three audited reads of the case per open); then it leaves one
+  quiet line, "The AI has not answered yet", with a Check again action, and never an error banner. When no read is expected (the AI off or degraded) the case looks exactly as with the AI off: no skeleton, no extra reads of the case. Read again that is not answered can be
+  asked again after the wait. A case that is closed shows no strip. The queue gets one neutral chip with the level word, and orders cases by the
+  `priority` sort when the server sends reads: wait, open reports, the read and the reporter's record, as a weight and never a filter. Its code
+  loads on its own then, in the React hub and in the headless controller alike. While the queue is in that order the top of the list is what Take
+  next takes (its button says "Take next: highest priority" and `controller.takeNext()` and `continueFrom()` claim the first case on the list as shown
+  that nobody holds, passing over one that was claimed a moment before; `queue.getSnapshot().ranked` says which order it is in), and in the
+  longest-wait order it is the server's oldest unclaimed case as before. For `groupQueue(items, { sort: 'priority', signals })` on your own,
+  `await loadAiRank()` first (from the main entry or `/headless`; it returns `priorityScore`, `RANK_WEIGHTS` and `reporterSignal`), or the sort is the longest wait.
+- **Level 2, Recommend.** The decision bar opens pre-filled from the recommendation, labelled "Suggested by AI" (it says "Edited" once
+  anything changes). `A` accepts it into the usual five-second Undo hold and goes on to the next case; `E` opens the editor. Both act where
+  Quick keys act (on in Simple, off in Detailed), through the same act guard as `1`, `2` and `3`, and never while typing. In Simple mode the
+  primary button reads "Accept AI suggestion" with the step in words. The hub fills the AI's step only when it is a warning, a note or a
+  chat restriction of 24 hours or less, whatever the server says (`AI_MAX_PREFILL_MS` in core); a ban, an area ban or anything longer is
+  left to the ladder's own "Add suggested step". Every decision tells the server which read the moderator was shown and whether it is that
+  read's pre-fill as it stood (`DecideInput.ai`).
+- **Settings > AI.** Off, Read or Recommend, a status line (Working, Paused, Unavailable, Not set up on this server) and one Advanced
+  disclosure: reads and spend against the limits, the cache hit rate, "Learn from our decisions", agreement and one-click rates and a
+  per-rule table. Saving asks for a reason, like the steps and ladder; only the owner can save. The daily spending limit and the adapter are set in
+  your server code and are read-only here; the ceiling on calls a day is the owner's, set in Advanced. "Learn from our decisions" off sends no examples
+  and keeps no new text, but example text already stored stays until its 180 days are up (or a senior marks the case "don't teach").
+
+The words of these parts are not in `en` (they load with the parts); `loadAiWords()` returns them, see "Words and languages". To see the whole
+flow with no key and no network, run `examples/tiny-chat` with `CW_DEMO_AI=1` (a scripted fake AI at level 2) and open `/mod`.
+
 ### Terms, Blocked, Rule gaps, Audit and the Guide
 
 **Words stay hidden.** A blocked word is hidden until a moderator chooses to see it, on every screen that holds one. On Terms, "Show words" (off by default)
@@ -703,6 +737,17 @@ export const t = createT({ ...en, ...de }, 'de');
 ```
 
 Pass it as `<Hub t={t} locale="de" />`. Times and numbers use `Intl` with the same locale.
+
+**The AI's words.** The parts that show the AI (the read on a case, its menu, the pre-filled decision and Settings > AI) are loaded only
+when they are first needed, so their English is not in `en` and costs the first load nothing. A key your `t` has no text for reads in
+English there. To translate them, spread them in with `loadAiWords()`, which returns the keys (named `hub.ai.*` and `hub.settings.ai.*`):
+
+```ts
+import { createT, en, loadAiWords } from '@chatwarden/hub-react';
+
+const de = { 'hub.nav.reports': 'Meldungen' };
+export const t = createT({ ...en, ...(await loadAiWords()), ...de }, 'de');
+```
 
 **Translators: add these words for 0.1.5.** A key you leave out falls back to English (it never shows as a key), so nothing breaks, but
 the faster-triage screens read English until you add them. A plural pair is listed by its base name and needs `.one` and `.other`

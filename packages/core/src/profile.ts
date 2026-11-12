@@ -144,7 +144,34 @@ export interface ModerationProfile extends ModerationProfileBase {
    * {@link ReportingSettings}.
    */
   reporting?: ReportingSettings;
+  /**
+   * The AI read, in the moderator's hands: `level` 0 is off (the default), 1 reads each report and shows a summary, 2 also
+   * recommends; `learn` (default true) lets decided cases teach the read. A level 3 or 4 is refused ("not available yet"). The
+   * hub edits this section; the code-side AI option sets the adapter and the highest level it may reach. See {@link AISettings}.
+   */
+  ai?: Partial<AISettings>;
 }
+
+/**
+ * The AI levels and the casebook switch, as the profile holds them. The level in force is also bounded by the adapter and the
+ * maximum level given in code, and is 0 when no adapter is configured.
+ * @experimental
+ */
+export interface AISettings {
+  /** 0 off, 1 read, 2 recommend. 3 and 4 are not available yet. */
+  level: 0 | 1 | 2;
+  /** Whether decided cases may be kept as pseudonymised examples for later reads. Default true. */
+  learn: boolean;
+  /**
+   * The most provider calls the AI may make in a UTC day, a second guard beside the spend cap in code (an adapter that reports no cost
+   * cannot run unbounded). A whole number from 1 to 100 000; default 5 000.
+   */
+  dailyCalls: number;
+}
+
+/** The default and the largest value of {@link AISettings.dailyCalls}. */
+export const AI_DAILY_CALLS_DEFAULT = 5000;
+export const AI_DAILY_CALLS_MAX = 100_000;
 
 /**
  * What `defineProfile`, `resolveProfile`, `applyPolicyLayer`, `cw.profile` and `cw.policy.get()` return: a validated, deep-frozen
@@ -164,6 +191,8 @@ export interface ResolvedProfile extends ModerationProfileBase {
   customDuration: boolean;
   /** The reporting settings in force, every field filled in. */
   reporting: ResolvedReporting;
+  /** The AI settings in force, every field filled in. */
+  ai: AISettings;
 }
 
 /** @deprecated The same as {@link ModerationProfile}, which now has the two fields optional. */
@@ -211,12 +240,14 @@ const TOP_KEYS = [
   'durations',
   'customDuration',
   'reporting',
+  'ai',
   'levels',
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
-const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai'];
+const AI_KEYS = ['level', 'learn', 'dailyCalls'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
 const REPEAT_KEYS = ['windowDays', 'notes', 'distinctGames', 'outcome'] as const;
@@ -396,6 +427,23 @@ function lineOf(v: unknown, path: string, min: 0 | 1, max: number): void {
   }
 }
 
+/** The `ai` section, in input shape (both fields optional). Levels 3 and 4 are designed but not built, so they are refused by name. */
+function validateAI(v: unknown, path: string): void {
+  const ai = obj(v, path, AI_KEYS, AI_KEYS);
+  if (Object.hasOwn(ai, 'level')) {
+    const level = ai['level'];
+    if (level === 3 || level === 4) fail(`${path}.level`, 'AI levels 3 and 4 are not available yet');
+    if (level !== 0 && level !== 1 && level !== 2) fail(`${path}.level`, 'must be 0 (off), 1 (read) or 2 (recommend)');
+  }
+  if (Object.hasOwn(ai, 'learn') && typeof ai['learn'] !== 'boolean') fail(`${path}.learn`, 'must be true or false');
+  if (Object.hasOwn(ai, 'dailyCalls')) {
+    const n = ai['dailyCalls'];
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > AI_DAILY_CALLS_MAX) {
+      fail(`${path}.dailyCalls`, `must be a whole number of calls from 1 to ${AI_DAILY_CALLS_MAX}`);
+    }
+  }
+}
+
 /** The `reporting` section, in input shape (every field optional, a reason needing only an id and a label). */
 function validateReporting(v: unknown, path: string): void {
   const rep = obj(v, path, REPORTING_KEYS, REPORTING_KEYS);
@@ -477,6 +525,7 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (Object.hasOwn(p, 'durations')) validateDurations(p['durations'], 'profile.durations');
   if (Object.hasOwn(p, 'customDuration') && typeof p['customDuration'] !== 'boolean') fail('profile.customDuration', 'must be true or false');
   if (Object.hasOwn(p, 'reporting')) validateReporting(p['reporting'], 'profile.reporting');
+  if (Object.hasOwn(p, 'ai')) validateAI(p['ai'], 'profile.ai');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
@@ -572,9 +621,16 @@ function dedupeReasonRules(copy: Record<string, unknown>): void {
   });
 }
 
-/** A profile written before `durations`, `customDuration` and `reporting` existed gets their defaults. */
+/** The AI settings with every field filled in; a value of the wrong shape is returned as it is, for the validator to name. */
+function fillAI(value: unknown): unknown {
+  if (value === undefined) return { level: 0, learn: true, dailyCalls: AI_DAILY_CALLS_DEFAULT };
+  return isPlain(value) ? { level: 0, learn: true, dailyCalls: AI_DAILY_CALLS_DEFAULT, ...value } : value;
+}
+
+/** A profile written before `durations`, `customDuration`, `reporting` and `ai` existed gets their defaults. */
 function fillDefaults(copy: unknown): void {
   if (!isPlain(copy)) return;
+  setOwn(copy, 'ai', fillAI(copy['ai']));
   if (!Object.hasOwn(copy, 'durations')) setOwn(copy, 'durations', [...DEFAULT_DURATIONS]);
   if (!Object.hasOwn(copy, 'customDuration')) setOwn(copy, 'customDuration', true);
   // A section of the wrong shape is left as it is, for the validator to name; one that checks out is filled in.
@@ -596,7 +652,13 @@ function finalize(value: unknown): ResolvedProfile {
  * changed and the profile is not validated here (`validateProfile` does that). Used by the document functions.
  */
 export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
-  return { ...p, durations: p.durations ?? [...DEFAULT_DURATIONS], customDuration: p.customDuration ?? true, reporting: resolveReporting(p.reporting) };
+  return {
+    ...p,
+    durations: p.durations ?? [...DEFAULT_DURATIONS],
+    customDuration: p.customDuration ?? true,
+    reporting: resolveReporting(p.reporting),
+    ai: { level: 0, learn: true, dailyCalls: AI_DAILY_CALLS_DEFAULT, ...p.ai },
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -916,7 +978,7 @@ export function defineProfile(p: ModerationProfile): ResolvedProfile {
  * The parts of a profile the hub may edit, and the order they are listed in. Everything else (identity, the written
  * levels, the AI context, profanity handling) stays in code: changing profanity means rebuilding the filter.
  */
-export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting'] as const;
+export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai'] as const;
 export type PolicySection = (typeof POLICY_SECTIONS)[number];
 
 /** One ladder cell as the editor sends it: the label may be left out and is then generated ("Restrict chat 6 hours"). */
@@ -950,6 +1012,8 @@ export interface PolicyLayer {
   guidelines?: Array<{ outcome: string } | null>;
   /** The reporting settings: `flow` and `thanks` replace the profile's; `reasons` replaces the whole list. Each is optional; a reason needs only `id` and `label`. */
   reporting?: ReportingSettings;
+  /** The AI settings: `level` (0 off, 1 read, 2 recommend), `learn` and `dailyCalls` (the owner's ceiling on calls in a UTC day, a whole number from 1 to 100 000). Each is optional and merges onto the profile's. Levels 3 and 4 are refused. */
+  ai?: Partial<AISettings>;
 }
 
 /** The longest outcome text a layer may set on a guideline tier. */

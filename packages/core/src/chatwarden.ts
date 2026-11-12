@@ -1,3 +1,5 @@
+import { createInertAi } from './ai/inert.js';
+import type { AiFacade, AiOptions, AiService } from './ai/service.js';
 import { AuditService } from './audit.js';
 import type { AuditPage, AuditQuery, AuditRecordInput } from './audit.js';
 import { ChatService } from './chat.js';
@@ -194,6 +196,14 @@ export interface ChatwardenOptions {
    * `RangeError`; set it when your registry numbers slurs differently.
    */
   autoRestrictRule?: number;
+  /**
+   * AI levels 1 and 2 (read, and recommend). Off unless you give an adapter; the level itself is a moderator setting
+   * (`profile.ai.level`, default 0) held to at most `maxLevel`. Needs a store with the AI methods (SQLite has them; the
+   * in-memory store has them through `withMemoryAi`). A store without them leaves the AI inert and logs `chatwarden.ai_store_unsupported`
+   * once at creation, as with any optional Store method; a bad option still throws. The adapter runs on the server only; see `ModerationAI`.
+   * @experimental
+   */
+  ai?: AiOptions;
 }
 
 /** The moderation kit as an adopter uses it. Nothing here returns an identifier meant for a player. */
@@ -460,6 +470,13 @@ export interface Chatwarden {
      */
     check(text: string): { ok: true } | { ok: false; reason: 'name_not_allowed'; rule: number };
   };
+  /**
+   * The AI read and recommend service. Always present: without an `ai` option (or at level 0) it answers as if there were no AI. A
+   * read is made after the report is stored and never delays the player's ack; a failing, slow or refusing provider changes nothing
+   * for players or moderators. Staff only: a read describes chat lines.
+   * @experimental
+   */
+  ai: AiFacade;
   /** The registry in use (the one given, or the starter rules for the profile). Retired rules stay listed. */
   rules: CommunityRules;
   /**
@@ -672,6 +689,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   if (opts.retention !== false && purgeEveryMs > MAX_PURGE_EVERY_MS) {
     throw new RangeError(`retention.everyMs must be at most ${MAX_PURGE_EVERY_MS}`);
   }
+  // The AI service is loaded only when an adapter is given, so a bundler can leave it (about 40 KB minified) out of a build that never passes one.
+  const aiModule = opts.ai === undefined ? undefined : await import('./ai/service.js');
+  // A bad option throws here. A store without the AI methods (the in-memory store has them only through `withMemoryAi`) does not: the AI stays
+  // inert and the kit says so once, like any optional Store method it cannot use.
+  const aiMissing = opts.ai !== undefined && aiModule !== undefined ? aiModule.checkAiSetup(store, opts.ai) : [];
+  if (aiMissing.length > 0) safeWarn(logger, 'chatwarden.ai_store_unsupported', { missing: aiMissing.join(',') });
   const rules = opts.rules ?? defineRules(starterRules(baseProfile.rules));
   const autoRestrictRule = opts.autoRestrictRule ?? 1;
   const autoRule = rules.get(autoRestrictRule);
@@ -746,6 +769,8 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     limits: limits.reports,
   });
   const doors = new DoorService({ hasher, subjects, sanctions, clock, logger, notices });
+  // The AI service is built after the audit trail it writes to; a decision reaches it through this late binding.
+  const aiRef: { service?: AiService } = {};
   const decisions = new DecisionService({
     store,
     subjects,
@@ -755,6 +780,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     index: sanctions,
     logger,
     reporterFeedback: limits.reporterFeedback,
+    aiOutcome: (args) => aiRef.service?.outcomeOf(args) ?? null,
   });
 
   // The person behind a player's connection details, FOUND and never created. An IP alone finds nobody.
@@ -846,6 +872,15 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       } catch (err) {
         eventFailed(err);
       }
+      // A decision recorded against an AI read leaves one audit row, written by the moderator (best effort: it never fails the decision).
+      const recorded = committed.aiOutcome;
+      if (recorded !== null && recorded.role !== null) {
+        try {
+          audit.record({ actor: recorded.actor, role: recorded.role, action: 'ai.outcome', target: { type: 'report', ref: committed.reportId } });
+        } catch (err) {
+          eventFailed(err);
+        }
+      }
     }
     return result;
   };
@@ -860,7 +895,27 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
   });
   const reasonBook = new ReasonBook(store);
 
+  // The AI read service. It listens for new reports and only enqueues; with no adapter it is a facade that is always off.
+  const aiService =
+    opts.ai === undefined || aiModule === undefined || aiMissing.length > 0
+      ? undefined
+      : new aiModule.AiService({
+          options: opts.ai,
+          store,
+          clock,
+          logger,
+          profile: () => policy.profileNow(),
+          rules,
+          suggest: (subject, level, rule, context) => suggest(policy.profileNow(), historyOf(store, subjects, subject, clock.now()), level, rule, clock.now(), context),
+          subscribe: bus.on,
+          audit: (input) => audit.record(input),
+          exampleRetentionMs: () => retentionPolicy.aiExamplesMs ?? RETENTION_DEFAULTS.aiExamplesMs,
+        });
+  aiRef.service = aiService;
+  const ai: AiFacade = aiService ?? createInertAi();
+
   return {
+    ai,
     rooms: {
       seat,
       seatConnection: (roomId, seatId, ctx, handle, tags) => {
@@ -914,7 +969,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
         if (res.ok) announceReport(res.reportId);
         return res;
       },
-      addDetail: (reportId, reporterSeat, detail) => reports.addDetail(reportId, reporterSeat, detail),
+      addDetail: async (reportId, reporterSeat, detail) => {
+        const res = await reports.addDetail(reportId, reporterSeat, detail);
+        // The follow-up changes what the AI would read: queue one new read (it only enqueues; the reporter's ack never waits).
+        if (res.ok) aiService?.caseChanged(reportId);
+        return res;
+      },
       list: (q) => listStaffReports(store, subjects, q, policy.profileNow().reporting.reasons),
       get: (id) => {
         const record = typeof id === 'string' ? store.loadReport(id) : null;
@@ -1110,6 +1170,9 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     close: async () => {
       if (timer !== undefined) clearInterval(timer);
       timer = undefined;
+      // Stop reading and abort calls in flight, and let them end before the store goes.
+      ai.close();
+      await ai.idle();
       await subjects.flush();
       store.close();
     },

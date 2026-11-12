@@ -177,6 +177,7 @@ export const en = {
   'hub.queue.people.other': '{count} people',
   'hub.queue.takeNext': 'Take next case',
   'hub.queue.takeNextHint': 'oldest unclaimed',
+  'hub.queue.takeNext.priority': 'Take next: highest priority',
   'hub.queue.filter.claim': 'Show',
   'hub.queue.claim.all': 'All',
   'hub.queue.claim.unclaimed': 'Unclaimed',
@@ -232,6 +233,7 @@ export const en = {
   'hub.claim.viewingMany': '{names} are viewing',
 
   'hub.ai.label': 'AI read',
+  'hub.ai.addStep': 'Add suggested step',
   'hub.ai.title': 'AI read (AI level {level})',
   'hub.ai.note': 'A read, never a decision. A moderator decides.',
 
@@ -870,6 +872,9 @@ export const en = {
   'hub.audit.label.report.decide': 'Decided a report',
   'hub.audit.label.report.dismissCase': 'Dismissed all open reports about a person',
   'hub.audit.label.report.dismissReporter': 'Dismissed all open reports from a reporter',
+  'hub.audit.label.ai.read': 'The AI read a report',
+  'hub.audit.label.ai.rerun': 'Asked the AI to read a report again',
+  'hub.audit.label.ai.outcome': 'Recorded a decision against the AI read',
   'hub.audit.label.sanction.apply': 'Applied a sanction',
   'hub.audit.label.sanction.revoke': 'Revoked a sanction',
   'hub.audit.label.gap.close': 'Closed a rule gap',
@@ -1048,6 +1053,7 @@ export const en = {
   'hub.settings.leave.stay': 'Keep editing',
   'hub.settings.leave.go': 'Leave',
   'hub.settings.reporting.nav': 'Reporting',
+  'hub.settings.ai.nav': 'AI',
   'hub.reporting.title': 'Reporting',
   'hub.reporting.intro': 'How players report a message, what they can say it is about, and what they read afterwards. A change applies at once to new reports. Reports already filed are not changed.',
   'hub.reporting.body': 'Reporting settings',

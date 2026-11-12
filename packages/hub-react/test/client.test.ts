@@ -123,6 +123,8 @@ describe('every staff route has a client method', () => {
 
   async function exercise(w: HubWorld) {
     const { id, person } = await w.file({ target: 'Mallory', reporter: 'Rita' });
+    await w.aiIdle();
+    const aiRead = (await w.client.getReport(id)).ai;
     const { groupId } = await w.sanction(person, 'chat');
     const gap = await w.sanction(person, 'warning', 'uncovered');
     const termId = w.live.rows.terms[0]!.id;
@@ -164,6 +166,8 @@ describe('every staff route has a client method', () => {
       ['savePolicyProfile', () => c.savePolicyProfile({ layer: { customDuration: false }, version: 0, reason: 'Fewer lengths' }), { method: 'PUT', path: '/policy/profile', body: { layer: { customDuration: false }, version: 0, reason: 'Fewer lengths' } }],
       ['resetPolicyProfile one section', () => c.resetPolicyProfile({ section: 'customDuration', reason: 'Back' }), { method: 'DELETE', path: '/policy/profile', query: { section: 'customDuration' }, body: { reason: 'Back' } }],
       ['resetPolicyProfile everything', () => c.resetPolicyProfile({ reason: 'Back' }), { method: 'DELETE', path: '/policy/profile', body: { reason: 'Back' } }],
+      ['aiStatus', () => c.aiStatus(), { method: 'GET', path: '/ai/status' }],
+      ['readAgain', () => c.readAgain(id), { method: 'POST', path: `/reports/${id}/ai/read` }],
       ['listAudit', () => c.listAudit({ limit: 5, action: 'report.view' }), { method: 'GET', path: '/audit', query: { limit: 5, action: 'report.view' } }],
       ['changes without a token', () => c.changes(), { method: 'GET', path: '/changes' }],
       ['changes since a token', () => c.changes('0'), { method: 'GET', path: '/changes', query: { since: '0' } }],
@@ -190,7 +194,13 @@ describe('every staff route has a client method', () => {
         () => c.decide(id, { verdict: 'upheld', reason: 'clear', actions: [{ subject: person, kind: 'warning', durationMs: null, rule: 1 }] }),
         { method: 'POST', path: `/reports/${id}/decide`, body: { verdict: 'upheld', reason: 'clear', actions: [{ subject: person, kind: 'warning', durationMs: null, rule: 1 }] } },
       ],
+      [
+        'dontTeach',
+        () => c.dontTeach(id),
+        { method: 'POST', path: `/reports/${id}/ai/dont-teach` },
+      ],
     ];
+    expect(aiRead).not.toBeNull();
     const results: unknown[] = [];
     for (const [name, call, want] of calls) {
       const before = w.sent.length;
@@ -205,17 +215,17 @@ describe('every staff route has a client method', () => {
   }
 
   it('sends the right method, path, query and body for each method, and each succeeds against the real routes', async () => {
-    const w = await hubWorld({ role: 'owner' });
+    const w = await hubWorld({ role: 'owner', ai: { level: 2 } });
     const { results } = await exercise(w);
     // exercise() turns a thrown error into a string naming the call, so any string here is a failed call.
     expect(results.filter((r) => typeof r === 'string')).toEqual([]);
   });
 
   it('covers every route the staff API mounts', async () => {
-    const w = await hubWorld({ role: 'owner' });
+    const w = await hubWorld({ role: 'owner', ai: { level: 2 } });
     await exercise(w);
     const keys = Object.keys(w.routes);
-    expect(keys.length).toBeGreaterThanOrEqual(23);
+    expect(keys.length).toBeGreaterThanOrEqual(26);
     const missing = keys.filter((key) => {
       const { method, re } = matcher(key.replace(/~ref/g, ''));
       return !w.sent.some((r) => r.method === method && re.test(r.path));
@@ -439,5 +449,106 @@ describe('listReports passes reporterAccuracy through', () => {
     const row = page.items.find((i) => i.id === open.id);
     expect(row).toBeDefined();
     expect(row?.reporterAccuracy ?? null).toBeNull();
+  });
+});
+
+describe('the AI methods', () => {
+  const body = (status: number, b: unknown, headers: Record<string, string> = {}): Transport => () => Promise.resolve({ status, headers, body: b as never });
+
+  it('readAgain: 200 ready carries the read, 202 pending carries nothing else', async () => {
+    const ready = { status: 'ready', ai: { id: 'a1' } };
+    expect(await createHubClient(body(200, ready)).readAgain('r1')).toEqual(ready);
+    expect(await createHubClient(body(202, { status: 'pending' })).readAgain('r1')).toEqual({ status: 'pending' });
+  });
+
+  it('readAgain: 409 ai_final, 409 ai_off, 429 ai_budget and 503 ai_unavailable are HubErrors with their codes', async () => {
+    const cases: Array<[number, string]> = [
+      [409, 'ai_final'],
+      [409, 'ai_off'],
+      [429, 'ai_budget'],
+      [503, 'ai_unavailable'],
+    ];
+    for (const [status, code] of cases) {
+      const err = await createHubClient(body(status, { error: code, message: 'm' })).readAgain('r1').catch((e: unknown) => e);
+      expect(err, code).toBeInstanceOf(HubError);
+      expect(err, code).toMatchObject({ status, code });
+    }
+  });
+
+  it('readAgain: a 503 says how long to wait, from the header', async () => {
+    const err = (await createHubClient(body(503, { error: 'ai_unavailable', message: 'm', retryAfterMs: 4000 }, { 'retry-after': '4' })).readAgain('r1').catch((e: unknown) => e)) as HubError;
+    expect(err.retryAfter).toBe(4);
+  });
+
+  it('readAgain encodes the id', async () => {
+    const seen: string[] = [];
+    const spy: Transport = (req) => {
+      seen.push(`${req.method} ${req.path}`);
+      return Promise.resolve({ status: 202, headers: {}, body: { status: 'pending' } });
+    };
+    await createHubClient(spy).readAgain('a/b?x');
+    expect(seen).toEqual(['POST /reports/a%2Fb%3Fx/ai/read']);
+  });
+
+  it('aiStatus and dontTeach are plain calls', async () => {
+    const seen: string[] = [];
+    const spy: Transport = (req) => {
+      seen.push(`${req.method} ${req.path} ${String(req.body)}`);
+      return Promise.resolve({ status: 200, headers: {}, body: { ok: true } });
+    };
+    const c = createHubClient(spy);
+    await c.aiStatus();
+    await c.dontTeach('r 1');
+    expect(seen).toEqual(['GET /ai/status undefined', 'POST /reports/r%201/ai/dont-teach undefined']);
+  });
+
+  it('a 404 from an older server (no AI routes) is a HubError the screens can read as "not set up"', async () => {
+    const err = await createHubClient(body(404, { error: 'not_found', message: 'm' })).aiStatus().catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 404, code: 'not_found' });
+  });
+
+  it('against the real routes: status of a kit with no adapter says so, with the AI off', async () => {
+    const w = await hubWorld({ role: 'owner' });
+    const status = await w.client.aiStatus();
+    expect(status).toMatchObject({ available: false, level: 0, state: 'off' });
+    expect(status.stats).toBeDefined();
+    expect(await w.client.readAgain((await w.file()).id).catch((e: unknown) => e)).toMatchObject({ status: 409, code: 'ai_off' });
+  });
+
+  it('against the real routes: a read lands on the case page and read again says ready while nothing changed', async () => {
+    const w = await hubWorld({ role: 'owner', ai: { level: 2 } });
+    const f = await w.file();
+    await w.aiIdle();
+    const detail = await w.client.getReport(f.id);
+    expect(detail.ai).toMatchObject({ severity: 'rude', stale: false });
+    expect(detail.ai?.recommendation).toMatchObject({ verdict: 'upheld' });
+    const again = await w.client.readAgain(f.id);
+    expect(again.status).toBe('ready');
+    const status = await w.client.aiStatus();
+    expect(status).toMatchObject({ available: true, level: 2, state: 'ok' });
+    expect(typeof status.capCalls).toBe('number');
+  });
+
+  it('decide carries the ai echo in its body, and only when given', async () => {
+    const sent: unknown[] = [];
+    const spy: Transport = (req) => {
+      sent.push(req.body);
+      return Promise.resolve({ status: 200, headers: {}, body: { ok: true, replay: false, groups: [] } });
+    };
+    const c = createHubClient(spy);
+    await c.decide('r1', { verdict: 'no_action', actions: [] });
+    await c.decide('r1', { verdict: 'no_action', actions: [], ai: { readId: 'a1', accepted: true, severity: 'rude' } });
+    expect(sent).toEqual([{ verdict: 'no_action', actions: [] }, { verdict: 'no_action', actions: [], ai: { readId: 'a1', accepted: true, severity: 'rude' } }]);
+  });
+
+  it('against the real routes: the echo is accepted and the server records the outcome', async () => {
+    const w = await hubWorld({ role: 'owner', ai: { level: 2 } });
+    const f = await w.file();
+    await w.aiIdle();
+    const read = (await w.client.getReport(f.id)).ai;
+    const res = await w.client.decide(f.id, { verdict: 'no_action', actions: [], ai: { readId: read!.id, accepted: false } });
+    expect(res.ok).toBe(true);
+    expect((await w.client.aiStatus()).stats.decided).toBe(1);
+    expect(await w.client.dontTeach(f.id)).toEqual({ ok: true });
   });
 });

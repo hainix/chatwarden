@@ -15,7 +15,10 @@ import { describe, expect, it } from 'vitest';
 // pass). The bundle is built with splitting on, as an adopter's bundler splits at a dynamic import().
 
 const entry = fileURLToPath(new URL('../src/index.ts', import.meta.url));
-const BUDGET = 75 * 1024;
+// Raised to 77 KB at 0.1.7 (AI levels 1 and 2), approved by the maintainer: every AI module is lazy and an install with the AI off
+// loads none of it, but the hub carries the plug-in points (case slots and form gating, queue hooks and chip mounts, the client
+// methods and loaders, the Settings > AI entry): about 1.5 KB gzipped, 76,425 -> 77,959. The AI itself is about 13 KB of lazy chunks.
+const BUDGET = 77 * 1024;
 const ENTRY_BUDGET = 52 * 1024;
 
 async function bundle() {
@@ -77,6 +80,8 @@ async function bundle() {
     all: outputs,
     /** The source files the entry itself carries. */
     entryInputs: Object.keys(entryMeta.inputs),
+    /** The source files of everything a first load fetches: the entry and every chunk it imports statically (shared code moves between them). */
+    eagerInputs: [...new Set(meta.filter(([k]) => eagerNames.has(k.split('/').pop() ?? k)).flatMap(([, o]) => Object.keys(o.inputs)))],
     /** The source file each on-demand chunk starts from (each dynamic `import()`). */
     chunkRoots: meta.flatMap(([, o]) => (o.entryPoint !== undefined && !o.entryPoint.endsWith('src/index.ts') ? [o.entryPoint] : [])),
     inputs: Object.keys(result.metafile.inputs),
@@ -133,9 +138,25 @@ describe('bundle size', () => {
     }
   });
 
+  it('with the AI off the first load carries none of the AI: every piece of it is a chunk loaded when the hub learns the AI is on', async () => {
+    const { entryInputs, eagerInputs, chunkRoots } = await bundle();
+    // The strip, the pieces drawn inside the always-present parts (chip, tick, decision bar header, Simple card), the AI's part of the case, the
+    // queue's ranking and the pre-fill's code are chunks of their own ...
+    for (const file of ['case/AiStrip.tsx', 'case/AiParts.tsx', 'ai/core.ts']) {
+      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
+      expect(chunkRoots.filter((i) => i.endsWith(`src/${file}`)), `${file} has no chunk`).toHaveLength(1);
+    }
+    // ... and no module of the AI rides in the first load: not the menu, the case controller, the ranking, the pre-fill, the hide state, the words, the
+    // shortcut sheet's level, nor the AI settings screen. Only `ai/load.ts` (the fetch) and `case/AiRead.tsx` (the slot that mounts the strip) are the first
+    // load's. The first load is the entry AND the chunks it imports statically: code can sit in either, so both are walked.
+    for (const i of entryInputs) expect(eagerInputs, `the walk lost ${i}`).toContain(i);
+    const inFirstLoad = eagerInputs.filter((i) => /src\/(ai|case\/Ai|screens\/AiSettings)/.test(i));
+    expect(inFirstLoad.map((i) => i.slice(i.indexOf('src/'))).sort()).toEqual(['src/ai/load.ts', 'src/case/AiRead.tsx']);
+  });
+
   it('keeps the settings and admin screens out of the entry: each is a chunk of its own', async () => {
     const { entryInputs, chunkRoots } = await bundle();
-    const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings'];
+    const lazy = ['Terms', 'Blocked', 'Gaps', 'Audit', 'Guide', 'Actions', 'LadderSettings', 'ReportingSettings', 'AiSettings'];
     for (const name of lazy) {
       expect(entryInputs.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} is in the entry`).toEqual([]);
       expect(chunkRoots.filter((i) => i.endsWith(`src/screens/${name}.tsx`)), `${name} has no chunk`).toHaveLength(1);

@@ -29,6 +29,12 @@ export type QuickKind = 'primary' | 'none' | 'warning';
 // on it. Taken once.
 const lastSent = new Map<string, QuickKind>();
 const LAST_SENT_MAX = 50;
+/** Remembers the button that sent a report's quick action (the AI's accept uses it too), so Undo can put focus back on it. */
+export function rememberQuick(reportId: string, kind: QuickKind): void {
+  if (lastSent.size >= LAST_SENT_MAX) lastSent.clear();
+  lastSent.set(reportId, kind);
+}
+
 /** The button that sent this report's last quick action, once; undefined when it was not a quick action. */
 export function takeLastQuick(reportId: string): QuickKind | undefined {
   const kind = lastSent.get(reportId);
@@ -53,6 +59,8 @@ export interface QuickActions {
   sendWarning: (click?: { detail?: number }) => void;
   /** The case's read is current (no newer report has arrived since). */
   fresh: boolean;
+  /** The AI's suggestion can be accepted: 1, A and Ctrl+Enter on a card send it (`sendPrimary`) in place of the ladder's step. */
+  aiOk: boolean;
   /** Which rule the card works from, for the rule field and "Something else". */
   pick: RulePick;
   suggest: Suggestion | undefined;
@@ -139,9 +147,10 @@ export function useQuickActions({ enabled = true, paused = false, refresh = fals
   const send = (form: DecisionForm, kind: QuickKind, click?: { detail?: number }): void => {
     // Keys and clicks alike: the case must have aged, and the second click of a double click is the first one's echo.
     if (!usable || report === undefined || !c.settled() || isRepeatClick(click)) return;
-    if (lastSent.size >= LAST_SENT_MAX) lastSent.clear();
-    lastSent.set(report.id, kind);
-    decisions.submit({ reportId: report.id, person: report.targetPerson, name, input: toInput(form), snapshot: form });
+    rememberQuick(report.id, kind);
+    const ai = c.echo(false, form);
+    const input = toInput(form);
+    decisions.submit({ reportId: report.id, person: report.targetPerson, name, input: ai === undefined ? input : { ...input, ai }, snapshot: form });
     void actions.continueFrom({ reportId: report.id, person: report.targetPerson }, { quick: true });
   };
 
@@ -154,7 +163,8 @@ export function useQuickActions({ enabled = true, paused = false, refresh = fals
     suggest,
     choice,
     cooled: c.cooled,
-    sendPrimary: (click) => primary !== null && send(primary.form, 'primary', click),
+    aiOk: c.aiCase?.gate?.ok === true,
+    sendPrimary: (click) => (c.aiCase?.gate?.ok === true ? c.aiCase.accept(click) : primary !== null && send(primary.form, 'primary', click)),
     sendDismiss: (click) => send(noActionForm(), 'none', click),
     sendWarning: (click) => warning !== null && send(warning.form, 'warning', click),
   };

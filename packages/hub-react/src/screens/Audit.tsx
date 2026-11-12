@@ -1,9 +1,9 @@
-import { policyAuditKey } from '../auditLabel.js';
+import { ACTION_LABEL, policyAuditKey } from '../auditLabel.js';
 import { AUDIT_ACTIONS } from '@chatwarden/core';
 import { useId, useRef, useState } from 'react';
 import { useHub } from '../context.js';
 import { hasFocus } from '../dom.js';
-import type { HubT, HubText } from '../i18n.js';
+import type { HubT } from '../i18n.js';
 import { personTag } from '../format.js';
 import { usePagedList } from '../hooks.js';
 import { errorText } from '../labels.js';
@@ -13,34 +13,6 @@ import { Empty, ErrorBlock, Link, Loading, Notice, Panel, Scroll, Time } from '.
 
 /** Entries asked for per page. */
 export const AUDIT_PAGE = 50;
-
-// One plain label for each action the kit records, typed against the kit's own list: a new action is a compile error until it has
-// a word here. An action from a newer kit than this hub is shown as it is.
-const LABEL: Record<AuditAction, HubText> = {
-  'report.view': 'hub.audit.label.report.view',
-  'report.decide': 'hub.audit.label.report.decide',
-  'report.dismiss_case': 'hub.audit.label.report.dismissCase',
-  'report.dismiss_reporter': 'hub.audit.label.report.dismissReporter',
-  'sanction.apply': 'hub.audit.label.sanction.apply',
-  'sanction.revoke': 'hub.audit.label.sanction.revoke',
-  'gap.close': 'hub.audit.label.gap.close',
-  'term.add': 'hub.audit.label.term.add',
-  'term.update': 'hub.audit.label.term.update',
-  'term.toggle': 'hub.audit.label.term.toggle',
-  'exception.add': 'hub.audit.label.exception.add',
-  'exception.update': 'hub.audit.label.exception.update',
-  'exception.toggle': 'hub.audit.label.exception.toggle',
-  'history.view': 'hub.audit.label.history.view',
-  suggest: 'hub.audit.label.suggest',
-  'policy.view': 'hub.audit.label.policy.view',
-  'blocked.view': 'hub.audit.label.blocked.view',
-  'case.takeover': 'hub.audit.label.case.takeover',
-  'reason.add': 'hub.audit.label.reason.add',
-  'reason.update': 'hub.audit.label.reason.update',
-  'reason.toggle': 'hub.audit.label.reason.toggle',
-  'policy.update': 'hub.audit.label.policy.update',
-  'policy.reset': 'hub.audit.label.policy.reset',
-};
 
 /** What the hub's routes accept for an id in an address (the same pattern the router uses). */
 const ROUTABLE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -86,7 +58,7 @@ function actionLabel(item: AuditItem, t: HubT): string {
   if (item.action === 'report.view' && item.target === undefined) return t('hub.audit.label.report.list');
   const settings = policyAuditKey(item.action, item.detail);
   if (settings !== null) return t(settings);
-  return Object.hasOwn(LABEL, item.action) ? t(LABEL[item.action]) : item.action;
+  return Object.hasOwn(ACTION_LABEL, item.action) ? t(ACTION_LABEL[item.action]) : item.action;
 }
 
 interface Filters {
@@ -220,7 +192,7 @@ export function Audit() {
               <option value="">{t('hub.audit.action.any')}</option>
               {AUDIT_ACTIONS.map((a) => (
                 <option key={a} value={a}>
-                  {t(LABEL[a])}
+                  {t(ACTION_LABEL[a])}
                 </option>
               ))}
             </select>

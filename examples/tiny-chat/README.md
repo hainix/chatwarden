@@ -63,6 +63,24 @@ DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/<id>/<token>' DISCORD_MENT
   passed wins over the environment, and an empty string passed as an option forces the feed off (or the ping off) even when the
   shell exports a value; an option that is left out falls back to the environment. `discordFetch` replaces `fetch` for tests.
 
+## AI reads (demo, optional)
+
+Off unless `CW_DEMO_AI=1`. With it, tiny-chat wires a scripted fake AI (`createFakeModerationAI`: it reads a report by simple rules, with no
+key, no SDK and no network) at level 2, so the whole flow can be seen in the hub: every new report gets a read, the case page shows the
+strip, and the decision form arrives pre-filled with a mild step you can accept with one key.
+
+```sh
+CW_DEMO_AI=1 TINY_CHAT_ADMIN_TOKEN=demo npm start -w @chatwarden/example-tiny-chat
+```
+
+- It is a demo, not a moderator: the fake calls any report with a line by the reported player "rude" and cites their first line. A real
+  app passes its own adapter instead; see [`examples/ai-anthropic`](../ai-anthropic/README.md) and the "Turning on AI reads" section of
+  [`docs/adoption/moxgate.md`](../../docs/adoption/moxgate.md).
+- The level is a code override here (2), so the owner can still lower it, or switch it off, in the hub's Settings.
+- `startServer({ demoAi })` takes the same switch as an option. An option that is passed wins over the environment (`false` forces it
+  off); only the exact value `1` turns the environment variable on.
+- Nothing about the AI changes without it: no adapter, level 0, no read on any report.
+
 ## The profile, swearing and the code of conduct
 
 tiny-chat runs the one-line preset `profile: 'relaxed'` with the optional `@chatwarden/profanity` package

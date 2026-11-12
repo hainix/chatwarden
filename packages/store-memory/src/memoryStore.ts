@@ -1,4 +1,6 @@
 import type {
+  AiOutcomeRow,
+  AiReadRow,
   AuditListQuery,
   AuditRow,
   ClaimAttempt,
@@ -30,7 +32,7 @@ import type {
 
 /** Local on purpose: core's randomId is internal, and this package must still link against core 0.1.0 (peer ^0.1.0).
  *  16 random bytes as unpadded base64url (22 characters), from Web Crypto: no `node:` module, so it runs in a browser. */
-function newId(): string {
+export function newId(): string {
   const web = (globalThis as { crypto?: { getRandomValues(a: Uint8Array): unknown } }).crypto;
   if (!web || typeof web.getRandomValues !== 'function') throw new Error('chatwarden: no secure random source (globalThis.crypto)');
   const raw = new Uint8Array(16);
@@ -98,17 +100,23 @@ export class MemoryStore implements Store {
   protected reasons: ReasonRow[] = [];
   /** The stored policy layer and its version, or null when none was ever saved. */
   protected policy: { layer: PolicyLayer; version: number } | null = null;
+  /** AI reads in insertion order (one row per report and input hash). */
+  protected aiReads: AiReadRow[] = [];
+  /** The AI spend ledger: one entry per attempt (a call started), booked at the time it was reserved. */
+  protected aiSpend: Array<{ readId: string; attempt: number; at: number; micros: number }> = [];
+  /** AI casebook outcomes by report. */
+  protected aiOutcomes = new Map<string, AiOutcomeRow>();
   /** The change token's counter (see `changeToken`). */
   private changes = 0;
   /** Undo steps of the innermost open transaction, or null outside one. */
   private journal: Array<() => void> | null = null;
 
-  private undoWith(step: () => void): void {
+  protected undoWith(step: () => void): void {
     this.journal?.push(step);
   }
 
   /** Move the change token; an undone transaction moves it back. */
-  private bump(): void {
+  protected bump(): void {
     this.changes += 1;
     this.undoWith(() => {
       this.changes -= 1;
@@ -880,8 +888,13 @@ export class MemoryStore implements Store {
       const alive = new Set(kept.map((r) => r.id));
       const dropped = [...this.decisions.values()].filter((d) => !alive.has(d.reportId));
       for (const d of dropped) this.decisions.delete(d.key);
+      // An AI read is a view of its report and goes with it. The casebook outcome has its own clock (`purgeAi`).
+      const reads = this.aiReads;
+      const gone = new Set(snapshot.filter((r) => !alive.has(r.id)).map((r) => r.id));
+      this.aiReads = reads.filter((r) => !gone.has(r.reportId));
       this.undoWith(() => {
         this.reports = snapshot;
+        this.aiReads = reads;
         for (const d of dropped) this.decisions.set(d.key, d);
       });
     }
@@ -1041,7 +1054,7 @@ const muteKey = (viewer: SubjectId, target: SubjectId): string => `${viewer}\u00
  * String order by code point, which is the order of SQLite's default (BINARY) collation on UTF-8 text. JavaScript's `<`
  * compares UTF-16 code units and puts a character outside the BMP before U+E000..U+FFFF; this does not.
  */
-function compare(a: string, b: string): number {
+export function compare(a: string, b: string): number {
   let i = 0;
   let j = 0;
   while (i < a.length && j < b.length) {
