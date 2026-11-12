@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { SignalRow } from '@chatwarden/core';
-import { signalsContract } from '../../../test/contract/signals.contract.js';
 import { MemoryStore } from '../src/index.js';
 
-// The behaviour MemoryStore shares with SqliteStore is the shared contract (test/contract/signals.contract.ts); it is run here for
-// MemoryStore directly until the contract index registers it for both stores. What follows is what is specific to MemoryStore.
-signalsContract('MemoryStore', () => new MemoryStore());
+// What is specific to MemoryStore in the signal methods: it stores copies, it is built to be subclassed, and it keeps its subject index
+// in step. The behaviour it shares with SqliteStore is in the shared contract suite (test/contract/signals.contract.ts, run by contract.test.ts).
 
 const NOW = 1_800_000_000_000;
 const row = (over: Partial<SignalRow> = {}): SignalRow => ({

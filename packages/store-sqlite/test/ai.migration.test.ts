@@ -37,6 +37,8 @@ const filePath = (): string => {
 };
 
 const M20 = MIGRATIONS.find((m) => m.version === 20);
+/** The migrations up to and including 20: this file tests migration 20, not what came after it. */
+const UP_TO_20 = MIGRATIONS.slice(0, 20);
 const NEW_TABLES = ['kit_ai_outcomes', 'kit_ai_reads', 'kit_ai_spend'];
 const NEW_INDEXES = ['kit_ai_outcomes_by_rule', 'kit_ai_reads_by_report', 'kit_ai_reads_by_time', 'kit_ai_reads_retry', 'kit_ai_spend_by_time'];
 
@@ -93,16 +95,15 @@ const snapshot = (db: DatabaseSync): unknown => ({
 });
 
 describe('migration 20: AI reads and outcomes', () => {
-  it('is the 20th migration and the last one', () => {
+  it('is the 20th migration', () => {
     expect(M20).toBeDefined();
     expect(MIGRATIONS[19]?.version).toBe(20);
-    expect(MIGRATIONS.at(-1)?.version).toBe(20);
-    expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    expect(MIGRATIONS.slice(0, 20).map((m) => m.version)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
   });
 
   it('migration 20 on a fresh database creates the three tables and the indexes', () => {
     const db = memDb();
-    const store = openStore({ db });
+    const store = openStore({ db, migrations: UP_TO_20 });
     expect(store.schemaVersion()).toBe(20);
     for (const t of NEW_TABLES) expect(names(db, 'table')).toContain(t);
     for (const i of NEW_INDEXES) expect(names(db, 'index')).toContain(i);
@@ -126,7 +127,7 @@ describe('migration 20: AI reads and outcomes', () => {
     const indexes = names(db, 'index');
     const cols = Object.fromEntries(OLD_TABLES.map((t) => [t, columns(db, t)]));
 
-    const store = openStore({ db });
+    const store = openStore({ db, migrations: UP_TO_20 });
     expect(store.schemaVersion()).toBe(20);
     expect(snapshot(db)).toEqual(before);
     expect(names(db, 'table').filter((n) => !tables.includes(n))).toEqual(NEW_TABLES);
@@ -137,7 +138,7 @@ describe('migration 20: AI reads and outcomes', () => {
     store.close();
 
     // Reopening runs nothing again and changes nothing.
-    const again = openStore({ db });
+    const again = openStore({ db, migrations: UP_TO_20 });
     expect(again.schemaVersion()).toBe(20);
     expect(snapshot(db)).toEqual(before);
     expect(db.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
@@ -147,11 +148,11 @@ describe('migration 20: AI reads and outcomes', () => {
     const db = memDb();
     openAt(db, 18).close();
     const before = snapshot(db);
-    const store = openStore({ db }); // runs 19 and 20
+    const store = openStore({ db, migrations: UP_TO_20 }); // runs 19 and 20
     expect(store.schemaVersion()).toBe(20);
     expect(snapshot(db)).toEqual(before);
     store.close();
-    expect(openStore({ db }).schemaVersion()).toBe(20);
+    expect(openStore({ db, migrations: UP_TO_20 }).schemaVersion()).toBe(20);
     expect(snapshot(db)).toEqual(before);
     expect(db.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
   });
@@ -162,7 +163,7 @@ describe('migration 20: AI reads and outcomes', () => {
     const reads = (s: SqliteStore) => ({ list: s.listReports({ limit: 50 }), tally: s.reporterTally(['s_rep1', 's_rep2']), token: s.changeToken() });
     const expected = reads(old);
     old.close();
-    expect(reads(openStore({ db }))).toEqual(expected);
+    expect(reads(openStore({ db, migrations: UP_TO_20 }))).toEqual(expected);
   });
 
   it('is idempotent on a file: reopening twice leaves the same schema and rows', () => {
@@ -207,13 +208,13 @@ describe('migration 20: AI reads and outcomes', () => {
     for (const t of NEW_TABLES) expect(names(db, 'table')).not.toContain(t);
     for (const i of NEW_INDEXES) expect(names(db, 'index')).not.toContain(i);
     expect(snapshot(db)).toEqual(before);
-    expect(openStore({ db }).schemaVersion()).toBe(20);
+    expect(openStore({ db, migrations: UP_TO_20 }).schemaVersion()).toBe(20);
     for (const t of NEW_TABLES) expect(names(db, 'table')).toContain(t);
   });
 
   it('an older kit refuses a database at version 20', () => {
     const db = memDb();
-    openStore({ db }).close();
+    openStore({ db, migrations: UP_TO_20 }).close();
     expect(() => openStore({ db, migrations: MIGRATIONS.slice(0, 19) })).toThrow(/newer than this kit supports/);
   });
 });
@@ -232,7 +233,7 @@ describe('the schema guards what the store relies on', () => {
 
   it('UNIQUE (report_id, input_hash) refuses a duplicate; another hash or report is fine', () => {
     const db = memDb();
-    openStore({ db });
+    openStore({ db, migrations: UP_TO_20 });
     insertRead(db, 'a');
     expect(() => insertRead(db, 'b')).toThrow(/UNIQUE/);
     expect(() => insertRead(db, 'c', { input_hash: 'h2' })).not.toThrow();
@@ -241,7 +242,7 @@ describe('the schema guards what the store relies on', () => {
 
   it('the status column accepts exactly the six statuses', () => {
     const db = memDb();
-    openStore({ db });
+    openStore({ db, migrations: UP_TO_20 });
     let n = 0;
     for (const status of ['pending', 'ok', 'declined', 'invalid', 'failed', 'skipped']) {
       expect(() => insertRead(db, `s${n}`, { status, input_hash: `h${n++}` })).not.toThrow();
@@ -251,7 +252,7 @@ describe('the schema guards what the store relies on', () => {
 
   it('the agreement column accepts exactly agree, override and none; one outcome per report', () => {
     const db = memDb();
-    openStore({ db });
+    openStore({ db, migrations: UP_TO_20 });
     for (const a of ['agree', 'override', 'none']) expect(() => insertOutcome(db, `o-${a}`, { agreement: a })).not.toThrow();
     expect(() => insertOutcome(db, 'o-bad', { agreement: 'maybe' })).toThrow(/CHECK/);
     expect(() => insertOutcome(db, 'o-agree')).toThrow(/UNIQUE|PRIMARY/);
@@ -259,7 +260,7 @@ describe('the schema guards what the store relies on', () => {
 
   it('one ledger row per read and attempt', () => {
     const db = memDb();
-    openStore({ db });
+    openStore({ db, migrations: UP_TO_20 });
     const ins = (read: string, attempt: number) => db.prepare('INSERT INTO kit_ai_spend (read_id, attempt, at, micros) VALUES (?, ?, ?, 0)').run(read, attempt, NOW);
     ins('a', 1);
     expect(() => ins('a', 1)).toThrow(/UNIQUE|PRIMARY/);
@@ -269,7 +270,7 @@ describe('the schema guards what the store relies on', () => {
 
   it('the defaults: attempts, injection, cost and the retake marker start at 0; reversed, the marks and the example start empty', () => {
     const db = memDb();
-    openStore({ db });
+    openStore({ db, migrations: UP_TO_20 });
     insertRead(db, 'a');
     insertOutcome(db, 'o');
     expect(db.prepare('SELECT attempts, injection, cost_micros, retaken FROM kit_ai_reads').get()).toEqual({ attempts: 0, injection: 0, cost_micros: 0, retaken: 0 });

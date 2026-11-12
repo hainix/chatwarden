@@ -59,6 +59,7 @@ export const CONTRACT_AREAS = [
   'policy',
   'report reasons',
   'ai',
+  'signals',
 ] as const;
 
 /** Registers every area suite against the stores `make` builds (a fresh, empty store on each call). */
@@ -79,4 +80,5 @@ export function storeContract(name: string, make: () => Store): void {
   policyContract(name, make);
   reportReasonsContract(name, make);
   aiContract(name, make);
+  signalsContract(name, make);
 }

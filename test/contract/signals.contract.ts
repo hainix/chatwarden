@@ -85,6 +85,15 @@ export function signalsContract(name: string, make: () => Store): void {
         expect(s.listSignalSources(['s_target'], 0)).toHaveLength(1);
       });
 
+      it('refuses a negative or non-numeric weight: it throws and writes nothing', () => {
+        const s = signals(make());
+        for (const weight of [-0.5, -1, Number.NaN]) {
+          expect(() => s.insertSignal(row({ weight })), String(weight)).toThrow();
+        }
+        expect(s.listSignalSources(['s_target'], 0)).toEqual([]);
+        expect(s.insertSignal(row())).toBe(true);
+      });
+
       it('keeps a fractional weight, zero, and a null roomId and bySubject', () => {
         const s = signals(make());
         expect(s.insertSignal(row({ weight: 0.5, sourceKey: 'd:2027-01-15', bySubject: null, roomId: null }))).toBe(true);
@@ -138,6 +147,20 @@ export function signalsContract(name: string, make: () => Store): void {
         expect(s.listSignalSources(['s_target'], NOW + 2)).toEqual([]);
         // The row before since neither adds its weight nor its time.
         expect(s.listSignalSources(['s_target'], NOW - 1)[0]).toMatchObject({ weight: 9, firstAt: NOW - 1 });
+      });
+
+      it('rows come back sorted by subject, kind and source', () => {
+        const s = signals(make());
+        s.insertSignal(row({ subject: 's_b', sourceKey: 'd:2' }));
+        s.insertSignal(row({ subject: 's_a', sourceKey: 'd:9', kind: 'muted_by_player' }));
+        s.insertSignal(row({ subject: 's_a', sourceKey: 'd:1', kind: 'blocked_by_player' }));
+        s.insertSignal(row({ subject: 's_a', sourceKey: 'd:1', kind: 'muted_by_player' }));
+        expect(s.listSignalSources(['s_b', 's_a'], 0).map((r) => `${r.subject}|${r.kind}|${r.sourceKey}`)).toEqual([
+          's_a|blocked_by_player|d:1',
+          's_a|muted_by_player|d:1',
+          's_a|muted_by_player|d:9',
+          's_b|muted_by_player|d:2',
+        ]);
       });
 
       it('several subjects (a person\'s aliases) in one call; other subjects are not returned', () => {

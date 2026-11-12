@@ -65,6 +65,9 @@ export interface StoredSanction extends SanctionRow {
   revokeReason: string | null;
 }
 
+/** Order two strings by code unit, the way the signal listing sorts. */
+const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 /**
  * In-memory {@link Store}: everything lives in this object and is lost when it is garbage collected or the process ends.
  * For tests, demos and single-process prototypes; use `@chatwarden/store-sqlite` for anything that must survive a
@@ -438,6 +441,8 @@ export class MemoryStore implements Store {
   // Signals (synchronous, see the Store interface). Not a queue change: they do not move the change token.
 
   insertSignal(row: SignalRow): boolean {
+    // SQLite's CHECK (weight >= 0) is the reference; NaN fails it too.
+    if (!(row.weight >= 0)) throw new Error('insertSignal: weight must be 0 or more');
     const key = JSON.stringify([row.kind, row.subject, row.sourceKey, row.capBucket]);
     if (this.signalRows.has(key) || this.signalIds.has(row.id)) return false;
     const copy = structuredClone(row);
@@ -484,7 +489,8 @@ export class MemoryStore implements Store {
         if (r.bySubject !== null && (g.bySubject === null || r.bySubject < g.bySubject)) g.bySubject = r.bySubject;
       }
     }
-    return [...groups.values()];
+    // Sorted by subject, kind and source, as the SQLite store answers.
+    return [...groups.values()].sort((a, b) => cmp(a.subject, b.subject) || cmp(a.kind, b.kind) || cmp(a.sourceKey, b.sourceKey));
   }
 
   purgeSignals(before: number): number {

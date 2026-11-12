@@ -36,6 +36,8 @@ import type {
   ReporterDecision,
   ReporterOutcomeRow,
   ReporterTally,
+  SignalRow,
+  SignalSourceRow,
   SanctionKind,
   SanctionListQuery,
   SanctionRow,
@@ -315,6 +317,9 @@ function detailFromRow(json: unknown): AiOutcomeRow['detail'] {
 /** The page sizes used when a limit is omitted, not finite or below 1 (the memory store keeps the same two numbers). */
 const EXAMPLES_DEFAULT_LIMIT = 2;
 const RETRIES_DEFAULT_LIMIT = 20;
+
+/** Order two strings by code unit, the way the signal listing sorts (the memory store sorts the same way). */
+const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** A page size: the limit floored and capped at 200, or `fallback` when it is omitted, not finite or below 1. */
 const pageSize = (limit: number | undefined, fallback: number): number =>
@@ -1051,6 +1056,60 @@ export class SqliteStore implements Store, TermStore {
       this.db.prepare('UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL').run(examplesBefore);
       return { reads, outcomes };
     });
+  }
+
+  // Signals (flood control and signals, migration 21). SYNCHRONOUS on purpose (like claims); they run inside `transaction`. A signal is not
+  // a queue change, so none of these moves the change token.
+
+  insertSignal(row: SignalRow): boolean {
+    // One statement: the UNIQUE index kit_signals_cap (and the primary key) decide, so of two connections writing the same
+    // (kind, subject, source, bucket) exactly one gets a row back. A negative or NaN weight fails the table's CHECK and throws.
+    const wrote = this.db
+      .prepare(
+        `INSERT INTO kit_signals (id, kind, subject_id, source_key, by_subject, room_id, at, weight, cap_bucket)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO NOTHING
+         RETURNING id`,
+      )
+      .get(row.id, row.kind, row.subject, row.sourceKey, row.bySubject, row.roomId, row.at, row.weight, row.capBucket);
+    return wrote !== undefined;
+  }
+
+  listSignalSources(subjects: readonly SubjectId[], since: number): SignalSourceRow[] {
+    const unique = [...new Set(subjects)];
+    if (unique.length === 0) return [];
+    return this.transaction(() => {
+      const out: SignalSourceRow[] = [];
+      for (let i = 0; i < unique.length; i += CLAIM_BATCH) {
+        const batch = unique.slice(i, i + CLAIM_BATCH);
+        // `by_subject` is the smallest one of the source's rows, so the answer does not depend on which row SQLite meets first.
+        const rows = this.db
+          .prepare(
+            `SELECT subject_id, kind, source_key, MIN(by_subject) AS by_subject, MAX(weight) AS weight, MIN(at) AS first_at, MAX(at) AS last_at
+             FROM kit_signals
+             WHERE subject_id IN (${batch.map(() => '?').join(', ')}) AND at >= ?
+             GROUP BY subject_id, kind, source_key`,
+          )
+          .all(...batch, since);
+        for (const r of rows) {
+          out.push({
+            subject: String(r.subject_id),
+            kind: String(r.kind),
+            sourceKey: String(r.source_key),
+            bySubject: r.by_subject === null ? null : String(r.by_subject),
+            weight: Number(r.weight),
+            firstAt: Number(r.first_at),
+            lastAt: Number(r.last_at),
+          });
+        }
+      }
+      // Sorted by subject, kind and source, whatever order SQLite grouped in (and across batches).
+      return out.sort((a, b) => cmp(a.subject, b.subject) || cmp(a.kind, b.kind) || cmp(a.sourceKey, b.sourceKey));
+    });
+  }
+
+  purgeSignals(before: number): number {
+    return Number(this.db.prepare('DELETE FROM kit_signals WHERE at < ?').run(before).changes);
   }
 
   listReasons(): ReasonRow[] {
