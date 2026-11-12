@@ -1079,3 +1079,7 @@ Each has a recommendation; the controller rules.
 ## 23. Rulings
 
 *(To be filled by the controller when the questions above are answered.)*
+
+## Rulings (2026-11-12, controller, under the owner's "go" on the roadmap order)
+All fourteen open questions take the recommendation: CC BY 4.0; Zenodo on every stable release after a manual first upload and a policy check; defaults `minSeverity: hostile` with `accepted` and `provisional`; a small Cloudflare Access review page; no eval sharing from the hub in K7; the installation opt-in is server config (`community.share`); a public ZipCrypto password with an unencrypted fallback if the reader proves fragile; adopters choose pin or follow explicitly, `pin` shown first; monthly releases plus best-effort 48-hour emergency patches; untouched community rows hidden from `GET /terms` behind `exposeCommunityRows`; the loader is the `@chatwarden/matcher/corpus` subpath (+ `/corpus/node`) with a one-folder lint exemption; reviewers and the seed are owner actions, the first release ships mostly `provisional`; the owner reads the Cloudflare and Zenodo content terms before the first upload.
+Sequencing: the in-repo kit work (loader, verification, hub share disclosure, Settings section) can be built and released before any owner action; with no keys it reports `no_trusted_keys` and the hub shows nothing. The service work waits for the owner actions listed above.
