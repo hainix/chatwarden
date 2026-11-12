@@ -9,7 +9,7 @@ import type { ConductLevel } from '../types.js';
  * read stale.
  * @experimental
  */
-export const AI_PROMPT_VERSION = 1;
+export const AI_PROMPT_VERSION = 2;
 
 /**
  * One speaker in a read: an alias (`P1` is the reported person, `P2` the reporter, the rest `P3...` in order of first appearance)

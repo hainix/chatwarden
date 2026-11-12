@@ -1,0 +1,717 @@
+import type { AuditRecordInput } from '../audit.js';
+import type { Subscribe } from '../events.js';
+import type { Suggestion } from '../ladder.js';
+import { errorClass, safeWarn } from '../log.js';
+import type { ResolvedProfile } from '../profile.js';
+import { suggestedRule } from '../reporting.js';
+import type { CommunityRules, RuleRef } from '../rules.js';
+import type { Clock, ConductLevel, Logger, ReportRecord, SanctionKind, Store, SubjectId } from '../types.js';
+import { Breaker } from './breaker.js';
+import { CallWindow, startOfUtcDay, utcDayLabel } from './budget.js';
+import { prepareCase } from './case.js';
+import type { Prepared } from './case.js';
+import { assertWithinCeilings, AICeilingError } from './ceilings.js';
+import { aiPolicyText } from './prompt.js';
+import { sha256Hex } from '../crypto.js';
+import type { AIExampleInput, AIRead, ModerationAI } from './types.js';
+import { Meter, runRead } from './worker.js';
+import type { AiStore, WorkerEnv } from './worker.js';
+
+// The AI service (design sections 4 and 6): listens for new reports and only enqueues; a small worker pool reads them off the ack
+// path; a sweeper fills the gaps; the facade (`cw.ai`) answers the hub. Everything fails soft: any error here is logged by class and
+// the caller gets what it would get with the AI off. This module never imports a sanction module: the AI advises, it cannot act.
+
+/**
+ * What the code decides about the AI. The adapter and the ceilings on level and spend are code, never the hub's.
+ * @experimental
+ */
+export interface AiOptions {
+  /** The model behind the reads. Runs on the server only. */
+  adapter: ModerationAI;
+  /** The highest level the hub may switch to. Default 2. */
+  maxLevel?: 1 | 2;
+  /** The most the AI may spend in a UTC day, in micro-dollars (1 = $0.000001). Default 1 000 000 ($1.00). Set in code: a hub cannot raise it. */
+  dailyBudgetMicros?: number;
+  /** The most calls in any minute. Default 30. */
+  perMinuteCalls?: number;
+  /** The most reads in flight at once. Default 2. */
+  concurrency?: number;
+  /** The hard deadline for one call, in milliseconds. Default 30 000. */
+  timeoutMs?: number;
+  /**
+   * `'raw'` (default) sends a line the filter touched (blocked, or starred in the room) as typed: the model needs the words to judge
+   * intent. `'mask'` sends it masked instead (a starred line as the room saw it, a blocked line as stars). Read the adapter's README
+   * before leaving the default: the provider receives abusive text.
+   */
+  blockedLines?: 'raw' | 'mask';
+  /** Reserved. No room tag, and no tag value, is ever sent to a provider in this release. */
+  contextTags?: string[];
+}
+
+/** Where the AI stands, for Settings. */
+export interface AiStatus {
+  /** An adapter is configured. */
+  available: boolean;
+  /** The effective level: the lower of the hub's setting and `maxLevel`; 0 without an adapter. */
+  level: 0 | 1 | 2;
+  maxLevel: 0 | 1 | 2;
+  state: 'ok' | 'paused_budget' | 'unavailable' | 'off';
+  /** Today's spend (UTC), in micro-dollars, from the store. */
+  spentMicros: number;
+  capMicros: number;
+  /** The UTC day the spend is for, `YYYY-MM-DD`. */
+  day: string;
+  /** Calls made today (UTC), from the store. */
+  reads: number;
+  /** The share of input tokens the provider served from its cache, over the calls this process made; null before any. */
+  cacheHitRate: number | null;
+  /** Answers core refused, by validator code, since this process started. Codes only, never text. */
+  invalid: Record<string, number>;
+}
+
+/** What the queue carries for a report: no summary, no line ids. */
+export interface AiBrief {
+  severity: ConductLevel;
+  confidence: AIRead['confidence'];
+  rule: number | 'uncovered' | null;
+  /** The read was made from older rules or an older version of the case. */
+  stale: boolean;
+  injectionSuspected: boolean;
+  /** Level 2 and a recommendation that is not `unclear`. */
+  hasRecommendation: boolean;
+}
+
+/** The step the ladder gives for the AI's conduct level: what a one-click accept may fill. */
+export interface SuggestionStep {
+  kind: SanctionKind;
+  durationMs: number | null;
+  label: string;
+}
+
+/** A stored read as the case page shows it. */
+export interface AiReadView {
+  /** The read's id: what a decision echoes back. */
+  id: string;
+  severity: ConductLevel;
+  rule: number | 'uncovered' | null;
+  summary: string;
+  /** Real line ids, at most 5. */
+  evidenceLineIds: string[];
+  confidence: AIRead['confidence'];
+  /** From older rules, or from an older version of the case. */
+  stale: boolean;
+  injectionSuspected: boolean;
+  model: string | null;
+  /** When the read was started, epoch ms. */
+  at: number;
+  /** Level 2 only. */
+  recommendation: null | {
+    verdict: 'upheld' | 'noted' | 'no_action' | 'unclear';
+    severity: ConductLevel;
+    rule: number | 'uncovered' | null;
+    evidenceLineIds: string[];
+    /** `cw.suggest` for the AI's conduct level, now; null when it names no action. */
+    step: SuggestionStep | null;
+    /** `step` is within the ceilings (a warning, a note or a restriction of at most 24 hours, with a line by the reported person cited). */
+    stepWithinCeiling: boolean;
+  };
+}
+
+/** The casebook counts for one rule. */
+export interface AiStatsRuleView {
+  rule: number | 'uncovered' | null;
+  decided: number;
+  agree: number;
+  override: number;
+  none: number;
+  falsePositives: number;
+}
+
+/** The casebook, overall and per rule. */
+export interface AiStatsView {
+  since: number;
+  decided: number;
+  agree: number;
+  override: number;
+  none: number;
+  falsePositives: number;
+  /** agree / (agree + override); null with neither. */
+  agreementRate: number | null;
+  /** falsePositives / (agree + override); null with neither. */
+  falsePositiveRate: number | null;
+  rules: AiStatsRuleView[];
+}
+
+/** What `cw.ai.readAgain` answers. */
+export type AiReadAgain = AiReadView | 'pending' | 'budget' | 'off';
+
+/**
+ * `cw.ai`. Every method is safe to call at any time: with the AI off, without an adapter or with a failing provider or store it
+ * answers as if there were no AI (null, an empty map, `'off'`), and never throws.
+ * @experimental
+ */
+export interface AiFacade {
+  /** The effective level now. */
+  level(): 0 | 1 | 2;
+  status(): AiStatus;
+  /**
+   * The newest finished read of a report as the case page shows it, or null. At level 0 nothing is read from the store. With
+   * `open: true` (the case page) a report with no read, or a stale one, is queued for a (re)read.
+   */
+  read(reportId: string, opts?: { open?: boolean }): AiReadView | null;
+  /** "Read again": the stored read when the input has not changed (no call), else a call is queued and the answer is `'pending'`. */
+  readAgain(reportId: string, actor: string): Promise<AiReadAgain>;
+  /** The queue's brief of each report that has a read. Reports without one are absent. */
+  briefs(reportIds: readonly string[]): Map<string, AiBrief>;
+  /** The casebook counts for decisions at or after `since` (default: the last 30 days). */
+  stats(q?: { since?: number }): AiStatsView;
+  /** Resolves when no read is queued or running (tests, graceful shutdown). */
+  idle(): Promise<void>;
+  /** Run the sweeper once. The timer does this every 60 seconds. */
+  sweep(): Promise<void>;
+  /** Stop the sweeper and abort the calls in flight. `cw.close()` does this. */
+  close(): void;
+}
+
+/** How often the sweeper runs. */
+export const SWEEP_EVERY_MS = 60_000;
+/** The most reports one sweep queues. */
+export const SWEEP_BATCH = 20;
+/** The most stale reads one idle sweep queues. */
+export const STALE_PER_SWEEP = 5;
+/** How many recent open reports a sweep looks at. */
+const SWEEP_SCAN = 200;
+/** The audit trail takes an actor of at most 128 characters of `A-Za-z0-9_.:@+-`. */
+const ACTOR_MAX = 128;
+const PREPARED_CACHE_MAX = 500;
+const STATS_DEFAULT_WINDOW_MS = 30 * 24 * 3_600_000;
+
+const DEFAULTS = { maxLevel: 2, dailyBudgetMicros: 1_000_000, perMinuteCalls: 30, concurrency: 2, timeoutMs: 30_000 } as const;
+
+/** The audit actor for the AI: `ai:` and the adapter's id with every character the trail refuses made an underscore, cut to fit. */
+export function aiActorOf(adapterId: string): string {
+  const id = String(adapterId).replace(/[^A-Za-z0-9_.:@+-]/gu, '_').slice(0, ACTOR_MAX - 'ai:'.length);
+  return `ai:${id === '' ? 'adapter' : id}`;
+}
+
+const REQUIRED_STORE_METHODS = [
+  'reserveAiRead',
+  'completeAiRead',
+  'failAiRead',
+  'loadAiRead',
+  'loadAiReads',
+  'listAiRetries',
+  'aiSpendSince',
+  'insertAiOutcome',
+  'loadAiOutcome',
+  'markAiOutcome',
+  'aiExamples',
+  'aiTeachableCount',
+  'aiStats',
+] as const;
+
+/** The store, typed with its AI methods; throws a plain error when it has not got them. */
+export function requireAiStore(store: Store): AiStore {
+  const missing = REQUIRED_STORE_METHODS.filter((m) => typeof (store as unknown as Record<string, unknown>)[m] !== 'function');
+  if (missing.length > 0) {
+    throw new Error(`createChatwarden: the AI needs a store with the AI methods (${missing.join(', ')}); use the memory or SQLite store, or leave the "ai" option out`);
+  }
+  return store as AiStore;
+}
+
+/** Check the AI option and the store before anything is started: throws a plain error for a bad option or a store without the AI methods. */
+export function checkAiSetup(store: Store, options: AiOptions): void {
+  checkOptions(options);
+  requireAiStore(store);
+}
+
+function checkOptions(o: AiOptions): Required<Omit<AiOptions, 'adapter' | 'contextTags'>> & { contextTags: string[] } {
+  const a: unknown = o?.adapter;
+  if (typeof a !== 'object' || a === null || typeof (a as ModerationAI).id !== 'string' || (a as ModerationAI).id === '' || typeof (a as ModerationAI).read !== 'function') {
+    throw new TypeError('createChatwarden: ai.adapter must be a ModerationAI ({ id, read })');
+  }
+  const maxLevel = o.maxLevel ?? DEFAULTS.maxLevel;
+  if (maxLevel !== 1 && maxLevel !== 2) throw new RangeError('createChatwarden: ai.maxLevel must be 1 or 2');
+  const whole = (v: unknown, name: string, min: number): number => {
+    if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v) || v < min) throw new RangeError(`createChatwarden: ai.${name} must be a whole number of at least ${min}`);
+    return v;
+  };
+  const dailyBudgetMicros = whole(o.dailyBudgetMicros ?? DEFAULTS.dailyBudgetMicros, 'dailyBudgetMicros', 0);
+  const perMinuteCalls = whole(o.perMinuteCalls ?? DEFAULTS.perMinuteCalls, 'perMinuteCalls', 1);
+  const concurrency = whole(o.concurrency ?? DEFAULTS.concurrency, 'concurrency', 1);
+  const timeoutMs = whole(o.timeoutMs ?? DEFAULTS.timeoutMs, 'timeoutMs', 1);
+  const blockedLines = o.blockedLines ?? 'raw';
+  if (blockedLines !== 'raw' && blockedLines !== 'mask') throw new RangeError("createChatwarden: ai.blockedLines must be 'raw' or 'mask'");
+  const contextTags = o.contextTags ?? [];
+  if (!Array.isArray(contextTags) || contextTags.some((t) => typeof t !== 'string')) throw new TypeError('createChatwarden: ai.contextTags must be a list of strings');
+  return { maxLevel, dailyBudgetMicros, perMinuteCalls, concurrency, timeoutMs, blockedLines, contextTags: [...contextTags] };
+}
+
+/** What the service needs from the kit around it. */
+export interface AiServiceDeps {
+  options: AiOptions;
+  store: Store;
+  clock: Clock;
+  logger: Logger | undefined;
+  /** The profile in force now (never kept across calls). */
+  profile: () => ResolvedProfile;
+  rules: CommunityRules;
+  /** `cw.suggest`. */
+  suggest: (subject: SubjectId, level: ConductLevel | null, rule: RuleRef, ctx: { roomId: string | null }) => Suggestion;
+  subscribe: Subscribe;
+  /** `cw.audit.record`. */
+  audit: (input: AuditRecordInput) => boolean;
+}
+
+/** The facade when no AI is configured: always off, never touches the store. */
+export function createInertAi(): AiFacade {
+  const status: AiStatus = { available: false, level: 0, maxLevel: 0, state: 'off', spentMicros: 0, capMicros: 0, day: '', reads: 0, cacheHitRate: null, invalid: {} };
+  return {
+    level: () => 0,
+    status: () => ({ ...status, invalid: {} }),
+    read: () => null,
+    readAgain: () => Promise.resolve('off'),
+    briefs: () => new Map(),
+    stats: (q) => emptyStats(q?.since ?? 0),
+    idle: () => Promise.resolve(),
+    sweep: () => Promise.resolve(),
+    close: () => undefined,
+  };
+}
+
+const emptyStats = (since: number): AiStatsView => ({ since, decided: 0, agree: 0, override: 0, none: 0, falsePositives: 0, agreementRate: null, falsePositiveRate: null, rules: [] });
+
+const ruleOfText = (rule: string | null): number | 'uncovered' | null => (rule === null ? null : /^\d+$/.test(rule) ? Number(rule) : rule === 'uncovered' ? 'uncovered' : null);
+
+/** A suggestion's outcome as a step: a note, a warning or a restriction; none is no step. */
+function stepOf(s: Suggestion): SuggestionStep | null {
+  const o = s.outcome;
+  if (o === 'none') return null;
+  if (o === 'note' || o === 'warning') return { kind: o, durationMs: null, label: s.label };
+  return { kind: o.kind, durationMs: o.durationMs, label: s.label };
+}
+
+export class AiService implements AiFacade {
+  protected readonly store: AiStore;
+  protected readonly clock: Clock;
+  protected readonly adapter: ModerationAI;
+  protected readonly actor: string;
+  protected readonly opts: ReturnType<typeof checkOptions>;
+  protected readonly meter = new Meter();
+  protected readonly breaker: Breaker;
+  protected readonly window: CallWindow;
+
+  private readonly queue: string[] = [];
+  private readonly queued = new Set<string>();
+  private readonly running = new Map<string, { dirty: boolean }>();
+  private readonly parked = new Map<string, number>();
+  private readonly controllers = new Set<AbortController>();
+  private readonly cache = new Map<string, Prepared>();
+  private pumpTimer: ReturnType<typeof setTimeout> | undefined;
+  private sweepTimer: ReturnType<typeof setInterval> | undefined;
+  private unsubscribe: (() => void) | undefined;
+  private waiters: Array<() => void> = [];
+  private lastStable = '';
+  private stableKey = '';
+  private isClosed = false;
+
+  protected readonly deps: AiServiceDeps;
+
+  constructor(deps: AiServiceDeps) {
+    this.deps = deps;
+    this.store = requireAiStore(deps.store);
+    this.clock = deps.clock;
+    this.opts = checkOptions(deps.options);
+    this.adapter = deps.options.adapter;
+    this.actor = aiActorOf(this.adapter.id);
+    this.breaker = new Breaker(deps.clock);
+    this.window = new CallWindow(this.opts.perMinuteCalls);
+    // Only enqueue: no await, no store read, so the player's ack never waits for the AI.
+    this.unsubscribe = deps.subscribe('report.created', (e) => {
+      this.enqueue(e.reportId);
+    });
+    this.sweepTimer = setInterval(() => void this.sweep(), SWEEP_EVERY_MS);
+    (this.sweepTimer as { unref?: () => void }).unref?.();
+  }
+
+  // --- the facade ------------------------------------------------------------------------------------------------------------
+
+  level(): 0 | 1 | 2 {
+    try {
+      return Math.min(this.deps.profile().ai.level, this.opts.maxLevel) as 0 | 1 | 2;
+    } catch (err) {
+      this.warn('ai.level_failed', err);
+      return 0;
+    }
+  }
+
+  status(): AiStatus {
+    const level = this.level();
+    let spent = { micros: 0, calls: 0 };
+    try {
+      spent = this.store.aiSpendSince(startOfUtcDay(this.clock.now()));
+    } catch (err) {
+      this.warn('ai.status_failed', err);
+    }
+    const cap = this.opts.dailyBudgetMicros;
+    let state: AiStatus['state'] = 'ok';
+    if (level === 0) state = 'off';
+    else if (this.breaker.state() !== 'closed') state = 'unavailable';
+    else if (spent.micros >= cap) state = 'paused_budget';
+    return {
+      available: true,
+      level,
+      maxLevel: this.opts.maxLevel,
+      state,
+      spentMicros: spent.micros,
+      capMicros: cap,
+      day: utcDayLabel(this.clock.now()),
+      reads: spent.calls,
+      cacheHitRate: this.meter.cacheHitRate(),
+      invalid: { ...this.meter.invalid },
+    };
+  }
+
+  read(reportId: string, o?: { open?: boolean }): AiReadView | null {
+    try {
+      const level = this.level();
+      if (level === 0 || typeof reportId !== 'string') return null;
+      const report = this.store.loadReport(reportId);
+      if (report === null) return null;
+      const row = this.store.loadAiRead(reportId);
+      const open = o?.open === true && report.status === 'open';
+      if (row === null || row.read === null) {
+        if (open) this.enqueue(reportId);
+        return null;
+      }
+      const prepared = this.prepare(report);
+      const view = this.view(row, report, prepared, level);
+      if (open && view.stale) this.enqueue(reportId);
+      return view;
+    } catch (err) {
+      this.warn('ai.read_view_failed', err);
+      return null;
+    }
+  }
+
+  readAgain(reportId: string, actor: string): Promise<AiReadAgain> {
+    void actor;
+    try {
+      const level = this.level();
+      if (level === 0 || typeof reportId !== 'string') return Promise.resolve('off');
+      const report = this.store.loadReport(reportId);
+      if (report === null || report.status !== 'open') return Promise.resolve('off');
+      const prepared = this.prepare(report);
+      const row = this.store.loadAiRead(reportId);
+      if (row !== null && row.read !== null && row.inputHash === prepared.hash) return Promise.resolve(this.view(row, report, prepared, level));
+      const spent = this.store.aiSpendSince(startOfUtcDay(this.clock.now())).micros;
+      if (spent >= this.opts.dailyBudgetMicros) return Promise.resolve('budget');
+      this.enqueue(reportId, { force: true });
+      return Promise.resolve('pending');
+    } catch (err) {
+      this.warn('ai.read_again_failed', err);
+      return Promise.resolve('off');
+    }
+  }
+
+  briefs(reportIds: readonly string[]): Map<string, AiBrief> {
+    const out = new Map<string, AiBrief>();
+    try {
+      const level = this.level();
+      if (level === 0 || !Array.isArray(reportIds) || reportIds.length === 0) return out;
+      for (const row of this.store.loadAiReads(reportIds)) {
+        const read = row.read;
+        if (read === null) continue;
+        const report = this.store.loadReport(row.reportId);
+        if (report === null) continue;
+        const rec = read.recommendation;
+        out.set(row.reportId, {
+          severity: read.severity,
+          confidence: read.confidence,
+          rule: read.rule,
+          stale: this.prepare(report).hash !== row.inputHash,
+          injectionSuspected: read.injectionSuspected,
+          hasRecommendation: level >= 2 && rec !== null && rec.verdict !== 'unclear',
+        });
+      }
+    } catch (err) {
+      this.warn('ai.briefs_failed', err);
+      return new Map();
+    }
+    return out;
+  }
+
+  stats(q?: { since?: number }): AiStatsView {
+    const since = typeof q?.since === 'number' && Number.isFinite(q.since) ? q.since : this.clock.now() - STATS_DEFAULT_WINDOW_MS;
+    try {
+      const rows = this.store.aiStats(since);
+      const view = emptyStats(since);
+      for (const r of rows) {
+        view.decided += r.decided;
+        view.agree += r.agree;
+        view.override += r.override;
+        view.none += r.none;
+        view.falsePositives += r.falsePositives;
+        view.rules.push({ rule: ruleOfText(r.rule), decided: r.decided, agree: r.agree, override: r.override, none: r.none, falsePositives: r.falsePositives });
+      }
+      const shown = view.agree + view.override;
+      view.agreementRate = shown === 0 ? null : view.agree / shown;
+      view.falsePositiveRate = shown === 0 ? null : view.falsePositives / shown;
+      return view;
+    } catch (err) {
+      this.warn('ai.stats_failed', err);
+      return emptyStats(since);
+    }
+  }
+
+  idle(): Promise<void> {
+    if (this.isIdle()) return Promise.resolve();
+    return new Promise<void>((resolve) => void this.waiters.push(resolve));
+  }
+
+  close(): void {
+    this.isClosed = true;
+    if (this.sweepTimer !== undefined) clearInterval(this.sweepTimer);
+    this.sweepTimer = undefined;
+    if (this.pumpTimer !== undefined) clearTimeout(this.pumpTimer);
+    this.pumpTimer = undefined;
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    this.queue.length = 0;
+    this.queued.clear();
+    for (const c of this.controllers) c.abort();
+    this.settleIdle();
+  }
+
+  // --- the queue -------------------------------------------------------------------------------------------------------------
+
+  /**
+   * Put a report on the queue. Synchronous and cheap: no store read, no await. Does nothing at level 0. `force` is for a case that
+   * changed or was asked for (it forgets any wait the sweeper was keeping).
+   */
+  enqueue(reportId: string, o?: { force?: boolean }): boolean {
+    try {
+      if (this.isClosed || typeof reportId !== 'string' || this.level() === 0) return false;
+      if (o?.force === true) this.parked.delete(reportId);
+      const job = this.running.get(reportId);
+      if (job !== undefined) {
+        // A change arrived while it was being read: read once more when this one ends.
+        job.dirty = true;
+        return false;
+      }
+      if (this.queued.has(reportId)) return false;
+      this.queued.add(reportId);
+      this.queue.push(reportId);
+      this.schedulePump();
+      return true;
+    } catch (err) {
+      this.warn('ai.enqueue_failed', err);
+      return false;
+    }
+  }
+
+  /** The reporter's follow-up changed the case: read it again once. Called by the facade's `reports.addDetail`. */
+  caseChanged(reportId: string): void {
+    this.enqueue(reportId, { force: true });
+  }
+
+  private schedulePump(): void {
+    if (this.pumpTimer !== undefined || this.isClosed) return;
+    this.pumpTimer = setTimeout(() => {
+      this.pumpTimer = undefined;
+      this.pump();
+    }, 0);
+    (this.pumpTimer as { unref?: () => void }).unref?.();
+  }
+
+  private pump(): void {
+    while (!this.isClosed && this.running.size < this.opts.concurrency && this.queue.length > 0) {
+      const id = this.queue.shift() as string;
+      this.queued.delete(id);
+      this.running.set(id, { dirty: false });
+      void this.runOne(id);
+    }
+    this.settleIdle();
+  }
+
+  private async runOne(id: string): Promise<void> {
+    try {
+      const park = await runRead(this.env(), id);
+      if (park !== null) this.parked.set(id, park);
+      else this.parked.delete(id);
+    } catch (err) {
+      this.warn('ai.job_failed', err);
+    } finally {
+      const job = this.running.get(id);
+      this.running.delete(id);
+      if (job?.dirty === true && !this.isClosed) this.enqueue(id, { force: true });
+      this.pump();
+    }
+  }
+
+  private isIdle(): boolean {
+    return this.queue.length === 0 && this.running.size === 0 && this.pumpTimer === undefined;
+  }
+
+  private settleIdle(): void {
+    if (!this.isIdle()) return;
+    const waiting = this.waiters;
+    this.waiters = [];
+    for (const resolve of waiting) resolve();
+  }
+
+  // --- the sweeper -----------------------------------------------------------------------------------------------------------
+
+  async sweep(): Promise<void> {
+    try {
+      if (this.isClosed || this.level() === 0 || this.breaker.state() === 'open') return;
+      const now = this.clock.now();
+      const quiet = this.isIdle();
+      let added = 0;
+      const room = (): number => SWEEP_BATCH - added;
+
+      // 1. Reads whose retry has come, and reads whose owner died.
+      for (const row of this.store.listAiRetries(now, 200)) {
+        if (room() <= 0) break;
+        const report = this.store.loadReport(row.reportId);
+        if (report === null || report.status !== 'open' || this.prepare(report).hash !== row.inputHash) continue;
+        if (this.enqueue(row.reportId, { force: true })) added += 1;
+      }
+
+      // 2. Open reports with no usable read, newest first.
+      const page = this.store.listReports({ status: 'open', limit: SWEEP_SCAN });
+      const ids = page.map((r) => r.id);
+      const read = new Map(this.store.loadAiReads(ids).map((r) => [r.reportId, r]));
+      for (const report of page) {
+        if (room() <= 0) break;
+        if (read.has(report.id) || this.isParked(report.id, now)) continue;
+        if (this.enqueue(report.id)) added += 1;
+      }
+
+      // 3. When there is nothing new, bring a few stale reads up to date (rules or case changed), at the pace of the budget.
+      if (added === 0 && quiet) {
+        let stale = 0;
+        for (const report of page) {
+          if (stale >= STALE_PER_SWEEP) break;
+          const row = read.get(report.id);
+          if (row === undefined || this.isParked(report.id, now)) continue;
+          if (this.prepare(report).hash !== row.inputHash && this.enqueue(report.id)) stale += 1;
+        }
+      }
+    } catch (err) {
+      this.warn('ai.sweep_failed', err);
+    }
+  }
+
+  private isParked(reportId: string, now: number): boolean {
+    const until = this.parked.get(reportId);
+    return until !== undefined && until > now;
+  }
+
+  // --- views -----------------------------------------------------------------------------------------------------------------
+
+  /** A report made ready for a read, cached by what it is made from. */
+  protected prepare(report: ReportRecord): Prepared {
+    const profile = this.deps.profile();
+    const policy = { profile, rules: this.deps.rules };
+    const stable = aiPolicyText(policy);
+    if (stable !== this.lastStable) {
+      // The rules, the level meanings or the standard changed: what was waiting for a retry may now read differently.
+      this.lastStable = stable;
+      this.stableKey = sha256Hex(stable);
+      this.parked.clear();
+    }
+    const reasons = profile.reporting.reasons;
+    const label = report.reportedReason === null || report.reportedReason === undefined ? '' : (reasons.find((r) => r.id === report.reportedReason)?.label ?? '');
+    const key = [report.id, report.detailAt ?? 0, this.stableKey, label].join('|');
+    const hit = this.cache.get(key);
+    if (hit !== undefined) return hit;
+    const made = prepareCase({ report, policy, reasons, adapterId: this.adapter.id, mask: this.opts.blockedLines === 'mask' });
+    if (this.cache.size >= PREPARED_CACHE_MAX) this.cache.delete(this.cache.keys().next().value as string);
+    this.cache.set(key, made);
+    return made;
+  }
+
+  private view(row: { id: string; read: AIRead | null; inputHash: string; model: string | null; createdAt: number }, report: ReportRecord, prepared: Prepared, level: number): AiReadView {
+    const read = row.read as AIRead;
+    const rec = read.recommendation;
+    return {
+      id: row.id,
+      severity: read.severity,
+      rule: read.rule,
+      summary: read.summary,
+      evidenceLineIds: [...read.evidence],
+      confidence: read.confidence,
+      stale: row.inputHash !== prepared.hash,
+      injectionSuspected: read.injectionSuspected,
+      model: row.model,
+      at: row.createdAt,
+      recommendation: level >= 2 && rec !== null ? { verdict: rec.verdict, severity: rec.severity, rule: rec.rule, evidenceLineIds: [...rec.evidence], ...this.stepFor(report, prepared, rec) } : null,
+    };
+  }
+
+  /** The step the ladder gives for the recommendation, and whether it is within the ceilings. */
+  private stepFor(report: ReportRecord, prepared: Prepared, rec: NonNullable<AIRead['recommendation']>): { step: SuggestionStep | null; stepWithinCeiling: boolean } {
+    if (rec.verdict === 'no_action' || rec.verdict === 'unclear') return { step: null, stepWithinCeiling: true };
+    try {
+      const profile = this.deps.profile();
+      const ruleRef = typeof rec.rule === 'number' ? rec.rule : suggestedRule(profile.reporting.reasons, report.reportedReason ?? null, this.deps.rules);
+      const step =
+        rec.verdict === 'noted'
+          ? ({ kind: 'note', durationMs: null, label: 'Note' } satisfies SuggestionStep)
+          : stepOf(this.deps.suggest(report.targetSubject, rec.severity, ruleRef, { roomId: report.roomId === '' ? null : report.roomId }));
+      if (step === null) return { step: null, stepWithinCeiling: true };
+      try {
+        assertWithinCeilings(step, { cited: rec.evidence, ownRefs: prepared.ownLineIds });
+        return { step, stepWithinCeiling: true };
+      } catch (err) {
+        if (!(err instanceof AICeilingError)) throw err;
+        return { step, stepWithinCeiling: false };
+      }
+    } catch (err) {
+      this.warn('ai.step_failed', err);
+      return { step: null, stepWithinCeiling: false };
+    }
+  }
+
+  // --- the worker's environment ----------------------------------------------------------------------------------------------
+
+  private env(): WorkerEnv {
+    return {
+      store: this.store,
+      clock: this.clock,
+      adapter: this.adapter,
+      timeoutMs: this.opts.timeoutMs,
+      capMicros: this.opts.dailyBudgetMicros,
+      breaker: this.breaker,
+      window: this.window,
+      meter: this.meter,
+      level: () => this.level(),
+      closed: () => this.isClosed,
+      prepare: (report) => this.prepare(report),
+      examplesFor: (report, prepared) => this.examplesFor(report, prepared),
+      track: (c) => void this.controllers.add(c),
+      untrack: (c) => void this.controllers.delete(c),
+      auditRead: (reportId) => {
+        try {
+          this.deps.audit({ actor: this.actor, role: null, action: 'ai.read', target: { type: 'report', ref: reportId } });
+        } catch (err) {
+          this.warn('ai.audit_failed', err);
+        }
+      },
+      warn: (event, detail) => safeWarn(this.deps.logger, event, detail),
+    };
+  }
+
+  /** Casebook examples for a read. The casebook (Task 9) fills this in; until it does there are none. */
+  protected examplesFor(report: ReportRecord, prepared: Prepared): AIExampleInput[] {
+    void report;
+    void prepared;
+    return [];
+  }
+
+  protected warn(event: string, err: unknown): void {
+    safeWarn(this.deps.logger, event, { error: errorClass(err) });
+  }
+}
+

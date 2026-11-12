@@ -304,3 +304,17 @@ describe('buildAIInput', () => {
     }
   });
 });
+
+describe('the summary instruction (carried from the chunk A review)', () => {
+  it('asks for a space after every full stop, so two sentences never read as a domain', () => {
+    const input = buildAIInput({
+      policy: { profile: PRESETS.standard, rules: defineRules(starterRules('standard')) },
+      reason: null,
+      chosen: chooseLines(mkReport([{ who: 'target', text: 'hello' }])),
+    });
+    expect(input.prompt.stable).toContain('Write a space after every full stop.');
+    // It sits on the summary line, not elsewhere.
+    const line = input.prompt.stable.split('\n').find((l) => l.startsWith('- summary:')) ?? '';
+    expect(line).toContain('Write a space after every full stop.');
+  });
+});

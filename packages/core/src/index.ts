@@ -356,3 +356,17 @@ export { aiPolicyText, buildAIInput, PROMPT_VERSION, usedExampleIds } from './ai
 export type { BuildAIInputArgs } from './ai/prompt.js';
 export { inputHash } from './ai/hash.js';
 export { looksLikeInjection } from './ai/injection.js';
+export { aiActorOf, createInertAi, AiService, SWEEP_BATCH, SWEEP_EVERY_MS } from './ai/service.js';
+export type {
+  AiBrief,
+  AiFacade,
+  AiOptions,
+  AiReadAgain,
+  AiReadView,
+  AiStatsRuleView,
+  AiStatsView,
+  AiStatus,
+  SuggestionStep,
+} from './ai/service.js';
+export { createFakeModerationAI, fakeRead, FAKE_USAGE } from './ai/fake.js';
+export type { FakeCallContext, FakeModerationAI, FakeScript, FakeStep } from './ai/fake.js';

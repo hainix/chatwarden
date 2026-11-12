@@ -43,7 +43,7 @@ const INSTRUCTIONS = [
   'Answer with the JSON object only, matching the schema you were given. No text before or after it, no markdown.',
   '- severity: banter, rude, hostile or severe, as CONDUCT LEVELS defines them.',
   '- rule: the number n of the matching "CR n" rule, "uncovered" when no rule fits, or null when nothing breaks a rule.',
-  '- summary: one plain sentence of at most 160 characters saying what the lines show. No link, no markdown and no player or line labels such as P1 or L3: say "the reported player".',
+  '- summary: one plain sentence of at most 160 characters saying what the lines show. No link, no markdown and no player or line labels such as P1 or L3: say "the reported player". Write a space after every full stop.',
   '- evidence: up to 5 line refs (such as L2) that support your answer, copied from the DATA.',
   '- confidence: low, medium or high.',
   '- recommendation: null, or an object with verdict, severity, rule and evidence. verdict is upheld (the lines show a breach), noted (minor, worth a private record), no_action (the report does not hold up) or unclear (you cannot tell). Use upheld or noted only when the evidence includes a line written by P1. Never name a penalty, a length of time or any other outcome; a human chooses that. Never call the reporter dishonest.',

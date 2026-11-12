@@ -74,13 +74,25 @@ function speakerKey(report: ReportRecord, line: ReportExcerptLine): string {
   return subject !== undefined ? `s:${subject}` : `seat:${line.seatId}`;
 }
 
+/**
+ * The text of one line as it is sent. By default the raw text, redacted. With `mask` (the `blockedLines: 'mask'` option) a line the
+ * filter touched is sent as the room saw it: a starred line as its delivered text, a blocked line with every character but spaces
+ * replaced by a star, so the model still sees its shape and length but not the words.
+ */
+function lineText(line: ReportExcerptLine, handles: string[], aliasOf: (h: string) => string | null, mask: boolean): string {
+  const touched = line.blocked || (line.delivered !== null && line.delivered !== line.raw);
+  if (!mask || !touched) return redactText(line.raw, handles, aliasOf);
+  if (line.blocked || line.delivered === null) return redactText(line.raw, handles, aliasOf).replace(/[^\s]/gu, '*');
+  return redactText(line.delivered, handles, aliasOf);
+}
+
 interface Analysis {
   result: ChosenLines;
   handles: string[];
   aliasOf: (h: string) => string | null;
 }
 
-function analyse(report: ReportRecord, opts: { max?: number } | undefined): Analysis {
+function analyse(report: ReportRecord, opts: { max?: number; mask?: boolean } | undefined): Analysis {
   const max = Math.max(1, Math.floor(opts?.max ?? AI_MAX_LINES));
   // Time order, ties broken by the stored order, so the same report always gives the same choice.
   const all = report.excerpt.map((line, i) => ({ line, i })).sort((a, b) => a.line.ts - b.line.ts || a.i - b.i).map((e) => e.line);
@@ -171,9 +183,9 @@ function analyse(report: ReportRecord, opts: { max?: number } | undefined): Anal
     lineId: line.lineId,
     secondsIn: Math.max(0, Math.round((line.ts - first) / 1000)),
     who: whos[k] as string,
-    text: redactText(line.raw, handles, aliasOf),
+    text: lineText(line, handles, aliasOf, opts?.mask === true),
     blocked: line.blocked,
-    // Star-masked in the room (not blocked): the filter touched it, the raw text is still what we send.
+    // Star-masked in the room (not blocked): the filter touched it, the raw text is still what we send (unless `mask`).
     filtered: !line.blocked && line.delivered !== null && line.delivered !== line.raw,
     byReported: roles[positions[k] as number] === 'reported',
   }));
@@ -186,9 +198,10 @@ function analyse(report: ReportRecord, opts: { max?: number } | undefined): Anal
  * Choose the lines a read sees, in time order: the pointed-at line, the reported person's latest 20, 12 before and 6 after the
  * pointed-at line, then the nearest others, up to `max` (default 40). Lines the reporter could not see are dropped. Text is
  * redacted and speakers are aliased; `P1` is the reported person and `P2` the reporter even when the reporter spoke first.
+ * With `mask`, a line the filter touched is sent masked, not raw (see the `blockedLines` option of the AI service).
  * @experimental
  */
-export function chooseLines(report: ReportRecord, opts?: { max?: number }): ChosenLines {
+export function chooseLines(report: ReportRecord, opts?: { max?: number; mask?: boolean }): ChosenLines {
   return analyse(report, opts).result;
 }
 
@@ -197,7 +210,7 @@ export function chooseLines(report: ReportRecord, opts?: { max?: number }): Chos
  * `chooseLines` call it goes with, or prefer `chooseLines(...).note`, which cannot disagree with the lines.
  * @experimental
  */
-export function redactReportNote(report: ReportRecord, opts?: { max?: number }): string | null {
+export function redactReportNote(report: ReportRecord, opts?: { max?: number; mask?: boolean }): string | null {
   const { handles, aliasOf } = analyse(report, opts);
   return redactNote(report.note, handles, aliasOf);
 }
