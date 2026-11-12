@@ -50,6 +50,7 @@ import { StrikeService } from './strikes.js';
 import {
   blockedCountsByTerm,
   blockedItems,
+  blockedNameItems,
   listSanctionGroups,
   reporterRecord,
   sanctionsOfPerson,
@@ -59,6 +60,7 @@ import type { ReporterAccuracy } from './reporterAccuracy.js';
 import type {
   BlockedDays,
   BlockedItem,
+  BlockedNameItem,
   ReporterRecord,
   SanctionGroupView,
   SanctionListInput,
@@ -377,6 +379,12 @@ export interface Chatwarden {
     list(q: { days: BlockedDays }): BlockedItem[];
     /** Strikes per term id over the same window; a term with none is absent. */
     countsByTerm(q: { days: BlockedDays }): Record<string, number>;
+    /**
+     * The blocked NAMES kept as evidence (`names.keepBlocked`) over the last `days` days (1, 7 or 30, else `RangeError`), newest first, at most
+     * 200: `{ id, at, person, name, termId, reason }`, the person a staff ref or null. Empty when none was kept, or the store keeps none. A name
+     * is a player's text and `person` a subject id: staff channels only, never send either to a player.
+     */
+    names(q: { days: BlockedDays }): BlockedNameItem[];
   };
   /**
    * The team workbench: soft claims on a person's case, take next, and who has a case open. Staff only; every `person` is
@@ -1307,6 +1315,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
     blocked: {
       list: (q) => blockedItems(store, subjects, q?.days, clock.now()),
       countsByTerm: (q) => blockedCountsByTerm(store, q?.days, clock.now()),
+      names: (q) => blockedNameItems(store, subjects, q?.days, clock.now()),
     },
     cases: {
       holder: (person) => desk.holder(person),

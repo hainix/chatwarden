@@ -194,6 +194,7 @@ export type { ReporterAccuracy } from './reporterAccuracy.js';
 export type {
   BlockedDays,
   BlockedItem,
+  BlockedNameItem,
   PersonSanctionView,
   ReporterRecord,
   SanctionGroupView,
