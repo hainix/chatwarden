@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "outDir": "dist"
+    "outDir": "dist",
+    "lib": ["ES2023", "DOM"]
   },
   "include": ["*.ts"],
   "references": [{ "path": "../../packages/core" }, { "path": "../../packages/discord" }, { "path": "../../packages/http" }, { "path": "../../packages/store-sqlite" }, { "path": "../../packages/matcher" }, { "path": "../../packages/profanity" }]

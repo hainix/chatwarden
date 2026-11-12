@@ -30,7 +30,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['scripts/**/*.mjs', 'site/scripts/**/*.mjs', 'packages/hub-element/build/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'site/scripts/**/*.mjs', 'packages/hub-element/build/**/*.mjs', 'examples/*/web/*.mjs'],
     languageOptions: {
       globals: { console: 'readonly', process: 'readonly', Buffer: 'readonly', URL: 'readonly' },
     },
