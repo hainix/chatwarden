@@ -221,3 +221,67 @@ describe('handleFlagged appears only when flagged and only with maskInHub; unfla
     for (const v of [BAD, FINE, 'unique', 'zorbak']) expect(text.toLowerCase()).not.toContain(v.toLowerCase());
   });
 });
+
+describe('the matcher runs once per distinct handle in one response, and again on the next request', () => {
+  const counting = () => {
+    const calls: string[] = [];
+    const m: Matcher = { match: (t) => (calls.push(t), /zorbak/i.test(t) ? { termId: 'syn:zorbak' } : null) };
+    return { calls, m };
+  };
+
+  it('GET /reports with many reports and repeated handles: each distinct handle is asked about once, the answers are unchanged', async () => {
+    const { calls, m } = counting();
+    const w = await world({ matcher: m });
+    for (let i = 0; i < 6; i++) await fileNamed(w, BAD, FINE);
+    for (let i = 0; i < 4; i++) await fileNamed(w, FINE, BAD);
+    calls.length = 0;
+    const items = (await body(w, '/reports')).items as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(10);
+    expect(calls.slice().sort()).toEqual([BAD, FINE].sort());
+    expect(items.filter((i) => i.targetHandleFlagged === true)).toHaveLength(6);
+    expect(items.filter((i) => i.reporterHandleFlagged === true)).toHaveLength(4);
+    // the next request asks again: a term added in between takes effect at once
+    calls.length = 0;
+    await body(w, '/reports');
+    expect(calls.slice().sort()).toEqual([BAD, FINE].sort());
+  });
+
+  it('GET /reports/:id: the same handle on the report and on every excerpt line is asked about once', async () => {
+    const { calls, m } = counting();
+    const w = await world({ matcher: m });
+    const f = await fileNamed(w, BAD, FINE);
+    calls.length = 0;
+    const one = (await body(w, `/reports/${f.id}`)).report as { excerpt: Array<{ handle: string; handleFlagged?: boolean }> };
+    expect(one.excerpt.length).toBeGreaterThan(1);
+    expect(calls.filter((c) => c === BAD)).toHaveLength(1);
+    expect(calls.filter((c) => c === FINE)).toHaveLength(1);
+    expect(one.excerpt.filter((l) => l.handle === BAD).every((l) => l.handleFlagged === true)).toBe(true);
+  });
+
+  it('a handle the matcher fails on is asked once per response too, reads as not flagged, and is retried on the next request', async () => {
+    let calls = 0;
+    const m: Matcher = {
+      match: () => {
+        calls += 1;
+        throw new RangeError('matcher down');
+      },
+    };
+    const w = await world({ matcher: m });
+    for (let i = 0; i < 5; i++) await fileNamed(w, BAD, FINE);
+    calls = 0;
+    const items = (await body(w, '/reports')).items as Array<Record<string, unknown>>;
+    expect(calls).toBe(2);
+    expect(items.some((i) => Object.keys(i).some((k) => k.endsWith('Flagged')))).toBe(false);
+    await body(w, '/reports');
+    expect(calls).toBe(4);
+  });
+
+  it('maskInHub off: the matcher is not asked at all', async () => {
+    const { calls, m } = counting();
+    const w = await world({ matcher: m, overrides: { names: { maskInHub: false } } });
+    for (let i = 0; i < 3; i++) await fileNamed(w, BAD, FINE);
+    calls.length = 0;
+    await body(w, '/reports');
+    expect(calls).toEqual([]);
+  });
+});

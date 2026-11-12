@@ -19,7 +19,18 @@ export function latestHandle(cw: Chatwarden, person: string): string | null {
  */
 export function handleFlags(cw: Chatwarden): (handle: string | null | undefined) => boolean {
   if (!cw.profile.names.maskInHub) return () => false;
-  return (handle) => typeof handle === 'string' && handle !== '' && cw.names.flagged(handle);
+  // Made once per response and remembered for that response only: a list that repeats a handle (a hundred reports against one player) asks the
+  // matcher once per distinct handle, and the next request asks again, so a term added meanwhile counts at once.
+  const seen = new Map<string, boolean>();
+  return (handle) => {
+    if (typeof handle !== 'string' || handle === '') return false;
+    let flagged = seen.get(handle);
+    if (flagged === undefined) {
+      flagged = cw.names.flagged(handle);
+      seen.set(handle, flagged);
+    }
+    return flagged;
+  };
 }
 
 /** `{ <key>: true }` when the handle is flagged, else nothing, so an unflagged body keeps exactly the keys it had. */
