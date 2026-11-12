@@ -285,8 +285,6 @@ export class MemoryStore implements Store {
       source: r.source,
       automated: r.automated,
       pending: r.pending,
-      // Only a row that was written with a report id carries the key, so a row without one reads back as it was written.
-      ...(r.reportId === undefined ? {} : { reportId: r.reportId }),
     };
   }
 
@@ -999,16 +997,23 @@ export class MemoryStore implements Store {
     return touched.length;
   }
 
-  purgeNotices(before: number): number {
+  purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number {
     const snapshot = [...this.notices];
     // A seen notice of these kinds goes after the cutoff; the rest of the kinds follow their end time. An unseen message notice (an
     // appeal outcome, a required rename) stays until it is seen or withdrawn. Spelled out here, not imported: this package links to old cores.
     const seenGoes = ['warning', 'report_outcome', 'rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'];
+    // An unseen message notice has a ceiling, given by the caller (an older caller gives none: it is kept).
+    const appealKinds = ['appeal_upheld', 'appeal_reduced', 'appeal_revoked'];
+    const pastCeiling = (n: NoticeRow): boolean =>
+      unseen !== undefined &&
+      n.ackedAt === null &&
+      ((appealKinds.includes(n.kind) && n.createdAt < unseen.appealBefore) || (n.kind === 'rename_required' && n.createdAt < unseen.renameBefore));
     const kept = snapshot.filter(
       (n) =>
         !(
           (n.withdrawnAt !== null && n.createdAt < before) ||
           (n.ackedAt !== null && seenGoes.includes(n.kind) && n.createdAt < before) ||
+          pastCeiling(n) ||
           (n.until !== null && n.until < before)
         ),
     );

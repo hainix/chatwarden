@@ -1208,7 +1208,12 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       revoke: async (groupId, actor, reason) => {
         // One instant for the stored revokedAt and the event, so a consumer correlating the two sees the same time.
         const at = clock.now();
-        const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, { notices, clock: { now: () => at }, index: sanctions });
+        const { revoked } = await revokeAndWithdraw(store, groupId, actor, reason, {
+          notices,
+          clock: { now: () => at },
+          index: sanctions,
+          clearAppealStatements: () => (retentionPolicy.appealStatementsMs ?? RETENTION_DEFAULTS.appealStatementsMs) === 0,
+        });
         if (revoked) {
           try {
             const code = store.sanctionRefCode(groupId);

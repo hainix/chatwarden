@@ -238,6 +238,33 @@ describe('the moot hook in revoke', () => {
     expect(store.loadSanctions(NOW).some((r) => r.groupId === group)).toBe(true);
   });
 
+  it('with appealStatementsMs 0 the moot clears the statement at once, like a decision; otherwise the text stays for retention', async () => {
+    const b = bare();
+    const w1 = writeSanction(b.store, b.subjects, b.input(b.person('k1')), NOW, false);
+    const w2 = writeSanction(b.store, b.subjects, b.input(b.person('k2')), NOW, false);
+    b.store.insertAppeal(appealFor(w1.groupId));
+    b.store.insertAppeal(appealFor(w2.groupId));
+    await revokeSanction(b.store, w1.groupId, 'mod_cy', NOW + 5, 'lifted', undefined, { clearStatement: true });
+    await revokeSanction(b.store, w2.groupId, 'mod_cy', NOW + 5, 'lifted');
+    expect(b.store.loadAppeal(`ap-${w1.groupId}`)).toMatchObject({ status: 'moot', statement: null });
+    expect(b.store.loadAppeal(`ap-${w2.groupId}`)).toMatchObject({ status: 'moot', statement: 'st' });
+  });
+
+  it('cw.sanctions.revoke follows the kit\'s retention: appealStatementsMs 0 clears the statement as it moots', async () => {
+    for (const [policy, expected] of [[{ appealStatementsMs: 0 }, null], [{}, 'st']] as const) {
+      const store = withMemoryAppeals(new MemoryStore());
+      const w = await world({ retention: policy }, store);
+      const f = await w.file();
+      const res = await w.cw.decide({ reportId: f.id, verdict: 'upheld', actor: 'mod@example.test', reason: 'p', actions: [{ subject: f.target, kind: 'chat', durationMs: H, rule: 2, lineIds: [] }] });
+      if (!res.ok) throw new Error('expected a decision');
+      const group = res.groups[0]?.groupId as string;
+      store.insertAppeal(appealFor(group));
+      await w.cw.sanctions.revoke(group, 'mod_cy', 'lifted');
+      expect(store.loadAppeal(`ap-${group}`)).toMatchObject({ status: 'moot', statement: expected });
+      await w.cw.close?.();
+    }
+  });
+
   it('an already decided appeal is untouched', async () => {
     const b = bare();
     const written = writeSanction(b.store, b.subjects, b.input(b.person('k1')), NOW, false);

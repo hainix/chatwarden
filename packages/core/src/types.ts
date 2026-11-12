@@ -1325,7 +1325,15 @@ export interface Store {
    * OPTIONAL. The sanction group was revoked by someone else: move its appeal, if still `open`, to `moot` (`decidedAt` and `decidedBy`
    * set, no reason). Returns how many moved (0 or 1); a decided or moot appeal is untouched.
    */
-  closeAppealsForGroup?(groupId: string, by: string, at: number): number;
+  closeAppealsForGroup?(groupId: string, by: string, at: number, clearStatement?: boolean): number;
+
+  /**
+   * OPTIONAL. Retention removed the sanction rows of a group that still has an `open` appeal (or the group never had a subject row): move
+   * each such appeal to `moot` (`decidedAt` = `at`, `decidedBy` = `by`, no reason), so it leaves the inbox and its statement goes on
+   * the decided clock. A group that is only REVOKED still has its row and is not an orphan. `clearStatement` also nulls the statement
+   * (retention with `appealStatementsMs` at 0). Returns how many moved; moves the change token when it is above 0.
+   */
+  closeOrphanAppeals?(by: string, at: number, clearStatement?: boolean): number;
 
   /**
    * OPTIONAL. Per rule, the appeals FILED at or after `since`: `appealed` (every status, a moot one included), `granted` (revoked ONLY) and
@@ -1354,9 +1362,10 @@ export interface Store {
   clearAppealStatements?(before: number): number;
 
   /**
-   * OPTIONAL. Delete appeals decided (or closed) before `before` (strict), EXCEPT one whose sanction group is permanent (a chat, area or ban
-   * with no end) and not revoked: that row is what stops the player appealing a live permanent sanction a second time. An open appeal is
-   * never deleted. Returns how many were deleted.
+   * OPTIONAL. Delete appeals decided (or closed) before `before` (strict), EXCEPT one whose sanction group is still in force: a chat, area or
+   * ban, not revoked, that has no end or whose end is after `before` (`before` stands for "now less the retention": a sanction that ended
+   * before it is over). That row is what stops the player appealing a live sanction a second time. An open appeal is never deleted.
+   * Returns how many were deleted.
    */
   purgeAppeals?(before: number): number;
 
@@ -1427,8 +1436,14 @@ export interface Store {
    * `report_outcome`, and has `createdAt < before`; or its end is past (`until` set and `< before`). A notice for a
    * permanent or still-running sanction is never deleted while it applies, and an unseen warning is kept until it
    * is seen or withdrawn.
+   *
+   * The four message kinds (`rename_required`, `appeal_upheld`, `appeal_reduced`, `appeal_revoked`) follow the `report_outcome`
+   * rule when seen (deleted with `createdAt < before`). An UNSEEN one is kept, but not for ever: `unseen`, when given, is a ceiling.
+   * An unseen appeal outcome goes with `createdAt < unseen.appealBefore`, an unseen `rename_required` with
+   * `createdAt < unseen.renameBefore`. Without `unseen` (an older caller) an unseen message notice is kept. A warning and a report
+   * outcome are not affected by it.
    */
-  purgeNotices(before: number): number;
+  purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number;
 
   // Webhook idempotency keys (K3b). SYNCHRONOUS on purpose (like sanctions): they run inside `transaction`.
 

@@ -21,6 +21,7 @@ type Appeals = Required<
     | 'loadSanctionSubjectRow'
     | 'clearAppealStatements'
     | 'purgeAppeals'
+    | 'closeOrphanAppeals'
   >
 >;
 const METHODS: Array<keyof Appeals> = [
@@ -36,6 +37,7 @@ const METHODS: Array<keyof Appeals> = [
   'loadSanctionSubjectRow',
   'clearAppealStatements',
   'purgeAppeals',
+  'closeOrphanAppeals',
 ];
 
 const H = 3_600_000;
@@ -117,7 +119,7 @@ export function appealsContract(name: string, make: () => Store): void {
       return s as Appeals & Store;
     };
 
-    it('has the twelve methods', () => {
+    it('has the thirteen methods', () => {
       const s = make();
       for (const m of METHODS) expect(typeof s[m], m).toBe('function');
     });
@@ -362,6 +364,24 @@ export function appealsContract(name: string, make: () => Store): void {
         expect(s.loadAppeal(done.id)).toEqual(decided);
       });
 
+      it('clearStatement nulls the statement of the appeal it moots (retention at 0 clears at the close, like a decision); without it the text stays', () => {
+        const s = store();
+        const keep = appeal({ groupId: 'g-keep' });
+        const clear = appeal({ groupId: 'g-clear' });
+        s.insertAppeal(keep);
+        s.insertAppeal(clear);
+        expect(s.closeAppealsForGroup('g-keep', 'x', NOW)).toBe(1);
+        expect(s.closeAppealsForGroup('g-clear', 'x', NOW, true)).toBe(1);
+        expect(s.loadAppeal(keep.id)).toMatchObject({ status: 'moot', statement: keep.statement });
+        expect(s.loadAppeal(clear.id)).toMatchObject({ status: 'moot', statement: null, decidedAt: NOW, decidedBy: 'x' });
+        // a decided appeal is untouched even with the flag
+        const done = appeal({ groupId: 'g-done' });
+        s.insertAppeal(done);
+        s.decideAppeal(done.id, decide());
+        expect(s.closeAppealsForGroup('g-done', 'x', NOW, true)).toBe(0);
+        expect(s.loadAppeal(done.id)?.statement).toBe(done.statement);
+      });
+
       it('a second call, and a group with no appeal, return 0', () => {
         const s = store();
         s.insertAppeal(appeal({ groupId: 'g-open' }));
@@ -475,6 +495,79 @@ export function appealsContract(name: string, make: () => Store): void {
         const s = store();
         expect(s.countSanctionsByRule(0)).toEqual([]);
         expect(s.appealCountsByRule(0)).toEqual([]);
+      });
+    });
+
+    describe('closeOrphanAppeals', () => {
+      it('moots an open appeal whose sanction rows are gone (retention removed them), counts it, and moves the open count', () => {
+        const s = store();
+        s.insertSanctionGroup(subjectAndIp('sg-live', 'M-90001'));
+        const live = appeal({ groupId: 'sg-live' });
+        const orphan = appeal({ groupId: 'sg-gone' });
+        const decided = appeal({ groupId: 'sg-gone-decided' });
+        for (const r of [live, orphan, decided]) s.insertAppeal(r);
+        s.decideAppeal(decided.id, decide());
+        expect(s.countOpenAppeals()).toBe(2);
+        const token = s.changeToken();
+        expect(s.closeOrphanAppeals('retention', NOW + 5)).toBe(1);
+        expect(s.loadAppeal(orphan.id)).toMatchObject({ status: 'moot', decidedAt: NOW + 5, decidedBy: 'retention', statement: orphan.statement });
+        expect(s.loadAppeal(live.id)?.status).toBe('open');
+        expect(s.loadAppeal(decided.id)?.status).toBe('upheld');
+        expect(s.countOpenAppeals()).toBe(1);
+        expect(s.changeToken()).not.toBe(token);
+        // nothing left to close: no write, no token move
+        const after = s.changeToken();
+        expect(s.closeOrphanAppeals('retention', NOW + 6)).toBe(0);
+        expect(s.changeToken()).toBe(after);
+      });
+
+      it('an appeal whose sanction is only revoked is not an orphan (the row is still there); one whose group has only an IP row is', () => {
+        const s = store();
+        s.insertSanctionGroup(subjectAndIp('sg-rev', 'M-90002'));
+        s.revokeSanctionGroup('sg-rev', 'mod_ann', NOW, 'lifted');
+        s.insertSanctionGroup([sanction({ groupId: 'sg-ip', refCode: 'M-90003', targetType: 'ip', value: 'iphash' })]);
+        const rev = appeal({ groupId: 'sg-rev' });
+        const ip = appeal({ groupId: 'sg-ip' });
+        s.insertAppeal(rev);
+        s.insertAppeal(ip);
+        expect(s.closeOrphanAppeals('retention', NOW)).toBe(1);
+        expect(s.loadAppeal(rev.id)?.status).toBe('open');
+        expect(s.loadAppeal(ip.id)?.status).toBe('moot');
+      });
+
+      it('clearStatement nulls the moot appeal\'s text (retention at 0)', () => {
+        const s = store();
+        const a = appeal({ groupId: 'sg-a' });
+        const b = appeal({ groupId: 'sg-b' });
+        s.insertAppeal(a);
+        expect(s.closeOrphanAppeals('retention', NOW, true)).toBe(1);
+        expect(s.loadAppeal(a.id)).toMatchObject({ status: 'moot', statement: null });
+        s.insertAppeal(b);
+        expect(s.closeOrphanAppeals('retention', NOW, false)).toBe(1);
+        expect(s.loadAppeal(b.id)?.statement).toBe(b.statement);
+      });
+
+      it('a moot appeal is on the statement clock and the row goes with purgeAppeals, since its sanction is gone', () => {
+        const s = store();
+        const a = appeal({ groupId: 'sg-a' });
+        s.insertAppeal(a);
+        s.closeOrphanAppeals('retention', NOW - 100 * DAY);
+        expect(s.clearAppealStatements(NOW - 90 * DAY)).toBe(1);
+        expect(s.purgeAppeals(NOW - 90 * DAY)).toBe(1);
+        expect(s.loadAppeal(a.id)).toBeNull();
+      });
+
+      it('is undone with its transaction', () => {
+        const s = store();
+        const a = appeal({ groupId: 'sg-a' });
+        s.insertAppeal(a);
+        expect(() =>
+          s.transaction(() => {
+            expect(s.closeOrphanAppeals('retention', NOW)).toBe(1);
+            throw new Error('boom');
+          }),
+        ).toThrow('boom');
+        expect(s.loadAppeal(a.id)?.status).toBe('open');
       });
     });
 
@@ -617,9 +710,37 @@ export function appealsContract(name: string, make: () => Store): void {
         expect(s.loadAppeal(row.id)).toBeNull();
       });
 
-      it('purgeAppeals deletes a decided row for a timed sanction, a warning and a sanction that is gone, and keeps the row of a permanent one', () => {
+      it('purgeAppeals keeps a decided row while its timed sanction is still running (or ended after the cutoff), deletes it once it ended before', () => {
         const s = store();
-        s.insertSanctionGroup(subjectAndIp('sg-timed', 'M-70002', { kind: 'chat', endsAt: NOW + H }));
+        // a year-long ban, upheld on day 5, is still running when the cutoff passes the decision: the row stays so no second appeal can be filed
+        s.insertSanctionGroup(subjectAndIp('sg-running', 'M-80001', { kind: 'ban', startsAt: NOW - 100 * DAY, endsAt: NOW + 265 * DAY }));
+        s.insertSanctionGroup(subjectAndIp('sg-late', 'M-80002', { kind: 'chat', startsAt: NOW - 100 * DAY, endsAt: NOW - 50 * DAY }));
+        s.insertSanctionGroup(subjectAndIp('sg-ended', 'M-80003', { kind: 'chat', startsAt: NOW - 200 * DAY, endsAt: NOW - 150 * DAY }));
+        s.insertSanctionGroup(subjectAndIp('sg-revoked', 'M-80004', { kind: 'ban', startsAt: NOW - 100 * DAY, endsAt: NOW + 265 * DAY }));
+        s.revokeSanctionGroup('sg-revoked', 'mod_ann', NOW - 60 * DAY, 'lifted');
+        const rows = ['sg-running', 'sg-late', 'sg-ended', 'sg-revoked'].map((g) => appeal({ groupId: g }));
+        for (const r of rows) {
+          s.insertAppeal(r);
+          s.decideAppeal(r.id, decide({ at: NOW - 95 * DAY }));
+        }
+        const cutoff = NOW - 90 * DAY;
+        expect(s.purgeAppeals(cutoff)).toBe(2);
+        expect(s.loadAppeal((rows[0] as AppealRow).id)).not.toBeNull();
+        expect(s.loadAppeal((rows[1] as AppealRow).id)).not.toBeNull();
+        expect(s.loadAppeal((rows[2] as AppealRow).id)).toBeNull();
+        expect(s.loadAppeal((rows[3] as AppealRow).id)).toBeNull();
+        // an end exactly on the cutoff has ended (the row applied strictly before it): the appeal row goes
+        s.insertSanctionGroup(subjectAndIp('sg-edge', 'M-80005', { kind: 'chat', startsAt: NOW - 200 * DAY, endsAt: cutoff }));
+        const edge = appeal({ groupId: 'sg-edge' });
+        s.insertAppeal(edge);
+        s.decideAppeal(edge.id, decide({ at: NOW - 95 * DAY }));
+        expect(s.purgeAppeals(cutoff)).toBe(1);
+        expect(s.loadAppeal(edge.id)).toBeNull();
+      });
+
+      it('purgeAppeals deletes a decided row for a timed sanction that has ended, a warning and a sanction that is gone, and keeps the row of a permanent one', () => {
+        const s = store();
+        s.insertSanctionGroup(subjectAndIp('sg-timed', 'M-70002', { kind: 'chat', startsAt: NOW - 500 * DAY, endsAt: NOW - 499 * DAY }));
         s.insertSanctionGroup(subjectAndIp('sg-warn', 'M-70003', { kind: 'warning', endsAt: null }));
         s.insertSanctionGroup(subjectAndIp('sg-perm', 'M-70004', { kind: 'chat', endsAt: null }));
         const timed = appeal({ groupId: 'sg-timed' });

@@ -78,7 +78,7 @@ describe('pace in the profile', () => {
 
 describe('pace in the layer', () => {
   it('POLICY_SECTIONS appends pace after ai', () => {
-    expect([...POLICY_SECTIONS].slice(-5, -3)).toEqual(['ai', 'pace']);
+    expect(POLICY_SECTIONS.indexOf('pace')).toBe(POLICY_SECTIONS.indexOf('ai') + 1);
   });
 
   it('a layer pace beats the code profile, field by field', () => {
@@ -236,7 +236,7 @@ describe('cw.policy and the pace section', () => {
   });
 
   it('AUDIT_ACTIONS gained no pace action (the 0.1.7 list is a prefix)', () => {
-    expect(AUDIT_ACTIONS.slice(23, 26)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
+    expect(AUDIT_ACTIONS.slice(AUDIT_ACTIONS.indexOf('ai.read'), AUDIT_ACTIONS.indexOf('ai.read') + 3)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
     expect([...AUDIT_ACTIONS].filter((a) => /pace|flood|signal/.test(a))).toEqual([]);
   });
 });

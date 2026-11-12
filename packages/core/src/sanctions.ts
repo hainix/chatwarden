@@ -313,12 +313,14 @@ export function revokeSanction(
   now: number,
   reason: string,
   index?: SanctionIndex,
+  opts: { clearStatement?: boolean } = {},
 ): Promise<boolean> {
   try {
     const n = store.transaction(() => {
       const revoked = store.revokeSanctionGroup(groupId, actor, now, reason);
       // An appeal still open against this group is moot now: nobody ruled on it. In the same transaction, so both land or neither.
-      if (revoked > 0) store.closeAppealsForGroup?.(groupId, actor, now);
+      // `clearStatement` (retention.appealStatementsMs 0) clears its text at once, as a decision would.
+      if (revoked > 0) store.closeAppealsForGroup?.(groupId, actor, now, opts.clearStatement === true);
       return revoked;
     });
     index?.remove(groupId);

@@ -233,8 +233,9 @@ describe('the layer', () => {
     expect(JSON.stringify(base)).toBe(before);
   });
 
-  it('signals is the last editable section; changedSections and layerSections list it in order', () => {
-    expect([...POLICY_SECTIONS].slice(-5, -2)).toEqual(['ai', 'pace', 'signals']);
+  it('signals follows pace in the editable sections; changedSections and layerSections list it in order', () => {
+    expect(POLICY_SECTIONS.indexOf('signals')).toBe(POLICY_SECTIONS.indexOf('pace') + 1);
+    expect(POLICY_SECTIONS.indexOf('pace')).toBe(POLICY_SECTIONS.indexOf('ai') + 1);
     expect(changedSections({}, { signals: { feeds: {} } })).toEqual(['signals']);
     expect(changedSections({ signals: { feeds: {} } }, { signals: { feeds: {} } })).toEqual([]);
     expect(changedSections({}, { signals: { feeds: {} }, pace: { slowModeMs: 2000 }, durations: [3_600_000] })).toEqual(['durations', 'pace', 'signals']);

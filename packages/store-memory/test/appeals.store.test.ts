@@ -160,13 +160,13 @@ describe('MemoryStore appeals', () => {
     expect(s.changeToken()).not.toBe(t3);
   });
 
-  it('a sanction row keeps its report id through insertSanctionGroup and loadSanctionSubjectRow', () => {
+  it('a sanction row keeps its report id through insertSanctionGroup and loadSanctionSubjectRow only: the generic loads keep their shape', () => {
     const s = withMemoryAppeals(new MemoryStore());
     s.insertSanctionGroup([sanction({ reportId: 'rep_7' }), sanction({ id: 'r2', targetType: 'ip', value: 'iphash' })]);
     expect(s.loadSanctionSubjectRow('g1')?.reportId).toBe('rep_7');
-    expect(s.loadSanctions(NOW)[0]?.reportId).toBe('rep_7');
-    // the other rows of the store do not grow a reportId key
-    expect(Object.keys(s.loadSanctions(NOW)[1] ?? {})).not.toContain('reportId');
+    for (const r of [...s.loadSanctions(NOW), ...s.loadSubjectActions(0), ...s.listSubjectSanctions({ limit: 10 }), ...s.listGaps()]) {
+      expect(Object.keys(r), r.id).not.toContain('reportId');
+    }
   });
 
   it('a sanction row written without a report id reads back without one, and loadSanctionSubjectRow says null', () => {

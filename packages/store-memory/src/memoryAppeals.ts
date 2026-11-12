@@ -20,6 +20,7 @@ export type MemoryAppealMethods = Required<
     | 'loadSanctionSubjectRow'
     | 'clearAppealStatements'
     | 'purgeAppeals'
+    | 'closeOrphanAppeals'
   >
 >;
 
@@ -121,18 +122,36 @@ class MemoryAppeals extends MemoryStore {
     return true;
   }
 
-  closeAppealsForGroup(groupId: string, by: string, at: number): number {
+  closeAppealsForGroup(groupId: string, by: string, at: number, clearStatement?: boolean): number {
     const s = this.appealState();
     const id = s.byGroup.get(groupId);
     const row = id === undefined ? undefined : s.rows.get(id);
     if (row === undefined || row.status !== 'open') return 0;
+    this.moot(row, by, at, clearStatement === true);
+    return 1;
+  }
+
+  /** Move one open appeal to moot, journaled, and move the change token. */
+  private moot(row: AppealRow, by: string, at: number, clearStatement: boolean): void {
     const before = { ...row };
     row.status = 'moot';
     row.decidedAt = at;
     row.decidedBy = by;
+    if (clearStatement) row.statement = null;
     this.undoWith(() => Object.assign(row, before));
     this.bump();
-    return 1;
+  }
+
+  closeOrphanAppeals(by: string, at: number, clearStatement?: boolean): number {
+    const held = new Set<string>();
+    for (const r of this.sanctions) if (r.targetType === 'subject') held.add(r.groupId);
+    let n = 0;
+    for (const row of this.appealState().rows.values()) {
+      if (row.status !== 'open' || held.has(row.groupId)) continue;
+      this.moot(row, by, at, clearStatement === true);
+      n += 1;
+    }
+    return n;
   }
 
   appealCountsByRule(since: number): Array<{ rule: string | null; appealed: number; granted: number; lightened: number }> {
@@ -167,7 +186,9 @@ class MemoryAppeals extends MemoryStore {
 
   loadSanctionSubjectRow(groupId: string): SanctionRow | null {
     const row = this.sanctions.find((r) => r.groupId === groupId && r.targetType === 'subject');
-    return row === undefined ? null : this.sanctionRow(row);
+    if (row === undefined) return null;
+    // The one read that carries the report id: only a row written with one has the key, so every other load keeps the shape it had.
+    return { ...this.sanctionRow(row), ...(row.reportId == null ? {} : { reportId: row.reportId }) };
   }
 
   clearAppealStatements(before: number): number {
@@ -190,9 +211,9 @@ class MemoryAppeals extends MemoryStore {
     const gone: AppealRow[] = [];
     for (const r of s.rows.values()) {
       if (r.status === 'open' || r.decidedAt === null || r.decidedAt >= before) continue;
-      // A decided appeal on a live permanent sanction stays: it is what stops a second appeal against it.
+      // A decided appeal on a sanction still in force stays (no end, or an end after the cutoff): it is what stops a second appeal against it.
       const held = this.sanctions.find((x) => x.groupId === r.groupId && x.targetType === 'subject');
-      if (held !== undefined && held.endsAt === null && held.kind !== 'warning' && held.kind !== 'note' && held.revokedAt === null) continue;
+      if (held !== undefined && held.kind !== 'warning' && held.kind !== 'note' && held.revokedAt === null && (held.endsAt === null || held.endsAt > before)) continue;
       gone.push(r);
     }
     for (const r of gone) {

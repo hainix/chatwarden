@@ -164,6 +164,8 @@ export interface PurgeResult {
   appealStatements: number;
   /** Kept blocked names deleted. 0 for a store without the blocked-name methods. */
   blockedNames: number;
+  /** Open appeals mooted because retention removed their sanction rows. 0 for a store without the appeal methods. */
+  appealsClosed: number;
 }
 
 function checkWindow(name: string, ms: number): void {
@@ -190,11 +192,13 @@ function checkWindow(name: string, ms: number): void {
  * - signals: `at < now - signalsMs` (90 days by default, never less than 14); a store without the signal methods has none
  * - appeals: the statement of an appeal decided (or closed) before `now - appealStatementsMs` is set to nothing, the row stays; then a
  *   decided row with `decidedAt < now - appealsMs` is deleted (365 days by default, never less than 90), EXCEPT one whose sanction is
- *   permanent and still in force. An open appeal is never touched. Blocked names: `at < now - blockedNamesMs` (30 days by default).
+ *   permanent, or timed and not yet ended before that cutoff, and not revoked (that row stops a second appeal). An open appeal is never
+ *   deleted or cleared; but one whose sanction rows this pass removed (or that has none) is first mooted, so it ends up decided-like. Blocked names: `at < now - blockedNamesMs` (30 days by default).
  *   A store without the appeal or blocked-name methods has none of these.
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
- *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn.
+ *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn. The four message kinds: seen, as a report outcome;
+ *   unseen, kept until the longer of `noticesMs` and `appealsMs` (appeal outcomes) or of `noticesMs` and `auditMs` (a required rename).
  *
  * Every cutoff is strict: a row exactly on the line is kept. Subjects and terms are never touched. The in-memory
  * indexes need no update: they already ignore everything this removes.
@@ -239,12 +243,20 @@ export async function purge(
       sanctions: store.purgeSanctions(now - p.sanctionAfterEndMs),
       strikes: store.purgeStrikes(now - p.strikesMs),
       mutes: store.purgeMutes(now - MUTE_TTL_MS),
-      notices: store.purgeNotices(now - p.noticesMs),
+      // An unseen message notice is kept until seen, but not for ever: an appeal outcome goes with the appeal row it describes, a required
+      // rename with the audit trail. Never earlier than a seen one would go (`noticesMs`).
+      notices: store.purgeNotices(now - p.noticesMs, {
+        appealBefore: now - Math.max(p.noticesMs, p.appealsMs),
+        renameBefore: now - Math.max(p.noticesMs, p.auditMs),
+      }),
       audit: store.purgeAudit(now - p.auditMs),
       webhookKeys: store.purgeWebhookKeys(now - WEBHOOK_KEY_TTL_MS),
       aiReads: ai.reads,
       aiOutcomes: ai.outcomes,
       signals: store.purgeSignals?.(now - p.signalsMs) ?? 0,
+      // An open appeal whose sanction rows were just removed can never be decided (`gone`): moot it, so it leaves the inbox and its statement
+      // goes on the decided clock (cleared at once when `appealStatementsMs` is 0).
+      appealsClosed: store.closeOrphanAppeals?.('retention', now, p.appealStatementsMs === 0) ?? 0,
       // Statements first: a statement is player text and goes on its own, shorter clock even when its row stays (or goes in the next call).
       appealStatements: store.clearAppealStatements?.(now - p.appealStatementsMs) ?? 0,
       appeals: store.purgeAppeals?.(now - p.appealsMs) ?? 0,

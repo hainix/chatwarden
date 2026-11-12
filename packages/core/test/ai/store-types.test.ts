@@ -51,7 +51,7 @@ describe('the AI Store methods are optional', () => {
 describe('purge and the AI rows', () => {
   it('a store without AI methods purges as before, with 0 AI rows', async () => {
     const res: PurgeResult = await purge(withoutAi(), NOW);
-    expect(res).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    expect(res).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
   });
 
   it('passes the three cutoffs: reads with the report window, outcomes and examples with their own', async () => {

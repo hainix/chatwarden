@@ -631,6 +631,8 @@ export interface RevokeDeps {
   clock: Clock;
   /** Dropped from once the revoke has committed. */
   index?: SanctionIndex;
+  /** True when `retention.appealStatementsMs` is 0: the statement of an appeal this revoke makes moot is cleared with it. */
+  clearAppealStatements?: () => boolean;
 }
 
 /**
@@ -651,7 +653,7 @@ export function revokeAndWithdraw(
     const out = store.transaction(() => {
       const revoked = store.revokeSanctionGroup(groupId, actor, now, reason) > 0;
       // An appeal still open against this group is moot now (same transaction: both land or neither).
-      if (revoked) store.closeAppealsForGroup?.(groupId, actor, now);
+      if (revoked) store.closeAppealsForGroup?.(groupId, actor, now, deps.clearAppealStatements?.() === true);
       return { revoked, withdrawn: deps.notices.withdrawGroup(groupId) };
     });
     deps.index?.remove(groupId);

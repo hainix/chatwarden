@@ -394,15 +394,15 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 40 * DAY));
     t.store.upsertMute({ viewer: 'v', target: 't', createdAt: NOW - 200 * DAY });
     await t.sanction(t.subject('k1'), NOW - 200 * DAY, DAY);
-    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    expect(await purge(t.store, NOW)).toEqual({ reports: 2, sanctions: 1, strikes: 1, mutes: 1, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
   });
 
   it('on an empty store, or run twice, deletes nothing', async () => {
     const { store } = setup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
     store.insertReport(report('r1', NOW - 100 * DAY));
     await purge(store, NOW);
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
   });
 
   it('a custom policy overrides the defaults, field by field', async () => {
@@ -411,9 +411,9 @@ describe('purge: result, policy and scope', () => {
     t.store.insertStrike(strike('s1', NOW - 10 * DAY));
     await t.sanction(t.subject('k1'), NOW - 20 * DAY, DAY); // ended 19 d ago
     const res = await purge(t.store, NOW, { reportsMs: 5 * DAY });
-    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    expect(res).toEqual({ reports: 1, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
     const res2 = await purge(t.store, NOW, { strikesMs: 5 * DAY, sanctionAfterEndMs: 5 * DAY });
-    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    expect(res2).toEqual({ reports: 0, sanctions: 1, strikes: 1, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
   });
 
   it('a zero window purges everything already past', async () => {
@@ -446,7 +446,7 @@ describe('purge: result, policy and scope', () => {
 
   it('a finite now (zero, negative) is accepted (control)', async () => {
     const t = setup();
-    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    await expect(purge(t.store, 0)).resolves.toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
     await expect(purge(t.store, -5)).resolves.toBeDefined();
   });
 
@@ -833,7 +833,7 @@ describe('appeals and blocked-name retention', () => {
 
   it('the result of a purge always has the three fields, 0 when nothing is due', async () => {
     const { store } = appealsSetup();
-    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    expect(await purge(store, NOW)).toEqual({ reports: 0, sanctions: 0, strikes: 0, mutes: 0, notices: 0, audit: 0, webhookKeys: 0, aiReads: 0, aiOutcomes: 0, signals: 0, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
   });
 
   it('strict cutoffs: a row exactly on the line is kept, one millisecond older goes', async () => {
@@ -862,8 +862,10 @@ describe('appeals and blocked-name retention', () => {
   });
 
   it("an open appeal's statement survives any purge; a decided one is nulled after appealStatementsMs and the row stays until appealsMs", async () => {
-    const { store } = appealsSetup();
-    store.insertAppeal(appeal('open', 'g-open', { createdAt: NOW - 3000 * DAY }));
+    const { store, subject, sanction } = appealsSetup();
+    // the open appeal's sanction is still in force (an appeal with no sanction rows left is mooted instead, see below)
+    const live = await sanction(subject('p0'), NOW - 10 * DAY, 300 * DAY, 'ban', true);
+    store.insertAppeal(appeal('open', live.groupId, { createdAt: NOW - 3000 * DAY }));
     store.insertAppeal(appeal('done', 'g-done'));
     decide(store, 'done', NOW - 120 * DAY);
     // the tightest windows: nothing a policy can say touches an open appeal
@@ -916,7 +918,7 @@ describe('appeals and blocked-name retention', () => {
     const { store } = setup();
     store.insertStrike(strike('old', NOW - 60 * DAY));
     const res = await purge(store, NOW);
-    expect(res).toMatchObject({ strikes: 1, appeals: 0, appealStatements: 0, blockedNames: 0 });
+    expect(res).toMatchObject({ strikes: 1, appeals: 0, appealStatements: 0, blockedNames: 0, appealsClosed: 0 });
     // a store with only the appeal methods, and one with only the name methods
     const onlyAppeals = withMemoryAppeals(new MemoryStore());
     onlyAppeals.insertAppeal(appeal('a', 'g-a'));
@@ -950,5 +952,149 @@ describe('appeals and blocked-name retention', () => {
     await expect(purge(store, NOW)).rejects.toThrow('disk full');
     expect(store.loadAppeal('a')).toMatchObject({ statement: 'statement a', status: 'upheld' });
     expect(store.listBlockedNames(0, 10)).toHaveLength(1);
+  });
+});
+
+describe('unseen message notices, running sanctions and orphaned appeals (review of chunk AA)', () => {
+  function kit() {
+    const base = setup();
+    const store = withMemoryNames(withMemoryAppeals(base.store));
+    return { ...base, store };
+  }
+  const message = (id: string, kind: NoticeRow['kind'], createdAt: number, over: Partial<NoticeRow> = {}): NoticeRow => ({
+    id,
+    subject: 's_x',
+    groupId: null,
+    kind,
+    rule: null,
+    until: null,
+    refCode: null,
+    excerpt: [],
+    createdAt,
+    ackedAt: null,
+    withdrawnAt: null,
+    ...over,
+  });
+  const appeal = (id: string, groupId: string, over: Partial<AppealRow> = {}): AppealRow => ({
+    id,
+    subject: 's_x',
+    groupId,
+    noticeId: `n-${id}`,
+    reportId: null,
+    rule: '2',
+    kind: 'chat',
+    statement: `statement ${id}`,
+    status: 'open',
+    createdAt: NOW - 500 * DAY,
+    decidedAt: null,
+    decidedBy: null,
+    decisionReason: null,
+    replacementGroupId: null,
+    ...over,
+  });
+  const left = (store: MemoryStore): string[] => store.rawNotices().map((n) => n.id).sort();
+
+  it('an unseen appeal outcome is removed after max(noticesMs, appealsMs): kept at 365 days exactly, gone a millisecond later', async () => {
+    const { store } = kit();
+    store.insertNotice(message('edge', 'appeal_upheld', NOW - 365 * DAY));
+    store.insertNotice(message('over', 'appeal_revoked', NOW - 365 * DAY - 1));
+    store.insertNotice(message('young', 'appeal_reduced', NOW - 364 * DAY));
+    await purge(store, NOW);
+    expect(left(store)).toEqual(['edge', 'young']);
+  });
+
+  it('an unseen rename_required is removed after max(noticesMs, auditMs)', async () => {
+    const { store } = kit();
+    store.insertNotice(message('edge', 'rename_required', NOW - 365 * DAY));
+    store.insertNotice(message('over', 'rename_required', NOW - 365 * DAY - 1));
+    await purge(store, NOW);
+    expect(left(store)).toEqual(['edge']);
+    // a longer audit retention keeps it longer, a shorter one cannot shorten it below noticesMs
+    const b = kit().store;
+    b.insertNotice(message('long', 'rename_required', NOW - 500 * DAY));
+    await purge(b, NOW, { auditMs: 600 * DAY });
+    expect(left(b)).toEqual(['long']);
+    await purge(b, NOW, { auditMs: 400 * DAY });
+    expect(left(b)).toEqual([]);
+  });
+
+  it('the ceiling follows the longer of noticesMs and appealsMs', async () => {
+    const a = kit().store;
+    a.insertNotice(message('x', 'appeal_upheld', NOW - 500 * DAY));
+    await purge(a, NOW, { appealsMs: 600 * DAY });
+    expect(left(a)).toEqual(['x']);
+    await purge(a, NOW, { appealsMs: 365 * DAY, noticesMs: 700 * DAY });
+    expect(left(a)).toEqual(['x']);
+    await purge(a, NOW, { appealsMs: 500 * DAY });
+    expect(left(a)).toEqual(['x']);
+    await purge(a, NOW, { appealsMs: 499 * DAY, noticesMs: 90 * DAY });
+    expect(left(a)).toEqual([]);
+  });
+
+  it('seen message notices still follow noticesMs; an unseen warning and an unseen report outcome are kept however old', async () => {
+    const { store } = kit();
+    store.insertNotice(message('seen', 'appeal_upheld', NOW - 100 * DAY, { ackedAt: NOW - 99 * DAY }));
+    store.insertNotice(message('seen-young', 'appeal_upheld', NOW - 10 * DAY, { ackedAt: NOW }));
+    store.insertNotice(message('unseen-outcome', 'report_outcome', NOW - 2000 * DAY));
+    store.insertNotice(message('unseen-warning', 'warning', NOW - 2000 * DAY, { groupId: 'g1', refCode: 'M-AAAAA' }));
+    await purge(store, NOW);
+    expect(left(store)).toEqual(['seen-young', 'unseen-outcome', 'unseen-warning']);
+  });
+
+  it('purgeNotices without the ceilings (an older caller) keeps every unseen message notice', () => {
+    const { store } = kit();
+    store.insertNotice(message('old', 'appeal_upheld', NOW - 2000 * DAY));
+    expect(store.purgeNotices(NOW - 90 * DAY)).toBe(0);
+  });
+
+  it('a decided appeal on a timed sanction that is still running outlives appealsMs (a second appeal cannot be filed against it)', async () => {
+    const { store, subject, sanction } = kit();
+    const ban = await sanction(subject('p1'), NOW - 100 * DAY, 365 * DAY, 'ban', true);
+    store.insertAppeal(appeal('running', ban.groupId, { kind: 'ban' }));
+    store.decideAppeal('running', { status: 'upheld', at: NOW - 95 * DAY, by: 'bea', reason: 'r', replacementGroupId: null });
+    const res = await purge(store, NOW, { appealsMs: 90 * DAY });
+    expect(res.appeals).toBe(0);
+    expect(store.loadAppeal('running')).not.toBeNull();
+    expect(store.insertAppeal(appeal('second', ban.groupId))).toBe(false);
+    // once the ban ends (and its row is later than the cutoff no more) the appeal row goes
+    expect((await purge(store, NOW + 400 * DAY, { appealsMs: 90 * DAY })).appeals).toBe(1);
+  });
+
+  it('an open appeal whose sanction rows retention removes is mooted: not open, its statement clearable, the open count drops', async () => {
+    const { store, subject, sanction } = kit();
+    const ended = await sanction(subject('p1'), NOW - 400 * DAY, 7 * DAY, 'ban', true);
+    const live = await sanction(subject('p2'), NOW - 1 * DAY, 7 * DAY, 'ban', true);
+    store.insertAppeal(appeal('orphan', ended.groupId, { kind: 'ban', createdAt: NOW - 300 * DAY }));
+    store.insertAppeal(appeal('fine', live.groupId, { kind: 'ban', createdAt: NOW - 1 * DAY }));
+    expect(store.countOpenAppeals()).toBe(2);
+    const res = await purge(store, NOW);
+    expect(res.sanctions).toBeGreaterThan(0);
+    expect(res.appealsClosed).toBe(1);
+    expect(store.countOpenAppeals()).toBe(1);
+    expect(store.loadAppeal('orphan')).toMatchObject({ status: 'moot', decidedAt: NOW, decidedBy: 'retention' });
+    expect(store.loadAppeal('fine')?.status).toBe('open');
+    // the statement goes on the moot clock, the row on appealsMs
+    expect(store.loadAppeal('orphan')?.statement).toBe('statement orphan');
+    expect((await purge(store, NOW + 91 * DAY)).appealStatements).toBe(1);
+    expect(store.loadAppeal('orphan')?.statement).toBeNull();
+    expect(store.loadAppeal('orphan')?.status).toBe('moot');
+    expect((await purge(store, NOW + 366 * DAY)).appeals).toBeGreaterThanOrEqual(1);
+    expect(store.loadAppeal('orphan')).toBeNull();
+  });
+
+  it('with appealStatementsMs 0 the statement of an orphaned appeal is cleared as it is mooted', async () => {
+    const { store, subject, sanction } = kit();
+    const ended = await sanction(subject('p1'), NOW - 400 * DAY, 7 * DAY, 'ban', true);
+    store.insertAppeal(appeal('orphan', ended.groupId, { kind: 'ban' }));
+    await purge(store, NOW, { appealStatementsMs: 0 });
+    expect(store.loadAppeal('orphan')).toMatchObject({ status: 'moot', statement: null });
+  });
+
+  it('a purge with nothing orphaned reports 0 closed, and a store without the method purges the rest', async () => {
+    const { store } = kit();
+    expect((await purge(store, NOW)).appealsClosed).toBe(0);
+    const plain = setup().store;
+    plain.insertStrike(strike('old', NOW - 60 * DAY));
+    expect(await purge(plain, NOW)).toMatchObject({ strikes: 1, appealsClosed: 0 });
   });
 });
