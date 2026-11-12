@@ -727,7 +727,7 @@ describe('the flood control and signals docs (0.1.8)', () => {
       const text = log.slice(at, log.indexOf('## 0.1.7', at));
       expect(text, dir).toContain('Upgrade notes, the AI after upgrading');
       expect(text, dir).toContain('count against your daily call and money caps');
-      expect(text, dir).toContain('`AIStoredRead`');
+      expect(text, dir).toContain('`AiReadRow`');
     }
   });
 });
