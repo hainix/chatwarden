@@ -315,6 +315,9 @@ export {
   resolveProfile,
   validateProfile,
 } from './profile.js';
+// Pace settings (@experimental): slow mode, burst limit and repeat refusal, all off until set.
+export { DUPLICATE_MIN_CHARS, DUPLICATE_RECENT, mergePace, PACE_KEYS_MAX, PACE_REASONS, PACE_SUGGESTIONS, resolvePace } from './pace.js';
+export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
 export { POLICY_REFRESH_MS, PREVIEW_SAMPLES } from './policy.js';
 export type {
   PolicyPreview,

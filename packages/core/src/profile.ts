@@ -18,6 +18,7 @@ import {
   resolveReporting,
 } from './reporting.js';
 import type { ReportingSettings, ResolvedReporting } from './reporting.js';
+import { ProfileError } from './profileError.js';
 
 /**
  * A moderation profile is a game's written standard: what each conduct level means, what happens on a first
@@ -208,18 +209,7 @@ export type DeepPartial<T> = T extends readonly unknown[]
 /** Overrides for {@link resolveProfile}. Any field; arrays replace the preset's array whole. */
 export type ProfileOverrides = DeepPartial<ModerationProfile>;
 
-/** A profile that fails validation. `path` names the field (`'profile.firstOffense.banter'`); the message never echoes a value. */
-export class ProfileError extends Error {
-  readonly path: string;
-  /** The rule that was broken, without the path. Never a value. */
-  readonly reason: string;
-  constructor(path: string, reason: string) {
-    super(`${path} ${reason}`);
-    this.name = 'ProfileError';
-    this.path = path;
-    this.reason = reason;
-  }
-}
+export { ProfileError };
 
 // ---------------------------------------------------------------------------------------------------------------
 // Validation
