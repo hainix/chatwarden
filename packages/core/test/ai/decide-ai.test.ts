@@ -222,6 +222,30 @@ describe('agreement is computed on the server', () => {
     expect(store(w).loadAiOutcome(c.id)?.detail.oneClick).toBe(false);
   });
 
+  it('accepted: true is not a one-click when the decision also acts on another person (the reporter)', async () => {
+    const w = await aiWorld({ level: 2, script: recommends('upheld') });
+    const a = await w.report();
+    const b = await w.report();
+    await w.idle();
+    const step = w.cw.ai.read(a.id)?.recommendation?.step;
+    const echo = (r: { id: string }) => ({ readId: w.cw.ai.read(r.id)?.id ?? 'x', accepted: true, role: 'moderator' as const });
+    // Control: the pre-fill alone is a one-click.
+    await w.cw.decide(decision(w, b, { actions: [{ subject: b.target, kind: step!.kind, durationMs: step!.durationMs, rule: RULE }], ai: echo(b) }));
+    expect(store(w).loadAiOutcome(b.id)?.detail).toMatchObject({ outcome: 'same', oneClick: true });
+    // The same pre-fill plus a warning to the reporter: a decision of the moderator's own, not the AI's one key.
+    await w.cw.decide(
+      decision(w, a, {
+        actions: [
+          { subject: a.target, kind: step!.kind, durationMs: step!.durationMs, rule: RULE },
+          { subject: a.reporter, kind: 'warning', durationMs: null, rule: RULE },
+        ],
+        ai: echo(a),
+      }),
+    );
+    expect(store(w).loadAiOutcome(a.id)?.detail).toMatchObject({ verdict: true, outcome: 'same', oneClick: false });
+    expect(w.cw.ai.stats().oneClick).toBe(1);
+  });
+
   it('accepted: true at level 1 (a none) is not a one-click either', async () => {
     const w = await aiWorld({ level: 1, script: recommends('upheld') });
     const r = await w.report();

@@ -305,6 +305,11 @@ export interface AiReadRow {
   latencyMs: number | null;
   /** When the row was first reserved (a take-over keeps it). Spend is booked per attempt, not by this. */
   createdAt: number;
+  /**
+   * True once a moderator's explicit "read again" has retaken this row (see `reserveAiRead` `opts.retake`). The explicit retake
+   * happens once per row, for good: it is a fact of the row, so a restart, a second process or any pruning cannot allow another.
+   */
+  retaken: boolean;
 }
 
 /**
@@ -1030,8 +1035,11 @@ export interface Store {
    * `ok` (readable), `declined` or `invalid` row, a `failed` or `skipped` one with no `retryAt`, and a live lease are returned as
    * `existing` (a copy). A win carries the fence token `lease` (= `attempts`), and opens one spend-ledger entry at `now` (one call
    * started); `aiSpendSince` reads that ledger, so every attempt is booked to the time it was made. Does not move the change token.
-   * With `opts.retake` (a moderator's explicit "read again") a row that finished without a read (`declined`, `invalid`, `failed`, or
-   * `skipped`, whatever its `retryAt`) is taken over too; an `ok` read and a live lease never are.
+   * With `opts.retake` (a moderator's explicit "read again") a FINAL row (`declined`, `invalid`, or `failed` with no `retryAt`) is
+   * taken over too, once: the take-over sets the row's `retaken` marker and a row already marked is never retaken again. A `failed` row
+   * still waiting for its own retry time (`retryAt` set), an `ok` read and a live lease never are, so the three automatic attempts
+   * hold; the one explicit retake is the single extra attempt (a given-up row's is its fourth). A `skipped` row made no call and gave its
+   * attempt back, so an explicit ask takes it at once, whatever its `retryAt`, without using the marker.
    */
   reserveAiRead?(row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult;
 
@@ -1079,6 +1087,12 @@ export interface Store {
    * moderator was shown; the caller checks that it belongs to the report and is `ok`.
    */
   loadAiReadById?(id: string): AiReadRow | null;
+
+  /**
+   * OPTIONAL. The row for this report and this input hash (the pair is unique), whatever its state (a copy), or null. "Read again"
+   * looks at it to tell a final row, which an explicit ask may retake once (`retaken`), from one still waiting for its own retry.
+   */
+  loadAiReadFor?(reportId: string, inputHash: string): AiReadRow | null;
 
   /**
    * OPTIONAL. The rows the sweeper should pick up at `now`, oldest first (`createdAt`, then `id`), at most `limit` (clamped to

@@ -21,6 +21,8 @@ export interface HumanDecision {
   step: StepLike | null;
   /** The step the ladder gives for the AI's conduct level: what the pre-fill would have been; null when there was none. */
   prefill: StepLike | null;
+  /** How many actions the decision took on people other than the reported person (the reporter, a bystander); absent means none. */
+  others?: number;
   /** The client says the moderator accepted the pre-fill in one click. A claim: the server counts it only when the decision is the pre-fill (see {@link agreementOf}). */
   oneClick: boolean;
 }
@@ -74,7 +76,8 @@ function stepAccepted(step: StepLike | null, prefill: StepLike | null): boolean 
  * `no_action` is the other; a `bad_faith` verdict is always an override of a recommendation (the AI can never call a report bad faith).
  * A rule that differs is not a disagreement: it is `rule: false` in the detail (and for a `no_action` the rule means nothing: `true`).
  * `detail.oneClick` is the server's verdict, not the client's claim: true only when the client said so AND the decision is an
- * agreement that equals the pre-fill (the same verdict, the same rule, the same kind of step and no longer).
+ * agreement that equals the pre-fill (the same verdict, the same rule, the same kind of step and no longer) and the decision takes no
+ * action on anyone else: a decision that also sanctions the reporter or a bystander is the moderator's own, not the AI's one key.
  */
 export function agreementOf(read: AIRead | null, decision: HumanDecision, level: 0 | 1 | 2 = 2): Agreement {
   const rec = read?.recommendation ?? null;
@@ -97,7 +100,7 @@ export function agreementOf(read: AIRead | null, decision: HumanDecision, level:
       rule: ruleMatches,
       lines,
       outcome: cmp === 0 ? 'same' : cmp < 0 ? 'milder' : 'harsher',
-      oneClick: decision.oneClick && same && rec.verdict === decision.verdict && ruleMatches && stepAccepted(decision.step, decision.prefill),
+      oneClick: decision.oneClick && same && rec.verdict === decision.verdict && ruleMatches && (decision.others ?? 0) === 0 && stepAccepted(decision.step, decision.prefill),
     },
   };
 }

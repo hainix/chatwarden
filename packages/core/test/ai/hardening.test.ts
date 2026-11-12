@@ -3,12 +3,15 @@ import { MemoryStore } from '@chatwarden/store-memory';
 import { AIError } from '../../src/ai/types.js';
 import { PARKED_MAX } from '../../src/ai/service.js';
 import type { FakeStep } from '../../src/ai/fake.js';
+import type { AiReadRow } from '../../src/types.js';
 import { aiWorld, MIN, NOW, OWNER } from './aiWorld.js';
 
 // Fix round 1: the end of every road. A read again on a final row, a half-open breaker, the daily call ceiling, attempts that skips do
 // not use up, and a sweeper that does not leak or starve.
 
 const store = (w: { store: unknown }): MemoryStore => w.store as MemoryStore;
+/** The newest row of a report in the memory store, whatever its state (loadAiRead only returns finished reads). */
+const rowOf = (w: { store: unknown }, reportId: string): AiReadRow | undefined => [...(store(w) as unknown as { aiReads: AiReadRow[] }).aiReads].reverse().find((r) => r.reportId === reportId);
 const view = (a: unknown): a is { id: string } => typeof a === 'object' && a !== null && 'id' in a;
 
 describe('read again on a read that ended without an answer', () => {
@@ -256,5 +259,116 @@ describe('the sweeper keeps its books', () => {
     const service = w.cw.ai as unknown as { parkedSize(): number };
     expect(service.parkedSize()).toBe(30);
     expect(PARKED_MAX).toBeGreaterThanOrEqual(1000);
+  });
+});
+
+// Chunk C review N1, N3 and N5: "already retaken once" is a fact about the row, kept in the store, so a restart, a prune or a second
+// process cannot allow a second retake; a retake only takes a FINAL row; and nothing about it lives in a pruned list.
+describe('the one explicit retake is kept on the row', () => {
+  const declined: FakeStep = { error: new AIError('declined') };
+
+  it('a restart does not forget a retake: the fresh service on the same store answers final, and calls nothing', async () => {
+    const w = await aiWorld({ level: 2, script: [declined, declined, declined] });
+    const r = await w.report();
+    await w.idle();
+    expect(await w.cw.ai.readAgain(r.id, 'mod_ann')).toBe('pending');
+    await w.idle();
+    expect(w.adapter.callCount).toBe(2);
+    // The process restarts: a new kit over the same store, with nothing in memory.
+    const again = await aiWorld({ level: 2, script: [declined, declined], store: w.store });
+    again.clock.t = w.clock.t;
+    expect(await again.cw.ai.readAgain(r.id, 'mod_bob')).toBe('final');
+    await again.idle();
+    expect(again.adapter.callCount).toBe(0);
+    expect(rowOf(w, r.id)).toMatchObject({ attempts: 2, retaken: true });
+  });
+
+  it('a restart before the first retake still allows exactly one: the marker is set by the retake, not by the ask', async () => {
+    const w = await aiWorld({ level: 2, script: [declined] });
+    const r = await w.report();
+    await w.idle();
+    const again = await aiWorld({ level: 2, script: [declined], store: w.store });
+    again.clock.t = w.clock.t;
+    expect(await again.cw.ai.readAgain(r.id, 'mod_bob')).toBe('pending');
+    await again.idle();
+    expect(again.adapter.callCount).toBe(1);
+    expect(await again.cw.ai.readAgain(r.id, 'mod_bob')).toBe('final');
+    expect(await again.cw.ai.readAgain(r.id, 'mod_ann')).toBe('final');
+    await again.idle();
+    expect(again.adapter.callCount).toBe(1);
+  });
+
+  it('two asks before the retake has run make one call', async () => {
+    const w = await aiWorld({ level: 2, script: [declined, declined, declined] });
+    const r = await w.report();
+    await w.idle();
+    const [a, b] = await Promise.all([w.cw.ai.readAgain(r.id, 'mod_ann'), w.cw.ai.readAgain(r.id, 'mod_bob')]);
+    expect([a, b]).toEqual(['pending', 'pending']);
+    await w.idle();
+    expect(w.adapter.callCount).toBe(2);
+    expect(await w.cw.ai.readAgain(r.id, 'mod_ann')).toBe('final');
+  });
+
+  it('the sweep, a sweep after a prune of the old books, and the newest-200 window never reopen a retaken row (N5)', async () => {
+    const w = await aiWorld({ level: 2, script: (_input, ctx): FakeStep => (ctx.call < 3 ? declined : { usage: { costMicros: 0 } }), dailyCalls: 100_000, ai: { perMinuteCalls: 100_000, concurrency: 4 } });
+    const old = await w.report();
+    await w.idle();
+    expect(await w.cw.ai.readAgain(old.id, 'mod_ann')).toBe('pending');
+    await w.idle();
+    // Newer open reports push it out of the sweeper's newest-200 scan; sweeps run meanwhile.
+    for (let i = 0; i < 205; i += 1) await w.report();
+    await w.idle();
+    w.clock.t += MIN;
+    await w.cw.ai.sweep();
+    await w.cw.ai.sweep();
+    await w.idle();
+    const calls = w.adapter.callCount;
+    expect(await w.cw.ai.readAgain(old.id, 'mod_ann')).toBe('final');
+    await w.idle();
+    expect(w.adapter.callCount).toBe(calls);
+  }, 30_000);
+
+  it('a read still waiting for its own retry is not retaken: the ask answers pending, and the call waits for its time (N3)', async () => {
+    const w = await aiWorld({ level: 2, script: [{ error: new AIError('retryable') }, { error: new AIError('retryable') }, { usage: { costMicros: 0 } }] });
+    const r = await w.report();
+    await w.idle();
+    expect(w.adapter.callCount).toBe(1);
+    expect(rowOf(w, r.id)).toMatchObject({ status: 'failed', attempts: 1 });
+    expect(await w.cw.ai.readAgain(r.id, 'mod_ann')).toBe('pending');
+    await w.idle();
+    // No call and no new attempt: it is waiting for its minute.
+    expect(w.adapter.callCount).toBe(1);
+    expect(rowOf(w, r.id)).toMatchObject({ status: 'failed', attempts: 1, retaken: false });
+    w.clock.t += MIN;
+    await w.cw.ai.sweep();
+    await w.idle();
+    expect(w.adapter.callCount).toBe(2);
+    expect(rowOf(w, r.id)).toMatchObject({ attempts: 2, retaken: false });
+  });
+
+  it('asking over and over never pushes a waiting row past three attempts', async () => {
+    const w = await aiWorld({ level: 2, script: () => ({ error: new AIError('retryable') }) });
+    const r = await w.report();
+    await w.idle();
+    for (let i = 0; i < 6; i += 1) {
+      await w.cw.ai.readAgain(r.id, 'mod_ann');
+      await w.idle();
+    }
+    expect(w.adapter.callCount).toBe(1);
+    w.clock.t += MIN;
+    await w.cw.ai.sweep();
+    await w.idle();
+    w.clock.t += 10 * MIN;
+    await w.cw.ai.sweep();
+    await w.idle();
+    expect(w.adapter.callCount).toBe(3);
+    expect(rowOf(w, r.id)).toMatchObject({ status: 'failed', attempts: 3, retryAt: null });
+    // Given up: the one explicit retake is the single extra call; the next ask is final.
+    w.clock.t += MIN;
+    expect(await w.cw.ai.readAgain(r.id, 'mod_ann')).toBe('pending');
+    await w.idle();
+    expect(w.adapter.callCount).toBe(4);
+    expect(await w.cw.ai.readAgain(r.id, 'mod_ann')).toBe('final');
+    expect(rowOf(w, r.id)).toMatchObject({ attempts: 4, retaken: true });
   });
 });

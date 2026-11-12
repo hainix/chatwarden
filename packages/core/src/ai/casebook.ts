@@ -43,17 +43,19 @@ export interface TakenAction {
 
 /**
  * What the human did to the reported person: their strongest step, the rule it cited and the lines they showed. A decision that
- * acted on nobody but others (the reporter, a bystander) did nothing to the reported person.
+ * acted on nobody but others (the reporter, a bystander) did nothing to the reported person; `others` counts the actions on those others.
  */
-export function actionsOnTarget(actions: readonly TakenAction[], target: string): { step: StepLike | null; rule: number | 'uncovered' | null; lineIds: string[] } {
+export function actionsOnTarget(actions: readonly TakenAction[], target: string): { step: StepLike | null; rule: number | 'uncovered' | null; lineIds: string[]; others: number } {
   const own = actions.filter((a) => a.subject === target);
-  if (own.length === 0) return { step: null, rule: null, lineIds: [] };
+  const others = actions.length - own.length;
+  if (own.length === 0) return { step: null, rule: null, lineIds: [], others };
   let strongest = own[0] as TakenAction;
   for (const a of own) if (compareSteps(a, strongest) > 0) strongest = a;
   return {
     step: { kind: strongest.kind, durationMs: strongest.durationMs },
     rule: strongest.rule,
     lineIds: [...new Set(own.flatMap((a) => a.lineIds))],
+    others,
   };
 }
 

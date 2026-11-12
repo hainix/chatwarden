@@ -34,6 +34,7 @@ export type AiStore = Store &
       | 'loadAiRead'
       | 'loadAiReads'
       | 'loadAiReadById'
+      | 'loadAiReadFor'
       | 'listAiRetries'
       | 'aiSpendSince'
       | 'insertAiOutcome'
@@ -179,20 +180,24 @@ export function parkOf(row: AiReadRow, now: number): number | null {
 }
 
 /**
- * How a job ended. `park` is the time (epoch ms, possibly Infinity) before which the sweeper should not queue the report again, or
- * null when there is nothing to wait for. `final` names the row when the report's read for this input has ended without an answer and
- * will not be tried again by itself (declined, invalid twice, fatal, given up): a moderator's explicit "read again" may retake it once.
+ * A row that ended without an answer and will not be tried again by itself (declined, invalid twice, fatal, given up): the only kind of
+ * row a moderator's explicit "read again" may retake, once (the row's `retaken` marker). A row waiting for its own retry is not final, and
+ * neither is a skipped one: it made no call and gave its attempt back, so an explicit ask simply takes it (no marker).
  */
-export interface ReadEnd {
-  park: number | null;
-  final: { hash: string; rowId: string } | null;
+export function isFinalRow(row: AiReadRow): boolean {
+  return row.status === 'declined' || row.status === 'invalid' || (row.status === 'failed' && row.retryAt === null);
 }
 
-const NOTHING: ReadEnd = { park: null, final: null };
+/** How a job ended. `park` is the time (epoch ms, possibly Infinity) before which the sweeper should not queue the report again, or null when there is nothing to wait for. */
+export interface ReadEnd {
+  park: number | null;
+}
+
+const NOTHING: ReadEnd = { park: null };
 
 /**
- * Read one report. `opts.retake` is a moderator's explicit ask: a row that ended without an answer is taken over once more (and the
- * call is charged and audited like any other). Throws only on a store failure; the caller fences it.
+ * Read one report. `opts.retake` is a moderator's explicit ask: a FINAL row (see {@link isFinalRow}) that has not been retaken is taken over once
+ * more (and the call is charged and audited like any other). Throws only on a store failure; the caller fences it.
  */
 export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?: boolean }): Promise<ReadEnd> {
   if (env.level() === 0 || env.closed()) return NOTHING;
@@ -212,8 +217,7 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
     opts?.retake === true ? { retake: true } : undefined,
   );
   if (!reserved.reserved) {
-    const park = parkOf(reserved.existing, now);
-    return { park, final: park === Number.POSITIVE_INFINITY ? { hash: prepared.hash, rowId: reserved.existing.id } : null };
+    return { park: parkOf(reserved.existing, now) };
   }
   const { id, lease } = reserved;
 
@@ -223,7 +227,7 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
   if (today.micros + env.meter.inflight * env.meter.estimate() >= env.capMicros || today.calls > env.dailyCalls()) {
     const resume = nextUtcMidnight(now);
     env.store.failAiRead(id, lease, 'skipped', 'budget', resume);
-    return { park: resume, final: null };
+    return { park: resume };
   }
 
   const gate = env.breaker.gate();
@@ -231,7 +235,7 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
     if (gate === 'probe') env.breaker.release();
     const again = now + RACE_RETRY_MS;
     env.store.failAiRead(id, lease, 'skipped', 'retryable', again);
-    return { park: again, final: null };
+    return { park: again };
   }
 
   let examples: AIExampleInput[] = [];
@@ -302,10 +306,10 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
     if (lease < 2) {
       const retryAt = env.clock.now() + (RETRY_AFTER_MS[0] ?? RACE_RETRY_MS);
       env.store.failAiRead(id, lease, 'failed', 'invalid', retryAt, usage);
-      return { park: retryAt, final: null };
+      return { park: retryAt };
     }
     if (env.store.failAiRead(id, lease, 'invalid', 'invalid', null, usage)) env.auditRead(reportId);
-    return { park: Number.POSITIVE_INFINITY, final: { hash: prepared.hash, rowId: id } };
+    return { park: Number.POSITIVE_INFINITY };
   }
 
   const toIds = (refs: readonly string[]): string[] => refs.flatMap((ref) => {
@@ -335,7 +339,7 @@ export async function runRead(env: WorkerEnv, reportId: string, opts?: { retake?
 /** An adapter failure: retry on the schedule, or give up (and say so once). */
 function settleFailure(env: WorkerEnv, f: { id: string; lease: number; reportId: string; hash: string; kind: CallKind }): ReadEnd {
   const { id, lease, reportId, kind } = f;
-  const final: ReadEnd = { park: Number.POSITIVE_INFINITY, final: { hash: f.hash, rowId: id } };
+  const final: ReadEnd = { park: Number.POSITIVE_INFINITY };
   if (kind === 'declined') {
     // A refusal is an answer: stored, not retried, and the provider is up.
     env.breaker.success();
@@ -356,5 +360,5 @@ function settleFailure(env: WorkerEnv, f: { id: string; lease: number; reportId:
   }
   const retryAt = env.clock.now() + (RETRY_AFTER_MS[lease - 1] ?? RETRY_AFTER_MS[RETRY_AFTER_MS.length - 1] ?? RACE_RETRY_MS);
   env.store.failAiRead(id, lease, 'failed', errorKind, retryAt);
-  return { park: retryAt, final: null };
+  return { park: retryAt };
 }

@@ -3,23 +3,6 @@ import { AiUnavailableError, HttpError, NotFoundError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import type { AdminContext } from './context.js';
 
-/**
- * The AI routes (staff only, each audited). The level itself moves through `PUT /policy/profile` with `layer.ai`; nothing here
- * changes a setting.
- * - `GET /ai/status` (`policy.read`, audited as `policy.view`): `{ available, level, maxLevel, state, spentMicros, capMicros, day, reads,
- *   cacheHitRate, invalid, learn, stats }`. `state` is `ok`, `paused_budget`, `unavailable` or `off`; `level` is the effective level (the
- *   hub's setting held to the code's `maxLevel`; 0 without an adapter, where `available` is false); `invalid` counts answers core refused by
- *   code since the process started; `stats` is the casebook (`cw.ai.stats()`): totals, rates and a row per rule.
- * - `POST /reports/:id/ai/read` (`reports.decide`, audited `ai.rerun`): "read again". 200 `{ status: 'ready', ai }` when the input has not
- *   changed (no call is made), 202 `{ status: 'pending' }` when a read is queued (a read that ended without an answer is retaken once by an
- *   explicit ask, charged to the spend), 409 `ai_off` (level 0, no adapter, or the report is decided; no audit row), 409 `ai_final` (the
- *   read for this input ended without an answer and was already retaken once: nothing more to try), 429 `ai_budget` (the daily money or
- *   call cap), 429 `rate_limited` (10 a minute per actor, counted per process) or 503 `ai_unavailable` with `retryAfterMs` (the breaker is
- *   open, or the minute's calls are used). 404 for an unknown report. Every answer after `ai_off` leaves its `ai.rerun` row, written first
- *   because the ask can spend money, so a limited click is still one row; a `ready` answer counts as an ask for the limit.
- * - `POST /reports/:id/ai/dont-teach` (`reasons.write`, a senior's): the decided report's casebook row can never teach again. 200
- *   `{ ok: true }`, 404 when the report is unknown or has no casebook row (it was not decided with the AI on). Audited `ai.outcome`.
- */
 /** What `POST /reports/:id/ai/read` answers with 200 or 202. */
 export type AiReadAgainBody = { status: 'ready'; ai: AiReadView } | { status: 'pending' };
 
@@ -30,6 +13,23 @@ export interface AiUnavailableBody {
   retryAfterMs: number;
 }
 
+/**
+ * The AI routes (staff only, each audited). The level itself moves through `PUT /policy/profile` with `layer.ai`; nothing here
+ * changes a setting.
+ * - `GET /ai/status` (`policy.read`, audited as `policy.view`): `{ available, level, maxLevel, state, spentMicros, capMicros, day, reads,
+ *   cacheHitRate, invalid, learn, stats }`. `state` is `ok`, `paused_budget`, `unavailable` or `off`; `level` is the effective level (the
+ *   hub's setting held to the code's `maxLevel`; 0 without an adapter, where `available` is false); `invalid` counts answers core refused by
+ *   code since the process started; `stats` is the casebook (`cw.ai.stats()`): totals, rates and a row per rule.
+ * - `POST /reports/:id/ai/read` (`reports.decide`, audited `ai.rerun`): "read again". 200 `{ status: 'ready', ai }` when the input has not
+ *   changed (no call is made), 202 `{ status: 'pending' }` when a read is queued (a read that ended without an answer is retaken once by an
+ *   explicit ask, charged to the spend; a read still waiting for its own retry is not retaken, it keeps its time), 409 `ai_off` (level 0, no adapter, or the report is decided; no audit row), 409 `ai_final` (the
+ *   read for this input ended without an answer and was already retaken once: nothing more to try), 429 `ai_budget` (the daily money or
+ *   call cap), 429 `rate_limited` (10 a minute per actor, counted per process) or 503 `ai_unavailable` with `retryAfterMs` (the breaker is
+ *   open, or the minute's calls are used). 404 for an unknown report. Every answer after `ai_off` leaves its `ai.rerun` row, written first
+ *   because the ask can spend money, so a limited click is still one row; a `ready` answer counts as an ask for the limit.
+ * - `POST /reports/:id/ai/dont-teach` (`reasons.write`, a senior's): the decided report's casebook row can never teach again. 200
+ *   `{ ok: true }`, 404 when the report is unknown or has no casebook row (it was not decided with the AI on). Audited `ai.outcome`.
+ */
 export function aiRoutes(ctx: AdminContext): RouteTable {
   const { cw } = ctx;
 

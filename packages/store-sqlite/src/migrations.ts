@@ -459,6 +459,8 @@ CREATE INDEX kit_reports_by_reporter_outcome ON kit_reports (reporter_subject, c
     //       kit_ai_reads_retry (status, retry_at): the sweeper's "failed and due" and "pending and lapsed" scans.
     //     `attempts` is also the fence of a lease: a take-over adds one, and only the holder of the current number may finish or fail
     //     the row. `example_ids` is a JSON array of the casebook example ids the read saw (they are not part of the input hash).
+    //     `retaken` is 1 once a moderator's explicit "read again" has retaken a final row: the one explicit retake is a fact of the row,
+    //     so a restart or a second process cannot allow another.
     //   kit_ai_spend is the spend ledger the daily cap reads: one row per (read, attempt) written when the call is reserved, so a retry
     //     that crosses UTC midnight books each attempt to its own day and a later attempt never overwrites an earlier one's cost. Counts
     //     and micro-dollars only; swept with the reads (purgeAi).
@@ -496,6 +498,7 @@ CREATE TABLE kit_ai_reads (
   latency_ms     INTEGER,
   example_ids    TEXT,
   created_at     INTEGER NOT NULL,
+  retaken        INTEGER NOT NULL DEFAULT 0,
   UNIQUE (report_id, input_hash)
 );
 CREATE INDEX kit_ai_reads_by_report ON kit_ai_reads (report_id, created_at);

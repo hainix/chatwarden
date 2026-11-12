@@ -40,6 +40,7 @@ type Ai = Required<
     | 'failAiRead'
     | 'loadAiRead'
     | 'loadAiReadById'
+    | 'loadAiReadFor'
     | 'loadAiReads'
     | 'listAiRetries'
     | 'aiSpendSince'
@@ -58,6 +59,7 @@ const METHODS: Array<keyof Ai> = [
   'failAiRead',
   'loadAiRead',
   'loadAiReadById',
+  'loadAiReadFor',
   'loadAiReads',
   'listAiRetries',
   'aiSpendSince',
@@ -237,6 +239,7 @@ export function aiContract(name: string, make: () => Store): void {
             costMicros: 0,
             latencyMs: null,
             createdAt: NOW,
+            retaken: false,
           } satisfies AiReadRow,
         });
       });
@@ -340,17 +343,99 @@ export function aiContract(name: string, make: () => Store): void {
         expect(s.aiSpendSince(0)).toEqual({ micros: 40, calls: 2 });
         // It is pending and owned now: a second retake loses.
         expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 2 * MIN, { retake: true }).reserved).toBe(false);
+        // And once it is final again, the marker refuses another.
+        fail(s, id, status, kind, null);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 3 * MIN, { retake: true }).reserved).toBe(false);
       });
 
-      it('a retake never takes an ok read or a live lease, and takes a failed read before its retry time', () => {
+      it('a retake never takes an ok read, a live lease, or a failed row that is still waiting for its own retry', () => {
         const s = ai(make());
         okRead(s, 'ok', 'h', NOW);
         expect(rsv(s, pending({ reportId: 'ok', inputHash: 'h' }), NOW + 9 * MIN, NOW + MIN, { retake: true }).reserved).toBe(false);
         reserve(s, { reportId: 'live' }, NOW, NOW + 50 * MIN);
         expect(rsv(s, pending({ reportId: 'live' }), NOW + 90 * MIN, NOW + MIN, { retake: true }).reserved).toBe(false);
+        // A failed read waiting for its retry is not final: its own retry time decides, and the three attempts hold.
         const soon = reserve(s, { reportId: 'soon' });
         fail(s, soon, 'failed', 'retryable', NOW + 50 * MIN);
-        expect(rsv(s, pending({ reportId: 'soon' }), NOW + 90 * MIN, NOW + MIN, { retake: true })).toEqual({ reserved: true, id: soon, lease: 2 });
+        expect(rsv(s, pending({ reportId: 'soon' }), NOW + 90 * MIN, NOW + MIN, { retake: true }).reserved).toBe(false);
+        // Nothing was written by the refused retakes: the rows keep their attempts and their retry times.
+        expect(s.loadAiReadFor('soon', 'h1')).toMatchObject({ attempts: 1, status: 'failed', retryAt: NOW + 50 * MIN, retaken: false });
+        expect(s.aiSpendSince(0).calls).toBe(3);
+      });
+
+      it('a skipped read made no call and gave its attempt back: an explicit ask takes it at once, unmarked, and as often as it is skipped', () => {
+        const s = ai(make());
+        const id = reserve(s, { reportId: 'skipped' });
+        fail(s, id, 'skipped', 'budget', MIDNIGHT + DAY);
+        expect(s.loadAiReadFor('skipped', 'h1')).toMatchObject({ attempts: 0, status: 'skipped', retryAt: MIDNIGHT + DAY });
+        // The ordinary take-over waits for the retry time; the explicit ask does not.
+        expect(rsv(s, pending({ reportId: 'skipped' }), NOW + 9 * MIN, NOW + MIN).reserved).toBe(false);
+        expect(rsv(s, pending({ reportId: 'skipped' }), NOW + 9 * MIN, NOW + MIN, { retake: true })).toEqual({ reserved: true, id, lease: 1 });
+        expect(s.loadAiReadFor('skipped', 'h1')).toMatchObject({ attempts: 1, retaken: false });
+        fail(s, id, 'skipped', 'budget', MIDNIGHT + DAY);
+        expect(rsv(s, pending({ reportId: 'skipped' }), NOW + 9 * MIN, NOW + 2 * MIN, { retake: true })).toEqual({ reserved: true, id, lease: 1 });
+        // A skipped row with no retry time is the same.
+        fail(s, id, 'skipped', 'budget', null);
+        expect(rsv(s, pending({ reportId: 'skipped' }), NOW + 9 * MIN, NOW + 3 * MIN, { retake: true }).reserved).toBe(true);
+        // And it never used its one explicit retake on a row that made a call: a later final failure can still be retaken once.
+        fail(s, id, 'failed', 'fatal', null);
+        expect(rsv(s, pending({ reportId: 'skipped' }), NOW + 9 * MIN, NOW + 4 * MIN, { retake: true }).reserved).toBe(true);
+        fail(s, id, 'failed', 'fatal', null);
+        expect(rsv(s, pending({ reportId: 'skipped' }), NOW + 9 * MIN, NOW + 5 * MIN, { retake: true }).reserved).toBe(false);
+      });
+
+      it('a row is retaken once, for good: the marker is on the row, so a second retake is refused however long after', () => {
+        const s = ai(make());
+        const id = reserve(s);
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ retaken: false });
+        fail(s, id, 'declined', 'declined', null);
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ retaken: false });
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + MIN, { retake: true })).toEqual({ reserved: true, id, lease: 2 });
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ retaken: true, attempts: 2 });
+        fail(s, id, 'declined', 'declined', null);
+        // Final again, and marked: a week later it is still refused, and its attempts do not move.
+        const later = rsv(s, pending(), NOW + 9 * DAY, NOW + 8 * DAY, { retake: true });
+        expect(later.reserved).toBe(false);
+        if (!later.reserved) expect(later.existing).toMatchObject({ status: 'declined', attempts: 2, retaken: true });
+        expect(s.aiSpendSince(0).calls).toBe(2);
+      });
+
+      it('a row given up after its three attempts takes its one explicit retake as a fourth call, and no more', () => {
+        const s = ai(make());
+        const id = reserve(s);
+        fail(s, id, 'failed', 'retryable', NOW + MIN);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + MIN)).toEqual({ reserved: true, id, lease: 2 });
+        fail(s, id, 'failed', 'retryable', NOW + 2 * MIN);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 2 * MIN)).toEqual({ reserved: true, id, lease: 3 });
+        fail(s, id, 'failed', 'retryable', null);
+        // The automatic retries did not mark it.
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ attempts: 3, retaken: false });
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 3 * MIN, { retake: true })).toEqual({ reserved: true, id, lease: 4 });
+        fail(s, id, 'failed', 'retryable', null);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 4 * MIN, { retake: true }).reserved).toBe(false);
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ attempts: 4, retaken: true });
+      });
+
+      it('the marker follows the row through a lapsed-lease take-over and is not set by an ordinary retry', () => {
+        const s = ai(make());
+        const id = reserve(s, {}, NOW, NOW + MIN);
+        fail(s, id, 'invalid', 'invalid', null);
+        expect(rsv(s, pending(), NOW + 9 * MIN, NOW + 2 * MIN, { retake: true }).reserved).toBe(true);
+        // The retake's owner died: its lease lapses and another process takes the row over. The marker stays.
+        expect(rsv(s, pending(), NOW + 99 * MIN, NOW + 20 * MIN)).toEqual({ reserved: true, id, lease: 3 });
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ retaken: true, attempts: 3 });
+        fail(s, id, 'invalid', 'invalid', null);
+        expect(rsv(s, pending(), NOW + 99 * MIN, NOW + 30 * MIN, { retake: true }).reserved).toBe(false);
+      });
+
+      it('a retaken row that answers is an ok read, and the marker is still readable', () => {
+        const s = ai(make());
+        const id = reserve(s);
+        fail(s, id, 'declined', 'declined', null);
+        rsv(s, pending(), NOW + 9 * MIN, NOW + MIN, { retake: true });
+        expect(complete(s, id, done())).toBe(true);
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ status: 'ok', retaken: true });
+        expect(s.loadAiReads(['r1'])[0]).toMatchObject({ retaken: true });
       });
 
       it('a retake of a row that does not exist reserves it like any other call', () => {
@@ -412,6 +497,7 @@ export function aiContract(name: string, make: () => Store): void {
           costMicros: 500,
           latencyMs: 640,
           createdAt: NOW,
+          retaken: false,
         } satisfies AiReadRow);
       });
 
@@ -710,6 +796,37 @@ export function aiContract(name: string, make: () => Store): void {
         const newer = okRead(s, 'r1', 'h2', NOW + MIN);
         expect(s.loadAiRead('r1')?.id).toBe(newer);
         expect(s.loadAiReadById(older)?.id).toBe(older);
+      });
+    });
+
+    describe('loadAiReadFor', () => {
+      it('loads the row of a report and input hash, whatever its state, as a copy; null for none', () => {
+        const s = ai(make());
+        const ok = okRead(s, 'r1', 'h1', NOW);
+        const bad = reserve(s, { reportId: 'r1', inputHash: 'h2' }, NOW + MIN);
+        fail(s, bad, 'declined', 'declined', null);
+        const waiting = reserve(s, { reportId: 'r2', inputHash: 'h1' });
+        fail(s, waiting, 'failed', 'retryable', NOW + 5 * MIN);
+        const live = reserve(s, { reportId: 'r3', inputHash: 'h1' });
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ id: ok, status: 'ok', retaken: false });
+        expect(s.loadAiReadFor('r1', 'h2')).toMatchObject({ id: bad, status: 'declined', read: null, retaken: false });
+        expect(s.loadAiReadFor('r2', 'h1')).toMatchObject({ id: waiting, status: 'failed', retryAt: NOW + 5 * MIN });
+        expect(s.loadAiReadFor('r3', 'h1')).toMatchObject({ id: live, status: 'pending' });
+        expect(s.loadAiReadFor('r1', 'h3')).toBeNull();
+        expect(s.loadAiReadFor('nope', 'h1')).toBeNull();
+        expect(s.loadAiReadFor('', '')).toBeNull();
+        const row = s.loadAiReadFor('r1', 'h1');
+        if (row !== null) row.read = null;
+        expect(s.loadAiReadFor('r1', 'h1')?.read).toEqual(read());
+      });
+
+      it('shows the retake marker, set by the retake and by nothing else', () => {
+        const s = ai(make());
+        const id = reserve(s);
+        fail(s, id, 'declined', 'declined', null);
+        expect(s.loadAiReadFor('r1', 'h1')?.retaken).toBe(false);
+        rsv(s, pending(), NOW + 9 * MIN, NOW + MIN, { retake: true });
+        expect(s.loadAiReadFor('r1', 'h1')).toMatchObject({ retaken: true, status: 'pending' });
       });
     });
 

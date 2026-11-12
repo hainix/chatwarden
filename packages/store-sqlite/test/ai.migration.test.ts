@@ -109,7 +109,7 @@ describe('migration 20: AI reads and outcomes', () => {
     expect(columns(db, 'kit_ai_reads')).toEqual([
       'id', 'report_id', 'input_hash', 'status', 'attempts', 'retry_at', 'lease_until', 'error_kind', 'adapter', 'model', 'prompt_version',
       'severity', 'rule', 'summary', 'evidence_json', 'confidence', 'injection', 'rec_json', 'input_tokens', 'output_tokens',
-      'cache_read_tokens', 'cache_write_tokens', 'cost_micros', 'latency_ms', 'example_ids', 'created_at',
+      'cache_read_tokens', 'cache_write_tokens', 'cost_micros', 'latency_ms', 'example_ids', 'created_at', 'retaken',
     ]);
     expect(columns(db, 'kit_ai_spend')).toEqual(['read_id', 'attempt', 'at', 'micros']);
     expect(columns(db, 'kit_ai_outcomes')).toEqual([
@@ -267,12 +267,12 @@ describe('the schema guards what the store relies on', () => {
     expect(() => ins('b', 1)).not.toThrow();
   });
 
-  it('the defaults: attempts, injection and cost start at 0; reversed, the marks and the example start empty', () => {
+  it('the defaults: attempts, injection, cost and the retake marker start at 0; reversed, the marks and the example start empty', () => {
     const db = memDb();
     openStore({ db });
     insertRead(db, 'a');
     insertOutcome(db, 'o');
-    expect(db.prepare('SELECT attempts, injection, cost_micros FROM kit_ai_reads').get()).toEqual({ attempts: 0, injection: 0, cost_micros: 0 });
+    expect(db.prepare('SELECT attempts, injection, cost_micros, retaken FROM kit_ai_reads').get()).toEqual({ attempts: 0, injection: 0, cost_micros: 0, retaken: 0 });
     expect(db.prepare('SELECT reversed, dont_teach, bad_faith, example_json FROM kit_ai_outcomes').get()).toEqual({
       reversed: 0,
       dont_teach: 0,

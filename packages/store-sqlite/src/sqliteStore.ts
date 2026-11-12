@@ -275,6 +275,7 @@ function aiReadFromRow(r: Record<string, unknown>, lenient = false): AiReadRow |
     costMicros: Number(r.cost_micros),
     latencyMs: nullableNumber(r.latency_ms),
     createdAt: Number(r.created_at),
+    retaken: Number(r.retaken) === 1,
   };
 }
 
@@ -708,6 +709,7 @@ export class SqliteStore implements Store, TermStore {
   // AI reads and the casebook (AI levels 1 and 2, migration 20). SYNCHRONOUS on purpose (like claims); they run inside `transaction`.
 
   reserveAiRead(row: AiReadPending, leaseUntil: number, now: number, opts?: { retake?: boolean }): AiReserveResult {
+    const retake = opts?.retake === true ? 1 : 0;
     return this.transaction((): AiReserveResult => {
       // The UNIQUE (report_id, input_hash) index decides who inserts: of two connections, one gets a row back, the other none.
       const fresh = this.db
@@ -724,14 +726,15 @@ export class SqliteStore implements Store, TermStore {
       const taken = this.db
         .prepare(
           `UPDATE kit_ai_reads
-           SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL
+           SET status = 'pending', attempts = attempts + 1, retry_at = NULL, lease_until = ?, error_kind = NULL,
+               retaken = CASE WHEN ? = 1 AND retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed') THEN 1 ELSE retaken END
            WHERE report_id = ? AND input_hash = ?
              AND ((status = 'pending' AND lease_until <= ?)
                OR (status IN ('failed', 'skipped') AND retry_at IS NOT NULL AND retry_at <= ?)
-               OR (? = 1 AND status IN ('declined', 'invalid', 'failed', 'skipped')))
+               OR (? = 1 AND ((retaken = 0 AND retry_at IS NULL AND status IN ('declined', 'invalid', 'failed')) OR status = 'skipped')))
            RETURNING id, attempts`,
         )
-        .get(leaseUntil, row.reportId, row.inputHash, now, now, opts?.retake === true ? 1 : 0);
+        .get(leaseUntil, retake, row.reportId, row.inputHash, now, now, retake);
       if (taken !== undefined) return this.openAttempt(String(taken.id), Number(taken.attempts), now);
       const existing = this.db.prepare('SELECT * FROM kit_ai_reads WHERE report_id = ? AND input_hash = ?').get(row.reportId, row.inputHash);
       const mapped = existing === undefined ? null : aiReadFromRow(existing, true);
@@ -867,6 +870,13 @@ export class SqliteStore implements Store, TermStore {
         if (mapped !== null) return mapped;
       }
       return null;
+    });
+  }
+
+  loadAiReadFor(reportId: string, inputHash: string): AiReadRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT * FROM kit_ai_reads WHERE report_id = ? AND input_hash = ?').get(reportId, inputHash);
+      return r === undefined ? null : aiReadFromRow(r, true);
     });
   }
 

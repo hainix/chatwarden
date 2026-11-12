@@ -25,6 +25,7 @@ const AI_METHODS = [
   'aiTeachableCount',
   'aiStats',
   'loadAiReadById',
+  'loadAiReadFor',
   'purgeAi',
 ] as const;
 

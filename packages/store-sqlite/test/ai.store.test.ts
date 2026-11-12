@@ -238,6 +238,37 @@ describe('two connections on one file, one call after the other', () => {
     expect(b.loadAiRead('r1')?.read?.summary).toBe('P1 was rude to P2.');
   });
 
+  it('the retake marker is on the row in the file: another connection, and a reopened file, refuse a second retake', () => {
+    const path = fileDb();
+    const a = open(path);
+    const id = reserve(a);
+    expect(a.failAiRead(id, 1, 'declined', 'declined', null)).toBe(true);
+    expect(a.reserveAiRead(pending(), NOW + 9 * MIN, NOW + MIN, { retake: true })).toEqual({ reserved: true, id, lease: 2 });
+    expect(a.failAiRead(id, 2, 'declined', 'declined', null)).toBe(true);
+    const b = open(path);
+    const refused = b.reserveAiRead(pending(), NOW + 9 * MIN, NOW + 2 * MIN, { retake: true });
+    expect(refused.reserved).toBe(false);
+    a.close();
+    stores.splice(stores.indexOf(a), 1);
+    const c = open(path);
+    const again = c.reserveAiRead(pending(), NOW + 9 * MIN, NOW + 3 * MIN, { retake: true });
+    expect(again.reserved).toBe(false);
+    if (!again.reserved) expect(again.existing).toMatchObject({ attempts: 2, retaken: true, status: 'declined' });
+    expect(c.aiSpendSince(0).calls).toBe(2);
+  });
+
+  it('a retake and an ordinary take-over of the same final row in turn: exactly one wins, and only the retake sets the marker', () => {
+    const path = fileDb();
+    const a = open(path);
+    const b = open(path);
+    const id = reserve(a);
+    expect(a.failAiRead(id, 1, 'invalid', 'invalid', null)).toBe(true);
+    const ra = a.reserveAiRead(pending(), NOW + 9 * MIN, NOW + MIN, { retake: true });
+    const rb = b.reserveAiRead(pending(), NOW + 9 * MIN, NOW + MIN, { retake: true });
+    expect([ra.reserved, rb.reserved]).toEqual([true, false]);
+    expect(b.loadAiReadFor('r1', 'h1')).toMatchObject({ retaken: true, attempts: 2 });
+  });
+
   it('spend adds up across connections', () => {
     const path = fileDb();
     const a = open(path);

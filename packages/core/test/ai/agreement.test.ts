@@ -194,6 +194,24 @@ describe('what it does not use', () => {
       expect(accept({}, read(null))).toBe(false);
       expect(accept({}, read(), 1)).toBe(false);
     });
+    it('false: the decision also acts on someone else (the reporter, a bystander), however small the extra', () => {
+      expect(accept({ others: 1 })).toBe(false);
+      expect(accept({ others: 3 })).toBe(false);
+      expect(accept({ others: 1, step: { kind: 'chat', durationMs: HOUR } })).toBe(false);
+    });
+    it('true: no action on anyone else, said as 0 or left out', () => {
+      expect(accept({ others: 0 })).toBe(true);
+      expect(accept({ others: undefined })).toBe(true);
+    });
+    it('an extra action on someone else changes nothing but oneClick: the agreement and its detail stay', () => {
+      const a = agreementOf(read(), human({ oneClick: true }));
+      const b = agreementOf(read(), human({ oneClick: true, others: 2 }));
+      expect(b).toEqual({ ...a, detail: { ...a.detail, oneClick: false } });
+    });
+    it('false: a dismissal accepted as one that also sanctions someone else', () => {
+      const r = read({ verdict: 'no_action', severity: 'banter', rule: null, evidence: [] });
+      expect(accept({ verdict: 'no_action', rule: null, lineIds: [], step: null, prefill: null, others: 1 }, r)).toBe(false);
+    });
     it('false when the client did not claim it, even for the same decision', () => {
       expect(agreementOf(read(), human({ oneClick: false })).detail.oneClick).toBe(false);
     });

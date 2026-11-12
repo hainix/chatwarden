@@ -425,6 +425,7 @@ export class MemoryStore implements Store {
         costMicros: 0,
         latencyMs: null,
         createdAt: now,
+        retaken: false,
       };
       this.aiReads.push(fresh);
       this.undoWith(() => {
@@ -435,10 +436,15 @@ export class MemoryStore implements Store {
     }
     const lapsed = existing.status === 'pending' && existing.leaseUntil !== null && existing.leaseUntil <= now;
     const due = (existing.status === 'failed' || existing.status === 'skipped') && existing.retryAt !== null && existing.retryAt <= now;
-    // An explicit retake (a moderator's read again) also takes a row that finished without a read; never an ok read or a live lease.
-    const retaken = opts?.retake === true && existing.status !== 'ok' && existing.status !== 'pending';
-    if (!lapsed && !due && !retaken) return { reserved: false, existing: structuredClone(existing) };
+    // An explicit retake (a moderator's read again) also takes a FINAL row (no retry time), once: it marks the row. Never an ok read,
+    // a live lease, or a row still waiting for its own retry.
+    // A skipped row made no call and gave its attempt back: an explicit ask takes it at once, without using the retake.
+    const final = existing.status === 'declined' || existing.status === 'invalid' || (existing.status === 'failed' && existing.retryAt === null);
+    const retaken = opts?.retake === true && final && !existing.retaken;
+    const skipped = opts?.retake === true && existing.status === 'skipped';
+    if (!lapsed && !due && !retaken && !skipped) return { reserved: false, existing: structuredClone(existing) };
     const before = { ...existing };
+    if (retaken) existing.retaken = true;
     existing.status = 'pending';
     existing.attempts += 1;
     existing.retryAt = null;
@@ -544,6 +550,11 @@ export class MemoryStore implements Store {
 
   loadAiRead(reportId: string): AiReadRow | null {
     return newestOk(this.aiReads.filter((r) => r.reportId === reportId));
+  }
+
+  loadAiReadFor(reportId: string, inputHash: string): AiReadRow | null {
+    const row = this.aiReads.find((r) => r.reportId === reportId && r.inputHash === inputHash);
+    return row === undefined ? null : structuredClone(row);
   }
 
   loadAiReadById(id: string): AiReadRow | null {

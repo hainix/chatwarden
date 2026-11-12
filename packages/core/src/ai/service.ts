@@ -21,7 +21,7 @@ import type { AiOutcomeArgs } from './casebook.js';
 import { aiPolicyText } from './prompt.js';
 import { sha256Hex } from '../crypto.js';
 import type { AIExampleInput, AIRead, ModerationAI } from './types.js';
-import { Meter, runRead } from './worker.js';
+import { isFinalRow, Meter, runRead } from './worker.js';
 import type { AiStore, ReadEnd, WorkerEnv } from './worker.js';
 
 // The AI service (design sections 4 and 6): listens for new reports and only enqueues; a small worker pool reads them off the ack
@@ -243,6 +243,7 @@ const REQUIRED_STORE_METHODS = [
   'loadAiRead',
   'loadAiReads',
   'loadAiReadById',
+  'loadAiReadFor',
   'listAiRetries',
   'aiSpendSince',
   'insertAiOutcome',
@@ -352,7 +353,6 @@ export class AiService implements AiFacade {
   private readonly queued = new Set<string>();
   private readonly running = new Map<string, { dirty: boolean }>();
   private readonly parked = new Map<string, number>();
-  private readonly finals = new Map<string, { hash: string; rowId: string; retaken: boolean }>();
   private readonly retakes = new Set<string>();
   private readonly controllers = new Set<{ abort(): void }>();
   private readonly cache = new Map<string, Prepared>();
@@ -456,6 +456,7 @@ export class AiService implements AiFacade {
       const prepared = this.prepare(report);
       const row = this.store.loadAiRead(reportId);
       if (row !== null && row.read !== null && row.inputHash === prepared.hash) return Promise.resolve(this.view(row, report, prepared, level));
+      const own = this.store.loadAiReadFor(reportId, prepared.hash);
       const now = this.clock.now();
       const today = this.store.aiSpendSince(startOfUtcDay(now));
       if (today.micros >= this.opts.dailyBudgetMicros || today.calls >= this.dailyCalls()) return Promise.resolve('budget');
@@ -465,13 +466,16 @@ export class AiService implements AiFacade {
         return Promise.resolve({ unavailable: { retryAfterMs: Math.max(1000, reopens - now) } });
       }
       if (!this.window.peek(now)) return Promise.resolve({ unavailable: { retryAfterMs: Math.max(1000, this.window.nextFree(now) - now) } });
-      const final = this.finals.get(reportId);
-      if (final !== undefined && final.hash === prepared.hash) {
-        // A moderator's explicit ask retakes a final read once; asking again for the same row has nothing left to try.
-        if (final.retaken) return Promise.resolve('final');
-        final.retaken = true;
+      // A moderator's explicit ask retakes a FINAL row (one that ended without an answer and will not be tried again by itself) once;
+      // the store keeps that on the row, so asking again has nothing left to try, whichever process or restart comes between. A row
+      // still waiting for its own retry is not retaken: the ask just makes sure it is queued, and the call waits for its time.
+      if (own !== null && isFinalRow(own)) {
+        if (own.retaken) return Promise.resolve('final');
+        this.retakes.add(reportId);
+      } else if (own?.status === 'skipped') {
+        // A skipped read made no call: the ask takes it now instead of at its retry time (the caps were checked above).
+        this.retakes.add(reportId);
       }
-      this.retakes.add(reportId);
       this.enqueue(reportId, { force: true });
       return Promise.resolve('pending');
     } catch (err) {
@@ -640,7 +644,6 @@ export class AiService implements AiFacade {
       const end: ReadEnd = await runRead(this.env(), id, retake ? { retake: true } : undefined);
       if (end.park !== null) this.park(id, end.park);
       else this.parked.delete(id);
-      this.noteFinal(id, end);
     } catch (err) {
       this.warn('ai.job_failed', err);
     } finally {
@@ -656,18 +659,6 @@ export class AiService implements AiFacade {
     this.parked.delete(reportId);
     if (this.parked.size >= PARKED_MAX) this.parked.delete(this.parked.keys().next().value as string);
     this.parked.set(reportId, until);
-  }
-
-  /** Keep what is known of a read that ended without an answer (so an explicit ask can tell a first retake from a second). */
-  private noteFinal(reportId: string, end: ReadEnd): void {
-    const prior = this.finals.get(reportId);
-    if (end.final === null) {
-      this.finals.delete(reportId);
-      return;
-    }
-    this.finals.delete(reportId);
-    if (this.finals.size >= PARKED_MAX) this.finals.delete(this.finals.keys().next().value as string);
-    this.finals.set(reportId, { hash: end.final.hash, rowId: end.final.rowId, retaken: prior !== undefined && prior.rowId === end.final.rowId && prior.retaken });
   }
 
   /** How many reports the sweeper is holding back (tests). */
@@ -711,7 +702,6 @@ export class AiService implements AiFacade {
       // Forget what is held back for reports that are decided or no longer open: the list only keeps the live ones.
       const open = new Set(ids);
       for (const id of [...this.parked.keys()]) if (!open.has(id)) this.parked.delete(id);
-      for (const id of [...this.finals.keys()]) if (!open.has(id)) this.finals.delete(id);
       for (const report of page) {
         if (room() <= 0) break;
         if (read.has(report.id) || this.isParked(report.id, now)) continue;
@@ -750,7 +740,6 @@ export class AiService implements AiFacade {
       this.lastStable = stable;
       this.stableKey = sha256Hex(stable);
       this.parked.clear();
-      this.finals.clear();
     }
     const reasons = profile.reporting.reasons;
     const label = report.reportedReason === null || report.reportedReason === undefined ? '' : (reasons.find((r) => r.id === report.reportedReason)?.label ?? '');
@@ -888,7 +877,7 @@ export class AiService implements AiFacade {
     const verdictClass: AiVerdict = verdict === 'bad_faith' ? 'no_action' : verdict;
     const result = agreementOf(
       read,
-      { verdict, rule: own.rule, lineIds: own.lineIds, step: own.step, prefill, oneClick: ai.accepted },
+      { verdict, rule: own.rule, lineIds: own.lineIds, step: own.step, prefill, others: own.others, oneClick: ai.accepted },
       level,
     );
 
