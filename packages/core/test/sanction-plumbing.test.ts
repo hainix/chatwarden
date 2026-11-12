@@ -203,7 +203,9 @@ describe('the moot hook in revoke', () => {
     store.insertAppeal(appealFor(group));
     expect(await w.cw.sanctions.revoke(group, 'mod_cy', 'lifted')).toBe(true);
     expect(store.loadAppeal(`ap-${group}`)?.status).toBe('moot');
-    expect(w.cw.notices.pending(f.target)).toEqual([]);
+    const notices = store.rawNotices().filter((n) => n.groupId === group);
+    expect(notices.length).toBeGreaterThan(0);
+    expect(notices.every((n) => n.withdrawnAt !== null)).toBe(true);
   });
 
   it('a failed revoke leaves it open and the sanction live', async () => {
