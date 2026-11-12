@@ -66,7 +66,8 @@ function fakeKit(get: Chatwarden['reports']['get'] = () => null) {
       return () => void listeners.delete(entry);
     },
     reports: { get },
-  } as unknown as Pick<Chatwarden, 'on' | 'reports'>;
+    people: { accountIds: () => [] },
+  } as unknown as Pick<Chatwarden, 'on' | 'reports' | 'people'>;
   return {
     kit,
     listeners,

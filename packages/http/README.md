@@ -585,7 +585,10 @@ staff API has it too.
 subject id. A subject id is an identifier, so send events to staff endpoints only, never to a player or a public channel.
 Chat text is never in an event. `includeExcerpts: true` adds the report's excerpt (the lines players typed, blocked ones
 included, with their seat and handle) to `report.created` and nothing else. That is private conversation: turn it on only for a
-receiver you control and may show chat text to.
+receiver you control and may show chat text to. `appeal.created`, `appeal.decided` and `rename.required` carry ids, codes and times and never a
+statement, a reason or a handle. `rename.required` names the person by staff ref, which means nothing to your game: `includeAccounts: true` adds
+`accounts: string[]` to it (and to no other event), the account ids you passed as `RawWho.accountId`, fetched when the event is raised. An account id
+is your own identifier for a player, so turn it on only for a receiver your game controls.
 
 ### Incoming: `webhookIn`
 

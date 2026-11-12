@@ -36,6 +36,15 @@ export interface WebhookEndpoint {
    * allowed to show chat text to (a private moderation channel, say). Off by default; the reporter's note is never sent.
    */
   includeExcerpts?: boolean;
+  /**
+   * Add `accounts: string[]` to `rename.required` (and to no other event): the account ids the kit holds for that person, as the game passed them
+   * (`RawWho.accountId`), found with `cw.people.accountIds` when the event is raised, so the game knows which of its players to rename. A guest has
+   * none (`[]`). Without it the event names only the person's staff ref, which means nothing to the game.
+   *
+   * WARNING: an account id is the GAME'S own identifier for a player. Turn it on only for a receiver the game controls (its own server), never a
+   * shared or third-party channel. It is never in a log, and never in any other event. Off by default.
+   */
+  includeAccounts?: boolean;
 }
 
 export interface WebhooksOutOptions {
@@ -74,6 +83,7 @@ interface Endpoint {
   readonly secret: string;
   readonly events: readonly KitEvent['type'][] | '*';
   readonly includeExcerpts: boolean;
+  readonly includeAccounts: boolean;
 }
 
 function checkEndpoint(raw: unknown, index: number): Endpoint {
@@ -81,7 +91,7 @@ function checkEndpoint(raw: unknown, index: number): Endpoint {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new RangeError(`${at} must be an object`);
   const e = raw as Partial<WebhookEndpoint>;
   // Every field is read exactly once, here.
-  const { secret, events, includeExcerpts } = e;
+  const { secret, events, includeExcerpts, includeAccounts } = e;
   const url = parseUrl(e.url);
   const local = url !== null && url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
   if (url === null || (url.protocol !== 'https:' && !local) || url.username !== '' || url.password !== '') {
@@ -96,11 +106,15 @@ function checkEndpoint(raw: unknown, index: number): Endpoint {
   if (includeExcerpts !== undefined && typeof includeExcerpts !== 'boolean') {
     throw new RangeError(`${at}.includeExcerpts must be a boolean`);
   }
+  if (includeAccounts !== undefined && typeof includeAccounts !== 'boolean') {
+    throw new RangeError(`${at}.includeAccounts must be a boolean`);
+  }
   return {
     href: url.href,
     secret,
     events: events === '*' ? '*' : Object.freeze([...new Set(events as readonly KitEvent['type'][])]),
     includeExcerpts: includeExcerpts === true,
+    includeAccounts: includeAccounts === true,
   };
 }
 
@@ -127,7 +141,9 @@ type Attempt =
  * `x-chatwarden-timestamp` (unix seconds) and `x-chatwarden-signature` (`v1=<hex>`, HMAC-SHA256 over
  * `${timestamp}.${body}` with the endpoint's secret) sign each ATTEMPT afresh, so a retry is never outside the
  * receiver's 5 minute window; verify them with `verify` (this package). Events carry subject ids: send them to staff
- * channels only. `includeExcerpts` puts chat text in the body: read its warning.
+ * channels only. `includeExcerpts` puts chat text in the body: read its warning. `includeAccounts` puts the game's own account ids in a
+ * `rename.required` body (nothing else): read its warning. The appeal events (`appeal.created`, `appeal.decided`) and `rename.required` carry ids,
+ * codes and times only, never a statement, a reason or a handle, and `events` accepts them like any other type.
  *
  * Delivery: a 2xx succeeds. A network error, a timeout (10 s per attempt), a 5xx or a 429 is retried, up to 5 times
  * (6 attempts), after 1, 2, 4, 8 and 16 seconds with plus or minus 20 percent jitter; a 429's `retry-after` (seconds or
@@ -142,7 +158,7 @@ type Attempt =
  * Everything is checked once, here: a bad URL or a secret under 32 characters throws `RangeError` (the message never
  * holds the value) and subscribes nothing. Call `dispose()` on shutdown.
  */
-export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: WebhooksOutOptions): WebhooksOut {
+export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports' | 'people'>, options: WebhooksOutOptions): WebhooksOut {
   if (typeof options !== 'object' || options === null || !Array.isArray(options.endpoints) || options.endpoints.length === 0) {
     throw new RangeError('webhooksOut: endpoints must be a non-empty list');
   }
@@ -317,6 +333,14 @@ export function webhooksOut(cw: Pick<Chatwarden, 'on' | 'reports'>, options: Web
             }
           } catch (err) {
             safeWarn(logger, 'chatwarden.webhook_excerpt_failed', { error: errorClass(err) });
+          }
+        }
+        if (endpoint.includeAccounts && event.type === 'rename.required') {
+          try {
+            // Fetched now, when the event is raised: the body is fixed from here on, and nothing is cached between events.
+            data = { ...data, accounts: cw.people.accountIds(event.target) };
+          } catch (err) {
+            safeWarn(logger, 'chatwarden.webhook_accounts_failed', { error: errorClass(err) });
           }
         }
         const id = randomUUID();
