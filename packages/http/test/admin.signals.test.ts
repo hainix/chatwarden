@@ -162,6 +162,60 @@ describe('the suggestion carries the ladder feed', () => {
   });
 });
 
+// FD M2: the ladder sentence is a count of what other players did to the person, like the counts on the record: it needs history.read.
+describe('the ladder sentence needs history.read, the outcome does not', () => {
+  const RAISE = { ladder: [{ id: 'muted-a-lot', effect: 'raise' as const, kinds: ['muted_by_player'], minDistinct: 3, windowDays: 14 }] };
+  const GATED = { permissions: { 'history.read': 'senior' as const } };
+  type Sug = { outcome: unknown; label: string; why: string; signals?: unknown };
+
+  async function both(feeds: Record<string, unknown>) {
+    const w = await signalWorld(feeds, GATED);
+    const f = await w.file();
+    mute(w, f.target, 3);
+    const post = (role: 'moderator' | 'senior') => w.call('POST', `/reports/${f.id}/suggest`, { role, body: { level: 'rude' } });
+    const get = (role: 'moderator' | 'senior') => w.call('GET', `/reports/${f.id}`, { role, query: { level: 'rude' } });
+    return { w, f, post, get };
+  }
+
+  it.each([['a note rule', LADDER], ['a raise rule', RAISE]])('%s: a caller without history.read gets no signals key and no count sentence, from both routes', async (_n, feeds) => {
+    const { post, get } = await both(feeds);
+    const viaPost = (await post('moderator')).body as Sug;
+    const viaGet = ((await get('moderator')).body as { suggest: Sug }).suggest;
+    for (const s of [viaPost, viaGet]) {
+      expect('signals' in s).toBe(false);
+      expect(s.why).not.toMatch(/Muted by other players|Also:|Raised one step|players? in \d+ days?/);
+      expect(s.why).toMatch(/^[A-Za-z]+ profile: .*.$/);
+    }
+  });
+
+  it('a caller with history.read still gets the sentence and the signals, as before', async () => {
+    const { post, get } = await both(LADDER);
+    const viaPost = (await post('senior')).body as Sug;
+    expect(viaPost.signals).toEqual({ raised: false, ids: ['muted-a-lot'] });
+    expect(viaPost.why).toContain('Muted by other players: 3 players in 14 days');
+    expect((((await get('senior')).body as { suggest: Sug }).suggest).why).toContain('Muted by other players: 3 players in 14 days');
+  });
+
+  it('the outcome moves the same for both callers: a raise rule raises for the moderator too, only unexplained', async () => {
+    const { post } = await both(RAISE);
+    const senior = (await post('senior')).body as Sug;
+    const moderator = (await post('moderator')).body as Sug;
+    expect(senior.signals).toMatchObject({ raised: true });
+    expect(moderator.outcome).toEqual(senior.outcome);
+    expect(moderator.label).toBe(senior.label);
+  });
+
+  it('with the permission left at its default every staff role sees the sentence', async () => {
+    const w = await signalWorld(LADDER);
+    const f = await w.file();
+    mute(w, f.target, 3);
+    for (const role of ['moderator', 'senior', 'owner'] as const) {
+      const s = (await w.call('POST', `/reports/${f.id}/suggest`, { role, body: { level: 'rude' } })).body as Sug;
+      expect(s.why, role).toContain('Muted by other players: 3 players in 14 days');
+    }
+  });
+});
+
 describe('PUT /policy/profile with signals.feeds', () => {
   const PUT = (body: unknown) => ({ role: 'owner' as const, actor: 'owner_ann', body });
 

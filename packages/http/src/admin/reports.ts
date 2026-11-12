@@ -4,7 +4,7 @@ import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { roleAtLeast } from '../permissions.js';
 import { applyDecision, checkDurationsOffered, needForDecision, parseDecision, peopleOf } from './apply.js';
-import type { AdminContext } from './context.js';
+import type { AdminCall, AdminContext } from './context.js';
 import { gateCase } from './claims.js';
 import { bodyAiEcho, bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
 
@@ -150,7 +150,9 @@ const summarize = (
  *   the ladder's suggestion for the AI's conduct level, computed now; `stepWithinCeiling` says a one-key accept may fill it). Opening a
  *   case with no read, or a stale one, queues a read. Never an error: with the AI off, broken or over budget it is null.
  * - `POST /reports/:id/suggest { level, rule?, person? }`: a suggestion (`suggest`). When a signal ladder rule (`feeds.ladder`) fired it also
- *   carries `signals: { raised, ids }` and the rule's sentence is in `why`; `GET /reports/:id` carries the same in its `suggest`.
+ *   carries `signals: { raised, ids }` and the rule's sentence is in `why`; `GET /reports/:id` carries the same in its `suggest`. Both are only
+ *   for a caller whose role holds `history.read` (the sentence is a count of what other players did, like the counts on the record): a caller
+ *   without it gets the same outcome and label, but no `signals` key and no such sentence in `why`.
  * - `POST /reports/:id/decide { verdict, actions, reason?, evidence?, takeOver? }`: decide (`report.decide`, replays too). `reason` may be
  *   left out (or blank) only for a `no_action` with no actions, a one-click dismissal: the core then stores `NO_ACTION_DEFAULT_REASON`.
  *   Every other decision needs a real reason (400 `invalid_request`). The body may carry `ai: { readId, accepted, severity? }`, the read the
@@ -188,6 +190,10 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
     if (report === null) throw new NotFoundError();
     return report;
   };
+
+  // The signal rules' sentence is a count of what other players did to the person: it needs `history.read`, like the counts on the record. The
+  // outcome still moves (that is what a decider must see); only the sentence and the `signals` key are left out for a caller without it.
+  const hideSignalsFor = (c: AdminCall): { hideSignalText?: true } => (roleAtLeast(c.authz.role, ctx.permissions['history.read']) ? {} : { hideSignalText: true });
 
   return {
     'GET /reports': ctx.secure('reports.read', (c) => {
@@ -237,7 +243,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const report = load(id);
       const rule = ruleOf(cw, report);
       const history = Object.fromEntries(peopleOf(report).map((p) => [p, cw.history(p)]));
-      const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report) });
+      const suggest = cw.suggest(report.targetPerson, level, rule, { roomId: roomOf(report), ...hideSignalsFor(c) });
       const claim = claimView(claimOf(report));
       // Opening a case is when a missing or stale read is asked for; the answer is whatever is stored now.
       const ai = cw.ai.read(id, { open: true });
@@ -265,6 +271,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       if (person !== undefined && !named.has(person)) throw new ValidationError();
       const suggestion = cw.suggest(person ?? report.targetPerson, level, rule ?? ruleOf(cw, report), {
         roomId: roomOf(report),
+        ...hideSignalsFor(c),
       });
       c.audit('suggest', { type: 'report', ref: id });
       return { status: 200, body: suggestion };

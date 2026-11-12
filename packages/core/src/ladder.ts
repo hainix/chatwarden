@@ -160,6 +160,12 @@ export interface SuggestContext {
    * @experimental
    */
   signals?: readonly SignalHit[];
+  /**
+   * Leave the signal rules' sentences and the `signals` key out of the suggestion (the outcome still moves, which is the part a decider must
+   * see). For a caller who may not read the person's record: the sentence is a count of what other players did. Set by a route; default false.
+   * @experimental
+   */
+  hideSignalText?: boolean;
 }
 
 /**
@@ -386,8 +392,8 @@ export function suggest(
       if (hit.effect === 'raise' && !raised && target !== undefined && !atLeast(pick.outcome, target.outcome)) {
         pick = target;
         raised = true;
-        sentences.push(`Raised one step: ${hit.text}.`);
-      } else sentences.push(`Also: ${hit.text}.`);
+        if (context.hideSignalText !== true) sentences.push(`Raised one step: ${hit.text}.`);
+      } else if (context.hideSignalText !== true) sentences.push(`Also: ${hit.text}.`);
     }
   }
 
@@ -400,7 +406,7 @@ export function suggest(
     areaNote = ' (this rule bans from public rooms instead of restricting chat)';
   }
   const why = `${name} profile: ${reason}${areaNote}.${sentences.map((s) => ` ${s}`).join('')}`;
-  return hits.length === 0 ? { outcome, label, why } : { outcome, label, why, signals: { raised, ids: hits.map((h) => h.id) } };
+  return hits.length === 0 || context.hideSignalText === true ? { outcome, label, why } : { outcome, label, why, signals: { raised, ids: hits.map((h) => h.id) } };
 }
 
 /** The hits `suggest` will use: well-formed ones only (a string id and text, a known effect), at most 20. Never throws. */
