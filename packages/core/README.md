@@ -85,7 +85,7 @@ const result = cw.chat.accept('lobby', 'seat-1', 'hello everyone');
 if ('deliver' in result) {
   console.log('send to the room:', result.deliver.text); // may be starred if you turned profanity starring on
 } else {
-  console.log('tell this player only:', result.refuse.reason); // 'blocked', 'rate', 'restricted', 'slow_mode', ...
+  console.log('tell this player only:', result.refuse.reason); // 'blocked', 'rate', 'restricted', ...
 }
 
 // Ada reports Bo from inside your game.

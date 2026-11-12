@@ -26,7 +26,7 @@ npm install @chatwarden/http express @types/express
 `@types/react` 18 and renders the hub and the headless entry on the server, but clicks and focus have not been exercised on 18. `@chatwarden/core` and
 `@chatwarden/http` are peers too: the hub imports types from both, and these values from core (constants and defaults, so the hub
 and the kit cannot drift apart): `LADDER_TABLE`, `DEFAULT_DURATIONS`, `DEFAULT_AREA_RULES`, `DEFAULT_SEVERE_RULES`, `AUDIT_ACTIONS`,
-`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES`, `REPORTER_RANK_LAPSE_MS`, `isDefaultNoActionReason` and `assertWithinCeilings` (the one check the AI's pre-fill is held to, from the kit itself). Its own type declarations name
+`MAX_REASON_RULES`, `MAX_REPORT_REASONS`, `OTHER_REASON_ID`, `defaultReporting`, `LEGACY_REASON_ALIASES`, `REPORTER_RANK_LAPSE_MS`, `isDefaultNoActionReason`, `BUILTIN_SIGNAL_KINDS` and `PACE_SUGGESTIONS` (the signal kinds the kit records itself, and the slow mode values the Advanced screen suggests) and `assertWithinCeilings` (the one check the AI's pre-fill is held to, from the kit itself). Its own type declarations name
 both packages. Node 22.13 or newer
 for the tooling; the hub itself runs in a browser and imports no `node:` module.
 
@@ -352,7 +352,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
   `UseMe`, `UseCases`, `UseCase`, `UseCaseOptions`, `UseDecide`, `UseClaim` and `UsePolicy`
 - every export of `@chatwarden/hub-react/headless`: the controller, the stores and their types, the constants and the pure helpers. That
   includes `HubController.configure`, `HubController.refresh`, `LiveQueueStore.refresh`, `HubControllerOptions.host`, `HubClient.dismissOpen`,
-  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy` and the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.dontTeach`. The names are the same declarations the main entry re-exports (`createHubClient`,
+  `DecisionStore.undoLatest`, `DecisionStore.dismissOpen`, `DecisionStore.previewDismiss`, `ReporterRecord.accuracy`, the signal and pace fields `PersonHistory.signals`, `PolicyLayer.pace`, `PolicyLayer.signals`, `ReportSummary.boosted` and `Suggestion.signals`, and the AI methods `HubClient.readAgain`, `HubClient.aiStatus` and `HubClient.dontTeach`. The names are the same declarations the main entry re-exports (`createHubClient`,
   `fetchTransport`, `HubError`, the staff types and so on), so they are experimental there too. The kit's own types that `/headless` passes through
   (`Role`, `Me`, `StaffReport` and the other types declared in `@chatwarden/core` and `@chatwarden/http`) follow those packages.
   - functions, values and classes:
@@ -373,9 +373,9 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `HubCatalog`, `HubClient`, `HubController`, `HubControllerOptions`, `HubControllerSettings`, `HubHost`, `HubParams`, `HubT`,
     `HubText`, `ListAuditQuery`, `ListReportsQuery`, `ListSanctionsQuery`, `LiveQueueOptions`, `LiveQueueState`, `LiveQueueStore`,
     `NextCase`, `NextReport`, `OpenCase`, `Page`, `PageSource`, `PagedListStore`, `PagedState`, `PersonHistory`, `PolicyDocs`,
-    `PolicyFormat`, `PolicySamples`, `PolicySaved`, `QueueFilter`, `QueueGroup`, `QueueHold`, `QueueSort`, `QueueStats`, `RankSignals`, `Reason`,
+    `PolicyFormat`, `PolicySamples`, `PolicySaved`, `PolicyState`, `QueueFilter`, `QueueGroup`, `QueueHold`, `QueueSort`, `QueueStats`, `RankSignals`, `Reason`,
     `ReportDetail`, `ReportStatus`, `ResourceState`, `ResourceStore`, `RouterTransportOptions`, `SanctionInput`, `SanctionRow`,
-    `SanctionSource`, `Session`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermInput`,
+    `SanctionSource`, `Session`, `SignalCountView`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermInput`,
     `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
     `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
 - the `<Hub>` prop `HubProps.onController`

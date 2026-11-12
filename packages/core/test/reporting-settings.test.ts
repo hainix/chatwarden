@@ -264,8 +264,9 @@ describe('validation: the reasons list', () => {
 
 describe('the policy layer carries reporting', () => {
   it("'reporting' is an editable section, listed before 'ai'", () => {
-    expect(POLICY_SECTIONS.at(-2)).toBe('reporting');
-    expect(POLICY_SECTIONS.at(-1)).toBe('ai');
+    // 'pace' and 'signals' (0.1.8) come after 'ai'; the order of the older sections is what this pins.
+    expect(POLICY_SECTIONS.indexOf('reporting')).toBe(POLICY_SECTIONS.indexOf('ai') - 1);
+    expect(POLICY_SECTIONS.slice(-4)).toEqual(['reporting', 'ai', 'pace', 'signals']);
     expect(POLICY_SECTIONS).toContain('reporting');
   });
 
