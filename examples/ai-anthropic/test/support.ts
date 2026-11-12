@@ -17,6 +17,7 @@ const chosen: ChosenLines = {
     { alias: 'P2', role: 'reporter' },
   ],
   reportedLine: 'L2',
+  note: null,
 };
 
 /** A read input rendered by core, as the service would hand it to the adapter. */
