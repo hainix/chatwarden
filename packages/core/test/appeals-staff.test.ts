@@ -76,6 +76,7 @@ describe('list', () => {
     const a = await k.sanction();
     const b = await k.sanction();
     k.cw.appeals.file(a.who, { noticeId: a.noticeId, statement: 'you zorbak' });
+    k.clock.t += 1000; // oldest first by time: two filings in one millisecond tie on a random id
     k.cw.appeals.file(b.who, { noticeId: b.noticeId, statement: 'a fair statement' });
     const flags = k.cw.appeals.list({ status: 'all' }).items.map((i) => i.statementFlagged);
     expect(flags).toEqual([true, false]);
