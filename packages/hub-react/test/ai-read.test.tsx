@@ -1,4 +1,4 @@
-import { act, cleanup, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { forgetHiddenAi } from '../src/case/CaseContext.js';
 import { aiCase, aiWorld, noStrip, open, openPlain, pageReads, reads, settle, strip, TALK } from './aiHub.js';
@@ -127,7 +127,7 @@ describe('the skeleton while a read is expected', () => {
     for (let i = 0; i < 8; i += 1) await tick(0);
   };
 
-  it('pending shows a skeleton and then disappears after 20 seconds (fake timers)', async () => {
+  it('pending shows a skeleton and then, after 20 seconds, only a quiet Check again (fake timers)', async () => {
     const { w, f } = await aiWorld({ level: 1, script: [{ hang: true }], noRead: true });
     vi.useFakeTimers(FAKE);
     renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
@@ -137,28 +137,66 @@ describe('the skeleton while a read is expected', () => {
     expect(within(region).getByText('The AI is reading this case.')).toBeInTheDocument();
     expect(region.querySelector('.cw-skel')).not.toBeNull();
     await tick(19_000);
-    expect(screen.queryByRole('region', { name: 'AI read' })).not.toBeNull();
+    expect(screen.getByRole('region', { name: 'AI read' })).toHaveAttribute('aria-busy', 'true');
     await tick(2_000);
-    expect(noStrip()).toBeNull();
-    // No error was ever shown on the case: a read that never arrives looks like the AI being off.
-    expect(document.querySelector('.cw-ai')).toBeNull();
+    // The skeleton is gone; a quiet line is left, with the one way to look again. No error is ever shown on the case.
+    const quiet = screen.getByRole('region', { name: 'AI read' });
+    expect(quiet).not.toHaveAttribute('aria-busy', 'true');
+    expect(quiet.querySelector('.cw-skel')).toBeNull();
+    expect(within(quiet).getByText('The AI has not answered yet.')).toBeInTheDocument();
+    expect(within(quiet).getByRole('button', { name: 'Check again' })).toBeInTheDocument();
+    expect(quiet.querySelector('[role="alert"], .cw-error, .cw-notice')).toBeNull();
     expect(screen.queryByText(/AI.*(failed|could not|error)/i)).toBeNull();
   });
 
-  it('while it waits the case is read again a few times, not in a loop', async () => {
+  it('while it waits the case is read again twice (about 5 and 15 seconds), then Check again reads it once per click', async () => {
     const { w, f } = await aiWorld({ level: 1, script: [{ hang: true }], noRead: true });
     vi.useFakeTimers(FAKE);
     renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
     await settleAll();
     const first = pageReads(w, f.id);
-    await tick(25_000);
-    const more = pageReads(w, f.id) - first;
-    expect(more).toBeGreaterThanOrEqual(2);
-    expect(more).toBeLessThanOrEqual(5);
-    // And it stops: nothing more is asked once the 20 seconds are over.
-    const stopped = pageReads(w, f.id);
+    await tick(4_900);
+    expect(pageReads(w, f.id) - first).toBe(0);
+    await tick(200);
+    expect(pageReads(w, f.id) - first).toBe(1);
+    await tick(9_800);
+    expect(pageReads(w, f.id) - first).toBe(1);
+    await tick(200);
+    expect(pageReads(w, f.id) - first).toBe(2);
+    // Nothing more is asked by itself once the 20 seconds are over: at most three audited reads of the case per open.
     await tick(60_000);
-    expect(pageReads(w, f.id)).toBe(stopped);
+    expect(pageReads(w, f.id) - first).toBe(2);
+    expect(first).toBe(1);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    });
+    await settleAll();
+    expect(pageReads(w, f.id) - first).toBe(3);
+    await tick(60_000);
+    expect(pageReads(w, f.id) - first).toBe(3);
+  });
+
+  it('Check again brings the read in when it has arrived meanwhile', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { w, f } = await aiWorld({ level: 1, script: async () => (await gate, { usage: {} }), noRead: true });
+    vi.useFakeTimers(FAKE);
+    renderHub(w, { path: `/reports/${f.id}`, mode: 'detailed' });
+    await settleAll();
+    await tick(21_000);
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeInTheDocument();
+    release();
+    await tick(10);
+    await settleAll();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    });
+    await settleAll();
+    const region = screen.getByRole('region', { name: 'AI read' });
+    expect(within(region).getByText(SUMMARY)).toBeInTheDocument();
+    expect(within(region).queryByRole('button', { name: 'Check again' })).toBeNull();
   });
 
   it('a read that arrives while the skeleton shows replaces it', async () => {
@@ -174,7 +212,7 @@ describe('the skeleton while a read is expected', () => {
     release();
     await tick(10);
     await settleAll();
-    await tick(4_000);
+    await tick(5_000);
     await settleAll();
     const region = screen.getByRole('region', { name: 'AI read' });
     expect(region).not.toHaveAttribute('aria-busy', 'true');

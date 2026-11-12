@@ -10,12 +10,13 @@ import { useCase } from './CaseContext.js';
 // The AI's read on the case: a neutral strip with a dashed outline ("machine-written"), the conduct level in words, the rule and the
 // summary as plain text, and one menu behind it for everything else. It is advice, never a decision, and it never shows an error: a read
 // that does not come looks like the AI being off. While one is expected it holds a skeleton for up to 20 seconds and reads the case again
-// a few times (not in a loop) until the read is there.
+// twice (about 5 and 15 seconds: each is an audited read of the case, so three per open at most), then leaves one quiet "Check again".
+
 
 /** How long a read is waited for before the skeleton goes. */
 export const AI_WAIT_MS = 20_000;
 /** When the case is read again while waiting (milliseconds after the strip appeared). */
-const POLLS_MS = [3_000, 6_000, 10_000, 15_000] as const;
+const POLLS_MS = [5_000, 15_000] as const;
 
 export function AiStrip({ read }: { read: AiReadView | null }) {
   const t = useAiT();
@@ -53,7 +54,18 @@ export function AiStrip({ read }: { read: AiReadView | null }) {
   }
 
   if (read === null) {
-    if (spent === key) return null;
+    if (spent === key) {
+      return (
+        <section className="cw-ai" aria-label={hubT('hub.ai.label')}>
+          <p className="cw-hint">
+            <span>{t('hub.ai.waiting')}</span>{' '}
+            <button type="button" className="cw-linkbtn" onClick={() => c.detail.reload()}>
+              {t('hub.ai.checkAgain')}
+            </button>
+          </p>
+        </section>
+      );
+    }
     return (
       <section className="cw-ai" aria-label={hubT('hub.ai.label')} aria-busy="true">
         <p className="cw-sr" role="status">
@@ -77,6 +89,11 @@ export function AiStrip({ read }: { read: AiReadView | null }) {
           <span className="cw-hint" role="status">
             {t('hub.ai.rereading')}
           </span>
+        )}
+        {read.stale && spent === key && (
+          <button type="button" className="cw-linkbtn" onClick={() => c.detail.reload()}>
+            {t('hub.ai.checkAgain')}
+          </button>
         )}
         <AiDetails read={read} rereading={rereading} onAsked={() => setAgain(key)} />
       </div>

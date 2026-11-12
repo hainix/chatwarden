@@ -17,6 +17,8 @@ export const aiEn = {
   'hub.ai.cites.other': 'AI cited {count} lines',
   'hub.ai.pending': 'The AI is reading this case.',
   'hub.ai.rereading': 'Reading again',
+  'hub.ai.waiting': 'The AI has not answered yet.',
+  'hub.ai.checkAgain': 'Check again',
 
   'hub.ai.details': 'AI details',
   'hub.ai.details.model': 'Model',
