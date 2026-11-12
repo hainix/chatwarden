@@ -104,13 +104,24 @@ export interface AIUsage {
 }
 
 /**
+ * The part of an `AbortSignal` that core and an adapter use, written out so core's published declarations need no DOM or Node lib: a real
+ * `AbortSignal` is one. It says whether the call was given up on, and tells a listener once when it is.
+ * @experimental
+ */
+export interface AbortSignalLike {
+  readonly aborted: boolean;
+  addEventListener(type: 'abort', listener: () => void, options?: { once?: boolean }): void;
+  removeEventListener(type: 'abort', listener: () => void): void;
+}
+
+/**
  * Implemented outside core. Runs on the server only. No method may hold or return a credential.
  * @experimental
  */
 export interface ModerationAI {
   /** Stable label for audit and logs, e.g. `anthropic:claude-haiku-5-5`. Never a key. */
   readonly id: string;
-  read(input: AIReadInput, options: { signal: AbortSignal }): Promise<AIReadResult>;
+  read(input: AIReadInput, options: { signal: AbortSignalLike }): Promise<AIReadResult>;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { AIError } from './types.js';
-import type { AIRead, AIReadInput, AIReadResult, AIUsage, ModerationAI } from './types.js';
+import type { AbortSignalLike, AIRead, AIReadInput, AIReadResult, AIUsage, ModerationAI } from './types.js';
 
 // A scripted ModerationAI for tests and the demo. No network, no key. A script is a function, or a queue of steps used one per call;
 // when the queue runs dry the fake reads the case by a simple rule (see `fakeRead`), so a test only scripts what it cares about.
@@ -14,7 +14,7 @@ export type FakeStep =
 /** What a function script is given. `call` counts from 1. */
 export interface FakeCallContext {
   call: number;
-  signal: AbortSignal;
+  signal: AbortSignalLike;
 }
 
 export type FakeScript = readonly FakeStep[] | ((input: AIReadInput, ctx: FakeCallContext) => FakeStep | Promise<FakeStep>);
@@ -24,7 +24,7 @@ export interface FakeModerationAI extends ModerationAI {
   /** Every input it was called with, oldest first. */
   readonly calls: AIReadInput[];
   /** The abort signal of each call. */
-  readonly signals: AbortSignal[];
+  readonly signals: AbortSignalLike[];
   readonly callCount: number;
   /** Add a step to the end of the queue (a queue script only). */
   push(...steps: FakeStep[]): void;
@@ -74,7 +74,7 @@ export function fakeRead(input: AIReadInput, over: Partial<AIRead> = {}): AIRead
 export function createFakeModerationAI(script: FakeScript = [], opts: { id?: string } = {}): FakeModerationAI {
   const queue: FakeStep[] = typeof script === 'function' ? [] : [...script];
   const calls: AIReadInput[] = [];
-  const signals: AbortSignal[] = [];
+  const signals: AbortSignalLike[] = [];
   return {
     id: opts.id ?? 'fake:model',
     calls,

@@ -354,7 +354,7 @@ export class AiService implements AiFacade {
   private readonly parked = new Map<string, number>();
   private readonly finals = new Map<string, { hash: string; rowId: string; retaken: boolean }>();
   private readonly retakes = new Set<string>();
-  private readonly controllers = new Set<AbortController>();
+  private readonly controllers = new Set<{ abort(): void }>();
   private readonly cache = new Map<string, Prepared>();
   private readonly asked = new Map<string, number[]>();
   private pumpTimer: ReturnType<typeof setTimeout> | undefined;

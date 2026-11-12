@@ -347,7 +347,7 @@ export type {
 
 // AI levels 1 and 2: the provider-free contract (@experimental). Kept apart from the rest so a bundler can drop it.
 export { AI_PROMPT_VERSION, AIError } from './ai/types.js';
-export type { AIExample, AIExampleInput, AIPerson, AIRead, AIReadInput, AIReadResult, AIStoredRead, AIUsage, ModerationAI } from './ai/types.js';
+export type { AbortSignalLike, AIExample, AIExampleInput, AIPerson, AIRead, AIReadInput, AIReadResult, AIStoredRead, AIUsage, ModerationAI } from './ai/types.js';
 export { AI_OUTPUT_SCHEMA } from './ai/schema.js';
 export { validateAIOutput } from './ai/validate.js';
 export type { AIValidation, AIValidationContext } from './ai/validate.js';

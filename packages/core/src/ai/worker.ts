@@ -5,7 +5,7 @@ import type { Breaker } from './breaker.js';
 import type { Prepared } from './case.js';
 import { usedExampleIds } from './prompt.js';
 import { validateAIOutput } from './validate.js';
-import type { AIExampleInput, AIRead, AIReadInput, AIReadResult, AIUsage, ModerationAI } from './types.js';
+import type { AbortSignalLike, AIExampleInput, AIRead, AIReadInput, AIReadResult, AIUsage, ModerationAI } from './types.js';
 
 // One read, start to finish (design section 4). The job reserves the right to call (one atomic write on the store, so two processes
 // make one call), checks the budget, the breaker and the rate, calls the adapter under a deadline, validates the answer in core,
@@ -93,8 +93,8 @@ export interface WorkerEnv {
   prepare(report: ReportRecord): Prepared;
   /** Casebook examples for this case, newest first; empty when there are none, learning is off or something fails. */
   examplesFor(report: ReportRecord, prepared: Prepared): AIExampleInput[];
-  track(controller: AbortController): void;
-  untrack(controller: AbortController): void;
+  track(controller: Abortable): void;
+  untrack(controller: Abortable): void;
   /** The `ai.read` audit row for a terminal outcome. Fenced by the caller. */
   auditRead(reportId: string): void;
   warn(event: string, detail?: Record<string, string | number | boolean>): void;
@@ -123,8 +123,13 @@ function kindOf(err: unknown, ours: boolean): CallKind {
   return ours ? 'timeout' : 'retryable';
 }
 
+/** What the worker needs of an `AbortController` to give a call up. */
+export interface Abortable {
+  abort(): void;
+}
+
 /** `promise`, or a timeout error as soon as the signal aborts, whichever comes first. The loser is never left unhandled. */
-function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignalLike): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const onAbort = (): void => reject(Object.assign(new Error('aborted'), { name: 'AIError', kind: 'timeout' }));
     if (signal.aborted) onAbort();

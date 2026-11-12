@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { AI_PROMPT_VERSION, AIError } from '../../src/ai/types.js';
-import type { AIRead, AIReadInput, AIReadResult, AIUsage, ModerationAI } from '../../src/ai/types.js';
+import type { AbortSignalLike, AIRead, AIReadInput, AIReadResult, AIUsage, ModerationAI } from '../../src/ai/types.js';
 import { automationAllowed } from '../../src/ai/ceilings.js';
 import type { ConductLevel } from '../../src/types.js';
 import * as core from '../../src/index.js';
@@ -66,5 +66,19 @@ describe('the AI contract', () => {
     expectTypeOf<'bad_faith'>().not.toExtend<Rec['verdict']>();
     expectTypeOf<AIRead['confidence']>().toEqualTypeOf<'low' | 'medium' | 'high'>();
     expectTypeOf<AIError['kind']>().toEqualTypeOf<'retryable' | 'fatal' | 'declined' | 'timeout'>();
+  });
+
+  it('the signal is a structural type: a real AbortSignal is one, and so is a plain object, so no DOM lib is needed to type an adapter', () => {
+    expectTypeOf<AbortSignal>().toExtend<AbortSignalLike>();
+    const listeners = new Set<() => void>();
+    const plain: AbortSignalLike = {
+      aborted: false,
+      addEventListener: (_type, listener) => void listeners.add(listener),
+      removeEventListener: (_type, listener) => void listeners.delete(listener),
+    };
+    plain.addEventListener('abort', () => undefined, { once: true });
+    expect(listeners.size).toBe(1);
+    expectTypeOf<Parameters<ModerationAI['read']>[1]['signal']>().toEqualTypeOf<AbortSignalLike>();
+    expect(Object.keys(core)).toContain('AIError');
   });
 });
