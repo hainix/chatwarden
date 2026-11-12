@@ -82,6 +82,7 @@ describe('the log', () => {
         room: 'lobby',
         you: { name: 'snerp' },
         maxLength: 200,
+        heartbeatMs: 20_000,
         summary: 's',
         restriction: null,
         lines: [{ id: '1', at: 1, name: 'tarvo', text: 'replayed' }],
@@ -274,5 +275,72 @@ describe.each(['light', 'dark'] as const)('axe, %s theme', (theme) => {
     const { container } = renderUi(box(w.transportFor('snerp'), { theme }));
     await within(await screen.findByRole('log')).findByText(/javascript:alert/);
     expect(await violations(container)).toEqual([]);
+  });
+});
+
+describe.each(['light', 'dark'] as const)('axe with the options open, %s theme', (theme) => {
+  const optionsOf = (name: string): HTMLElement => within(log()).getByRole('button', { name: `Options for this message from ${name}` });
+
+  it('a line row open', async () => {
+    w.say('lobby', 'tarvo', 'hello');
+    const { container, user } = renderUi(box(w.transportFor('snerp'), { theme }));
+    await within(await screen.findByRole('log')).findByText('hello');
+    await user.click(optionsOf('tarvo'));
+    expect(within(log()).getByRole('button', { name: 'Mute tarvo' })).toBeInTheDocument();
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the Chat options panel open, with a muted player and the rules link', async () => {
+    const line = w.say('lobby', 'tarvo', 'x');
+    const s = w.chat.session('lobby', w.who('snerp'), w.member('snerp'));
+    if (!line.ok || 'refused' in s) throw new Error('setup');
+    s.mute({ lineId: line.line.id, on: true });
+    const { container, user } = renderUi(box(w.transportFor('snerp'), { theme, onOpenRules: () => undefined }));
+    await screen.findByRole('textbox', { name: 'Message' });
+    await user.click(screen.getByRole('button', { name: 'Chat options' }));
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the mute line with Undo showing', async () => {
+    w.say('lobby', 'tarvo', 'hello');
+    const { container, user } = renderUi(box(w.transportFor('snerp'), { theme }));
+    await within(await screen.findByRole('log')).findByText('hello');
+    await user.click(optionsOf('tarvo'));
+    await user.click(within(log()).getByRole('button', { name: 'Mute tarvo' }));
+    await screen.findByText(/Muted tarvo/);
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the report dialog open over the box', async () => {
+    w.say('lobby', 'tarvo', 'hello');
+    const { container, user } = renderUi(box(w.transportFor('snerp'), { theme }));
+    await within(await screen.findByRole('log')).findByText('hello');
+    await user.click(optionsOf('tarvo'));
+    await user.click(within(log()).getByRole('button', { name: 'Report' }));
+    await screen.findByRole('dialog');
+    expect(await violations(container)).toEqual([]);
+  });
+});
+
+describe('the report dialog from the box', () => {
+  it('traps focus and returns it', async () => {
+    w.say('lobby', 'tarvo', 'hello');
+    const { user } = renderUi(box(w.transportFor('snerp')));
+    await within(await screen.findByRole('log')).findByText('hello');
+    const control = within(log()).getByRole('button', { name: 'Options for this message from tarvo' });
+    await user.click(control);
+    await user.click(within(log()).getByRole('button', { name: 'Report' }));
+    const dialog = await screen.findByRole('dialog');
+    // Tab goes round inside the dialog, and never reaches the box behind it.
+    const seen = new Set<Element | null>();
+    for (let i = 0; i < 8; i += 1) {
+      await user.tab();
+      seen.add(document.activeElement);
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(2);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(control).toHaveFocus();
   });
 });

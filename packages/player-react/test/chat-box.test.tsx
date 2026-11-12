@@ -91,7 +91,8 @@ describe('the box shows the room', () => {
     w.say('lobby', 'tarvo', 'gg');
     await join('snerp');
     const item = within(log()).getByText('gg').closest('li') as HTMLElement;
-    expect(item.textContent).toBe('tarvo: gg');
+    // (the options control's glyph is aria-hidden and not part of what is read)
+    expect((item.querySelector('.cw-chat-name')?.textContent ?? '') + (item.querySelector('.cw-chat-text')?.textContent ?? '')).toBe('tarvo: gg');
   });
 
   it('the time of a line is on a <time> element, for those who hover', async () => {

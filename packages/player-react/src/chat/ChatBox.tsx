@@ -1,26 +1,35 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+import type { PlayerReporting, ReportResult } from '@chatwarden/core';
+import { PlayerError } from '../client.js';
 import { untilText } from '../format.js';
 import { createT, en } from '../i18n.js';
 import type { PlayerT, PlayerText } from '../i18n.js';
+import { ReportDialog } from '../ReportDialog.js';
+import type { ReportDraft } from '../ReportDialog.js';
 import { RestrictedChatLine } from '../RestrictedChatLine.js';
-import { Root, useUi } from '../ui.js';
-import type { PlayerUiProps, Ui } from '../ui.js';
+import { errorText, Root, useUi } from '../ui.js';
+import type { DialogHostProps, PlayerUiProps, Ui } from '../ui.js';
+import { OptionsButton, OptionsPanel } from './ChatOptions.js';
 import { Composer } from './Composer.js';
+import { LineOptions } from './LineOptions.js';
 import { chatReducer, createChatState } from './state.js';
-import { enChat } from './words.js';
 import type { ChatClosedWhy, ChatStatus } from './status.js';
 import type { ChatConnection, ChatTransport } from './transport.js';
+import { enChat } from './words.js';
 import { readFrame } from './wire.js';
 import type { WireLine, WireRefusal, WireRestriction } from './wire.js';
 
 /** What `onRefused` gets: the reason and the known fields. Never the text. */
 export type ChatRefusal = WireRefusal;
 
-export interface ChatBoxProps extends PlayerUiProps {
+export interface ChatBoxProps extends PlayerUiProps, DialogHostProps {
   /** How to reach the room: `sseTransport({ baseUrl: '/chat' })`, or your own. Keep it stable across renders (create it once). */
   transport: ChatTransport;
   /** The room id the server's `join` hook understands. A new `room` closes the connection and opens another. */
   room: string;
+  /** How reporting works here: `(await client.rules()).reporting`. Passed to `ReportDialog`. Without it a report is one press. */
+  reporting?: PlayerReporting;
   /** The name of the log for assistive technology. Default: the word "Chat". */
   title?: string;
   /** Called when the server says a notice is waiting, or a refusal points at one. Bump your `NoticeQueue` `refreshKey`. */
@@ -29,6 +38,8 @@ export interface ChatBoxProps extends PlayerUiProps {
   onRefused?: (refusal: ChatRefusal) => void;
   /** Called when the connection changes. */
   onStatus?: (status: ChatStatus, why?: ChatClosedWhy) => void;
+  /** When given, "Read the rules" appears in the options panel and calls this. */
+  onOpenRules?: () => void;
   /** Lines kept in the page. Default 200, at most 5 000 (the oldest go). */
   maxLines?: number;
   /** Focus the input when the box appears. Default false (a chat should not steal focus from a game). */
@@ -37,6 +48,17 @@ export interface ChatBoxProps extends PlayerUiProps {
   readOnly?: boolean;
 }
 
+/** The reader is at the bottom when they are within this many pixels of it. */
+const BOTTOM_PX = 24;
+/** How long the mute line (with Undo) stays. */
+const MUTE_NOTE_MS = 8000;
+const CLOSED = new Set<string>(['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'not_found', 'unsupported']);
+/** The longest a timer is set for (a larger delay fires at once). */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/** A failure as an error the components can word: anything that is not already a PlayerError is a dropped connection. */
+const failureOf = (e: unknown): PlayerError => (e instanceof PlayerError ? e : new PlayerError({ status: 0, code: 'network', message: 'Could not reach the server.' }));
+
 /**
  * The common props, with the chat words behind the host's own: a key the host's `t` has no text for (it answers with the key itself)
  * is worded in English, so a catalog built before the chat existed does not show `player.chat.send` on a button.
@@ -44,29 +66,31 @@ export interface ChatBoxProps extends PlayerUiProps {
 function useChatUi(props: ChatBoxProps): Ui {
   const base = useUi(props);
   const { t: host, locale } = props;
-  return useMemo(() => {
+  const t = useMemo<PlayerT>(() => {
     const english = createT({ ...en, ...enChat }, locale ?? 'en');
-    const t: PlayerT = host === undefined ? english : (key, params) => {
-      const out = host(key, params);
-      return out === key ? english(key, params) : out;
-    };
-    return { t, locale: base.locale, now: base.now, timeZone: base.timeZone };
-  }, [host, locale, base.locale, base.now, base.timeZone]);
+    return host === undefined
+      ? english
+      : (key, params) => {
+          const out = host(key, params);
+          return out === key ? english(key, params) : out;
+        };
+  }, [host, locale]);
+  return { t, locale: base.locale, now: base.now, timeZone: base.timeZone };
 }
-
-/** The reader is at the bottom when they are within this many pixels of it. */
-const BOTTOM_PX = 24;
-const CLOSED = new Set<string>(['banned', 'forbidden', 'unauthorized', 'room_closed', 'shutdown', 'not_found', 'unsupported']);
-/** The longest a timer is set for (a larger delay fires at once). */
-const MAX_TIMER_MS = 2 ** 31 - 1;
 
 interface LineViewProps {
   line: WireLine;
   /** The name is shown (the first of a run by one name). */
   first: boolean;
   you: string;
+  t: PlayerT;
   locale: string;
   timeZone: string | undefined;
+  open: boolean;
+  onToggle: (id: string) => void;
+  onReport: (line: WireLine) => void;
+  onMute: (line: WireLine) => void;
+  register: (id: string, el: HTMLButtonElement | null) => void;
 }
 
 /** The time of a line for the `<time>` element, or null for a time that is not a date. */
@@ -79,7 +103,7 @@ function timeOf(at: number, locale: string, timeZone: string | undefined): { iso
 }
 
 /** One line: "name: text". The name once per run; a screen reader always hears it. Text is a text node, never markup. */
-const LineView = memo(function LineView({ line, first, you, locale, timeZone }: LineViewProps) {
+const LineView = memo(function LineView({ line, first, you, t, locale, timeZone, open, onToggle, onReport, onMute, register }: LineViewProps) {
   const mine = line.mine === true;
   const name = mine ? you : line.name;
   const when = timeOf(line.at, locale, timeZone);
@@ -94,6 +118,7 @@ const LineView = memo(function LineView({ line, first, you, locale, timeZone }: 
         <span className="cw-chat-sr">{name}: </span>
       )}
       <span className="cw-chat-text">{when === null ? line.text : <time dateTime={when.iso} title={when.title}>{line.text}</time>}</span>
+      {!mine && <LineOptions t={t} line={line} open={open} onToggle={onToggle} onReport={onReport} onMute={onMute} register={register} />}
     </li>
   );
 });
@@ -106,13 +131,21 @@ function connectionText(ui: Ui, status: ChatStatus, ready: boolean, closed: stri
   return '';
 }
 
+interface MuteNote {
+  name: string;
+  /** The refs held when the mute was made: the new one is the entry the next `state` frame adds under this name. */
+  before: Set<string>;
+  error: PlayerError | null;
+}
+
 /**
  * A moderated chat for one room: the list, one input and Send. Lines are checked by the kit on the server; a refusal is shown to its
- * author only. A restricted player sees `RestrictedChatLine` in place of the input, and gets it back when the restriction ends.
+ * author only. A restricted player sees `RestrictedChatLine` in place of the input, and gets it back when the restriction ends. Per
+ * line there is one quiet control (Report, Mute); the one door at the corner (Chat options) holds the muted players and the standard.
  * @experimental
  */
 export function ChatBox(props: ChatBoxProps) {
-  const { transport, room, title, maxLines, autoFocus = false, readOnly = false, theme, className } = props;
+  const { transport, room, reporting, maxLines, autoFocus = false, readOnly = false, theme, className, container, returnFocusTo, onOpenRules } = props;
   const ui = useChatUi(props);
   const { t } = ui;
   const [state, dispatch] = useReducer(chatReducer, undefined, () => createChatState(maxLines));
@@ -121,12 +154,22 @@ export function ChatBox(props: ChatBoxProps) {
   latest.current = props;
   const now = useRef(ui.now);
   now.current = ui.now;
+  const current = useRef(state);
+  current.current = state;
   // The log is live only after the first hello has rendered, so joining does not read the snapshot aloud.
   const [live, setLive] = useState(false);
   const [snapshots, setSnapshots] = useState(0);
   const [refusedRestriction, setRefusedRestriction] = useState<WireRestriction | null>(null);
   const [refusedClosed, setRefusedClosed] = useState<string | null>(null);
   const [, setTick] = useState(0);
+  const [openLine, setOpenLine] = useState<string | null>(null);
+  const [reportFor, setReportFor] = useState<WireLine | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [muteNote, setMuteNote] = useState<MuteNote | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const controls = useRef(new Map<string, HTMLButtonElement>());
+  const doorControl = useRef<HTMLButtonElement | null>(null);
+  const panelId = useId();
 
   useEffect(() => {
     if (maxLines !== undefined) dispatch({ type: 'maxLines', maxLines });
@@ -137,6 +180,10 @@ export function ChatBox(props: ChatBoxProps) {
     setLive(false);
     setRefusedRestriction(null);
     setRefusedClosed(null);
+    setOpenLine(null);
+    setReportFor(null);
+    setPanelOpen(false);
+    setMuteNote(null);
     const conn = transport.open(room, {
       frame: (raw) => {
         const frame = readFrame(raw);
@@ -158,6 +205,7 @@ export function ChatBox(props: ChatBoxProps) {
     return () => {
       conn.close();
       connection.current = null;
+      clearTimeout(noteTimer.current);
     };
   }, [transport, room]);
 
@@ -204,18 +252,86 @@ export function ChatBox(props: ChatBoxProps) {
     latest.current.onRefused?.(refusal);
   };
 
+  // ---- Per-line options, report and mute -----------------------------------------------------------------------------
+  const register = useCallback((id: string, el: HTMLButtonElement | null): void => {
+    if (el === null) controls.current.delete(id);
+    else controls.current.set(id, el);
+  }, []);
+  const toggleRow = useCallback((id: string): void => setOpenLine((open) => (open === id ? null : id)), []);
+  const startReport = useCallback((line: WireLine): void => {
+    setOpenLine(null);
+    setReportFor(line);
+  }, []);
+
+  const showNote = (note: MuteNote | null): void => {
+    clearTimeout(noteTimer.current);
+    setMuteNote(note);
+    if (note !== null) noteTimer.current = setTimeout(() => setMuteNote(null), MUTE_NOTE_MS);
+  };
+  const showNoteRef = useRef(showNote);
+  showNoteRef.current = showNote;
+
+  const startMute = useCallback((line: WireLine): void => {
+    setOpenLine(null);
+    const conn = connection.current;
+    if (conn === null) return;
+    const before = new Set(current.current.muted.map((m) => m.ref));
+    void (async () => {
+      try {
+        const changed = await conn.mute({ lineId: line.id }, true);
+        if (changed) {
+          // The server's `hide` frame follows; hiding at once covers the gap (and a reconnect in it). Lines are known by name only here.
+          const ids = current.current.lines.filter((l) => l.name === line.name && l.mine !== true).map((l) => l.id);
+          dispatch({ type: 'frame', frame: { type: 'hide', ids } });
+          showNoteRef.current({ name: line.name, before, error: null });
+        }
+      } catch (e) {
+        showNoteRef.current({ name: line.name, before, error: failureOf(e) });
+      }
+      // The control that had focus is gone with the line: keep focus in the box.
+      const at = document.activeElement;
+      if (at === null || at === document.body) log.current?.focus();
+    })();
+  }, []);
+
+  const undoRef = muteNote === null ? undefined : state.muted.find((m) => m.name === muteNote.name && !muteNote.before.has(m.ref))?.ref;
+  const unmute = (ref: string): void => {
+    connection.current?.mute({ ref }, false).catch(() => undefined);
+  };
+
+  const sendReport = (line: WireLine, draft: ReportDraft): Promise<ReportResult> => {
+    const conn = connection.current;
+    if (conn === null) return Promise.reject(new Error('closed'));
+    // A line that aged out of the room, or one this viewer cannot see, is `not_found`: to the player that is a player who left.
+    return conn.report(line.id, draft).then((result) => (result.ok === false && (result.refused as string) === 'not_found' ? { ...result, refused: 'not_player' } : result));
+  };
+
+  const closeOpen = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== 'Escape') return;
+    if (panelOpen) {
+      setPanelOpen(false);
+      doorControl.current?.focus();
+    } else if (openLine !== null) {
+      const id = openLine;
+      setOpenLine(null);
+      controls.current.get(id)?.focus();
+    } else return;
+    e.stopPropagation();
+  };
+
   const lines = state.lines;
   const you = t('player.chat.you');
   const status = connectionText(ui, state.status, state.ready, closed);
+  const undo = muteNote !== null && muteNote.error === null ? muteNote : null;
 
   return (
     <Root theme={theme} className={className}>
-      <div className="cw-chat">
+      <div className="cw-chat" onKeyDown={closeOpen}>
         <div className="cw-chat-body">
           <div
             ref={log}
             role="log"
-            aria-label={title ?? t('player.chat.label')}
+            aria-label={props.title ?? t('player.chat.label')}
             aria-live={live ? 'polite' : 'off'}
             aria-relevant="additions"
             tabIndex={0}
@@ -227,7 +343,22 @@ export function ChatBox(props: ChatBoxProps) {
               {lines.map((line, i) => {
                 const before = lines[i - 1];
                 const first = before === undefined || before.name !== line.name || before.mine !== line.mine;
-                return <LineView key={line.id} line={line} first={first} you={you} locale={ui.locale} timeZone={ui.timeZone} />;
+                return (
+                  <LineView
+                    key={line.id}
+                    line={line}
+                    first={first}
+                    you={you}
+                    t={t}
+                    locale={ui.locale}
+                    timeZone={ui.timeZone}
+                    open={openLine === line.id}
+                    onToggle={toggleRow}
+                    onReport={startReport}
+                    onMute={startMute}
+                    register={register}
+                  />
+                );
               })}
             </ul>
           </div>
@@ -248,31 +379,97 @@ export function ChatBox(props: ChatBoxProps) {
         <div role="status" className="cw-chat-conn">
           {status}
         </div>
-        {!readOnly && closed === null && (
-          <div className="cw-chat-foot">
-            {active !== null ? (
-              <RestrictedChatLine
-                t={ui.t}
-                locale={ui.locale}
-                now={ui.now}
-                {...(ui.timeZone === undefined ? {} : { timeZone: ui.timeZone })}
-                {...(theme === undefined ? {} : { theme })}
-                until={active.until}
-                byModerator={active.byModerator}
+        <div role="status" className="cw-chat-note">
+          {muteNote !== null && muteNote.error !== null && <p className="cw-chat-failure">{errorText(t, muteNote.error)}</p>}
+          {undo !== null && (
+            <p>
+              {t('player.chat.muted', { name: undo.name })}{' '}
+              <button
+                type="button"
+                className="cw-chat-undo"
+                disabled={undoRef === undefined}
+                onClick={() => {
+                  if (undoRef === undefined) return;
+                  showNote(null);
+                  unmute(undoRef);
+                }}
+              >
+                {t('player.chat.undo')}
+              </button>
+            </p>
+          )}
+        </div>
+        {closed === null && (
+          <>
+            <div className="cw-chat-foot">
+              {!readOnly &&
+                (active !== null ? (
+                  <RestrictedChatLine
+                    t={ui.t}
+                    locale={ui.locale}
+                    now={ui.now}
+                    {...(ui.timeZone === undefined ? {} : { timeZone: ui.timeZone })}
+                    {...(theme === undefined ? {} : { theme })}
+                    until={active.until}
+                    byModerator={active.byModerator}
+                  />
+                ) : (
+                  <Composer
+                    ui={ui}
+                    maxLength={state.maxLength}
+                    autoFocus={autoFocus}
+                    send={(text) => (connection.current === null ? Promise.reject(new Error('closed')) : connection.current.send(text))}
+                    onDelivered={(line) => dispatch({ type: 'sent', line })}
+                    onRefused={onRefused}
+                  />
+                ))}
+              <OptionsButton
+                t={t}
+                open={panelOpen}
+                panelId={panelId}
+                onToggle={() => setPanelOpen((open) => !open)}
+                register={(el) => {
+                  doorControl.current = el;
+                }}
               />
-            ) : (
-              <Composer
-                ui={ui}
-                maxLength={state.maxLength}
-                autoFocus={autoFocus}
-                send={(text) => (connection.current === null ? Promise.reject(new Error('closed')) : connection.current.send(text))}
-                onDelivered={(line) => dispatch({ type: 'sent', line })}
-                onRefused={onRefused}
+            </div>
+            {panelOpen && (
+              <OptionsPanel
+                t={t}
+                id={panelId}
+                muted={state.muted}
+                summary={state.summary}
+                onUnmute={unmute}
+                onOpenRules={
+                  onOpenRules === undefined
+                    ? undefined
+                    : () => {
+                        setPanelOpen(false);
+                        onOpenRules();
+                      }
+                }
               />
             )}
-          </div>
+          </>
         )}
       </div>
+      {reportFor !== null && (
+        <ReportDialog
+          t={ui.t}
+          locale={ui.locale}
+          now={ui.now}
+          {...(ui.timeZone === undefined ? {} : { timeZone: ui.timeZone })}
+          {...(theme === undefined ? {} : { theme })}
+          {...(className === undefined ? {} : { className })}
+          {...(container === undefined ? {} : { container })}
+          {...(reporting === undefined ? {} : { reporting })}
+          returnFocusTo={() => controls.current.get(reportFor.id) ?? log.current ?? returnFocusTo?.() ?? null}
+          targetName={reportFor.name}
+          line={reportFor.text}
+          onSubmit={(draft) => sendReport(reportFor, draft)}
+          onClose={() => setReportFor(null)}
+        />
+      )}
     </Root>
   );
 }

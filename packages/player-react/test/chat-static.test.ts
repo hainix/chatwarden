@@ -249,13 +249,23 @@ describe('chat.css is a complete token contract', () => {
     expect(rulesUsing('--cw-yellow')).toEqual([]);
   });
 
+  it('keeps the options control reachable on touch: always shown (dimmed by its colour) under (hover: none), and on focus', () => {
+    expect(css).toMatch(/@media\s*\(\s*hover:\s*none\s*\)/);
+    expect(css).toMatch(/:focus-within/);
+    expect(css).toMatch(/\.cw-chat-optbtn/);
+  });
+
+  it('every control is at least 2.25 rem tall', () => {
+    expect(strip(css)).toMatch(/\.cw-chat-optbtn\s*\{[^}]*min-height:\s*2\.25rem/);
+  });
+
   it('wraps long words and isolates bidirectional text', () => {
     expect(css).toMatch(/overflow-wrap:\s*anywhere/);
     expect(css).toMatch(/unicode-bidi:\s*isolate/);
   });
 
-  it('is small: under 8 KB raw (chat-size holds it to its gzip budget)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(8 * 1024);
+  it('is small: under 12 KB raw (chat-size holds it to its gzip budget)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(12 * 1024);
   });
 });
 
