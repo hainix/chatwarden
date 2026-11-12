@@ -13,6 +13,7 @@
     { "path": "packages/hub-react" },
     { "path": "packages/player-react" },
     { "path": "packages/hub-element" },
-    { "path": "examples/tiny-chat" }
+    { "path": "examples/tiny-chat" },
+    { "path": "examples/ai-anthropic" }
   ]
 }
