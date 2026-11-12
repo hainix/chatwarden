@@ -308,7 +308,7 @@ export interface FaqItem {
   links?: { label: string; href: string }[];
 }
 
-export const FAQ: FaqItem[] = [
+const FAQ_BASE: FaqItem[] = [
   {
     id: 'chat',
     q: 'Does Chatwarden give my game a chat?',
@@ -363,3 +363,41 @@ export const FAQ: FaqItem[] = [
     ],
   },
 ];
+/**
+ * AI levels 1 and 2 ship in 0.1.7. The wording that says so is below, written and tested, and NOT shown: this stays false until the release is on
+ * npm and has run in a real game for a while (design question 10, docs/plans/follow-ups.md). Flipping it replaces the "planned" answer in place and makes
+ * `AI_SECTION_PREPARED` ready for a section; then the site is deployed by hand (site/README.md).
+ */
+export const AI_LEVELS_AVAILABLE = false;
+
+/** The answer once levels 1 and 2 are available: it takes the place of the "planned" answer, in the same position. */
+export const AI_FAQ_PREPARED: FaqItem = {
+  id: 'ai',
+  q: "Does an AI read my players' chat?",
+  a: 'Only if you turn it on. Levels are per game and off by default. Only the chat lines of a report, with names replaced, go to the AI provider you choose.',
+};
+
+/** The words of a section about the optional AI, for when it comes back as a section (docs/plans/follow-ups.md). Not rendered yet. */
+export const AI_SECTION_PREPARED = {
+  title: 'Optional AI help, with a person in charge',
+  lead: 'Turn it on and the AI reads each report after the player has been told it arrived, then shows your moderators what it saw. At the next level it also suggests a decision. A moderator makes every decision.',
+  levels: [
+    { name: 'Read', body: 'A short summary of what happened, the rule it touches and the lines that matter, above the transcript.' },
+    { name: 'Recommend', body: 'The decision form opens filled in with a mild suggestion. One key accepts it, or edit it first.' },
+  ],
+  ceilingsIntro: 'The AI can advise; it cannot act. These limits are in the code, not in a setting:',
+  ceilings: [
+    'The one-key accept never fills in a ban or anything longer than 24 hours.',
+    'A suggestion to act needs a line the reported player wrote.',
+    'Flags, mutes and report counts never reach the model.',
+    'Names, handles, IP addresses and ids are replaced or left out before anything leaves your server.',
+    'It stops at the daily spending limit you set in code.',
+  ],
+} as const;
+
+/** The nine questions, with the AI answer that is true today (`aiAvailable` false) or the prepared one (true). */
+export function buildFaq(aiAvailable: boolean): FaqItem[] {
+  return FAQ_BASE.map((item) => (item.id === 'ai' && aiAvailable ? AI_FAQ_PREPARED : item));
+}
+
+export const FAQ: FaqItem[] = buildFaq(AI_LEVELS_AVAILABLE);

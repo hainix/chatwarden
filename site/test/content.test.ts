@@ -4,7 +4,22 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FAQ, HERO, HERO_CHAT, HOW_PANELS, HUB_STEP, INSTALL_KIT, OPEN_SOURCE, PLAYER_STEP, RULES_STRIP, STEPS } from '../src/content';
+import {
+  AI_FAQ_PREPARED,
+  AI_LEVELS_AVAILABLE,
+  AI_SECTION_PREPARED,
+  buildFaq,
+  FAQ,
+  HERO,
+  HERO_CHAT,
+  HOW_PANELS,
+  HUB_STEP,
+  INSTALL_KIT,
+  OPEN_SOURCE,
+  PLAYER_STEP,
+  RULES_STRIP,
+  STEPS,
+} from '../src/content';
 
 const repo = join(__dirname, '..', '..');
 const readmes = [
@@ -217,5 +232,67 @@ describe('the words of the proposal (docs/design/2026-11-11-site-copy-rewrite.md
     expect(RULES_STRIP.body).toBe(
       'Start with relaxed, standard or strict rules. They set what counts as over the line, what the hub suggests, and the code of conduct your players read. Change any of it later in the hub.',
     );
+  });
+});
+
+// AI levels 1 and 2 (0.1.7): the wording that says they are available is written and tested, but not shown. The page still says "planned" (the tests
+// above) until the release is on npm and Moxgate has run it (design question 10); then AI_LEVELS_AVAILABLE becomes true, the "unflipped" tests below
+// are replaced by the flipped ones, and the site is deployed by hand. Until then nothing in the built page changes.
+describe('the wording for AI levels 1 and 2 is prepared and not shown (unflipped)', () => {
+  it('the switch is off, and the page shows the "planned" answer and no AI section', () => {
+    expect(AI_LEVELS_AVAILABLE).toBe(false);
+    expect(FAQ.find((f) => f.id === 'ai')?.q).toBe('Does it use AI?');
+    expect(FAQ).toEqual(buildFaq(false));
+    const shown = JSON.stringify([HERO, HERO_CHAT, HOW_PANELS, RULES_STRIP, FAQ, OPEN_SOURCE, STEPS, HUB_STEP, PLAYER_STEP]);
+    for (const line of [AI_FAQ_PREPARED.q, AI_FAQ_PREPARED.a, AI_SECTION_PREPARED.title, AI_SECTION_PREPARED.ceilingsIntro]) expect(shown).not.toContain(line);
+  });
+
+  it('the prepared FAQ answer is the agreed one, word for word', () => {
+    expect(AI_FAQ_PREPARED.id).toBe('ai');
+    expect(AI_FAQ_PREPARED.q).toBe("Does an AI read my players' chat?");
+    expect(AI_FAQ_PREPARED.a).toBe(
+      'Only if you turn it on. Levels are per game and off by default. Only the chat lines of a report, with names replaced, go to the AI provider you choose.',
+    );
+  });
+
+  it('flipped, it replaces the planned answer in place: same position, same ids, still nine questions', () => {
+    const before = buildFaq(false);
+    const after = buildFaq(true);
+    expect(after).toHaveLength(9);
+    expect(after.map((f) => f.id)).toEqual(before.map((f) => f.id));
+    expect(after.find((f) => f.id === 'ai')).toEqual(AI_FAQ_PREPARED);
+    for (const f of before) if (f.id !== 'ai') expect(after.find((g) => g.id === f.id)).toEqual(f);
+    expect(JSON.stringify(after)).not.toMatch(/isn't built yet|is planned/);
+  });
+
+  it('the prepared copy tells the truth about this release: advice only, a person decides, off by default, the ceilings in code', () => {
+    const s = AI_SECTION_PREPARED;
+    expect(s.title).toBe('Optional AI help, with a person in charge');
+    expect(s.levels.map((l) => l.name)).toEqual(['Read', 'Recommend']);
+    expect(s.lead).toMatch(/A moderator makes every decision\.$/);
+    expect(s.ceilingsIntro).toBe('The AI can advise; it cannot act. These limits are in the code, not in a setting:');
+    expect(s.ceilings).toEqual([
+      'The one-key accept never fills in a ban or anything longer than 24 hours.',
+      'A suggestion to act needs a line the reported player wrote.',
+      'Flags, mutes and report counts never reach the model.',
+      'Names, handles, IP addresses and ids are replaced or left out before anything leaves your server.',
+      'It stops at the daily spending limit you set in code.',
+    ]);
+  });
+
+  it('the prepared copy promises nothing it cannot keep: no accuracy, no replacing moderators, no acting alone, no default-on', () => {
+    const text = JSON.stringify([AI_FAQ_PREPARED, AI_SECTION_PREPARED]);
+    expect(text).not.toMatch(/accura|always right|replace(s)? your moderators|on its own|automatic|acts alone|free|no cost|private|never leaves|nothing leaves/i);
+    // Words the page does not use for the reader (the glossary rule), outside the section title that names the feature.
+    expect(JSON.stringify([AI_FAQ_PREPARED.a, AI_SECTION_PREPARED.lead, AI_SECTION_PREPARED.levels, AI_SECTION_PREPARED.ceilings])).not.toMatch(/\bladder\b|\bseats?\b|\bheadless\b|\bpreset\b/i);
+  });
+
+  it('each ceiling the copy states is stated in the READMEs too (the copy cannot drift from what the code does)', () => {
+    const hub = readFileSync(join(repo, 'packages', 'hub-react', 'README.md'), 'utf8');
+    const core = readFileSync(join(repo, 'packages', 'core', 'README.md'), 'utf8');
+    expect(hub).toMatch(/24 hours or less/);
+    expect(core).toMatch(/never writes a sanction/i);
+    expect(core + hub).toMatch(/flags, mutes|Flags, mutes/);
+    expect(core).toMatch(/dailyBudgetMicros/);
   });
 });
