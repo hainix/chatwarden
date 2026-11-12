@@ -50,7 +50,7 @@ const indexSql = (db: DatabaseSync, table: string): unknown[] =>
 const OLD_KINDS: NoticeKind[] = ['warning', 'chat', 'area', 'ban', 'report_outcome'];
 const NEW_KINDS = ['rename_required', 'appeal_upheld', 'appeal_reduced', 'appeal_revoked'] as const;
 const NOTICE_INDEXES = ['kit_notices_by_created', 'kit_notices_by_group', 'kit_notices_by_subject'];
-const APPEAL_INDEXES = ['kit_appeals_by_group', 'kit_appeals_by_rule', 'kit_appeals_by_status', 'kit_appeals_by_subject'];
+const APPEAL_INDEXES = ['kit_appeals_by_group', 'kit_appeals_by_replacement', 'kit_appeals_by_rule', 'kit_appeals_by_status', 'kit_appeals_by_subject'];
 const APPEAL_COLUMNS = [
   'id', 'subject_id', 'group_id', 'notice_id', 'report_id', 'rule', 'kind', 'statement', 'status', 'created_at', 'decided_at', 'decided_by',
   'decision_reason', 'replacement_group_id',
@@ -123,7 +123,14 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
     expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 22 }, (_, i) => i + 1));
   });
 
-  it('from an empty database creates kit_appeals with four indexes and kit_blocked_names; kit_ai_outcomes gains corrective defaulting to 0; kit_sanctions gains report_id', () => {
+  it('the replacement index is partial (only appeals that wrote a replacement)', () => {
+    const db = memDb();
+    openStore({ db }).close();
+    const sql = String(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'kit_appeals_by_replacement'").get()?.sql);
+    expect(sql).toMatch(/ON kit_appeals \(replacement_group_id\)\s+WHERE replacement_group_id IS NOT NULL/);
+  });
+
+  it('from an empty database creates kit_appeals with its indexes and kit_blocked_names; kit_ai_outcomes gains corrective defaulting to 0; kit_sanctions gains report_id', () => {
     const db = memDb();
     const store = openStore({ db });
     expect(store.schemaVersion()).toBe(22);

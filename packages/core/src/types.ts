@@ -1442,6 +1442,11 @@ export interface Store {
    * An unseen appeal outcome goes with `createdAt < unseen.appealBefore`, an unseen `rename_required` with
    * `createdAt < unseen.renameBefore`. Without `unseen` (an older caller) an unseen message notice is kept. A warning and a report
    * outcome are not affected by it.
+   *
+   * A store written outside this repo that ignores the second argument simply has no ceiling (an unseen message notice is then kept until
+   * it is seen); that is the safe direction, and the release notes say so. The same goes for the optional `closeOrphanAppeals` and for the
+   * trailing `clearStatement` argument of `closeAppealsForGroup`: a store without them keeps an orphaned appeal open and clears a moot
+   * statement on the next purge instead of at once.
    */
   purgeNotices(before: number, unseen?: { appealBefore: number; renameBefore: number }): number;
 

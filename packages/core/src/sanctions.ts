@@ -86,7 +86,9 @@ export interface SanctionInput {
   roomId?: string | null;
   /**
    * The report whose decision made this sanction: a non-empty string, kept on the subject row so a granted appeal can mark that decision
-   * reversed. Absent stores nothing (an automatic or direct sanction). Private.
+   * reversed. Absent stores nothing (an automatic or direct sanction). Private. For the kit's own decision path only, like `startsAt`: it
+   * is accepted only with `startsAtToken`, because a wrong id would corrupt the casebook; any other caller passing it gets a `RangeError`.
+   * @internal
    */
   reportId?: string;
   /**
@@ -96,7 +98,7 @@ export interface SanctionInput {
    * @internal
    */
   startsAt?: number;
-  /** @internal The key to `startsAt`: {@link APPEALS_START_TOKEN}. */
+  /** @internal The key to `startsAt` and `reportId`: {@link APPEALS_START_TOKEN}. */
   startsAtToken?: symbol;
 }
 
@@ -129,10 +131,16 @@ export function refCode(): string {
   return out;
 }
 
-/** What `validate` settles: the rule as stored text, and the trimmed gap note (null when there is none). */
+/**
+ * What `validate` settles: the rule as stored text, the trimmed gap note (null when there is none), and the two internal values it read
+ * ONCE (`start` and `reportId`, undefined when not given). The writer uses these, never a second read of the input, so what was checked
+ * is what is stored even for an object with getters or an inherited property.
+ */
 interface Checked {
   rule: string;
   gapNote: string | null;
+  start: number | undefined;
+  reportId: string | undefined;
 }
 
 /**
@@ -145,14 +153,19 @@ export function validateSanctionInput(input: SanctionInput): void {
 }
 
 function validate(input: SanctionInput, now?: number): Checked {
-  // A start time is the appeals service's alone: refused for everyone else before any other check, naming nothing of the input.
-  const start: unknown = Object.hasOwn(input, 'startsAt') ? input.startsAt : undefined;
+  // A start time and a report id are the kit's own (the appeals service and the decision): refused for everyone else before any other
+  // check, naming nothing of the input. Each is read ONCE, as an ordinary property read (an inherited value counts, so a prototype cannot
+  // smuggle one past the guard), and the writer uses this read.
+  const start: unknown = input.startsAt;
+  const report: unknown = input.reportId;
+  const token: unknown = input.startsAtToken;
+  if ((start !== undefined || report !== undefined) && token !== APPEALS_START_TOKEN) {
+    throw new RangeError('applySanction: startsAt and reportId are not accepted');
+  }
   if (start !== undefined) {
-    if (input.startsAtToken !== APPEALS_START_TOKEN) throw new RangeError('applySanction: startsAt is not accepted');
     if (typeof start !== 'number' || !Number.isSafeInteger(start) || start < 0) throw new SanctionError('applySanction: invalid start');
     if (now !== undefined && start > now) throw new SanctionError('applySanction: a start cannot be in the future');
   }
-  const report: unknown = Object.hasOwn(input, 'reportId') ? input.reportId : undefined;
   if (report !== undefined && (typeof report !== 'string' || report === '')) throw new SanctionError('applySanction: invalid report id');
   const d = input.durationMs;
   if (isRecordKind(input.kind)) {
@@ -183,10 +196,10 @@ function validate(input: SanctionInput, now?: number): Checked {
     const trimmed = typeof note === 'string' ? note.trim() : '';
     if (trimmed === '') throw new SanctionError('applySanction: a rule-gap note is required when no rule is cited');
     if (trimmed.length > GAP_NOTE_MAX) throw new SanctionError('applySanction: the rule-gap note is too long');
-    return { rule: 'uncovered', gapNote: trimmed };
+    return { rule: 'uncovered', gapNote: trimmed, start: start as number | undefined, reportId: report as string | undefined };
   }
   if (note !== undefined) throw new SanctionError('applySanction: a rule-gap note is only for an uncovered moderator sanction');
-  return { rule: String(ref), gapNote: null };
+  return { rule: String(ref), gapNote: null, start: start as number | undefined, reportId: report as string | undefined };
 }
 
 /** What {@link writeSanction} wrote: the group's handle and the rows, for the caller to hand to the index. */
@@ -205,10 +218,10 @@ function applyNow(
   now: number,
   pending: boolean,
 ): WrittenSanction {
-  const { rule, gapNote } = validate(input, now);
+  const { rule, gapNote, start: given, reportId } = validate(input, now);
   const subject = subjects.canonical(input.subject);
   // The start is "now" unless the appeals service gave the original one (validate has refused anyone else).
-  const start = input.startsAt ?? now;
+  const start = given ?? now;
   // A warning or note has no end: it ends where it starts, so it is never "still running".
   const endsAt = isRecordKind(input.kind) ? start : input.durationMs === null ? null : start + input.durationMs;
   const ipEndsAt = endsAt === null ? start + IP_MAX_MS : Math.min(endsAt, start + IP_MAX_MS);
@@ -239,7 +252,7 @@ function applyNow(
       gapNote,
       gapStatus: gapNote === null ? null : 'open',
       // Only a sanction a report decision made carries one; the key is absent otherwise, so every other row keeps its shape.
-      ...(input.reportId === undefined ? {} : { reportId: input.reportId }),
+      ...(reportId === undefined ? {} : { reportId }),
     };
     const rows: SanctionRow[] = [subjectRow];
     if (ip !== null) {
@@ -305,6 +318,10 @@ export function writeSanction(
  * when given, the index are updated before the promise is returned. Resolves
  * true when this call revoked something, false for an unknown or already
  * revoked group.
+ *
+ * An appeal still open against the group is made moot in the same transaction. `opts.clearStatement` also clears that appeal's statement
+ * (what `retention.appealStatementsMs: 0` asks for); `cw.sanctions.revoke` passes it from the retention options the kit was CREATED with,
+ * so a one-off `cw.purge(policy)` with another `appealStatementsMs` does not change it, and the text then waits for the next purge.
  */
 export function revokeSanction(
   store: Store,

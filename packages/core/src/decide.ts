@@ -6,7 +6,7 @@ import { safeWarn } from './log.js';
 import { ownLines } from './notices.js';
 import type { NoticeService } from './notices.js';
 import type { CommunityRules, RuleRef } from './rules.js';
-import { SANCTION_KINDS, SANCTION_SOURCES, validateSanctionInput, writeSanction } from './sanctions.js';
+import { APPEALS_START_TOKEN, SANCTION_KINDS, SANCTION_SOURCES, validateSanctionInput, writeSanction } from './sanctions.js';
 import type { SanctionIndex } from './sanctions.js';
 import type { SubjectIndex } from './subjects.js';
 import { CONDUCT_LEVELS } from './types.js';
@@ -494,7 +494,7 @@ export class DecisionService {
       roomId: roomId === '' ? null : roomId,
       ...(a.gapNote === undefined ? {} : { gapNote: a.gapNote }),
       // The report this decision closes: a granted appeal against the sanction marks that decision reversed.
-      ...(reportId === undefined ? {} : { reportId }),
+      ...(reportId === undefined ? {} : { reportId, startsAtToken: APPEALS_START_TOKEN }),
     };
   }
 

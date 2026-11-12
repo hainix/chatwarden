@@ -91,16 +91,55 @@ describe('reportId on a sanction', () => {
 
   it('writeSanction stores a given report id on the subject row and loadSanctionSubjectRow reads it', () => {
     const b = bare();
-    const written = writeSanction(b.store, b.subjects, b.input(b.person('k1'), { reportId: 'rep_9' }), NOW, false);
+    const written = writeSanction(b.store, b.subjects, { ...b.input(b.person('k1'), { reportId: 'rep_9' }), startsAtToken: APPEALS_START_TOKEN } as SanctionInput, NOW, false);
     expect(written.rows[0]?.reportId).toBe('rep_9');
     expect(b.store.loadSanctionSubjectRow(written.groupId)?.reportId).toBe('rep_9');
+  });
+
+  it('a public caller cannot stamp a report id: it is refused like startsAt, with or without the key being own', async () => {
+    const b = bare();
+    const s = b.person('k1');
+    expect(() => writeSanction(b.store, b.subjects, b.input(s, { reportId: 'rep_9' }), NOW, false)).toThrow(RangeError);
+    expect(() => validateSanctionInput(b.input(s, { reportId: 'rep_9' }))).toThrow(RangeError);
+    await expect(applySanction(b.store, b.subjects, b.input(s, { reportId: 'rep_9' }), NOW)).rejects.toThrow(RangeError);
+    // an inherited one too
+    const inherited = Object.assign(Object.create({ reportId: 'rep_inherited' }) as object, b.input(s)) as SanctionInput;
+    expect(() => writeSanction(b.store, b.subjects, inherited, NOW, false)).toThrow(RangeError);
+    expect(b.store.rawSanctions()).toEqual([]);
+    const w = await world();
+    const f = await w.file();
+    await expect(w.cw.sanctions.apply({ kind: 'chat', subject: f.target, includeIp: false, durationMs: H, reason: 'r', actor: 'm', source: 'moderator', automated: false, rule: 1, reportId: 'rep_x' } as never)).rejects.toThrow(RangeError);
+  });
+
+  it('an inherited startsAt cannot backdate a sanction: it is refused (RangeError) and nothing is written', async () => {
+    const b = bare();
+    const s = b.person('k1');
+    const inherited = Object.assign(Object.create({ startsAt: NOW - 6 * DAY }) as object, b.input(s)) as SanctionInput;
+    expect(() => writeSanction(b.store, b.subjects, inherited, NOW, false)).toThrow(RangeError);
+    expect(() => validateSanctionInput(inherited)).toThrow(RangeError);
+    await expect(applySanction(b.store, b.subjects, inherited, NOW)).rejects.toThrow(RangeError);
+    expect(b.store.rawSanctions()).toEqual([]);
+    // even with a token an inherited start is the one value that was validated: read once, never twice
+    let reads = 0;
+    const getter = {
+      ...b.input(s),
+      startsAtToken: APPEALS_START_TOKEN,
+      get startsAt(): number {
+        reads += 1;
+        return reads === 1 ? NOW - DAY : NOW - 100 * DAY;
+      },
+    } as SanctionInput;
+    const written = writeSanction(b.store, b.subjects, getter, NOW, false);
+    expect(written.rows[0]?.startsAt).toBe(NOW - DAY);
+    expect(reads).toBe(1);
   });
 
   it('a malformed report id is refused before anything is written', () => {
     const b = bare();
     for (const bad of ['', 5, null, {}]) {
-      expect(() => writeSanction(b.store, b.subjects, b.input(b.person('k1'), { reportId: bad as never }), NOW, false), String(bad)).toThrow(SanctionError);
-      expect(() => validateSanctionInput(b.input(b.person('k1'), { reportId: bad as never }))).toThrow(SanctionError);
+      const input = { ...b.input(b.person('k1'), { reportId: bad as never }), startsAtToken: APPEALS_START_TOKEN } as SanctionInput;
+      expect(() => writeSanction(b.store, b.subjects, input, NOW, false), String(bad)).toThrow(SanctionError);
+      expect(() => validateSanctionInput(input)).toThrow(SanctionError);
     }
     expect(b.store.rawSanctions()).toEqual([]);
   });
@@ -109,7 +148,7 @@ describe('reportId on a sanction', () => {
     const b = bare();
     const s = b.person('k1');
     b.subjects.resolve({ clientKey: 'k1', accountId: null, ipHash: 'iphash1' });
-    const written = writeSanction(b.store, b.subjects, b.input(s, { reportId: 'rep_9', includeIp: true }), NOW, false);
+    const written = writeSanction(b.store, b.subjects, { ...b.input(s, { reportId: 'rep_9', includeIp: true }), startsAtToken: APPEALS_START_TOKEN } as SanctionInput, NOW, false);
     const ip = written.rows.find((r) => r.targetType === 'ip');
     expect(ip).toBeDefined();
     expect(Object.keys(ip ?? {})).not.toContain('reportId');

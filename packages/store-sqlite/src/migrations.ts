@@ -583,6 +583,9 @@ ALTER TABLE kit_ai_reads ADD COLUMN signals_json TEXT;
     //       kit_appeals_by_subject (subject_id, created_at): the weekly cap (countAppealsBy) for a person and their aliases.
     //       kit_appeals_by_status (status, created_at, id): the open count and the inbox, oldest first, with the keyset cursor.
     //       kit_appeals_by_rule (rule, created_at): the per-rule counts the false-positive rate reads.
+    //       kit_appeals_by_replacement (replacement_group_id) WHERE NOT NULL: partial, so only the appeals that wrote a replacement are in
+    //         it. The per-rule sanction count leaves out a group an appeal wrote as a replacement (a reduction is one sanction, not two),
+    //         which is one probe per sanction here instead of a scan of the appeals.
     //   kit_sanctions.report_id is the report whose decision made a sanction, so a granted appeal can mark that decision reversed. Set by
     //     `decide` from 0.1.9. The backfill links a moderator sanction row to the decision that holds its group id in `result_json`.
     //     Group ids are random and long, so a false match is not a concern, and at kit scale one UPDATE is the same trade migration 17
@@ -617,6 +620,7 @@ CREATE UNIQUE INDEX kit_appeals_by_group   ON kit_appeals (group_id);
 CREATE INDEX        kit_appeals_by_subject ON kit_appeals (subject_id, created_at);
 CREATE INDEX        kit_appeals_by_status  ON kit_appeals (status, created_at, id);
 CREATE INDEX        kit_appeals_by_rule    ON kit_appeals (rule, created_at);
+CREATE INDEX        kit_appeals_by_replacement ON kit_appeals (replacement_group_id) WHERE replacement_group_id IS NOT NULL;
 
 ALTER TABLE kit_sanctions ADD COLUMN report_id TEXT;
 UPDATE kit_sanctions SET report_id = (

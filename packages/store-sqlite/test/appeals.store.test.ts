@@ -219,6 +219,8 @@ describe('the plans migration 22 gives', () => {
     for (let i = 0; i < 200; i++) store.insertSanctionGroup([sanction({ startsAt: NOW - i * DAY })]);
     const plan = planOf(db, record(db, () => store.countSanctionsByRule(NOW - 30 * DAY)), /COUNT\(DISTINCT group_id\)/i);
     expect(plan.join('\n')).toMatch(/USING (COVERING )?INDEX kit_sanctions_by_start/);
+    // the replacement exclusion is an index probe per sanction group, not a scan of the appeals
+    expect(plan.join('\n')).toMatch(/INDEX kit_appeals_by_replacement/);
     const moot = planOf(db, record(db, () => store.closeAppealsForGroup('g1', 'x', NOW)), /UPDATE kit_appeals SET status = 'moot'/i);
     expect(moot.join('\n')).toMatch(/INDEX kit_appeals_by_group/);
   });
