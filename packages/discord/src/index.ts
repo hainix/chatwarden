@@ -1,4 +1,4 @@
-export const VERSION = '0.1.4';
+export const VERSION = '0.1.5';
 export { discordFeed, QUEUE_MAX } from './feed.js';
 export type { DiscordFeed, DiscordFeedOptions, FeedKit } from './feed.js';
 export { parseWebhookUrl } from './forum.js';

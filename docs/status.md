@@ -29,7 +29,7 @@ Updated 2026-11-12. The full roadmap and the reasoning behind it: [design/2026-1
 - **Later phases:** K4b init CLI, K5 Coop adapter, K7 term corpus service.
 
 ## 0.1.5
-Ready, not published (the owner tags it: see [RELEASING.md](../RELEASING.md)). Faster report triage, all additive (a patch), on branch `triage-speed`:
+Version prepared (`npm run version` run, peer floors raised by hand, `check:pack` and the smoke test green), not merged or published (the owner tags it: see [RELEASING.md](../RELEASING.md)). Faster report triage, all additive (a patch), on branch `triage-speed`:
 - **Dismiss.** `reason` is optional for a `no_action` decision with no actions; the kit stores the standard reason `No action needed`
   (`NO_ACTION_DEFAULT_REASON`). The hub's "Nothing wrong here" sends none. Every quick action moves on to the next case; Undo still works
   after the move and `U` undoes the newest waiting decision.

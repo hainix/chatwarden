@@ -74,7 +74,7 @@ The three are public packages with provenance, like the others (`publishConfig.a
    The `peerDependencies` ranges stay where they are through a compatible release: `.changeset/config.json` sets
    `onlyUpdatePeerDependentsWhenOutOfRange`, so changesets only raises a peer range when the new version falls outside it.
    `scripts/manifests.test.ts` fails CI if a range moves unexpectedly (it holds each package's floor: `^0.1.0` for `core`, `matcher`,
-   `profanity` and `discord`, `^0.1.2` for the rest). The exact `devDependencies` pins and the tiny-chat versions do move with the
+   `profanity` and `discord`, `^0.1.2` for `player-react`, and `^0.1.5` for `store-memory`, `store-sqlite`, `http` and `hub-react`, with `hub-react`'s peer on `http` and `hub-element`'s on `hub-react` at `^0.1.5` too). The exact `devDependencies` pins and the tiny-chat versions do move with the
    release.
 
    ### When a peer floor must rise

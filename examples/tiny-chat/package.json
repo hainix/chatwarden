@@ -12,14 +12,14 @@
     "start": "npm run build --workspace @chatwarden/hub-element && tsc -b . && node dist/server.js"
   },
   "dependencies": {
-    "@chatwarden/core": "0.1.4",
-    "@chatwarden/discord": "0.1.4",
-    "@chatwarden/http": "0.1.4",
-    "@chatwarden/hub-element": "0.1.4",
-    "@chatwarden/matcher": "0.1.4",
-    "@chatwarden/profanity": "0.1.4",
-    "@chatwarden/store-memory": "0.1.4",
-    "@chatwarden/store-sqlite": "0.1.4",
+    "@chatwarden/core": "0.1.5",
+    "@chatwarden/discord": "0.1.5",
+    "@chatwarden/http": "0.1.5",
+    "@chatwarden/hub-element": "0.1.5",
+    "@chatwarden/matcher": "0.1.5",
+    "@chatwarden/profanity": "0.1.5",
+    "@chatwarden/store-memory": "0.1.5",
+    "@chatwarden/store-sqlite": "0.1.5",
     "express": "^5.1.0",
     "ws": "^8.18.3"
   },
