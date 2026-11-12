@@ -4,7 +4,7 @@
 and one calm teal "warden" that does the protecting. It should read as a game studio's site and still be credible to an engineer.
 
 The one memorable thing is the hero chat HUD: lines arrive, and when an invented slur is sent it is struck through and a
-**REFUSED!** stamp slams onto it. Everything else stays quiet and disciplined so that moment lands.
+**Blocked** stamp slams onto it. Everything else stays quiet and disciplined so that moment lands.
 
 ## Palette tokens (CSS variables in `src/styles.css`)
 
@@ -31,7 +31,7 @@ stores the choice in `localStorage` (guarded, the page works without it).
 - Body: **Atkinson Hyperlegible Next** (SIL OFL), self-hosted variable woff2, Latin subset, 34 KB. Chosen for legibility.
 - Code: the system monospace stack. No download.
 
-Scale: hero `clamp(2.35rem, 1.1rem + 5.2vw, 4.6rem)`, h2 `clamp(1.7rem, 1.1rem + 2.6vw, 2.7rem)`, h3 `1.1875rem`
+Scale: hero `clamp(2rem, 1.2rem + 2.6vw, 3.1rem)` (the headline is four short lines, and MODERATION must fit the column unbroken), h2 `clamp(1.7rem, 1.1rem + 2.6vw, 2.7rem)`, h3 `1.1875rem`
 (bold body face), body `1.0625rem` / 1.6, small `0.9375rem`. Body lines are capped near 34 to 44em. Headings are
 sentence-case content set in a display face, never tracked-out caps labels above a heading.
 
@@ -41,8 +41,8 @@ Licences for both fonts sit in `public/fonts/OFL-*.txt`.
 
 - Chunky 2px borders, 6px radius (10px for big "screens"), hard offset shadows instead of soft blur: arcade-panel feel.
 - HUD corner ticks on cards (teal L-brackets) that grow on hover.
-- Dashed borders mean "not here yet" (coming-soon pills, AI levels 1 to 4, the demo slot). Solid teal means live.
-- Numbers appear only where the content is a sequence: the three steps and AI levels 0 to 4.
+- Dashed borders mean "not here yet" or "optional" (the optional step's pill, the demo slot). Solid teal means live.
+- Numbers appear only where the content is a sequence: the five steps of "Add it to your game".
 - Alignment: left-aligned throughout, one 1120px column, alternating plain and tinted bands for rhythm.
 
 ## Motion
@@ -77,9 +77,7 @@ so they work on both backgrounds.
 - Every delight is cheap, optional and reduced-motion safe (the base style is always the finished look):
   - the hero grid lights up teal under a mouse (`--mx` / `--my` on `.hero`, set only for mouse and pen, never under
     reduced motion, eased by a registered `@property`);
-  - feature cards: the icon tile pops on hover ("level up");
-  - the AI-levels HUD meter (four unlit pips for levels 1 to 4) runs one pip scan when it scrolls into view (`useSeen`); it states only what is true,
-    "AI levels shipped: 0 of 4";
+  - the "How it works" cards: the icon tile pops on hover ("level up");
   - the konami code (up up down down left right left right B A) turns the warden gold and says so in a polite live region;
     typing it again turns it back (`GoldWarden`, `data-gold` on `<html>`). It ignores form fields.
 - Nothing fakes data: no counters, no activity feeds.
@@ -102,17 +100,20 @@ so they work on both backgrounds.
 
 ## Honesty rules the copy keeps
 
-No customer logos (only the true "Built for Moxgate, now being adopted"; flip it to "Used by Moxgate" once Moxgate is deployed on the kit), no invented numbers, install commands and code come from the READMEs
-(`test/content.test.ts`), AI levels 1 to 4 are marked coming soon, the moderator hub card says what ships (the team workbench, Simple
-mode, editable steps and reporting, four ways to adopt (a drop-in, pieces, hooks and headless, or `<chatwarden-hub>` with one script tag)), and "free forever, no SLA" is stated plainly. Demo words are the invented
-terms from `@chatwarden/matcher/fixtures` only.
+No customer logos and no mention of Moxgate (cut until it ships on the kit, then "Used in Moxgate" with a link), no invented numbers,
+install commands and code come from the READMEs (`test/content.test.ts`). The page promises nothing that is not built: it moderates
+the chat a game already has (no chat box), slur blocking needs the game's own word list, spaced letters are not caught, the server side is
+Node 22.13 or newer, and AI is one FAQ line ("planned, it isn't built yet"; the AI levels section comes back when level 1 ships). The
+words are `docs/design/2026-11-11-site-copy-rewrite.md` section 3, with the glossary rule of its section 2 (no "ladder", "refused",
+"seats", "staff routes", "headless", "preset" outside code; checked in `test/content.test.ts`). Demo words are the invented terms from
+`@chatwarden/matcher/fixtures` only.
 
 ## The interactive demo (`src/demo/`, its own chunk)
 
 Two "screens" side by side: the game (a lobby with You, Ada and Bo, a composer, a report button on every other player's line, and a
 button per player who has a notice waiting) and the moderator pane, which is the REAL hub (`@chatwarden/hub-react`, Simple mode),
-drawn in the page theme. The REFUSED! stamp is the hero's, reused. The tour tooltip is a gold quest bubble with progress pips, so it
-never reads as part of a screen; it points at the control with a static gold ring (a soft ripple only when motion is allowed).
+drawn in the page theme. The Blocked stamp is the hero's, reused. The tour card is a gold strip docked above the panes (a bar at the bottom of a phone window) with progress pips, so it
+never reads as part of a screen; it points at the control with a static gold ring (a soft ripple only when motion is allowed). It never moves.
 
 - The game side talks to the kit through `DemoEngine` (`engine.ts`), shaped like `@chatwarden/core` (`chat.accept`,
   `reports.submit`, `reports.addDetail`, `notices.*`). `kitEngine.ts` binds the REAL kit behind it (core, the in-memory store, the
@@ -125,14 +126,15 @@ never reads as part of a screen; it points at the control with a static gold rin
 - The player side: player-react's `ReportDialog` (the kit's own reporting settings, one tap by default) and `NoticeQueue`, through
   `playerTransport.ts`, a small local transport that answers `GET /notices`, `POST /notices/:id/ack` and `GET /record` from the kit
   for one seat (the kit has no player report route, and the player routes do not run in a browser). The notice opens only when the
-  visitor presses "See what Bo sees": it never interrupts the hub.
-- The tour has seven steps (report, the case in the queue, open it in Simple, apply the suggestion, the player's notice, then two
-  optional: the Detailed switch and Steps and ladder). It points at hub controls by role and accessible name (`hubTarget.ts`).
-- "Show me the code" shows lines copied verbatim from the READMEs (`test/demoCode.test.ts` checks every line).
-- Layout: side by side from 1152px (the game is the narrow column, the hub gets about 720px); below that one pane at a time, a
-  sticky Game / Moderator switcher below the site header, and the tour moves to the pane a step is about. The hub stacks itself under
+  visitor presses "See Bo's screen": it never interrupts the hub.
+- The tour has four steps (report Bo's message, open the report in the hub, take the suggested action, see what Bo sees). It points at hub
+  controls by role and accessible name (`hubTarget.ts`), and the ring is frozen on one of Bo's lines when step 1 starts.
+- "Show the code" shows lines copied verbatim from the READMEs (`test/demoCode.test.ts` checks every line).
+- Layout: side by side from 1152px (the game is the narrow column of 360 to 400px, the hub gets the rest); below that one pane at a time, a
+  sticky Game / Moderator switcher below the site header, and the tour says which tab to open (the tab pulses) instead of switching for the visitor. The hub stacks itself under
   820px; from 1200px `demo.css` keeps its case and record stacked inside the pane instead of three panes.
-- Scripted players say a line every 4 to 6 seconds; they wait while the tab is hidden, while you type, while the report
-  dialog is open and while paused. Nothing is stored: a reload is a fresh lobby.
+- The room is finite and reactive: the opening plays once, Ada or Bo answers a line you send two seconds later, Ada thanks the
+  moderators after a decision, and a timed out Bo is silent. Pause (in the game pane's header) holds the answers. Nothing is stored: a
+  reload is a fresh lobby.
 - Lazy: `DemoSlot` loads the chunk when the section is within 200px of the viewport (or on pointer or focus). It is the heavy chunk now
   (the hub and the player components: about 178 KB JS and 15 KB CSS gzip), so a phone's first screen does not fetch it.
