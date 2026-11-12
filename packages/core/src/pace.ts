@@ -34,7 +34,11 @@ export interface ResolvedPace {
 export const DUPLICATE_MIN_CHARS = 3;
 /** How many of a player's most recent line hashes a repeat is compared with. */
 export const DUPLICATE_RECENT = 8;
-/** The most (room, player) states the limiter holds; the oldest go. */
+/**
+ * The most (room, player) states the limiter holds; the oldest go. A state is small (a time, a digest or two) but a burst of 100 lines
+ * keeps up to 100 times and 8 digests per player, roughly 1.5 KB: at the cap with the largest settings that is about 70 MB, so a game
+ * that sets `burst.lines` high and has very many players in one process should budget for it.
+ */
 export const PACE_KEYS_MAX = 50_000;
 
 const SLOW_MODE_RANGE = [500, 600_000] as const;
@@ -83,7 +87,17 @@ function checkBurst(v: unknown, path: string): { lines: number; windowMs: number
   return { lines: whole(lines, BURST_LINES_RANGE, `${path}.lines`), windowMs: whole(windowMs, BURST_WINDOW_RANGE, `${path}.windowMs`) };
 }
 
-/** Check the shape and ranges of `input` and return what is set: a key is present only when it was given a value (`null` included). */
+/**
+ * Check the shape and ranges of `input` and return what is set, as a new object that shares nothing with it: a key is present only
+ * when it was given a value (`null` included), and each value was read from `input` exactly once, so what was validated is what is
+ * returned even for an object with getters. Throws ProfileError like {@link resolvePace}. For a caller that must keep the override a
+ * room was given (`cw.rooms.setPace`).
+ * @experimental
+ */
+export function checkPace(input: PaceSettings, path = 'pace'): PaceSettings {
+  return checked(input, path);
+}
+
 function checked(input: unknown, path: string): PaceSettings {
   if (!isPlain(input)) throw new ProfileError(path, 'must be an object');
   for (const k of Object.keys(input)) if (!PACE_KEYS.includes(k)) throw new ProfileError(`${path}.${k}`, 'is not a known setting');

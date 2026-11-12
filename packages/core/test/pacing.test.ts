@@ -450,7 +450,7 @@ describe('signalFlood', () => {
     expect(refusal(pacer.check(a, 'three')).signalFlood).toBe(false);
   });
 
-  it('a clock that stepped back does not silence a later flood for ever', () => {
+  it('a clock that stepped back does not lock the player out: the stale burst is no burst, and a new one is flagged once', () => {
     const { clock, pacer, key, send } = setup({ burst });
     clock.t = T0 + 1_000_000;
     send('line one');
@@ -459,7 +459,149 @@ describe('signalFlood', () => {
     clock.t += 1;
     expect(refusal(pacer.check(key, 'three')).signalFlood).toBe(true);
     clock.t = T0; // back by 1 000 002 ms
-    expect(refusal(pacer.check(key, 'three')).signalFlood).toBe(true);
+    expect(pacer.check(key, 'three').ok).toBe(true);
+    expect(send('three').ok).toBe(true);
+    expect(send('four').ok).toBe(true);
+    const again = refusal(pacer.check(key, 'five'));
+    expect(again.reason).toBe('flood');
+    expect(again.signalFlood).toBe(true);
+  });
+});
+
+describe('a clock that steps backwards never locks a player out (review I1)', () => {
+  const HOUR = 3_600_000;
+
+  it('slow_mode: after a 1 h step back the next line is accepted, and slow mode counts from it', () => {
+    const { clock, pacer, key, send } = setup({ slowModeMs: 2000 });
+    clock.t = T0 + 5 * HOUR;
+    expect(send('before the step').ok).toBe(true);
+    clock.t -= HOUR;
+    expect(pacer.check(key, 'after the step').ok).toBe(true);
+    expect(send('after the step').ok).toBe(true);
+    clock.t += 500;
+    expect(pacer.check(key, 'next line')).toEqual({ ok: false, reason: 'slow_mode', retryAfterMs: 1500, signalFlood: false });
+    clock.t += 1500;
+    expect(pacer.check(key, 'next line').ok).toBe(true);
+  });
+
+  it('slow_mode: a step back of a few seconds does not add seconds to the wait either', () => {
+    const { clock, pacer, key, send } = setup({ slowModeMs: 2000 });
+    send('first');
+    clock.t -= 3000;
+    expect(pacer.check(key, 'second').ok).toBe(true);
+  });
+
+  it('flood: stamps after now are ignored; the first commit after the step starts clean', () => {
+    const { clock, pacer, key, send } = setup({ burst: { lines: 3, windowMs: 10_000 } });
+    clock.t = T0 + 5 * HOUR;
+    for (let i = 0; i < 3; i += 1) {
+      expect(send(`before ${i}`).ok).toBe(true);
+      clock.t += 1;
+    }
+    expect(refusal(pacer.check(key, 'refused')).reason).toBe('flood');
+    clock.t -= HOUR;
+    expect(pacer.check(key, 'after the step').ok).toBe(true);
+    // Three lines are free again, the fourth is the flood: the three stale stamps do not count.
+    for (let i = 0; i < 3; i += 1) {
+      expect(send(`after ${i}`).ok, `after ${i}`).toBe(true);
+      clock.t += 1;
+    }
+    const v = refusal(pacer.check(key, 'one too many'));
+    expect(v.reason).toBe('flood');
+    expect(v.retryAfterMs).toBeGreaterThan(9990);
+    expect(v.retryAfterMs).toBeLessThanOrEqual(10_000);
+  });
+
+  it('duplicate: a digest stamped after now is stale; the repeat is accepted, then guarded from the new time', () => {
+    const { clock, pacer, key, send } = setup({ duplicateWindowMs: 30_000 });
+    clock.t = T0 + 5 * HOUR;
+    expect(send('same words again').ok).toBe(true);
+    clock.t -= HOUR;
+    expect(pacer.check(key, 'same words again').ok).toBe(true);
+    expect(send('same words again').ok).toBe(true);
+    clock.t += 1000;
+    expect(pacer.check(key, 'same words again')).toEqual({ ok: false, reason: 'duplicate', retryAfterMs: 29_000, signalFlood: false });
+  });
+
+  it('commit drops what is stamped after now (a later check sees only clean state)', () => {
+    const { clock, pacer, key, send } = setup({ slowModeMs: 1000, burst: { lines: 5, windowMs: 60_000 }, duplicateWindowMs: 60_000 });
+    clock.t = T0 + 5 * HOUR;
+    send('future line');
+    clock.t = T0;
+    send('present line');
+    const state = (__pacerState(pacer) as Array<{ stamps: number[]; recent: Array<{ at: number }>; lastAt: number }>)[0]!;
+    expect(state.lastAt).toBe(T0);
+    expect(state.stamps).toEqual([T0]);
+    expect(state.recent.map((e) => e.at)).toEqual([T0]);
+    void key;
+  });
+
+  it('control: ordinary monotonic time behaves exactly as before', () => {
+    const { clock, pacer, key, send } = setup({ slowModeMs: 2000, burst: { lines: 3, windowMs: 10_000 }, duplicateWindowMs: 15_000 });
+    send('line a');
+    clock.t += 1999;
+    expect(refusal(pacer.check(key, 'line b')).reason).toBe('slow_mode');
+    clock.t += 1;
+    expect(send('line b').ok).toBe(true);
+    clock.t += 2000;
+    expect(send('line c').ok).toBe(true);
+    clock.t += 2000;
+    expect(refusal(pacer.check(key, 'line a')).reason).toBe('flood');
+    clock.t = T0 + 10_000;
+    expect(refusal(pacer.check(key, 'line c')).reason).toBe('duplicate');
+  });
+
+  it('control: the same millisecond is not "in the future"', () => {
+    const { pacer, key, send } = setup({ slowModeMs: 2000 });
+    send('first');
+    expect(refusal(pacer.check(key, 'second')).retryAfterMs).toBe(2000);
+  });
+});
+
+describe('variation selectors and emoji (review I2)', () => {
+  const dup = { duplicateWindowMs: 60_000 };
+
+  it('variation selectors are dropped, so text and emoji spellings of one line are one line', () => {
+    expect(normalizeForRepeat('a\uFE0F')).toBe('a');
+    expect(normalizeForRepeat('1\uFE0F\u20E3')).toBe(normalizeForRepeat('1\u20E3'));
+    expect(normalizeForRepeat('\uFE0F\uFE0F')).toBe('');
+  });
+
+  it('❤️❤️❤️ and ☺️☺️☺️ are not repeats of each other, nor of anything: they have no letters', () => {
+    const { clock, pacer, key, send } = setup(dup);
+    expect(send('❤️❤️❤️').ok).toBe(true);
+    expect(pacer.check(key, '☺️☺️☺️').ok).toBe(true);
+    expect(send('☺️☺️☺️').ok).toBe(true);
+    clock.t += 1;
+    expect(pacer.check(key, '❤️❤️❤️').ok).toBe(true);
+    expect(pacer.check(key, '☺️☺️☺️').ok).toBe(true);
+  });
+
+  it('keycap digits: 1️⃣1️⃣1️⃣ and 2️⃣2️⃣2️⃣ differ, a real repeat of either is a repeat (also without the selector)', () => {
+    const { pacer, key, send } = setup(dup);
+    expect(send('1️⃣1️⃣1️⃣').ok).toBe(true);
+    expect(pacer.check(key, '2️⃣2️⃣2️⃣').ok).toBe(true);
+    expect(refusal(pacer.check(key, '1️⃣1️⃣1️⃣')).reason).toBe('duplicate');
+    expect(refusal(pacer.check(key, '1\u20E31\u20E31\u20E3')).reason).toBe('duplicate');
+    expect(send('2️⃣2️⃣2️⃣').ok).toBe(true);
+    expect(refusal(pacer.check(key, '2️⃣2️⃣2️⃣')).reason).toBe('duplicate');
+  });
+
+  it('Devanagari and Thai lines one vowel sign apart are different lines; the same line is a repeat', () => {
+    const { pacer, key, send } = setup(dup);
+    send('किताब');
+    expect(pacer.check(key, 'कीताब').ok).toBe(true);
+    expect(refusal(pacer.check(key, 'किताब')).reason).toBe('duplicate');
+    send('กินข้าว');
+    expect(pacer.check(key, 'กันข้าว').ok).toBe(true);
+    expect(refusal(pacer.check(key, 'กินข้าว!!')).reason).toBe('duplicate');
+  });
+
+  it('a real repeat with an emoji tail is still a repeat; an emoji-only difference is not a different line', () => {
+    const { pacer, key, send } = setup(dup);
+    send('gg well played ❤️');
+    expect(refusal(pacer.check(key, 'GG well played ☺️')).reason).toBe('duplicate');
+    expect(pacer.check(key, 'gg well played again').ok).toBe(true);
   });
 });
 

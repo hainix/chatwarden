@@ -4,7 +4,7 @@ import type { MuteService } from './mutes.js';
 import type { NoticeService } from './notices.js';
 import type { PaceReason, ResolvedPace } from './pace.js';
 import { createPacer } from './pacing.js';
-import type { Pacer } from './pacing.js';
+import type { PaceKey, Pacer } from './pacing.js';
 import type { Limits } from './limits.js';
 import { slidingWindow } from './rateLimit.js';
 import type { SlidingWindow } from './rateLimit.js';
@@ -150,8 +150,8 @@ export interface ChatServiceDeps {
   limits?: { maxLength: Limits['chatMaxLength']; rate: Limits['chatRate'] };
   /**
    * Pacing: slow mode, a burst limit and repeat refusal. `settings` is read on every line (so a saved change applies at once) and
-   * answers every check off for a room that is not paced, which costs nothing and allocates nothing. `canonical` folds a merged
-   * subject into the person the state is kept under. `onFlood` is told once per burst window when a known person trips the burst
+   * answers every check off for a room that is not paced: such a line builds no key and makes no `canonical` call, and keeps no state.
+   * `canonical` folds a merged subject into the person the state is kept under. `onFlood` is told once per burst window when a known person trips the burst
    * limit; a throw from it is logged by class and absorbed. Without `pace` nothing is paced.
    * @experimental
    */
@@ -161,6 +161,13 @@ export interface ChatServiceDeps {
     onFlood?: (info: { roomId: string; subject: SubjectId }) => void;
   };
 }
+
+/** What pacing says about a line: a refusal, or the key to commit under; neither when nothing is paced. */
+interface Paced {
+  refusal: ChatResult | null;
+  key: PaceKey | null;
+}
+const NOT_PACED: Paced = Object.freeze({ refusal: null, key: null });
 
 const errName = (err: unknown): string => (err instanceof Error ? err.name : typeof err);
 
@@ -373,17 +380,14 @@ export class ChatService {
     if (trimmed.length > this.maxLength) return refuse('length');
 
     // Pacing asks before `rate` so the specific, retryable message wins over the blunt one; it only reads, so a refusal spends nothing.
-    const pacer = this.pacer;
-    const paceKey = pacer === undefined ? undefined : { roomId, who: subject === null ? `seat:${seatId}` : this.canonicalOf(subject) };
-    if (pacer !== undefined && paceKey !== undefined) {
-      const paced = this.paceCheck(pacer, paceKey, trimmed, subject);
-      if (paced !== null) return paced;
-    }
+    // With every check off it builds nothing (no key, no canonical lookup) and there is nothing to commit.
+    const paced = this.pacer === undefined ? NOT_PACED : this.paceCheck(this.pacer, roomId, seatId, subject, trimmed);
+    if (paced.refusal !== null) return paced.refusal;
     // Spent even when the line is then blocked, so a flood of slurs is throttled like any flood and cannot
     // probe the term list faster than ordinary chat.
     if (!this.rate.check(rateKey)) return refuse('rate');
     // Past `rate` the line has happened as far as pacing is concerned (a blocked or profane line has spent its slot too).
-    if (pacer !== undefined && paceKey !== undefined) this.paceCommit(pacer, paceKey, trimmed);
+    if (this.pacer !== undefined && paced.key !== null) this.paceCommit(this.pacer, paced.key, trimmed);
 
     const audience = opts?.audience === undefined ? null : [...opts.audience];
 
@@ -435,27 +439,26 @@ export class ChatService {
     return { deliver: { lineId, text: delivered } };
   }
 
-  private canonicalOf(subject: SubjectId): SubjectId {
-    return this.pace?.canonical(subject) ?? subject;
-  }
-
   /**
-   * The pacing verdict as a refusal, or null to carry on. Fails open: a settings function or a pacer that throws must not silence
-   * chat, so the line goes on and the class is logged (at most once a minute).
+   * Ask pacing about a line: a refusal to return, or the key to commit under once `rate` passes. Everything that can throw is in the
+   * fence (the settings, the canonical lookup, the pacer), and it fails open: a broken pacer must not silence chat, so the line goes on
+   * with nothing to commit and the class is logged (at most once a minute).
    */
-  private paceCheck(pacer: Pacer, key: { roomId: string; who: string }, text: string, subject: SubjectId | null): ChatResult | null {
+  private paceCheck(pacer: Pacer, roomId: string, seatId: string, subject: SubjectId | null, text: string): Paced {
     try {
+      if (!pacer.active(roomId)) return NOT_PACED;
+      const key: PaceKey = { roomId, who: subject === null ? `seat:${seatId}` : (this.pace?.canonical(subject) ?? subject) };
       const verdict = pacer.check(key, text);
-      if (verdict.ok) return null;
-      if (verdict.reason === 'flood' && verdict.signalFlood && subject !== null) this.tellFlood(key.roomId, key.who);
-      return refuse(verdict.reason, { retryAfterMs: verdict.retryAfterMs });
+      if (verdict.ok) return { refusal: null, key };
+      if (verdict.reason === 'flood' && verdict.signalFlood && subject !== null) this.tellFlood(roomId, key.who);
+      return { refusal: refuse(verdict.reason, { retryAfterMs: verdict.retryAfterMs }), key: null };
     } catch (err) {
       this.paceWarn.warn('chatwarden.pace_failed', { error: errorClass(err) });
-      return null;
+      return NOT_PACED;
     }
   }
 
-  private paceCommit(pacer: Pacer, key: { roomId: string; who: string }, text: string): void {
+  private paceCommit(pacer: Pacer, key: PaceKey, text: string): void {
     try {
       pacer.commit(key, text);
     } catch (err) {

@@ -627,7 +627,8 @@ describe('onFlood', () => {
     e.say('p1', 'two line');
     e.clock.t += 1000;
     expect(refusal(e.say('p1', 'three line')).reason).toBe('flood');
-    await new Promise((r) => setTimeout(r, 0));
+    await Promise.resolve();
+    await Promise.resolve();
     expect(e.logs).toEqual([{ event: 'chatwarden.pace_failed', detail: { error: 'RangeError' } }]);
   });
 
@@ -639,6 +640,55 @@ describe('onFlood', () => {
     e.say('p1', 'two line');
     e.clock.t += 1000;
     expect(refusal(e.say('p1', 'three line')).reason).toBe('flood');
+  });
+});
+
+describe('what an off kit does per line (review M1, M2)', () => {
+  it('with every check off, canonical is never asked and no key is built', () => {
+    let asked = 0;
+    const e = setup({
+      pace: OFF,
+      canonical: (s) => {
+        asked += 1;
+        return s;
+      },
+    });
+    e.sit('p1', who('k1'));
+    e.sit('g1', null);
+    for (let i = 0; i < 5; i += 1) {
+      e.clock.t += 6 * SEC;
+      expect(reasonOf(e.say('p1', `line ${i}`))).toBe('deliver');
+      expect(reasonOf(e.say('g1', `guest ${i}`))).toBe('deliver');
+    }
+    expect(asked).toBe(0);
+  });
+
+  it('with a check on, canonical is asked once for a line (check and commit share the key)', () => {
+    let asked = 0;
+    const e = setup({
+      pace: { ...OFF, slowModeMs: 1000 },
+      canonical: (s) => {
+        asked += 1;
+        return s;
+      },
+    });
+    e.sit('p1', who('k1'));
+    expect(reasonOf(e.say('p1', 'one'))).toBe('deliver');
+    expect(asked).toBe(1);
+  });
+
+  it('a canonical that throws lets the line through, logged by class only (it is inside the fence)', () => {
+    const e = setup({
+      pace: { ...OFF, slowModeMs: 1000 },
+      canonical: () => {
+        throw new TypeError('s_secret_subject');
+      },
+    });
+    e.sit('p1', who('k1'));
+    expect(reasonOf(e.say('p1', 'one'))).toBe('deliver');
+    expect(reasonOf(e.say('p1', 'two'))).toBe('deliver');
+    expect(e.logs).toEqual([{ event: 'chatwarden.pace_failed', detail: { error: 'TypeError' } }]);
+    expect(JSON.stringify(e.logs)).not.toContain('s_secret');
   });
 });
 
@@ -860,6 +910,64 @@ const refusalOf = (r: ChatResult) => {
   if (!('refuse' in r)) throw new Error('expected a refusal');
   return r.refuse;
 };
+
+describe('the merged pace of a room with an override (review M3)', () => {
+  it('is one stable object until something changes, and is not rebuilt per line', async () => {
+    const { cw, say, clock } = await world({ pace: { slowModeMs: 1000 } });
+    cw.rooms.setPace(ROOM, { duplicateWindowMs: 5000 });
+    const first = cw.rooms.pace(ROOM);
+    expect(cw.rooms.pace(ROOM)).toBe(first);
+    for (let i = 0; i < 4; i += 1) {
+      clock.t += 6000;
+      say('p1', `line ${i}`);
+    }
+    expect(cw.rooms.pace(ROOM)).toBe(first);
+    expect(first).toEqual({ slowModeMs: 1000, burst: null, duplicateWindowMs: 5000 });
+  });
+
+  it('follows the stored layer, setPace and close', async () => {
+    const { cw } = await world({ pace: { slowModeMs: 1000 } });
+    cw.rooms.setPace(ROOM, { duplicateWindowMs: 5000 });
+    const first = cw.rooms.pace(ROOM);
+    cw.policy.save({ pace: { slowModeMs: 2000 } }, { version: 0, ...OWNER });
+    const second = cw.rooms.pace(ROOM);
+    expect(second).not.toBe(first);
+    expect(second).toEqual({ slowModeMs: 2000, burst: null, duplicateWindowMs: 5000 });
+    expect(cw.rooms.pace(ROOM)).toBe(second);
+    cw.rooms.setPace(ROOM, { duplicateWindowMs: 7000 });
+    expect(cw.rooms.pace(ROOM)).toEqual({ slowModeMs: 2000, burst: null, duplicateWindowMs: 7000 });
+    cw.rooms.close(ROOM);
+    expect(cw.rooms.pace(ROOM)).toEqual({ slowModeMs: 2000, burst: null, duplicateWindowMs: null });
+  });
+
+  it('a room without an override returns the profile\'s own pace object', async () => {
+    const { cw } = await world({ pace: { slowModeMs: 1000 } });
+    expect(cw.rooms.pace(ROOM)).toBe(cw.profile.pace);
+  });
+});
+
+describe('setPace snapshots what it is given (review M4)', () => {
+  it('reads each field once: a getter that changes its answer cannot slip past the validation', async () => {
+    const { cw } = await world();
+    let reads = 0;
+    const tricky = {
+      get slowModeMs(): number {
+        reads += 1;
+        return reads === 1 ? 3000 : 1;
+      },
+    };
+    cw.rooms.setPace(ROOM, tricky);
+    expect(cw.rooms.pace(ROOM).slowModeMs).toBe(3000);
+    expect(reads).toBe(1);
+  });
+
+  it('a second call replaces the first override, it does not merge into it', async () => {
+    const { cw } = await world();
+    cw.rooms.setPace(ROOM, { slowModeMs: 3000 });
+    cw.rooms.setPace(ROOM, { duplicateWindowMs: 5000 });
+    expect(cw.rooms.pace(ROOM)).toEqual({ slowModeMs: null, burst: null, duplicateWindowMs: 5000 });
+  });
+});
 
 describe('through the facade', () => {
   it('flood works with no onFlood wired (Task 10 supplies it) and guests are paced by seat', async () => {

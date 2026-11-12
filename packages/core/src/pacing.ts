@@ -32,6 +32,8 @@ export interface Pacer {
   check(key: PaceKey, line: string): PaceVerdict;
   /** Record that a line was accepted: it now counts toward the next check. A no-op while every check is off. */
   commit(key: PaceKey, line: string): void;
+  /** Is any check on for this room right now? When not, `check` and `commit` do nothing and the caller need not build a key. */
+  active(roomId: string): boolean;
   /** Forget every key of a room in one step. */
   dropRoom(roomId: string): void;
   /** Keys held. A diagnostic: it stays at or under {@link PACE_KEYS_MAX}. */
@@ -51,10 +53,12 @@ interface KeyState {
 
 /**
  * NFKC, lower-case, then only letters, digits and the combining marks that belong to them: what "the same line again" means. Marks stay
- * because in many scripts (Devanagari, Thai) the vowel signs are marks, and without them different words look alike. Never stored.
+ * because in many scripts (Devanagari, Thai) the vowel signs are marks, and without them different words look alike. Variation
+ * selectors (U+FE00 to U+FE0F, which pick text or emoji presentation) are marks too but carry no meaning of their own, so they go
+ * first: `1\uFE0F\u20E3` and `1\u20E3` are one line, and an emoji line leaves nothing to count. Never stored.
  */
 export function normalizeForRepeat(text: string): string {
-  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\p{M}]/gu, '');
+  return text.normalize('NFKC').toLowerCase().replace(/[\uFE00-\uFE0F]/g, '').replace(/[^\p{L}\p{N}\p{M}]/gu, '');
 }
 
 /** Letters and digits in a normalized line: marks do not count toward the minimum length, so a line of marks alone is never a repeat. */
@@ -127,15 +131,25 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
   };
 
   const digest = (normalized: string): string => sha256Hex(normalized).slice(0, DIGEST_CHARS);
+  /**
+   * The digest `check` made of the line it just accepted, so `commit` of the same line does not hash it again. It holds that one line
+   * only from the check to the commit that follows it in the same call (and is replaced or cleared by the next call): the keyed state
+   * below never holds text.
+   */
+  let memo: { line: string; h: string | null } | null = null;
   /** A normalized line long enough to be called a repeat, as its digest; null for one that is not. */
   const repeatHash = (line: string): string | null => {
+    if (memo !== null && memo.line === line) return memo.h;
     const normalized = normalizeForRepeat(line);
     return baseChars(normalized) < DUPLICATE_MIN_CHARS ? null : digest(normalized);
   };
 
   const pacer: Pacer = {
+    active: (roomId) => !allOff(settings(roomId)),
+
     check(key, line) {
       const now = clock.now();
+      memo = null;
       if (++calls % SWEEP_EVERY === 0) sweep(now);
       const pace = settings(key.roomId);
       if (allOff(pace)) return OK;
@@ -143,12 +157,14 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
       if (state === undefined) return OK;
 
       const { slowModeMs, burst, duplicateWindowMs } = pace;
-      if (slowModeMs !== null && now - state.lastAt < slowModeMs) {
+      // State stamped after `now` (the clock stepped back) is stale, not "in the future": it never refuses, so a step back cannot lock
+      // a player out. The refusal clamp below is then a guard only.
+      if (slowModeMs !== null && state.lastAt <= now && now - state.lastAt < slowModeMs) {
         return refusal('slow_mode', state.lastAt + slowModeMs - now, slowModeMs, false);
       }
 
       if (burst !== null) {
-        const live = state.stamps.filter((t) => now - t < burst.windowMs).sort((a, b) => a - b);
+        const live = state.stamps.filter((t) => t <= now && now - t < burst.windowMs).sort((a, b) => a - b);
         if (live.length >= burst.lines) {
           // Enough must age out to leave room for one more: with exactly `lines` live that is the oldest, with more (a burst
           // narrowed after the lines were sent) it is the one that leaves `lines - 1`.
@@ -162,9 +178,10 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
       if (duplicateWindowMs !== null && state.recent.length > 0) {
         const h = repeatHash(line);
         if (h !== null) {
-          const seen = state.recent.find((e) => e.h === h && now - e.at < duplicateWindowMs);
+          const seen = state.recent.find((e) => e.h === h && e.at <= now && now - e.at < duplicateWindowMs);
           if (seen !== undefined) return refusal('duplicate', seen.at + duplicateWindowMs - now, duplicateWindowMs, false);
-        }
+          memo = { line, h };
+        } else memo = { line, h: null };
       }
       return OK;
     },
@@ -189,15 +206,16 @@ export function createPacer(opts: { clock: Clock; settings: (roomId: string) => 
 
       const { burst, duplicateWindowMs } = pace;
       if (burst === null) state.stamps = [];
-      else state.stamps = [...state.stamps.filter((t) => now - t < burst.windowMs), now].slice(-burst.lines);
+      else state.stamps = [...state.stamps.filter((t) => t <= now && now - t < burst.windowMs), now].slice(-burst.lines);
 
       if (duplicateWindowMs === null) state.recent = [];
       else {
         const h = repeatHash(line);
-        const kept = state.recent.filter((e) => e.h !== h && now - e.at < duplicateWindowMs);
+        const kept = state.recent.filter((e) => e.h !== h && e.at <= now && now - e.at < duplicateWindowMs);
         if (h !== null) kept.push({ h, at: now });
         state.recent = kept.slice(-DUPLICATE_RECENT);
       }
+      memo = null;
     },
 
     dropRoom(roomId) {
