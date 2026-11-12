@@ -80,6 +80,8 @@ async function bundle() {
     all: outputs,
     /** The source files the entry itself carries. */
     entryInputs: Object.keys(entryMeta.inputs),
+    /** The source files of everything a first load fetches: the entry and every chunk it imports statically (shared code moves between them). */
+    eagerInputs: [...new Set(meta.filter(([k]) => eagerNames.has(k.split('/').pop() ?? k)).flatMap(([, o]) => Object.keys(o.inputs)))],
     /** The source file each on-demand chunk starts from (each dynamic `import()`). */
     chunkRoots: meta.flatMap(([, o]) => (o.entryPoint !== undefined && !o.entryPoint.endsWith('src/index.ts') ? [o.entryPoint] : [])),
     inputs: Object.keys(result.metafile.inputs),
@@ -137,7 +139,7 @@ describe('bundle size', () => {
   });
 
   it('with the AI off the first load carries none of the AI: every piece of it is a chunk loaded when the hub learns the AI is on', async () => {
-    const { entryInputs, chunkRoots } = await bundle();
+    const { entryInputs, eagerInputs, chunkRoots } = await bundle();
     // The strip, the pieces drawn inside the always-present parts (chip, tick, decision bar header, Simple card), the AI's part of the case, the
     // queue's ranking and the pre-fill's code are chunks of their own ...
     for (const file of ['case/AiStrip.tsx', 'case/AiParts.tsx', 'ai/core.ts']) {
@@ -145,9 +147,11 @@ describe('bundle size', () => {
       expect(chunkRoots.filter((i) => i.endsWith(`src/${file}`)), `${file} has no chunk`).toHaveLength(1);
     }
     // ... and no module of the AI rides in the first load: not the menu, the case controller, the ranking, the pre-fill, the hide state, the words, the
-    // shortcut sheet's level, nor the AI settings screen. Only `ai/load.ts` (the fetch) and `case/AiRead.tsx` (the slot that mounts the strip) are the entry's.
-    const inEntry = entryInputs.filter((i) => /src\/(ai|case\/Ai|screens\/AiSettings)/.test(i));
-    expect(inEntry.map((i) => i.slice(i.indexOf('src/')))).toEqual(['src/ai/load.ts', 'src/case/AiRead.tsx']);
+    // shortcut sheet's level, nor the AI settings screen. Only `ai/load.ts` (the fetch) and `case/AiRead.tsx` (the slot that mounts the strip) are the first
+    // load's. The first load is the entry AND the chunks it imports statically: code can sit in either, so both are walked.
+    for (const i of entryInputs) expect(eagerInputs, `the walk lost ${i}`).toContain(i);
+    const inFirstLoad = eagerInputs.filter((i) => /src\/(ai|case\/Ai|screens\/AiSettings)/.test(i));
+    expect(inFirstLoad.map((i) => i.slice(i.indexOf('src/'))).sort()).toEqual(['src/ai/load.ts', 'src/case/AiRead.tsx']);
   });
 
   it('keeps the settings and admin screens out of the entry: each is a chunk of its own', async () => {

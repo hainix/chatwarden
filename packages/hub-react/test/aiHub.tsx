@@ -82,7 +82,17 @@ export const noStrip = (): HTMLElement | null => screen.queryByRole('region', { 
 /** Waits for a number of GET /reports/:id requests (the page, and the polls that follow it). */
 export const pageReads = (w: HubWorld, id: string): number => w.sent.filter((r) => r.method === 'GET' && r.path === `/reports/${id}`).length;
 
-export const settle = (ms = 40): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Lets what is already on its way land, for a test that then asserts something did NOT happen: the AI's code is fetched (from the module cache once
+ * any test in the file has), then a fixed number of turns of the event loop run inside `act`. It counts turns of work, not milliseconds, so it does not
+ * sleep for a wall-clock time.
+ */
+export async function settle(): Promise<void> {
+  await Promise.all([import('../src/case/AiParts.js'), import('../src/case/AiStrip.js'), import('../src/ai/core.js')]);
+  await act(async () => {
+    for (let i = 0; i < 12; i += 1) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 export async function untilGone(el: () => HTMLElement | null): Promise<void> {
   await waitFor(() => expect(el()).toBeNull());

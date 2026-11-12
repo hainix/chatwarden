@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { HubProvider } from '../src/provider.js';
 import { usePolicy } from '../src/policyHooks.js';
 import { rulesCss } from './css.js';
+import { settle } from './aiHub.js';
 import { renderHub } from './render.js';
 import { hubWorld } from './world.js';
 import type { HubWorld, WorldOptions } from './world.js';
@@ -200,7 +201,7 @@ describe('who can see and who can save', () => {
     // A role the server does not let read the settings has no Settings, and so no AI section to reach.
     const closed = await hubWorld({ role: 'moderator', permissions: { 'policy.read': 'owner' }, ai: { level: 0 } });
     renderHub(closed, { path: '/settings/ai' });
-    await settleOnce();
+    await settle();
     expect(screen.queryByRole('link', { name: 'AI' })).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
   });
@@ -213,8 +214,6 @@ describe('who can see and who can save', () => {
     await screen.findByRole('heading', { level: 2, name: 'AI' });
   });
 });
-
-const settleOnce = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 80));
 
 describe('the status line', () => {
   it('the status line for working, paused and unavailable', async () => {

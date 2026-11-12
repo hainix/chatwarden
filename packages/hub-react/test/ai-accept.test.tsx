@@ -109,7 +109,7 @@ describe('A accepts', () => {
     await waitFor(() => expect(heldNotice()).not.toBeNull());
     await flushHold();
     await waitFor(() => expect(decides(w)).toHaveLength(1));
-    await settle(30);
+    await settle();
     expect(decides(w)).toHaveLength(1);
   });
 
@@ -119,7 +119,7 @@ describe('A accepts', () => {
     press('a', { ctrlKey: true });
     press('a', { metaKey: true });
     press('a', { altKey: true });
-    await settle(30);
+    await settle();
     expect(heldNotice()).toBeNull();
     press('A', { shiftKey: true });
     await waitFor(() => expect(heldNotice()).not.toBeNull());
@@ -134,7 +134,7 @@ describe('A accepts', () => {
     await user.keyboard('a');
     await user.keyboard('e');
     expect((box as HTMLTextAreaElement).value.endsWith('ae')).toBe(true);
-    await settle(30);
+    await settle();
     expect(heldNotice()).toBeNull();
     expect(decides(w)).toHaveLength(0);
   });
@@ -143,7 +143,7 @@ describe('A accepts', () => {
     const { w } = await aiCase({ level: 2, stay: true });
     const bar = await aiBar();
     press('a');
-    await settle(30);
+    await settle();
     expect(heldNotice()).toBeNull();
     fireEvent.click(accept(bar), { detail: 1 });
     await waitFor(() => expect(heldNotice()).not.toBeNull());
@@ -155,7 +155,7 @@ describe('A accepts', () => {
     await aiCase({ level: 2, stay: true, shortcuts: false });
     await aiBar();
     press('a');
-    await settle(30);
+    await settle();
     expect(heldNotice()).toBeNull();
   });
 });
@@ -172,7 +172,7 @@ describe('when A is disabled it says why', () => {
     expect(accept(bar)).toHaveAttribute('aria-disabled', 'true');
     press('a');
     fireEvent.click(accept(bar), { detail: 1 });
-    await settle(40);
+    await settle();
     expect(decides(w)).toHaveLength(0);
     expect(heldNotice()).toBeNull();
   });
@@ -187,11 +187,11 @@ describe('when A is disabled it says why', () => {
     expect(within(bar).getByText('This read is out of date. A new one is on its way.')).toBeInTheDocument();
     expect(accept(bar)).toHaveAttribute('aria-disabled', 'true');
     press('a');
-    await settle(40);
+    await settle();
     expect(heldNotice()).toBeNull();
     expect(decides(w)).toHaveLength(0);
     // The server queued the new read (the follow-up did); the hub did not ask for one itself.
-    await settle(60);
+    await settle();
     expect(w.adapter?.callCount).toBe(2);
     expect(w.sent.filter((r) => r.method === 'POST' && r.path.endsWith('/ai/read'))).toHaveLength(0);
   });
@@ -205,7 +205,7 @@ describe('when A is disabled it says why', () => {
     await open(w, f.id, { stay: true });
     await aiBar();
     press('a');
-    await settle(40);
+    await settle();
     expect(heldNotice()).toBeNull();
   });
 
@@ -216,7 +216,7 @@ describe('when A is disabled it says why', () => {
     const bar = await aiBar();
     expect(within(bar).getByText('Your role cannot apply this step.')).toBeInTheDocument();
     press('a');
-    await settle(40);
+    await settle();
     expect(heldNotice()).toBeNull();
     expect(decides(w)).toHaveLength(0);
   });
@@ -232,7 +232,7 @@ describe('when A is disabled it says why', () => {
     await open(w, f.id, { stay: true });
     await aiBar();
     press('a');
-    await settle(40);
+    await settle();
     expect(heldNotice()).toBeNull();
     expect(decides(w)).toHaveLength(0);
   });
@@ -244,7 +244,7 @@ describe('when A is disabled it says why', () => {
     // Focus leaves the field (a key typed in a field is typing).
     (document.activeElement as HTMLElement).blur();
     press('a');
-    await settle(40);
+    await settle();
     expect(heldNotice()).toBeNull();
     expect(decides(w)).toHaveLength(0);
   });
@@ -390,7 +390,7 @@ describe('the act guard', () => {
     const root = document.querySelector('.cw-hub') as HTMLElement;
     root.setAttribute(MOVING_ATTRIBUTE, '');
     press('a');
-    await settle(40);
+    await settle();
     expect(heldNotice()).toBeNull();
     root.removeAttribute(MOVING_ATTRIBUTE);
     press('a');
@@ -404,7 +404,7 @@ describe('the act guard', () => {
     const root = document.querySelector('.cw-hub') as HTMLElement;
     root.setAttribute('data-cw-window', '');
     press('a');
-    await settle(40);
+    await settle();
     expect(heldNotice()).toBeNull();
     root.removeAttribute('data-cw-window');
   });
@@ -413,7 +413,7 @@ describe('the act guard', () => {
     await quick();
     await aiBar();
     await act(async () => void press('a', { repeat: true }));
-    await settle(30);
+    await settle();
     expect(heldNotice()).toBeNull();
   });
 });

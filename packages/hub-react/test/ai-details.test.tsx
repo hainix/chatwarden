@@ -117,7 +117,7 @@ describe('Read again', () => {
     await user.click(again);
     await user.click(again);
     await waitFor(() => expect(readPosts(w)).toBe(1));
-    await settle(30);
+    await settle();
     expect(readPosts(w)).toBe(1);
     // Pending: the strip says so (a polite status), and the button waits.
     expect(within(await strip()).getByText('Reading again')).toBeInTheDocument();

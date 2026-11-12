@@ -30,13 +30,13 @@ describe('A and the cooldown', () => {
     const { w, f } = await aiWorld({ level: 2 });
     await open(w, f.id, { stay: true });
     await aiBar();
-    await settle(30);
+    await settle();
     press('a');
-    await settle(30);
+    await settle();
     expect(held()).toBeNull();
     advanceGuardTime(QUICK_ACT_COOLDOWN_MS - 1);
     press('a');
-    await settle(30);
+    await settle();
     expect(held()).toBeNull();
     advanceGuardTime(1);
     press('a');
@@ -51,7 +51,7 @@ describe('A and the cooldown', () => {
     const bar = await aiBar();
     const accept = within(bar).getByRole('button', { name: /^Accept AI suggestion/ });
     fireEvent.click(accept, { detail: 1 });
-    await settle(30);
+    await settle();
     expect(held()).toBeNull();
     advanceGuardTime(QUICK_ACT_COOLDOWN_MS + 1);
     await waitFor(() => expect(accept).toBeTruthy());

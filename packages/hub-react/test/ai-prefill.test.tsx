@@ -89,7 +89,7 @@ describe('level 1 and the cases where the AI has nothing to fill', () => {
     expect(noAiBar()).toBeNull();
     cleanup();
     await open(w, f.id);
-    await settle(60);
+    await settle();
     expect(noAiBar()).toBeNull();
     expect(verdict('Fair').checked).toBe(false);
   });

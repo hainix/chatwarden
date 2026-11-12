@@ -1,6 +1,7 @@
 // The AI's code is loaded when the hub learns the AI is on (a queue that holds a read, a case that has one or expects one), not with the hub:
-// an install with the AI off pays for none of it. `ensureAi()` fetches it once and keeps it; a failed fetch leaves the hub as it is without the
-// AI (the ladder's pre-fill, the longest-wait order): these are optional extras, not screens. No React here: the headless queue uses it too.
+// an install with the AI off pays for none of it. `ensureAi()` fetches it and keeps it; a failed fetch leaves the hub as it is without the
+// AI (the ladder's pre-fill, the longest-wait order) and is not remembered, so the next look (a refresh of the queue) tries again. These are
+// optional extras, not screens. No React here: the headless queue uses it too.
 
 type Core = typeof import('./core.js');
 
@@ -10,29 +11,17 @@ export const aiLoaders: { core: () => Promise<Core> } = {
 };
 
 let core: Core | null = null;
-let failed = false;
 let pending: Promise<Core | null> | null = null;
 
-/** The AI's code if it is here, else null. Never fetches. */
-export const aiCore = (): Core | null => core;
-/** Whether the fetch was tried and failed. */
-export const aiFailed = (): boolean => failed;
-
-/** Fetches the AI's code (once) and resolves with it, or null when it cannot be fetched. */
+/** Fetches the AI's code (once it has arrived, never again) and resolves with it, or null when it cannot be fetched (the next call tries again). */
 export function ensureAi(): Promise<Core | null> {
+  if (core !== null) return Promise.resolve(core);
   pending ??= aiLoaders.core().then(
     (m) => (core = m),
     () => {
-      failed = true;
+      pending = null;
       return null;
     },
   );
   return pending;
-}
-
-/** Forgets what was fetched (tests). */
-export function resetAiCore(): void {
-  core = null;
-  failed = false;
-  pending = null;
 }

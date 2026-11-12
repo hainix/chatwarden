@@ -100,7 +100,7 @@ describe('the Simple mode card', () => {
     expect(card().querySelectorAll('.cw-scard-actions .cw-btn--primary')).toHaveLength(1);
     expect(within(card()).getByText(/never fills a ban, an area ban or a step over 24 hours/)).toBeInTheDocument();
     press('a');
-    await settle(40);
+    await settle();
     expect(held()).toBeNull();
   });
 
@@ -158,7 +158,7 @@ describe('the shortcut sheet', () => {
       const { user } = await aiCase({ level, mode: 'detailed', stay: true });
       const dialog = await sheet(user);
       // The rows are in; let the policy the sheet reads come.
-      await settle(60);
+      await settle();
       expect(within(dialog).queryByText('Accept the AI suggestion') !== null, `level ${level}`).toBe(shown);
       expect(within(dialog).queryByText('Edit the AI suggestion') !== null, `level ${level}`).toBe(shown);
     }
@@ -197,7 +197,7 @@ describe('the bar around it', () => {
     const markup = async (o: Parameters<typeof aiCase>[0]) => {
       cleanup();
       const { container } = await aiCase({ stay: true, ...o });
-      await settle(60);
+      await settle();
       const dock = container.querySelector('.cw-dock') as HTMLElement;
       // Ids come from the order things were drawn in; times and the case's own ids are not what this is about.
       return dock.outerHTML.replace(/_r_[0-9a-z]+_/g, '_id_').replace(/report [\w-]+/g, 'report');
@@ -211,7 +211,7 @@ describe('the bar around it', () => {
       const w = await hubWorld({ actor: 'ann@example.test', ai: { level: 0 } });
       const f = await w.fileRich({});
       const { container } = await open(w, f.id, { stay: true });
-      await settle(60);
+      await settle();
       return (container.querySelector('.cw-dock') as HTMLElement).outerHTML.replace(/_r_[0-9a-z]+_/g, '_id_').replace(/report [\w-]+/g, 'report');
     })();
     expect(zero).toBe(off);

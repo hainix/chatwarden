@@ -19,7 +19,7 @@ describe('the strip: nothing when there is nothing to say', () => {
   it('renders nothing at level 0 or with no read', async () => {
     // Level 0: no adapter, no setting. Nothing is drawn and nothing is asked for.
     const { container, w, f } = await aiCase({ level: 0 });
-    await settle(60);
+    await settle();
     expect(noStrip()).toBeNull();
     expect(container.querySelector('.cw-ai')).toBeNull();
     expect(pageReads(w, f.id)).toBe(1);
@@ -29,13 +29,13 @@ describe('the strip: nothing when there is nothing to say', () => {
     const { w, f } = await aiWorld({ level: 1 });
     await w.client.decide(f.id, { verdict: 'no_action', actions: [] });
     const { container } = await openPlain(w, f.id);
-    await settle(60);
+    await settle();
     expect(container.querySelector('.cw-ai')).toBeNull();
   });
 
   it('the Simple mode card shows no strip at level 0 either', async () => {
     const { container } = await aiCase({ level: 0, mode: 'simple' });
-    await settle(60);
+    await settle();
     expect(container.querySelector('.cw-ai')).toBeNull();
   });
 });
@@ -258,7 +258,7 @@ describe('the lines the AI cited', () => {
 
   it('with no read there is no tick', async () => {
     await aiCase({ level: 0 });
-    await settle(40);
+    await settle();
     expect(document.querySelector('.cw-aitick')).toBeNull();
   });
 });
