@@ -26,8 +26,8 @@ Found writing the copy rewrite (`docs/design/2026-11-11-site-copy-rewrite.md`, b
   demo, or frame the hub pane light.
 - **"In about 15 minutes".** Someone times a fresh install against `examples/tiny-chat`; if it is under 15 minutes, add it to the
   "Add it to your game" lead. Until then the page makes no time claim. (Ruling 5.)
-- **Chat box.** A `<ChatBox>` in player-react and a room broadcaster in http, so the page can promise chat. The headline changes only
-  after it ships. (Ruling 1.)
+- **Chat box on the site.** The chat box is built (see the status page), so the page can promise chat. The headline changes only after the
+  release that holds it is on npm; the site demo adopts `<ChatBox>` in its own PR after that. (Ruling 1.)
 - **AI section.** It comes back as a section when level 1 ships (the work is on branch `ai-levels`); today it is one FAQ answer. (Ruling 4.)
 - **Moxgate mention.** Cut until the Moxgate adoption ships, then "Used in Moxgate" with a link and a screenshot. (Ruling 8.)
 - **Non-Node servers.** A chat-check HTTP route would give other server languages a ready path; the FAQ says plainly that there is none.

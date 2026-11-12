@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { render, screen } from '@testing-library/react';
+import { createElement } from 'react';
 import { describe, expect, it } from 'vitest';
+import * as chatEntry from '../src/chat/index.js';
 import * as player from '../src/index.js';
 
 // The README's way in: install, the easy path, mounting on a server, signing players in, the CSP, then the reference. Its snippets are
@@ -121,5 +124,61 @@ describe('reporting in the README is one step', () => {
     expect(quick).toContain('Also mute this player');
     expect(quick).toContain('reason, note, yours, Report, Cancel');
     expect(readme.split(String.fromCharCode(10)).find((l) => l.startsWith('| `ReportDialog` |'))).toContain('`extra`');
+  });
+});
+
+describe('the chat box', () => {
+  const chat = flat(section('The chat box'));
+
+  it('is a lazy subpath that the main entry does not carry, with chat.css loaded beside styles.css', () => {
+    expect(chat).toContain('@chatwarden/player-react/chat');
+    expect(chat).toContain("import '@chatwarden/player-react/chat.css'");
+    expect(chat).toMatch(/the main entry and its size are untouched/);
+    expect(chat).toContain("await import('@chatwarden/player-react/chat')");
+  });
+
+  it('says plainly that a host translating chat spreads enChat, and that the box falls back to English', () => {
+    expect(chat).toContain('spreads `enChat` too');
+    expect(chat).toContain("createT({ ...en, ...enChat, ...de }, 'de')");
+    expect(chat).toMatch(/falls back to the English chat words/);
+    expect(Object.keys(chatEntry)).toContain('enChat');
+  });
+
+  it('states the accessibility behaviour as designed: every line announced politely, and one tab stop per line', () => {
+    expect(chat).toMatch(/every line that arrives is announced politely, your own included/);
+    expect(chat).toMatch(/there is no setting for it in this release/);
+    expect(chat).toMatch(/one tab stop per line from another player/);
+    expect(chat).toMatch(/the log is not live until the first snapshot has rendered/i);
+  });
+
+  it('documents the three chat tokens with the defaults chat.css declares', () => {
+    const css = readFileSync(join(root, 'packages', 'player-react', 'src', 'chat.css'), 'utf8');
+    for (const [token, value] of [['chat-height', '20rem'], ['chat-gap', '0.25rem'], ['chat-name-width', 'auto']] as const) {
+      expect(css).toContain(`--cwd-${token}: ${value};`);
+      expect(readme).toContain(`| \`--cw-${token}\` | \`${value}\` |`);
+    }
+  });
+
+  it('the README is true about the reconnect and the stream errors', () => {
+    expect(chat).toMatch(/`401` and `403` are not retried/);
+    expect(chat).toMatch(/`not_found` and `unsupported`/);
+    expect(chat).toMatch(/silent for 2\.5 heartbeats/);
+  });
+
+  it('the mount example renders: the box over sseTransport, a hello from a server, a line, the input', async () => {
+    const hello = { type: 'hello', v: 1, epoch: 'e', room: 'lobby', you: { name: 'snerp' }, maxLength: 200, heartbeatMs: 20_000, summary: 'Be kind.', restriction: null, lines: [{ id: '1', at: 1, name: 'tarvo', text: 'anyone for a round?' }], muted: [] };
+    const body = new ReadableStream<Uint8Array>({
+      start: (c) => {
+        c.enqueue(new TextEncoder().encode(`event: hello\ndata: ${JSON.stringify(hello)}\n\n`));
+      },
+    });
+    const fakeFetch = (() => Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } }))) as unknown as typeof fetch;
+    // The README's lines: a transport made once, a room, the box.
+    const transport = chatEntry.sseTransport({ baseUrl: '/chat', credentials: 'same-origin', fetch: fakeFetch });
+    const view = render(createElement(chatEntry.ChatBox, { transport, room: 'lobby' }));
+    expect(await screen.findByText('anyone for a round?')).toBeInTheDocument();
+    expect(screen.getByRole('log', { name: 'Chat' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+    view.unmount();
   });
 });

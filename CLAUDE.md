@@ -19,10 +19,10 @@ before changing an area.
 | `core` | The engine: chat path, matcher hook, sanctions, ladder, reports, notices, policy, documents. No runtime deps. |
 | `store-memory`, `store-sqlite` | Storage. Both pass the shared contract suite in `test/contract/`. |
 | `matcher`, `profanity` | Term matching and the profanity filter. |
-| `http` | Staff (`/admin`, browser-safe subpath `@chatwarden/http/admin`) and player routes, webhooks. |
+| `http` | Staff (`/admin`, browser-safe subpath `@chatwarden/http/admin`) and player routes, webhooks, and the chat: a room broadcaster and four routes (browser-safe subpath `@chatwarden/http/chat`). |
 | `discord` | Discord forum feed. |
 | `hub-react` | The moderator hub. Simple and Detailed views; `<Hub>`, pieces under `HubProvider`, hooks, and a framework-agnostic controller at `/headless`. |
-| `player-react` | Player UI: notices, my record, rules page, report dialog, restricted-chat line. |
+| `player-react` | Player UI: notices, my record, rules page, report dialog, restricted-chat line, and `<ChatBox>` at the lazy subpath `@chatwarden/player-react/chat` (its words are `enChat`, apart from `en`, to keep the main entry's size). |
 | `hub-element` | `<chatwarden-hub>`: the whole hub in one script tag (bundles React; ships THIRD_PARTY_NOTICES.txt). |
 
 `site/` is chatwarden.dev (Vite + React, live demo on the real kit and hub). `examples/tiny-chat` is the runnable example.
