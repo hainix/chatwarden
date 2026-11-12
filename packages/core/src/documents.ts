@@ -53,7 +53,7 @@ export interface ModeratorGuideOptions {
 export interface PolicyJson {
   version: 1;
   /** With `durations` and `customDuration` filled in, so a profile written for 0.1.1 reads back with the two new keys. */
-  profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals'>;
+  profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names'>;
   /** Every rule, retired ones included, in number order. */
   rules: CommunityRule[];
 }
@@ -705,11 +705,14 @@ export function agentBrief(policy: DocumentPolicy): string {
  */
 export function policyJson(policy: DocumentPolicy): PolicyJson {
   const snapshot = checkPolicy(policy);
-  // The AI settings, the pace settings and the signal settings are runtime switches, not policy text: the document tools never carry them.
-  const profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals'> & { ai?: unknown; pace?: unknown; signals?: unknown } = structuredClone(snapshot.profile);
+  // The AI, pace, signal, appeal and name settings are runtime switches, not policy text: the document tools never carry them.
+  const profile: Omit<ResolvedProfile, 'ai' | 'pace' | 'signals' | 'appeals' | 'names'> & { ai?: unknown; pace?: unknown; signals?: unknown; appeals?: unknown; names?: unknown } =
+    structuredClone(snapshot.profile);
   delete profile.ai;
   delete profile.pace;
   delete profile.signals;
+  delete profile.appeals;
+  delete profile.names;
   return { version: 1, profile, rules: snapshot.rules.all() };
 }
 

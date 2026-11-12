@@ -78,7 +78,7 @@ describe('pace in the profile', () => {
 
 describe('pace in the layer', () => {
   it('POLICY_SECTIONS appends pace after ai', () => {
-    expect([...POLICY_SECTIONS].slice(-3, -1)).toEqual(['ai', 'pace']);
+    expect([...POLICY_SECTIONS].slice(-5, -3)).toEqual(['ai', 'pace']);
   });
 
   it('a layer pace beats the code profile, field by field', () => {

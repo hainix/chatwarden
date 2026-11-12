@@ -21,6 +21,10 @@ import type { ReportingSettings, ResolvedReporting } from './reporting.js';
 import { deepFreeze } from './freeze.js';
 import { mergePace, resolvePace } from './pace.js';
 import type { PaceSettings, ResolvedPace } from './pace.js';
+import { resolveAppeals } from './appeals.js';
+import type { AppealSettings, ResolvedAppeals } from './appeals.js';
+import { resolveNames } from './names.js';
+import type { NameSettings, ResolvedNames } from './names.js';
 import { checkSignalFeeds, resolveSignals } from './signals.js';
 import type { ResolvedSignals, SignalFeeds, SignalSettings } from './signals.js';
 import { ProfileError } from './profileError.js';
@@ -170,6 +174,18 @@ export interface ModerationProfile extends ModerationProfileBase {
    * @experimental
    */
   signals?: SignalSettings;
+  /**
+   * Appeals: whether players may appeal a sanction from its notice, how many a week, and whether the moderator who made the original
+   * decision may decide its appeal. Off until set, so a profile without `appeals` changes nothing. See {@link AppealSettings}.
+   * @experimental
+   */
+  appeals?: AppealSettings;
+  /**
+   * Names: a profanity pass on the name check, kept evidence of blocked names, required renames, and masking a flagged name in the
+   * hub (on by default; it changes only what the hub shows). See {@link NameSettings}.
+   * @experimental
+   */
+  names?: NameSettings;
 }
 
 /**
@@ -217,6 +233,10 @@ export interface ResolvedProfile extends ModerationProfileBase {
   pace: ResolvedPace;
   /** The signal settings in force: the declared kinds merged over the built-ins, the guards filled in, the feeds as given. @experimental */
   signals: ResolvedSignals;
+  /** The appeal settings in force, every field filled in. @experimental */
+  appeals: ResolvedAppeals;
+  /** The name settings in force, every field filled in. @experimental */
+  names: ResolvedNames;
 }
 
 /** @deprecated The same as {@link ModerationProfile}, which now has the two fields optional. */
@@ -256,12 +276,14 @@ const TOP_KEYS = [
   'ai',
   'pace',
   'signals',
+  'appeals',
+  'names',
   'levels',
   'guidelines',
 ] as const;
 /** Top-level keys that may be left out (the kit falls back to its defaults). */
 const RULE_LIST_KEYS: readonly string[] = ['areaRules', 'severeRules'];
-const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals'];
+const OPTIONAL_TOP_KEYS: readonly string[] = [...RULE_LIST_KEYS, 'durations', 'customDuration', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names'];
 const AI_KEYS = ['level', 'learn', 'dailyCalls'] as const;
 /** The most rule numbers `areaRules` or `severeRules` may list. */
 export const MAX_RULE_LIST = 100;
@@ -543,6 +565,8 @@ export function validateProfile(value: unknown): asserts value is ModerationProf
   if (Object.hasOwn(p, 'ai')) validateAI(p['ai'], 'profile.ai');
   if (Object.hasOwn(p, 'pace')) resolvePace(p['pace'] as PaceSettings, 'profile.pace');
   if (Object.hasOwn(p, 'signals')) resolveSignals(p['signals'] as SignalSettings, 'profile.signals');
+  if (Object.hasOwn(p, 'appeals')) resolveAppeals(p['appeals'] as AppealSettings, 'profile.appeals');
+  if (Object.hasOwn(p, 'names')) resolveNames(p['names'] as NameSettings, 'profile.names');
 
   const prof = obj(p['profanity'], 'profile.profanity', PROFANITY_KEYS);
   oneOf(prof['mode'], 'profile.profanity.mode', PROFANITY_MODES, "must be 'allow', 'star' or 'refuse'");
@@ -657,6 +681,8 @@ function finalize(value: unknown): ResolvedProfile {
   if (isPlain(copy)) {
     setOwn(copy, 'pace', resolvePace(copy['pace'] as PaceSettings | undefined, 'profile.pace'));
     setOwn(copy, 'signals', resolveSignals(copy['signals'] as SignalSettings | undefined, 'profile.signals'));
+    setOwn(copy, 'appeals', resolveAppeals(copy['appeals'] as AppealSettings | undefined, 'profile.appeals'));
+    setOwn(copy, 'names', resolveNames(copy['names'] as NameSettings | undefined, 'profile.names'));
   }
   return deepFreeze(copy as ResolvedProfile);
 }
@@ -674,6 +700,8 @@ export function withDurationDefaults(p: ModerationProfile): ResolvedProfile {
     ai: { level: 0, learn: true, dailyCalls: AI_DAILY_CALLS_DEFAULT, ...p.ai },
     pace: resolvePace(p.pace),
     signals: resolveSignals(p.signals),
+    appeals: resolveAppeals(p.appeals),
+    names: resolveNames(p.names),
   };
 }
 
@@ -994,7 +1022,7 @@ export function defineProfile(p: ModerationProfile): ResolvedProfile {
  * The parts of a profile the hub may edit, and the order they are listed in. Everything else (identity, the written
  * levels, the AI context, profanity handling) stays in code: changing profanity means rebuilding the filter.
  */
-export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals'] as const;
+export const POLICY_SECTIONS = ['durations', 'customDuration', 'ladder', 'firstOffense', 'repeat', 'areaRules', 'severeRules', 'guidelines', 'reporting', 'ai', 'pace', 'signals', 'appeals', 'names'] as const;
 export type PolicySection = (typeof POLICY_SECTIONS)[number];
 
 /** One ladder cell as the editor sends it: the label may be left out and is then generated ("Restrict chat 6 hours"). */
@@ -1040,6 +1068,10 @@ export interface PolicyLayer {
    * profile's wholesale, like every other section: a feed left out is off. A feed names declared kinds only. @experimental
    */
   signals?: { feeds?: SignalFeeds };
+  /** The appeal settings: `enabled`, `perPlayerPerWeek` (1 to 20) and `allowSelfReview`. Each is optional and merges onto the profile's. @experimental */
+  appeals?: AppealSettings;
+  /** The name settings: `profanity`, `keepBlocked`, `renames` and `maskInHub`. Each is optional and merges onto the profile's. @experimental */
+  names?: NameSettings;
 }
 
 /** The longest outcome text a layer may set on a guideline tier. */
