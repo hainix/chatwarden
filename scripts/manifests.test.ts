@@ -278,9 +278,18 @@ describe('player-react', () => {
     expect(player().peerDependencies?.['@chatwarden/core']).toBe(NEW_KIT_RANGE);
     expect(player().dependencies).toBeUndefined();
   });
-  it('ships the stylesheet as ./styles.css and lists only it under sideEffects', () => {
+  it('ships the stylesheets as ./styles.css and ./chat.css and lists only those two under sideEffects', () => {
     expect(player().exports?.['./styles.css']).toBe('./src/styles.css');
-    expect(player().sideEffects).toEqual(['./src/styles.css']);
+    expect(player().exports?.['./chat.css']).toBe('./src/chat.css');
+    expect(player().sideEffects).toEqual(['./src/styles.css', './src/chat.css']);
+  });
+  it('has the lazy ./chat subpath, with types for both resolution modes, and the main entry does not point at it', () => {
+    const pkg = player() as Manifest & { exports?: Record<string, { types?: string; default?: string } | string>; typesVersions?: { '*': Record<string, string[]> } };
+    const chat = pkg.exports?.['./chat'] as { types?: string; default?: string } | undefined;
+    expect(chat?.default).toMatch(/chat\/index\.js$/);
+    expect(chat?.types).toMatch(/chat\/index\.d\.ts$/);
+    expect(pkg.typesVersions?.['*'].chat?.[0]).toBe(chat?.types?.replace(/^\.\//, ''));
+    expect(JSON.stringify(pkg.exports?.['.'])).not.toContain('chat');
   });
   it('dev-depends on the kit the tests run on, on hub-react for the transport type check, and on the test tools, not as peers', () => {
     for (const d of ['@chatwarden/http', '@chatwarden/store-memory', '@chatwarden/hub-react', 'react', 'react-dom', 'axe-core', 'jsdom', '@testing-library/react', '@testing-library/user-event']) {
@@ -325,11 +334,20 @@ describe('tiny-chat example', () => {
   it('depends on every published server package as a regular dependency at the group version (the React packages are for a front end)', () => {
     for (const n of names.filter((n) => !UI_PACKAGES.has(n))) expect(tiny.dependencies?.[n]).toBe(VERSION);
   });
-  it('serves the hub from @chatwarden/hub-element, the one script tag that needs no React build, and so does not depend on the React packages', () => {
+  it('serves the hub from @chatwarden/hub-element, the one script tag that needs no React build, and so does not depend on hub-react', () => {
     expect(tiny.dependencies?.['@chatwarden/hub-element']).toBe(VERSION);
     expect(tiny.dependencies?.['@chatwarden/hub-react']).toBeUndefined();
-    expect(tiny.dependencies?.['@chatwarden/player-react']).toBeUndefined();
-    expect(tiny.dependencies?.react).toBeUndefined();
+  });
+  it('builds its chat page with the player UI: player-react at the group version, react and react-dom, and esbuild to bundle them (for that page, not the hub)', () => {
+    expect(tiny.dependencies?.['@chatwarden/player-react']).toBe(VERSION);
+    expect(tiny.dependencies?.react).toBeDefined();
+    expect(tiny.dependencies?.['react-dom']).toBeDefined();
+    expect(tiny.dependencies?.esbuild).toBeDefined();
+  });
+  it('stays private and ignored by changesets, so its React dependency never reaches a tarball', () => {
+    const config = readJson<{ ignore: string[] }>('.changeset', 'config.json');
+    expect(tiny.private).toBe(true);
+    expect(config.ignore).toContain('@chatwarden/example-tiny-chat');
   });
 });
 
