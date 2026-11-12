@@ -49,7 +49,7 @@ export const QUIET_AFTER_MS = 5 * MIN;
 /** Why a timed out scripted player has gone quiet, with the way out. Null for a timeout of a few minutes or less. */
 export function quietNote(name: string, ms: number, pronoun: 'he' | 'she'): string | null {
   if (ms <= QUIET_AFTER_MS) return null;
-  return `${name} is timed out for ${durationWords(ms)}, so ${pronoun} stays quiet. Press Reset demo to replay.`;
+  return `${name} is timed out for ${durationWords(ms)}, so ${pronoun}'s gone quiet. Press Start over to replay.`;
 }
 
 interface Refusal {
@@ -76,12 +76,12 @@ export function refusalMessage(r: Refusal, lineMax: number, at: (ms: number) => 
     case 'profanity':
       return 'That line has language this lobby does not allow. Change it and send again.';
     case 'blocked':
-      return `Blocked by ${rule(r.rule ?? 1)}. Only you see this.`;
+      return `Blocked (rule ${r.rule ?? 1}). Only you can see this.`;
     case 'restricted': {
       const by = r.byModerator === true ? 'A moderator' : 'The automatic filter';
       const under = typeof r.rule === 'number' ? ` (${rule(r.rule)})` : '';
-      if (typeof r.until !== 'number') return `${by} has banned you from chat${under}. Press Reset demo to start over.`;
-      return `${by} has put you on a chat timeout until ${at(r.until)}${under}. Press Reset demo to start over.`;
+      if (typeof r.until !== 'number') return `${by} has banned you from chat${under}. Press Start over to replay.`;
+      return `${by} has put you on a chat timeout until ${at(r.until)}${under}. Press Start over to replay.`;
     }
     default:
       return assertNever(r.reason);

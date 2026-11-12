@@ -92,14 +92,14 @@ export function ModeratorPane({ world, hidden, theme, active, onEvent, onControl
     <section className="pane pane-mod" data-pane="mod" aria-labelledby="pane-mod-title" hidden={hidden}>
       <header className="pane-head">
         <h3 id="pane-mod-title" tabIndex={-1}>
-          Your moderator
+          Moderator hub
         </h3>
-        <span className="pane-tag">the real hub, over the real staff routes</span>
+        <span className="pane-tag">what your team sees</span>
       </header>
       <div className="hub-host">
         {world === null ? (
           <p className="demo-status" role="status">
-            Opening the moderator hub…
+            Loading the hub…
           </p>
         ) : (
           <HubPane world={world} theme={theme} active={active} onEvent={onEvent} onController={onController} />

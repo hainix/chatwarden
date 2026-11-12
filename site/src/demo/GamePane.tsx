@@ -1,7 +1,7 @@
 import type { FormEvent, RefObject } from 'react';
 import { LINE_MAX } from './engine';
 import type { DemoSeat, SeatState } from './engine';
-import { FlagIcon, SendIcon } from './icons';
+import { FlagIcon, PauseIcon, PlayIcon, SendIcon } from './icons';
 import { formatUntil } from './notice';
 import type { FeedItem } from './types';
 
@@ -10,6 +10,10 @@ const AVATAR: Record<string, string> = { you: 'avatar-you', ada: 'avatar-a', bo:
 /** When a timeout ends, in the one format every surface uses (see `formatUntil`). */
 export const endTime = (ms: number) => formatUntil(ms, Date.now());
 
+/**
+ * One chat line. The Report button is a direct child of the line, in a column of its own at the right: every line's button is at the
+ * same x, it is always there (muted at rest), and its width is reserved, so reaching for it never moves anything.
+ */
 function Message({ item, tourTarget, onReport }: { item: FeedItem; tourTarget: boolean; onReport: (item: FeedItem, opener: HTMLElement) => void }) {
   const refused = item.refused !== undefined;
   return (
@@ -17,56 +21,67 @@ function Message({ item, tourTarget, onReport }: { item: FeedItem; tourTarget: b
       <span className={`avatar ${AVATAR[item.seat] ?? 'avatar-a'}`} aria-hidden="true">
         {item.name.slice(0, 1)}
       </span>
-      <div className="msg-main">
-        <div className="bubble">
-          <span className={`who ${item.you ? 'who-you' : ''}`}>{item.name}</span>
-          <span className="said">{item.text}</span>
-          {refused && <span className="stamp">Refused!</span>}
-        </div>
-        {!item.you && (
-          <button
-            type="button"
-            className="report-btn"
-            aria-label={`Report ${item.name}'s line: ${item.text}`}
-            data-tour={tourTarget ? 'report' : undefined}
-            onClick={(e) => onReport(item, e.currentTarget)}
-          >
-            <FlagIcon />
-            <span>Report</span>
-          </button>
-        )}
+      <div className="bubble">
+        <span className={`who ${item.you ? 'who-you' : ''}`}>{item.name}</span>
+        <span className="said">{item.text}</span>
+        {refused && <span className="stamp">Blocked</span>}
       </div>
-      {refused && <p className="msg-notice">Blocked by Community Rule {item.refused?.rule ?? 1}. Only you see this.</p>}
+      {!item.you && (
+        <button
+          type="button"
+          className="report-btn"
+          aria-label={`Report ${item.name}'s message: "${item.text}"`}
+          data-tour={tourTarget ? 'report' : undefined}
+          onClick={(e) => onReport(item, e.currentTarget)}
+        >
+          <FlagIcon />
+          <span>Report</span>
+        </button>
+      )}
+      {refused && <p className="msg-notice">Blocked (rule {item.refused?.rule ?? 1}). Only you can see this.</p>}
     </div>
   );
 }
 
-/** One button per player who has a notice waiting. The notice itself is player-react's dialog, drawn by the demo. */
-function NoticeBar({ seats, waiting, tourSeat, onShow }: { seats: readonly DemoSeat[]; waiting: Record<string, number>; tourSeat: string | null; onShow: (seat: DemoSeat, opener: HTMLElement) => void }) {
+/** One row per player who has a notice waiting, and one for a scripted player who has gone quiet. The notice itself is player-react's dialog. */
+function NoticeBar({
+  seats,
+  waiting,
+  tourSeat,
+  quietNote,
+  onShow,
+}: {
+  seats: readonly DemoSeat[];
+  waiting: Record<string, number>;
+  tourSeat: string | null;
+  quietNote: string | null;
+  onShow: (seat: DemoSeat, opener: HTMLElement) => void;
+}) {
   const who = seats.filter((s) => (waiting[s.id] ?? 0) > 0);
-  if (who.length === 0) return null;
+  if (who.length === 0 && quietNote === null) return null;
   return (
     <ul className="notice-bar" aria-label="Players with a notice waiting">
       {who.map((s) => {
         const n = waiting[s.id] ?? 0;
-        const what = s.you ? 'you' : s.name;
+        const what = s.you ? 'your' : `${s.name}'s`;
         return (
           <li key={s.id}>
             <span>
-              {s.you ? 'You have' : `${s.name} has`} {n === 1 ? 'a notice' : `${n} notices`} waiting.
+              {s.you ? 'You have' : `${s.name} has`} {n === 1 ? 'a notice' : `${n} notices`}.
             </span>
             <button
               type="button"
               className="notice-btn"
-              aria-label={`See what ${what} sees (${n} ${n === 1 ? 'notice' : 'notices'} waiting)`}
+              aria-label={`See ${what} screen (${n} ${n === 1 ? 'notice' : 'notices'} waiting)`}
               data-tour={s.id === tourSeat ? 'notice' : undefined}
               onClick={(e) => onShow(s, e.currentTarget)}
             >
-              See what {what} sees
+              See {what} screen
             </button>
           </li>
         );
       })}
+      {quietNote !== null && <li className="notice-quiet">{quietNote}</li>}
     </ul>
   );
 }
@@ -81,9 +96,18 @@ interface Props {
   draft: string;
   setDraft: (v: string) => void;
   note: string | null;
-  /** Replaces the default line under the seats, e.g. why a timed out player has gone quiet. */
-  seatsNote: string | null;
+  /** The one-line note under the seats. */
+  seatsNote: string;
+  /** Why a timed out scripted player has gone quiet; shown in the notice bar. */
+  quietNote: string | null;
   tourLineId: string | null;
+  paused: boolean;
+  onTogglePause: () => void;
+  /** Lines that arrived while the reader was scrolled up. */
+  unseen: number;
+  onJumpToNewest: () => void;
+  onChatScroll: () => void;
+  onChatHold: (source: 'pointer' | 'focus', holding: boolean) => void;
   onSend: (text: string) => void;
   onBlockedWord: () => void;
   onReport: (item: FeedItem, opener: HTMLElement) => void;
@@ -102,7 +126,14 @@ export function GamePane({
   setDraft,
   note,
   seatsNote,
+  quietNote,
   tourLineId,
+  paused,
+  onTogglePause,
+  unseen,
+  onJumpToNewest,
+  onChatScroll,
+  onChatHold,
   onSend,
   onBlockedWord,
   onReport,
@@ -123,9 +154,13 @@ export function GamePane({
     <section className="pane pane-game" data-pane="game" aria-labelledby="pane-game-title" hidden={hidden}>
       <header className="pane-head">
         <h3 id="pane-game-title" tabIndex={-1}>
-          The game
+          Your game
         </h3>
         <span className="pane-tag">#lobby</span>
+        <button type="button" className="pane-tool" aria-pressed={paused} onClick={onTogglePause}>
+          {paused ? <PlayIcon /> : <PauseIcon />}
+          <span>{paused ? 'Resume' : 'Pause'}</span>
+        </button>
       </header>
       <div className="seats-wrap" data-tour="seats">
         <ul className="seats" aria-label="Players in the lobby">
@@ -137,19 +172,48 @@ export function GamePane({
                   {s.name.slice(0, 1)}
                 </span>
                 <span className="seat-name">{s.name}</span>
-                {until !== null && <span className="seat-flag">timed out until {endTime(until)}</span>}
+                {until !== null && (
+                  <span className="seat-flag" title={`Timed out until ${endTime(until)}`}>
+                    timed out until {endTime(until)}
+                  </span>
+                )}
               </li>
             );
           })}
         </ul>
-        <p className="seats-note">{seatsNote ?? 'Ada and Bo are scripted. Only you type.'}</p>
+        <p className="seats-note">{seatsNote}</p>
       </div>
-      <div className="chat" role="log" aria-label="Lobby chat" aria-live="off" ref={logRef} tabIndex={0}>
-        {feed.map((item) => (
-          <Message key={item.id} item={item} tourTarget={item.id === tourLineId} onReport={onReport} />
-        ))}
+      <div className="chat-wrap">
+        <div
+          className="chat"
+          role="log"
+          aria-label="Lobby chat"
+          aria-live="off"
+          ref={logRef}
+          tabIndex={0}
+          onScroll={onChatScroll}
+          onPointerEnter={() => onChatHold('pointer', true)}
+          onPointerLeave={() => onChatHold('pointer', false)}
+          onFocus={() => onChatHold('focus', true)}
+          onBlur={() => onChatHold('focus', false)}
+        >
+          {feed.map((item) => (
+            <Message key={item.id} item={item} tourTarget={item.id === tourLineId} onReport={onReport} />
+          ))}
+        </div>
+        {/* Over the chat's bottom edge, so a pill, a notice or a note never takes room from the chat or moves its lines. */}
+        <div className="chat-overlay">
+          {unseen > 0 && (
+            <button type="button" className="new-pill" onClick={onJumpToNewest}>
+              ↓ {unseen} new {unseen === 1 ? 'message' : 'messages'}
+            </button>
+          )}
+          <NoticeBar seats={allSeats} waiting={waiting} tourSeat={tourSeat} quietNote={quietNote} onShow={onShowNotices} />
+          {note !== null && (
+            <p className="composer-note">{note}</p>
+          )}
+        </div>
       </div>
-      <NoticeBar seats={allSeats} waiting={waiting} tourSeat={tourSeat} onShow={onShowNotices} />
       <form className="composer" data-tour="composer" onSubmit={submit}>
         <div className="chips" role="group" aria-label="Quick lines">
           <button type="button" className="chip" onClick={() => onSend('gg')}>
@@ -159,7 +223,7 @@ export function GamePane({
             nice one
           </button>
           <button type="button" className="chip chip-bad" onClick={onBlockedWord}>
-            try a blocked word
+            Try a blocked word
           </button>
         </div>
         <div className="composer-row">
@@ -174,7 +238,7 @@ export function GamePane({
             maxLength={LINE_MAX}
             autoComplete="off"
             enterKeyHint="send"
-            placeholder="Say something"
+            placeholder="Type a message"
             onChange={(e) => setDraft(e.target.value)}
           />
           <span className="count" data-near={draft.length >= LINE_MAX - 20 ? 'true' : undefined} aria-hidden="true">
@@ -185,7 +249,6 @@ export function GamePane({
             <span>Send</span>
           </button>
         </div>
-        {note !== null && <p className="composer-note">{note}</p>}
       </form>
     </section>
   );

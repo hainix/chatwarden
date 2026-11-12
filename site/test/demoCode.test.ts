@@ -1,4 +1,4 @@
-// "Show me the code" must show real code: every non-blank line has to be a verbatim line of a README in this repo.
+// "Show the code" must show real code: every non-blank line has to be a verbatim line of a README in this repo.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,9 +8,9 @@ const repo = join(__dirname, '..', '..');
 const readmeFiles = ['README.md', ...readdirSync(join(repo, 'packages')).map((p) => join('packages', p, 'README.md'))];
 const readme = (rel: string) => readFileSync(join(repo, rel), 'utf8').split('\n').map((l) => l.trimEnd());
 
-describe('Show me the code', () => {
+describe('Show the code', () => {
   it('has one snippet per tour step, each with a title, a one-sentence blurb and a source README', () => {
-    expect(CODE_STEPS).toHaveLength(7); // one per tour step
+    expect(CODE_STEPS).toHaveLength(4); // one per tour step
     for (const s of CODE_STEPS) {
       expect(s.title.length).toBeGreaterThan(3);
       expect(s.blurb.length).toBeGreaterThan(20);
@@ -38,13 +38,22 @@ describe('Show me the code', () => {
     const stitched = [lines[0], lines[3], lines[2]].join('\n');
     expect(readme('packages/core/README.md').join('\n').includes(stitched)).toBe(false);
   });
-  it('step 5 says the real client reads the HTTP player API and that the demo calls cw.notices.pending in process', () => {
-    const blurb = CODE_STEPS[4]?.blurb ?? '';
-    expect(blurb).toMatch(/HTTP/);
-    expect(blurb).toContain('cw.notices.pending');
-    expect(blurb).toMatch(/in process/);
-    expect(blurb).toMatch(/local transport/);
-    expect(blurb).toMatch(/never carries anyone else’s chat, an IP, or an account or subject id/);
+  it('the blurbs are the proposal’s, one sentence each', () => {
+    expect(CODE_STEPS.map((c) => c.blurb)).toEqual([
+      'Your server files the report with one call. The room and players come from your session, never from the client.',
+      'The whole hub is one component on a page of your admin site.',
+      "A decision closes the report, applies the timeout and writes the player's notice in one step.",
+      "Your game reads the player's notices from one route and shows them with the notice dialog.",
+    ]);
+  });
+  it('where the demo differs from a game it says so, beside the blurb: notices are read in process here, over HTTP in a game', () => {
+    const note = CODE_STEPS[3]?.demoNote ?? '';
+    expect(note).toMatch(/HTTP/);
+    expect(note).toContain('cw.notices.pending');
+    expect(note).toMatch(/in process/);
+    expect(note).toMatch(/local transport/);
+    expect(note).toMatch(/never carries anyone else’s chat, an IP, or an account or subject id/);
+    expect(CODE_STEPS[0]?.demoNote).toContain('cw.reports.submit');
   });
   it('keeps each snippet short (a few lines, not a page)', () => {
     for (const s of CODE_STEPS) expect(s.code.split('\n').length, s.title).toBeLessThanOrEqual(10);
@@ -54,13 +63,10 @@ describe('Show me the code', () => {
     expect(CODE_STEPS[0]?.source).toBe('packages/player-react/README.md');
     expect(CODE_STEPS[1]?.code).toContain('<Hub client={client} />');
     expect(CODE_STEPS[1]?.source).toBe('packages/hub-react/README.md');
-    expect(CODE_STEPS[2]?.code).toContain('routerTransport(handle)');
-    expect(CODE_STEPS[2]?.code).toContain('adminRoutes(cw');
-    expect(CODE_STEPS[3]?.code).toContain('await cw.decide(');
-    expect(CODE_STEPS[3]?.source).toBe('packages/core/README.md');
-    expect(CODE_STEPS[4]?.code).toContain('client.notices()');
-    expect(CODE_STEPS[5]?.code).toContain('<CaseCard');
-    expect(CODE_STEPS[6]?.code).toContain('durations: [HOUR, 6 * HOUR, 12 * HOUR');
+    expect(CODE_STEPS[2]?.code).toContain('await cw.decide(');
+    expect(CODE_STEPS[2]?.source).toBe('packages/core/README.md');
+    expect(CODE_STEPS[3]?.code).toContain('client.notices()');
+    expect(CODE_STEPS[3]?.source).toBe('packages/player-react/README.md');
   });
   it('shows no address a visitor could mistake for something this page loads (the hub-element CDN line is not a step)', () => {
     for (const s of CODE_STEPS) expect(s.code, s.title).not.toMatch(/https?:\/\//);

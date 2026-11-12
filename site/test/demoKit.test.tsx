@@ -25,19 +25,19 @@ afterEach(() => {
 });
 
 describe('honest about the demo', () => {
-  it('lists the demo settings next to the note: swearing filter allowed, reporter feedback off, a signed-in owner', async () => {
+  it('lists the demo settings under "Demo settings": swearing allowed, no "action taken" notice for the reporter, a signed-in owner', async () => {
     await setup();
     const more = document.querySelector('.demo-details') as HTMLElement;
     expect(more).toBeTruthy();
-    expect(more.textContent).toMatch(/swearing filter: allowed/i);
-    expect(more.textContent).toMatch(/reporter feedback: off/i);
-    expect(more.textContent).toMatch(/real hub/i);
-    expect(more.textContent).toMatch(/signed in as an owner/i);
+    expect(more.querySelector('summary')?.textContent).toBe('Demo settings');
+    expect(more.textContent).toMatch(/swearing is allowed/i);
+    expect(more.textContent).toMatch(/no "action taken" notice for your own reports/i);
+    expect(more.textContent).toMatch(/signed in as the owner/i);
     expect(more.textContent).not.toMatch(/keyword|heuristic|tone check/i); // the suggestion is the kit's ladder now, not a demo guess
   });
   it('says what runs the demo: the real kit, a made-up word list', async () => {
     await setup();
-    expect(document.querySelector('.demo-badge')?.textContent).toBe('This is the real Chatwarden kit running in your browser, with a made-up word list.');
+    expect(document.querySelector('.demo-badge')?.textContent).toBe('The real packages, running in your browser. The blocked words are made up, like "zorbak".');
   });
 });
 
@@ -65,14 +65,16 @@ describe('a long timeout is dated and explained', () => {
     expect(within(dialog).getByRole('heading', { name: /chat/i })).toBeTruthy();
     expect(dialog.textContent).toContain(date);
   });
-  it('replaces the seats note: Bo is timed out for 7 days, so he stays quiet, and Reset puts it back', async () => {
+  it('says in the notice bar that Bo is timed out for 7 days and has gone quiet (the seats note stays one line), and Start over puts it back', async () => {
     const { user } = await timeout7d();
-    const sentence = 'Bo is timed out for 7 days, so he stays quiet. Press Reset demo to replay.';
-    await waitFor(() => expect(document.querySelector('.seats-note')?.textContent).toBe(sentence));
+    const sentence = "Bo is timed out for 7 days, so he's gone quiet. Press Start over to replay.";
+    await waitFor(() => expect(document.querySelector('.notice-bar .notice-quiet')?.textContent).toBe(sentence));
+    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are bots. You can type too.');
     expect(live().textContent).toContain(`Bo has a notice waiting. ${sentence}`);
-    await user.click(screen.getByRole('button', { name: /reset demo/i }));
-    await waitFor(() => expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are scripted. Only you type.'));
-    expect(live().textContent).not.toContain('stays quiet');
+    await user.click(screen.getByRole('button', { name: /start over/i }));
+    await waitFor(() => expect(document.querySelector('.notice-quiet')).toBeNull());
+    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are bots. You can type too.');
+    expect(live().textContent).not.toContain('gone quiet');
   });
   it('a warning leaves the note alone', async () => {
     const { user } = await setup();
@@ -83,14 +85,14 @@ describe('a long timeout is dated and explained', () => {
     await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
     await sendHeldDecision();
     await noticeBtn('Bo');
-    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are scripted. Only you type.');
-    expect(live().textContent).not.toContain('stays quiet');
+    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are bots. You can type too.');
+    expect(live().textContent).not.toContain('gone quiet');
   });
-  it('the visitor’s own 30 minute automatic timeout shows an end time and does not claim anyone stays quiet', async () => {
+  it('the visitor’s own 30 minute automatic timeout shows an end time and does not claim anyone has gone quiet', async () => {
     const { user } = await setup();
     for (const w of ['zorbak', 'vlemmo', 'snerp']) await say(user, `you ${w}`);
     await noticeBtn('you');
-    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are scripted. Only you type.');
+    expect(document.querySelector('.seats-note')?.textContent).toBe('Ada and Bo are bots. You can type too.');
     const seats = screen.getByRole('list', { name: /players in the lobby/i });
     expect(within(seats).getAllByRole('listitem')[0]?.textContent).toMatch(/timed out until/i);
   });
@@ -127,7 +129,7 @@ describe('the player notice is the kit’s own, in player-react’s dialog', () 
     await sendHeldDecision();
     await user.click(await noticeBtn('Bo'));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /acknowledge/i }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /see what bo sees/i })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /see bo's screen/i })).toBeNull());
     expect(await engine.notices.pending('bo')).toEqual([]);
     expect((await engine.notices.record('bo')).map((n) => n.kind)).toEqual(['warning']);
   });
@@ -140,7 +142,7 @@ describe('the player notice is the kit’s own, in player-react’s dialog', () 
     await user.click(within(card).getByRole('button', { name: /^send a warning/i }));
     await sendHeldDecision();
     await noticeBtn('Bo');
-    expect(screen.queryByRole('button', { name: /see what you see/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /see your screen/i })).toBeNull();
   });
   it.each([
     ['chat', /chat/i, 30 * 60_000],
@@ -168,7 +170,7 @@ describe('refusals, in the kit own words', () => {
       [{ refuse: { reason: 'rate' } }, /three lines every five seconds/i],
       [{ refuse: { reason: 'gate' } }, /cannot chat in this lobby right now/i],
       [{ refuse: { reason: 'profanity' } }, /language this lobby does not allow/i],
-      [{ refuse: { reason: 'restricted', until: Date.now() + 600_000, byModerator: true, rule: 2 } }, /a moderator has put you on a chat timeout until .*community rule 2.*reset demo/i],
+      [{ refuse: { reason: 'restricted', until: Date.now() + 600_000, byModerator: true, rule: 2 } }, /a moderator has put you on a chat timeout until .*community rule 2.*start over/i],
       [{ refuse: { reason: 'restricted', until: null, byModerator: true } }, /banned you from chat/i],
     ];
     for (const [result, re] of cases) {
@@ -201,23 +203,23 @@ describe('a visitor who trips the real automatic timeout', () => {
   it('speaks to her, not about "You"', async () => {
     await spam();
     const bar = await screen.findByRole('list', { name: /players with a notice waiting/i });
-    expect(bar.textContent).toMatch(/You have a notice waiting/);
-    expect(bar.textContent).toMatch(/See what you see/);
+    expect(bar.textContent).toMatch(/You have a notice\./);
+    expect(bar.textContent).toMatch(/See your screen/);
     expect(bar.textContent).not.toMatch(/You has|what You sees/);
   });
   it('her next line says so with the end time and points at Reset; the line stays in the box', async () => {
     const { user } = await spam();
     await say(user, 'hello?');
-    await waitFor(() => expect(document.querySelector('.composer-note')?.textContent).toMatch(/automatic filter has put you on a chat timeout until \d.*community rule 1.*press reset demo/i));
+    await waitFor(() => expect(document.querySelector('.composer-note')?.textContent).toMatch(/automatic filter has put you on a chat timeout until \d.*community rule 1.*press start over/i));
     expect(live().textContent).toMatch(/chat timeout until/i);
     expect(composer().value).toBe('hello?');
   });
   it('Reset is the way out: the lobby, the timeout and the notice are gone', async () => {
     const { user } = await spam();
     await noticeBtn('you');
-    await user.click(screen.getByRole('button', { name: /reset demo/i }));
+    await user.click(screen.getByRole('button', { name: /start over/i }));
     await screen.findByText(RUDE);
-    await waitFor(() => expect(screen.queryByRole('button', { name: /see what you see/i })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /see your screen/i })).toBeNull());
     expect(screen.queryByText(/timed out until/i)).toBeNull();
     await say(user, 'back again');
     expect(await screen.findByText('back again')).toBeTruthy();
@@ -227,19 +229,19 @@ describe('a visitor who trips the real automatic timeout', () => {
     const { user } = await setup();
     await say(user, 'you zorbak');
     await say(user, 'you vlemmo');
-    expect(screen.queryByRole('button', { name: /see what you see/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /see your screen/i })).toBeNull();
     await say(user, 'fine now');
     expect(await screen.findByText('fine now')).toBeTruthy();
   });
 });
 
-describe('the scripted players never get timed out', () => {
+describe('the scripted players never get timed out (the endless script, scripted="loop")', () => {
   it('ten full loops of the script: no timeout notice, no seat flag, no refused scripted line', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     stubMatchMedia(false);
     const engine = new KitEngine();
     const accept = vi.spyOn(engine.chat, 'accept');
-    render(<Demo engine={engine} scripted />);
+    render(<Demo engine={engine} scripted="loop" />);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100);
     });
@@ -253,7 +255,7 @@ describe('the scripted players never get timed out', () => {
     // exactly one refusal in the whole run: Bo's single blocked word in the opening
     expect(refused.map((r) => r.refuse?.reason)).toEqual(['blocked']);
     expect(accept.mock.calls.length).toBeGreaterThanOrEqual(5 + LOOP.length * 10);
-    expect(screen.queryByRole('button', { name: /see what/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /see .* screen/i })).toBeNull();
     expect(screen.queryByText(/timed out until/i)).toBeNull();
     expect((await engine.rooms.seats()).map((s) => s.restrictedUntil)).toEqual([null, null, null]);
     expect(await engine.notices.pending('bo')).toEqual([]);

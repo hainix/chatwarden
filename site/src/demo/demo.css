@@ -62,10 +62,12 @@
    a queue beside the case, and wants about 720px, which is what is left of the 1120px column. Below that, one pane at a time. */
 @media (min-width: 1152px) {
   .demo-panes {
-    grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+    grid-template-columns: minmax(360px, 400px) minmax(0, 1fr);
   }
+  /* Up to 660px, less on a short window (the site header, the tour strip and a margin come off the window's height), never under 520px. */
   .demo:not(.is-stacked) .pane {
-    height: 660px;
+    height: min(660px, calc(100vh - 152px));
+    min-height: 520px;
   }
 }
 .pane {
@@ -118,6 +120,36 @@
   font-size: 0.875rem;
   color: var(--screen-muted);
 }
+/* Pause, in the game pane's header next to #lobby. */
+.pane-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--screen-text);
+  background: #19214a;
+  border: 2px solid var(--screen-edge);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.pane-tool:hover {
+  border-color: var(--warden);
+  background: #1f2a5c;
+}
+.pane-tool[aria-pressed='true'] {
+  color: #ffd479;
+  border-color: #ffc83d;
+}
+@media (pointer: coarse) {
+  .pane-tool {
+    min-height: 44px;
+  }
+}
 
 /* ---------- the game pane ---------- */
 .seats-wrap {
@@ -126,8 +158,9 @@
 }
 .seats {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap; /* a chip that grows (a timeout flag) must not wrap a second row in and push the chat down */
   gap: 8px;
+  min-width: 0;
 }
 .seat {
   display: inline-flex;
@@ -142,20 +175,29 @@
   font-size: 0.9rem;
 }
 .seat[data-out='true'] {
+  min-width: 0;
   border-color: #ff5b9c;
 }
 .seat-flag {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 0.78rem;
   font-weight: 700;
   color: #ff9cc4;
+  white-space: nowrap;
 }
 .seats-wrap {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 14px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
+/* One line, whatever it says: a second line would move the whole chat down. */
 .seats-note {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: 0.8125rem;
   color: var(--screen-muted);
 }
@@ -171,12 +213,19 @@
 .who-you {
   color: #ff9cc4;
 }
+.chat-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+  min-height: 96px;
+}
 .chat {
   scrollbar-color: #3a4780 #0c1022;
 }
 .chat {
   flex: 1 1 auto;
-  min-height: 96px;
+  min-width: 0;
   display: grid;
   align-content: start;
   gap: 12px;
@@ -190,26 +239,67 @@
 .chat:focus-visible {
   outline-offset: -3px;
 }
+/* Room for the overlay's rows at the bottom, so the newest line can be scrolled clear of them. */
+.chat-wrap:has(.chat-overlay > *) .chat {
+  padding-bottom: 96px;
+}
+/* A pill, the notice bar and a note about your own line sit over the chat's bottom edge. They take no room from the chat, so nothing
+   in it moves when they come and go. */
+.chat-overlay {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.chat-overlay > * {
+  pointer-events: auto;
+}
+.new-pill {
+  align-self: center;
+  min-height: 36px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 800;
+  color: #07251f;
+  background: var(--warden);
+  border: 2px solid #1a7f6e;
+  border-radius: 999px;
+  box-shadow: 0 3px 0 #1a7f6e;
+  cursor: pointer;
+}
+.new-pill:hover {
+  box-shadow: 0 4px 0 #1a7f6e;
+}
+@media (pointer: coarse) {
+  .new-pill {
+    min-height: 44px;
+  }
+}
+/* Every line has the same three columns: avatar, bubble, and a Report column of fixed width. Every line's Report button is at the
+   same x, so the one you aim at is always where the last one was. */
 .chat .msg {
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: 34px minmax(0, 1fr) 88px;
   gap: 10px;
+  /* A new line fades in over 120ms: no travel, no scale, nothing that moves what the reader is aiming at. */
+  animation: msg-fade 0.12s ease-out both;
+  animation-delay: 0s;
+}
+.chat .msg .bubble {
+  grid-column: 2;
+}
+@keyframes msg-fade {
+  from {
+    opacity: 0;
+  }
 }
 .chat .avatar {
   width: 34px;
   height: 34px;
-}
-.msg-main {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-}
-.msg-main .bubble {
-  min-width: 0;
-  flex: 0 1 auto;
-}
-.msg-refused .msg-main .bubble {
-  flex: 1 1 auto;
 }
 /* A refused line slams right away here (the hero's slower, staged timing is for the intro). */
 .chat .msg-refused .bubble {
@@ -222,15 +312,19 @@
   animation-delay: 0.15s;
 }
 .chat .msg-notice {
+  grid-column: 2 / 4;
   animation-delay: 0.45s;
 }
 .report-btn {
-  flex: none;
+  grid-column: 3;
+  align-self: start;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  min-width: 0;
   min-height: 32px;
-  padding: 0 10px;
+  padding: 0 8px;
   font: inherit;
   font-size: 0.8125rem;
   font-weight: 700;
@@ -239,25 +333,17 @@
   border: 2px solid var(--screen-edge);
   border-radius: 999px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.msg:hover .report-btn,
-.msg:focus-within .report-btn,
-.report-btn:focus-visible,
-.report-btn[data-tour-target] {
-  opacity: 1;
-}
-.report-btn:hover {
+.report-btn:hover,
+.report-btn:focus-visible {
   color: #ff9cc4;
   border-color: #ff5b9c;
   background: rgba(255, 91, 156, 0.1);
 }
 @media (hover: none), (pointer: coarse) {
   .report-btn {
-    opacity: 1;
     min-height: 44px;
-    padding: 0 12px;
   }
 }
 
@@ -376,90 +462,86 @@
   box-shadow: none;
 }
 .composer-note {
+  padding: 8px 12px;
   font-size: 0.875rem;
   color: #ffb3d1;
+  background: #0b1030;
+  border: 2px solid #ff5b9c;
+  border-radius: 6px;
+  animation: frame-in 0.2s ease-out;
 }
 
-/* ---------- the tour tooltip ---------- */
-/* Under the sticky Game / Moderator switcher (z-index 30 below): the card floats over the panes, and on a phone it can sit where the
-   switcher is stuck, which must stay pressable. */
+/* ---------- the tour card ---------- */
+/* Docked: a strip above the panes (a bar at the bottom of the window on a phone). It never follows the control it is about, so it can
+   never cover the chat, the chips or the hub's toasts, and nothing about it moves. The control wears a gold ring instead. Under the
+   Game / Moderator switcher (z-index 30 below), and far under player-react's dialogs (z-index 1000). */
 .tour {
-  position: absolute;
+  position: relative;
   z-index: 25;
-  left: 8px;
-  top: 8px;
-  width: min(350px, calc(100% - 16px));
   display: grid;
-  gap: 6px;
-  padding: 12px 14px 12px;
+  grid-template-columns: minmax(180px, 230px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 20px;
+  /* The strip keeps one height for every step, hint and the finished card (the tallest is a step plus a two-line hint), so pressing Next,
+     or a hint appearing, never moves the panes under it or the Next button itself. */
+  min-height: 124px;
+  padding: 10px 14px;
   color: #14102e;
   background: #ffc83d;
   border: 2px solid #14102e;
   border-radius: 10px;
   box-shadow: 5px 5px 0 rgba(5, 8, 20, 0.55);
-  transition: left 0.28s ease, top 0.28s ease;
 }
-.tour[data-done] {
-  width: min(400px, calc(100% - 16px));
+.tour-head,
+.tour-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
 }
-.tour::before {
-  content: '';
-  position: absolute;
-  left: var(--arrow-x, 30px);
-  width: 14px;
-  height: 14px;
-  background: #ffc83d;
-  border: 2px solid #14102e;
-  rotate: 45deg;
-  translate: -50% 0;
-}
-.tour[data-placement='below']::before {
-  top: -9px;
-  border-right: 0;
-  border-bottom: 0;
-}
-.tour[data-placement='above']::before {
-  bottom: -9px;
-  border-left: 0;
-  border-top: 0;
-}
-.tour[data-placement='right']::before {
-  left: -9px;
-  top: var(--arrow-y, 30px);
-  translate: 0 -50%;
-  border-right: 0;
-  border-top: 0;
-}
-.tour[data-placement='left']::before {
-  left: auto;
-  right: -9px;
-  top: var(--arrow-y, 30px);
-  translate: 0 -50%;
-  border-left: 0;
-  border-bottom: 0;
+/* Narrower than the hub's side-by-side width: the step and the buttons share the first row, the instruction takes the second. */
+@media (max-width: 1099px) {
+  .tour:not([data-compact]) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'head actions'
+      'text text';
+    align-content: start;
+    min-height: 184px;
+  }
+  .tour:not([data-compact]) .tour-head {
+    grid-area: head;
+  }
+  .tour:not([data-compact]) .tour-text {
+    grid-area: text;
+  }
+  .tour:not([data-compact]) .tour-actions {
+    grid-area: actions;
+    justify-self: end;
+  }
 }
 .tour :focus-visible {
   outline: 3px solid #14102e;
   outline-offset: 2px;
 }
 /* A phone (Demo.tsx has the matching max-width: 599px): the card is a bar that sticks to the bottom of the window while the demo is in
-   view, "Step 4 of 7: Apply the suggestion" with Next and Skip, and a tap opens the full text. It never floats over the hub. */
+   view, "Step 2 of 4" and the instruction ("Open the report in the hub") with Next and Skip tour, and a tap opens the full text. */
 .tour[data-compact] {
   position: sticky;
-  top: auto;
-  left: auto;
   bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   z-index: 25;
   width: auto;
+  min-height: 0;
   margin: 0 8px;
   padding: 6px 10px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 2px 8px;
-  transition: none;
 }
-.tour[data-compact]::before {
-  display: none;
+.tour-tabhint {
+  font-size: 0.8125rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .tour[data-compact] .tour-toggle {
   grid-column: 1;
@@ -588,7 +670,8 @@
 
 /* The control the tour is pointing at: a static gold ring (so it shows with reduced motion too) and a soft ripple. */
 [data-tour-target] {
-  /* When the tour scrolls to it (a phone): clear of the 64px site header and the pane switcher above, and the tour bar below. */
+  /* When focus or the visitor scrolls to it: clear of the 64px site header and the pane switcher above, and the tour bar below. The tour
+     itself never scrolls the page. */
   scroll-margin: 150px 0 100px;
   outline: 3px solid #ffc83d;
   outline-offset: 3px;
@@ -662,6 +745,9 @@
   color: #14102e;
   background: #ffc83d;
   border-color: #14102e;
+}
+.drawer-head .drawer-note {
+  font-size: 0.875rem;
 }
 .drawer-source {
   color: var(--muted);
@@ -740,8 +826,24 @@
   background: var(--warden);
   border-color: var(--edge);
 }
-.is-stacked .chat {
+/* The tour says which tab to open; it never switches the pane for you. The tab it means pulses. */
+.pane-tabs button[data-pulse] {
+  border-color: #ffc83d;
+  animation: tab-pulse 1.6s ease-out infinite;
+}
+@keyframes tab-pulse {
+  from {
+    box-shadow: 0 0 0 0 rgba(255, 200, 61, 0.6);
+  }
+  70%,
+  to {
+    box-shadow: 0 0 0 12px rgba(255, 200, 61, 0);
+  }
+}
+.is-stacked .chat-wrap {
   flex: none;
+}
+.is-stacked .chat {
   min-height: 240px;
   max-height: min(52vh, 440px);
 }
@@ -797,10 +899,9 @@
 
 /* ---------- the notices waiting for a player ---------- */
 .notice-bar {
-  flex: none;
   display: grid;
-  gap: 8px;
-  margin: 0 14px 10px;
+  gap: 6px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -815,7 +916,15 @@
   background: #0b1030;
   border: 2px solid #94b8ff;
   border-radius: 6px;
-  animation: frame-in 0.35s ease-out;
+  animation: frame-in 0.2s ease-out;
+}
+/* Why a timed out scripted player has gone quiet: a line of its own in the bar, so the seats note stays one line. */
+.notice-bar .notice-quiet {
+  display: block;
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  color: var(--screen-muted);
+  border-color: #3a4780;
 }
 .notice-btn {
   min-height: 44px;
@@ -838,10 +947,10 @@
   transform: translateY(3px);
   box-shadow: 0 1px 0 #1a7f6e;
 }
+/* The notice bar, a note about your line and the tour card appear by fading in: no travel, so nothing shifts under the pointer. */
 @keyframes frame-in {
   from {
     opacity: 0;
-    transform: translateY(36px) scale(0.96);
   }
 }
 
