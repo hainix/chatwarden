@@ -178,3 +178,30 @@ describe('responses carry no store header surprises and no identifier', () => {
     }
   });
 });
+
+describe('GET /me says whether the community list is wired', () => {
+  type Features = { appeals: boolean; renames: boolean; keepBlocked: boolean; community?: boolean };
+  const meOf = async (w: { call: (m: string, p: string) => Promise<{ body: unknown }> }) => (await w.call('GET', '/me')).body as { features?: Features };
+
+  it('with community: features.community is true, whatever else is on, and nothing about it is a term', async () => {
+    const w = await communityWorld();
+    const me = await meOf(w);
+    expect(me.features).toEqual({ appeals: false, renames: false, keepBlocked: false, community: true });
+    noWords(me);
+  });
+
+  it('without community the body is what it was: no features unless another is on, and never a community key', async () => {
+    const plain = await world();
+    expect((await meOf(plain)).features).toBeUndefined();
+    const keep = await world({ overrides: { names: { keepBlocked: true } } });
+    const features = (await meOf(keep)).features;
+    expect(features).toBeDefined();
+    expect(Object.hasOwn(features as object, 'community')).toBe(false);
+  });
+
+  it('is there for every signed-in role (it needs no permission), and a caller who is nobody is still a 401', async () => {
+    const w = await communityWorld({ permissions: { 'terms.read': 'owner' } });
+    expect(((await w.call('GET', '/me', { role: 'moderator' })).body as { features?: Features }).features?.community).toBe(true);
+    expect((await w.call('GET', '/me', { role: null })).status).toBe(401);
+  });
+});

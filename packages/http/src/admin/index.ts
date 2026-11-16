@@ -84,7 +84,7 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
   const ctx = createAdminContext(cw, options);
   const terms = options.terms ?? options.community?.live;
   return {
-    ...meRoutes(ctx),
+    ...meRoutes(ctx, { community: options.community !== undefined }),
     ...reportRoutes(ctx),
     ...teamRoutes(ctx),
     ...sanctionRoutes(ctx),
