@@ -521,6 +521,12 @@ describe('changesets config', () => {
     expect(site.private).toBe(true);
     expect(site.name).toBe('@chatwarden/site');
   });
+  it('keeps the corpus service private, out of the published set, and on the group version of the matcher it builds on (so npm links the workspace)', () => {
+    const service = readJson<Manifest>('services', 'corpus', 'package.json');
+    expect(names).not.toContain(service.name);
+    expect(service.private).toBe(true);
+    expect(service.dependencies?.['@chatwarden/matcher']).toBe(VERSION);
+  });
   it('keeps the landing site out of the published package set', () => {
     expect(names).not.toContain('@chatwarden/site');
   });
