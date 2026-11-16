@@ -7,6 +7,7 @@ import { resolveOptions } from './options.js';
 import type { CoopOptions } from './options.js';
 import { createOutbound } from './outbound.js';
 import { createSetup } from './setup.js';
+import { createSignal } from './signal.js';
 import type { CoopChecklist, CoopVerification } from './setup.js';
 import type { SweepResult } from './outbound.js';
 
@@ -16,7 +17,7 @@ export type { CoopChecklist, CoopChecklistItemType, CoopVerification } from './s
 
 /** What `coop` returns. @experimental */
 export interface CoopAdapter {
-  /** The routes to mount with the rest of the kit's: `POST /coop/actions` (the callback). */
+  /** The routes to mount with the rest of the kit's: `POST /coop/actions` (the callback), and `POST /coop/signal` when `signal` is set. */
   routes: RouteTable;
   /**
    * Send every open report from the last `catchUpMs` that has no link yet (run once at startup; also callable on a timer). Resolves when each has been sent,
@@ -45,12 +46,14 @@ export function coop(cw: Chatwarden, options: CoopOptions): CoopAdapter {
   const inbound = createInbound(cw, o);
   const outbound = createOutbound(cw, o);
   const setup = createSetup(cw, o);
+  const signal = createSignal(o);
   return {
-    routes: inbound.routes,
+    routes: { ...inbound.routes, ...(signal?.routes ?? {}) },
     sweep: () => outbound.sweep(),
     setup,
     dispose() {
       inbound.dispose();
+      signal?.dispose();
       outbound.dispose();
     },
   };
