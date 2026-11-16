@@ -80,11 +80,17 @@ export function stepWithinActCeilings(step: { kind: SanctionKind; durationMs: nu
 }
 
 /**
- * Whether the AI may act on this person. Always true now; level 3 will back it with a "do not automate" mark. Called on every
- * path that could ever act. Reads and drafts are advice, so they are produced either way.
+ * Whether the AI may act on this person: false for a person a senior marked "do not automate" (design 6.4, ruling 17). `lookup` is the mark's answer
+ * (`cw.people.automation.get(person).allowed`), injected so this module imports no store and no writer; without one, as before, every person is allowed.
+ * A lookup that throws, or answers anything but `true`, means NOT allowed (fail closed). Called on every path that could ever act. Reads and drafts are
+ * advice, so they are produced either way.
  * @experimental
  */
-export function automationAllowed(person: string): boolean {
-  void person;
-  return true;
+export function automationAllowed(person: string, lookup?: (person: string) => boolean): boolean {
+  if (lookup === undefined) return true;
+  try {
+    return lookup(person) === true;
+  } catch {
+    return false;
+  }
 }

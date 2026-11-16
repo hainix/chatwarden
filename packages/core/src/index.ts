@@ -16,6 +16,7 @@ export type {
   WebhookKeyReservation,
   DecisionRow,
   DiscordThreadRow,
+  NoAutomationRow,
   ReportCategory,
   ReportExcerptLine,
   ReportListQuery,
@@ -179,6 +180,8 @@ export {
   isSanctionActive,
   sanctionGroupView,
 } from './staffViews.js';
+export { AUTOMATION_CODES } from './automation.js';
+export type { AutomationCode, AutomationFacade, AutomationMark } from './automation.js';
 export { BULK_DISMISS_MAX, BULK_REPORTER_SCAN_MAX } from './dismissMany.js';
 export type { DismissManyInput, DismissManyResult, DismissScope } from './dismissMany.js';
 export {

@@ -601,6 +601,19 @@ export interface StrikeRow {
 // ---------------------------------------------------------------------------
 
 /**
+ * A "do not automate" mark as stored (AI levels 3 and 4, design 6.4). `setBy` is the senior's staff ref (audit-class: staff channels only, never a player).
+ * @experimental
+ */
+export interface NoAutomationRow {
+  subject: string;
+  /** One of the closed codes (`AUTOMATION_CODES`). */
+  code: string;
+  setBy: string;
+  /** Epoch ms. */
+  setAt: number;
+}
+
+/**
  * A Discord forum thread kept for one person by `@chatwarden/discord`. `label` is the neutral name the thread was
  * created with (`Case 7K2QX`): random, never derived from an id, hash or handle.
  *
@@ -1321,6 +1334,16 @@ export interface Store {
    * entries made before `readsBefore` go with the reads. Returns how many reads and outcomes were deleted. `purgeReports` deletes the reads of the reports it deletes itself.
    */
   purgeAi?(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number };
+
+  /**
+   * OPTIONAL. Set (a row) or clear (`null`) the "do not automate" mark of one person (AI levels 3 and 4, design 6.4). One row per subject: a second
+   * set replaces it, clearing a person with no mark is not an error. `code` is one of the closed codes the service checks; the store keeps what it
+   * is given. Not purged by `purge()`: a mark lives until it is cleared. Does not move the change token.
+   */
+  setNoAutomation?(subject: string, mark: { code: string; setBy: string; setAt: number } | null): void;
+
+  /** OPTIONAL. The "do not automate" mark of this subject (a copy), or null. A store reads only the subject it is given; the service asks for each alias. */
+  loadNoAutomation?(subject: string): NoAutomationRow | null;
 
   // Signals (flood control and signals, design 5.8). OPTIONAL: a store without them cannot keep signals, and `createChatwarden` refuses a
   // profile that declares kinds or feeds with one. SYNCHRONOUS on purpose (like claims); they run inside `transaction`. They do not move

@@ -11,6 +11,7 @@ import type {
   AiReadRow,
   AiReserveResult,
   AiStatsRow,
+  NoAutomationRow,
   Store,
 } from '@chatwarden/core';
 import { MemoryStore, compare, newId } from './memoryStore.js';
@@ -44,6 +45,8 @@ export type MemoryAiMethods = Required<
     | 'aiTeachableCount'
     | 'aiStats'
     | 'aiGateRows'
+    | 'setNoAutomation'
+    | 'loadNoAutomation'
     | 'purgeAi'
   >
 >;
@@ -53,6 +56,8 @@ export type MemoryAiStore = MemoryStore & MemoryAiMethods;
 
 /** The methods, on a class only so they can reach the store's own state. Never constructed: `withMemoryAi` copies them onto a store. */
 class MemoryAi extends MemoryStore {
+  private noAutomation?: Map<string, NoAutomationRow>;
+
   // AI reads and the casebook (AI levels 1 and 2). Synchronous like claims; each write is journaled, so an undone transaction
   // undoes it. Rows go in and come out as copies.
 
@@ -371,6 +376,24 @@ class MemoryAi extends MemoryStore {
       });
     }
     return out.sort((a, b) => ruleRank(a.rule) - ruleRank(b.rule) || ruleOrder(a.rule, b.rule) || SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+  }
+
+  // "Do not automate" (AI levels 3 and 4): one row per person, with no retention of its own, so no purge touches it. Journaled like every write.
+
+  setNoAutomation(subject: string, mark: { code: string; setBy: string; setAt: number } | null): void {
+    const rows = (this.noAutomation ??= new Map());
+    const had = rows.get(subject);
+    if (mark === null) rows.delete(subject);
+    else rows.set(subject, { subject, code: mark.code, setBy: mark.setBy, setAt: mark.setAt });
+    this.undoWith(() => {
+      if (had === undefined) rows.delete(subject);
+      else rows.set(subject, had);
+    });
+  }
+
+  loadNoAutomation(subject: string): NoAutomationRow | null {
+    const row = this.noAutomation?.get(subject);
+    return row === undefined ? null : { ...row };
   }
 
   purgeAi(readsBefore: number, outcomesBefore: number, examplesBefore: number): { reads: number; outcomes: number } {

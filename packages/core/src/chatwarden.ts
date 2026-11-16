@@ -19,6 +19,8 @@ import { historyOf, suggest } from './ladder.js';
 import type { ActionRecord, Suggestion, SuggestContext } from './ladder.js';
 import { resolveLimits } from './limits.js';
 import type { Limits, LimitsInput } from './limits.js';
+import { createAutomation } from './automation.js';
+import type { AutomationFacade } from './automation.js';
 import { dismissMany } from './dismissMany.js';
 import type { DismissManyInput, DismissManyResult } from './dismissMany.js';
 import { PolicyService } from './policy.js';
@@ -813,6 +815,12 @@ export interface Chatwarden {
      * @experimental
      */
     accountIds(subject: SubjectId): string[];
+    /**
+     * The "do not automate" mark (AI levels 3 and 4, design 6.4): a senior marks a person so the AI never acts on them. Staff only (`automation.write` in
+     * the HTTP layer). Reads and drafts are still produced for a marked person. Follows a merge. A store without the methods answers `unsupported`.
+     * @experimental
+     */
+    automation: AutomationFacade;
   };
   /**
    * The Discord feed's thread map (`@chatwarden/discord`): the forum thread kept per person (`kit_discord_threads`). A
@@ -1563,6 +1571,7 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       canonical: (subject) => subjects.canonical(subject),
       aliases: (subject) => subjects.aliasesOf(subject),
       accountIds: (subject) => (typeof subject === 'string' ? subjects.identifiersOf(subject).accounts : []),
+      automation: createAutomation({ store, subjects, clock, logger }),
     },
     discordThreads: {
       get: (subject) => store.transaction(() => store.getDiscordThread(subject)),

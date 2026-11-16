@@ -32,6 +32,7 @@ import type {
   ClaimRow,
   DecisionRow,
   MuteRow,
+  NoAutomationRow,
   NoticeKind,
   NoticeRow,
   OpenReportQuery,
@@ -1205,6 +1206,30 @@ export class SqliteStore implements Store, TermStore {
       // The only chat text that outlives a report goes on its own, shorter clock; the row keeps its counts.
       this.db.prepare('UPDATE kit_ai_outcomes SET example_json = NULL WHERE decided_at < ? AND example_json IS NOT NULL').run(examplesBefore);
       return { reads, outcomes };
+    });
+  }
+
+  // "Do not automate" (AI levels 3 and 4, migration 24). One row per person; no retention of its own.
+
+  setNoAutomation(subject: string, mark: { code: string; setBy: string; setAt: number } | null): void {
+    this.transaction(() => {
+      if (mark === null) {
+        this.db.prepare('DELETE FROM kit_ai_noauto WHERE subject_id = ?').run(subject);
+        return;
+      }
+      this.db
+        .prepare(
+          `INSERT INTO kit_ai_noauto (subject_id, code, set_by, set_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT (subject_id) DO UPDATE SET code = excluded.code, set_by = excluded.set_by, set_at = excluded.set_at`,
+        )
+        .run(subject, mark.code, mark.setBy, mark.setAt);
+    });
+  }
+
+  loadNoAutomation(subject: string): NoAutomationRow | null {
+    return this.transaction(() => {
+      const r = this.db.prepare('SELECT subject_id, code, set_by, set_at FROM kit_ai_noauto WHERE subject_id = ?').get(subject);
+      return r === undefined ? null : { subject: String(r.subject_id), code: String(r.code), setBy: String(r.set_by), setAt: Number(r.set_at) };
     });
   }
 

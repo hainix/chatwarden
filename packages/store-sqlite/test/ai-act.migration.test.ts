@@ -107,6 +107,28 @@ describe('migration 24: the casebook gains the gate columns', () => {
     for (const bad of ['ai', 'HUMAN', '', 'moderator']) expect(() => db.prepare("UPDATE kit_ai_outcomes SET source = ? WHERE report_id = 'x'").run(bad), bad).toThrow(/CHECK/);
   });
 
+  it('adds the do-not-automate table: one row per person, a closed set of columns, and no row in an upgraded database', () => {
+    const db = memDb();
+    openAt23(db);
+    expect(names(db, 'table')).not.toContain('kit_ai_noauto');
+    const store = openStore({ db });
+    expect(names(db, 'table')).toContain('kit_ai_noauto');
+    const cols = info(db, 'kit_ai_noauto').map((r) => [String(r.name), String(r.type), Number(r.notnull), Number(r.pk)]);
+    expect(cols).toEqual([
+      ['subject_id', 'TEXT', 1, 1],
+      ['code', 'TEXT', 1, 0],
+      ['set_by', 'TEXT', 1, 0],
+      ['set_at', 'INTEGER', 1, 0],
+    ]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM kit_ai_noauto').get()).toEqual({ n: 0 });
+    // a second row for the same person is refused by the key (the store upserts)
+    store.setNoAutomation?.('s_a', { code: 'staff', setBy: 'sen_ann', setAt: NOW });
+    expect(() => db.prepare("INSERT INTO kit_ai_noauto VALUES ('s_a', 'other', 'x', 1)").run()).toThrow(/UNIQUE|constraint/i);
+    store.setNoAutomation?.('s_a', { code: 'other', setBy: 'sen_bo', setAt: NOW + 1 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM kit_ai_noauto').get()).toEqual({ n: 1 });
+    expect(store.loadNoAutomation?.('s_a')).toEqual({ subject: 's_a', code: 'other', setBy: 'sen_bo', setAt: NOW + 1 });
+  });
+
   it('the migration adds the columns, backfills them from a read that still exists and leaves older rows NULL', () => {
     const db = memDb();
     openAt23(db);
@@ -160,6 +182,7 @@ describe('migration 24: the casebook gains the gate columns', () => {
     expect(openStore({ db, migrations: UP_TO_23 }).schemaVersion()).toBe(23);
     expect(info(db, 'kit_ai_outcomes').map((r) => r.name)).not.toContain('ai_rule');
     expect(names(db, 'index')).not.toContain('kit_ai_outcomes_by_cell');
+    expect(names(db, 'table')).not.toContain('kit_ai_noauto');
     expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(info(db, 'kit_ai_outcomes').map((r) => r.name)).toContain('ai_rule');
   });

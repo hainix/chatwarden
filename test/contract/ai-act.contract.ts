@@ -298,5 +298,71 @@ export function aiActContract(name: string, make: () => Store): void {
       (first[0] as AiGateRow).counts.recent.n = 999;
       expect(counts(s)).toMatchObject({ qualifying: 1, recent: { n: 1 } });
     });
+    // "Do not automate" (design 6.4): a closed code, who set it and when, per person. Not a casebook row: it has no retention of its own.
+    describe('the do-not-automate mark', () => {
+      type MarkStore = Required<Pick<Store, 'setNoAutomation' | 'loadNoAutomation'>>;
+      const mark = (s: Store): Store & MarkStore => {
+        for (const m of ['setNoAutomation', 'loadNoAutomation'] as const) if (s[m] === undefined) throw new Error(`this store has no ${m}`);
+        return s as Store & MarkStore;
+      };
+
+      it('has both methods', () => {
+        const s = make();
+        expect(typeof s.setNoAutomation).toBe('function');
+        expect(typeof s.loadNoAutomation).toBe('function');
+      });
+
+      it('set, get and clear round-trip', () => {
+        const s = mark(make());
+        expect(s.loadNoAutomation('s_a')).toBeNull();
+        s.setNoAutomation('s_a', { code: 'vulnerable', setBy: 'sen_ann', setAt: NOW });
+        expect(s.loadNoAutomation('s_a')).toEqual({ subject: 's_a', code: 'vulnerable', setBy: 'sen_ann', setAt: NOW });
+        // a second set replaces the row (one row per person)
+        s.setNoAutomation('s_a', { code: 'staff', setBy: 'sen_bo', setAt: NOW + 1 });
+        expect(s.loadNoAutomation('s_a')).toEqual({ subject: 's_a', code: 'staff', setBy: 'sen_bo', setAt: NOW + 1 });
+        expect(s.loadNoAutomation('s_b')).toBeNull();
+        s.setNoAutomation('s_a', null);
+        expect(s.loadNoAutomation('s_a')).toBeNull();
+        // clearing what is not there is fine
+        expect(() => s.setNoAutomation('s_a', null)).not.toThrow();
+        expect(() => s.setNoAutomation('s_zz', null)).not.toThrow();
+      });
+
+      it('answers with copies', () => {
+        const s = mark(make());
+        s.setNoAutomation('s_a', { code: 'other', setBy: 'sen_ann', setAt: NOW });
+        const first = s.loadNoAutomation('s_a');
+        (first as { code: string }).code = 'changed';
+        expect(s.loadNoAutomation('s_a')?.code).toBe('other');
+      });
+
+      it('the mark survives purge, whatever the cutoff', () => {
+        const s = mark(make());
+        s.setNoAutomation('s_a', { code: 'under_review', setBy: 'sen_ann', setAt: NOW - 400 * DAY });
+        const far = NOW + 10_000 * DAY;
+        s.purgeAi?.(far, far, far);
+        s.purgeReports(far, far);
+        s.purgeSanctions(far);
+        s.purgeStrikes(far);
+        s.purgeMutes(far);
+        s.purgeNotices(far);
+        s.purgeAudit(far);
+        s.purgeAppeals?.(far);
+        s.purgeSignals?.(far);
+        s.purgeLinks?.(far);
+        expect(s.loadNoAutomation('s_a')).toMatchObject({ code: 'under_review', setAt: NOW - 400 * DAY });
+      });
+
+      it('a rolled-back transaction leaves no mark', () => {
+        const s = mark(make());
+        expect(() =>
+          s.transaction(() => {
+            s.setNoAutomation('s_a', { code: 'other', setBy: 'sen_ann', setAt: NOW });
+            throw new Error('undo');
+          }),
+        ).toThrow('undo');
+        expect(s.loadNoAutomation('s_a')).toBeNull();
+      });
+    });
   });
 }
