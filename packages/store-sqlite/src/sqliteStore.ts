@@ -5,6 +5,8 @@ import type {
   AppealRow,
   AppealStatus,
   BlockedNameRow,
+  LinkRow,
+  LinkSystem,
   NameReason,
   AIExample,
   AIRead,
@@ -440,6 +442,11 @@ export function inSavepoint<T>(db: DatabaseSync, fn: () => T): T {
   }
   db.exec(`RELEASE ${name}`);
   return value;
+}
+
+/** A `kit_links` row as the facade's {@link LinkRow}. */
+function linkRowOf(r: Record<string, unknown>): LinkRow {
+  return { system: String(r.system) as LinkSystem, ref: String(r.ref), external: String(r.external), state: String(r.state), at: Number(r.at) };
 }
 
 /**
@@ -1463,6 +1470,38 @@ export class SqliteStore implements Store, TermStore {
 
   purgeBlockedNames(before: number): number {
     return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_blocked_names WHERE at < ?').run(before).changes));
+  }
+
+  getLink(system: LinkSystem, ref: string): LinkRow | null {
+    const row = this.transaction(() =>
+      this.db.prepare('SELECT system, ref, external, state, at FROM kit_links WHERE system = ? AND ref = ?').get(system, ref),
+    );
+    return row === undefined ? null : linkRowOf(row);
+  }
+
+  putLink(row: LinkRow): void {
+    this.transaction(() => {
+      this.db
+        .prepare('INSERT OR REPLACE INTO kit_links (system, ref, external, state, at) VALUES (?, ?, ?, ?, ?)')
+        .run(row.system, row.ref, row.external, row.state, row.at);
+    });
+  }
+
+  listLinks(system: LinkSystem, q: { state?: string; limit: number }): LinkRow[] {
+    const n = Math.floor(q.limit);
+    const size = Number.isFinite(n) ? Math.min(500, Math.max(1, n)) : 1;
+    return this.transaction(() => {
+      const columns = 'SELECT system, ref, external, state, at FROM kit_links';
+      const rows =
+        q.state === undefined
+          ? this.db.prepare(`${columns} WHERE system = ? ORDER BY at, ref LIMIT ?`).all(system, size)
+          : this.db.prepare(`${columns} WHERE system = ? AND state = ? ORDER BY at, ref LIMIT ?`).all(system, q.state, size);
+      return rows.map(linkRowOf);
+    });
+  }
+
+  purgeLinks(before: number): number {
+    return this.transaction(() => Number(this.db.prepare('DELETE FROM kit_links WHERE at < ?').run(before).changes));
   }
 
   listReasons(): ReasonRow[] {

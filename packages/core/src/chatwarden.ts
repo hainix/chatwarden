@@ -40,6 +40,8 @@ import { NoticeService } from './notices.js';
 import type { PlayerNotice } from './notices.js';
 import { ReportService } from './reports.js';
 import type { ReportCounts, ReportDetailInput, ReportDetailResult, ReportInput, ReportResult } from './reports.js';
+import { checkLinkRow, hasLinkMethods, isLinkSystem, isLinkValue, linkLimit } from './links.js';
+import type { LinkRow, LinkSystem } from './links.js';
 import { checkRetentionFloors, purge, RETENTION_DEFAULTS } from './retention.js';
 import type { PurgeResult, RetentionPolicy } from './retention.js';
 import { defineRules, parseRuleRef, starterRules } from './rules.js';
@@ -565,6 +567,24 @@ export interface Chatwarden {
     renamesEnabled(): boolean;
     /** A person's rename requests, newest first, at most 20: `{ at, pending }` each. No reason, actor, rule or name. Staff only: never send to a player. @experimental */
     renamesOf(subject: SubjectId): Array<{ at: number; pending: boolean }>;
+  };
+  /**
+   * "This kit id is that outside id": a small table the Coop and EOS adapters keep their links in (a report sent to Coop, a sanction pushed
+   * to EOS, an EOS report already filed, a polling cursor). Rows are ids and one short state word, never text. Purged with `retention.reportsMs`.
+   * @experimental
+   */
+  links: {
+    /** True when the store implements the link methods. An adapter that needs links throws `RangeError` at construction when false. */
+    readonly supported: boolean;
+    /** The row for `(system, ref)`, a copy, or null (also for a value `put` would refuse, and for a store without links). Never throws. */
+    get(system: LinkSystem, ref: string): LinkRow | null;
+    /**
+     * Insert or replace the row for `(system, ref)`. Throws `RangeError` for a value outside the shapes (the message names the field, never the
+     * value) and a plain `Error` for a store without links. Only the five fields are stored.
+     */
+    put(row: LinkRow): void;
+    /** The system's rows, oldest `at` first and then `ref`, only this state when given, at most `limit` (1..500, default 100). Empty for a store without links. */
+    list(system: LinkSystem, q?: { state?: string; limit?: number }): LinkRow[];
   };
   /**
    * The AI read and recommend service. Always present: without an `ai` option (or at level 0) it answers as if there were no AI. A
@@ -1433,6 +1453,24 @@ export async function createChatwarden(opts: ChatwardenOptions): Promise<Chatwar
       renamed: (who) => nameService.renamed(who),
       renamesEnabled: () => nameService.renamesEnabled(),
       renamesOf: (subject) => nameService.renamesOf(subject),
+    },
+    links: {
+      supported: hasLinkMethods(store),
+      get: (system, ref) => {
+        if (!hasLinkMethods(store) || !isLinkSystem(system) || !isLinkValue(ref)) return null;
+        return store.getLink?.(system, ref) ?? null;
+      },
+      put: (row) => {
+        checkLinkRow(row);
+        if (!hasLinkMethods(store)) throw new Error('chatwarden: links are not supported by this store');
+        const { system, ref, external, state, at } = row;
+        store.putLink?.({ system, ref, external, state, at });
+      },
+      list: (system, q) => {
+        if (!hasLinkMethods(store) || !isLinkSystem(system)) return [];
+        const state = q?.state;
+        return store.listLinks?.(system, { ...(typeof state === 'string' ? { state } : {}), limit: linkLimit(q?.limit) }) ?? [];
+      },
     },
     rules,
     get profile() {

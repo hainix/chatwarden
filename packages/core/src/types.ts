@@ -4,6 +4,7 @@
 import type { AIExample, AIRead, AISignal } from './ai/types.js';
 import type { AppealStatus } from './appeals.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
+import type { LinkRow, LinkSystem } from './links.js';
 import type { NameReason } from './names.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
@@ -1406,6 +1407,25 @@ export interface Store {
 
   /** OPTIONAL. Delete names with `at < before` (a row exactly on the line is kept); returns how many. */
   purgeBlockedNames?(before: number): number;
+
+  // Links (K5 design 5.1, `cw.links`). OPTIONAL: a store without all four has `cw.links.supported` false, and an adapter that needs links
+  // refuses it at construction. SYNCHRONOUS (like notices); they run inside `transaction` and are undone with it. They take a row the
+  // facade has already validated, keep it as it is and return copies. A link write is not a queue change: it does not move the change token.
+
+  /** OPTIONAL (`@experimental`). The row for `(system, ref)`, a copy, or null. */
+  getLink?(system: LinkSystem, ref: string): LinkRow | null;
+
+  /** OPTIONAL (`@experimental`). Insert the row, or replace the one with the same `(system, ref)`. */
+  putLink?(row: LinkRow): void;
+
+  /**
+   * OPTIONAL (`@experimental`). The `system`'s rows, oldest `at` first and then by `ref` (code point order), only this `state` when given,
+   * at most `limit` (floored, clamped to 1..500; NaN is 1). The state filter applies before the limit. Copies.
+   */
+  listLinks?(system: LinkSystem, q: { state?: string; limit: number }): LinkRow[];
+
+  /** OPTIONAL (`@experimental`). Delete rows with `at < before` (a row exactly on the line is kept), in every system; returns how many. */
+  purgeLinks?(before: number): number;
 
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).

@@ -63,9 +63,9 @@ const withoutServerOnlyAi: Plugin = {
       loader: 'js',
       resolveDir: dirname(args.path),
     }));
-    // `withMemoryAi`, `withMemorySignals`, `withMemoryAppeals` and `withMemoryNames` are the in-memory store's opt-in methods: their names are left out of `export * as storeMemory`.
+    // `withMemoryAi`, `withMemorySignals`, `withMemoryAppeals`, `withMemoryLinks` and `withMemoryNames` are the in-memory store's opt-in methods: their names are left out of `export * as storeMemory`.
     b.onLoad({ filter: /packages[\\/]store-memory[\\/]dist[\\/]src[\\/]index\.js$/ }, (args) => ({
-      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*\{[^}]*\}\s*from\s*['"]\.\/memory(?:Ai|Appeals|Names|Signals)\.js['"];?[ \t]*$/gm, ''),
+      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*\{[^}]*\}\s*from\s*['"]\.\/memory(?:Ai|Appeals|Links|Names|Signals)\.js['"];?[ \t]*$/gm, ''),
       loader: 'js',
       resolveDir: dirname(args.path),
     }));
@@ -329,7 +329,7 @@ describe('browser bundle: size', () => {
 // names that live only in the AI module: the prompt builder, the output schema and the scripted fake adapter.
 const AI_MARKERS = ['buildAIInput', 'AI_OUTPUT_SCHEMA', 'createFakeModerationAI'];
 // And the in-memory store's AI methods, which are opt-in (`withMemoryAi`) so a bundle that never calls it does not carry them.
-const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries', 'withMemoryAppeals', 'withMemoryNames', 'UNIQUE constraint failed: kit_blocked_names.id'];
+const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries', 'withMemoryAppeals', 'withMemoryLinks', 'withMemoryNames', 'UNIQUE constraint failed: kit_blocked_names.id'];
 const inputsOf = (m: Metafile): string[] => Object.keys(m.inputs).map((p) => p.replaceAll('\\', '/'));
 
 describe('browser bundle: the server-only AI module', () => {
