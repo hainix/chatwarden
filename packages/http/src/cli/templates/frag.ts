@@ -1,7 +1,7 @@
 // The template engine: a template is a function of a `Ctx` that returns text built from template literals. Everything that exists only in
 // TypeScript (an annotation, a type import, a cast, a generic, an interface) is written through `t` or `impType`, which vanish in the JavaScript
 // rendering, so that rendering is mechanical: there is no pass that strips types afterwards.
-import type { Answers, Lang, Versions } from '../types.js';
+import type { Answers, AppLayout, Lang, Versions } from '../types.js';
 
 export interface Ctx {
   answers: Answers;
@@ -13,19 +13,24 @@ export interface Ctx {
   /** The extension of a file with JSX: `.tsx` or `.jsx`. */
   jsxExt: string;
   versions: Versions;
+  /** What the root listing says about the app directory (Next.js only reads it). */
+  layout: AppLayout;
 }
 
 export interface CtxOptions {
   /** `"type"` of the project's package.json. JavaScript in a CommonJS project is written as `.mjs`. Default `module`. */
   moduleType?: 'module' | 'commonjs';
+  /** `src` and `app` entries of the project root, for where a Next.js route goes. */
+  layout?: AppLayout;
 }
 
 export function makeCtx(answers: Answers, versions: Versions, options: CtxOptions = {}): Ctx {
   // A Next.js project resolves imports with its bundler: no suffix on a relative import, and its JavaScript is .js whatever the package's type.
   const next = answers.framework === 'next';
-  if (answers.lang === 'ts') return { answers, lang: 'ts', ext: next ? '' : '.js', scriptExt: '.ts', jsxExt: '.tsx', versions };
+  const layout = options.layout ?? {};
+  if (answers.lang === 'ts') return { answers, lang: 'ts', ext: next ? '' : '.js', scriptExt: '.ts', jsxExt: '.tsx', versions, layout };
   const mjs = options.moduleType === 'commonjs' && !next;
-  return { answers, lang: 'js', ext: next ? '' : mjs ? '.mjs' : '.js', scriptExt: mjs ? '.mjs' : '.js', jsxExt: '.jsx', versions };
+  return { answers, lang: 'js', ext: next ? '' : mjs ? '.mjs' : '.js', scriptExt: mjs ? '.mjs' : '.js', jsxExt: '.jsx', versions, layout };
 }
 
 /** The TypeScript-only fragment for `ts`, nothing for `js`. */

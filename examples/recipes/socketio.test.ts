@@ -7,7 +7,7 @@ import { MemoryStore } from '@chatwarden/store-memory';
 import { Server } from 'socket.io';
 import { io as connectClient } from 'socket.io-client';
 import type { Socket as ClientSocket } from 'socket.io-client';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BLOCKED_WORD, LONG_TOKEN, SECRET, keyOf, settle, withEnv } from './harness.js';
 import * as hooks from './cases/express-sqlite-box-socketio/chatwarden/auth.js';
 import { createKit } from './cases/express-sqlite-box-socketio/chatwarden/kit.js';
@@ -127,6 +127,35 @@ describe('two sockets in the lobby', () => {
     expect(b.seen.join('')).not.toContain(BLOCKED_WORD);
     expect(a.seen.filter((s) => s.includes(BLOCKED_WORD))).toEqual([]);
     expect(b.frames.filter((f) => f.type === 'line')).toEqual([]);
+  });
+});
+
+describe('a throw inside the connection handler', () => {
+  it('is not an unhandled rejection: the socket is disconnected and the server keeps serving the next one', async () => {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown): void => void unhandled.push(reason);
+    process.on('unhandledRejection', listener);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const kit = await createKit();
+      const session = vi.spyOn(kit.chat, 'session').mockImplementationOnce(() => {
+        throw new Error('zorbak failed inside the session');
+      });
+      const run = await boot(kit);
+      const broken = join(run, keyOf('fenrisk'));
+      expect(await broken.disconnected).toBe('io server disconnect');
+      await settle(100);
+      expect(session).toHaveBeenCalledTimes(1);
+      expect(unhandled).toEqual([]);
+      // Logged by class only: the message of the error never reaches the log line.
+      expect(warn).toHaveBeenCalledWith('chatwarden: a chat connection failed:', 'Error');
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('zorbak failed');
+      const next = join(run, keyOf('tarvo'));
+      await until(() => hello(next));
+    } finally {
+      warn.mockRestore();
+      process.off('unhandledRejection', listener);
+    }
   });
 });
 

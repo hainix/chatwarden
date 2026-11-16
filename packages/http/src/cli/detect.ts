@@ -66,6 +66,7 @@ export async function detect(env: CliEnv): Promise<Detected | Failure> {
     ts: names.includes('tsconfig.json'),
     moduleType: record.type === 'module' ? 'module' : 'commonjs',
     srcDir: names.includes('src'),
+    appDir: names.includes('app'),
     hasDir: names.includes('chatwarden'),
   };
 }

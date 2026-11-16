@@ -62,7 +62,10 @@ ${box ? '  /** The room broadcaster the chat routes use. */\n  chat: RoomBroadca
 `
     : '';
 
-  const content = `${header(ctx, 'The Chatwarden kit: the one place the moderation engine is configured.')}${imports}
+  const cycleNote = `// auth.ts imports BASE and secretFromEnv from this file, so the two form an import cycle (a lint rule like import/no-cycle may flag it). It is safe
+// because auth.ts reads them only inside functions. Keep BASE and secretFromEnv free of anything from auth.ts at load time.
+`;
+  const content = `${header(ctx, 'The Chatwarden kit: the one place the moderation engine is configured.')}${imports}${routes ? cycleNote : ''}
 /** Every route family lives under this prefix, so it cannot collide with your own /api or /admin. */
 export const BASE = '${answers.base}';
 

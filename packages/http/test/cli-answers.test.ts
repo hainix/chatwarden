@@ -14,6 +14,7 @@ const DETECTED: Detected = {
   ts: true,
   moduleType: 'module',
   srcDir: false,
+  appDir: false,
   hasDir: false,
 };
 const detected = (over: Partial<Detected> = {}): Detected => ({ ...DETECTED, ...over });

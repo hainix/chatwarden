@@ -19,10 +19,13 @@ function headersOf(raw: IncomingHttpHeaders): Record<string, string> {
   return out;
 }
 
-/** The Web Request for a Fastify request. The body is the exact text the parser below handed over. */
+/**
+ * The Web Request for a Fastify request. The body is the exact text the parser below handed over. The URL is the path on a fixed base, never the
+ * client's Host header (a malformed one would throw here): the kit reads only the path and the query.
+ */
 function webRequestOf(request: FastifyRequest, signal: AbortSignal): Request {
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
-  return new Request(new URL(request.url, `${request.protocol}://${request.host}`), {
+  return new Request(new URL(request.url, 'http://localhost'), {
     method: request.method,
     headers: headersOf(request.headers),
     signal,

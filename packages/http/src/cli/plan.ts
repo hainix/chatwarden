@@ -1,6 +1,6 @@
 // The plan: what init would do, as pure data (design 5.2). No file system, no clock, no randomness: the same answers give the same plan, byte
 // for byte, on every machine. Applying it is apply.ts's job.
-import type { Answers, EnvName, FileSpec, PackageManager, Plan, Project, TodoItem, Versions } from './types.js';
+import type { Answers, AppLayout, EnvName, FileSpec, PackageManager, Plan, Project, TodoItem, Versions } from './types.js';
 
 /** The shared and framework templates (Tasks 3, 5 and 6), as `renderAll` or as the list it returns. Injected so this file is tested with stubs. */
 export type Templates = FileSpec[] | ((answers: Answers, versions: Versions) => FileSpec[]);
@@ -55,20 +55,25 @@ export function envNames(answers: Answers): EnvName[] {
   return env;
 }
 
-/** Where a Next.js project keeps its routes: `src/app` when the project has a `src` folder (the folder init writes to is then under `src`), else `app`. */
-export function nextAppRoot(answers: Answers): string {
+/**
+ * Where a Next.js project keeps its routes. An `app` folder at the root wins; a `src` folder with no `app` beside it means `src/app` (Next ignores a
+ * root `app` once `src` holds the routes). Only when the root listing says neither does the `--dir` prefix decide: `src/...` goes under `src/app`.
+ */
+export function nextAppRoot(answers: Answers, layout: AppLayout = {}): string {
+  if (layout.appDir === true) return 'app';
+  if (layout.srcDir === true) return 'src/app';
   return answers.dir.startsWith('src/') ? 'src/app' : 'app';
 }
 
-function entryLine(answers: Answers): string {
-  const line = frameworkEntryLine(answers);
+function entryLine(answers: Answers, layout: AppLayout): string {
+  const line = frameworkEntryLine(answers, layout);
   if (answers.chat === 'box' && answers.chatTransport === 'socketio') {
     return `${line} Then attach the chat to your Socket.IO server: attachChat(io, kit) (from ${answers.dir}/socketio).`;
   }
   return line;
 }
 
-function frameworkEntryLine(answers: Answers): string {
+function frameworkEntryLine(answers: Answers, layout: AppLayout): string {
   const { dir, base } = answers;
   switch (answers.framework) {
     case 'express':
@@ -76,7 +81,7 @@ function frameworkEntryLine(answers: Answers): string {
     case 'fastify':
       return `Add one line to your app: await mountChatwarden(app) (from ${dir}/fastify).`;
     case 'next':
-      return `Next serves the route handler under ${nextAppRoot(answers)}${base}/ by itself: there is nothing to add to your code. This recipe needs Next running as a Node process, not serverless (next start, a container or a VM): the database file and the open chat streams need one long-lived process.`;
+      return `Next serves the route handler under ${nextAppRoot(answers, layout)}${base}/ by itself: there is nothing to add to your code. This recipe needs Next running as a Node process, not serverless (next start, a container or a VM): the database file and the open chat streams need one long-lived process.`;
     case 'fetch':
       return `Call the handler from ${dir}/handler for each request under ${base}: const response = await handler(request).`;
     case 'none':
@@ -84,7 +89,7 @@ function frameworkEntryLine(answers: Answers): string {
   }
 }
 
-function nextSteps(answers: Answers, command: string): string[] {
+function nextSteps(answers: Answers, command: string, layout: AppLayout): string[] {
   const library = answers.framework === 'none';
   const variables = library ? 'CHATWARDEN_SECRET' : 'CHATWARDEN_SECRET and CHATWARDEN_ADMIN_TOKEN';
   const setLine = `Set ${variables} (make a value with: ${SECRET_COMMAND}).`;
@@ -92,7 +97,7 @@ function nextSteps(answers: Answers, command: string): string[] {
   if (library) last = 'Call the check from your chat handler before you broadcast a line (the hook below).';
   else if (answers.hub === 'none') last = `Start your server and open http://localhost:3000${answers.base}/healthz (use your server's port).`;
   else last = `Start your server and open http://localhost:3000${answers.base}/mod (use your server's port).`;
-  return [`Install the packages: ${command}`, entryLine(answers), setLine, last];
+  return [`Install the packages: ${command}`, entryLine(answers, layout), setLine, last];
 }
 
 function todoOf(files: readonly FileSpec[]): TodoItem[] {
@@ -139,7 +144,7 @@ export function buildPlan(answers: Answers, versions: Versions, templates: Templ
     files,
     install: { manager: project.manager, command, packages },
     env: envNames(answers),
-    nextSteps: nextSteps(answers, command),
+    nextSteps: nextSteps(answers, command, project),
     warnings,
     todo: todoOf(files),
   };

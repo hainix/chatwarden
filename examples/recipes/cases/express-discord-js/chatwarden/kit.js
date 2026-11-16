@@ -7,6 +7,8 @@ import { createProfanityFilter } from '@chatwarden/profanity';
 import { discordFeed } from '@chatwarden/discord';
 import { loadMatcher } from './terms.js';
 import * as hooks from './auth.js';
+// auth.ts imports BASE and secretFromEnv from this file, so the two form an import cycle (a lint rule like import/no-cycle may flag it). It is safe
+// because auth.ts reads them only inside functions. Keep BASE and secretFromEnv free of anything from auth.ts at load time.
 
 /** Every route family lives under this prefix, so it cannot collide with your own /api or /admin. */
 export const BASE = '/chatwarden';

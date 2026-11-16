@@ -113,6 +113,17 @@ describe('routing', () => {
     expect((await app.inject({ method: 'GET', url: '/own' })).json()).toEqual({ own: true });
   });
 
+  it("a malformed Host header is the kit's answer, not Fastify's 500 Invalid URL (the request URL is built from a fixed base, never from Host)", async () => {
+    const { app } = await boot();
+    for (const host of ['a b', 'exa mple.test:99999999', '[::', '', 'zorbak.test/vlemmo?x=1', 'a@b@c']) {
+      const health = await app.inject({ method: 'GET', url: '/chatwarden/healthz', headers: { host } });
+      expect(health.statusCode, `Host ${JSON.stringify(host)}`).toBe(200);
+      const staff = await app.inject({ method: 'GET', url: '/chatwarden/admin/me', headers: { host } });
+      expect(staff.statusCode, `Host ${JSON.stringify(host)}`).toBe(401);
+      expect(staff.body).not.toContain('Invalid URL');
+    }
+  });
+
   it('the staff routes and the hub are 401 without a long token, and the header and the sign-in cookie reach /admin/me as owner', async () => {
     const { app } = await boot();
     for (const url of ['/chatwarden/admin/me', '/chatwarden/mod', '/chatwarden/mod/hub-element.js']) {

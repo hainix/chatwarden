@@ -89,7 +89,10 @@ function kitRequestOf(req${t(ctx, ': Request')})${t(ctx, ': KitRequest')} {
   return { method: req.method, path: req.path, query: {}, headers, body: undefined };
 }
 
-/** Mount the hub under <base>/mod: the page, its script and the sign-in form. Call it after the kit's own mounts. */
+/**
+ * Mount the hub under <base>/mod: the page, its script and the sign-in form. mountChatwarden calls it before the health mount, which is
+ * fallthrough: false and would answer <base>/mod with the kit's 404 if it came first; mount it yourself the same way, ahead of that catch-all.
+ */
 export function mountHub(app${t(ctx, ': Express')}, kit${t(ctx, ': Kit')})${t(ctx, ': void')} {
   const mod = \`\${kit.base}/mod\`;
   const signedIn = (req${t(ctx, ': Request')})${t(ctx, ': boolean')} => kit.hooks.authorize(kitRequestOf(req)) !== null;

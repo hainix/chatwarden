@@ -122,6 +122,19 @@ describe('the report', () => {
     expect(clean).toMatch(/Nothing left/);
   });
 
+  it('when a required variable is missing, the text says .env is not loaded for you and how to load it; a clean report does not', async () => {
+    const { world, answers } = project();
+    const text = renderCheck(await checkProject(world.env, answers));
+    expect(text).toContain('.env');
+    expect(text).toContain('not loaded');
+    expect(text).toContain('node --env-file=.env');
+    const noneMissing = renderCheck({ ok: false, files: ['a'], markers: [{ file: 'a', line: 1, marker: 'TODO(auth)' }], missingEnv: [], problems: [] });
+    expect(noneMissing).not.toContain('--env-file');
+    expect(renderCheck({ ok: true, files: ['a'], markers: [], missingEnv: [], problems: [] })).not.toContain('--env-file');
+    // The hint holds no value and no secret, and the json document is unchanged.
+    expect(text.includes('\r')).toBe(false);
+  });
+
   it('the json is version 1 with ok, markers and missingEnv, and no value, path or content', async () => {
     const { world, answers } = project({}, { env: { CHATWARDEN_SECRET: SECRET_VALUE } });
     const doc = JSON.parse(renderCheckJson(await checkProject(world.env, answers), '9.9.9')) as Record<string, unknown>;

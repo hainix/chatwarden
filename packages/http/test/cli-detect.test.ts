@@ -85,6 +85,13 @@ describe.each(['posix', 'win32'] as const)('detect (%s paths, %s root)', (kind) 
     expect((await found({ 'package.json': pkg({ type: 5 }) }, kind)).detected.moduleType).toBe('commonjs');
   });
 
+  it('an app folder at the root is noted (the Next.js app directory), and a name that merely contains the word is not', async () => {
+    expect((await found({ 'package.json': pkg(), 'app/page.tsx': '' }, kind)).detected.appDir).toBe(true);
+    expect((await found({ 'package.json': pkg() }, kind, { dirs: ['app'] })).detected.appDir).toBe(true);
+    expect((await found({ 'package.json': pkg() }, kind)).detected.appDir).toBe(false);
+    expect((await found({ 'package.json': pkg(), 'apps/a.ts': '', 'myapp': '', 'src/app/page.tsx': '' }, kind)).detected.appDir).toBe(false);
+  });
+
   it('src/ present moves the default dir', async () => {
     const withSrc = (await found({ 'package.json': pkg(), 'src/index.ts': '' }, kind)).detected;
     expect(withSrc.srcDir).toBe(true);

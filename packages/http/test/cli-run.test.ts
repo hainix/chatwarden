@@ -361,3 +361,26 @@ describe.each(['posix', 'win32'] as const)('the whole flow on %s paths', (kind: 
     expect(world.out()).not.toContain('\\');
   });
 });
+
+describe('Next.js: the route goes where the project\'s app directory is', () => {
+  const NEXT = JSON.stringify({ name: 'zorbak-game', type: 'module', dependencies: { next: '^15.0.0', react: '^19.0.0' } });
+  const nextProject = (files: Record<string, string>): World => createWorld({ files: { 'package.json': NEXT, 'tsconfig.json': '{}', ...files } });
+  const routes = (world: World): string[] => world.files().filter((f) => f.endsWith('route.ts'));
+
+  it('--dir chatwarden in a project with src/app puts the route under src/app, and the next step says so', async () => {
+    const world = nextProject({ 'src/app/page.tsx': 'export default function Page() { return null; }\n' });
+    expect(await run(world, '--yes', '--dir', 'chatwarden', '--store', 'memory')).toBe(0);
+    expect(routes(world)).toEqual(['src/app/chatwarden/[...path]/route.ts']);
+    expect(world.out()).toContain('under src/app/chatwarden/');
+  });
+  it('the default directory in a project with src/app keeps the route under src/app', async () => {
+    const world = nextProject({ 'src/app/page.tsx': '' });
+    expect(await run(world, '--yes', '--store', 'memory')).toBe(0);
+    expect(routes(world)).toEqual(['src/app/chatwarden/[...path]/route.ts']);
+  });
+  it('a project with an app folder at the root keeps the route under app, even with --dir src/chatwarden', async () => {
+    const world = nextProject({ 'app/page.tsx': '', 'src/util.ts': 'export {};\n' });
+    expect(await run(world, '--yes', '--dir', 'src/chatwarden', '--store', 'memory')).toBe(0);
+    expect(routes(world)).toEqual(['app/chatwarden/[...path]/route.ts']);
+  });
+});

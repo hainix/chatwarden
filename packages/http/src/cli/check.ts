@@ -76,7 +76,7 @@ export function renderCheck(result: CheckResult): string {
   if (result.missingEnv.length > 0) {
     lines.push('Required environment variables that are not set (names only)');
     for (const name of result.missingEnv) lines.push(`  ${name}`);
-    lines.push('');
+    lines.push("These are read from this shell's environment. A .env file is not loaded for you: export the names, or start your server with node --env-file=.env.", '');
   }
   if (result.ok) lines.push('Nothing left to replace: no starter marker remains and the required environment variables are set.');
   else if (result.problems.length === 0) lines.push('Replace the starter code (see the comment at each marker), set the variables, then run this check again.');

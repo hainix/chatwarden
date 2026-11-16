@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VERSION } from '../src/index.js';
-import { buildPlan, contentProblems } from '../src/cli/plan.js';
+import { buildPlan, contentProblems, nextAppRoot } from '../src/cli/plan.js';
 import type { Answers, FileSpec, Project } from '../src/cli/types.js';
 import { PROJECT, VERSIONS, answersOf, stubTemplates } from './cli-stubs.js';
 
@@ -280,5 +280,32 @@ describe('buildPlan: environment, next steps, warnings', () => {
         expect(line).not.toMatch(/[A-Za-z]:\\|\\|^\/(Users|home)/);
       }
     }
+  });
+});
+
+describe('nextAppRoot: where the project\'s app directory is (not only the --dir prefix)', () => {
+  const root = (dir: string, layout?: { srcDir?: boolean; appDir?: boolean }): string => nextAppRoot(answersOf({ framework: 'next', dir }), layout);
+  it('a src folder and no app folder means src/app, whatever --dir says', () => {
+    expect(root('chatwarden', { srcDir: true, appDir: false })).toBe('src/app');
+    expect(root('lib/chatwarden', { srcDir: true })).toBe('src/app');
+    expect(root('src/chatwarden', { srcDir: true, appDir: false })).toBe('src/app');
+  });
+  it('an app folder at the root means app, even beside a src folder and even for --dir src/...', () => {
+    expect(root('chatwarden', { srcDir: false, appDir: true })).toBe('app');
+    expect(root('chatwarden', { srcDir: true, appDir: true })).toBe('app');
+    expect(root('src/chatwarden', { srcDir: true, appDir: true })).toBe('app');
+  });
+  it('with neither folder (or nothing known) the --dir prefix decides, as before', () => {
+    expect(root('src/chatwarden')).toBe('src/app');
+    expect(root('chatwarden')).toBe('app');
+    expect(root('src/chatwarden', { srcDir: false, appDir: false })).toBe('src/app');
+    expect(root('chatwarden', { srcDir: false, appDir: false })).toBe('app');
+    expect(root('srcs/chatwarden')).toBe('app');
+  });
+  it('the next step names the same root as the route file', () => {
+    const p = plan({ framework: 'next', dir: 'chatwarden' }, { ...PROJECT, srcDir: true, appDir: false });
+    expect(p.nextSteps.join('\n')).toContain('under src/app/chatwarden/');
+    const q = plan({ framework: 'next', dir: 'chatwarden' }, { ...PROJECT, srcDir: false, appDir: true });
+    expect(q.nextSteps.join('\n')).toContain('under app/chatwarden/');
   });
 });

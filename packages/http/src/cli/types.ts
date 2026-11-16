@@ -41,6 +41,8 @@ export interface Detected {
   moduleType: 'module' | 'commonjs';
   /** A `src/` entry is present in the root listing: the default directory moves under it. */
   srcDir: boolean;
+  /** An `app` entry is present in the root listing: a Next.js app directory at the root. */
+  appDir: boolean;
   /** A `chatwarden` entry is present in the root listing (a previous run, or the adopter's own folder of that name). */
   hasDir: boolean;
 }
@@ -89,4 +91,7 @@ export interface Versions {
  * What the plan needs to know about the project beyond the answers. `platform` (`process.platform`) only changes how the install command is printed:
  * on `win32` each package is double-quoted, because a bare `^` is cmd.exe's escape character and would turn a range into an exact pin.
  */
-export type Project = Pick<Detected, 'manager' | 'react'> & { platform?: string };
+/** What the root listing says about where a Next.js project keeps its routes. */
+export type AppLayout = Partial<Pick<Detected, 'srcDir' | 'appDir'>>;
+
+export type Project = Pick<Detected, 'manager' | 'react'> & AppLayout & { platform?: string };

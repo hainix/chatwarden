@@ -4,6 +4,8 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { BASE, secretFromEnv } from './kit.js';
 
+// kit.ts imports this file and this file imports BASE and secretFromEnv back from it: an import cycle (a lint rule like import/no-cycle may flag it).
+// It is safe because both are only read inside functions, after both modules have loaded. Keep it that way: do not use them at the top level here.
 /** The cookie the sign-in form sets. It holds an HMAC of the token, never the token. */
 export const STAFF_COOKIE = 'chatwarden_staff';
 const MIN_TOKEN_LENGTH = 24;

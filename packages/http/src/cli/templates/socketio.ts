@@ -112,7 +112,11 @@ export function attachChat(io${t(ctx, ': Server')}, kit${t(ctx, ': Kit')})${t(ct
       }
     })
     .on('connection', (socket) => {
-      void serve(socket, kit);
+      // A throw inside serve (a hook of yours, say) must not become an unhandled rejection, which ends a Node process: log the class, drop the socket.
+      serve(socket, kit).catch((error${t(ctx, ': unknown')}) => {
+        console.warn('chatwarden: a chat connection failed:', error instanceof Error ? error.constructor.name : typeof error);
+        socket.disconnect(true);
+      });
     });
 }
 `;

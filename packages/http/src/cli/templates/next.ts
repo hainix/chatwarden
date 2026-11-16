@@ -19,7 +19,7 @@ export function nextFiles(ctx: Ctx): FileSpec[] {
   const { answers } = ctx;
   if (answers.framework !== 'next') return [];
   // A base of /chatwarden is the folder app/chatwarden; /game/mod is app/game/mod.
-  const root = `${nextAppRoot(answers)}${answers.base}`;
+  const root = `${nextAppRoot(answers, ctx.layout)}${answers.base}`;
   const routeDir = `${root}/[...path]`;
 
   const route = `${header(ctx, 'The Next.js route handler: every request under the prefix goes to the Chatwarden handler.')}import { handler } from '${relativeSpecifier(routeDir, `${answers.dir}/handler`)}';
