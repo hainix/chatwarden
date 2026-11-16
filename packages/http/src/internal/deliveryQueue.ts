@@ -68,7 +68,9 @@ function clampWait(ms: number | undefined): number | undefined {
 /** Make a delivery queue. Nothing runs until the first `push`. */
 export function createDeliveryQueue<Job>(opts: DeliveryQueueOptions<Job>): DeliveryQueue<Job> {
   const { send, clock, random, logger, event, detail } = opts;
-  const max = opts.max ?? QUEUE_MAX;
+  const max = opts.max === undefined ? QUEUE_MAX : opts.max;
+  // A NaN, zero or negative bound would make the queue unbounded or drop everything.
+  if (typeof max !== 'number' || !Number.isInteger(max) || max < 1) throw new RangeError('createDeliveryQueue: max must be a positive integer');
   const queue: Job[] = [];
   let busy = false;
   let disposed = false;
@@ -122,7 +124,23 @@ export function createDeliveryQueue<Job>(opts: DeliveryQueueOptions<Job>): Deliv
     const timeout = setTimeout(() => controller.abort(new DOMException('The attempt timed out.', 'TimeoutError')), ATTEMPT_TIMEOUT_MS);
     attemptTimeouts.add(timeout);
     try {
-      return await send(job, controller.signal);
+      // Raced against the abort: a `send` that ignores its signal and never settles still ends with the attempt timeout (or dispose), and the queue moves on.
+      // The race is lost by one macrotask on purpose: a `send` that does honour its signal rejects with its own error, and that is the class logged.
+      const sent = send(job, controller.signal);
+      const aborted = new Promise<never>((_resolve, reject) => {
+        controller.signal.addEventListener(
+          'abort',
+          () => {
+            const late = setTimeout(() => {
+              attemptTimeouts.delete(late);
+              reject(controller.signal.reason);
+            }, 0);
+            attemptTimeouts.add(late);
+          },
+          { once: true },
+        );
+      });
+      return await Promise.race([sent, aborted]);
     } catch (err) {
       return { kind: 'retry', error: errorClass(err) };
     } finally {

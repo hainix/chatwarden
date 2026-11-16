@@ -369,7 +369,8 @@ describe('the bound', () => {
     const queue = createDeliveryQueue<Job>({
       send: (j) => {
         sent.push(j.id);
-        return sent.length === 1 ? gate.then(() => OK) : Promise.resolve(OK);
+        // Every attempt of the first job is held (an attempt is cut off after 10 s and retried, and the retry waits too).
+        return j.id === 'in-flight' ? gate.then(() => OK) : Promise.resolve(OK);
       },
       clock,
       random: () => 0.5,
@@ -399,7 +400,7 @@ describe('the bound', () => {
     expect(logged).toEqual([['test.delivery_dropped', { count: 1 }], ['test.delivery_dropped', { count: 2 }]]);
     release();
     await tick(0);
-    expect(sent).toEqual(['in-flight', '4', '5', '6']);
+    expect(sent.filter((id) => id !== 'in-flight')).toEqual(['4', '5', '6']);
   });
 
   it('after a quiet minute a new drop logs at once again', async () => {
@@ -565,5 +566,68 @@ describe('two queues', () => {
     expect(logged).toEqual([['one_dropped', { count: 1 }], ['two_dropped', { count: 1 }]]);
     expect(a.sent).toEqual(['a1']);
     expect(b.sent).toEqual(['b1']);
+  });
+});
+
+describe('a send that ignores its signal (K5a review 4)', () => {
+  const stuck = () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const logged: Logged = [];
+    const sent: string[] = [];
+    const queue = createDeliveryQueue<Job>({
+      // Never settles, never looks at the signal.
+      send: (j) => {
+        sent.push(j.id);
+        return j.id === 'stuck' ? new Promise<Attempt>(() => undefined) : Promise.resolve(OK);
+      },
+      clock,
+      random: () => 0.5,
+      logger: { warn: (e, d) => void logged.push([e, d]) },
+      event: 'test.delivery',
+    });
+    return { queue, logged, sent };
+  };
+
+  it('the attempt timeout frees the slot: the next job is sent after the retries of the stuck one are used up', async () => {
+    const { queue, logged, sent } = stuck();
+    queue.push(job('stuck'));
+    queue.push(job('next'));
+    await tick(0);
+    expect(sent).toEqual(['stuck']);
+    // Six attempts, each cut off after 10 s, with the backoff between them (1, 2, 4, 8, 16 s at jitter 0.5 is exact).
+    await tick(6 * ATTEMPT_TIMEOUT_MS + (1 + 2 + 4 + 8 + 16) * BACKOFF_BASE_MS + 100);
+    expect(sent.filter((id) => id === 'stuck')).toHaveLength(MAX_RETRIES + 1);
+    expect(sent).toContain('next');
+    expect(logged).toEqual([['test.delivery_failed', { error: 'TimeoutError', attempts: MAX_RETRIES + 1 }]]);
+    queue.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('dispose frees a stuck send and leaves no timer behind', async () => {
+    const { queue, sent } = stuck();
+    queue.push(job('stuck'));
+    queue.push(job('next'));
+    await tick(0);
+    queue.dispose();
+    await tick(10 * ATTEMPT_TIMEOUT_MS);
+    expect(sent).toEqual(['stuck']);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('the max option (K5a review 4)', () => {
+  const make = (max: unknown) => () =>
+    createDeliveryQueue<Job>({ send: () => Promise.resolve(OK), clock, random: () => 0.5, event: 'x', max: max as number });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, '5', null])('refuses %s with a RangeError that does not echo it', (value) => {
+    expect(make(value)).toThrow(RangeError);
+    expect(() => make(value)()).toThrow('createDeliveryQueue: max must be a positive integer');
+  });
+
+  it('accepts 1, a thousand and the default', () => {
+    expect(make(1)).not.toThrow();
+    expect(make(1000)).not.toThrow();
+    expect(make(undefined)).not.toThrow();
   });
 });
