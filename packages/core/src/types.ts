@@ -888,7 +888,9 @@ export interface Store {
 
   /**
    * OPTIONAL (0.1.12, `@experimental`). The sanction group that holds this exact ref code (`M-` plus five characters, already
-   * normalised: upper case), or null. Revoked and ended groups are found: the code never changes. A store without it makes
+   * normalised: upper case), or null. Revoked and ended groups are found: the code never changes. A store that implements it MUST also honour
+   * `SanctionListQuery.groupId` (`cw.sanctions.byRef` reads the group's rows with it; a store that ignores the filter returns other groups'
+   * rows and the code is silently missed). A store without it makes
    * `cw.sanctions.byRef` read the newest 1 000 groups through {@link Store.listSubjectSanctions} instead.
    */
   sanctionGroupByRef?(refCode: string): string | null;

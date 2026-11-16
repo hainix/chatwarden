@@ -138,7 +138,7 @@ describe('cw.sanctions.byRef', () => {
     expect(who).toBe(cw.people.canonical(a));
   });
 
-  it('accepts lower case, surrounding spaces and a bare five character code; rejects four and six characters, an ambiguous letter (I, L, O, U, 0, 1) and an empty string', async () => {
+  it('accepts lower case, surrounding spaces and a bare five character code; rejects four and six characters, an ambiguous letter (I, L, O, 0, 1) and an empty string', async () => {
     const { cw, person, sanction } = await setup();
     const g = await sanction(person());
     const code = g.refCode; // 'M-' plus five
