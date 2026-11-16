@@ -4,3 +4,7 @@ dist/
 *.tsbuildinfo
 .smoke/
 CLAUDE.local.md
+.corpus-data/
+*.pem
+*.key
+.dev.vars
