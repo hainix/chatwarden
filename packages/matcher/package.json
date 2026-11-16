@@ -39,6 +39,10 @@
     "./test-fixtures": {
       "types": "./dist/src/fixtures/testFixtures.d.ts",
       "default": "./dist/src/fixtures/testFixtures.js"
+    },
+    "./corpus": {
+      "types": "./dist/src/corpus/index.d.ts",
+      "default": "./dist/src/corpus/index.js"
     }
   },
   "typesVersions": {
@@ -48,6 +52,9 @@
       ],
       "test-fixtures": [
         "dist/src/fixtures/testFixtures.d.ts"
+      ],
+      "corpus": [
+        "dist/src/corpus/index.d.ts"
       ]
     }
   },

@@ -28,6 +28,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./packages/matcher/src/fixtures/testFixtures.ts', import.meta.url)),
       },
       {
+        find: '@chatwarden/matcher/corpus',
+        replacement: fileURLToPath(new URL('./packages/matcher/src/corpus/index.ts', import.meta.url)),
+      },
+      {
         find: '@chatwarden/matcher/fixtures',
         replacement: fileURLToPath(new URL('./packages/matcher/src/fixtures/index.ts', import.meta.url)),
       },
