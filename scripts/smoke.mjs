@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 export const PROJECTS = {
   esm: { typescript: '5.9', scenario: 'scenario.ts', extras: ['express@5', '@types/express@5', '@types/react@19', '@types/react-dom@19'], init: true },
   cjs: { typescript: '5.7', scenario: 'scenario.ts', extras: ['express@5', '@types/express@5', '@types/react@19', '@types/react-dom@19'], requireCli: true },
-  headless: { typescript: '5.9', scenario: 'headless.ts', extras: [], only: ['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react'] },
+  headless: { typescript: '5.9', scenario: 'headless.ts', extras: [], only: ['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/matcher'] },
   // React 18.3 (the other end of the peer range `^18.3.0 || ^19.0.0`; the projects above get React 19). It server-renders the hub and the player
   // components and imports the headless entry. hub-element is left out: it bundles its own React.
   react18: {

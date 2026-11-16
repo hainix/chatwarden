@@ -50,6 +50,20 @@ export interface TermEditor {
  */
 export type ChangeRefusalCode = 'duplicate' | 'unblocks_known' | 'invalid' | 'not_found' | 'not_loaded' | 'build_failed';
 
+/** What {@link LiveTerms.syncPack} changed, counted over terms and exceptions together. `keptYours` is a row a human has edited (left
+ *  alone), `skipped` a pack row whose word already reads as another row's word. @experimental */
+export interface SyncSummary {
+  added: number;
+  deactivated: number;
+  reactivated: number;
+  changed: number;
+  keptYours: number;
+  skipped: number;
+}
+
+/** The answer of {@link LiveTerms.syncPack}: the summary and the pack version, or the refusal code ({@link ChangeRefusalCode}). @experimental */
+export type SyncResult = { ok: true; summary: SyncSummary; version: string } | { ok: false; code: ChangeRefusalCode };
+
 /** `error` is a message safe to show a moderator (it never quotes a term or a line); `code` is the same refusal as data. */
 export type ChangeResult<T> = { ok: true; value: T } | { ok: false; error: string; code: ChangeRefusalCode };
 export type CheckResult = { ok: true; hits: string[] } | { ok: false; error: string };
@@ -139,7 +153,8 @@ interface Kind {
  */
 export class LiveTerms implements Matcher {
   private readonly store: TermStore;
-  private readonly pack: TermPack | null;
+  /** The pack the canary and `check` read. {@link syncPack} replaces it when it succeeds. */
+  private pack: TermPack | null;
   private readonly clock: Clock;
   private readonly logger: Logger;
   private current: Matcher = NEVER;
@@ -258,6 +273,8 @@ export class LiveTerms implements Matcher {
    * rolls back and rejects with that error. `fn` must be synchronous. A refusal carries a `code`
    * ({@link ChangeRefusalCode}) next to the message.
    *
+   * An actor beginning `corpus:` is reserved to {@link syncPack} and refused (`invalid`).
+   *
    * A thin async wrapper over {@link changeSync}. A synchronous host (a relay boot, a handler that cannot await)
    * calls `changeSync` and gets the same result without a promise.
    */
@@ -271,6 +288,9 @@ export class LiveTerms implements Matcher {
    *  committed is a `build_failed` result. `fn` must be synchronous: an async `fn` throws a `TypeError` and is
    *  rolled back (a later rejection of its promise is swallowed, not reported as unhandled). */
   changeSync<T>(actor: string, fn: (edit: TermEditor) => T): ChangeResult<T> {
+    // `corpus:` is the shared list's own actor prefix ({@link syncPack}): a row last written by one is not an adopter's edit. A human
+    // actor must never look like it, or their edit would be handed to the next release. Refused, `fn` never called.
+    if (typeof actor === 'string' && actor.startsWith('corpus:')) return { ok: false, error: 'this actor name is reserved', code: 'invalid' };
     // With a pack configured, the store is not the truth until `load()` has seeded it and built from it: an
     // edit before then would act on an unseeded store. Refuse, writing nothing and never calling `fn`.
     if (this.pack !== null && !this.storeLoaded) return { ok: false, error: 'not loaded', code: 'not_loaded' };
@@ -309,6 +329,172 @@ export class LiveTerms implements Matcher {
       if (err instanceof Refusal) return { ok: false, error: err.message, code: err.code };
       this.logger.warn('terms.change_failed', { error: errName(err) });
       return { ok: false, error: 'the term store failed; no change was made', code: 'build_failed' };
+    }
+  }
+
+  /**
+   * Brings the store to a verified pack (a release of the shared list), as one transaction with the same rules as {@link change}.
+   * Each pack row is matched to a store row by id. Absent: it is added (`addedBy: actor`) unless another row already reads as the
+   * same word (`skipped`). Present and untouched: it follows the pack's `active`, word and language (`deactivated`, `reactivated`,
+   * `changed`). Present and touched: left exactly as it is (`keptYours`). A row the store has and the pack does not is never
+   * changed or deleted. Then the usual rules run (an active term must remain, every row must build, no exception may unblock a
+   * `positive` line), and on success the pack replaces this one, so `check` and the canary use its corpora. A refusal, a store
+   * failure or `dryRun` writes nothing and changes nothing; `dryRun` still reports the summary a real run would produce.
+   *
+   * A row is the adopter's ("touched") when `updatedBy` is set to anything that is not a `corpus:` actor, so the rows this method
+   * itself changed (which {@link TermStore} stamps with `actor`) stay the corpus's to change until a human edits them. Pass
+   * `corpus:<version>` as the actor. Never throws: a store failure is `build_failed` and logged (`terms.sync_failed`, error class only).
+   * @experimental
+   */
+  syncPack(pack: TermPack, options: { actor: string; dryRun?: boolean }): SyncResult {
+    if (this.pack !== null && !this.storeLoaded) return { ok: false, code: 'not_loaded' };
+    if (!isSyncable(pack)) return { ok: false, code: 'invalid' };
+    const previous = this.pack;
+    const state: { summary?: SyncSummary; built?: { matcher: Matcher; rows: Rows } } = {};
+    let committed = false;
+    // `validate` reads the pack's positive lines from `this.pack`; it must see the new pack, and the old one must come back on any failure.
+    this.pack = pack;
+    try {
+      this.store.transaction(() => {
+        state.summary = this.mergePack(pack, options.actor);
+        state.built = this.validate();
+        if (options.dryRun === true) throw new DryRunDone();
+      });
+      const { matcher, rows } = state.built!;
+      this.current = matcher;
+      this.loaded = rows;
+      this.fromPack = false;
+      this.storeLoaded = true;
+      committed = true;
+      return { ok: true, summary: state.summary!, version: pack.version };
+    } catch (err) {
+      if (err instanceof DryRunDone) return { ok: true, summary: state.summary!, version: pack.version };
+      if (err instanceof Refusal) return { ok: false, code: err.code };
+      this.resync();
+      this.logger.warn('terms.sync_failed', { error: errName(err) });
+      return { ok: false, code: 'build_failed' };
+    } finally {
+      if (!committed) this.pack = previous;
+    }
+  }
+
+  /** The writes of {@link syncPack}, inside its transaction. Reads each store list once; nothing here scans the store per row. */
+  private mergePack(pack: TermPack, actor: string): SyncSummary {
+    const summary: SyncSummary = { added: 0, deactivated: 0, reactivated: 0, changed: 0, keptYours: 0, skipped: 0 };
+    const at = this.clock.now();
+    const store = this.store;
+    this.mergeRows(
+      {
+        subject: 'term',
+        wordField: 'term',
+        key: termKey,
+        fold: foldTerm,
+        records: store.listTerms() as Mergeable[],
+        insert: (r) => store.insertTerm(r),
+        setWord: (id, word, language) => store.updateTerm(id, { term: word, language, updatedBy: actor, updatedAt: at }),
+        setActive: (id, active) => store.setTermActive(id, active, actor, at),
+      },
+      pack.terms.map((t) => ({ id: t.id, word: t.term, language: t.language, active: t.active })),
+      actor,
+      at,
+      summary,
+    );
+    this.mergeRows(
+      {
+        subject: 'exception',
+        wordField: 'phrase',
+        key: foldPhrase,
+        fold: foldPhrase,
+        records: store.listExceptions() as Mergeable[],
+        insert: (r) => store.insertException(r),
+        setWord: (id, word, language) => store.updateException(id, { phrase: word, language, updatedBy: actor, updatedAt: at }),
+        setActive: (id, active) => store.setExceptionActive(id, active, actor, at),
+      },
+      pack.exceptions.map((e) => ({ id: e.id, word: e.phrase, language: e.language, active: e.active })),
+      actor,
+      at,
+      summary,
+    );
+    return summary;
+  }
+
+  private mergeRows(
+    kind: MergeKind,
+    rows: { id: string; word: string; language: string; active: boolean }[],
+    actor: string,
+    at: number,
+    summary: SyncSummary,
+  ): void {
+    const byId = new Map<string, Mergeable>(kind.records.map((r) => [r.id, r]));
+    const taken = new Map<string, string>();
+    for (const r of kind.records) taken.set(kind.key(r[kind.wordField]), r.id);
+    const writeAudit = (op: 'add' | 'update' | 'toggle', before: Mergeable | null, after: Mergeable): void =>
+      this.store.writeAudit({
+        at,
+        actor,
+        action: `${kind.subject}.${op}`,
+        subjectType: kind.subject,
+        subjectRef: after.id,
+        beforeJson: before === null ? null : JSON.stringify(before),
+        afterJson: JSON.stringify(after),
+      });
+    for (const row of rows) {
+      const key = kind.key(row.word);
+      const cur = byId.get(row.id);
+      if (cur === undefined) {
+        // An empty key is left for validation to refuse as malformed.
+        if (key !== '' && taken.has(key)) {
+          summary.skipped += 1;
+          continue;
+        }
+        const added = {
+          id: row.id,
+          [kind.wordField]: kind.fold(row.word),
+          language: row.language,
+          active: row.active,
+          note: null,
+          addedBy: actor,
+          addedAt: at,
+          updatedBy: null,
+          updatedAt: null,
+        } as Mergeable;
+        kind.insert(added);
+        writeAudit('add', null, added);
+        byId.set(row.id, added);
+        if (key !== '') taken.set(key, row.id);
+        summary.added += 1;
+        continue;
+      }
+      // Touched: a human (anything but a `corpus:` actor) last wrote this row. It is theirs.
+      if (cur.updatedBy !== null && !cur.updatedBy.startsWith('corpus:')) {
+        summary.keptYours += 1;
+        continue;
+      }
+      let now = cur;
+      const oldKey = kind.key(cur[kind.wordField]);
+      if (key !== oldKey || row.language !== cur.language) {
+        const holder = taken.get(key);
+        if (key !== oldKey && holder !== undefined && holder !== row.id) {
+          summary.skipped += 1;
+        } else {
+          const word = key !== oldKey ? kind.fold(row.word) : cur[kind.wordField];
+          kind.setWord(row.id, word, row.language);
+          now = { ...cur, [kind.wordField]: word, language: row.language, updatedBy: actor, updatedAt: at };
+          writeAudit('update', cur, now);
+          if (taken.get(oldKey) === row.id) taken.delete(oldKey);
+          taken.set(key, row.id);
+          summary.changed += 1;
+        }
+      }
+      if (row.active !== now.active) {
+        kind.setActive(row.id, row.active);
+        const after = { ...now, active: row.active, updatedBy: actor, updatedAt: at };
+        writeAudit('toggle', now, after);
+        now = after;
+        if (row.active) summary.reactivated += 1;
+        else summary.deactivated += 1;
+      }
+      byId.set(row.id, now);
     }
   }
 
@@ -418,9 +604,13 @@ export class LiveTerms implements Matcher {
     // Canary: every positive line the active terms block on their own must still be blocked once the
     // exceptions apply. The error names the term row and the line's index, not the line (it is a slur).
     // Two lists, one rule: each term's own `positive` lines, then the pack's flat `positiveCorpus`.
-    if (this.pack) {
+    // With no active exception the matcher IS the terms-only matcher, so nothing can be unblocked and the lines need not be read. With one,
+    // the check that fails is rare, so it is asked the cheap way round: the full matcher first (a line that still blocks ends it), the
+    // terms-only matcher only for a line that does not. Both are pure, so the order changes no verdict. (At 5 000 terms this was the
+    // cost of every edit: two matches for every positive line of every term.)
+    if (this.pack && rows.exceptions.some((x) => x.active)) {
       const termsOnly = buildMatcher(rows.terms, []);
-      const unblocked = (line: string): boolean => termsOnly.match(line) !== null && matcher.match(line) === null;
+      const unblocked = (line: string): boolean => matcher.match(line) === null && termsOnly.match(line) !== null;
       for (const t of this.pack.terms) {
         for (const [i, line] of t.positive.entries()) {
           if (unblocked(line)) throw new Refusal('unblocks_known', `exception would unblock positive line ${i} of term ${t.id}`);
@@ -555,6 +745,35 @@ export class LiveTerms implements Matcher {
     kind.setActive(id, active, actor, this.clock.now());
     this.audit(kind, actor, 'toggle', id, before, this.snapshot(kind, id));
   }
+}
+
+/** The thrown sentinel that rolls a `dryRun` back. */
+class DryRunDone extends Error {}
+
+/** A stored term or exception row, whichever it is, for the merge in {@link LiveTerms.syncPack}. */
+type Mergeable = TermRecord & ExceptionRecord & Record<string, unknown>;
+
+interface MergeKind {
+  subject: 'term' | 'exception';
+  /** The field holding the word: `term` or `phrase`. */
+  wordField: 'term' | 'phrase';
+  key(word: string): string;
+  fold(word: string): string;
+  records: Mergeable[];
+  insert(record: Mergeable): void;
+  setWord(id: string, word: string, language: string): void;
+  setActive(id: string, active: boolean): void;
+}
+
+/** The shape `syncPack` needs, checked because a caller may hand it a pack that did not come through `loadTermPack`. */
+function isSyncable(pack: TermPack): boolean {
+  if (pack === null || typeof pack !== 'object' || !Array.isArray(pack.terms) || !Array.isArray(pack.exceptions)) return false;
+  const ids = new Set<string>();
+  for (const row of [...pack.terms, ...pack.exceptions]) {
+    if (row === null || typeof row !== 'object' || typeof row.id !== 'string' || ids.has(row.id)) return false;
+    ids.add(row.id);
+  }
+  return true;
 }
 
 /** What the matcher compares for a term: two terms with the same key are the same word. */

@@ -367,7 +367,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
   - types:
     `ActionResult`, `ActionState`, `ActionStore`, `AiReadAgainResult`, `AiStatusView`, `AppealDecided`, `AppealDecisionInput`, `AppealDetail`, `AppealOutcome`,
     `AppealRow`, `AppealRuleStats`, `AppealStats`, `AppealStatus`, `AppealSummary`, `BlockedDays`, `BlockedLine`, `BlockedName`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
-    `ClaimResult`, `CloseGapInput`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
+    `ClaimResult`, `CloseGapInput`, `CommunityApplied`, `CommunityStatus`, `CommunitySummary`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
     `DecisionEntry`, `DecisionForm`, `DecisionHost`, `DecisionOutcome`, `DecisionState`, `DecisionStore`, `DecisionStoreOptions`,
     `DismissOpenInput`, `DismissOpenOutcome`, `DismissOpenRequest`, `DismissOpenResult`,
     `ExceptionInput`, `ExceptionPatch`, `ExceptionRow`, `FetchTransportOptions`, `FlaggedReport`, `Handoff`, `Hold`, `HoldInput`, `Holder`,
@@ -375,8 +375,8 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `HubText`, `ListAppealsQuery`, `ListAuditQuery`, `ListReportsQuery`, `ListSanctionsQuery`, `LiveQueueOptions`, `LiveQueueState`, `LiveQueueStore`,
     `MeFeatures`, `NextCase`, `NextReport`, `OpenCase`, `Page`, `PageSource`, `PagedListStore`, `PagedState`, `PersonHistory`, `PolicyDocs`,
     `PolicyFormat`, `PolicySamples`, `PolicySaved`, `PolicyState`, `QueueFilter`, `QueueGroup`, `QueueHold`, `QueueSort`, `QueueStats`, `RankSignals`, `Reason`,
-    `ReportDetail`, `ReportStatus`, `ResourceState`, `ResourceStore`, `RouterTransportOptions`, `SanctionInput`, `SanctionRow`,
-    `SanctionSource`, `Session`, `SignalCountView`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermInput`,
+    `ReportDetail`, `ReportInput`, `ReportKind`, `ReportStatus`, `ResourceState`, `ResourceStore`, `RouterTransportOptions`, `SanctionInput`, `SanctionRow`,
+    `SanctionSource`, `Session`, `ShareCategory`, `ShareInput`, `ShareReason`, `ShareState`, `ShareTarget`, `SignalCountView`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermDetail`, `TermInput`,
     `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
     `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
 - the `<Hub>` prop `HubProps.onController`
@@ -442,6 +442,7 @@ for its Undo survives it.
 | `#/audit` | The audit trail, newest first, 50 at a time: time, staff member, role, action and target, filtered by staff member and action | `audit.read` (a senior and up) |
 | `#/settings/ladder` | Steps and ladder (under Settings in Detailed, and More in Simple): the lengths moderators can pick, the ladder grid (six steps by a lighter and a harsher column, each a kind and a length), the first offence per conduct level, the repeat rule, the area and severe rules, and the outcome text of the written guidelines. The owner edits a local draft and sees a preview (400 ms after the last edit) of what it would suggest for sample records. Saving asks for a reason; a 409 reads "Someone else changed these settings" with Reload; a 400 puts keyboard focus on the field the kit named. Each section has a Reset, and so has the whole screen, both with an in-page confirm that asks why. Leaving with unsaved edits asks in the page (links, the command bar and buttons) and closing the tab asks the browser to confirm; the browser's Back button and an address typed by hand are not guarded. A role that cannot write (or a store that cannot save settings) sees it read-only with one sentence saying why; `usePolicy().save` and `reset` refuse with `not_allowed` for a role that cannot write, and a reset of several sections that fails part way answers `partial: true` (what did go through is already applied) | `policy.read`; changing needs `policy.write` |
 | `#/settings/reporting` | Reporting (beside Steps and ladder): how players report (one tap, pick a reason first, or reason required, each with a plain line), the reasons (add, rename, hint, group, move up and down with buttons, switch on and off, map to Community Rules with a rule multi-picker, ask for a note; "Something else" can be renamed and mapped but never removed or switched off), the thank-you, and a "What players see" picture drawn from the draft. It saves, conflicts, refuses, resets (Reset reporting) and guards leaving exactly as Steps and ladder does; each screen's save keeps what the other saved, and "Reset steps and ladder" leaves reporting alone (it names only its own sections). The reason a reporter gives is only a hint: Detailed shows "Reported as X" or "No reason given" as the chip beside the case name and beside each report, and the queue (and Take next) can be filtered by it; the Simple card asks "Which rule does this break?" when no rule is clear (no reason, "Something else", a reason with no single rule) and suggests once one is picked, and preselects the rule when the reason maps to exactly one. A reporter's page says "Their reasons matched the decision 3 of 4 times" once three reports are decided. A reason's id is what a report stores, and a new reason's id comes from its name: reusing a removed reason's id relabels its old reports (removing "Spam" and adding "Spam" again gives the id `spam` again, so reports filed under the old one read as the new one), so rename a reason rather than remove and re-add it when the meaning is the same | `policy.read`; changing needs `policy.write` |
+| `#/settings/community` | Community list (only when the server wired `community`): the version in use, what is waiting, per-language counts, Check now, Apply (an owner) and Find a word. |
 | `#/settings/advanced` | Advanced (last in the settings list; not in Simple's menu): power settings, each panel off until the owner turns it on and a lazy chunk of its own. **Slow mode and flooding**: slow mode, "N messages in W seconds" and repeats, in seconds, with a "Use suggested values" button that only fills the draft (never saved, never a default), a hint when a burst is looser than the built-in 3 per 5 seconds, and a line saying the settings apply per process and to every room unless the game overrides a room. **Signals**: the kinds your game declared (read only, with weight and "counts against" or "counts for" in words), and four small forms, each off until switched on: show on a person's record, put these people sooner in the queue (kinds that count against a person only), add to the suggested step (rules: kinds, players, days, add a note or suggest one step higher), and give the AI read as background (only when the AI is available); windows are 1 to 90 days. A saved feed the kit had to drop (the game stopped declaring its kind) is listed in words with why, and a save removes it. **Appeals**: the switch, how many a player may file a week (1 to 20), "Allow the moderator who made the decision to decide it" (off), the statement limit (read only) and, behind a **Mistakes by rule** disclosure, the per-rule table from `GET /appeals/stats` (sanctions, appealed, removed on appeal, "made lighter on appeal" beside it and never in the rate, and the band in words: usually fine, often reversed, frequently reversed, not enough decisions yet; no colour and no number outside the table). **Names**: four switches with one sentence each (check swearing in names, keep blocked names as evidence for 30 days unless the server sets another time, let moderators ask a player for a new name, hide flagged names until shown). All four panels use the same save, conflict, refusal and reset machinery as the other settings; the owner edits, others read. `@experimental` | `policy.read`; changing needs `policy.write` |
 | `#/guide` | The Community Rules and the escalation ladder (the profile's own, else the kit's `LADDER_TABLE`) from the policy data, then the generated moderator guide (`GET /policy?format=markdown`) through a safe renderer | `policy.read` |
 
@@ -683,6 +684,33 @@ policy data. The generated guide is asked for without those two sections (`GET /
 **The guide is rendered safely.** `Markdown` (internal) draws headings, paragraphs, lists, emphasis, code, tables and links, and nothing else. Raw HTML, images,
 quotes and entities are shown as the text they are. A link is drawn only for `https:` or a relative address on this site (no backslash, no `//` or `/ ` start, no whitespace or control character); any other link keeps its words and loses its address. A line is read for block syntax in its first 2,000 characters only, and the scans are linear, so a hostile guide cannot stall the page.
 No string is ever turned into HTML.
+
+### The Community list (0.1.11)
+
+The shared term list reaches the hub in two quiet places and nowhere else. **There is no new always-visible control, badge or counter
+on the Terms screen.** A community row looks like any other row; its Changed cell reads "Community list 2026.12" where another row
+shows a person. Everything below appears only when the server wired `community` into `adminRoutes` (see the `@chatwarden/http`
+README); `GET /me` says so with `features.community`, and a server that did not wire it is never asked.
+
+- **Settings, "Community list"** (beside Steps and ladder and Reporting): the version in use and whether a newer one is waiting; per
+  language, how many terms are in use (never a term); the last check and, in words, the last problem; **Check now**; for an owner,
+  **Apply version X**, with the summary shown before ("Add 12, switch off 2, switch on 1, your 4 changes kept"); and a "Find a word"
+  box that opens that one row in Terms. The word goes in a request body, never in an address. There is no list of the words and no
+  export.
+- **The term editor.** Below the fields of a row of your own, a closed disclosure **"Share with the community list"**, when
+  `GET /community` says `sharing` is on. Opened, it shows exactly what will be sent: the word (masked until Show words is on), its
+  language, the category, the target for a slur, the note, the day (never a time), the Chatwarden version and a random key for this
+  server. It also shows the consent text. Below the fields of a community row, a closed disclosure **"Report a problem with this
+  community term"**, when `reporting` is on. It sends the term's number on the list and one problem from a closed list ("It blocks
+  ordinary words", "It is in the wrong category", "It should not be on the list"). It sends no word and no free text.
+
+The browser never contacts the service: it asks its own server (`POST /terms/:id/share`, `POST /terms/:id/report`), which signs and
+sends. A hidden community row that a blocked line or the Tester points at is fetched by its id (`GET /terms/:id`), only when the
+list is wired. A moderator switches a wrongly blocking community term off there (the row is then the adopter's own) and may report it
+from the same editor. Every string goes through `t()` and none holds a term. Both disclosures are loaded the first time they are
+needed, so the hub's first load does not carry them. `HubClient` has `community`, `refreshCommunity`, `applyCommunity`, `getTerm`,
+`lookupTerm`, `shareTerm`, `shareStatus` and `reportTerm`. `CommunityStatus`, `ShareInput`, `ReportInput` and `ReportKind` are
+`@experimental` until 0.2.
 
 ### `HubClient`
 

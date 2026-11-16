@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import { RegExpMatcher, englishDataset, englishRecommendedTransformers } from 'obscenity';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { datasetWords, scanForSlurs, wordSafeChunks } from './helpers/slurScan';
+import { datasetWords, scanForSlurs, stripBuildHashes, wordSafeChunks } from './helpers/slurScan';
 import { SYNTHETIC_TERMS } from '../../packages/matcher/src/fixtures/syntheticPack';
 
 const siteDir = join(__dirname, '..');
@@ -109,7 +109,9 @@ describe('built dist', () => {
       if (isFontLicence(file)) continue;
       // A minified bundle is mostly code, which the matcher's look-alike folding would misread (`f(k`). Scan the
       // words a visitor could read instead: for scripts, every string literal; for everything else, the whole file.
-      const readable = extname(file) === '.js' ? (text.match(STRING_LITERAL) ?? []).filter((l) => !/[{};]|=>|function/.test(l)).join('\n') : text;
+      // A chunk's file name ends in a random content hash (`core-CEmFckgm.js`); a hash is not a word a visitor reads, and its letters can
+      // spell part of one by chance whenever the code changes. Only the hash is taken out before the scan; the rest of each name is still read.
+      const readable = stripBuildHashes((extname(file) === '.js' ? (text.match(STRING_LITERAL) ?? []).filter((l) => !/[{};]|=>|function/.test(l)).join('\n') : text));
       for (const hit of scanForSlurs(readable)) hits.push(`${relative(dist, file)}: ${hit}`);
     }
     expect(hits).toEqual([]);
@@ -124,6 +126,16 @@ describe('built dist', () => {
       const js = [...texts].filter(([f]) => f.endsWith('.js'));
       expect(js.length).toBeGreaterThan(0);
       for (const [file, text] of js) expect(text.includes(marker), `${relative(dist, file)} holds ${marker}`).toBe(false);
+    },
+  );
+
+  // The shared term list is for a server (design 16): none of its module, its file names or its log events may be in the built page. These
+  // are the same markers as scripts/browser-bundle.test.ts plus the names of the share and report events and the corpus schemas.
+  it.each(['chatwarden-corpus', 'chatwarden-terms', 'corpus.refresh_failed', 'corpus.share_failed', 'corpus.report_failed', 'ZipCrypto', '/v1/submissions', '/v1/reports'])(
+    'the built page has none of the corpus module markers (%s)',
+    (marker) => {
+      expect(texts.size).toBeGreaterThan(0);
+      for (const [file, text] of texts) expect(text.includes(marker), `${relative(dist, file)} holds ${marker}`).toBe(false);
     },
   );
 

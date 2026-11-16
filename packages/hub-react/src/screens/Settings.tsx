@@ -3,8 +3,9 @@ import { useHub } from '../context.js';
 import type { HubText } from '../i18n.js';
 import type { Route, SettingsSection } from '../router.js';
 import type { PermissionKey } from '../types.js';
+import { useFeatures } from '../features.js';
 import { Link } from '../ui.js';
-import { LazyAdvancedSettings, LazyAiSettings, LazyLadderSettings, LazyReportingSettings } from './lazy.js';
+import { LazyAdvancedSettings, LazyAiSettings, LazyCommunitySettings, LazyLadderSettings, LazyReportingSettings } from './lazy.js';
 
 // The settings screen is a list of sections, each its own address (`#/settings/ladder`) and its own component. A new section
 // is one more entry here and one more value of `SettingsSection` in the router: nothing else is restructured. The section list shows
@@ -26,7 +27,10 @@ const SECTIONS: readonly Section[] = [
 
 export function Settings({ section }: { section: SettingsSection }) {
   const { t, can } = useHub();
-  const visible = SECTIONS.filter((s) => can(s.need));
+  // The Community list section exists only where the server wired it (`GET /me` says so): nobody else sees a link, and nothing is asked.
+  const { community } = useFeatures();
+  const sections: readonly Section[] = community ? [...SECTIONS, { id: 'community', label: 'hub.settings.community.nav', need: 'terms.read', render: () => <LazyCommunitySettings /> }] : SECTIONS;
+  const visible = sections.filter((s) => can(s.need));
   const shown = visible.find((s) => s.id === section) ?? visible[0];
   return (
     <>

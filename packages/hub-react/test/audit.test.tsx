@@ -103,6 +103,48 @@ describe('the trail', () => {
     expect(list().textContent).not.toContain(person);
   });
 
+  it('hub: the community actions read in words; a release is "Release" and its version, a shared term is only "A term" and its id is never shown', async () => {
+    await openAudit({}, async (x) => {
+      x.cw.audit.record({ actor: 'bea@example.test', role: 'senior', action: 'term.share', target: { type: 'term', ref: 'syn:zorbak' } });
+      x.cw.audit.record({ actor: 'omar@example.test', role: 'owner', action: 'community.apply', target: { type: 'release', ref: '2026.12.0' } });
+      x.cw.audit.record({ actor: 'omar@example.test', role: 'owner', action: 'community.apply' });
+      x.cw.audit.record({ actor: 'bea@example.test', role: 'senior', action: 'term.report', target: { type: 'term', ref: 'CWT-0001' } });
+    });
+    const shared = bodyRows().find((r) => r.textContent?.includes('Offered a term to the community list'))!;
+    expect(shared).toHaveTextContent('A term');
+    expect(within(shared).queryByRole('link')).toBeNull();
+    const applied = bodyRows().filter((r) => r.textContent?.includes('Applied a community list release'));
+    expect(applied).toHaveLength(2);
+    expect(applied.some((r) => r.textContent?.includes('Release 2026.12.0'))).toBe(true);
+    expect(applied.some((r) => within(r).queryByText('None') !== null)).toBe(true);
+    // a report is its own words, not an offer, and its term id is never shown
+    const reported = bodyRows().filter((r) => r.textContent?.includes('Reported a problem with a community term'));
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toHaveTextContent('A term');
+    expect(reported[0]?.textContent).not.toContain('Offered a term');
+    expect(bodyRows().filter((r) => r.textContent?.includes('Offered a term to the community list'))).toHaveLength(1);
+    // no raw action name and no term id reaches the page
+    expect(list().textContent).not.toMatch(/term\.share|term\.report|community\.apply|zorbak|CWT-0001/);
+  });
+
+  it('hub: an unknown future action and an unknown future target type still render', async () => {
+    const w = await hubWorld({ role: 'senior' });
+    w.intercept.fn = (req) =>
+      req.path === '/audit'
+        ? { status: 200, body: { items: [
+            { id: 'a1', at: w.now(), actor: 'x@example.test', role: 'owner', action: 'community.future', target: { type: 'release', ref: '2027.1.0' } },
+            { id: 'a2', at: w.now(), actor: 'y', role: 'owner', action: 'term.share', target: { type: 'brandnew', ref: 'abc' } },
+          ], next: null } }
+        : undefined;
+    renderHub(w, { path: '/audit' });
+    await screen.findByRole('region', { name: 'Audit entries' });
+    const rows = bodyRows();
+    expect(rows[0]).toHaveTextContent('community.future');
+    expect(rows[0]).toHaveTextContent('Release 2027.1.0');
+    expect(rows[1]).toHaveTextContent('Offered a term to the community list');
+    expect(rows[1]).toHaveTextContent('None');
+  });
+
   it('a sanction is "Sanction" and a short tag; an entry with no target says None', async () => {
     const { w } = await openAudit({}, async (x) => {
       const f = await x.file({ target: 'Vantablob' });
@@ -296,7 +338,7 @@ describe('filters', () => {
     const { w, user } = await setup();
     const labels = [...action().options].map((o) => o.textContent);
     expect(labels[0]).toBe('Any action');
-    expect(labels).toHaveLength(1 + 29);
+    expect(labels).toHaveLength(1 + 32);
     expect(new Set(labels).size).toBe(labels.length);
     // The two bulk dismissals (triage speed) are labelled in plain words, not shown as raw action names.
     expect(labels).toContain('Dismissed all open reports about a person');

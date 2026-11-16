@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LiveTerms, type ExceptionRecord, type TermRecord, type TermStore } from '@chatwarden/matcher';
-import { SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS, syntheticTermPack } from '@chatwarden/matcher/fixtures';
+import { LiveTerms, type ExceptionRecord, type TermPack, type TermRecord, type TermStore } from '@chatwarden/matcher';
+import { MemoryTermStore, SYNTHETIC_EXCEPTIONS, SYNTHETIC_TERMS, syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { MIGRATIONS, openStore, type SqliteStore } from '../src/index.js';
 
 const T0 = 1_700_000_000_000;
@@ -389,6 +389,52 @@ describe('LiveTerms on SQLite, end to end', () => {
     expect((await live.change('a', (e) => e.addTerm({ term: 'blorft', language: 'en' }))).ok).toBe(true);
     expect(live.match('what a blorft')).not.toBeNull();
     expect(count(db, 'host_things')).toBe(0);
+    db.close();
+  });
+});
+
+describe('LiveTerms.syncPack: SQLite and the in-memory store agree', () => {
+  const pk = (version: string, terms: [string, string, boolean][], exceptions: [string, string][] = [], over: Partial<TermPack> = {}): TermPack => ({
+    id: 'chatwarden-corpus',
+    version,
+    terms: terms.map(([id, term, active]) => ({ id, term, language: 'en', active, positive: [`you ${term}`], negative: [] })),
+    exceptions: exceptions.map(([id, phrase]) => ({ id, phrase, language: 'en', active: true })),
+    negativeCorpus: [],
+    knownLosses: [],
+    ...over,
+  });
+
+  /** The same script on any store: seed, a human edit, a sync, a refused sync, a second identical sync. */
+  async function script(store: TermStore) {
+    const live = new LiveTerms({ store, pack: pk('2026.11.0', [['CWT-1', 'zorbak', true], ['CWT-2', 'vlemmo', true], ['CWT-3', 'quissel', true]]), clock: clock(), logger: quiet() });
+    await live.load();
+    await live.change('alice', (e) => e.setTermActive('CWT-2', false));
+    const next = pk('2026.12.0', [['CWT-1', 'zorbak', false], ['CWT-2', 'vlemmo', true], ['CWT-3', 'quissel', true], ['CWT-4', 'drakkuun', true]], [['CWX-1', 'snerp glarn']]);
+    const dry = live.syncPack(next, { actor: 'corpus:2026.12.0', dryRun: true });
+    const first = live.syncPack(next, { actor: 'corpus:2026.12.0' });
+    const refused = live.syncPack(pk('2027.01.0', [['CWT-1', 'zorbak', false], ['CWT-2', 'vlemmo', false], ['CWT-3', 'quissel', false], ['CWT-4', 'drakkuun', false]]), { actor: 'corpus:2027.01.0' });
+    const again = live.syncPack(next, { actor: 'corpus:2026.12.0' });
+    return {
+      dry, first, refused, again,
+      blocks: ['you zorbak', 'you vlemmo', 'you drakkuun'].map((l) => live.match(l) !== null),
+      terms: store.listTerms(),
+      exceptions: store.listExceptions(),
+    };
+  }
+
+  it('gives the same results, rows and summaries on both stores, and a refusal leaves SQLite untouched', async () => {
+    const mem = new MemoryTermStore();
+    const db = new DatabaseSync(':memory:');
+    const sql = openStore({ db });
+    const a = await script(mem);
+    const b = await script(sql);
+    expect(b).toEqual(a);
+    expect(a.first).toEqual({ ok: true, version: '2026.12.0', summary: { added: 2, deactivated: 1, reactivated: 0, changed: 0, keptYours: 1, skipped: 0 } });
+    expect(a.refused).toEqual({ ok: false, code: 'invalid' });
+    expect(a.again).toMatchObject({ ok: true, summary: { added: 0, keptYours: 1 } });
+    expect(a.blocks).toEqual([false, false, true]);
+    const auditOf = () => db.prepare('SELECT actor, action, subject_ref FROM kit_audit ORDER BY rowid').all().map((r) => [r.actor, r.action, r.subject_ref]);
+    expect(auditOf()).toEqual(mem.state.audit.map((x) => [x.actor, x.action, x.subjectRef]));
     db.close();
   });
 });

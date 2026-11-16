@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+// @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
+import { badWords } from './no-corpus-data.mjs';
 
 // The READMEs are the product an adopter (or a coding agent) copies from. These checks hold for EVERY published package:
 // each has the sections an adopter needs, installs what it needs, and every ```ts block compiles against the real sources.
@@ -425,6 +427,8 @@ declare const authorize: import('@chatwarden/http').Authenticate;
         '@chatwarden/store-memory': src('store-memory/src/index.ts'),
         '@chatwarden/store-memory/testing': src('store-memory/src/testing/index.ts'),
         '@chatwarden/matcher': src('matcher/src/index.ts'),
+        '@chatwarden/matcher/corpus': src('matcher/src/corpus/index.ts'),
+        '@chatwarden/matcher/corpus/node': src('matcher/src/corpus/node/index.ts'),
         '@chatwarden/matcher/fixtures': src('matcher/src/fixtures/index.ts'),
         '@chatwarden/matcher/test-fixtures': src('matcher/src/fixtures/testFixtures.ts'),
         '@chatwarden/profanity': src('profanity/src/index.ts'),
@@ -994,5 +998,160 @@ describe('the adoption docs (0.1.10)', () => {
     const http = readme('http');
     for (const match of http.matchAll(/\]\((\.\.\/\.\.\/docs\/[^)#]+)\)/g)) expect(existsSync(join(root, 'packages', 'http', match[1] as string)), match[1]).toBe(true);
     expect(http).toContain('docs/recipes');
+  });
+});
+
+describe('the shared term list docs (K7, 0.1.11)', () => {
+  const matcherDoc = readme('matcher');
+  const httpDoc = readme('http');
+  const hubDoc = readme('hub-react');
+  const rootDoc = read('README.md');
+  const design = read('docs/design/2026-11-12-k7-term-corpus.md');
+  /** The names an entry file exports. */
+  const exported = (src: string): string[] =>
+    [...src.matchAll(/^export (?:type )?\{([^}]*)\}/gm)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim().replace(/^type /, '')).filter((n) => n !== ''));
+  /** The field names of an exported interface or the top-level keys of an exported object type. */
+  const fieldsOf = (src: string, decl: string): string[] => {
+    const start = src.indexOf(decl);
+    expect(start, decl).toBeGreaterThanOrEqual(0);
+    const body = src.slice(src.indexOf('{', start), src.indexOf('\n}', start));
+    return [...body.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+  };
+
+  it('matcher: says the package ships no terms and nothing is on by default, and that "not released yet" is gone', () => {
+    const doc = flat(section(matcherDoc, 'The community term corpus'));
+    expect(doc).toMatch(/ships no terms at all/);
+    expect(doc).toMatch(/nothing here is on by default/);
+    expect(doc).not.toMatch(/not released yet/i);
+    expect(doc).toContain('`@chatwarden/matcher/corpus/node`');
+    expect(doc).toContain('`no_trusted_keys`');
+    expect(doc).toMatch(/pin or follow/i);
+    expect(doc).toMatch(/offline first/i);
+    expect(doc).toContain('`seed');
+    expect(doc).toContain('Contains the Chatwarden community term list (chatwarden.dev), CC BY 4.0.');
+  });
+
+  it('matcher: says what syncPack may and may not touch, the corpus: prefix, and what a status outside the selection does', () => {
+    const doc = flat(section(matcherDoc, 'The community term corpus'));
+    expect(doc).toContain('`LiveTerms.syncPack(pack, { actor, dryRun? })`');
+    expect(doc).toMatch(/never deletes a row/);
+    expect(doc).toMatch(/`updatedBy`[^.]*does not start with `corpus:`/);
+    expect(doc).toMatch(/refuse an actor that starts with `corpus:`/);
+    expect(doc).toMatch(/A row whose status is outside the selected statuses is excluded: it is not carried in as an inactive row/);
+    expect(doc).toMatch(/Narrowing a selection later does not switch off rows you already have/);
+  });
+
+  it('matcher: says what the restart sync needs (terms), what minKit needs (kit), and that the share and report calls never throw and have a deadline', () => {
+    const doc = flat(section(matcherDoc, 'The community term corpus'));
+    expect(doc).toMatch(/needs the loader to hold `terms`/);
+    expect(doc).toMatch(/`minKit`[^.]*`kit`/);
+    expect(doc).toMatch(/15 second deadline/);
+    expect(doc).toMatch(/never throws/);
+    expect(doc).toContain('share.report(');
+  });
+
+  it('every documented option name exists, and every option of the loader and the share client is documented', () => {
+    const doc = flat(section(matcherDoc, 'The community term corpus'));
+    const loader = read('packages/matcher/src/corpus/loader.ts');
+    const loaderOptions = [...loader.slice(loader.indexOf('export type CorpusLoaderOptions'), loader.indexOf('} & ({ pin')).matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+    expect(loaderOptions.length).toBeGreaterThanOrEqual(14);
+    for (const o of loaderOptions) expect(doc, `CorpusLoaderOptions.${o}`).toContain(`\`${o}\``);
+    for (const o of ['follow', 'pin']) expect(doc, o).toContain(`\`${o}`);
+    const shareOptions = fieldsOf(read('packages/matcher/src/corpus/share.ts'), 'export interface CommunityShareOptions');
+    expect(shareOptions.length).toBeGreaterThanOrEqual(8);
+    for (const o of shareOptions) expect(doc, `CommunityShareOptions.${o}`).toContain(`\`${o}\``);
+    const select = fieldsOf(read('packages/matcher/src/corpus/select.ts'), 'export interface PackSelection');
+    for (const o of select) expect(doc, `PackSelection.${o}`).toContain(`\`${o}\``);
+    // The control: a name the code does not have is not documented.
+    expect(doc).not.toContain('`definitelyNotAnOption`');
+  });
+
+  it('the READMEs list the @experimental names of the corpus subpaths, every one the entries export, and LiveTerms.syncPack', () => {
+    const doc = flat(section(matcherDoc, 'The community term corpus'));
+    const names = [...exported(read('packages/matcher/src/corpus/index.ts')), ...exported(read('packages/matcher/src/corpus/node/index.ts'))];
+    expect(names.length).toBeGreaterThan(60);
+    for (const n of names) expect(doc, n).toContain(`\`${n}\``);
+    for (const n of ['LiveTerms.syncPack', 'SyncResult', 'SyncSummary']) expect(doc, n).toContain(`\`${n}\``);
+    expect(doc).toMatch(/`@experimental` until 0\.2/);
+  });
+
+  it('no README holds a term: every word in a term, phrase or line of a code block is invented or ordinary', () => {
+    const blocks = [matcherDoc, httpDoc, hubDoc, rootDoc].flatMap((doc) => [...doc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((m) => m[1] as string));
+    expect(blocks.length).toBeGreaterThan(20);
+    const strings = blocks.flatMap((b) => [...b.matchAll(/\b(term|phrase|word|text|line)s?: '([^']*)'/g)].map((m) => [m[1] as string, m[2] as string] as const));
+    expect(strings.length).toBeGreaterThanOrEqual(2);
+    for (const [key, value] of strings) {
+      expect(badWords(value, key === 'term'), `${key}: ${value}`).toEqual([]);
+    }
+    // The control: the scanner is not blind.
+    expect(badWords('blorpix', true)).toEqual(['blorpix']);
+  });
+
+  it('http: lists the community routes with their permissions, the report route, the share memory and the new error codes', () => {
+    const doc = flat(httpDoc);
+    for (const route of ['GET /community', 'POST /community/refresh', 'POST /community/apply', 'GET /terms/:id', 'POST /terms/lookup', 'POST /terms/:id/share', 'GET /terms/:id/share', 'POST /terms/:id/report']) {
+      expect(doc, route).toContain(`\`${route}\``);
+    }
+    expect(doc).toContain('`exposeCommunityRows`');
+    expect(doc).toContain('`term.share`');
+    expect(doc).toContain('`term.report`');
+    expect(doc).toContain('`community.apply`');
+    expect(doc).toMatch(/core adds four names/);
+    expect(doc).not.toMatch(/same\s+audit name as a share|only three names/);
+    expect(doc).toMatch(/share status is kept in memory[^.]*1000[^.]*lost on restart/i);
+    expect(doc).toMatch(/two staff[^.]*same term at once[^.]*`duplicate`/i);
+    expect(doc).toMatch(/15 seconds/);
+    expect(doc).toContain('`not_reportable`');
+    expect(doc).toContain('`features.community`');
+    expect(doc).toMatch(/audit row[^.]*even when the share fails/i);
+  });
+
+  it('hub-react: has the Community list section, the two disclosures, and says the browser never contacts the service', () => {
+    const doc = flat(hubDoc);
+    expect(doc).toContain('Community list');
+    expect(doc).toContain('Share with the community list');
+    expect(doc).toContain('Report a problem with this community term');
+    expect(doc).toMatch(/browser never (contacts|talks to) the (community )?service/i);
+    expect(doc).toContain('`reporting`');
+    expect(doc).toContain('`sharing`');
+    expect(doc).toMatch(/no new always-visible control/i);
+  });
+
+  it('the root README has the "Use the shared community term list" row, and says nothing is on by default', () => {
+    expect(rootDoc).toMatch(/\| Use the shared community term list[^|]*\|[^|]*@chatwarden\/matcher\/corpus\/node/);
+    expect(flat(rootDoc)).toMatch(/ships no terms/);
+  });
+
+  it('the project docs say it exists: status, follow-ups (the items of design 20) and CLAUDE.md', () => {
+    const status = read('docs/status.md');
+    expect(status).toMatch(/## K7: the shared term corpus/);
+    expect(flat(status.slice(status.indexOf('## K7')))).toMatch(/Part A[^.]*kit[^.]*0\.1\.11/);
+    const followUps = flat(read('docs/plans/follow-ups.md'));
+    for (const item of ['A hub review UI for the corpus', 'chatwarden terms install', 'AI-assisted review of proposed terms', 'browser build of the loader', 'moderator-calibration screen', 'Phrases, regex terms']) {
+      expect(followUps, item).toContain(item);
+    }
+    const claude = read('CLAUDE.md');
+    expect(claude).toContain('2026-11-12-k7-term-corpus.md');
+    expect(claude).toContain('@chatwarden/matcher/corpus');
+  });
+
+  it('the design note holds the shapes the service must write: positive.json, the limits, the sequence rule, the report wire and the interface choices', () => {
+    const doc = flat(design);
+    expect(doc).toContain('chatwarden-corpus-positive/1');
+    expect(doc).toMatch(/at most 50 lines of at most 200 characters/);
+    expect(doc).toMatch(/at most 2 000 lines of at most 500 characters/);
+    expect(doc).toMatch(/phrase of at most 100 characters/);
+    expect(doc).toMatch(/`expected\.sequence` is an upper bound[^.]*not above the index/i);
+    expect(doc).toMatch(/A row whose status is outside the selected statuses is excluded/);
+    expect(doc).toMatch(/`updatedBy` starts with `corpus:`/);
+    expect(doc).toContain('POST /v1/reports');
+    expect(doc).toContain('chatwarden-corpus-report/1');
+    expect(doc).toContain('signedMessage(\'report\'');
+    expect(doc).toMatch(/signed over `signedMessage\('submission', UTF8\(id\)\)`/);
+    expect(doc).toMatch(/nonce[^.]*\[A-Za-z0-9_-\]\{1,32\}/);
+    expect(doc).toMatch(/no `gate` key/);
+    expect(doc).toMatch(/12 lines/);
+    expect(doc).toMatch(/`long-room`/);
+    expect(doc).toMatch(/200 OK[^.]*`\{ "status": null \}`|`\{ status: null \}`/);
   });
 });

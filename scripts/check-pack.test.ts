@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { BROWSER_SAFE, BUNDLED, bareImports, binProblems, checkFileList, checkManifest, exportTargets, nodeImports, undeclaredImports, nodeImportProblems } from './check-pack.mjs';
+import { BROWSER_SAFE, BUNDLED, bareImports, binProblems, checkFileList, checkManifest, corpusDataProblems, exportTargets, nodeImports, undeclaredImports, nodeImportProblems } from './check-pack.mjs';
 
 type Pkg = Record<string, unknown>;
 
@@ -584,5 +584,114 @@ describe('binProblems', () => {
     });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('"two"');
+  });
+});
+
+describe('corpusDataProblems: no packed tarball holds a zip, a sig, a key or corpus JSON (design 16)', () => {
+  const clean = (): string[] => goodFiles();
+  const PRIVATE_HEADER = ['-----BEGIN', 'PRIVATE KEY-----'].join(' ');
+
+  it('a normal package has none', () => {
+    expect(corpusDataProblems({ files: clean(), sources: {} })).toEqual([]);
+    expect(corpusDataProblems({ files: [...clean(), 'dist/src/corpus/index.js', 'src/corpus/index.ts', 'dist/src/corpus/index.d.ts'], sources: {} })).toEqual([]);
+  });
+
+  it.each([
+    'releases/terms-2026.12.0.zip',
+    'dist/data/terms.zip',
+    'terms.ZIP',
+    'index.json.sig',
+    'releases/terms-2026.12.0.zip.sig',
+    'a.7z',
+    'a.tar',
+    'a.tar.gz',
+    'a.tgz',
+    'keys/installation.pem',
+    'keys/signing.key',
+    '.dev.vars',
+    'deploy/.dev.vars',
+  ])('a file named %s fails and is named', (path) => {
+    const problems = corpusDataProblems({ files: [...clean(), path], sources: {} });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(path);
+  });
+
+  it('a JSON file whose schema starts chatwarden-corpus- fails, wherever it sits, and a JSON file that is not corpus data passes', () => {
+    for (const schema of ['chatwarden-corpus-manifest/1', 'chatwarden-corpus-terms/1', 'chatwarden-corpus-index/1', 'chatwarden-corpus-submission/1']) {
+      const problems = corpusDataProblems({ files: [...clean(), 'dist/data/x.json'], sources: { 'dist/data/x.json': JSON.stringify({ schema, rows: [] }) } });
+      expect(problems, schema).toHaveLength(1);
+      expect(problems[0]).toContain('dist/data/x.json');
+    }
+    const fine = { 'dist/data/a.json': '{"schema":"something-else/1"}', 'dist/data/b.json': '[1,2]', 'dist/data/c.json': 'not json', 'dist/data/d.json': '{"name":"x"}' };
+    expect(corpusDataProblems({ files: [...clean(), ...Object.keys(fine)], sources: fine })).toEqual([]);
+  });
+
+  it('a private key header in any shipped JSON fails (a key pasted into a data file)', () => {
+    const problems = corpusDataProblems({ files: [...clean(), 'dist/x.json'], sources: { 'dist/x.json': JSON.stringify({ key: `${PRIVATE_HEADER}\nAAAA` }) } });
+    expect(problems.join('\n')).toContain('dist/x.json');
+  });
+
+  it('every kind of PEM private key header fails in a shipped JSON (the same pattern as the repo guard)', () => {
+    for (const kind of ['', 'ENCRYPTED ', 'RSA ', 'EC ', 'OPENSSH ']) {
+      const header = ['-----BEGIN', `${kind}PRIVATE KEY-----`].join(' ');
+      const problems = corpusDataProblems({ files: [...clean(), 'dist/y.json'], sources: { 'dist/y.json': JSON.stringify({ key: header }) } });
+      expect(problems.join(', '), kind).toContain('dist/y.json');
+    }
+  });
+
+  it('every problem is reported, one for each file', () => {
+    const problems = corpusDataProblems({ files: [...clean(), 'a.zip', 'b.sig', 'c.pem'], sources: {} });
+    expect(problems).toHaveLength(3);
+  });
+
+  it('names the file and the kind, never the content', () => {
+    const problems = corpusDataProblems({ files: [...clean(), 'x.json'], sources: { 'x.json': JSON.stringify({ schema: 'chatwarden-corpus-terms/1', terms: [{ term: 'zorbak' }] }) } });
+    expect(problems.join('\n')).not.toContain('zorbak');
+  });
+});
+
+describe('the matcher tarball and the corpus subpaths (0.1.11)', () => {
+  const matcher = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/matcher/package.json', import.meta.url)), 'utf8')) as Pkg;
+  const shipped = (): string[] => [
+    ...goodFiles().filter((f) => !f.startsWith('dist/src/extra') && f !== 'package.json'),
+    'package.json',
+    ...exportTargets(matcher),
+    'src/corpus/index.ts',
+    'src/corpus/node/index.ts',
+    'dist/src/corpus/index.js',
+    'dist/src/corpus/index.js.map',
+    'dist/src/corpus/index.d.ts',
+    'dist/src/corpus/index.d.ts.map',
+    'dist/src/corpus/node/index.js',
+    'dist/src/corpus/node/index.js.map',
+    'dist/src/corpus/node/index.d.ts',
+    'dist/src/corpus/node/index.d.ts.map',
+  ];
+
+  it('check-pack: @chatwarden/matcher/corpus and /corpus/node resolve from the packed tarball under ESM and under CommonJS with moduleResolution node, and the root entry does not load them', () => {
+    const targets = exportTargets(matcher);
+    // ESM and CommonJS (require of an ES module on Node 22.13): the export map names the code and the types of both subpaths.
+    const exportsMap = matcher.exports as Record<string, Record<string, string>>;
+    expect(exportsMap['./corpus']).toEqual({ types: './dist/src/corpus/index.d.ts', default: './dist/src/corpus/index.js' });
+    expect(exportsMap['./corpus/node']).toEqual({ types: './dist/src/corpus/node/index.d.ts', default: './dist/src/corpus/node/index.js' });
+    // moduleResolution node reads typesVersions, not exports.
+    const tv = (matcher.typesVersions as Record<string, Record<string, string[]>>)['*'] as Record<string, string[]>;
+    expect(tv.corpus).toEqual(['dist/src/corpus/index.d.ts']);
+    expect(tv['corpus/node']).toEqual(['dist/src/corpus/node/index.d.ts']);
+    for (const t of ['dist/src/corpus/index.js', 'dist/src/corpus/index.d.ts', 'dist/src/corpus/node/index.js', 'dist/src/corpus/node/index.d.ts']) expect(targets).toContain(t);
+    // Every one of those files is in the list a good tarball has, so the check passes; take one away and it names it.
+    expect(checkFileList({ pkg: matcher, files: shipped() }).filter((p: string) => /export target/.test(p))).toEqual([]);
+    const without = shipped().filter((f) => f !== 'dist/src/corpus/node/index.js');
+    expect(checkFileList({ pkg: matcher, files: without }).join('\n')).toContain('export target is not in the tarball: dist/src/corpus/node/index.js');
+    // The root entry is its own file and names neither subpath: nothing a root import loads reaches the corpus folder.
+    const root = readFileSync(fileURLToPath(new URL('../packages/matcher/src/index.ts', import.meta.url)), 'utf8');
+    expect(root).not.toMatch(/corpus/);
+    expect(exportsMap['.']).toEqual({ types: './dist/src/index.d.ts', default: './dist/src/index.js' });
+  });
+
+  it('a tarball with a release zip, a signature or a key in it is refused by corpusDataProblems even when the matcher files are fine', () => {
+    expect(corpusDataProblems({ files: shipped(), sources: {} })).toEqual([]);
+    expect(corpusDataProblems({ files: [...shipped(), 'dist/src/corpus/seed.zip'], sources: {} })).toHaveLength(1);
+    expect(corpusDataProblems({ files: [...shipped(), 'dist/src/corpus/seed.zip.sig'], sources: {} }).length).toBeGreaterThan(0);
   });
 });

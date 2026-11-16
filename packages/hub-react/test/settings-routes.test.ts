@@ -12,6 +12,8 @@ describe('the settings route', () => {
     ['#/settings/ladder', { name: 'settings', section: 'ladder' }],
     ['/settings/ladder/', { name: 'settings', section: 'ladder' }],
     ['/settings', { name: 'settings', section: 'ladder' }],
+    ['/settings/community', { name: 'settings', section: 'community' }],
+    ['#/settings/community/', { name: 'settings', section: 'community' }],
   ])('parses %s', (path, route) => {
     expect(parseRoute(path)).toEqual(route);
   });

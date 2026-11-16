@@ -180,6 +180,40 @@ describe("compileWords: the same hits as obscenity's RegExpMatcher with the Engl
     expect(twice.getAllMatches('zorbak').map((h) => h.termId)).toEqual([0, 1]);
   });
 
+  it('a long list (the index) gives obscenity hits on word-run edges: underscores, digits, punctuation, case, look-alikes, repeats', () => {
+    // Two thousand invented words (consonant-vowel syllables), plus the table's words, so the lookup is exercised at the size a real list has.
+    const syllables = ['za', 've', 'qi', 'xo', 'ju', 'wa', 'zi', 'vo', 'qu', 'xe'];
+    const long = [...WORDS];
+    for (let i = 0; i < 2000; i += 1) long.push(syllables[i % 10]! + syllables[Math.floor(i / 10) % 10]! + syllables[Math.floor(i / 100) % 10]! + (i > 999 ? syllables[Math.floor(i / 1000)]! : 'k') + 'ra'.repeat(1 + (i % 2)));
+    const unique = [...new Set(long.map((w) => collapseLikePreset(w)))];
+    const big = compileWords(unique);
+    const ref = referenceMatcher(unique);
+    const picks = [unique[0]!, unique[5]!, unique[400]!, unique[1500]!, unique[unique.length - 1]!];
+    const zeroWidth = String.fromCodePoint(0x200b);
+    const emoji = String.fromCodePoint(0x1f600);
+    const lines: string[] = [];
+    for (const w of picks) {
+      lines.push(w, w.toUpperCase(), `${w}_${w}`, `${w}1`, `1${w}`, `x${w}`, `${w}x`, `${w}-${w}`, `${w}.${w}`, `${w}!`, `(${w})`, `${w} ${w}`, `${w}${w}`, `a${w} ${w}b`, `${w}${zeroWidth}${w}`, `${emoji}${w}${emoji}`);
+    }
+    lines.push('', ' ', '___', '1234', 'zorbak_glarn zorbak-glarn zorbak.glarn');
+    for (const line of lines) expect(big.getAllMatches(line), line).toEqual(ref.getAllMatches(line, true));
+  }, 60_000);
+
+  it('refuses a word outside its [A-Za-z0-9_] contract instead of silently never matching it', () => {
+    for (const bad of ['zor bak', 'zor-bak', 'zorbak!', 'z\u00f3rbak', '\uff5aorbak', 'zor\u200bbak', 'zorbak\n', '|zorbak|', '\ud83d\ude00', '']) {
+      expect(() => compileWords(['glarn', bad]), JSON.stringify(bad)).toThrow();
+    }
+    // The error names the position, never the word.
+    expect(() => compileWords(['glarn', 'tar vo'])).toThrow(/ID 1/);
+    try {
+      compileWords(['tar vo']);
+    } catch (err) {
+      expect(String(err)).not.toContain('tar vo');
+    }
+    // What the matcher actually hands it is still fine.
+    expect(() => compileWords(['zorbak', 'v1emmo', 'quis_sel', 'ZORBAK'])).not.toThrow();
+  });
+
   it('an empty list matches nothing', () => {
     expect(compileWords([]).getAllMatches('zorbak glarn')).toEqual([]);
     expect(referenceMatcher([]).getAllMatches('zorbak glarn', true)).toEqual([]);

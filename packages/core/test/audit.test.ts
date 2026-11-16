@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createChatwarden } from '../src/chatwarden.js';
 import type { ChatwardenOptions } from '../src/chatwarden.js';
-import { AUDIT_ACTIONS, AuditQueryError, ROLES } from '../src/audit.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_TYPES, AuditQueryError, ROLES } from '../src/audit.js';
 import type { AuditAction, AuditRow, Role } from '../src/audit.js';
 import { ProfileError } from '../src/profile.js';
 import { RETENTION_DEFAULTS } from '../src/retention.js';
@@ -58,6 +58,9 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'appeal.view',
       'appeal.decide',
       'name.rename_required',
+      'term.share',
+      'community.apply',
+      'term.report',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -108,10 +111,69 @@ describe('cw.audit.record and list', () => {
       expect(rec(cw, { action, ...detail, ...ai, ...own, ...who })).toBe(true);
     }
     for (const role of ROLES) expect(rec(cw, { role })).toBe(true);
-    for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal']) {
+    for (const type of ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release']) {
       expect(rec(cw, { target: { type, ref: 'x1' } })).toBe(true);
     }
-    expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 7);
+    expect(cw.audit.list({ limit: 200 }).items).toHaveLength(AUDIT_ACTIONS.length + ROLES.length + 8);
+  });
+
+  it('audit: term.share and community.apply are recorded and listed; release is an accepted target type', async () => {
+    const { cw } = await setup();
+    expect(AUDIT_TARGET_TYPES).toContain('release');
+    expect(rec(cw, { actor: 'bea', role: 'senior', action: 'term.share', target: { type: 'term', ref: 'syn:zorbak-1' } })).toBe(true);
+    expect(rec(cw, { actor: 'omar', role: 'owner', action: 'community.apply', target: { type: 'release', ref: '2026.12.0' } })).toBe(true);
+    const items = cw.audit.list({ limit: 10 }).items;
+    expect(items.map((i) => `${i.action}:${i.target?.type}:${i.target?.ref}`).sort()).toEqual([
+      'community.apply:release:2026.12.0',
+      'term.share:term:syn:zorbak-1',
+    ]);
+    // listed and filterable by the new names
+    expect(cw.audit.list({ limit: 10, action: 'term.share' }).items).toHaveLength(1);
+    expect(cw.audit.list({ limit: 10, action: 'community.apply' }).items).toHaveLength(1);
+    // a report of a community term is its own name, recorded, listed and filterable apart from a share
+    expect(rec(cw, { actor: 'bea', role: 'senior', action: 'term.report', target: { type: 'term', ref: 'CWT-0001' } })).toBe(true);
+    expect(cw.audit.list({ limit: 10, action: 'term.report' }).items.map((i) => `${i.action}:${i.target?.type}:${i.target?.ref}`)).toEqual(['term.report:term:CWT-0001']);
+    expect(cw.audit.list({ limit: 10, action: 'term.share' }).items).toHaveLength(1);
+    // every role may be the actor (the routes decide who may)
+    for (const role of ROLES) expect(rec(cw, { role, action: 'community.apply', target: { type: 'release', ref: '2026.12.1' } })).toBe(true);
+  });
+
+  it('audit: a ref with dots such as 2026.12.0 is accepted; a ref with a slash, a space or 65 characters is refused', async () => {
+    const { cw, logged } = await setup();
+    for (const ref of ['2026.12.0', '2026.12.12', '2026.1.0-rc.1', 'v1.2.3', 'a'.repeat(64)]) {
+      expect(rec(cw, { action: 'community.apply', target: { type: 'release', ref } }), ref).toBe(true);
+    }
+    for (const ref of ['2026/12/0', '2026.12.0/', 'v1\\2', '2026.12 .0', ' 2026.12.0', '2026.12.0 ', '', 'a'.repeat(65), '2026.12.0\n', 'zorbak vlemmo', '../x']) {
+      expect(rec(cw, { action: 'community.apply', target: { type: 'release', ref } }), JSON.stringify(ref)).toBe(false);
+      expect(rec(cw, { action: 'term.share', target: { type: 'term', ref } }), JSON.stringify(ref)).toBe(false);
+      expect(rec(cw, { action: 'term.report', target: { type: 'term', ref } }), JSON.stringify(ref)).toBe(false);
+    }
+    // the refusal logs the event name and nothing of the input
+    expect(logged.length).toBeGreaterThan(0);
+    expect(JSON.stringify(logged)).not.toMatch(/zorbak|vlemmo|2026/);
+    // control: a type outside the closed list is still refused
+    expect(rec(cw, { action: 'community.apply', target: { type: 'releases', ref: '2026.12.0' } })).toBe(false);
+  });
+
+  it('audit: neither new action carries a detail; a word in the ref position is not required nor stored', async () => {
+    const { cw, store } = await setup();
+    // ids only: a detail, in any shape, is refused
+    for (const action of ['term.share', 'term.report', 'community.apply'] as const) {
+      const target = action !== 'community.apply' ? { type: 'term', ref: 't_1' } : { type: 'release', ref: '2026.12.0' };
+      expect(rec(cw, { action, target, detail: { sections: [] } }), action).toBe(false);
+      expect(rec(cw, { action, target, detail: { reason: 'zorbak' } }), action).toBe(false);
+      expect(rec(cw, { action, target, detail: 'zorbak' }), action).toBe(false);
+      // no target is allowed: the trail does not need a word to record that a share happened
+      expect(rec(cw, { action }), action).toBe(true);
+      expect(rec(cw, { action, target }), action).toBe(true);
+    }
+    // a word with a space or punctuation outside the id charset can never be the ref
+    expect(rec(cw, { action: 'term.share', target: { type: 'term', ref: 'you zorbak' } })).toBe(false);
+    expect(rec(cw, { action: 'term.share', target: { type: 'term', ref: 'zorbak!!' } })).toBe(false);
+    const rows = store.listAudit({ limit: 50 });
+    expect(rows).toHaveLength(6);
+    for (const r of rows) expect(Object.keys(r)).not.toContain('detail');
+    expect(JSON.stringify(rows)).not.toMatch(/zorbak|vlemmo/);
   });
 
   it('report.dismiss_case and report.dismiss_reporter take a person target, round-trip, filter, and refuse a detail', async () => {

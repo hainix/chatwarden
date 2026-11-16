@@ -271,3 +271,79 @@ describe('the 0.1.10 notes (all ten CHANGELOGs)', () => {
     for (const flag of named) expect(flags.has(flag), flag).toBe(true);
   });
 });
+
+describe('the 0.1.11 notes (all ten CHANGELOGs)', () => {
+  const section0111 = (dir: string): string => {
+    const text = readFileSync(join(root, 'packages', dir, 'CHANGELOG.md'), 'utf8').replace(/\r\n/g, '\n');
+    const at = text.indexOf('## 0.1.11');
+    expect(at, `${dir} has a 0.1.11 section`).toBeGreaterThanOrEqual(0);
+    const end = text.indexOf('\n## 0.1.10', at);
+    return text.slice(at, end < 0 ? undefined : end);
+  };
+
+  it.each(dirs)('%s: opens with "adds an opt-in loader for the shared community term list" and is a patch', (dir) => {
+    const s = section0111(dir);
+    expect(s).toContain('### Patch Changes');
+    expect(s).toContain('- Adds an opt-in loader for the shared community term list.');
+  });
+
+  it.each(dirs)('%s: names the two subpaths, LiveTerms.syncPack, the staff routes, the Community list and the four core names', (dir) => {
+    const s = section0111(dir);
+    for (const needle of ['`@chatwarden/matcher/corpus`', '`@chatwarden/matcher/corpus/node`', '`LiveTerms.syncPack`', '`startCorpus`', 'Community list', '`term.share`', '`term.report`', '`community.apply`', '`release`', '`POST /terms/:id/report`']) {
+      expect(s, needle).toContain(needle);
+    }
+  });
+
+  it.each(dirs)('%s: says no package ships any terms, nothing is on by default, and the names are experimental until 0.2', (dir) => {
+    const s = section0111(dir).replace(/\s+/g, ' ');
+    expect(s).toMatch(/No package ships any terms/);
+    expect(s).toMatch(/nothing is on by default/i);
+    expect(s).toContain('`@experimental` until 0.2');
+    for (const name of ['`createCorpusLoader`', '`createCommunityShare`', '`CorpusLoader`', '`fileCache`', '`installationKey`']) expect(s, name).toContain(name);
+  });
+
+  it.each(dirs)('%s: is true about who is affected: the lead does not say nothing changes, and the word engine, /me, /terms, HubClient and the widened unions are named', (dir) => {
+    const s = section0111(dir).replace(/\s+/g, ' ');
+    expect(s).not.toMatch(/imports nothing new changes nothing/);
+    expect(s).toContain('a project that imports nothing new sees the same results');
+    expect(s).toContain('the word engine in `@chatwarden/matcher` is rewritten');
+    expect(s).toMatch(/The word engine is rewritten, and every adopter gets it/);
+    expect(s).toMatch(/finds the same hits/);
+    expect(s).toMatch(/differential test/);
+    expect(s).toMatch(/much faster at large term counts/);
+    expect(s).toContain('`features.community`');
+    expect(s).toContain('`MeFeatures.community?`');
+    expect(s).toContain('community: { hidden }');
+    expect(s).toMatch(/hand-written `HubClient` must add the new methods/);
+    // the eight methods are named inside the sentence that says they are required
+    const sentence = s.slice(s.indexOf('A hand-written `HubClient`'), s.indexOf('A hand-written `HubClient`') + 600);
+    for (const m of ['community', 'refreshCommunity', 'applyCommunity', 'getTerm', 'lookupTerm', 'shareTerm', 'shareStatus', 'reportTerm']) expect(sentence, m).toContain('`' + m + '`');
+    expect(s).toContain('**Four new names in `@chatwarden/core`:**');
+    expect(s).not.toMatch(/Three new names/);
+    expect(s).not.toMatch(/A report is audited as `term.share`/);
+    expect(s).toMatch(/a report of a community term as `term.report`/);
+    expect(s).toMatch(/`AuditAction` and `AuditTargetType` are wider unions/);
+    expect(s).toMatch(/needs the new cases/);
+  });
+
+  it.each(dirs)('%s: says which peer floors rose and why, and that nothing else moved, no migration and no new package', (dir) => {
+    const s = section0111(dir).replace(/\s+/g, ' ');
+    expect(s).toMatch(/`@chatwarden\/http` and `@chatwarden\/hub-react` now need `@chatwarden\/core` `\^0\.1\.11`/);
+    expect(s).toMatch(/`@chatwarden\/hub-react` also needs `@chatwarden\/http` `\^0\.1\.11`/);
+    expect(s).toMatch(/`@chatwarden\/matcher` keeps `\^0\.1\.0`/);
+    expect(s).toContain('No migration');
+    expect(s).toContain('No new package is published');
+  });
+
+  it('the 0.1.11 notes are the same text in all ten', () => {
+    const first = section0111(dirs[0] as string);
+    expect(first.length).toBeGreaterThan(1500);
+    for (const dir of dirs) expect(section0111(dir), dir).toBe(first);
+  });
+
+  it('every name the notes call experimental is really exported by the corpus entries or the matcher root', async () => {
+    const corpus = readFileSync(join(root, 'packages', 'matcher', 'src', 'corpus', 'index.ts'), 'utf8') + readFileSync(join(root, 'packages', 'matcher', 'src', 'corpus', 'node', 'index.ts'), 'utf8');
+    for (const name of ['createCorpusLoader', 'createCommunityShare', 'CorpusLoader', 'fileCache', 'installationKey', 'startCorpus']) expect(corpus, name).toContain(name);
+    expect(readFileSync(join(root, 'packages', 'matcher', 'src', 'liveTerms.ts'), 'utf8')).toContain('syncPack(');
+  });
+});

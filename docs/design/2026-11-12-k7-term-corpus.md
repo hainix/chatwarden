@@ -142,7 +142,7 @@ Each ruling states the decision, what it costs, and what was rejected. The detai
 15. **Calibration and eval sets are one file shape: the AI eval's `EvalCase`**, plus an optional `meta` object. Synthetic cases may live
     in the repo; cases with real terms or contributed material live only in the published sets. Contributed cases are paraphrased by a
     reviewer so the original wording is gone. Section 12.
-16. **No store migration, and one small core addition.** `AUDIT_ACTIONS` gains `term.share` and `community.apply`, and
+16. **No store migration, and one small core addition.** `AUDIT_ACTIONS` gains `term.share`, `community.apply` and `term.report`, and
     `AUDIT_TARGET_TYPES` gains `release`. `http` and `hub-react` raise their core peer floor by hand in release prep. The
     SQLite audit filter is built from `AUDIT_ACTIONS`, so there is no migration.
 
@@ -299,6 +299,17 @@ parsed only after its signature verified, but the limits hold anyway): at most 3
 | `positive.json` | pack-wide lines that must keep blocking (optional) |
 | `LICENSE.txt`, `README.txt` | CC BY 4.0 text, attribution sentence, the content warning, the verification steps |
 
+**`positive.json` and the limits the reader enforces** (written down after Part A fixed them; the service must write exactly these).
+`positive.json` is `{ "schema": "chatwarden-corpus-positive/1", "lines": ["..."] }`. Every entry of the zip must be listed in the manifest
+with its size and SHA-256 and must match, before anything is parsed; an entry name outside `terms.json`, `exceptions.json`,
+`positive.json` and `negative.<lang>.json` is refused even if listed (`manifest.json`, `LICENSE.txt` and `README.txt` may be unlisted).
+A term row has all 13 fields and no others. A row's `positive` and `negative` hold at most 50 lines of at most 200 characters each. A
+`negative.<lang>.json` file holds at most 2 000 lines of at most 500 characters each. An exception row has a phrase of at most 100
+characters. A term must fold to plain `a` to `z`, with 3 or more letters once repeats collapse, and be at most 40 characters as written;
+two rows may not share a folded word (a withdrawn row still holds its word). **`expected.sequence` is an upper bound, the index's sequence:** the
+manifest's `sequence` must be not above the index's sequence for that release (a pinned older release has a lower one), so a release can
+never claim to be newer than the index that served it. The manifest's `languages` and `counts` must agree with the rows.
+
 ### 6.5 `manifest.json`
 
 ```json
@@ -371,6 +382,13 @@ exception suppresses, like a place name; same statuses). `negative.en.json`: `{ 
 candidate against them; a larger set stays in the service's gates). Lines come from public-domain or CC-licensed sentence sources and
 reviewers' own writing; each line's origin is kept in D1, not in the release.
 
+**Which rows a selection loads, and whose rows they become.** A row whose status is outside the selected statuses is excluded: it is not
+carried in as an inactive row, and narrowing a selection later does not switch off rows an adopter already has. Disputed and withdrawn
+rows always load, switched off, for any selected language. A row a release added or changed carries `addedBy` or `updatedBy` of
+`corpus:<version>`. A row whose `updatedBy` starts with `corpus:` belongs to the corpus; a row whose `updatedBy` is anything else is the
+adopter's and is never changed again. Actors that start with `corpus:` are refused by `LiveTerms.change`, so a person cannot take the
+corpus's name.
+
 ### 6.8 The contribution wire (`POST /v1/submissions`)
 
 Headers: `content-type: application/json`; `x-cw-key` (the installation's public key, base64url); `x-cw-sig` (base64url Ed25519 signature
@@ -388,6 +406,33 @@ the server's. Nothing else is read; an unknown key is a `400`. Answers: `202 { "
 `GET /v1/submissions/:id` (signed the same way by the same key) returns `{ "status": "received" | "in_review" | "accepted" | "declined" |
 "merged", "reason"?: "known_innocent" | "not_a_term" | "duplicate" | "needs_context" | "other" }`. The reason is a closed code; reviewers'
 free text never leaves the service.
+
+**Interface choices the kit fixed, which the service must match** (Part A, the share client and the eval reader):
+
+1. `GET /v1/submissions/:id` is signed over `signedMessage('submission', UTF8(id))` (headers `x-cw-key` and `x-cw-sig`, no stamp). The id
+   must start with a letter or a digit.
+2. The stamp is `<bits>:<nonce>`: `bits` is one or two decimal digits with no leading zero, and the nonce is `[A-Za-z0-9_-]{1,32}`. The
+   kit's `stampBits` option (0 to 26, default 16) is how many zero bits it mints; the service says how many it wants and checks with
+   `checkStamp(body, stamp, bits)`.
+3. The kit sends its version as `kit` (default `0.0.0`; `startCorpus` and the hub pass the matcher's version).
+4. The note rules are the service's rules too: at most 200 characters, no control character, no `@`, no digit run longer than 4, no URL
+   (a scheme, `www.`, or a bare host under a common top-level domain).
+5. An answer is read at most 8 KiB, every request has a 15 second deadline, and nothing the service says is passed on: `known` carries
+   the public term id, `received` carries an id that looks like an id, `400` is `invalid`, `too_large`, `unsupported_language` or `stamp`
+   (the kit treats `stamp` as `rejected`).
+6. **A report** (design 10.6) is `POST /v1/reports`, headers `x-cw-key` and `x-cw-sig` (no stamp), body at most 2 KiB:
+   `{ "schema": "chatwarden-corpus-report/1", "termId": "CWT-2026-00001", "kind": "innocent_sense", "day": "2026-12-02", "kit": "0.1.11" }`
+   with `kind` one of `innocent_sense`, `wrong_category`, `removal`. The signature is over `signedMessage('report', body)`, a kind of its
+   own, so a share signature cannot be replayed as a report or the other way round. No free text and no word. Answers: `202 { "id":
+   "rep_...", "status": "received" }`, `200 { "status": "duplicate" }` (one open report per term, per key, per day), `400 { "error":
+   "invalid" }`, `401`, `404`, `429` with `retry-after`.
+7. **The eval manifest** (6.10) has the fields of 6.5 and **no `gate` key**. `counts.cases` lists every language of the manifest (zeros
+   included) and `counts.groups` totals across languages; the files are `cases.<lang>.json`. A contributed case has at most 12 lines;
+   the group `long-room` (written by the maintainers, never contributed) may have up to 64, because the repo's own cases need it.
+   `checkCase` in the service holds contributed cases to 12.
+8. **The release builder's counts.** The manifest's `counts` has an entry for every manifest language (zero counts included); a term is
+   counted once for each language it lists; `status` counts the term rows only; every row language is in the manifest's `languages`. A
+   Zenodo record carries `<zip>.sig` beside the zip (the loader derives the signature address from the zip address).
 
 ### 6.9 The service's tables (D1, SQLite dialect; `services/corpus/schema.sql`)
 
@@ -631,9 +676,18 @@ export function createCommunityShare(options: {
 for the untouched community rows it did not list (unless `exposeCommunityRows: true`). A refused or failed share is a fixed error code,
 never the service's message.
 
+**What Part A built beyond the table.** `GET /terms/:id/share` answers `200` with `{ status: null }` for a term that was never shared, so a
+page that asks as it opens an editor does not log a 404. `POST /terms/:id/report { kind }` (`terms.write`) reports a term of the list
+(`innocent_sense`, `wrong_category` or `removal`; 409 `not_reportable` for a row of the adopter's own); it sends the term id and the
+kind only, and audits as `term.report` on the term id (a name of its own, so a report is never read as an offer; the core adds four names). `GET /community` also says `reporting`. A share
+or a report that reached the share client writes its best-effort audit row even when it fails, and logs the outcome as a closed code.
+`GET /terms/:id/share` asks the service at most once every 15 seconds for a term. `GET /me` has `features.community: true` when the
+list is wired. A share's status is kept in the http process (1000 terms, lost on restart). **Wiring needs** `terms: live` on the loader
+(for the restart sync) and `kit` on a hand-built loader (for `minKit`); `startCorpus` sets `kit` itself.
+
 ### 8.6 Core additions (the only change to `@chatwarden/core`)
 
-`AUDIT_ACTIONS` += `'term.share'`, `'community.apply'`; `AUDIT_TARGET_TYPES` += `'release'`. Nothing else. `http` and `hub-react` raise
+`AUDIT_ACTIONS` += `'term.share'`, `'community.apply'`, `'term.report'` (appended last, in that order); `AUDIT_TARGET_TYPES` += `'release'`. Nothing else. `http` and `hub-react` raise
 their `@chatwarden/core` peer floor by hand in release prep (RELEASING.md "When a peer floor must rise"), with the new names in the
 changeset. `matcher` keeps `^0.1.0`: the corpus subpaths import only the `Clock` and `Logger` types.
 
@@ -689,6 +743,18 @@ seeds the store once per pack id as today) and the corpus loader then calls `syn
 the tests use. The plan benchmarks a generated 5 000-term pack of invented words and sets budgets (a rebuild under 300 ms, a line match
 under 2 ms). If a budget fails, the first remedies are memoising the terms-only matcher in `validate()` and loading only `severe` and
 `hostile` rows by default (already the default).
+
+**Measured (plan Task 4, `corpus-bench.test.ts`, a generated pack of invented words, one developer machine).** The first measurement failed
+the budget by orders of magnitude, and not through the terms-only matcher: the engine kept one RegExp per term and scanned the whole line
+once for each, so a line match, a rebuild and above all the canary in `changeSync` (two matches for every positive line of every term)
+grew with the list: a match took 0.19 ms at 500 terms and 0.72 ms at 2 000, and one edit took 0.42 s at 500 terms and 10.9 s at 2 000
+(quadratic). Two changes fixed the cause. `compileWords` (`src/vendored/wordEngine.ts`) now cuts the transformed line into its runs of
+word characters and looks each run up in a map, which is exactly what a whole-word `\bword\b` pattern matches (it is held against obscenity
+on the same table and generated lines as before, and on a 2 000-word list); and the canary is skipped when no exception is active (then
+the matcher is the terms-only matcher) and otherwise asks the cheap question first (does the full matcher still block the line?). Now, at
+5 000 active terms with 500 active exceptions: build 3 ms, match of a 200-character line 0.03 ms, `changeSync` of one edit 0.18 s, first seed
+of the store from the pack 0.2 s (budgets: 300 ms, 2 ms, 600 ms). Run `CW_BENCH=1 npx vitest run packages/matcher/test/corpus-bench.test.ts`
+for the numbers on your machine; a 500-term check always runs.
 
 ## 10. Contributions
 

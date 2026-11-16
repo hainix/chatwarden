@@ -63,6 +63,13 @@ export default tseslint.config(
     rules: { 'no-restricted-imports': browserSafeImports, 'no-restricted-syntax': browserSafeSyntax },
   },
   {
+    // The one folder under a browser-safe package's src that may import `node:`: the server-only half of the shared term list (a disk cache,
+    // the installation key, the starter). It is named exactly, so `corpus/` beside it, the rest of the matcher and every other package keep the
+    // ban; scripts/eslint-ban.test.ts pins both sides, including look-alike folder names.
+    files: ['packages/matcher/src/corpus/node/**/*.ts'],
+    rules: { 'no-restricted-imports': 'off', 'no-restricted-syntax': 'off' },
+  },
+  {
     // The AI never writes a sanction, a strike, a mute or a notice: nothing under core/src/ai may import the modules that do. A flat-config rule
     // replaces the one above for these files, so the browser-safe ban is repeated here and the AI's is added to it. scripts/eslint-ban.test.ts
     // proves it fires (type-only imports, re-exports and dynamic imports included).

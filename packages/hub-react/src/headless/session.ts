@@ -22,7 +22,7 @@ export const SESSION_REPORTERS_MAX = 200;
  * an address): Blocked sends "add an exception for this line" or "show me this term" to Terms.
  * @experimental
  */
-export type Handoff = { kind: 'exception'; phrase: string; language: string } | { kind: 'term'; id: string };
+export type Handoff = { kind: 'exception'; phrase: string; language: string } | { kind: 'term'; id: string; from?: 'find' };
 
 /** @experimental */
 export interface Session {

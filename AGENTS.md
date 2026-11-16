@@ -10,7 +10,7 @@ Rules for any agent or contributor working in this repo.
   properties, no enums.
 - `@chatwarden/core` imports nothing from `node:` except `node:crypto`, and has no runtime dependencies. An
   eslint `no-restricted-imports` rule enforces this.
-- No real slur, hate term or profanity list in the repo. Tests use synthetic terms.
+- No real slur, hate term or profanity list in the repo, and no corpus data, no key (no private key, no `.dev.vars`, no release archive outside `test/fixtures/`). Tests use synthetic terms; `scripts/no-corpus-data.test.ts` enforces it with an allowlist.
 - No identifier (client key, account id, IP, any hash, subject id) appears in a value the API returns for a
   player: refusals and deliveries carry reasons, rule numbers, times and line ids only.
 - IP never links two subjects and never delivers a notice. An IP sanction row lasts at most 24 h.

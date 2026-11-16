@@ -11,6 +11,8 @@ import type {
   BlockedLine,
   BlockedName,
   CloseGapInput,
+  CommunityApplied,
+  CommunityStatus,
   DecideInput,
   DecideResult,
   DismissOpenInput,
@@ -44,8 +46,12 @@ import type {
   NextCase,
   Reason,
   ReportCategory,
+  ShareInput,
+  ReportInput,
+  ShareState,
   Suggestion,
   SuggestInput,
+  TermDetail,
   TermInput,
   TermPatch,
   TermsList,
@@ -221,6 +227,24 @@ export interface HubClient {
   /** `POST /exceptions/:id/active`. */
   setExceptionActive(id: string, active: boolean): Promise<{ ok: true }>;
 
+  // The shared term list (K7; needs `community` on the server, otherwise every one of these is a 404)
+  /** `GET /community`: the state of the shared list. */
+  community(): Promise<CommunityStatus>;
+  /** `POST /community/refresh`: check now. */
+  refreshCommunity(): Promise<CommunityStatus>;
+  /** `POST /community/apply`: apply the verified version (an owner). */
+  applyCommunity(): Promise<CommunityApplied>;
+  /** `GET /terms/:id`: one row, a hidden community row too. */
+  getTerm(id: string): Promise<TermDetail>;
+  /** `POST /terms/lookup`: the row for an exact word. The word is in the body, never the address. */
+  lookupTerm(word: string): Promise<TermDetail>;
+  /** `POST /terms/:id/share`: send one term of the adopter's own to the community list. */
+  shareTerm(id: string, input: ShareInput): Promise<{ status: 'received' | 'known' | 'duplicate' }>;
+  /** `POST /terms/:id/report`: report a problem with a term of the community list (a term id and a closed kind; never the word). */
+  reportTerm(id: string, input: ReportInput): Promise<{ status: 'received' }>;
+  /** `GET /terms/:id/share`: where the last share of this term stands, or null when it was never shared. */
+  shareStatus(id: string): Promise<ShareState | null>;
+
   // The team: claims, take next, viewing, the change token, saved reasons
   /** `GET /changes`: the token for the queue and claims, and whether it differs from `since`. One cheap read. */
   changes(since?: string): Promise<Changes>;
@@ -317,6 +341,18 @@ export function createHubClient(transport: Transport): HubClient {
     addException: (input) => post<{ id: string }>('/exceptions', input),
     updateException: (id, p) => patch<{ ok: true }>(`/exceptions/${enc(id)}`, p),
     setExceptionActive: (id, active) => post<{ ok: true }>(`/exceptions/${enc(id)}/active`, { active }),
+
+    community: () => get<CommunityStatus>('/community'),
+    refreshCommunity: () => post<CommunityStatus>('/community/refresh', undefined),
+    applyCommunity: () => post<CommunityApplied>('/community/apply', undefined),
+    getTerm: (id) => get<TermDetail>(`/terms/${enc(id)}`),
+    lookupTerm: (word) => post<TermDetail>('/terms/lookup', { word }),
+    shareTerm: (id, input) => post<{ status: 'received' | 'known' | 'duplicate' }>(`/terms/${enc(id)}/share`, input),
+    reportTerm: (id, input) => post<{ status: 'received' }>(`/terms/${enc(id)}/report`, input),
+    shareStatus: async (id) => {
+      const answer = await get<{ status: ShareState['status'] | null; reason?: ShareState['reason'] }>(`/terms/${enc(id)}/share`);
+      return answer.status === null ? null : (answer as ShareState);
+    },
 
     changes: (since) => get<Changes>('/changes', q({ since })),
     claimCase: (person, options = {}) => post<ClaimResult>(`/cases/${enc(person)}/claim`, options.takeOver === true ? { takeOver: true } : undefined),

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LiveTerms, type TermEditor, type TermPack } from '../src/index.js';
+import { buildMatcher } from '../src/matcher.js';
 import {
   MemoryTermStore,
   SYNTHETIC_EXCEPTIONS,
@@ -989,7 +990,9 @@ describe('row ids come from Web Crypto, not a node: import', () => {
     const walk = (dir: string): string[] =>
       readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : f.endsWith('.ts') ? [join(dir, f)] : []));
     const { fileURLToPath } = await import('node:url');
-    for (const file of walk(fileURLToPath(new URL('../src', import.meta.url)))) {
+    // The one folder allowed `node:` is the server-only corpus starter (design 16; eslint names it too).
+    const exempt = join('corpus', 'node', 'x').slice(0, -1);
+    for (const file of walk(fileURLToPath(new URL('../src', import.meta.url))).filter((f) => !f.includes(exempt))) {
       expect(readFileSync(file, 'utf8'), file).not.toMatch(/(?:from|import\s*\()\s*['"]node:/);
     }
   });
@@ -1522,5 +1525,66 @@ describe('records (the rows with who changed them and when)', () => {
     r.live.records().terms[0]!.note = 'tampered';
     expect(r.live.records().terms[0]!.note).toBeNull();
     expect(r.store.state.terms[0]!.note).toBeNull();
+  });
+});
+
+// The canary skips its terms-only matcher when no exception is active (then the full matcher IS the terms-only one) and otherwise
+// asks the full matcher first. This holds both shortcuts against the plain rule, "an exception may not unblock a line the terms
+// block", computed here the long way (two matches for every line), over many candidate exceptions.
+describe('the canary shortcuts give the same answers as the full canary', () => {
+  const pack0 = syntheticTermPack({ exceptions: [] });
+  const lines = [...pack0.terms.flatMap((t) => t.positive), ...(pack0.positiveCorpus ?? [])];
+  const candidates = [
+    'you zorbak', 'zorbak', 'my zorbak', 'Z0RBAK', 'quissel', 'seu quissel', 'tarvo lake', 'tarvo lake, you tarvo', 'you snerp', 'snerp glarn',
+    'blorft stew', 'vlemmo', 'a vlemmo', 'f3nr1sk', 'you', 'ZORBAK!!', 'drakkuun day', 'plain words here', 'glarn',
+  ];
+  const longWay = (exceptionPhrases: string[]): boolean => {
+    const terms = pack0.terms.map((t) => ({ id: t.id, term: t.term, language: t.language, active: true }));
+    const exceptions = exceptionPhrases.map((phrase, i) => ({ id: `x${i}`, phrase, language: 'en', active: true }));
+    const full = buildMatcher(terms, exceptions);
+    const only = buildMatcher(terms, []);
+    return lines.some((l) => only.match(l) !== null && full.match(l) === null); // true: the canary would refuse
+  };
+
+  it('adding one exception: refused exactly when the long way says so, for every candidate', async () => {
+    for (const phrase of candidates) {
+      const r = await loaded({ pack: pack0 });
+      const res = await r.live.change('a', (e) => e.addException({ phrase, language: 'en' }));
+      expect(res.ok, phrase).toBe(!longWay([phrase]));
+      if (!res.ok) expect(res.code, phrase).toBe('unblocks_known');
+    }
+  });
+
+  it('a second exception on top of an accepted one: the same, pair by pair', async () => {
+    for (const a of ['plain words here', 'drakkuun day', 'glarn']) {
+      for (const b of candidates) {
+        const r = await loaded({ pack: pack0 });
+        if (a === b || !(await r.live.change('a', (e) => e.addException({ phrase: a, language: 'en' }))).ok) continue;
+        const res = await r.live.change('a', (e) => e.addException({ phrase: b, language: 'en' }));
+        expect(res.ok, `${a} + ${b}`).toBe(!longWay([a, b]));
+      }
+    }
+  });
+
+  it('with only inactive exceptions the canary is skipped and agrees: switching one off is always fine, switching it back on is judged', async () => {
+    for (const phrase of candidates) {
+      const r = await loaded({ pack: pack0 });
+      const added = await r.live.change('a', (e) => e.addException({ phrase, language: 'en' }));
+      if (!added.ok) continue; // refused: nothing to switch
+      const id = added.value;
+      expect((await r.live.change('a', (e) => e.setExceptionActive(id, false))).ok, phrase).toBe(true);
+      const on = await r.live.change('a', (e) => e.setExceptionActive(id, true));
+      expect(on.ok, phrase).toBe(!longWay([phrase])); // it was accepted once, so on again it is accepted again
+    }
+    // An inactive exception that WOULD unblock a line is not judged while it stays off.
+    const r = await loaded({ pack: pack0 });
+    const bad = await r.live.change('a', (e) => {
+      const id = e.addException({ phrase: 'you zorbak', language: 'en' });
+      e.setExceptionActive(id, false);
+      return id;
+    });
+    expect(bad.ok).toBe(true);
+    const flip = await r.live.change('a', (e) => e.setExceptionActive((bad as { value: string }).value, true));
+    expect(flip).toMatchObject({ ok: false, code: 'unblocks_known' });
   });
 });

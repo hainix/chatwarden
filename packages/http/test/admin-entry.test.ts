@@ -66,7 +66,7 @@ describe('@chatwarden/http/admin entry', () => {
   it('exports MeFeatures (the shape of GET /me features) as a type, the same one the root gives, so a browser hub can name it', () => {
     expectTypeOf<AdminMeFeatures>().toEqualTypeOf<MeFeatures>();
     expectTypeOf<AdminMe['features']>().toEqualTypeOf<Me['features']>();
-    expectTypeOf<AdminMeFeatures>().toEqualTypeOf<{ appeals: boolean; renames: boolean; keepBlocked: boolean }>();
+    expectTypeOf<AdminMeFeatures>().toEqualTypeOf<{ appeals: boolean; renames: boolean; keepBlocked: boolean; community?: boolean }>();
     // A type has no run-time binding in either entry; the entry file says it by name.
     expect('MeFeatures' in admin).toBe(false);
     const text = readFileSync(join(SRC, 'admin-entry.ts'), 'utf8');

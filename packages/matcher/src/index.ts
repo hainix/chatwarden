@@ -1,4 +1,4 @@
-export const VERSION = '0.1.10';
+export const VERSION = '0.1.11';
 
 export type { TermRow, ExceptionRow, Matcher, Span } from './matcher.js';
 export { MatcherBuildError, buildMatcher } from './matcher.js';
@@ -22,6 +22,8 @@ export {
   type ChangeResult,
   type CheckResult,
   type ExceptionListRow,
+  type SyncResult,
+  type SyncSummary,
   type TermEditor,
   type TermListRow,
 } from './liveTerms.js';

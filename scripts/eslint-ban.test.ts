@@ -19,6 +19,7 @@ const BROWSER_SAFE_SRC = [
   'packages/core/src/x.ts',
   'packages/store-memory/src/x.ts',
   'packages/matcher/src/x.ts',
+  'packages/matcher/src/corpus/x.ts',
   'packages/hub-react/src/x.ts',
   'packages/hub-react/src/x.tsx',
   'packages/player-react/src/x.ts',
@@ -48,6 +49,57 @@ describe.each(BROWSER_SAFE_SRC)('%s', (file) => {
     ["export const a = await import('pathfinder');\n", 'a package whose name starts like a builtin'],
   ])('allows %s (%s)', async (code) => {
     expect(await messages(code, file)).toEqual([]);
+  });
+});
+
+// The shared term list's server half is the one folder under a browser-safe package's src that may import node: (a disk cache, the installation key,
+// a starter). Both halves are pinned: the exemption works there, and only there. The isomorphic folder beside it (the verifier and the
+// loader, which a page may bundle) keeps the ban, and so do look-alike folder names, nested ones, and the same folder of any other package.
+describe('the matcher corpus/node exemption', () => {
+  const NODE_IMPORTS: [string, string][] = [
+    ["import { readFile } from 'node:fs/promises';\nexport const a = readFile;\n", 'a static node: import'],
+    ["import { join } from 'node:path';\nexport const a = join;\n", 'a static node:path import'],
+    ["import { randomBytes } from 'crypto';\nexport const a = randomBytes;\n", 'a bare builtin import'],
+    ["export const a = await import('node:fs/promises');\n", 'a dynamic node: import'],
+    ["export * from 'node:os';\n", 'a node: re-export'],
+  ];
+  it.each(NODE_IMPORTS)('allows %s (%s) in packages/matcher/src/corpus/node, at any depth', async (code) => {
+    for (const file of ['packages/matcher/src/corpus/node/x.ts', 'packages/matcher/src/corpus/node/fileCache.ts', 'packages/matcher/src/corpus/node/deeper/x.ts']) {
+      expect(await messages(code, file), file).toEqual([]);
+    }
+  });
+  it.each(NODE_IMPORTS)('refuses %s (%s) everywhere else in the matcher src', async (code) => {
+    for (const file of [
+      'packages/matcher/src/x.ts',
+      'packages/matcher/src/corpus/x.ts',
+      'packages/matcher/src/corpus/loader.ts',
+      'packages/matcher/src/corpus/sub/x.ts',
+      'packages/matcher/src/fixtures/x.ts',
+      'packages/matcher/src/vendored/x.ts',
+    ]) {
+      expect((await messages(code, file)).length, file).toBeGreaterThan(0);
+    }
+  });
+  it.each(NODE_IMPORTS)("refuses %s (%s) in look-alike folders and in another package's corpus/node", async (code) => {
+    for (const file of [
+      'packages/matcher/src/corpus/nodes/x.ts',
+      'packages/matcher/src/corpus/node_x/x.ts',
+      'packages/matcher/src/corpus/xnode/x.ts',
+      'packages/matcher/src/corpus/Node/x.ts',
+      'packages/matcher/src/node/x.ts',
+      'packages/matcher/src/fixtures/node/x.ts',
+      'packages/matcher/src/corpus/sub/node/x.ts',
+      'packages/matcher/src/corpus/node.ts',
+      'packages/core/src/corpus/node/x.ts',
+      'packages/store-memory/src/corpus/node/x.ts',
+      'packages/hub-react/src/corpus/node/x.ts',
+    ]) {
+      expect((await messages(code, file)).length, file).toBeGreaterThan(0);
+    }
+  });
+  it('the exemption turns off the import ban only: the rest of the lint config still applies there', async () => {
+    const [result] = await eslint.lintText('export const a: any = 1;\n', { filePath: `${root}packages/matcher/src/corpus/node/x.ts` });
+    expect((result?.messages ?? []).some((m) => m.ruleId === '@typescript-eslint/no-explicit-any')).toBe(true);
   });
 });
 

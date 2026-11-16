@@ -18,6 +18,9 @@ export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
 
+import { makeCommunity } from './communityWorld.js';
+import type { CommunityOptions } from './communityWorld.js';
+
 export interface WorldOptions {
   role?: Role | null;
   actor?: string;
@@ -35,6 +38,8 @@ export interface WorldOptions {
   overrides?: NonNullable<Parameters<typeof createChatwarden>[0]['overrides']>;
   /** Turn the AI on with the scripted fake (never a network): the level the hub has set, the fake's script, and the code-side options. */
   ai?: { level?: 0 | 1 | 2; script?: FakeScript; options?: Partial<AiOptions> };
+  /** Wire the shared term list (K7): a fake loader and share over the real routes. Default: not wired. */
+  community?: CommunityOptions;
 }
 
 export interface FileOptions {
@@ -92,6 +97,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     who: opts.role === null ? null : { actor: opts.actor ?? 'ann@example.test', role: opts.role ?? 'moderator' },
   };
   // A second moderator: a client made by `clientFor` sends who it is in a header, so two people can act at once on one server.
+  const community = opts.community === undefined ? undefined : makeCommunity(live, opts.community);
   const routes: RouteTable = adminRoutes(cw, {
     authorize: (req) => {
       const actor = req.headers['x-test-actor'];
@@ -101,6 +107,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     },
     ...(opts.permissions === undefined ? {} : { permissions: opts.permissions }),
     ...(opts.terms === false ? {} : { terms: live }),
+    ...(community === undefined ? {} : { community: community.admin }),
     gameName: opts.gameName ?? 'Test Game',
   });
   const handle = createRouter(routes);
@@ -239,7 +246,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     for (let i = 0; i < 5; i += 1) await cw.ai.idle();
   };
 
-  return { cw, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, blockLine, raw, live, now: () => clock.t };
+  return { cw, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, blockLine, raw, live, community, now: () => clock.t };
 }
 
 export type HubWorld = Awaited<ReturnType<typeof hubWorld>>;

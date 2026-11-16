@@ -9,16 +9,16 @@
     "node": ">=22.13"
   },
   "dependencies": {
-    "@chatwarden/core": "0.1.10",
-    "@chatwarden/discord": "0.1.10",
-    "@chatwarden/http": "0.1.10",
-    "@chatwarden/hub-element": "0.1.10",
-    "@chatwarden/hub-react": "0.1.10",
-    "@chatwarden/matcher": "0.1.10",
-    "@chatwarden/player-react": "0.1.10",
-    "@chatwarden/profanity": "0.1.10",
-    "@chatwarden/store-memory": "0.1.10",
-    "@chatwarden/store-sqlite": "0.1.10"
+    "@chatwarden/core": "0.1.11",
+    "@chatwarden/discord": "0.1.11",
+    "@chatwarden/http": "0.1.11",
+    "@chatwarden/hub-element": "0.1.11",
+    "@chatwarden/hub-react": "0.1.11",
+    "@chatwarden/matcher": "0.1.11",
+    "@chatwarden/player-react": "0.1.11",
+    "@chatwarden/profanity": "0.1.11",
+    "@chatwarden/store-memory": "0.1.11",
+    "@chatwarden/store-sqlite": "0.1.11"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

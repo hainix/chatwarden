@@ -88,12 +88,133 @@ removed in the next; import `@chatwarden/matcher/fixtures` instead.
 
 ## The community term corpus
 
-A real, shared list of terms is a separate project. The data is hosted separately from the code, so it is not in this
-repository and not in this package. The plan
-is a precision-first list that many communities maintain together, in which every term ships with lines it must block and lines it
-must never block. It would be published as signed, versioned releases, and your app would download a release,
-check its signature and load it as a term pack. That corpus is not released yet. Until it is, bring your own list: build a term
-pack (the shape is `TermPack`, validated by `loadTermPack`) from your moderators' terms, or use the fixtures to try things out.
+A shared, community-kept list of terms is a separate project. The data is hosted separately from the code, so it is not in this
+repository and not in this package. **This package ships no terms at all, and nothing here is on by default.** It ships the
+loader. The list is a precision-first list that many communities keep together: every term has lines it must block and lines it
+must never block. It is published as signed, versioned releases. Your server downloads a release, checks its signature, keeps it
+on disk and loads it as a term pack. No real slur is in this repository or in any package.
+
+Everything in this section is `@experimental` until 0.2. Until the first release exists, the loader has no trusted keys and answers
+`no_trusted_keys`, and your own list is untouched.
+
+### Turn it on
+
+Import the loader from its own subpath, on the server only. The root of `@chatwarden/matcher` never imports it, so a browser bundle
+holds none of it.
+
+```ts
+import { LiveTerms, loadTermPack } from '@chatwarden/matcher';
+import { startCorpus } from '@chatwarden/matcher/corpus/node';
+import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
+import { openStore } from '@chatwarden/store-sqlite';
+
+const store = openStore({ path: './chatwarden.db' });
+const terms = new LiveTerms({ store, pack: loadTermPack(syntheticTermPack()), clock: { now: () => Date.now() } });
+await terms.load();
+
+// Reads the cache in ./corpus-cache, asks the service for news (at most 10 seconds at start), then checks again about once a day.
+const corpus = await startCorpus({
+  dir: './corpus-cache',
+  select: { languages: ['en'] },
+  pin: '2026.12.0', // or follow: 'stable'
+  terms, // the live list: needed for `pending`, for `apply: 'auto'` and to put the applied list back after a restart
+});
+console.log(corpus.status().state); // 'ready' once a release has verified; 'failed' (lastError.code 'no_trusted_keys') while the kit has no keys
+
+// The owner decides when a release goes in. A summary first (a dry run), then the change.
+console.log(corpus.status().pending); // { added, deactivated, reactivated, changed, keptYours, skipped }, or null
+const applied = corpus.applyTo(terms);
+if (applied?.ok) console.log('in use:', applied.version);
+corpus.stop();
+```
+
+Pass the loader to `adminRoutes` as `community: { loader: corpus, live: terms }` to get the Community list in the hub (see the
+`@chatwarden/http` and `@chatwarden/hub-react` READMEs). Without that the hub shows nothing about it.
+
+**Pin or follow.** You choose, and `pin` is shown first. `pin: '2026.12.0'` keeps that release until you change it. `follow: 'stable'`
+moves to the newest stable release the index offers, and never goes back to an older one. With `apply: 'manual'` (the default) a new
+release waits as `pending` until `applyTo` is called (the hub's Apply button does that for an owner). With `apply: 'auto'` it is
+applied as soon as it verifies.
+
+**Offline first.** The last good release is kept on disk and verified again every time it is read. If the network is down, the cache
+is damaged or the signature fails, the list in use stays exactly as it is, and `status()` says why with a code and a stage (never a
+term, a path or a URL). A restart hands the applied release to the live list again. That needs the loader to hold `terms`: pass
+`terms` to `startCorpus`, or call `applyTo(terms)` once. A host that wires `community.live` into the routes but not `terms` into the
+loader gets no restart sync. `minKit` in a release is checked against the loader's `kit`, which `startCorpus` sets to this package's
+version. If you call `createCorpusLoader` yourself, pass `kit`, or `minKit` is not enforced.
+
+**A seed.** To ship a release inside an image, pass `seed: { zip, sig }`. It is verified exactly like a download and is used only
+while nothing better has verified.
+
+**Which rows load.** `select` takes `languages` (required), and optionally `categories`, `minSeverity` (default `hostile`) and
+`statuses` (default `accepted` and `provisional`). A row whose status is outside the selected statuses is excluded: it is not
+carried in as an inactive row. Narrowing a selection later does not switch off rows you already have. Disputed and withdrawn rows
+always load, switched off, so a release can take a term out of use.
+
+### What a release may and may not change in your list
+
+`LiveTerms.syncPack(pack, { actor, dryRun? })` is what applies a release. It is browser-safe and does no I/O. It adds rows,
+switches them on and off, renames and re-words them, in one transaction. It never deletes a row. It never changes a row a person
+has edited: a row is yours as soon as `updatedBy` is set to anything that does not start with `corpus:`. Rows the list added or
+changed carry `addedBy` or `updatedBy` of `corpus:<version>`. That prefix belongs to the corpus: `change()` and `changeSync()`
+refuse an actor that starts with `corpus:`. A refusal (`SyncResult` with `ok: false`) changes nothing: the pack would leave no
+active term, or an exception of yours would unblock a line the release says must stay blocked. The summary counts what was or would
+be done: `added`, `deactivated`, `reactivated`, `changed`, `keptYours` and `skipped`.
+
+### Sharing a term back
+
+A server that wants to offer one of its own terms builds a share client with its installation key. The hub's Share action and the
+"Report a problem with this community term" action call it through the staff routes; the browser never contacts the service.
+
+```ts
+import { createCommunityShare } from '@chatwarden/matcher/corpus';
+import { installationKey } from '@chatwarden/matcher/corpus/node';
+
+const key = await installationKey('./corpus-cache'); // a random key kept in a file: it identifies this server, not a person or a game
+const share = createCommunityShare({ sign: key.sign, publicKey: key.publicKey, clock: { now: () => Date.now() } });
+
+// One term at a time. The payload is built from a closed list of keys: the word, its language, a category, a target, a note, the
+// day (never a time) and the kit version. Never a chat line, a name, an id, an address, a room or an excerpt.
+const sent = await share.share({ term: 'zorbak', language: 'en', category: 'abuse' });
+console.log(sent.ok ? sent.status : sent.code); // 'received', or a closed code such as 'offline' or 'rate_limited'
+
+// A report of a problem with a community term is a term id and a closed kind. No word, no free text.
+const report = await share.report({ termId: 'CWT-2026-00001', kind: 'innocent_sense' });
+console.log(report.ok);
+```
+
+Every call has a 15 second deadline and is aborted at it, reads at most 8 KiB of the answer and never throws. A share also costs a
+small piece of work (a 16-bit hash stamp, well under a second) so that sending junk is not free. Nothing the service says is passed
+on: an answer becomes a closed code.
+
+### The attribution sentence
+
+The list is released under CC BY 4.0. Put this sentence in your docs, or wherever you credit your data: "Contains the Chatwarden
+community term list (chatwarden.dev), CC BY 4.0." The same sentence is in each release's manifest (`manifest.license.attribution`).
+
+### The names (`@experimental` until 0.2)
+
+From `@chatwarden/matcher`: `LiveTerms.syncPack`, `SyncResult`, `SyncSummary`.
+
+From `@chatwarden/matcher/corpus/node`: `fileCache`, `installationKey`, `startCorpus`, `StartCorpusOptions`, `StartedCorpus`,
+`StartedEvalCorpus`.
+
+From `@chatwarden/matcher/corpus` (it imports nothing from Node): `CorpusError`, `CorpusErrorCode`, `CorpusStage`, `CORPUS_BASE_URL`,
+`CORPUS_KEYS`, `CORPUS_REVOKED_KEY_IDS`, `CORPUS_ZIP_PASSWORD`, `CorpusKey`, `signedMessage`, `verifySignature`, `ZIP_LIMITS`,
+`readZip`, `ZipLimits`, `parseTermsRelease`, `ExceptionRow6`, `NegativeFile`, `ReleaseManifest`, `TermRow6`, `TermsRelease`,
+`releaseToPack`, `PackSelection`, `parseEvalSet`, `ConductLevelName`, `EvalCaseFile`, `EvalExpectFile`, `EvalLineFile`,
+`EvalManifest`, `EvalMeta`, `EvalSet`, `chooseRelease`, `parseIndex`, `revokedKeyIdsOf`, `ChooseOptions`, `CorpusIndex`, `CorpusKind`,
+`CorpusLanguageCounts`, `CorpusMirror`, `CorpusReleaseEntry`, `CorpusRevokedRelease`, `CorpusRevokeReason`, `createCorpusLoader`,
+`CorpusCache`, `CorpusEvalLoader`, `CorpusLoader`, `CorpusLoaderOptions`, `CorpusState`, `CorpusStatus`, `RefreshResult`, `Schedule`,
+`COMMUNITY_ENDPOINT`, `checkStamp`, `createCommunityShare`, `mintStamp`, `CommunityShare`, `CommunityShareOptions`, `ReportInput`,
+`ReportKind`, `ReportResult`, `ShareInput`, `ShareResult`.
+
+The options of the loader are `select`, `pin`, `follow`, `apply`, `kind`, `baseUrl`, `mirrors`, `keys`, `fetch`, `seed`, `kit`,
+`logger`, `terms`, `schedule`, `cache` and `clock`; `startCorpus` takes `dir` in place of `cache`, and `clock` is optional there. The
+options of the share client are `endpoint`, `sign`, `publicKey`, `fetch`, `clock`, `kit`, `logger`, `schedule` and `stampBits`.
+
+A release is a signed zip with `terms.json`, `exceptions.json`, `positive.json`, `negative.<lang>.json` and a manifest. See the
+[design note](https://github.com/hainix/chatwarden/blob/main/docs/design/2026-11-12-k7-term-corpus.md) for the formats.
 
 ## Options
 

@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import * as http from '../src/index.js';
-import type { CompiledRoutes, FetchHandler, FetchOptions, KitResponse, KitStream, Mounts, RouteTable } from '../src/index.js';
+import type { CommunityAdmin, CommunityLoader, CommunityShareClient, CompiledRoutes, FetchHandler, FetchOptions, KitResponse, KitStream, Mounts, RouteTable } from '../src/index.js';
 import * as fetchEntry from '../src/fetch.js';
 import * as cliEntry from '../src/cli/index.js';
-import type { KitStream as AdminKitStream } from '../src/admin-entry.js';
+import type { CommunityAdmin as AdminCommunityAdmin, KitStream as AdminKitStream } from '../src/admin-entry.js';
 import type { KitStream as DeclaredKitStream } from '../src/types.js';
 import * as wire from '../src/chat/wire.js';
 import { compileRoutes } from '../src/router.js';
@@ -67,6 +67,23 @@ describe('the public exports an adapter author needs', () => {
     for (const entry of ['../src/index.ts', '../src/admin-entry.ts']) {
       const text = readFileSync(new URL(entry, import.meta.url), 'utf8');
       expect(text).toMatch(/export type \{[^}]*KitStream[^}]*\} from '\.\/types\.js'/);
+    }
+  });
+
+  it('exports: the structural types of the shared term list are type exports of the root and of /admin, with no run-time binding', () => {
+    expectTypeOf<AdminCommunityAdmin>().toEqualTypeOf<CommunityAdmin>();
+    expectTypeOf<CommunityAdmin['loader']>().toEqualTypeOf<CommunityLoader>();
+    expectTypeOf<NonNullable<CommunityAdmin['share']>>().toEqualTypeOf<CommunityShareClient>();
+    for (const name of ['CommunityAdmin', 'CommunityLoader', 'CommunityShareClient', 'CommunityStatus', 'CommunitySummary', 'CommunitySyncTarget']) {
+      expect(name in http, name).toBe(false);
+    }
+    for (const entry of ['../src/index.ts', '../src/admin-entry.ts']) {
+      const text = readFileSync(new URL(entry, import.meta.url), 'utf8');
+      for (const name of ['CommunityAdmin', 'CommunityLoader', 'CommunityRelease', 'CommunityShareClient', 'CommunityShareInput', 'CommunityStatus', 'CommunitySummary', 'CommunitySyncResult', 'CommunitySyncTarget']) {
+        expect(text, `${entry} ${name}`).toMatch(new RegExp(`\\b${name},`));
+      }
+      // Types only: the route builder is not part of the public surface.
+      expect(text).not.toMatch(/communityRoutes/);
     }
   });
 

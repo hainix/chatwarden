@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PRIVATE_KEY_HEADER } from './no-corpus-data.mjs';
 
 const REPO = 'https://github.com/hainix/chatwarden';
 const REQUIRED_KEYWORDS = ['chatwarden', 'moderation', 'chat'];
@@ -107,6 +108,44 @@ export function checkFileList({ pkg, files }) {
 
   for (const target of exportTargets(pkg)) {
     if (!have.has(target)) problems.push(`export target is not in the tarball: ${target}`);
+  }
+  return problems;
+}
+
+/** Files that are data or key material, whatever their folder: an archive, a signature, a key, a service secrets file. */
+const CORPUS_FILE_RES = [
+  [/\.(zip|7z|tar|tgz)$/i, 'an archive'],
+  [/\.tar\.gz$/i, 'an archive'],
+  [/\.sig$/i, 'a signature file'],
+  [/\.(pem|key)$/i, 'a key file'],
+  [/(^|\/)\.dev\.vars$/, 'a secrets file'],
+];
+
+/**
+ * Problems with data and keys that must never be in a tarball (design 16; empty array = good): any archive, signature, key or `.dev.vars`
+ * file, any JSON file whose `schema` starts `chatwarden-corpus-` (a release file), and a private key header in a shipped JSON file. The
+ * messages name the file and the kind, never the content.
+ * @param {{ files: string[], sources: Record<string, string> }} input `sources` maps a shipped `.json` file to its text
+ */
+export function corpusDataProblems({ files, sources }) {
+  const problems = [];
+  for (const f of files) {
+    for (const [re, what] of CORPUS_FILE_RES) {
+      if (re.test(f)) {
+        problems.push(`${what} would ship: ${f} (the shared term list and its keys never go in a package)`);
+        break;
+      }
+    }
+  }
+  for (const [path, text] of Object.entries(sources)) {
+    if (PRIVATE_KEY_HEADER.test(text)) problems.push(`a private key would ship in ${path}`);
+    try {
+      const json = JSON.parse(text);
+      const schema = json !== null && typeof json === 'object' && !Array.isArray(json) ? json.schema : undefined;
+      if (typeof schema === 'string' && schema.startsWith('chatwarden-corpus-')) problems.push(`corpus data would ship: ${path} (schema ${schema})`);
+    } catch {
+      // not JSON: nothing to read
+    }
   }
   return problems;
 }
@@ -309,8 +348,10 @@ function main() {
         .filter((target) => files.includes(target))
         .map((target) => [target, readFileSync(join(base, dir, target), 'utf8')]),
     );
+    const jsonSources = Object.fromEntries(files.filter((f) => f.endsWith('.json')).map((f) => [f, readFileSync(join(base, dir, f), 'utf8')]));
     const problems = [
       ...checkManifest(pkg, dir),
+      ...corpusDataProblems({ files, sources: jsonSources }),
       ...checkFileList({ pkg, files }),
       ...binProblems({ pkg, files, sources: binSources }),
       ...undeclaredImports({ pkg, files: sources }),

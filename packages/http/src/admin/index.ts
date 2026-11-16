@@ -4,6 +4,8 @@ import { aiRoutes } from './ai.js';
 import { appealRoutes } from './appeals.js';
 import { auditRoutes } from './audit.js';
 import { blockedRoutes } from './blocked.js';
+import { communityRoutes } from './community.js';
+import type { CommunityAdmin } from './community.js';
 import { createAdminContext } from './context.js';
 import type { AdminOptions } from './context.js';
 import { gapRoutes } from './gaps.js';
@@ -25,6 +27,18 @@ export { appealRoutes } from './appeals.js';
 export type { AiReadAgainBody, AiUnavailableBody } from './ai.js';
 export { auditRoutes } from './audit.js';
 export { blockedRoutes } from './blocked.js';
+export { communityRoutes } from './community.js';
+export type {
+  CommunityAdmin,
+  CommunityLoader,
+  CommunityRelease,
+  CommunityShareClient,
+  CommunityShareInput,
+  CommunityStatus,
+  CommunitySummary,
+  CommunitySyncResult,
+  CommunitySyncTarget,
+} from './community.js';
 export { gapRoutes } from './gaps.js';
 export { meRoutes } from './me.js';
 export { nameRoutes } from './names.js';
@@ -51,6 +65,14 @@ export interface AdminRoutesOptions extends AdminOptions, PolicyOptions {
    * on each check. Default: none. These are other players' lines: they reach staff in the `hits` and nowhere else.
    */
   recentLines?: () => readonly string[];
+  /**
+   * The shared term list (K7, experimental): `{ loader, live, share? }`, where `loader` is the matcher's corpus loader, `live` its
+   * `LiveTerms` and `share` the community share client. With it the staff API gains `GET /community`, `POST /community/refresh`,
+   * `POST /community/apply`, `GET /terms/:id` and `POST /terms/lookup`, and, with `share`, `POST` and `GET /terms/:id/share`; the term
+   * routes use `live` when `terms` is not given. `GET /terms` stops listing community rows nobody has edited (it reports
+   * `community.hidden`) unless `community.exposeCommunityRows` is true. Without `community` none of this exists.
+   */
+  community?: CommunityAdmin;
 }
 
 /**
@@ -60,8 +82,9 @@ export interface AdminRoutesOptions extends AdminOptions, PolicyOptions {
  */
 export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteTable {
   const ctx = createAdminContext(cw, options);
+  const terms = options.terms ?? options.community?.live;
   return {
-    ...meRoutes(ctx),
+    ...meRoutes(ctx, { community: options.community !== undefined }),
     ...reportRoutes(ctx),
     ...teamRoutes(ctx),
     ...sanctionRoutes(ctx),
@@ -69,7 +92,10 @@ export function adminRoutes(cw: Chatwarden, options: AdminRoutesOptions): RouteT
     ...nameRoutes(ctx),
     ...blockedRoutes(ctx, options.terms),
     ...gapRoutes(ctx),
-    ...(options.terms === undefined ? {} : termRoutes(ctx, options.terms, options.recentLines ?? (() => []))),
+    ...(terms === undefined
+      ? {}
+      : termRoutes(ctx, terms, options.recentLines ?? (() => []), options.community === undefined ? undefined : { expose: options.community.exposeCommunityRows === true })),
+    ...(options.community === undefined ? {} : communityRoutes(ctx, options.community)),
     ...policyRoutes(ctx, {
       ...(options.gameName === undefined ? {} : { gameName: options.gameName }),
       ...(options.contactUrl === undefined ? {} : { contactUrl: options.contactUrl }),
