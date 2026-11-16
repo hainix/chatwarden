@@ -233,3 +233,20 @@ describe('the EOS subpath (K5 E1)', () => {
     }
   });
 });
+
+describe('the subpaths of the package (K5 X1)', () => {
+  it('the map holds the nine entries and typesVersions names every one but the root; the root entry is the plain index', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      exports: Record<string, { types: string; default: string }>;
+      typesVersions: { '*': Record<string, string[]> };
+    };
+    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './admin', './chat', './cli', './coop', './discord', './eos', './express', './fetch']);
+    expect(Object.keys(pkg.typesVersions['*']).sort()).toEqual(['admin', 'chat', 'cli', 'coop', 'discord', 'eos', 'express', 'fetch']);
+    expect(pkg.exports['.']).toEqual({ types: './dist/src/index.d.ts', default: './dist/src/index.js' });
+    // Every entry the map names has the same shape: types and default, under dist/src.
+    for (const [name, entry] of Object.entries(pkg.exports)) {
+      expect(entry.default, name).toMatch(/^\.\/dist\/src\/.+\.js$/);
+      expect(entry.types, name).toBe(entry.default.replace(/\.js$/, '.d.ts'));
+    }
+  });
+});
