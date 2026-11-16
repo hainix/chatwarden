@@ -15,6 +15,7 @@
     { "path": "packages/hub-element" },
     { "path": "examples/tiny-chat" },
     { "path": "examples/ai-anthropic" },
+    { "path": "examples/coop-signal" },
     { "path": "services/corpus" },
     { "path": "services/corpus/types-check" }
   ]
