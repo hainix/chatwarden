@@ -63,7 +63,7 @@ describe('reading', () => {
     const stored = writeZip([{ name: 'a.json', data: '["fenrisk","tarvo"]', method: 0, password: PW }]);
     const deflated = writeZip([{ name: 'a.json', data: '["fenrisk","tarvo"]'.repeat(30), method: 8, password: PW }]);
     const rand = prng(7);
-    const wrong = ['', 'x', 'chatwarden-term', 'chatwarden-terms ', 'Chatwarden-terms', 'café', '\u0000', 'chatwarden-termS'];
+    const wrong = ['', 'x', 'chatwarden-term', 'chatwarden-terms ', 'Chatwarden-terms', 'caf\u00e9', '\u0000', 'chatwarden-termS'];
     for (let i = 0; i < 300; i += 1) wrong.push(Array.from({ length: 1 + Math.floor(rand() * 20) }, () => String.fromCharCode(33 + Math.floor(rand() * 90))).join(''));
     for (const password of wrong) {
       expect(await code(stored, { password }), JSON.stringify(password)).toBe('bad_zip');
@@ -82,7 +82,7 @@ describe('reading', () => {
     const rand = prng(99);
     const mib = new Uint8Array(1024 * 1024);
     for (let i = 0; i < mib.length; i += 1) mib[i] = i % 3 === 0 ? Math.floor(rand() * 256) : 97 + (i % 7);
-    const utf8 = enc.encode('café naïve 日本語 😀 ñandú ção');
+    const utf8 = enc.encode('caf\u00e9 na\u00efve \u65e5\u672c\u8a9e \u{1f600} \u00f1and\u00fa \u00e7\u00e3o');
     const cases: Array<[string, Uint8Array]> = [
       ['empty.json', new Uint8Array(0)],
       ['one.bin', new Uint8Array([0])],
@@ -242,8 +242,8 @@ describe('names', () => {
       'del\u007fx',
       'has space',
       'colon:x',
-      'café.json',
-      '日本.json',
+      'caf\u00e9.json',
+      '\u65e5\u672c.json',
       'a*b',
       'a?b',
       '%2e%2e',

@@ -418,9 +418,13 @@ export class LiveTerms implements Matcher {
     // Canary: every positive line the active terms block on their own must still be blocked once the
     // exceptions apply. The error names the term row and the line's index, not the line (it is a slur).
     // Two lists, one rule: each term's own `positive` lines, then the pack's flat `positiveCorpus`.
-    if (this.pack) {
+    // With no active exception the matcher IS the terms-only matcher, so nothing can be unblocked and the lines need not be read. With one,
+    // the check that fails is rare, so it is asked the cheap way round: the full matcher first (a line that still blocks ends it), the
+    // terms-only matcher only for a line that does not. Both are pure, so the order changes no verdict. (At 5 000 terms this was the
+    // cost of every edit: two matches for every positive line of every term.)
+    if (this.pack && rows.exceptions.some((x) => x.active)) {
       const termsOnly = buildMatcher(rows.terms, []);
-      const unblocked = (line: string): boolean => termsOnly.match(line) !== null && matcher.match(line) === null;
+      const unblocked = (line: string): boolean => matcher.match(line) === null && termsOnly.match(line) !== null;
       for (const t of this.pack.terms) {
         for (const [i, line] of t.positive.entries()) {
           if (unblocked(line)) throw new Refusal('unblocks_known', `exception would unblock positive line ${i} of term ${t.id}`);

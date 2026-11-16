@@ -1,3 +1,4 @@
+import { parseUtcDate } from './dates.js';
 import { CorpusError } from './errors.js';
 import { asBytes, isBytes } from './sign.js';
 
@@ -75,24 +76,15 @@ const COUNT_KEY_RE = /^[a-z][A-Za-z]{0,15}$/;
 const MIRROR_KIND_RE = /^[a-z][a-z0-9_-]{0,15}$/;
 const PATH_RE = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
 const URL_RE = /^https:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?(?:\/[\x21-\x7e]*)?$/;
-const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/** A UTC timestamp `YYYY-MM-DDTHH:MM:SSZ` (milliseconds optional) that is a real moment, as epoch ms. */
+/** A UTC timestamp as epoch ms; anything that is not a real one is a refusal. */
 function parseDate(v: unknown): number {
-  if (typeof v !== 'string') throw bad();
-  const m = DATE_RE.exec(v);
-  if (m === null) throw bad();
-  const [year, month, day, hour, minute, second] = [m[1], m[2], m[3], m[4], m[5], m[6]].map(Number) as [number, number, number, number, number, number];
-  const ms = m[7] === undefined ? 0 : Number(m[7].padEnd(3, '0'));
-  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) throw bad();
-  const t = Date.UTC(year, month - 1, day, hour, minute, second, ms);
-  const back = new Date(t);
-  // Date.UTC rolls 30 February over to March; a real calendar day reads back as itself.
-  if (back.getUTCFullYear() !== year || back.getUTCMonth() !== month - 1 || back.getUTCDate() !== day) throw bad();
+  const t = parseUtcDate(v);
+  if (t === null) throw bad();
   return t;
 }
 
@@ -259,7 +251,7 @@ export function parseIndex(json: unknown, now: number): CorpusIndex {
 /**
  * The key ids an index revokes, for `verifySignature`'s `options.revokedKeyIds`, leaving out the key that signed the index: an index
  * is believed about other keys, and a key does not get to revoke itself out of the check that just trusted it. The caller passes the
- * `keyId` that `verifySignature('index', …)` returned.
+ * `keyId` that `verifySignature('index', ...)` returned.
  * @experimental
  */
 export function revokedKeyIdsOf(index: CorpusIndex, signerKeyId: string): string[] {

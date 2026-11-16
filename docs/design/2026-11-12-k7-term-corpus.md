@@ -690,6 +690,18 @@ the tests use. The plan benchmarks a generated 5 000-term pack of invented words
 under 2 ms). If a budget fails, the first remedies are memoising the terms-only matcher in `validate()` and loading only `severe` and
 `hostile` rows by default (already the default).
 
+**Measured (plan Task 4, `corpus-bench.test.ts`, a generated pack of invented words, one developer machine).** The first measurement failed
+the budget by orders of magnitude, and not through the terms-only matcher: the engine kept one RegExp per term and scanned the whole line
+once for each, so a line match, a rebuild and above all the canary in `changeSync` (two matches for every positive line of every term)
+grew with the list: a match took 0.19 ms at 500 terms and 0.72 ms at 2 000, and one edit took 0.42 s at 500 terms and 10.9 s at 2 000
+(quadratic). Two changes fixed the cause. `compileWords` (`src/vendored/wordEngine.ts`) now cuts the transformed line into its runs of
+word characters and looks each run up in a map, which is exactly what a whole-word `\bword\b` pattern matches (it is held against obscenity
+on the same table and generated lines as before, and on a 2 000-word list); and the canary is skipped when no exception is active (then
+the matcher is the terms-only matcher) and otherwise asks the cheap question first (does the full matcher still block the line?). Now, at
+5 000 active terms with 500 active exceptions: build 3 ms, match of a 200-character line 0.03 ms, `changeSync` of one edit 0.18 s, first seed
+of the store from the pack 0.2 s (budgets: 300 ms, 2 ms, 600 ms). Run `CW_BENCH=1 npx vitest run packages/matcher/test/corpus-bench.test.ts`
+for the numbers on your machine; a 500-term check always runs.
+
 ## 10. Contributions
 
 ### 10.1 The flow

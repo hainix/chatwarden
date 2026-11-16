@@ -222,7 +222,7 @@ describe('parseIndex', () => {
       expect(codeOf(bad), String(bad)).toBe('bad_index');
     }
     expect(codeOf(new Uint8Array([0xff, 0xfe, 0xfd]))).toBe('bad_index');
-    expect(codeOf(enc.encode('﻿' + JSON.stringify(exampleIndex())))).toBe('bad_index');
+    expect(codeOf(enc.encode('\ufeff' + JSON.stringify(exampleIndex())))).toBe('bad_index');
     expect(codeOf(new Uint8Array(0))).toBe('bad_index');
     const big = JSON.stringify({ ...exampleIndex(), notes: 'x'.repeat(300 * 1024) });
     expect(codeOf(big)).toBe('too_large');

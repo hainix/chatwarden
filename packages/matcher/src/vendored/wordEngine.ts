@@ -11,7 +11,7 @@
 //   - the transformer chain of `englishRecommendedBlacklistMatcherTransformers`, in its order and with its options: look-alike
 //     characters to letters, leetspeak to letters, ASCII uppercase to lowercase, runs of one character cut to 1 (2 for b e o l s g);
 //   - obscenity's one-code-point-at-a-time reading and its map from transformed indices back to the original text;
-//   - the `|word|` pattern: `\b` + the word with its RegExp specials escaped + `\b`, flags `gs`;
+//   - the `|word|` pattern, `\b` + the word + `\b`, kept as an index of the text's word runs (see `compileWords`; same hits);
 //   - `RegExpMatcher.getAllMatches(text, true)`: hits sorted by start, end, then term.
 // What is dropped: the whitelist (the matcher passes none and applies its exceptions itself), the censor, the pattern parser
 // (only `|word|` is ever built), stateful-transformer plumbing, and everything else of the package.
@@ -104,14 +104,8 @@ export function transformLikePreset(input: string): { text: string; toOrig: numb
   return { text, toOrig };
 }
 
-const REGEXP_SPECIALS = new Set([...'[.*+?^${}()|[\\]'].map((c) => c.codePointAt(0)!));
-
-/** `|word|` as a RegExp: a word boundary, the word, a word boundary. */
-function wordRegExp(word: string): RegExp {
-  let body = '';
-  for (const ch of word) body += (REGEXP_SPECIALS.has(ch.codePointAt(0)!) ? '\\' : '') + ch;
-  return new RegExp(`\\b${body}\\b`, 'gs');
-}
+/** The runs of word characters (`\w`, the ASCII ones) of the transformed text: where a whole-word pattern can match. */
+const WORD_RUN = /[A-Za-z0-9_]+/g;
 
 function compareHits(a: EngineHit, b: EngineHit): number {
   if (a.startIndex !== b.startIndex) return a.startIndex < b.startIndex ? -1 : 1;
@@ -121,25 +115,33 @@ function compareHits(a: EngineHit, b: EngineHit): number {
 
 /** Compiles whole-word terms (each already in the preset's collapsed form). The term at position `i` gets `termId` `i`.
  *  Takes `[a-z]` words only, the form `normaliseTerm` (matcher.ts) guarantees: every character is read as a literal, where
- *  obscenity's pattern parser would have read `? [ ] \ |` as syntax. Do not call it with anything else. */
+ *  obscenity's pattern parser would have read `? [ ] \ |` as syntax. Do not call it with anything else.
+ *
+ *  A `|word|` pattern is `\bword\b`. Its word is made of word characters only, so it matches exactly where a whole run of word
+ *  characters of the text (a maximal `[A-Za-z0-9_]+`) equals the word. That makes the list an index: the text is cut into its
+ *  runs once and each run is looked up, so a line costs the same with 5 000 terms as with 5 (it was one RegExp scan of the whole
+ *  line per term, which made a rebuild, a check and an edit grow with the list). wordEngine.test.ts holds this against obscenity. */
 export function compileWords(words: readonly string[]): { getAllMatches(input: string): EngineHit[] } {
-  const terms = words.map((word, termId) => {
+  const index = new Map<string, number[]>();
+  words.forEach((word, termId) => {
     if (word.length === 0) throw new Error(`Pattern with ID ${termId} potentially matches empty string; this is unsupported.`);
-    return { termId, regExp: wordRegExp(word) };
+    const ids = index.get(word);
+    if (ids === undefined) index.set(word, [termId]);
+    else ids.push(termId);
   });
   return {
     /** Every hit, sorted by start, end, then term, as `RegExpMatcher.getAllMatches(input, true)` returns them. */
     getAllMatches(input: string): EngineHit[] {
       const { text, toOrig } = transformLikePreset(input);
       const hits: EngineHit[] = [];
-      for (const { termId, regExp } of terms) {
-        for (const match of text.matchAll(regExp)) {
-          const startIndex = toOrig[match.index]!;
-          let endIndex = toOrig[match.index + match[0].length - 1]!;
-          // The last character is a surrogate pair: the range covers both halves.
-          if (endIndex < input.length - 1 && isHighSurrogate(input.charCodeAt(endIndex)) && isLowSurrogate(input.charCodeAt(endIndex + 1))) endIndex++;
-          hits.push({ termId, startIndex, endIndex, matchLength: [...match[0]].length });
-        }
+      for (const run of text.matchAll(WORD_RUN)) {
+        const ids = index.get(run[0]);
+        if (ids === undefined) continue;
+        const startIndex = toOrig[run.index]!;
+        let endIndex = toOrig[run.index + run[0].length - 1]!;
+        // The last character is a surrogate pair: the range covers both halves.
+        if (endIndex < input.length - 1 && isHighSurrogate(input.charCodeAt(endIndex)) && isLowSurrogate(input.charCodeAt(endIndex + 1))) endIndex++;
+        for (const termId of ids) hits.push({ termId, startIndex, endIndex, matchLength: run[0].length });
       }
       return hits.sort(compareHits);
     },

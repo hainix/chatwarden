@@ -6,6 +6,15 @@ export { CORPUS_BASE_URL, CORPUS_KEYS, CORPUS_REVOKED_KEY_IDS, CORPUS_ZIP_PASSWO
 export { signedMessage, verifySignature } from './sign.js';
 export { ZIP_LIMITS, readZip, type ZipLimits } from './zip.js';
 export {
+  parseTermsRelease,
+  type ExceptionRow6,
+  type NegativeFile,
+  type ReleaseManifest,
+  type TermRow6,
+  type TermsRelease,
+} from './release.js';
+export { releaseToPack, type PackSelection } from './select.js';
+export {
   chooseRelease,
   parseIndex,
   revokedKeyIdsOf,
