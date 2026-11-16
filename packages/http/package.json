@@ -14,7 +14,9 @@
     "chat",
     "http",
     "api",
-    "express"
+    "express",
+    "cli",
+    "init"
   ],
   "homepage": "https://github.com/hainix/chatwarden/tree/main/packages/http#readme",
   "bugs": {

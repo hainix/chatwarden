@@ -103,6 +103,21 @@ jobs:
       - run: npx playwright install-deps chromium || echo "::warning::playwright install-deps failed; using the runner image's libraries"
       - run: npm run smoke:browser --workspace @chatwarden/hub-element
 
+  # The init CLI is the one part that meets a Windows machine head on (paths, line endings, cmd.exe, spawn of .cmd). Only its own tests and the test kit's
+  # run here, on the oldest supported Node: the whole suite stays on Linux. It also runs the Windows path tests of the CLI (cli-windows.test.ts).
+  cli-windows:
+    name: Init CLI and test kit (Windows, Node 22.13)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run packages/http/test/cli-*.test.ts packages/store-memory/test/testing-*.test.ts
+
   smoke:
     name: Smoke (consumer install) Node ${{ matrix.node }}
     runs-on: ubuntu-latest

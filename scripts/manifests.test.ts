@@ -243,6 +243,44 @@ describe('matcher peers', () => {
   });
 });
 
+describe('the bin and the new subpaths (init, the fetch adapter, the test kit)', () => {
+  type Shipping = Manifest & { bin?: string | Record<string, string>; exports?: Record<string, { types: string; default: string }>; typesVersions?: { '*': Record<string, string[]> }; keywords?: string[] };
+  const shipping = (dir: string): Shipping => readJson<Shipping>('packages', dir, 'package.json');
+  /** The source file a built `dist/src/x.js` or `x.d.ts` comes from: `src/x.ts` (or `.tsx`). */
+  const sourceOf = (dir: string, built: string): string | undefined => {
+    const stem = built.replace(/^\.\//, '').replace(/^dist\/src\//, '').replace(/\.d\.ts$|\.js$/, '');
+    return ['.ts', '.tsx'].map((ext) => join(root, 'packages', dir, 'src', `${stem}${ext}`)).find((f) => existsSync(f));
+  };
+  it('exactly one published package declares a bin and it is chatwarden, pointing at the compiled CLI entry', () => {
+    const withBin = published.filter((p) => (p.pkg as Shipping).bin !== undefined);
+    expect(withBin.map((p) => p.pkg.name)).toEqual(['@chatwarden/http']);
+    expect(shipping('http').bin).toEqual({ chatwarden: './dist/src/cli/bin.js' });
+    expect(sourceOf('http', './dist/src/cli/bin.js'), 'the bin has a source').toBeDefined();
+  });
+  it('http lists the CLI in its keywords', () => {
+    expect(shipping('http').keywords).toEqual(expect.arrayContaining(['cli', 'init']));
+  });
+  it.each([
+    ['http', './fetch', 'fetch', 'dist/src/fetch'],
+    ['http', './cli', 'cli', 'dist/src/cli/index'],
+    ['store-memory', './testing', 'testing', 'dist/src/testing/index'],
+  ])('%s: the %s subpath is in exports and typesVersions, with types and code, and points at files a build produces', (dir, subpath, versionsKey, stem) => {
+    const pkg = shipping(dir);
+    expect(pkg.exports?.[subpath]).toEqual({ types: `./${stem}.d.ts`, default: `./${stem}.js` });
+    expect(pkg.typesVersions?.['*'][versionsKey]).toEqual([`${stem}.d.ts`]);
+    expect(sourceOf(dir, `${stem}.js`), `${dir} ${subpath} has a source`).toBeDefined();
+  });
+  it('the bin and the new subpaths are not under a test path and do not point outside dist/src', () => {
+    for (const target of ['dist/src/cli/bin.js', 'dist/src/cli/index.js', 'dist/src/fetch.js', 'dist/src/testing/index.js']) {
+      expect(target).not.toMatch(/(^|\/)test\//);
+      expect(target.startsWith('dist/src/')).toBe(true);
+    }
+  });
+  it('a bin does not add a dependency: http still has no dependencies entry', () => {
+    expect(shipping('http').dependencies).toBeUndefined();
+  });
+});
+
 describe('http optional peers', () => {
   const http = published.find((p) => p.pkg.name === '@chatwarden/http')!.pkg;
   it('express ^5 and @types/express ^5 are optional peers', () => {

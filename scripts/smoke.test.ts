@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { installArgs, isInside, keepTemp, packagesFor, publishedPackages, PROJECTS, renderTemplate, tarballName, TEMP_PREFIX, timeoutFor } from './smoke.mjs';
+import { cliRequireCommand, initCommand, initProblems, installArgs, isInside, keepTemp, packagesFor, publishedPackages, PROJECTS, renderTemplate, tarballName, TEMP_PREFIX, timeoutFor } from './smoke.mjs';
 
 describe('tarballName', () => {
   it('maps a scoped name the way npm pack names the file', () => {
@@ -233,5 +233,85 @@ describe('the smoke scenario', () => {
     expect(scenario).toContain("from '@chatwarden/store-memory'");
     expect(scenario).toMatch(/createMemoryStore\(\)/);
     expect(scenario).toMatch(/openStore\(\{ path: ':memory:' \}\)/);
+  });
+});
+
+describe("the init step (the packed bin, run in the ESM consumer)", () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const ok = (over: Record<string, unknown> = {}): string =>
+    JSON.stringify({
+      version: 1,
+      chatwarden: '0.1.10',
+      ok: true,
+      dryRun: false,
+      answers: { framework: 'express', store: 'memory', chat: 'box', hub: 'element', dir: 'src/chatwarden' },
+      files: ['kit.ts', 'express.ts', 'auth.ts', 'terms.ts', 'hub.ts', 'ChatPanel.tsx', '.env.example'].map((name) => ({ path: `src/chatwarden/${name}`, action: 'created' })),
+      install: { manager: 'npm', command: 'npm install x', ran: false },
+      env: [],
+      todo: [],
+      nextSteps: [],
+      warnings: [],
+      ...over,
+    });
+
+  it('the command line is npx --no-install chatwarden init with every answer given, so nothing is asked and nothing is installed', () => {
+    const { command, args } = initCommand();
+    expect(command).toBe('npx');
+    expect(args.slice(0, 3)).toEqual(['--no-install', 'chatwarden', 'init']);
+    expect(args).toEqual(expect.arrayContaining(['--yes', '--json']));
+    const flag = (name: string): string | undefined => args[args.indexOf(name) + 1];
+    expect(flag('--framework')).toBe('express');
+    expect(flag('--store')).toBe('memory');
+    expect(flag('--chat')).toBe('box');
+    expect(flag('--hub')).toBe('element');
+    expect(args).not.toContain('--install');
+    expect(args).not.toContain('--force');
+  });
+  it('every flag and value the command uses is one the parser knows', async () => {
+    const { parseCli } = await import('../packages/http/src/cli/args.js');
+    const parsed = parseCli(initCommand().args.slice(2));
+    expect('error' in parsed ? parsed.error : '').toBe('');
+    expect(parsed).toMatchObject({ command: 'init', yes: true, json: true, framework: 'express', store: 'memory', chat: 'box', hub: 'element' });
+  });
+  it('the expected JSON passes: ok, not a dry run, the version of the packed package, the four answers, and the files it must write', () => {
+    expect(initProblems(ok(), '0.1.10')).toEqual([]);
+  });
+  it.each([
+    ['not JSON', 'Created files\n', /JSON/],
+    ['ok false', ok({ ok: false, error: { kind: 'io', message: 'x' } }), /ok/],
+    ['a dry run', ok({ dryRun: true }), /dry/i],
+    ['another version', ok({ chatwarden: '0.1.9' }), /0\.1\.9|version/],
+    ['another framework', ok({ answers: { framework: 'fastify', store: 'memory', chat: 'box', hub: 'element' } }), /framework/],
+    ['a missing kit.ts', ok({ files: [{ path: 'src/chatwarden/express.ts', action: 'created' }] }), /kit\.ts/],
+    ['a file that was skipped', ok({ files: [{ path: 'src/chatwarden/kit.ts', action: 'skipped' }, { path: 'src/chatwarden/express.ts', action: 'created' }, { path: 'src/chatwarden/auth.ts', action: 'created' }] }), /skipped|created/],
+    ['an absolute path', ok({ files: [{ path: '/home/a/kit.ts', action: 'created' }] }), /path/],
+  ])('fails with a named problem for %s', (_label, text, pattern) => {
+    const problems: string[] = initProblems(text, '0.1.10');
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems.join('\n')).toMatch(pattern);
+  });
+  it('only the ESM project runs the bin and the server check; the CommonJS one requires runCli from ./cli', () => {
+    expect(PROJECTS.esm.init).toBe(true);
+    expect(PROJECTS.cjs.init).toBeUndefined();
+    expect(PROJECTS.cjs.requireCli).toBe(true);
+    expect(PROJECTS.esm.requireCli).toBeUndefined();
+    const { command, args } = cliRequireCommand();
+    expect(command).toBe('node');
+    expect(args[0]).toBe('-e');
+    expect(args[1]).toContain("require('@chatwarden/http/cli')");
+    expect(args[1]).toContain('--version');
+  });
+  it('the server check starts the generated server and asserts healthz 200, the hub 401 without a token and a first hello frame', () => {
+    const text = readFileSync(join(root, 'scripts', 'smoke', 'init-check.mjs'), 'utf8');
+    expect(text).toContain('/chatwarden/healthz');
+    expect(text).toContain('/chatwarden/mod');
+    expect(text).toMatch(/401/);
+    expect(text).toContain("'hello'");
+    expect(text).toContain('mountChatwarden');
+    expect(text).toMatch(/listen\(0/);
+    expect(text).not.toMatch(/https?:\/\/(?!127\.0\.0\.1|localhost)/);
+  });
+  it('the ESM consumer compiles JSX, because the generated chat panel is a .tsx file', () => {
+    expect(readFileSync(join(root, 'scripts', 'smoke', 'esm', 'tsconfig.json'), 'utf8')).toMatch(/"jsx": "react-jsx"/);
   });
 });
