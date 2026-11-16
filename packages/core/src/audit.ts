@@ -20,6 +20,10 @@ export type Role = (typeof ROLES)[number];
  * The three appeal and name actions (0.1.9): `appeal.view` is a staff read of the inbox, one appeal or the numbers (its target is the
  * `appeal`, or none for the list and the numbers); `appeal.decide` points at the `appeal` decided and needs it; `name.rename_required`
  * points at the `person` asked to rename and needs it. None of them carries a detail: a statement, a reason or a name never reaches the trail.
+ *
+ * The two community-list actions (0.1.11): `term.share` is a moderator offering one of the adopter's own terms to the shared list (its target is the
+ * `term` id, never the word) and `community.apply` is an owner applying a release of the shared list (its target is the `release` version, such as
+ * `2026.12.0`). Neither carries a detail.
  */
 export const AUDIT_ACTIONS = [
   'report.view',
@@ -51,6 +55,8 @@ export const AUDIT_ACTIONS = [
   'appeal.view',
   'appeal.decide',
   'name.rename_required',
+  'term.share',
+  'community.apply',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -82,15 +88,15 @@ const AI_ACTOR_PREFIX = 'ai:';
 /** The actions whose row carries an {@link AuditDetail}, and the only ones that may. */
 const DETAIL_ACTIONS: readonly string[] = ['policy.update', 'policy.reset'];
 
-/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id, a saved reason id or an appeal id. */
-export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal'] as const;
+/** What an entry points at: a report id, a sanction group id, a person (a staff ref), a term id, an exception id, a saved reason id, an appeal id or a release version. */
+export const AUDIT_TARGET_TYPES = ['report', 'sanction', 'person', 'term', 'exception', 'reason', 'appeal', 'release'] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];
 
 export interface AuditTarget {
   type: AuditTargetType;
   /**
    * An id: 1..64 characters of `A-Z a-z 0-9 _ . : -`. It holds ids only (a report id, a sanction group id, a
-   * subject id, a term id), never text: pass the id of a term, not the term.
+   * subject id, a term id, a release version such as `2026.12.0`), never text: pass the id of a term, not the term.
    */
   ref: string;
 }

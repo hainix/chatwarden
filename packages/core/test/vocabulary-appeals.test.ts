@@ -24,19 +24,21 @@ const rec = (cw: Awaited<ReturnType<typeof kit>>, over: Record<string, unknown>)
   cw.audit.record({ actor: 'alice', role: 'senior', action: 'report.view', ...over } as never);
 
 describe('audit actions', () => {
-  it('the three actions are last in AUDIT_ACTIONS and the order-lock test allows the append', () => {
-    expect(AUDIT_ACTIONS.slice(-3)).toEqual(['appeal.view', 'appeal.decide', 'name.rename_required']);
+  it('the three actions follow the AI ones in AUDIT_ACTIONS (the 0.1.11 community actions are appended after them)', () => {
+    const at = AUDIT_ACTIONS.indexOf('appeal.view');
+    expect(AUDIT_ACTIONS.slice(at, at + 3)).toEqual(['appeal.view', 'appeal.decide', 'name.rename_required']);
+    expect(AUDIT_ACTIONS.slice(-2)).toEqual(['term.share', 'community.apply']);
     // nothing before them moved: the 0.1.7 list is a prefix
     expect(AUDIT_ACTIONS.slice(AUDIT_ACTIONS.indexOf('ai.read'), AUDIT_ACTIONS.indexOf('ai.read') + 3)).toEqual(['ai.read', 'ai.rerun', 'ai.outcome']);
-    expect(AUDIT_ACTIONS).toHaveLength(29);
+    expect(AUDIT_ACTIONS).toHaveLength(31);
     expect(new Set(AUDIT_ACTIONS).size).toBe(AUDIT_ACTIONS.length);
     expectTypeOf<'appeal.view'>().toExtend<AuditAction>();
     expectTypeOf<'appeal.decide'>().toExtend<AuditAction>();
     expectTypeOf<'name.rename_required'>().toExtend<AuditAction>();
   });
 
-  it('AUDIT_TARGET_TYPES ends with appeal; old rows still list', async () => {
-    expect(AUDIT_TARGET_TYPES.slice(-1)).toEqual(['appeal']);
+  it('AUDIT_TARGET_TYPES holds appeal (then release, 0.1.11); old rows still list', async () => {
+    expect(AUDIT_TARGET_TYPES.slice(-2)).toEqual(['appeal', 'release']);
     expect([...AUDIT_TARGET_TYPES].slice(0, 6)).toEqual(['report', 'sanction', 'person', 'term', 'exception', 'reason']);
     expectTypeOf<'appeal'>().toExtend<AuditTargetType>();
     const cw = await kit();

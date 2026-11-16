@@ -151,6 +151,34 @@ describe('legacy rows read through listAudit', () => {
   });
 });
 
+describe('the community actions', () => {
+  it('sqlite: both new actions round-trip through the audit table without a migration (the filter is built from AUDIT_ACTIONS)', () => {
+    const db = new DatabaseSync(':memory:');
+    const store = openStore({ db });
+    const versionBefore = Number(db.prepare('PRAGMA user_version').get()?.user_version);
+    expect(MIGRATIONS.at(-1)).toBeDefined();
+    expect(AUDIT_ACTIONS).toContain('term.share');
+    expect(AUDIT_ACTIONS).toContain('community.apply');
+    store.insertAudit(row('s1', NOW, { action: 'term.share', role: 'senior', target: { type: 'term', ref: 't_1' } }));
+    store.insertAudit(row('c1', NOW + 1, { action: 'community.apply', role: 'owner', target: { type: 'release', ref: '2026.12.0' } }));
+    store.insertAudit(row('c2', NOW + 2, { action: 'community.apply', role: 'owner', target: null }));
+    const all = store.listAudit({ limit: 10 });
+    expect(all.map((r) => r.id)).toEqual(['c2', 'c1', 's1']);
+    expect(all[1]).toEqual({ id: 'c1', at: NOW + 1, actor: 'alice', role: 'owner', action: 'community.apply', target: { type: 'release', ref: '2026.12.0' } });
+    expect(all[0]?.target).toBeNull();
+    expect(all[2]).toMatchObject({ action: 'term.share', target: { type: 'term', ref: 't_1' } });
+    // the filter finds them by the new names, and does not fold them into term.update (the fallback of the CASE)
+    expect(store.listAudit({ limit: 10, action: 'community.apply' }).map((r) => r.id)).toEqual(['c2', 'c1']);
+    expect(store.listAudit({ limit: 10, action: 'term.share' }).map((r) => r.id)).toEqual(['s1']);
+    expect(store.listAudit({ limit: 10, action: 'term.update' })).toEqual([]);
+    // no schema change was needed: the database version is the last migration's and did not move
+    expect(Number(db.prepare('PRAGMA user_version').get()?.user_version)).toBe(versionBefore);
+    // a 64-character dotted ref survives the table
+    store.insertAudit(row('c3', NOW + 3, { action: 'community.apply', target: { type: 'release', ref: `2026.12.${'0'.repeat(56)}` } }));
+    expect(store.listAudit({ limit: 1 })[0]?.target?.ref).toHaveLength(64);
+  });
+});
+
 describe('rows written by the real term editor', () => {
   it('list as term.* / exception.* entries and never show the term, the hits or the json', async () => {
     const db = new DatabaseSync(':memory:');

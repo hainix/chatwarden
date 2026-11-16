@@ -34,6 +34,8 @@ export const ACTION_LABEL: Record<AuditAction, HubText> = {
   'appeal.view': 'hub.audit.label.appeal.view',
   'appeal.decide': 'hub.audit.label.appeal.decide',
   'name.rename_required': 'hub.audit.label.name.renameRequired',
+  'term.share': 'hub.audit.label.term.share',
+  'community.apply': 'hub.audit.label.community.apply',
 };
 
 // A settings save or reset is one audit action for two screens. The row's detail names the sections it changed, so its words can say which

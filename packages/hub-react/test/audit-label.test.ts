@@ -68,6 +68,19 @@ describe('ACTION_LABEL', () => {
     expect(en['hub.audit.target.appeal']).toBe('Appeal {tag}');
   });
 
+  it('hub: both community actions have a label in the audit list and words for a screen reader, in plain words', () => {
+    expect(ACTION_LABEL['term.share']).toBe('hub.audit.label.term.share');
+    expect(ACTION_LABEL['community.apply']).toBe('hub.audit.label.community.apply');
+    expect(en['hub.audit.label.term.share']).toBe('Offered a term to the community list');
+    expect(en['hub.audit.label.community.apply']).toBe('Applied a community list release');
+    expect(en['hub.audit.target.release']).toBe('Release {version}');
+    // the words never carry a raw action name and never a term
+    for (const key of ['hub.audit.label.term.share', 'hub.audit.label.community.apply', 'hub.audit.target.release'] as const) {
+      expect(en[key]).not.toMatch(/term\.share|community\.apply/);
+      expect(en[key]).not.toMatch(/zorbak|vlemmo|quissel/);
+    }
+  });
+
   it('every action the kit records has plain words', () => {
     for (const action of AUDIT_ACTIONS) {
       const key = ACTION_LABEL[action];
