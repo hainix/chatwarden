@@ -93,7 +93,7 @@ export function evalFiles(parts: EvalParts = {}): Map<string, Uint8Array> {
   const files: Record<string, { bytes: number; sha256: string }> = {};
   for (const [name, bytes] of data) files[name] = { bytes: bytes.length, sha256: sha256HexNode(bytes) };
   const languages = Object.keys(byLanguage);
-  const groups: Record<string, number> = {};
+  const groups: Record<string, number> = Object.create(null) as Record<string, number>;
   for (const list of Object.values(byLanguage)) for (const c of caseList(list)) if (typeof c.group === 'string') groups[c.group] = (groups[c.group] ?? 0) + 1;
   const manifest: Json = {
     schema: 'chatwarden-corpus-manifest/1',

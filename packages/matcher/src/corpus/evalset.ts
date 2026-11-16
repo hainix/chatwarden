@@ -307,7 +307,8 @@ export function parseEvalSet(files: ReadonlyMap<string, Uint8Array>, expected?: 
 
     const byLanguage: Record<string, EvalCaseFile[]> = {};
     const ids = new Set<string>();
-    const groups: Record<string, number> = {};
+    // A Map: a group named like a property every object has (`constructor`, `toString`) is an ordinary name.
+    const groups = new Map<string, number>();
     for (const [name, bytes] of entries) {
       const m = CASES_NAME_RE.exec(name);
       if (m === null) continue;
@@ -317,14 +318,14 @@ export function parseEvalSet(files: ReadonlyMap<string, Uint8Array>, expected?: 
       for (const c of list) {
         if (ids.has(c.id)) throw badPack();
         ids.add(c.id);
-        groups[c.group] = (groups[c.group] ?? 0) + 1;
+        groups.set(c.group, (groups.get(c.group) ?? 0) + 1);
       }
       byLanguage[m[1] as string] = list;
     }
     // The manifest says what is in the set; the cases are what is in it. They must agree.
     const perLanguage: Record<string, number> = {};
     for (const tag of manifest.languages) perLanguage[tag] = (byLanguage[tag] ?? []).length;
-    if (!sameCounts(perLanguage, manifest.counts.cases) || !sameCounts(groups, manifest.counts.groups)) throw badManifest();
+    if (!sameCounts(perLanguage, manifest.counts.cases) || !sameCounts(Object.fromEntries(groups), manifest.counts.groups)) throw badManifest();
 
     const cases = manifest.languages.flatMap((l) => byLanguage[l] ?? []);
     return { manifest, version: manifest.version, sequence: manifest.sequence, cases, byLanguage };

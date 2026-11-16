@@ -140,6 +140,27 @@ describe('parseEvalSet: refusals', () => {
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
+  it('a group may be named like a property every object has: constructor, toString, valueOf, hasOwnProperty, isPrototypeOf', () => {
+    const names = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf', 'toLocaleString', 'propertyIsEnumerable'];
+    const cases = names.flatMap((group, i) => [exampleCase({ id: `g-${i}-a`, group }), exampleCase({ id: `g-${i}-b`, group })]);
+    const out = withCases(cases);
+    expect(out.code).toBe('ok');
+    const set = out.set as EvalSet;
+    expect(Object.fromEntries(Object.entries(set.manifest.counts.groups))).toEqual(Object.fromEntries(names.map((n) => [n, 2])));
+    expect(set.cases).toHaveLength(names.length * 2);
+    // The counts must still agree: a manifest that says one fewer is refused, and so is one that names a group with no cases.
+    const wrong = evalFiles({ cases: { en: cases }, manifest: { counts: { cases: { en: cases.length }, groups: Object.fromEntries(names.map((n) => [n, n === 'constructor' ? 1 : 2])) } } });
+    expect(run(wrong).code).toBe('bad_manifest');
+    const extra = evalFiles({ cases: { en: cases }, manifest: { counts: { cases: { en: cases.length }, groups: Object.fromEntries([...names, 'toJSON'].map((n) => [n, 2])) } } });
+    expect(run(extra).code).toBe('bad_manifest');
+  });
+
+  it('a single case in a group called constructor is counted once, and a manifest that says so is accepted', () => {
+    const out = withCases([exampleCase({ group: 'constructor' })]);
+    expect(out.code).toBe('ok');
+    expect((out.set as EvalSet).manifest.counts.groups.constructor).toBe(1);
+  });
+
   it('refuses every wrong type and out-of-range value', () => {
     for (const id of ['', 5, null, 'has space', 'x'.repeat(81), '../up']) bad({ id });
     for (const group of [5, null, '__proto__']) bad({ group });
