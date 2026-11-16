@@ -7,7 +7,7 @@ import { roleAtLeast } from '../permissions.js';
 import { TEXT, ephemeral, updateMessage } from './answers.js';
 import type { InteractionAnswer } from './answers.js';
 import { auditBestEffort, auditRequired } from './audit.js';
-import { DISMISS_CODE, codeOf, encodeCustomId, parseCode } from './customId.js';
+import { DISMISS_CODE, REPORT_ID_RE, codeOf, encodeCustomId, parseCode } from './customId.js';
 import type { ParsedCustomId } from './customId.js';
 import { ruleText } from './lookup.js';
 import type { ResolvedBotOptions } from './options.js';
@@ -23,7 +23,6 @@ import type { DiscordActionRow, DiscordButton } from './types.js';
 export const SUGGESTION_REASON = 'Profile suggestion, accepted in Discord';
 const WHY_MAX = 300;
 const LABEL_MAX = 80;
-const REPORT_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 
 /** Who is acting: from the signed payload and the adopter's role map. */
 export interface Acting {
@@ -98,6 +97,12 @@ function decisionOf(code: string, report: StaffReport): ParsedDecision | null {
   };
 }
 
+/**
+ * How an answer is made. A click on the report post (which everyone can see) is answered with a new ephemeral message (type 4): an update (type 7) there
+ * would overwrite the post for the whole channel. Only a click on the ephemeral preview (verb `ok`) updates its message.
+ */
+type Reply = (text: string, rows?: readonly DiscordActionRow[]) => InteractionAnswer;
+
 /** Handles one button click (verbs `dis`, `sug` and `ok`; the bot answers `x` itself). */
 export class ActFlow {
   private readonly cw: Chatwarden;
@@ -125,20 +130,20 @@ export class ActFlow {
       return reply(TEXT.actionsOff);
     }
     const report = this.cw.reports.get(parsed.reportId);
-    if (parsed.verb === 'ok') return this.decide(report, parsed.code, who, parsed.reportId);
+    if (parsed.verb === 'ok') return this.decide(report, parsed.code, who, parsed.reportId, reply);
     // Step 5 (state): the report, not the message, is the truth.
     if (report === null || report.status !== 'open') return this.decided(report, parsed.reportId, reply);
     // Step 6 (claim).
     const claimed = this.claimRefusal(report, who, reply);
     if (claimed !== null) return claimed;
     if (parsed.verb === 'dis') {
-      if (!actions.confirm) return this.decide(report, DISMISS_CODE, who, parsed.reportId);
+      if (!actions.confirm) return this.decide(report, DISMISS_CODE, who, parsed.reportId, reply);
       return reply('Nothing wrong here? This closes the report with no action.', this.confirmRow(parsed.reportId, DISMISS_CODE));
     }
     // 'sug'. Step 7 (rule) and step 8 (preview: the suggestion, and its audit row in required mode).
     const derived = this.derive(report, who, true);
     if (derived === null) return reply(TEXT.needsRule, linkRow(this.o, parsed.reportId));
-    if (!actions.confirm) return this.decide(report, derived.code, who, parsed.reportId, derived.code);
+    if (!actions.confirm) return this.decide(report, derived.code, who, parsed.reportId, reply, derived.code);
     const head = `**Apply this step?**\n${safeText(derived.label, LABEL_MAX)}${DOT}${ruleText(this.cw, derived.rule) ?? `Rule ${derived.rule}`}`;
     return reply(`${head}\n${safeText(derived.why, WHY_MAX)}`, this.confirmRow(parsed.reportId, derived.code));
   }
@@ -165,7 +170,7 @@ export class ActFlow {
   }
 
   /** Another moderator's live claim on the reported person stops the click (a Discord click never takes a case over). */
-  private claimRefusal(report: StaffReport, who: Acting, reply: (text: string, rows?: readonly DiscordActionRow[]) => InteractionAnswer): InteractionAnswer | null {
+  private claimRefusal(report: StaffReport, who: Acting, reply: Reply): InteractionAnswer | null {
     const holder = this.cw.cases.holder(report.targetPerson);
     if (holder === null || holder.by === who.actor) return null;
     this.denied('claimed');
@@ -189,7 +194,7 @@ export class ActFlow {
   }
 
   /** The answer for a report that is closed (or gone): the verdict word, and the link. */
-  private decided(report: StaffReport | null, reportId: string, reply: (text: string, rows?: readonly DiscordActionRow[]) => InteractionAnswer): InteractionAnswer {
+  private decided(report: StaffReport | null, reportId: string, reply: Reply): InteractionAnswer {
     const word = report === null ? null : verdictWord(report);
     return reply(word === null ? 'This report was already decided.' : `This report was already decided (${word}).`, linkRow(this.o, reportId));
   }
@@ -199,8 +204,14 @@ export class ActFlow {
    * not re-derived (the suggestion has moved on after a decision): the same decision again is a replay, "Already done", and a different one is "already
    * decided". `knownCode` is a code this very click just derived (the no-confirm path), so it is not derived twice.
    */
-  private async decide(report: StaffReport | null, code: string, who: Acting, reportId: string, knownCode?: string): Promise<InteractionAnswer> {
-    const reply = updateMessage;
+  private async decide(
+    report: StaffReport | null,
+    code: string,
+    who: Acting,
+    reportId: string,
+    reply: Reply,
+    knownCode?: string,
+  ): Promise<InteractionAnswer> {
     if (report === null) return this.decided(null, reportId, reply);
     const parsed = parseCode(code);
     if (parsed === null) return reply(TEXT.changed, linkRow(this.o, reportId));
@@ -240,7 +251,7 @@ export class ActFlow {
   }
 
   /** What the hub's own refusals say to a person on Discord; anything else (a store failure) is rethrown for the bot to log by class. */
-  private refusalOf(err: unknown, reportId: string, reply: (text: string, rows?: readonly DiscordActionRow[]) => InteractionAnswer): InteractionAnswer {
+  private refusalOf(err: unknown, reportId: string, reply: Reply): InteractionAnswer {
     if (err instanceof ClaimedError || (err instanceof HttpError && err.code === 'claimed')) {
       this.denied('claimed');
       return reply(TEXT.claimed);

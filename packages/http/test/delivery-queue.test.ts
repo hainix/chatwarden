@@ -400,7 +400,9 @@ describe('the bound', () => {
     expect(logged).toEqual([['test.delivery_dropped', { count: 1 }], ['test.delivery_dropped', { count: 2 }]]);
     release();
     await tick(0);
+    // The dropped jobs (1, 2, 3) were never sent; the held job was sent once per attempt (the retry count), not as the others.
     expect(sent.filter((id) => id !== 'in-flight')).toEqual(['4', '5', '6']);
+    expect(sent.filter((id) => id === 'in-flight').length).toBeGreaterThanOrEqual(1);
   });
 
   it('after a quiet minute a new drop logs at once again', async () => {

@@ -87,6 +87,7 @@ export interface DiscordFeedOptions {
    * Only an application-owned webhook can send interactive buttons; a link button works on any webhook.
    * When the report closes the feed edits that post to no components (`PATCH` of the webhook message, buttons only, text untouched), if this
    * run still knows where Discord put it: a restart forgets, and the old post keeps its buttons (the bot answers a click on one from the report).
+   * An edit that still fails after the forum's retries is dropped and logged: the buttons stay until a click is answered from the report.
    */
   components?: (post: { kind: 'report'; reportId: string }) => readonly DiscordActionRow[] | undefined;
 }

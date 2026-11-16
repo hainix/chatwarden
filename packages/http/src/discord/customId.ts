@@ -18,7 +18,7 @@ export const VERSION_TAG = 'cw1';
 /** The code of a dismissal. */
 export const DISMISS_CODE = 'n';
 
-const REPORT_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
+export const REPORT_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const KINDS = ['chat', 'area', 'ban', 'warning', 'note'] as const;
 const RECORD_KINDS: readonly string[] = ['warning', 'note'];
 const DURATION_RE = /^[1-9]\d{0,10}$/;

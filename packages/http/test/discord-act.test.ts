@@ -281,7 +281,8 @@ describe('with actions.confirm false the first click decides directly', () => {
     const b = await rig({ options: { actions: { ...ACTIONS, confirm: false } } });
     const f = await b.filed();
     const res = await b.click(dis(f.id));
-    expect(answerOf(res).type).toBe(7);
+    // The click is on the PUBLIC report post: a type 7 would overwrite it for everyone. The answer is a new ephemeral message (type 4, flags 64).
+    expect(answerOf(res)).toMatchObject({ type: 4, data: { flags: 64, allowed_mentions: { parse: [] } } });
     expect(contentOf(res)).toBe('Done \u00B7 No action');
     expect(b.cw.reports.get(f.id)?.status).toBe('dismissed');
     expect(b.rows('report.decide')).toHaveLength(1);
@@ -309,5 +310,60 @@ describe('with actions.confirm false the first click decides directly', () => {
     const uncovered = await rig({ options: { actions: { ...ACTIONS, confirm: false } } });
     const k = await uncovered.filed('other');
     expect(contentOf(await uncovered.click(sug(k.id)))).toBe('This report needs a Community Rule chosen. Open it in the hub.');
+  });
+});
+
+describe('with actions.confirm false no answer to the public post is a type 7', () => {
+  const direct = { actions: { ...ACTIONS, confirm: false } };
+  const ephemeralFour = { type: 4, data: { flags: 64, allowed_mentions: { parse: [] } } };
+
+  it('every refusal is a type 4 ephemeral message: claimed, changed, needs a rule, no permission, already decided, off', async () => {
+    const claimed = await rig({ options: direct });
+    const a = await claimed.filed();
+    claimed.cw.cases.claim(a.target, 'someone-else');
+    for (const id of [dis(a.id), sug(a.id)]) expect(answerOf(await claimed.click(id))).toMatchObject(ephemeralFour);
+
+    const uncovered = await rig({ options: direct });
+    const u = await uncovered.filed('other');
+    const needsRule = await uncovered.click(sug(u.id));
+    expect(answerOf(needsRule)).toMatchObject(ephemeralFour);
+    expect(contentOf(needsRule)).toBe('This report needs a Community Rule chosen. Open it in the hub.');
+
+    const ban = await rig({ options: direct, outcome: { kind: 'ban', durationMs: null } });
+    const b = await ban.filed('harassment');
+    const noPermission = await ban.click(sug(b.id));
+    expect(answerOf(noPermission)).toMatchObject(ephemeralFour);
+    expect(contentOf(noPermission)).toBe('You do not have permission to do this.');
+
+    const decided = await rig({ options: direct });
+    const d = await decided.filed();
+    await decided.click(dis(d.id));
+    const again = await decided.click(dis(d.id));
+    expect(answerOf(again)).toMatchObject(ephemeralFour);
+    expect(contentOf(again)).toMatch(/^This report was already decided/);
+    const gone = await decided.click(dis('NoSuchReportIdOneTwoThree'));
+    expect(answerOf(gone)).toMatchObject(ephemeralFour);
+
+    const off = await rig({ options: { actions: { dismiss: false, suggestion: true, confirm: false } } });
+    const o = await off.filed();
+    const refused = await off.click(dis(o.id));
+    expect(answerOf(refused)).toMatchObject(ephemeralFour);
+    expect(contentOf(refused)).toBe('Actions from Discord are turned off.');
+  });
+
+  it('a success on a suggestion is type 4 too', async () => {
+    const b = await rig({ options: direct, outcome: { kind: 'chat', durationMs: DAY } });
+    const f = await b.filed('harassment');
+    expect(answerOf(await b.click(sug(f.id)))).toMatchObject(ephemeralFour);
+  });
+
+  it('the two-step flow is unchanged: a preview is type 4, the confirm and its refusals are type 7 on the ephemeral preview, a cancel is type 7', async () => {
+    const b = await rig();
+    const f = await b.filed();
+    const preview = await b.click(dis(f.id));
+    expect(answerOf(preview).type).toBe(4);
+    const confirmId = b.confirmId(preview);
+    b.cw.cases.claim(f.target, 'someone-else');
+    expect(answerOf(await b.click(confirmId)).type).toBe(7);
   });
 });
