@@ -265,7 +265,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
   let persistedRatchet = '0|';
   /** Whether the verified pack has been handed to the live list since this loader was made. */
   let installed = false;
-  /** The newest index that verified (this process or the disk's), for the checks on a cached release. */
+  /** The newest index that verified (from this run or from the disk), for the checks on a cached release. */
   let lastIndex: CorpusIndex | null = null;
 
   const zipName = (v: string): string => `releases/${kind}-${v}.zip`;
@@ -616,7 +616,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
           failure = err('bad_pack', 'validate');
         }
       } else {
-        // The usual restart: the applied release is in, a newer one waits. The applied pack goes in first, once per process.
+        // The usual restart: the applied release is in, a newer one waits. The applied pack goes in first, once per start.
         if (!installed && applied !== null) {
           const lost = await installApplied(live);
           if (lost !== null && failure === null) failure = lost;
