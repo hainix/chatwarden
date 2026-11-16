@@ -443,9 +443,11 @@ describe('what the service answers', () => {
   });
 
   it('a request that hangs is offline after 15 seconds, and its timer is cancelled when it does not', async () => {
-    const w = await world({ fetchImpl: () => new Promise<Response>(() => {}) });
+    let calls = 0;
+    const w = await world({ fetchImpl: () => { calls += 1; return new Promise<Response>(() => {}); } });
     const pending = w.share.share(input());
-    await vi.waitFor(() => expect(w.schedule.delays).toEqual([15_000]));
+    await vi.waitFor(() => expect(calls).toBe(1));
+    expect(w.schedule.delays).toEqual([15_000]);
     w.schedule.advance(15_000);
     expect(await pending).toEqual({ ok: false, code: 'offline' });
     const ok = await world();
@@ -544,11 +546,79 @@ describe('status(id)', () => {
   });
 
   it('a status request that hangs is null after 15 seconds', async () => {
-    const w = await world({ fetchImpl: () => new Promise<Response>(() => {}) });
+    let calls = 0;
+    const w = await world({ fetchImpl: () => { calls += 1; return new Promise<Response>(() => {}); } });
     const pending = w.share.status('sub_abc123');
-    await vi.waitFor(() => expect(w.schedule.delays).toEqual([15_000]));
+    await vi.waitFor(() => expect(calls).toBe(1));
+    expect(w.schedule.delays).toEqual([15_000]);
     w.schedule.advance(15_000);
     expect(await pending).toBeNull();
+  });
+});
+
+describe('every request carries a deadline signal, and the request is aborted when the deadline passes (review A2)', () => {
+  it('share and status pass an AbortSignal to fetch; it is aborted at 15 seconds and a fetch that honours it ends as offline / null', async () => {
+    const signals: AbortSignal[] = [];
+    const hang: typeof fetch = (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal;
+        signals.push(signal);
+        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    const w = await world({ fetchImpl: hang });
+    const pending = w.share.share(input());
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    expect(signals[0]?.aborted).toBe(false);
+    w.schedule.advance(15_000);
+    expect(await pending).toEqual({ ok: false, code: 'offline' });
+    expect(signals[0]?.aborted).toBe(true);
+
+    const status = w.share.status('sub_abc123');
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    w.schedule.advance(15_000);
+    expect(await status).toBeNull();
+    expect(signals[1]?.aborted).toBe(true);
+  });
+
+  it('a fetch that ignores the signal still ends at the deadline, and a request that finished in time is never aborted afterwards', async () => {
+    const seen: AbortSignal[] = [];
+    const ignoring: typeof fetch = (_input, init) => {
+      seen.push(init?.signal as AbortSignal);
+      return new Promise<Response>(() => {});
+    };
+    const w = await world({ fetchImpl: ignoring });
+    const pending = w.share.share(input());
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    w.schedule.advance(15_000);
+    expect(await pending).toEqual({ ok: false, code: 'offline' });
+
+    const ok = await world();
+    expect((await ok.share.share(input())).ok).toBe(true);
+    const signal = ok.sent[0]?.init.signal as AbortSignal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    ok.schedule.advance(60_000);
+    expect(signal.aborted).toBe(false);
+  });
+
+  it('a sign function that never answers is a refused share after the deadline (nothing is sent), and a refused status', async () => {
+    const w = await world({ sign: () => new Promise<string>(() => {}) });
+    const pending = w.share.share(input());
+    await vi.waitFor(() => expect(w.schedule.delays).toEqual([15_000]));
+    w.schedule.advance(15_000);
+    expect(await pending).toEqual({ ok: false, code: 'rejected' });
+    const status = w.share.status('sub_abc123');
+    await vi.waitFor(() => expect(w.schedule.delays).toEqual([15_000]));
+    w.schedule.advance(15_000);
+    expect(await status).toBeNull();
+    expect(w.sent).toHaveLength(0);
+    expect(JSON.stringify(w.warn.mock.calls)).not.toContain('zorbak');
+  });
+
+  it('a status id must start with a letter or digit: dots and dashes alone are refused before anything is signed or sent', async () => {
+    const w = await world();
+    for (const id of ['.', '..', '-', '_', '.a', '-a', 'a/b', '../x']) expect(await w.share.status(id)).toBeNull();
+    expect(w.sent).toHaveLength(0);
+    expect(w.sign).not.toHaveBeenCalled();
   });
 });
 

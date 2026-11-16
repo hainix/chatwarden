@@ -46,7 +46,7 @@ const TARGETS: readonly string[] = ['none', 'ethnicity', 'religion', 'gender', '
 const STATUSES: readonly string[] = ['received', 'in_review', 'accepted', 'declined', 'merged'];
 const REASONS: readonly string[] = ['known_innocent', 'not_a_term', 'duplicate', 'needs_context', 'other'];
 const KEY_RE = /^[A-Za-z0-9_-]{43}$/;
-const ID_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 const KIT_RE = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
 const LANG_RE = /^[a-z]{2,3}$/;
 const BODY_MAX_BYTES = 2048;
@@ -261,12 +261,27 @@ export function createCommunityShare(options: CommunityShareOptions): CommunityS
   /** A request with a deadline. Resolves to the status, headers' retry-after and a bounded body, or null for any failure of the transport. */
   async function request(url: string, init: RequestInit): Promise<{ status: number; retryAfter: string | null; body: Uint8Array | null } | null> {
     let cancel: () => void = () => undefined;
+    // The request is aborted at the deadline, so a hung one does not keep its socket; the race still ends it for a fetch that ignores the signal.
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const deadline = new Promise<null>((resolve) => {
-      cancel = schedule.after(TIMEOUT_MS, () => resolve(null));
+      cancel = schedule.after(TIMEOUT_MS, () => {
+        resolve(null);
+        try {
+          controller?.abort();
+        } catch {
+          // nothing to abort
+        }
+      });
     });
     const work = (async () => {
       try {
-        const res = await (o.fetch ?? globalThis.fetch)(url, { ...init, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error' });
+        const res = await (o.fetch ?? globalThis.fetch)(url, {
+          ...init,
+          credentials: 'omit',
+          referrerPolicy: 'no-referrer',
+          redirect: 'error',
+          ...(controller === null ? {} : { signal: controller.signal }),
+        });
         if (res === null || typeof res !== 'object' || typeof res.status !== 'number') return null;
         let body: Uint8Array | null = null;
         try {
@@ -279,8 +294,27 @@ export function createCommunityShare(options: CommunityShareOptions): CommunityS
         return null;
       }
     })();
+    work.catch(() => undefined);
     try {
       return await Promise.race([work, deadline]);
+    } finally {
+      cancel();
+    }
+  }
+
+  /** The signature of `message`, as base64url, or null when `sign` fails, answers badly or does not answer within the deadline. */
+  async function signed(message: Uint8Array): Promise<string | null> {
+    let cancel: () => void = () => undefined;
+    const deadline = new Promise<null>((resolve) => {
+      cancel = schedule.after(TIMEOUT_MS, () => resolve(null));
+    });
+    try {
+      const out = await Promise.race([Promise.resolve(sign(message)).then((v) => v as unknown), deadline]);
+      if (out === null) return null;
+      const signature = typeof out === 'string' ? out : base64url(out as Uint8Array);
+      return /^[A-Za-z0-9_-]{1,200}$/.test(signature) ? signature : null;
+    } catch {
+      return null;
     } finally {
       cancel();
     }
@@ -316,14 +350,8 @@ export function createCommunityShare(options: CommunityShareOptions): CommunityS
       }),
     );
     if (body.length > BODY_MAX_BYTES) return fail('too_large');
-    let signature: string;
-    try {
-      const signed = await sign(signedMessage('submission', body));
-      signature = typeof signed === 'string' ? signed : base64url(signed as Uint8Array);
-      if (!/^[A-Za-z0-9_-]{1,200}$/.test(signature)) throw new Error('not a signature');
-    } catch {
-      return fail('rejected');
-    }
+    const signature = await signed(signedMessage('submission', body));
+    if (signature === null) return fail('rejected');
     const stamp = await mintStampSliced(body, stampBits);
     const res = await request(`${origin}/v1/submissions`, {
       method: 'POST',
@@ -358,12 +386,8 @@ export function createCommunityShare(options: CommunityShareOptions): CommunityS
 
   async function status(id: string): Promise<{ status: 'received' | 'in_review' | 'accepted' | 'declined' | 'merged'; reason?: string } | null> {
     if (typeof id !== 'string' || !ID_RE.test(id)) return null;
-    let signature: string;
-    try {
-      const signed = await sign(signedMessage('submission', encoder.encode(id)));
-      signature = typeof signed === 'string' ? signed : base64url(signed as Uint8Array);
-      if (!/^[A-Za-z0-9_-]{1,200}$/.test(signature)) throw new Error('not a signature');
-    } catch {
+    const signature = await signed(signedMessage('submission', encoder.encode(id)));
+    if (signature === null) {
       warn('rejected');
       return null;
     }
