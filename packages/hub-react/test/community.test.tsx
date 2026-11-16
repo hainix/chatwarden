@@ -172,6 +172,18 @@ describe('the Share disclosure in the term editor', () => {
     expect(posts[0]?.path).not.toContain(OWN_WORD);
   });
 
+  it('the preview lists everything that is sent, the calendar day and the kit version included, and says no time of day is sent', async () => {
+    const { user } = await editOwn({ community: {} });
+    await user.click(await screen.findByRole('button', { name: 'Share with the community list' }));
+    const payload = screen.getByRole('group', { name: 'What will be sent' });
+    const labels = [...payload.querySelectorAll('dt')].map((e) => e.textContent);
+    expect(labels).toEqual(['Word', 'Language', 'Category', 'Note', 'Day', 'Chatwarden version', 'Sent with']);
+    expect(payload).toHaveTextContent("today's date, never the time");
+    expect(payload).toHaveTextContent('the version of Chatwarden on this server');
+    await user.selectOptions(screen.getByLabelText('Category'), 'Slur');
+    expect([...payload.querySelectorAll('dt')].map((e) => e.textContent)).toEqual(['Word', 'Language', 'Category', 'Aimed at', 'Note', 'Day', 'Chatwarden version', 'Sent with']);
+  });
+
   it('a slur needs a target: the select appears for it, and the payload names it; a note has a limit and a warning about chat lines', async () => {
     const { w, user } = await editOwn({ community: {} });
     await user.click(await screen.findByRole('button', { name: 'Share with the community list' }));

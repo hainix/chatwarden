@@ -231,6 +231,14 @@ function SharePanel({
             <dd>{trimmed === '' ? t('hub.community.share.none') : trimmed}</dd>
           </div>
           <div>
+            <dt>{t('hub.community.share.field.day')}</dt>
+            <dd>{t('hub.community.share.day')}</dd>
+          </div>
+          <div>
+            <dt>{t('hub.community.share.field.kit')}</dt>
+            <dd>{t('hub.community.share.kit')}</dd>
+          </div>
+          <div>
             <dt>{t('hub.community.share.field.key')}</dt>
             <dd>{t('hub.community.share.key')}</dd>
           </div>
