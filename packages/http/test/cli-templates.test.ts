@@ -288,6 +288,8 @@ describe('synthetic words only', () => {
   const ALLOWED_QUOTED = new Set([
     'admin', 'owner', 'lobby', 'standard', 'relaxed', 'strict', 'production', 'development', 'hex', 'sha256', 'utf8', 'object', 'string', 'report',
     'person', 'reports', 'people', 'sqlite', 'memory', 'Strict', 'Lax', 'Secure', 'HttpOnly', 'Player', 'none', 'true', 'false', 'syn',
+    // the framework files: the HTML page's content type, the kit's route and package names, and a few DOM and header names
+    'html', 'text', 'post', 'viewport', 'GET', 'HEAD', 'POST', 'nosniff', 'off', 'token', 'login', 'hub', 'express', 'react', 'self', 'password', 'submit', 'module', 'nodejs', 'force',
   ]);
 
   it('no rendering quotes a plain word outside the allowed list, and none embeds a list of words', () => {

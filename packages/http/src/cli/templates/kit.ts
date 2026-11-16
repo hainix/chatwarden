@@ -94,21 +94,21 @@ export async function createKit()${t(ctx, ': Promise<Kit>')} {
   const secret = secretFromEnv();
   ${storeLine}
   const terms = await loadMatcher(${sqlite ? 'store' : ''});
-${box ? `  let chat${t(ctx, ': RoomBroadcaster | undefined')};\n` : ''}  const cw = await createChatwarden({
+${box ? `  // The broadcaster needs the engine and the engine's notify hook needs the broadcaster, so the hook reaches it through this holder.\n  const live${t(ctx, ': { chat?: RoomBroadcaster }')} = {};\n` : ''}  const cw = await createChatwarden({
     store,
     secret,
     matcher: terms,
     profile: '${answers.profile}',
     profanityPackage: { createProfanityFilter },
     // identify is used only to seat a connection; the routes read who is calling from the identify hook.
-    platform: { identify: () => ({}), notify: ${box ? '(subject) => chat?.noticePending(subject)' : '() => {}'} },
+    platform: { identify: () => ({}), notify: ${box ? '(subject) => live.chat?.noticePending(subject)' : '() => {}'} },
   });
-${box ? '  chat = createRoomBroadcaster(cw);\n' : ''}${feed}${routes ? '  hooks.announce();\n' : ''}  return {
+${box ? '  const chat = createRoomBroadcaster(cw);\n  live.chat = chat;\n' : ''}${feed}${routes ? '  hooks.announce();\n' : ''}  return {
     cw,
     terms,
 ${box ? '    chat,\n' : ''}${routes ? '    hooks,\n' : ''}    base: BASE,
     async close() {
-${box ? '      chat?.close();\n' : ''}${discord ? '      feed?.dispose();\n' : ''}      await cw.close();
+${box ? '      chat.close();\n' : ''}${discord ? '      feed?.dispose();\n' : ''}      await cw.close();
     },
   };
 }

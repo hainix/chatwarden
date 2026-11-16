@@ -10,7 +10,7 @@ export function termsFiles(ctx: Ctx): FileSpec[] {
   const sqlite = answers.store === 'sqlite';
   const imports =
     imp(ctx, 'LiveTerms', '@chatwarden/matcher') +
-    impType(ctx, 'TermStore', '@chatwarden/matcher') +
+    (sqlite ? impType(ctx, 'TermStore', '@chatwarden/matcher') : '') +
     (sqlite ? imp(ctx, 'syntheticTermPack', '@chatwarden/matcher/fixtures') : imp(ctx, ['MemoryTermStore', 'syntheticTermPack'], '@chatwarden/matcher/fixtures'));
   // The memory store keeps no term list, so its words live in a store of their own and are lost on restart like everything else.
   const param = sqlite ? `store${t(ctx, ': TermStore')}` : '';

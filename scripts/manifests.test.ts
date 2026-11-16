@@ -394,13 +394,29 @@ describe('ai-anthropic example', () => {
   });
 });
 
+describe('recipes example', () => {
+  const recipes = readJson<Manifest>('examples', 'recipes', 'package.json');
+  it('is private, named as the changeset config expects, and not a published package (the release must add no package)', () => {
+    expect(recipes.private).toBe(true);
+    expect(recipes.name).toBe('@chatwarden/example-recipes');
+    expect(names).not.toContain(recipes.name);
+    expect(recipes.version).toBe('0.0.0');
+  });
+  it('depends on the ten published packages at the group version and on the frameworks it runs the goldens against', () => {
+    for (const n of names) expect(recipes.dependencies?.[n], n).toBe(VERSION);
+    for (const dep of ['fastify', 'socket.io', 'socket.io-client', 'react', 'react-dom', '@types/react', '@types/react-dom', 'express']) {
+      expect(recipes.devDependencies?.[dep], dep).toBeDefined();
+    }
+  });
+});
+
 describe('changesets config', () => {
   const config = readJson<{ fixed: string[][]; ignore: string[]; linked: string[][] }>('.changeset', 'config.json');
   it('versions every @chatwarden package together', () => {
     expect(config.fixed).toEqual([['@chatwarden/*']]);
   });
   it('ignores the example and the landing site (private, never versioned or published)', () => {
-    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/site']);
+    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/example-recipes', '@chatwarden/site']);
   });
   it('has no linked groups', () => {
     expect(config.linked).toEqual([]);
@@ -408,8 +424,10 @@ describe('changesets config', () => {
   it('ignores only private packages', () => {
     const tiny = readJson<Manifest>('examples', 'tiny-chat', 'package.json');
     const ai = readJson<Manifest>('examples', 'ai-anthropic', 'package.json');
+    const recipes = readJson<Manifest>('examples', 'recipes', 'package.json');
     const site = readJson<Manifest>('site', 'package.json');
-    expect(config.ignore).toEqual([ai.name, tiny.name, site.name]);
+    expect(config.ignore).toEqual([ai.name, tiny.name, recipes.name, site.name]);
+    expect(recipes.private).toBe(true);
     expect(ai.private).toBe(true);
     expect(tiny.private).toBe(true);
     expect(site.private).toBe(true);

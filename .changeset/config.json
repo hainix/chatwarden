@@ -14,6 +14,7 @@
   "ignore": [
     "@chatwarden/example-ai-anthropic",
     "@chatwarden/example-tiny-chat",
+    "@chatwarden/example-recipes",
     "@chatwarden/site"
   ],
   "___experimentalUnsafeOptions_WILL_CHANGE_IN_PATCH": {

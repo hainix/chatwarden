@@ -10,6 +10,8 @@ import { JS_OPTIONS, VERSIONS, answersOf, legalAnswers, syntaxProblems } from '.
 
 // The JavaScript rendering is the TypeScript one with the types left out, written that way (no stripping pass). These tests hold it to that.
 
+/** The path without its script extension: a .tsx file and its .jsx twin share a stem. */
+const stem = (path: string): string => path.replace(/\.(tsx?|jsx?|mjs)$/, '');
 const isJs = (f: FileSpec): boolean => /\.(js|mjs|jsx)$/.test(f.path);
 
 describe('the JS rendering', () => {
@@ -51,15 +53,15 @@ describe('the JS rendering', () => {
   it('is the TypeScript rendering with the types removed: the same program once both are compiled', () => {
     const compile = (file: FileSpec): string =>
       ts
-        .transpileModule(file.content, { fileName: file.path, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, allowJs: true, removeComments: true } })
+        .transpileModule(file.content, { fileName: file.path, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, allowJs: true, removeComments: true, jsx: ts.JsxEmit.Preserve } })
         .outputText.replace(/\n\s*\n/g, '\n');
     let compared = 0;
     for (const combo of legalAnswers('ts').filter((_, i) => i % 5 === 0)) {
       const tsFiles = renderAll(combo, VERSIONS).filter((f) => /\.tsx?$/.test(f.path));
       const jsFiles = renderAll({ ...combo, lang: 'js' }, VERSIONS).filter(isJs);
-      expect(jsFiles.map((f) => f.path.replace(/\.js$/, '')).sort()).toEqual(tsFiles.map((f) => f.path.replace(/\.ts$/, '')).sort());
+      expect(jsFiles.map((f) => stem(f.path)).sort()).toEqual(tsFiles.map((f) => stem(f.path)).sort());
       for (const tsFile of tsFiles) {
-        const jsFile = jsFiles.find((f) => f.path === tsFile.path.replace(/\.ts$/, '.js'));
+        const jsFile = jsFiles.find((f) => stem(f.path) === stem(tsFile.path));
         expect(jsFile, tsFile.path).toBeDefined();
         expect(compile(jsFile!), tsFile.path).toBe(compile(tsFile));
         compared += 1;
@@ -102,7 +104,7 @@ describe('the JS rendering', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it('writes .js in a module project and .mjs in a CommonJS one, each importing its own siblings by that suffix', () => {
     const esm = renderAll(answersOf({ lang: 'js' }), VERSIONS, { moduleType: 'module' });

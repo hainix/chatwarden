@@ -45,6 +45,13 @@ export default tseslint.config(
     languageOptions: { globals: { localStorage: 'readonly', document: 'readonly' } },
   },
   {
+    // The recipe goldens are what `chatwarden init` writes for an adopter's Node project: JavaScript there uses Node's and the Web's globals.
+    files: ['examples/recipes/cases/**/*.{js,mjs}'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', Buffer: 'readonly', URL: 'readonly', URLSearchParams: 'readonly', Request: 'readonly', Response: 'readonly', Headers: 'readonly', TextDecoder: 'readonly' },
+    },
+  },
+  {
     files: [
       'packages/core/src/**/*.ts',
       'packages/store-memory/src/**/*.ts',
