@@ -22,7 +22,7 @@ async function build(): Promise<Ready> {
     {
       '/admin': adminRoutes(kit.cw, { authorize: kit.hooks.authorize, terms: kit.terms }),
       '/api': playerRoutes(kit.cw, { identify: kit.hooks.identify }),
-    '/chat': chatRoutes(kit.cw, kit.chat, { identify: kit.hooks.identify, join: kit.hooks.join }),
+      '/chat': chatRoutes(kit.cw, kit.chat, { identify: kit.hooks.identify, join: kit.hooks.join }),
       '': healthRoutes(kit.cw),
     },
     { prefix: kit.base },

@@ -5,6 +5,18 @@ import { imp, impType, t } from './frag.js';
 import type { Ctx } from './frag.js';
 import { header } from './header.js';
 
+/** The table of route families `toFetch` takes, one entry per line, `indent` deep. Shared by the Web handler and the Fastify bridge. */
+export function mountsText(box: boolean, indent: string): string {
+  const lines = [
+    "'/admin': adminRoutes(kit.cw, { authorize: kit.hooks.authorize, terms: kit.terms }),",
+    "'/api': playerRoutes(kit.cw, { identify: kit.hooks.identify }),",
+    ...(box ? ["'/chat': chatRoutes(kit.cw, kit.chat, { identify: kit.hooks.identify, join: kit.hooks.join }),"] : []),
+    "'': healthRoutes(kit.cw),",
+  ];
+  return lines.map((line) => `${indent}${line}
+`).join('');
+}
+
 export function fetchHandlerFiles(ctx: Ctx): FileSpec[] {
   const { answers } = ctx;
   if (answers.framework !== 'next' && answers.framework !== 'fetch') return [];
@@ -24,7 +36,6 @@ export function fetchHandlerFiles(ctx: Ctx): FileSpec[] {
   // space, so a path the kit does not know is handed back to it as null.
   const result = next ? 'Response' : 'Response | null';
   const options = next ? '{ prefix: kit.base }' : "{ prefix: kit.base, unmatched: 'pass' }";
-  const chat = box ? "    '/chat': chatRoutes(kit.cw, kit.chat, { identify: kit.hooks.identify, join: kit.hooks.join }),\n" : '';
   const hubLine = hub ? '  const hub = hubHandler(kit);\n' : '';
   const answer = hub ? '(request) => hub(request).then((response) => response ?? handle(request))' : 'handle';
 
@@ -46,10 +57,7 @@ async function build()${t(ctx, ': Promise<Ready>')} {
   const kit = await createKit();
   const handle = toFetch(
     {
-      '/admin': adminRoutes(kit.cw, { authorize: kit.hooks.authorize, terms: kit.terms }),
-      '/api': playerRoutes(kit.cw, { identify: kit.hooks.identify }),
-${chat}      '': healthRoutes(kit.cw),
-    },
+${mountsText(box, '      ')}    },
     ${options},
   );
 ${hubLine}  return { kit, answer: ${answer} };

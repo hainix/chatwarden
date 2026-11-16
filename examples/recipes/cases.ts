@@ -37,6 +37,7 @@ export const CASES: RecipeCase[] = [
   { name: 'next-memory-minimal', check: 'bundler', answers: answers({ framework: 'next', store: 'memory' }) },
   { name: 'fetch-memory-element-none', check: 'nodenext', answers: answers({ framework: 'fetch', store: 'memory', chat: 'box', hub: 'none' }) },
   { name: 'fetch-memory-box-element', check: 'nodenext', answers: answers({ framework: 'fetch', store: 'memory', chat: 'box', hub: 'element' }) },
+  { name: 'fastify-sqlite-box-element', check: 'nodenext', answers: answers({ framework: 'fastify', chat: 'box', hub: 'element' }) },
   { name: 'none-library', check: 'nodenext', answers: answers({ framework: 'none' }) },
 ];
 

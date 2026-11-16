@@ -64,7 +64,7 @@ function entryLine(answers: Answers): string {
     case 'express':
       return `Add one line to your app, before any body parser: await mountChatwarden(app) (from ${dir}/express).`;
     case 'fastify':
-      return `Register the plugin in your app: await app.register(chatwarden) (from ${dir}/fastify).`;
+      return `Add one line to your app: await mountChatwarden(app) (from ${dir}/fastify).`;
     case 'next':
       return `Next serves the route handler under ${nextAppRoot(answers)}${base}/ by itself: there is nothing to add to your code. This recipe needs Next running as a Node process, not serverless (next start, a container or a VM): the database file and the open chat streams need one long-lived process.`;
     case 'fetch':

@@ -223,7 +223,7 @@ describe('buildPlan: environment, next steps, warnings', () => {
       expect(built.nextSteps[3]).toContain('/chatwarden/mod');
     }
     expect(plan({ framework: 'express' }).nextSteps[1]).toContain('mountChatwarden');
-    expect(plan({ framework: 'fastify' }).nextSteps[1]).toContain('register');
+    expect(plan({ framework: 'fastify' }).nextSteps[1]).toContain('mountChatwarden');
     expect(plan({ framework: 'next', hub: 'react' }).nextSteps[1]).toMatch(/route/i);
     expect(plan({ framework: 'fetch' }).nextSteps[1]).toContain('handler');
   });
