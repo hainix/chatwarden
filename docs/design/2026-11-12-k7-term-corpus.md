@@ -514,6 +514,15 @@ calibration screen hides while a moderator labels. `group` values are the eval's
 band of them; `verdict` is one of `upheld`, `noted`, `no_action`, `unclear`; `mustCite` and `mustNotCite` are 1-based line numbers.
 A reader (`parseEvalSet`) accepts exactly these keys and ignores `meta` content it does not know.
 
+**What the service's `checkCase` and eval builder do** (`services/corpus/src/checkCase.ts`, `src/build/eval.ts`). `checkCase` answers closed codes only
+(`identifier`, `contact`, `too_long`, `copy_of_source`, `unknown_term`), never a quote. The rules are read on the NFKC form with hidden characters
+removed. A contributed case is held to **12 lines** whatever its group is called; the 64-line `long-room` exception is the repo's own cases only
+(`meta.source` is `synthetic`; a `derived` or unlabelled case gets 12). `unknown_term` is judged by the `blocked` flag of a line: a line marked
+`blocked: true` must be blocked by the corpus's terms (every status), so a case never introduces a word the term review has not seen. `copy_of_source`
+compares each line with the lines of the case it was paraphrased from, ignoring case, spacing, punctuation and accents. The builder holds a case out
+(by id and code, in the release summary and the printed list, never a line) when it is not a case the kit reads, when its id is used twice, when
+`meta.reviewed` is below 3 (a reference label needs three reviewers), or when `checkCase` refuses it; the rest is published.
+
 ## 7. Signature and key custody
 
 **Who holds what.**

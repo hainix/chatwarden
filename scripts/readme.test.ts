@@ -5,6 +5,16 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
 import { badWords } from './no-corpus-data.mjs';
+import { ATTRIBUTION } from '../services/corpus/src/build/texts.js';
+import { LIMITS } from '../services/corpus/src/counters.js';
+import { EVAL_USAGE } from '../services/corpus/src/tools/evalset.js';
+import { KEYGEN_USAGE } from '../services/corpus/src/tools/keygen.js';
+import { PUBLISH_USAGE } from '../services/corpus/src/tools/publish.js';
+import { RELEASE_USAGE } from '../services/corpus/src/tools/release.js';
+import { SEED_USAGE } from '../services/corpus/src/tools/seed.js';
+import { SIGN_USAGE } from '../services/corpus/src/tools/sign.js';
+import { VERIFY_USAGE } from '../services/corpus/src/tools/verifyLive.js';
+import { ZENODO_USAGE } from '../services/corpus/src/tools/zenodo.js';
 
 // The READMEs are the product an adopter (or a coding agent) copies from. These checks hold for EVERY published package:
 // each has the sections an adopter needs, installs what it needs, and every ```ts block compiles against the real sources.
@@ -1153,5 +1163,154 @@ describe('the shared term list docs (K7, 0.1.11)', () => {
     expect(doc).toMatch(/12 lines/);
     expect(doc).toMatch(/`long-room`/);
     expect(doc).toMatch(/200 OK[^.]*`\{ "status": null \}`|`\{ status: null \}`/);
+  });
+});
+
+// --- the corpus service's pages (services/corpus, docs/community-list.md) -------------------------------------------------------------------
+// The README is the owner's step-by-step. A command in it that cannot work is worse than no command, so every fenced command block is parsed:
+// the quotes balance, the program is one we know, a wrangler subcommand and its flags are ones wrangler documents, a tool is a real file and its
+// flags are the ones its own usage text lists, and a test path exists. (The service's own words are checked by scripts/no-corpus-data.test.ts.)
+
+describe('the corpus service README: its command blocks parse, and every command in them is real', () => {
+  const doc = read('services/corpus/README.md');
+  const usage: Record<string, string> = { keygen: KEYGEN_USAGE, sign: SIGN_USAGE, release: RELEASE_USAGE, publish: PUBLISH_USAGE, zenodo: ZENODO_USAGE, 'verify-live': VERIFY_USAGE, seed: SEED_USAGE, eval: EVAL_USAGE };
+  // Flags per wrangler subcommand, from Cloudflare's wrangler documentation (read 2026-11).
+  const wrangler: Record<string, string[]> = {
+    login: [],
+    'd1 create': [],
+    'd1 execute': ['--remote', '--local', '--file', '--command', '--persist-to', '--yes', '--json'],
+    'd1 export': ['--remote', '--local', '--output', '--table', '--no-schema', '--no-data'],
+    'r2 bucket create': [],
+    'r2 bucket domain add': ['--domain', '--zone-id', '--min-tls', '--force'],
+    'secret put': [],
+    deploy: ['--config'],
+  };
+
+  /** Shell-style words, or null for an unbalanced quote. */
+  function words(line: string): string[] | null {
+    const out: string[] = [];
+    let cur = '';
+    let quote: string | null = null;
+    let any = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const c = line[i] as string;
+      if (quote !== null) {
+        if (c === quote) quote = null;
+        else if (c === '\\' && quote === '"' && i + 1 < line.length) cur += line[(i += 1)];
+        else cur += c;
+      } else if (c === '"' || c === "'") {
+        quote = c;
+        any = true;
+      } else if (/\s/.test(c)) {
+        if (cur !== '' || any) out.push(cur);
+        cur = '';
+        any = false;
+      } else cur += c;
+    }
+    if (quote !== null) return null;
+    if (cur !== '' || any) out.push(cur);
+    return out;
+  }
+  const blocks = [...doc.matchAll(/```(sh|bash)\n([\s\S]*?)```/g)].map((m) => (m[2] as string).split('\n').filter((l) => l.trim() !== ''));
+  const commands = blocks.flat();
+  const flagsOf = (text: string): Set<string> => new Set(text.match(/--[a-z][a-z-]*/g) ?? []);
+
+  it('has command blocks (the deploy, the keys, the seed, the release, the smoke)', () => {
+    expect(commands.length).toBeGreaterThan(25);
+    expect(blocks.length).toBeGreaterThan(8);
+  });
+
+  it.each(commands)('parses: %s', (line) => {
+    const w = words(line);
+    expect(w, 'unbalanced quote').not.toBeNull();
+    const [program, ...rest] = w as string[];
+    const flags = rest.filter((t) => t.startsWith('--'));
+    if (program === 'npx' && rest[0] === 'wrangler') {
+      const sub = Object.keys(wrangler)
+        .filter((k) => rest.slice(1, 1 + k.split(' ').length).join(' ') === k)
+        .sort((a, b) => b.length - a.length)[0];
+      expect(sub, 'a wrangler subcommand that is documented').toBeDefined();
+      for (const f of flags) expect(wrangler[sub as string], f).toContain(f);
+    } else if (program === 'node') {
+      const m = /^services\/corpus\/tools\/([a-z-]+)\.mjs$/.exec(rest[0] ?? '');
+      expect(m, 'node runs one of the service tools').not.toBeNull();
+      const name = (m as RegExpExecArray)[1] as string;
+      expect(existsSync(join(root, 'services/corpus/tools', `${name}.mjs`))).toBe(true);
+      const allowed = flagsOf(usage[name] ?? '');
+      expect(allowed.size, `usage for ${name}`).toBeGreaterThan(0);
+      for (const f of flags) expect(allowed, `${name} ${f}`).toContain(f);
+    } else if (program === 'npx' && rest[0] === 'tsc') {
+      expect(rest.slice(1)).toEqual(['-b', 'services/corpus']);
+    } else if (program === 'npm') {
+      expect(rest.slice(0, 2)).toEqual(['run', 'smoke:d1']);
+      expect((JSON.parse(read('services/corpus/package.json')) as { scripts: Record<string, string> }).scripts['smoke:d1']).toBeDefined();
+    } else if (program === 'npx' && rest[0] === 'vitest') {
+      for (const p of rest.slice(2)) expect(existsSync(join(root, p)), p).toBe(true);
+    } else {
+      throw new Error('a command this lint does not know');
+    }
+  });
+
+  it('every tool launcher runs a module that exists, and every tool is in the README', () => {
+    const dir = join(root, 'services/corpus/tools');
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.mjs') && !['run.mjs', 'smoke-d1.mjs'].includes(f))) {
+      const m = /await run\('([A-Za-z]+)'\)/.exec(read('services/corpus/tools', file));
+      expect(m, file).not.toBeNull();
+      expect(existsSync(join(root, 'services/corpus/src/tools', `${(m as RegExpExecArray)[1]}.ts`)), file).toBe(true);
+      expect(doc, file).toContain(`tools/${file}`);
+    }
+  });
+
+  it('names the secrets and variables the Worker needs, and no value for any of them', () => {
+    const config = read('services/corpus/wrangler.jsonc');
+    for (const name of ['COUNTER_SECRET', 'TURNSTILE_SECRET']) {
+      expect(config).toContain(name);
+      expect(doc).toContain(`wrangler secret put ${name}`);
+    }
+    for (const name of ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'REPORTS_ORIGIN', 'REPORTS_HOSTNAME']) expect(doc).toContain(name);
+    expect(doc).not.toMatch(/(COUNTER_SECRET|TURNSTILE_SECRET)\s*[=:]\s*\S/);
+    expect(doc).not.toMatch(/BEGIN [A-Z ]*PRIVATE KEY/);
+  });
+
+  it('says that the local smoke is opt-in and why, and that nothing is deployed', () => {
+    const text = flat(doc);
+    expect(text).toMatch(/does not run with the other tests/);
+    expect(text).toMatch(/no\s+Cloudflare account/);
+    expect(text).toMatch(/Nothing has been deployed/);
+  });
+
+  it('is titled with its package name, has a status line and no marketing words', () => {
+    expect(doc.startsWith('# @chatwarden/corpus-service\n')).toBe(true);
+    expect(doc).toMatch(/^Status: pre-release, as-is, no support promise\.$/m);
+    expect(doc).not.toMatch(MARKETING);
+  });
+});
+
+describe('the corpus service other pages say what the code does', () => {
+  it('PRIVACY.md: the retention numbers are the code, it is marked as a draft and not legal advice, and it says no address is kept', () => {
+    const text = flat(read('services/corpus/PRIVACY.md'));
+    expect(text).toMatch(/maintainers' draft/);
+    expect(text).toMatch(/Not legal advice/);
+    expect(text).toContain(`${LIMITS.installationDays} days after the decision`);
+    expect(text).toContain(`${LIMITS.noteDays} days after the decision`);
+    expect(text).toMatch(/\*\*Two days\*\*|\*\*two days\*\*/);
+    expect(LIMITS.counterDays).toBe(2);
+    expect(text).toMatch(/An IP address/);
+    expect(text).toMatch(/Cloudflare's own logs/);
+  });
+
+  it('SOURCES.md: no source is approved yet, and every source needs the four things before it is loaded', () => {
+    const text = flat(read('services/corpus/SOURCES.md'));
+    expect(text).toMatch(/Nothing is loaded yet/);
+    for (const item of ['Name and where it comes from', 'Licence', 'The internal-use check', 'Not redistributed']) expect(text, item).toContain(item);
+    expect(text).toMatch(/not redistributed|never redistributed/i);
+  });
+
+  it('docs/community-list.md: the rules, the consent, the licence sentence and the removal limits', () => {
+    const text = flat(read('docs/community-list.md'));
+    expect(text).toContain(ATTRIBUTION);
+    for (const item of ['The rules', 'Licence and consent', 'A published release cannot be recalled', 'Words only', 'CC BY 4.0']) expect(text, item).toContain(item);
+    expect(text).toMatch(/opt-in/);
+    expect(text).not.toMatch(MARKETING);
   });
 });
