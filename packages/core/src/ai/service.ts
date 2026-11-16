@@ -432,11 +432,13 @@ export class AiService implements AiFacade {
   private stableKey = '';
   private isClosed = false;
 
-  protected readonly deps: AiServiceDeps;
+  /** The dependencies WITHOUT the store: the service reads the store only through `this.store`, the narrow {@link AiStore} (design 6.1), never the full one. */
+  protected readonly deps: Omit<AiServiceDeps, 'store'>;
 
   constructor(deps: AiServiceDeps) {
-    this.deps = deps;
-    this.store = requireAiStore(deps.store);
+    const { store, ...rest } = deps;
+    this.deps = rest;
+    this.store = requireAiStore(store);
     this.clock = deps.clock;
     this.opts = checkOptions(deps.options);
     this.adapter = deps.options.adapter;

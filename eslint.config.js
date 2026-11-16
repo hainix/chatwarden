@@ -25,9 +25,25 @@ const browserSafeSyntax = [
   { selector: `ImportExpression[source.value=/^(${builtins.join('|')})(\\x2f.*)?$/]`, message: BROWSER_SAFE_MESSAGE },
 ];
 
-// The modules that write a sanction, a strike, a mute or a notice. The AI folder may import none of them (see the block at the end).
-const AI_WRITERS = ['decide', 'sanctions', 'strikes', 'mutes', 'notices'];
-const AI_MESSAGE = 'the AI never writes a sanction, a strike, a mute or a notice: packages/core/src/ai may not import decide, sanctions, strikes, mutes or notices.';
+// The AI folder may import its OWN files and a short list of read-only modules of core/src, and nothing else (an allowlist, review R1a I2: a denylist of
+// the writing modules left the barrel `index` and the kit `chatwarden`, which re-export every writer, wide open). A new import the AI module needs is
+// added here in view. Everything is one selector per import form (a static import, a re-export, a dynamic import, an `import type(...)`, `import = require`),
+// because no-restricted-imports does not see the dynamic ones; a dynamic import whose argument is not a plain string is refused outright.
+const AI_ALLOWED_MODULES = ['types', 'profile', 'ladder', 'rules', 'reporting', 'documents', 'crypto', 'log', 'events', 'audit'];
+const AI_MESSAGE =
+  'the AI never writes: packages/core/src/ai may import only its own files and the read-only modules of core/src named in eslint.config.js (never the barrel, the kit, decide, sanctions, strikes, mutes, notices or the actor).';
+// A specifier that is NOT an allowed one: a negative lookahead, so one regex per node form. (An esquery regex ends at the next "/", so a slash is \x2f.)
+const aiNotAllowed = `/^(?!(?:\\.\\x2f[\\w-]+(?:\\.js)?|(?:\\.\\.\\x2f)+(?:${AI_ALLOWED_MODULES.join('|')})(?:\\.js)?)$)/`;
+const aiImportSyntax = [
+  `ImportDeclaration[source.value=${aiNotAllowed}]`,
+  `ExportAllDeclaration[source.value=${aiNotAllowed}]`,
+  `ExportNamedDeclaration[source.value=${aiNotAllowed}]`,
+  `ImportExpression[source.value=${aiNotAllowed}]`,
+  "ImportExpression:not([source.type='Literal'])",
+  `TSImportType Literal[value=${aiNotAllowed}]`,
+  `TSExternalModuleReference > Literal[value=${aiNotAllowed}]`,
+  "CallExpression[callee.name='require']",
+].map((selector) => ({ selector, message: AI_MESSAGE }));
 
 // The Store's writers. The import ban above does not stop `this.store.insertSanctionGroup(...)` on the Store type the AI module is handed, so a second
 // selector names the writers themselves. Only packages/core/src/aiActor (design 6.1) may call them for the AI. scripts/eslint-ban.test.ts pins every
@@ -46,11 +62,36 @@ const AI_STORE_WRITERS = [
   'pruneMutes',
   'closeGap',
   'decideAppeal',
+  'savePolicyLayer',
+  'claimCase',
+  'releaseClaim',
+  'ackNotice',
+  'insertAppeal',
+  'closeAppealsForGroup',
+  'closeOrphanAppeals',
+  'insertReport',
+  'addReportDetail',
+  'purgeReports',
+  'purgeSanctions',
+  'purgeNotices',
+  'purgeMutes',
+  'purgeStrikes',
 ];
 export const AI_SEAM_MESSAGE =
   "the AI never writes: packages/core/src/ai may not use the store's writers (sanctions, decisions, notices, strikes, mutes, closing a report); a sanction by the AI is written only in packages/core/src/aiActor.";
 const aiWriterNames = `/^(${AI_STORE_WRITERS.join('|')})$/`;
+// A writer reached without naming it: a variable key on a store-like value (`store[k]`, `this.store?.[k]`), Reflect, Object.* over the store, a spread of it.
+// "Store-like" is a name ending in Store/store; the type (`AiStore`, which has no writer) is the real guard, this is the second one.
+const aiStoreName = '/^\\w*[sS]tore$/';
+const aiStoreLike = (path) => `[${path}.name=${aiStoreName}], [${path}.property.name=${aiStoreName}]`;
+const aiDynamicSyntax = [
+  `MemberExpression[computed=true]:matches(${aiStoreLike('object')}):not([property.type='Literal']):not([property.type='TemplateLiteral'][property.expressions.length=0])`,
+  "Identifier[name='Reflect']",
+  `CallExpression[callee.object.name='Object'][callee.property.name=/^(values|entries|assign|getOwnPropertyDescriptors?|getOwnPropertyNames|fromEntries)$/]:matches(${aiStoreLike('arguments.0')}, ${aiStoreLike('arguments.1')})`,
+  `SpreadElement:matches(${aiStoreLike('argument')})`,
+].map((selector) => ({ selector, message: AI_SEAM_MESSAGE }));
 const aiSeamSyntax = [
+  ...aiDynamicSyntax,
   { selector: `MemberExpression[computed=false][property.name=${aiWriterNames}]`, message: AI_SEAM_MESSAGE },
   { selector: `MemberExpression[computed=true][property.value=${aiWriterNames}]`, message: AI_SEAM_MESSAGE },
   { selector: `MemberExpression[computed=true][property.type='TemplateLiteral'][property.quasis.0.value.cooked=${aiWriterNames}]`, message: AI_SEAM_MESSAGE },
@@ -104,22 +145,16 @@ export default tseslint.config(
     rules: { 'no-restricted-imports': 'off', 'no-restricted-syntax': 'off' },
   },
   {
-    // The AI never writes a sanction, a strike, a mute or a notice: nothing under core/src/ai may import the modules that do. A flat-config rule
+    // The AI never writes a sanction, a strike, a mute or a notice: core/src/ai may import only an allowlist of read-only modules (see AI_ALLOWED_MODULES). A flat-config rule
     // replaces the one above for these files, so the browser-safe ban is repeated here and the AI's is added to it. scripts/eslint-ban.test.ts
     // proves it fires (type-only imports, re-exports and dynamic imports included).
     files: ['packages/core/src/ai/**/*.ts'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: browserSafeImports[1].paths,
-          patterns: [...browserSafeImports[1].patterns, { group: AI_WRITERS.flatMap((m) => [`**/${m}`, `**/${m}.js`]), message: AI_MESSAGE }],
-        },
-      ],
+      'no-restricted-imports': ['error', { paths: browserSafeImports[1].paths, patterns: browserSafeImports[1].patterns }],
       'no-restricted-syntax': [
         'error',
         ...browserSafeSyntax.slice(1),
-        { selector: `ImportExpression[source.value=/^(\\.{1,2}\\x2f)+(${AI_WRITERS.join('|')})(\\.js)?$/]`, message: AI_MESSAGE },
+        ...aiImportSyntax,
         ...aiSeamSyntax,
       ],
     },

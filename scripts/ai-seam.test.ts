@@ -50,15 +50,42 @@ interface Found {
   automated: Record<string, number>;
 }
 
+/**
+ * The text with its comments blanked out, string and template literals respected (a `//` inside a string is not a comment). A comment is prose; a line that merely
+ * STARTS like one is not (`/* x *\/ const a = { source: 'ai' };`, or a `*` that continues an expression), so the scan strips comments over the whole text, not by line prefix.
+ */
+export function stripComments(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i] as string;
+    const n = text[i + 1];
+    if (c === '/' && n === '/') {
+      while (i < text.length && text[i] !== '\n') i += 1;
+    } else if (c === '/' && n === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end === -1 ? text.length : end + 2;
+      out += ' ';
+    } else if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1;
+      // A ' or " string ends at the line's end, so a regex literal holding a quote cannot swallow the code after it.
+      while (j < text.length && text[j] !== c && (c === '`' || text[j] !== '\n')) j += text[j] === '\\' ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return out;
+}
+
 function scan(base: string): Found {
   const found: Found = { sourceAi: [], automated: {} };
   for (const file of sources(base)) {
     if (file.startsWith(ACTOR_DIR)) continue;
-    // Comment-only lines are prose (strikes.ts names `automated: true` in one); code is what writes a row.
-    const text = readFileSync(join(base, file), 'utf8')
-      .split('\n')
-      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-      .join('\n');
+    // Comments are prose (strikes.ts names `automated: true` in one); code is what writes a row.
+    const text = stripComments(readFileSync(join(base, file), 'utf8'));
     const ai = text.match(SOURCE_AI)?.length ?? 0;
     if (ai > 0) found.sourceAi.push(`${file} (${ai})`);
     const auto = text.match(AUTOMATED_TRUE)?.length ?? 0;
@@ -93,6 +120,41 @@ describe("source 'ai' and automated true for a sanction appear only under core/s
       const found = scan(dir);
       expect(found.sourceAi.sort()).toEqual(['packages/core/src/leak.ts (1)', 'packages/http/src/deep/leak2.tsx (1)', 'packages/store-memory/src/leak3.ts (1)']);
       expect(found.automated).toEqual({ 'packages/http/src/deep/leak2.tsx': 1 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a comment never hides code: a one-line block comment before the literal, a trailing comment, a // inside a string', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-ai-seam-'));
+    try {
+      const put = (rel: string, text: string): void => {
+        mkdirSync(join(dir, rel, '..'), { recursive: true });
+        writeFileSync(join(dir, rel), text);
+      };
+      put('packages/core/src/a.ts', "/* note */ export const a = { source: 'ai' };\n");
+      put('packages/core/src/b.ts', "export const u = 'http://x.example'; export const a = { source: 'ai' };\n");
+      put('packages/core/src/c.ts', "export const a = { source: 'ai' }; // trailing\n");
+      put('packages/core/src/d.ts', 'export const a = 1 /* x */ + 2; const b = { automated: true }; /* y */\n');
+      put('packages/core/src/e.ts', "export const a = {\n  /* c */ source: 'ai',\n};\n");
+      put('packages/core/src/f.ts', "export const re = /['\"]/;\nexport const a = { source: 'ai' };\n");
+      const found = scan(dir);
+      expect(found.sourceAi.sort()).toEqual(['packages/core/src/a.ts (1)', 'packages/core/src/b.ts (1)', 'packages/core/src/c.ts (1)', 'packages/core/src/e.ts (1)', 'packages/core/src/f.ts (1)']);
+      expect(found.automated).toEqual({ 'packages/core/src/d.ts': 1 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prose in a comment is not code: a line comment, a block comment over several lines, a doc comment', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-ai-seam-'));
+    try {
+      mkdirSync(join(dir, 'packages/core/src'), { recursive: true });
+      writeFileSync(
+        join(dir, 'packages/core/src/p.ts'),
+        "// a sanction with source: 'ai' and automated: true is the actor's\n/*\n * { source: 'ai', automated: true }\n */\n/** `source: 'ai'` */\nexport const a = 1;\n",
+      );
+      expect(scan(dir)).toEqual({ sourceAi: [], automated: {} });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

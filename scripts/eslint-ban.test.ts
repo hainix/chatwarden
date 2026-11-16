@@ -133,6 +133,8 @@ describe.each(AI_SRC)('%s: the AI folder may not import what writes a sanction',
     ["export const a = await import('../mutes.js');\n", 'a dynamic import of mutes'],
     ["export const a = await import('../../decide.js');\n", 'a dynamic import of decide by a deeper path'],
     ["import { x } from '../../decide.js';\nexport const a = x;\n", 'a deeper relative path to decide'],
+    ["import { x } from '../decideHelpers.js';\nexport const a = x;\n", 'a name that starts like decide (not on the allowlist)'],
+    ["import { x } from '../dismissMany.js';\nexport const a = x;\n", 'a module that is not on the allowlist'],
   ])('refuses %s (%s)', async (code) => {
     expect((await messages(code, file)).length).toBeGreaterThan(0);
   });
@@ -146,9 +148,6 @@ describe.each(AI_SRC)('%s: the AI folder may not import what writes a sanction',
     ["import { sha256Hex } from '../crypto.js';\nexport const a = sha256Hex;\n", 'the crypto helper'],
     ["import { x } from './worker.js';\nexport const a = x;\n", 'a sibling in the AI folder'],
     ["import { x } from '../audit.js';\nexport const a = x;\n", 'the audit trail (the AI writes its own audit rows)'],
-    ["import { x } from '../decideHelpers.js';\nexport const a = x;\n", 'a name that starts like decide'],
-    ["import { x } from '../noticesView.js';\nexport const a = x;\n", 'a name that starts like notices'],
-    ["import { x } from '../dismissMany.js';\nexport const a = x;\n", 'a module that is not in the list'],
     ["export const a = await import('./lazy.js');\n", 'a dynamic relative import'],
   ])('allows %s (%s)', async (code) => {
     expect(await messages(code, file)).toEqual([]);
@@ -175,14 +174,66 @@ describe('outside the AI folder the same imports are fine', () => {
   });
 });
 
-describe('the rule names exactly the five modules', () => {
-  it('refuses the five and no sixth: every other module of core/src can be imported from the AI folder', async () => {
+// The ban is an ALLOWLIST (review R1a I2): a name on a denylist is one more module a later change can forget, and the barrel (`index`) and the
+// kit (`chatwarden`) re-export every writer. The AI folder may import its own files and these read-only modules of core/src, and nothing else.
+const AI_ALLOWED = ['types', 'profile', 'ladder', 'rules', 'reporting', 'documents', 'crypto', 'log', 'events', 'audit'];
+
+describe('the AI folder imports only an allowlist', () => {
+  it('every module of core/src is refused from the AI folder except the allowlist: no sixth writer can slip in unnoticed', async () => {
     const names = readdirSync(`${root}packages/core/src`)
       .filter((f) => f.endsWith('.ts'))
       .map((f) => f.replace(/\.ts$/, ''));
-    const refused: string[] = [];
-    for (const n of names) if ((await messages(imp(`../${n}.js`), 'packages/core/src/ai/x.ts')).length > 0) refused.push(n);
-    expect(refused.sort()).toEqual([...WRITERS].sort());
+    const allowed: string[] = [];
+    for (const n of names) if ((await messages(imp(`../${n}.js`), 'packages/core/src/ai/x.ts')).length === 0) allowed.push(n);
+    expect(allowed.sort()).toEqual([...AI_ALLOWED].sort());
+  });
+
+  it.each([
+    ["import { applySanction } from '../index.js';\nexport const a = applySanction;\n", 'the barrel'],
+    ["import { applySanction } from '../index';\nexport const a = applySanction;\n", 'the barrel without an extension'],
+    ["import * as k from '../chatwarden.js';\nexport const a = k;\n", 'the kit as a namespace'],
+    ["import type { Chatwarden } from '../chatwarden.js';\nexport type A = Chatwarden;\n", 'a type-only import of the kit'],
+    ["import { x } from '../appeals.js';\nexport const a = x;\n", 'appeals'],
+    ["import { x } from '../appealService.js';\nexport const a = x;\n", 'the appeals service'],
+    ["import { x } from '../aiActor/service.js';\nexport const a = x;\n", 'the actor folder'],
+    ["import { x } from '../../aiActor/service.js';\nexport const a = x;\n", 'the actor folder by a deeper path'],
+    ["import { x } from './sub/deeper.js';\nexport const a = x;\n", 'a nested path under the AI folder'],
+    ["import { x } from '@chatwarden/core';\nexport const a = x;\n", 'the package by name'],
+    ["import { x } from 'some-package';\nexport const a = x;\n", 'a bare package'],
+    ["export * from '../index.js';\n", 'a star re-export of the barrel'],
+    ["export { applySanction } from '../index.js';\n", 'a named re-export of the barrel'],
+    ["export const a = await import('../index.js');\n", 'a dynamic import of the barrel'],
+    ["export const a = await import('../chatwarden.js');\n", 'a dynamic import of the kit'],
+    ["export type A = import('../index.js').Chatwarden;\n", 'an import type of the barrel'],
+    ["import x = require('../index.js');\nexport const a = x;\n", 'an import = require of the barrel'],
+    ["export const a = require('../index.js');\n", 'a require call'],
+    ["const p = '../index.js';\nexport const a = await import(p);\n", 'a computed dynamic import'],
+    ["export const a = await import('../chat' + 'warden.js');\n", 'a concatenated dynamic import'],
+  ])('refuses %s (%s)', async (code) => {
+    for (const file of AI_SRC) expect((await messages(code, file)).length, file).toBeGreaterThan(0);
+  });
+
+  it.each(AI_ALLOWED)('allows %s, as a value and as a type, with or without the extension', async (m) => {
+    expect(await messages(imp(`../${m}.js`), 'packages/core/src/ai/x.ts')).toEqual([]);
+    expect(await messages(imp(`../${m}`), 'packages/core/src/ai/x.ts')).toEqual([]);
+    expect(await messages(`import type { X } from '../${m}.js';\nexport type A = X;\n`, 'packages/core/src/ai/x.ts')).toEqual([]);
+  });
+
+  it('allows a sibling of the AI folder, with or without the extension', async () => {
+    expect(await messages(imp('./worker.js'), 'packages/core/src/ai/x.ts')).toEqual([]);
+    expect(await messages(imp('./worker'), 'packages/core/src/ai/x.ts')).toEqual([]);
+    expect(await messages("export const a = await import('./lazy.js');\n", 'packages/core/src/ai/x.ts')).toEqual([]);
+  });
+
+  it('says why', async () => {
+    expect((await messages(imp('../index.js'), 'packages/core/src/ai/x.ts')).join('\n')).toMatch(/AI never writes/);
+  });
+
+  it('the same imports are fine outside the AI folder (the actor, the kit and the barrel are core)', async () => {
+    for (const file of ['packages/core/src/aiActor/x.ts', 'packages/core/src/chatwarden.ts', 'packages/core/src/x.ts', 'packages/core/test/ai/x.ts', 'packages/core/src/aiding/x.ts']) {
+      expect(await messages(imp('../index.js'), file), file).toEqual([]);
+      expect(await messages(imp('../chatwarden.js'), file), file).toEqual([]);
+    }
   });
 });
 
@@ -203,6 +254,20 @@ const STORE_WRITERS = [
   'pruneMutes',
   'closeGap',
   'decideAppeal',
+  'savePolicyLayer',
+  'claimCase',
+  'releaseClaim',
+  'ackNotice',
+  'insertAppeal',
+  'closeAppealsForGroup',
+  'closeOrphanAppeals',
+  'insertReport',
+  'addReportDetail',
+  'purgeReports',
+  'purgeSanctions',
+  'purgeNotices',
+  'purgeMutes',
+  'purgeStrikes',
 ];
 
 const SEAM_SRC = ['packages/core/src/ai/x.ts', 'packages/core/src/ai/sub/x.ts'];
@@ -232,6 +297,35 @@ describe.each(SEAM_SRC)('%s', (file) => {
     }
   });
 
+  // A writer reached without naming it (review R1a I2): a variable key on the store, Reflect, Object.* over the store, a spread of it.
+  it.each([
+    ['export function f(store: Record<string, (x: unknown) => void>, k: string): void {\n  store[k]({});\n}\n', 'store[k]'],
+    ['export class C {\n  store!: Record<string, (x: unknown) => void>;\n  run(k: string): void {\n    this.store[k]({});\n  }\n}\n', 'this.store[k]'],
+    ['export function f(store: Record<string, (x: unknown) => void>, k: string): void {\n  store?.[k]?.({});\n}\n', 'store?.[k]'],
+    ['export function f(store: Record<string, (x: unknown) => void>, k: string): void {\n  store["insert" + k]({});\n}\n', 'store["insert" + k]'],
+    ["export function f(store: object): unknown {\n  return Reflect.get(store, 'insertSanctionGroup');\n}\n", 'Reflect.get'],
+    ['export function f(store: object, k: string): unknown {\n  return Reflect.apply(Reflect.get(store, k) as () => void, store, []);\n}\n', 'Reflect.apply'],
+    ['export function f(store: object): unknown {\n  return Object.values(store);\n}\n', 'Object.values(store)'],
+    ['export function f(store: object): unknown {\n  return Object.entries(store);\n}\n', 'Object.entries(store)'],
+    ['export function f(store: object): unknown {\n  return Object.getOwnPropertyDescriptors(store);\n}\n', 'Object.getOwnPropertyDescriptors(store)'],
+    ['export class C {\n  store!: object;\n  run(): unknown {\n    return Object.assign({}, this.store);\n  }\n}\n', 'Object.assign({}, this.store)'],
+    ['export function f(store: object): unknown {\n  return { ...store };\n}\n', 'a spread of the store'],
+    ['export class C {\n  store!: object;\n  run(): unknown {\n    return { ...this.store };\n  }\n}\n', 'a spread of this.store'],
+  ])('ESLint: ai/ cannot reach a writer without naming it: %s (%s)', async (code, shape) => {
+    expect((await seamMessages(code, file)).length, shape).toBeGreaterThan(0);
+  });
+
+  it('a variable key on something that is not the store is fine (a control: ordinary lookups stay)', async () => {
+    const ok = [
+      'export function f(rows: Record<string, number>, k: string): number {\n  return rows[k] ?? 0;\n}\n',
+      'export function f(xs: number[], i: number): number {\n  return xs[i] ?? 0;\n}\n',
+      'export function f(o: object): unknown {\n  return Object.entries(o);\n}\n',
+      'export function f(a: object): unknown {\n  return { ...a };\n}\n',
+      'export function f(store: { rows: Record<string, number> }, k: string): number {\n  return store.rows[k] ?? 0;\n}\n',
+    ];
+    for (const code of ok) expect(await seamMessages(code, file), code).toEqual([]);
+  });
+
   it('says why, and names the seam', async () => {
     const [code] = shapes('insertSanctionGroup')[0] as [string, string];
     expect((await seamMessages(code, file)).join('\n')).toMatch(/store's writers.*aiActor/s);
@@ -255,6 +349,11 @@ describe.each(SEAM_SRC)('%s', (file) => {
 });
 
 describe('ESLint: the same call outside ai/ is allowed', () => {
+  it('a variable key, Reflect and a spread of the store are fine outside ai/', async () => {
+    const code = 'export function f(store: Record<string, (x: unknown) => void>, k: string): unknown {\n  store[k]({});\n  return [Reflect.get(store, k), Object.values(store), { ...store }];\n}\n';
+    for (const file of ['packages/core/src/x.ts', 'packages/core/src/aiActor/x.ts', 'packages/http/src/x.ts']) expect(await messages(code, file), file).toEqual([]);
+  });
+
   it.each(['packages/core/src/x.ts', 'packages/core/src/aiActor/x.ts', 'packages/core/src/decide.ts', 'packages/http/src/x.ts', 'packages/core/test/ai/x.ts', 'packages/core/src/aiding/x.ts'])(
     '%s may call every store writer',
     async (file) => {
