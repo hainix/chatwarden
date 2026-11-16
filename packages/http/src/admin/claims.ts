@@ -1,3 +1,4 @@
+import type { Chatwarden } from '@chatwarden/core';
 import { ClaimedError } from '../errors.js';
 import { roleAtLeast } from '../permissions.js';
 import type { AdminCall, AdminContext } from './context.js';
@@ -17,11 +18,28 @@ export const canOverrideClaims = (ctx: AdminContext, c: AdminCall): boolean =>
  * (the last report closed meanwhile) has nothing to move and simply goes on.
  */
 export function gateCase(ctx: AdminContext, c: AdminCall, person: string, takeOver: boolean): void {
-  const { cw } = ctx;
+  gateClaim(ctx.cw, person, c.authz.actor, takeOver, canOverrideClaims(ctx, c), () =>
+    c.audit('case.takeover', { type: 'person', ref: ctx.cw.people.canonical(person) }, 'required'),
+  );
+}
+
+/**
+ * The claim gate with its inputs spelled out, for a caller that has no admin call (`decideAs`, which the Discord bot and the Coop callback
+ * share with the staff route): the same rule as {@link gateCase}. `canOverride` is whether the actor's role holds `claims.override`;
+ * `auditTakeover` is called, and must not return if the row could not be recorded (it throws), BEFORE the claim moves.
+ */
+export function gateClaim(
+  cw: Chatwarden,
+  person: string,
+  actor: string,
+  takeOver: boolean,
+  canOverride: boolean,
+  auditTakeover: () => void,
+): void {
   const holder = cw.cases.holder(person);
-  if (holder === null || holder.by === c.authz.actor) return;
-  if (!takeOver || !canOverrideClaims(ctx, c)) throw new ClaimedError(holder);
-  c.audit('case.takeover', { type: 'person', ref: cw.people.canonical(person) }, 'required');
-  const moved = cw.cases.claim(person, c.authz.actor, { takeOver: true });
+  if (holder === null || holder.by === actor) return;
+  if (!takeOver || !canOverride) throw new ClaimedError(holder);
+  auditTakeover();
+  const moved = cw.cases.claim(person, actor, { takeOver: true });
   if (!moved.ok && moved.error === 'claimed') throw new ClaimedError(moved.claim);
 }

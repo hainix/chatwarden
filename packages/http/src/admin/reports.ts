@@ -4,9 +4,10 @@ import { NotFoundError, ValidationError } from '../errors.js';
 import type { RouteTable } from '../router.js';
 import { roleAtLeast } from '../permissions.js';
 import { flagKey, handleFlags } from './handles.js';
-import { applyDecision, checkDurationsOffered, needForDecision, parseDecision, peopleOf } from './apply.js';
+import { parseDecision, peopleOf } from './apply.js';
 import type { AdminCall, AdminContext } from './context.js';
-import { gateCase } from './claims.js';
+import { canOverrideClaims, gateCase } from './claims.js';
+import { decideAs } from './decideAs.js';
 import { bodyAiEcho, bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
 
 /** How many recent reports `GET /people/:ref/history` summarises when `limit` is absent. */
@@ -308,32 +309,25 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
       const takeOver = bodyTakeOver(body);
       const echo = has(body, 'ai') ? bodyAiEcho(body.ai) : undefined;
 
-      // Authorization for what the decision DOES, before anything is read or written.
-      needForDecision(decision.actions, c.need);
-
-      // Another moderator's live claim on the reported person stops the decision, unless a senior takes the case over.
-      // A report that is no longer open is a replay or an already_decided: a claim taken since must not turn that into a 409.
-      const existing = cw.reports.get(id);
-      // The lengths on offer apply to a decision that would be applied now: a replay, or a different decision on a report that is
-      // already decided, is answered as such (`already_decided` or a replay) whatever the rule says today.
-      if (existing !== null && existing.status === 'open') checkDurationsOffered(cw, decision.actions);
-      const person = existing !== null && existing.status === 'open' ? existing.targetPerson : null;
-      if (person !== null) gateCase(ctx, c, person, takeOver);
-
-      // Never from the body: the caller is who the auth hook says, and an admin route is always a moderator's.
-      const result = await applyDecision(cw, id, decision, c.authz.actor, { ...(echo === undefined ? {} : { echo }), role: c.authz.role });
+      // The whole decision path is `decideAs`, shared with the Discord bot and the Coop callback: the permissions the decision needs, the
+      // lengths on offer, another moderator's claim (a senior may take the case over, on the record: the takeover's audit row is written
+      // first, in required mode), the decision itself and ending the caller's claim on the person's last open report. Never from the body:
+      // the caller is who the auth hook says and an admin route is always a moderator's.
+      const result = await decideAs(cw, {
+        reportId: id,
+        decision,
+        actor: c.authz.actor,
+        role: c.authz.role,
+        permissions: ctx.permissions,
+        claims: 'gate',
+        takeOver,
+        canOverride: canOverrideClaims(ctx, c),
+        onTakeOver: (person) => c.audit('case.takeover', { type: 'person', ref: cw.people.canonical(person) }, 'required'),
+        ...(echo === undefined ? {} : { echo }),
+        ...(ctx.logger === undefined ? {} : { logger: ctx.logger }),
+      });
       // The decision has committed (a replay included): an audit failure is logged, never turned into an error.
       c.audit('report.decide', { type: 'report', ref: id }, 'best-effort');
-      // Deciding the person's last open report ends the caller's own claim; while other reports about them are open the claim is
-      // kept (one case per person), so nobody else can take the case from the moderator who is working through it. Not on a
-      // replay: the caller may hold a fresh claim on the person's next report.
-      if (person !== null && !result.replay) {
-        try {
-          cw.cases.releaseWhenDone(person, c.authz.actor);
-        } catch {
-          safeWarn(ctx.logger, 'chatwarden.http_release_failed');
-        }
-      }
       return { status: 200, body: { ok: true, replay: result.replay, groups: result.groups } };
     }),
 
