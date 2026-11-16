@@ -37,7 +37,7 @@ export function isInventedWord(word) {
 const isOrdinary = (w) => w.length < 2 || ORDINARY.has(w);
 
 /** The words of a text that are not allowed: any word with a letter outside the allowlist. `strict` allows invented words only (a term). */
-function badWords(text, strict) {
+export function badWords(text, strict) {
   const words = String(text).split(/[^\p{L}\p{M}\p{N}]+/u).filter((w) => w !== '');
   return words.filter((w) => !isInventedWord(w) && (strict || !isOrdinary(fold(w))));
 }

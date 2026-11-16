@@ -40,6 +40,7 @@ yourself and your project gets exactly one copy of it. `store-sqlite` and `profa
 | Show players their notices, record and the rules, and let them report | add `npm install @chatwarden/player-react react react-dom` (it needs `@chatwarden/core` as a peer, for types) |
 | Run tests or a demo with no database (everything is lost on restart) | swap `@chatwarden/store-sqlite` for `npm install @chatwarden/store-memory` |
 | Try it with invented test words, no real term list | nothing extra: `@chatwarden/matcher/fixtures` is part of `@chatwarden/matcher` |
+| Use the shared community term list (signed, kept on disk, server only; the package ships no terms and nothing is on until you turn it on) | nothing extra: import `startCorpus` from `@chatwarden/matcher/corpus/node` (the names are experimental until 0.2), and pass the loader to `adminRoutes` as `community` for the hub's Community list. See the [matcher README](packages/matcher#the-community-term-corpus) |
 
 Express 5 ships no types, so `@types/express` goes with `express` in a TypeScript project (a plain JavaScript project can skip it).
 

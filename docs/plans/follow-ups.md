@@ -132,3 +132,23 @@ Decided in [design/2026-11-12-appeals-and-names.md](../design/2026-11-12-appeals
   history once. Adding a `handle` to the detail would let both show it.
 - **Settings panels repeat a block.** Four Advanced panels share a discard, reload and reset flow; a `usePanelFlow` would hold it once.
 - **A lone U+FE0F statement** cleans to empty and is refused. Intended, listed so nobody reads it as a bug.
+
+## The shared term corpus (0.1.11), parked
+Design 20 of [design/2026-11-12-k7-term-corpus.md](../design/2026-11-12-k7-term-corpus.md): not in this release.
+- A hub review UI for the corpus, and in-hub sharing of eval cases.
+- Non-Latin scripts and languages beyond en, es, pt; per-language matching.
+- A `chatwarden terms install` command (K4b's CLI); until then the matcher README shows the short script.
+- AI-assisted review of proposed terms.
+- Automatic updates that apply without the adopter choosing `apply: 'auto'`.
+- A browser build of the loader for the site demo (the code is isomorphic; the demo stays on the synthetic pack).
+- The hub's moderator-calibration screen (the sets are published; the screen is its own K4 follow-up).
+- Changes to `@chatwarden/profanity`'s own English list. Ordinary swearing stays its job.
+- Phrases, regex terms and a `severity` that changes matcher behaviour (it is metadata in this release).
+- A public web page listing terms. The service shows counts, versions and statuses; the data is in the signed zips.
+
+Found while building Part A:
+- The share status of a term is kept in memory in the http process (1000 terms, lost on restart). A store-backed record would survive a restart and agree across processes.
+- A report uses the audit name `term.share`, because the core adds only three names. A name of its own (`term.report`) would tell the two apart; it needs a core change and a peer floor.
+- The loader keeps the index's ETag in memory only, so a new process fetches the index whole; `state.json` could carry it.
+- A cache write failure leaves a verified release unadopted (the previous one stays). A read-only cache folder shows as `failed` / `cache_failed` in the hub.
+- The site headline and copy wait for the first real release and some use of it.

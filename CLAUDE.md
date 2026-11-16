@@ -51,6 +51,7 @@ before changing an area.
 | Hub UX, teams, claims | `docs/design/2026-11-10-hub-workbench-and-teams.md` |
 | Simple mode, embedding, public API | `docs/design/2026-11-10-hub-simple-mode-and-embedding.md`; the API lock in `packages/hub-react/test/api.test.ts` |
 | Product scope and phase order | `docs/design/2026-11-09-product-scope.md` |
+| The shared term corpus (the loader, the signed releases, the share and report calls, the Community list) | `docs/design/2026-11-12-k7-term-corpus.md`; the subpaths `@chatwarden/matcher/corpus` and `@chatwarden/matcher/corpus/node`; `scripts/no-corpus-data.test.ts` (no corpus data and no key in git) |
 | Releases, versions, peers | `RELEASING.md` |
 | Site deploy and CSP | `site/README.md` |
 

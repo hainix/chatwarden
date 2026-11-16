@@ -187,7 +187,7 @@ Staff, under the prefix you mount (`/admin` above). Each one is authenticated, n
 
 | Route | What it does |
 | --- | --- |
-| `GET /me` | Who is calling: `{ actor, role, can }`, where `can` is a boolean for every permission under the table in force (your `permissions` overrides included). It needs only a signed-in caller, and writes no audit row. `features` (`@experimental`, new in 0.1.9) is `{ appeals, renames, keepBlocked }` and is added only when one is on: appeals are on, renames can work (`names.renames` is on and the store can release one), or `names.keepBlocked` is on. With all three off the body is what 0.1.8 sent. |
+| `GET /me` | Who is calling: `{ actor, role, can }`, where `can` is a boolean for every permission under the table in force (your `permissions` overrides included). It needs only a signed-in caller, and writes no audit row. `features` (`@experimental`, new in 0.1.9) is `{ appeals, renames, keepBlocked }` and is added only when one is on: appeals are on, renames can work (`names.renames` is on and the store can release one), or `names.keepBlocked` is on. With all three off the body is what 0.1.8 sent. When you pass `community` (0.1.11), `features` also has `community: true`. |
 | `GET /reports?status&reason&cursor&limit` | The queue, newest first, as summaries: `id`, `createdAt`, `roomId`, `tags`, `category`, `reportedReason`, `reportedReasonLabel`, `status`, `badFaith`, `targetPerson`, `reporterPerson`, `actionedAt`, `actionedBy`, `targetHandle`, `reporterHandle`, `claim`, `viewing`, `reporterAccuracy`, `ai`, and `boosted`. `targetHandle` and `reporterHandle` are the reported person's and the reporter's handle as they were when the report was filed (null if none was recorded), so a row can show a name; they are staff-only, like the report page. `claim` is `{ by, since, until }` when another moderator (or you) is handling the reported person's case, else null, and `viewing` lists the other staff who have the case open right now (see the team routes below); both are empty for a report that is no longer open. `reporterAccuracy` is `{ decided, unfounded, falseRate, habitual }` for the reporter of an OPEN row: how their reports of the last 30 days turned out (`falseRate` is `unfounded / decided`, null below 5 decided reports; `habitual` is a rate of 0.8 or more). It is null on a decided row, when the reporter has no decided report in the window, when the store cannot tell, and for a caller whose role does not hold `history.read`. It is a ranking hint and a line on the case, never a reason to hide a report, and it never reaches a player. `boosted: true` (`@experimental`, new in 0.1.8) is on an OPEN row only when the queue signal feed (`feeds.queue`) is on, the person meets it and the caller's role holds `history.read`; with the feed off the key is absent and no store read is made. `ai` is the AI's brief of an OPEN report, `{ severity, confidence, rule, stale, injectionSuspected, hasRecommendation }` (the conduct level it read, how sure, the rule, whether it was read from older rules or an older version of the case, whether a line tried to instruct it, and whether it has a recommendation, which only level 2 counts), or null: on a decided row, when the AI is off or broken, and while a report has no read yet. No summary and no line ids. No chat text or notes. `reportedReason` is the reason the reporter gave (an id from the profile's reporting reasons; an old category reads as its new id, `disruption` as `griefing`), or null; `reportedReasonLabel` is its label as it is now (the id when the reason has since been removed, null when none was given). It is a hint, never the truth. `reason` filters on it: a reason id (the old `disruption` finds `griefing`), or `none` for the reports that gave no reason; a malformed value is 400 `invalid_query`, and an id nobody used is an empty page. |
 | `GET /reports/:id?level` | One report with its excerpt, notes, each person's history and a suggestion. This is where evidence is read, so it is audited with the report id. The answer is `{ report, history, suggest, rule, claim, ai, aiExpected? }`. `report` also has `reportedReasonLabel` beside `reportedReason`, and `detailAt` (when the reporter added their follow-up, or null). `rule` is the first still-citable rule of the reported reason, or `"uncovered"` when no reason was given (the moderator picks). `claim` is the claim on the reported person's case (`{ by, since, until }` or null). A claim never stops anyone reading. `ai` is null, or the AI's read: `{ id, severity, rule, summary, evidenceLineIds, confidence, stale, injectionSuspected, model, at, recommendation }`. `recommendation` is null at level 1, and at level 2 `{ verdict, severity, rule, evidenceLineIds, step, stepWithinCeiling }`: `step` is what the ladder suggests for the AI's conduct level, computed now (`{ kind, durationMs, label }`, or null for no action), and `stepWithinCeiling` is true when it is a note, a warning or a restriction of at most 24 hours with a line by the reported person cited, which is all a one-key accept may fill. Opening a case with no read, or a stale one, queues a read; the answer is whatever is stored now, and never an error. `aiExpected` is a boolean that is present only while the AI is on (level 1 or 2): true when a read of this report is on its way (an adapter is set up, the breaker is closed, neither daily limit is reached and the read has not ended without an answer), false in those degraded cases. The hub waits for a read only when it is true; with the AI off the answer has no such key. |
 | `POST /reports/:id/suggest` | `{ level, rule?, person? }`: a suggestion for a person the report names (default: the reported person). When a signal ladder rule (`feeds.ladder`) fired it also carries `signals: { raised, ids }` and the rule's sentence is in `why` (`GET /reports/:id` carries the same in its `suggest`); both only for a caller whose role holds `history.read`, because the sentence is a count of what other players did. A caller without it gets the same outcome and label, and no `signals` key and no such sentence. |
@@ -272,6 +272,42 @@ With appeals off every appeal route answers 404 `not_found`, and with all the ne
 of moderators who are all `moderator` lowers who may decide with `permissions: { 'appeals.decide': 'moderator' }` (the default is `senior`), and a team of one
 also sets `appeals.allowSelfReview`, because the kit refuses `same_decider` to the moderator who made the decision: give each moderator their own login.
 `POST /appeals` has its own limiter, `playerRoutes(cw, { appealsRateLimit: { max, windowMs } })` (default 10 an hour per identity), in front of the weekly cap.
+
+### The community list (0.1.11)
+
+`adminRoutes(cw, { terms, community: { loader, live, share? } })` adds the staff routes of the shared term list. Nothing is added
+unless you pass `community`: without it these routes do not exist (404), `GET /terms` is what it was, and `GET /me` has no
+`features.community`. This package imports no matcher code. `community` is described by small structural types
+(`CommunityAdmin`, `CommunityLoader`, `CommunityShareClient`, exported as types only); the objects from
+`@chatwarden/matcher/corpus` fit them: `loader` is what `startCorpus` returns, `live` is your `LiveTerms`, `share` is what
+`createCommunityShare` returns. All of it is `@experimental` until 0.2.
+
+| Route | Permission | What |
+| --- | --- | --- |
+| `GET /community` | `terms.read` | `{ state, applied, available, pending, lastError: { code, stage } \| null, languages, license, counts, sharing, reporting }`. No term. |
+| `POST /community/refresh` | `terms.write` | Check now. The same body as the GET. |
+| `POST /community/apply` | `settings` (owner) | Apply the verified list. Audit `community.apply` (target `release:<version>`). The rows are stamped `corpus:<version>`; the staff member is in the audit row only. 409 `nothing_to_apply` or `apply_refused`. |
+| `GET /terms/:id` | `terms.read` | One row, a hidden community row too, with `community` and `blocks30d`. |
+| `POST /terms/lookup` | `terms.read` | The row for an exact word (folded), or 404. The word is in the body, never the address. |
+| `POST /terms/:id/share` | `terms.write` | Send one term of your own to the community list (only with `share`). Body `{ category, target?, note? }`. The answer is `{ status }` only. 409 `not_shareable` for a community row. |
+| `GET /terms/:id/share` | `terms.read` | `{ status, reason? }` of the last share of this term, or `{ status: null }` when it was never shared (so a page that asks as it opens an editor logs no 404). |
+| `POST /terms/:id/report` | `terms.write` | Report a problem with a term of the community list (only with a `share` that has `report`). Body `{ kind }`, one of `innocent_sense`, `wrong_category`, `removal`. Sends the term id and the kind, never the word. The answer is `{ status: 'received' }`. 409 `not_reportable` for a row of your own. |
+
+`GET /terms` lists your own rows and the community rows a person has touched. The untouched community rows are counted
+(`community: { hidden: n }`) and not listed, unless you set `exposeCommunityRows` to `true`. They are reached one at a time with
+`GET /terms/:id`. A refused or failed share or report is a fixed error code (`share_unavailable` 502, `share_refused` 422,
+`rate_limited` 429, `invalid_request` 400), never the service's text. `GET /me` has `features.community: true` when `community` is wired.
+
+**What is written, and what is not.** Every term route writes only ids. A share or a report writes an audit row for every attempt that reached the service, even when the share fails: the word may have left the server. The row is `term.share`, on the term id.
+The outcome (`offline`, `rate_limited`, `rejected` and so on) is logged as a closed code and nothing else. A report uses the same
+audit name as a share because the core adds only three names (`term.share`, `community.apply` and the target type `release`). A
+request that never reached the service (a bad body, an unknown id, too low a role) writes no row.
+
+**Things to know.** The share status is kept in memory in this process (at most 1000 terms, the oldest go first) and is lost
+on restart; after a restart a shared term reads as never shared, and sending it again gets `duplicate` or `known` from the service.
+Two processes behind a balancer do not share it. Two staff who send the same term at once get `duplicate` for the second. The
+service is asked about the status of a term at most once every 15 seconds, however often the page asks, and many reads at the same
+moment are one request. The hub never contacts the service.
 
 ### The AI routes
 
@@ -443,6 +479,7 @@ error class only.
 | `same_decider` | 409 | The moderator who made the decision cannot decide its appeal (`appeals.allowSelfReview` lifts this for a team of one). |
 | `gone` | 409 | The sanction an appeal was about is gone (revoked meanwhile); the appeal is closed as moot. |
 | `not_shareable` | 409 | `POST /terms/:id/share` for a row the shared list added (it is already on it). |
+| `not_reportable` | 409 | `POST /terms/:id/report` for a row of your own (only a term of the community list can be reported). |
 | `nothing_to_apply` | 409 | `POST /community/apply` with no verified community list. |
 | `apply_refused` | 409 | `POST /community/apply` was refused by the live term list (it would leave no active term, or unblock a known line); nothing changed. |
 | `pending_rename` | 409 | `POST /people/:ref/rename` while an earlier request is still waiting for the game to release the player. |
