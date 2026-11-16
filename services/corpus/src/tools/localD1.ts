@@ -1,4 +1,5 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { returnsRows } from './rows.js';
 import type { D1Like, D1Result, D1Statement } from '../env.js';
 
 // A D1-shaped, in-memory copy of the database for the maintainers' tools (the release builder reads a copy, never the live database): it opens a
@@ -22,7 +23,7 @@ class Statement implements D1Statement {
   private execute(): D1Result {
     const stmt = this.db.prepare(this.sql);
     const params = this.values as SQLInputValue[];
-    if (stmt.columns().length > 0) return { results: stmt.all(...params).map((row) => ({ ...row })), success: true, meta: meta(0, 0) };
+    if (returnsRows(stmt, this.sql)) return { results: stmt.all(...params).map((row) => ({ ...row })), success: true, meta: meta(0, 0) };
     const out = stmt.run(...params);
     return { results: [], success: true, meta: meta(Number(out.changes), out.lastInsertRowid) };
   }

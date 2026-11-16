@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
+import { returnsRows } from '../src/tools/rows.js';
 import type { D1Like, D1Result, D1Statement } from '../src/env.js';
 
 // A D1-shaped adapter over node:sqlite, so every test runs the real SQL with no Cloudflare account. It follows D1 where D1 differs from
@@ -16,7 +17,7 @@ const meta = (changes: number, last: number | bigint): { changes: number; last_r
 function execute(db: DatabaseSync, sql: string, values: readonly unknown[]): D1Result {
   const stmt: StatementSync = db.prepare(sql);
   const params = values as SQLInputValue[];
-  if (stmt.columns().length > 0) {
+  if (returnsRows(stmt, sql)) {
     const results = stmt.all(...params).map((row) => ({ ...row }));
     return { results, success: true, meta: meta(0, 0) };
   }
