@@ -74,21 +74,21 @@ export interface TermsRelease {
   positive: string[];
 }
 
-const badManifest = (): CorpusError => new CorpusError('bad_manifest', 'unpack');
-const badPack = (): CorpusError => new CorpusError('bad_pack', 'validate');
+export const badManifest = (): CorpusError => new CorpusError('bad_manifest', 'unpack');
+export const badPack = (): CorpusError => new CorpusError('bad_pack', 'validate');
 
 const CATEGORIES: readonly string[] = ['slur', 'abuse', 'sexual', 'other'];
 const TARGETS: readonly string[] = ['none', 'ethnicity', 'religion', 'gender', 'sexuality', 'disability', 'nationality', 'other'];
 const SEVERITIES: readonly string[] = ['rude', 'hostile', 'severe'];
 const STATUSES: readonly string[] = ['provisional', 'accepted', 'disputed', 'withdrawn'];
 
-const VERSION_RE = /^\d{4}\.(?:0[1-9]|1[0-2])\.(?:0|[1-9]\d{0,2})$/;
+export const VERSION_RE = /^\d{4}\.(?:0[1-9]|1[0-2])\.(?:0|[1-9]\d{0,2})$/;
 const TERM_ID_RE = /^CWT-\d{4}-\d{5}$/;
 const EXCEPTION_ID_RE = /^CWX-\d{4}-\d{5}$/;
-const LANG_RE = /^[a-z]{2,3}$/;
-const SHA_RE = /^[0-9a-f]{64}$/;
+export const LANG_RE = /^[a-z]{2,3}$/;
+export const SHA_RE = /^[0-9a-f]{64}$/;
 const NEGATIVE_NAME_RE = /^negative\.([a-z]{2,3})\.json$/;
-const UNLISTED_OK: readonly string[] = ['manifest.json', 'LICENSE.txt', 'README.txt'];
+export const UNLISTED_OK: readonly string[] = ['manifest.json', 'LICENSE.txt', 'README.txt'];
 
 const MAX_TERMS = 50_000;
 const MAX_EXCEPTIONS = 10_000;
@@ -99,33 +99,39 @@ const MAX_FILE_LINES = 2000;
 const MAX_FILE_LINE = 500;
 const MAX_PHRASE = 100;
 
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+/** @internal shared with the eval reader */
+export const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** An object whose keys are exactly `keys`: no more, no fewer. Each is read once by the caller. */
-function exact(v: unknown, keys: readonly string[], fail: () => CorpusError): Record<string, unknown> {
+/** @internal shared with the eval reader */
+export function exact(v: unknown, keys: readonly string[], fail: () => CorpusError): Record<string, unknown> {
   if (!isObject(v)) throw fail();
   const own = Object.keys(v);
   if (own.length !== keys.length || own.some((k) => !keys.includes(k))) throw fail();
   return v;
 }
 
-function nonNegativeInt(v: unknown, fail: () => CorpusError, max = Number.MAX_SAFE_INTEGER): number {
+/** @internal shared with the eval reader */
+export function nonNegativeInt(v: unknown, fail: () => CorpusError, max = Number.MAX_SAFE_INTEGER): number {
   if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 0 || v > max) throw fail();
   return v;
 }
 
-function oneOf<T extends string>(v: unknown, list: readonly string[], fail: () => CorpusError): T {
+/** @internal shared with the eval reader */
+export function oneOf<T extends string>(v: unknown, list: readonly string[], fail: () => CorpusError): T {
   if (typeof v !== 'string' || !list.includes(v)) throw fail();
   return v as T;
 }
 
-function text(v: unknown, fail: () => CorpusError, max: number): string {
+/** @internal shared with the eval reader */
+export function text(v: unknown, fail: () => CorpusError, max: number): string {
   if (typeof v !== 'string' || v.length < 1 || v.length > max) throw fail();
   return v;
 }
 
 /** A list of distinct base language tags. */
-function languageList(v: unknown, fail: () => CorpusError, min: number, max: number): string[] {
+/** @internal shared with the eval reader */
+export function languageList(v: unknown, fail: () => CorpusError, min: number, max: number): string[] {
   if (!Array.isArray(v) || v.length < min || v.length > max) throw fail();
   const out: string[] = [];
   for (const tag of v as unknown[]) {
@@ -140,7 +146,8 @@ function lineList(v: unknown, fail: () => CorpusError, maxCount: number, maxLeng
   return (v as unknown[]).map((line) => text(line, fail, maxLength));
 }
 
-function jsonOf(bytes: Uint8Array, fail: () => CorpusError): unknown {
+/** @internal shared with the eval reader */
+export function jsonOf(bytes: Uint8Array, fail: () => CorpusError): unknown {
   try {
     return JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(asBytes(bytes)));
   } catch {
@@ -323,7 +330,8 @@ function checkFiles(entries: Map<string, Uint8Array>, manifest: ReleaseManifest)
 }
 
 /** The entries as a plain Map of bytes (a copy), or a refusal if the input is not one. */
-function entriesOf(files: unknown): Map<string, Uint8Array> {
+/** @internal shared with the eval reader */
+export function entriesOf(files: unknown): Map<string, Uint8Array> {
   if (Object.prototype.toString.call(files) !== '[object Map]') throw badManifest();
   const out = new Map<string, Uint8Array>();
   for (const [name, bytes] of (files as ReadonlyMap<unknown, unknown>).entries()) {

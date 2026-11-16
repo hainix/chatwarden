@@ -15,6 +15,16 @@ export {
 } from './release.js';
 export { releaseToPack, type PackSelection } from './select.js';
 export {
+  parseEvalSet,
+  type ConductLevelName,
+  type EvalCaseFile,
+  type EvalExpectFile,
+  type EvalLineFile,
+  type EvalManifest,
+  type EvalMeta,
+  type EvalSet,
+} from './evalset.js';
+export {
   chooseRelease,
   parseIndex,
   revokedKeyIdsOf,
@@ -30,6 +40,7 @@ export {
 export {
   createCorpusLoader,
   type CorpusCache,
+  type CorpusEvalLoader,
   type CorpusLoader,
   type CorpusLoaderOptions,
   type CorpusState,

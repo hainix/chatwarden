@@ -284,7 +284,7 @@ export async function rig(over: Partial<CorpusLoaderOptions> & Record<string, un
       schedule,
       ...over,
       ...extra,
-    } as CorpusLoaderOptions);
+    } as CorpusLoaderOptions) as CorpusLoader;
   return { w, cache, clock, schedule, warn, loader: make(), make };
 }
 

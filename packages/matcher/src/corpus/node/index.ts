@@ -4,4 +4,4 @@
 
 export { fileCache } from './fileCache.js';
 export { installationKey } from './installationKey.js';
-export { startCorpus, type StartCorpusOptions, type StartedCorpus } from './start.js';
+export { startCorpus, type StartCorpusOptions, type StartedCorpus, type StartedEvalCorpus } from './start.js';

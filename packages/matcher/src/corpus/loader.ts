@@ -3,10 +3,11 @@ import type { LiveTerms, SyncResult, SyncSummary } from '../liveTerms.js';
 import type { TermPack } from '../termPack.js';
 import { readBounded } from './bounded.js';
 import { CorpusError, type CorpusErrorCode, type CorpusStage } from './errors.js';
+import { parseEvalSet, type EvalSet } from './evalset.js';
 import { INDEX_MAX_BYTES, chooseRelease, parseIndex, revokedKeyIdsOf, type CorpusIndex, type CorpusKind, type CorpusReleaseEntry } from './index-file.js';
 import { CORPUS_BASE_URL, CORPUS_KEYS, type CorpusKey } from './keys.js';
 import { parseTermsRelease, sha256Hex, type TermsRelease } from './release.js';
-import { releaseToPack, type PackSelection } from './select.js';
+import { releaseToPack, selectedLanguages, type PackSelection } from './select.js';
 import { isBytes, verifySignature } from './sign.js';
 import { ZIP_LIMITS, readZip } from './zip.js';
 
@@ -15,6 +16,8 @@ import { ZIP_LIMITS, readZip } from './zip.js';
 // against the index, its signature is checked, and only then is it unzipped, parsed and turned into a pack. The disk is untrusted: a
 // cached release is verified again every time it is read. Nothing here throws out of refresh(), status() or start(), and a failure
 // leaves the list in use exactly as it was. Errors and logs carry a stage and a code, never a term, a URL, a path or a key.
+// The same loader reads an eval set (`kind: 'eval'`, design 6.10 and 12): the download, the verification and the cache are the same;
+// what is read from the archive is an `EvalSet` (`release()`), there is no pack to apply, and its cache names are its own.
 
 /** A timer the loader can be given: run `fn` once after `ms` milliseconds, and return a function that cancels it. @experimental */
 export interface Schedule {
@@ -74,6 +77,15 @@ export interface RefreshResult {
   changed: boolean;
 }
 
+/**
+ * What `createCorpusLoader({ kind: 'eval' })` returns: the same refresh, status and start, with `release()` answering the verified
+ * {@link EvalSet} (only the selected languages' cases; its manifest is whole). There is nothing to apply.
+ * @experimental
+ */
+export interface CorpusEvalLoader extends Omit<CorpusLoader, 'release' | 'pack' | 'applyTo'> {
+  release(): EvalSet | null;
+}
+
 /** @experimental */
 export interface CorpusLoader {
   /** Never rejects. A second call while one is running returns the same promise. */
@@ -118,8 +130,10 @@ interface DiskState {
 interface Verified {
   version: string;
   sequence: number;
-  release: TermsRelease;
-  pack: TermPack;
+  /** A terms release and its pack, or (for an eval loader) an eval set and no pack. */
+  release: TermsRelease | null;
+  evalSet: EvalSet | null;
+  pack: TermPack | null;
   signer: string;
   fromSeed?: boolean;
 }
@@ -181,17 +195,20 @@ function sigUrlOf(zipUrl: string): string {
 
 /**
  * Make a loader for the shared term list. Throws a `RangeError` (naming the option, never a value) for a configuration that can never
- * work: neither or both of `pin` and `follow`, a missing cache or clock, a bad `kit` or `apply`, or `kind: 'eval'` (eval sets have
- * their own reader).
+ * work: neither or both of `pin` and `follow`, a missing cache or clock, a bad `kit` or `apply`, a `kind` that is neither `terms` nor
+ * `eval`, or a `select` with no language.
  * @experimental
  */
-export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
+export function createCorpusLoader(options: CorpusLoaderOptions & { kind: 'eval' }): CorpusEvalLoader;
+export function createCorpusLoader(options: CorpusLoaderOptions & { kind?: 'terms' }): CorpusLoader;
+export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader | CorpusEvalLoader;
+export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader | CorpusEvalLoader {
   const o = options as CorpusLoaderOptions & { pin?: unknown; follow?: unknown };
   if (o === null || typeof o !== 'object') throw new RangeError('createCorpusLoader: options are required');
   if ((o.pin === undefined) === (o.follow === undefined)) throw new RangeError('createCorpusLoader: give pin or follow, not both and not neither');
   if (o.pin !== undefined && (typeof o.pin !== 'string' || !VERSION_RE.test(o.pin))) throw new RangeError('createCorpusLoader: pin must be a release version such as 2026.12.0');
   if (o.follow !== undefined && o.follow !== 'stable') throw new RangeError("createCorpusLoader: follow must be 'stable'");
-  if (o.kind !== undefined && o.kind !== 'terms') throw new RangeError("createCorpusLoader: kind must be 'terms'");
+  if (o.kind !== undefined && o.kind !== 'terms' && o.kind !== 'eval') throw new RangeError("createCorpusLoader: kind must be 'terms' or 'eval'");
   if (o.cache === null || typeof o.cache !== 'object' || typeof o.cache.read !== 'function' || typeof o.cache.write !== 'function' || typeof o.cache.remove !== 'function') {
     throw new RangeError('createCorpusLoader: cache must have read, write and remove');
   }
@@ -200,7 +217,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
   if (o.apply !== undefined && o.apply !== 'manual' && o.apply !== 'auto') throw new RangeError("createCorpusLoader: apply must be 'manual' or 'auto'");
   if (o.select === null || typeof o.select !== 'object') throw new RangeError('createCorpusLoader: select is required');
 
-  const kind: CorpusKind = 'terms';
+  const kind: CorpusKind = o.kind ?? 'terms';
   const pin = o.pin as string | undefined;
   const cache = o.cache;
   const clock = o.clock;
@@ -210,7 +227,11 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
   const kit = o.kit ?? ANY_KIT;
   const select = o.select;
   const bases = [o.baseUrl ?? CORPUS_BASE_URL, ...(o.mirrors ?? [])].map((b) => String(b).replace(/\/+$/, ''));
-  let target: Pick<LiveTerms, 'syncPack'> | undefined = o.terms;
+  let target: Pick<LiveTerms, 'syncPack'> | undefined = kind === 'terms' ? o.terms : undefined;
+  // An eval set has its own state file, so a term list and an eval set can share one cache folder.
+  const stateName = kind === 'terms' ? 'state.json' : 'state-eval.json';
+  // Only an eval loader needs the languages (a term list's selection is checked when the pack is built).
+  const evalLanguages = kind === 'eval' ? selectedLanguages(select) : [];
 
   const warn = (event: string, detail: Record<string, string | number | boolean>): void => {
     try {
@@ -339,6 +360,14 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
     const { keyId } = await verifySignature('zip', zip, sig, keys, { revokedKeyIds: [...revoked] });
     afterSignature?.();
     const files = await readZip(zip);
+    if (kind === 'eval') {
+      const set = parseEvalSet(files, expected);
+      // Only the selected languages' cases are kept; the manifest still says what the whole release holds.
+      const byLanguage: EvalSet['byLanguage'] = {};
+      for (const tag of evalLanguages) if (set.byLanguage[tag] !== undefined) byLanguage[tag] = set.byLanguage[tag];
+      const cases = set.manifest.languages.flatMap((l) => byLanguage[l] ?? []);
+      return { version: set.version, sequence: set.sequence, release: null, evalSet: { ...set, cases, byLanguage }, pack: null, signer: keyId };
+    }
     const release = parseTermsRelease(files, expected);
     let pack: TermPack;
     try {
@@ -346,7 +375,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
     } catch (e) {
       throw asCorpusError(e, 'bad_pack', 'validate');
     }
-    return { version: release.version, sequence: release.sequence, release, pack, signer: keyId };
+    return { version: release.version, sequence: release.sequence, release, evalSet: null, pack, signer: keyId };
   }
 
   /** The cached copy of a release, verified again; null (with `earlyError` set when it was there but wrong) if it cannot be used. */
@@ -368,7 +397,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
   }
 
   async function loadDisk(): Promise<void> {
-    const disk = parseDiskState(await safeRead('state.json'));
+    const disk = parseDiskState(await safeRead(stateName));
     maxSequence = Math.max(maxSequence, disk.maxSequence);
     for (const id of disk.revokedKeyIds) revoked.add(id);
     applied = disk.applied;
@@ -442,7 +471,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
     }
     await put('index.json', copy.bytes);
     await put('index.json.sig', copy.sig);
-    await put('state.json', stateBytes(entry.version));
+    await put(stateName, stateBytes(entry.version));
     lastCommit = key;
   }
 
@@ -495,6 +524,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
   // --- applying ---
   function tryApply(terms: Pick<LiveTerms, 'syncPack'>, v: Verified, actor: string, dryRun: boolean): SyncResult {
     try {
+      if (v.pack === null) return { ok: false, code: 'build_failed' };
       const r = terms.syncPack(v.pack, { actor, dryRun });
       return r !== null && typeof r === 'object' && typeof r.ok === 'boolean' ? r : { ok: false, code: 'build_failed' };
     } catch {
@@ -506,7 +536,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
     writes = writes
       .then(async () => {
         try {
-          await cache.write('state.json', stateBytes(verified?.version ?? null));
+          await cache.write(stateName, stateBytes(verified?.version ?? null));
         } catch {
           warn('corpus.refresh_failed', { stage: 'cache', code: 'cache_failed' });
         }
@@ -532,7 +562,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
       earlyError = null;
     }
     const live = target;
-    if (verified !== null && live !== undefined && verified.version !== applied) {
+    if (kind === 'terms' && verified !== null && live !== undefined && verified.version !== applied) {
       const actor = `corpus:${verified.version}`;
       if (mode === 'auto') {
         const r = tryApply(live, verified, actor, false);
@@ -587,9 +617,10 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
     refresh,
     status,
     pack: () => verified?.pack ?? null,
-    release: () => verified?.release ?? null,
+    // For an eval loader this answers the EvalSet; the overloads of createCorpusLoader say so, and nothing else can reach it.
+    release: () => (kind === 'eval' ? (verified?.evalSet ?? null) : (verified?.release ?? null)) as TermsRelease | null,
     applyTo(terms, actor) {
-      if (verified === null) return null;
+      if (verified === null || verified.pack === null) return null;
       target ??= terms;
       const r = tryApply(terms, verified, typeof actor === 'string' && actor !== '' ? actor : `corpus:${verified.version}`, false);
       if (r.ok) {

@@ -1,5 +1,5 @@
 import type { Clock } from '@chatwarden/core';
-import { createCorpusLoader, systemSchedule, type CorpusLoader, type CorpusLoaderOptions } from '../loader.js';
+import { createCorpusLoader, systemSchedule, type CorpusEvalLoader, type CorpusLoader, type CorpusLoaderOptions } from '../loader.js';
 import { fileCache } from './fileCache.js';
 
 // The convenience starter (design 8.2, 9): a disk cache in `dir`, one refresh bounded to 10 seconds so a game never waits on the
@@ -16,13 +16,19 @@ export type StartCorpusOptions = Omit<CorpusLoaderOptions, 'cache' | 'clock'> & 
 /** A running loader: everything {@link CorpusLoader} does, and `stop()` for the periodic refresh the starter began. @experimental */
 export type StartedCorpus = CorpusLoader & { stop(): void };
 
+/** A running eval-set loader (`kind: 'eval'`): everything {@link CorpusEvalLoader} does, and `stop()`. @experimental */
+export type StartedEvalCorpus = CorpusEvalLoader & { stop(): void };
+
 /**
  * Open the cache folder, refresh once (waiting at most 10 seconds for it; a slower refresh carries on in the background), start the
  * periodic refresh (24 hours, plus or minus 10 percent, unref'd) and return the loader. With `apply: 'auto'` and `terms`, the verified
  * list is applied inside that first refresh.
  * @experimental
  */
-export async function startCorpus(options: StartCorpusOptions): Promise<StartedCorpus> {
+export async function startCorpus(options: StartCorpusOptions & { kind: 'eval' }): Promise<StartedEvalCorpus>;
+export async function startCorpus(options: StartCorpusOptions & { kind?: 'terms' }): Promise<StartedCorpus>;
+export async function startCorpus(options: StartCorpusOptions): Promise<StartedCorpus | StartedEvalCorpus>;
+export async function startCorpus(options: StartCorpusOptions): Promise<StartedCorpus | StartedEvalCorpus> {
   if (options === null || typeof options !== 'object') throw new RangeError('startCorpus: options are required');
   const { dir, clock, ...rest } = options;
   if (typeof dir !== 'string' || dir === '') throw new RangeError('startCorpus: dir must be the folder the cache lives in');
@@ -40,5 +46,5 @@ export async function startCorpus(options: StartCorpusOptions): Promise<StartedC
   await Promise.race([loader.refresh().then(() => undefined), bound]);
   cancelBound();
   const stop = loader.start({ schedule });
-  return { ...loader, stop };
+  return { ...loader, stop } as StartedCorpus | StartedEvalCorpus;
 }

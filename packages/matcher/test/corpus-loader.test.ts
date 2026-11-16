@@ -392,7 +392,7 @@ describe('happy path', () => {
     expect(() => createCorpusLoader({ ...base, follow: 'stable', clock: null } as unknown as CorpusLoaderOptions)).toThrow(RangeError);
     expect(() => createCorpusLoader({ ...base, follow: 'stable', kit: 'next' } as unknown as CorpusLoaderOptions)).toThrow(RangeError);
     expect(() => createCorpusLoader({ ...base, follow: 'stable', apply: 'sometimes' } as unknown as CorpusLoaderOptions)).toThrow(RangeError);
-    expect(() => createCorpusLoader({ ...base, follow: 'stable', kind: 'eval' } as unknown as CorpusLoaderOptions)).toThrow(RangeError);
+    expect(() => createCorpusLoader({ ...base, follow: 'stable', kind: 'calibration' } as unknown as CorpusLoaderOptions)).toThrow(RangeError);
     expect(() => createCorpusLoader({ ...base, follow: 'stable' } as unknown as CorpusLoaderOptions)).not.toThrow();
   });
 

@@ -29,6 +29,11 @@ function baseTag(v: unknown): string | null {
   return LANG_RE.test(tag) ? tag : null;
 }
 
+/** The base tags a selection names, in the order asked for (`pt-BR` is `pt`); a RangeError naming the option when there are none. @internal */
+export function selectedLanguages(select: unknown): string[] {
+  return normalise(select).languages;
+}
+
 interface Normalised {
   languages: string[];
   categories: ReadonlySet<string>;
