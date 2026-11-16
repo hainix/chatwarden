@@ -423,6 +423,7 @@ declare const authorize: import('@chatwarden/http').Authenticate;
         '@chatwarden/core': src('core/src/index.ts'),
         '@chatwarden/store-sqlite': src('store-sqlite/src/index.ts'),
         '@chatwarden/store-memory': src('store-memory/src/index.ts'),
+        '@chatwarden/store-memory/testing': src('store-memory/src/testing/index.ts'),
         '@chatwarden/matcher': src('matcher/src/index.ts'),
         '@chatwarden/matcher/fixtures': src('matcher/src/fixtures/index.ts'),
         '@chatwarden/matcher/test-fixtures': src('matcher/src/fixtures/testFixtures.ts'),
@@ -564,6 +565,17 @@ describe('the AI sections', () => {
     expect(doc).toMatch(/leaves the AI inert/i);
     expect(doc).toMatch(/does not carry them/i);
     expect(readme('store-memory')).toMatch(/```ts\nimport [^\n]*\n[^`]*import \{[^}]*withMemoryAi[^}]*\} from '@chatwarden\/store-memory';/);
+  });
+
+  it('store-memory: the test kit says first that it is not for production, names its entry, its experimental status and its plain errors, and its example starts with an import', () => {
+    const raw = readme('store-memory');
+    const section = raw.slice(raw.indexOf('## The test kit'));
+    expect(section.length).toBeGreaterThan(500);
+    const doc = flat(section);
+    expect(doc.indexOf('Not for production')).toBeGreaterThanOrEqual(0);
+    expect(doc.indexOf('Not for production')).toBeLessThan(80);
+    for (const needle of ['@chatwarden/store-memory/testing', '@experimental', 'ScriptMismatch', 'createTestKit', 'kit.play', 'checkLines', 'no `node:` import', 'invented']) expect(doc, needle).toContain(needle);
+    expect(section).toMatch(/```ts\nimport \{[^}]*createTestKit[^}]*\} from '@chatwarden\/store-memory\/testing';/);
   });
 
   it('store-memory: the signal methods are opt-in through withMemorySignals, said plainly, with a snippet that compiles (it starts with an import)', () => {

@@ -41,7 +41,10 @@ const CHAT_ENTRY = fileURLToPath(new URL('./browser-entry-chat.ts', import.meta.
 // Raised to 125 KB at 0.1.8 on the maintainer's instruction ("size doesn't really matter, up the limit generously"): the slow-mode pacer runs
 // on every chat line (~2.4 KB) and signals validation and glue add ~3.8 KB (109.1 KB measured). The signal service itself still loads only for a
 // store that keeps signals. This guard now catches large accidental growth (a word list or a server module leaking in), not small features.
-const SIZE_BUDGET_GZIP = 125 * 1024;
+// Raised to 140 KB for K4b: `@chatwarden/store-memory/testing` (the test kit, a dev-only module a page does not ship) is in this entry so the same bundle proves it
+// is browser-safe and runs in the bare context; it measured 126.6 KB gzip with it (about 7 KB of it the kit, the scripted chat and the word stubs). The guard still
+// catches large accidental growth, not small features.
+const SIZE_BUDGET_GZIP = 140 * 1024;
 
 /**
  * The browser build without the server-only AI module, as a bundler that splits at `import()` gives a page that never passes an adapter:
@@ -163,6 +166,21 @@ describe('browser bundle: static scan', () => {
     expect(adapter).not.toMatch(/\bfrom\s*["']node:/);
     expect(adapter).not.toMatch(/\bimport\s*\(/);
     expect(adapter).not.toMatch(/\b(?:Buffer|process|require)\b/);
+  });
+
+  it('bundles @chatwarden/store-memory/testing from its own files, with no Node-side module and no test runner', () => {
+    const inputs = Object.keys(metafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    for (const file of ['index', 'kit', 'room', 'script', 'clock', 'duration', 'words']) expect(inputs, file).toContain(`packages/store-memory/dist/src/testing/${file}.js`);
+    expect(inputs.filter((p) => /node_modules\/(vitest|jest|@vitest|chai|mocha)\//.test(p))).toEqual([]);
+  });
+
+  it('the test kit has no node: import and no reference to the Node globals of its own', () => {
+    for (const file of ['index', 'kit', 'room', 'script', 'clock', 'duration', 'words']) {
+      const code = readFileSync(`${ROOT}packages/store-memory/dist/src/testing/${file}.js`, 'utf8').replaceAll(/\/\*[\s\S]*?\*\//g, '').replaceAll(/^\s*\/\/.*$/gm, '');
+      expect(code, file).not.toMatch(/\bfrom\s*["']node:/);
+      expect(code, file).not.toMatch(/\bimport\s*\(/);
+      expect(code, file).not.toMatch(/\b(?:Buffer|process|require)\b/);
+    }
   });
 
   it('the size entry does not carry the chat server side', () => {
@@ -326,7 +344,8 @@ describe('browser bundle: the server-only AI module', () => {
       expect(iife.includes(marker), `${marker} in the IIFE build`).toBe(false);
     }
     const inputs = inputsOf(metafile);
-    expect(inputs.filter((p) => /packages\/store-memory\/dist\/src\//.test(p)).sort()).toEqual(['packages/store-memory/dist/src/index.js', 'packages/store-memory/dist/src/memoryStore.js']);
+    // (The test kit under src/testing is in the entry too, and is not the AI's business: it is left out of this list.)
+    expect(inputs.filter((p) => /packages\/store-memory\/dist\/src\/(?!testing\/)/.test(p)).sort()).toEqual(['packages/store-memory/dist/src/index.js', 'packages/store-memory/dist/src/memoryStore.js']);
     // Only the inert facade (a few lines) is there: nothing of the service, the worker, the prompt, the validator, the fake or the ranking.
     expect(inputs.filter((p) => /packages\/core\/dist\/src\/ai\//.test(p))).toEqual(['packages/core/dist/src/ai/inert.js']);
     expect(inputs.filter((p) => /packages\/hub-react\/dist\/src\/ai\//.test(p))).toEqual([]);
@@ -746,7 +765,33 @@ const FETCH_SCENARIO = `(async () => {
   return JSON.stringify({ a: await a.json(), b: await b.text(), c: await c.text(), cType: c.headers.get('content-type'), d, e: e.status });
 })()`;
 
+// `@chatwarden/store-memory/testing` in the bare context: a kit, a script with a blocked word, an automatic timeout and a suggestion, with no Node anywhere.
+const TESTING_SCENARIO = `(async () => {
+  const { createTestKit, expectOutcomes } = CW.storeMemoryTesting;
+  const kit = await createTestKit({ blocked: ['zorbak'] });
+  const run = await kit.play([
+    { player: 'tarvo', say: 'good game', expect: 'delivered' },
+    { player: 'fenrisk', say: 'you zorbak', expect: 'refused:blocked' },
+    { wait: '10s' },
+    { player: 'fenrisk', say: 'zorbak zorbak', expect: 'refused:blocked' },
+    { wait: '10s' },
+    { player: 'fenrisk', say: 'zorbak', expect: 'refused:blocked' },
+    { player: 'fenrisk', say: 'hello', expect: 'refused:restricted' },
+  ]);
+  expectOutcomes(run, ['delivered', 'refused:blocked', 'refused:blocked', 'refused:blocked', 'refused:restricted']);
+  let mismatch = '';
+  try { expectOutcomes(run, ['delivered']); } catch (e) { mismatch = e.name; }
+  return JSON.stringify({ outcomes: run.outcomes, auto: run.events.some((e) => e.type === 'auto.restricted'), mismatch, now: kit.clock.now() });
+})()`;
+
 describe('browser bundle: runs in a context with no Node globals', () => {
+  it('runs the test kit: a script, a blocked word, an automatic timeout and a plain-error assertion', async () => {
+    const ctx = browserContext();
+    run(ctx, iife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, TESTING_SCENARIO)) as Record<string, unknown>;
+    expect(out).toEqual({ outcomes: ['delivered', 'refused:blocked', 'refused:blocked', 'refused:blocked', 'refused:restricted'], auto: true, mismatch: 'ScriptMismatch', now: 1_800_000_020_000 });
+  });
+
   it('serves a Request with toFetch: a route, a body, a stream, a pass and a 404', async () => {
     const ctx = browserContext();
     run(ctx, iife);
@@ -765,7 +810,7 @@ describe('browser bundle: runs in a context with no Node globals', () => {
   it('loads the bundle with only browser globals', () => {
     const ctx = browserContext();
     run(ctx, iife);
-    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,httpFetch,hubHeadless,matcher,storeMemory');
+    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,httpFetch,hubHeadless,matcher,storeMemory,storeMemoryTesting');
     expect(run(ctx, `typeof CW.core.createChatwarden + typeof CW.matcher.LiveTerms + typeof CW.storeMemory.MemoryStore`)).toBe('functionfunctionfunction');
   });
 

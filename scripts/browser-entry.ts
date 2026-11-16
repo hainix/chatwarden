@@ -7,3 +7,4 @@ export * as storeMemory from '@chatwarden/store-memory';
 export * as httpAdmin from '@chatwarden/http/admin';
 export * as httpFetch from '@chatwarden/http/fetch';
 export * as hubHeadless from '@chatwarden/hub-react/headless';
+export * as storeMemoryTesting from '@chatwarden/store-memory/testing';
