@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "../dist/types-check",
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["workers.ts", "../src/env.ts"]
+}

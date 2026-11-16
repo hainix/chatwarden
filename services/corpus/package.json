@@ -1,0 +1,22 @@
+{
+  "name": "@chatwarden/corpus-service",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Chatwarden term-corpus service: submissions, review, reports and the release builder. Deployed by the maintainer to Cloudflare; never published.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@chatwarden/matcher": "0.1.11"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "wrangler": "^4.163.0"
+  }
+}

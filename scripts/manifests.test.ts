@@ -502,7 +502,7 @@ describe('changesets config', () => {
     expect(config.fixed).toEqual([['@chatwarden/*']]);
   });
   it('ignores the example and the landing site (private, never versioned or published)', () => {
-    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/example-recipes', '@chatwarden/site']);
+    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/example-recipes', '@chatwarden/corpus-service', '@chatwarden/site']);
   });
   it('has no linked groups', () => {
     expect(config.linked).toEqual([]);
@@ -512,7 +512,9 @@ describe('changesets config', () => {
     const ai = readJson<Manifest>('examples', 'ai-anthropic', 'package.json');
     const recipes = readJson<Manifest>('examples', 'recipes', 'package.json');
     const site = readJson<Manifest>('site', 'package.json');
-    expect(config.ignore).toEqual([ai.name, tiny.name, recipes.name, site.name]);
+    const service = readJson<Manifest>('services', 'corpus', 'package.json');
+    expect(config.ignore).toEqual([ai.name, tiny.name, recipes.name, service.name, site.name]);
+    expect(service.private).toBe(true);
     expect(recipes.private).toBe(true);
     expect(ai.private).toBe(true);
     expect(tiny.private).toBe(true);
