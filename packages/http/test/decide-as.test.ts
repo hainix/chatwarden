@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../src/errors.js';
 import type { ErrorCode } from '../src/errors.js';
 import { decideAs } from '../src/admin/decideAs.js';
@@ -51,7 +51,7 @@ const asInput = (w: W, reportId: string, body: Record<string, unknown>, over: Pa
   permissions: PERMISSIONS,
   claims: 'gate',
   ...over,
-});
+} as DecideAsInput);
 
 const viaDecideAs = async (w: W, reportId: string, body: Record<string, unknown>, over: Partial<DecideAsInput> = {}): Promise<Outcome> => {
   try {
@@ -170,7 +170,7 @@ describe('decideAs matches the staff route', () => {
 });
 
 describe('decideAs and the claim on the person', () => {
-  it('gates a claim held by another actor and passes the actor\'s own; takeOver needs canOverride; claims \'ignore\' never gates', async () => {
+  it('gates a claim held by another actor and passes the actor\'s own; takeOver needs the claims.override role; claims \'ignore\' never gates', async () => {
     const w = await world();
     const f1 = await w.file();
     expect(w.cw.cases.claim(f1.target, 'ann').ok).toBe(true);
@@ -186,11 +186,11 @@ describe('decideAs and the claim on the person', () => {
     expect(w.cw.reports.get(f1.id)?.status).toBe('open');
     expect(w.cw.cases.holder(f1.target)?.by).toBe('ann');
 
-    // takeOver without canOverride: still refused (the caller's own say-so is not enough)
-    expect(await viaDecideAs(w, f1.id, decisionOf(f1.target, 'upheld'), { actor: 'bea', takeOver: true })).toEqual({ status: 409, error: 'claimed' });
-    expect(await viaDecideAs(w, f1.id, decisionOf(f1.target, 'upheld'), { actor: 'bea', takeOver: true, canOverride: false })).toEqual({ status: 409, error: 'claimed' });
-    // canOverride without takeOver: also refused
-    expect(await viaDecideAs(w, f1.id, decisionOf(f1.target, 'upheld'), { actor: 'bea', canOverride: true })).toEqual({ status: 409, error: 'claimed' });
+    // takeOver as a moderator: still refused (the role decides, not the caller's say-so)
+    expect(await viaDecideAs(w, f1.id, decisionOf(f1.target, 'upheld'), { actor: 'bea', takeOver: true, onTakeOver: () => undefined })).toEqual({ status: 409, error: 'claimed' });
+    expect(await viaDecideAs(w, f1.id, decisionOf(f1.target, 'upheld'), { actor: 'bea', role: 'moderator', takeOver: true, onTakeOver: () => undefined })).toEqual({ status: 409, error: 'claimed' });
+    // a senior without takeOver: also refused
+    expect(await viaDecideAs(w, f1.id, decisionOf(f1.target, 'upheld'), { actor: 'bea', role: 'senior' })).toEqual({ status: 409, error: 'claimed' });
     expect(w.cw.cases.holder(f1.target)?.by).toBe('ann');
 
     // the holder's own decision passes
@@ -211,7 +211,7 @@ describe('decideAs and the claim on the person', () => {
     const hook = (person: string): void => {
       seen.push({ person, holderThen: w.cw.cases.holder(person)?.by });
     };
-    const out = await viaDecideAs(w, f.id, decisionOf(f.target, 'upheld'), { actor: 'sam', role: 'senior', takeOver: true, canOverride: true, onTakeOver: hook });
+    const out = await viaDecideAs(w, f.id, decisionOf(f.target, 'upheld'), { actor: 'sam', role: 'senior', takeOver: true, onTakeOver: hook });
     expect(out).toMatchObject({ status: 200, replay: false });
     expect(seen).toEqual([{ person: f.target, holderThen: 'ann' }]);
 
@@ -220,7 +220,7 @@ describe('decideAs and the claim on the person', () => {
     const failing = (): void => {
       throw new Error('audit unavailable');
     };
-    await expect(decideAs(w.cw, asInput(w, g.id, decisionOf(g.target, 'upheld'), { actor: 'sam', role: 'senior', takeOver: true, canOverride: true, onTakeOver: failing }))).rejects.toThrow('audit unavailable');
+    await expect(decideAs(w.cw, asInput(w, g.id, decisionOf(g.target, 'upheld'), { actor: 'sam', role: 'senior', takeOver: true, onTakeOver: failing }))).rejects.toThrow('audit unavailable');
     expect(w.cw.cases.holder(g.target)?.by).toBe('ann');
     expect(w.cw.reports.get(g.id)?.status).toBe('open');
   });
@@ -230,10 +230,10 @@ describe('decideAs and the claim on the person', () => {
     const f = await w.file();
     const calls: string[] = [];
     const hook = (p: string): void => void calls.push(p);
-    expect(await viaDecideAs(w, f.id, decisionOf(f.target, 'no_action'), { actor: 'sam', role: 'senior', takeOver: true, canOverride: true, onTakeOver: hook })).toMatchObject({ status: 200 });
+    expect(await viaDecideAs(w, f.id, decisionOf(f.target, 'no_action'), { actor: 'sam', role: 'senior', takeOver: true, onTakeOver: hook })).toMatchObject({ status: 200 });
     const g = await w.file();
     w.cw.cases.claim(g.target, 'sam');
-    expect(await viaDecideAs(w, g.id, decisionOf(g.target, 'no_action'), { actor: 'sam', role: 'senior', takeOver: true, canOverride: true, onTakeOver: hook })).toMatchObject({ status: 200 });
+    expect(await viaDecideAs(w, g.id, decisionOf(g.target, 'no_action'), { actor: 'sam', role: 'senior', takeOver: true, onTakeOver: hook })).toMatchObject({ status: 200 });
     expect(calls).toEqual([]);
   });
 
@@ -265,7 +265,7 @@ describe('decideAs and the claim on the person', () => {
     expect(w.cw.cases.holder(first.target)?.by).toBe('ann');
   });
 
-  it('with claims \'ignore\' the actor\'s own claim is released on the last open report, and another holder\'s is left alone', async () => {
+  it("with claims 'ignore' no claim is ended: neither another holder's nor one under the actor's own name", async () => {
     const w = await world();
     const f = await w.file();
     w.cw.cases.claim(f.target, 'ann');
@@ -274,7 +274,7 @@ describe('decideAs and the claim on the person', () => {
     const g = await w.file();
     w.cw.cases.claim(g.target, 'coop');
     await viaDecideAs(w, g.id, decisionOf(g.target, 'no_action'), { actor: 'coop', claims: 'ignore' });
-    expect(w.cw.cases.holder(g.target)).toBeNull();
+    expect(w.cw.cases.holder(g.target)?.by).toBe('coop');
   });
 
   it('a failing release is logged by class and never turns the decision into an error', async () => {
@@ -399,5 +399,72 @@ describe('decideAs is exported and not a route', () => {
     await attempt({ permissions: resolvePermissions({ 'reports.decide': 'owner' }) }, decisionOf(f.target, 'no_action'));
     expect([...codes].sort()).toEqual(['forbidden', 'invalid_request', 'not_found']);
     expect(NOW).toBeGreaterThan(0);
+  });
+});
+
+describe('decideAs and the takeover hook (K5a review 1, 3, 6)', () => {
+  it('takeOver without an onTakeOver is refused before anything is read or written, for every role', async () => {
+    const w = await world();
+    const f = await w.file();
+    w.cw.cases.claim(f.target, 'ann');
+    for (const role of ['moderator', 'senior', 'owner'] as const) {
+      const input = asInput(w, f.id, decisionOf(f.target, 'upheld'), { actor: 'sam', role, takeOver: true } as Partial<DecideAsInput>);
+      await expect(decideAs(w.cw, input)).rejects.toThrow(TypeError);
+    }
+    // a takeOver nobody could use (nobody holds the case) is the same programming error
+    const g = await w.file();
+    await expect(decideAs(w.cw, asInput(w, g.id, decisionOf(g.target, 'no_action'), { actor: 'sam', role: 'senior', takeOver: true } as Partial<DecideAsInput>))).rejects.toThrow(TypeError);
+    expect(w.cw.cases.holder(f.target)?.by).toBe('ann');
+    expect(w.cw.reports.get(f.id)?.status).toBe('open');
+    expect(w.cw.reports.get(g.id)?.status).toBe('open');
+  });
+
+  it('the refusal never names the actor, the person or the report', async () => {
+    const w = await world();
+    const f = await w.file();
+    let message = '';
+    try {
+      await decideAs(w.cw, asInput(w, f.id, decisionOf(f.target, 'no_action'), { actor: 'sam-secret', role: 'senior', takeOver: true } as Partial<DecideAsInput>));
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).not.toBe('');
+    for (const s of ['sam-secret', f.target, f.id]) expect(message).not.toContain(s);
+  });
+
+  it('takeOver with a hook still works for a senior, and a caller-supplied canOverride is ignored (the role decides)', async () => {
+    const w = await world();
+    const f = await w.file();
+    w.cw.cases.claim(f.target, 'ann');
+    const forged = { actor: 'bea', role: 'moderator', takeOver: true, onTakeOver: () => undefined, canOverride: true } as unknown as Partial<DecideAsInput>;
+    expect(await viaDecideAs(w, f.id, decisionOf(f.target, 'upheld'), forged)).toEqual({ status: 409, error: 'claimed' });
+    expect(w.cw.cases.holder(f.target)?.by).toBe('ann');
+    const hook = vi.fn();
+    expect(await viaDecideAs(w, f.id, decisionOf(f.target, 'upheld'), { actor: 'sam', role: 'senior', takeOver: true, onTakeOver: hook })).toMatchObject({ status: 200 });
+    expect(hook).toHaveBeenCalledTimes(1);
+  });
+
+  it('canOverride follows the effective permission table: lowering claims.override lets a moderator take over, raising it stops a senior', async () => {
+    const w = await world();
+    const f = await w.file();
+    w.cw.cases.claim(f.target, 'ann');
+    const hook = vi.fn();
+    const raised = resolvePermissions({ 'claims.override': 'owner' });
+    expect(await viaDecideAs(w, f.id, decisionOf(f.target, 'upheld'), { actor: 'sam', role: 'senior', takeOver: true, onTakeOver: hook, permissions: raised })).toEqual({ status: 409, error: 'claimed' });
+    expect(hook).not.toHaveBeenCalled();
+    const lowered = resolvePermissions({ 'claims.override': 'moderator' });
+    expect(await viaDecideAs(w, f.id, decisionOf(f.target, 'upheld'), { actor: 'bea', role: 'moderator', takeOver: true, onTakeOver: hook, permissions: lowered })).toMatchObject({ status: 200 });
+    expect(hook).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims ignore does not end any claim (releaseWhenDone is not called)', async () => {
+    const w = await world();
+    const f = await w.file();
+    const spy = vi.spyOn(w.cw.cases, 'releaseWhenDone');
+    expect(await viaDecideAs(w, f.id, decisionOf(f.target, 'no_action'), { actor: 'coop:ops', claims: 'ignore' })).toMatchObject({ status: 200, replay: false });
+    expect(spy).not.toHaveBeenCalled();
+    const g = await w.file();
+    expect(await viaDecideAs(w, g.id, decisionOf(g.target, 'no_action'), { actor: 'ann' })).toMatchObject({ status: 200 });
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

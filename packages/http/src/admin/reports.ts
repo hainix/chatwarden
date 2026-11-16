@@ -6,7 +6,7 @@ import { roleAtLeast } from '../permissions.js';
 import { flagKey, handleFlags } from './handles.js';
 import { parseDecision, peopleOf } from './apply.js';
 import type { AdminCall, AdminContext } from './context.js';
-import { canOverrideClaims, gateCase } from './claims.js';
+import { gateCase } from './claims.js';
 import { decideAs } from './decideAs.js';
 import { bodyAiEcho, bodyDismissOpen, bodyId, bodyLevel, bodyObject, bodyRule, bodyTakeOver, has, queryLevel, queryLimit } from './validate.js';
 
@@ -320,8 +320,7 @@ export function reportRoutes(ctx: AdminContext): RouteTable {
         role: c.authz.role,
         permissions: ctx.permissions,
         claims: 'gate',
-        takeOver,
-        canOverride: canOverrideClaims(ctx, c),
+        ...(takeOver ? { takeOver: true as const } : {}),
         onTakeOver: (person) => c.audit('case.takeover', { type: 'person', ref: cw.people.canonical(person) }, 'required'),
         ...(echo === undefined ? {} : { echo }),
         ...(ctx.logger === undefined ? {} : { logger: ctx.logger }),
