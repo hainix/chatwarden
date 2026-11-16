@@ -15,6 +15,16 @@ no key**: tests use invented words and keys generated at run time, and `scripts/
 - `src/env.ts`: the typed bindings.
 - `test/`: the D1 and R2 fakes and the tests.
 
+## The submission API
+
+`POST /v1/submissions` and `GET /v1/submissions/:id` (design 6.8). The kit's share client is the contract and the tests drive it against the app
+(`test/world.ts`). The order of the checks is the order of their cost: content type, size (2 KiB, enforced while reading), the hashcash
+stamp (16 bits), the Ed25519 signature, the decline lock and the limits (20 a day per installation, 60 a day per network hash, 200 pending),
+then the body, the day window (the server's UTC day, one either side) and the gates. A request is counted only after it has paid for its
+stamp and signed. The network address (`cf-connecting-ip`) is turned into a keyed hash that changes every day (`COUNTER_SECRET`) and is never
+stored or logged; an IPv6 address counts as its /64. Logs hold `{ stage, code }` and nothing else. A cron trigger purges counters after two
+days and notes 90 days after a decision.
+
 ## Owner actions
 
 Written up with the tools (later tasks): create the D1 database and the R2 bucket, apply `schema.sql`, set the secrets

@@ -72,3 +72,6 @@ CREATE TABLE IF NOT EXISTS releases (
 );
 
 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL);
+
+-- At most one pending submission per word, whoever sends it: a second one at the same moment is a duplicate, not a second row.
+CREATE UNIQUE INDEX IF NOT EXISTS submissions_one_pending ON submissions (word_key) WHERE status IN ('received','in_review');

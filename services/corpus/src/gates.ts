@@ -45,18 +45,28 @@ export type ArrivalResult =
 
 const refuse = (code: ArrivalCode): ArrivalResult => ({ ok: false, code });
 
+/** The fields of a submission, cleaned. */
+export interface Fields {
+  wordKey: string;
+  term: string;
+  language: string;
+  category: string;
+  target: string;
+  note: string | null;
+}
+
 /**
- * The arrival gate: the fields of a submission checked against the closed lists, the term against the plain-word rule, the note against the
- * note rules, and the word against the top-ranked innocent words of its language. Each field is read once.
+ * The checks that need no database: the fields against the closed lists, the term against the plain-word rule, the note against the note
+ * rules, the language against the supported ones. Each field is read once. Never throws.
  */
-export async function arrivalGate(input: unknown, db: D1Like): Promise<ArrivalResult> {
+export function readFields(input: unknown): { ok: true; fields: Fields } | { ok: false; code: 'invalid' | 'unsupported_language' } {
   let term: unknown;
   let language: unknown;
   let category: unknown;
   let target: unknown;
   let note: unknown;
   try {
-    if (input === null || typeof input !== 'object' || Array.isArray(input)) return refuse('invalid');
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) return { ok: false, code: 'invalid' };
     const o = input as Record<string, unknown>;
     term = o.term;
     language = o.language;
@@ -64,21 +74,33 @@ export async function arrivalGate(input: unknown, db: D1Like): Promise<ArrivalRe
     target = o.target;
     note = o.note;
   } catch {
-    return refuse('invalid');
+    return { ok: false, code: 'invalid' };
   }
   const word = plainWord(term);
-  if (word === null) return refuse('invalid');
-  if (typeof language !== 'string' || !/^[a-z]{2,3}$/.test(language)) return refuse('invalid');
-  if (typeof category !== 'string' || !CATEGORIES.includes(category)) return refuse('invalid');
+  if (word === null) return { ok: false, code: 'invalid' };
+  if (typeof language !== 'string' || !/^[a-z]{2,3}$/.test(language)) return { ok: false, code: 'invalid' };
+  if (typeof category !== 'string' || !CATEGORIES.includes(category)) return { ok: false, code: 'invalid' };
   const aim = target === undefined ? 'none' : target;
-  if (typeof aim !== 'string' || !TARGETS.includes(aim)) return refuse('invalid');
+  if (typeof aim !== 'string' || !TARGETS.includes(aim)) return { ok: false, code: 'invalid' };
   const text = readNote(note);
-  if (text === undefined) return refuse('invalid');
-  if (!SUPPORTED_LANGUAGES.includes(language)) return refuse('unsupported_language');
-  const key = wordKey(word);
+  if (text === undefined) return { ok: false, code: 'invalid' };
+  if (!SUPPORTED_LANGUAGES.includes(language)) return { ok: false, code: 'unsupported_language' };
+  return { ok: true, fields: { wordKey: wordKey(word), term: word, language, category, target: aim, note: text } };
+}
+
+/** Whether a word key is in the top-ranked ordinary words of its language. */
+export async function isKnownInnocent(db: D1Like, language: string, key: string): Promise<boolean> {
   const rank = await innocentRank(db, language, key);
-  if (rank !== null && rank <= INNOCENT_TOP_RANK) return refuse('known_innocent');
-  return { ok: true, wordKey: key, term: word, language, category, target: aim, note: text };
+  return rank !== null && rank <= INNOCENT_TOP_RANK;
+}
+
+/** The arrival gate: {@link readFields}, then the top-ranked innocent words of the language. */
+export async function arrivalGate(input: unknown, db: D1Like): Promise<ArrivalResult> {
+  const read = readFields(input);
+  if (!read.ok) return refuse(read.code);
+  const { fields } = read;
+  if (await isKnownInnocent(db, fields.language, fields.wordKey)) return refuse('known_innocent');
+  return { ok: true, ...fields };
 }
 
 /** What the cross-language gate finds for a candidate term. */

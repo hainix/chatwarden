@@ -18,7 +18,10 @@
 
   // Secrets are set with `wrangler secret put <NAME>`, never written here. COUNTER_SECRET keys the rate-limit network hash;
   // TURNSTILE_SECRET is the siteverify secret of the docs-site report form.
-  "secrets": { "required": ["COUNTER_SECRET", "TURNSTILE_SECRET"] }
+  "secrets": { "required": ["COUNTER_SECRET", "TURNSTILE_SECRET"] },
+
+  // The daily purge: rate-limit counters older than two days, and the notes of submissions decided 90 days ago (src/worker.ts, `scheduled`).
+  "triggers": { "crons": ["17 3 * * *"] }
 
   // The Worker answers on corpus.chatwarden.dev (a custom domain on the project's zone), set by the owner at deploy time:
   // "routes": [{ "pattern": "corpus.chatwarden.dev", "custom_domain": true }]
