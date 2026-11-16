@@ -67,9 +67,10 @@ describe('release.mjs', () => {
     const zip = new Uint8Array(readFileSync(join(dir, 'out', 'terms-2026.12.0.zip')));
     const rel = parseTermsRelease(await readZip(zip), { version: '2026.12.0', sequence: 1 });
     expect(rel.terms.map((t) => t.id)).toEqual(['CWT-2026-00001', 'CWT-2026-00002']);
-    const summary = JSON.parse(readFileSync(join(dir, 'out', 'terms-2026.12.0.release.json'), 'utf8')) as { summary: { sha256: string; sequence: number }; held: unknown[] };
+    const summary = JSON.parse(readFileSync(join(dir, 'out', 'terms-2026.12.0.release.json'), 'utf8')) as { summary: { sha256: string; sequence: number }; held: unknown[]; stamped: string[] };
     expect(summary.summary.sequence).toBe(1);
     expect(summary.held).toEqual([]);
+    expect(summary.stamped).toEqual(['CWT-2026-00001', 'CWT-2026-00002']);
     expect(all()).toContain('added: 2');
     expect(all()).toContain('CWT-2026-00001');
     expect(all()).not.toMatch(/zorbak|vlemmo/);

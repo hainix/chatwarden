@@ -106,8 +106,11 @@ describe('builds a release from a seeded D1 of invented words; the output parses
   it('stamps `since` with this version for a term never released, and keeps the version of one that was', async () => {
     await w.term({ id: 'CWT-2026-00001', term: 'zorbak', since: '2026.11.0' });
     await w.term({ id: 'CWT-2026-00002', term: 'vlemmo', since: null });
-    const rel = await read(await build({ previous: '2026.11.0' }));
+    const built = await build({ previous: '2026.11.0' });
+    const rel = await read(built);
     expect(Object.fromEntries(rel.terms.map((t) => [t.id, t.since]))).toEqual({ 'CWT-2026-00001': '2026.11.0', 'CWT-2026-00002': '2026.12.0' });
+    // `stamped` is what the database must be told once the release is out: the ids that got their `since` from this release (a held term is not one).
+    expect(built.stamped).toEqual(['CWT-2026-00002']);
     expect(rel.manifest.previous).toBe('2026.11.0');
   });
 

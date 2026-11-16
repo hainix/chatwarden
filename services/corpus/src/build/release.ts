@@ -76,6 +76,8 @@ export interface BuildResult {
   release: TermsRelease;
   /** Terms the gates kept out of this release. */
   held: GateFailure[];
+  /** The ids of the rows this release gave their `since` to: the database is told once the release is out (a held row is not one). */
+  stamped: string[];
   diff: TermsDiff;
   gate: GateCounts;
 }
@@ -247,6 +249,7 @@ export function buildFromSnapshot(snapshot: Snapshot, o: BuildOptions): BuildRes
         summary: summarise({ kind: 'terms', version: o.version, sequence: o.sequence, minKit: o.minKit ?? VERSION, languages: counts, zip }),
         release: final,
         held,
+        stamped: drafts.filter((d) => d.record.since === null).map((d) => d.row.id),
         diff: diffTerms(o.previous, o.previousTerms ?? null, final.terms, held),
         gate: report.counts,
       };

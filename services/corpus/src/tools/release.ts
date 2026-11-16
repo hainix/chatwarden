@@ -40,7 +40,7 @@ export async function main(argv: readonly string[], io: ToolIo): Promise<number>
     await io.ensureDir(out);
     const zipPath = `${out}/terms-${version}.zip`;
     await io.write(zipPath, result.zip);
-    await io.write(`${out}/terms-${version}.release.json`, `${JSON.stringify({ summary: result.summary, held: result.held }, null, 2)}\n`);
+    await io.write(`${out}/terms-${version}.release.json`, `${JSON.stringify({ summary: result.summary, held: result.held, stamped: result.stamped }, null, 2)}\n`);
     const words = args['show-words'] === true ? new Map(result.release.terms.map((t) => [t.id, t.term])) : undefined;
     io.out(renderDiff(result.diff, words).trimEnd());
     io.out('');

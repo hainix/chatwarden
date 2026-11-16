@@ -40,7 +40,7 @@ export interface R2BodyLike {
 /** An R2 bucket, the part of it the release tools use. */
 export interface R2Like {
   get(key: string): Promise<R2BodyLike | null>;
-  put(key: string, value: string | ArrayBuffer | Uint8Array, options?: { httpMetadata?: { contentType?: string; cacheControl?: string } }): Promise<unknown>;
+  put(key: string, value: string | ArrayBuffer | Uint8Array, options?: { httpMetadata?: { contentType?: string; cacheControl?: string; contentDisposition?: string } }): Promise<unknown>;
   delete(keys: string | string[]): Promise<void>;
   list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{ objects: { key: string; size: number }[]; truncated: boolean; cursor?: string }>;
 }
