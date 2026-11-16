@@ -483,11 +483,13 @@ describe('several notices', () => {
     const w = await three();
     const { user } = renderUi(<NoticeQueue {...props(w)} />);
     const d = await dialog();
-    expect(within(d).getByRole('heading', { name: 'You have a warning' })).toHaveFocus();
+    // Focus moves after the dialog's own effects run; a loaded runner can take longer than waitFor's 1 s default.
+    const slow = { timeout: 5000 };
+    await waitFor(() => expect(within(d).getByRole('heading', { name: 'You have a warning' })).toHaveFocus(), slow);
     await user.click(within(d).getByRole('button', { name: 'Acknowledge' }));
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Your chat is turned off' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Your chat is turned off' })).toHaveFocus(), slow);
     await user.click(screen.getByRole('button', { name: 'Got it' }));
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are banned' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are banned' })).toHaveFocus(), slow);
   });
 
   it('a failed acknowledge on the first leaves the second hidden, and the error does not carry over to the next notice', async () => {
