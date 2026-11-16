@@ -35,6 +35,8 @@ export interface DiscordBotOptions {
   timestampToleranceMs?: number;
   /** How long work may take before the bot answers "deferred" (Discord's deadline is 3 000 ms). Default 2 500. */
   respondWithinMs?: number;
+  /** Runs `run` once after `ms` and returns its cancel. Default: `setTimeout`, unref'd where the runtime has it. For tests. */
+  schedule?: (run: () => void, ms: number) => () => void;
   /** The replay memory. Default a new `ReplayCache`. */
   replay?: ReplayCache;
   /** The `fetch` for the one deferred follow-up. Default the global one. */
@@ -58,6 +60,7 @@ export interface ResolvedBotOptions {
   rateLimit: NamesRateLimit;
   timestampToleranceMs: number;
   respondWithinMs: number;
+  schedule: (run: () => void, ms: number) => () => void;
   replay: ReplayCache;
   fetch: typeof fetch | undefined;
   clock: Clock;
@@ -67,6 +70,12 @@ export interface ResolvedBotOptions {
 const systemClock: Clock = { now: () => Date.now() };
 const DEFAULT_RATE: NamesRateLimit = { max: 20, windowMs: 60_000 };
 const DEFAULT_RESPOND_MS = 2500;
+
+function defaultSchedule(run: () => void, ms: number): () => void {
+  const timer = setTimeout(run, ms);
+  (timer as { unref?: () => void }).unref?.();
+  return () => clearTimeout(timer);
+}
 /** Discord's own deadline for the first answer. */
 const DISCORD_DEADLINE_MS = 3000;
 const TOLERANCE_MAX_MS = 3_600_000;
@@ -80,7 +89,7 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 export function resolveOptions(options: unknown): ResolvedBotOptions {
   if (!isObject(options)) throw new RangeError('discordBot: options are required');
   // Every field is read exactly once, here.
-  const { applicationId, publicKey, guildId, roles, hubLink, actions, permissions, actorOf, rateLimit, timestampToleranceMs, respondWithinMs, replay, fetch, clock, logger } =
+  const { applicationId, publicKey, guildId, roles, hubLink, actions, permissions, actorOf, rateLimit, timestampToleranceMs, respondWithinMs, schedule, replay, fetch, clock, logger } =
     options as unknown as Partial<DiscordBotOptions> & Record<string, unknown>;
 
   if (!isSnowflake(applicationId)) throw new RangeError('discordBot: applicationId must be a Discord id (17 to 20 digits)');
@@ -134,6 +143,7 @@ export function resolveOptions(options: unknown): ResolvedBotOptions {
   if (respondWithinMs !== undefined && (!isPositiveInt(respondWithinMs) || respondWithinMs >= DISCORD_DEADLINE_MS)) {
     throw new RangeError('discordBot: respondWithinMs must be a whole number of milliseconds under 3000');
   }
+  if (schedule !== undefined && typeof schedule !== 'function') throw new RangeError('discordBot: schedule must be a function');
   if (replay !== undefined && !(replay instanceof ReplayCache)) throw new RangeError('discordBot: replay must be a ReplayCache');
   if (fetch !== undefined && typeof fetch !== 'function') throw new RangeError('discordBot: fetch must be a function');
   if (clock !== undefined && (!isObject(clock) || typeof clock.now !== 'function')) throw new RangeError('discordBot: clock must have a now() function');
@@ -151,6 +161,7 @@ export function resolveOptions(options: unknown): ResolvedBotOptions {
     rateLimit: limit,
     timestampToleranceMs: timestampToleranceMs ?? DEFAULT_TOLERANCE_MS,
     respondWithinMs: respondWithinMs ?? DEFAULT_RESPOND_MS,
+    schedule: schedule ?? defaultSchedule,
     replay: replay ?? new ReplayCache(),
     fetch,
     clock: (clock as Clock | undefined) ?? systemClock,

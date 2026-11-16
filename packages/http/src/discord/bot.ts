@@ -14,6 +14,7 @@ import { parseCustomId } from './customId.js';
 import { parseInteraction, lookupRef } from './interaction.js';
 import type { ParsedInteraction } from './interaction.js';
 import { lookupAnswer } from './lookup.js';
+import { Deferral, deferred } from './respond.js';
 import { resolveOptions } from './options.js';
 import type { DiscordBotOptions } from './options.js';
 import { kitRoleOf } from './roles.js';
@@ -141,12 +142,32 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
     return act.click(parsed, g.who);
   };
 
+  const deferral = new Deferral({
+    applicationId: o.applicationId,
+    withinMs: o.respondWithinMs,
+    schedule: o.schedule,
+    fetch: o.fetch,
+    logger,
+    fail,
+  });
+
+  /**
+   * What to answer first when the work is slow. A command, and a click on a button of the report post (a public message), get a loading message only the
+   * clicker sees (type 5, ephemeral): an update there would rewrite the post for everyone. A click on a button of the ephemeral message (Confirm, Cancel)
+   * is acknowledged as an update (type 6) of that ephemeral message, which the follow-up then edits.
+   */
+  const deferredFor = (i: ParsedInteraction): { type: number; data?: { flags: number } } => {
+    if (i.type !== MESSAGE_COMPONENT) return deferred('message');
+    const verb = parseCustomId(i.customId)?.verb;
+    return deferred(verb === 'ok' || verb === 'x' ? 'update' : 'message');
+  };
+
   /** What a verified interaction gets. */
   const handle = async (body: Record<string, unknown>): Promise<InteractionAnswer | { type: number }> => {
     const i = parseInteraction(body);
     if (i.type === PING) return { type: 1 };
-    if (i.type === APPLICATION_COMMAND || i.type === MESSAGE_COMPONENT) return remembered(i);
-    return ephemeral(TEXT.unsupported);
+    if (i.type !== APPLICATION_COMMAND && i.type !== MESSAGE_COMPONENT) return ephemeral(TEXT.unsupported);
+    return deferral.settle(remembered(i), deferredFor(i), body.token);
   };
 
   /**
@@ -186,13 +207,8 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
     // Verify BEFORE parsing. Every failure is the same 401.
     if (disposed || !verifyInteraction(o.publicKey, req.headers, raw, clock.now(), o.timestampToleranceMs, o.replay)) throw new HttpError('unauthorized');
     const body = bodyObject(req);
-    try {
-      return respond(await handle(body));
-    } catch (err) {
-      // A bug or a store failure answers the person who clicked with a fixed text; the kit's own operation is never touched.
-      fail('handle', err);
-      return respond(ephemeral(TEXT.failed));
-    }
+    // The work's own failures are answered with a fixed text inside `deferral.settle`; the kit's own operation is never touched.
+    return respond(await handle(body));
   }, logger);
 
   return {
@@ -201,6 +217,7 @@ export function discordBot(cw: Chatwarden, options: DiscordBotOptions): DiscordB
     commands: () => JSON.parse(JSON.stringify(COMMANDS)) as DiscordCommand[],
     dispose() {
       disposed = true;
+      deferral.dispose();
       seen.clear();
     },
   };
