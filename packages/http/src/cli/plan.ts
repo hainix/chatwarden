@@ -37,6 +37,8 @@ function installPackages(answers: Answers, versions: Versions, project: Project)
   if (answers.chat === 'box') names.push('player-react');
   const packages = names.map((name) => `@chatwarden/${name}@^${versions.chatwarden}`);
   if ((answers.hub === 'react' || answers.chat === 'box') && !project.react) packages.push('react', 'react-dom');
+  // The box's socket client. The server side (socket.io) is the game's own and is not touched: an install of it could move the game's version.
+  if (answers.chat === 'box' && answers.chatTransport === 'socketio') packages.push('socket.io-client');
   return packages;
 }
 
@@ -59,6 +61,14 @@ export function nextAppRoot(answers: Answers): string {
 }
 
 function entryLine(answers: Answers): string {
+  const line = frameworkEntryLine(answers);
+  if (answers.chat === 'box' && answers.chatTransport === 'socketio') {
+    return `${line} Then attach the chat to your Socket.IO server: attachChat(io, kit) (from ${answers.dir}/socketio).`;
+  }
+  return line;
+}
+
+function frameworkEntryLine(answers: Answers): string {
   const { dir, base } = answers;
   switch (answers.framework) {
     case 'express':

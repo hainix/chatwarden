@@ -9,12 +9,13 @@ export function chatFiles(ctx: Ctx): FileSpec[] {
   const { answers } = ctx;
   if (answers.chat !== 'box') return [];
   const client = answers.framework === 'next' ? "'use client';\n\n" : '';
+  const socketio = answers.chatTransport === 'socketio';
   const imports =
     imp(ctx, ['lazy', 'Suspense', 'useEffect', 'useMemo', 'useState'], 'react') +
     "import '@chatwarden/player-react/styles.css';\nimport '@chatwarden/player-react/chat.css';\n" +
     imp(ctx, ['createPlayerClient', 'fetchTransport', 'NoticeQueue'], '@chatwarden/player-react') +
     impType(ctx, 'PlayerReporting', '@chatwarden/player-react') +
-    imp(ctx, 'sseTransport', '@chatwarden/player-react/chat');
+    (socketio ? imp(ctx, 'io', 'socket.io-client') + imp(ctx, 'socketTransport', './socketTransport') + impType(ctx, 'ChatTransport', '@chatwarden/player-react/chat') : imp(ctx, 'sseTransport', '@chatwarden/player-react/chat'));
   const props = t(
     ctx,
     `export interface ChatPanelProps {
@@ -34,7 +35,15 @@ const BASE = '${answers.base}';
 ${props}export default function ChatPanel({ playerKey, room = 'lobby' }${t(ctx, ': ChatPanelProps')}) {
   const headers = useMemo(() => ({ 'x-chatwarden-key': playerKey }), [playerKey]);
   const client = useMemo(() => createPlayerClient({ transport: fetchTransport({ baseUrl: \`\${BASE}/api\`, headers }) }), [headers]);
-  const transport = useMemo(() => sseTransport({ baseUrl: \`\${BASE}/chat\`, headers }), [headers]);
+${
+  socketio
+    ? `  // The socket is made when the box opens (in the browser, never on the server) and closed when it unmounts. It rides your Socket.IO server's origin.
+  const transport${t(ctx, ': ChatTransport')} = useMemo(
+    () => ({ open: (roomId, events) => socketTransport(io(\`\${BASE}/chat\`, { autoConnect: false, auth: { key: playerKey } })).open(roomId, events) }),
+    [playerKey],
+  );`
+    : '  const transport = useMemo(() => sseTransport({ baseUrl: `${BASE}/chat`, headers }), [headers]);'
+}
   const [reporting, setReporting] = useState${t(ctx, '<PlayerReporting | undefined>')}(undefined);
   const [refresh, setRefresh] = useState(0);
 

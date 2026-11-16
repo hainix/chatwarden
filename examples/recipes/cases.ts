@@ -38,6 +38,7 @@ export const CASES: RecipeCase[] = [
   { name: 'fetch-memory-element-none', check: 'nodenext', answers: answers({ framework: 'fetch', store: 'memory', chat: 'box', hub: 'none' }) },
   { name: 'fetch-memory-box-element', check: 'nodenext', answers: answers({ framework: 'fetch', store: 'memory', chat: 'box', hub: 'element' }) },
   { name: 'fastify-sqlite-box-element', check: 'nodenext', answers: answers({ framework: 'fastify', chat: 'box', hub: 'element' }) },
+  { name: 'express-sqlite-box-socketio', check: 'nodenext', answers: answers({ chat: 'box', chatTransport: 'socketio', hub: 'element' }) },
   { name: 'none-library', check: 'nodenext', answers: answers({ framework: 'none' }) },
 ];
 

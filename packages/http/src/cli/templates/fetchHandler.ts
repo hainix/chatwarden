@@ -13,15 +13,15 @@ export function mountsText(box: boolean, indent: string): string {
     ...(box ? ["'/chat': chatRoutes(kit.cw, kit.chat, { identify: kit.hooks.identify, join: kit.hooks.join }),"] : []),
     "'': healthRoutes(kit.cw),",
   ];
-  return lines.map((line) => `${indent}${line}
-`).join('');
+  return lines.map((line) => `${indent}${line}\n`).join('');
 }
 
 export function fetchHandlerFiles(ctx: Ctx): FileSpec[] {
   const { answers } = ctx;
   if (answers.framework !== 'next' && answers.framework !== 'fetch') return [];
   const next = answers.framework === 'next';
-  const box = answers.chat === 'box';
+  // The HTTP chat routes are mounted for the SSE transport; with Socket.IO the box rides the game's own socket (socketio.ts) instead.
+  const box = answers.chat === 'box' && answers.chatTransport === 'sse';
   const hub = answers.hub === 'element';
 
   const routes = ['adminRoutes', ...(box ? ['chatRoutes'] : []), 'healthRoutes', 'playerRoutes'];

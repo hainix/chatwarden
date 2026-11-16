@@ -11,7 +11,8 @@ import { header } from './header.js';
 export function fastifyFiles(ctx: Ctx): FileSpec[] {
   const { answers } = ctx;
   if (answers.framework !== 'fastify') return [];
-  const box = answers.chat === 'box';
+  // The HTTP chat routes are mounted for the SSE transport; with Socket.IO the box rides the game's own socket (socketio.ts) instead.
+  const box = answers.chat === 'box' && answers.chatTransport === 'sse';
   const hub = answers.hub === 'element';
 
   const routes = ['adminRoutes', ...(box ? ['chatRoutes'] : []), 'healthRoutes', 'playerRoutes'];

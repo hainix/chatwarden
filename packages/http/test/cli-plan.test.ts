@@ -179,7 +179,7 @@ describe('buildPlan: the install command', () => {
     for (const answers of allAnswers()) {
       for (const manager of MANAGERS) {
         for (const spec of buildPlan(answers, VERSIONS, stubTemplates, { manager, react: false }).install.packages) {
-          expect(spec).toMatch(/^(@chatwarden\/[a-z-]+@\^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?|react|react-dom)$/);
+          expect(spec).toMatch(/^(@chatwarden\/[a-z-]+@\^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?|react|react-dom|socket.io-client)$/);
         }
       }
     }
