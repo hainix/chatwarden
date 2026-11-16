@@ -154,3 +154,27 @@ Found while building Part A:
 
 Found while building Part B (the service):
 - A confirmed `wrong_category` report has no category or target edit action yet: it holds the term out (`disputed`) and the only exit is a two-reviewer restore with the category unchanged. Add the edit to the review page before the first real report is confirmed.
+
+
+## The Discord bot (K5 / 0.1.12), parked
+
+Found building `@chatwarden/http/discord` (K5 D1 to D9, 2026-11).
+
+- **Open, owner: the live Discord check (task D10).** Nothing has talked to Discord yet; every test uses fakes. Use a throwaway server and a throwaway application, never the
+  production one. Do these in order, and write down the answer to each of the first three:
+  1. Follow the "Discord bot" setup in `packages/http/README.md` as far as the webhook (steps 1 to 4). Make the webhook with the `curl` there. **Does the answer to a post
+     with buttons name your application?** Start the feed with `components: bot.components`, file a test report, and watch the log. If you see
+     `chatwarden.discord_components_ignored`, a webhook made with the bot is not application-owned: stop, and tell the maintainer (the plan then adds a bot-token post
+     route). If the post shows its buttons, it is.
+  2. Deploy the route, paste its URL as the **Interactions Endpoint URL**. **Does Discord accept it when you save?** (It sends a PING; the bot answers it.) If not, check that
+     the adapter gives `rawBody` and that no body parser runs first.
+  3. Run `registerCommands`, then type `/chatwarden` in the server. **Does the command show for the roles you expect?** The default visibility is Discord's "Moderate Members"
+     permission (`1099511627776`); if it is wrong, fix `default_member_permissions` in `bot.commands()` (the role map is the control, not this).
+  4. Click "Nothing wrong here" and Confirm, and the same on "Apply suggestion". The feed should post the outcome and take the buttons off.
+  5. With `respondWithinMs` set to `1` for one run, click again: you should see Discord's "thinking" message and then the answer.
+  Write the results in `docs/status.md` (K5) when done.
+- **Open: strip after a restart.** The feed keeps `report -> message` in memory. After a restart an old report post keeps its buttons until someone clicks one. A small
+  table would fix it but costs a migration; not worth it until someone asks.
+- **Open: a bot-token post route.** Only if check 1 fails: the feed would post through `POST /channels/{id}/messages` with a bot token instead of a webhook.
+- **Open: `registerCommands` needs a bot.** The one-shot script builds the same `discordBot` to call `bot.commands()`. A plain exported list would avoid building a bot with a kit.
+- **Open: a redelivered interaction.** Discord rarely sends one twice. The bot answers it from memory, and for a slow one it sends the follow-up again (the same text).

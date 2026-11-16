@@ -14,7 +14,7 @@ Status: pre-release, as-is, no support promise; PRs welcome.
 | [`@chatwarden/matcher`](packages/matcher) | Text matcher that resists Unicode evasion without blocking innocent words. |
 | [`@chatwarden/profanity`](packages/profanity) | Optional ordinary-swearing filter (allow, star or refuse; style, add, remove, custom list). Slurs stay the matcher's job. |
 | [`@chatwarden/http`](packages/http) | HTTP routes: the staff API (reports, decisions, sanctions, terms, audit), the player API (notices, record, rules), health probes, signed webhooks in and out, an Express adapter, and a room broadcaster with chat routes (Server-Sent Events down, `POST` up). |
-| [`@chatwarden/discord`](packages/discord) | Posts the staff review queue into a Discord forum through a channel webhook, one thread per reported person. |
+| [`@chatwarden/discord`](packages/discord) | Posts the staff review queue into a Discord forum through a channel webhook, one thread per reported person. Optional buttons on a report post, made by the bot in `@chatwarden/http/discord`. |
 | [`@chatwarden/hub-react`](packages/hub-react) | The moderator hub: a themeable React UI over the staff API (report queue, decisions, sanctions, blocked terms, audit). Runs in a browser. |
 | [`@chatwarden/player-react`](packages/player-react) | The player side: small React components for a game (a notice dialog, My record, the rules, a report dialog, a restricted-chat line) over the player routes, and a moderated `<ChatBox>` at its own lazy subpath. Runs in a browser. |
 | [`@chatwarden/hub-element`](packages/hub-element) | The moderator hub as one custom element, `<chatwarden-hub>`, in a single self-contained script (React inside): one script tag for plain HTML, Vue, Svelte or a server-rendered admin page. Runs in a browser. |
@@ -34,6 +34,7 @@ yourself and your project gets exactly one copy of it. `store-sqlite` and `profa
 | Give moderators and players HTTP routes (Express) | add `npm install @chatwarden/http express @types/express` |
 | Mask or refuse ordinary swearing | add `npm install @chatwarden/profanity` |
 | Post the review queue into a Discord forum | add `npm install @chatwarden/discord` |
+| Answer `/chatwarden lookup` and let moderators act on a report from Discord, with a confirm step (experimental until 0.2) | add `@chatwarden/discord` and `@chatwarden/http`, then `discordBot` from `@chatwarden/http/discord` (setup in the [`@chatwarden/http` README](packages/http#discord-bot)) |
 | Give moderators a web UI over the staff routes | add `npm install @chatwarden/hub-react react react-dom` (it also needs `@chatwarden/http` as a peer) |
 | Put the moderator hub on any page with one script tag (no React or build step) | add `npm install @chatwarden/hub-element` to self-host the script, or load it from a CDN; it has no required peer |
 | Add chat to a game that has none: a moderated chat box with report and mute | `npm install @chatwarden/http @chatwarden/player-react express react react-dom` and `@chatwarden/core`: `createRoomBroadcaster` and `chatRoutes` on the server, `<ChatBox>` from `@chatwarden/player-react/chat` in the page (the chat names are experimental until 0.2) |

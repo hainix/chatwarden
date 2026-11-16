@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { adminRoutes, healthRoutes, playerRoutes, BACKOFF_BASE_MS, DELIVERY_HEADER, MAX_RETRIES, PERMISSIONS, PERMISSION_KEYS, RETRY_AFTER_CAP_MS, RETRY_AFTER_FLOOR_MS, SIGNATURE_HEADER, TIMESTAMP_HEADER } from '../src/index.js';
 import { OPTIONS, helpText, parseCli } from '../src/cli/args.js';
@@ -483,5 +484,163 @@ describe('packages/http/README.md, Other servers: toFetch', () => {
   it('the intro and "Writing another adapter" name both adapters that ship', () => {
     expect(http).toContain('a **Web fetch adapter** (`toFetch`');
     expect(section(http, 'Writing another adapter')).toContain('`toExpress` and `toFetch` are the adapters that ship');
+  });
+});
+
+describe('packages/http/README.md, Discord bot', () => {
+  const doc = section(http, 'Discord bot');
+  /** A README block is TypeScript; strip the types so it can run. */
+  const js = (code: string): string => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  /** A `### ` subsection of the Discord bot section, up to the next `###`. */
+  const sub = (heading: string): string => {
+    const start = doc.indexOf(`\n### ${heading}\n`);
+    expect(start, `subsection ${heading}`).toBeGreaterThanOrEqual(0);
+    const next = doc.indexOf('\n### ', start + 1);
+    return doc.slice(start, next === -1 ? undefined : next);
+  };
+
+  it('every documented option name exists, and every option is documented', () => {
+    const source = read('../src/discord/options.ts');
+    const block = /export interface DiscordBotOptions \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
+    const fields = [...block.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+    expect(fields.length).toBeGreaterThanOrEqual(14);
+    const documented = rows(sub('Discord bot options')).map((r) => r[0] as string);
+    const names = documented.flatMap((cell) => [...cell.matchAll(/`(\w+)`/g)].map((m) => m[1] as string));
+    for (const field of fields) expect(names, field).toContain(field);
+    for (const name of names) expect(fields, name).toContain(name);
+  });
+
+  it('the READMEs list the @experimental names, every one the entry exports', () => {
+    const entry = read('../src/discord/index.ts');
+    const exported = [...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean));
+    expect(new Set(exported)).toEqual(
+      new Set(['discordBot', 'DiscordBotOptions', 'DiscordActionRow', 'DiscordBot', 'DiscordButton', 'DiscordCommand', 'DiscordCommandOption', 'registerCommands', 'RegisterCommandsOptions', 'RegisterCommandsResult', 'verifyInteraction']),
+    );
+    for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
+    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+    // The feed's side.
+    const feed = flat(discord);
+    for (const needle of ['`components`', '@experimental', 'application-owned', '`chatwarden.discord_components_ignored`', '`bot.components`', 'Buttons']) expect(feed, needle).toContain(needle);
+    expect(feed).not.toContain('has no buttons: a webhook can only write');
+  });
+
+  it('says the entry is not in the root, and sets up in order: application, bot, the exact curl for the webhook, roles, the route, the endpoint URL, the one-shot command', () => {
+    expect(flat(doc)).toContain('not in the package root');
+    const order = ['Make the application', 'Make the bot', 'Make the application-owned webhook', 'Copy the role ids', 'Add it to your server', 'Interactions Endpoint URL', 'Register the command, once', 'Try it'].map((needle) => doc.indexOf(needle));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(doc).toContain('curl -X POST "https://discord.com/api/v10/channels/$FORUM_CHANNEL_ID/webhooks"');
+    expect(doc).toContain('Authorization: Bot $DISCORD_BOT_TOKEN');
+    expect(doc).toContain('https://discord.com/api/webhooks/<id>/<token>');
+    for (const needle of ['`bot` and', '`applications.commands`', 'Manage Webhooks']) expect(flat(doc), needle).toContain(needle);
+  });
+
+  it('says what each answer says: every fixed text the bot uses is written down', () => {
+    const answers = read('../src/discord/answers.ts');
+    const texts = [...(/export const TEXT = \{([\s\S]*?)\} as const;/.exec(answers)?.[1] ?? '').matchAll(/: '([^']+)'/g)].map((m) => m[1] as string);
+    expect(texts.length).toBeGreaterThanOrEqual(10);
+    // The refusals that name nothing are one row; every other text is quoted.
+    const grouped = new Set(['You do not have a moderator role for this bot.', 'You do not have permission to do this.', 'Slow down.', 'This bot is not set up for this server.', 'Actions from Discord are turned off.', 'That is not available here.', 'Cancelled.']);
+    for (const text of texts.filter((t) => !grouped.has(t))) expect(flat(doc), text).toContain(text);
+    expect(flat(doc)).toContain('Already done');
+    expect(flat(doc)).toContain('This report was already decided');
+  });
+
+  it('documents the roles map, the permissions each step needs, the deferred answer and the security notes (verify first, rate limit at the edge)', () => {
+    const who = flat(sub('Who may do what'));
+    for (const needle of ['`history.read`', '`history.view`', '`reports.read`', '`reports.decide`', '`sanctions.apply`', '`sanctions.apply.ban_permanent`', '`report.decide`', '`actorOf`', 'highest one']) expect(who, needle).toContain(needle);
+    const slow = flat(sub('Slow work'));
+    for (const needle of ['3 seconds', '`respondWithinMs`', 'type 5', 'type 6', '@original', 'no Authorization header', '429', 'never logged and never stored']) expect(slow, needle).toContain(needle);
+    const notes = flat(sub('Discord bot: security notes'));
+    for (const needle of ['Verify before parse', 'same `401', '`custom_id`', 'Rate-limit the route at your edge', 'bot token', '`chatwarden.discord_components_ignored`']) expect(notes, needle).toContain(needle);
+  });
+
+  it('the server block compiles (scripts/readme.test.ts) and runs against fakes: the route answers a signed PING, the feed carries the bot buttons, dispose is clean', async () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    expect(blocks).toHaveLength(2);
+    const block = blocks[0] as string;
+    expect(block.startsWith("import express from 'express';")).toBe(true);
+    const body = block.split('\n').filter((l) => !l.startsWith('import ')).join('\n');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore } = await import('@chatwarden/store-memory');
+    const { discordFeed } = await import('@chatwarden/discord');
+    const { toExpress } = await import('../src/express.js');
+    const { discordBot } = await import('../src/discord/index.js');
+    const { default: express } = await import('express');
+    const { fakeDiscordClient, APP_ID, GUILD_ID, ROLE_MOD, ROLE_OWNER, ROLE_SENIOR } = await import('./discord-world.js');
+    const { createRouter } = await import('../src/router.js');
+    const cw = await createChatwarden({ store: new MemoryStore(), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false, logger: { warn: () => undefined } });
+    const client = fakeDiscordClient({ now: () => Date.now() });
+    const env: Record<string, string> = {
+      DISCORD_APP_ID: APP_ID,
+      DISCORD_PUBLIC_KEY: client.publicKeyHex,
+      DISCORD_GUILD_ID: GUILD_ID,
+      DISCORD_ROLE_MODERATOR: ROLE_MOD,
+      DISCORD_ROLE_SENIOR: ROLE_SENIOR,
+      DISCORD_ROLE_OWNER: ROLE_OWNER,
+      DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/123456789012345678/tok_README-fake_123',
+    };
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+    // The block minus its shutdown lines, which are checked below and run by hand.
+    const run = js(body.replace(/\n\/\/ on shutdown\n[\s\S]*$/, '\n'));
+    const make = new AsyncFunction('express', 'discordFeed', 'toExpress', 'discordBot', 'cw', 'process', `${run}\nreturn { bot, feed, app };`);
+    const out = (await make(express, discordFeed, toExpress, discordBot, cw, { env })) as { bot: ReturnType<typeof discordBot>; feed: { dispose(): void }; app: unknown };
+    expect(Object.keys(out.bot.routes)).toEqual(['POST /discord/interactions']);
+    expect(out.bot.components({ kind: 'report', reportId: 'ReportIdOneTwoThreeFour' })).toHaveLength(1);
+    const res = await createRouter(out.bot.routes)(client.ping());
+    expect(res).toMatchObject({ status: 200, body: { type: 1 } });
+    expect(block).toMatch(/\/\/ on shutdown\nfeed\.dispose\(\);\nbot\.dispose\(\);/);
+    out.feed.dispose();
+    out.bot.dispose();
+    expect((await createRouter(out.bot.routes)(client.ping())).status).toBe(401);
+    await cw.close();
+  });
+
+  it('the registerCommands block runs against a fake fetch: it puts bot.commands() to the guild route and prints the count', async () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    const block = blocks[1] as string;
+    expect(block.startsWith("import { registerCommands } from '@chatwarden/http/discord';")).toBe(true);
+    const { registerCommands, discordBot } = await import('../src/discord/index.js');
+    const { fakeDiscordClient, APP_ID, GUILD_ID, ROLE_MOD } = await import('./discord-world.js');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore } = await import('@chatwarden/store-memory');
+    const cw = await createChatwarden({ store: new MemoryStore(), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false, logger: { warn: () => undefined } });
+    const client = fakeDiscordClient({ now: () => Date.now() });
+    const bot = discordBot(cw, { applicationId: APP_ID, publicKey: client.publicKeyHex, guildId: GUILD_ID, roles: { moderator: [ROLE_MOD] }, hubLink: (_k, id) => `https://mod.example.test/${id}` });
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      seen.push({ url, init });
+      return new Response('[{"id":"1"}]', { status: 200 });
+    }) as unknown as typeof fetch;
+    const lines: string[] = [];
+    const body = js(block.split('\n').filter((l) => !l.startsWith('import ')).join('\n').replace('commands: bot.commands(),', 'commands: bot.commands(), fetch: fakeFetch,'));
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+    const make = new AsyncFunction('registerCommands', 'bot', 'process', 'console', 'fakeFetch', body);
+    await make(registerCommands, bot, { env: { DISCORD_APP_ID: APP_ID, DISCORD_GUILD_ID: GUILD_ID, DISCORD_BOT_TOKEN: 'FAKE.readme-bot-token' } }, { log: (line: string) => void lines.push(line) }, fakeFetch);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.url).toBe(`https://discord.com/api/v10/applications/${APP_ID}/guilds/${GUILD_ID}/commands`);
+    expect(JSON.parse(String(seen[0]?.init.body))).toEqual(bot.commands());
+    expect(lines).toEqual(['registered 1 command(s)']);
+    bot.dispose();
+    await cw.close();
+  });
+});
+
+describe('the Discord bot in the project docs', () => {
+  const status = flat(read('../../../docs/status.md'));
+  const follow = flat(read('../../../docs/plans/follow-ups.md'));
+
+  it('the root README has the row and the package line; CLAUDE.md names the bot', () => {
+    const rootText = flat(root);
+    expect(rootText).toContain('`discordBot` from `@chatwarden/http/discord`');
+    expect(rootText).toContain('Optional buttons on a report post');
+    expect(flat(read('../../../CLAUDE.md'))).toContain('`@chatwarden/http/discord`');
+  });
+
+  it('status says what is built and what the owner checks; follow-ups tell the owner exactly what to do (task D10)', () => {
+    for (const needle of ['Discord bot (built', '`chatwarden.discord_components_ignored`', 'No store change, no migration', "The owner's live check (K5 D10)"]) expect(status, needle).toContain(needle);
+    for (const needle of ['the live Discord check (task D10)', 'throwaway server', 'Interactions Endpoint URL', '`registerCommands`', '1099511627776', 'respondWithinMs', 'bot-token post route']) {
+      expect(follow, needle).toContain(needle);
+    }
   });
 });

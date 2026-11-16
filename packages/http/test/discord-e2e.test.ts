@@ -166,7 +166,7 @@ describe('Discord end to end: the real feed, the real bot, the real kit', () => 
     const confirm = customIdOf(buttonsOf(preview.data), 'cw1:ok:');
     const done = await b.click(confirm);
     expect(done.type).toBe(7);
-    expect(done.data?.content).toBe('Done · No action');
+    expect(done.data?.content).toBe('Done \u00B7 No action');
     expect(b.cw.reports.get(f.id)?.status).toBe('dismissed');
 
     // The feed hears report.closed: the outcome is posted into the thread, then the buttons come off the first post.
@@ -220,7 +220,7 @@ describe('Discord end to end: the real feed, the real bot, the real kit', () => 
     const confirm = customIdOf(buttonsOf(preview.data), 'cw1:ok:');
     const done = await b.click(confirm);
     expect(done.type).toBe(7);
-    expect(done.data?.content).toMatch(/^Done · .+ · M-[A-Z0-9]{5}$/);
+    expect(done.data?.content).toMatch(/^Done \u00B7 .+ \u00B7 M-[A-Z0-9]{5}$/);
     expect(b.cw.reports.get(f.id)?.status).toBe('actioned');
 
     const notices = b.cw.notices.pending({ clientKey: f.key });

@@ -746,6 +746,179 @@ One route, `POST /webhooks/in/action` (mounted at `/hooks` above, so `/hooks/web
   not throttle them. Put a limit in front of it (your reverse proxy, load balancer, or `express-rate-limit` on the mount) so a
   flood of bad requests is stopped before it reaches the process.
 
+## Discord bot
+
+`@experimental` until 0.2. A bot that lives in your Discord server and answers staff. It does two things:
+
+- `/chatwarden lookup <code>` tells a moderator what a reference code (like `M-7K3Q9`) stands for, so they can answer a player who quotes one.
+- Optional: two buttons on each report post, "Nothing wrong here" and "Apply suggestion", with a confirm step. A click decides the report
+  through the same checks as the hub.
+
+It is in its own entry, `@chatwarden/http/discord`, and not in the package root, because it uses `node:crypto`. It does nothing when you
+import it. Pair it with the feed in `@chatwarden/discord`, which posts the report and shows the buttons. The bot never reads Discord's
+gateway, never holds a bot token and never posts chat text, a handle, a reason or a note.
+
+### Set up, in order
+
+1. **Make the application.** In the Discord Developer Portal, create an application. Copy the **application id** and the **public key**
+   (64 hex characters; it is not a secret).
+2. **Make the bot and invite it.** Add a bot to the application. Invite it to your moderation server with the scopes `bot` and
+   `applications.commands`, with **Manage Webhooks** on the forum channel. Copy the **bot token** and keep it off the server: only
+   `registerCommands` uses it, once.
+3. **Make the application-owned webhook.** A webhook made by hand cannot send buttons you can click, so make it with the bot. One request:
+
+   ```sh
+   curl -X POST "https://discord.com/api/v10/channels/$FORUM_CHANNEL_ID/webhooks" \
+     -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"name":"Chatwarden"}'
+   ```
+
+   The answer holds an `id` and a `token`. The feed's URL is `https://discord.com/api/webhooks/<id>/<token>`. The name may not contain
+   "clyde" or "discord". The URL is a credential: keep it in a secret store.
+4. **Copy the role ids.** Turn on Developer Mode, right-click each role and choose **Copy Role ID**. You need the ones for your moderators,
+   seniors and owners. Also copy the server's id.
+5. **Add it to your server** (the block below). The route is `POST /discord/interactions`. Mount it where nothing reads the body first: the
+   signature covers the exact bytes (`toExpress` and `toFetch` keep them as `rawBody`).
+6. **Deploy, then paste the route's full URL** into the application's **Interactions Endpoint URL** in the Developer Portal. Discord sends a
+   PING when you save; the bot answers it, and the Portal refuses the URL if it does not.
+7. **Register the command, once** (the second block). The command list replaces the application's commands in that server.
+8. **Try it.** Run `/chatwarden lookup` with a code from a sanction you applied. File a test report and click a button.
+
+```ts
+import express from 'express';
+import { discordFeed } from '@chatwarden/discord';
+import { toExpress } from '@chatwarden/http/express';
+import { discordBot } from '@chatwarden/http/discord';
+
+const hubLink = (kind: 'report' | 'person', id: string) => `https://mod.example.com/${kind === 'report' ? 'reports' : 'people'}/${encodeURIComponent(id)}`;
+
+const bot = discordBot(cw, {
+  applicationId: process.env.DISCORD_APP_ID!,
+  publicKey: process.env.DISCORD_PUBLIC_KEY!, // 64 hex characters, from the Developer Portal
+  guildId: process.env.DISCORD_GUILD_ID!, // the one server this kit serves; every other is refused
+  roles: {
+    moderator: [process.env.DISCORD_ROLE_MODERATOR!],
+    senior: [process.env.DISCORD_ROLE_SENIOR!],
+    owner: [process.env.DISCORD_ROLE_OWNER!],
+  },
+  hubLink,
+  actions: { dismiss: true, suggestion: true }, // leave this out and the bot only answers /chatwarden lookup
+});
+
+const app = express();
+app.use('/', toExpress(bot.routes)); // POST /discord/interactions, with no body parser before it
+
+const feed = discordFeed(cw, {
+  webhookUrl: process.env.DISCORD_WEBHOOK_URL!, // the application-owned webhook from step 3
+  hubLink,
+  components: bot.components, // the buttons on a report post
+});
+
+// on shutdown
+feed.dispose();
+bot.dispose();
+```
+
+Register the command once, from your own machine (the bot token never goes on the server). `bot` is the one above:
+
+```ts
+import { registerCommands } from '@chatwarden/http/discord';
+
+const result = await registerCommands({
+  applicationId: process.env.DISCORD_APP_ID!,
+  botToken: process.env.DISCORD_BOT_TOKEN!,
+  guildId: process.env.DISCORD_GUILD_ID!,
+  commands: bot.commands(),
+});
+console.log(result.ok ? `registered ${result.count} command(s)` : `Discord answered ${result.status}`);
+```
+
+`registerCommands` answers `{ ok: true, count }` or `{ ok: false, status }` (status `0` when there was no answer). A bad id or token is a
+`RangeError` that never repeats the value. A 429 is waited out once. The token is sent in one header and is in no result, error or log.
+
+### What the bot says
+
+Every answer is ephemeral (only the person who clicked sees it) and mentions no one. The words are fixed.
+
+| When | The answer |
+| --- | --- |
+| A lookup finds the code | The code, the kind, the length, the Community Rule, whether it is active, ended or lifted, when it was given, and who gave it in words (a moderator, the chat filter, Coop, the AI read, the API). An "Open person" link. No reason, no moderator, no handle, no subject id. |
+| A lookup finds nothing, or the code is malformed | `No sanction found for that code.` (the same text for both) |
+| A click on "Nothing wrong here" or "Apply suggestion" | A preview of what it would do, with Confirm and Cancel. For the suggestion: the step, the rule and the one-line why. |
+| Confirm | `Done`, the step and the code. The report closes, the feed posts the outcome and takes the buttons off. |
+| The same confirm again | `Already done`, and nothing is applied twice. |
+| The report was decided in the hub first | `This report was already decided (...)` with an "Open report" link. |
+| The profile's suggestion changed since the preview | `That changed. Open it in the hub.` |
+| The report needs a Community Rule chosen | `This report needs a Community Rule chosen. Open it in the hub.` |
+| Another moderator has the case open | `Another moderator has this case open.` A Discord click never takes a case over. |
+| No role, no permission, too many clicks, the wrong server | A fixed refusal. Role names and ids are never echoed. |
+| Anything goes wrong | `Something went wrong. Try again in the hub.` The class of the error is logged, never its text. |
+
+With `actions: { confirm: false }` the first click decides at once, with the same checks. The answer is still a private message; the report post
+itself changes only when the report closes.
+
+### Who may do what
+
+You map Discord role ids to the kit's three roles with `roles`. A person's kit role is the highest one they hold an id of. A role you did
+not list is nothing. The permission for each step is the staff routes' table (see Permissions), and `permissions` overrides it the same way:
+
+- lookup needs `history.read`, and is audited as `history.view`;
+- a preview needs `reports.read`, and a suggestion preview is audited as `suggest`;
+- a confirm needs `reports.decide`, and `sanctions.apply` for a sanction, and `sanctions.apply.ban_permanent` (senior by default) for a permanent ban. The decision is audited as `report.decide`.
+
+Nothing in a Discord payload except the signed `member.roles` and `user.id` picks the role, the actor or the source. The actor is
+`discord:<user id>`, or what your `actorOf` gives for that user (so a moderator's own claim does not block them). The source is `moderator`.
+
+### Discord bot options
+
+| Option | What it does |
+| --- | --- |
+| `applicationId` | The application id (17 to 20 digits). Required. |
+| `publicKey` | The application's Ed25519 public key, 64 hex characters. Required. |
+| `guildId` | The one server this kit serves. An interaction from any other, or a DM, is refused. Required. |
+| `roles` | Discord role ids per kit role (`moderator`, `senior`, `owner`). At least one id overall. Required. |
+| `hubLink` | `(kind, id) => url`. Where "Open report" and "Open person" go. A throw or a URL that is not `http(s)` drops that link. Required. |
+| `actions` | `{ dismiss?, suggestion?, confirm? }`. Leave it out for lookup only. `dismiss` and `suggestion` default `true` once it is set; `confirm` defaults `true`. |
+| `permissions` | Overrides of the minimum roles, checked as for the staff routes. |
+| `actorOf` | `(discordUserId) => string \| undefined`. Map a Discord user to a hub login. An invalid answer or a throw falls back to `discord:<id>`. |
+| `rateLimit` | Per Discord user, `{ max, windowMs }`. Default 20 a minute. |
+| `timestampToleranceMs` | How far a signed timestamp may be from the clock, either way. Default 300 000 (5 minutes). |
+| `respondWithinMs` | How long work may take before the bot answers "working on it". Default 2 500; under Discord's 3 000. |
+| `fetch` | The `fetch` for the one follow-up of a slow answer. Default the global one. For tests. |
+| `schedule` | `(run, ms) => cancel`. The timer behind `respondWithinMs` and the one retry. Default `setTimeout`. For tests. |
+| `replay` | The replay memory (a `ReplayCache`). Default a new one. |
+| `clock`, `logger` | Time source, and where failures are logged (an event name and an error class only). |
+
+`bot.routes` is the route table. `bot.components` goes to `discordFeed`. `bot.commands()` goes to `registerCommands`. `bot.dispose()` forgets what the
+bot holds and cancels its timers; a disposed bot answers 401. The names `discordBot`, `DiscordBotOptions`, `DiscordBot`, `DiscordCommand`,
+`DiscordActionRow`, `DiscordButton`, `DiscordCommandOption`, `registerCommands`, `RegisterCommandsOptions`, `RegisterCommandsResult` and `verifyInteraction` are `@experimental` until 0.2.
+
+### Slow work
+
+Discord wants a first answer within 3 seconds. If the work is not done in `respondWithinMs`, the bot answers at once with a loading message
+(type 5, only the clicker sees it; or type 6 for a click on the private Confirm), and when the work finishes it edits that answer once
+(`PATCH https://discord.com/api/v10/webhooks/<application id>/<token>/messages/@original`, no Authorization header: the token is the key). A
+429 is waited out once, for the time Discord names, between 1 and 60 seconds. Any other failure is logged by class and dropped. The interaction
+token is never logged and never stored. Work that throws gives the fixed failure text.
+
+### Discord bot: security notes
+
+- **Verify before parse.** The route checks the signature over the exact bytes before it reads the body. A missing or malformed header, a wrong
+  key, a stale or future timestamp, a changed byte and a replayed request are all the same `401 { "error": "unauthorized" }`. A body over 64 KiB is a 413 before any check.
+- **The bot never trusts a `custom_id`.** It is a short, closed format. Every click re-reads the report, the claim, the rule and the profile; a
+  code that is not the current suggestion is refused.
+- **No secret leaves.** No log line, answer or error holds a token, a signature, a subject id outside a hub link, chat text or a handle.
+- **Rate-limit the route at your edge.** The bot limits each Discord user after the signature check, but an unsigned request still costs a body
+  read and a signature check. A low per-address limit in front of `/discord/interactions` is fine: Discord sends few requests. Do not block
+  Discord's addresses.
+- **Keep the webhook URL and the bot token secret.** The bot token is only for `registerCommands`.
+- **One restart caveat.** The feed forgets which post held which buttons when the process restarts. An old post keeps its buttons, and a click
+  on one is answered from the report ("already decided").
+- **Two things Discord's docs leave open,** checked by hand before you rely on them (see `docs/plans/follow-ups.md`): that a webhook made with
+  the bot is application-owned, and that the command's default visibility value is right. If the first is wrong the feed logs
+  `chatwarden.discord_components_ignored` and posts without buttons.
+
 ## Health probes
 
 `healthRoutes(cw)` adds two public routes. They say "up" or "not ready" and never why.
