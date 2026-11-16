@@ -60,6 +60,10 @@
     "./discord": {
       "types": "./dist/src/discord/index.d.ts",
       "default": "./dist/src/discord/index.js"
+    },
+    "./coop": {
+      "types": "./dist/src/coop/index.d.ts",
+      "default": "./dist/src/coop/index.js"
     }
   },
   "typesVersions": {
@@ -81,6 +85,9 @@
       ],
       "discord": [
         "dist/src/discord/index.d.ts"
+      ],
+      "coop": [
+        "dist/src/coop/index.d.ts"
       ]
     }
   },

@@ -161,3 +161,20 @@ describe('the Discord subpath (K5 D3)', () => {
     }
   });
 });
+
+describe('the Coop subpath (K5 C1)', () => {
+  it('the root does not export the adapter or its mappers (they use node:crypto)', () => {
+    for (const name of ['coop', 'buildReport', 'decisionOf', 'verifyCoopSignature']) expect(name in http, name).toBe(false);
+  });
+
+  it('package.json maps ./coop to the built entry with its types, and typesVersions agrees', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      exports: Record<string, { types: string; default: string }>;
+      typesVersions: { '*': Record<string, string[]> };
+      sideEffects: boolean;
+    };
+    expect(pkg.exports['./coop']).toEqual({ types: './dist/src/coop/index.d.ts', default: './dist/src/coop/index.js' });
+    expect(pkg.typesVersions['*'].coop).toEqual(['dist/src/coop/index.d.ts']);
+    expect(pkg.sideEffects).toBe(false);
+  });
+});
