@@ -1,6 +1,12 @@
 import { createPrivateKey, createSign, generateKeyPairSync } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
+import type { Chatwarden } from '@chatwarden/core';
+import { coop } from '../src/coop/index.js';
+import type { CoopOptions } from '../src/coop/index.js';
+import { createRouter } from '../src/router.js';
 import type { KitRequest } from '../src/types.js';
+import { world } from './world.js';
+import type { WorldOptions } from './world.js';
 
 // The fake Coop for the adapter's tests (K5 C1): a `fetch` that is as strict as Coop's documented API (https://docs.roost.tools/coop/latest/api/), an RSA key
 // pair generated here (never a real key) and a maker of signed callbacks. Everything here is written from the documented wire format and does NOT import
@@ -294,4 +300,77 @@ export const callbackRequest = (body: unknown, o: SignedOptions = {}): KitReques
 export function recordingLogger() {
   const logged: Array<[string, Record<string, string | number | boolean> | undefined]> = [];
   return { logged, logger: { warn: (event: string, detail?: Record<string, string | number | boolean>) => void logged.push([event, detail]) } };
+}
+
+// ---- a whole adapter on a real kit ----
+
+/** The Coop action ids the tests map. */
+export const ACTION = {
+  warn: 'action-warn',
+  chat: 'action-chat',
+  ban7: 'action-ban7',
+  banPerm: 'action-banperm',
+  note: 'action-note',
+  dismiss: 'action-dismiss',
+  badFaith: 'action-badfaith',
+} as const;
+
+export interface CoopWorldOptions {
+  options?: Record<string, unknown>;
+  world?: WorldOptions;
+  fake?: FakeCoopOptions;
+  /** Wrap the kit the ADAPTER sees (a proxy that fails a call); the test still reads the real one through `cw` and `w`. */
+  wrapKit?: (cw: Chatwarden) => Chatwarden;
+}
+
+type W = Awaited<ReturnType<typeof world>>;
+
+/** An adapter on kit world `w` (the kit keeps its own clock), with a fake Coop and a recording logger. */
+export function makeCoop(w: W, over: CoopWorldOptions = {}) {
+  const fake = fakeCoop(over.fake);
+  const { logged, logger } = recordingLogger();
+  const active = w.cw.rules.active();
+  const ruleA = active[0]!.number;
+  const ruleB = active[1]!.number;
+  const kit = over.wrapKit === undefined ? w.cw : over.wrapKit(w.cw);
+  const adapter = coop(kit, {
+    baseUrl: COOP_URL,
+    apiKey: API_KEY,
+    webhookPublicKey: sharedPair().publicPem,
+    itemTypes: { ...ITEM_TYPES },
+    evidence: 'excerpt',
+    actions: {
+      [ACTION.warn]: { verdict: 'upheld', kind: 'warning' },
+      [ACTION.chat]: { verdict: 'upheld', kind: 'chat', durationMs: 86_400_000 },
+      [ACTION.ban7]: { verdict: 'upheld', kind: 'ban', durationMs: 7 * 86_400_000 },
+      [ACTION.banPerm]: { verdict: 'upheld', kind: 'ban' },
+      [ACTION.note]: { verdict: 'noted' },
+      [ACTION.dismiss]: { verdict: 'no_action' },
+      [ACTION.badFaith]: { verdict: 'bad_faith' },
+    },
+    rules: { 'policy-harass': ruleA, 'policy-spam': ruleB },
+    fetch: fake.fetch,
+    clock: w.clock,
+    random: () => 0.5,
+    logger,
+    ...over.options,
+  } as unknown as CoopOptions);
+  const router = createRouter(adapter.routes);
+  return { w, cw: w.cw, fake, adapter, logged, router, send: (req: KitRequest) => router(req), ruleA, ruleB };
+}
+
+/** A kit world with an adapter already subscribed. */
+export async function coopWorld(over: CoopWorldOptions = {}) {
+  const w = await world(over.world);
+  return makeCoop(w, over);
+}
+export type CoopWorld = Awaited<ReturnType<typeof coopWorld>>;
+
+/** Wait (real timers) until `check` holds. */
+export async function until(check: () => boolean, what: string): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > 4000) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }

@@ -178,3 +178,23 @@ describe('the Coop subpath (K5 C1)', () => {
     expect(pkg.sideEffects).toBe(false);
   });
 });
+
+describe('the Coop subpath: nothing at import (K5 C2)', () => {
+  it('importing the subpath starts nothing: no timer, no listener, no request', async () => {
+    const { vi } = await import('vitest');
+    vi.useFakeTimers();
+    const listeners = process.eventNames().map((n) => process.listenerCount(n));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      vi.resetModules();
+      const mod = await import('../src/coop/index.js');
+      expect(typeof mod.coop).toBe('function');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(process.eventNames().map((n) => process.listenerCount(n))).toEqual(listeners);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
