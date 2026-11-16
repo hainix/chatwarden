@@ -31,7 +31,8 @@ stamp (16 bits), the Ed25519 signature, the decline lock and the limits (20 a da
 then the body, the day window (the server's UTC day, one either side) and the gates. A request is counted only after it has paid for its
 stamp and signed. The network address (`cf-connecting-ip`) is turned into a keyed hash that changes every day (`COUNTER_SECRET`) and is never
 stored or logged; an IPv6 address counts as its /64. Logs hold `{ stage, code }` and nothing else. A cron trigger purges counters after two
-days, notes 90 days after a decision and the installation hash of a decided submission after 180.
+days, notes 90 days after a decision, the installation hash of a decided submission after 180, and the channel key of a report (the same hashes)
+after two days (network) or 180 days (installation) from the report's day, when it becomes `gone:<its id>`.
 
 ## Reports
 
@@ -145,7 +146,8 @@ npx tsc -b services/corpus
 
 **Keys, once** (the first release only: design owner action 3). Make two, keep the standby offline in a second place, and put the printed
 public keys in `packages/matcher/src/corpus/keys.ts` in a pull request (the only edit that turns the loader on). The tool refuses a path inside a
-git working tree and never overwrites a file:
+git working tree and never overwrites a file. On Windows the file mode is not enforced, so put the key in a folder only your account can read, and make
+the second copy of `k2` offline (a USB stick in a drawer), never in a synced folder:
 
 ```sh
 node services/corpus/tools/keygen.mjs --id k1 --out <a folder outside every repository>/k1.pem
@@ -173,6 +175,10 @@ npx wrangler d1 export chatwarden-corpus --remote --output <folder>/d1-export.sq
 node services/corpus/tools/release.mjs --dump <folder>/d1-export.sql --out <folder>/out --previous <folder>/last/terms-2026.11.0.zip
 ```
 
+The release folder holds the whole real list, so `release`, `eval build` and `publish --dry-run` write to `chatwarden-release-out` in your home
+folder unless `--out` says otherwise, and **refuse a folder inside a git working tree** (the one exception is `release-out/` or `.corpus-data/` at the
+top of a repository, which git ignores; the repository guard fails if a file there is ever tracked).
+
 `release` reads a **copy** of the database, never the live one. It builds `terms.json`, `exceptions.json`, `negative.<lang>.json` and
 `positive.json`, writes the zip, reads it back with the kit's own parser and runs the gates with the real matcher in every selection of the
 languages; then it prints the diff: counts and ids, never a word (add `--show-words` to see them). A term that fails a gate is held out with a
@@ -184,26 +190,67 @@ node services/corpus/tools/eval.mjs build --cases <folder>/cases --dump <folder>
 node services/corpus/tools/eval.mjs check --case <folder>/one-case.json --source <folder>/the-original.json --dump <folder>/d1-export.sql
 ```
 
-Read the diff. Then sign the zip, archive it on Zenodo (the first record is made by hand; after that the tool makes a new version and prints
-the record id to use next time), and publish (the index is signed here too, and uploaded last):
+Read the diff. Then sign the zip, rehearse the Zenodo step on its sandbox, check the publish with a dry run, and only then do the permanent steps (the
+first record is made by hand; after that the tool makes a new version and prints the record id to use next time). The index is signed by `publish`
+and uploaded last:
 
 ```sh
 node services/corpus/tools/sign.mjs --kind zip --file <folder>/out/terms-2026.12.0.zip --key-id k1 --key <folder>/k1.pem
+node services/corpus/tools/publish.mjs --release <folder>/out/terms-2026.12.0.release.json --key-id k1 --key <folder>/k1.pem --dry-run --out <folder>/dry
+node services/corpus/tools/zenodo.mjs --sandbox --release <folder>/out/terms-2026.12.0.release.json --record <sandbox deposition id> --key k1=<public key>
 node services/corpus/tools/zenodo.mjs --release <folder>/out/terms-2026.12.0.release.json --record <deposition id of the latest version> --key k1=<public key>
-node services/corpus/tools/publish.mjs --release <folder>/out/terms-2026.12.0.release.json --key-id k1 --key <folder>/k1.pem --mirror <folder>/out/zenodo-terms-2026.12.0.json --dry-run --out <folder>/dry
 node services/corpus/tools/publish.mjs --release <folder>/out/terms-2026.12.0.release.json --key-id k1 --key <folder>/k1.pem --mirror <folder>/out/zenodo-terms-2026.12.0.json
 npx wrangler d1 execute chatwarden-corpus --remote --file <folder>/out/record-terms-2026.12.0.sql
+npx wrangler d1 execute chatwarden-corpus --remote --file <folder>/out/doi-terms-2026.12.0.sql
 node services/corpus/tools/verify-live.mjs --key k1=<public key>
 ```
 
 `ZENODO_TOKEN` is read from the environment of the release machine (the name can be changed with `--token-env`), and the Zenodo step may be left
-out: a release without a mirror is valid, and a later publish adds it (give `publish` the same release and `--mirror` again). `--dry-run` signs and
+out: a release without a mirror is valid, and a later publish adds it (give `publish` the same release and `--mirror` again). **`zenodo --sandbox`**
+uses sandbox.zenodo.org (it needs a sandbox token and a sandbox record, in the same environment variable) and writes its own result file,
+`zenodo-sandbox-terms-2026.12.0.json`, so it never stands in for the real archive; `publish --mirror` refuses a sandbox result, a sandbox DOI or any
+host but zenodo.org, because a mirror in a signed index is permanent in practice. `--dry-run` signs and
 writes the new index to `--out` and uploads nothing: do it first. `publish` reads the live index and refuses to build on one that does not verify,
 never lowers the sequence, uploads the zip and its signature, reads them back and verifies them, and only then replaces the index signature and the
-index as a pair (the old pair is put back if that fails). The SQL it writes records the release in the database (`since` for the new terms, the
-release row); you apply it once. After a Zenodo upload, `UPDATE releases SET doi = '...' WHERE kind = 'terms' AND version = '...'` records the DOI
-(the result file has it). **`verify-live` is the last step**: it fetches the public urls and verifies them end to end with the kit's own loader. If
+index as a pair (the old pair is put back if that fails, and if even that fails it says so and exits non-zero: restore `index.json` and
+`index.json.sig` by hand). The SQL it writes records the release in the database (`since` for the new terms, the
+release row); you apply it once. `zenodo` writes the SQL that records the DOI beside its result file (`doi-terms-2026.12.0.sql`); apply it too.
+The signature and the index are two objects, so for a moment a fresh client can see one new and one old and fail closed: run `verify-live` a minute
+after the upload. **`verify-live` is the last step**: it fetches the public urls and verifies them end to end with the kit's own loader. If
 it fails, do not announce the release. After a key rotation, name the older key that `publish` must still trust with `--trust k1=<public key>`.
+
+### The index expires after 90 days
+
+Every `publish` signs the index with an expiry 90 days ahead. After that, kits answer `index_expired` to a **new** installation (kits that already
+have a release keep running on it). A month with no release still needs a fresh index: re-sign the live one, with no release file, at least every
+60 days:
+
+```sh
+node services/corpus/tools/publish.mjs --refresh --key-id k1 --key <folder>/k1.pem
+node services/corpus/tools/verify-live.mjs --key k1=<public key>
+```
+
+`--refresh` takes the next sequence and a new expiry and leaves the releases as they are (`--dry-run` first, if you like). Put it in your calendar.
+
+### Rotation and compromise
+
+**Rotating** (a planned change of key): sign the next release with the standby `k2` after adding its public key to `packages/matcher/src/corpus/keys.ts`
+in a release of the kit, naming the older key with `--trust k1=<public key>` so `publish` can verify the index `k1` signed.
+
+**If a key may be compromised** (the procedure is signed by the standby, so it needs no new kit):
+
+1. Sign an index with `k2` that revokes `k1` (and any release `k1` signed that you no longer vouch for, with the reason `key_compromise`):
+
+   ```sh
+   node services/corpus/tools/publish.mjs --key-id k2 --key <folder>/k2.pem --trust k1=<public key of k1> --revoke-key k1 --revoke-release terms:2026.12.0:key_compromise
+   ```
+
+2. Run `verify-live`. Kits that fetch the new index stop trusting `k1` at once; installations that still hold a release keep it until they refresh.
+3. Cut a new release signed by `k2`, make a new standby `k3`, and ship a kit that lists it in `keys.ts`.
+
+To withdraw one release without a key problem: `publish --revoke-release terms:2026.12.0:bad_release` (the reasons are `bad_release`,
+`key_compromise` and legal; the index signed by the key you use cannot revoke that key itself). Re-publishing a live release with a revocation
+is a real publish, not "nothing to publish".
 
 ## Checks
 

@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 CREATE TABLE IF NOT EXISTS reviewers (email TEXT PRIMARY KEY, fluent TEXT NOT NULL DEFAULT '[]', active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS reviewer_installations (reviewer TEXT NOT NULL, installation TEXT NOT NULL, PRIMARY KEY (reviewer, installation));
 
--- No free text is stored for a report. channel is `inst:<hash>` (a signed report) or `web:<hash>` (the docs-site form).
+-- No free text is stored for a report. channel is `inst:<hash>` (a signed report) or `web:<hash>` (the docs-site form); the daily job replaces it with `gone:<id>` after 180 days (installation) or two days (network).
 CREATE TABLE IF NOT EXISTS reports (
   id TEXT PRIMARY KEY,
   term_id TEXT NOT NULL,

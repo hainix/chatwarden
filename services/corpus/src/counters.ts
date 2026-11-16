@@ -25,6 +25,10 @@ export const LIMITS = {
   noteDays: 90,
   /** The installation hash of a decided submission is emptied this many days after the decision (design 15). */
   installationDays: 180,
+  /** The network hash that is a report's channel key is replaced once the report's day is older than this many days (as for the counters). */
+  reportNetworkDays: 2,
+  /** The installation hash that is a report's channel key is replaced this many days after the report's day. */
+  reportInstallationDays: 180,
 } as const;
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -91,8 +95,12 @@ export async function hit(db: D1Like, key: string, day: string): Promise<number>
   return row === null ? 1 : row.n;
 }
 
-/** Deletes what has outlived its use: counters older than two days, the notes of submissions decided 90 days ago or more, and their installation hashes after 180. */
-export async function purgeExpired(db: D1Like, clock: Clock): Promise<{ counters: number; notes: number; installations: number }> {
+/**
+ * Deletes what has outlived its use: counters older than two days, the notes of submissions decided 90 days ago or more, their installation hashes
+ * after 180, and the channel key of a report (the same network or installation hash) after two and 180 days. A report's channel becomes
+ * `gone:<its own id>`: nothing that identifies a sender, and still unique for the one-open-report index.
+ */
+export async function purgeExpired(db: D1Like, clock: Clock): Promise<{ counters: number; notes: number; installations: number; reports: number }> {
   const now = clock.now();
   const counters = await db.prepare('DELETE FROM counters WHERE day < ?').bind(addDays(dayOf(now), -LIMITS.counterDays)).run();
   const notes = await db
@@ -103,5 +111,13 @@ export async function purgeExpired(db: D1Like, clock: Clock): Promise<{ counters
     .prepare("UPDATE submissions SET installation = '' WHERE installation != '' AND decided_at IS NOT NULL AND decided_at <= ?")
     .bind(isoSeconds(now - LIMITS.installationDays * DAY_MS))
     .run();
-  return { counters: counters.meta.changes, notes: notes.meta.changes, installations: installations.meta.changes };
+  const webReports = await db
+    .prepare("UPDATE reports SET channel = 'gone:' || id WHERE channel LIKE 'web:%' AND received_day < ?")
+    .bind(addDays(dayOf(now), -LIMITS.reportNetworkDays))
+    .run();
+  const instReports = await db
+    .prepare("UPDATE reports SET channel = 'gone:' || id WHERE channel LIKE 'inst:%' AND received_day <= ?")
+    .bind(addDays(dayOf(now), -LIMITS.reportInstallationDays))
+    .run();
+  return { counters: counters.meta.changes, notes: notes.meta.changes, installations: installations.meta.changes, reports: webReports.meta.changes + instReports.meta.changes };
 }

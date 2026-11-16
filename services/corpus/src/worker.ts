@@ -101,10 +101,10 @@ export default {
       return Promise.resolve(json(500, { error: 'internal' }));
     }
   },
-  /** The daily purge (the cron trigger in wrangler.jsonc): counters older than two days, notes 90 days after a decision. */
+  /** The daily purge (the cron trigger in wrangler.jsonc): counters and network-hash report keys after two days, notes 90 days and installation hashes (submissions and reports) 180 days after. */
   scheduled(_event: ScheduledEventLike, env: Env, ctx: ExecutionContextLike): Promise<void> {
     const work = purgeExpired(env.DB, systemClock).then(
-      (out) => logEvent(depsFor(env), 'purge', 'done', out.counters + out.notes),
+      (out) => logEvent(depsFor(env), 'purge', 'done', out.counters + out.notes + out.installations + out.reports),
       () => logEvent(depsFor(env), 'purge', 'db_error'),
     );
     ctx.waitUntil(work);

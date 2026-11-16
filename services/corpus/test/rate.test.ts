@@ -239,8 +239,8 @@ describe('purgeExpired: counters older than two days go, notes go 90 days after 
   });
 
   it('is safe to run again and on an empty database', async () => {
-    expect(await purgeExpired(w.db, w.clock)).toEqual({ counters: 0, notes: 0, installations: 0 });
-    expect(await purgeExpired(w.db, w.clock)).toEqual({ counters: 0, notes: 0, installations: 0 });
+    expect(await purgeExpired(w.db, w.clock)).toEqual({ counters: 0, notes: 0, installations: 0, reports: 0 });
+    expect(await purgeExpired(w.db, w.clock)).toEqual({ counters: 0, notes: 0, installations: 0, reports: 0 });
   });
 
   it('runs from the worker\u2019s scheduled handler', async () => {

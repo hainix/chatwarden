@@ -45,7 +45,7 @@ release's diff and signs it offline.
 By sending a word you confirm it is yours to share and that, if accepted, it joins a public list under **CC BY 4.0** that any game can use, and
 that it stays in releases that have already been published. Credit, if you use the list, is one sentence: "Contains the Chatwarden community
 term list (chatwarden.dev), CC BY 4.0." The service sees your server's network address while it answers and keeps only a hashed rate-limit count
-for two days.
+for two days (a report sent from a server also keeps that server's random hash for 180 days).
 
 ## A word that blocks innocent text, or should not be there
 
