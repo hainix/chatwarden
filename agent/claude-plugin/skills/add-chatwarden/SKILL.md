@@ -10,8 +10,8 @@ Use this when a user wants chat moderation (blocked words, reports, mutes, a mod
 ## The three commands
 
 1. Install and write the files. Run from the folder with `package.json`:
-   `npm install @chatwarden/http @chatwarden/core`, then `npx chatwarden init --yes --json`.
-   The JSON lists each file, the packages to install, the variable names, the starter markers and the next steps. Run `npx chatwarden init --dry-run --json` first to see the plan and write nothing.
+   `npm install @chatwarden/http @chatwarden/core`, then `npx chatwarden init --dry-run --json` to see the plan and write nothing, then `npx chatwarden init --yes --json`.
+   The JSON lists each file, the packages to install, the variable names, the starter markers and the next steps.
 2. Edit the one line the report names, for example `await mountChatwarden(app)` in the server file. Install the packages in `install.command`.
 3. Run `npx chatwarden init --check`. It lists the starter code still in place and the required variables that are not set. Exit 1 means something is left.
 

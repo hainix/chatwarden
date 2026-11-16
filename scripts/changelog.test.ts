@@ -242,7 +242,7 @@ describe('the 0.1.10 notes (all ten CHANGELOGs)', () => {
 
   it.each(dirs)('%s: says what init takes and gives: flags, --json, --check, the four exit codes, and that it never overwrites', (dir) => {
     const s = section0110(dir);
-    for (const needle of ['`--json`', '`--check`', '`--dry-run`', '`--yes`', 'Exit codes: 0', '1 a usage error', '2 applied but some files were skipped', '3 could not write or install', 'never edits a file that exists', 'never uses the network', 'writes no secret']) {
+    for (const needle of ['`--json`', '`--check`', '`--dry-run`', '`--yes`', 'Exit codes: 0', '1 a usage error', '2 applied but some files were skipped', '3 could not write or install', 'never edits a file that exists', 'uses the network only with `--install`', 'writes no secret']) {
       expect(s, needle).toContain(needle);
     }
   });

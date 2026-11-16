@@ -7,6 +7,7 @@ Init writes the files below. It never changes a file that exists. With `--framew
 **You write:** nothing to wire for Next. Replace the starter hooks in `auth.ts` (marked `TODO(auth)` and `TODO(identity)`) and the terms in `terms.ts` (marked `TODO(terms)`). With `--framework fetch`, one call to the handler for each request.
 
 ```sh
+npm install @chatwarden/http @chatwarden/core
 npx chatwarden init --framework next
 ```
 

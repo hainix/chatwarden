@@ -187,7 +187,7 @@ export function helpText(): string {
     '',
     'Exit codes:',
     '  0  done, or nothing to do, or nothing wrong (dry run, check)',
-    '  1  a usage error: a bad flag, value or combination, or an unsafe path',
+    '  1  a usage error: a bad flag, value or combination, or an unsafe path; or --check found something left',
     '  2  applied, but some files were skipped because they differ',
     '  3  could not write or install',
     '',

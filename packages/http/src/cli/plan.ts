@@ -65,21 +65,29 @@ export function nextAppRoot(answers: Answers, layout: AppLayout = {}): string {
   return answers.dir.startsWith('src/') ? 'src/app' : 'app';
 }
 
-function entryLine(answers: Answers, layout: AppLayout): string {
-  const line = frameworkEntryLine(answers, layout);
+function entryLine(answers: Answers, layout: AppLayout, moduleType: 'module' | 'commonjs'): string {
+  const line = frameworkEntryLine(answers, layout, moduleType);
   if (answers.chat === 'box' && answers.chatTransport === 'socketio') {
     return `${line} Then attach the chat to your Socket.IO server: attachChat(io, kit) (from ${answers.dir}/socketio).`;
   }
   return line;
 }
 
-function frameworkEntryLine(answers: Answers, layout: AppLayout): string {
+/** Where the mount comes from, and the await: a CommonJS file has no top-level await, and its JavaScript mount is an .mjs file that only `import()` loads. */
+function mountLine(answers: Answers, moduleType: 'module' | 'commonjs', before: string): string {
+  const file = `${answers.dir}/${answers.framework}`;
+  if (moduleType === 'module') return `Add one line to your app${before}: await mountChatwarden(app) (from ${file}).`;
+  const from = answers.lang === 'js' ? `${file}.mjs, loaded with a dynamic import` : file;
+  return `Add one line to your app${before}, inside an async function (CommonJS has no top-level await): await mountChatwarden(app) (from ${from}).`;
+}
+
+function frameworkEntryLine(answers: Answers, layout: AppLayout, moduleType: 'module' | 'commonjs'): string {
   const { dir, base } = answers;
   switch (answers.framework) {
     case 'express':
-      return `Add one line to your app, before any body parser: await mountChatwarden(app) (from ${dir}/express).`;
+      return mountLine(answers, moduleType, ', before any body parser');
     case 'fastify':
-      return `Add one line to your app: await mountChatwarden(app) (from ${dir}/fastify).`;
+      return mountLine(answers, moduleType, '');
     case 'next':
       return `Next serves the route handler under ${nextAppRoot(answers, layout)}${base}/ by itself: there is nothing to add to your code. This recipe needs Next running as a Node process, not serverless (next start, a container or a VM): the database file and the open chat streams need one long-lived process.`;
     case 'fetch':
@@ -89,7 +97,7 @@ function frameworkEntryLine(answers: Answers, layout: AppLayout): string {
   }
 }
 
-function nextSteps(answers: Answers, command: string, layout: AppLayout): string[] {
+function nextSteps(answers: Answers, command: string, layout: AppLayout, moduleType: 'module' | 'commonjs'): string[] {
   const library = answers.framework === 'none';
   const variables = library ? 'CHATWARDEN_SECRET' : 'CHATWARDEN_SECRET and CHATWARDEN_ADMIN_TOKEN';
   const setLine = `Set ${variables} (make a value with: ${SECRET_COMMAND}).`;
@@ -97,7 +105,7 @@ function nextSteps(answers: Answers, command: string, layout: AppLayout): string
   if (library) last = 'Call the check from your chat handler before you broadcast a line (the hook below).';
   else if (answers.hub === 'none') last = `Start your server and open http://localhost:3000${answers.base}/healthz (use your server's port).`;
   else last = `Start your server and open http://localhost:3000${answers.base}/mod (use your server's port).`;
-  return [`Install the packages: ${command}`, entryLine(answers, layout), setLine, last];
+  return [`Install the packages: ${command}`, entryLine(answers, layout, moduleType), setLine, last];
 }
 
 function todoOf(files: readonly FileSpec[]): TodoItem[] {
@@ -144,7 +152,7 @@ export function buildPlan(answers: Answers, versions: Versions, templates: Templ
     files,
     install: { manager: project.manager, command, packages },
     env: envNames(answers),
-    nextSteps: nextSteps(answers, command, project),
+    nextSteps: nextSteps(answers, command, project, project.moduleType ?? 'module'),
     warnings,
     todo: todoOf(files),
   };

@@ -8,7 +8,7 @@ HTTP routes for Chatwarden, the open-source chat moderation kit for games. It gi
 - **signed webhooks**, outgoing (`webhooksOut`) and incoming (`webhookIn`);
 - an **Express adapter** (`toExpress`, from `@chatwarden/http/express`);
 - a **Web fetch adapter** (`toFetch`, from `@chatwarden/http/fetch`) for Next.js, Hono, Bun, Deno and anything else on `Request` and `Response`;
-- a **`chatwarden` command** (`npx chatwarden init`) that writes the wiring for you, with the recipes in [`docs/recipes`](../../docs/recipes);
+- a **`chatwarden` command** (`npx -p @chatwarden/http chatwarden init`) that writes the wiring for you, with the recipes in [`docs/recipes`](../../docs/recipes);
 - a **browser-safe entry** (`@chatwarden/http/admin`): the staff API, `createRouter` and the error, role and permission exports, with nothing that imports a Node builtin, so a browser app can run the staff routes in the page.
 
 The routes are plain functions over a small request and response type, so the package has no web framework in it. Express
@@ -45,13 +45,15 @@ newer, or `await import(...)`.)
 `chatwarden init` writes the wiring for a moderated server into your project: the kit (engine, store and matcher), the mount for your framework, three starter hooks and a synthetic term pack. It can also write the chat box, the moderator hub and a Discord feed. Run it from the project root, the folder with `package.json`:
 
 ```sh
+npm install @chatwarden/http @chatwarden/core
 npx chatwarden init
-npx -p @chatwarden/http chatwarden init   # before anything is installed
 ```
+
+With nothing installed yet, `npx -p @chatwarden/http chatwarden init` runs the same command.
 
 It asks only what it cannot detect. With `--yes` it asks nothing. With `--json` it asks nothing and prints one JSON document. When the input is not a terminal it uses the detected answers and says so. It supports Express, Fastify, Next.js route handlers, anything on Web `Request` and `Response`, or the library alone (`--framework none`). The recipes in [`docs/recipes`](../../docs/recipes) show each result.
 
-What it never does: it never edits a file that exists, it never writes outside the project folder, it never uses the network, and it never writes a secret. A file that exists and differs is skipped (or, with `--on-conflict new`, written beside it with `chatwarden-new` in its name (`kit.chatwarden-new.ts`); with `--on-conflict overwrite` or `--force`, replaced). Running it again with the same answers changes nothing.
+What it never does: it never edits a file that exists, it never writes outside the project folder, it uses the network only with `--install` (your package manager does), and it never writes a secret. A file that exists and differs is skipped (or, with `--on-conflict new`, written beside it with `chatwarden-new` in its name (`kit.chatwarden-new.ts`); with `--on-conflict overwrite` or `--force`, replaced). Running it again with the same answers changes nothing.
 
 What it writes is a starter, and says so. Every starter hook carries a `TODO(auth)`, `TODO(identity)` or `TODO(terms)` marker. The staff routes answer 401 until `CHATWARDEN_ADMIN_TOKEN` is set to a long value, and production refuses to start without `CHATWARDEN_SECRET`. Run `npx chatwarden init --check` to list the markers still in your code and the required variable names that are not set. It changes nothing and exits 1 until nothing is left. A `.env` file is not loaded for you: export the names, or start your server with `node --env-file=.env`.
 

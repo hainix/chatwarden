@@ -247,6 +247,38 @@ describe('buildPlan: environment, next steps, warnings', () => {
     expect(plan({ framework: 'fetch' }).nextSteps[1]).toContain('handler');
   });
 
+  it('the entry line for Express and Fastify shows top-level await only for an ES module project, and an async function for CommonJS', () => {
+    for (const framework of ['express', 'fastify'] as const) {
+      for (const lang of ['ts', 'js'] as const) {
+        const esm = plan({ framework, lang }, { ...PROJECT, moduleType: 'module' }).nextSteps[1] as string;
+        const unset = plan({ framework, lang }).nextSteps[1] as string;
+        const cjs = plan({ framework, lang }, { ...PROJECT, moduleType: 'commonjs' }).nextSteps[1] as string;
+        expect(esm, `${framework} ${lang} esm`).toContain('await mountChatwarden(app)');
+        expect(esm).not.toMatch(/async function|CommonJS/);
+        expect(unset, 'no module type given: as for an ES module').toBe(esm);
+        expect(cjs, `${framework} ${lang} cjs`).toContain('await mountChatwarden(app)');
+        expect(cjs).toMatch(/inside an async function/);
+        expect(cjs).toContain('CommonJS');
+        expect(cjs).toContain(`chatwarden/${framework}`);
+      }
+    }
+  });
+
+  it('a CommonJS JavaScript project, whose files are .mjs, is told to load the mount with a dynamic import', () => {
+    const js = plan({ framework: 'express', lang: 'js' }, { ...PROJECT, moduleType: 'commonjs' }).nextSteps[1] as string;
+    expect(js).toContain('dynamic import');
+    expect(js).toContain('express.mjs');
+    const ts = plan({ framework: 'express', lang: 'ts' }, { ...PROJECT, moduleType: 'commonjs' }).nextSteps[1] as string;
+    expect(ts).not.toContain('.mjs');
+  });
+
+  it('the module type changes nothing for the frameworks that add no line of code, or the socket line', () => {
+    for (const framework of ['next', 'fetch', 'none'] as const) {
+      expect(plan({ framework }, { ...PROJECT, moduleType: 'commonjs' }).nextSteps).toEqual(plan({ framework }).nextSteps);
+    }
+    expect(plan({ framework: 'express', chat: 'box', chatTransport: 'socketio' }, { ...PROJECT, moduleType: 'commonjs' }).nextSteps[1]).toContain('attachChat(io, kit)');
+  });
+
   it('the entry line names the folder the files were written to, with / separators', () => {
     expect(plan({ framework: 'express', dir: 'lib/vlemmo' }).nextSteps[1]).toContain('lib/vlemmo');
     expect(plan({ framework: 'express', dir: 'lib/vlemmo' }).nextSteps[1]).not.toContain('\\');

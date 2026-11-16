@@ -23,7 +23,7 @@ describe('.github/workflows/ci.yml', () => {
     expect(text).toContain("node-version: '22.13'");
     expect(text).toContain('- run: npm ci');
     const runs = [...text.matchAll(/^\s+- run: (.*)$/gm)].map((m) => m[1]);
-    expect(runs).toEqual(['npm ci', 'npx vitest run packages/http/test/cli-*.test.ts packages/store-memory/test/testing-*.test.ts']);
+    expect(runs).toEqual(['npm ci', 'npx vitest run packages/http/test/cli- packages/store-memory/test/testing-']);
   });
   it('the Windows job never runs the whole suite, the build or the site', () => {
     const text = job('cli-windows');
@@ -35,10 +35,16 @@ describe('.github/workflows/ci.yml', () => {
     expect(ci).toMatch(/\npermissions:\n {2}contents: read\n/);
     expect(job('cli-windows')).not.toContain('permissions:');
   });
+  it('the Windows job filters by substring: no glob character in the vitest command', () => {
+    const run = [...job('cli-windows').matchAll(/^\s+- run: (npx vitest.*)$/gm)].map((m) => m[1] as string);
+    expect(run).toHaveLength(1);
+    expect(run[0]).not.toMatch(/[*?{}[\]]/);
+    expect(run[0]).not.toContain('.test.ts');
+  });
   it('the existing jobs are still there: check, site, element-browser and smoke', () => {
     for (const name of ['check', 'site', 'element-browser', 'smoke']) expect(ci).toContain(`\n  ${name}:\n`);
   });
-  it('the globs in the Windows job match test files that exist', () => {
+  it('the Windows job uses substring filters, not globs (PowerShell passes * literally and vitest filters by substring), that match test files that exist', () => {
     expect(readdirSync(join(root, 'packages/http/test')).filter((f) => /^cli-.*\.test\.ts$/.test(f)).length).toBeGreaterThan(10);
     expect(readdirSync(join(root, 'packages/store-memory/test')).filter((f) => /^testing-.*\.test\.ts$/.test(f)).length).toBeGreaterThan(3);
   });

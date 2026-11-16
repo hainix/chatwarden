@@ -7,6 +7,7 @@ This one is written by hand. Init does not write it, because a generated file th
 **Init writes:** nothing for Colyseus itself. It can write the kit (`kit.ts`) that the helper takes: the helper needs the kit's `chat` room broadcaster, so ask for the chat box.
 
 ```sh
+npm install @chatwarden/http @chatwarden/core
 npx chatwarden init --framework none --chat box
 ```
 

@@ -399,7 +399,7 @@ describe('packages/http/README.md, the init command', () => {
 
   it('every `chatwarden init ...` command in a shell block parses', () => {
     const commands = [...init.matchAll(/```sh\n([\s\S]*?)```/g)].flatMap((m) => (m[1] as string).split('\n')).map((l) => l.replace(/#.*$/, '').trim()).filter((l) => l.includes('chatwarden init'));
-    expect(commands.length).toBeGreaterThanOrEqual(2);
+    expect(commands.length).toBeGreaterThanOrEqual(1);
     for (const command of commands) {
       const argv = command.slice(command.indexOf('chatwarden init') + 'chatwarden'.length).trim().split(/\s+/).filter(Boolean);
       const parsed = parseCli(argv);
@@ -426,9 +426,9 @@ describe('packages/http/README.md, the init command', () => {
     }
   });
 
-  it('says it never edits a file, never leaves the project, never uses the network and writes no secret, and that .env is not loaded for you', () => {
+  it('says it never edits a file, never leaves the project, uses the network only with --install and writes no secret, and that .env is not loaded for you', () => {
     const doc = flat(init);
-    for (const needle of ['never edits a file that exists', 'never writes outside the project folder', 'never uses the network', 'never writes a secret', 'is not loaded for you', 'node --env-file=.env', 'TODO(auth)', 'TODO(identity)', 'TODO(terms)', 'CHATWARDEN_ADMIN_TOKEN', 'CHATWARDEN_SECRET', '--check']) {
+    for (const needle of ['never edits a file that exists', 'never writes outside the project folder', 'uses the network only with `--install`', 'never writes a secret', 'is not loaded for you', 'node --env-file=.env', 'TODO(auth)', 'TODO(identity)', 'TODO(terms)', 'CHATWARDEN_ADMIN_TOKEN', 'CHATWARDEN_SECRET', '--check']) {
       expect(doc, needle).toContain(needle);
     }
   });

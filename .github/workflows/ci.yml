@@ -116,7 +116,7 @@ jobs:
           node-version: '22.13'
           cache: npm
       - run: npm ci
-      - run: npx vitest run packages/http/test/cli-*.test.ts packages/store-memory/test/testing-*.test.ts
+      - run: npx vitest run packages/http/test/cli- packages/store-memory/test/testing-
 
   smoke:
     name: Smoke (consumer install) Node ${{ matrix.node }}

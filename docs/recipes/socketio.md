@@ -5,6 +5,7 @@ Your game already has a Socket.IO server. This puts the chat box on it, with eve
 **Init writes:** everything the Express recipe writes, plus `socketio.ts` (the server side: `attachChat(io, kit)`), `socketTransport.ts` (the client side) and a `ChatPanel.tsx` that uses it. Run init with the chat box and the Socket.IO transport:
 
 ```sh
+npm install @chatwarden/http @chatwarden/core
 npx chatwarden init --chat box --chat-transport socketio
 ```
 

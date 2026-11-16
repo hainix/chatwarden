@@ -224,6 +224,15 @@ describe('helpText', () => {
     for (const line of lines) expect(line.length).toBeLessThanOrEqual(110);
   });
 
+  it('says --check exits 1 when it finds something left, and still lists check under exit 0 for a clean project', () => {
+    const one = lines.find((l) => /^\s+1\s/.test(l)) ?? '';
+    expect(one).toMatch(/--check/);
+    expect(one).toMatch(/left|found|remain/);
+    const zero = lines.find((l) => /^\s+0\s/.test(l)) ?? '';
+    expect(zero).toMatch(/check/);
+    expect(zero).not.toBe(one);
+  });
+
   it('names the default of an option that has one and the detection of one that has none', () => {
     const store = lines.find((l) => /^\s+--store\b/.test(l)) ?? '';
     expect(store).toContain('sqlite');

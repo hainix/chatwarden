@@ -121,7 +121,7 @@ async function run(argv: readonly string[], env: CliEnv, options: RunOptions): P
 
     const render = options.render ?? renderAll;
     const versions: Versions = { chatwarden: VERSION };
-    const project = { manager: detected.manager, react: detected.react, srcDir: detected.srcDir, appDir: detected.appDir, platform: env.platform };
+    const project = { manager: detected.manager, react: detected.react, srcDir: detected.srcDir, appDir: detected.appDir, moduleType: detected.moduleType, platform: env.platform };
     const plan = buildPlan(answers, versions, (a, v) => render(a, v, { moduleType: detected.moduleType, layout: { srcDir: detected.srcDir, appDir: detected.appDir } }), project);
 
     const ask = prompter === undefined ? undefined : createConflictAsker({ readLine: prompter.readLine, write: (text) => void env.stderr.write(text) });

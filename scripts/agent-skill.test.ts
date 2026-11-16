@@ -64,7 +64,7 @@ describe('the agent skill plugin', () => {
     for (const text of [...spans, ...blocks]) {
       const tokens = text.replace(/#.*$/, '').trim().split(/\s+/);
       // `node --env-file=.env` is a flag of node, not of init.
-      if (tokens[0] === 'node') return;
+      if (tokens[0] === 'node') continue;
       tokens.forEach((token, i) => {
         if (!token.startsWith('--')) return;
         const flag = token.replace(/=.*$/, '');

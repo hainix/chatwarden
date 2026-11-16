@@ -94,4 +94,4 @@ export interface Versions {
 /** What the root listing says about where a Next.js project keeps its routes. */
 export type AppLayout = Partial<Pick<Detected, 'srcDir' | 'appDir'>>;
 
-export type Project = Pick<Detected, 'manager' | 'react'> & AppLayout & { platform?: string };
+export type Project = Pick<Detected, 'manager' | 'react'> & AppLayout & { platform?: string; moduleType?: Detected['moduleType'] };

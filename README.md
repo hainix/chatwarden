@@ -47,7 +47,7 @@ Each package has its own README with the options, a copy-paste start and its sec
 
 ## Quick start
 
-`npx chatwarden init` writes this wiring for you, and the recipes in [`docs/recipes`](docs/recipes) show the result for each server. What follows is the same wiring written by hand, so you can see what init writes.
+After `npm install @chatwarden/http @chatwarden/core`, `npx chatwarden init` writes this wiring for you, and the recipes in [`docs/recipes`](docs/recipes) show the result for each server. What follows is the same wiring written by hand, so you can see what init writes.
 
 Add the kit to a server that already has chat. The engine (`createChatwarden`) decides; `@chatwarden/http` puts it behind
 routes; `@chatwarden/discord` is optional.

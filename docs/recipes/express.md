@@ -7,6 +7,7 @@ Init writes the files below into `chatwarden/` (into `src/chatwarden/` when your
 **You write:** one line in your app, the staff and player hooks in `auth.ts` (marked `TODO(auth)` and `TODO(identity)`) and your own terms in `terms.ts` (marked `TODO(terms)`). The rest is yours to change.
 
 ```sh
+npm install @chatwarden/http @chatwarden/core
 npx chatwarden init --framework express
 ```
 
