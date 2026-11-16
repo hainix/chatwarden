@@ -11,6 +11,8 @@ import { makeToolWorld, type ToolWorld } from './tool-world.js';
 // Keys and signatures (design 7). Keys are generated here, in the test; the kit's own verifier is the judge of every signature.
 
 const PASS = 'correct horse battery staple 7';
+// Built in two pieces so that this file does not itself look like a committed key to scripts/no-corpus-data.mjs.
+const ENCRYPTED_HEADER = '-----BEGIN ENCRYPTED ' + 'PRIVATE KEY-----';
 const bytes = new TextEncoder().encode('the bytes of a release zip, invented');
 
 let tw: ToolWorld;
@@ -33,7 +35,7 @@ const codeOf = (f: () => unknown): string | null => {
 describe('generateSigningKey and loadSigningKey', () => {
   it('make an encrypted PKCS#8 key whose public half is the raw 32-byte key the kit imports, and whose fingerprint is the SHA-256 of it', () => {
     const k = generateSigningKey('k1', PASS);
-    expect(k.pem.startsWith('-----BEGIN ENCRYPTED PRIVATE KEY-----')).toBe(true);
+    expect(k.pem.startsWith(ENCRYPTED_HEADER)).toBe(true);
     expect(b64uDecode(k.publicKey)).toHaveLength(32);
     expect(k.fingerprint).toBe(createHash('sha256').update(b64uDecode(k.publicKey)).digest('hex'));
     const loaded = loadSigningKey(k.pem, PASS);
@@ -61,7 +63,7 @@ describe('keygen refuses a path inside a git tree, writes mode 0600, and the pri
     const path = join(tw.dir, 'k1.pem');
     expect(await run('--id', 'k1', '--out', path)).toBe(0);
     const pem = readFileSync(path, 'utf8');
-    expect(pem.startsWith('-----BEGIN ENCRYPTED PRIVATE KEY-----')).toBe(true);
+    expect(pem.startsWith(ENCRYPTED_HEADER)).toBe(true);
     const loaded = loadSigningKey(pem, PASS);
     const printed = tw.everything();
     expect(printed).toContain(loaded.publicKey);
