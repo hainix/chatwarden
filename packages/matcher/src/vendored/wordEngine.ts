@@ -125,6 +125,9 @@ export function compileWords(words: readonly string[]): { getAllMatches(input: s
   const index = new Map<string, number[]>();
   words.forEach((word, termId) => {
     if (word.length === 0) throw new Error(`Pattern with ID ${termId} potentially matches empty string; this is unsupported.`);
+    // The index only finds a word made of word characters; any other would silently never match, so refuse it (fail closed).
+    // The message names the position, never the word.
+    if (!/^[A-Za-z0-9_]+$/.test(word)) throw new Error(`Pattern with ID ${termId} is not made of word characters; this is unsupported.`);
     const ids = index.get(word);
     if (ids === undefined) index.set(word, [termId]);
     else ids.push(termId);

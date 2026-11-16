@@ -199,6 +199,21 @@ describe("compileWords: the same hits as obscenity's RegExpMatcher with the Engl
     for (const line of lines) expect(big.getAllMatches(line), line).toEqual(ref.getAllMatches(line, true));
   }, 60_000);
 
+  it('refuses a word outside its [A-Za-z0-9_] contract instead of silently never matching it', () => {
+    for (const bad of ['zor bak', 'zor-bak', 'zorbak!', 'z\u00f3rbak', '\uff5aorbak', 'zor\u200bbak', 'zorbak\n', '|zorbak|', '\ud83d\ude00', '']) {
+      expect(() => compileWords(['glarn', bad]), JSON.stringify(bad)).toThrow();
+    }
+    // The error names the position, never the word.
+    expect(() => compileWords(['glarn', 'tar vo'])).toThrow(/ID 1/);
+    try {
+      compileWords(['tar vo']);
+    } catch (err) {
+      expect(String(err)).not.toContain('tar vo');
+    }
+    // What the matcher actually hands it is still fine.
+    expect(() => compileWords(['zorbak', 'v1emmo', 'quis_sel', 'ZORBAK'])).not.toThrow();
+  });
+
   it('an empty list matches nothing', () => {
     expect(compileWords([]).getAllMatches('zorbak glarn')).toEqual([]);
     expect(referenceMatcher([]).getAllMatches('zorbak glarn', true)).toEqual([]);

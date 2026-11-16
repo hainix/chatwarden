@@ -22,6 +22,8 @@ export {
   type ChangeResult,
   type CheckResult,
   type ExceptionListRow,
+  type SyncResult,
+  type SyncSummary,
   type TermEditor,
   type TermListRow,
 } from './liveTerms.js';
