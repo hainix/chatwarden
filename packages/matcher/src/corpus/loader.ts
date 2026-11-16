@@ -257,7 +257,14 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
   let memIndex: IndexCopy | null = null;
   let lastCommit = '';
   let inflight: Promise<RefreshResult> | null = null;
+  /** The queue of state.json writes: one at a time, each built from the values at the moment it runs, so an older write never lands last. */
   let writes: Promise<void> = Promise.resolve();
+  /** The release state.json names (the one in the cache folder), as far as this loader knows. */
+  let diskRelease: string | null = null;
+  /** The ratchet (highest sequence, revoked key ids) as last written or read, to know when it has moved. */
+  let persistedRatchet = '0|';
+  /** Whether the verified pack has been handed to the live list since this loader was made. */
+  let installed = false;
 
   const zipName = (v: string): string => `releases/${kind}-${v}.zip`;
 
@@ -270,6 +277,17 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
       return null;
     }
   }
+  /** Write state.json after everything queued before it. Rejects with `cache_failed`; the queue goes on either way. */
+  function writeState(release?: string | null): Promise<void> {
+    const job = writes.then(async () => {
+      const named = release === undefined ? diskRelease : release;
+      await put(stateName, stateBytes(named));
+      diskRelease = named;
+      persistedRatchet = ratchetKey();
+    });
+    writes = job.catch(() => undefined);
+    return job;
+  }
   async function put(name: string, bytes: Uint8Array): Promise<void> {
     try {
       await cache.write(name, bytes);
@@ -277,6 +295,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
       throw err('cache_failed', 'cache');
     }
   }
+  const ratchetKey = (): string => `${maxSequence}|${[...revoked].join(',')}`;
   function stateBytes(release: string | null): Uint8Array {
     return new TextEncoder().encode(
       JSON.stringify({ maxSequence, applied, checkedAt: lastCheckedAt, release, revokedKeyIds: [...revoked].slice(0, 64) }),
@@ -401,6 +420,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
     maxSequence = Math.max(maxSequence, disk.maxSequence);
     for (const id of disk.revokedKeyIds) revoked.add(id);
     applied = disk.applied;
+    diskRelease = disk.release;
     let index: CorpusIndex | null = null;
     const indexBytes = await safeRead('index.json');
     const indexSig = await safeRead('index.json.sig');
@@ -417,6 +437,8 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
         earlyError = asCorpusError(e, 'bad_signature', 'verify');
       }
     }
+    // What the folder says (state.json, and the index beside it) is on disk already; only what is learned after this needs writing.
+    persistedRatchet = ratchetKey();
     const version = pin ?? disk.release;
     if (version !== null && version !== undefined) {
       const loaded = await loadCachedRelease(version, index);
@@ -471,7 +493,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
     }
     await put('index.json', copy.bytes);
     await put('index.json.sig', copy.sig);
-    await put(stateName, stateBytes(entry.version));
+    await writeState(entry.version);
     lastCommit = key;
   }
 
@@ -533,15 +555,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
   }
 
   function persist(): void {
-    writes = writes
-      .then(async () => {
-        try {
-          await cache.write(stateName, stateBytes(verified?.version ?? null));
-        } catch {
-          warn('corpus.refresh_failed', { stage: 'cache', code: 'cache_failed' });
-        }
-      })
-      .catch(() => undefined);
+    writeState().catch(() => warn('corpus.refresh_failed', { stage: 'cache', code: 'cache_failed' }));
   }
 
   // --- refresh ---
@@ -556,6 +570,9 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
     } catch (e) {
       failure = asCorpusError(e, 'bad_pack', 'validate');
     }
+    // A verified index raised the ratchet (or named revoked keys) but the run did not get to commit: record that anyway, so a restart
+    // cannot accept an older replayed index. A write that fails changes nothing else.
+    if (failure !== null && ratchetKey() !== persistedRatchet) await writeState().catch(() => undefined);
     // The cached file or the seed that would not verify is the news when there is no network and nothing else to use.
     if (failure !== null && (failure.code === 'offline' || failure.code === 'timeout') && verified === null && earlyError !== null) failure = earlyError;
     if (failure === null) {
@@ -569,6 +586,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
         if (r.ok) {
           applied = verified.version;
           pending = null;
+          installed = true;
           persist();
         } else if (failure === null) {
           failure = err('bad_pack', 'validate');
@@ -578,6 +596,14 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
         pending = r.ok ? r.summary : null;
         if (!r.ok && failure === null) failure = err('bad_pack', 'validate');
       }
+    } else if (kind === 'terms' && verified !== null && live !== undefined && !installed) {
+      // The release is already applied (state.json says so) but this loader has not handed its pack to the live list: the canary and
+      // check() would still read the app's own pack, and a store that did not survive the restart would stay empty. The sync of a
+      // version that is already in is a no-op for the rows, so it is done once per start whatever `apply` is.
+      const r = tryApply(live, verified, `corpus:${verified.version}`, false);
+      if (r.ok) installed = true;
+      else if (failure === null) failure = err('bad_pack', 'validate');
+      pending = null;
     } else if (verified === null || verified.version === applied) {
       pending = null;
     }
@@ -626,6 +652,7 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader |
       if (r.ok) {
         applied = verified.version;
         pending = null;
+        installed = true;
         persist();
       }
       return r;

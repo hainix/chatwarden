@@ -238,7 +238,9 @@ describe('the failure table: nothing changes, one { stage, code } log line, a st
     const res = await r.loader.refresh();
     expect(res.status).toMatchObject({ state: 'failed', lastError: { code: 'revoked_key', stage: 'verify' } });
     expect(r.loader.pack()).toBeNull();
-    expect(r.cache.writes()).toEqual([]);
+    // Only the ratchet (the revoked key the verified index named) is recorded; no release is cached or named.
+    expect(r.cache.writes()).toEqual(['state.json']);
+    expect(r.cache.json('state.json')).toMatchObject({ release: null, revokedKeyIds: ['k2'] });
     expectCleanLog(r, { stage: 'verify', code: 'revoked_key' });
 
     // An index cannot revoke the key that signed it (it would lock every kit out of the fix): that revocation is ignored.

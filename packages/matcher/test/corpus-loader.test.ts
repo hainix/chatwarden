@@ -347,7 +347,9 @@ describe('happy path', () => {
     const res = await bad.loader.refresh();
     expect(res.status).toMatchObject({ state: 'failed', lastError: { code: 'hash_mismatch', stage: 'download' } });
     expect(bad.loader.pack()).toBeNull();
-    expect(bad.cache.writes()).toEqual([]);
+    // Only the ratchet is recorded; no release is cached or named.
+    expect(bad.cache.writes()).toEqual(['state.json']);
+    expect(bad.cache.json('state.json')).toMatchObject({ release: null, maxSequence: 14 });
   });
 
   it('options.mirrors are tried after the base URL, for the index and for the files', async () => {

@@ -1,5 +1,6 @@
 import type { Clock } from '@chatwarden/core';
 import { createCorpusLoader, systemSchedule, type CorpusEvalLoader, type CorpusLoader, type CorpusLoaderOptions } from '../loader.js';
+import { VERSION } from '../../index.js';
 import { fileCache } from './fileCache.js';
 
 // The convenience starter (design 8.2, 9): a disk cache in `dir`, one refresh bounded to 10 seconds so a game never waits on the
@@ -33,7 +34,7 @@ export async function startCorpus(options: StartCorpusOptions): Promise<StartedC
   const { dir, clock, ...rest } = options;
   if (typeof dir !== 'string' || dir === '') throw new RangeError('startCorpus: dir must be the folder the cache lives in');
   const schedule = rest.schedule ?? systemSchedule;
-  const loader = createCorpusLoader({ ...rest, schedule, cache: fileCache(dir), clock: clock ?? systemClock } as CorpusLoaderOptions);
+  const loader = createCorpusLoader({ ...rest, kit: rest.kit ?? VERSION, schedule, cache: fileCache(dir), clock: clock ?? systemClock } as CorpusLoaderOptions);
 
   let cancelBound: () => void = () => undefined;
   const bound = new Promise<void>((resolve) => {

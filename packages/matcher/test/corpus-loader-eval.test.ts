@@ -122,7 +122,8 @@ describe("createCorpusLoader({ kind: 'eval' })", () => {
       const res = await loader.refresh();
       expect({ name, state: res.status.state, code: res.status.lastError?.code, stage: res.status.lastError?.stage }).toEqual({ name, state: 'failed', code, stage });
       expect(loader.release()).toBeNull();
-      expect(r.cache.files.has('state-eval.json')).toBe(false);
+      // At most the ratchet is on disk; no release is named.
+      if (r.cache.files.has('state-eval.json')) expect(r.cache.json('state-eval.json').release).toBeNull();
       expect(r.cache.writes().some((n) => n.startsWith('releases/eval-'))).toBe(false);
       for (const w of r.warn.mock.calls) expect(JSON.stringify(w)).not.toMatch(/quissel|zorbak|surprise/);
     }
