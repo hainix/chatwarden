@@ -817,3 +817,168 @@ describe('Coop in the project docs', () => {
     }
   });
 });
+
+describe('packages/http/README.md, Epic Online Services', () => {
+  const doc = section(http, 'Epic Online Services');
+  const js = (code: string): string => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  const sub = (heading: string): string => {
+    const start = doc.indexOf(`\n### ${heading}\n`);
+    expect(start, `subsection ${heading}`).toBeGreaterThanOrEqual(0);
+    const next = doc.indexOf('\n### ', start + 1);
+    return doc.slice(start, next === -1 ? undefined : next);
+  };
+
+  it('every documented option exists, and every option is documented', () => {
+    const source = read('../src/eos/options.ts');
+    const block = /export interface EosOptions \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
+    const top = [...block.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+    const nested = (name: string): string[] => {
+      const inner = new RegExp(`^ {2}${name}\\?: \\{([\\s\\S]*?)\\n {2}\\};`, 'm').exec(block)?.[1] ?? '';
+      return [...inner.matchAll(/^ {4}(\w+)\??:/gm)].map((m) => `${name}.${m[1] as string}`);
+    };
+    const fields = [...top, ...nested('sanctions'), ...nested('reports')];
+    expect(fields.length).toBeGreaterThanOrEqual(18);
+    const names = rows(sub('Epic Online Services options')).flatMap((r) => [...(r[0] as string).matchAll(/`([\w.]+)`/g)].map((m) => m[1] as string));
+    for (const field of fields) expect(names, field).toContain(field);
+    for (const name of names) expect(fields, name).toContain(name);
+  });
+
+  it('the READMEs list the @experimental names, every one the entry exports', () => {
+    const entry = read('../src/eos/index.ts');
+    const exported = [
+      ...[...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean)),
+      ...[...entry.matchAll(/^export (?:interface|function) (\w+)/gm)].map((m) => m[1] as string),
+    ];
+    expect(new Set(exported)).toEqual(new Set(['eos', 'EosAdapter', 'EosOptions', 'EosKind', 'EosSeat', 'PollResult']));
+    for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
+    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+  });
+
+  it('says what EOS can and cannot do, that the entry is not in the root, and needs links', () => {
+    const can = flat(sub("What EOS's API can and cannot do"));
+    for (const needle of ['cannot list them all', 'no id, no room, no chat line', 'both** players in the **same room', 'The kit stores no EOS id']) expect(can, needle).toContain(needle);
+    expect(flat(doc)).toContain('not in the package root');
+    expect(flat(doc)).toContain('`cw.links`');
+    expect(flat(doc)).toContain('The kit stays the source of truth');
+  });
+
+  it('lists the client policy actions the adapter calls, and sets up in order', () => {
+    const setup = flat(sub('Set up, in order'));
+    for (const needle of ['`sanctions:createSanction`', '`sanctions:deleteSanction`', '`sanctions:findSanctionsForAnyUser`', '`playerreports:findReportsForAnyUser`', 'sandbox', 'cw.people.accountIds']) {
+      expect(setup, needle).toContain(needle);
+    }
+    const order = ['Make client credentials', 'Choose the action names', 'Write the two functions', 'Add it to your server', 'Check it by hand'].map((needle) => setup.indexOf(needle));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('documents the push and the pull steps, the limits in the code and what never leaves', () => {
+    const push = flat(sub('The push: a kit sanction becomes an EOS sanction'));
+    for (const needle of ['`cw_ref`', 'second sanction after a crash', 'at most 500', '`source` `chatwarden`', '`0` for a permanent ban and for a warning', '`Lifted: M-7K3Q9`', 'retry-after', 'What EOS never gets']) {
+      expect(push, needle).toContain(needle);
+    }
+    const pull = flat(sub('The pull: an EOS report becomes a kit report'));
+    for (const needle of ['20 at a time', '50 to a page', '10 minutes before the cursor', '`unseated`', '`different_room`', '`self`', '500 characters', '64 at most', 'now plus one minute', '`maxPerPoll`', '20 pages', 'The first poll starts from now', 'weak evidence']) {
+      expect(pull, needle).toContain(needle);
+    }
+    // The numbers in the text are the numbers in the code.
+    const reports = read('../src/eos/reports.ts');
+    expect(reports).toMatch(/const PAGE = 50;/);
+    expect(reports).toMatch(/const PAGES_MAX = 20;/);
+    expect(reports).toMatch(/const PLAYERS_MAX = 500;/);
+    expect(reports).toMatch(/const NOTE_MAX = 500;/);
+    expect(reports).toMatch(/const OVERLAP_MS = 10 \* 60_000;/);
+    expect(reports).toMatch(/const AHEAD_MS = 60_000;/);
+    expect(read('../src/eos/sanctions.ts')).toMatch(/const LOOKUP_PAGES = 5;/);
+    expect(read('../src/eos/sanctions.ts')).toMatch(/const PAGE = 100;/);
+    expect(read('../src/eos/options.ts')).toMatch(/batch: batch \?\? 20/);
+    // Every skip code the poll counts is documented.
+    for (const code of ['unseated', 'different_room', 'self', 'malformed', 'seat_error']) expect(doc, code).toContain(`\`${code}\``);
+    expect(flat(sub('What stays on the game client'))).toContain('EOS SDK call your game client makes');
+  });
+
+  it('documents every log event and every operation the code logs, and the security notes', () => {
+    const logs = flat(sub('Logs'));
+    for (const event of ['chatwarden.eos_failed', 'chatwarden.eos_dropped', 'chatwarden.eos_report_skipped']) expect(logs, event).toContain(`\`${event}\``);
+    const ops = new Set(['eos/token.ts', 'eos/sanctions.ts', 'eos/reports.ts'].flatMap((f) => [...read(`../src/${f}`).matchAll(/\bop: '(\w+)'/g)].map((m) => m[1] as string)));
+    expect(ops.size).toBeGreaterThanOrEqual(9);
+    for (const op of ops) expect(logs, op).toContain(`\`${op}\``);
+    for (const op of ['apply', 'revoke', 'enqueue']) expect(logs, op).toContain(`\`${op}\``);
+    const notes = flat(sub('Epic Online Services: security notes'));
+    for (const needle of ['The secret and the token stay in memory', 'Redirects are never followed', 'Reports are hostile input', 'No outside account id is stored', 'A line decides the person']) expect(notes, needle).toContain(needle);
+  });
+
+  it('lists what is not confirmed yet', () => {
+    const open = flat(sub('Not confirmed yet'));
+    for (const needle of ['`duration: 0`', '`reportedPlayerId`', 'rate limits', '`404`', '`automated`', "A restart between the kit's revoke and the delete", 'Nothing has run against the real EOS']) expect(open, needle).toContain(needle);
+  });
+
+  it('the wiring block compiles (scripts/readme.test.ts) and runs against the fake EOS: a sanction is pushed, a report is pulled, dispose is clean', async () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    expect(blocks).toHaveLength(1);
+    const block = blocks[0] as string;
+    expect(block.startsWith("import { eos } from '@chatwarden/http/eos';")).toBe(true);
+    expect(block).toMatch(/\/\/ at startup\nadapter\.start\(\);.*\n\n\/\/ on shutdown\nadapter\.dispose\(\);/);
+    // The startup line starts a timer; the test polls by hand instead, and checks the line is there.
+    const body = block
+      .split('\n')
+      .filter((l) => !l.startsWith('import '))
+      .join('\n')
+      .replace(/\n\/\/ at startup\n[\s\S]*?\n\n\/\/ on shutdown\nadapter\.dispose\(\);\n?$/, '\n');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore, withMemoryLinks } = await import('@chatwarden/store-memory');
+    const { eos } = await import('../src/eos/index.js');
+    const { fakeEos, DEPLOYMENT, CLIENT_ID, CLIENT_SECRET, until } = await import('./eos-world.js');
+    const { vi } = await import('vitest');
+    const cw = await createChatwarden({ store: withMemoryLinks(new MemoryStore()), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false, logger: { warn: () => undefined } });
+    const fake = fakeEos();
+    vi.stubGlobal('fetch', fake.fetch);
+    try {
+      const env: Record<string, string> = { EOS_DEPLOYMENT_ID: DEPLOYMENT, EOS_CLIENT_ID: CLIENT_ID, EOS_CLIENT_SECRET: CLIENT_SECRET };
+      const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+      const make = new AsyncFunction('eos', 'cw', 'process', `${js(body)}\nreturn { adapter, productUserIdOfAccount, seatOfProductUserId };`);
+      const out = (await make(eos, cw, { env })) as {
+        adapter: ReturnType<typeof eos>;
+        productUserIdOfAccount: Map<string, string>;
+        seatOfProductUserId: Map<string, { roomId: string; seatId: string }>;
+      };
+      // A person with an account id, a sanction, and the push.
+      cw.rooms.seat('readme-room', 'p1', { clientKey: 'raw-key-one', ip: '198.51.100.1', accountId: 'acct-one' }, 'One');
+      cw.rooms.seat('readme-room', 'p2', { clientKey: 'raw-key-two', ip: '198.51.100.2', accountId: 'acct-two' }, 'Two');
+      out.productUserIdOfAccount.set('acct-one', 'puid-readme-one');
+      out.productUserIdOfAccount.set('acct-two', 'puid-readme-two');
+      out.seatOfProductUserId.set('puid-readme-one', { roomId: 'readme-room', seatId: 'p1' });
+      out.seatOfProductUserId.set('puid-readme-two', { roomId: 'readme-room', seatId: 'p2' });
+      const subject = cw.rooms.subjectAt('readme-room', 'p2') as string;
+      await cw.sanctions.apply({ kind: 'chat', subject, includeIp: false, durationMs: 86_400_000, reason: 'private', actor: 'ann', source: 'moderator', automated: false, rule: 1 });
+      await until(() => fake.sanctions.length === 1, 'the push');
+      expect(fake.sanctions[0]).toMatchObject({ productUserId: 'puid-readme-two', action: 'chatwarden-chat', source: 'chatwarden', duration: 86_400 });
+      // A report between the two, pulled.
+      fake.addReport({ reportingPlayerId: 'puid-readme-one', reportedPlayerId: 'puid-readme-two', reasonId: 4, time: new Date().toISOString(), message: 'zorbak' });
+      expect(await out.adapter.pollReports()).toMatchObject({ seen: 1, filed: 1 });
+      out.adapter.dispose();
+      expect(await out.adapter.pollReports()).toEqual({ seen: 0, filed: 0, skipped: {}, refused: {} });
+    } finally {
+      vi.unstubAllGlobals();
+      await cw.close();
+    }
+  });
+});
+
+describe('EOS in the project docs', () => {
+  const status = flat(read('../../../docs/status.md'));
+  const follow = flat(read('../../../docs/plans/follow-ups.md'));
+
+  it('the root README has the row; CLAUDE.md names the adapter', () => {
+    expect(flat(root)).toContain('`eos` from `@chatwarden/http/eos`');
+    expect(flat(root)).toContain('Epic Online Services');
+    expect(flat(read('../../../CLAUDE.md'))).toContain('`@chatwarden/http/eos`');
+  });
+
+  it('status says what is built and what the owner checks; follow-ups tell the owner exactly what to do (task E5)', () => {
+    for (const needle of ['EOS (built', '`chatwarden.eos_failed`', 'Nothing has run against the real EOS', "The owner's sandbox check (K5 E5)", 'the Discord bot, Coop and EOS are built']) expect(status, needle).toContain(needle);
+    for (const needle of ['the EOS sandbox check (task E5)', '**sandbox**', '`sanctions:createSanction`', '`playerreports:findReportsForAnyUser`', 'permanent ban', '`duration: 0`', '`reports.batch`', '429', 'a lost revoke', '`chatwarden.eos_report_skipped`']) {
+      expect(follow, needle).toContain(needle);
+    }
+  });
+});

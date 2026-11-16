@@ -518,6 +518,11 @@ declare const bot: import('@chatwarden/http/discord').DiscordBot;
     expect(fromHttp.some((c) => c.includes('signal: {') && c.includes('COOP_SIGNAL_SECRET'))).toBe(true);
   });
 
+  it('the readme code block for eos() is among them (so it compiles with the rest)', () => {
+    const fromHttp = snippets.filter((s) => s.doc === 'http').map((s) => s.code);
+    expect(fromHttp.some((c) => standalone(c) && c.includes('eos(cw, {') && c.includes("from '@chatwarden/http/eos'") && c.includes('productUserIdsOf') && c.includes('seatOf'))).toBe(true);
+  });
+
   it('all compile in one program, and a deliberate error is caught (control)', { timeout: 120_000 }, () => {
     const diagnostics = compile([{ file: 'control.ts', code: "const n: number = 'not a number';" }]);
     const control = diagnostics.get('control.ts');

@@ -211,3 +211,31 @@ Found building `@chatwarden/http/coop` (K5 C1 to C7, 2026-11).
 - **Open: Coop appeals, the Partial Items endpoint and `items/async`.** Not built, on purpose (design section 13).
 - **Open: after step 4 above, delete the signature header shapes Coop does not send** (the hex `v1`, the `t.body` form or the `t=` form, whichever you saw is absent) from `packages/http/src/coop/verify.ts`, and record the finding in `docs/status.md`. Fewer accepted forms is the safer end state.
 - **Open: a bounded signature cache.** Coop's signature has no time, so a replay is harmless only by effect. If Coop ever signs a time, add a window like the signal route's.
+
+## EOS (K5 / 0.1.12), parked
+
+Found building `@chatwarden/http/eos` (K5 E1 to E4, 2026-11).
+
+- **Open, owner: the EOS sandbox check (task E5).** Nothing has talked to EOS yet; every test uses a fake written from EOS's public Web API pages. Use a **sandbox** deployment and
+  test players only, never the live one. Do these in order, and write down the answer to each of the first six:
+  1. In the Developer Portal, make client credentials for the sandbox deployment. Give the client a policy that allows `sanctions:createSanction`, `sanctions:deleteSanction`,
+     `sanctions:findSanctionsForAnyUser` and `playerreports:findReportsForAnyUser`. To send a test report from a script you also need `playerreports:sendReportForAnyUser` on a second client.
+     Copy the deployment id, client id and client secret. Keep them out of source control.
+  2. Start the kit with `eos(cw, ...)` as in the "Epic Online Services" section of `packages/http/README.md`. Use two test accounts that have EOS product user ids, and give the
+     adapter the two functions for them. Use your own action names. Start with `adapter.start()` for the pull.
+  3. In the hub, apply a **24 hour chat** sanction to the first test player. **Does it appear in the Developer Portal's sanctions list for that player, with your action name, the
+     justification "Chatwarden M-XXXXX, Rule n", the tags `cw` and `rule<n>`, and the metadata `cw_ref`?** If the log shows `chatwarden.eos_failed` with a status, note it.
+     A 403 on `op` `reconcile` means the client policy lacks `findSanctionsForAnyUser`.
+  4. Apply a **permanent ban** to the second test player. **Does it show as permanent (no end time), or does it end at once, or does EOS answer 400?** This settles whether
+     `duration: 0` means permanent on create. Tell the maintainer exactly what you see.
+  5. Revoke the first sanction in the hub. **Does it disappear from the Developer Portal list within a minute (status Removed)?** Revoke the second too.
+  6. Send a test report between the two accounts (the game client's report menu, or `POST /player-reports/v1/report` from a script), with both accounts seated in the same room in
+     your test server. Wait one poll. **Does a new report appear in the hub, with the message as the note and the reason you mapped?** Then try a report where one player is not seated: the log
+     should show `chatwarden.eos_report_skipped` with `unseated` and the hub should show nothing.
+  7. Batch size and limits: set `reports.batch` to 20, then 50, then 100 and note the largest the find call accepts without a 400 (the fake accepts 50). Watch the log for `status: 429` in
+     any run and note it. The EOS pages state no rate limits.
+  8. Ask the maintainer to read your notes, then write the results in `docs/status.md` (K5).
+- **Open: a lost revoke.** If the kit restarts between a revoke and the EOS delete, the EOS sanction stays until it ends by itself. A sweep that finds `active` links whose group was revoked
+  and deletes them is not built (design section 13).
+- **Open: pulling sanctions made in the EOS Developer Portal into the kit (`GET /sanctions/v1/sync`), EOS appeals and EOS anti-cheat.** Not built, on purpose (design section 13).
+- **Open: the lookup reads at most 500 sanctions of one user.** A user with more, where ours is not among them, gets no push and a `reconcile` log. If a real player has that many, page further.

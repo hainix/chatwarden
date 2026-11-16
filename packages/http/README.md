@@ -1140,6 +1140,167 @@ end-to-end run (`docs/plans/follow-ups.md`) settles these:
 - Coop's names for the field types, and whether a report job evaluates signals when a rule routes it.
 - The plugin types package: Coop's docs say `@roostorg/coop-types`, its example imports `@roostorg/types`.
 
+## Epic Online Services
+
+`@experimental` until 0.2. This adapter connects the kit to [Epic Online Services](https://dev.epicgames.com/docs/web-api-ref/web-api-introduction) (EOS) in two ways.
+When a moderator sanctions a player, the sanction is also made in EOS, and when the kit lifts it, EOS lifts it. When players report each other through EOS, those
+reports become kit reports for the moderators, when your server can place both players in the same room.
+
+The kit stays the source of truth. EOS gets a mirror of what the kit decided. An outage at EOS never changes what the kit does.
+
+It is in its own entry, `@chatwarden/http/eos`, and not in the package root, because it uses `node:crypto`. It does nothing when you import it. It needs a store
+that has `cw.links` (the memory store with `withMemoryLinks`, or SQLite from 0.1.12); without one, `eos(...)` throws a `RangeError`. You can turn on either half alone.
+
+### What EOS's API can and cannot do
+
+- A trusted server can create, read and remove sanctions. EOS gives each sanction a `referenceId`. The push uses that.
+- A trusted server can send and find player reports, but **it cannot list them all.** The find call needs a player id. So the adapter asks about the players you name,
+  the players who are in rooms right now.
+- An EOS report has no id, no room, no chat line and no time you can trust. The reporting client writes the time and the text. So the adapter files a report in the kit
+  only when your server can seat **both** players in the **same room**. Every other report is counted and left out. It is never invented.
+- The kit stores no EOS id. You give it two small functions, one in each direction (below).
+
+### Set up, in order
+
+1. **Make client credentials in the EOS Developer Portal** for your product and deployment. Use a sandbox deployment first. Give the client a client policy that allows
+   `sanctions:createSanction`, `sanctions:deleteSanction`, `sanctions:findSanctionsForAnyUser` and `playerreports:findReportsForAnyUser`. The first two are the push. The
+   lookup before each create needs the third. The pull needs the fourth. Copy the deployment id, the client id and the client secret. Keep them out of source control.
+2. **Choose the action names.** An EOS action is a name you pick, such as `chatwarden-chat`. Your game client reads active sanctions by these names. Use only `A-Z a-z 0-9 _ -`, up to 64 characters.
+3. **Write the two functions.** `sanctions.productUserIdsOf` turns a person into their EOS product user ids. `reports.seatOf` turns a product user id into the seat that player holds now.
+   The kit already holds your own account ids: `cw.people.accountIds(subject)` returns the strings you passed as `accountId` when the player took a seat.
+4. **Add it to your server.** The block below is the whole wiring.
+
+```ts
+import { eos } from '@chatwarden/http/eos';
+
+// Your own tables. The kit stores no EOS id.
+const productUserIdOfAccount = new Map<string, string>(); // your account id -> EOS product user id
+const seatOfProductUserId = new Map<string, { roomId: string; seatId: string }>(); // set when a player takes a seat
+
+const adapter = eos(cw, {
+  deploymentId: process.env.EOS_DEPLOYMENT_ID!,
+  clientId: process.env.EOS_CLIENT_ID!,
+  clientSecret: process.env.EOS_CLIENT_SECRET!, // a secret: never logged
+  sanctions: {
+    // The kit gives the person's staff ref. You give back their EOS product user ids.
+    productUserIdsOf: (subject) => cw.people.accountIds(subject).flatMap((account) => productUserIdOfAccount.get(account) ?? []),
+    actions: { chat: 'chatwarden-chat', area: 'chatwarden-area', ban: 'chatwarden-ban' },
+  },
+  reports: {
+    seatOf: (productUserId) => seatOfProductUserId.get(productUserId) ?? null,
+    players: () => [...seatOfProductUserId.keys()], // who to ask EOS about
+  },
+});
+
+// at startup
+adapter.start(); // poll for reports every minute
+
+// on shutdown
+adapter.dispose();
+```
+
+5. **Check it by hand** against your sandbox deployment. The steps are in `docs/plans/follow-ups.md` (task E5). Nothing has run against the real EOS yet.
+
+`adapter.pollReports()` is one poll, for tests or your own schedule. It resolves with `{ seen, filed, skipped, refused }`: how many reports EOS returned, how many became
+kit reports, and what was left out or refused, counted by reason code. `adapter.start()` polls every `pollMs` on a timer that does not keep Node running, and skips a tick
+if the last poll is still running. `adapter.stop()` ends the timer. `adapter.dispose()` unsubscribes, aborts what is in flight, clears every timer and drops the queue;
+nothing is written after it. The names `eos`, `EosAdapter`, `EosOptions`, `EosKind`, `EosSeat` and `PollResult` are `@experimental` until 0.2.
+
+### Epic Online Services options
+
+| Option | What it does |
+| --- | --- |
+| `deploymentId` | Your EOS deployment id. Required. |
+| `clientId` | The client id of your credentials. No colon. Required. |
+| `clientSecret` | The client secret. A secret: never logged, never stored, never in an error. Required. |
+| `baseUrl` | Default `https://api.epicgames.dev`. Only for tests: `https`, or `http` on `localhost` and `127.0.0.1`. No user, password, query or fragment. Redirects are never followed. |
+| `sanctions` | Turns on the push. Needs `productUserIdsOf` and `actions`. |
+| `sanctions.productUserIdsOf` | `(subject, aliases) => string[]`. Yours. `subject` is the person's staff ref and `aliases` is every subject merged into it. Return one id for each account. An empty list, a throw or a bad answer pushes nothing. At most 20 ids are used. |
+| `sanctions.actions` | `{ chat, area, ban, warning }`: the EOS action name for each kind. Name at least one. A kind with no name is not pushed. A `note` is never pushed. |
+| `sanctions.justification` | `'ref'` (default) sends "Chatwarden M-7K3Q9, Rule 2". `'reason'` sends the moderator's private reason instead, cut to 2048 characters. |
+| `sanctions.includeAutomatic` | Also push the automatic 30 minute chat timeouts. Default `false`. Needs `actions.chat`. |
+| `reports` | Turns on the pull. Needs `seatOf` and `players`. |
+| `reports.seatOf` | `(productUserId) => seat or null`, a seat being `{ roomId, seatId }`. Yours. Where that player sits now, from your own session table. |
+| `reports.players` | `() => string[]`. Yours. The product user ids to ask EOS about this poll. At most 500 are used. |
+| `reports.reasons` | EOS reason id (1 to 7) to a kit reason id, or `null` for no reason. It is merged over the defaults: 1 and 2 `cheating`, 3 and 7 `other`, 4 `harassment`, 5 and 6 `spam`. |
+| `reports.pollMs` | How often `start()` polls. Default 60 000. At least 1000. |
+| `reports.batch` | How many players go in one request. Default 20, at most 100. |
+| `reports.maxPerPoll` | The most new reports one poll handles. Default 100, at most 1000. |
+| `fetch`, `clock`, `random`, `logger` | The `fetch` for EOS, the time source, the retry jitter and where failures are logged. All for tests; the defaults are the global ones. |
+
+### The push: a kit sanction becomes an EOS sanction
+
+When a sanction of a kind you named is written, the adapter queues one job. The jobs run one at a time, in order. For each product user id the adapter:
+
+1. Skips it if `cw.links` already has a row for this sanction and this id.
+2. Looks at the user's sanctions in EOS for one whose `cw_ref` metadata is this sanction's reference code. If it finds one, it writes the row and stops. This is what stops a
+   second sanction after a crash between EOS's answer and the kit's note of it. It reads at most 500 sanctions. If it cannot find ours in them, it creates nothing and logs it.
+3. Creates the sanction in EOS: your action name, `source` `chatwarden`, `duration` in seconds (rounded, at least 1; `0` for a permanent ban and for a warning), the tags `cw` and
+   `rule<n>`, the metadata `cw_ref` and `cw_rule`, and the justification.
+4. Writes the row: a hash of the id, and EOS's `referenceId`. Nothing else.
+
+When the kit revokes the sanction, the adapter finds the same ids again and removes each EOS sanction that has an active row, with the justification `Lifted: M-7K3Q9`. A sanction
+that ended by itself needs nothing: EOS ends it by its duration.
+
+Failures are retried like the kit's other adapters: 10 seconds for each attempt, then 1, 2, 4, 8 and 16 seconds, a 429's `retry-after` honoured (1 to 60 seconds), at most 1000 jobs
+waiting. A 401 gets a new token once. A 400 or a 403 is final and logged. A failure at EOS never changes the kit's own sanction.
+
+What EOS never gets: the moderator's reason (unless you chose `'reason'`), a handle, a chat line, a subject id, the report, or the actor.
+
+### The pull: an EOS report becomes a kit report
+
+Each poll asks EOS for reports **about** your players, 20 at a time, 50 to a page, oldest first, starting 10 minutes before the cursor. For each report the adapter:
+
+1. Makes a key from a hash of its time, both player ids and the reason. EOS gives a report no id. If the key is known, the report is skipped. That is how the 10 minute overlap and a second poll are safe.
+2. Asks your `seatOf` for both players. If either is not seated, or they are in different rooms, or the reporter and the reported are the same player, the report is skipped and counted
+   (`unseated`, `different_room`, `self`). The reporter's seat comes from `seatOf` and nothing else. Nothing in the report picks the room or the person.
+3. Files it with `cw.reports.submit`: the reason from `reports.reasons`, the message as the note (cut to 500 characters), and a line only if the `context` is JSON with a `lineId` that
+   is a short string of visible characters (64 at most). The rest of `context` is ignored. The kit's own checks decide: the 10 reports a day, a suspended reporter, an unknown reason.
+   A refusal is counted by its code (`rate`, `suspended`, `reason_unknown`, ...) and not tried again.
+4. Writes the row (`filed` or `skipped`) and moves the cursor to the newest report time seen. The cursor never moves backwards, and never past now plus one minute, so a client cannot push it
+   into the future. A report's `createdAt` is always the kit's own clock.
+
+The first poll starts from now. It does not read the history from before the adapter started. A poll handles at most `maxPerPoll` new reports; the rest wait for the next poll, and the cursor
+stays behind them. It reads at most 20 pages for each batch. A report whose time is more than 10 minutes before the cursor is not found: EOS is asked only for newer ones. A `429` pauses polling for its `retry-after` (1 to 60 seconds,
+60 if it names none). A bad page, a `5xx` or a network failure ends that poll, is logged by status or class, and leaves the cursor where it was.
+
+An EOS report is weak evidence. The kit files what its own checks accept and the moderator decides. You will not see every EOS report in the hub, only the ones your server can place.
+
+### What stays on the game client
+
+Reading a player's active sanctions, to show "you are sanctioned" or to stop a login, is an EOS SDK call your game client makes. So is sending a report from the game's own menu. They need
+the local player to be signed in to EOS, and they are not the kit's job. The kit's own notices still tell the player the rule and the reference code. EOS appeals are not read in this release.
+
+### Logs
+
+Logs hold an event name, an operation, an HTTP status or an error class, and a count. Never an id, a URL, a header, a token, a secret, a message, a context or a reason.
+
+| Event | When |
+| --- | --- |
+| `chatwarden.eos_failed` | A push or poll step failed. `op` says which: `token`, `resolve`, `reconcile`, `create`, `link`, `apply`, `revoke`, `players`, `seat`, `poll`, `submit`, `enqueue`. With `status` or `error`, and `attempts` for a job that gave up. |
+| `chatwarden.eos_dropped` | The queue was full and dropped its oldest jobs. With a `count`. |
+| `chatwarden.eos_report_skipped` | A poll left reports out. With a `reason` (`unseated`, `different_room`, `self`, `malformed`, `seat_error`, or `refused_<code>`) and a `count`. |
+
+### Epic Online Services: security notes
+
+- **The secret and the token stay in memory.** The client secret goes into the Basic header for each token request and nowhere else. The access token is held until 60 seconds before it expires. Neither is logged, stored or put in an error.
+- **The host is fixed.** Requests go to `https://api.epicgames.dev`. Redirects are never followed. The `baseUrl` option exists for tests.
+- **Reports are hostile input.** Every field of an EOS report is written by a player's client. Each is shape-checked and cut before use, and the rest is ignored.
+- **No outside account id is stored.** The rows in `cw.links` hold a hash and EOS's `referenceId`.
+- **A line decides the person.** If a report's `context` names a `lineId` that is still in the room's evidence, the kit reports the author of that line, as it does for a report made in the game. Both players must still be seated in the same room.
+
+### Not confirmed yet
+
+This adapter was written from EOS's public Web API pages and tested against a fake that follows them. Nothing has run against the real EOS. The owner's sandbox run
+(`docs/plans/follow-ups.md`) settles these:
+
+- That `duration: 0` means permanent on create. The pages say so for a pending sanction; the example for create uses it.
+- The most `reportedPlayerId` values one find call takes. The default batch is 20.
+- EOS's rate limits. The pages state none. The adapter backs off on a 429 and a 5xx.
+- That a delete of a sanction EOS no longer has answers `404`, and what the error bodies look like.
+- That the create accepts `automated`, which the example shows and the field table does not list.
+- A restart between the kit's revoke and the delete leaves the EOS sanction in place until it expires. A sweep that fixes this is not built.
+
 ## Health probes
 
 `healthRoutes(cw)` adds two public routes. They say "up" or "not ready" and never why.
