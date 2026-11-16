@@ -8,6 +8,10 @@ import type { D1Like } from './env.js';
 export const LIMITS = {
   perInstallationDaily: 20,
   perNetworkDaily: 60,
+  /** Reports have their own counts, so a flood of reports cannot use up the submissions of an installation, nor the other way round. */
+  reportsPerInstallationDaily: 20,
+  reportsPerNetworkDaily: 60,
+  webReportsPerNetworkDaily: 10,
   /** Reads of a submission's status per network per day. */
   statusDaily: 600,
   /** Submissions waiting for a decision, per installation. */

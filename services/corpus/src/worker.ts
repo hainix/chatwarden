@@ -4,6 +4,7 @@ import { purgeExpired } from './counters.js';
 import { logEvent, type AppDeps, type Clock } from './deps.js';
 import type { Env } from './env.js';
 import { json, methodNotAllowed, notFound } from './http.js';
+import { preflight, report } from './reports.js';
 import { handleAdmin } from './review.js';
 
 export type { AppDeps, Clock, LogEvent } from './deps.js';
@@ -16,6 +17,7 @@ export interface App {
 }
 
 const SUBMISSIONS = '/v1/submissions';
+const REPORTS = '/v1/reports';
 
 /** The routes, over `deps`. Throws only for a configuration that cannot work (no secret). */
 export function createApp(deps: AppDeps): App {
@@ -25,6 +27,10 @@ export function createApp(deps: AppDeps): App {
     async fetch(request: Request): Promise<Response> {
       const { pathname } = new URL(request.url);
       if (pathname === '/admin' || pathname.startsWith('/admin/')) return handleAdmin(request, deps, verifier);
+      if (pathname === REPORTS) {
+        if (request.method === 'POST') return report(request, deps);
+        return request.method === 'OPTIONS' ? preflight(deps, request) : methodNotAllowed('POST');
+      }
       if (pathname === SUBMISSIONS) return request.method === 'POST' ? submit(request, deps) : methodNotAllowed('POST');
       if (pathname.startsWith(`${SUBMISSIONS}/`)) {
         const id = pathname.slice(SUBMISSIONS.length + 1);
@@ -57,6 +63,10 @@ function depsFor(env: Env): AppDeps {
   if (env.ACCESS_TEAM_DOMAIN !== undefined && env.ACCESS_TEAM_DOMAIN !== '' && env.ACCESS_AUD !== undefined && env.ACCESS_AUD !== '') {
     deps.access = { teamDomain: env.ACCESS_TEAM_DOMAIN, aud: env.ACCESS_AUD };
   }
+  if (env.TURNSTILE_SECRET !== undefined && env.TURNSTILE_SECRET !== '') {
+    deps.turnstile = { secret: env.TURNSTILE_SECRET, ...(env.REPORTS_HOSTNAME === undefined || env.REPORTS_HOSTNAME === '' ? {} : { hostname: env.REPORTS_HOSTNAME }) };
+  }
+  if (env.REPORTS_ORIGIN !== undefined && env.REPORTS_ORIGIN !== '') deps.reportsOrigin = env.REPORTS_ORIGIN;
   const assets = env.ASSETS;
   if (assets !== undefined) {
     deps.assets = async (name) => {

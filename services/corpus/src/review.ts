@@ -84,6 +84,12 @@ async function route(request: Request, ctx: Ctx): Promise<Response> {
   if (parts.length === 1 && a === 'me') return only(request, 'GET', () => json(200, { email: ctx.reviewer.email, fluent: ctx.reviewer.fluent }));
   if (parts.length === 1 && a === 'queue') return only(request, 'GET', () => listQueue(ctx, url));
   if (parts.length === 1 && a === 'terms') return only(request, 'GET', () => listTerms(ctx, url));
+  if (parts.length === 1 && a === 'reports') return only(request, 'GET', () => listReports(ctx, url));
+  if (parts.length === 3 && a === 'reports' && b !== undefined && SUBMISSION_ID.test(b)) {
+    const id = b;
+    if (c === 'confirm') return action(request, ctx, {}, () => resolveReport(ctx, id, true));
+    if (c === 'decline') return action(request, ctx, {}, () => resolveReport(ctx, id, false));
+  }
   if (parts.length === 3 && a === 'submissions' && b !== undefined && SUBMISSION_ID.test(b)) {
     const id = b;
     if (c === 'reveal') return action(request, ctx, {}, () => revealSubmission(ctx, id));
@@ -450,11 +456,11 @@ async function dispute(ctx: Ctx, id: string): Promise<Response> {
   return json(200, { status: 'disputed' });
 }
 
-/** Restoring a disputed term takes two reviewers; the one who disputed it, and anyone who already voted, cannot be one of them. */
+/** Restoring a disputed or withdrawn term takes two reviewers; the one who disputed it, and anyone who already voted, cannot be one of them. */
 async function restore(ctx: Ctx, id: string): Promise<Response> {
   const t = await loadTerm(ctx, id);
   if (t === null) return notFound();
-  if (t.status !== 'disputed') return err(409, 'not_disputed');
+  if (t.status !== 'disputed' && t.status !== 'withdrawn') return err(409, 'not_disputed');
   if ((await reviewedBy(ctx, 'term', id)) !== null) return err(409, 'already_reviewed');
   const before = await q(ctx, "SELECT COUNT(*) AS n FROM reviews WHERE subject_kind = 'term' AND subject_id = ? AND verdict = 'restore'").bind(id).first<{ n: number }>();
   const votes = (before?.n ?? 0) + 1;
@@ -473,6 +479,7 @@ async function restore(ctx: Ctx, id: string): Promise<Response> {
                                     THEN 'accepted' ELSE 'provisional' END, updated_at = ?2 WHERE id = ?1`,
     ).bind(id, ctx.now),
     q(ctx, "DELETE FROM reviews WHERE subject_kind = 'term' AND subject_id = ? AND verdict IN ('dispute','restore')").bind(id),
+    q(ctx, "UPDATE reports SET status = 'restored' WHERE term_id = ? AND status IN ('disputed','withdrawn')").bind(id),
     audit(ctx, 'review.restore', id),
   ]);
   const after = await loadTerm(ctx, id);
@@ -489,4 +496,62 @@ async function addNegative(ctx: Ctx, id: string, body: Record<string, unknown>):
     q(ctx, 'INSERT INTO audit (at, actor, action, subject) SELECT ?, ?, ?, ? WHERE changes() > 0').bind(ctx.now, ctx.reviewer.email, 'review.negative', id),
   ]);
   return json(200, { added: (out[0]?.meta.changes ?? 0) > 0 });
+}
+
+// ---- reports (design 10.4, 10.6) ----
+
+const REPORT_STATUSES = ['received', 'disputed', 'withdrawn', 'restored', 'declined'];
+
+async function listReports(ctx: Ctx, url: URL): Promise<Response> {
+  const status = url.searchParams.get('status') ?? 'received';
+  const limit = limitOf(url);
+  if (!REPORT_STATUSES.includes(status) || limit === null) return err(400, 'invalid');
+  const res = await q(
+    ctx,
+    `SELECT r.id, r.term_id, r.kind, r.status, r.received_day,
+       (SELECT COUNT(*) FROM reviews v WHERE v.subject_kind = 'report' AND v.subject_id = r.id AND v.verdict = 'dispute') AS votes,
+       (SELECT v.verdict FROM reviews v WHERE v.subject_kind = 'report' AND v.subject_id = r.id AND v.reviewer = ?) AS mine,
+       CASE WHEN r.kind = 'removal' AND (SELECT category FROM terms t WHERE t.id = r.term_id) = 'slur' THEN 2 ELSE 1 END AS needed
+     FROM reports r WHERE r.status = ? ORDER BY r.rowid DESC LIMIT ?`,
+  )
+    .bind(ctx.reviewer.email, status, limit)
+    .all<{ id: string; term_id: string; kind: string; status: string; received_day: string; votes: number; needed: number; mine: string | null }>();
+  return json(200, {
+    items: res.results.map((r) => ({ id: r.id, termId: r.term_id, kind: r.kind, status: r.status, receivedDay: r.received_day, votes: r.votes, needed: r.needed, mine: r.mine })),
+  });
+}
+
+/**
+ * A reviewer confirms or declines a report. An innocent-sense or wrong-category report that is confirmed disputes the term on one reviewer's word
+ * (precision first); a removal needs two reviewers when the term is a slur, one otherwise, and then withdraws it. A decline by one reviewer
+ * closes the report. The reporter is never told which.
+ */
+async function resolveReport(ctx: Ctx, id: string, confirm: boolean): Promise<Response> {
+  const r = await q(ctx, 'SELECT id, term_id, kind, channel, status FROM reports WHERE id = ?').bind(id).first<{ id: string; term_id: string; kind: string; channel: string; status: string }>();
+  if (r === null) return notFound();
+  if (r.channel.startsWith('inst:') && (await ownsInstallation(ctx, r.channel.slice('inst:'.length)))) return err(403, 'own_submission');
+  if (r.status !== 'received') return err(409, 'closed');
+  if ((await reviewedBy(ctx, 'report', id)) !== null) return err(409, 'already_reviewed');
+  const vote = q(ctx, 'INSERT INTO reviews (subject_kind, subject_id, reviewer, verdict, fluent, at) VALUES (?, ?, ?, ?, ?, ?)').bind('report', id, ctx.reviewer.email, confirm ? 'dispute' : 'decline', 0, ctx.now);
+  if (!confirm) {
+    await ctx.deps.db.batch([vote, q(ctx, "UPDATE reports SET status = 'declined' WHERE id = ?").bind(id), audit(ctx, 'review.report.decline', id)]);
+    return json(200, { status: 'declined' });
+  }
+  const term = await loadTerm(ctx, r.term_id);
+  const removal = r.kind === 'removal';
+  const needed = removal && term?.category === 'slur' ? 2 : 1;
+  const before = await q(ctx, "SELECT COUNT(*) AS n FROM reviews WHERE subject_kind = 'report' AND subject_id = ? AND verdict = 'dispute'").bind(id).first<{ n: number }>();
+  const votes = (before?.n ?? 0) + 1;
+  if (votes < needed) {
+    await ctx.deps.db.batch([vote, audit(ctx, 'review.report.confirm', id)]);
+    return json(200, { status: 'received', votes, needed });
+  }
+  const outcome = removal ? 'withdrawn' : 'disputed';
+  await ctx.deps.db.batch([
+    vote,
+    q(ctx, 'UPDATE reports SET status = ? WHERE id = ?').bind(outcome, id),
+    q(ctx, "UPDATE terms SET status = ?, updated_at = ? WHERE id = ? AND status IN ('provisional','accepted','disputed')").bind(outcome, ctx.now, r.term_id),
+    audit(ctx, 'review.report.confirm', id),
+  ]);
+  return json(200, { status: outcome, votes, needed });
 }

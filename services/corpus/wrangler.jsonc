@@ -17,7 +17,7 @@
   "assets": { "directory": "./page", "binding": "ASSETS", "run_worker_first": true, "html_handling": "none", "not_found_handling": "none" },
 
   // Not secret: the Cloudflare Access team domain and the application's audience tag for /admin/*. Fill in at deploy time.
-  "vars": { "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "" },
+  "vars": { "ACCESS_TEAM_DOMAIN": "", "ACCESS_AUD": "", "REPORTS_ORIGIN": "", "REPORTS_HOSTNAME": "" },
 
   // Secrets are set with `wrangler secret put <NAME>`, never written here. COUNTER_SECRET keys the rate-limit network hash;
   // TURNSTILE_SECRET is the siteverify secret of the docs-site report form.

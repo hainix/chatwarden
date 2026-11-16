@@ -58,6 +58,9 @@ export interface Env {
   ACCESS_AUD?: string;
   /** The review page's static files (Workers Static Assets, `page/admin/*`). Reached only after Access and the reviewer table have said yes. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
-  /** Secret: the Turnstile secret for the docs-site report form (S5). */
+  /** Secret: the Turnstile secret for the docs-site report form. */
   TURNSTILE_SECRET?: string;
+  /** The docs site origin (https://chatwarden.dev), allowed to call the web report form from a browser, and its hostname, which a Turnstile token must have been solved on. */
+  REPORTS_ORIGIN?: string;
+  REPORTS_HOSTNAME?: string;
 }

@@ -25,6 +25,16 @@ stamp and signed. The network address (`cf-connecting-ip`) is turned into a keye
 stored or logged; an IPv6 address counts as its /64. Logs hold `{ stage, code }` and nothing else. A cron trigger purges counters after two
 days and notes 90 days after a decision.
 
+## Reports
+
+`POST /v1/reports` (design 10.6): a term id, a closed kind (`innocent_sense`, `wrong_category`, `removal`) and a day. A report is signed by an
+installation (the kind `report`, no stamp) or, for the docs-site form, carries a Turnstile token (`{ schema, termId, kind, token }`; the
+secret is `TURNSTILE_SECRET`). No free text is read or stored: a body with any other key is refused and the table has no column for it. One open
+report per term, per channel (an installation, or a keyed hash of the network) and day; a second collapses into the first. The reporter gets an
+acknowledgement id and nothing about the term. The web form is the only route that answers a browser: set `REPORTS_ORIGIN` to the docs site's
+origin and `REPORTS_HOSTNAME` to the host a token must have been solved on. In the review page, one reviewer's confirmation of an innocent-sense
+or wrong-category report disputes the term; a removal of a slur takes two reviewers (one for other terms); restoring takes two.
+
 ## The review page
 
 `/admin/*` (the page in `page/admin/`, served from Workers Static Assets, and its API) sits behind a Cloudflare Access application. The Worker

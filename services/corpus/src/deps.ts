@@ -1,5 +1,6 @@
 import type { AccessConfig } from './access.js';
 import type { D1Like } from './env.js';
+import type { TurnstileConfig } from './turnstile.js';
 
 /** The injected clock: every time in the service comes from here (the Worker entry is the one place that reads the system clock). */
 export interface Clock {
@@ -28,6 +29,10 @@ export interface AppDeps {
   access?: AccessConfig;
   /** The review page's static files (`page/admin/*`): the Worker's ASSETS binding in production, files in a test. Null when there is no such file. */
   assets?: (name: string) => Promise<Response | null>;
+  /** Cloudflare Turnstile for the docs-site report form. Without it a report must be signed by an installation. */
+  turnstile?: TurnstileConfig;
+  /** The one origin (such as `https://chatwarden.dev`) whose page may call the web report form from a browser. Without it no cross-origin call is answered. */
+  reportsOrigin?: string;
 }
 
 /** Logs an event without ever letting the logger break a request. */

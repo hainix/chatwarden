@@ -9,7 +9,8 @@
     { id: 'held', label: 'Held', path: '/admin/api/queue?status=held', kind: 'submission' },
     { id: 'disputed', label: 'Disputed terms', path: '/admin/api/terms?status=disputed', kind: 'term' },
     { id: 'provisional', label: 'Provisional terms', path: '/admin/api/terms?status=provisional', kind: 'term' },
-    { id: 'accepted', label: 'Accepted terms', path: '/admin/api/terms?status=accepted', kind: 'term' }
+    { id: 'accepted', label: 'Accepted terms', path: '/admin/api/terms?status=accepted', kind: 'term' },
+    { id: 'reports', label: 'Reports', path: '/admin/api/reports?status=received', kind: 'report' }
   ];
   var current = TABS[0];
   var list = document.getElementById('list');
@@ -65,6 +66,7 @@
   }
 
   function metaText(item, kind) {
+    if (kind === 'report') return [item.kind, item.termId, item.status, item.votes + ' of ' + item.needed + ' confirmations'].join(' - ');
     var parts = kind === 'term' ? [item.languages.join(', '), item.category, item.target, item.status] : [item.language, item.category, item.target, item.status];
     parts.push(item.approvals + ' approval' + (item.approvals === 1 ? '' : 's'));
     if (item.held) parts.push('held: ' + item.held);
@@ -83,7 +85,8 @@
     var actions = el('div', null, 'actions');
     li.appendChild(actions);
     var reveal = button('Reveal', function () {
-      api('/admin/api/' + kind + 's/' + encodeURIComponent(item.id) + '/reveal', 'POST').then(function (res) {
+      var revealPath = kind === 'report' ? '/admin/api/terms/' + encodeURIComponent(item.termId) + '/reveal' : '/admin/api/' + kind + 's/' + encodeURIComponent(item.id) + '/reveal';
+      api(revealPath, 'POST').then(function (res) {
         if (!res.ok) return failure(res);
         word.textContent = res.json.term;
         word.className = 'word';
@@ -125,6 +128,14 @@
         actions.appendChild(override);
         actions.appendChild(overrideLabel);
       }
+    } else if (kind === 'report') {
+      detail.appendChild(el('p', 'The term is ' + info.status + ' (' + info.category + ', ' + info.target + ').'));
+      actions.appendChild(button('Confirm', function () {
+        act('/admin/api/reports/' + encodeURIComponent(item.id) + '/confirm', {}, 'Confirmed');
+      }));
+      actions.appendChild(button('Decline', function () {
+        act('/admin/api/reports/' + encodeURIComponent(item.id) + '/decline', {}, 'Declined');
+      }));
     } else {
       if (info.negatives.length) detail.appendChild(el('p', 'Lines that must never be blocked: ' + info.negatives.join(' | ')));
       if (info.collidesWith.length) detail.appendChild(el('p', 'Also an ordinary word in: ' + info.collidesWith.join(', ')));

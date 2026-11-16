@@ -172,10 +172,29 @@ describe('the page sets a strict CSP and renders no term until revealed', () => 
       expect(again.doc.getElementById('message')?.textContent).toBe('Not done: closed');
     });
 
+    it('the reports tab lists a report by its term id, and reveals the word only on request', async () => {
+      await rw.w.addTerm('CWT-2026-00001', 'zorbak', 'accepted');
+      await rw.w.db.prepare("INSERT INTO reports VALUES ('rep_page1', 'CWT-2026-00001', 'innocent_sense', 'inst:aa', 'received', '2026-12-02')").run();
+      const page = await open();
+      await settle(() => page.doc.querySelectorAll('#tabs button').length === 6);
+      const tab = [...page.doc.querySelectorAll('#tabs button')].find((b) => b.textContent === 'Reports') as El;
+      tab.click();
+      await settle(() => page.items().length === 1);
+      expect(page.text()).toContain('CWT-2026-00001');
+      expect(page.text()).not.toContain('zorbak');
+      const li = page.items()[0] as El;
+      (li.querySelector('button') as El).click();
+      await settle(() => li.querySelector('.word.masked') === null);
+      expect(li.querySelector('.word')?.textContent).toBe('zorbak');
+      ([...li.querySelectorAll('button')].find((b) => b.textContent === 'Confirm') as El).click();
+      await settle(() => page.items().length === 0);
+      expect((await rw.rows('SELECT status FROM terms'))[0]?.status).toBe('disputed');
+    });
+
     it('the terms tabs list masked terms; a disputed term offers Restore', async () => {
       await rw.w.addTerm('CWT-2026-00001', 'zorbak', 'disputed');
       const page = await open();
-      await settle(() => page.doc.querySelectorAll('#tabs button').length === 5);
+      await settle(() => page.doc.querySelectorAll('#tabs button').length === 6);
       const tab = [...page.doc.querySelectorAll('#tabs button')].find((b) => b.textContent === 'Disputed terms') as El;
       tab.click();
       await settle(() => page.items().length === 1);
