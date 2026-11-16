@@ -7,7 +7,8 @@ export type Templates = FileSpec[] | ((answers: Answers, versions: Versions) => 
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const INSTALL_VERBS: Record<PackageManager, string> = { npm: 'npm install', pnpm: 'pnpm add', yarn: 'yarn add', bun: 'bun add' };
-const SECRET_COMMAND = `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`;
+/** The command that makes a value for CHATWARDEN_SECRET and CHATWARDEN_ADMIN_TOKEN: the same on every shell (double quotes outside, single inside). */
+export const SECRET_COMMAND = `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`;
 
 /**
  * What must never be in a generated file: a carriage return, a machine path, a timestamp, a key-like run of characters (design 5.5 and
@@ -39,12 +40,15 @@ function installPackages(answers: Answers, versions: Versions, project: Project)
   return packages;
 }
 
-function envNames(answers: Answers): EnvName[] {
+/** The environment variables the generated code reads, in the order the env example lists them. Names only. */
+export function envNames(answers: Answers): EnvName[] {
   const routes = answers.framework !== 'none';
   const env: EnvName[] = [{ name: 'CHATWARDEN_SECRET', required: true }];
   if (routes) env.push({ name: 'CHATWARDEN_ADMIN_TOKEN', required: true });
   if (answers.store === 'sqlite') env.push({ name: 'CHATWARDEN_DB', required: false });
-  if (answers.discord) env.push({ name: 'DISCORD_WEBHOOK_URL', required: true }, { name: 'DISCORD_MENTION_ROLE_ID', required: false });
+  if (answers.discord) {
+    env.push({ name: 'DISCORD_WEBHOOK_URL', required: true }, { name: 'DISCORD_MENTION_ROLE_ID', required: false }, { name: 'CHATWARDEN_PUBLIC_URL', required: false });
+  }
   if (answers.framework === 'next' || answers.framework === 'fetch') env.push({ name: 'CHATWARDEN_TRUST_PROXY', required: false });
   return env;
 }
