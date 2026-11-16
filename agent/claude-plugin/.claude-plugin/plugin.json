@@ -1,0 +1,7 @@
+{
+  "name": "chatwarden",
+  "description": "A skill that adds Chatwarden chat moderation to a game server with chatwarden init.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/hainix/chatwarden",
+  "repository": "https://github.com/hainix/chatwarden"
+}
