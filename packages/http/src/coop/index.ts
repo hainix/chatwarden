@@ -2,6 +2,7 @@
 // adopter calls.
 import type { Chatwarden } from '@chatwarden/core';
 import type { RouteTable } from '../router.js';
+import { createInbound } from './inbound.js';
 import { resolveOptions } from './options.js';
 import type { CoopOptions } from './options.js';
 import { createOutbound } from './outbound.js';
@@ -33,10 +34,14 @@ export interface CoopAdapter {
 export function coop(cw: Chatwarden, options: CoopOptions): CoopAdapter {
   const o = resolveOptions(options);
   if (!cw.links.supported) throw new RangeError('coop: the store does not support links (use a store from 0.1.12 or later)');
+  const inbound = createInbound(cw, o);
   const outbound = createOutbound(cw, o);
   return {
-    routes: {},
+    routes: inbound.routes,
     sweep: () => outbound.sweep(),
-    dispose: () => outbound.dispose(),
+    dispose() {
+      inbound.dispose();
+      outbound.dispose();
+    },
   };
 }

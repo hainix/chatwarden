@@ -125,7 +125,10 @@ export function createOutbound(cw: Chatwarden, o: ResolvedCoopOptions): Outbound
         const external = await externalOf(res);
         if (disposed) return { kind: 'ok' };
         try {
-          cw.links.put({ system: 'coop-report', ref: job.reportId, external, state: 'sent', at: clock.now() });
+          // The callback may have decided the report while this request was out: that row stands (state `decided`), and only learns the Coop id.
+          const existing = cw.links.get('coop-report', job.reportId);
+          if (existing === null) cw.links.put({ system: 'coop-report', ref: job.reportId, external, state: 'sent', at: clock.now() });
+          else if (existing.external === 'unknown' && external !== 'unknown') cw.links.put({ ...existing, external });
         } catch (err) {
           // The job is out; only the ledger missed it. The next `sweep` sends it once more (Coop counts a second report on the item), which is the documented cost.
           fail('link', err);
