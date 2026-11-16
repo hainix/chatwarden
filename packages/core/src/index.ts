@@ -413,6 +413,8 @@ export { inputHash } from './ai/hash.js';
 export { looksLikeInjection } from './ai/injection.js';
 export { aiActorOf, AiService, READ_AGAIN_PER_MINUTE, SWEEP_BATCH, SWEEP_EVERY_MS } from './ai/service.js';
 export { createInertAi } from './ai/inert.js';
+export { AI_GATE_BANDS, AI_GATE_DEFAULTS, AI_RECENT_DAYS, checkGateConfig, evaluateCell, wilsonLower, wilsonUpper } from './ai/gates.js';
+export type { AiAppealFacts, AiCellCounts, AiCellGate, AiCellVerdict, AiGateCheck, AiGateConfig, AiGateName } from './ai/gates.js';
 export type {
   AiBrief,
   AiFacade,
