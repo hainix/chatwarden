@@ -990,7 +990,9 @@ describe('row ids come from Web Crypto, not a node: import', () => {
     const walk = (dir: string): string[] =>
       readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? walk(join(dir, f)) : f.endsWith('.ts') ? [join(dir, f)] : []));
     const { fileURLToPath } = await import('node:url');
-    for (const file of walk(fileURLToPath(new URL('../src', import.meta.url)))) {
+    // The one folder allowed `node:` is the server-only corpus starter (design 16; eslint names it too).
+    const exempt = join('corpus', 'node', 'x').slice(0, -1);
+    for (const file of walk(fileURLToPath(new URL('../src', import.meta.url))).filter((f) => !f.includes(exempt))) {
       expect(readFileSync(file, 'utf8'), file).not.toMatch(/(?:from|import\s*\()\s*['"]node:/);
     }
   });

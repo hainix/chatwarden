@@ -273,6 +273,8 @@ export class LiveTerms implements Matcher {
    * rolls back and rejects with that error. `fn` must be synchronous. A refusal carries a `code`
    * ({@link ChangeRefusalCode}) next to the message.
    *
+   * An actor beginning `corpus:` is reserved to {@link syncPack} and refused (`invalid`).
+   *
    * A thin async wrapper over {@link changeSync}. A synchronous host (a relay boot, a handler that cannot await)
    * calls `changeSync` and gets the same result without a promise.
    */
@@ -286,6 +288,9 @@ export class LiveTerms implements Matcher {
    *  committed is a `build_failed` result. `fn` must be synchronous: an async `fn` throws a `TypeError` and is
    *  rolled back (a later rejection of its promise is swallowed, not reported as unhandled). */
   changeSync<T>(actor: string, fn: (edit: TermEditor) => T): ChangeResult<T> {
+    // `corpus:` is the shared list's own actor prefix ({@link syncPack}): a row last written by one is not an adopter's edit. A human
+    // actor must never look like it, or their edit would be handed to the next release. Refused, `fn` never called.
+    if (typeof actor === 'string' && actor.startsWith('corpus:')) return { ok: false, error: 'this actor name is reserved', code: 'invalid' };
     // With a pack configured, the store is not the truth until `load()` has seeded it and built from it: an
     // edit before then would act on an unseeded store. Refuse, writing nothing and never calling `fn`.
     if (this.pack !== null && !this.storeLoaded) return { ok: false, error: 'not loaded', code: 'not_loaded' };

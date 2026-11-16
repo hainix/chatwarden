@@ -357,3 +357,53 @@ describe('syncPack', () => {
     expect(lists).toBeLessThan(10);
   });
 });
+
+describe('the corpus: actor prefix is reserved to the corpus (review I2)', () => {
+  const edits: [string, (e: Parameters<Parameters<LiveTerms['changeSync']>[1]>[0]) => unknown][] = [
+    ['addTerm', (e) => e.addTerm({ term: 'glarn', language: 'en' })],
+    ['updateTerm', (e) => e.updateTerm('CWT-1', { note: 'n' })],
+    ['setTermActive', (e) => e.setTermActive('CWT-1', false)],
+    ['addException', (e) => e.addException({ phrase: 'glarn lake', language: 'en' })],
+    ['setExceptionActive', (e) => e.setExceptionActive('missing', false)],
+  ];
+
+  it('changeSync and change refuse a human actor that starts with corpus: (invalid), call nothing and write nothing', async () => {
+    for (const actor of ['corpus:', 'corpus:2026.12.0', 'corpus:alice', 'corpus:\u0000']) {
+      for (const [name, edit] of edits) {
+        const r = await loaded();
+        const before = snapshotOf(r.store);
+        const fn = vi.fn(edit);
+        const sync = r.live.changeSync(actor, fn);
+        const async = await r.live.change(actor, fn);
+        expect({ actor, name, sync, async }).toMatchObject({ sync: { ok: false, code: 'invalid' }, async: { ok: false, code: 'invalid' } });
+        expect(fn).not.toHaveBeenCalled();
+        expect(snapshotOf(r.store)).toEqual(before);
+        expect(blocked(r.live, 'you zorbak')).toBe(true);
+      }
+    }
+  });
+
+  it('the refusal message says nothing about the actor', async () => {
+    const r = await loaded();
+    const out = r.live.changeSync('corpus:zorbak-admin', (e) => e.setTermActive('CWT-1', false));
+    expect(out.ok).toBe(false);
+    expect(JSON.stringify(out)).not.toContain('zorbak-admin');
+  });
+
+  it('controls: ordinary actors, ones that merely contain or resemble corpus, still edit; and a corpus-like actor never makes a row the corpus\'s', async () => {
+    for (const actor of ['alice', 'Corpus:alice', ' corpus:alice', 'the-corpus:alice', 'corpus', 'corpus-bot', 'staff@example.test']) {
+      const r = await loaded();
+      const out = r.live.changeSync(actor, (e) => e.setTermActive('CWT-1', false));
+      expect({ actor, ok: out.ok }).toEqual({ actor, ok: true });
+      // The row is the adopter's from now on: the corpus restores nothing.
+      expect(summaryOf(r.live.syncPack(pack('2026.12.0', [{ id: 'CWT-1', term: 'zorbak' }, { id: 'CWT-2', term: 'vlemmo' }, { id: 'CWT-3', term: 'quissel' }]), { actor: ACTOR }))).toEqual({ ...ZERO, keptYours: 1 });
+      expect(row(r.store, 'CWT-1').active).toBe(false);
+    }
+  });
+
+  it('syncPack still takes the corpus actor, and a row it changed is stamped with it', async () => {
+    const r = await loaded();
+    r.live.syncPack(pack('2026.12.0', [{ id: 'CWT-1', term: 'zorbak', active: false }, { id: 'CWT-2', term: 'vlemmo' }, { id: 'CWT-3', term: 'quissel' }]), { actor: ACTOR });
+    expect(row(r.store, 'CWT-1').updatedBy).toBe(ACTOR);
+  });
+});
