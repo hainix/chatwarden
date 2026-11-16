@@ -150,6 +150,21 @@ describe('browser bundle: static scan', () => {
     }
   });
 
+  it('bundles @chatwarden/http/fetch from its own file, with the router it serves, and none of the Node-side http modules', () => {
+    const inputs = Object.keys(metafile.inputs).map((p) => p.replaceAll('\\', '/'));
+    for (const file of ['fetch', 'router', 'errors', 'body']) expect(inputs, file).toContain(`packages/http/dist/src/${file}.js`);
+    for (const nodeSide of ['index', 'player', 'express', 'health', 'webhooks/in', 'webhooks/out', 'webhooks/sign', 'webhooks/fingerprint']) {
+      expect(inputs, nodeSide).not.toContain(`packages/http/dist/src/${nodeSide}.js`);
+    }
+  });
+
+  it('the fetch adapter has no node: import and no reference to the Node globals of its own', () => {
+    const adapter = readFileSync(`${ROOT}packages/http/dist/src/fetch.js`, 'utf8').replaceAll(/\/\*[\s\S]*?\*\//g, '').replaceAll(/^\s*\/\/.*$/gm, '');
+    expect(adapter).not.toMatch(/\bfrom\s*["']node:/);
+    expect(adapter).not.toMatch(/\bimport\s*\(/);
+    expect(adapter).not.toMatch(/\b(?:Buffer|process|require)\b/);
+  });
+
   it('the size entry does not carry the chat server side', () => {
     const inputs = Object.keys(metafile.inputs).map((p) => p.replaceAll('\\', '/'));
     expect(inputs.some((p) => p.startsWith('packages/http/dist/src/chat/'))).toBe(false);
@@ -453,6 +468,12 @@ function browserContext(): Record<string, unknown> {
     structuredClone,
     // What a browser has and the AI module's calls under a deadline need.
     AbortController,
+    // The Fetch API a browser has: what `@chatwarden/http/fetch` is built on.
+    Request,
+    Response,
+    Headers,
+    ReadableStream,
+    ByteLengthQueuingStrategy,
   };
   return createContext(sandbox) as Record<string, unknown>;
 }
@@ -708,7 +729,31 @@ const SIGNAL_OFF_SCENARIO = `(async () => {
   return JSON.stringify(out);
 })()`;
 
+// `@chatwarden/http/fetch` in the bare context: route tables behind a Request and a Response, a body read and a stream, with no Node anywhere.
+const FETCH_SCENARIO = `(async () => {
+  const { toFetch } = CW.httpFetch;
+  const table = {
+    'GET /hello/:name': (req, params) => ({ status: 200, body: { hi: params.name, x: req.query.x } }),
+    'POST /echo': (req) => ({ status: 200, body: req.rawBody }),
+    'GET /stream': () => ({ status: 200, body: undefined, stream: { start(sink) { sink.write('data: 1\\n\\n'); sink.end(); return () => {}; } } }),
+  };
+  const handler = toFetch({ '/api': table }, { prefix: '/kit', unmatched: 'pass' });
+  const a = await handler(new Request('http://game.invalid/kit/api/hello/zorbak?x=1'));
+  const b = await handler(new Request('http://game.invalid/kit/api/echo', { method: 'POST', body: 'h\\u00e9llo' }));
+  const c = await handler(new Request('http://game.invalid/kit/api/stream'));
+  const d = await handler(new Request('http://game.invalid/elsewhere'));
+  const e = await handler(new Request('http://game.invalid/kit/api/nothing'));
+  return JSON.stringify({ a: await a.json(), b: await b.text(), c: await c.text(), cType: c.headers.get('content-type'), d, e: e.status });
+})()`;
+
 describe('browser bundle: runs in a context with no Node globals', () => {
+  it('serves a Request with toFetch: a route, a body, a stream, a pass and a 404', async () => {
+    const ctx = browserContext();
+    run(ctx, iife);
+    const out = JSON.parse(await run<Promise<string>>(ctx, FETCH_SCENARIO)) as Record<string, unknown>;
+    expect(out).toEqual({ a: { hi: 'zorbak', x: '1' }, b: 'héllo', c: 'data: 1\n\n', cType: 'text/event-stream; charset=utf-8', d: null, e: 404 });
+  });
+
   it('the context really is bare', () => {
     const ctx = browserContext();
     expect(run(ctx, `[typeof process, typeof Buffer, typeof require, typeof module, typeof exports, typeof global, typeof setImmediate].join()`)).toBe(
@@ -720,7 +765,7 @@ describe('browser bundle: runs in a context with no Node globals', () => {
   it('loads the bundle with only browser globals', () => {
     const ctx = browserContext();
     run(ctx, iife);
-    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,hubHeadless,matcher,storeMemory');
+    expect(run(ctx, `Object.keys(CW).sort().join()`)).toBe('core,fixtures,httpAdmin,httpFetch,hubHeadless,matcher,storeMemory');
     expect(run(ctx, `typeof CW.core.createChatwarden + typeof CW.matcher.LiveTerms + typeof CW.storeMemory.MemoryStore`)).toBe('functionfunctionfunction');
   });
 
