@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { adminRoutes, healthRoutes, playerRoutes, BACKOFF_BASE_MS, DELIVERY_HEADER, MAX_RETRIES, PERMISSIONS, PERMISSION_KEYS, RETRY_AFTER_CAP_MS, RETRY_AFTER_FLOOR_MS, SIGNATURE_HEADER, TIMESTAMP_HEADER } from '../src/index.js';
 import { OPTIONS, helpText, parseCli } from '../src/cli/args.js';
@@ -483,5 +484,501 @@ describe('packages/http/README.md, Other servers: toFetch', () => {
   it('the intro and "Writing another adapter" name both adapters that ship', () => {
     expect(http).toContain('a **Web fetch adapter** (`toFetch`');
     expect(section(http, 'Writing another adapter')).toContain('`toExpress` and `toFetch` are the adapters that ship');
+  });
+});
+
+describe('packages/http/README.md, Discord bot', () => {
+  const doc = section(http, 'Discord bot');
+  /** A README block is TypeScript; strip the types so it can run. */
+  const js = (code: string): string => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  /** A `### ` subsection of the Discord bot section, up to the next `###`. */
+  const sub = (heading: string): string => {
+    const start = doc.indexOf(`\n### ${heading}\n`);
+    expect(start, `subsection ${heading}`).toBeGreaterThanOrEqual(0);
+    const next = doc.indexOf('\n### ', start + 1);
+    return doc.slice(start, next === -1 ? undefined : next);
+  };
+
+  it('every documented option name exists, and every option is documented', () => {
+    const source = read('../src/discord/options.ts');
+    const block = /export interface DiscordBotOptions \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
+    const fields = [...block.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+    expect(fields.length).toBeGreaterThanOrEqual(14);
+    const documented = rows(sub('Discord bot options')).map((r) => r[0] as string);
+    const names = documented.flatMap((cell) => [...cell.matchAll(/`(\w+)`/g)].map((m) => m[1] as string));
+    for (const field of fields) expect(names, field).toContain(field);
+    for (const name of names) expect(fields, name).toContain(name);
+  });
+
+  it('the READMEs list the @experimental names, every one the entry exports', () => {
+    const entry = read('../src/discord/index.ts');
+    const exported = [...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean));
+    expect(new Set(exported)).toEqual(
+      new Set(['discordBot', 'DiscordBotOptions', 'DiscordActionRow', 'DiscordBot', 'DiscordButton', 'DiscordCommand', 'DiscordCommandOption', 'registerCommands', 'RegisterCommandsOptions', 'RegisterCommandsResult', 'verifyInteraction']),
+    );
+    for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
+    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+    // The feed's side.
+    const feed = flat(discord);
+    for (const needle of ['`components`', '@experimental', 'application-owned', '`chatwarden.discord_components_ignored`', '`bot.components`', 'Buttons']) expect(feed, needle).toContain(needle);
+    expect(feed).not.toContain('has no buttons: a webhook can only write');
+  });
+
+  it('says the entry is not in the root, and sets up in order: application, bot, the exact curl for the webhook, roles, the route, the endpoint URL, the one-shot command', () => {
+    expect(flat(doc)).toContain('not in the package root');
+    const order = ['Make the application', 'Make the bot', 'Make the application-owned webhook', 'Copy the role ids', 'Add it to your server', 'Interactions Endpoint URL', 'Register the command, once', 'Try it'].map((needle) => doc.indexOf(needle));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(doc).toContain('curl -X POST "https://discord.com/api/v10/channels/$FORUM_CHANNEL_ID/webhooks"');
+    expect(doc).toContain('Authorization: Bot $DISCORD_BOT_TOKEN');
+    expect(doc).toContain('https://discord.com/api/webhooks/<id>/<token>');
+    for (const needle of ['`bot` and', '`applications.commands`', 'Manage Webhooks']) expect(flat(doc), needle).toContain(needle);
+  });
+
+  it('says what each answer says: every fixed text the bot uses is written down', () => {
+    const answers = read('../src/discord/answers.ts');
+    const texts = [...(/export const TEXT = \{([\s\S]*?)\} as const;/.exec(answers)?.[1] ?? '').matchAll(/: '([^']+)'/g)].map((m) => m[1] as string);
+    expect(texts.length).toBeGreaterThanOrEqual(10);
+    // The refusals that name nothing are one row; every other text is quoted.
+    const grouped = new Set(['You do not have a moderator role for this bot.', 'You do not have permission to do this.', 'Slow down.', 'This bot is not set up for this server.', 'Actions from Discord are turned off.', 'That is not available here.', 'Cancelled.']);
+    for (const text of texts.filter((t) => !grouped.has(t))) expect(flat(doc), text).toContain(text);
+    expect(flat(doc)).toContain('Already done');
+    expect(flat(doc)).toContain('This report was already decided');
+  });
+
+  it('documents the roles map, the permissions each step needs, the deferred answer and the security notes (verify first, rate limit at the edge)', () => {
+    const who = flat(sub('Who may do what'));
+    for (const needle of ['`history.read`', '`history.view`', '`reports.read`', '`reports.decide`', '`sanctions.apply`', '`sanctions.apply.ban_permanent`', '`report.decide`', '`actorOf`', 'highest one']) expect(who, needle).toContain(needle);
+    const slow = flat(sub('Slow work'));
+    for (const needle of ['3 seconds', '`respondWithinMs`', 'type 5', 'type 6', '@original', 'no Authorization header', '429', 'never logged and never stored']) expect(slow, needle).toContain(needle);
+    const notes = flat(sub('Discord bot: security notes'));
+    for (const needle of ['Verify before parse', 'same `401', '`custom_id`', 'Rate-limit the route at your edge', 'bot token', '`chatwarden.discord_components_ignored`']) expect(notes, needle).toContain(needle);
+  });
+
+  it('the server block compiles (scripts/readme.test.ts) and runs against fakes: the route answers a signed PING, the feed carries the bot buttons, dispose is clean', async () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    expect(blocks).toHaveLength(2);
+    const block = blocks[0] as string;
+    expect(block.startsWith("import express from 'express';")).toBe(true);
+    const body = block.split('\n').filter((l) => !l.startsWith('import ')).join('\n');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore } = await import('@chatwarden/store-memory');
+    const { discordFeed } = await import('@chatwarden/discord');
+    const { toExpress } = await import('../src/express.js');
+    const { discordBot } = await import('../src/discord/index.js');
+    const { default: express } = await import('express');
+    const { fakeDiscordClient, APP_ID, GUILD_ID, ROLE_MOD, ROLE_OWNER, ROLE_SENIOR } = await import('./discord-world.js');
+    const { createRouter } = await import('../src/router.js');
+    const cw = await createChatwarden({ store: new MemoryStore(), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false, logger: { warn: () => undefined } });
+    const client = fakeDiscordClient({ now: () => Date.now() });
+    const env: Record<string, string> = {
+      DISCORD_APP_ID: APP_ID,
+      DISCORD_PUBLIC_KEY: client.publicKeyHex,
+      DISCORD_GUILD_ID: GUILD_ID,
+      DISCORD_ROLE_MODERATOR: ROLE_MOD,
+      DISCORD_ROLE_SENIOR: ROLE_SENIOR,
+      DISCORD_ROLE_OWNER: ROLE_OWNER,
+      DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/123456789012345678/tok_README-fake_123',
+    };
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+    // The block minus its shutdown lines, which are checked below and run by hand.
+    const run = js(body.replace(/\n\/\/ on shutdown\n[\s\S]*$/, '\n'));
+    const make = new AsyncFunction('express', 'discordFeed', 'toExpress', 'discordBot', 'cw', 'process', `${run}\nreturn { bot, feed, app };`);
+    const out = (await make(express, discordFeed, toExpress, discordBot, cw, { env })) as { bot: ReturnType<typeof discordBot>; feed: { dispose(): void }; app: unknown };
+    expect(Object.keys(out.bot.routes)).toEqual(['POST /discord/interactions']);
+    expect(out.bot.components({ kind: 'report', reportId: 'ReportIdOneTwoThreeFour' })).toHaveLength(1);
+    const res = await createRouter(out.bot.routes)(client.ping());
+    expect(res).toMatchObject({ status: 200, body: { type: 1 } });
+    expect(block).toMatch(/\/\/ on shutdown\nfeed\.dispose\(\);\nbot\.dispose\(\);/);
+    out.feed.dispose();
+    out.bot.dispose();
+    expect((await createRouter(out.bot.routes)(client.ping())).status).toBe(401);
+    await cw.close();
+  });
+
+  it('the registerCommands block runs against a fake fetch: it puts bot.commands() to the guild route and prints the count', async () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    const block = blocks[1] as string;
+    expect(block.startsWith("import { registerCommands } from '@chatwarden/http/discord';")).toBe(true);
+    const { registerCommands, discordBot } = await import('../src/discord/index.js');
+    const { fakeDiscordClient, APP_ID, GUILD_ID, ROLE_MOD } = await import('./discord-world.js');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore } = await import('@chatwarden/store-memory');
+    const cw = await createChatwarden({ store: new MemoryStore(), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false, logger: { warn: () => undefined } });
+    const client = fakeDiscordClient({ now: () => Date.now() });
+    const bot = discordBot(cw, { applicationId: APP_ID, publicKey: client.publicKeyHex, guildId: GUILD_ID, roles: { moderator: [ROLE_MOD] }, hubLink: (_k, id) => `https://mod.example.test/${id}` });
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      seen.push({ url, init });
+      return new Response('[{"id":"1"}]', { status: 200 });
+    }) as unknown as typeof fetch;
+    const lines: string[] = [];
+    const body = js(block.split('\n').filter((l) => !l.startsWith('import ')).join('\n').replace('commands: bot.commands(),', 'commands: bot.commands(), fetch: fakeFetch,'));
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+    const make = new AsyncFunction('registerCommands', 'bot', 'process', 'console', 'fakeFetch', body);
+    await make(registerCommands, bot, { env: { DISCORD_APP_ID: APP_ID, DISCORD_GUILD_ID: GUILD_ID, DISCORD_BOT_TOKEN: 'FAKE.readme-bot-token' } }, { log: (line: string) => void lines.push(line) }, fakeFetch);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.url).toBe(`https://discord.com/api/v10/applications/${APP_ID}/guilds/${GUILD_ID}/commands`);
+    expect(JSON.parse(String(seen[0]?.init.body))).toEqual(bot.commands());
+    expect(lines).toEqual(['registered 1 command(s)']);
+    bot.dispose();
+    await cw.close();
+  });
+});
+
+describe('the Discord bot in the project docs', () => {
+  const status = flat(read('../../../docs/status.md'));
+  const follow = flat(read('../../../docs/plans/follow-ups.md'));
+
+  it('the root README has the row and the package line; CLAUDE.md names the bot', () => {
+    const rootText = flat(root);
+    expect(rootText).toContain('`discordBot` from `@chatwarden/http/discord`');
+    expect(rootText).toContain('Optional buttons on a report post');
+    expect(flat(read('../../../CLAUDE.md'))).toContain('`@chatwarden/http/discord`');
+  });
+
+  it('status says what is built and what the owner checks; follow-ups tell the owner exactly what to do (task D10)', () => {
+    for (const needle of ['Discord bot (built', '`chatwarden.discord_components_ignored`', 'No store change, no migration', "The owner's live check (K5 D10)"]) expect(status, needle).toContain(needle);
+    for (const needle of ['the live Discord check (task D10)', 'throwaway server', 'Interactions Endpoint URL', '`registerCommands`', '1099511627776', 'respondWithinMs', 'bot-token post route']) {
+      expect(follow, needle).toContain(needle);
+    }
+  });
+});
+
+describe('packages/http/README.md, Coop', () => {
+  const doc = section(http, 'Coop');
+  const js = (code: string): string => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  const sub = (heading: string): string => {
+    const start = doc.indexOf(`\n### ${heading}\n`);
+    expect(start, `subsection ${heading}`).toBeGreaterThanOrEqual(0);
+    const next = doc.indexOf('\n### ', start + 1);
+    return doc.slice(start, next === -1 ? undefined : next);
+  };
+
+  it('every documented option exists, and every option is documented', () => {
+    const source = read('../src/coop/options.ts');
+    const block = /export interface CoopOptions \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
+    const fields = [...block.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+    expect(fields.length).toBeGreaterThanOrEqual(18);
+    const names = rows(sub('Coop options')).flatMap((r) => [...(r[0] as string).matchAll(/`(\w+)`/g)].map((m) => m[1] as string));
+    for (const field of fields) expect(names, field).toContain(field);
+    for (const name of names) expect(fields, name).toContain(name);
+  });
+
+  it('the READMEs list the @experimental names, every one the entry exports', () => {
+    const entry = read('../src/coop/index.ts');
+    const exported = [
+      ...[...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean)),
+      ...[...entry.matchAll(/^export (?:interface|function) (\w+)/gm)].map((m) => m[1] as string),
+    ];
+    expect(new Set(exported)).toEqual(new Set(['coop', 'CoopAdapter', 'CoopOptions', 'CoopDecision', 'SweepResult', 'CoopChecklist', 'CoopChecklistItemType', 'CoopVerification']));
+    for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
+    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+  });
+
+  it('says the entry is not in the root, needs links, and sets up in order: run Coop, create by hand, copy ids, wire it, verify, file a test report', () => {
+    expect(flat(doc)).toContain('not in the package root');
+    expect(flat(doc)).toContain('`cw.links`');
+    const order = ['Run Coop', 'Create things in Coop by hand', 'Copy the ids into the options', 'Add it to your server', 'Check it', 'File a test report'].map((needle) => doc.indexOf(needle));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    for (const needle of ['user strikes off', '/coop/actions', 'Webhook Signature Verification Key']) expect(flat(doc), needle).toContain(needle);
+  });
+
+  it('documents the three item types with every field the builders send, and the action list with every shape the options accept', async () => {
+    const { ITEM_FIELDS } = await import('../src/coop/wire.js');
+    const items = sub('The three item types');
+    for (const kind of ['line', 'report'] as const) {
+      for (const f of ITEM_FIELDS[kind]) {
+        const row = items.split('\n').find((l) => l.includes(`\`${f.name}\``));
+        expect(row, f.name).toBeDefined();
+        expect(row, f.name).toContain(`\`${f.type}\``);
+        expect(row, f.name).toContain(f.required ? 'yes' : 'no');
+      }
+    }
+    expect(flat(items)).toContain('never sets `csam`');
+    const actions = flat(sub('Which Coop actions mean what'));
+    for (const needle of ["verdict: 'upheld', kind: 'warning'", "verdict: 'upheld', kind: 'chat', durationMs", "verdict: 'noted'", "verdict: 'no_action'", "verdict: 'bad_faith'", 'coop:<the moderator', '`report.decide`', 'first of the callback']) {
+      expect(actions, needle).toContain(needle);
+    }
+  });
+
+  it('documents the callback steps, every answer and every ignore reason the code has', () => {
+    const callback = flat(sub('The callback'));
+    for (const needle of ['64 KiB', '`413`', '`rawBody`', 'Coop-Signature', 't=<time>,v1=<signature>', '`callbackAuth`', '`400`', '`503`', '`401 { "error": "unauthorized" }`', '"outcome": "ignored"', '`"applied"`', '`"replay"`', '`chatwarden.coop_callback_ignored`']) {
+      expect(callback, needle).toContain(needle);
+    }
+    const reasons = /export type IgnoreReason = ([^;]+);/.exec(read('../src/coop/wire.ts'))?.[1] ?? '';
+    const codes = [...reasons.matchAll(/'(\w+)'/g)].map((m) => m[1] as string);
+    expect(codes.length).toBeGreaterThanOrEqual(9);
+    for (const code of codes) expect(callback, code).toContain(`\`${code}\``);
+  });
+
+  it('says the conflict rules in plain words: first decision wins, replays, nothing guessed, nothing unattended, Ignore sends nothing', () => {
+    const rules = flat(sub('When two places decide'));
+    for (const needle of ['The first decision wins', 'reason `closed`', 'A repeated callback is harmless', 'is not guessed', 'Nothing unattended', 'strike threshold', 'Ignore sends nothing', 'Dismiss action']) expect(rules, needle).toContain(needle);
+  });
+
+  it('documents the privacy switches, what is never sent, the replay posture and the log events', () => {
+    const privacy = flat(sub('Privacy'));
+    for (const needle of ['`evidence` (no default)', '`includeNote`', '`handles`', 'The room id, the seat ids, client keys and IP addresses are never sent', '`chatwarden.coop_failed`', '`chatwarden.coop_callback_ignored`', '`chatwarden.coop_dropped`', '`actorNote` and `decisionReason`']) {
+      expect(privacy, needle).toContain(needle);
+    }
+    const notes = flat(sub('Coop: security notes'));
+    for (const needle of ['Verify before parse', 'Replays', 'carries no time', 'rotate it in Coop', 'Rate-limit the routes at your edge', 'Redirects are never followed']) expect(notes, needle).toContain(needle);
+  });
+
+  it('documents the signal route: the scheme, the caps, the answers and that the plugin is a copy-in example', () => {
+    const signal = flat(sub('The signal route (optional)'));
+    for (const needle of ['`POST /coop/signal`', 'x-chatwarden-timestamp', 'x-chatwarden-signature', 'five minute window', 'At most 50 lines', '400 characters', '64 KiB', '`503` with an empty body', '`429`', '`retry-after`', 'examples/coop-signal', 'not published', 'No identifier']) {
+      expect(signal, needle).toContain(needle);
+    }
+  });
+
+  it('lists what is not confirmed yet', () => {
+    const open = flat(sub('Not confirmed yet'));
+    for (const needle of ['`t=...,v1=...`', 'Invalidate reports', '`creator`', '`datetime`', '@roostorg/coop-types', '@roostorg/types', 'Nothing has run against a real Coop']) expect(open, needle).toContain(needle);
+  });
+
+  it('the wiring block compiles (scripts/readme.test.ts) and runs against fakes: the route verifies a signed callback, the checklist prints, dispose is clean', async () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    expect(blocks).toHaveLength(2);
+    const block = blocks[0] as string;
+    expect(block.startsWith("import express from 'express';")).toBe(true);
+    // The startup lines call Coop over the network: run everything but them, and check they are there.
+    expect(block).toMatch(/\/\/ at startup\nconsole\.log\(adapter\.setup\.checklist\(\)\.toText\(\)\);.*\nadapter\.setup\.verify\(\)\.then\(.*\nvoid adapter\.sweep\(\);.*\n\n\/\/ on shutdown\nadapter\.dispose\(\);/);
+    const body = block
+      .split('\n')
+      .filter((l) => !l.startsWith('import '))
+      .join('\n')
+      .replace(/\n\/\/ at startup\n[\s\S]*?\n\n\/\/ on shutdown\nadapter\.dispose\(\);\n?$/, '\n');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore, withMemoryLinks } = await import('@chatwarden/store-memory');
+    const { toExpress } = await import('../src/express.js');
+    const { coop } = await import('../src/coop/index.js');
+    const { default: express } = await import('express');
+    const { createRouter } = await import('../src/router.js');
+    const { ITEM_TYPES, ACTION, sharedPair, newRsaPair, callbackBody, callbackRequest, COOP_URL, API_KEY } = await import('./coop-world.js');
+    const cw = await createChatwarden({ store: withMemoryLinks(new MemoryStore()), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false, logger: { warn: () => undefined } });
+    const env: Record<string, string> = {
+      COOP_URL,
+      COOP_API_KEY: API_KEY,
+      COOP_WEBHOOK_KEY: sharedPair().publicPem,
+      COOP_TYPE_USER: ITEM_TYPES.user,
+      COOP_TYPE_LINE: ITEM_TYPES.line,
+      COOP_TYPE_REPORT: ITEM_TYPES.report,
+      COOP_ACTION_WARN: ACTION.warn,
+      COOP_ACTION_CHAT_24H: ACTION.chat,
+      COOP_ACTION_DISMISS: ACTION.dismiss,
+      COOP_POLICY_HARASSMENT: 'policy-harass',
+    };
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+    const make = new AsyncFunction('express', 'coop', 'toExpress', 'cw', 'process', `${js(body)}\nreturn { adapter, app };`);
+    const out = (await make(express, coop, toExpress, cw, { env })) as { adapter: ReturnType<typeof coop>; app: unknown };
+    expect(Object.keys(out.adapter.routes)).toEqual(['POST /coop/actions']);
+    const router = createRouter(out.adapter.routes);
+    // A correctly signed callback for a report this kit does not have is acknowledged and ignored; a wrong key is the one 401.
+    expect(await router(callbackRequest(callbackBody('no-such-report')))).toEqual({ status: 200, body: { ok: true, outcome: 'ignored' } });
+    expect((await router(callbackRequest(callbackBody('no-such-report'), { pair: newRsaPair() }))).status).toBe(401);
+    const list = out.adapter.setup.checklist();
+    expect(list.toText()).toContain('Community Rule 1');
+    expect(list.actions).toHaveLength(3);
+    out.adapter.dispose();
+    expect((await router(callbackRequest(callbackBody('no-such-report')))).status).toBe(401);
+    await cw.close();
+  });
+
+  it('the signal block shows the option that adds the route', () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    const block = blocks[1] as string;
+    expect(block).toContain('signal: {');
+    expect(block).toContain('secret: process.env.COOP_SIGNAL_SECRET!');
+    expect(block).toContain('read: async (lines)');
+  });
+});
+
+describe('Coop in the project docs', () => {
+  const status = flat(read('../../../docs/status.md'));
+  const follow = flat(read('../../../docs/plans/follow-ups.md'));
+
+  it('the root README has the row; CLAUDE.md names the adapter and the example', () => {
+    const rootText = flat(root);
+    expect(rootText).toContain('`coop` from `@chatwarden/http/coop`');
+    expect(rootText).toContain('Review in Coop');
+    const claude = flat(read('../../../CLAUDE.md'));
+    expect(claude).toContain('`@chatwarden/http/coop`');
+    expect(claude).toContain('`examples/coop-signal`');
+  });
+
+  it('status says what is built and what the owner checks; follow-ups tell the owner exactly what to do (task C8)', () => {
+    for (const needle of ['Coop (built', '`chatwarden.coop_callback_ignored`', 'Nothing has run against a real Coop', "The owner's live check (K5 C8)", '`examples/coop-signal`']) expect(status, needle).toContain(needle);
+    for (const needle of ['the live Coop check (task C8)', 'docker compose', '`setup.checklist()`', '`setup.verify()`', 'Webhook Signature Verification Key', 'Ignore', 'Invalidate', '`datetime`', '`creator`', '@roostorg/coop-types', 'integrations.config.json', '`chatwarden.coop_failed`']) {
+      expect(follow, needle).toContain(needle);
+    }
+  });
+});
+
+describe('packages/http/README.md, Epic Online Services', () => {
+  const doc = section(http, 'Epic Online Services');
+  const js = (code: string): string => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  const sub = (heading: string): string => {
+    const start = doc.indexOf(`\n### ${heading}\n`);
+    expect(start, `subsection ${heading}`).toBeGreaterThanOrEqual(0);
+    const next = doc.indexOf('\n### ', start + 1);
+    return doc.slice(start, next === -1 ? undefined : next);
+  };
+
+  it('every documented option exists, and every option is documented', () => {
+    const source = read('../src/eos/options.ts');
+    const block = /export interface EosOptions \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
+    const top = [...block.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+    const nested = (name: string): string[] => {
+      const inner = new RegExp(`^ {2}${name}\\?: \\{([\\s\\S]*?)\\n {2}\\};`, 'm').exec(block)?.[1] ?? '';
+      return [...inner.matchAll(/^ {4}(\w+)\??:/gm)].map((m) => `${name}.${m[1] as string}`);
+    };
+    const fields = [...top, ...nested('sanctions'), ...nested('reports')];
+    expect(fields.length).toBeGreaterThanOrEqual(18);
+    const names = rows(sub('Epic Online Services options')).flatMap((r) => [...(r[0] as string).matchAll(/`([\w.]+)`/g)].map((m) => m[1] as string));
+    for (const field of fields) expect(names, field).toContain(field);
+    for (const name of names) expect(fields, name).toContain(name);
+  });
+
+  it('the READMEs list the @experimental names, every one the entry exports', () => {
+    const entry = read('../src/eos/index.ts');
+    const exported = [
+      ...[...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean)),
+      ...[...entry.matchAll(/^export (?:interface|function) (\w+)/gm)].map((m) => m[1] as string),
+    ];
+    expect(new Set(exported)).toEqual(new Set(['eos', 'EosAdapter', 'EosOptions', 'EosKind', 'EosSeat', 'PollResult']));
+    for (const name of exported) expect(doc, name).toContain(`\`${name}\``);
+    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+  });
+
+  it('says what EOS can and cannot do, that the entry is not in the root, and needs links', () => {
+    const can = flat(sub("What EOS's API can and cannot do"));
+    for (const needle of ['cannot list them all', 'no id, no room, no chat line', 'both** players in the **same room', 'The kit stores no EOS id']) expect(can, needle).toContain(needle);
+    expect(flat(doc)).toContain('not in the package root');
+    expect(flat(doc)).toContain('`cw.links`');
+    expect(flat(doc)).toContain('The kit stays the source of truth');
+  });
+
+  it('lists the client policy actions the adapter calls, and sets up in order', () => {
+    const setup = flat(sub('Set up, in order'));
+    for (const needle of ['`sanctions:createSanction`', '`sanctions:deleteSanction`', '`sanctions:findSanctionsForAnyUser`', '`playerreports:findReportsForAnyUser`', 'sandbox', 'cw.people.accountIds']) {
+      expect(setup, needle).toContain(needle);
+    }
+    const order = ['Make client credentials', 'Choose the action names', 'Write the two functions', 'Add it to your server', 'Check it by hand'].map((needle) => setup.indexOf(needle));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('documents the push and the pull steps, the limits in the code and what never leaves', () => {
+    const push = flat(sub('The push: a kit sanction becomes an EOS sanction'));
+    for (const needle of ['`cw_ref`', 'second sanction after a crash', 'at most 500', '`source` `chatwarden`', '`0` for a permanent ban and for a warning', '`Lifted: M-7K3Q9`', 'retry-after', 'What EOS never gets']) {
+      expect(push, needle).toContain(needle);
+    }
+    const pull = flat(sub('The pull: an EOS report becomes a kit report'));
+    for (const needle of ['20 at a time', '50 to a page', '10 minutes before the cursor', '`unseated`', '`different_room`', '`self`', '500 characters', '64 at most', 'now plus one minute', '`maxPerPoll`', '20 pages', 'The first poll starts from now', 'weak evidence']) {
+      expect(pull, needle).toContain(needle);
+    }
+    // The numbers in the text are the numbers in the code.
+    const reports = read('../src/eos/reports.ts');
+    expect(reports).toMatch(/const PAGE = 50;/);
+    expect(reports).toMatch(/const PAGES_MAX = 20;/);
+    expect(reports).toMatch(/const PLAYERS_MAX = 500;/);
+    expect(reports).toMatch(/const NOTE_MAX = 500;/);
+    expect(reports).toMatch(/const OVERLAP_MS = 10 \* 60_000;/);
+    expect(reports).toMatch(/const AHEAD_MS = 60_000;/);
+    expect(read('../src/eos/sanctions.ts')).toMatch(/const LOOKUP_PAGES = 5;/);
+    expect(read('../src/eos/sanctions.ts')).toMatch(/const PAGE = 100;/);
+    expect(read('../src/eos/options.ts')).toMatch(/batch: batch \?\? 20/);
+    // Every skip code the poll counts is documented.
+    for (const code of ['unseated', 'different_room', 'self', 'malformed', 'seat_error']) expect(doc, code).toContain(`\`${code}\``);
+    expect(flat(sub('What stays on the game client'))).toContain('EOS SDK call your game client makes');
+  });
+
+  it('documents every log event and every operation the code logs, and the security notes', () => {
+    const logs = flat(sub('Logs'));
+    for (const event of ['chatwarden.eos_failed', 'chatwarden.eos_dropped', 'chatwarden.eos_report_skipped']) expect(logs, event).toContain(`\`${event}\``);
+    const ops = new Set(['eos/token.ts', 'eos/sanctions.ts', 'eos/reports.ts'].flatMap((f) => [...read(`../src/${f}`).matchAll(/\bop: '(\w+)'/g)].map((m) => m[1] as string)));
+    expect(ops.size).toBeGreaterThanOrEqual(9);
+    for (const op of ops) expect(logs, op).toContain(`\`${op}\``);
+    for (const op of ['apply', 'revoke', 'enqueue']) expect(logs, op).toContain(`\`${op}\``);
+    const notes = flat(sub('Epic Online Services: security notes'));
+    for (const needle of ['The secret and the token stay in memory', 'Redirects are never followed', 'Reports are hostile input', 'No outside account id is stored', 'A line decides the person']) expect(notes, needle).toContain(needle);
+  });
+
+  it('lists what is not confirmed yet', () => {
+    const open = flat(sub('Not confirmed yet'));
+    for (const needle of ['`duration: 0`', '`reportedPlayerId`', 'rate limits', '`404`', '`automated`', "A restart between the kit's revoke and the delete", 'Nothing has run against the real EOS']) expect(open, needle).toContain(needle);
+  });
+
+  it('the wiring block compiles (scripts/readme.test.ts) and runs against the fake EOS: a sanction is pushed, a report is pulled, dispose is clean', async () => {
+    const blocks = [...doc.matchAll(/```ts\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+    expect(blocks).toHaveLength(1);
+    const block = blocks[0] as string;
+    expect(block.startsWith("import { eos } from '@chatwarden/http/eos';")).toBe(true);
+    expect(block).toMatch(/\/\/ at startup\nadapter\.start\(\);.*\n\n\/\/ on shutdown\nadapter\.dispose\(\);/);
+    // The startup line starts a timer; the test polls by hand instead, and checks the line is there.
+    const body = block
+      .split('\n')
+      .filter((l) => !l.startsWith('import '))
+      .join('\n')
+      .replace(/\n\/\/ at startup\n[\s\S]*?\n\n\/\/ on shutdown\nadapter\.dispose\(\);\n?$/, '\n');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore, withMemoryLinks } = await import('@chatwarden/store-memory');
+    const { eos } = await import('../src/eos/index.js');
+    const { fakeEos, DEPLOYMENT, CLIENT_ID, CLIENT_SECRET, until } = await import('./eos-world.js');
+    const { vi } = await import('vitest');
+    const cw = await createChatwarden({ store: withMemoryLinks(new MemoryStore()), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false, logger: { warn: () => undefined } });
+    const fake = fakeEos();
+    vi.stubGlobal('fetch', fake.fetch);
+    try {
+      const env: Record<string, string> = { EOS_DEPLOYMENT_ID: DEPLOYMENT, EOS_CLIENT_ID: CLIENT_ID, EOS_CLIENT_SECRET: CLIENT_SECRET };
+      const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+      const make = new AsyncFunction('eos', 'cw', 'process', `${js(body)}\nreturn { adapter, productUserIdOfAccount, seatOfProductUserId };`);
+      const out = (await make(eos, cw, { env })) as {
+        adapter: ReturnType<typeof eos>;
+        productUserIdOfAccount: Map<string, string>;
+        seatOfProductUserId: Map<string, { roomId: string; seatId: string }>;
+      };
+      // A person with an account id, a sanction, and the push.
+      cw.rooms.seat('readme-room', 'p1', { clientKey: 'raw-key-one', ip: '198.51.100.1', accountId: 'acct-one' }, 'One');
+      cw.rooms.seat('readme-room', 'p2', { clientKey: 'raw-key-two', ip: '198.51.100.2', accountId: 'acct-two' }, 'Two');
+      out.productUserIdOfAccount.set('acct-one', 'puid-readme-one');
+      out.productUserIdOfAccount.set('acct-two', 'puid-readme-two');
+      out.seatOfProductUserId.set('puid-readme-one', { roomId: 'readme-room', seatId: 'p1' });
+      out.seatOfProductUserId.set('puid-readme-two', { roomId: 'readme-room', seatId: 'p2' });
+      const subject = cw.rooms.subjectAt('readme-room', 'p2') as string;
+      await cw.sanctions.apply({ kind: 'chat', subject, includeIp: false, durationMs: 86_400_000, reason: 'private', actor: 'ann', source: 'moderator', automated: false, rule: 1 });
+      await until(() => fake.sanctions.length === 1, 'the push');
+      expect(fake.sanctions[0]).toMatchObject({ productUserId: 'puid-readme-two', action: 'chatwarden-chat', source: 'chatwarden', duration: 86_400 });
+      // A report between the two, pulled.
+      fake.addReport({ reportingPlayerId: 'puid-readme-one', reportedPlayerId: 'puid-readme-two', reasonId: 4, time: new Date().toISOString(), message: 'zorbak' });
+      expect(await out.adapter.pollReports()).toMatchObject({ seen: 1, filed: 1 });
+      out.adapter.dispose();
+      expect(await out.adapter.pollReports()).toEqual({ seen: 0, filed: 0, skipped: {}, refused: {} });
+    } finally {
+      vi.unstubAllGlobals();
+      await cw.close();
+    }
+  });
+});
+
+describe('EOS in the project docs', () => {
+  const status = flat(read('../../../docs/status.md'));
+  const follow = flat(read('../../../docs/plans/follow-ups.md'));
+
+  it('the root README has the row; CLAUDE.md names the adapter', () => {
+    expect(flat(root)).toContain('`eos` from `@chatwarden/http/eos`');
+    expect(flat(root)).toContain('Epic Online Services');
+    expect(flat(read('../../../CLAUDE.md'))).toContain('`@chatwarden/http/eos`');
+  });
+
+  it('status says what is built and what the owner checks; follow-ups tell the owner exactly what to do (task E5)', () => {
+    for (const needle of ['EOS (built', '`chatwarden.eos_failed`', 'Nothing has run against the real EOS', "The owner's sandbox check (K5 E5)", 'the Discord bot, Coop and EOS are built']) expect(status, needle).toContain(needle);
+    for (const needle of ['the EOS sandbox check (task E5)', '**sandbox**', '`sanctions:createSanction`', '`playerreports:findReportsForAnyUser`', 'permanent ban', '`duration: 0`', '`reports.batch`', '429', 'a lost revoke', '`chatwarden.eos_report_skipped`']) {
+      expect(follow, needle).toContain(needle);
+    }
   });
 });

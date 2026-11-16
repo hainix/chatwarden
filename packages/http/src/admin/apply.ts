@@ -1,5 +1,5 @@
 import { validateSanctionInput } from '@chatwarden/core';
-import type { Chatwarden, DecisionAction, DecisionInput, Role, SanctionInput, SanctionKind, StaffReport } from '@chatwarden/core';
+import type { Chatwarden, DecisionAction, DecisionInput, Role, SanctionInput, SanctionKind, Source, StaffReport } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import type { PermissionKey } from '../permissions.js';
 import { bodyText, has, parseAction } from './validate.js';
@@ -93,7 +93,8 @@ export interface DecisionOutcome {
 /**
  * Decide report `reportId` as `actor` (never from a request body): the report must exist and every action must name a
  * person on it. 404 for an unknown report, 409 `already_decided`, 400 for anything the facade refuses. A replay of the same
- * decision is `replay: true` and applies nothing.
+ * decision is `replay: true` and applies nothing. `source` is who the decision is on behalf of, `moderator` unless the caller is another
+ * system (the Coop callback passes `coop`); like the actor it is never from a request body.
  */
 export async function applyDecision(
   cw: Chatwarden,
@@ -101,6 +102,7 @@ export async function applyDecision(
   decision: ParsedDecision,
   actor: string,
   ai?: { echo?: AiEchoBody; role: Role },
+  source: Source = 'moderator',
 ): Promise<DecisionOutcome> {
   const report = cw.reports.get(reportId);
   if (report === null) throw new NotFoundError();
@@ -117,7 +119,7 @@ export async function applyDecision(
     // Never from the body: the caller is who the auth hook says (or the webhook's configured actor), always a moderator's.
     actor,
     ...(decision.reason === undefined ? {} : { reason: decision.reason }),
-    source: 'moderator',
+    source,
     // The read the moderator saw, with the caller's role for the audit row. It never changes the decision or what is answered.
     ...(ai === undefined
       ? {}

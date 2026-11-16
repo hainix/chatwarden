@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/http",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": false,
   "description": "Chatwarden HTTP package: framework-free router, error mapping, auth hook and role permissions for the admin and player APIs.",
   "license": "Apache-2.0",
@@ -56,6 +56,18 @@
     "./cli": {
       "types": "./dist/src/cli/index.d.ts",
       "default": "./dist/src/cli/index.js"
+    },
+    "./discord": {
+      "types": "./dist/src/discord/index.d.ts",
+      "default": "./dist/src/discord/index.js"
+    },
+    "./coop": {
+      "types": "./dist/src/coop/index.d.ts",
+      "default": "./dist/src/coop/index.js"
+    },
+    "./eos": {
+      "types": "./dist/src/eos/index.d.ts",
+      "default": "./dist/src/eos/index.js"
     }
   },
   "typesVersions": {
@@ -74,6 +86,15 @@
       ],
       "cli": [
         "dist/src/cli/index.d.ts"
+      ],
+      "discord": [
+        "dist/src/discord/index.d.ts"
+      ],
+      "coop": [
+        "dist/src/coop/index.d.ts"
+      ],
+      "eos": [
+        "dist/src/eos/index.d.ts"
       ]
     }
   },
@@ -88,7 +109,7 @@
     "prepack": "tsc -b"
   },
   "peerDependencies": {
-    "@chatwarden/core": "^0.1.11",
+    "@chatwarden/core": "^0.1.12",
     "@types/express": "^5.0.0",
     "express": "^5.0.0"
   },
@@ -101,11 +122,11 @@
     }
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.11",
-    "@chatwarden/discord": "0.1.11",
-    "@chatwarden/matcher": "0.1.11",
-    "@chatwarden/profanity": "0.1.11",
-    "@chatwarden/store-sqlite": "0.1.11",
+    "@chatwarden/core": "0.1.12",
+    "@chatwarden/discord": "0.1.12",
+    "@chatwarden/matcher": "0.1.12",
+    "@chatwarden/profanity": "0.1.12",
+    "@chatwarden/store-sqlite": "0.1.12",
     "@types/express": "^5.0.3",
     "express": "^5.1.0"
   },

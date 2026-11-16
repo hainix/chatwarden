@@ -4,8 +4,9 @@ Posts the Chatwarden staff review queue into a Discord forum channel, through a 
 one forum thread, and every later report, decision, timeout and lifted sanction for that person is posted into it, so
 moderators can discuss a case where it is.
 
-It is one function, `discordFeed`. It listens to the kit's events (`cw.on`) and posts. It reads nothing from Discord and has no
-buttons: a webhook can only write.
+It is one function, `discordFeed`. It listens to the kit's events (`cw.on`) and posts. It reads nothing from Discord. A webhook can
+only write, so a post has no buttons unless you add some with the `components` option; see "Buttons" below. The bot that answers a
+click is a separate part, `discordBot` in `@chatwarden/http/discord`.
 
 Status: pre-release, as-is, no support promise.
 
@@ -64,6 +65,7 @@ and subscribes nothing.
 | `hubLink` | `(kind: 'report' \| 'person', id: string) => string` | Builds the links in each post. Required. The id is the only place an id appears in a post (see below). A result that is not an `http(s)` URL, one over 512 characters, or a throw drops that one link and keeps the post. |
 | `mentionRoleId` | `string` | A Discord role id (17 to 20 digits) to ping on a severe report or a severe sanction. Nothing else ever pings anyone. |
 | `severeOnly` | `boolean` | Post only severe reports, their closing, severe sanctions, the lift of a sanction under a severe rule and appeals under a severe rule. Skips automatic timeouts and rule gaps. Default `false`. |
+| `components` | `(post: { kind: 'report'; reportId: string }) => DiscordActionRow[] \| undefined` | `@experimental`. Buttons for the post that announces a report; nothing else gets any. Give it `bot.components` from `discordBot`. Needs an application-owned webhook (see "Buttons"). A throw or an invalid result drops the buttons for that post, never the post. |
 | `fetch` | `typeof fetch` | The `fetch` to post with. Default: the global one. For tests. |
 | `logger` | `{ warn(event, detail?) }` | Where failures are logged. Default `console.warn`. |
 | `clock`, `random` | | Time source and retry jitter. For tests. |
@@ -88,6 +90,24 @@ times after 1, 2, 4, 8 and 16 seconds. Each request times out at 10 seconds. The
 events; past that the oldest is dropped, and the drops are logged as a count (`chatwarden.discord_dropped`). Dropped hub links
 are logged the same way (`chatwarden.discord_link_dropped`, with the link kind, a reason and a count, at most one line a minute
 for each). A restart loses what is queued.
+
+## Buttons (`components`, `@experimental`)
+
+A report post can carry buttons: "Nothing wrong here", "Apply suggestion" and an "Open report" link. The bot in `@chatwarden/http/discord`
+makes them and answers the clicks; the feed only posts them. Pass `components: bot.components`.
+
+**The webhook must belong to your application.** A webhook made by hand in the channel settings cannot send buttons you can click. Discord
+ignores them without an error. So make the webhook with the bot instead (the exact `curl` is in the `@chatwarden/http` README, section "Discord
+bot") and give the feed that webhook's URL.
+
+If the webhook is not the application's own, Discord's answer to the post does not name an application. The feed then logs one
+`chatwarden.discord_components_ignored` (no detail), keeps posting without buttons, and strips none. Nothing else changes.
+
+**When the report closes,** the feed edits its post to remove the buttons (the text stays). It can only do this while it remembers where the post is:
+a restart forgets, so an old post keeps its buttons. A click on one is answered "already decided". An edit that still fails after the retries is
+dropped and logged.
+
+At most one row of five buttons. A label over 80 characters, a `custom_id` over 100 or a link over 512 drops the buttons for that post.
 
 ## Security notes
 
@@ -117,4 +137,4 @@ for each). A restart loses what is queued.
   still has the report.
 - **One webhook, one channel.** Each `discordFeed` posts to one forum. Run two feeds for two channels (for example one with
   `severeOnly: true`).
-- **It cannot read Discord.** A decision made in Discord is not seen by the kit; decide through your console or the staff API.
+- **The feed cannot read Discord.** A decision made in Discord is not seen by the feed. With the bot (`@chatwarden/http/discord`) and its buttons, a click is a decision through the kit's own path; without it, decide through your console or the staff API.

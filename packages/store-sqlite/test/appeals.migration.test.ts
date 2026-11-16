@@ -116,11 +116,10 @@ const snapshot = (db: DatabaseSync): unknown => ({
 });
 
 describe('migration 22: appeals, blocked names, four notice kinds', () => {
-  it('is the 22nd migration and the last one', () => {
+  it('is the 22nd migration', () => {
     expect(M22).toBeDefined();
     expect(MIGRATIONS[21]?.version).toBe(22);
-    expect(MIGRATIONS.at(-1)?.version).toBe(22);
-    expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 22 }, (_, i) => i + 1));
+    expect(MIGRATIONS.map((m) => m.version).slice(0, 22)).toEqual(Array.from({ length: 22 }, (_, i) => i + 1));
   });
 
   it('the replacement index is partial (only appeals that wrote a replacement)', () => {
@@ -133,7 +132,7 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
   it('from an empty database creates kit_appeals with its indexes and kit_blocked_names; kit_ai_outcomes gains corrective defaulting to 0; kit_sanctions gains report_id', () => {
     const db = memDb();
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(22);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(names(db, 'table')).toEqual(expect.arrayContaining(['kit_appeals', 'kit_blocked_names']));
     expect(columns(db, 'kit_appeals')).toEqual(APPEAL_COLUMNS);
     for (const i of [...APPEAL_INDEXES, 'kit_blocked_names_by_at']) expect(names(db, 'index')).toContain(i);
@@ -156,13 +155,13 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
     expect((before as { notices: Array<{ kind: string }> }).notices.map((r) => r.kind)).toEqual(expect.arrayContaining(OLD_KINDS));
 
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(22);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(snapshot(db)).toEqual({ ...(before as object), outcomes: (before as { outcomes: Array<Record<string, unknown>> }).outcomes.map((r) => ({ ...r, corrective: 0 })) });
     // the live schema survives the rebuild: the same columns (names, types, nullability, defaults, primary key) and the same three indexes, byte for byte
     expect(columnInfo(db, 'kit_notices')).toEqual(noticeCols);
     expect(indexSql(db, 'kit_notices')).toEqual(noticeIdx);
     expect(names(db, 'index').filter((i) => i.startsWith('kit_notices'))).toEqual(NOTICE_INDEXES);
-    expect(names(db, 'table').filter((x) => !tables.includes(x))).toEqual(['kit_appeals', 'kit_blocked_names']);
+    expect(names(db, 'table').filter((x) => !tables.includes(x) && x !== 'kit_links')).toEqual(['kit_appeals', 'kit_blocked_names']);
     // the same rows through the store, in the same order
     expect(store.loadNotices(['s_0', 's_1', 's_2', 's_3']).map((r) => r.id)).toEqual(
       (before as { notices: Array<{ id: string; created_at: number }> }).notices
@@ -183,7 +182,7 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
 
     // Reopening runs nothing again and changes nothing.
     const again = openStore({ db });
-    expect(again.schemaVersion()).toBe(22);
+    expect(again.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(db.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
   });
@@ -281,7 +280,7 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
     s.close();
     const before = dump(db, 'kit_notices', 'rowid');
     const store = openStore({ db });
-    expect(store.schemaVersion()).toBe(22);
+    expect(store.schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(dump(db, 'kit_notices', 'rowid')).toEqual(before);
   });
 
@@ -334,7 +333,7 @@ describe('migration 22: appeals, blocked names, four notice kinds', () => {
     expect(columns(db, 'kit_sanctions')).toEqual(sanctionCols);
     expect(columns(db, 'kit_ai_outcomes')).not.toContain('corrective');
     expect(snapshot(db)).toEqual(before);
-    expect(openStore({ db }).schemaVersion()).toBe(22);
+    expect(openStore({ db }).schemaVersion()).toBe(MIGRATIONS.at(-1)?.version);
     expect(names(db, 'table')).toContain('kit_appeals');
   });
 

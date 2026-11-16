@@ -195,6 +195,7 @@ function checkWindow(name: string, ms: number): void {
  *   permanent, or timed and not yet ended before that cutoff, and not revoked (that row stops a second appeal). An open appeal is never
  *   deleted or cleared; but one whose sanction rows this pass removed (or that has none) is first mooted, so it ends up decided-like. Blocked names: `at < now - blockedNamesMs` (30 days by default).
  *   A store without the appeal or blocked-name methods has none of these.
+ * - links (`cw.links`): `at < now - reportsMs` (90 days by default), every system. A store without the link methods has none.
  * - notices: withdrawn, or a seen warning / report outcome, with `createdAt < now - noticesMs`; or
  *   `until < now - noticesMs`. A notice for a permanent or running sanction is kept while it applies (agrees with
  *   `NoticeService.record`), and an unseen warning is kept until it is seen or withdrawn. The four message kinds: seen, as a report outcome;
@@ -237,6 +238,8 @@ export async function purge(
   checkWindow('blockedNamesMs', p.blockedNamesMs);
   return store.transaction(() => {
     const reports = store.purgeReports(now - p.reportsMs, now - p.badFaithMs);
+    // Link rows (`cw.links`) are ids only and outlive the report they name by no useful time: the same clock as reports. Not counted in the result. A live row (an active EOS sanction, the EOS cursor) is kept by the store whatever its age.
+    store.purgeLinks?.(now - p.reportsMs);
     const ai = store.purgeAi?.(now - p.reportsMs, now - p.aiOutcomesMs, now - p.aiExamplesMs) ?? { reads: 0, outcomes: 0 };
     return {
       reports,

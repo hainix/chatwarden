@@ -1625,3 +1625,618 @@ describe('the known limit: an answer lost after Discord made the thread', () => 
     expect(k.threads.get(subject)?.threadId).toBe('T1');
   });
 });
+
+describe('components on the report post (K5 D1)', () => {
+  const ROWS = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'Nothing wrong here', custom_id: 'cw1:dis:ID' }] }];
+  const SECRET_ID = 'cw1:dis:SECRET-CUSTOM-ID';
+  const SECRET_LABEL = 'SECRET-LABEL-TEXT';
+  const SECRET_URL = 'https://secret.example.test/SECRET-URL-PATH';
+
+  const withComponents = (calls: Array<{ url: URL; body: Record<string, unknown> }>) => calls.filter((c) => c.url.searchParams.has('with_components'));
+
+  it('the report post carries with_components=true and the components; no other post carries either', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject });
+    const components = vi.fn(() => ROWS);
+    const { d } = start(k, undefined, { components });
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id));
+    await k.emit(applied(subject));
+    await k.emit(lifted(subject));
+    await k.emit(gapEv(subject));
+    await k.emit(auto(subject));
+    await settle();
+    // six posts, and the one edit that takes the buttons off when the report closes (that is D2: it is the only other request that carries them)
+    expect(d.calls).toHaveLength(7);
+    expect(d.calls[0]!.url.searchParams.get('wait')).toBe('true');
+    expect(d.calls[0]!.url.searchParams.get('with_components')).toBe('true');
+    expect(d.calls[0]!.body.components).toEqual(ROWS);
+    const edits = d.calls.filter((c) => c.init.method === 'PATCH');
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.body.components).toEqual([]);
+    expect(withComponents(d.calls.filter((c) => c.init.method === 'POST'))).toHaveLength(1);
+    for (const c of d.calls.filter((c) => c.init.method === 'POST').slice(1)) {
+      expect('components' in c.body).toBe(false);
+      expect(c.href).toBe(`${WEBHOOK}?wait=true&thread_id=T1`);
+    }
+  });
+
+  it('the components function is called with { kind: report, reportId } and nothing else; never for sanction, gap, timeout or closed posts', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject });
+    const components = vi.fn<(post: { kind: 'report'; reportId: string }) => typeof ROWS>(() => ROWS);
+    start(k, undefined, { components });
+    await k.emit(applied(subject));
+    await k.emit(lifted(subject));
+    await k.emit(gapEv(subject));
+    await k.emit(auto(subject));
+    await k.emit(closed(r.id));
+    await settle();
+    expect(components).not.toHaveBeenCalled();
+    await k.emit(created(r.id));
+    await settle();
+    expect(components).toHaveBeenCalledTimes(1);
+    expect(components.mock.calls[0]).toEqual([{ kind: 'report', reportId: r.id }]);
+    expect(Object.keys(components.mock.calls[0]![0] as object).sort()).toEqual(['kind', 'reportId']);
+  });
+
+  it('severeOnly still skips a non-severe report: the components function is not called for it', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid(), category: 'spam' });
+    const components = vi.fn(() => ROWS);
+    const { d } = start(k, undefined, { components, severeOnly: true });
+    await k.emit(created(r.id, 'spam'));
+    await settle();
+    expect(components).not.toHaveBeenCalled();
+    expect(d.calls).toHaveLength(0);
+  });
+
+  const SIX = [{ type: 1, components: Array.from({ length: 6 }, () => ROWS[0]!.components[0]) }];
+  const JS_LINK = [{ type: 1, components: [{ type: 2, style: 5, label: 'x', url: 'javascript:alert(1)' }] }];
+  it.each([
+    [
+      'throws',
+      () => {
+        throw new RangeError('boom');
+      },
+      'RangeError',
+    ],
+    ['returns six buttons', () => SIX, 'invalid'],
+    ['returns a non-array', () => 'junk', 'invalid'],
+    ['returns a promise', () => Promise.resolve(ROWS), 'invalid'],
+    ['returns a javascript: link', () => JS_LINK, 'invalid'],
+  ])('a components function that %s posts the report without buttons and logs one coalesced line', async (_n, fn, reason) => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = start(k, undefined, { components: fn as never });
+    await k.emit(created(r.id));
+    await settle();
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0]!.href).toBe(`${WEBHOOK}?wait=true`);
+    expect('components' in d.calls[0]!.body).toBe(false);
+    expect(String(d.calls[0]!.body.content)).toContain('**New report**');
+    expect(logged).toEqual([['chatwarden.discord_link_dropped', { op: 'components', reason, count: 1 }]]);
+  });
+
+  it('the log line holds no custom_id, label, url or error message', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const bad = (): never => {
+      throw new Error(`${SECRET_ID} ${SECRET_LABEL} ${SECRET_URL}`);
+    };
+    const { logged } = start(k, undefined, { components: bad });
+    await k.emit(created(r.id));
+    await settle();
+    expect(logged).toHaveLength(1);
+    const text = JSON.stringify(logged);
+    for (const s of [SECRET_ID, SECRET_LABEL, SECRET_URL, 'SECRET']) expect(text).not.toContain(s);
+  });
+
+  it('a junk result is coalesced like dropped links: the first at once, then one line a minute with the count', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const { logged } = start(k, undefined, { components: () => 'junk' as never });
+    for (let i = 0; i < 3; i++) {
+      await k.emit(created(k.addReport({ targetPerson: subject }).id));
+      await settle();
+    }
+    const lines = () => logged.filter(([e]) => e === 'chatwarden.discord_link_dropped');
+    expect(lines()).toEqual([['chatwarden.discord_link_dropped', { op: 'components', reason: 'invalid', count: 1 }]]);
+    await settle(60_000);
+    expect(lines()).toEqual([
+      ['chatwarden.discord_link_dropped', { op: 'components', reason: 'invalid', count: 1 }],
+      ['chatwarden.discord_link_dropped', { op: 'components', reason: 'invalid', count: 2 }],
+    ]);
+  });
+
+  it('an undefined or empty result is not an error: no buttons, no log', async () => {
+    const k = fakeKit();
+    const first = start(k, undefined, { components: () => undefined });
+    await k.emit(created(k.addReport({ targetPerson: sid() }).id));
+    await settle();
+    first.feed.dispose();
+    const second = start(k, undefined, { components: () => [] });
+    await k.emit(created(k.addReport({ targetPerson: sid() }).id));
+    await settle();
+    expect(first.logged).toEqual([]);
+    expect(second.logged).toEqual([]);
+    expect(first.d.calls).toHaveLength(1);
+    expect(second.d.calls).toHaveLength(1);
+    expect(withComponents(first.d.calls)).toHaveLength(0);
+    expect(withComponents(second.d.calls)).toHaveLength(0);
+  });
+
+  it('a components option that is not a function is a RangeError at construction', () => {
+    for (const bad of ['yes', 3, {}, null]) {
+      expect(() => discordFeed(fakeKit().kit, { webhookUrl: WEBHOOK, hubLink, fetch: fakeDiscord().fetch, components: bad } as never)).toThrow(RangeError);
+    }
+  });
+
+  it('dispose flushes a pending components drop count like a link drop, and leaves no timer', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const { feed, logged } = start(k, undefined, { components: () => 'junk' as never });
+    await k.emit(created(k.addReport({ targetPerson: subject }).id));
+    await k.emit(created(k.addReport({ targetPerson: subject }).id));
+    await settle();
+    feed.dispose();
+    expect(logged.filter(([e]) => e === 'chatwarden.discord_link_dropped').map(([, detail]) => detail)).toEqual([
+      { op: 'components', reason: 'invalid', count: 1 },
+      { op: 'components', reason: 'invalid', count: 1 },
+    ]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('every existing post kind is byte-identical to before when components is not set (and for non-report posts when it is)', async () => {
+    const run = async (options: Partial<DiscordFeedOptions>) => {
+      const k = fakeKit();
+      const subject = sid();
+      const r = k.addReport({ targetPerson: subject });
+      const { d } = start(k, undefined, options);
+      await k.emit(created(r.id));
+      await k.emit(closed(r.id));
+      await k.emit(applied(subject, { groupId: 'g1', refCode: 'M-SNAP1', until: NOW + DAY }));
+      await k.emit(lifted(subject, { groupId: 'g2', refCode: 'M-SNAP2' }));
+      await k.emit(gapEv(subject, { groupId: 'g3', refCode: 'M-SNAP3' }));
+      await k.emit(auto(subject, { groupId: 'g4', refCode: 'M-SNAP4' }));
+      await settle();
+      return { calls: d.calls, id: r.id, subject };
+    };
+    const plain = await run({});
+    expect(plain.calls).toHaveLength(6);
+    expect(plain.calls[0]!.href).toBe(`${WEBHOOK}?wait=true`);
+    for (const c of plain.calls.slice(1)) expect(c.href).toBe(`${WEBHOOK}?wait=true&thread_id=T1`);
+    for (const c of plain.calls) {
+      expect(Object.keys(c.body).filter((key) => key !== 'thread_name')).toEqual(['content', 'allowed_mentions', 'flags']);
+      expect(c.body.flags).toBe(4);
+    }
+    const withHook = await run({ components: () => ROWS });
+    const strip = (calls: typeof plain.calls, id: string, subject: string) =>
+      calls.slice(1).filter((c) => c.init.method === 'POST').map((c) => JSON.stringify(c.body).replaceAll(id, 'R').replaceAll(subject, 'S'));
+    expect(strip(withHook.calls, withHook.id, withHook.subject)).toEqual(strip(plain.calls, plain.id, plain.subject));
+  });
+});
+
+describe('the buttons are stripped when the report closes (K5 D2)', () => {
+  const ROWS = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'Nothing wrong here', custom_id: 'cw1:dis:ID' }] }];
+  const withButtons = { components: () => ROWS };
+  const patches = <C extends { init: { method?: string } }>(calls: C[]): C[] => calls.filter((c) => c.init.method === 'PATCH');
+  const base = (c: { url: URL }): string => c.url.origin + c.url.pathname;
+  /** `start`, with the plan seeing the call too (so a test can fail only the PATCH). */
+  const begin = (k: Kit, plan: Parameters<typeof fakeDiscord>[0], options: Partial<DiscordFeedOptions>) => {
+    const d = fakeDiscord(plan);
+    const logged: Logged = [];
+    const feed = discordFeed(k.kit, { webhookUrl: WEBHOOK, hubLink, fetch: d.fetch, logger: { warn: (e, detail) => void logged.push([e, detail]) }, random: () => 0.5, ...options });
+    return { feed, d, logged };
+  };
+
+  it("report.closed edits the report's own post to no components, in the right thread, once", async () => {
+    const k = fakeKit();
+    const a = k.addReport({ targetPerson: sid() });
+    const b = k.addReport({ targetPerson: sid() });
+    const { d } = start(k, undefined, withButtons);
+    await k.emit(created(a.id));
+    await k.emit(created(b.id));
+    await settle();
+    // call 0 opened T1 (message m0), call 1 opened T2 (message m1)
+    await k.emit(closed(b.id));
+    await settle();
+    expect(patches(d.calls)).toHaveLength(1);
+    const edit = patches(d.calls)[0]!;
+    expect(base(edit)).toBe(`${WEBHOOK}/messages/m1`);
+    expect(edit.url.searchParams.get('thread_id')).toBe('T2');
+    expect(edit.url.searchParams.get('with_components')).toBe('true');
+    expect(edit.body).toEqual({ components: [], allowed_mentions: { parse: [] } });
+    // closing it again edits nothing more; the other report's post is untouched
+    await k.emit(closed(b.id));
+    await settle();
+    expect(patches(d.calls)).toHaveLength(1);
+    // and report a is still strippable
+    await k.emit(closed(a.id));
+    await settle();
+    expect(patches(d.calls).map((c) => base(c))).toEqual([`${WEBHOOK}/messages/m1`, `${WEBHOOK}/messages/m0`]);
+    expect(patches(d.calls)[1]!.url.searchParams.get('thread_id')).toBe('T1');
+  });
+
+  it('a second report of the same person is edited in the shared thread by its own message id', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const a = k.addReport({ targetPerson: person });
+    const b = k.addReport({ targetPerson: person });
+    const { d } = start(k, undefined, withButtons);
+    await k.emit(created(a.id));
+    await k.emit(created(b.id));
+    await settle();
+    await k.emit(closed(b.id));
+    await settle();
+    expect(base(patches(d.calls)[0]!)).toBe(`${WEBHOOK}/messages/m1`);
+    expect(patches(d.calls)[0]!.url.searchParams.get('thread_id')).toBe('T1');
+    await k.emit(closed(a.id));
+    await settle();
+    expect(base(patches(d.calls)[1]!)).toBe(`${WEBHOOK}/messages/m0`);
+    expect(patches(d.calls)[1]!.url.searchParams.get('thread_id')).toBe('T1');
+  });
+
+  it('the closing post is sent before the edit, and the edit never changes the closing post', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d } = start(k, undefined, withButtons);
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id, 'no_action'));
+    await settle();
+    expect(d.calls.map((c) => c.init.method)).toEqual(['POST', 'POST', 'PATCH']);
+    expect(String(d.calls[1]!.body.content)).toContain('**Report closed**');
+    expect('components' in d.calls[1]!.body).toBe(false);
+  });
+
+  it('the edit body has no content, no embeds, no flags and an allowed_mentions parse that is empty, whatever the report held', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid(), category: 'hate' });
+    const { d } = start(k, undefined, { ...withButtons, mentionRoleId: ROLE });
+    await k.emit(created(r.id, 'hate'));
+    await settle();
+    expect(d.calls[0]!.body.allowed_mentions).toEqual({ parse: [], roles: [ROLE] });
+    await k.emit(closed(r.id));
+    await settle();
+    const edit = patches(d.calls)[0]!;
+    expect(Object.keys(edit.body).sort()).toEqual(['allowed_mentions', 'components']);
+    expect(edit.body.components).toEqual([]);
+    expect(edit.body.allowed_mentions).toEqual({ parse: [] });
+    expect(JSON.stringify(edit.body)).not.toMatch(/Case|Report|<@|@everyone|http/);
+  });
+
+  it('an edit failure is logged by class and does not block the next post', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const a = k.addReport({ targetPerson: person });
+    const b = k.addReport({ targetPerson: person });
+    // call 0 opens the thread, call 1 is the closing post, call 2 the edit (a network error, over and over), then the next post
+    const { d, logged } = begin(k, (_n, call) => (call.init.method === 'PATCH' ? new TypeError('secret-url-in-message') : undefined), withButtons);
+    await k.emit(created(a.id));
+    await settle();
+    await k.emit(closed(a.id));
+    await k.emit(created(b.id));
+    await settle(60_000);
+    expect(logged).toEqual([['chatwarden.discord_failed', { op: 'edit', error: 'TypeError', attempts: 6 }]]);
+    expect(JSON.stringify(logged)).not.toContain('secret-url');
+    const last = d.calls.filter((c) => c.init.method === 'POST').at(-1)!;
+    expect(String(last.body.content)).toContain('**New report**');
+    expect(last.url.searchParams.get('with_components')).toBe('true');
+  });
+
+  it('a 403 on the edit is logged with the status once and not retried', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = begin(k, (_n, call) => (call.init.method === 'PATCH' ? 403 : undefined), withButtons);
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id));
+    await settle(60_000);
+    expect(patches(d.calls)).toHaveLength(1);
+    expect(logged).toEqual([['chatwarden.discord_failed', { op: 'edit', status: 403, attempts: 1 }]]);
+  });
+
+  it('after a restart (a new feed) a closed report edits nothing and posts nothing wrong', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const first = start(k, undefined, withButtons);
+    await k.emit(created(r.id));
+    await settle();
+    first.feed.dispose();
+    const second = start(k, undefined, withButtons);
+    await k.emit(closed(r.id));
+    await settle();
+    expect(patches(second.d.calls)).toHaveLength(0);
+    expect(second.d.calls).toHaveLength(1);
+    expect(String(second.d.calls[0]!.body.content)).toContain('**Report closed**');
+    expect(second.d.calls[0]!.url.searchParams.has('with_components')).toBe(false);
+    expect(second.logged).toEqual([]);
+  });
+
+  it('without a components option nothing is ever edited and nothing is remembered', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d } = start(k);
+    await k.emit(created(r.id));
+    await k.emit(closed(r.id));
+    await settle();
+    expect(d.calls.map((c) => c.init.method)).toEqual(['POST', 'POST']);
+  });
+
+  it('a report whose buttons were dropped (junk) or never posted has no entry, so closing it edits nothing', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d } = start(k, undefined, { components: () => 'junk' as never });
+    await k.emit(created(r.id));
+    await k.emit(closed(r.id));
+    await settle();
+    expect(patches(d.calls)).toHaveLength(0);
+  });
+
+  it('an answer without a usable message id leaves no entry and logs nothing', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = begin(k, (n) => (n === 0 ? { status: 200, json: { channel_id: 'T1', application_id: '111111111111111111' } } : undefined), withButtons);
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id));
+    await settle();
+    expect(patches(d.calls)).toHaveLength(0);
+    expect(logged).toEqual([]);
+  });
+
+  it('a post that Discord sent after the thread was found gone is remembered under the new thread and message', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const first = k.addReport({ targetPerson: person });
+    const second = k.addReport({ targetPerson: person });
+    // call 0 opens T1; call 1 is the second report's post: 404 Unknown Channel; call 2 reopens (T2, message m2)
+    const { d } = begin(k, (n) => (n === 1 ? { status: 404, json: { code: 10003 } } : undefined), withButtons);
+    await k.emit(created(first.id));
+    await settle();
+    await k.emit(created(second.id));
+    await settle();
+    await k.emit(closed(second.id));
+    await settle();
+    const edit = patches(d.calls)[0]!;
+    expect(base(edit)).toBe(`${WEBHOOK}/messages/m2`);
+    expect(edit.url.searchParams.get('thread_id')).toBe('T2');
+  });
+
+  it('a thread deleted since is not recreated for an edit (the edit answers gone and nothing else is sent)', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = begin(k, (_n, call) => (call.init.method === 'PATCH' ? { status: 404, json: { code: 10003 } } : undefined), withButtons);
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id));
+    await settle(60_000);
+    expect(patches(d.calls)).toHaveLength(1);
+    // the only thread that was opened is the first one: nothing is recreated for an edit
+    expect(d.creates()).toHaveLength(1);
+    expect(d.calls.filter((c) => c.init.method === 'POST')).toHaveLength(2);
+    expect(logged).toEqual([]);
+  });
+
+  it('severeOnly: a non-severe report was never posted, so its closing posts and edits nothing', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid(), category: 'spam' });
+    const { d } = start(k, undefined, { ...withButtons, severeOnly: true });
+    await k.emit(created(r.id, 'spam'));
+    await k.emit(closed(r.id));
+    await settle();
+    expect(d.calls).toHaveLength(0);
+  });
+
+  it('severeOnly: a severe report is edited on close, like any other', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid(), category: 'hate' });
+    const { d } = start(k, undefined, { ...withButtons, severeOnly: true });
+    await k.emit(created(r.id, 'hate'));
+    await settle();
+    await k.emit(closed(r.id));
+    await settle();
+    expect(patches(d.calls)).toHaveLength(1);
+  });
+
+  it('the map is bounded at 10000 and forgets the oldest', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const ids: string[] = [];
+    const { d } = start(k, undefined, withButtons);
+    for (let i = 0; i < 10_001; i++) {
+      const r = k.addReport({ targetPerson: person });
+      ids.push(r.id);
+      await k.emit(created(r.id));
+      // the queue itself holds 1000: let it drain, or the oldest would be dropped before it is sent
+      if (i % 200 === 199) await settle();
+    }
+    await settle();
+    expect(d.calls).toHaveLength(10_001);
+    await k.emit(closed(ids[0]!)); // the oldest was forgotten
+    await k.emit(closed(ids[1]!)); // the second oldest is still there
+    await k.emit(closed(ids[10_000]!));
+    await settle();
+    expect(patches(d.calls).map((c) => base(c))).toEqual([`${WEBHOOK}/messages/m1`, `${WEBHOOK}/messages/m10000`]);
+  }, 60_000);
+
+  it('dispose drops a pending edit', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    // call 0: the report post; call 1: the closing post hangs, with the edit waiting behind it
+    const { d, feed } = begin(k, (n) => (n === 1 ? 'hang' : undefined), withButtons);
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id));
+    await settle();
+    expect(d.calls).toHaveLength(2);
+    feed.dispose();
+    await settle(120_000);
+    expect(patches(d.calls)).toHaveLength(0);
+    expect(d.calls).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('no edit and no post after dispose', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, feed } = start(k, undefined, withButtons);
+    await k.emit(created(r.id));
+    await settle();
+    feed.dispose();
+    await k.emit(closed(r.id));
+    await settle();
+    expect(d.calls).toHaveLength(1);
+  });
+
+  it('nothing in any post or edit carries chat text, a handle, a note or an id outside the links', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const r = k.addReport({ targetPerson: person });
+    const { d } = start(k, undefined, withButtons);
+    await k.emit(created(r.id));
+    await k.emit(closed(r.id));
+    await settle();
+    for (const c of d.calls) {
+      const text = visibleTexts(c.body).join('\n');
+      expect(leaks(text, [CHAT, HANDLE, NOTE, person, r.id])).toEqual([]);
+      expect(JSON.stringify(c.body)).not.toContain(CHAT);
+    }
+  });
+});
+
+describe('the webhook must be the application\'s own (K5 design 6.2)', () => {
+  const ROWS = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'Nothing wrong here', custom_id: 'cw1:dis:ID' }] }];
+  const patches = <C extends { init: { method?: string } }>(calls: C[]): C[] => calls.filter((c) => c.init.method === 'PATCH');
+  /** A webhook made by hand: Discord's answer carries no application id. */
+  const handMade = (n: number, call: { url: URL }) => (n >= 0 ? { status: 200, json: call.url.searchParams.has('thread_id') ? { id: `m${n}` } : { id: `m${n}`, channel_id: `T${n + 1}` } } : undefined);
+  const make = (k: Kit, plan: Parameters<typeof fakeDiscord>[0], asked: string[] = []) => {
+    const d = fakeDiscord(plan);
+    const logged: Logged = [];
+    const feed = discordFeed(k.kit, {
+      webhookUrl: WEBHOOK,
+      hubLink,
+      fetch: d.fetch,
+      logger: { warn: (e, detail) => void logged.push([e, detail]) },
+      random: () => 0.5,
+      components: ({ reportId }) => {
+        asked.push(reportId);
+        return ROWS;
+      },
+    });
+    return { feed, d, logged, asked };
+  };
+
+  it('an answer that does not name an application logs one chatwarden.discord_components_ignored with no detail, remembers no message and strips nothing', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = make(k, handMade);
+    await k.emit(created(r.id));
+    await settle();
+    expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
+    await k.emit(closed(r.id));
+    await settle();
+    expect(patches(d.calls)).toHaveLength(0);
+    expect(logged).toHaveLength(1);
+  });
+
+  it('after that the feed carries on posting without buttons (the components function is not asked again), and it logs once, not once a post', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const a = k.addReport({ targetPerson: person });
+    const b = k.addReport({ targetPerson: person });
+    const c = k.addReport({ targetPerson: person });
+    const { d, logged, asked } = make(k, handMade);
+    await k.emit(created(a.id));
+    await settle();
+    await k.emit(created(b.id));
+    await k.emit(created(c.id));
+    await settle();
+    expect(asked).toEqual([a.id]);
+    expect(d.calls).toHaveLength(3);
+    expect(d.calls[0]!.url.searchParams.get('with_components')).toBe('true');
+    for (const call of d.calls.slice(1)) {
+      expect(call.url.searchParams.has('with_components')).toBe(false);
+      expect(call.body.components).toBeUndefined();
+    }
+    expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
+  });
+
+  it('one answer that cannot be read does not turn the buttons off for good: no log, the next report post still carries them, and a hand-made answer afterwards still does', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const a = k.addReport({ targetPerson: person });
+    const b = k.addReport({ targetPerson: person });
+    const c = k.addReport({ targetPerson: person });
+    const e = k.addReport({ targetPerson: person });
+    // Answers by call: the thread opens normally; the second call's body is unreadable; the third is a good bot answer; the fourth is a hand-made one.
+    const plan = (n: number, call: { url: URL }) => {
+      if (n === 0) return { status: 200, json: { id: 'm0', channel_id: 'T1', application_id: '111111111111111111' } };
+      if (n === 1) return { status: 200, text: 'upstream hiccup' };
+      if (n === 2) return { status: 200, json: { id: 'm2', application_id: '111111111111111111' } };
+      return { status: 200, json: call.url.searchParams.has('thread_id') ? { id: `m${n}` } : { id: `m${n}`, channel_id: 'T9' } };
+    };
+    const { d, logged, asked } = make(k, plan);
+    await k.emit(created(a.id));
+    await settle();
+    await k.emit(created(b.id));
+    await settle();
+    expect(logged).toEqual([]);
+    await k.emit(created(c.id));
+    await settle();
+    expect(asked).toEqual([a.id, b.id, c.id]);
+    for (const call of d.calls) expect(call.url.searchParams.get('with_components')).toBe('true');
+    expect(logged).toEqual([]);
+    await k.emit(created(e.id));
+    await settle();
+    expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
+  });
+
+  it('an answer that names an application (a bot-made webhook) is ours: no log, and the strip works as before', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = make(k, () => undefined);
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id));
+    await settle();
+    expect(logged).toEqual([]);
+    expect(patches(d.calls)).toHaveLength(1);
+  });
+
+  it('a null, empty, mistyped or non-snowflake application id is not ours either', async () => {
+    for (const application_id of [null, '', 'zorbak', 1234567, '123']) {
+      const k = fakeKit();
+      const r = k.addReport({ targetPerson: sid() });
+      const { d, logged } = make(k, (n) => ({ status: 200, json: { id: `m${n}`, channel_id: 'T1', application_id } }));
+      await k.emit(created(r.id));
+      await settle();
+      await k.emit(closed(r.id));
+      await settle();
+      expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
+      expect(patches(d.calls)).toHaveLength(0);
+    }
+  });
+
+  it('a post without components never trips the check, and the log line holds nothing but its name', async () => {
+    const k = fakeKit();
+    const d = fakeDiscord(handMade);
+    const logged: Logged = [];
+    const feed = discordFeed(k.kit, { webhookUrl: WEBHOOK, hubLink, fetch: d.fetch, logger: { warn: (e, detail) => void logged.push([e, detail]) }, random: () => 0.5 });
+    const r = k.addReport({ targetPerson: sid() });
+    await k.emit(created(r.id));
+    await settle();
+    expect(logged).toEqual([]);
+    feed.dispose();
+    const k2 = fakeKit();
+    const r2 = k2.addReport({ targetPerson: sid() });
+    const second = make(k2, handMade);
+    await k2.emit(created(r2.id));
+    await settle();
+    expect(JSON.stringify(second.logged)).not.toMatch(/T1|m0|\d{6}|tok_|cw1/);
+  });
+});

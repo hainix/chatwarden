@@ -208,6 +208,39 @@ export function listSanctionGroups(store: Store, subjects: SubjectIndex, q: Sanc
   };
 }
 
+/** How many of the newest groups the by-ref fallback reads for a store with no `sanctionGroupByRef`. */
+export const BY_REF_FALLBACK_GROUPS = 1000;
+
+/**
+ * One group's staff view with its canonical person, found by a normalised ref code (`M-XXXXX`), or null. A store with
+ * `sanctionGroupByRef` answers from its index; one without is read through the newest {@link BY_REF_FALLBACK_GROUPS} groups.
+ * Built from the group's SUBJECT row only: an IP row is never read.
+ */
+export function sanctionByRef(store: Store, subjects: SubjectIndex, code: string, now: number): PersonSanctionView | null {
+  const view = (r: SanctionRow): PersonSanctionView => ({ ...sanctionGroupView(r, now), person: subjects.canonical(r.value) });
+  if (typeof store.sanctionGroupByRef === 'function') {
+    const groupId = store.sanctionGroupByRef(code);
+    if (groupId === null) return null;
+    const row = store.listSubjectSanctions({ groupId, limit: 5 }).find((r) => r.groupId === groupId && r.refCode === code);
+    return row === undefined ? null : view(row);
+  }
+  let before: { startsAt: number; id: string } | null = null;
+  let seen = 0;
+  while (seen < BY_REF_FALLBACK_GROUPS) {
+    const page = store.listSubjectSanctions({
+      limit: Math.min(200, BY_REF_FALLBACK_GROUPS - seen),
+      ...(before === null ? {} : { before: before.startsAt, beforeId: before.id }),
+    });
+    const hit = page.find((r) => r.refCode === code);
+    if (hit !== undefined) return view(hit);
+    const last = page[page.length - 1];
+    if (last === undefined || page.length < Math.min(200, BY_REF_FALLBACK_GROUPS - seen)) return null;
+    seen += page.length;
+    before = { startsAt: last.startsAt, id: last.id };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // The reporter's record
 // ---------------------------------------------------------------------------

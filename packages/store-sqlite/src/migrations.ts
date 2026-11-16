@@ -662,4 +662,20 @@ CREATE INDEX kit_blocked_names_by_at ON kit_blocked_names (at);
 ALTER TABLE kit_ai_outcomes ADD COLUMN corrective INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    // Links (K5 design 5.1, `cw.links`): "this kit id is that outside id". Additive: one table and one index, nothing else touched. Ids and one
+    // short state word only; no text. (system, ref) is the key; the index serves the by-state listing, oldest first.
+    version: 23,
+    sql: `
+CREATE TABLE kit_links (
+  system   TEXT NOT NULL,
+  ref      TEXT NOT NULL,
+  external TEXT NOT NULL,
+  state    TEXT NOT NULL,
+  at       INTEGER NOT NULL,
+  PRIMARY KEY (system, ref)
+) WITHOUT ROWID;
+CREATE INDEX kit_links_by_state ON kit_links (system, state, at);
+`,
+  },
 ];

@@ -1,4 +1,4 @@
-export const VERSION = '0.1.11';
+export const VERSION = '0.1.12';
 
 export type {
   Clock,
@@ -92,6 +92,7 @@ export {
   MAX_SANCTION_DURATION_MS,
   SANCTION_KINDS,
   SanctionError,
+  normalizeRefCode,
   SANCTION_SOURCES,
   SanctionIndex,
   validateSanctionInput,
@@ -330,6 +331,8 @@ export type { PaceReason, PaceSettings, ResolvedPace } from './pace.js';
 // Appeals and names settings (@experimental): off until set (names masking in the hub is the one default-on setting).
 export { APPEAL_OUTCOMES, APPEAL_RATE_ELEVATED, APPEAL_RATE_HIGH, APPEAL_STATEMENT_MAX, APPEAL_STATS_MIN_SANCTIONS, normalizeStatement, resolveAppeals, SANCTION_KIND_ORDER, statementLength } from './appeals.js';
 export type { AppealDecideResult, AppealDecision, AppealDetail, AppealFileResult, AppealOutcome, AppealPage, AppealRuleStats, AppealStats, AppealSummary, AppealRefusal, AppealSettings, AppealStatus, PlayerAppeal, ResolvedAppeals } from './appeals.js';
+export { LINK_SYSTEMS } from './links.js';
+export type { LinkRow, LinkSystem } from './links.js';
 export { resolveNames } from './names.js';
 export type { NameCheckResult, NameReason, NameSettings, ResolvedNames } from './names.js';
 // Signals (@experimental): kinds a game declares, the guards, and the feeds that say where counts may be read.

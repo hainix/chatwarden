@@ -1,0 +1,12 @@
+{
+  "name": "@chatwarden/example-coop-signal",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A copy-in Coop plugin that adds a Chatwarden AI severity signal. Not published to npm.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "engines": {
+    "node": ">=22.13"
+  }
+}

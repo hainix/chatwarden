@@ -695,3 +695,29 @@ describe('the matcher tarball and the corpus subpaths (0.1.11)', () => {
     expect(corpusDataProblems({ files: [...shipped(), 'dist/src/corpus/seed.zip.sig'], sources: {} }).length).toBeGreaterThan(0);
   });
 });
+
+describe('the http manifest in the repo and the K5 subpaths', () => {
+  const http = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/http/package.json', import.meta.url)), 'utf8')) as Pkg;
+  const SUBPATHS = ['discord', 'coop', 'eos'] as const;
+  it('lists the Discord, Coop and EOS entries among the files a tarball must hold, and the root still does not name them', () => {
+    const targets = exportTargets(http) as string[];
+    for (const name of SUBPATHS) {
+      expect(targets, name).toContain(`dist/src/${name}/index.js`);
+      expect(targets, name).toContain(`dist/src/${name}/index.d.ts`);
+    }
+    expect(http.exports?.['.']).toEqual({ types: './dist/src/index.d.ts', default: './dist/src/index.js' });
+  });
+  it('maps each entry for CommonJS with moduleResolution node too (typesVersions), which is what the CommonJS smoke project resolves through', () => {
+    for (const name of SUBPATHS) expect((http as unknown as { typesVersions: { '*': Record<string, string[]> } }).typesVersions['*'][name], name).toEqual([`dist/src/${name}/index.d.ts`]);
+  });
+  it('a tarball that lacks one of the entries is refused', () => {
+    const targets = exportTargets(http) as string[];
+    const sources = targets.filter((t) => t.endsWith('.js')).map((t) => t.replace(/^dist\//, '').replace(/\.js$/, '.ts'));
+    const files = ['package.json', 'README.md', 'LICENSE', ...targets, ...targets.map((t) => `${t}.map`), ...sources];
+    expect(checkFileList({ pkg: http, files }).filter((p) => /discord|coop|eos/.test(p))).toEqual([]);
+    for (const name of SUBPATHS) {
+      const without = files.filter((f) => f !== `dist/src/${name}/index.js`);
+      expect(checkFileList({ pkg: http, files: without }).join('\n'), name).toContain(`dist/src/${name}/index.js`);
+    }
+  });
+});

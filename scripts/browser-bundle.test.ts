@@ -63,9 +63,9 @@ const withoutServerOnlyAi: Plugin = {
       loader: 'js',
       resolveDir: dirname(args.path),
     }));
-    // `withMemoryAi`, `withMemorySignals`, `withMemoryAppeals` and `withMemoryNames` are the in-memory store's opt-in methods: their names are left out of `export * as storeMemory`.
+    // `withMemoryAi`, `withMemorySignals`, `withMemoryAppeals`, `withMemoryLinks` and `withMemoryNames` are the in-memory store's opt-in methods: their names are left out of `export * as storeMemory`.
     b.onLoad({ filter: /packages[\\/]store-memory[\\/]dist[\\/]src[\\/]index\.js$/ }, (args) => ({
-      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*\{[^}]*\}\s*from\s*['"]\.\/memory(?:Ai|Appeals|Names|Signals)\.js['"];?[ \t]*$/gm, ''),
+      contents: readFileSync(args.path, 'utf8').replaceAll(/^export\s*\{[^}]*\}\s*from\s*['"]\.\/memory(?:Ai|Appeals|Links|Names|Signals)\.js['"];?[ \t]*$/gm, ''),
       loader: 'js',
       resolveDir: dirname(args.path),
     }));
@@ -329,7 +329,7 @@ describe('browser bundle: size', () => {
 // names that live only in the AI module: the prompt builder, the output schema and the scripted fake adapter.
 const AI_MARKERS = ['buildAIInput', 'AI_OUTPUT_SCHEMA', 'createFakeModerationAI'];
 // And the in-memory store's AI methods, which are opt-in (`withMemoryAi`) so a bundle that never calls it does not carry them.
-const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries', 'withMemoryAppeals', 'withMemoryNames', 'UNIQUE constraint failed: kit_blocked_names.id'];
+const MEMORY_AI_MARKERS = ['withMemoryAi', 'reserveAiRead', 'aiTeachableCount', 'listAiRetries', 'withMemoryAppeals', 'withMemoryLinks', 'withMemoryNames', 'UNIQUE constraint failed: kit_blocked_names.id'];
 const inputsOf = (m: Metafile): string[] => Object.keys(m.inputs).map((p) => p.replaceAll('\\', '/'));
 
 describe('browser bundle: the server-only AI module', () => {
@@ -1025,5 +1025,39 @@ describe('browser bundle: the shared term list stays out of a page', () => {
       expect(run(ctx, 'typeof process + typeof Buffer + typeof require + typeof module')).toBe('undefinedundefinedundefinedundefined');
       expect(run(ctx, 'Object.keys(Corpus).includes("fileCache") || Object.keys(Corpus).includes("startCorpus")')).toBe(false);
     });
+  });
+});
+
+// The K5 integrations (the Discord bot, Coop and EOS adapters in `@chatwarden/http`) use `node:crypto` and belong to a server. The size build, the build with the AI
+// module and the chat server side must hold none of their files and none of their strings, and the root of `@chatwarden/http` must not pull them in.
+describe('browser bundle: the K5 integrations stay out of a page', () => {
+  const isIntegration = (p: string): boolean => /packages\/http\/(?:dist\/)?src\/(?:discord|coop|eos|internal\/(?:deliveryQueue|boundedText)\.)/.test(p.replaceAll('\\', '/'));
+  const MARKERS = ['chatwarden.discord_bot', 'chatwarden.discord_followup', 'chatwarden.coop_failed', 'chatwarden.eos_failed', 'chatwarden.eos_report_skipped', 'cw1:dis:', 'X-API-KEY', 'sanctions/v1', 'player-reports/v1'];
+
+  it('the size build, the build with the AI module and the chat build hold no file and no string of them', () => {
+    for (const meta of [metafile, aiMetafile, chatMetafile]) expect(Object.keys(meta.inputs).filter(isIntegration)).toEqual([]);
+    for (const [name, code] of Object.entries({ esm, iife, aiEsm, aiIife, chatEsm, chatIife })) {
+      for (const marker of MARKERS) expect(code.includes(marker), `${name} has ${marker}`).toBe(false);
+    }
+  });
+
+  it('the root of @chatwarden/http, bundled for Node with nothing external but the Node builtins, holds none of them either', async () => {
+    const out = await build({
+      ...common,
+      entryPoints: undefined,
+      stdin: { contents: "export * from '@chatwarden/http';", resolveDir: ROOT, loader: 'ts' },
+      format: 'esm',
+      platform: 'node',
+      external: ['node:*', 'express'],
+    });
+    // The delivery queue is shared with `webhooksOut`, so the root holds it; nothing of the three adapters, or of the bounded reader only they use, may be there.
+    expect(Object.keys(out.metafile.inputs).filter((p) => isIntegration(p) && !/deliveryQueue/.test(p))).toEqual([]);
+    for (const marker of MARKERS) expect(out.outputFiles[0]!.text.includes(marker), marker).toBe(false);
+  }, 60_000);
+
+  it('the root and the chat build still import no node: module (the scans above run on these two)', () => {
+    for (const [name, code] of Object.entries({ esm, iife, chatEsm, chatIife })) {
+      expect(code, name).not.toMatch(/(?:from|import)\s*\(?\s*["']node:/);
+    }
   });
 });

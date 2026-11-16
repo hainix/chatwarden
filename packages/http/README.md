@@ -746,6 +746,569 @@ One route, `POST /webhooks/in/action` (mounted at `/hooks` above, so `/hooks/web
   not throttle them. Put a limit in front of it (your reverse proxy, load balancer, or `express-rate-limit` on the mount) so a
   flood of bad requests is stopped before it reaches the process.
 
+## Discord bot
+
+`@experimental` until 0.2. A bot that lives in your Discord server and answers staff. It does two things:
+
+- `/chatwarden lookup <code>` tells a moderator what a reference code (like `M-7K3Q9`) stands for, so they can answer a player who quotes one.
+- Optional: two buttons on each report post, "Nothing wrong here" and "Apply suggestion", with a confirm step. A click decides the report
+  through the same checks as the hub.
+
+It is in its own entry, `@chatwarden/http/discord`, and not in the package root, because it uses `node:crypto`. It does nothing when you
+import it. Pair it with the feed in `@chatwarden/discord`, which posts the report and shows the buttons. The bot never reads Discord's
+gateway, never holds a bot token and never posts chat text, a handle, a reason or a note.
+
+### Set up, in order
+
+1. **Make the application.** In the Discord Developer Portal, create an application. Copy the **application id** and the **public key**
+   (64 hex characters; it is not a secret).
+2. **Make the bot and invite it.** Add a bot to the application. Invite it to your moderation server with the scopes `bot` and
+   `applications.commands`, with **Manage Webhooks** on the forum channel. Copy the **bot token** and keep it off the server: only
+   `registerCommands` uses it, once.
+3. **Make the application-owned webhook.** A webhook made by hand cannot send buttons you can click, so make it with the bot. One request:
+
+   ```sh
+   curl -X POST "https://discord.com/api/v10/channels/$FORUM_CHANNEL_ID/webhooks" \
+     -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"name":"Chatwarden"}'
+   ```
+
+   The answer holds an `id` and a `token`. The feed's URL is `https://discord.com/api/webhooks/<id>/<token>`. The name may not contain
+   "clyde" or "discord". The URL is a credential: keep it in a secret store.
+4. **Copy the role ids.** Turn on Developer Mode, right-click each role and choose **Copy Role ID**. You need the ones for your moderators,
+   seniors and owners. Also copy the server's id.
+5. **Add it to your server** (the block below). The route is `POST /discord/interactions`. Mount it where nothing reads the body first: the
+   signature covers the exact bytes (`toExpress` and `toFetch` keep them as `rawBody`).
+6. **Deploy, then paste the route's full URL** into the application's **Interactions Endpoint URL** in the Developer Portal. Discord sends a
+   PING when you save; the bot answers it, and the Portal refuses the URL if it does not.
+7. **Register the command, once** (the second block). The command list replaces the application's commands in that server.
+8. **Try it.** Run `/chatwarden lookup` with a code from a sanction you applied. File a test report and click a button.
+
+```ts
+import express from 'express';
+import { discordFeed } from '@chatwarden/discord';
+import { toExpress } from '@chatwarden/http/express';
+import { discordBot } from '@chatwarden/http/discord';
+
+const hubLink = (kind: 'report' | 'person', id: string) => `https://mod.example.com/${kind === 'report' ? 'reports' : 'people'}/${encodeURIComponent(id)}`;
+
+const bot = discordBot(cw, {
+  applicationId: process.env.DISCORD_APP_ID!,
+  publicKey: process.env.DISCORD_PUBLIC_KEY!, // 64 hex characters, from the Developer Portal
+  guildId: process.env.DISCORD_GUILD_ID!, // the one server this kit serves; every other is refused
+  roles: {
+    moderator: [process.env.DISCORD_ROLE_MODERATOR!],
+    senior: [process.env.DISCORD_ROLE_SENIOR!],
+    owner: [process.env.DISCORD_ROLE_OWNER!],
+  },
+  hubLink,
+  actions: { dismiss: true, suggestion: true }, // leave this out and the bot only answers /chatwarden lookup
+});
+
+const app = express();
+app.use('/', toExpress(bot.routes)); // POST /discord/interactions, with no body parser before it
+
+const feed = discordFeed(cw, {
+  webhookUrl: process.env.DISCORD_WEBHOOK_URL!, // the application-owned webhook from step 3
+  hubLink,
+  components: bot.components, // the buttons on a report post
+});
+
+// on shutdown
+feed.dispose();
+bot.dispose();
+```
+
+Register the command once, from your own machine (the bot token never goes on the server). `bot` is the one above:
+
+```ts
+import { registerCommands } from '@chatwarden/http/discord';
+
+const result = await registerCommands({
+  applicationId: process.env.DISCORD_APP_ID!,
+  botToken: process.env.DISCORD_BOT_TOKEN!,
+  guildId: process.env.DISCORD_GUILD_ID!,
+  commands: bot.commands(),
+});
+console.log(result.ok ? `registered ${result.count} command(s)` : `Discord answered ${result.status}`);
+```
+
+`registerCommands` answers `{ ok: true, count }` or `{ ok: false, status }` (status `0` when there was no answer). A bad id or token is a
+`RangeError` that never repeats the value. A 429 is waited out once. The token is sent in one header and is in no result, error or log.
+
+### What the bot says
+
+Every answer is ephemeral (only the person who clicked sees it) and mentions no one. The words are fixed.
+
+| When | The answer |
+| --- | --- |
+| A lookup finds the code | The code, the kind, the length, the Community Rule, whether it is active, ended or lifted, when it was given, and who gave it in words (a moderator, the chat filter, Coop, the AI read, the API). An "Open person" link. No reason, no moderator, no handle, no subject id. |
+| A lookup finds nothing, or the code is malformed | `No sanction found for that code.` (the same text for both) |
+| A click on "Nothing wrong here" or "Apply suggestion" | A preview of what it would do, with Confirm and Cancel. For the suggestion: the step, the rule and the one-line why. |
+| Confirm | `Done`, the step and the code. The report closes, the feed posts the outcome and takes the buttons off. |
+| The same confirm again | `Already done`, and nothing is applied twice. |
+| The report was decided in the hub first | `This report was already decided (...)` with an "Open report" link. |
+| The profile's suggestion changed since the preview | `That changed. Open it in the hub.` |
+| The report needs a Community Rule chosen | `This report needs a Community Rule chosen. Open it in the hub.` |
+| Another moderator has the case open | `Another moderator has this case open.` A Discord click never takes a case over. |
+| No role, no permission, too many clicks, the wrong server | A fixed refusal. Role names and ids are never echoed. |
+| Anything goes wrong | `Something went wrong. Try again in the hub.` The class of the error is logged, never its text. |
+
+With `actions: { confirm: false }` the first click decides at once, with the same checks. The answer is still a private message; the report post
+itself changes only when the report closes.
+
+### Who may do what
+
+You map Discord role ids to the kit's three roles with `roles`. A person's kit role is the highest one they hold an id of. A role you did
+not list is nothing. The permission for each step is the staff routes' table (see Permissions), and `permissions` overrides it the same way:
+
+- lookup needs `history.read`, and is audited as `history.view`;
+- a preview needs `reports.read`, and a suggestion preview is audited as `suggest`;
+- a confirm needs `reports.decide`, and `sanctions.apply` for a sanction, and `sanctions.apply.ban_permanent` (senior by default) for a permanent ban. The decision is audited as `report.decide`.
+
+Nothing in a Discord payload except the signed `member.roles` and `user.id` picks the role, the actor or the source. The actor is
+`discord:<user id>`, or what your `actorOf` gives for that user (so a moderator's own claim does not block them). The source is `moderator`.
+
+### Discord bot options
+
+| Option | What it does |
+| --- | --- |
+| `applicationId` | The application id (17 to 20 digits). Required. |
+| `publicKey` | The application's Ed25519 public key, 64 hex characters. Required. |
+| `guildId` | The one server this kit serves. An interaction from any other, or a DM, is refused. Required. |
+| `roles` | Discord role ids per kit role (`moderator`, `senior`, `owner`). At least one id overall. Required. |
+| `hubLink` | `(kind, id) => url`. Where "Open report" and "Open person" go. A throw or a URL that is not `http(s)` drops that link. Required. |
+| `actions` | `{ dismiss?, suggestion?, confirm? }`. Leave it out for lookup only. `dismiss` and `suggestion` default `true` once it is set; `confirm` defaults `true`. |
+| `permissions` | Overrides of the minimum roles, checked as for the staff routes. |
+| `actorOf` | `(discordUserId) => string \| undefined`. Map a Discord user to a hub login. An invalid answer or a throw falls back to `discord:<id>`. |
+| `rateLimit` | Per Discord user, `{ max, windowMs }`. Default 20 a minute. |
+| `timestampToleranceMs` | How far a signed timestamp may be from the clock, either way. Default 300 000 (5 minutes). |
+| `respondWithinMs` | How long work may take before the bot answers "working on it". Default 2 500; under Discord's 3 000. |
+| `fetch` | The `fetch` for the one follow-up of a slow answer. Default the global one. For tests. |
+| `schedule` | `(run, ms) => cancel`. The timer behind `respondWithinMs` and the one retry. Default `setTimeout`. For tests. |
+| `replay` | The replay memory (a `ReplayCache`). Default a new one. |
+| `clock`, `logger` | Time source, and where failures are logged (an event name and an error class only). |
+
+`bot.routes` is the route table. `bot.components` goes to `discordFeed`. `bot.commands()` goes to `registerCommands`. `bot.dispose()` forgets what the
+bot holds and cancels its timers; a disposed bot answers 401. The names `discordBot`, `DiscordBotOptions`, `DiscordBot`, `DiscordCommand`,
+`DiscordActionRow`, `DiscordButton`, `DiscordCommandOption`, `registerCommands`, `RegisterCommandsOptions`, `RegisterCommandsResult` and `verifyInteraction` are `@experimental` until 0.2.
+
+### Slow work
+
+Discord wants a first answer within 3 seconds. If the work is not done in `respondWithinMs`, the bot answers at once with a loading message
+(type 5, only the clicker sees it; or type 6 for a click on the private Confirm), and when the work finishes it edits that answer once
+(`PATCH https://discord.com/api/v10/webhooks/<application id>/<token>/messages/@original`, no Authorization header: the token is the key). A
+429 is waited out once, for the time Discord names, between 1 and 60 seconds. Any other failure is logged by class and dropped. The interaction
+token is never logged and never stored. Work that throws gives the fixed failure text.
+
+### Discord bot: security notes
+
+- **Verify before parse.** The route checks the signature over the exact bytes before it reads the body. A missing or malformed header, a wrong
+  key, a stale or future timestamp, a changed byte and a replayed request are all the same `401 { "error": "unauthorized" }`. A body over 64 KiB is a 413 before any check.
+- **The bot never trusts a `custom_id`.** It is a short, closed format. Every click re-reads the report, the claim, the rule and the profile; a
+  code that is not the current suggestion is refused.
+- **No secret leaves.** No log line, answer or error holds a token, a signature, a subject id outside a hub link, chat text or a handle.
+- **Rate-limit the route at your edge.** The bot limits each Discord user after the signature check, but an unsigned request still costs a body
+  read and a signature check. A low per-address limit in front of `/discord/interactions` is fine: Discord sends few requests. Do not block
+  Discord's addresses.
+- **Keep the webhook URL and the bot token secret.** The bot token is only for `registerCommands`.
+- **One restart caveat.** The feed forgets which post held which buttons when the process restarts. An old post keeps its buttons, and a click
+  on one is answered from the report ("already decided").
+- **Two things Discord's docs leave open,** checked by hand before you rely on them (see `docs/plans/follow-ups.md`): that a webhook made with
+  the bot is application-owned, and that the command's default visibility value is right. If the first is wrong the feed logs
+  `chatwarden.discord_components_ignored` and posts without buttons.
+- **One more thing to check by hand:** that a slow click on the public report post shows only the clicker a loading message and leaves the post as it was (the bot answers
+  type 5 with flags 64 there, and type 6 only on the private Confirm and Cancel). Step 5 of the live check in `docs/plans/follow-ups.md` says how.
+
+## Coop
+
+`@experimental` until 0.2. [Coop](https://github.com/roostorg/coop) is an open-source review tool. This adapter sends each report to Coop as a job, so reviewers
+can work there. When a reviewer decides, Coop calls your server, and the kit applies the decision through the same checks as the hub.
+
+The kit stays the source of truth. Coop is a place to review. Only the kit writes sanctions, notices and the status of a report. A job in Coop does not
+change the report: it stays open in the hub until someone decides it.
+
+It is in its own entry, `@chatwarden/http/coop`, and not in the package root, because it uses `node:crypto`. It does nothing when you import it. It needs a
+store that has `cw.links` (the memory store with `withMemoryLinks`, or SQLite from 0.1.12); without one, `coop(...)` throws a `RangeError`.
+
+### Set up, in order
+
+1. **Run Coop.** Use Coop's own Docker Compose set-up. In Coop, open Settings, then API Keys. Make an API key. Copy the **Webhook Signature Verification Key** too.
+   It is a public key in PEM form.
+2. **Create things in Coop by hand.** Coop has no way to create item types, policies or actions from outside, so the adapter prints a checklist. Call
+   `adapter.setup.checklist().toText()` once and follow it. It lists the three item types and their fields, one policy for each of your Community Rules, and the
+   actions to make. Each action gets the callback URL (your public URL plus `/coop/actions`) and **user strikes off**.
+3. **Copy the ids into the options.** Coop gives each item type, policy and action an id. Put them in `itemTypes`, `actions` and `rules` (below).
+4. **Add it to your server.** The route needs the exact request body, so use an adapter that supplies `rawBody` (`toExpress` does), with no body parser before it. The block below is the whole wiring.
+
+```ts
+import express from 'express';
+import { coop } from '@chatwarden/http/coop';
+import { toExpress } from '@chatwarden/http/express';
+
+const adapter = coop(cw, {
+  baseUrl: process.env.COOP_URL!, // https, or http on localhost for a local Coop
+  apiKey: process.env.COOP_API_KEY!,
+  webhookPublicKey: process.env.COOP_WEBHOOK_KEY!, // the PEM from Settings, API Keys
+  itemTypes: { user: process.env.COOP_TYPE_USER!, line: process.env.COOP_TYPE_LINE!, report: process.env.COOP_TYPE_REPORT! },
+  evidence: 'excerpt', // required: 'none' or 'excerpt'. There is no default.
+  actions: {
+    [process.env.COOP_ACTION_WARN!]: { verdict: 'upheld', kind: 'warning' },
+    [process.env.COOP_ACTION_CHAT_24H!]: { verdict: 'upheld', kind: 'chat', durationMs: 86_400_000 },
+    [process.env.COOP_ACTION_DISMISS!]: { verdict: 'no_action' },
+  },
+  rules: { [process.env.COOP_POLICY_HARASSMENT!]: 2 }, // Coop policy id -> Community Rule number
+});
+
+const app = express();
+app.use('/', toExpress(adapter.routes)); // POST /coop/actions, with no body parser before it
+
+// at startup
+console.log(adapter.setup.checklist().toText()); // while you set Coop up
+adapter.setup.verify().then((result) => console.log(result)); // read-only: three GETs
+void adapter.sweep(); // send the open reports from the last day that have no job yet
+
+// on shutdown
+adapter.dispose();
+```
+
+5. **Check it.** `adapter.setup.verify()` makes three read-only requests and says which configured ids Coop does not list, which actions have no meaning
+   here, and which item types lack a field. It writes nothing and never returns your key. `{ ok: false, status: 401 }` means Coop refused the key.
+6. **File a test report** and watch the job appear in Coop. Decide it there with one of your actions and watch the hub close the report.
+
+`adapter.sweep()` sends every open report from the last `catchUpMs` (default one day) that has no job yet. Run it at startup. A crash between Coop's answer and
+the kit's note of it sends that report once more at the next sweep. Coop then counts a second report on the same item. That is the only cost.
+
+### Coop options
+
+| Option | What it does |
+| --- | --- |
+| `baseUrl` | Where Coop is. `https`, or `http` on `localhost` and `127.0.0.1`. No user, password, query or fragment. Redirects are never followed. Required. |
+| `apiKey` | Sent as `X-API-KEY`. A secret: never logged, never in a result. Required. |
+| `webhookPublicKey` | Coop's Webhook Signature Verification Key, a public RSA key in PEM form. A private key is refused. Required. |
+| `itemTypes` | `{ user, line, report }`: the ids of the three item types you made in Coop. Required. |
+| `evidence` | `'none'` or `'excerpt'`. Required, no default. `'none'` sends the category, rule, severity and room tags only. `'excerpt'` also sends the chat lines of the report. |
+| `includeNote` | Send the reporter's note. It is player text. Default `false`. |
+| `handles` | `'hidden'` (default) labels people `reporter`, `reported`, `other 1`. `'shown'` also sends each line's handle. |
+| `policies` | `{ byReason, byRule }`: which Coop policy a report is filed under. A reported reason wins over the suggested rule. Optional. |
+| `actions` | Coop action id to the kit decision it means (below). Required. An id that is not listed is acknowledged and ignored. |
+| `rules` | Coop policy id to a Community Rule number. Without a match, the report's suggested rule is used. |
+| `role` | The kit role the callbacks act with. Default `moderator`. A permanent ban needs `senior`. |
+| `permissions` | Overrides of the minimum roles, checked as for the staff routes. |
+| `callbackAuth` | `{ header, value }`. Coop can send a header you set on each action. When this is set, a callback without it gets the same `401`. Compared in constant time. |
+| `catchUpMs` | How far back `sweep()` looks. Default 24 hours; at most 30 days. |
+| `aiSeverity` | `(report) => number`. The kit's AI severity, 0 to 100. It rides in the item as `aiSeverity`, so a Coop routing rule can sort by it. A throw, or a value outside 0 to 100, drops that field and not the report. |
+| `signal` | `{ secret, read, rateLimit? }`. Adds `POST /coop/signal` (below). Off unless set. |
+| `fetch`, `schedule`, `clock`, `random`, `logger` | The `fetch` for Coop, the timer for the signal's time limit, the time source, the retry jitter and where failures are logged. All for tests; the defaults are the global ones. |
+
+`adapter.routes` is the route table. `adapter.sweep()` resolves with `{ sent, skipped, failed }`. `adapter.setup` has `checklist()` and `verify()`.
+`adapter.dispose()` unsubscribes, aborts the request in flight, clears every timer and drops the queue; nothing is written after it, and a disposed adapter's
+routes answer `401`. The names `coop`, `CoopAdapter`, `CoopOptions`, `CoopDecision`, `SweepResult`, `CoopChecklist`, `CoopChecklistItemType` and `CoopVerification`
+are `@experimental` until 0.2.
+
+### The three item types
+
+Make these in Coop, with exactly these field names. Names are case sensitive. `adapter.setup.checklist()` prints the same list.
+
+| Item type | Field | Coop type | Required |
+| --- | --- | --- | --- |
+| Player (`user`) | none | | |
+| Chat line (`line`) | `text` | `STRING` | yes |
+| | `author` | `STRING` | yes |
+| | `datetime` | `DATETIME` | yes |
+| | `handle` | `STRING` | no |
+| Report (`report`) | `category` | `STRING` | yes |
+| | `reportedReason` | `STRING` | no |
+| | `rule` | `NUMBER` | no |
+| | `aiSeverity` | `NUMBER` | no |
+| | `room` | `STRING` | no |
+| | `creator` | `RELATED_ITEM` | yes |
+
+The report is the item. Its id in Coop is the kit's report id, so every callback names exactly one report. A line is not used as the item, because a one-tap
+report has no line and two reports can name one line. `author` is `reporter`, `reported` or `other n`. `room` is the room's own tags as `key=value` pairs, cut to
+200 characters. `creator` is the reported player. The ids the kit sends for people are its own opaque staff refs, never a hash of an account. The kit never
+sets `csam`: it does not detect it. Coop's own pipelines do.
+
+### Which Coop actions mean what
+
+`actions` maps a Coop action id to one of these:
+
+| You write | The kit does |
+| --- | --- |
+| `{ verdict: 'upheld', kind: 'warning' }` | A warning on the reported player. |
+| `{ verdict: 'upheld', kind: 'chat', durationMs }` | A chat restriction for that long. `kind: 'area'` and `kind: 'ban'` work the same. A ban with no `durationMs` is permanent. |
+| `{ verdict: 'noted' }` | A note on the player. Nothing is done to them. |
+| `{ verdict: 'no_action' }` | Closes the report as within the rules. |
+| `{ verdict: 'bad_faith' }` | Closes the report and marks it as bad faith. The Coop decision reason is stored as the evidence; with no reason the callback is ignored. |
+
+The sanction always lands on the person the report is about. Nothing in a Coop callback can pick another person, a role, an actor or a source. The decision is
+recorded with the source `coop`, the actor `coop:<the moderator's email>` and the role you configured, and the audit trail gets a `report.decide` row.
+
+The Community Rule is the first of the callback's policies that `rules` maps to a rule you can still cite. Otherwise it is the report's suggested rule. If there
+is none, a decision that acts on a player (a warning, a restriction, a ban, a note) is ignored. A dismissal and a bad-faith mark need no rule.
+
+### The callback
+
+`POST /coop/actions` is the one URL for every action. In order, and each step refuses without doing anything else:
+
+1. The body must be at most 64 KiB (`413`) and the adapter must have the exact bytes (`rawBody`; if not, `500` and a log line).
+2. The `Coop-Signature` header must verify over those exact bytes with `webhookPublicKey` (RSA, SHA-256). The `t=<time>,v1=<signature>` form the docs also show is
+   accepted, for the body alone or for `<t>.<body>`.
+3. When `callbackAuth` is set, its header must match.
+4. Only then is the body read. It must be JSON with an `item.id` and an `action.id` (`400` if not).
+5. A callback no moderator made is ignored: one with no `actorEmail` (a rule), or with empty `policies` and `rules` (a strike threshold).
+6. The report is read. An unknown report is ignored.
+7. The action id is looked up in `actions`. An unknown one is ignored.
+8. The decision is built, then made through the same path as the hub, as `role`. A refusal is ignored.
+9. A store failure is a `503`, so Coop retries. The decision is all-or-nothing, so a retry is safe.
+
+Every verification failure (a missing or malformed header, a wrong key, a changed byte) is the same `401 { "error": "unauthorized" }`. Everything else that
+Coop could retry in vain is `200 { "ok": true, "outcome": "ignored" }`, with the reason in the log as `chatwarden.coop_callback_ignored`. An applied decision answers `"applied"`
+as its outcome, and the same decision again answers `"replay"`. Nothing else is in the body.
+
+The reason codes are `no_actor`, `no_policies`, `unknown_item`, `closed`, `unknown_action`, `no_rule`, `no_reason`, `forbidden` and `refused`.
+
+### When two places decide
+
+- **The first decision wins.** If the report was decided in the hub (or by a webhook, or from Discord) before Coop's callback arrives, the callback is answered
+  `ignored` with the reason `closed` and applies nothing. The job stays in Coop, because Coop's API cannot close it. A reviewer may open a job whose case is
+  already settled.
+- **A repeated callback is harmless.** The same decision twice is applied once. The second is answered `replay`.
+- **A decision the kit cannot apply is not guessed.** An unknown action, a policy with no rule, a bad-faith mark with no reason, or a permanent ban from a
+  role below `senior` is answered `ignored`, and the report stays open for the hub. A `4xx` would only make Coop retry five times.
+- **Nothing unattended.** A rule-triggered action or a strike threshold is never applied. Make the actions with user strikes off. The kit's own ladder is the
+  only strike logic.
+- **Ignore sends nothing.** Coop's Ignore and "Invalidate reports" are not known to send a callback. A job closed with Ignore leaves the report open in the
+  hub. Use a Dismiss action (`{ verdict: 'no_action' }`) instead.
+
+### Privacy
+
+Chat text leaves the kit only where you say so, and only to your own Coop. There are three switches: `evidence` (no default), `includeNote` (off by default) and `handles` (hidden by
+default). With `evidence: 'none'` no chat line is sent at all. With `handles: 'hidden'` no handle is sent.
+The room id, the seat ids, client keys and IP addresses are never sent. A report that Coop gets holds the staff refs of the reporter and the reported player,
+and nothing that identifies either outside the kit.
+
+A log line carries an event name, an operation, an HTTP status or an error class, and a count. It never holds your key, a URL, a report id, a person, a note
+or any chat text. The events are `chatwarden.coop_failed`, `chatwarden.coop_callback_ignored` and the queue's `chatwarden.coop_dropped`.
+
+A Coop decision's `actorNote` and `decisionReason` are staff text. They are stored only as the decision's private reason (cut to 500 characters). They are in
+no log, no event and no answer.
+
+### The signal route (optional)
+
+With `signal: { secret, read }` the adapter also serves `POST /coop/signal`. A Coop plugin can post the lines of a reported thread and get back a severity
+from 0 to 100, which a Coop rule can compare with a threshold. The copy-in plugin is in `examples/coop-signal` in this repository. It is not published.
+
+```ts
+const adapter = coop(cw, {
+  // ...the options above...
+  signal: {
+    secret: process.env.COOP_SIGNAL_SECRET!, // at least 32 characters
+    read: async (lines) => myAiRead(lines), // your function: [{ label, text }] in, a number from 0 to 100 out
+  },
+});
+```
+
+The request is signed with the kit's own scheme: the headers `x-chatwarden-timestamp` and `x-chatwarden-signature`, a five minute window and a replay
+cache. A bad signature, a stale or future time, a replay and a wrong secret are all the same `401`. The body is `{ lines: [{ label, text }], item?: { text } }`
+and at most 64 KiB. At most 50 lines are read, each text is cut to 400 characters, and the item text is added as a last line. Extra keys are ignored and never
+reach `read`. No identifier is in the request or the answer. The answer is `200 { "severity": n }`, with `n` kept between 0 and 100.
+
+If `read` throws, takes more than 8 seconds, or answers something that is not a number, the answer is `503` with an empty body. More than `rateLimit`
+requests (default 60 a minute) is `429` with `retry-after`. Your own AI cost limits apply inside `read`. The route only reads: it never decides anything.
+
+### Coop: security notes
+
+- **Verify before parse.** The callback is checked over the exact bytes before the body is read. The signal route is the same.
+- **Replays.** Coop's signature carries no time, so a captured callback stays valid. A replay is harmless because the decision is idempotent and a closed report
+  is acknowledged, not because it is fresh. A callback that was ignored for a configuration reason (`no_rule`, `unknown_action`, `forbidden`) can still be replayed after you fix
+  the configuration, so a captured one can apply a stale but genuine decision to a report that is still open. The remedy is to rotate the verification key. If the key leaks, rotate it in Coop.
+- **Rate-limit the routes at your edge.** A request with a bad signature still costs a body read and a signature check.
+- **No secret leaves.** Keep the API key, the signal secret and `callbackAuth` out of source control.
+- **Redirects are never followed.** The key is sent only to the `baseUrl` you set.
+
+### Not confirmed yet
+
+This adapter was written from Coop's public docs and tested against a fake that follows them. Nothing has run against a real Coop. The owner's local
+end-to-end run (`docs/plans/follow-ups.md`) settles these:
+
+- Which signature header Coop 1.2.2 sends: the base64 body signature, or `t=...,v1=...`. The adapter accepts both.
+- That Ignore, Invalidate reports and Move send no callback.
+- That `creator` is honoured as a relation field and that `datetime` is the field Coop orders a thread by (the kit sends it at the top level of each line
+  and in its `data`).
+- Coop's names for the field types, and whether a report job evaluates signals when a rule routes it.
+- The plugin types package: Coop's docs say `@roostorg/coop-types`, its example imports `@roostorg/types`.
+
+## Epic Online Services
+
+`@experimental` until 0.2. This adapter connects the kit to [Epic Online Services](https://dev.epicgames.com/docs/web-api-ref/web-api-introduction) (EOS) in two ways.
+When a moderator sanctions a player, the sanction is also made in EOS, and when the kit lifts it, EOS lifts it. When players report each other through EOS, those
+reports become kit reports for the moderators, when your server can place both players in the same room.
+
+The kit stays the source of truth. EOS gets a mirror of what the kit decided. An outage at EOS never changes what the kit does.
+
+It is in its own entry, `@chatwarden/http/eos`, and not in the package root, because it uses `node:crypto`. It does nothing when you import it. It needs a store
+that has `cw.links` (the memory store with `withMemoryLinks`, or SQLite from 0.1.12); without one, `eos(...)` throws a `RangeError`. You can turn on either half alone.
+
+### What EOS's API can and cannot do
+
+- A trusted server can create, read and remove sanctions. EOS gives each sanction a `referenceId`. The push uses that.
+- A trusted server can send and find player reports, but **it cannot list them all.** The find call needs a player id. So the adapter asks about the players you name,
+  the players who are in rooms right now.
+- An EOS report has no id, no room, no chat line and no time you can trust. The reporting client writes the time and the text. So the adapter files a report in the kit
+  only when your server can seat **both** players in the **same room**. Every other report is counted and left out. It is never invented.
+- The kit stores no EOS id. You give it two small functions, one in each direction (below).
+
+### Set up, in order
+
+1. **Make client credentials in the EOS Developer Portal** for your product and deployment. Use a sandbox deployment first. Give the client a client policy that allows
+   `sanctions:createSanction`, `sanctions:deleteSanction`, `sanctions:findSanctionsForAnyUser` and `playerreports:findReportsForAnyUser`. The first two are the push. The
+   lookup before each create needs the third. The pull needs the fourth. Copy the deployment id, the client id and the client secret. Keep them out of source control.
+2. **Choose the action names.** An EOS action is a name you pick, such as `chatwarden-chat`. Your game client reads active sanctions by these names. Use only `A-Z a-z 0-9 _ -`, up to 64 characters.
+3. **Write the two functions.** `sanctions.productUserIdsOf` turns a person into their EOS product user ids. `reports.seatOf` turns a product user id into the seat that player holds now.
+   The kit already holds your own account ids: `cw.people.accountIds(subject)` returns the strings you passed as `accountId` when the player took a seat.
+4. **Add it to your server.** The block below is the whole wiring.
+
+```ts
+import { eos } from '@chatwarden/http/eos';
+
+// Your own tables. The kit stores no EOS id.
+const productUserIdOfAccount = new Map<string, string>(); // your account id -> EOS product user id
+const seatOfProductUserId = new Map<string, { roomId: string; seatId: string }>(); // set when a player takes a seat
+
+const adapter = eos(cw, {
+  deploymentId: process.env.EOS_DEPLOYMENT_ID!,
+  clientId: process.env.EOS_CLIENT_ID!,
+  clientSecret: process.env.EOS_CLIENT_SECRET!, // a secret: never logged
+  sanctions: {
+    // The kit gives the person's staff ref. You give back their EOS product user ids.
+    productUserIdsOf: (subject) => cw.people.accountIds(subject).flatMap((account) => productUserIdOfAccount.get(account) ?? []),
+    actions: { chat: 'chatwarden-chat', area: 'chatwarden-area', ban: 'chatwarden-ban' },
+  },
+  reports: {
+    seatOf: (productUserId) => seatOfProductUserId.get(productUserId) ?? null,
+    players: () => [...seatOfProductUserId.keys()], // who to ask EOS about
+  },
+});
+
+// at startup
+adapter.start(); // poll for reports every minute
+
+// on shutdown
+adapter.dispose();
+```
+
+5. **Check it by hand** against your sandbox deployment. The steps are in `docs/plans/follow-ups.md` (task E5). Nothing has run against the real EOS yet.
+
+`adapter.pollReports()` is one poll, for tests or your own schedule. It resolves with `{ seen, filed, skipped, refused }`: how many reports EOS returned, how many became
+kit reports, and what was left out or refused, counted by reason code. `adapter.start()` polls every `pollMs` on a timer that does not keep Node running, and skips a tick
+if the last poll is still running. `adapter.stop()` ends the timer. `adapter.dispose()` unsubscribes, aborts what is in flight, clears every timer and drops the queue;
+nothing is written after it. The names `eos`, `EosAdapter`, `EosOptions`, `EosKind`, `EosSeat` and `PollResult` are `@experimental` until 0.2.
+
+### Epic Online Services options
+
+| Option | What it does |
+| --- | --- |
+| `deploymentId` | Your EOS deployment id. Required. |
+| `clientId` | The client id of your credentials. No colon. Required. |
+| `clientSecret` | The client secret. A secret: never logged, never stored, never in an error. Required. |
+| `baseUrl` | Default `https://api.epicgames.dev`. Only for tests: `https`, or `http` on `localhost` and `127.0.0.1`. No user, password, query or fragment. Redirects are never followed. |
+| `sanctions` | Turns on the push. Needs `productUserIdsOf` and `actions`. |
+| `sanctions.productUserIdsOf` | `(subject, aliases) => string[]`. Yours. `subject` is the person's staff ref and `aliases` is every subject merged into it. Return one id for each account. An empty list, a throw or a bad answer pushes nothing. At most 20 ids are used. |
+| `sanctions.actions` | `{ chat, area, ban, warning }`: the EOS action name for each kind. Name at least one. A kind with no name is not pushed. A `note` is never pushed. |
+| `sanctions.justification` | `'ref'` (default) sends "Chatwarden M-7K3Q9, Rule 2". `'reason'` sends the moderator's private reason instead, cut to 2048 characters. |
+| `sanctions.includeAutomatic` | Also push the automatic 30 minute chat timeouts. Default `false`. Needs `actions.chat`. |
+| `reports` | Turns on the pull. Needs `seatOf` and `players`. |
+| `reports.seatOf` | `(productUserId) => seat or null`, a seat being `{ roomId, seatId }`. Yours. Where that player sits now, from your own session table. |
+| `reports.players` | `() => string[]`. Yours. The product user ids to ask EOS about this poll. At most 500 are used. |
+| `reports.reasons` | EOS reason id (1 to 7) to a kit reason id, or `null` for no reason. It is merged over the defaults: 1 and 2 `cheating`, 3 and 7 `other`, 4 `harassment`, 5 and 6 `spam`. |
+| `reports.pollMs` | How often `start()` polls. Default 60 000. At least 1000. |
+| `reports.batch` | How many players go in one request. Default 20, at most 100. |
+| `reports.maxPerPoll` | The most new reports one poll handles. Default 100, at most 1000. |
+| `fetch`, `clock`, `random`, `logger` | The `fetch` for EOS, the time source, the retry jitter and where failures are logged. All for tests; the defaults are the global ones. |
+
+### The push: a kit sanction becomes an EOS sanction
+
+When a sanction of a kind you named is written, the adapter queues one job. The jobs run one at a time, in order. For each product user id the adapter:
+
+1. Skips it if `cw.links` already has a row for this sanction and this id.
+2. Looks at the user's sanctions in EOS for one whose `cw_ref` metadata is this sanction's reference code. If it finds one, it writes the row and stops. This is what stops a
+   second sanction after a crash between EOS's answer and the kit's note of it. It reads at most 500 sanctions. If it cannot find ours in them, it creates nothing and logs it.
+3. Creates the sanction in EOS: your action name, `source` `chatwarden`, `duration` in seconds (rounded, at least 1; `0` for a permanent ban and for a warning), the tags `cw` and
+   `rule<n>`, the metadata `cw_ref` and `cw_rule`, and the justification.
+4. Writes the row: a hash of the id, and EOS's `referenceId`. Nothing else.
+
+When the kit revokes the sanction, the adapter finds the same ids again and removes each EOS sanction that has an active row, with the justification `Lifted: M-7K3Q9`. A sanction
+that ended by itself needs nothing: EOS ends it by its duration.
+
+Failures are retried like the kit's other adapters: 10 seconds for each attempt, then 1, 2, 4, 8 and 16 seconds, a 429's `retry-after` honoured (1 to 60 seconds), at most 1000 jobs
+waiting. A 401 gets a new token once. A 400 or a 403 is final and logged. A failure at EOS never changes the kit's own sanction.
+
+What EOS never gets: the moderator's reason (unless you chose `'reason'`), a handle, a chat line, a subject id, the report, or the actor.
+
+### The pull: an EOS report becomes a kit report
+
+Each poll asks EOS for reports **about** your players, 20 at a time, 50 to a page, oldest first, starting 10 minutes before the cursor. For each report the adapter:
+
+1. Makes a key from a hash of its time, both player ids and the reason. EOS gives a report no id. If the key is known, the report is skipped. That is how the 10 minute overlap and a second poll are safe.
+2. Asks your `seatOf` for both players. If either is not seated, or they are in different rooms, or the reporter and the reported are the same player, the report is skipped and counted
+   (`unseated`, `different_room`, `self`). The reporter's seat comes from `seatOf` and nothing else. Nothing in the report picks the room or the person.
+3. Files it with `cw.reports.submit`: the reason from `reports.reasons`, the message as the note (cut to 500 characters), and a line only if the `context` is JSON with a `lineId` that
+   is a short string of visible characters (64 at most). The rest of `context` is ignored. The kit's own checks decide: the 10 reports a day, a suspended reporter, an unknown reason.
+   A refusal is counted by its code (`rate`, `suspended`, `reason_unknown`, ...) and not tried again.
+4. Writes the row (`filed` or `skipped`) and moves the cursor to the newest report time seen. The cursor never moves backwards, and never past now plus one minute, so a client cannot push it
+   into the future. A report's `createdAt` is always the kit's own clock.
+
+The first poll starts from now. It does not read the history from before the adapter started. A poll handles at most `maxPerPoll` new reports; the rest wait for the next poll, and the cursor
+stays behind them. It reads at most 20 pages for each batch. A report whose time is more than 10 minutes before the cursor is not found: EOS is asked only for newer ones. A `429` pauses polling for its `retry-after` (1 to 60 seconds,
+60 if it names none). A bad page, a `5xx` or a network failure ends that batch only: it is logged by status or class, the other batches are still read, and the cursor stays behind
+what that batch had read, so its players are asked about again. A `400`, `404`, `405`, `413`, `414` or `422` on the first page of a batch means EOS refused the request itself (a bad id, say). Asking again
+would get the same answer, so that batch does not hold the cursor; its reports are lost for that poll. Only a `429` stops the whole poll.
+
+What is not covered. If a report is filed and the row that says so cannot be written, the next poll writes the row again and does not file the report twice, but only while the server keeps running: a restart in between
+can file it a second time. If `seatOf` fails for a report and keeps failing for more than 10 minutes, that report is not found again, because the cursor has moved on and EOS is asked only for newer ones.
+
+An EOS report is weak evidence. The kit files what its own checks accept and the moderator decides. You will not see every EOS report in the hub, only the ones your server can place.
+
+### What stays on the game client
+
+Reading a player's active sanctions, to show "you are sanctioned" or to stop a login, is an EOS SDK call your game client makes. So is sending a report from the game's own menu. They need
+the local player to be signed in to EOS, and they are not the kit's job. The kit's own notices still tell the player the rule and the reference code. EOS appeals are not read in this release.
+
+### Logs
+
+Logs hold an event name, an operation, an HTTP status or an error class, and a count. Never an id, a URL, a header, a token, a secret, a message, a context or a reason.
+
+| Event | When |
+| --- | --- |
+| `chatwarden.eos_failed` | A push or poll step failed. `op` says which: `token`, `resolve`, `reconcile`, `create`, `link`, `apply`, `revoke`, `players`, `seat`, `poll`, `submit`, `enqueue`. With `status` or `error`, and `attempts` for a job that gave up. |
+| `chatwarden.eos_dropped` | The queue was full and dropped its oldest jobs. With a `count`. |
+| `chatwarden.eos_revoke_no_link` | A lift found no link for an account, so nothing was sent to EOS: the sanction was never pushed (the adapter was off, or the push failed for good), or the row is gone. With a `count` only. An `active` link is kept by retention however old, so a sanction lifted long after it was pushed is still removed. |
+| `chatwarden.eos_report_skipped` | A poll left reports out. With a `reason` (`unseated`, `different_room`, `self`, `malformed`, `seat_error`, or `refused_<code>`) and a `count`. |
+
+### Epic Online Services: security notes
+
+- **The secret and the token stay in memory.** The client secret goes into the Basic header for each token request and nowhere else. The access token is held until 60 seconds before it expires. Neither is logged, stored or put in an error.
+- **The host is fixed.** Requests go to `https://api.epicgames.dev`. Redirects are never followed. The `baseUrl` option exists for tests.
+- **Reports are hostile input.** Every field of an EOS report is written by a player's client. Each is shape-checked and cut before use, and the rest is ignored.
+- **No outside account id is stored.** The rows in `cw.links` hold a hash and EOS's `referenceId`.
+- **A line decides the person.** If a report's `context` names a `lineId` that is still in the room's evidence, the kit reports the author of that line, as it does for a report made in the game. Both players must still be seated in the same room.
+
+### Not confirmed yet
+
+This adapter was written from EOS's public Web API pages and tested against a fake that follows them. Nothing has run against the real EOS. The owner's sandbox run
+(`docs/plans/follow-ups.md`) settles these:
+
+- That `duration: 0` means permanent on create. The pages say so for a pending sanction; the example for create uses it.
+- The most `reportedPlayerId` values one find call takes. The default batch is 20.
+- EOS's rate limits. The pages state none. The adapter backs off on a 429 and a 5xx.
+- That a delete of a sanction EOS no longer has answers `404`, and what the error bodies look like.
+- That the create accepts `automated`, which the example shows and the field table does not list.
+- What EOS answers to the user query for a player who has no sanctions at all. The adapter reads a `404` as "none found" and goes on to create the sanction. If EOS answers something else, the first sanction for a player is not created and the log shows the status.
+- The link of an EOS sanction that is still `active`, and the poll cursor, are never purged by age. A link marked `removed` is purged with the reports (90 days by default).
+- A restart between the kit's revoke and the delete leaves the EOS sanction in place until it expires. A sweep that fixes this is not built.
+
 ## Health probes
 
 `healthRoutes(cw)` adds two public routes. They say "up" or "not ready" and never why.

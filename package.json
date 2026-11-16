@@ -6,7 +6,7 @@
   "description": "Open-source chat moderation for games and anyone with a chat.",
   "license": "Apache-2.0",
   "engines": { "node": ">=22.13" },
-  "workspaces": ["packages/*", "examples/*", "services/*", "site"],
+  "workspaces": ["packages/*", "examples/*", "!examples/coop-signal", "services/*", "site"],
   "scripts": {
     "build": "tsc -b && node packages/hub-element/build/build.mjs",
     "clean": "node scripts/clean.mjs",

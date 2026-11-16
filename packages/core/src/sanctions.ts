@@ -50,6 +50,23 @@ const REF_ATTEMPTS = 5;
 const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 /**
+ * Reads a player-typed reference code: trims, ignores case, accepts a bare five characters as `M-` plus them. Returns the canonical
+ * `M-XXXXX`, or null for anything else (a wrong length, an ambiguous character I, L, O, 0 or 1, another prefix). A non-string is a
+ * `TypeError`. Pure.
+ * @experimental
+ */
+export function normalizeRefCode(text: string): string | null {
+  if (typeof text !== 'string') throw new TypeError('a reference code is a string');
+  const t = text.trim();
+  // ASCII only before upper-casing: a few non-ASCII letters (a long s) upper-case into a valid one.
+  const m = /^(?:[Mm]-)?([A-Za-z0-9]{5})$/.exec(t);
+  const code = m?.[1]?.toUpperCase();
+  if (code === undefined) return null;
+  for (const ch of code) if (!REF_ALPHABET.includes(ch)) return null;
+  return `M-${code}`;
+}
+
+/**
  * The key to `SanctionInput.startsAt`. It is exported from this module only, never from the package index, so only code inside the kit (the
  * appeals service) can hold it; a public caller passing a start time is refused with a `RangeError`.
  * @internal

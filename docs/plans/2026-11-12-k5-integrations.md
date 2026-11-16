@@ -430,7 +430,7 @@ See the Release section. Changeset, `npm run version`, peer floors, `check:pack`
 
 **What ships:** a patch (the number is assigned in merge order) of the ten packages in the fixed group, carrying one, two or all three integrations. **No new package**, so the OIDC publish
 path is unchanged and the owner has no first publish to do (RELEASING.md, "New packages: the first publish" does not apply). A release that carries `cw.links` includes one additive SQLite migration: a database
-opened by that release is readable by the one before. A release that carries only the Discord bot has no migration.
+opened by that release cannot be opened by the release before (an older kit refuses a newer schema, so the migration is one-way: say so and tell adopters to back up first). A release that carries only the Discord bot has no migration.
 
 ### Before the tag (all in the branch)
 1. `npx changeset`: patch for the group. First line names what the release carries ("adds a Discord bot, a Coop adapter and an EOS adapter" or the subset). Then plain sentences: the subpaths (`@chatwarden/http/discord`, `@chatwarden/http/coop`,
@@ -440,7 +440,7 @@ opened by that release is readable by the one before. A release that carries onl
    `scripts/manifests.test.ts` in the same commit, naming the API in the changeset. `store-memory` and `store-sqlite` rise to it in the release that carries `cw.links` (they implement the new store methods). `@chatwarden/discord` keeps `^0.1.0`.
    Never raise a floor to the current version just because the group moved.
 4. `npm run check:pack` after deleting `dist`, and `node scripts/smoke.mjs`.
-5. A dry run: `gh workflow run release.yml -f dry_run=true --ref k5`.
+5. A dry run: `gh workflow run release.yml -f dry_run=true --ref k5-integrations` (the branch name in use; the branch must be pushed first).
 6. Merge when CI is green. **Tag and push only on the maintainer's go-ahead.** The release publishes the ten through OIDC with provenance.
 
 ### What the adopter does (not part of the tag)

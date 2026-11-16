@@ -126,3 +126,127 @@ describe('the public exports an adapter author needs', () => {
     }
   });
 });
+
+describe('the Discord subpath (K5 D3)', () => {
+  it('the root does not export the bot, its verifier or registerCommands (they use node:crypto)', () => {
+    for (const name of ['discordBot', 'registerCommands', 'verifyInteraction', 'kitRoleOf']) expect(name in http, name).toBe(false);
+  });
+
+  it('package.json maps ./discord to the built entry with its types, and typesVersions agrees', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      exports: Record<string, { types: string; default: string }>;
+      typesVersions: { '*': Record<string, string[]> };
+      sideEffects: boolean;
+    };
+    expect(pkg.exports['./discord']).toEqual({ types: './dist/src/discord/index.d.ts', default: './dist/src/discord/index.js' });
+    expect(pkg.typesVersions['*'].discord).toEqual(['dist/src/discord/index.d.ts']);
+    expect(pkg.sideEffects).toBe(false);
+  });
+
+  it('importing the subpath starts nothing: no timer, no listener, no request', async () => {
+    const { vi } = await import('vitest');
+    vi.useFakeTimers();
+    const listeners = process.eventNames().map((n) => process.listenerCount(n));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      vi.resetModules();
+      const mod = await import('../src/discord/index.js');
+      expect(typeof mod.discordBot).toBe('function');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(process.eventNames().map((n) => process.listenerCount(n))).toEqual(listeners);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('the Coop subpath (K5 C1)', () => {
+  it('the root does not export the adapter or its mappers (they use node:crypto)', () => {
+    for (const name of ['coop', 'buildReport', 'decisionOf', 'verifyCoopSignature']) expect(name in http, name).toBe(false);
+  });
+
+  it('package.json maps ./coop to the built entry with its types, and typesVersions agrees', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      exports: Record<string, { types: string; default: string }>;
+      typesVersions: { '*': Record<string, string[]> };
+      sideEffects: boolean;
+    };
+    expect(pkg.exports['./coop']).toEqual({ types: './dist/src/coop/index.d.ts', default: './dist/src/coop/index.js' });
+    expect(pkg.typesVersions['*'].coop).toEqual(['dist/src/coop/index.d.ts']);
+    expect(pkg.sideEffects).toBe(false);
+  });
+});
+
+describe('the Coop subpath: nothing at import (K5 C2)', () => {
+  it('importing the subpath starts nothing: no timer, no listener, no request', async () => {
+    const { vi } = await import('vitest');
+    vi.useFakeTimers();
+    const listeners = process.eventNames().map((n) => process.listenerCount(n));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      vi.resetModules();
+      const mod = await import('../src/coop/index.js');
+      expect(typeof mod.coop).toBe('function');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(process.eventNames().map((n) => process.listenerCount(n))).toEqual(listeners);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('the EOS subpath (K5 E1)', () => {
+  it('the root does not export the adapter, the client or the token source', () => {
+    for (const name of ['eos', 'createEosClient', 'createTokenSource', 'TokenError']) expect(name in http, name).toBe(false);
+  });
+
+  it('package.json maps ./eos to the built entry with its types, and typesVersions agrees', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      exports: Record<string, { types: string; default: string }>;
+      typesVersions: { '*': Record<string, string[]> };
+      sideEffects: boolean;
+    };
+    expect(pkg.exports['./eos']).toEqual({ types: './dist/src/eos/index.d.ts', default: './dist/src/eos/index.js' });
+    expect(pkg.typesVersions['*'].eos).toEqual(['dist/src/eos/index.d.ts']);
+    expect(pkg.sideEffects).toBe(false);
+  });
+
+  it('importing the subpath starts nothing: no timer, no listener, no request', async () => {
+    const { vi } = await import('vitest');
+    vi.useFakeTimers();
+    const listeners = process.eventNames().map((n) => process.listenerCount(n));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      vi.resetModules();
+      const mod = await import('../src/eos/index.js');
+      expect(typeof mod.eos).toBe('function');
+      expect(vi.getTimerCount()).toBe(0);
+      expect(process.eventNames().map((n) => process.listenerCount(n))).toEqual(listeners);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('the subpaths of the package (K5 X1)', () => {
+  it('the map holds the nine entries and typesVersions names every one but the root; the root entry is the plain index', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      exports: Record<string, { types: string; default: string }>;
+      typesVersions: { '*': Record<string, string[]> };
+    };
+    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './admin', './chat', './cli', './coop', './discord', './eos', './express', './fetch']);
+    expect(Object.keys(pkg.typesVersions['*']).sort()).toEqual(['admin', 'chat', 'cli', 'coop', 'discord', 'eos', 'express', 'fetch']);
+    expect(pkg.exports['.']).toEqual({ types: './dist/src/index.d.ts', default: './dist/src/index.js' });
+    // Every entry the map names has the same shape: types and default, under dist/src.
+    for (const [name, entry] of Object.entries(pkg.exports)) {
+      expect(entry.default, name).toMatch(/^\.\/dist\/src\/.+\.js$/);
+      expect(entry.types, name).toBe(entry.default.replace(/\.js$/, '.d.ts'));
+    }
+  });
+});

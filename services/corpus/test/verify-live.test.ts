@@ -1,5 +1,5 @@
 import { CORPUS_BASE_URL, createCorpusLoader, type CorpusCache } from '@chatwarden/matcher/corpus';
-import { LiveTerms } from '@chatwarden/matcher';
+import { LiveTerms, VERSION as KIT } from '@chatwarden/matcher';
 import { MemoryTermStore } from '@chatwarden/matcher/fixtures';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { main as verifyLiveMain, verifyLive } from '../src/tools/verifyLive.js';
@@ -41,7 +41,7 @@ describe('the owner\u2019s release, loaded by the kit: build, sign, publish, the
     };
     const store = new MemoryTermStore();
     const live = new LiveTerms({ store, pack: null, clock: clockNow(), logger: { warn: () => undefined } });
-    const loader = createCorpusLoader({ select: { languages: ['en'], minSeverity: 'rude' }, cache, clock: clockNow(), baseUrl: BASE, keys: pw.keys, fetch: fetchOf(pw.store), pin: '2026.12.0', kit: '0.1.11' });
+    const loader = createCorpusLoader({ select: { languages: ['en'], minSeverity: 'rude' }, cache, clock: clockNow(), baseUrl: BASE, keys: pw.keys, fetch: fetchOf(pw.store), pin: '2026.12.0', kit: KIT });
     const result = await loader.refresh();
     expect(result.status).toMatchObject({ state: 'ready', available: '2026.12.0', lastError: null });
     const applied = loader.applyTo(live);

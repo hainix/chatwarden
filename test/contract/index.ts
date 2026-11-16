@@ -7,6 +7,7 @@ import { aiContract } from './ai.contract.js';
 import { appealsContract } from './appeals.contract.js';
 import { auditContract } from './audit.contract.js';
 import { discordThreadsContract } from './discordThreads.contract.js';
+import { linksContract } from './links.contract.js';
 import { mutesContract } from './mutes.contract.js';
 import { namesContract } from './names.contract.js';
 import { noticesContract } from './notices.contract.js';
@@ -28,6 +29,7 @@ export {
   appealsContract,
   auditContract,
   discordThreadsContract,
+  linksContract,
   mutesContract,
   namesContract,
   noticesContract,
@@ -66,6 +68,7 @@ export const CONTRACT_AREAS = [
   'signals',
   'appeals',
   'names',
+  'links',
 ] as const;
 
 /** Registers every area suite against the stores `make` builds (a fresh, empty store on each call). */
@@ -89,4 +92,5 @@ export function storeContract(name: string, make: () => Store): void {
   signalsContract(name, make);
   appealsContract(name, make);
   namesContract(name, make);
+  linksContract(name, make);
 }

@@ -499,3 +499,194 @@ describe('dispose', () => {
     expect(() => forum.dispose()).not.toThrow();
   });
 });
+
+describe('components on a post (K5 D1)', () => {
+  const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'Nothing wrong here', custom_id: 'cw1:dis:abc' }] }];
+
+  it('openThread with components sends with_components=true after wait=true and the components in the body', async () => {
+    const { forum, d } = client();
+    void forum.openThread('t', { content: 'x', components: ROW });
+    await settle();
+    expect(d.calls[0]!.url.searchParams.get('wait')).toBe('true');
+    expect(d.calls[0]!.url.searchParams.get('with_components')).toBe('true');
+    expect(d.calls[0]!.body.components).toEqual(ROW);
+  });
+
+  it('post with components adds with_components=true to the thread request', async () => {
+    const { forum, d } = client();
+    void forum.post('T1', { content: 'x', components: ROW });
+    await settle();
+    expect(d.calls[0]!.url.searchParams.get('thread_id')).toBe('T1');
+    expect(d.calls[0]!.url.searchParams.get('with_components')).toBe('true');
+    expect(d.calls[0]!.body.components).toEqual(ROW);
+  });
+
+  it('without components, or with an empty list, the request has no with_components and no components key', async () => {
+    const { forum, d } = client();
+    void forum.openThread('t', { content: 'x' });
+    void forum.post('T1', { content: 'x', components: [] });
+    await settle();
+    for (const c of d.calls) {
+      expect(c.url.searchParams.has('with_components')).toBe(false);
+      expect('components' in c.body).toBe(false);
+    }
+    expect(d.calls[0]!.href).toBe(`${WEBHOOK}?wait=true`);
+    expect(d.calls[1]!.href).toBe(`${WEBHOOK}?wait=true&thread_id=T1`);
+  });
+
+  it('components never change the content or the mention rules', async () => {
+    const { forum, d } = client();
+    void forum.post('T1', { content: 'hello', mentionRoleId: ROLE, components: ROW });
+    await settle();
+    expect(d.calls[0]!.body).toMatchObject({ content: 'hello', allowed_mentions: { parse: [], roles: [ROLE] }, flags: 4 });
+  });
+});
+
+describe('editing a message (K5 D2)', () => {
+  const STRIP = { components: [] as const };
+
+  it('PATCHes the webhook message in its thread with with_components=true and a body of no components, no content and no mentions', async () => {
+    const { forum, d } = client();
+    const r = forum.edit('T9', 'm42', STRIP);
+    await settle();
+    expect(await r).toEqual({ ok: true });
+    expect(d.calls).toHaveLength(1);
+    const call = d.calls[0]!;
+    expect(call.init.method).toBe('PATCH');
+    expect(call.url.origin + call.url.pathname).toBe(`${WEBHOOK}/messages/m42`);
+    expect(call.url.searchParams.get('thread_id')).toBe('T9');
+    expect(call.url.searchParams.get('with_components')).toBe('true');
+    expect(call.url.searchParams.has('wait')).toBe(false);
+    expect(call.body).toEqual({ components: [], allowed_mentions: { parse: [] } });
+    expect('content' in call.body).toBe(false);
+    expect(call.init.redirect).toBe('manual');
+  });
+
+  it('a message id that could change the path is refused without a request', async () => {
+    const { forum, d } = client();
+    for (const id of ['', '../x', 'a/b', 'a b', 'a?b', '1'.repeat(65), 'm1#x']) {
+      const r = forum.edit('T9', id, STRIP);
+      await settle();
+      expect(await r).toBeNull();
+    }
+    expect(d.calls).toHaveLength(0);
+  });
+
+  it('a thread id that is not a plain token is refused too', async () => {
+    const { forum, d } = client();
+    const r = forum.edit('T9&x=1', 'm1', STRIP);
+    await settle();
+    expect(await r).toBeNull();
+    expect(d.calls).toHaveLength(0);
+  });
+
+  it('retries a 5xx with the same backoff as a post, then gives up and logs op edit', async () => {
+    const { forum, d, logged } = client(() => 503);
+    const r = forum.edit('T1', 'm1', STRIP);
+    await settle(60_000);
+    expect(await r).toBeNull();
+    expect(d.calls).toHaveLength(6);
+    expect(logged).toEqual([['chatwarden.discord_failed', { op: 'edit', status: 503, attempts: 6 }]]);
+  });
+
+  it('honours a 429 retry_after', async () => {
+    const { forum, d } = client((n) => (n === 0 ? { status: 429, json: { retry_after: 2 } } : undefined));
+    const r = forum.edit('T1', 'm1', STRIP);
+    await settle(1999);
+    expect(d.calls).toHaveLength(1);
+    await settle(1);
+    expect(d.calls).toHaveLength(2);
+    expect(await r).toEqual({ ok: true });
+  });
+
+  it('Unknown Channel (10003) is gone; another 404 code and a 403 are null and logged with the status', async () => {
+    const gone = client(() => ({ status: 404, json: { code: 10003 } }));
+    const a = gone.forum.edit('T1', 'm1', STRIP);
+    await settle();
+    expect(await a).toEqual({ gone: true });
+    expect(gone.logged).toEqual([]);
+
+    const other = client(() => ({ status: 404, json: { code: 10008 } }));
+    const b = other.forum.edit('T1', 'm1', STRIP);
+    await settle();
+    expect(await b).toBeNull();
+    expect(other.d.calls).toHaveLength(1);
+    expect(other.logged).toEqual([['chatwarden.discord_failed', { op: 'edit', status: 404, attempts: 1 }]]);
+
+    const denied = client(() => 403);
+    const c = denied.forum.edit('T1', 'm1', STRIP);
+    await settle();
+    expect(await c).toBeNull();
+    expect(denied.logged).toEqual([['chatwarden.discord_failed', { op: 'edit', status: 403, attempts: 1 }]]);
+  });
+
+  it('is serialised with the other calls: a post queued before the edit is sent first', async () => {
+    const { forum, d } = client();
+    void forum.post('T1', { content: 'first' });
+    void forum.edit('T1', 'm1', STRIP);
+    void forum.post('T1', { content: 'third' });
+    await settle();
+    expect(d.calls.map((c) => c.init.method)).toEqual(['POST', 'PATCH', 'POST']);
+  });
+
+  it('dispose answers a pending edit null and sends nothing more', async () => {
+    const { forum, d } = client(() => 'hang');
+    void forum.post('T1', { content: 'a' });
+    const e = forum.edit('T1', 'm1', STRIP);
+    await settle();
+    forum.dispose();
+    await settle(120_000);
+    expect(await e).toBeNull();
+    expect(d.calls).toHaveLength(1);
+    expect(await forum.edit('T1', 'm2', STRIP)).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('openThread and post answer the message id only for a post with components', async () => {
+    const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'x', custom_id: 'cw1:x' }] }];
+    const { forum } = client();
+    const a = forum.openThread('t', { content: 'x', components: ROW });
+    const b = forum.post('T1', { content: 'x', components: ROW });
+    const c = forum.post('T1', { content: 'x' });
+    await settle();
+    expect(await a).toEqual({ threadId: 'T1', messageId: 'm0' });
+    expect(await b).toEqual({ ok: true, messageId: 'm1' });
+    expect(await c).toEqual({ ok: true });
+  });
+
+  it('an answer that does not name an application (a webhook made by hand) is foreign: no message id is passed on, and foreign is set', async () => {
+    const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'x', custom_id: 'cw1:x' }] }];
+    for (const application_id of [undefined, null, '', 'not-a-snowflake', 1234567, '12345']) {
+      const answer = { id: 'm9', channel_id: 'T5', ...(application_id === undefined ? {} : { application_id }) };
+      const { forum } = client(() => ({ status: 200, json: answer }));
+      const a = forum.openThread('t', { content: 'x', components: ROW });
+      const b = forum.post('T5', { content: 'x', components: ROW });
+      await settle();
+      expect(await a).toEqual({ threadId: 'T5', foreign: true });
+      expect(await b).toEqual({ ok: true, foreign: true });
+    }
+    // A post without components is never judged: there was nothing to own.
+    const { forum } = client(() => ({ status: 200, json: { id: 'm9', channel_id: 'T5' } }));
+    const c = forum.post('T5', { content: 'x' });
+    await settle();
+    expect(await c).toEqual({ ok: true });
+  });
+
+  it('a 200 whose body cannot be read says nothing about the webhook: no verdict, no message id, not foreign', async () => {
+    const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'x', custom_id: 'cw1:x' }] }];
+    for (const text of ['', 'not json', 'null', '[]', '"x"', '<html>proxy page</html>']) {
+      const { forum } = client(() => ({ status: 200, text }));
+      const b = forum.post('T5', { content: 'x', components: ROW });
+      await settle();
+      expect(await b, text).toEqual({ ok: true });
+    }
+  });
+
+  it('a message id in the answer that is not a plain token is not passed on', async () => {
+    const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'x', custom_id: 'cw1:x' }] }];
+    const { forum } = client(() => ({ status: 200, json: { id: '../../evil', channel_id: 'T5', application_id: '111111111111111111' } }));
+    const a = forum.openThread('t', { content: 'x', components: ROW });
+    await settle();
+    expect(await a).toEqual({ threadId: 'T5' });
+  });
+});

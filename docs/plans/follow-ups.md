@@ -154,3 +154,91 @@ Found while building Part A:
 
 Found while building Part B (the service):
 - A confirmed `wrong_category` report has no category or target edit action yet: it holds the term out (`disputed`) and the only exit is a two-reviewer restore with the category unchanged. Add the edit to the review page before the first real report is confirmed.
+
+
+## The Discord bot (K5 / 0.1.12), parked
+
+Found building `@chatwarden/http/discord` (K5 D1 to D9, 2026-11).
+
+- **Open, owner: the live Discord check (task D10).** Nothing has talked to Discord yet; every test uses fakes. Use a throwaway server and a throwaway application, never the
+  production one. Do these in order, and write down the answer to each of the first three:
+  1. Follow the "Discord bot" setup in `packages/http/README.md` as far as the webhook (steps 1 to 4). Make the webhook with the `curl` there. **Does the answer to a post
+     with buttons name your application?** Start the feed with `components: bot.components`, file a test report, and watch the log. If you see
+     `chatwarden.discord_components_ignored`, a webhook made with the bot is not application-owned: stop, and tell the maintainer (the plan then adds a bot-token post
+     route). If the post shows its buttons, it is.
+  2. Deploy the route, paste its URL as the **Interactions Endpoint URL**. **Does Discord accept it when you save?** (It sends a PING; the bot answers it.) If not, check that
+     the adapter gives `rawBody` and that no body parser runs first.
+  3. Run `registerCommands`, then type `/chatwarden` in the server. **Does the command show for the roles you expect?** The default visibility is Discord's "Moderate Members"
+     permission (`1099511627776`); if it is wrong, fix `default_member_permissions` in `bot.commands()` (the role map is the control, not this).
+  4. Click "Nothing wrong here" and Confirm, and the same on "Apply suggestion". The feed should post the outcome and take the buttons off.
+  5. With `respondWithinMs` set to `1` for one run, click both: (a) "Nothing wrong here" on the public report post, then (b) Confirm on the private preview that (a) opens.
+     **For (a), does the public post stay exactly as it was** (same text, same buttons), with only you seeing a loading message that becomes the preview with Confirm and Cancel?
+     **For (b), does the preview turn into `Done`?** Write down both. This is the third fact Discord's docs leave open: the bot answers a click on the public post with a private
+     loading message (type 5, flags 64) and edits that, so the public post is never rewritten; if the public post changes, tell the maintainer.
+  Write the results in `docs/status.md` (K5) when done.
+- **Open: strip after a restart.** The feed keeps `report -> message` in memory. After a restart an old report post keeps its buttons until someone clicks one. A small
+  table would fix it but costs a migration; not worth it until someone asks.
+- **Open: a bot-token post route.** Only if check 1 fails: the feed would post through `POST /channels/{id}/messages` with a bot token instead of a webhook.
+- **Open: `registerCommands` needs a bot.** The one-shot script builds the same `discordBot` to call `bot.commands()`. A plain exported list would avoid building a bot with a kit.
+- **Open: a redelivered interaction.** Discord rarely sends one twice. The bot answers it from memory, and for a slow one it sends the follow-up again (the same text).
+
+## Coop (K5 / 0.1.12), parked
+
+Found building `@chatwarden/http/coop` (K5 C1 to C7, 2026-11).
+
+- **Open, owner: the live Coop check (task C8).** Nothing has talked to a Coop yet; every test uses a fake written from Coop's public docs. Use a local Coop (never a production one),
+  with a throwaway API key. Do these in order, and write down the answer to each of the first five:
+  1. Start a local Coop with its own `docker compose` set-up. In Settings, API Keys, make an API key, and copy the **Webhook Signature Verification Key** (a PEM).
+  2. Start the kit with `coop(cw, ...)` as in the "Coop" section of `packages/http/README.md`, with `evidence: 'excerpt'`. Call `setup.checklist()` and print its `toText()`. Make
+     in Coop exactly what it lists: the three item types with their fields, one policy per Community Rule, and the actions, each with the callback URL (your public URL plus
+     `/coop/actions`, for example through a tunnel) and **user strikes off**. Copy the ids into the options. Run `setup.verify()`. **Does it say `complete: true`?** If an
+     item type or a field is reported missing, compare the names with the checklist. If Coop uses other names for the field types (the kit says `STRING`, `NUMBER`, `DATETIME`
+     and `RELATED_ITEM`), tell the maintainer.
+  3. File a test report in the kit. **Does a job appear in Coop? Does it show the lines in order, with `datetime`, and the reported player as `creator`?** If Coop answers 400,
+     the log shows `chatwarden.coop_failed` with status 400 and attempts 1: the item type fields differ from what the kit sends. Tell the maintainer which.
+  4. Decide the job in Coop with your Warn action. **Does the kit apply it?** The report should close in the hub, the player should get a warning with the source `coop`, and the
+     audit trail should show `report.decide` by `coop:<your email>`. **Which signature header did Coop send?** The adapter accepts both shapes, so it works either way; note
+     whichever you see (a tool such as the Coop server's own log, or a request catcher on the tunnel, shows it).
+  5. Close a job in Coop with **Ignore**, and use "Invalidate reports" on another. **Does the kit get a callback for either?** It should not. If it does, the log shows
+     `chatwarden.coop_callback_ignored`; note the reason and tell the maintainer. Also try Move. The report stays open in the hub in each case.
+  6. Decide a report in the hub first, then decide its job in Coop. The kit should log `chatwarden.coop_callback_ignored` with reason `closed` and change nothing.
+  7. Optional, for the signal: set `signal: { secret, read }` on the adapter, build `examples/coop-signal` (see its README), list it in Coop's `integrations.config.json` by local path
+     and fill its form. **Does it appear as a signal in a rule? Does a report job evaluate it?** Compare the plugin's file with Coop's own example plugin
+     (github.com/roostorg/coop-integration-example): the return shape of `createSignals`, whether a model card is needed, and the package name of the types (`@roostorg/coop-types`
+     in Coop's docs, `@roostorg/types` in its example). Tell the maintainer the differences.
+  Write the results in `docs/status.md` (K5) when done.
+- **Open: Coop jobs the hub closed first stay in Coop.** The documented API cannot close a job. A reviewer may open a job whose case is settled; the late callback is acknowledged and ignored.
+- **Open: Coop appeals, the Partial Items endpoint and `items/async`.** Not built, on purpose (design section 13).
+- **Open: after step 4 above, delete the signature header shapes Coop does not send** (the hex `v1`, the `t.body` form or the `t=` form, whichever you saw is absent) from `packages/http/src/coop/verify.ts`, and record the finding in `docs/status.md`. Fewer accepted forms is the safer end state.
+- **Open: a bounded signature cache.** Coop's signature has no time, so a replay is harmless only by effect. If Coop ever signs a time, add a window like the signal route's.
+
+## EOS (K5 / 0.1.12), parked
+
+Found building `@chatwarden/http/eos` (K5 E1 to E4, 2026-11).
+
+- **Open, owner: the EOS sandbox check (task E5).** Nothing has talked to EOS yet; every test uses a fake written from EOS's public Web API pages. Use a **sandbox** deployment and
+  test players only, never the live one. Do these in order, and write down the answer to each of the first six:
+  1. In the Developer Portal, make client credentials for the sandbox deployment. Give the client a policy that allows `sanctions:createSanction`, `sanctions:deleteSanction`,
+     `sanctions:findSanctionsForAnyUser` and `playerreports:findReportsForAnyUser`. To send a test report from a script you also need `playerreports:sendReportForAnyUser` on a second client.
+     Copy the deployment id, client id and client secret. Keep them out of source control.
+  2. Start the kit with `eos(cw, ...)` as in the "Epic Online Services" section of `packages/http/README.md`. Use two test accounts that have EOS product user ids, and give the
+     adapter the two functions for them. Use your own action names. Start with `adapter.start()` for the pull.
+  3. In the hub, apply a **24 hour chat** sanction to the first test player. **Does it appear in the Developer Portal's sanctions list for that player, with your action name, the
+     justification "Chatwarden M-XXXXX, Rule n", the tags `cw` and `rule<n>`, and the metadata `cw_ref`?** If the log shows `chatwarden.eos_failed` with a status, note it.
+     A 403 on `op` `reconcile` means the client policy lacks `findSanctionsForAnyUser`.
+     This is also the first sanction for that player, so it settles what EOS answers to the user query for a player with no sanctions (the adapter reads a `404` as "none found"). If the sanction is not created and the log shows a status on `reconcile`, note it.
+  4. Apply a **permanent ban** to the second test player. **Does it show as permanent (no end time), or does it end at once, or does EOS answer 400?** This settles whether
+     `duration: 0` means permanent on create. Tell the maintainer exactly what you see.
+  5. Revoke the first sanction in the hub. **Does it disappear from the Developer Portal list within a minute (status Removed)?** Revoke the second too.
+  6. Send a test report between the two accounts (the game client's report menu, or `POST /player-reports/v1/report` from a script), with both accounts seated in the same room in
+     your test server. Wait one poll. **Does a new report appear in the hub, with the message as the note and the reason you mapped?** Then try a report where one player is not seated: the log
+     should show `chatwarden.eos_report_skipped` with `unseated` and the hub should show nothing.
+     Also note what the reports query answers for a **wrong deployment id** (change one character, restart, wait one poll): the pull reads a 404 on the first page as "request refused"
+     (with 400, 405, 413, 414 and 422), so if EOS answers 404 for a bad deployment id the log shows `status: 404` on every poll and a misconfiguration looks like a poisoned id. Record the status and the body shape.
+  7. Batch size and limits: set `reports.batch` to 20, then 50, then 100 and note the largest the find call accepts without a 400 (the fake accepts 50). Watch the log for `status: 429` in
+     any run and note it. The EOS pages state no rate limits.
+  8. Ask the maintainer to read your notes, then write the results in `docs/status.md` (K5).
+- **Open: a lost revoke.** If the kit restarts between a revoke and the EOS delete, the EOS sanction stays until it ends by itself. A sweep that finds `active` links whose group was revoked
+  and deletes them is not built (design section 13).
+- **Open: pulling sanctions made in the EOS Developer Portal into the kit (`GET /sanctions/v1/sync`), EOS appeals and EOS anti-cheat.** Not built, on purpose (design section 13).
+- **Open: the lookup reads at most 500 sanctions of one user.** A user with more, where ours is not among them, gets no push and a `reconcile` log. If a real player has that many, page further.

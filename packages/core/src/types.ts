@@ -4,6 +4,7 @@
 import type { AIExample, AIRead, AISignal } from './ai/types.js';
 import type { AppealStatus } from './appeals.js';
 import type { AuditListQuery, AuditRow } from './audit.js';
+import type { LinkRow, LinkSystem } from './links.js';
 import type { NameReason } from './names.js';
 import type { PolicyLayer } from './profile.js';
 import type { RuleRef } from './rules.js';
@@ -216,6 +217,8 @@ export interface SanctionListQuery {
   /** Keyset cursor: only rows older than this (`startsAt` below it, or equal with an id below `beforeId`). `beforeId` without `before` is ignored. */
   before?: number;
   beforeId?: string;
+  /** Only the rows of this sanction group (its subject row: an IP row is never listed). Optional, additive (0.1.12). */
+  groupId?: string;
   /** Clamped to 1..200 (a fraction is floored). */
   limit: number;
 }
@@ -884,6 +887,15 @@ export interface Store {
   sanctionRefCode(groupId: string): string | null;
 
   /**
+   * OPTIONAL (0.1.12, `@experimental`). The sanction group that holds this exact ref code (`M-` plus five characters, already
+   * normalised: upper case), or null. Revoked and ended groups are found: the code never changes. A store that implements it MUST also honour
+   * `SanctionListQuery.groupId` (`cw.sanctions.byRef` reads the group's rows with it; a store that ignores the filter returns other groups'
+   * rows and the code is silently missed). A store without it makes
+   * `cw.sanctions.byRef` read the newest 1 000 groups through {@link Store.listSubjectSanctions} instead.
+   */
+  sanctionGroupByRef?(refCode: string): string | null;
+
+  /**
    * The person a sanction group is about and the rule it cites, for the `sanction.revoked` event: the group's SUBJECT row
    * (its IP row is not a person) and its stored rule text (`'1'`.., `'uncovered'`, or null on a row written before rules
    * existed). Revoked and ended groups are still found. Null for an unknown group. `subject` is the id as stored; the
@@ -1397,6 +1409,29 @@ export interface Store {
 
   /** OPTIONAL. Delete names with `at < before` (a row exactly on the line is kept); returns how many. */
   purgeBlockedNames?(before: number): number;
+
+  // Links (K5 design 5.1, `cw.links`). OPTIONAL: a store without all four has `cw.links.supported` false, and an adapter that needs links
+  // refuses it at construction. SYNCHRONOUS (like notices); they run inside `transaction` and are undone with it. They take a row the
+  // facade has already validated, keep it as it is and return copies. A link write is not a queue change: it does not move the change token.
+
+  /** OPTIONAL (`@experimental`). The row for `(system, ref)`, a copy, or null. */
+  getLink?(system: LinkSystem, ref: string): LinkRow | null;
+
+  /** OPTIONAL (`@experimental`). Insert the row, or replace the one with the same `(system, ref)`. */
+  putLink?(row: LinkRow): void;
+
+  /**
+   * OPTIONAL (`@experimental`). The `system`'s rows, oldest `at` first and then by `ref` (code point order), only this `state` when given,
+   * at most `limit` (floored, clamped to 1..500; NaN is 1). The state filter applies before the limit. Copies.
+   */
+  listLinks?(system: LinkSystem, q: { state?: string; limit: number }): LinkRow[];
+
+  /**
+   * OPTIONAL (`@experimental`). Delete rows with `at < before` (a row exactly on the line is kept); returns how many. A row that says it is live
+   * is never deleted by age: an `eos-sanction` row in state `active` (a lift long after the push must still find it) and every `eos-cursor`
+   * row. Once such a row is marked `removed` (or `failed`) its `at` is new and it ages out like any other.
+   */
+  purgeLinks?(before: number): number;
 
   // Staff audit trail. SYNCHRONOUS on purpose (like sanctions). The trail also holds the rows `closeGap` and the term
   // editor write; none of these methods ever returns the json columns those carry (they may hold term text).
