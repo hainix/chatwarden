@@ -112,7 +112,7 @@ describe('POST /terms/:id/report', () => {
     expect(audits(w)).toEqual([]);
   });
 
-  it("a failed report is a fixed error code and never the service's text; no audit row", async () => {
+  it("a failed report is a fixed error code and never the service's text; each attempt is audited", async () => {
     const w = await communityWorld();
     const id = idOf(w, 'glarn');
     const secret = 'service said: ip 203.0.113.9 key CLIENTKEY-secret';
@@ -132,13 +132,15 @@ describe('POST /terms/:id/report', () => {
       expect({ result, status: res.status, error: (res.body as { error: string }).error }).toEqual({ result, status, error: code });
       expect(text(res)).not.toMatch(/service said|203\.0\.113|CLIENTKEY/);
     }
-    expect(audits(w)).toEqual([]);
+    // Each attempt reached the service: one best-effort row on the term id each, never the word.
+    expect(audits(w)).toHaveLength(table.length);
     // An acknowledgement the service dressed up is still only { status }.
     w.share.reportResult = { ok: true, id: '<script>', message: secret };
     const ok = await w.call('POST', `/terms/${id}/report`, { body: { kind: 'removal' } });
     expect(ok.body).toEqual({ status: 'received' });
     expect(text(ok)).not.toMatch(/service said|script/);
-    expect(audits(w)).toHaveLength(1);
+    expect(audits(w)).toHaveLength(table.length + 1);
+    expect(text(w.audit())).not.toContain('glarn');
   });
 
   it('a throwing share object is a 502 with a fixed message, and the log never holds the word or the message', async () => {
@@ -149,7 +151,7 @@ describe('POST /terms/:id/report', () => {
     expect(res.body).toMatchObject({ error: 'share_unavailable' });
     expect(text(res)).not.toContain('exploded');
     expect(text(w.logged)).not.toMatch(/glarn|exploded/);
-    expect(audits(w)).toEqual([]);
+    expect(audits(w)).toHaveLength(1);
   });
 
   it('sends no identifier: the call holds the two keys and nothing else, whatever the request carried', async () => {

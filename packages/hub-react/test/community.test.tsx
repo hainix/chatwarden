@@ -301,7 +301,8 @@ describe('the Share disclosure in the term editor', () => {
       const alert = await screen.findByRole('alert');
       expect(alert).toHaveTextContent(words);
       expect(document.body.textContent).not.toContain('SERVICE-SECRET');
-      expect(audits(w, 'term.share')).toHaveLength(0);
+      // The word was sent to the service, so the attempt is on the audit trail even though it failed.
+      expect(audits(w, 'term.share')).toHaveLength(1);
       // The draft is kept, so the person can fix it and try again.
       expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
       unmount();

@@ -2,7 +2,7 @@ import { errorClass, safeWarn } from '@chatwarden/core';
 import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import { REF_PARAM_RE } from '../router.js';
 import type { RouteTable } from '../router.js';
-import type { AdminContext } from './context.js';
+import type { AdminCall, AdminContext } from './context.js';
 import type { TermListRow, TermsAdmin } from './terms.js';
 import { bodyObject } from './validate.js';
 
@@ -88,6 +88,8 @@ export interface CommunityAdmin {
   share?: CommunityShareClient;
   /** List the untouched community rows in `GET /terms` (default false: they are counted and reached one at a time). */
   exposeCommunityRows?: boolean;
+  /** Epoch-ms clock for the short memory of share lookups. Default `Date.now`. */
+  now?: () => number;
 }
 
 /** A row the shared list added: `addedBy` is `corpus:<version>`. */
@@ -108,6 +110,10 @@ const SHARE_REASONS: readonly string[] = ['known_innocent', 'not_a_term', 'dupli
 const IMMEDIATE: readonly string[] = ['received', 'known', 'duplicate'];
 const NOTE_MAX = 200;
 const WORD_MAX = 200;
+/** How long the answer of the service about one shared term is remembered, so a page that reloads in a loop is one outbound request. */
+const LOOKUP_MEMORY_MS = 15_000;
+/** The outcome codes a share can have, as the client words them; anything else is logged as `unknown`. */
+const OUTCOMES: readonly string[] = ['offline', 'rate_limited', 'rejected', 'unsupported_language', 'too_large', 'invalid'];
 /** How many shared terms are remembered (their last answer and service id); the oldest go first. */
 const REMEMBERED = 1000;
 // eslint-disable-next-line no-control-regex -- a control character in a note is refused
@@ -192,6 +198,12 @@ function shareFailure(result: unknown): HttpError {
   if (code === 'rejected' || code === 'unsupported_language') return new HttpError('share_refused');
   if (code === 'invalid' || code === 'too_large') return new ValidationError();
   return new HttpError('share_unavailable');
+}
+
+/** The closed word for how an attempt ended, for the log: a client code, `unknown` for an answer that is not understood. Never service text. */
+function outcomeOf(result: unknown): string {
+  const code = isObject(result) && result.ok === false ? result.code : undefined;
+  return typeof code === 'string' && OUTCOMES.includes(code) ? code : 'unknown';
 }
 
 /** `{ category, target?, note? }`, checked: nothing else is accepted, so the body cannot carry a word, an id or a language. */
@@ -297,6 +309,20 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
       shared.set(termId, entry);
       while (shared.size > REMEMBERED) shared.delete(shared.keys().next().value as string);
     };
+    // The service's answer about one term, remembered for a short while (only an answer that was understood), and one lookup in flight
+    // per term: a page that reloads in a loop, or many staff opening the same editor, is one outbound request.
+    const now = community.now ?? Date.now;
+    const answers = new Map<string, { at: number; body: Record<string, unknown> }>();
+    const inflight = new Map<string, Promise<Record<string, unknown> | null>>();
+    const forget = (termId: string): void => {
+      answers.delete(termId);
+      inflight.delete(termId);
+    };
+    /** An attempt reached the share client, so the word (or a term id) may have left this server: one best-effort audit row on the term id, and the outcome as a closed code. */
+    const attempted = (c: AdminCall, termId: string, outcome: string): void => {
+      if (outcome !== 'sent') safeWarn(ctx.logger, 'chatwarden.http_share_outcome', { code: outcome });
+      c.audit('term.share', { type: 'term', ref: termId }, 'best-effort');
+    };
 
     table['POST /terms/:id~ref/share'] = ctx.secure('terms.write', async (c) => {
       const id = c.params.id as string;
@@ -310,13 +336,17 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
       } catch (e) {
         // The error class only: its message can carry the word.
         safeWarn(ctx.logger, 'chatwarden.http_share_failed', { error: errorClass(e) });
+        attempted(c, id, 'threw');
         throw new HttpError('share_unavailable');
       }
-      if (!isObject(result) || result.ok !== true || typeof result.status !== 'string' || !IMMEDIATE.includes(result.status)) throw shareFailure(result);
-      remember(id, { status: result.status, id: typeof result.id === 'string' && REF_PARAM_RE.test(result.id) ? result.id : null });
-      // The word has been sent: a failed audit write is logged, never turned into an error. The target is the row id, never the word.
-      c.audit('term.share', { type: 'term', ref: id }, 'best-effort');
-      return { status: 200, body: { status: result.status } };
+      const answered = isObject(result) && result.ok === true && typeof result.status === 'string' && IMMEDIATE.includes(result.status);
+      // The word has been sent, whatever the answer: one best-effort row on the term id (never the word), and the outcome as a closed code in the log.
+      attempted(c, id, answered ? 'sent' : outcomeOf(result));
+      if (!answered) throw shareFailure(result);
+      const accepted = result as { status: string; id?: unknown };
+      forget(id);
+      remember(id, { status: accepted.status, id: typeof accepted.id === 'string' && REF_PARAM_RE.test(accepted.id) ? accepted.id : null });
+      return { status: 200, body: { status: accepted.status } };
     });
 
     if (typeof share.report === 'function') {
@@ -333,11 +363,13 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
           result = await report({ termId: id, kind });
         } catch (e) {
           safeWarn(ctx.logger, 'chatwarden.http_share_failed', { error: errorClass(e) });
+          attempted(c, id, 'threw');
           throw new HttpError('share_unavailable');
         }
-        if (!isObject(result) || result.ok !== true) throw shareFailure(result);
         // A report sends a term id and a kind, never the word. No new audit name exists for it: it is the same outward call as a share.
-        c.audit('term.share', { type: 'term', ref: id }, 'best-effort');
+        const ok = isObject(result) && result.ok === true;
+        attempted(c, id, ok ? 'sent' : outcomeOf(result));
+        if (!ok) throw shareFailure(result);
         return { status: 200, body: { status: 'received' } };
       });
     }
@@ -348,18 +380,36 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
       // A term that was never shared is not an error: `{ status: null }`, so a page that asks as it opens an editor logs nothing.
       const last = shared.get(id);
       if (last === undefined) return { status: 200, body: { status: null } };
-      let answer: unknown = null;
-      if (last.id !== null) {
-        try {
-          answer = await share.status(last.id);
-        } catch (e) {
-          safeWarn(ctx.logger, 'chatwarden.http_share_failed', { error: errorClass(e) });
-        }
+      const kept = answers.get(id);
+      if (kept !== undefined && now() - kept.at < LOOKUP_MEMORY_MS && now() >= kept.at) return { status: 200, body: kept.body };
+      let pending = inflight.get(id);
+      if (pending === undefined) {
+        const lastId = last.id;
+        const ask = async (): Promise<Record<string, unknown> | null> => {
+          let answer: unknown = null;
+          if (lastId !== null) {
+            try {
+              answer = await share.status(lastId);
+            } catch (e) {
+              safeWarn(ctx.logger, 'chatwarden.http_share_failed', { error: errorClass(e) });
+            }
+          }
+          if (isObject(answer) && typeof answer.status === 'string' && SHARE_STATUSES.includes(answer.status)) {
+            const reason = typeof answer.reason === 'string' && SHARE_REASONS.includes(answer.reason) ? { reason: answer.reason } : {};
+            const body = { status: answer.status, ...reason };
+            // A newer share of this term while this asked has forgotten the lookup: its answer is not kept.
+            if (inflight.get(id) === pending) answers.set(id, { at: now(), body });
+            return body;
+          }
+          return null;
+        };
+        pending = ask().finally(() => {
+          if (inflight.get(id) === pending) inflight.delete(id);
+        });
+        inflight.set(id, pending);
       }
-      if (isObject(answer) && typeof answer.status === 'string' && SHARE_STATUSES.includes(answer.status)) {
-        const reason = typeof answer.reason === 'string' && SHARE_REASONS.includes(answer.reason) ? { reason: answer.reason } : {};
-        return { status: 200, body: { status: answer.status, ...reason } };
-      }
+      const body = await pending;
+      if (body !== null) return { status: 200, body };
       return { status: 200, body: { status: last.status } };
     });
   }

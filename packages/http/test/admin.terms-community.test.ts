@@ -24,6 +24,7 @@ interface List {
 }
 const text = (v: unknown): string => JSON.stringify(v);
 const idOf = (w: Awaited<ReturnType<typeof communityWorld>>, word: string): string => w.rowByWord(word)?.id as string;
+const audits = (w: Awaited<ReturnType<typeof communityWorld>>) => w.routeAudit().filter((r) => r.action === 'term.share');
 
 describe('GET /terms with the shared list wired', () => {
   it('lists the adopter\'s rows, omits untouched community rows and reports community.hidden (terms and exceptions together)', async () => {
@@ -301,33 +302,56 @@ describe('POST /terms/:id/share', () => {
     expect(w.routeAudit().filter((r) => r.action === 'term.share')).toEqual([]);
   });
 
-  it('a failed share is a fixed error code and never the service\'s text; no audit row', async () => {
+  it("a failed share is a fixed error code and never the service's text; each attempt that reached the service leaves one audit row, and the log holds the outcome code only", async () => {
     const w = await communityWorld();
     const id = ownId(w);
     const secret = 'service said: ip 203.0.113.9 key CLIENTKEY-secret';
-    const table: Array<[unknown, number, string]> = [
-      [{ ok: false, code: 'offline', message: secret }, 502, 'share_unavailable'],
-      [{ ok: false, code: 'rate_limited', retryAfterMs: 5000, message: secret }, 429, 'rate_limited'],
-      [{ ok: false, code: 'rejected', message: secret }, 422, 'share_refused'],
-      [{ ok: false, code: 'unsupported_language', message: secret }, 422, 'share_refused'],
-      [{ ok: false, code: 'too_large', message: secret }, 400, 'invalid_request'],
-      [{ ok: false, code: 'invalid', message: secret }, 400, 'invalid_request'],
-      [{ ok: false, code: 'something-new', message: secret }, 502, 'share_unavailable'],
-      [{ ok: true, status: 'surprise', message: secret }, 502, 'share_unavailable'],
-      [null, 502, 'share_unavailable'],
-      ['text', 502, 'share_unavailable'],
+    const table: Array<[unknown, number, string, string]> = [
+      [{ ok: false, code: 'offline', message: secret }, 502, 'share_unavailable', 'offline'],
+      [{ ok: false, code: 'rate_limited', retryAfterMs: 5000, message: secret }, 429, 'rate_limited', 'rate_limited'],
+      [{ ok: false, code: 'rejected', message: secret }, 422, 'share_refused', 'rejected'],
+      [{ ok: false, code: 'unsupported_language', message: secret }, 422, 'share_refused', 'unsupported_language'],
+      [{ ok: false, code: 'too_large', message: secret }, 400, 'invalid_request', 'too_large'],
+      [{ ok: false, code: 'invalid', message: secret }, 400, 'invalid_request', 'invalid'],
+      [{ ok: false, code: 'something-new', message: secret }, 502, 'share_unavailable', 'unknown'],
+      [{ ok: true, status: 'surprise', message: secret }, 502, 'share_unavailable', 'unknown'],
+      [null, 502, 'share_unavailable', 'unknown'],
+      ['text', 502, 'share_unavailable', 'unknown'],
     ];
-    for (const [result, status, code] of table) {
+    let attempts = 0;
+    for (const [result, status, code, outcome] of table) {
       w.share.result = result;
+      w.logged.length = 0;
       const res = await w.call('POST', `/terms/${id}/share`, { body: { category: 'abuse' } });
+      attempts += 1;
       expect({ result, status: res.status, error: (res.body as { error: string }).error }).toEqual({ result, status, error: code });
       expect(Object.keys(res.body as object).sort()).toEqual(['error', 'message']);
       expect(text(res)).not.toMatch(/service said|203\.0\.113|CLIENTKEY|sub_abc/);
+      // The word may have left the server: one best-effort row on the term id, and a log line with the closed outcome and nothing else.
+      expect(audits(w)).toHaveLength(attempts);
+      const outcomes = w.logged.filter((l) => /share_outcome/.test(text(l)));
+      expect(outcomes).toHaveLength(1);
+      expect(text(outcomes[0])).toContain(`"code":"${outcome}"`);
+      expect(text(w.logged)).not.toMatch(/service said|203\.0\.113|CLIENTKEY|fenriskz/);
     }
-    expect(w.routeAudit().filter((r) => r.action === 'term.share')).toEqual([]);
+    for (const row of audits(w)) {
+      expect(row).toMatchObject({ action: 'term.share', target: { type: 'term', ref: id } });
+      expect(Object.keys(row as object).sort()).toEqual(['action', 'actor', 'at', 'id', 'role', 'target']);
+    }
+    expect(text(w.audit())).not.toContain(OWN_WORD);
   });
 
-  it('a throwing share object is a 502 with a fixed message, and the log never holds the word', async () => {
+  it('a share that never reached the service (a bad body, an unknown id, a community row, too low a role) leaves no audit row', async () => {
+    const w = await communityWorld();
+    await w.call('POST', `/terms/${ownId(w)}/share`, { body: { category: 'nope' } });
+    await w.call('POST', '/terms/CWT-2026-99999/share', { body: { category: 'abuse' } });
+    await w.call('POST', `/terms/${idOf(w, 'glarn')}/share`, { body: { category: 'abuse' } });
+    await w.call('POST', `/terms/${ownId(w)}/share`, { body: { category: 'abuse' }, role: null });
+    expect(w.share.calls).toEqual([]);
+    expect(audits(w)).toEqual([]);
+  });
+
+  it('a throwing share object is a 502 with a fixed message, and the log never holds the word; the attempt is audited as an unknown outcome', async () => {
     const w = await communityWorld();
     w.share.throws = true;
     const res = await w.call('POST', `/terms/${ownId(w)}/share`, { body: { category: 'abuse' } });
@@ -336,7 +360,8 @@ describe('POST /terms/:id/share', () => {
     expect(text(res)).not.toContain('exploded');
     expect(text(w.logged)).not.toContain(OWN_WORD);
     expect(text(w.logged)).not.toContain('exploded');
-    expect(w.routeAudit().filter((r) => r.action === 'term.share')).toEqual([]);
+    expect(audits(w)).toHaveLength(1);
+    expect(text(w.logged)).toContain('"code":"threw"');
   });
 });
 
@@ -363,6 +388,49 @@ describe('GET /terms/:id/share', () => {
     expect(res.body).toEqual({ status: 'declined', reason: 'known_innocent' });
     expect(w.share.statusCalls).toEqual(['sub_abc123']);
     expect(w.routeAudit().filter((r) => r.action === 'term.share')).toHaveLength(1); // the share's own row; a status read adds none
+    w.share.statusResult = { status: 'accepted' };
+    w.shareClock.t += 15_000;
+    expect((await w.call('GET', `/terms/${id}/share`)).body).toEqual({ status: 'accepted' });
+  });
+
+  it('does not ask the service again within 15 seconds: a reload in a loop is one outbound request; after that it asks again and sees the change', async () => {
+    const w = await communityWorld();
+    const id = own(w);
+    await w.call('POST', `/terms/${id}/share`, { body: { category: 'abuse' } });
+    w.share.statusResult = { status: 'in_review' };
+    const first = await w.call('GET', `/terms/${id}/share`);
+    expect(first.body).toEqual({ status: 'in_review' });
+    w.share.statusResult = { status: 'accepted' };
+    for (let i = 0; i < 20; i += 1) {
+      w.shareClock.t += 500;
+      expect((await w.call('GET', `/terms/${id}/share`)).body).toEqual({ status: 'in_review' });
+    }
+    expect(w.share.statusCalls).toEqual(['sub_abc123']);
+    w.shareClock.t += 15_000;
+    expect((await w.call('GET', `/terms/${id}/share`)).body).toEqual({ status: 'accepted' });
+    expect(w.share.statusCalls).toHaveLength(2);
+  });
+
+  it('many reads at the same moment are one outbound request, and a new share of the term forgets the remembered answer', async () => {
+    const w = await communityWorld();
+    const id = own(w);
+    await w.call('POST', `/terms/${id}/share`, { body: { category: 'abuse' } });
+    const all = await Promise.all(Array.from({ length: 8 }, () => w.call('GET', `/terms/${id}/share`)));
+    expect(all.every((r) => text(r.body) === text(all[0]?.body))).toBe(true);
+    expect(w.share.statusCalls).toHaveLength(1);
+    w.share.statusResult = { status: 'declined', reason: 'duplicate' };
+    await w.call('POST', `/terms/${id}/share`, { body: { category: 'abuse' } });
+    expect((await w.call('GET', `/terms/${id}/share`)).body).toEqual({ status: 'declined', reason: 'duplicate' });
+    expect(w.share.statusCalls).toHaveLength(2);
+  });
+
+  it('an answer that could not be had is not remembered: the next read asks again', async () => {
+    const w = await communityWorld();
+    const id = own(w);
+    await w.call('POST', `/terms/${id}/share`, { body: { category: 'abuse' } });
+    w.share.throws = true;
+    expect((await w.call('GET', `/terms/${id}/share`)).body).toEqual({ status: 'received' });
+    w.share.throws = false;
     w.share.statusResult = { status: 'accepted' };
     expect((await w.call('GET', `/terms/${id}/share`)).body).toEqual({ status: 'accepted' });
   });

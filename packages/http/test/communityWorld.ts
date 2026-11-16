@@ -156,6 +156,8 @@ export interface CommunityOptions extends Omit<WorldOptions, 'community'> {
 export async function communityWorld(over: CommunityOptions = {}) {
   let loader!: FakeLoader;
   const share = fakeShare();
+  /** The clock the community routes read (for the short memory of share lookups); a test moves it. */
+  const shareClock = { t: 1_800_000_000_000 };
   // A share object from before reporting existed has no `report`.
   const shareObject = over.report === false ? { share: share.share, status: share.status } : share;
   const w = await world({
@@ -166,6 +168,7 @@ export async function communityWorld(over: CommunityOptions = {}) {
         loader: loader as never,
         live,
         ...(over.share === false ? {} : { share: shareObject as never }),
+        now: () => shareClock.t,
         ...(over.exposeCommunityRows === undefined ? {} : { exposeCommunityRows: over.exposeCommunityRows }),
       };
     },
@@ -181,5 +184,5 @@ export async function communityWorld(over: CommunityOptions = {}) {
   if (!made.ok) throw new Error('own row refused');
   w.logged.length = 0;
   const own = { id: made.value, term: OWN_WORD };
-  return { ...w, loader, share, rowByWord, own };
+  return { ...w, loader, share, shareClock, rowByWord, own };
 }
