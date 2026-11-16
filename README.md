@@ -29,6 +29,7 @@ yourself and your project gets exactly one copy of it. `store-sqlite` and `profa
 
 | I want to | Install |
 | --- | --- |
+| Set it up fast: write the wiring for my server (Express, Fastify, Next.js, anything on Web `Request`) | `npm install @chatwarden/http @chatwarden/core`, then `npx chatwarden init`. With nothing installed yet: `npx -p @chatwarden/http chatwarden init` (the command and its result are experimental until 0.2) |
 | Moderate chat: the engine, a store and a slur matcher | `npm install @chatwarden/core @chatwarden/store-sqlite @chatwarden/matcher` |
 | Give moderators and players HTTP routes (Express) | add `npm install @chatwarden/http express @types/express` |
 | Mask or refuse ordinary swearing | add `npm install @chatwarden/profanity` |
@@ -45,6 +46,8 @@ Express 5 ships no types, so `@types/express` goes with `express` in a TypeScrip
 Each package has its own README with the options, a copy-paste start and its security notes: [core](packages/core), [store-sqlite](packages/store-sqlite), [store-memory](packages/store-memory), [matcher](packages/matcher), [profanity](packages/profanity), [http](packages/http), [discord](packages/discord), [hub-react](packages/hub-react), [hub-element](packages/hub-element), [player-react](packages/player-react).
 
 ## Quick start
+
+`npx chatwarden init` writes this wiring for you, and the recipes in [`docs/recipes`](docs/recipes) show the result for each server. What follows is the same wiring written by hand, so you can see what init writes.
 
 Add the kit to a server that already has chat. The engine (`createChatwarden`) decides; `@chatwarden/http` puts it behind
 routes; `@chatwarden/discord` is optional.
@@ -93,6 +96,29 @@ app.use('/chat', toExpress(chatRoutes(cw, chat, {
 
 The page renders `<ChatBox transport={sseTransport({ baseUrl: '/chat' })} room="lobby" />` from `@chatwarden/player-react/chat`; see
 [`packages/http/README.md`](packages/http/README.md) ("Chat") and [`packages/player-react/README.md`](packages/player-react/README.md) ("The chat box").
+
+## Test your policy
+
+Write your moderation rules as a table, and run it in your own tests. `@chatwarden/store-memory/testing` is a fake clock, a scripted chat and plain assertions. It needs no test runner and no database, and its names are `@experimental` until 0.2. The words below are invented.
+
+```ts
+import { createTestKit, expectOutcomes } from '@chatwarden/store-memory/testing';
+
+const kit = await createTestKit({ profile: 'strict', blocked: ['zorbak'], swears: ['snerp'] });
+const run = await kit.play([
+  { player: 'tarvo', say: 'good game', expect: 'delivered' },
+  { player: 'fenrisk', say: 'snerp that', expect: 'refused:profanity' },
+  { player: 'fenrisk', say: 'zorbak', expect: 'refused:blocked' },
+  { wait: '10m' },
+  { player: 'fenrisk', say: 'you zorbak', expect: 'refused:blocked' },
+  { player: 'fenrisk', say: 'zorbak zorbak', expect: 'refused:blocked' },
+  { player: 'fenrisk', say: 'hello', expect: 'refused:restricted' },
+  { suggest: 'fenrisk', level: 'hostile', expect: 'Full ban 7 days' },
+]);
+expectOutcomes(run, ['delivered', 'refused:profanity', 'refused:blocked', 'refused:blocked', 'refused:blocked', 'refused:restricted']);
+```
+
+Each step is a player saying something, a wait, a report or a suggestion, with what you expect. A mismatch throws an error that names the step. The full list of what it does and does not do is in [`packages/store-memory/README.md`](packages/store-memory) ("The test kit").
 
 ## Pick a preset
 

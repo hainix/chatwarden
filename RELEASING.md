@@ -56,6 +56,8 @@ that exists. So their first version goes out with the token, like the first rele
 
 The three are public packages with provenance, like the others (`publishConfig.access` is `public` in each manifest).
 
+The `@chatwarden/http` package also ships a command, `chatwarden` (the `bin` in its manifest, `dist/src/cli/bin.js`). It is part of the same tarball, so it needs no extra step: `npm run check:pack` fails if the bin is missing from the tarball or does not start with the node shebang, and `node scripts/smoke.mjs` runs the packed bin in a fresh project. A package added to the repository later (a `create-chatwarden` wrapper, say) is a new package: it needs the first-publish steps above, then a Trusted Publisher, then its name added to `scripts/publish-order.mjs`, the manifests tests and `check-pack`.
+
 ## Each release
 
 1. **Describe the change.** In the pull request that changes a package, run `npx changeset`. Pick the packages (the group

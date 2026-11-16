@@ -17,9 +17,9 @@ before changing an area.
 | Package | What it is |
 | --- | --- |
 | `core` | The engine: chat path, matcher hook, sanctions, ladder, reports, notices, policy, documents. No runtime deps. |
-| `store-memory`, `store-sqlite` | Storage. Both pass the shared contract suite in `test/contract/`. |
+| `store-memory`, `store-sqlite` | Storage. Both pass the shared contract suite in `test/contract/`. `store-memory` also has the test kit at `@chatwarden/store-memory/testing` (fake clock, scripted chat, outcome assertions; browser-safe, no test runner). |
 | `matcher`, `profanity` | Term matching and the profanity filter. |
-| `http` | Staff (`/admin`, browser-safe subpath `@chatwarden/http/admin`) and player routes, webhooks, and the chat: a room broadcaster and four routes (browser-safe subpath `@chatwarden/http/chat`). |
+| `http` | Staff (`/admin`, browser-safe subpath `@chatwarden/http/admin`) and player routes, webhooks, and the chat: a room broadcaster and four routes (browser-safe subpath `@chatwarden/http/chat`); the Web fetch adapter `toFetch` (`@chatwarden/http/fetch`, browser-safe); and the `chatwarden` bin (`chatwarden init`, in `src/cli/`, Node only, zero dependencies, subpath `@chatwarden/http/cli`). Recipes are goldens in `examples/recipes`, embedded in `docs/recipes`. |
 | `discord` | Discord forum feed. |
 | `hub-react` | The moderator hub. Simple and Detailed views; `<Hub>`, pieces under `HubProvider`, hooks, and a framework-agnostic controller at `/headless`. |
 | `player-react` | Player UI: notices, my record, rules page, report dialog, restricted-chat line, and `<ChatBox>` at the lazy subpath `@chatwarden/player-react/chat` (its words are `enChat`, apart from `en`, to keep the main entry's size). |

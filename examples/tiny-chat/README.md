@@ -1,6 +1,6 @@
 # tiny-chat
 
-A one-room chat server (Express + `ws`) wired to Chatwarden through `createChatwarden`: the smallest end-to-end example.
+A one-room chat server (Express + `ws`) wired to Chatwarden through `createChatwarden`: the smallest end-to-end example. `chatwarden init` writes the same wiring for your own project (see [`docs/recipes`](../../docs/recipes)).
 
 ```sh
 npm install                       # from the repo root

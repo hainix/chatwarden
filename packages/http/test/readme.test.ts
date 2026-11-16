@@ -2,7 +2,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { BACKOFF_BASE_MS, DELIVERY_HEADER, MAX_RETRIES, PERMISSIONS, PERMISSION_KEYS, RETRY_AFTER_CAP_MS, RETRY_AFTER_FLOOR_MS, SIGNATURE_HEADER, TIMESTAMP_HEADER } from '../src/index.js';
+import { adminRoutes, healthRoutes, playerRoutes, BACKOFF_BASE_MS, DELIVERY_HEADER, MAX_RETRIES, PERMISSIONS, PERMISSION_KEYS, RETRY_AFTER_CAP_MS, RETRY_AFTER_FLOOR_MS, SIGNATURE_HEADER, TIMESTAMP_HEADER } from '../src/index.js';
+import { OPTIONS, helpText, parseCli } from '../src/cli/args.js';
+import type { OptionSpec } from '../src/cli/args.js';
+import { buildPlan } from '../src/cli/plan.js';
+import { renderJson } from '../src/cli/report.js';
+import { toFetch } from '../src/fetch.js';
+import { PROJECT, VERSIONS, answersOf, stubTemplates } from './cli-stubs.js';
 
 // The READMEs are part of the product: an adopter (or a coding agent) copies from them. These checks keep them true to the
 // code: every permission, every error code and every header the code defines must be written down, and every ```ts block
@@ -28,6 +34,9 @@ const rows = (text: string): string[][] => text.split('\n').filter((l) => l.star
 
 /** The error codes and statuses the code defines, read from the table in errors.ts. */
 const errorTable = [...read('../src/errors.ts').matchAll(/^ {2}(\w+): \{ status: (\d+),/gm)].map((m) => [m[1] as string, Number(m[2])] as const);
+
+/** Whitespace collapsed to single spaces, so a sentence that wraps still matches. */
+const flat = (text: string): string => text.replace(/\s+/g, ' ');
 
 const MARKETING = /\b(blazing|seamless|powerful|robust|world-class|cutting-edge|revolutionary)\b/i;
 
@@ -352,5 +361,127 @@ describe('packages/http/README.md, Chat', () => {
     expect(chat).toContain('io.on(\'connection\'');
     expect(chat).toContain('session.open({ write:');
     expect(chat).toMatch(/`ChatSink` \(`write`, and optionally `ping` and `end`\)/);
+  });
+});
+
+// The init command and the fetch adapter, as the README says them (0.1.10). Names, flags, codes and snippets are read from the code, never retyped.
+describe('packages/http/README.md, the init command', () => {
+  const init = section(http, 'The init command');
+  const flagLabel = (o: OptionSpec): string => (o.negatable ? `\`--${o.name}\`, \`--no-${o.name}\`` : `\`${o.short ? `-${o.short}, ` : ''}--${o.name}${o.type === 'string' ? ' <value>' : ''}\``);
+  const expectedTable = (): string =>
+    [
+      '| Flag | Values | Default | What it does |',
+      '| --- | --- | --- | --- |',
+      ...OPTIONS.map((o) => `| ${flagLabel(o)} | ${o.values ? o.values.map((v) => `\`${v}\``).join(', ') : '-'} | ${o.default ?? o.defaultNote ?? '-'} | ${o.help} |`),
+    ].join('\n');
+
+  it('the flags table in the http README equals OPTIONS (generated)', () => {
+    const between = init.slice(init.indexOf('<!-- flags:start -->') + '<!-- flags:start -->'.length, init.indexOf('<!-- flags:end -->')).trim();
+    expect(between).toBe(expectedTable());
+  });
+
+  it('control: a table with a changed row or a missing flag is not the generated one', () => {
+    const table = expectedTable();
+    expect(table.replace('`--store <value>`', '`--stores <value>`')).not.toBe(table);
+    expect(table.split('\n').slice(0, -1).join('\n')).not.toBe(table);
+    expect(table.split('\n')).toHaveLength(OPTIONS.length + 2);
+  });
+
+  it('every documented option and flag exists: each --flag in the section is in OPTIONS (or --no-discord)', () => {
+    const known = new Set([...OPTIONS.map((o) => `--${o.name}`), '--no-discord']);
+    // `--env-file` is a flag of node, not of this command.
+    const used = new Set((init.replaceAll('node --env-file=.env', '').match(/(?<![\w-])--[a-z][a-z-]*/g) ?? []));
+    expect(used.size).toBeGreaterThan(12);
+    for (const flag of used) expect(known.has(flag), flag).toBe(true);
+    // And the reverse: every flag is documented (the table does it, and the prose names the main ones).
+    for (const o of OPTIONS) expect(init, `--${o.name}`).toContain(`--${o.name}`);
+  });
+
+  it('every `chatwarden init ...` command in a shell block parses', () => {
+    const commands = [...init.matchAll(/```sh\n([\s\S]*?)```/g)].flatMap((m) => (m[1] as string).split('\n')).map((l) => l.replace(/#.*$/, '').trim()).filter((l) => l.includes('chatwarden init'));
+    expect(commands.length).toBeGreaterThanOrEqual(2);
+    for (const command of commands) {
+      const argv = command.slice(command.indexOf('chatwarden init') + 'chatwarden'.length).trim().split(/\s+/).filter(Boolean);
+      const parsed = parseCli(argv);
+      expect('error' in parsed ? parsed.error : '', command).toBe('');
+    }
+  });
+
+  it('the exit codes are the ones --help lists, and each is explained', () => {
+    const table = rows(init.slice(init.indexOf('### Exit codes'), init.indexOf('### `--json`')));
+    const codes = table.filter((r) => /^\d$/.test(r[0] as string)).map((r) => r[0]);
+    const help = [...helpText().matchAll(/^ {2}(\d) {2}/gm)].map((m) => m[1]);
+    expect(codes).toEqual(help);
+    expect(codes).toEqual(['0', '1', '2', '3']);
+  });
+
+  it('--json names the keys of the real document, in order', () => {
+    const real = Object.keys(JSON.parse(renderJson(buildPlan(answersOf(), VERSIONS, stubTemplates, PROJECT), { dryRun: false, files: [] }, '1.2.3')) as Record<string, unknown>);
+    const text = init.slice(init.indexOf('### `--json`'), init.indexOf('### From your own code'));
+    let from = 0;
+    for (const key of real) {
+      const at = text.indexOf(`\`${key}\``, from);
+      expect(at, `the key ${key}, in order`).toBeGreaterThanOrEqual(from);
+      from = at;
+    }
+  });
+
+  it('says it never edits a file, never leaves the project, never uses the network and writes no secret, and that .env is not loaded for you', () => {
+    const doc = flat(init);
+    for (const needle of ['never edits a file that exists', 'never writes outside the project folder', 'never uses the network', 'never writes a secret', 'is not loaded for you', 'node --env-file=.env', 'TODO(auth)', 'TODO(identity)', 'TODO(terms)', 'CHATWARDEN_ADMIN_TOKEN', 'CHATWARDEN_SECRET', '--check']) {
+      expect(doc, needle).toContain(needle);
+    }
+  });
+
+  it('lists the @experimental names: runCli and CliEnv', () => {
+    expect(flat(init)).toMatch(/`runCli`, `CliEnv`\) are `@experimental` until 0\.2/);
+    expect(read('../src/cli/index.ts')).toMatch(/export async function runCli/);
+    expect(read('../src/cli/index.ts')).toMatch(/export type \{ CliEnv \}/);
+  });
+});
+
+describe('packages/http/README.md, Other servers: toFetch', () => {
+  const doc = section(http, 'Other servers: `toFetch`');
+  const fetchSource = read('../src/fetch.ts');
+
+  it('lists the @experimental names, every one the entry exports', () => {
+    const exported = [...fetchSource.matchAll(/^export (?:function|type|interface) (\w+)/gm)].map((m) => m[1] as string);
+    expect(new Set(exported)).toEqual(new Set(['toFetch', 'Mounts', 'FetchOptions', 'FetchHandler']));
+    for (const name of new Set(exported)) expect(doc, name).toContain(`\`${name}\``);
+    expect(flat(doc)).toMatch(/@experimental` until 0\.2/);
+  });
+
+  it('documents every field of FetchOptions as a row of its options table', () => {
+    const block = /export interface FetchOptions \{([\s\S]*?)\n\}/.exec(fetchSource)?.[1] ?? '';
+    const fields = [...block.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1] as string);
+    expect(fields).toEqual(['prefix', 'maxBody', 'remoteAddress', 'unmatched', 'logger']);
+    const table = rows(doc).map((r) => r[0]);
+    for (const field of fields) expect(table, field).toContain(`\`${field}\``);
+  });
+
+  it('the example compiles (scripts/readme.test.ts) and runs: the probes answer, the staff routes refuse without a login, an unknown path is the kit 404', async () => {
+    const block = /```ts\n([\s\S]*?)```/.exec(doc)?.[1] as string;
+    expect(block.startsWith("import { adminRoutes, healthRoutes, playerRoutes } from '@chatwarden/http';\nimport { toFetch } from '@chatwarden/http/fetch';")).toBe(true);
+    const body = block.split('\n').filter((l) => !l.startsWith('import ')).join('\n');
+    const { createChatwarden } = await import('@chatwarden/core');
+    const { MemoryStore } = await import('@chatwarden/store-memory');
+    const cw = await createChatwarden({ store: new MemoryStore(), secret: 'readme-secret-0123456789', platform: { identify: (ctx) => ctx as never }, retention: false });
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (...args: string[]) => (...values: unknown[]) => Promise<unknown>;
+    const make = new AsyncFunction('adminRoutes', 'healthRoutes', 'playerRoutes', 'toFetch', 'cw', 'authorize', `${body}\nreturn handle;`);
+    const handle = (await make(adminRoutes, healthRoutes, playerRoutes, toFetch, cw, () => null)) as (request: Request) => Promise<Response>;
+    expect((await handle(new Request('http://x.test/chatwarden/healthz'))).status).toBe(200);
+    expect((await handle(new Request('http://x.test/chatwarden/admin/me'))).status).toBe(401);
+    expect((await handle(new Request('http://x.test/chatwarden/nope'))).status).toBe(404);
+    await cw.close();
+  });
+
+  it('says what the adapter does with a path no mount owns, a body over the cap and a stream', () => {
+    const text = flat(doc);
+    for (const needle of ["`unmatched: 'pass'`", "kit's 413", 'streaming `Response`', 'long-lived Node process', 'imports no Node module']) expect(text, needle).toContain(needle);
+  });
+
+  it('the intro and "Writing another adapter" name both adapters that ship', () => {
+    expect(http).toContain('a **Web fetch adapter** (`toFetch`');
+    expect(section(http, 'Writing another adapter')).toContain('`toExpress` and `toFetch` are the adapters that ship');
   });
 });

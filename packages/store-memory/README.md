@@ -168,6 +168,9 @@ and the outcome says so (`autoRestricted`: `'first'`, then `'second'`). `kit.roo
 `sees`, `leave`), `checkLines(options, [{ text, expect }])` checks a table of independent lines on a fresh kit each, and `kit.cw` is the whole kit when a test
 needs more. It does not run HTTP, make moderator decisions or take the real matcher's place.
 
+The names in this entry, all `@experimental` until 0.2: `createTestKit`, `checkLines`, `createFakeClock`, `durationMs`, `wordFilter`, `wordMatcher`, `expectOutcomes` and
+`ScriptMismatch`, and the types `TestKit`, `TestKitOptions`, `TestRoom`, `FakeClock`, `Duration`, `Step`, `Run`, `SayLabel`, `SayOutcome`, `ReportLabel` and `ReportOutcome`.
+
 ## Options
 
 `createMemoryStore()` and `new MemoryStore()` take no options. The inspection helpers below return copies, so changing what they

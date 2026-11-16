@@ -7,10 +7,12 @@ HTTP routes for Chatwarden, the open-source chat moderation kit for games. It gi
 - **health probes** (`healthRoutes`);
 - **signed webhooks**, outgoing (`webhooksOut`) and incoming (`webhookIn`);
 - an **Express adapter** (`toExpress`, from `@chatwarden/http/express`);
+- a **Web fetch adapter** (`toFetch`, from `@chatwarden/http/fetch`) for Next.js, Hono, Bun, Deno and anything else on `Request` and `Response`;
+- a **`chatwarden` command** (`npx chatwarden init`) that writes the wiring for you, with the recipes in [`docs/recipes`](../../docs/recipes);
 - a **browser-safe entry** (`@chatwarden/http/admin`): the staff API, `createRouter` and the error, role and permission exports, with nothing that imports a Node builtin, so a browser app can run the staff routes in the page.
 
 The routes are plain functions over a small request and response type, so the package has no web framework in it. Express
-is the only adapter that ships; `createRouter` lets you write another.
+(`toExpress`) and the Web `Request` (`toFetch`) are the adapters that ship; `createRouter` lets you write another.
 
 Status: pre-release, as-is, no support promise.
 
@@ -37,6 +39,66 @@ For types, a TypeScript project with `module: commonjs` and `moduleResolution: n
 `import { toExpress } from '@chatwarden/http/express'` type-checks. `module: node16` or `nodenext` reads `exports` directly.
 (TypeScript before 5.8 reports TS1479 when CommonJS code `require()`s an ES module under `node16`; use `nodenext` with 5.8 or
 newer, or `await import(...)`.)
+
+## The init command
+
+`chatwarden init` writes the wiring for a moderated server into your project: the kit (engine, store and matcher), the mount for your framework, three starter hooks and a synthetic term pack. It can also write the chat box, the moderator hub and a Discord feed. Run it from the project root, the folder with `package.json`:
+
+```sh
+npx chatwarden init
+npx -p @chatwarden/http chatwarden init   # before anything is installed
+```
+
+It asks only what it cannot detect. With `--yes` it asks nothing. With `--json` it asks nothing and prints one JSON document. When the input is not a terminal it uses the detected answers and says so. It supports Express, Fastify, Next.js route handlers, anything on Web `Request` and `Response`, or the library alone (`--framework none`). The recipes in [`docs/recipes`](../../docs/recipes) show each result.
+
+What it never does: it never edits a file that exists, it never writes outside the project folder, it never uses the network, and it never writes a secret. A file that exists and differs is skipped (or, with `--on-conflict new`, written beside it with `chatwarden-new` in its name (`kit.chatwarden-new.ts`); with `--on-conflict overwrite` or `--force`, replaced). Running it again with the same answers changes nothing.
+
+What it writes is a starter, and says so. Every starter hook carries a `TODO(auth)`, `TODO(identity)` or `TODO(terms)` marker. The staff routes answer 401 until `CHATWARDEN_ADMIN_TOKEN` is set to a long value, and production refuses to start without `CHATWARDEN_SECRET`. Run `npx chatwarden init --check` to list the markers still in your code and the required variable names that are not set. It changes nothing and exits 1 until nothing is left. A `.env` file is not loaded for you: export the names, or start your server with `node --env-file=.env`.
+
+### Flags
+
+This table is generated from the option list in the code, and a test checks it.
+
+<!-- flags:start -->
+| Flag | Values | Default | What it does |
+| --- | --- | --- | --- |
+| `--framework <value>` | `express`, `fastify`, `next`, `fetch`, `none` | detected, else express | Server framework to wire up |
+| `--store <value>` | `sqlite`, `memory` | sqlite | Where moderation data is kept |
+| `--chat <value>` | `none`, `box` | none | Add the kit chat box, or keep your own chat |
+| `--chat-transport <value>` | `sse`, `socketio` | socketio if installed | How the chat box reaches the server |
+| `--hub <value>` | `element`, `react`, `none` | react for next | How moderators open the hub |
+| `--discord`, `--no-discord` | - | no | Post reports to a Discord forum |
+| `--profile <value>` | `relaxed`, `standard`, `strict` | standard | How strict the standard is |
+| `--base <value>` | - | /chatwarden | URL prefix everything lives under |
+| `--dir <value>` | - | detected | Folder to write into, inside the project |
+| `--lang <value>` | `ts`, `js` | from tsconfig.json | Language of the generated files |
+| `--on-conflict <value>` | `skip`, `overwrite`, `new` | skip | What to do with a file that exists and differs |
+| `--force` | - | - | Overwrite every file that exists and differs |
+| `--install` | - | - | Run the package manager for you |
+| `--dry-run` | - | - | Print the plan and write nothing |
+| `--json` | - | - | Print one JSON document; ask nothing |
+| `-y, --yes` | - | - | Accept detected answers and defaults; ask nothing |
+| `--check` | - | - | Report what is still starter code; change nothing |
+| `-h, --help` | - | - | Show this help |
+| `-v, --version` | - | - | Show the version |
+<!-- flags:end -->
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Done, or nothing to do. A dry run and a check that finds nothing wrong are 0 too. |
+| 1 | A usage error (a bad flag, value or combination), an unsafe path, or `--check` found something left to do. |
+| 2 | Applied, but some files were skipped because they differ. |
+| 3 | Could not write a file, or the install failed. |
+
+### `--json`
+
+With `--json` standard output holds one JSON document and nothing else (child output of `--install` goes to standard error). Its keys, in order: `version` (the document's own, `1`), `chatwarden` (the package version), `ok`, `dryRun`, `answers`, `files` (each with a relative `path` and an `action`), `install`, `env` (names only, never values), `todo`, `nextSteps` and `warnings`, then `error` when something failed. It holds no secret and no absolute path.
+
+### From your own code
+
+`runCli(argv, env?)` from `@chatwarden/http/cli` runs the same command and returns the exit code, for a wrapper such as a `create-` package. Its names (`runCli`, `CliEnv`) are `@experimental` until 0.2, like every name this release adds.
 
 ## Set up
 
@@ -650,9 +712,46 @@ One route, `POST /webhooks/in/action` (mounted at `/hooks` above, so `/hooks/web
 
 Use `/healthz` for "restart me" checks and `/readyz` for "send me traffic" checks.
 
+## Other servers: `toFetch`
+
+`toFetch` serves the same route tables from a Web `Request`, so a Next.js route handler, a Bun or Deno server, a Worker or Hono can use the kit. It is what `chatwarden init --framework next`, `fetch` and `fastify` write. It imports no Node module, so it also runs in a browser bundle.
+
+```ts
+import { adminRoutes, healthRoutes, playerRoutes } from '@chatwarden/http';
+import { toFetch } from '@chatwarden/http/fetch';
+
+// Route tables by the path they live under. The key '' is the probes.
+const handle = toFetch(
+  {
+    '/admin': adminRoutes(cw, { authorize }),
+    '/api': playerRoutes(cw, { identify: (req) => ({ clientKey: req.headers['x-player-token'], ip: req.remoteAddress }) }),
+    '': healthRoutes(cw),
+  },
+  { prefix: '/chatwarden' },
+);
+
+// Next.js:  export const GET = handle; export const POST = handle;
+// Bun:      Bun.serve({ fetch: handle });
+// Hono:     app.all('/chatwarden/*', (c) => handle(c.req.raw));
+```
+
+`handle(request)` resolves to the kit's `Response`. The longest mount key that owns the path wins, and the prefix and the key are removed before a table sees the path, so the tables `toExpress` takes work as they are. A path no mount owns is the kit's JSON 404, or `null` with `unmatched: 'pass'` so your own router can answer it. A wrong method is the kit's 405 with an `allow` header.
+
+| Option | Meaning |
+| --- | --- |
+| `prefix` | Where the mounts are rooted in the URL, such as `/chatwarden`. Default: none. |
+| `maxBody` | The largest request body read, in bytes (1 to 16 MiB). Default 65536. A larger body is the kit's 413, and a stream that passes the cap is cancelled. |
+| `remoteAddress` | The socket's address, if your host can tell (Bun: `server.requestIP`). It is never read from a header. Default: none. |
+| `unmatched` | `'not_found'` (default) or `'pass'`. |
+| `logger` | Where the adapter logs (the event and the error class only). Default `console.warn`. |
+
+The request body is read as the exact UTF-8 text the Express adapter gives, so a signature check sees the same bytes. A response with a stream (the chat) is a streaming `Response`, stopped when the client leaves. A handler error is the kit's 500 with no stack. Next.js and the other hosts must run as a long-lived Node process for the chat stream and a database file: see [the Next.js recipe](../../docs/recipes/nextjs.md).
+
+`toFetch`, `Mounts`, `FetchOptions` and `FetchHandler` are `@experimental` until 0.2.
+
 ## Writing another adapter
 
-`toExpress` is the only adapter that ships, but the routes are plain functions, so an adapter for Fastify, Koa or a Worker is
+`toExpress` and `toFetch` are the adapters that ship, but the routes are plain functions, so an adapter for Koa or your own host is
 a few lines. `createRouter(routes)` gives you `(req) => Promise<KitResponse>`. When your framework needs to tell "this path
 is not mine" from "mine, and the answer is 404", use `matchRoute(routes)`, which is what `toExpress` uses. It returns a
 `CompiledRoutes` with two methods:

@@ -159,6 +159,11 @@ Rule, or `'uncovered'` with a `gapNote`. `lineIds` picks up to five of that play
 with blocked words starred out. A timeout is `kind: 'chat'` with `durationMs`. `cw.suggest(subject, level, rule)` says what the preset
 would do next, for a moderator who wants a starting point. A failing store rejects the call, so catch it.
 
+## Testing your own rules
+
+To test your policy in your own tests, use the test kit in `@chatwarden/store-memory/testing`: a fake clock and a scripted chat over the memory store (see [store-memory](https://github.com/hainix/chatwarden/tree/main/packages/store-memory), "The test kit").
+To wire a server quickly, run `npx chatwarden init` from `@chatwarden/http` (see [http](https://github.com/hainix/chatwarden/tree/main/packages/http), "The init command").
+
 ## The editable profile
 
 The profile you give `createChatwarden` (a preset and `overrides`) is the **base**. An owner can change part of it while the game

@@ -246,7 +246,7 @@ describe('the root README', () => {
   });
 
   it('installs @types/express next to express for the HTTP routes, and says why', () => {
-    const http = rows(section(doc, 'Install')).find((r) => (r[1] ?? '').includes('@chatwarden/http'));
+    const http = rows(section(doc, 'Install')).find((r) => (r[0] ?? '').startsWith('Give moderators and players HTTP routes'));
     expect(http?.[1]).toContain('npm install @chatwarden/http express @types/express');
     expect(flat(section(doc, 'Install'))).toMatch(/Express 5 ships no types/);
   });
@@ -439,6 +439,8 @@ declare const authorize: import('@chatwarden/http').Authenticate;
         '@chatwarden/player-react': src('player-react/src/index.ts'),
         '@chatwarden/player-react/chat': src('player-react/src/chat/index.ts'),
         '@chatwarden/http/express': src('http/src/express.ts'),
+        '@chatwarden/http/fetch': src('http/src/fetch.ts'),
+        '@chatwarden/http/cli': src('http/src/cli/index.ts'),
       },
       noEmit: true,
       composite: false,
@@ -916,5 +918,81 @@ describe('the appeals and names docs (0.1.9)', () => {
 
   it('the control: a feature the docs do not have is not found', () => {
     expect(core).not.toContain('`definitelyNotAnAppealSetting`');
+  });
+});
+
+// K4b (0.1.10): fast adoption. Where an adopter reads about init, toFetch and the test kit, and what the project docs say about it.
+describe('the adoption docs (0.1.10)', () => {
+  const rootDoc = read('README.md');
+
+  it('the root README has the init row first in the "I want to" table, with both commands', () => {
+    const table = rootDoc.slice(rootDoc.indexOf('| I want to | Install |'));
+    const first = table.split('\n')[2] as string;
+    expect(first).toContain('Set it up fast');
+    expect(first).toContain('npx chatwarden init');
+    expect(first).toContain('npx -p @chatwarden/http chatwarden init');
+    expect(first).toContain('npm install @chatwarden/http @chatwarden/core');
+  });
+
+  it('the root README keeps the hand-wired quick start and says init writes it, in one sentence before it', () => {
+    const quick = section(rootDoc, 'Quick start');
+    expect(quick.indexOf('npx chatwarden init')).toBeGreaterThan(0);
+    expect(quick.indexOf('npx chatwarden init')).toBeLessThan(quick.indexOf('```ts'));
+    expect(quick).toContain('written by hand');
+    expect(quick).toContain('createChatwarden');
+  });
+
+  it('the root README has "Test your policy", with the same example the store-memory README runs, and says it is experimental', () => {
+    const mine = section(rootDoc, 'Test your policy');
+    const kit = readme('store-memory');
+    const theirs = /```ts\n([\s\S]*?)```/.exec(kit.slice(kit.indexOf('## The test kit')))?.[1];
+    const block = /```ts\n([\s\S]*?)```/.exec(mine)?.[1];
+    expect(block, 'the root block').toBeDefined();
+    expect(block).toBe(theirs);
+    expect(block?.startsWith("import { createTestKit, expectOutcomes } from '@chatwarden/store-memory/testing';")).toBe(true);
+    expect(flat(mine)).toContain('`@experimental` until 0.2');
+    expect(flat(mine)).toContain('invented');
+  });
+
+  it('the root README lists no speed claim for setup', () => {
+    expect(rootDoc).not.toMatch(/\b(in|within|under) (about )?(\d+|five|ten|fifteen) minutes\b/i);
+  });
+
+  it('core: two lines point at the test kit and at init', () => {
+    const core = flat(section(readme('core'), 'Testing your own rules'));
+    expect(core).toContain('@chatwarden/store-memory/testing');
+    expect(core).toContain('npx chatwarden init');
+  });
+
+  it('store-memory: the README names every export of the testing entry, and says they are experimental', () => {
+    const entry = read('packages/store-memory/src/testing/index.ts');
+    const names = [...entry.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => (m[1] as string).split(',').map((n) => n.trim()).filter(Boolean));
+    expect(names.length).toBeGreaterThan(15);
+    const kit = flat(readme('store-memory').slice(readme('store-memory').indexOf('## The test kit')));
+    for (const name of names) expect(kit, name).toContain(name);
+    expect(kit).toContain('`@experimental` until 0.2');
+  });
+
+  it('the project docs say it exists: status, follow-ups, CLAUDE.md, RELEASING.md and tiny-chat', () => {
+    const status = read('docs/status.md');
+    expect(status).toMatch(/## K4b: fast adoption \(0\.1\.10/);
+    expect(flat(status.slice(status.indexOf('## K4b')))).toContain('npx chatwarden init');
+    const followUps = flat(read('docs/plans/follow-ups.md'));
+    expect(followUps).toContain('How to time it');
+    expect(followUps).toContain('service mode');
+    const claude = read('CLAUDE.md');
+    expect(claude).toContain('`chatwarden` bin');
+    expect(claude).toContain('@chatwarden/http/fetch');
+    expect(claude).toContain('@chatwarden/store-memory/testing');
+    const releasing = flat(read('RELEASING.md'));
+    expect(releasing).toContain('`bin` in its manifest');
+    expect(releasing).toContain('a new package');
+    expect(read('examples/tiny-chat/README.md')).toContain('`chatwarden init` writes the same wiring for your own project');
+  });
+
+  it('the http README links the recipes, and every recipe page it links exists', () => {
+    const http = readme('http');
+    for (const match of http.matchAll(/\]\((\.\.\/\.\.\/docs\/[^)#]+)\)/g)) expect(existsSync(join(root, 'packages', 'http', match[1] as string)), match[1]).toBe(true);
+    expect(http).toContain('docs/recipes');
   });
 });
