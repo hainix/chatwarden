@@ -11,17 +11,19 @@ afterEach(() => {
 });
 
 /** A fake repo root with packages/<name>/package.json and packages/<name>/src/index.ts. */
-function fakeRepo(pkgs: Record<string, { version: string; index: string | null }>): string {
+function fakeRepo(pkgs: Record<string, { version: string; index: string | null; versionFile?: string }>): string {
   const root = mkdtempSync(join(tmpdir(), 'cw-sync-version-'));
   dirs.push(root);
-  for (const [name, { version, index }] of Object.entries(pkgs)) {
+  for (const [name, { version, index, versionFile }] of Object.entries(pkgs)) {
     mkdirSync(join(root, 'packages', name, 'src'), { recursive: true });
     writeFileSync(join(root, 'packages', name, 'package.json'), JSON.stringify({ name: `@chatwarden/${name}`, version }));
     if (index !== null) writeFileSync(join(root, 'packages', name, 'src', 'index.ts'), index);
+    if (versionFile !== undefined) writeFileSync(join(root, 'packages', name, 'src', 'version.ts'), versionFile);
   }
   return root;
 }
 const index = (root: string, name: string): string => readFileSync(join(root, 'packages', name, 'src', 'index.ts'), 'utf8');
+const versionTs = (root: string, name: string): string => readFileSync(join(root, 'packages', name, 'src', 'version.ts'), 'utf8');
 
 describe('setVersion', () => {
   it('rewrites the VERSION constant and nothing else', () => {
@@ -96,5 +98,39 @@ describe('versionProblems', () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatch(/packages\/a/);
     expect(index(root, 'a')).toBe("export const VERSION = '0.0.0';\n");
+  });
+});
+
+describe('a package with a src/version.ts (the constant lives there; index.ts re-exports it)', () => {
+  const REEXPORT = "export { VERSION } from './version.js';\nexport {};\n";
+  it('syncVersions writes version.ts and leaves index.ts alone', () => {
+    const root = fakeRepo({ a: { version: '0.5.0', index: REEXPORT, versionFile: "export const VERSION = '0.1.0';\n" } });
+    expect(syncVersions(root)).toEqual(['packages/a']);
+    expect(versionTs(root, 'a')).toBe("export const VERSION = '0.5.0';\n");
+    expect(index(root, 'a')).toBe(REEXPORT);
+    expect(syncVersions(root)).toEqual([]);
+  });
+  it('versionProblems checks version.ts, not index.ts, and names the package', () => {
+    const stale = fakeRepo({ a: { version: '0.5.0', index: REEXPORT, versionFile: "export const VERSION = '0.1.0';\n" } });
+    const problems: string[] = versionProblems(stale);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/packages\/a/);
+    expect(versionTs(stale, 'a')).toBe("export const VERSION = '0.1.0';\n");
+    const fresh = fakeRepo({ a: { version: '0.5.0', index: REEXPORT, versionFile: "export const VERSION = '0.5.0';\n" } });
+    expect(versionProblems(fresh)).toEqual([]);
+  });
+  it('fails, naming the package, when version.ts has no VERSION constant', () => {
+    const root = fakeRepo({ a: { version: '0.5.0', index: REEXPORT, versionFile: 'export {};\n' } });
+    expect(() => syncVersions(root)).toThrow(/packages\/a/);
+    expect(versionProblems(root)[0]).toMatch(/packages\/a/);
+  });
+  it('a package with neither file is still reported', () => {
+    const root = fakeRepo({ a: { version: '0.5.0', index: null } });
+    expect(() => syncVersions(root)).toThrow(/packages\/a/);
+  });
+  it('a package without version.ts keeps its constant in index.ts, as before', () => {
+    const root = fakeRepo({ a: { version: '0.5.0', index: "export const VERSION = '0.1.0';\n" } });
+    expect(syncVersions(root)).toEqual(['packages/a']);
+    expect(index(root, 'a')).toBe("export const VERSION = '0.5.0';\n");
   });
 });

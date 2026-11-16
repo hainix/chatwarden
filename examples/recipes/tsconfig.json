@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "lib": ["ES2023", "DOM"],
+    "jsx": "react-jsx"
+  },
+  "include": ["cases/**/*", "colyseus-types.d.ts"],
+  "exclude": ["cases/next-*", "cases/**/*.js", "cases/**/*.mjs", "cases/**/*.jsx"],
+  "references": [{ "path": "../../packages/core" }, { "path": "../../packages/discord" }, { "path": "../../packages/http" }, { "path": "../../packages/store-sqlite" }, { "path": "../../packages/matcher" }, { "path": "../../packages/profanity" }]
+}

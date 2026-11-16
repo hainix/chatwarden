@@ -1,4 +1,4 @@
-export const VERSION = '0.1.9';
+export { VERSION } from './version.js';
 export { ROLES } from '@chatwarden/core';
 export type { Role } from '@chatwarden/core';
 export type { Authz, KitRequest, KitResponse, KitStream, RouteParams } from './types.js';
@@ -7,6 +7,8 @@ export type { CompiledRoutes, RouteHandler, RouteTable } from './router.js';
 export { AiUnavailableError, ClaimedError, errorResponse, HttpError, NotFoundError, ValidationError, withErrors } from './errors.js';
 export type { ErrorCode } from './errors.js';
 export { BODY_MAX_BYTES, parseJson } from './body.js';
+export { toFetch } from './fetch.js';
+export type { FetchHandler, FetchOptions, Mounts } from './fetch.js';
 export { guard, requireRole } from './auth.js';
 export type { Authenticate, GuardOptions } from './auth.js';
 export { PERMISSION_KEYS, PERMISSIONS, resolvePermissions, roleAtLeast } from './permissions.js';

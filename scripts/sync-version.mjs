@@ -1,4 +1,5 @@
-// Keeps each package's exported `VERSION` constant (packages/<dir>/src/index.ts) equal to the version in its package.json.
+// Keeps each package's exported `VERSION` constant equal to the version in its package.json. The constant is in packages/<dir>/src/index.ts, or in
+// packages/<dir>/src/version.ts when that file exists (http: its CLI imports the constant without loading the package root, which re-exports it).
 // `changeset version` bumps package.json only, so the root `version` script runs this right after it:
 //   "version": "changeset version && node scripts/sync-version.mjs && npm install --package-lock-only"
 // `node scripts/sync-version.mjs` writes the constants; `--check` only reports the stale ones (exit 1).
@@ -28,12 +29,18 @@ export function setVersion(source, version) {
   return source.replace(VERSION_LINE, `export const VERSION = '${version}';`);
 }
 
-/** Reads a package: its manifest version, the index path and the index source. Throws, naming the package, when it cannot. */
+/** The file that holds a package's VERSION constant, relative to the package: `src/version.ts` when it exists, else `src/index.ts`. */
+function versionFileOf(root, dir) {
+  return existsSync(join(root, dir, 'src', 'version.ts')) ? 'src/version.ts' : 'src/index.ts';
+}
+
+/** Reads a package: its manifest version, the file that holds the constant and that file's source. Throws, naming the package, when it cannot. */
 function readPackage(root, dir) {
   const { version } = JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8'));
-  const file = join(root, dir, 'src', 'index.ts');
-  if (!existsSync(file)) throw new Error(`${dir}: src/index.ts is missing`);
-  return { version, file, source: readFileSync(file, 'utf8') };
+  const relative = versionFileOf(root, dir);
+  const file = join(root, dir, relative);
+  if (!existsSync(file)) throw new Error(`${dir}: ${relative} is missing`);
+  return { version, file, relative, source: readFileSync(file, 'utf8') };
 }
 
 /** Rewrites the VERSION constant of every package from its package.json. Returns the directories it changed. */
@@ -83,7 +90,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       process.exit(problems.length === 0 ? 0 : 1);
     } else {
       const changed = syncVersions(root);
-      for (const dir of changed) console.log(`${dir}/src/index.ts`);
+      for (const dir of changed) console.log(`${dir}/${versionFileOf(root, dir)}`);
       if (changed.length === 0) console.log('VERSION constants already match the manifests');
     }
   } catch (err) {

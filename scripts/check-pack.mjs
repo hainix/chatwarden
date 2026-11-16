@@ -40,6 +40,7 @@ export function exportTargets(pkg) {
   add(pkg.types);
   add(pkg.exports);
   add(pkg.typesVersions);
+  add(pkg.bin);
   return [...out];
 }
 
@@ -106,6 +107,38 @@ export function checkFileList({ pkg, files }) {
 
   for (const target of exportTargets(pkg)) {
     if (!have.has(target)) problems.push(`export target is not in the tarball: ${target}`);
+  }
+  return problems;
+}
+
+const SHEBANG = '#!/usr/bin/env node';
+
+/** The bins of a manifest as `[name, target]` pairs, the target without the leading `./`. A string `bin` is named for the package. */
+function binEntries(pkg) {
+  if (typeof pkg.bin === 'string') return [[dirOf(pkg), pkg.bin.replace(/^\.\//, '')]];
+  if (pkg.bin && typeof pkg.bin === 'object') return Object.entries(pkg.bin).map(([name, target]) => [name, String(target).replace(/^\.\//, '')]);
+  return [];
+}
+
+/**
+ * Problems with a package's `bin` entries (empty array = good): each target must be in the tarball, must not sit under a test path, and its first
+ * line must be exactly `#!/usr/bin/env node` (a CRLF after it is fine; a byte order mark before it is not, the kernel would not see the `#!`).
+ * @param {{ pkg: Record<string, any>, files: string[], sources: Record<string, string> }} input `sources` maps a shipped file to its text (only the bin targets are read)
+ */
+export function binProblems({ pkg, files, sources }) {
+  const problems = [];
+  const have = new Set(files);
+  for (const [name, target] of binEntries(pkg)) {
+    if (!have.has(target)) {
+      problems.push(`bin "${name}" target is not in the tarball: ${target}`);
+      continue;
+    }
+    if (/(^|\/)test\//.test(target) || /\.(test|spec)\.[^/]*$/.test(target)) {
+      problems.push(`bin "${name}" target is under a test path, which never ships: ${target}`);
+      continue;
+    }
+    const firstLine = (sources[target] ?? '').split('\n', 1)[0].replace(/\r$/, '');
+    if (firstLine !== SHEBANG) problems.push(`bin "${name}" target ${target} must start with ${SHEBANG}`);
   }
   return problems;
 }
@@ -223,6 +256,13 @@ export function nodeImportProblems({ pkg, files }) {
 }
 
 /**
+ * Shipped files that hold the text of other files and no imports of their own: the templates of `chatwarden init`. Their import lines sit inside
+ * template strings (the line `import { x } from '@chatwarden/player-react'` is what the adopter's file will say). A real import there is stopped by
+ * packages/http/test/cli-static.test.ts, which allows relative imports only.
+ */
+const TEXT_ONLY = /^dist\/src\/cli\/templates\//;
+
+/**
  * One message per (file, package) where a shipped `.js` file (`dist/src/**`, or a bundle in `dist`) imports a package that an installer would not
  * have: it must be a Node builtin, the package itself, or in dependencies or peerDependencies. devDependencies do not count.
  * @param {{ pkg: Record<string, any>, files: Array<{ path: string, source: string }> }} input
@@ -231,7 +271,7 @@ export function undeclaredImports({ pkg, files }) {
   const declared = new Set([pkg.name, ...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {})]);
   const problems = [];
   for (const { path, source } of files) {
-    if (!isShippedJs(path)) continue;
+    if (!isShippedJs(path) || TEXT_ONLY.test(path)) continue;
     for (const name of bareImports(source)) {
       if (!declared.has(name)) {
         problems.push(`${path} imports "${name}", which is not in dependencies or peerDependencies (a consumer would not have it)`);
@@ -263,9 +303,16 @@ function main() {
     const sources = files
       .filter((f) => isShippedJs(f))
       .map((f) => ({ path: f, source: readFileSync(join(base, dir, f), 'utf8') }));
+    const binSources = Object.fromEntries(
+      binEntries(pkg)
+        .map(([, target]) => target)
+        .filter((target) => files.includes(target))
+        .map((target) => [target, readFileSync(join(base, dir, target), 'utf8')]),
+    );
     const problems = [
       ...checkManifest(pkg, dir),
       ...checkFileList({ pkg, files }),
+      ...binProblems({ pkg, files, sources: binSources }),
       ...undeclaredImports({ pkg, files: sources }),
       ...nodeImportProblems({ pkg, files: sources }),
     ];

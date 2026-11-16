@@ -4,9 +4,10 @@
 // The two projects are created in the OS temp directory (chatwarden-smoke-*), never inside the repository: from there Node
 // cannot fall back on the monorepo's node_modules, so a package that imports something it forgot to declare fails here.
 // They are deleted afterwards unless SMOKE_KEEP=1. Every child process has a timeout (5 minutes to install, 60 s to run).
-//   ESM: type "module", NodeNext, TypeScript 5.9.
+//   ESM: type "module", NodeNext, TypeScript 5.9. It also runs the packed `chatwarden` bin (`init --yes ... --json`), type-checks and compiles what it wrote
+//        with the rest of the project, starts the generated server on port 0 and checks it (scripts/smoke/init-check.mjs).
 //   CJS: module commonjs, moduleResolution node, esModuleInterop, strict, TypeScript 5.7 (Moxgate's server). The compiled
-//        scenario `require()`s the ESM packages, so Node's require(esm) path runs for real.
+//        scenario `require()`s the ESM packages, so Node's require(esm) path runs for real, and `runCli` is required from `@chatwarden/http/cli`.
 // The pure helpers are exported and unit-tested in scripts/smoke.test.ts; the end-to-end run is at the bottom.
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,8 +22,8 @@ import { fileURLToPath } from 'node:url';
  * (react and react-dom are optional peers of hub-react, so npm does not fetch them; player-react and hub-element would bring React in).
  */
 export const PROJECTS = {
-  esm: { typescript: '5.9', scenario: 'scenario.ts', extras: ['express@5', '@types/express@5', '@types/react@19', '@types/react-dom@19'] },
-  cjs: { typescript: '5.7', scenario: 'scenario.ts', extras: ['express@5', '@types/express@5', '@types/react@19', '@types/react-dom@19'] },
+  esm: { typescript: '5.9', scenario: 'scenario.ts', extras: ['express@5', '@types/express@5', '@types/react@19', '@types/react-dom@19'], init: true },
+  cjs: { typescript: '5.7', scenario: 'scenario.ts', extras: ['express@5', '@types/express@5', '@types/react@19', '@types/react-dom@19'], requireCli: true },
   headless: { typescript: '5.9', scenario: 'headless.ts', extras: [], only: ['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react'] },
   // React 18.3 (the other end of the peer range `^18.3.0 || ^19.0.0`; the projects above get React 19). It server-renders the hub and the player
   // components and imports the headless entry. hub-element is left out: it bundles its own React.
@@ -87,7 +88,60 @@ export function renderTemplate(text, vars) {
   });
 }
 
-/** The prefix of the temp directory holding the two consumer projects. */
+/** The answers the init step gives, as flags. Every one is given, so nothing is asked, and there is no `--install` and no `--force`. */
+const INIT_ANSWERS = ['--framework', 'express', '--store', 'memory', '--chat', 'box', '--hub', 'element'];
+
+/** The command line of the init step: the packed bin, by `npx --no-install` (the project has the tarballs, and nothing may reach the registry). */
+export function initCommand() {
+  return { command: 'npx', args: ['--no-install', 'chatwarden', 'init', '--yes', ...INIT_ANSWERS, '--json'] };
+}
+
+/** The files the init step must have created (the project has a `src` folder, so the default folder is src/chatwarden). */
+const INIT_FILES = ['src/chatwarden/kit.ts', 'src/chatwarden/express.ts', 'src/chatwarden/auth.ts'];
+
+/**
+ * What is wrong with the output of the init step (empty array = good): it must be JSON, ok, not a dry run, from the packed version, with the answers
+ * that were given, and each file in `INIT_FILES` created at a relative path.
+ * @param {string} text what the bin printed on standard output
+ * @param {string} version the version of the packed @chatwarden/http
+ */
+export function initProblems(text, version) {
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return ['the init step did not print JSON on standard output'];
+  }
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) return ['the init step JSON is not an object'];
+  const problems = [];
+  if (doc.ok !== true) problems.push(`ok is ${JSON.stringify(doc.ok)}${doc.error ? `: ${doc.error.message}` : ''}`);
+  if (doc.dryRun !== false) problems.push('the run was a dry run: nothing was written');
+  if (doc.chatwarden !== version) problems.push(`the bin reports version ${JSON.stringify(doc.chatwarden)}, the packed package is ${version}`);
+  const expected = { framework: 'express', store: 'memory', chat: 'box', hub: 'element' };
+  for (const [key, value] of Object.entries(expected)) {
+    if (doc.answers?.[key] !== value) problems.push(`answers.${key} is ${JSON.stringify(doc.answers?.[key])}, expected ${value}`);
+  }
+  const files = Array.isArray(doc.files) ? doc.files : [];
+  for (const file of files) {
+    if (typeof file?.path !== 'string' || file.path.startsWith('/') || /^[A-Za-z]:/.test(file.path) || file.path.includes('\\')) problems.push(`a file path is not relative with /: ${JSON.stringify(file?.path)}`);
+  }
+  for (const wanted of INIT_FILES) {
+    const found = files.find((f) => f?.path === wanted);
+    if (found === undefined) problems.push(`${wanted} is not in the report`);
+    else if (found.action !== 'created') problems.push(`${wanted} was ${found.action}, expected created`);
+  }
+  return problems;
+}
+
+/** The CommonJS check: `require` the CLI entry (Node's require(esm) path) and ask it for its version. */
+export function cliRequireCommand() {
+  return {
+    command: 'node',
+    args: ['-e', "const { runCli } = require('@chatwarden/http/cli'); runCli(['--version']).then((code) => process.exit(code));"],
+  };
+}
+
+/** The prefix of the temp directory holding the consumer projects. */
 export const TEMP_PREFIX = 'chatwarden-smoke-';
 
 const TIMEOUTS = { install: 5 * 60_000, run: 60_000 };
@@ -121,6 +175,17 @@ function run(cmd, args, cwd, label, kind) {
   if (res.status !== 0) throw new Error(`${label} failed (exit ${res.status ?? res.signal ?? 'unknown'})`);
 }
 
+/** Like `run`, but returns what the command printed on standard output (its standard error still goes to the terminal). */
+function capture(cmd, args, cwd, label, kind) {
+  console.log(`\n[smoke] ${label}: ${cmd} ${args.join(' ')}`);
+  const shimmed = WIN && (cmd === 'npm' || cmd === 'npx');
+  const timeout = timeoutFor(kind);
+  const res = spawnSync(shimmed ? `${cmd}.cmd` : cmd, args, { cwd, stdio: ['ignore', 'pipe', 'inherit'], shell: shimmed, timeout, encoding: 'utf8' });
+  if (res.error?.code === 'ETIMEDOUT') throw new Error(`${label} timed out after ${timeout / 1000} s`);
+  if (res.status !== 0) throw new Error(`${label} failed (exit ${res.status ?? res.signal ?? 'unknown'})`);
+  return res.stdout;
+}
+
 function copyTemplates(root, project, dest) {
   mkdirSync(join(dest, 'src'), { recursive: true });
   const from = join(root, 'scripts', 'smoke', project);
@@ -145,6 +210,8 @@ function main() {
     .filter((d) => d.isDirectory() && existsSync(join(base, d.name, 'package.json')))
     .map((d) => JSON.parse(readFileSync(join(base, d.name, 'package.json'), 'utf8')));
   const packages = publishedPackages(manifests);
+  const httpVersion = packages.find((p) => p.name === '@chatwarden/http')?.version;
+  if (httpVersion === undefined) throw new Error('@chatwarden/http is not among the published packages');
 
   run('npm', ['run', 'build'], root, 'build', 'install');
   for (const p of packages) {
@@ -164,15 +231,30 @@ function main() {
       const dir = join(work, project);
       copyTemplates(root, project, dir);
       run('npm', installArgs(project, tarballsFor(project)), dir, `${project}: install`, 'install');
+      if (PROJECTS[project].init === true) {
+        // The packed bin writes the starter into src/chatwarden; the type-check and compile below then cover those files with the project's TypeScript.
+        const init = initCommand();
+        const problems = initProblems(capture(init.command, init.args, dir, `${project}: chatwarden init`, 'run'), httpVersion);
+        if (problems.length > 0) throw new Error(`${project}: the init step failed:\n  - ${problems.join('\n  - ')}`);
+      }
       run('npx', ['tsc', '--noEmit'], dir, `${project}: typecheck`, 'run');
       run('npx', ['tsc'], dir, `${project}: compile`, 'run');
       run(process.execPath, ['dist/index.js'], dir, `${project}: scenario`, 'run');
+      if (PROJECTS[project].init === true) {
+        cpSync(join(root, 'scripts', 'smoke', 'init-check.mjs'), join(dir, 'init-check.mjs'));
+        run(process.execPath, ['init-check.mjs'], dir, `${project}: the generated server`, 'run');
+      }
+      if (PROJECTS[project].requireCli === true) {
+        const required = cliRequireCommand();
+        const printed = capture(process.execPath, required.args, dir, `${project}: require the CLI`, 'run');
+        if (printed.trim() !== httpVersion) throw new Error(`${project}: require('@chatwarden/http/cli') printed ${JSON.stringify(printed.trim())}, expected ${httpVersion}`);
+      }
     }
   } finally {
     if (keepTemp(process.env)) console.log(`[smoke] SMOKE_KEEP=1: left ${work} in place`);
     else rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
-  console.log(`\n[smoke] ok: ${packages.length} tarballs; the ESM, CJS, headless (no React) and React 18.3 consumers typecheck and run`);
+  console.log(`\n[smoke] ok: ${packages.length} tarballs; the ESM (with the init step), CJS, headless (no React) and React 18.3 consumers typecheck and run`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

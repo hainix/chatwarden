@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -94,7 +94,9 @@ describe('versions', () => {
     expect(pkg.version).toBe(VERSION);
   });
   it.each(published.map((p) => [p.pkg.name, p.dir, p.pkg.version] as const))('%s exports a VERSION constant equal to its manifest version', (_n, dir, version) => {
-    const src = readFileSync(join(root, 'packages', dir, 'src', 'index.ts'), 'utf8').replaceAll('\r\n', '\n');
+    // http keeps the constant in src/version.ts (the CLI imports it without loading the package root); index.ts re-exports it.
+    const file = existsSync(join(root, 'packages', dir, 'src', 'version.ts')) ? 'version.ts' : 'index.ts';
+    const src = readFileSync(join(root, 'packages', dir, 'src', file), 'utf8').replaceAll('\r\n', '\n');
     expect(/^export const VERSION = '([^']*)';$/m.exec(src)?.[1]).toBe(version);
   });
   it('are identical across the fixed group', () => {
@@ -172,6 +174,19 @@ describe('peer floors', () => {
   it.each([...NEEDS_NEW_KIT])('%s needs core ^0.1.9 (appeals and names: the optional Store methods and row types, cw.appeals, cw.names, cw.people.accountIds, the new events and types)', (name) => {
     expect(byName(name).peerDependencies?.['@chatwarden/core']).toBe('^0.1.9');
   });
+  it('no peer floor changed by this release (0.1.10 uses nothing new in core or http, so the sets above are as 0.1.9 left them)', () => {
+    // A floor at the group version would mean a package imports a name that only this release has; this release adds only subpaths and a bin.
+    for (const { pkg } of published) {
+      for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {}).filter(([n]) => ownScope(n))) {
+        expect(range, `${pkg.name} peer ${peer}`).not.toBe(`^${VERSION}`);
+        expect(['^0.1.0', '^0.1.5', '^0.1.9']).toContain(range);
+      }
+    }
+    expect(peerRangeOf('@chatwarden/http', '@chatwarden/core')).toBe('^0.1.9');
+    expect(peerRangeOf('@chatwarden/store-memory', '@chatwarden/core')).toBe('^0.1.9');
+    expect(peerRangeOf('@chatwarden/hub-react', '@chatwarden/http')).toBe('^0.1.9');
+    expect(peerRangeOf('@chatwarden/hub-element', '@chatwarden/hub-react')).toBe('^0.1.5');
+  });
   it('the new floors are the ones in NEEDS_NEW_KIT: store-memory, store-sqlite, http, discord, hub-react and player-react, and no other package', () => {
     expect([...NEEDS_NEW_KIT].sort()).toEqual(['@chatwarden/discord', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/player-react', '@chatwarden/store-memory', '@chatwarden/store-sqlite']);
     const peering = published.filter((p) => (p.pkg.peerDependencies?.['@chatwarden/core'] ?? '') !== '' && p.pkg.peerDependencies?.['@chatwarden/core'] !== PEER_RANGE).map((p) => p.pkg.name).sort();
@@ -238,6 +253,44 @@ describe('matcher peers', () => {
   });
   it('profanity still needs obscenity at run time (its own filter)', () => {
     expect(byName('@chatwarden/profanity').dependencies?.obscenity).toBeDefined();
+  });
+});
+
+describe('the bin and the new subpaths (init, the fetch adapter, the test kit)', () => {
+  type Shipping = Manifest & { bin?: string | Record<string, string>; exports?: Record<string, { types: string; default: string }>; typesVersions?: { '*': Record<string, string[]> }; keywords?: string[] };
+  const shipping = (dir: string): Shipping => readJson<Shipping>('packages', dir, 'package.json');
+  /** The source file a built `dist/src/x.js` or `x.d.ts` comes from: `src/x.ts` (or `.tsx`). */
+  const sourceOf = (dir: string, built: string): string | undefined => {
+    const stem = built.replace(/^\.\//, '').replace(/^dist\/src\//, '').replace(/\.d\.ts$|\.js$/, '');
+    return ['.ts', '.tsx'].map((ext) => join(root, 'packages', dir, 'src', `${stem}${ext}`)).find((f) => existsSync(f));
+  };
+  it('exactly one published package declares a bin and it is chatwarden, pointing at the compiled CLI entry', () => {
+    const withBin = published.filter((p) => (p.pkg as Shipping).bin !== undefined);
+    expect(withBin.map((p) => p.pkg.name)).toEqual(['@chatwarden/http']);
+    expect(shipping('http').bin).toEqual({ chatwarden: './dist/src/cli/bin.js' });
+    expect(sourceOf('http', './dist/src/cli/bin.js'), 'the bin has a source').toBeDefined();
+  });
+  it('http lists the CLI in its keywords', () => {
+    expect(shipping('http').keywords).toEqual(expect.arrayContaining(['cli', 'init']));
+  });
+  it.each([
+    ['http', './fetch', 'fetch', 'dist/src/fetch'],
+    ['http', './cli', 'cli', 'dist/src/cli/index'],
+    ['store-memory', './testing', 'testing', 'dist/src/testing/index'],
+  ])('%s: the %s subpath is in exports and typesVersions, with types and code, and points at files a build produces', (dir, subpath, versionsKey, stem) => {
+    const pkg = shipping(dir);
+    expect(pkg.exports?.[subpath]).toEqual({ types: `./${stem}.d.ts`, default: `./${stem}.js` });
+    expect(pkg.typesVersions?.['*'][versionsKey]).toEqual([`${stem}.d.ts`]);
+    expect(sourceOf(dir, `${stem}.js`), `${dir} ${subpath} has a source`).toBeDefined();
+  });
+  it('the bin and the new subpaths are not under a test path and do not point outside dist/src', () => {
+    for (const target of ['dist/src/cli/bin.js', 'dist/src/cli/index.js', 'dist/src/fetch.js', 'dist/src/testing/index.js']) {
+      expect(target).not.toMatch(/(^|\/)test\//);
+      expect(target.startsWith('dist/src/')).toBe(true);
+    }
+  });
+  it('a bin does not add a dependency: http still has no dependencies entry', () => {
+    expect(shipping('http').dependencies).toBeUndefined();
   });
 });
 
@@ -394,13 +447,29 @@ describe('ai-anthropic example', () => {
   });
 });
 
+describe('recipes example', () => {
+  const recipes = readJson<Manifest>('examples', 'recipes', 'package.json');
+  it('is private, named as the changeset config expects, and not a published package (the release must add no package)', () => {
+    expect(recipes.private).toBe(true);
+    expect(recipes.name).toBe('@chatwarden/example-recipes');
+    expect(names).not.toContain(recipes.name);
+    expect(recipes.version).toBe('0.0.0');
+  });
+  it('depends on the ten published packages at the group version and on the frameworks it runs the goldens against', () => {
+    for (const n of names) expect(recipes.dependencies?.[n], n).toBe(VERSION);
+    for (const dep of ['fastify', 'socket.io', 'socket.io-client', 'react', 'react-dom', '@types/react', '@types/react-dom', 'express']) {
+      expect(recipes.devDependencies?.[dep], dep).toBeDefined();
+    }
+  });
+});
+
 describe('changesets config', () => {
   const config = readJson<{ fixed: string[][]; ignore: string[]; linked: string[][] }>('.changeset', 'config.json');
   it('versions every @chatwarden package together', () => {
     expect(config.fixed).toEqual([['@chatwarden/*']]);
   });
   it('ignores the example and the landing site (private, never versioned or published)', () => {
-    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/site']);
+    expect(config.ignore).toEqual(['@chatwarden/example-ai-anthropic', '@chatwarden/example-tiny-chat', '@chatwarden/example-recipes', '@chatwarden/site']);
   });
   it('has no linked groups', () => {
     expect(config.linked).toEqual([]);
@@ -408,8 +477,10 @@ describe('changesets config', () => {
   it('ignores only private packages', () => {
     const tiny = readJson<Manifest>('examples', 'tiny-chat', 'package.json');
     const ai = readJson<Manifest>('examples', 'ai-anthropic', 'package.json');
+    const recipes = readJson<Manifest>('examples', 'recipes', 'package.json');
     const site = readJson<Manifest>('site', 'package.json');
-    expect(config.ignore).toEqual([ai.name, tiny.name, site.name]);
+    expect(config.ignore).toEqual([ai.name, tiny.name, recipes.name, site.name]);
+    expect(recipes.private).toBe(true);
     expect(ai.private).toBe(true);
     expect(tiny.private).toBe(true);
     expect(site.private).toBe(true);

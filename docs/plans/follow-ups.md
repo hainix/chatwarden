@@ -26,11 +26,16 @@ Found writing the copy rewrite (`docs/design/2026-11-11-site-copy-rewrite.md`, b
   demo, or frame the hub pane light.
 - **"In about 15 minutes".** Someone times a fresh install against `examples/tiny-chat`; if it is under 15 minutes, add it to the
   "Add it to your game" lead. Until then the page makes no time claim. (Ruling 5.)
+  **How to time it** (a checklist): start with an empty folder and a stopwatch. `npm init -y` (stopwatch starts), set `"type": "module"`,
+  `npm install express @types/express typescript @chatwarden/http @chatwarden/core`, `npx chatwarden init --yes --framework express --store memory`, add the
+  one line the init report prints to a small Express app, set `CHATWARDEN_SECRET` and `CHATWARDEN_ADMIN_TOKEN`, start the server, post a line with the
+  synthetic blocked word and see it refused (stopwatch stops). Do it three times on a clean machine and write down the slowest. Only a slowest time
+  under 15 minutes allows the claim.
 - **Chat box on the site.** The chat box is built (see the status page), so the page can promise chat. The headline changes only after the
   release that holds it is on npm; the site demo adopts `<ChatBox>` in its own PR after that. (Ruling 1.)
 - **AI section.** It comes back as a section when level 1 ships (the work is on branch `ai-levels`); today it is one FAQ answer. (Ruling 4.)
 - **Moxgate mention.** Cut until the Moxgate adoption ships, then "Used in Moxgate" with a link and a screenshot. (Ruling 8.)
-- **Non-Node servers.** A chat-check HTTP route would give other server languages a ready path; the FAQ says plainly that there is none.
+- **Non-Node servers.** A chat-check HTTP route would give other server languages a ready path; the FAQ says plainly that there is none. The route is **service mode**, designed next as K4d (the generated service, with `chatwarden init` as the way to get it); the FAQ answer is rewritten when K4b is on npm (Express, Fastify and Next.js are written by `init`, anything on Web `Request` uses `toFetch`).
 
 ## Open: left from the review of the landing-page rewrite (2026-11-11)
 

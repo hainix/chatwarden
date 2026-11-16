@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { BROWSER_SAFE, BUNDLED, bareImports, checkFileList, checkManifest, exportTargets, nodeImports, undeclaredImports, nodeImportProblems } from './check-pack.mjs';
+import { BROWSER_SAFE, BUNDLED, bareImports, binProblems, checkFileList, checkManifest, exportTargets, nodeImports, undeclaredImports, nodeImportProblems } from './check-pack.mjs';
 
 type Pkg = Record<string, unknown>;
 
@@ -321,6 +321,19 @@ describe('undeclaredImports', () => {
     ];
     expect(undeclaredImports({ pkg, files })).toEqual([]);
   });
+  it('skips the init CLI templates: they hold the text of the files init writes, whose import lines are not imports of this package', () => {
+    const text = ["export const x = `import { a } from '@chatwarden/player-react';", "import b from '${spec(ctx, from)}';`;"].join(String.fromCharCode(10));
+    const http = { name: '@chatwarden/http', peerDependencies: { '@chatwarden/core': '^0.1.0' } };
+    expect(undeclaredImports({ pkg: http, files: [file('dist/src/cli/templates/chat.js', text), file('dist/src/cli/templates/sub/x.js', text)] })).toEqual([]);
+  });
+  it('but looks at every other file of the CLI, and at a folder that only starts like the templates folder', () => {
+    const http = { name: '@chatwarden/http', peerDependencies: { '@chatwarden/core': '^0.1.0' } };
+    const out: string[] = undeclaredImports({
+      pkg: http,
+      files: ['dist/src/cli/index.js', 'dist/src/cli/templates-extra/x.js', 'dist/src/templates/x.js'].map((path) => file(path, "import ws from 'ws';")),
+    });
+    expect(out).toHaveLength(3);
+  });
   it('treats a package with no dependency fields at all as declaring nothing', () => {
     const out: string[] = undeclaredImports({ pkg: { name: '@chatwarden/bare' }, files: [file('dist/src/a.js', "import x from 'x';\nimport fs from 'node:fs';\n")] });
     expect(out).toHaveLength(1);
@@ -494,5 +507,82 @@ describe('a bundled package (hub-element ships dist/*.js, built by esbuild, and 
   it('a bundle that imports a Node builtin is flagged (it is browser-safe)', () => {
     const out: string[] = nodeImportProblems({ pkg: { name: '@chatwarden/hub-element' }, files: [{ path: 'dist/index.js', source: 'import fs from "node:fs";\n' }] });
     expect(out.join('\n')).toMatch(/dist\/index\.js imports the Node builtin "node:fs"/);
+  });
+});
+
+describe('exportTargets and the bin', () => {
+  it('exportTargets includes bin (an object, or a string)', () => {
+    expect((exportTargets({ bin: { chatwarden: './dist/src/cli/bin.js' } }) as string[]).sort()).toEqual(['dist/src/cli/bin.js']);
+    expect(exportTargets({ bin: './dist/src/cli/bin.js' })).toEqual(['dist/src/cli/bin.js']);
+    expect((exportTargets({ main: './a.js', bin: { x: './b.js', y: './c.js' } }) as string[]).sort()).toEqual(['a.js', 'b.js', 'c.js']);
+  });
+  it('a bin target that is not in the tarball is an export-target problem too', () => {
+    const pkg = { ...goodPkg(), bin: { demo: './dist/src/cli.js' } };
+    expect(check(goodFiles(), pkg).join('\n')).toContain('export target is not in the tarball: dist/src/cli.js');
+  });
+  it('the real http manifest names its bin target and ./cli among the files a tarball must hold', () => {
+    const http = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/http/package.json', import.meta.url)), 'utf8')) as Pkg;
+    const targets = exportTargets(http) as string[];
+    expect(targets).toEqual(expect.arrayContaining(['dist/src/cli/bin.js', 'dist/src/cli/index.js', 'dist/src/cli/index.d.ts', 'dist/src/fetch.js']));
+  });
+});
+
+describe('binProblems', () => {
+  const pkg = (bin: unknown = { demo: './dist/src/cli/bin.js' }): Pkg => ({ ...goodPkg(), bin });
+  const SHEBANG = '#!/usr/bin/env node\nimport "./index.js";\n';
+  const input = (over: { bin?: unknown; files?: string[]; sources?: Record<string, string> } = {}) => ({
+    pkg: pkg(over.bin),
+    files: over.files ?? [...goodFiles(), 'dist/src/cli/bin.js'],
+    sources: over.sources ?? { 'dist/src/cli/bin.js': SHEBANG },
+  });
+  it('a bin target that is in the tarball and starts with the shebang passes', () => {
+    expect(binProblems(input())).toEqual([]);
+  });
+  it('a package with no bin has nothing to check', () => {
+    expect(binProblems({ pkg: goodPkg(), files: goodFiles(), sources: {} })).toEqual([]);
+  });
+  it('a string bin is checked too', () => {
+    expect(binProblems(input({ bin: './dist/src/cli/bin.js' }))).toEqual([]);
+    expect(binProblems(input({ bin: './dist/src/cli/bin.js', sources: { 'dist/src/cli/bin.js': 'console.log(1)\n' } })).join('\n')).toContain('#!/usr/bin/env node');
+  });
+  it('a missing bin target fails and names it', () => {
+    const problems = binProblems(input({ files: goodFiles(), sources: {} }));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('"demo"');
+    expect(problems[0]).toContain('dist/src/cli/bin.js');
+    expect(problems[0]).toMatch(/not in the tarball/);
+  });
+  it.each([
+    ['no shebang', 'import "./index.js";\n'],
+    ['a different interpreter', '#!/usr/bin/env bash\necho 1\n'],
+    ['a shebang on the second line', '\n#!/usr/bin/env node\n'],
+    ['an empty file', ''],
+    ['a byte order mark before the shebang', '\uFEFF#!/usr/bin/env node\n'],
+  ])('fails when the file has %s, and names the bin and the expected line', (_label, text) => {
+    const problems = binProblems(input({ sources: { 'dist/src/cli/bin.js': text } }));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('"demo"');
+    expect(problems[0]).toContain('#!/usr/bin/env node');
+  });
+  it('accepts a CRLF after the shebang (the line itself is what counts)', () => {
+    expect(binProblems(input({ sources: { 'dist/src/cli/bin.js': '#!/usr/bin/env node\r\nx\n' } }))).toEqual([]);
+  });
+  it.each(['test/bin.js', 'dist/test/bin.js', 'src/test/cli.js', 'dist/src/cli/foo.test.js'])('a bin under a test path (%s) fails with a named problem', (path) => {
+    const problems = binProblems({ pkg: pkg({ demo: `./${path}` }), files: [...goodFiles(), path], sources: { [path]: SHEBANG } });
+    expect(problems.join('\n')).toMatch(/test/);
+    expect(problems.join('\n')).toContain(path);
+  });
+  it('does not mistake a "test" substring for a test directory', () => {
+    const path = 'dist/src/cli/latest.js';
+    expect(binProblems({ pkg: pkg({ demo: `./${path}` }), files: [...goodFiles(), path], sources: { [path]: SHEBANG } })).toEqual([]);
+  });
+  it('reports every bin, each with its own name', () => {
+    const problems = binProblems({
+      pkg: pkg({ one: './dist/src/a.js', two: './dist/src/b.js' }),
+      files: [...goodFiles(), 'dist/src/a.js', 'dist/src/b.js'],
+      sources: { 'dist/src/a.js': SHEBANG, 'dist/src/b.js': 'x\n' },
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('"two"');
   });
 });

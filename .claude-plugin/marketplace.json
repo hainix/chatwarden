@@ -1,0 +1,14 @@
+{
+  "name": "chatwarden-plugins",
+  "description": "Skills for adding Chatwarden, the open-source chat moderation kit for games, to a game server.",
+  "owner": {
+    "name": "Chatwarden maintainers"
+  },
+  "plugins": [
+    {
+      "name": "chatwarden",
+      "source": "./agent/claude-plugin",
+      "description": "A skill that adds Chatwarden chat moderation to a game server with chatwarden init."
+    }
+  ]
+}

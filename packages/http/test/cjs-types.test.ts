@@ -30,7 +30,7 @@ function resolve(specifier: string, declared: string[], patch?: (packagePath: st
     fileExists: (f) => built.has(real(f)) || ts.sys.fileExists(f),
     readFile: (f) => {
       const text = ts.sys.readFile(f);
-      return text !== undefined && patch !== undefined && /\/(packages|@chatwarden)\/http\/package\.json$/.test(norm(f)) ? patch(f, text) : text;
+      return text !== undefined && patch !== undefined && /\/(packages|@chatwarden)\/(http|store-memory)\/package\.json$/.test(norm(f)) ? patch(f, text) : text;
     },
     directoryExists: (d) => [...built].some((f) => f.startsWith(`${real(d)}/`)) || ts.sys.directoryExists(d),
     realpath: (p) => real(ts.sys.realpath?.(p) ?? p),
@@ -45,6 +45,10 @@ const BUILT = [
   'packages/http/dist/src/express.d.ts',
   'packages/http/dist/src/admin-entry.d.ts',
   'packages/http/dist/src/chat/index.d.ts',
+  'packages/http/dist/src/fetch.d.ts',
+  'packages/http/dist/src/cli/index.d.ts',
+  'packages/store-memory/dist/src/index.d.ts',
+  'packages/store-memory/dist/src/testing/index.d.ts',
 ];
 
 describe('@chatwarden/http under module commonjs / moduleResolution node', () => {
@@ -60,6 +64,13 @@ describe('@chatwarden/http under module commonjs / moduleResolution node', () =>
     expect(resolve('@chatwarden/http/chat', BUILT)).toMatch(/\/packages\/http\/dist\/src\/chat\/index\.d\.ts$/);
   });
 
+  it('a CommonJS project with moduleResolution node resolves @chatwarden/http/fetch, @chatwarden/http/cli and @chatwarden/store-memory/testing types', () => {
+    expect(resolve('@chatwarden/http/fetch', BUILT)).toMatch(/\/packages\/http\/dist\/src\/fetch\.d\.ts$/);
+    expect(resolve('@chatwarden/http/cli', BUILT)).toMatch(/\/packages\/http\/dist\/src\/cli\/index\.d\.ts$/);
+    expect(resolve('@chatwarden/store-memory/testing', BUILT)).toMatch(/\/packages\/store-memory\/dist\/src\/testing\/index\.d\.ts$/);
+    expect(resolve('@chatwarden/store-memory', BUILT)).toMatch(/\/packages\/store-memory\/dist\/src\/index\.d\.ts$/);
+  });
+
   it('still resolves the package root types', () => {
     expect(resolve('@chatwarden/http', BUILT)).toMatch(/\/packages\/http\/dist\/src\/index\.d\.ts$/);
   });
@@ -73,6 +84,9 @@ describe('@chatwarden/http under module commonjs / moduleResolution node', () =>
     expect(resolve('@chatwarden/http/express', BUILT, stripped)).toBeUndefined();
     expect(resolve('@chatwarden/http/admin', BUILT, stripped)).toBeUndefined();
     expect(resolve('@chatwarden/http/chat', BUILT, stripped)).toBeUndefined();
+    expect(resolve('@chatwarden/http/fetch', BUILT, stripped)).toBeUndefined();
+    expect(resolve('@chatwarden/http/cli', BUILT, stripped)).toBeUndefined();
+    expect(resolve('@chatwarden/store-memory/testing', BUILT, stripped)).toBeUndefined();
     expect(resolve('@chatwarden/http', BUILT, stripped)).toMatch(/index\.d\.ts$/);
   });
 
@@ -82,7 +96,7 @@ describe('@chatwarden/http under module commonjs / moduleResolution node', () =>
 });
 
 describe('typesVersions mirrors the exports map', () => {
-  it.each([['http'], ['matcher']])('%s: every subpath in "exports" has a typesVersions entry with the same file', (dir) => {
+  it.each([['http'], ['matcher'], ['store-memory']])('%s: every subpath in "exports" has a typesVersions entry with the same file', (dir) => {
     const pkg = manifest(dir);
     const subpaths = Object.entries(pkg.exports).filter(([key]) => key !== '.');
     expect(subpaths.length).toBeGreaterThan(0);

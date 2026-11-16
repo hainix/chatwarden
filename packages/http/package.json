@@ -1,6 +1,6 @@
 {
   "name": "@chatwarden/http",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": false,
   "description": "Chatwarden HTTP package: framework-free router, error mapping, auth hook and role permissions for the admin and player APIs.",
   "license": "Apache-2.0",
@@ -14,7 +14,9 @@
     "chat",
     "http",
     "api",
-    "express"
+    "express",
+    "cli",
+    "init"
   ],
   "homepage": "https://github.com/hainix/chatwarden/tree/main/packages/http#readme",
   "bugs": {
@@ -24,6 +26,9 @@
     "type": "git",
     "url": "git+https://github.com/hainix/chatwarden.git",
     "directory": "packages/http"
+  },
+  "bin": {
+    "chatwarden": "./dist/src/cli/bin.js"
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -43,6 +48,14 @@
     "./express": {
       "types": "./dist/src/express.d.ts",
       "default": "./dist/src/express.js"
+    },
+    "./fetch": {
+      "types": "./dist/src/fetch.d.ts",
+      "default": "./dist/src/fetch.js"
+    },
+    "./cli": {
+      "types": "./dist/src/cli/index.d.ts",
+      "default": "./dist/src/cli/index.js"
     }
   },
   "typesVersions": {
@@ -55,6 +68,12 @@
       ],
       "express": [
         "dist/src/express.d.ts"
+      ],
+      "fetch": [
+        "dist/src/fetch.d.ts"
+      ],
+      "cli": [
+        "dist/src/cli/index.d.ts"
       ]
     }
   },
@@ -82,10 +101,11 @@
     }
   },
   "devDependencies": {
-    "@chatwarden/core": "0.1.9",
-    "@chatwarden/discord": "0.1.9",
-    "@chatwarden/matcher": "0.1.9",
-    "@chatwarden/store-sqlite": "0.1.9",
+    "@chatwarden/core": "0.1.10",
+    "@chatwarden/discord": "0.1.10",
+    "@chatwarden/matcher": "0.1.10",
+    "@chatwarden/profanity": "0.1.10",
+    "@chatwarden/store-sqlite": "0.1.10",
     "@types/express": "^5.0.3",
     "express": "^5.1.0"
   },
