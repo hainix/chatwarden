@@ -9,6 +9,8 @@ import type { KitRequest, KitResponse, PermissionKey, RouteTable } from '@chatwa
 import type { ReportCategory } from '@chatwarden/core';
 import { createHubClient } from '../src/client.js';
 import { advanceGuardTime } from './guardTime.js';
+import { makeCommunity } from './communityWorld.js';
+import type { CommunityOptions } from './communityWorld.js';
 import type { HubClient } from '../src/client.js';
 import { routerTransport } from '../src/transport.js';
 import type { Transport, TransportRequest } from '../src/transport.js';
@@ -44,6 +46,8 @@ export interface WorldOptions {
   limits?: LimitsInput;
   /** How long signal rows are kept, ms (the automatic purge stays off in this world). */
   signalsMs?: number;
+  /** Wire the shared term list (K7): a fake loader and share over the real routes. Default: not wired, so there are no community routes. */
+  community?: CommunityOptions;
 }
 
 export interface FileOptions {
@@ -110,6 +114,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     retention: opts.signalsMs === undefined ? false : { signalsMs: opts.signalsMs },
     ...(opts.limits === undefined ? {} : { limits: opts.limits }),
   });
+  const community = opts.community === undefined ? undefined : makeCommunity(live, opts.community);
   // The caller is whoever `session` says: tests change it to see a role, or nobody (401).
   const session: { who: { actor: string; role: Role } | null } = {
     who: opts.role === null ? null : { actor: opts.actor ?? 'ann@example.test', role: opts.role ?? 'moderator' },
@@ -124,6 +129,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     },
     ...(opts.permissions === undefined ? {} : { permissions: opts.permissions }),
     ...(opts.terms === false ? {} : { terms: live }),
+    ...(community === undefined ? {} : { community: community.admin }),
     gameName: opts.gameName ?? 'Test Game',
   });
   const handle = createRouter(routes);
@@ -262,7 +268,7 @@ export async function hubWorld(opts: WorldOptions = {}) {
     for (let i = 0; i < 5; i += 1) await cw.ai.idle();
   };
 
-  return { cw, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, blockLine, raw, live, now: () => clock.t };
+  return { cw, clock, adapter, aiIdle, session, routes, handle, transport, client, direct, sent, intercept, clientFor, file, fileRich, sanction, blockLine, raw, live, community, now: () => clock.t };
 }
 
 export type HubWorld = Awaited<ReturnType<typeof hubWorld>>;

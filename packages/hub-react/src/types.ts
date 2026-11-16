@@ -369,6 +369,85 @@ export interface TermsList {
   terms: TermRow[];
   exceptions: ExceptionRow[];
   blocks30d: Record<string, number>;
+  /** With the shared term list wired: how many untouched community rows the list left out. The hub never shows it. */
+  community?: { hidden: number };
+}
+
+/**
+ * What the shared term list changes or changed, counted over terms and exceptions together (`GET /community`, `POST /community/apply`).
+ * @experimental
+ */
+export interface CommunitySummary {
+  added: number;
+  deactivated: number;
+  reactivated: number;
+  changed: number;
+  keptYours: number;
+  skipped: number;
+}
+
+/**
+ * `GET /community` and `POST /community/refresh`: the loader's state, the release's languages, licence and counts, and whether sharing is on. No term.
+ * @experimental
+ */
+export interface CommunityStatus {
+  state: 'none' | 'ready' | 'stale' | 'offline' | 'failed';
+  /** The version in the live list. */
+  applied: string | null;
+  /** The newest verified version waiting to be applied. */
+  available: string | null;
+  lastCheckedAt: number | null;
+  pending: CommunitySummary | null;
+  lastError: { code: string; stage: string } | null;
+  languages: string[];
+  license: { spdx: string; attribution: string } | null;
+  counts: {
+    terms: Record<string, number>;
+    exceptions: Record<string, number>;
+    status: { accepted: number; provisional: number; disputed: number; withdrawn: number };
+  } | null;
+  sharing: boolean;
+}
+
+/**
+ * `POST /community/apply`.
+ * @experimental
+ */
+export interface CommunityApplied {
+  ok: true;
+  version: string;
+  summary: CommunitySummary;
+}
+
+/**
+ * `GET /terms/:id` and `POST /terms/lookup`: one term row, a hidden community row too. `community` is true for a row the shared list added.
+ * @experimental
+ */
+export interface TermDetail extends TermRow {
+  community: boolean;
+  blocks30d: number;
+}
+
+/** @experimental */
+export type ShareCategory = 'slur' | 'abuse' | 'sexual' | 'other';
+
+/** Who a slur is aimed at. @experimental */
+export type ShareTarget = 'ethnicity' | 'religion' | 'gender' | 'sexuality' | 'disability' | 'nationality' | 'other';
+
+/** `POST /terms/:id/share`: what the person chose. The word and its language are the row's own, never sent by the hub. @experimental */
+export interface ShareInput {
+  category: ShareCategory;
+  target?: ShareTarget;
+  note?: string | null;
+}
+
+/** Why a share was not added: a closed list. @experimental */
+export type ShareReason = 'known_innocent' | 'not_a_term' | 'duplicate' | 'needs_context' | 'other';
+
+/** `GET /terms/:id/share`: where a shared term stands. `known` and `duplicate` are the answers of the send itself. @experimental */
+export interface ShareState {
+  status: 'received' | 'known' | 'duplicate' | 'in_review' | 'accepted' | 'declined' | 'merged';
+  reason?: ShareReason;
 }
 
 /** @experimental */

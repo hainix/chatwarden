@@ -367,7 +367,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
   - types:
     `ActionResult`, `ActionState`, `ActionStore`, `AiReadAgainResult`, `AiStatusView`, `AppealDecided`, `AppealDecisionInput`, `AppealDetail`, `AppealOutcome`,
     `AppealRow`, `AppealRuleStats`, `AppealStats`, `AppealStatus`, `AppealSummary`, `BlockedDays`, `BlockedLine`, `BlockedName`, `CaseStore`, `CaseStoreOptions`, `Changes`, `Claim`,
-    `ClaimResult`, `CloseGapInput`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
+    `ClaimResult`, `CloseGapInput`, `CommunityApplied`, `CommunityStatus`, `CommunitySummary`, `Connection`, `ContinueOutcome`, `DecideCommand`, `DecideInput`, `DecideOptions`, `DecideResult`,
     `DecisionEntry`, `DecisionForm`, `DecisionHost`, `DecisionOutcome`, `DecisionState`, `DecisionStore`, `DecisionStoreOptions`,
     `DismissOpenInput`, `DismissOpenOutcome`, `DismissOpenRequest`, `DismissOpenResult`,
     `ExceptionInput`, `ExceptionPatch`, `ExceptionRow`, `FetchTransportOptions`, `FlaggedReport`, `Handoff`, `Hold`, `HoldInput`, `Holder`,
@@ -376,7 +376,7 @@ name of each entry point, so any change shows up as a snapshot diff and the chan
     `MeFeatures`, `NextCase`, `NextReport`, `OpenCase`, `Page`, `PageSource`, `PagedListStore`, `PagedState`, `PersonHistory`, `PolicyDocs`,
     `PolicyFormat`, `PolicySamples`, `PolicySaved`, `PolicyState`, `QueueFilter`, `QueueGroup`, `QueueHold`, `QueueSort`, `QueueStats`, `RankSignals`, `Reason`,
     `ReportDetail`, `ReportStatus`, `ResourceState`, `ResourceStore`, `RouterTransportOptions`, `SanctionInput`, `SanctionRow`,
-    `SanctionSource`, `Session`, `SignalCountView`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermInput`,
+    `SanctionSource`, `Session`, `ShareCategory`, `ShareInput`, `ShareReason`, `ShareState`, `ShareTarget`, `SignalCountView`, `StartResult`, `Store`, `SubmitDecision`, `SuggestInput`, `TakeOutcome`, `TeamMember`, `TermDetail`, `TermInput`,
     `TermPatch`, `TermRow`, `TermsList`, `TextVerdict`, `Timers`, `ToastInput`, `ToastRecord`, `ToastStore`, `ToastStoreOptions`,
     `Toasts`, `Transport`, `TransportRequest`, `TransportResponse`, `WritableStore`
 - the `<Hub>` prop `HubProps.onController`

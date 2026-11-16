@@ -219,7 +219,7 @@ function shareBody(body: Record<string, unknown>): { category: CommunityShareInp
  * - `GET /terms/:id` (`terms.read`): one row, a hidden community row too, with `community` and `blocks30d`.
  * - `POST /terms/lookup { word }` (`terms.read`): the row for an exact word (folded), or 404. The word is in the body, never the URL.
  * - with `community.share`: `POST /terms/:id/share { category, target?, note? }` (`terms.write`; audit `term.share`, target `term:<id>`; answer
- *   `{ status }` only; 409 `not_shareable` for a community row) and `GET /terms/:id/share` (`terms.read`; `{ status, reason? }`).
+ *   `{ status }` only; 409 `not_shareable` for a community row) and `GET /terms/:id/share` (`terms.read`; `{ status, reason? }`, or `{ status: null }` for a term never shared).
  * A failed share is a fixed error code (`share_unavailable` 502, `share_refused` 422, `rate_limited` 429, 400), never the service's text.
  */
 export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): RouteTable {
@@ -308,8 +308,9 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
     table['GET /terms/:id~ref/share'] = ctx.secure('terms.read', async (c) => {
       const id = c.params.id as string;
       if (find(id) === undefined) throw new NotFoundError();
+      // A term that was never shared is not an error: `{ status: null }`, so a page that asks as it opens an editor logs nothing.
       const last = shared.get(id);
-      if (last === undefined) throw new NotFoundError();
+      if (last === undefined) return { status: 200, body: { status: null } };
       let answer: unknown = null;
       if (last.id !== null) {
         try {

@@ -13,10 +13,15 @@ import { TermForm } from '../terms/TermForm.js';
 import type { TermKind, TermRowDraft } from '../terms/TermForm.js';
 import { languageLabel, sortLanguages } from '../terms/languages.js';
 import { Tester } from '../terms/Tester.js';
-import type { ExceptionRow, TermRow, TermsList } from '../types.js';
+import type { ExceptionRow, TermDetail, TermRow, TermsList } from '../types.js';
 import { Empty, ErrorBlock, Loading, Notice, Panel, Scroll, Tag, Time } from '../ui.js';
 
 type Row = (TermRow & { word: string }) | (ExceptionRow & { word: string });
+
+/** A row the shared community list added or last changed: its `by` is `corpus:<version>`, not a person. */
+const COMMUNITY_BY = 'corpus:';
+/** `2026.12.0` reads as the month's list, `2026.12`; a patch release (`2026.12.1`) keeps its number. */
+const versionOf = (by: string): string => by.slice(COMMUNITY_BY.length).replace(/\.0$/, '');
 
 interface FormState {
   kind: TermKind;
@@ -60,25 +65,37 @@ export function Terms() {
   const canWrite = can('terms.write');
   const data = list.data;
   const pickedId = handoff?.kind === 'term' ? handoff.id : null;
-  // The marked row takes the focus and the scroll once, when the list first arrives: a reload after a switch must not take them back.
+  const pickedFrom = handoff?.kind === 'term' && handoff.from === 'find' ? 'find' : 'blocked';
+  // An untouched community row is not in the list (the server counts it, never lists it): the one a moderator was sent to is fetched by
+  // its id, once, and shown with the rest. After they switch it off it is a touched row and the list holds it.
+  const [fetched, setFetched] = useState<TermDetail | null>(null);
+  const asked = useRef(false);
+  useEffect(() => {
+    if (pickedId === null || data === undefined || asked.current || data.terms.some((r) => r.id === pickedId)) return;
+    asked.current = true;
+    void client.getTerm(pickedId).then(setFetched, () => undefined);
+  }, [pickedId, data, client]);
+  const terms = useMemo(() => (data === undefined ? [] : fetched !== null && !data.terms.some((r) => r.id === fetched.id) ? [...data.terms, fetched] : data.terms), [data, fetched]);
+  // The marked row takes the focus and the scroll once, when it first appears: a reload after a switch must not take them back.
   const pickedDone = useRef(false);
   useEffect(() => {
     if (pickedId === null || data === undefined || pickedDone.current) return;
-    pickedDone.current = true;
     const row = picked.current.get(pickedId);
-    row?.focus({ preventScroll: true });
-    row?.scrollIntoView?.({ block: 'center' });
-  }, [pickedId, data]);
+    if (row === undefined) return;
+    pickedDone.current = true;
+    row.focus({ preventScroll: true });
+    row.scrollIntoView?.({ block: 'center' });
+  }, [pickedId, data, fetched]);
 
   const groups = useMemo(() => {
     if (data === undefined) return [];
-    const languages = sortLanguages([...data.terms.map((r) => r.language), ...data.exceptions.map((r) => r.language)], locale);
+    const languages = sortLanguages([...terms.map((r) => r.language), ...data.exceptions.map((r) => r.language)], locale);
     return languages.map((language) => ({
       language,
-      terms: data.terms.filter((r) => r.language === language).map((r): Row => ({ ...r, word: r.term })),
+      terms: terms.filter((r) => r.language === language).map((r): Row => ({ ...r, word: r.term })),
       exceptions: data.exceptions.filter((r) => r.language === language).map((r): Row => ({ ...r, word: r.phrase })),
     }));
-  }, [data, locale]);
+  }, [data, terms, locale]);
 
   if (data === undefined) {
     if (list.error === null) return <Screen><Loading /></Screen>;
@@ -135,10 +152,12 @@ export function Terms() {
     }
   };
 
-  const matchOf = (termId: string) => {
-    const row = data.terms.find((r) => r.id === termId);
+  const matchOf = (termId: string, one?: TermRow) => {
+    const row = terms.find((r) => r.id === termId) ?? one;
     return row === undefined ? null : { word: shown ? row.term : null, language: languageLabel(row.language, locale) };
   };
+
+  const counts: TermsList['blocks30d'] = fetched === null ? data.blocks30d : { [fetched.id]: fetched.blocks30d, ...data.blocks30d };
 
   const name = (kind: TermKind, row: Row, n: number): string => (shown ? row.word : t(kind === 'term' ? 'hub.terms.rowName.term' : 'hub.terms.rowName.exception', { n }));
 
@@ -160,6 +179,7 @@ export function Terms() {
             const rowName = name(kind, row, i + 1);
             const by = row.updatedBy ?? row.addedBy;
             const at = row.updatedAt ?? row.addedAt;
+            const byCommunity = by !== null && by.startsWith(COMMUNITY_BY);
             return (
               <Fragment key={row.id}>
               <tr
@@ -176,13 +196,15 @@ export function Terms() {
                   {row.id === pickedId && kind === 'term' && (
                     <>
                       {' '}
-                      <Tag>{t('hub.terms.fromBlocked')}</Tag>
+                      <Tag>{t(pickedFrom === 'find' ? 'hub.terms.fromFind' : 'hub.terms.fromBlocked')}</Tag>
                     </>
                   )}
                 </td>
                 <td className="cw-term-note">{row.note === null ? <span className="cw-hint">{t('hub.terms.noNote')}</span> : row.note}</td>
                 <td className="cw-term-changed">
-                  {by === null || at === null ? (
+                  {byCommunity ? (
+                    t('hub.terms.changed.community', { version: versionOf(by) })
+                  ) : by === null || at === null ? (
                     t('hub.terms.changed.starter')
                   ) : (
                     <>
@@ -214,7 +236,7 @@ export function Terms() {
                         if (el === null) editButtons.current.delete(row.id);
                         else editButtons.current.set(row.id, el);
                       }}
-                      onClick={() => open(kind, { id: row.id, word: row.word, language: row.language, note: row.note })}
+                      onClick={() => open(kind, { id: row.id, word: row.word, language: row.language, note: row.note, community: kind === 'term' && row.addedBy?.startsWith(COMMUNITY_BY) === true })}
                     >
                       {t('hub.terms.edit')}
                     </button>
@@ -293,7 +315,7 @@ export function Terms() {
           />
         </div>
       )}
-      <Tester matchOf={matchOf} />
+      <Tester matchOf={matchOf} loadOne={(id) => client.getTerm(id)} />
       {groups.length === 0 ? (
         <Empty>{t('hub.terms.empty')}</Empty>
       ) : (
@@ -301,7 +323,7 @@ export function Terms() {
           <Panel key={g.language} title={languageLabel(g.language, locale)}>
             <div className="cw-terms-group">
               <h3>{t('hub.terms.group.terms')}</h3>
-              {g.terms.length === 0 ? <p className="cw-hint">{t('hub.terms.noneInLanguage')}</p> : table('term', g.terms, g.language, data.blocks30d)}
+              {g.terms.length === 0 ? <p className="cw-hint">{t('hub.terms.noneInLanguage')}</p> : table('term', g.terms, g.language, counts)}
               <h3>{t('hub.terms.group.exceptions')}</h3>
               {g.exceptions.length === 0 ? <p className="cw-hint">{t('hub.terms.noneInLanguage')}</p> : table('exception', g.exceptions, g.language, data.blocks30d)}
             </div>

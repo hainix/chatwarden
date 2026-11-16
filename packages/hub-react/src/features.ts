@@ -8,10 +8,12 @@ export interface Features {
   appeals: boolean;
   /** A moderator may ask for a new name and this role may apply sanctions: the last option of the Sanction form. */
   renames: boolean;
+  /** The server wired the shared term list and this role may read terms: the Settings section, and the Share disclosure's question to the server. */
+  community: boolean;
 }
 
 export function useFeatures(): Features {
   const { me, can } = useHub();
   const appeals = me.features?.appeals === true && can('appeals.read');
-  return { appeals, renames: me.features?.renames === true && can('sanctions.apply') };
+  return { appeals, renames: me.features?.renames === true && can('sanctions.apply'), community: me.features?.community === true && can('terms.read') };
 }

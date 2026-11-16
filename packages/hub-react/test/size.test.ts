@@ -190,6 +190,15 @@ describe('bundle size', () => {
     }
   });
 
+  it('keeps the Community list section and the Share disclosure out of the first load: each a chunk of its own, loaded when used (K7)', async () => {
+    const { entryInputs, eagerInputs, chunkRoots } = await bundle();
+    for (const file of ['settings/Community.tsx', 'terms/ShareTerm.tsx']) {
+      expect(entryInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the entry`).toEqual([]);
+      expect(eagerInputs.filter((i) => i.endsWith(`src/${file}`)), `${file} is in the first load`).toEqual([]);
+      expect(chunkRoots.filter((i) => i.endsWith(`src/${file}`)), `${file} has no chunk`).toHaveLength(1);
+    }
+  });
+
   it('the stylesheet is small too', async () => {
     const { readFile } = await import('node:fs/promises');
     const css = await readFile(fileURLToPath(new URL('../src/styles.css', import.meta.url)));

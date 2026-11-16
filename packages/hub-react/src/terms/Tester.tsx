@@ -1,10 +1,10 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Field } from '../case/ActionEditor.js';
 import { toHubError } from '../client.js';
 import type { HubError } from '../client.js';
 import { useHub } from '../context.js';
 import { errorText } from '../labels.js';
-import type { TextVerdict } from '../types.js';
+import type { TermDetail, TermRow, TextVerdict } from '../types.js';
 import { Panel } from '../ui.js';
 
 /** What the live list says about one line: whether it would be blocked, and by which term (its word and language, as far as they may be shown). */
@@ -19,7 +19,15 @@ export interface Matched {
  * "Test a message": would the live list block this chat line? Nothing is sent to anyone and nothing is saved or audited. The line
  * you typed is never repeated in the answer, and the matching word is named only when words are shown.
  */
-export function Tester({ matchOf }: { matchOf: (termId: string) => Matched | null }) {
+export function Tester({
+  matchOf,
+  loadOne,
+}: {
+  /** The term the list names, from the rows on the screen or (second argument) one fetched for the purpose. */
+  matchOf: (termId: string, fetched?: TermRow) => Matched | null;
+  /** One row by id, for a term the list does not hold (an untouched community row is counted, never listed). */
+  loadOne?: (termId: string) => Promise<TermDetail>;
+}) {
   const { t, client } = useHub();
   const id = useId();
   const [text, setText] = useState('');
@@ -47,7 +55,25 @@ export function Tester({ matchOf }: { matchOf: (termId: string) => Matched | nul
     }
   };
 
-  const matched = result?.termId == null ? null : matchOf(result.termId);
+  // A term the screen does not list is fetched on its own, once per answer, and named like any other.
+  const [one, setOne] = useState<TermDetail | null>(null);
+  const termId = result?.termId ?? null;
+  const unlisted = termId !== null && matchOf(termId) === null;
+  const load = useRef(loadOne);
+  load.current = loadOne;
+  const have = one?.id === termId;
+  useEffect(() => {
+    if (!unlisted || termId === null || have || load.current === undefined) return;
+    let live = true;
+    void load.current(termId).then(
+      (row) => live && setOne(row),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [unlisted, termId, have]);
+  const matched = termId === null ? null : matchOf(termId, one?.id === termId ? one : undefined);
   const problem = attempted && text.trim() === '' ? { key: 'hub.terms.test.empty' as const } : undefined;
 
   return (

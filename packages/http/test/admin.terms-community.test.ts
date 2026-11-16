@@ -343,9 +343,12 @@ describe('POST /terms/:id/share', () => {
 describe('GET /terms/:id/share', () => {
   const own = (w: Awaited<ReturnType<typeof communityWorld>>): string => w.own.id;
 
-  it('is 404 for a term that was never shared, and needs terms.read', async () => {
+  it('says { status: null } for a term that was never shared (a browser logs a 404 as an error), 404 for a term that is not there, and needs terms.read', async () => {
     const w = await communityWorld({ permissions: { 'terms.read': 'senior' } });
-    expect((await w.call('GET', `/terms/${own(w)}/share`, { role: 'senior' })).status).toBe(404);
+    const never = await w.call('GET', `/terms/${own(w)}/share`, { role: 'senior' });
+    expect(never.status).toBe(200);
+    expect(never.body).toEqual({ status: null });
+    expect(w.share.statusCalls).toEqual([]);
     expect((await w.call('GET', `/terms/${own(w)}/share`, { role: 'moderator' })).status).toBe(403);
     expect((await w.call('GET', '/terms/CWT-2026-99999/share', { role: 'senior' })).status).toBe(404);
   });

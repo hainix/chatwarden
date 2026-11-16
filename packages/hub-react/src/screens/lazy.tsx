@@ -156,6 +156,7 @@ export function lazyScreen<P extends object>(what: HubText, load: () => Promise<
   return Screen;
 }
 
+export const LazyCommunitySettings = lazyScreen('hub.state.what.community', () => import('../settings/Community.js').then((m) => m.CommunitySettings));
 export const LazyTerms = lazyScreen('hub.state.what.terms', () => import('./Terms.js').then((m) => m.Terms));
 export const LazyBlocked = lazyScreen('hub.state.what.blocked', () => import('./Blocked.js').then((m) => m.Blocked));
 export const LazyGaps = lazyScreen('hub.state.what.gaps', () => import('./Gaps.js').then((m) => m.Gaps));
