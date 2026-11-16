@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { GateTable } from '../ai/GateTable.js';
 import { useAiT } from '../ai/i18n.js';
 import type { AiT } from '../ai/i18n.js';
 import { useHub } from '../context.js';
@@ -233,6 +234,7 @@ function Editor({ state, policy }: { state: PolicyState; policy: UsePolicy }) {
         </button>
         {advanced && (
           <div id={`${base}-advanced`}>
+            <GateTable />
             <Numbers status={readStatus} draft={draft} editable={editable} onLearn={(learn) => setDraftState((d) => ({ ...d, learn }))} signalsSent={state.effective.signals?.feeds?.ai !== undefined} t={t} />
           </div>
         )}

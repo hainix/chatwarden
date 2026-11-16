@@ -9,11 +9,13 @@ import type {
   AppealStats as KitAppealStats,
   AppealStatus as KitAppealStatus,
   AppealSummary as KitAppealSummary,
+  AiGatesView as KitAiGatesView,
   AiReadView,
   AiStatsView,
   AiStatus,
   AuditAction,
   AuditItem,
+  AutomationCode as KitAutomationCode,
   Chatwarden,
   CommunityRule,
   ConductLevel,
@@ -89,6 +91,25 @@ export type { AiReadView };
  * @experimental
  */
 export type AiStatusView = AiStatus & { learn: boolean; stats: AiStatsView };
+
+/**
+ * `GET /ai/gates` (AI levels 3 and 4, release 1): every rule and conduct level the profile could ever act on, with each gate's number against its need, the reach
+ * and any cooling date. Computed on the server from the store and the clock; the hub shows it as sent and computes no gate. Read-only: nothing in this release lets the AI act.
+ * @experimental
+ */
+export type AiGatesView = KitAiGatesView;
+
+/** One cell of {@link AiGatesView}: a rule at a conduct level. @experimental */
+export type AiGateCell = AiGatesView['cells'][number];
+
+/** The closed reasons a person can be marked "do not automate" for. @experimental */
+export type AutomationCode = KitAutomationCode;
+
+/**
+ * What `PUT /people/:id/automation` takes: `allowed: false` with one of the closed reason codes (mark the person), or `allowed: true` (clear the mark).
+ * @experimental
+ */
+export type AutomationInput = { allowed: false; code: AutomationCode } | { allowed: true };
 
 /**
  * `POST /reports/:id/ai/read`: the read when nothing changed (`ready`, no call made), or `pending` when a read was queued.
@@ -303,6 +324,11 @@ export interface PersonHistory {
    * @experimental
    */
   renames?: Array<{ at: number; pending: boolean }>;
+  /**
+   * The "do not automate" mark (AI levels 3 and 4): the closed reason code and when it was set (null when the server could not read the time). Present only
+   * while the person is marked, and never says who set it. Absent from an older server. @experimental
+   */
+  automation?: { code: AutomationCode; at: number | null };
 }
 
 /**

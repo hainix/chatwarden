@@ -189,3 +189,37 @@ describe('PUT /people/:id/automation', () => {
     expect(JSON.stringify(w.cw.ai.gates())).toBe(before);
   });
 });
+
+describe('GET /people/:ref/history carries the mark, and only while there is one', () => {
+  it('a marked person has automation { code, at }; no actor, no other key', async () => {
+    const w = await world();
+    const person = w.person();
+    await put(w, person, { allowed: false, code: 'under_review' }, { actor: 'sen_cy' });
+    const res = await w.call('GET', `/people/${person}/history`, { role: 'moderator' });
+    expect(res.status).toBe(200);
+    const body = res.body as { automation?: unknown };
+    expect(body.automation).toEqual({ code: 'under_review', at: w.clock.t });
+    expect(JSON.stringify(res.body)).not.toContain('sen_cy');
+  });
+
+  it('an unmarked person, and a person whose mark was cleared, have no automation key (the body is what it was)', async () => {
+    const w = await world();
+    const person = w.person();
+    expect(Object.keys((await w.call('GET', `/people/${person}/history`)).body as object)).not.toContain('automation');
+    await put(w, person);
+    await put(w, person, { allowed: true });
+    expect(Object.keys((await w.call('GET', `/people/${person}/history`)).body as object)).not.toContain('automation');
+  });
+
+  it('the mark is seen through a merged alias', async () => {
+    const w = await world();
+    w.cw.rooms.seat('r-a', 'p1', { clientKey: 'k-h-a', accountId: 'acct-h' }, 'A');
+    const a = w.cw.rooms.subjectAt('r-a', 'p1') as string;
+    w.cw.rooms.seat('r-b', 'p1', { clientKey: 'k-h-b' }, 'B');
+    const b = w.cw.rooms.subjectAt('r-b', 'p1') as string;
+    w.cw.rooms.seat('r-b2', 'p1', { clientKey: 'k-h-b', accountId: 'acct-h' }, 'B');
+    await put(w, b);
+    expect((await w.call('GET', `/people/${a}/history`)).body).toMatchObject({ automation: { code: 'vulnerable' } });
+  });
+});
+

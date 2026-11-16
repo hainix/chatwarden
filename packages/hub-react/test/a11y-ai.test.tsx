@@ -1,4 +1,6 @@
 import { cleanup, screen, within } from '@testing-library/react';
+import { renderHub } from './render.js';
+import { hubWorld } from './world.js';
 import axe from 'axe-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { forgetHiddenAi } from '../src/ai/hide.js';
@@ -79,5 +81,31 @@ describe('at 360 px the strip wraps and nothing scrolls sideways', () => {
   it('the menu is in the flow on a phone (it grows the strip, it does not float off the screen)', () => {
     expect(rule('.cw-hub .cw-ai-menu')).not.toMatch(/position:\s*absolute/);
     expect(rule('.cw-hub .cw-ai-menu')).toMatch(/min-width:\s*0/);
+  });
+});
+
+// The gate table (Settings > AI > Advanced) and the Person page's "Do not automate" under axe, in both themes: the table has headers, the ticks have text
+// alternatives (a mark hidden from a reader and a word that is not), and the `...` group is a labelled fieldset.
+describe.each(['light', 'dark'] as const)('axe on the gate table and the Person mark, %s theme', (theme) => {
+  it('the gate table, open, with the never-acted list open', async () => {
+    const w = await hubWorld({ role: 'owner', profile: 'strict', ai: { level: 2 } });
+    const { container, user } = renderHub(w, { path: '/settings/ai', theme });
+    await user.click(await screen.findByRole('button', { name: 'Advanced' }));
+    const table = await screen.findByRole('table', { name: 'Gates for each rule and conduct level' });
+    expect(within(table).getAllByRole('columnheader').length).toBe(10);
+    expect(within(table).getAllByRole('rowheader').length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: /^Never acted on by the AI/ }));
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it('the Person page with a mark and the "..." group open', async () => {
+    const w = await hubWorld({ role: 'senior' });
+    const f = await w.file();
+    w.cw.people.automation.set(f.person, { allowed: false, code: 'vulnerable', actor: 'sen_bea' });
+    const { container, user } = renderHub(w, { path: `/people/${f.person}`, theme });
+    await screen.findByText(/Do not automate: the AI never acts on this person/);
+    await user.click(await screen.findByRole('button', { name: 'More' }));
+    expect(screen.getByRole('group', { name: 'Do not automate' })).toBeInTheDocument();
+    expect(await violations(container)).toEqual([]);
   });
 });

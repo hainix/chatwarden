@@ -245,8 +245,10 @@ describe('the stylesheet is a complete token contract', () => {
   // of repeated text raw, about +1 KB gzipped. Gzip is the contract; the raw cap only keeps the file from growing without a look.
   // 120 KB at 0.1.8 (flood control and signals): the maintainer's rule for the release is to raise budgets generously rather than trim; the Advanced
   // settings forms and the Person page's signal lines add about 2 KB raw. The gzipped limit (the size test) is unchanged and holds.
-  it('is under 120 KB raw (the size test holds it to 18 KB gzipped)', () => {
-    expect(Buffer.byteLength(css)).toBeLessThan(120 * 1024);
+  // 128 KB at 0.1.13 (AI levels 3 and 4, release 1): the gate table and the Person page's "do not automate" mark add about 2 KB raw; the AI, appeals and names
+  // screens of 0.1.7 to 0.1.9 had already brought the file to the old cap. Raised generously, as every release does; the gzipped limit (the size test) is what counts.
+  it('is under 128 KB raw (the size test holds it to 18 KB gzipped)', () => {
+    expect(Buffer.byteLength(css)).toBeLessThan(128 * 1024);
   });
 });
 

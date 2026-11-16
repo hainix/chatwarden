@@ -20,8 +20,10 @@ import { bundle } from '../build/build.mjs';
 // Raised to 240 KB gzipped and 860 KB raw at 0.1.8 (the maintainer's standing rule: a size budget is raised generously with a comment, never trimmed for
 // bytes). Measured 218,083 gzipped and 796,576 raw: the standalone bundle inlines every lazy chunk, so the Advanced screen (slow mode and flooding,
 // signals), the Person page signal lines and the AI parts all count here in full, and the hub's stylesheet grew with them.
+// Raised to 960 KB raw at 0.1.13 (AI levels 3 and 4, release 1): the standalone bundle inlines every lazy chunk, so the gate table and the Person page's "do not
+// automate" part count in full, after the appeals and names screens of 0.1.9 had brought it to the old cap (measured 892,021 raw). The gzip budget holds.
 const BUDGET_GZIP = 240 * 1024;
-const BUDGET_RAW = 860 * 1024;
+const BUDGET_RAW = 960 * 1024;
 
 interface Built {
   standalone: { text: string; bytes: number; gzip: number };
