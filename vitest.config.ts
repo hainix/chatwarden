@@ -68,6 +68,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL('./packages/http/src/coop/index.ts', import.meta.url)),
       },
       {
+        find: '@chatwarden/http/eos',
+        replacement: fileURLToPath(new URL('./packages/http/src/eos/index.ts', import.meta.url)),
+      },
+      {
         find: '@chatwarden/http/chat',
         replacement: fileURLToPath(new URL('./packages/http/src/chat/index.ts', import.meta.url)),
       },

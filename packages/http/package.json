@@ -64,6 +64,10 @@
     "./coop": {
       "types": "./dist/src/coop/index.d.ts",
       "default": "./dist/src/coop/index.js"
+    },
+    "./eos": {
+      "types": "./dist/src/eos/index.d.ts",
+      "default": "./dist/src/eos/index.js"
     }
   },
   "typesVersions": {
@@ -88,6 +92,9 @@
       ],
       "coop": [
         "dist/src/coop/index.d.ts"
+      ],
+      "eos": [
+        "dist/src/eos/index.d.ts"
       ]
     }
   },

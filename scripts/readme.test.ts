@@ -449,6 +449,7 @@ declare const bot: import('@chatwarden/http/discord').DiscordBot;
         '@chatwarden/http/chat': src('http/src/chat/index.ts'),
         '@chatwarden/http/discord': src('http/src/discord/index.ts'),
         '@chatwarden/http/coop': src('http/src/coop/index.ts'),
+        '@chatwarden/http/eos': src('http/src/eos/index.ts'),
         '@chatwarden/hub-element': src('hub-element/src/index.ts'),
         '@chatwarden/hub-element/standalone': src('hub-element/src/standalone.ts'),
         '@chatwarden/hub-react': src('hub-react/src/index.ts'),
