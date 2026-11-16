@@ -3,6 +3,7 @@ import type { Chatwarden } from '@chatwarden/core';
 import { createEosClient } from './client.js';
 import { resolveOptions } from './options.js';
 import type { EosOptions } from './options.js';
+import { createSanctions } from './sanctions.js';
 import { createTokenSource } from './token.js';
 
 export type { EosKind, EosOptions, EosSeat } from './options.js';
@@ -19,7 +20,7 @@ export interface PollResult {
 export interface EosAdapter {
   /** One pass over `reports.players()`: find reports about them since the cursor, file the ones both of whose players are seated together. */
   pollReports(): Promise<PollResult>;
-  /** Poll every `pollMs` on a timer that does not keep the process alive. `stop()` or `dispose()` ends it. */
+  /** Poll every `pollMs` on a timer that does not keep Node running. `stop()` or `dispose()` ends it. */
   start(): void;
   stop(): void;
   /** Unsubscribe, clear timers, abort what is in flight and drop the queue. Safe to call more than once; nothing is written afterwards. */
@@ -39,7 +40,7 @@ export function eos(cw: Chatwarden, options: EosOptions): EosAdapter {
   const call = o.fetch ?? ((input: string | URL | Request, init?: RequestInit) => globalThis.fetch(input, init));
   const tokens = createTokenSource({ clientId: o.clientId, clientSecret: o.clientSecret, deploymentId: o.deploymentId, baseUrl: o.baseUrl, fetch: call, clock: o.clock, logger: o.logger });
   const client = createEosClient({ tokens, baseUrl: o.baseUrl, deploymentId: o.deploymentId, fetch: call });
-  void client;
+  const sanctions = createSanctions(cw, o, client);
   let disposed = false;
   return {
     pollReports: () => Promise.resolve({ seen: 0, filed: 0, skipped: {}, refused: {} }),
@@ -48,6 +49,7 @@ export function eos(cw: Chatwarden, options: EosOptions): EosAdapter {
     dispose() {
       if (disposed) return;
       disposed = true;
+      sanctions.dispose();
       tokens.dispose();
     },
   };

@@ -4,6 +4,13 @@
 // UNVERIFIED against the real service (design section 15): that `duration: 0` is permanent on create, the batch limit for `reportedPlayerId`, rate limits, the error
 // bodies, and what an unknown `referenceId` answers on a delete (this fake answers 404).
 
+import { createHash } from 'node:crypto';
+import type { Chatwarden, KitEvent } from '@chatwarden/core';
+import { eos } from '../src/eos/index.js';
+import type { EosAdapter, EosOptions } from '../src/eos/index.js';
+import { world } from './world.js';
+import type { WorldOptions } from './world.js';
+
 export const EOS_URL = 'https://api.epicgames.dev';
 export const DEPLOYMENT = 'deployment0zorbak0000000000000001';
 export const CLIENT_ID = 'xyzclientid0vlemmo0000000000001';
@@ -339,4 +346,109 @@ export type FakeEos = ReturnType<typeof fakeEos>;
 export function recordingLogger() {
   const logged: Array<[string, Record<string, string | number | boolean> | undefined]> = [];
   return { logged, logger: { warn: (event: string, detail?: Record<string, string | number | boolean>) => void logged.push([event, detail]) } };
+}
+
+// ---- a whole adapter on a real kit ----
+
+type W = Awaited<ReturnType<typeof world>>;
+
+export interface EosWorldOptions {
+  /** Extra or replaced `sanctions` options; `false` leaves the push off. */
+  sanctions?: Record<string, unknown> | false;
+  /** Extra or replaced `reports` options; `false` leaves the pull off. */
+  reports?: Record<string, unknown> | false;
+  /** Other adapter options. */
+  options?: Record<string, unknown>;
+  world?: WorldOptions;
+  fake?: FakeEosOptions;
+  /** Wrap the kit the ADAPTER sees (a proxy that fails a call); the test still reads the real one through `cw` and `w`. */
+  wrapKit?: (cw: Chatwarden) => Chatwarden;
+}
+
+/** The hex sha256 the adapter's link keys are built from. */
+export const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
+/** The `eos-sanction` link key for a group and a product user id (design 5.1). */
+export const sanctionKey = (groupId: string, productUserId: string): string => `${groupId}#${sha(productUserId).slice(0, 16)}`;
+/** The `eos-report` link key (design 5.1). */
+export const reportKey = (r: { time: string; reportingPlayerId: string; reportedPlayerId: string; reasonId: number }): string => sha(`${r.time}|${r.reportingPlayerId}|${r.reportedPlayerId}|${r.reasonId}`);
+
+/** An adapter on kit world `w` (the kit keeps its own clock), with a fake EOS, the adopter's two maps as plain tables, and a recording logger. */
+export function makeEos(w: W, over: EosWorldOptions = {}) {
+  const fake = fakeEos(over.fake);
+  const { logged, logger } = recordingLogger();
+  /** subject (any alias) -> product user ids: the adopter's own account table. */
+  const accounts = new Map<string, string[]>();
+  /** product user id -> seat: the adopter's session table. */
+  const seats = new Map<string, { roomId: string; seatId: string } | null>();
+  /** Who `reports.players()` names. */
+  const players: string[] = [];
+  /** Every call of productUserIdsOf, as [subject, aliases]. */
+  const resolved: Array<[string, readonly string[]]> = [];
+  /** Handlers the adapter subscribed, so a test can raise an event the kit does not raise by itself. */
+  const subs: Array<[string, (e: KitEvent) => void]> = [];
+  const base = over.wrapKit === undefined ? w.cw : over.wrapKit(w.cw);
+  const kit = new Proxy(base, {
+    get(target, prop, receiver) {
+      if (prop === 'on') {
+        return (type: string, fn: (e: KitEvent) => void) => {
+          subs.push([type, fn]);
+          return (target.on as (t: string, f: (e: KitEvent) => void) => () => void)(type, fn);
+        };
+      }
+      return Reflect.get(target, prop, receiver) as unknown;
+    },
+  });
+  const adapter: EosAdapter = eos(kit, {
+    deploymentId: DEPLOYMENT,
+    clientId: CLIENT_ID,
+    clientSecret: CLIENT_SECRET,
+    baseUrl: EOS_URL,
+    ...(over.sanctions === false
+      ? {}
+      : {
+          sanctions: {
+            productUserIdsOf: (subject: string, aliases: readonly string[]) => {
+              resolved.push([subject, aliases]);
+              return [...new Set(aliases.flatMap((a) => accounts.get(a) ?? []))];
+            },
+            actions: { chat: 'chatwarden-chat', area: 'chatwarden-area', ban: 'chatwarden-ban' },
+            ...over.sanctions,
+          },
+        }),
+    ...(over.reports === false
+      ? {}
+      : {
+          reports: {
+            seatOf: (id: string) => seats.get(id) ?? null,
+            players: () => [...players],
+            ...over.reports,
+          },
+        }),
+    fetch: fake.fetch,
+    clock: w.clock,
+    random: () => 0.5,
+    logger,
+    ...over.options,
+  } as unknown as EosOptions);
+  /** Raise an event to the adapter's own subscription (the kit's `auto.restricted` needs a matcher; this is the same call). */
+  const emit = (event: KitEvent): void => {
+    for (const [type, fn] of subs) if (type === event.type || type === '*') fn(event);
+  };
+  return { w, cw: w.cw, fake, adapter, logged, accounts, seats, players, resolved, subs, emit };
+}
+
+/** A kit world with an adapter already subscribed. */
+export async function eosWorld(over: EosWorldOptions = {}) {
+  const w = await world(over.world);
+  return makeEos(w, over);
+}
+export type EosWorld = Awaited<ReturnType<typeof eosWorld>>;
+
+/** Wait (real timers) until `check` holds. */
+export async function until(check: () => boolean, what: string): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > 4000) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
