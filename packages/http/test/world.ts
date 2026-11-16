@@ -42,6 +42,8 @@ export interface WorldOptions {
   matcher?: Matcher;
   /** The kit's profanity filter (for `names.profanity`). Default none. */
   profanity?: ProfanityFilter;
+  /** The shared term list's admin (K7): built from the world's `LiveTerms`. Default none: no community routes. */
+  community?: (live: LiveTerms) => Parameters<typeof adminRoutes>[1]['community'];
 }
 
 export async function world(over: WorldOptions = {}) {
@@ -82,6 +84,7 @@ export async function world(over: WorldOptions = {}) {
     ...(over.permissions === undefined ? {} : { permissions: over.permissions }),
     ...(over.terms === false ? {} : { terms: live }),
     ...(over.recentLines === undefined ? {} : { recentLines: over.recentLines }),
+    ...(over.community === undefined ? {} : { community: over.community(live) }),
     ...(over.gameName === undefined ? {} : { gameName: over.gameName }),
     ...(over.contactUrl === undefined ? {} : { contactUrl: over.contactUrl }),
   });

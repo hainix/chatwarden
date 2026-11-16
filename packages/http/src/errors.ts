@@ -37,6 +37,9 @@ const TABLE = {
   already_appealed: { status: 409, message: 'This has already been appealed.' },
   same_decider: { status: 409, message: 'The person who made the decision cannot decide its appeal.' },
   gone: { status: 409, message: 'The sanction this appeal was about is gone.' },
+  not_shareable: { status: 409, message: 'This term cannot be shared.' },
+  nothing_to_apply: { status: 409, message: 'There is no verified community list to apply.' },
+  apply_refused: { status: 409, message: 'The community list could not be applied; nothing was changed.' },
   pending_rename: { status: 409, message: 'A rename is already waiting for this player.' },
   conflict: { status: 409, message: 'The settings changed since you loaded them.' },
   claimed: { status: 409, message: 'Another moderator is handling this case.' },
@@ -45,9 +48,11 @@ const TABLE = {
   in_progress: { status: 409, message: 'A request with this idempotency key is still being processed.' },
   idempotency_mismatch: { status: 409, message: 'This idempotency key was used with a different request.' },
   payload_too_large: { status: 413, message: 'The request body is too large.' },
+  share_refused: { status: 422, message: 'The community list did not take this term.' },
   rate_limited: { status: 429, message: 'Too many requests. Try again later.' },
   ai_budget: { status: 429, message: 'The AI has reached its limit for today.' },
   not_supported: { status: 501, message: 'This store cannot save settings.' },
+  share_unavailable: { status: 502, message: 'The community list could not be reached.' },
   ai_unavailable: { status: 503, message: 'The AI cannot be called right now.' },
 } as const;
 

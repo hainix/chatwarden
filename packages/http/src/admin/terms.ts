@@ -4,6 +4,7 @@ import { HttpError, NotFoundError, ValidationError } from '../errors.js';
 import { REF_PARAM_RE } from '../router.js';
 import type { RouteTable } from '../router.js';
 import type { AdminContext } from './context.js';
+import { isUntouchedCommunityRow } from './community.js';
 import { bodyObject, has } from './validate.js';
 
 // The term routes talk to the matcher package's `LiveTerms` through the small structural interface below, so this
@@ -126,7 +127,7 @@ const note = (v: unknown): string | null => {
  * The term text appears in the `GET /terms` rows and the `check` hits only. A refused change is 400 `invalid_term` with a fixed
  * message: the matcher's reason, the term and the row ids it names are never passed on, and the text is never in an audit row.
  */
-export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: () => readonly string[]): RouteTable {
+export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: () => readonly string[], community?: { expose: boolean }): RouteTable {
   type Kind = 'term' | 'exception';
   // A stored id the `:id~ref` pattern would 404 can be listed but never edited: say so once, by count only.
   const unroutable = [...terms.rows.terms, ...terms.rows.exceptions].filter((r) => !REF_PARAM_RE.test(r.id)).length;
@@ -134,7 +135,18 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
   const { cw } = ctx;
   const table: RouteTable = {
     'GET /terms': ctx.secure('terms.read', () => {
-      const rows = terms.records?.() ?? terms.rows;
+      const all = terms.records?.() ?? terms.rows;
+      // With the shared list wired, community rows no person has touched are counted, not listed (design 8.5): no bulk term data reaches
+      // the browser by default. A row someone edited is the adopter's and is listed like any other.
+      let rows = all;
+      let hidden = 0;
+      if (community !== undefined && !community.expose) {
+        rows = {
+          terms: all.terms.filter((t) => !isUntouchedCommunityRow(t)),
+          exceptions: all.exceptions.filter((e) => !isUntouchedCommunityRow(e)),
+        };
+        hidden = all.terms.length - rows.terms.length + (all.exceptions.length - rows.exceptions.length);
+      }
       const meta = (r: TermMetadata) => ({
         note: r.note ?? null,
         addedBy: r.addedBy ?? null,
@@ -153,6 +165,7 @@ export function termRoutes(ctx: AdminContext, terms: TermsAdmin, recentLines: ()
           terms: rows.terms.map((t) => ({ id: t.id, term: t.term, language: t.language, active: t.active, ...meta(t) })),
           exceptions: rows.exceptions.map((e) => ({ id: e.id, phrase: e.phrase, language: e.language, active: e.active, ...meta(e) })),
           blocks30d,
+          ...(community === undefined ? {} : { community: { hidden } }),
         },
       };
     }),

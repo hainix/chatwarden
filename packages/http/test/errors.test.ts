@@ -53,6 +53,11 @@ describe('withErrors: mapping', () => {
     ['HttpError(invalid_term)', () => new HttpError('invalid_term'), 400, 'invalid_term'],
     ['HttpError(invalid_gap_ref)', () => new HttpError('invalid_gap_ref'), 400, 'invalid_gap_ref'],
     ['HttpError(invalid_idempotency_key)', () => new HttpError('invalid_idempotency_key'), 400, 'invalid_idempotency_key'],
+    ['HttpError(not_shareable)', () => new HttpError('not_shareable'), 409, 'not_shareable'],
+    ['HttpError(nothing_to_apply)', () => new HttpError('nothing_to_apply'), 409, 'nothing_to_apply'],
+    ['HttpError(apply_refused)', () => new HttpError('apply_refused'), 409, 'apply_refused'],
+    ['HttpError(share_refused)', () => new HttpError('share_refused'), 422, 'share_refused'],
+    ['HttpError(share_unavailable)', () => new HttpError('share_unavailable'), 502, 'share_unavailable'],
     ['HttpError(in_progress)', () => new HttpError('in_progress'), 409, 'in_progress'],
     ['HttpError(idempotency_mismatch)', () => new HttpError('idempotency_mismatch'), 409, 'idempotency_mismatch'],
   ];

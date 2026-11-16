@@ -442,6 +442,9 @@ error class only.
 | `already_appealed` | 409 | This sanction has had its appeal (one per sanction). |
 | `same_decider` | 409 | The moderator who made the decision cannot decide its appeal (`appeals.allowSelfReview` lifts this for a team of one). |
 | `gone` | 409 | The sanction an appeal was about is gone (revoked meanwhile); the appeal is closed as moot. |
+| `not_shareable` | 409 | `POST /terms/:id/share` for a row the shared list added (it is already on it). |
+| `nothing_to_apply` | 409 | `POST /community/apply` with no verified community list. |
+| `apply_refused` | 409 | `POST /community/apply` was refused by the live term list (it would leave no active term, or unblock a known line); nothing changed. |
 | `pending_rename` | 409 | `POST /people/:ref/rename` while an earlier request is still waiting for the game to release the player. |
 | `conflict` | 409 | The profile settings changed since the caller loaded them (`PUT` or `DELETE /policy/profile` with an old `version`). |
 | `claimed` | 409 | Another moderator holds the case. The body also has `by` (who) and `until` (when the claim lapses, epoch ms). |
@@ -450,9 +453,11 @@ error class only.
 | `in_progress` | 409 | An incoming-webhook request with this idempotency key is still running. Retry later. |
 | `idempotency_mismatch` | 409 | The idempotency key was used with a different request. |
 | `payload_too_large` | 413 | The body is over 64 KiB. |
+| `share_refused` | 422 | The community service did not take the term (rejected, or a language it does not support). No service text is passed on. |
 | `rate_limited` | 429 | Too many name checks, or too many read-again requests; `retry-after` says how long. |
 | `ai_budget` | 429 | The AI has reached its daily limit; reads resume at 00:00 UTC. |
 | `not_supported` | 501 | The store cannot save profile settings (it has no `savePolicyLayer`). |
+| `share_unavailable` | 502 | The community service could not be reached, or the share object failed. |
 | `ai_unavailable` | 503 | `POST /reports/:id/ai/read` while no call can be made (the breaker is open, or the minute's calls are used). The body also has `retryAfterMs`; `retry-after` says the same in seconds. |
 | `internal` | 500 | Anything else. No detail is sent. |
 
