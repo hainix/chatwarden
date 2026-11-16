@@ -95,7 +95,8 @@ const DEV_VARS = /(^|\/)\.dev\.vars$/;
 const ARCHIVE = /\.(zip|7z|tar|tgz)$|\.tar\.gz$/i;
 const FIXTURES = /(^|\/)test\/fixtures\//;
 const ZIP = /\.zip$/i;
-const PRIVATE_KEY_HEADER = /-----BEGIN (?:ENCRYPTED )?PRIVATE KEY-----/;
+/** Any PEM private key header (PKCS#8, encrypted, RSA, EC, OPENSSH and so on). The tarball check in check-pack.mjs uses this same pattern. */
+export const PRIVATE_KEY_HEADER = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 const BINARY = /\.(png|jpe?g|gif|webp|ico|woff2?|ttf|otf|eot|pdf|gz|zip|7z|tar|tgz|wasm|mp4|mov)$/i;
 const MAX_SCAN_BYTES = 4 * 1024 * 1024;
 

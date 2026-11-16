@@ -631,6 +631,14 @@ describe('corpusDataProblems: no packed tarball holds a zip, a sig, a key or cor
     expect(problems.join('\n')).toContain('dist/x.json');
   });
 
+  it('every kind of PEM private key header fails in a shipped JSON (the same pattern as the repo guard)', () => {
+    for (const kind of ['', 'ENCRYPTED ', 'RSA ', 'EC ', 'OPENSSH ']) {
+      const header = ['-----BEGIN', `${kind}PRIVATE KEY-----`].join(' ');
+      const problems = corpusDataProblems({ files: [...clean(), 'dist/y.json'], sources: { 'dist/y.json': JSON.stringify({ key: header }) } });
+      expect(problems.join(', '), kind).toContain('dist/y.json');
+    }
+  });
+
   it('every problem is reported, one for each file', () => {
     const problems = corpusDataProblems({ files: [...clean(), 'a.zip', 'b.sig', 'c.pem'], sources: {} });
     expect(problems).toHaveLength(3);

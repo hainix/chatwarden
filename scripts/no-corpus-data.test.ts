@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { readZip } from '../packages/matcher/src/corpus/index.js';
 import { writeZip } from '../packages/matcher/test/corpus-zip-writer.js';
 // @ts-expect-error plain ESM script with JSDoc types; the repo tsconfig does not cover scripts/
-import { INVENTED, checkFiles, isInventedWord } from './no-corpus-data.mjs';
+import { INVENTED, PRIVATE_KEY_HEADER, checkFiles, isInventedWord } from './no-corpus-data.mjs';
 
 // The repo holds no real term, no real list and no key (AGENTS.md, design 16). Nothing here knows a real word, so it cannot leak one: it is an
 // ALLOWLIST. Every term, phrase and line of a corpus-shaped JSON file must be made of the invented words (the matcher fixtures' words and their
@@ -163,6 +163,27 @@ describe('files that must not be tracked', () => {
     expect(problems.join('\n')).toContain('docs/notes.md');
     expect(problems.join('\n')).toContain('src/a.ts');
     expect(problems.join('\n')).not.toContain('AAAA');
+  });
+});
+
+describe('the private key header is one pattern, shared with check-pack', () => {
+  it('matches every PEM private key kind, and not a public key or a certificate', async () => {
+    for (const kind of ['', 'ENCRYPTED ', 'RSA ', 'EC ', 'DSA ', 'OPENSSH ']) {
+      const header = ['-----BEGIN', `${kind}PRIVATE KEY-----`].join(' ');
+      expect(PRIVATE_KEY_HEADER.test(header), kind).toBe(true);
+      expect((await run({ 'docs/k.md': `x
+${header}
+AAAA` })).length, kind).toBe(1);
+    }
+    for (const fine of ['-----BEGIN PUBLIC KEY-----', '-----BEGIN CERTIFICATE-----', 'BEGIN PRIVATE KEY']) {
+      expect(PRIVATE_KEY_HEADER.test(fine), fine).toBe(false);
+    }
+  });
+
+  it('check-pack imports the same constant instead of keeping its own copy', () => {
+    const pack = readFileSync(join(ROOT, 'scripts', 'check-pack.mjs'), 'utf8');
+    expect(pack).toContain("import { PRIVATE_KEY_HEADER } from './no-corpus-data.mjs';");
+    expect(pack).not.toMatch(/const PRIVATE_KEY_HEADER/);
   });
 });
 

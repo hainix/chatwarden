@@ -42,3 +42,11 @@ export function datasetWords(): string[] {
   const file = join(dirname(entry), 'preset', 'english.js');
   return [...readFileSync(file, 'utf8').matchAll(/originalWord: '([a-z]+)'/g)].map((m) => m[1] as string);
 }
+
+/**
+ * Take the build hash out of every chunk file name (`core-CEmFckgm.js` becomes `core.js`) and nothing else. The hash is not a word a visitor
+ * reads and its letters can spell part of one by chance whenever the code changes; the rest of the name is still scanned.
+ */
+export function stripBuildHashes(text: string): string {
+  return text.replace(/-[\w-]{8}(?=\.(?:js|css)\b)/g, '');
+}

@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import { RegExpMatcher, englishDataset, englishRecommendedTransformers } from 'obscenity';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { datasetWords, scanForSlurs, wordSafeChunks } from './helpers/slurScan';
+import { datasetWords, scanForSlurs, stripBuildHashes, wordSafeChunks } from './helpers/slurScan';
 import { SYNTHETIC_TERMS } from '../../packages/matcher/src/fixtures/syntheticPack';
 
 const siteDir = join(__dirname, '..');
@@ -110,8 +110,8 @@ describe('built dist', () => {
       // A minified bundle is mostly code, which the matcher's look-alike folding would misread (`f(k`). Scan the
       // words a visitor could read instead: for scripts, every string literal; for everything else, the whole file.
       // A chunk's file name ends in a random content hash (`core-CEmFckgm.js`); a hash is not a word a visitor reads, and its letters can
-      // spell part of one by chance whenever the code changes. Those names are taken out before the scan.
-      const readable = (extname(file) === '.js' ? (text.match(STRING_LITERAL) ?? []).filter((l) => !/[{};]|=>|function/.test(l)).join('\n') : text).replace(/[\w./-]+-[\w-]{8}\.(?:js|css)/g, ' ');
+      // spell part of one by chance whenever the code changes. Only the hash is taken out before the scan; the rest of each name is still read.
+      const readable = stripBuildHashes((extname(file) === '.js' ? (text.match(STRING_LITERAL) ?? []).filter((l) => !/[{};]|=>|function/.test(l)).join('\n') : text));
       for (const hit of scanForSlurs(readable)) hits.push(`${relative(dist, file)}: ${hit}`);
     }
     expect(hits).toEqual([]);

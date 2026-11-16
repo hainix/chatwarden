@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PRIVATE_KEY_HEADER } from './no-corpus-data.mjs';
 
 const REPO = 'https://github.com/hainix/chatwarden';
 const REQUIRED_KEYWORDS = ['chatwarden', 'moderation', 'chat'];
@@ -119,7 +120,6 @@ const CORPUS_FILE_RES = [
   [/\.(pem|key)$/i, 'a key file'],
   [/(^|\/)\.dev\.vars$/, 'a secrets file'],
 ];
-const PRIVATE_KEY_HEADER = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 
 /**
  * Problems with data and keys that must never be in a tarball (design 16; empty array = good): any archive, signature, key or `.dev.vars`
