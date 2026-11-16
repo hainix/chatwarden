@@ -47,7 +47,8 @@ export async function detect(env: CliEnv): Promise<Detected | Failure> {
   }
   let manifest: unknown;
   try {
-    manifest = JSON.parse(text);
+    // A Windows editor may save package.json with a UTF-8 byte order mark, which JSON.parse refuses.
+    manifest = JSON.parse(text.startsWith('\uFEFF') ? text.slice(1) : text);
   } catch {
     return { error: 'package.json is empty or is not valid JSON: fix it, then run chatwarden init again.' };
   }

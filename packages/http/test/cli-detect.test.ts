@@ -107,6 +107,17 @@ describe.each(['posix', 'win32'] as const)('detect (%s paths, %s root)', (kind) 
     expect((await found({ 'package.json': pkg() }, kind)).detected.hasDir).toBe(false);
   });
 
+  it('a UTF-8 byte order mark at the start of package.json (a Windows editor) does not stop detection', async () => {
+    const { detected } = await found({ 'package.json': `\uFEFF${pkg({ dependencies: { express: '^5.1.0' }, type: 'module' })}` }, kind);
+    expect(detected.frameworks).toEqual(['express']);
+    expect(detected.moduleType).toBe('module');
+  });
+
+  it('a byte order mark is stripped only at the very start: one inside the text is still invalid JSON', async () => {
+    expect(await failed({ 'package.json': `{"name": "a",\uFEFF "type": "module"}` }, kind)).toMatch(/not valid JSON/);
+    expect(await failed({ 'package.json': '\uFEFF' }, kind)).toMatch(/package\.json/);
+  });
+
   it('a missing, empty or invalid package.json is an error sentence, never a throw', async () => {
     expect(await failed({}, kind)).toMatch(/package\.json/);
     await failed({ 'package.json': '' }, kind);
