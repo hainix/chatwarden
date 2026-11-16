@@ -96,13 +96,15 @@ export interface ForumEdit {
 export interface ForumClient {
   /**
    * Open a forum thread whose first message is `message`. The thread id, or null when it could not be opened. `messageId` is the id of that
-   * first message, answered only for a message with components (the feed edits those later) and only when Discord's answer holds a plain id.
+   * first message, answered only for a message with components (the feed edits those later) and only when Discord's answer holds a plain id and names
+   * the application. `foreign: true` is answered instead when the post had components and the answer does not name an application: the webhook is not
+   * the application's own, its interactive buttons were ignored, and there is no message to edit later.
    */
-  openThread(name: string, message: ForumMessage): Promise<{ threadId: string; messageId?: string } | null>;
+  openThread(name: string, message: ForumMessage): Promise<{ threadId: string; messageId?: string; foreign?: true } | null>;
   /**
    * Post into a thread. `{ gone: true }` when Discord says the thread no longer exists; null when it failed. `messageId` as for `openThread`.
    */
-  post(threadId: string, message: ForumMessage): Promise<{ ok: true; messageId?: string } | { gone: true } | null>;
+  post(threadId: string, message: ForumMessage): Promise<{ ok: true; messageId?: string; foreign?: true } | { gone: true } | null>;
   /**
    * Edit one of this webhook's messages in a thread: `PATCH .../messages/{messageId}?thread_id=..&with_components=true` with the new components and
    * no content (so the text is untouched) and `allowed_mentions` empty. Same retries and one-at-a-time order as a post. `{ gone: true }` when
@@ -239,10 +241,16 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
     return u.toString();
   };
 
-  /** The id of the message Discord answered with, when it is a plain token; only asked for on a post with components. */
-  const messageIdOf = (message: ForumMessage, json: Json): { messageId: string } | Record<string, never> => {
+  /**
+   * What a post with components learns from Discord's answer (nothing for any other post). An application-owned webhook's message names its application
+   * (`application_id`, a snowflake); one made by hand does not, and its interactive buttons were ignored, so there is nothing to edit later: `foreign`.
+   * Otherwise the id of the message, when it is a plain token.
+   */
+  const messageIdOf = (message: ForumMessage, json: Json): { messageId: string } | { foreign: true } | Record<string, never> => {
+    if (!hasComponents(message)) return {};
+    if (!isSnowflake(json?.application_id)) return { foreign: true };
     const id = json?.id;
-    return hasComponents(message) && typeof id === 'string' && PLAIN_ID_RE.test(id) ? { messageId: id } : {};
+    return typeof id === 'string' && PLAIN_ID_RE.test(id) ? { messageId: id } : {};
   };
 
   const hasComponents = (message: ForumMessage): boolean => message.components !== undefined && message.components.length > 0;
@@ -262,7 +270,7 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
 
   return {
     openThread: (name, message) =>
-      serial<{ threadId: string; messageId?: string } | null>(async () => {
+      serial<{ threadId: string; messageId?: string; foreign?: true } | null>(async () => {
         const out = await send('openThread', urlFor(undefined, hasComponents(message)), payloadOf(message, { thread_name: cutText(name, THREAD_NAME_MAX) }));
         if (out.kind === 'final') {
           safeWarn(logger, 'chatwarden.discord_failed', { op: 'openThread', status: out.status, attempts: 1 });
@@ -278,7 +286,7 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
       }, null),
 
     post: (threadId, message) =>
-      serial<{ ok: true; messageId?: string } | { gone: true } | null>(async () => {
+      serial<{ ok: true; messageId?: string; foreign?: true } | { gone: true } | null>(async () => {
         const out = await send('post', urlFor(threadId, hasComponents(message)), payloadOf(message));
         if (out.kind === 'ok') return { ok: true, ...messageIdOf(message, out.json) };
         if (out.kind === 'failed') return null;

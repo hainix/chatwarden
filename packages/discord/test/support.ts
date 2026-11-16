@@ -4,6 +4,8 @@ export const NOW = 1_800_000_000_000;
 export const TOKEN = 'tok_ABC-def_123XYZ';
 export const WEBHOOK = `https://discord.com/api/webhooks/123456789012345678/${TOKEN}`;
 export const ROLE = '987654321098765432';
+/** The application id a fake bot-made webhook names in its answers (obviously fake digits). */
+export const APPLICATION = '111111111111111111';
 
 export interface Call {
   url: URL;
@@ -21,7 +23,7 @@ export type Step =
 
 /**
  * A fake Discord forum webhook. By default `POST ?wait=true` (no thread_id) opens thread `T<n>` and answers
- * `{ id, channel_id }`; `POST ?wait=true&thread_id=..` answers `{ id }`. `plan(n, call)` may override call n (0-based).
+ * `{ id, application_id, channel_id }`; `POST ?wait=true&thread_id=..` answers `{ id, application_id }` (as an application-owned webhook does). `plan(n, call)` may override call n (0-based).
  */
 export function fakeDiscord(plan: (n: number, call: Call) => Step | undefined = () => undefined) {
   const calls: Call[] = [];
@@ -46,10 +48,10 @@ export function fakeDiscord(plan: (n: number, call: Call) => Step | undefined = 
       return Promise.resolve(new Response(text, { status: step.status, ...(step.headers === undefined ? {} : { headers: step.headers }) }));
     }
     if (call.url.searchParams.has('thread_id')) {
-      return Promise.resolve(new Response(JSON.stringify({ id: `m${n}` }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ id: `m${n}`, application_id: APPLICATION }), { status: 200 }));
     }
     threads++;
-    return Promise.resolve(new Response(JSON.stringify({ id: `m${n}`, channel_id: `T${threads}` }), { status: 200 }));
+    return Promise.resolve(new Response(JSON.stringify({ id: `m${n}`, application_id: APPLICATION, channel_id: `T${threads}` }), { status: 200 }));
   };
   return {
     fetch: fn as unknown as typeof fetch,

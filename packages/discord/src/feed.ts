@@ -201,7 +201,17 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
   const rows = new Map<string, DiscordThreadRow>();
   /** Where each report post with buttons is, from Discord's answer; memory only (a restart forgets it and the old buttons stay, harmlessly). */
   const buttonPosts = new Map<string, { threadId: string; messageId: string }>();
-  const rememberButtons = (reportId: string, threadId: string, messageId: string | undefined): void => {
+  /**
+   * Set when Discord's answer to a post with buttons does not name an application: the webhook was made by hand, so it cannot send interactive
+   * buttons. The feed says so once and carries on without buttons (design 6.2); nothing is attached or stripped after that.
+   */
+  let buttonsIgnored = false;
+  const rememberButtons = (reportId: string, threadId: string, sent: { messageId?: string; foreign?: true }): void => {
+    if (sent.foreign === true && !buttonsIgnored) {
+      buttonsIgnored = true;
+      safeWarn(logger, 'chatwarden.discord_components_ignored');
+    }
+    const messageId = sent.messageId;
     if (messageId === undefined) return;
     buttonPosts.delete(reportId);
     if (buttonPosts.size >= BUTTON_POSTS_MAX) {
@@ -345,18 +355,18 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       // Remembered even if dispose() ran meanwhile: the thread exists in Discord, and forgetting it would open a second one.
       if (opened !== null) {
         keep({ subject: key, threadId: opened.threadId, label, createdAt: clock.now() });
-        if (job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, opened.threadId, opened.messageId);
+        if (job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, opened.threadId, opened);
       }
       return;
     }
     const posted = await forum.post(row.threadId, job.message);
-    if (posted !== null && 'ok' in posted && job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, row.threadId, posted.messageId);
+    if (posted !== null && 'ok' in posted && job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, row.threadId, posted);
     if (posted !== null && 'gone' in posted) {
       // The thread was deleted in Discord: the same post opens a new one, once, under the same label. A failure there is given up on.
       const opened = await forum.openThread(row.label, job.message);
       if (opened !== null) {
         keep({ subject: key, threadId: opened.threadId, label: row.label, createdAt: clock.now() });
-        if (job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, opened.threadId, opened.messageId);
+        if (job.buttonsOf !== undefined) rememberButtons(job.buttonsOf, opened.threadId, opened);
       }
     }
   };
@@ -457,7 +467,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
 
   /** The buttons for a report post: the adopter's rows when they pass `checkRows`; none (and one coalesced log line) for a throw or junk. */
   const buttonsFor = (reportId: string): readonly DiscordActionRow[] | undefined => {
-    if (components === undefined) return undefined;
+    if (components === undefined || buttonsIgnored) return undefined;
     let result: unknown;
     try {
       result = components({ kind: 'report', reportId });

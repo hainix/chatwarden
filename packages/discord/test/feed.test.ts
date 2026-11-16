@@ -1980,7 +1980,7 @@ describe('the buttons are stripped when the report closes (K5 D2)', () => {
   it('an answer without a usable message id leaves no entry and logs nothing', async () => {
     const k = fakeKit();
     const r = k.addReport({ targetPerson: sid() });
-    const { d, logged } = begin(k, (n) => (n === 0 ? { status: 200, json: { channel_id: 'T1' } } : undefined), withButtons);
+    const { d, logged } = begin(k, (n) => (n === 0 ? { status: 200, json: { channel_id: 'T1', application_id: '111111111111111111' } } : undefined), withButtons);
     await k.emit(created(r.id));
     await settle();
     await k.emit(closed(r.id));
@@ -2106,5 +2106,107 @@ describe('the buttons are stripped when the report closes (K5 D2)', () => {
       expect(leaks(text, [CHAT, HANDLE, NOTE, person, r.id])).toEqual([]);
       expect(JSON.stringify(c.body)).not.toContain(CHAT);
     }
+  });
+});
+
+describe('the webhook must be the application\'s own (K5 design 6.2)', () => {
+  const ROWS = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'Nothing wrong here', custom_id: 'cw1:dis:ID' }] }];
+  const patches = <C extends { init: { method?: string } }>(calls: C[]): C[] => calls.filter((c) => c.init.method === 'PATCH');
+  /** A webhook made by hand: Discord's answer carries no application id. */
+  const handMade = (n: number, call: { url: URL }) => (n >= 0 ? { status: 200, json: call.url.searchParams.has('thread_id') ? { id: `m${n}` } : { id: `m${n}`, channel_id: `T${n + 1}` } } : undefined);
+  const make = (k: Kit, plan: Parameters<typeof fakeDiscord>[0], asked: string[] = []) => {
+    const d = fakeDiscord(plan);
+    const logged: Logged = [];
+    const feed = discordFeed(k.kit, {
+      webhookUrl: WEBHOOK,
+      hubLink,
+      fetch: d.fetch,
+      logger: { warn: (e, detail) => void logged.push([e, detail]) },
+      random: () => 0.5,
+      components: ({ reportId }) => {
+        asked.push(reportId);
+        return ROWS;
+      },
+    });
+    return { feed, d, logged, asked };
+  };
+
+  it('an answer that does not name an application logs one chatwarden.discord_components_ignored with no detail, remembers no message and strips nothing', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = make(k, handMade);
+    await k.emit(created(r.id));
+    await settle();
+    expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
+    await k.emit(closed(r.id));
+    await settle();
+    expect(patches(d.calls)).toHaveLength(0);
+    expect(logged).toHaveLength(1);
+  });
+
+  it('after that the feed carries on posting without buttons (the components function is not asked again), and it logs once, not once a post', async () => {
+    const k = fakeKit();
+    const person = sid();
+    const a = k.addReport({ targetPerson: person });
+    const b = k.addReport({ targetPerson: person });
+    const c = k.addReport({ targetPerson: person });
+    const { d, logged, asked } = make(k, handMade);
+    await k.emit(created(a.id));
+    await settle();
+    await k.emit(created(b.id));
+    await k.emit(created(c.id));
+    await settle();
+    expect(asked).toEqual([a.id]);
+    expect(d.calls).toHaveLength(3);
+    expect(d.calls[0]!.url.searchParams.get('with_components')).toBe('true');
+    for (const call of d.calls.slice(1)) {
+      expect(call.url.searchParams.has('with_components')).toBe(false);
+      expect(call.body.components).toBeUndefined();
+    }
+    expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
+  });
+
+  it('an answer that names an application (a bot-made webhook) is ours: no log, and the strip works as before', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = make(k, () => undefined);
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id));
+    await settle();
+    expect(logged).toEqual([]);
+    expect(patches(d.calls)).toHaveLength(1);
+  });
+
+  it('a null, empty, mistyped or non-snowflake application id is not ours either', async () => {
+    for (const application_id of [null, '', 'zorbak', 1234567, '123']) {
+      const k = fakeKit();
+      const r = k.addReport({ targetPerson: sid() });
+      const { d, logged } = make(k, (n) => ({ status: 200, json: { id: `m${n}`, channel_id: 'T1', application_id } }));
+      await k.emit(created(r.id));
+      await settle();
+      await k.emit(closed(r.id));
+      await settle();
+      expect(logged).toEqual([['chatwarden.discord_components_ignored', undefined]]);
+      expect(patches(d.calls)).toHaveLength(0);
+    }
+  });
+
+  it('a post without components never trips the check, and the log line holds nothing but its name', async () => {
+    const k = fakeKit();
+    const d = fakeDiscord(handMade);
+    const logged: Logged = [];
+    const feed = discordFeed(k.kit, { webhookUrl: WEBHOOK, hubLink, fetch: d.fetch, logger: { warn: (e, detail) => void logged.push([e, detail]) }, random: () => 0.5 });
+    const r = k.addReport({ targetPerson: sid() });
+    await k.emit(created(r.id));
+    await settle();
+    expect(logged).toEqual([]);
+    feed.dispose();
+    const k2 = fakeKit();
+    const r2 = k2.addReport({ targetPerson: sid() });
+    const second = make(k2, handMade);
+    await k2.emit(created(r2.id));
+    await settle();
+    expect(JSON.stringify(second.logged)).not.toMatch(/T1|m0|\d{6}|tok_|cw1/);
   });
 });

@@ -654,9 +654,27 @@ describe('editing a message (K5 D2)', () => {
     expect(await c).toEqual({ ok: true });
   });
 
+  it('an answer that does not name an application (a webhook made by hand) is foreign: no message id is passed on, and foreign is set', async () => {
+    const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'x', custom_id: 'cw1:x' }] }];
+    for (const application_id of [undefined, null, '', 'not-a-snowflake', 1234567, '12345']) {
+      const answer = { id: 'm9', channel_id: 'T5', ...(application_id === undefined ? {} : { application_id }) };
+      const { forum } = client(() => ({ status: 200, json: answer }));
+      const a = forum.openThread('t', { content: 'x', components: ROW });
+      const b = forum.post('T5', { content: 'x', components: ROW });
+      await settle();
+      expect(await a).toEqual({ threadId: 'T5', foreign: true });
+      expect(await b).toEqual({ ok: true, foreign: true });
+    }
+    // A post without components is never judged: there was nothing to own.
+    const { forum } = client(() => ({ status: 200, json: { id: 'm9', channel_id: 'T5' } }));
+    const c = forum.post('T5', { content: 'x' });
+    await settle();
+    expect(await c).toEqual({ ok: true });
+  });
+
   it('a message id in the answer that is not a plain token is not passed on', async () => {
     const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'x', custom_id: 'cw1:x' }] }];
-    const { forum } = client(() => ({ status: 200, json: { id: '../../evil', channel_id: 'T5' } }));
+    const { forum } = client(() => ({ status: 200, json: { id: '../../evil', channel_id: 'T5', application_id: '111111111111111111' } }));
     const a = forum.openThread('t', { content: 'x', components: ROW });
     await settle();
     expect(await a).toEqual({ threadId: 'T5' });
