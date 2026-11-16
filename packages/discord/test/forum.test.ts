@@ -499,3 +499,45 @@ describe('dispose', () => {
     expect(() => forum.dispose()).not.toThrow();
   });
 });
+
+describe('components on a post (K5 D1)', () => {
+  const ROW = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'Nothing wrong here', custom_id: 'cw1:dis:abc' }] }];
+
+  it('openThread with components sends with_components=true after wait=true and the components in the body', async () => {
+    const { forum, d } = client();
+    void forum.openThread('t', { content: 'x', components: ROW });
+    await settle();
+    expect(d.calls[0]!.url.searchParams.get('wait')).toBe('true');
+    expect(d.calls[0]!.url.searchParams.get('with_components')).toBe('true');
+    expect(d.calls[0]!.body.components).toEqual(ROW);
+  });
+
+  it('post with components adds with_components=true to the thread request', async () => {
+    const { forum, d } = client();
+    void forum.post('T1', { content: 'x', components: ROW });
+    await settle();
+    expect(d.calls[0]!.url.searchParams.get('thread_id')).toBe('T1');
+    expect(d.calls[0]!.url.searchParams.get('with_components')).toBe('true');
+    expect(d.calls[0]!.body.components).toEqual(ROW);
+  });
+
+  it('without components, or with an empty list, the request has no with_components and no components key', async () => {
+    const { forum, d } = client();
+    void forum.openThread('t', { content: 'x' });
+    void forum.post('T1', { content: 'x', components: [] });
+    await settle();
+    for (const c of d.calls) {
+      expect(c.url.searchParams.has('with_components')).toBe(false);
+      expect('components' in c.body).toBe(false);
+    }
+    expect(d.calls[0]!.href).toBe(`${WEBHOOK}?wait=true`);
+    expect(d.calls[1]!.href).toBe(`${WEBHOOK}?wait=true&thread_id=T1`);
+  });
+
+  it('components never change the content or the mention rules', async () => {
+    const { forum, d } = client();
+    void forum.post('T1', { content: 'hello', mentionRoleId: ROLE, components: ROW });
+    await settle();
+    expect(d.calls[0]!.body).toMatchObject({ content: 'hello', allowed_mentions: { parse: [], roles: [ROLE] }, flags: 4 });
+  });
+});

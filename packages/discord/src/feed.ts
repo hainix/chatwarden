@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { CATEGORY_TO_RULE, CONDUCT_LEVELS, DEFAULT_SEVERE_RULES, errorClass, safeWarn } from '@chatwarden/core';
 import type { Chatwarden, Clock, DiscordThreadRow, KitEvent, KitEventOf, Limits, Logger, ModerationProfile } from '@chatwarden/core';
+import { checkRows } from './components.js';
+import type { DiscordActionRow } from './components.js';
 import { isSnowflake, makeForumClient, parseWebhookUrl } from './forum.js';
 import type { ForumMessage } from './forum.js';
 import { CATEGORY_LABELS, KIND_LABELS, VERDICT_LABELS, fitMessage, humanDuration, labelOf, safeText } from './text.js';
@@ -75,6 +77,14 @@ export interface DiscordFeedOptions {
   clock?: Clock;
   /** Jitter source in [0, 1) for retry backoff. Default `Math.random`; a test passes a fixed one. */
   random?: () => number;
+  /**
+   * @experimental Buttons for the post that announces a report; called once per `report.created` that is posted, with the report id and
+   * nothing else, and never for any other post. A throw, or a result that does not pass `checkRows` (more than one row or five buttons, a
+   * label over 80 characters, a `custom_id` over 100, a `url` over 512 or not http(s)), drops the buttons for that post, never the post,
+   * and logs `chatwarden.discord_link_dropped` (op `components`, reason `invalid` or the error class, a count; coalesced like dropped links).
+   * Only an application-owned webhook can send interactive buttons; a link button works on any webhook.
+   */
+  components?: (post: { kind: 'report'; reportId: string }) => readonly DiscordActionRow[] | undefined;
 }
 
 export interface DiscordFeed {
@@ -153,11 +163,12 @@ interface Job {
 export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFeed {
   if (typeof options !== 'object' || options === null) throw new RangeError('discordFeed: options are required');
   // Every field is read exactly once, here.
-  const { webhookUrl, hubLink, mentionRoleId, severeOnly, logger } = options;
+  const { webhookUrl, hubLink, mentionRoleId, severeOnly, logger, components } = options;
   const base = parseWebhookUrl(webhookUrl);
   if (typeof hubLink !== 'function') throw new RangeError('discordFeed: hubLink must be a function');
   if (mentionRoleId !== undefined && !isSnowflake(mentionRoleId)) throw new RangeError('discordFeed: mentionRoleId must be a Discord role id (digits)');
   if (severeOnly !== undefined && typeof severeOnly !== 'boolean') throw new RangeError('discordFeed: severeOnly must be a boolean');
+  if (components !== undefined && typeof components !== 'function') throw new RangeError('discordFeed: components must be a function');
   const onlySevere = severeOnly === true;
   const clock = options.clock ?? systemClock;
   const forum = makeForumClient({
@@ -212,7 +223,8 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
   // ---- dropped hub links, logged as a coalesced count per kind and reason ----
 
   interface LinkDrops {
-    kind: 'report' | 'person';
+    /** What is logged beside the reason: `{ kind }` for a hub link, `{ op: 'components' }` for the buttons of a post. */
+    what: { kind: 'report' | 'person' } | { op: 'components' };
     reason: string;
     count: number;
     lastLog: number | null;
@@ -223,21 +235,22 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
     if (entry.timer !== undefined) clearTimeout(entry.timer);
     entry.timer = undefined;
     if (entry.count === 0) return;
-    safeWarn(logger, 'chatwarden.discord_link_dropped', { kind: entry.kind, reason: entry.reason, count: entry.count });
+    safeWarn(logger, 'chatwarden.discord_link_dropped', { ...entry.what, reason: entry.reason, count: entry.count });
     entry.count = 0;
     entry.lastLog = clock.now();
   };
   /** Count a dropped link. The first of a kind and reason logs at once; after that at most one line a minute for it. */
-  const noteLinkDrop = (kind: 'report' | 'person', reason: string): void => {
-    let key = `${kind}:${reason}`;
+  const noteLinkDrop = (what: LinkDrops['what'], reason: string): void => {
+    const tag = 'kind' in what ? what.kind : what.op;
+    let key = `${tag}:${reason}`;
     // A hubLink that throws a new error class every time must not grow this without bound: past the cap they share one entry.
     if (!linkDrops.has(key) && linkDrops.size >= LINK_KEYS_MAX) {
       reason = 'other';
-      key = `${kind}:other`;
+      key = `${tag}:other`;
     }
     let entry = linkDrops.get(key);
     if (entry === undefined) {
-      entry = { kind, reason, count: 0, lastLog: null, timer: undefined };
+      entry = { what, reason, count: 0, lastLog: null, timer: undefined };
       linkDrops.set(key, entry);
     }
     entry.count++;
@@ -375,7 +388,7 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
    */
   const link = (kind: 'report' | 'person', id: string, label: string): string | null => {
     const dropped = (reason: string): null => {
-      noteLinkDrop(kind, reason);
+      noteLinkDrop({ kind }, reason);
       return null;
     };
     try {
@@ -397,6 +410,25 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       linkLine,
     );
     return { content, ...(ping ? { mentionRoleId } : {}) };
+  };
+
+  /** The buttons for a report post: the adopter's rows when they pass `checkRows`; none (and one coalesced log line) for a throw or junk. */
+  const buttonsFor = (reportId: string): readonly DiscordActionRow[] | undefined => {
+    if (components === undefined) return undefined;
+    let result: unknown;
+    try {
+      result = components({ kind: 'report', reportId });
+    } catch (err) {
+      noteLinkDrop({ op: 'components' }, errorClass(err));
+      return undefined;
+    }
+    if (result === undefined) return undefined;
+    const rows = checkRows(result);
+    if (rows === null) {
+      noteLinkDrop({ op: 'components' }, 'invalid');
+      return undefined;
+    }
+    return rows.length === 0 ? undefined : rows;
   };
 
   const toPerson = (op: string, person: string | null, fallback: Shared, message: ForumMessage): void => {
@@ -423,7 +455,8 @@ export function discordFeed(cw: FeedKit, options: DiscordFeedOptions): DiscordFe
       [link('report', e.reportId, 'Open report'), person === null ? null : link('person', person, 'Open person')],
       severe,
     );
-    toPerson(e.type, person, UNATTRIBUTED, message);
+    const rows = buttonsFor(e.reportId);
+    toPerson(e.type, person, UNATTRIBUTED, rows === undefined ? message : { ...message, components: rows });
   };
 
   const onClosed = (e: KitEventOf<'report.closed'>): void => {

@@ -1,5 +1,6 @@
 import { errorClass, safeWarn } from '@chatwarden/core';
 import type { Logger } from '@chatwarden/core';
+import type { DiscordActionRow } from './components.js';
 
 // The Discord forum, as a channel webhook. A forum webhook can open a thread (`thread_name`) and post into one
 // (`thread_id`), and nothing more: no buttons, no reading. Every request is `POST ...?wait=true`, so Discord answers
@@ -70,6 +71,8 @@ export interface ForumMessage {
   content: string;
   /** Pinged through `allowed_mentions.roles`. Anything that is not a snowflake is ignored. */
   mentionRoleId?: string;
+  /** Buttons for this post, already checked by `checkRows`. Sent with `with_components=true`; absent or empty means none. */
+  components?: readonly DiscordActionRow[];
 }
 
 export interface ForumClientOptions {
@@ -209,12 +212,16 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
     return run.catch(() => whenDisposed);
   };
 
-  const urlFor = (threadId?: string): string => {
+  const urlFor = (threadId?: string, withComponents = false): string => {
     const u = new URL(base);
     u.searchParams.set('wait', 'true');
     if (threadId !== undefined) u.searchParams.set('thread_id', threadId);
+    // A webhook ignores interactive components unless asked, and only an application-owned one can send them at all.
+    if (withComponents) u.searchParams.set('with_components', 'true');
     return u.toString();
   };
+
+  const hasComponents = (message: ForumMessage): boolean => message.components !== undefined && message.components.length > 0;
 
   const payloadOf = (message: ForumMessage, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
     ...extra,
@@ -222,6 +229,7 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
     // Nothing the adopter or a rule title wrote can ping anyone; only the one configured role, on a severe post.
     allowed_mentions: isSnowflake(message.mentionRoleId) ? { parse: [], roles: [message.mentionRoleId] } : { parse: [] },
     flags: SUPPRESS_EMBEDS,
+    ...(hasComponents(message) ? { components: message.components } : {}),
   });
 
   const failLog = (op: string, error: string): void => {
@@ -231,7 +239,7 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
   return {
     openThread: (name, message) =>
       serial<{ threadId: string } | null>(async () => {
-        const out = await send('openThread', urlFor(), payloadOf(message, { thread_name: cutText(name, THREAD_NAME_MAX) }));
+        const out = await send('openThread', urlFor(undefined, hasComponents(message)), payloadOf(message, { thread_name: cutText(name, THREAD_NAME_MAX) }));
         if (out.kind === 'final') {
           safeWarn(logger, 'chatwarden.discord_failed', { op: 'openThread', status: out.status, attempts: 1 });
           return null;
@@ -247,7 +255,7 @@ export function makeForumClient(options: ForumClientOptions): ForumClient {
 
     post: (threadId, message) =>
       serial<{ ok: true } | { gone: true } | null>(async () => {
-        const out = await send('post', urlFor(threadId), payloadOf(message));
+        const out = await send('post', urlFor(threadId, hasComponents(message)), payloadOf(message));
         if (out.kind === 'ok') return { ok: true };
         if (out.kind === 'failed') return null;
         const code = out.json?.code;

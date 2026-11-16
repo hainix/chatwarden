@@ -1625,3 +1625,193 @@ describe('the known limit: an answer lost after Discord made the thread', () => 
     expect(k.threads.get(subject)?.threadId).toBe('T1');
   });
 });
+
+describe('components on the report post (K5 D1)', () => {
+  const ROWS = [{ type: 1 as const, components: [{ type: 2 as const, style: 2 as const, label: 'Nothing wrong here', custom_id: 'cw1:dis:ID' }] }];
+  const SECRET_ID = 'cw1:dis:SECRET-CUSTOM-ID';
+  const SECRET_LABEL = 'SECRET-LABEL-TEXT';
+  const SECRET_URL = 'https://secret.example.test/SECRET-URL-PATH';
+
+  const withComponents = (calls: Array<{ url: URL; body: Record<string, unknown> }>) => calls.filter((c) => c.url.searchParams.has('with_components'));
+
+  it('the report post carries with_components=true and the components; no other post carries either', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject });
+    const components = vi.fn(() => ROWS);
+    const { d } = start(k, undefined, { components });
+    await k.emit(created(r.id));
+    await settle();
+    await k.emit(closed(r.id));
+    await k.emit(applied(subject));
+    await k.emit(lifted(subject));
+    await k.emit(gapEv(subject));
+    await k.emit(auto(subject));
+    await settle();
+    expect(d.calls).toHaveLength(6);
+    expect(d.calls[0]!.url.searchParams.get('wait')).toBe('true');
+    expect(d.calls[0]!.url.searchParams.get('with_components')).toBe('true');
+    expect(d.calls[0]!.body.components).toEqual(ROWS);
+    expect(withComponents(d.calls)).toHaveLength(1);
+    for (const c of d.calls.slice(1)) {
+      expect('components' in c.body).toBe(false);
+      expect(c.href).toBe(`${WEBHOOK}?wait=true&thread_id=T1`);
+    }
+  });
+
+  it('the components function is called with { kind: report, reportId } and nothing else; never for sanction, gap, timeout or closed posts', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const r = k.addReport({ targetPerson: subject });
+    const components = vi.fn<(post: { kind: 'report'; reportId: string }) => typeof ROWS>(() => ROWS);
+    start(k, undefined, { components });
+    await k.emit(applied(subject));
+    await k.emit(lifted(subject));
+    await k.emit(gapEv(subject));
+    await k.emit(auto(subject));
+    await k.emit(closed(r.id));
+    await settle();
+    expect(components).not.toHaveBeenCalled();
+    await k.emit(created(r.id));
+    await settle();
+    expect(components).toHaveBeenCalledTimes(1);
+    expect(components.mock.calls[0]).toEqual([{ kind: 'report', reportId: r.id }]);
+    expect(Object.keys(components.mock.calls[0]![0] as object).sort()).toEqual(['kind', 'reportId']);
+  });
+
+  it('severeOnly still skips a non-severe report: the components function is not called for it', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid(), category: 'spam' });
+    const components = vi.fn(() => ROWS);
+    const { d } = start(k, undefined, { components, severeOnly: true });
+    await k.emit(created(r.id, 'spam'));
+    await settle();
+    expect(components).not.toHaveBeenCalled();
+    expect(d.calls).toHaveLength(0);
+  });
+
+  const SIX = [{ type: 1, components: Array.from({ length: 6 }, () => ROWS[0]!.components[0]) }];
+  const JS_LINK = [{ type: 1, components: [{ type: 2, style: 5, label: 'x', url: 'javascript:alert(1)' }] }];
+  it.each([
+    [
+      'throws',
+      () => {
+        throw new RangeError('boom');
+      },
+      'RangeError',
+    ],
+    ['returns six buttons', () => SIX, 'invalid'],
+    ['returns a non-array', () => 'junk', 'invalid'],
+    ['returns a promise', () => Promise.resolve(ROWS), 'invalid'],
+    ['returns a javascript: link', () => JS_LINK, 'invalid'],
+  ])('a components function that %s posts the report without buttons and logs one coalesced line', async (_n, fn, reason) => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const { d, logged } = start(k, undefined, { components: fn as never });
+    await k.emit(created(r.id));
+    await settle();
+    expect(d.calls).toHaveLength(1);
+    expect(d.calls[0]!.href).toBe(`${WEBHOOK}?wait=true`);
+    expect('components' in d.calls[0]!.body).toBe(false);
+    expect(String(d.calls[0]!.body.content)).toContain('**New report**');
+    expect(logged).toEqual([['chatwarden.discord_link_dropped', { op: 'components', reason, count: 1 }]]);
+  });
+
+  it('the log line holds no custom_id, label, url or error message', async () => {
+    const k = fakeKit();
+    const r = k.addReport({ targetPerson: sid() });
+    const bad = (): never => {
+      throw new Error(`${SECRET_ID} ${SECRET_LABEL} ${SECRET_URL}`);
+    };
+    const { logged } = start(k, undefined, { components: bad });
+    await k.emit(created(r.id));
+    await settle();
+    expect(logged).toHaveLength(1);
+    const text = JSON.stringify(logged);
+    for (const s of [SECRET_ID, SECRET_LABEL, SECRET_URL, 'SECRET']) expect(text).not.toContain(s);
+  });
+
+  it('a junk result is coalesced like dropped links: the first at once, then one line a minute with the count', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const { logged } = start(k, undefined, { components: () => 'junk' as never });
+    for (let i = 0; i < 3; i++) {
+      await k.emit(created(k.addReport({ targetPerson: subject }).id));
+      await settle();
+    }
+    const lines = () => logged.filter(([e]) => e === 'chatwarden.discord_link_dropped');
+    expect(lines()).toEqual([['chatwarden.discord_link_dropped', { op: 'components', reason: 'invalid', count: 1 }]]);
+    await settle(60_000);
+    expect(lines()).toEqual([
+      ['chatwarden.discord_link_dropped', { op: 'components', reason: 'invalid', count: 1 }],
+      ['chatwarden.discord_link_dropped', { op: 'components', reason: 'invalid', count: 2 }],
+    ]);
+  });
+
+  it('an undefined or empty result is not an error: no buttons, no log', async () => {
+    const k = fakeKit();
+    const first = start(k, undefined, { components: () => undefined });
+    await k.emit(created(k.addReport({ targetPerson: sid() }).id));
+    await settle();
+    first.feed.dispose();
+    const second = start(k, undefined, { components: () => [] });
+    await k.emit(created(k.addReport({ targetPerson: sid() }).id));
+    await settle();
+    expect(first.logged).toEqual([]);
+    expect(second.logged).toEqual([]);
+    expect(first.d.calls).toHaveLength(1);
+    expect(second.d.calls).toHaveLength(1);
+    expect(withComponents(first.d.calls)).toHaveLength(0);
+    expect(withComponents(second.d.calls)).toHaveLength(0);
+  });
+
+  it('a components option that is not a function is a RangeError at construction', () => {
+    for (const bad of ['yes', 3, {}, null]) {
+      expect(() => discordFeed(fakeKit().kit, { webhookUrl: WEBHOOK, hubLink, fetch: fakeDiscord().fetch, components: bad } as never)).toThrow(RangeError);
+    }
+  });
+
+  it('dispose flushes a pending components drop count like a link drop, and leaves no timer', async () => {
+    const k = fakeKit();
+    const subject = sid();
+    const { feed, logged } = start(k, undefined, { components: () => 'junk' as never });
+    await k.emit(created(k.addReport({ targetPerson: subject }).id));
+    await k.emit(created(k.addReport({ targetPerson: subject }).id));
+    await settle();
+    feed.dispose();
+    expect(logged.filter(([e]) => e === 'chatwarden.discord_link_dropped').map(([, detail]) => detail)).toEqual([
+      { op: 'components', reason: 'invalid', count: 1 },
+      { op: 'components', reason: 'invalid', count: 1 },
+    ]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('every existing post kind is byte-identical to before when components is not set (and for non-report posts when it is)', async () => {
+    const run = async (options: Partial<DiscordFeedOptions>) => {
+      const k = fakeKit();
+      const subject = sid();
+      const r = k.addReport({ targetPerson: subject });
+      const { d } = start(k, undefined, options);
+      await k.emit(created(r.id));
+      await k.emit(closed(r.id));
+      await k.emit(applied(subject, { groupId: 'g1', refCode: 'M-SNAP1', until: NOW + DAY }));
+      await k.emit(lifted(subject, { groupId: 'g2', refCode: 'M-SNAP2' }));
+      await k.emit(gapEv(subject, { groupId: 'g3', refCode: 'M-SNAP3' }));
+      await k.emit(auto(subject, { groupId: 'g4', refCode: 'M-SNAP4' }));
+      await settle();
+      return { calls: d.calls, id: r.id, subject };
+    };
+    const plain = await run({});
+    expect(plain.calls).toHaveLength(6);
+    expect(plain.calls[0]!.href).toBe(`${WEBHOOK}?wait=true`);
+    for (const c of plain.calls.slice(1)) expect(c.href).toBe(`${WEBHOOK}?wait=true&thread_id=T1`);
+    for (const c of plain.calls) {
+      expect(Object.keys(c.body).filter((key) => key !== 'thread_name')).toEqual(['content', 'allowed_mentions', 'flags']);
+      expect(c.body.flags).toBe(4);
+    }
+    const withHook = await run({ components: () => ROWS });
+    const strip = (calls: typeof plain.calls, id: string, subject: string) =>
+      calls.slice(1).map((c) => JSON.stringify(c.body).replaceAll(id, 'R').replaceAll(subject, 'S'));
+    expect(strip(withHook.calls, withHook.id, withHook.subject)).toEqual(strip(plain.calls, plain.id, plain.subject));
+  });
+});
