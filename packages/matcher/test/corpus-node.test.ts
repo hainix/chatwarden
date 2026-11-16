@@ -333,7 +333,7 @@ describe('startCorpus', () => {
     const realClear = globalThis.clearTimeout;
     vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) => {
       const timer = (real as (...a: unknown[]) => NodeJS.Timeout)(fn, ms, ...rest);
-      if (ms === 10_000 || ms === 60_000 || (ms !== undefined && ms > 80_000_000)) seen.push({ delay: ms, timer });
+      if (ms === 10_000 || ms === 60_000 || (ms !== undefined && ms >= 77_760_000)) seen.push({ delay: ms, timer });
       return timer;
     }) as typeof setTimeout);
     vi.spyOn(globalThis, 'clearTimeout').mockImplementation(((t: NodeJS.Timeout) => {
@@ -342,7 +342,8 @@ describe('startCorpus', () => {
     }) as typeof clearTimeout);
     const started = await startCorpus({ dir: tmp(), select: { languages: ['en'] }, keys: r.w.keys(), baseUrl: BASE, fetch: r.w.fetch, follow: 'stable', kit: '0.1.11' });
     expect(started.status().state).toBe('ready');
-    const periodic = seen.filter((s) => s.delay > 80_000_000);
+    // The daily check is jittered to 0.9-1.1 days, so its delay is at least 0.9 x 86 400 000 ms.
+    const periodic = seen.filter((s) => s.delay >= 77_760_000);
     expect(periodic).toHaveLength(1);
     expect(seen.length).toBeGreaterThan(1);
     for (const s of seen) expect(s.timer.hasRef(), `${s.delay}`).toBe(false);
