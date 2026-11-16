@@ -14,52 +14,97 @@ const K = new Uint32Array([
 
 const rotr = (x: number, n: number): number => (x >>> n) | (x << (32 - n));
 
+const INITIAL = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19] as const;
+
+/** One 64-byte block of `view` at `block`, folded into the state `h`. `w` is scratch space. */
+function compress(h: Uint32Array, w: Uint32Array, view: DataView, block: number): void {
+  for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(block + i * 4, false);
+  for (let i = 16; i < 64; i += 1) {
+    const a = w[i - 15] as number;
+    const b = w[i - 2] as number;
+    const s0 = rotr(a, 7) ^ rotr(a, 18) ^ (a >>> 3);
+    const s1 = rotr(b, 17) ^ rotr(b, 19) ^ (b >>> 10);
+    w[i] = ((w[i - 16] as number) + s0 + (w[i - 7] as number) + s1) >>> 0;
+  }
+  let [a, b, c, d, e, f, g, hh] = h as unknown as [number, number, number, number, number, number, number, number];
+  for (let i = 0; i < 64; i += 1) {
+    const t1 = (hh + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + (K[i] as number) + (w[i] as number)) >>> 0;
+    const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+    hh = g;
+    g = f;
+    f = e;
+    e = (d + t1) >>> 0;
+    d = c;
+    c = b;
+    b = a;
+    a = (t1 + t2) >>> 0;
+  }
+  h[0] = ((h[0] as number) + a) >>> 0;
+  h[1] = ((h[1] as number) + b) >>> 0;
+  h[2] = ((h[2] as number) + c) >>> 0;
+  h[3] = ((h[3] as number) + d) >>> 0;
+  h[4] = ((h[4] as number) + e) >>> 0;
+  h[5] = ((h[5] as number) + f) >>> 0;
+  h[6] = ((h[6] as number) + g) >>> 0;
+  h[7] = ((h[7] as number) + hh) >>> 0;
+}
+
+/** The message, a 1 bit, zeros, and the bit length as 64 bits, to a multiple of 64 bytes; `before` is how many bytes were already hashed. */
+function pad(message: Uint8Array, before: number): { view: DataView; total: number } {
+  const length = message.length;
+  const total = (((length + 8) >> 6) + 1) << 6;
+  const padded = new Uint8Array(total);
+  padded.set(message);
+  padded[length] = 0x80;
+  const view = new DataView(padded.buffer);
+  const all = before + length;
+  view.setUint32(total - 8, Math.floor(all / 0x20000000), false);
+  view.setUint32(total - 4, (all << 3) >>> 0, false);
+  return { view, total };
+}
+
 /** The SHA-256 of `bytes` as 64 lower-case hex characters. */
 export function sha256Hex(bytes: Uint8Array): string {
   if (!isBytes(bytes)) throw new TypeError('sha256Hex: bytes must be a Uint8Array');
-  const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
-  const length = bytes.length;
-  // The message, a 1 bit, zeros, and the bit length as 64 bits, to a multiple of 64 bytes.
-  const total = (((length + 8) >> 6) + 1) << 6;
-  const padded = new Uint8Array(total);
-  padded.set(bytes);
-  padded[length] = 0x80;
-  const view = new DataView(padded.buffer);
-  view.setUint32(total - 8, Math.floor(length / 0x20000000), false);
-  view.setUint32(total - 4, (length << 3) >>> 0, false);
+  const h = new Uint32Array(INITIAL);
   const w = new Uint32Array(64);
-  for (let block = 0; block < total; block += 64) {
-    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(block + i * 4, false);
-    for (let i = 16; i < 64; i += 1) {
-      const a = w[i - 15] as number;
-      const b = w[i - 2] as number;
-      const s0 = rotr(a, 7) ^ rotr(a, 18) ^ (a >>> 3);
-      const s1 = rotr(b, 17) ^ rotr(b, 19) ^ (b >>> 10);
-      w[i] = ((w[i - 16] as number) + s0 + (w[i - 7] as number) + s1) >>> 0;
-    }
-    let [a, b, c, d, e, f, g, hh] = h as unknown as [number, number, number, number, number, number, number, number];
-    for (let i = 0; i < 64; i += 1) {
-      const t1 = (hh + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + (K[i] as number) + (w[i] as number)) >>> 0;
-      const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
-      hh = g;
-      g = f;
-      f = e;
-      e = (d + t1) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (t1 + t2) >>> 0;
-    }
-    h[0] = ((h[0] as number) + a) >>> 0;
-    h[1] = ((h[1] as number) + b) >>> 0;
-    h[2] = ((h[2] as number) + c) >>> 0;
-    h[3] = ((h[3] as number) + d) >>> 0;
-    h[4] = ((h[4] as number) + e) >>> 0;
-    h[5] = ((h[5] as number) + f) >>> 0;
-    h[6] = ((h[6] as number) + g) >>> 0;
-    h[7] = ((h[7] as number) + hh) >>> 0;
-  }
+  const { view, total } = pad(bytes, 0);
+  for (let block = 0; block < total; block += 64) compress(h, w, view, block);
   let out = '';
   for (let i = 0; i < 8; i += 1) out += (h[i] as number).toString(16).padStart(8, '0');
   return out;
+}
+
+/**
+ * For proof of work: the number of leading zero bits of SHA-256(`prefix` followed by `suffix`), with the work on `prefix` done once.
+ * Returns a function of the suffix; every call costs about one or two blocks however long the prefix is.
+ */
+export function leadingZeroBitsAfter(prefix: Uint8Array): (suffix: Uint8Array) => number {
+  if (!isBytes(prefix)) throw new TypeError('leadingZeroBitsAfter: prefix must be a Uint8Array');
+  const done = prefix.length - (prefix.length % 64);
+  const state = new Uint32Array(INITIAL);
+  const w = new Uint32Array(64);
+  if (done > 0) {
+    const view = new DataView(prefix.buffer.slice(prefix.byteOffset, prefix.byteOffset + done));
+    for (let block = 0; block < done; block += 64) compress(state, w, view, block);
+  }
+  const rest = prefix.slice(done);
+  return (suffix) => {
+    const message = new Uint8Array(rest.length + suffix.length);
+    message.set(rest);
+    message.set(suffix, rest.length);
+    const { view, total } = pad(message, done);
+    const h = new Uint32Array(state);
+    for (let block = 0; block < total; block += 64) compress(h, w, view, block);
+    let zeros = 0;
+    for (let i = 0; i < 8; i += 1) {
+      const word = h[i] as number;
+      if (word === 0) {
+        zeros += 32;
+        continue;
+      }
+      return zeros + Math.clz32(word);
+    }
+    return zeros;
+  };
 }

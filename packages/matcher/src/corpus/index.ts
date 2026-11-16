@@ -37,3 +37,13 @@ export {
   type RefreshResult,
   type Schedule,
 } from './loader.js';
+export {
+  COMMUNITY_ENDPOINT,
+  checkStamp,
+  createCommunityShare,
+  mintStamp,
+  type CommunityShare,
+  type CommunityShareOptions,
+  type ShareInput,
+  type ShareResult,
+} from './share.js';

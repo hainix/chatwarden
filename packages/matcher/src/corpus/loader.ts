@@ -1,6 +1,7 @@
 import type { Clock, Logger } from '@chatwarden/core';
 import type { LiveTerms, SyncResult, SyncSummary } from '../liveTerms.js';
 import type { TermPack } from '../termPack.js';
+import { readBounded } from './bounded.js';
 import { CorpusError, type CorpusErrorCode, type CorpusStage } from './errors.js';
 import { INDEX_MAX_BYTES, chooseRelease, parseIndex, revokedKeyIdsOf, type CorpusIndex, type CorpusKind, type CorpusReleaseEntry } from './index-file.js';
 import { CORPUS_BASE_URL, CORPUS_KEYS, type CorpusKey } from './keys.js';
@@ -172,16 +173,6 @@ function parseDiskState(bytes: Uint8Array | null): DiskState {
   }
 }
 
-function concat(chunks: Uint8Array[], total: number): Uint8Array {
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const c of chunks) {
-    out.set(c, at);
-    at += c.length;
-  }
-  return out;
-}
-
 /** The sibling signature URL of a mirror's zip URL: `.sig` after the path, before any query. */
 function sigUrlOf(zipUrl: string): string {
   const q = zipUrl.indexOf('?');
@@ -273,36 +264,9 @@ export function createCorpusLoader(options: CorpusLoaderOptions): CorpusLoader {
 
   // --- network ---
   async function readCapped(res: Response, cap: number, stage: CorpusStage): Promise<Uint8Array> {
-    const declared = Number(res.headers?.get?.('content-length'));
-    if (Number.isFinite(declared) && declared > cap) {
-      try {
-        await res.body?.cancel();
-      } catch {
-        // nothing to release
-      }
-      throw err('too_large', stage);
-    }
-    const body = res.body;
-    if (body !== null && body !== undefined && typeof body.getReader === 'function') {
-      const reader = body.getReader();
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!isBytes(value)) throw err('offline', stage);
-        total += value.length;
-        if (total > cap) {
-          await reader.cancel().catch(() => undefined);
-          throw err('too_large', stage);
-        }
-        chunks.push(value);
-      }
-      return concat(chunks, total);
-    }
-    const all = new Uint8Array(await res.arrayBuffer());
-    if (all.length > cap) throw err('too_large', stage);
-    return all;
+    const bytes = await readBounded(res, cap);
+    if (bytes === null) throw err('too_large', stage);
+    return bytes;
   }
 
   /** One GET with a deadline of its own. A 304 (only asked for with an ETag) comes back with `bytes: null`. */
