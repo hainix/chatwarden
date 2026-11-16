@@ -410,6 +410,11 @@ describe('version and sequence', () => {
     await w.release('terms', '2026.11.7', 2);
     expect(await nextVersion(w.db, w.clock)).toBe('2026.12.1');
     expect(await nextSequence(w.db)).toBe(5);
+    // each kind has its own versions: the eval set follows its own releases
+    expect(await nextVersion(w.db, w.clock, 'eval')).toBe('2026.12.1');
+    w.clock.set('2026-11-20T00:00:00Z');
+    expect(await nextVersion(w.db, w.clock, 'eval')).toBe('2026.11.0');
+    w.clock.set('2026-12-01T09:00:00Z');
     w.clock.set('2027-01-03T00:00:00Z');
     expect(await nextVersion(w.db, w.clock)).toBe('2027.01.0');
   });

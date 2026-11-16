@@ -1,5 +1,6 @@
 import type { CorpusKey } from '@chatwarden/matcher/corpus';
 import { buildTermsRelease, type BuildResult } from '../src/build/release.js';
+import type { ReleaseSummary } from '../src/build/summary.js';
 import { generateSigningKey, loadSigningKey, type LoadedKey } from '../src/tools/keys.js';
 import { publishRelease, type PublishInput, type PublishResult, type PutMeta, type ReleaseStore } from '../src/tools/publishing.js';
 import { signBytes } from '../src/tools/sign.js';
@@ -58,7 +59,7 @@ export interface PublishWorld {
   keys: CorpusKey[];
   /** Builds a release of `n` invented words (more than the last, so two versions differ), signs its zip, and returns both. */
   release(version: string, sequence: number, words?: string[]): Promise<{ built: BuildResult; zipSig: string }>;
-  publish(built: BuildResult, zipSig: string, over?: Partial<PublishInput>): Promise<PublishResult>;
+  publish(built: { summary: ReleaseSummary; zip: Uint8Array }, zipSig: string, over?: Partial<PublishInput>): Promise<PublishResult>;
 }
 
 export async function makePublishWorld(): Promise<PublishWorld> {

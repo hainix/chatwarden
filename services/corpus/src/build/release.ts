@@ -269,10 +269,10 @@ export async function buildTermsRelease(db: D1Like, o: BuildOptions): Promise<Bu
   return buildFromSnapshot(await loadSnapshot(db, languages), o);
 }
 
-/** The next CalVer version for the month the clock is in: `YYYY.MM.0`, or the next patch when this month already has one. */
-export async function nextVersion(db: D1Like, clock: Clock): Promise<string> {
+/** The next CalVer version of a kind for the month the clock is in: `YYYY.MM.0`, or the next patch when this month already has one. */
+export async function nextVersion(db: D1Like, clock: Clock, kind: 'terms' | 'eval' = 'terms'): Promise<string> {
   const month = isoSeconds(clock.now()).slice(0, 7).replace('-', '.');
-  const rows = (await db.prepare("SELECT version FROM releases WHERE kind = 'terms' AND version LIKE ?").bind(`${month}.%`).all<{ version: string }>()).results;
+  const rows = (await db.prepare('SELECT version FROM releases WHERE kind = ? AND version LIKE ?').bind(kind, `${month}.%`).all<{ version: string }>()).results;
   const patches = rows.map((r) => Number(r.version.slice(month.length + 1))).filter((n) => Number.isInteger(n));
   return `${month}.${patches.length === 0 ? 0 : Math.max(...patches) + 1}`;
 }
