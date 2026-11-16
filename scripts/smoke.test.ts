@@ -66,7 +66,7 @@ describe('the consumer projects', () => {
   it('esm and cjs install all ten packages; headless installs only the kit packages hub-react needs, so React never arrives', () => {
     expect(packagesFor('esm', all)).toHaveLength(10);
     expect(packagesFor('cjs', all)).toHaveLength(10);
-    expect(packagesFor('headless', all).map((p: { name: string }) => p.name)).toEqual(['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react']);
+    expect(packagesFor('headless', all).map((p: { name: string }) => p.name)).toEqual(['@chatwarden/core', '@chatwarden/http', '@chatwarden/hub-react', '@chatwarden/matcher']);
   });
   it('a package the headless project asks for but was not packed is an error, not a quiet skip', () => {
     expect(() => packagesFor('headless', all.filter((p) => p.name !== '@chatwarden/hub-react'))).toThrow(/hub-react/);
@@ -75,8 +75,8 @@ describe('the consumer projects', () => {
     const args: string[] = installArgs('headless', packagesFor('headless', all).map((p: { tarball: string }) => `/t/${p.tarball}`));
     const named = args.filter((a) => !a.startsWith('/t/') && !a.startsWith('-'));
     expect(named).toEqual(['install', '@types/node@22', 'typescript@5.9']);
-    // The tarballs are the three kit packages (hub-react itself has "react" in its name, so look at the file names, not a pattern).
-    expect(args.filter((a) => a.startsWith('/t/')).map((a) => a.slice(3))).toEqual(['chatwarden-core-0.1.2.tgz', 'chatwarden-http-0.1.2.tgz', 'chatwarden-hub-react-0.1.2.tgz']);
+    // The tarballs are the kit packages (hub-react itself has "react" in its name, so look at the file names, not a pattern); the matcher is there to prove its corpus subpaths load with no React.
+    expect(args.filter((a) => a.startsWith('/t/')).map((a) => a.slice(3))).toEqual(['chatwarden-core-0.1.2.tgz', 'chatwarden-http-0.1.2.tgz', 'chatwarden-hub-react-0.1.2.tgz', 'chatwarden-matcher-0.1.2.tgz']);
     expect(args).toEqual(expect.arrayContaining(['@types/node@22', 'typescript@5.9']));
   });
   it('esm and cjs also install the types that react-dom/server needs, because the scenario renders the hub on the server', () => {
@@ -228,6 +228,23 @@ describe('the smoke scenario', () => {
     for (const sub of ['@chatwarden/http/express', '@chatwarden/http/admin', '@chatwarden/matcher/fixtures']) expect(scenario, sub).toContain(`from '${sub}'`);
     expect(scenario).toMatch(/adminRoutes\(cw,/);
     expect(scenario).toContain("path: '/me'");
+  });
+  it('a consumer imports both corpus subpaths in the ESM, CommonJS and no-React projects, and runs them offline with no keys', () => {
+    for (const [label, text] of [['scenario', scenario], ['headless', headless]] as const) {
+      expect(text, label).toContain("from '@chatwarden/matcher/corpus'");
+      expect(text, label).toContain('createCorpusLoader(');
+      expect(text, label).toContain('no_trusted_keys');
+    }
+    expect(scenario).toContain("from '@chatwarden/matcher/corpus/node'");
+    for (const call of ['startCorpus(', 'installationKey(', 'createCommunityShare(', 'fileCache(']) expect(scenario, call).toContain(call);
+    // No network: a fetch that fails the run if it is ever called, and a cache folder that is made and removed.
+    expect(scenario).toMatch(/mkdtemp/);
+    expect(scenario).toMatch(/rm\(/);
+    expect(headless).toContain("from '@chatwarden/matcher/corpus/node'");
+  });
+  it('the headless project installs the matcher, which brings no React', () => {
+    expect(PROJECTS.headless.only).toContain('@chatwarden/matcher');
+    expect(scenario).toMatch(/matcher\/corpus\/node/);
   });
   it('runs the scenario on the in-memory store as well as on SQLite', () => {
     expect(scenario).toContain("from '@chatwarden/store-memory'");

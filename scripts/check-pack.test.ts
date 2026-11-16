@@ -641,3 +641,49 @@ describe('corpusDataProblems: no packed tarball holds a zip, a sig, a key or cor
     expect(problems.join('\n')).not.toContain('zorbak');
   });
 });
+
+describe('the matcher tarball and the corpus subpaths (0.1.11)', () => {
+  const matcher = JSON.parse(readFileSync(fileURLToPath(new URL('../packages/matcher/package.json', import.meta.url)), 'utf8')) as Pkg;
+  const shipped = (): string[] => [
+    ...goodFiles().filter((f) => !f.startsWith('dist/src/extra') && f !== 'package.json'),
+    'package.json',
+    ...exportTargets(matcher),
+    'src/corpus/index.ts',
+    'src/corpus/node/index.ts',
+    'dist/src/corpus/index.js',
+    'dist/src/corpus/index.js.map',
+    'dist/src/corpus/index.d.ts',
+    'dist/src/corpus/index.d.ts.map',
+    'dist/src/corpus/node/index.js',
+    'dist/src/corpus/node/index.js.map',
+    'dist/src/corpus/node/index.d.ts',
+    'dist/src/corpus/node/index.d.ts.map',
+  ];
+
+  it('check-pack: @chatwarden/matcher/corpus and /corpus/node resolve from the packed tarball under ESM and under CommonJS with moduleResolution node, and the root entry does not load them', () => {
+    const targets = exportTargets(matcher);
+    // ESM and CommonJS (require of an ES module on Node 22.13): the export map names the code and the types of both subpaths.
+    const exportsMap = matcher.exports as Record<string, Record<string, string>>;
+    expect(exportsMap['./corpus']).toEqual({ types: './dist/src/corpus/index.d.ts', default: './dist/src/corpus/index.js' });
+    expect(exportsMap['./corpus/node']).toEqual({ types: './dist/src/corpus/node/index.d.ts', default: './dist/src/corpus/node/index.js' });
+    // moduleResolution node reads typesVersions, not exports.
+    const tv = (matcher.typesVersions as Record<string, Record<string, string[]>>)['*'] as Record<string, string[]>;
+    expect(tv.corpus).toEqual(['dist/src/corpus/index.d.ts']);
+    expect(tv['corpus/node']).toEqual(['dist/src/corpus/node/index.d.ts']);
+    for (const t of ['dist/src/corpus/index.js', 'dist/src/corpus/index.d.ts', 'dist/src/corpus/node/index.js', 'dist/src/corpus/node/index.d.ts']) expect(targets).toContain(t);
+    // Every one of those files is in the list a good tarball has, so the check passes; take one away and it names it.
+    expect(checkFileList({ pkg: matcher, files: shipped() }).filter((p: string) => /export target/.test(p))).toEqual([]);
+    const without = shipped().filter((f) => f !== 'dist/src/corpus/node/index.js');
+    expect(checkFileList({ pkg: matcher, files: without }).join('\n')).toContain('export target is not in the tarball: dist/src/corpus/node/index.js');
+    // The root entry is its own file and names neither subpath: nothing a root import loads reaches the corpus folder.
+    const root = readFileSync(fileURLToPath(new URL('../packages/matcher/src/index.ts', import.meta.url)), 'utf8');
+    expect(root).not.toMatch(/corpus/);
+    expect(exportsMap['.']).toEqual({ types: './dist/src/index.d.ts', default: './dist/src/index.js' });
+  });
+
+  it('a tarball with a release zip, a signature or a key in it is refused by corpusDataProblems even when the matcher files are fine', () => {
+    expect(corpusDataProblems({ files: shipped(), sources: {} })).toEqual([]);
+    expect(corpusDataProblems({ files: [...shipped(), 'dist/src/corpus/seed.zip'], sources: {} })).toHaveLength(1);
+    expect(corpusDataProblems({ files: [...shipped(), 'dist/src/corpus/seed.zip.sig'], sources: {} }).length).toBeGreaterThan(0);
+  });
+});

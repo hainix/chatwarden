@@ -3,8 +3,11 @@
 // must compile under both NodeNext and `module: commonjs` + `moduleResolution: node`, so: no top-level await, no import.meta.
 // Any failed assertion throws and the process exits non-zero.
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import express from 'express';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
@@ -20,6 +23,8 @@ import { createHubClient, Hub, memoryRouter, routerTransport, VERSION as HUB_VER
 import { createHubController } from '@chatwarden/hub-react/headless';
 import { buildMatcher, LiveTerms } from '@chatwarden/matcher';
 import type { Matcher } from '@chatwarden/matcher';
+import { createCommunityShare, createCorpusLoader } from '@chatwarden/matcher/corpus';
+import { fileCache, installationKey, startCorpus } from '@chatwarden/matcher/corpus/node';
 import { syntheticTermPack } from '@chatwarden/matcher/fixtures';
 import { syntheticTermPack as legacySyntheticTermPack } from '@chatwarden/matcher/test-fixtures';
 import { createPlayerClient, routerTransport as playerTransport, VERSION as PLAYER_VERSION } from '@chatwarden/player-react';
@@ -50,7 +55,51 @@ async function main(): Promise<void> {
   const pack = syntheticTermPack();
   await scenario('store-memory', memory, buildMatcher(pack.terms, pack.exceptions));
 
+  await corpus();
+
   console.log('smoke scenario: ok');
+}
+
+/**
+ * The shared term list from the packed tarball: both subpaths load (ESM and CommonJS), the loader runs offline with no trusted keys and says so
+ * by a code, a share goes through a fake network, and nothing is on by default. No network is used; the cache folder is made and removed.
+ */
+async function corpus(): Promise<void> {
+  const noNetwork: typeof fetch = () => Promise.reject(new TypeError('the smoke test has no network'));
+  const held = new Map<string, Uint8Array>();
+  const loader = createCorpusLoader({
+    select: { languages: ['en'] },
+    follow: 'stable',
+    clock,
+    keys: [],
+    fetch: noNetwork,
+    cache: { read: async (name) => held.get(name) ?? null, write: async (name, bytes) => void held.set(name, bytes), remove: async (name) => void held.delete(name) },
+  });
+  const res = await loader.refresh();
+  assert.equal(res.status.lastError?.code, 'no_trusted_keys', 'with no keys the loader says so');
+  assert.equal(loader.pack(), null, 'nothing is loaded without a verified release');
+
+  const dir = await mkdtemp(join(tmpdir(), 'cw-corpus-smoke-'));
+  try {
+    const cache = fileCache(dir);
+    await cache.write('probe.txt', new TextEncoder().encode('x'));
+    assert.equal(new TextDecoder().decode((await cache.read('probe.txt')) as Uint8Array), 'x');
+    const started = await startCorpus({ dir, select: { languages: ['en'] }, follow: 'stable', fetch: noNetwork, keys: [] });
+    assert.equal(started.status().lastError?.code, 'no_trusted_keys');
+    started.stop();
+    const key = await installationKey(dir);
+    assert.match(key.publicKey, /^[A-Za-z0-9_-]{43}$/);
+    const share = createCommunityShare({
+      sign: key.sign,
+      publicKey: key.publicKey,
+      clock,
+      stampBits: 0,
+      fetch: async () => new Response(JSON.stringify({ status: 'received', id: 'sub_smoke' }), { status: 202 }),
+    });
+    assert.deepEqual(await share.share({ term: 'zorbak', language: 'en', category: 'abuse' }), { ok: true, status: 'received', id: 'sub_smoke' });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 async function scenario(label: string, store: Store, matcher: Matcher): Promise<void> {

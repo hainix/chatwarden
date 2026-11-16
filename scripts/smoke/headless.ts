@@ -6,6 +6,8 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { createHubClient, createHubController, createStore, createT, en, formatDuration } from '@chatwarden/hub-react/headless';
+import { createCorpusLoader } from '@chatwarden/matcher/corpus';
+import { fileCache } from '@chatwarden/matcher/corpus/node';
 import type { Transport } from '@chatwarden/hub-react/headless';
 
 // The specifiers are held in variables on purpose: this project has no React types, so a literal import of them would fail the
@@ -56,6 +58,19 @@ async function main(): Promise<void> {
 
   // 6. What does not work without React, tested rather than assumed: the React entry needs it.
   await assert.rejects(import(reactEntry), 'the React entry cannot load without React');
+
+  // 7. The shared term list needs no React either: both subpaths load, and with no trusted keys the loader says so by a code, offline.
+  assert.equal(typeof fileCache, 'function');
+  const held = new Map<string, Uint8Array>();
+  const loader = createCorpusLoader({
+    select: { languages: ['en'] },
+    follow: 'stable',
+    clock: { now: () => Date.now() },
+    keys: [],
+    fetch: () => Promise.reject(new TypeError('no network')),
+    cache: { read: async (name) => held.get(name) ?? null, write: async (name, bytes) => void held.set(name, bytes), remove: async (name) => void held.delete(name) },
+  });
+  assert.equal((await loader.refresh()).status.lastError?.code, 'no_trusted_keys');
 
   console.log('smoke scenario (headless, no React): ok');
 }

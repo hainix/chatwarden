@@ -1,4 +1,4 @@
-export const VERSION = '0.1.10';
+export const VERSION = '0.1.11';
 
 export { MemoryStore, createMemoryStore } from './memoryStore.js';
 export type { StoredReportRow, StoredSanction } from './memoryStore.js';
