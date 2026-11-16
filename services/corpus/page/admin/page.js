@@ -10,6 +10,7 @@
     { id: 'disputed', label: 'Disputed terms', path: '/admin/api/terms?status=disputed', kind: 'term' },
     { id: 'provisional', label: 'Provisional terms', path: '/admin/api/terms?status=provisional', kind: 'term' },
     { id: 'accepted', label: 'Accepted terms', path: '/admin/api/terms?status=accepted', kind: 'term' },
+    { id: 'withdrawn', label: 'Withdrawn terms', path: '/admin/api/terms?status=withdrawn', kind: 'term' },
     { id: 'reports', label: 'Reports', path: '/admin/api/reports?status=received', kind: 'report' }
   ];
   var current = TABS[0];
@@ -147,7 +148,7 @@
       actions.appendChild(button('Add line', function () {
         act('/admin/api/terms/' + encodeURIComponent(item.id) + '/negative', { line: line.value }, 'Line added', true);
       }));
-      var verb = info.status === 'disputed' ? 'restore' : 'dispute';
+      var verb = info.status === 'disputed' || info.status === 'withdrawn' ? 'restore' : 'dispute';
       actions.appendChild(button(verb === 'restore' ? 'Restore' : 'Dispute', function () {
         act('/admin/api/terms/' + encodeURIComponent(item.id) + '/' + verb, {}, verb === 'restore' ? 'Restore vote recorded' : 'Disputed');
       }));

@@ -176,7 +176,7 @@ describe('the page sets a strict CSP and renders no term until revealed', () => 
       await rw.w.addTerm('CWT-2026-00001', 'zorbak', 'accepted');
       await rw.w.db.prepare("INSERT INTO reports VALUES ('rep_page1', 'CWT-2026-00001', 'innocent_sense', 'inst:aa', 'received', '2026-12-02')").run();
       const page = await open();
-      await settle(() => page.doc.querySelectorAll('#tabs button').length === 6);
+      await settle(() => page.doc.querySelectorAll('#tabs button').length === 7);
       const tab = [...page.doc.querySelectorAll('#tabs button')].find((b) => b.textContent === 'Reports') as El;
       tab.click();
       await settle(() => page.items().length === 1);
@@ -191,10 +191,27 @@ describe('the page sets a strict CSP and renders no term until revealed', () => 
       expect((await rw.rows('SELECT status FROM terms'))[0]?.status).toBe('disputed');
     });
 
+    it('a Withdrawn terms tab lists withdrawn terms and offers Restore on them (the S5 restore of a withdrawn term is reachable)', async () => {
+      await rw.w.addTerm('CWT-2026-00001', 'zorbak', 'withdrawn');
+      const page = await open();
+      await settle(() => page.doc.querySelectorAll('#tabs button').length === 7);
+      const tab = [...page.doc.querySelectorAll('#tabs button')].find((b) => b.textContent === 'Withdrawn terms') as El;
+      expect(tab).toBeDefined();
+      tab.click();
+      await settle(() => page.items().length === 1);
+      expect(page.text()).not.toContain('zorbak');
+      const li = page.items()[0] as El;
+      (li.querySelector('button') as El).click();
+      await settle(() => li.querySelector('.word.masked') === null);
+      const labels = [...li.querySelectorAll('button')].map((b) => b.textContent);
+      expect(labels).toContain('Restore');
+      expect(labels).not.toContain('Dispute');
+    });
+
     it('the terms tabs list masked terms; a disputed term offers Restore', async () => {
       await rw.w.addTerm('CWT-2026-00001', 'zorbak', 'disputed');
       const page = await open();
-      await settle(() => page.doc.querySelectorAll('#tabs button').length === 6);
+      await settle(() => page.doc.querySelectorAll('#tabs button').length === 7);
       const tab = [...page.doc.querySelectorAll('#tabs button')].find((b) => b.textContent === 'Disputed terms') as El;
       tab.click();
       await settle(() => page.items().length === 1);

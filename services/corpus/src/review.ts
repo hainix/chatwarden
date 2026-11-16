@@ -448,40 +448,71 @@ async function dispute(ctx: Ctx, id: string): Promise<Response> {
   if (t.status === 'disputed') return err(409, 'already_disputed');
   if (t.status === 'withdrawn') return err(409, 'closed');
   if ((await reviewedBy(ctx, 'term', id)) !== null) return err(409, 'already_reviewed');
-  await ctx.deps.db.batch([
-    q(ctx, 'INSERT INTO reviews (subject_kind, subject_id, reviewer, verdict, fluent, at) VALUES (?, ?, ?, ?, ?, ?)').bind('term', id, ctx.reviewer.email, 'dispute', 0, ctx.now),
-    q(ctx, "UPDATE terms SET status = 'disputed', updated_at = ? WHERE id = ?").bind(ctx.now, id),
-    audit(ctx, 'review.dispute', id),
-  ]);
+  try {
+    await ctx.deps.db.batch([
+      q(ctx, 'INSERT INTO reviews (subject_kind, subject_id, reviewer, verdict, fluent, at) VALUES (?, ?, ?, ?, ?, ?)').bind('term', id, ctx.reviewer.email, 'dispute', 0, ctx.now),
+      q(ctx, "UPDATE terms SET status = 'disputed', updated_at = ? WHERE id = ?").bind(ctx.now, id),
+      audit(ctx, 'review.dispute', id),
+    ]);
+  } catch (e) {
+    // The same reviewer's other vote landed between the check and this write: the UNIQUE constraint held, the batch rolled back.
+    if (isUnique(e) !== null) return err(409, 'already_reviewed');
+    throw e;
+  }
   return json(200, { status: 'disputed' });
 }
 
-/** Restoring a disputed or withdrawn term takes two reviewers; the one who disputed it, and anyone who already voted, cannot be one of them. */
+/** Whether this reviewer confirmed a report that is still holding the term out (a disputed or withdrawn one: restoring marks them restored). */
+async function confirmedOpenReport(ctx: Ctx, termId: string): Promise<boolean> {
+  const row = await q(
+    ctx,
+    `SELECT 1 AS yes FROM reviews v JOIN reports r ON v.subject_kind = 'report' AND v.subject_id = r.id
+     WHERE r.term_id = ? AND v.reviewer = ? AND v.verdict = 'dispute' AND r.status IN ('disputed','withdrawn') LIMIT 1`,
+  )
+    .bind(termId, ctx.reviewer.email)
+    .first();
+  return row !== null;
+}
+
+/**
+ * Restoring a disputed or withdrawn term takes two reviewers. Whoever put the term out cannot be one of them: the reviewer who disputed it,
+ * the reviewer who confirmed a report that disputed or withdrew it, and anyone who already voted.
+ */
 async function restore(ctx: Ctx, id: string): Promise<Response> {
   const t = await loadTerm(ctx, id);
   if (t === null) return notFound();
   if (t.status !== 'disputed' && t.status !== 'withdrawn') return err(409, 'not_disputed');
-  if ((await reviewedBy(ctx, 'term', id)) !== null) return err(409, 'already_reviewed');
+  if ((await reviewedBy(ctx, 'term', id)) !== null || (await confirmedOpenReport(ctx, id))) return err(409, 'already_reviewed');
   const before = await q(ctx, "SELECT COUNT(*) AS n FROM reviews WHERE subject_kind = 'term' AND subject_id = ? AND verdict = 'restore'").bind(id).first<{ n: number }>();
   const votes = (before?.n ?? 0) + 1;
   const vote = q(ctx, 'INSERT INTO reviews (subject_kind, subject_id, reviewer, verdict, fluent, at) VALUES (?, ?, ?, ?, ?, ?)').bind('term', id, ctx.reviewer.email, 'restore', 0, ctx.now);
   if (votes < 2) {
-    await ctx.deps.db.batch([vote, audit(ctx, 'review.restore', id)]);
+    try {
+      await ctx.deps.db.batch([vote, audit(ctx, 'review.restore', id)]);
+    } catch (e) {
+      if (isUnique(e) !== null) return err(409, 'already_reviewed');
+      throw e;
+    }
     return json(200, { status: 'disputed', votes });
   }
   // The second vote: back to what its approvals earned, and the dispute and restore votes are cleared so the term can be disputed again.
-  await ctx.deps.db.batch([
-    vote,
-    q(
-      ctx,
-      `UPDATE terms SET status = CASE WHEN (SELECT COUNT(*) FROM reviews WHERE subject_kind = 'submission' AND verdict = 'approve' AND subject_id IN (SELECT id FROM submissions WHERE term_id = ?1)) >= 2
-                                         AND (SELECT COUNT(*) FROM reviews WHERE subject_kind = 'submission' AND verdict = 'approve' AND fluent = 1 AND subject_id IN (SELECT id FROM submissions WHERE term_id = ?1)) >= 1
-                                    THEN 'accepted' ELSE 'provisional' END, updated_at = ?2 WHERE id = ?1`,
-    ).bind(id, ctx.now),
-    q(ctx, "DELETE FROM reviews WHERE subject_kind = 'term' AND subject_id = ? AND verdict IN ('dispute','restore')").bind(id),
-    q(ctx, "UPDATE reports SET status = 'restored' WHERE term_id = ? AND status IN ('disputed','withdrawn')").bind(id),
-    audit(ctx, 'review.restore', id),
-  ]);
+  try {
+    await ctx.deps.db.batch([
+      vote,
+      q(
+        ctx,
+        `UPDATE terms SET status = CASE WHEN (SELECT COUNT(*) FROM reviews WHERE subject_kind = 'submission' AND verdict = 'approve' AND subject_id IN (SELECT id FROM submissions WHERE term_id = ?1)) >= 2
+                                           AND (SELECT COUNT(*) FROM reviews WHERE subject_kind = 'submission' AND verdict = 'approve' AND fluent = 1 AND subject_id IN (SELECT id FROM submissions WHERE term_id = ?1)) >= 1
+                                      THEN 'accepted' ELSE 'provisional' END, updated_at = ?2 WHERE id = ?1`,
+      ).bind(id, ctx.now),
+      q(ctx, "DELETE FROM reviews WHERE subject_kind = 'term' AND subject_id = ? AND verdict IN ('dispute','restore')").bind(id),
+      q(ctx, "UPDATE reports SET status = 'restored' WHERE term_id = ? AND status IN ('disputed','withdrawn')").bind(id),
+      audit(ctx, 'review.restore', id),
+    ]);
+  } catch (e) {
+    if (isUnique(e) !== null) return err(409, 'already_reviewed');
+    throw e;
+  }
   const after = await loadTerm(ctx, id);
   return json(200, { status: after?.status ?? 'provisional' });
 }

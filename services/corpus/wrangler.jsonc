@@ -7,6 +7,9 @@
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
 
+  // The workers.dev hostname is not served: it sits outside the Cloudflare Access application. The Worker answers on its custom domain only.
+  "workers_dev": false,
+
   // The queue and term database. Create it with `wrangler d1 create chatwarden-corpus`, then apply schema.sql.
   "d1_databases": [{ "binding": "DB", "database_name": "chatwarden-corpus", "database_id": "REPLACE_AT_DEPLOY" }],
 

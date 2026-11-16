@@ -381,6 +381,31 @@ describe('a confirmed innocent_sense report sets disputed on one reviewer\u2019s
     expect(await reportStatus(id)).toBe('restored');
   });
 
+  it('a reviewer who confirmed the report cannot cast a restore vote on the term it disputed (the same rule as the disputer)', async () => {
+    const id = await reportId('innocent_sense');
+    await confirm(id, CARA);
+    const r = (who: string) => rw.admin(`/admin/api/terms/${TERM}/restore`, { method: 'POST', body: {}, who });
+    const mine = await r(CARA);
+    expect(mine.status).toBe(409);
+    expect(await mine.json()).toEqual({ error: 'already_reviewed' });
+    expect(await rw.rows("SELECT * FROM reviews WHERE verdict = 'restore'")).toEqual([]);
+    expect(await termStatus()).toBe('disputed');
+    await r(ALICE);
+    expect(await termStatus()).toBe('disputed');
+    await r(BOB);
+    expect(await termStatus()).not.toBe('disputed');
+  });
+
+  it('once the term is restored, the reviewer who confirmed an earlier report may vote on a later dispute', async () => {
+    const id = await reportId('innocent_sense');
+    await confirm(id, CARA);
+    const r = (who: string) => rw.admin(`/admin/api/terms/${TERM}/restore`, { method: 'POST', body: {}, who });
+    await r(ALICE);
+    await r(BOB);
+    await rw.admin(`/admin/api/terms/${TERM}/dispute`, { method: 'POST', body: {}, who: DAN });
+    expect((await r(CARA)).status).toBe(200);
+  });
+
   it('a removal of a slur takes two reviewers: one vote leaves it standing, the second withdraws it', async () => {
     const id = await reportId('removal');
     const first = await confirm(id, CARA);

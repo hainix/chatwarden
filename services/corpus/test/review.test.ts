@@ -396,6 +396,56 @@ describe('dispute and restore: one reviewer disputes, two restore', () => {
     expect((await term(t))?.status).toBe('accepted');
   });
 
+  // A race, made deterministic: the other request's vote is already stored, but this request's "has this reviewer voted?" read ran before it
+  // landed, so it sees nothing. The UNIQUE constraint is then the only thing between the second vote and a 500.
+  const blindToVotes = (): void => {
+    const real = rw.w.deps.db;
+    rw.w.deps.db = {
+      batch: (statements) => real.batch(statements),
+      prepare: (sql) => {
+        const stmt = real.prepare(sql);
+        if (!sql.includes('SELECT verdict FROM reviews')) return stmt;
+        const blind = { bind: () => blind, first: () => Promise.resolve(null), all: () => stmt.all(), run: () => stmt.run() };
+        return blind as unknown as ReturnType<typeof real.prepare>;
+      },
+    };
+  };
+
+  it('a dispute vote that loses a race to the same reviewer\u2019s other vote answers 409 already_reviewed, never 500, and writes nothing', async () => {
+    const t = await accepted();
+    await rw.rows("INSERT INTO reviews (subject_kind, subject_id, reviewer, verdict, fluent, at) VALUES ('term', ?, ?, 'dispute', 0, 'x') RETURNING id", t, ALICE);
+    blindToVotes();
+    const res = await post(`/admin/api/terms/${t}/dispute`, ALICE);
+    expect(res.status).toBe(409);
+    expect(await json(res)).toEqual({ error: 'already_reviewed' });
+    expect((await term(t))?.status).toBe('accepted');
+    expect(await rw.rows("SELECT * FROM audit WHERE action = 'review.dispute'")).toEqual([]);
+  });
+
+  it('a restore vote that loses a race answers 409 already_reviewed, never 500, and counts once', async () => {
+    const t = await accepted();
+    await post(`/admin/api/terms/${t}/dispute`, CARA);
+    await post(`/admin/api/terms/${t}/restore`, ALICE);
+    blindToVotes();
+    const res = await post(`/admin/api/terms/${t}/restore`, ALICE);
+    expect(res.status).toBe(409);
+    expect(await json(res)).toEqual({ error: 'already_reviewed' });
+    expect(await rw.rows("SELECT * FROM reviews WHERE verdict = 'restore'")).toHaveLength(1);
+    expect((await term(t))?.status).toBe('disputed');
+  });
+
+  it('the second restore vote that loses a race leaves the term disputed, not half restored', async () => {
+    const t = await accepted();
+    await post(`/admin/api/terms/${t}/dispute`, CARA);
+    await post(`/admin/api/terms/${t}/restore`, ALICE);
+    await rw.rows("INSERT INTO reviews (subject_kind, subject_id, reviewer, verdict, fluent, at) VALUES ('term', ?, ?, 'restore', 0, 'x') RETURNING id", t, BOB);
+    blindToVotes();
+    // BOB's vote is already stored, so this is a would-be second vote (count says 2 with it): the term must still end up in one state.
+    const res = await post(`/admin/api/terms/${t}/restore`, BOB);
+    expect(res.status).toBe(409);
+    expect((await term(t))?.status).toBe('disputed');
+  });
+
   it('restores to provisional when the approvals were not enough for accepted, and can be disputed again afterwards', async () => {
     const id = await rw.seed({ term: 'vlemmo' });
     await approve(id, BOB); // one approval: provisional

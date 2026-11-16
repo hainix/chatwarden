@@ -45,6 +45,8 @@ describe('the workspace builds with tsc -b and lints', () => {
   it('has a wrangler.jsonc with placeholders only: no account id, no real database id, no secret value', () => {
     const text = read('services', 'corpus', 'wrangler.jsonc');
     expect(text).toContain('REPLACE_AT_DEPLOY');
+    // The workers.dev hostname is outside the Access application, so it is not served at all (review B1, minor 6).
+    expect(text).toMatch(/^\s*"workers_dev":\s*false,?\s*$/m);
     expect(text).not.toMatch(/account_id/);
     expect(text).not.toMatch(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/);
     expect(text).not.toMatch(/\b[0-9a-f]{32}\b/);
