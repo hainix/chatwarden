@@ -51,7 +51,7 @@ const PEER_RANGE = '^0.1.0';
 // are unchanged); core, matcher and profanity keep ^0.1.0.
 const NEW_KIT_RANGE_0_1_9 = '^0.1.9';
 const NEEDS_NEW_KIT = new Set(['@chatwarden/store-memory', '@chatwarden/store-sqlite', '@chatwarden/http', '@chatwarden/discord', '@chatwarden/hub-react', '@chatwarden/player-react']);
-// ...and, for 0.1.11 (the shared term list), what is new in core and http: the audit names `term.share` and `community.apply` and the target type `release`
+// ...and, for 0.1.11 (the shared term list), what is new in core and http: the audit names `term.share`, `term.report` and `community.apply` and the target type `release`
 // (http writes the audit rows; hub-react names them in its audit labels and filters), and the community routes of http (hub-react calls them). That raises
 // three peers and nothing else: http and hub-react on core, hub-react on http. Each was confirmed with a grep of its source (see "peer floors" below).
 // The matcher imports only the Clock and Logger types from core, so it keeps ^0.1.0; the stores, discord, profanity and player-react use none of it, and

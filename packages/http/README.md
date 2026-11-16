@@ -298,9 +298,9 @@ unless you pass `community`: without it these routes do not exist (404), `GET /t
 `GET /terms/:id`. A refused or failed share or report is a fixed error code (`share_unavailable` 502, `share_refused` 422,
 `rate_limited` 429, `invalid_request` 400), never the service's text. `GET /me` has `features.community: true` when `community` is wired.
 
-**What is written, and what is not.** Every term route writes only ids. A share or a report writes an audit row for every attempt that reached the service, even when the share fails: the word may have left the server. The row is `term.share`, on the term id.
-The outcome (`offline`, `rate_limited`, `rejected` and so on) is logged as a closed code and nothing else. A report uses the same
-audit name as a share because the core adds only three names (`term.share`, `community.apply` and the target type `release`). A
+**What is written, and what is not.** Every term route writes only ids. A share or a report writes an audit row for every attempt that reached the service, even when the share fails: the word may have left the server. The row is `term.share` for a share and `term.report` for a report, on the term id, so the audit trail never reads a report as an offer.
+The outcome (`offline`, `rate_limited`, `rejected` and so on) is logged as a closed code and nothing else. The core adds four names for the
+list (the audit actions `term.share`, `term.report` and `community.apply`, and the target type `release`). A
 request that never reached the service (a bad body, an unknown id, too low a role) writes no row.
 
 **Things to know.** The share status is kept in memory in this process (at most 1000 terms, the oldest go first) and is lost

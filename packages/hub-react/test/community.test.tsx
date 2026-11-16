@@ -416,7 +416,8 @@ describe('the Report disclosure in the term editor (a community term)', () => {
     expect(posts[0]?.body).toEqual({ kind: 'removal' });
     expect(w.community?.rig.reportCalls).toEqual([{ termId: 'CWT-2026-00001', kind: 'removal' }]);
     expect(w.community?.rig.shareCalls).toEqual([]);
-    expect(audits(w, 'term.share')).toHaveLength(1);
+    expect(audits(w, 'term.report')).toHaveLength(1);
+    expect(audits(w, 'term.share')).toHaveLength(0);
     // The panel is closed again, and the toggle keeps the focus.
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
     expect(button).toHaveFocus();

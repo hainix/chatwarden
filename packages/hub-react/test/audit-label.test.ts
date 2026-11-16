@@ -73,10 +73,13 @@ describe('ACTION_LABEL', () => {
     expect(ACTION_LABEL['community.apply']).toBe('hub.audit.label.community.apply');
     expect(en['hub.audit.label.term.share']).toBe('Offered a term to the community list');
     expect(en['hub.audit.label.community.apply']).toBe('Applied a community list release');
+    expect(ACTION_LABEL['term.report']).toBe('hub.audit.label.term.report');
+    expect(en['hub.audit.label.term.report']).toBe('Reported a problem with a community term');
+    expect(en['hub.audit.label.term.report']).not.toBe(en['hub.audit.label.term.share']);
     expect(en['hub.audit.target.release']).toBe('Release {version}');
     // the words never carry a raw action name and never a term
-    for (const key of ['hub.audit.label.term.share', 'hub.audit.label.community.apply', 'hub.audit.target.release'] as const) {
-      expect(en[key]).not.toMatch(/term\.share|community\.apply/);
+    for (const key of ['hub.audit.label.term.share', 'hub.audit.label.term.report', 'hub.audit.label.community.apply', 'hub.audit.target.release'] as const) {
+      expect(en[key]).not.toMatch(/term\.share|term\.report|community\.apply/);
       expect(en[key]).not.toMatch(/zorbak|vlemmo|quissel/);
     }
   });

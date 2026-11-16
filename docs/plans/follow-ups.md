@@ -148,7 +148,6 @@ Design 20 of [design/2026-11-12-k7-term-corpus.md](../design/2026-11-12-k7-term-
 
 Found while building Part A:
 - The share status of a term is kept in memory in the http process (1000 terms, lost on restart). A store-backed record would survive a restart and agree across processes.
-- A report uses the audit name `term.share`, because the core adds only three names. A name of its own (`term.report`) would tell the two apart; it needs a core change and a peer floor.
 - The loader keeps the index's ETag in memory only, so a new process fetches the index whole; `state.json` could carry it.
 - A cache write failure leaves a verified release unadopted (the previous one stays). A read-only cache folder shows as `failed` / `cache_failed` in the hub.
 - The site headline and copy wait for the first real release and some use of it.

@@ -245,7 +245,7 @@ function reportBody(body: Record<string, unknown>): 'innocent_sense' | 'wrong_ca
  * - with `community.share`: `POST /terms/:id/share { category, target?, note? }` (`terms.write`; audit `term.share`, target `term:<id>`; answer
  *   `{ status }` only; 409 `not_shareable` for a community row) and `GET /terms/:id/share` (`terms.read`; `{ status, reason? }`, or `{ status: null }` for a term never shared).
  * - with a `community.share` that can `report`: `POST /terms/:id/report { kind }` (`terms.write`; the row must be a community row, else 409
- *   `not_reportable`; sends the term id and the kind, never the word; audit `term.share`, target `term:<id>`; answer `{ status: 'received' }`).
+ *   `not_reportable`; sends the term id and the kind, never the word; audit `term.report`, target `term:<id>`; answer `{ status: 'received' }`).
  * A failed share or report is a fixed error code (`share_unavailable` 502, `share_refused` 422, `rate_limited` 429, 400), never the service's text.
  */
 export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): RouteTable {
@@ -304,11 +304,6 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
   if (share !== undefined) {
     // The last answer for each term this server shared, by term id: nothing about the word, only the status and the service's id.
     const shared = new Map<string, { status: string; id: string | null }>();
-    const remember = (termId: string, entry: { status: string; id: string | null }): void => {
-      shared.delete(termId);
-      shared.set(termId, entry);
-      while (shared.size > REMEMBERED) shared.delete(shared.keys().next().value as string);
-    };
     // The service's answer about one term, remembered for a short while (only an answer that was understood), and one lookup in flight
     // per term: a page that reloads in a loop, or many staff opening the same editor, is one outbound request.
     const now = community.now ?? Date.now;
@@ -318,10 +313,20 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
       answers.delete(termId);
       inflight.delete(termId);
     };
-    /** An attempt reached the share client, so the word (or a term id) may have left this server: one best-effort audit row on the term id, and the outcome as a closed code. */
-    const attempted = (c: AdminCall, termId: string, outcome: string): void => {
+    // All three maps hold at most REMEMBERED terms: when the oldest share is dropped, its answer and its lookup go with it.
+    const remember = (termId: string, entry: { status: string; id: string | null }): void => {
+      shared.delete(termId);
+      shared.set(termId, entry);
+      while (shared.size > REMEMBERED) {
+        const oldest = shared.keys().next().value as string;
+        shared.delete(oldest);
+        forget(oldest);
+      }
+    };
+    /** An attempt reached the share client, so the word (or a term id) may have left this server: one best-effort audit row on the term id (`term.share` for a share, `term.report` for a report), and the outcome as a closed code. */
+    const attempted = (c: AdminCall, termId: string, outcome: string, action: 'term.share' | 'term.report' = 'term.share'): void => {
       if (outcome !== 'sent') safeWarn(ctx.logger, 'chatwarden.http_share_outcome', { code: outcome });
-      c.audit('term.share', { type: 'term', ref: termId }, 'best-effort');
+      c.audit(action, { type: 'term', ref: termId }, 'best-effort');
     };
 
     table['POST /terms/:id~ref/share'] = ctx.secure('terms.write', async (c) => {
@@ -363,12 +368,12 @@ export function communityRoutes(ctx: AdminContext, community: CommunityAdmin): R
           result = await report({ termId: id, kind });
         } catch (e) {
           safeWarn(ctx.logger, 'chatwarden.http_share_failed', { error: errorClass(e) });
-          attempted(c, id, 'threw');
+          attempted(c, id, 'threw', 'term.report');
           throw new HttpError('share_unavailable');
         }
-        // A report sends a term id and a kind, never the word. No new audit name exists for it: it is the same outward call as a share.
+        // A report sends a term id and a kind, never the word. It is audited as `term.report`, never as a share.
         const ok = isObject(result) && result.ok === true;
-        attempted(c, id, ok ? 'sent' : outcomeOf(result));
+        attempted(c, id, ok ? 'sent' : outcomeOf(result), 'term.report');
         if (!ok) throw shareFailure(result);
         return { status: 200, body: { status: 'received' } };
       });

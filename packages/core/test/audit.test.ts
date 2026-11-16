@@ -60,6 +60,7 @@ describe('AUDIT_ACTIONS and ROLES', () => {
       'name.rename_required',
       'term.share',
       'community.apply',
+      'term.report',
     ]);
     expect([...ROLES]).toEqual(['moderator', 'senior', 'owner']);
   });
@@ -129,6 +130,10 @@ describe('cw.audit.record and list', () => {
     // listed and filterable by the new names
     expect(cw.audit.list({ limit: 10, action: 'term.share' }).items).toHaveLength(1);
     expect(cw.audit.list({ limit: 10, action: 'community.apply' }).items).toHaveLength(1);
+    // a report of a community term is its own name, recorded, listed and filterable apart from a share
+    expect(rec(cw, { actor: 'bea', role: 'senior', action: 'term.report', target: { type: 'term', ref: 'CWT-0001' } })).toBe(true);
+    expect(cw.audit.list({ limit: 10, action: 'term.report' }).items.map((i) => `${i.action}:${i.target?.type}:${i.target?.ref}`)).toEqual(['term.report:term:CWT-0001']);
+    expect(cw.audit.list({ limit: 10, action: 'term.share' }).items).toHaveLength(1);
     // every role may be the actor (the routes decide who may)
     for (const role of ROLES) expect(rec(cw, { role, action: 'community.apply', target: { type: 'release', ref: '2026.12.1' } })).toBe(true);
   });
@@ -141,6 +146,7 @@ describe('cw.audit.record and list', () => {
     for (const ref of ['2026/12/0', '2026.12.0/', 'v1\\2', '2026.12 .0', ' 2026.12.0', '2026.12.0 ', '', 'a'.repeat(65), '2026.12.0\n', 'zorbak vlemmo', '../x']) {
       expect(rec(cw, { action: 'community.apply', target: { type: 'release', ref } }), JSON.stringify(ref)).toBe(false);
       expect(rec(cw, { action: 'term.share', target: { type: 'term', ref } }), JSON.stringify(ref)).toBe(false);
+      expect(rec(cw, { action: 'term.report', target: { type: 'term', ref } }), JSON.stringify(ref)).toBe(false);
     }
     // the refusal logs the event name and nothing of the input
     expect(logged.length).toBeGreaterThan(0);
@@ -152,8 +158,8 @@ describe('cw.audit.record and list', () => {
   it('audit: neither new action carries a detail; a word in the ref position is not required nor stored', async () => {
     const { cw, store } = await setup();
     // ids only: a detail, in any shape, is refused
-    for (const action of ['term.share', 'community.apply'] as const) {
-      const target = action === 'term.share' ? { type: 'term', ref: 't_1' } : { type: 'release', ref: '2026.12.0' };
+    for (const action of ['term.share', 'term.report', 'community.apply'] as const) {
+      const target = action !== 'community.apply' ? { type: 'term', ref: 't_1' } : { type: 'release', ref: '2026.12.0' };
       expect(rec(cw, { action, target, detail: { sections: [] } }), action).toBe(false);
       expect(rec(cw, { action, target, detail: { reason: 'zorbak' } }), action).toBe(false);
       expect(rec(cw, { action, target, detail: 'zorbak' }), action).toBe(false);
@@ -165,7 +171,7 @@ describe('cw.audit.record and list', () => {
     expect(rec(cw, { action: 'term.share', target: { type: 'term', ref: 'you zorbak' } })).toBe(false);
     expect(rec(cw, { action: 'term.share', target: { type: 'term', ref: 'zorbak!!' } })).toBe(false);
     const rows = store.listAudit({ limit: 50 });
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(6);
     for (const r of rows) expect(Object.keys(r)).not.toContain('detail');
     expect(JSON.stringify(rows)).not.toMatch(/zorbak|vlemmo/);
   });

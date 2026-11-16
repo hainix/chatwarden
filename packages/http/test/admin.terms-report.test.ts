@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { COMMUNITY_WORDS, OWN_WORD, communityPack, communityWorld } from './communityWorld.js';
 
 // "Report a problem with this community term" (design 10.6, 14): a staff member with terms.write sends a term id and a closed kind. No
-// word, no text. The audit row is `term.share` on the term id (the core names are exactly three: nothing is added for a report).
+// word, no text. The audit row is `term.report` on the term id (a name of its own: a report is never recorded as an offer).
 // Invented words only.
 
 const text = (v: unknown): string => JSON.stringify(v);
 type W = Awaited<ReturnType<typeof communityWorld>>;
 const idOf = (w: W, word: string): string => w.rowByWord(word)?.id as string;
-const audits = (w: W) => w.routeAudit().filter((r) => r.action === 'term.share');
+const audits = (w: W) => w.routeAudit().filter((r) => r.action === 'term.report');
+const shareAudits = (w: W) => w.routeAudit().filter((r) => r.action === 'term.share');
 
 describe('POST /terms/:id/report', () => {
   it('needs terms.write: below it is 403, without a caller 401, and nothing is sent', async () => {
@@ -30,7 +31,8 @@ describe('POST /terms/:id/report', () => {
     expect(w.share.calls).toEqual([]);
     const rows = audits(w);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ actor: 'ann', role: 'moderator', action: 'term.share', target: { type: 'term', ref: id } });
+    expect(rows[0]).toMatchObject({ actor: 'ann', role: 'moderator', action: 'term.report', target: { type: 'term', ref: id } });
+    expect(shareAudits(w)).toEqual([]);
     expect(rows[0]?.detail).toBeUndefined();
     expect(Object.keys(rows[0] as object).sort()).toEqual(['action', 'actor', 'at', 'id', 'role', 'target']);
     expect(text(w.audit())).not.toMatch(/glarn|innocent_sense/);
@@ -140,6 +142,7 @@ describe('POST /terms/:id/report', () => {
     expect(ok.body).toEqual({ status: 'received' });
     expect(text(ok)).not.toMatch(/service said|script/);
     expect(audits(w)).toHaveLength(table.length + 1);
+    expect(shareAudits(w)).toEqual([]);
     expect(text(w.audit())).not.toContain('glarn');
   });
 
@@ -152,6 +155,7 @@ describe('POST /terms/:id/report', () => {
     expect(text(res)).not.toContain('exploded');
     expect(text(w.logged)).not.toMatch(/glarn|exploded/);
     expect(audits(w)).toHaveLength(1);
+    expect(shareAudits(w)).toEqual([]);
   });
 
   it('sends no identifier: the call holds the two keys and nothing else, whatever the request carried', async () => {
@@ -160,6 +164,19 @@ describe('POST /terms/:id/report', () => {
     expect(Object.keys(w.share.reportCalls[0] as object)).toEqual(['termId', 'kind']);
     expect(text(w.share.reportCalls)).not.toMatch(/ann|moderator|glarn/);
     expect(COMMUNITY_WORDS).toContain('glarn');
+  });
+});
+
+describe('a share and a report keep their own audit names', () => {
+  it('a share writes term.share, a report writes term.report, and neither writes the other', async () => {
+    const w = await communityWorld();
+    expect((await w.call('POST', `/terms/${w.own.id}/share`, { body: { category: 'abuse' } })).status).toBe(200);
+    expect(shareAudits(w)).toHaveLength(1);
+    expect(audits(w)).toEqual([]);
+    expect((await w.call('POST', `/terms/${idOf(w, 'glarn')}/report`, { body: { kind: 'removal' } })).status).toBe(200);
+    expect(shareAudits(w)).toHaveLength(1);
+    expect(audits(w)).toHaveLength(1);
+    expect(w.routeAudit().map((r) => r.action).sort()).toEqual(['term.report', 'term.share']);
   });
 });
 

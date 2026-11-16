@@ -142,7 +142,7 @@ Each ruling states the decision, what it costs, and what was rejected. The detai
 15. **Calibration and eval sets are one file shape: the AI eval's `EvalCase`**, plus an optional `meta` object. Synthetic cases may live
     in the repo; cases with real terms or contributed material live only in the published sets. Contributed cases are paraphrased by a
     reviewer so the original wording is gone. Section 12.
-16. **No store migration, and one small core addition.** `AUDIT_ACTIONS` gains `term.share` and `community.apply`, and
+16. **No store migration, and one small core addition.** `AUDIT_ACTIONS` gains `term.share`, `community.apply` and `term.report`, and
     `AUDIT_TARGET_TYPES` gains `release`. `http` and `hub-react` raise their core peer floor by hand in release prep. The
     SQLite audit filter is built from `AUDIT_ACTIONS`, so there is no migration.
 
@@ -679,7 +679,7 @@ never the service's message.
 **What Part A built beyond the table.** `GET /terms/:id/share` answers `200` with `{ status: null }` for a term that was never shared, so a
 page that asks as it opens an editor does not log a 404. `POST /terms/:id/report { kind }` (`terms.write`) reports a term of the list
 (`innocent_sense`, `wrong_category` or `removal`; 409 `not_reportable` for a row of the adopter's own); it sends the term id and the
-kind only, and audits as `term.share` on the term id (the core adds only three names). `GET /community` also says `reporting`. A share
+kind only, and audits as `term.report` on the term id (a name of its own, so a report is never read as an offer; the core adds four names). `GET /community` also says `reporting`. A share
 or a report that reached the share client writes its best-effort audit row even when it fails, and logs the outcome as a closed code.
 `GET /terms/:id/share` asks the service at most once every 15 seconds for a term. `GET /me` has `features.community: true` when the
 list is wired. A share's status is kept in the http process (1000 terms, lost on restart). **Wiring needs** `terms: live` on the loader
@@ -687,7 +687,7 @@ list is wired. A share's status is kept in the http process (1000 terms, lost on
 
 ### 8.6 Core additions (the only change to `@chatwarden/core`)
 
-`AUDIT_ACTIONS` += `'term.share'`, `'community.apply'`; `AUDIT_TARGET_TYPES` += `'release'`. Nothing else. `http` and `hub-react` raise
+`AUDIT_ACTIONS` += `'term.share'`, `'community.apply'`, `'term.report'` (appended last, in that order); `AUDIT_TARGET_TYPES` += `'release'`. Nothing else. `http` and `hub-react` raise
 their `@chatwarden/core` peer floor by hand in release prep (RELEASING.md "When a peer floor must rise"), with the new names in the
 changeset. `matcher` keeps `^0.1.0`: the corpus subpaths import only the `Clock` and `Logger` types.
 

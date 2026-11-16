@@ -1094,7 +1094,10 @@ describe('the shared term list docs (K7, 0.1.11)', () => {
     }
     expect(doc).toContain('`exposeCommunityRows`');
     expect(doc).toContain('`term.share`');
+    expect(doc).toContain('`term.report`');
     expect(doc).toContain('`community.apply`');
+    expect(doc).toMatch(/core adds four names/);
+    expect(doc).not.toMatch(/same\s+audit name as a share|only three names/);
     expect(doc).toMatch(/share status is kept in memory[^.]*1000[^.]*lost on restart/i);
     expect(doc).toMatch(/two staff[^.]*same term at once[^.]*`duplicate`/i);
     expect(doc).toMatch(/15 seconds/);

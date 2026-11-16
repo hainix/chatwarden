@@ -21,9 +21,12 @@ export type Role = (typeof ROLES)[number];
  * `appeal`, or none for the list and the numbers); `appeal.decide` points at the `appeal` decided and needs it; `name.rename_required`
  * points at the `person` asked to rename and needs it. None of them carries a detail: a statement, a reason or a name never reaches the trail.
  *
- * The two community-list actions (0.1.11): `term.share` is a moderator offering one of the adopter's own terms to the shared list (its target is the
+ * The community-list actions (0.1.11): `term.share` is a moderator offering one of the adopter's own terms to the shared list (its target is the
  * `term` id, never the word) and `community.apply` is an owner applying a release of the shared list (its target is the `release` version, such as
  * `2026.12.0`). Neither carries a detail.
+ *
+ * `term.report` (0.1.11, appended last) is a moderator reporting a problem with a term from the shared list; it targets the `term` id, never the word,
+ * and carries no detail. It is a name of its own, so a report is never read as an offer.
  */
 export const AUDIT_ACTIONS = [
   'report.view',
@@ -57,6 +60,7 @@ export const AUDIT_ACTIONS = [
   'name.rename_required',
   'term.share',
   'community.apply',
+  'term.report',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

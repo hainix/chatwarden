@@ -493,4 +493,32 @@ describe('no identifier and no word in any response, header or log of the new ro
     expect(text(w.logged)).not.toMatch(/fenriskz|tarvox|glarn|CLIENTKEY|203\.0\.113/);
     expect(text(w.audit())).not.toMatch(/fenriskz|tarvox|glarn|CLIENTKEY|203\.0\.113/);
   });
+  it('remembers at most 1000 shared terms: the oldest one, its kept answer and its lookup all go, the rest still answer from memory', async () => {
+    const w = await communityWorld();
+    const first = w.own.id;
+    await w.call('POST', `/terms/${first}/share`, { body: { category: 'abuse' } });
+    w.share.statusResult = { status: 'accepted' };
+    expect((await w.call('GET', `/terms/${first}/share`)).body).toEqual({ status: 'accepted' });
+    expect(w.share.statusCalls).toHaveLength(1);
+    const letters = 'bcdfghjklmnprstvw';
+    const ids: string[] = [];
+    for (let n = 0; n < 1000; n++) {
+      const word = `zq${letters[n % 17]}a${letters[Math.floor(n / 17) % 17]}e${letters[Math.floor(n / 289) % 17]}ox`;
+      const made = w.live.changeSync('seed-admin', (e) => e.addTerm({ term: word, language: 'en' }));
+      if (!made.ok) throw new Error(`own row refused ${n} ${word} ${JSON.stringify(made)}`);
+      ids.push(made.value);
+    }
+    for (const id of ids) expect((await w.call('POST', `/terms/${id}/share`, { body: { category: 'abuse' } })).status).toBe(200);
+    // 1001 shares were made: the first is forgotten (never shared, as far as this server remembers), and no service call is made for it.
+    expect((await w.call('GET', `/terms/${first}/share`)).body).toEqual({ status: null });
+    expect(w.share.statusCalls).toHaveLength(1);
+    // The newest is kept, and asking twice inside the memory window is one service call.
+    const newest = ids[ids.length - 1] as string;
+    await w.call('GET', `/terms/${newest}/share`);
+    await w.call('GET', `/terms/${newest}/share`);
+    expect(w.share.statusCalls).toHaveLength(2);
+    // The second share is the oldest kept one now, and still answers.
+    expect((await w.call('GET', `/terms/${ids[0]}/share`)).status).toBe(200);
+    expect(w.share.statusCalls).toHaveLength(3);
+  }, 60_000);
 });
